@@ -20,7 +20,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, GeneratedFinancialDocumentKind.Contract)]
     public async Task FinancialCaptureFreezesOriginalGraphAndBytesBeforeAnyFinancialPublication(bool postgres, GeneratedFinancialDocumentKind kind)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync();
         var key = Guid.NewGuid(); var requestSha = new string('a', 64); var calls = 0;
         var recorded = await new GeneratedFinancialDocumentRegistry(f.Db).CaptureAsync(f.Case.Id, orderId, f.User.Id,
@@ -69,7 +69,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, "content")]
     public async Task FinancialCaptureRejectsChangedRequestOrDamagedAttemptWithoutAllocatingAgain(bool postgres, string scenario)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync();
         var key = Guid.NewGuid(); var requestSha = new string('a', 64);
         var result = await new GeneratedFinancialDocumentRegistry(f.Db).CaptureAsync(f.Case.Id, orderId, f.User.Id,
@@ -107,7 +107,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     public async Task FinancialCaptureFailureRollsBackAttemptBytesAndTrackedChanges(bool postgres, string boundary)
     {
         var fence = new FinancialCaptureSavedFailure();
-        await using var f = await Fixture.CreateAsync(postgres, 2, false, fence);
+        await using var f = await CreateFixtureAsync(postgres, 2, false, fence);
         var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync();
         var titleBefore = f.Case.Title; fence.Armed = boundary == "saved";
         await Assert.ThrowsAsync<InvalidOperationException>(() => new GeneratedFinancialDocumentRegistry(f.Db).CaptureAsync(
@@ -131,7 +131,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     public async Task FinancialCaptureLostCommitAckRecoversOriginalIdentityWithoutAnotherRender(bool postgres)
     {
         var fence = new FinancialCaptureCommitAckFailure();
-        await using var f = await Fixture.CreateAsync(postgres, 2, false, fence);
+        await using var f = await CreateFixtureAsync(postgres, 2, false, fence);
         var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync();
         var key = Guid.NewGuid(); fence.Armed = true; GeneratedFinancialIdentity? frozenIdentity = null;
         await Assert.ThrowsAsync<InvalidOperationException>(() => new GeneratedFinancialDocumentRegistry(f.Db).CaptureAsync(
@@ -153,7 +153,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task FinancialCaptureConcurrentSameRequestUsesOneAttemptAndOneRender(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2); f.PrepareIdentityObservers();
+        await using var f = await CreateFixtureAsync(postgres, 2); f.PrepareIdentityObservers();
         var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync();
         var key = Guid.NewGuid(); var calls = 0; var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var workers = Enumerable.Range(0, 4).Select(_ => Task.Run(async () =>
@@ -175,7 +175,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task FinancialCaptureLargeUnicodeGraphKeepsSmallExactQueueProof(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync();
         var description = string.Concat(Enumerable.Repeat("Условия договора 🧾; ", 5000));
         var result = await new GeneratedFinancialDocumentRegistry(f.Db).CaptureAsync(f.Case.Id, orderId, f.User.Id,
@@ -198,7 +198,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task FinancialCaptureRejectsForeignOrMalleablePublicationProof(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync(); var registry = new GeneratedFinancialDocumentRegistry(f.Db);
         var result = await registry.CaptureAsync(f.Case.Id, orderId, f.User.Id, f.User.FullName, Guid.NewGuid(),
             GeneratedFinancialDocumentKind.Invoice, new string('a', 64),
@@ -220,7 +220,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task FinancialCaptureFinalAuthorityLossRollsBackAttemptAndPermissionChange(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync();
         await Assert.ThrowsAsync<InvalidOperationException>(() => new GeneratedFinancialDocumentRegistry(f.Db).CaptureAsync(
             f.Case.Id, orderId, f.User.Id, f.User.FullName, Guid.NewGuid(), GeneratedFinancialDocumentKind.Invoice, new string('a', 64),
@@ -241,7 +241,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task FinancialCaptureRetiredKeyCannotRenderAnotherAttempt(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync(); var key = Guid.NewGuid();
         f.Db.CaseDocumentUploadRetirements.Add(new CaseDocumentUploadRetirement { CaseId = f.Case.Id, ActorId = f.User.Id, UploadKey = key });
         await f.Db.SaveChangesAsync();
@@ -361,7 +361,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, GeneratedFinancialDocumentKind.Contract)]
     public async Task FinancialCapturePreservesExistingStatusAliasesAndRejectsUnapprovedOrder(bool postgres, GeneratedFinancialDocumentKind kind)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var order = await f.Db.ClientCaseWorkOrders.SingleAsync();
         var approved = new[] { "approved", " СОГЛАСОВАН ", "согласовано" };
         var aliases = kind == GeneratedFinancialDocumentKind.Invoice ? approved : approved.Concat(new[] { "invoice_created", "invoice-created", "счет создан", "счёт создан" });

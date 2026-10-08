@@ -10,10 +10,11 @@ namespace PayPlanner.Api.Tests;
 public class DeleteBehaviorContractTests
 {
     [Theory]
-    [MemberData(nameof(CreateContexts))]
-    public void ClientDeletion_UsesExpectedDeleteBehavior(DbContext context)
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ClientDeletion_UsesExpectedDeleteBehavior(bool postgres)
     {
-        using (context)
+        using (var context = CreateContext(postgres))
         {
             AssertDeleteBehavior<ClientCase, Client>(context, DeleteBehavior.Cascade, nameof(ClientCase.ClientId));
             AssertDeleteBehavior<ClientContract, Client>(context, DeleteBehavior.Cascade, nameof(ClientContract.ClientId));
@@ -23,10 +24,11 @@ public class DeleteBehaviorContractTests
     }
 
     [Theory]
-    [MemberData(nameof(CreateContexts))]
-    public void CaseDeletion_CascadesCaseOwnedDocumentsAndKeepsLinkedPayments(DbContext context)
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CaseDeletion_CascadesCaseOwnedDocumentsAndKeepsLinkedPayments(bool postgres)
     {
-        using (context)
+        using (var context = CreateContext(postgres))
         {
             AssertDeleteBehavior<ClientCaseDocument, ClientCase>(context, DeleteBehavior.Cascade, nameof(ClientCaseDocument.ClientCaseId));
             AssertDeleteBehavior<InvoiceClientCase, ClientCase>(context, DeleteBehavior.Cascade, nameof(InvoiceClientCase.ClientCaseId));
@@ -35,10 +37,11 @@ public class DeleteBehaviorContractTests
     }
 
     [Theory]
-    [MemberData(nameof(CreateContexts))]
-    public void PaymentDeletion_CascadesPaymentOwnedRowsAndKeepsDocumentsNullable(DbContext context)
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PaymentDeletion_CascadesPaymentOwnedRowsAndKeepsDocumentsNullable(bool postgres)
     {
-        using (context)
+        using (var context = CreateContext(postgres))
         {
             AssertDeleteBehavior<PaymentResponsible, Payment>(context, DeleteBehavior.Cascade, nameof(PaymentResponsible.PaymentId));
             AssertDeleteBehavior<InvoiceLineItem, Payment>(context, DeleteBehavior.Cascade, nameof(InvoiceLineItem.PaymentId));
@@ -50,10 +53,11 @@ public class DeleteBehaviorContractTests
     }
 
     [Theory]
-    [MemberData(nameof(CreateContexts))]
-    public void DocumentDeletion_UsesExpectedDeleteBehavior(DbContext context)
+    [InlineData(false)]
+    [InlineData(true)]
+    public void DocumentDeletion_UsesExpectedDeleteBehavior(bool postgres)
     {
-        using (context)
+        using (var context = CreateContext(postgres))
         {
             AssertDeleteBehavior<Payment, Invoice>(context, DeleteBehavior.SetNull, nameof(Payment.InvoiceId));
             AssertDeleteBehavior<CashOrder, Invoice>(context, DeleteBehavior.SetNull, nameof(CashOrder.InvoiceId));
@@ -63,10 +67,11 @@ public class DeleteBehaviorContractTests
     }
 
     [Theory]
-    [MemberData(nameof(CreateContexts))]
-    public void ContractDeletion_CascadesJoinRowsAndKeepsPaymentsNullable(DbContext context)
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ContractDeletion_CascadesJoinRowsAndKeepsPaymentsNullable(bool postgres)
     {
-        using (context)
+        using (var context = CreateContext(postgres))
         {
             AssertDeleteBehavior<ClientContract, Contract>(context, DeleteBehavior.Cascade, nameof(ClientContract.ContractId));
             AssertDeleteBehavior<ContractAct, Contract>(context, DeleteBehavior.Cascade, nameof(ContractAct.ContractId));
@@ -77,10 +82,11 @@ public class DeleteBehaviorContractTests
     }
 
     [Theory]
-    [MemberData(nameof(CreateContexts))]
-    public void AttachmentDeletion_UsesExpectedDeleteBehavior(DbContext context)
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AttachmentDeletion_UsesExpectedDeleteBehavior(bool postgres)
     {
-        using (context)
+        using (var context = CreateContext(postgres))
         {
             AssertDeleteBehavior<TaskJournalFile, TaskJournalItem>(context, DeleteBehavior.Cascade, nameof(TaskJournalFile.TaskJournalItemId));
             AssertDeleteBehavior<ClientCaseProceduralDeadline, ClientCaseDocument>(context, DeleteBehavior.SetNull, nameof(ClientCaseProceduralDeadline.ClientCaseDocumentId));
@@ -88,25 +94,31 @@ public class DeleteBehaviorContractTests
         }
     }
 
-    public static TheoryData<DbContext> CreateContexts()
+    private static DbContext CreateContext(bool postgres)
     {
-        var sqliteConnection = new SqliteConnection("Data Source=:memory:");
-        sqliteConnection.Open();
-
-        return new TheoryData<DbContext>
-        {
-            new PaymentContext(
-                new DbContextOptionsBuilder<PaymentContext>()
-                    .UseSqlite(sqliteConnection)
-                    .Options,
-                useObjectAuditModel: false),
-            new PostgreSqlPaymentContext(
+        if (postgres)
+            return new PostgreSqlPaymentContext(
                 new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
                     .UseNpgsql("Host=localhost;Database=payplanner_delete_behavior_model;Username=postgres;Password=postgres")
                     .Options,
                 new HttpContextAccessor(),
-                useObjectAuditModel: false)
-        };
+                useObjectAuditModel: false);
+
+        var sqliteConnection = new SqliteConnection("Data Source=:memory:");
+        try
+        {
+            sqliteConnection.Open();
+            return new PaymentContext(
+                new DbContextOptionsBuilder<PaymentContext>()
+                    .UseSqlite(sqliteConnection, contextOwnsConnection: true)
+                    .Options,
+                useObjectAuditModel: false);
+        }
+        catch
+        {
+            sqliteConnection.Dispose();
+            throw;
+        }
     }
 
     private static void AssertDeleteBehavior<TDependent, TPrincipal>(

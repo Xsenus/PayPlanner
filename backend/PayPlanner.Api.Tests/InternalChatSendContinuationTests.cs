@@ -35,7 +35,7 @@ public sealed partial class InternalChatControllerTests
     [InlineData(true, "successor")]
     public async Task ChatSendContinuationUsesOneLeaseAcrossOriginalsAndPublication(bool postgres, string scenario)
     {
-        await using var f = await Fixture.CreateMigratedAsync(postgres, true);
+        await using var f = await CreateMigratedFixtureAsync(postgres, true);
         var actor = await f.AddUserAsync("chat-continue@example.test", "Автор");
         var thread = await CaptureChannelAsync(f, actor);
         var snapshot = CaptureSnapshot(thread.Id, actor.Id);

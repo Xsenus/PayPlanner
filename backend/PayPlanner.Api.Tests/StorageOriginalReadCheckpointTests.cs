@@ -26,7 +26,7 @@ public sealed partial class StorageStageCapacityServiceTests
     public async Task OriginalReadProducerCoalescesAndPreservesSourceFailures(bool postgres, string scenario)
     {
         var commits = new CheckpointCommitFault();
-        await using var f = await WriterProcessFixture.CreateAsync(postgres, commits);
+        await using var f = await CreateWriterFixtureAsync(postgres, commits);
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             [LocalStoragePaths.RootConfigurationKey] = Path.Combine(f.Root, "objects"),
@@ -137,7 +137,7 @@ public sealed partial class StorageStageCapacityServiceTests
     [InlineData(true)]
     public async Task OriginalReadProducerPersistsCheckpointBeforeReadonlyHandoff(bool postgres)
     {
-        await using var f = await WriterProcessFixture.CreateAsync(postgres);
+        await using var f = await CreateWriterFixtureAsync(postgres);
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             [LocalStoragePaths.RootConfigurationKey] = Path.Combine(f.Root, "objects"),

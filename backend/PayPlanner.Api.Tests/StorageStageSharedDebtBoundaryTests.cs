@@ -17,7 +17,7 @@ public sealed partial class StorageStageCapacityServiceTests
     [InlineData(true)]
     public async Task SharedStageBudgetCreditsOnlyItsConfirmedPhysicalPrefix(bool postgres)
     {
-        await using var f = await WriterProcessFixture.CreateAsync(postgres);
+        await using var f = await CreateWriterFixtureAsync(postgres);
         var (stages, service, policy, root) = CreateSharedBudgetServices(f);
         const long otherUpper = 8L * 1024 * 1024;
         var other = Assert.IsType<StorageStageCapacityTicket>((await stages.ReserveAsync("credit-other:" + Guid.NewGuid().ToString("N"),
@@ -57,7 +57,7 @@ public sealed partial class StorageStageCapacityServiceTests
     [InlineData(true)]
     public async Task SharedStageBudgetCompletionDoesNotChargeUnusedUpperBound(bool postgres)
     {
-        await using var f = await WriterProcessFixture.CreateAsync(postgres);
+        await using var f = await CreateWriterFixtureAsync(postgres);
         var (stages, _, policy, root) = CreateSharedBudgetServices(f);
         const long upper = 8L * 1024 * 1024;
         var other = Assert.IsType<StorageStageCapacityTicket>((await stages.ReserveAsync("unused-other:" + Guid.NewGuid().ToString("N"),
@@ -91,7 +91,7 @@ public sealed partial class StorageStageCapacityServiceTests
     public async Task SharedStageBudgetRejectsInvalidOrOverflowingDebtBeforeCreateNew(bool postgres, bool overflow)
     {
         var probe = new SharedBudgetSqlProbe();
-        await using var f = await WriterProcessFixture.CreateAsync(postgres, probe);
+        await using var f = await CreateWriterFixtureAsync(postgres, probe);
         var (stages, _, _, root) = CreateSharedBudgetServices(f);
         var other = Assert.IsType<StorageStageCapacityTicket>((await stages.ReserveAsync("invalid-other:" + Guid.NewGuid().ToString("N"),
             Path.Combine(root, "invalid-other.tmp"), 4, default)).Ticket);

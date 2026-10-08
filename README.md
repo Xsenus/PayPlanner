@@ -206,15 +206,28 @@ dotnet ef migrations add Init
 - `npm run test:watch` — интерактивный режим разработки с ограничением до двух worker-процессов
 - `npm run test:unit:serial` — последовательный прогон для диагностики нестабильного теста
 - `npm run test:integration` — последовательный набор интеграционных frontend-тестов
+- `npm run test:integration -- src/components/Accounts/InstallmentPlanner.integration.test.tsx` — выбранный integration-файл для разработки; можно перечислить несколько точных путей
+- `npm run test:integration -- --help` — допустимые параметры; неизвестный путь или флаг завершает команду ошибкой
 
 Чистые проверки утилит и файловых контрактов выполняются в лёгком Node-окружении; компонентные и браузерные сценарии продолжают использовать `jsdom`.
+
+Во время правок запускайте ближайший unit/component-файл, например `npx vitest run src/utils/reportPeriod.test.ts --maxWorkers=1`, или явно выбранные integration-файлы. Integration runner сохраняет один worker и полный набор без аргументов; поддерживает `--reporter`, но отвергает каталоги, glob-фильтры и `-t`/`--testNamePattern`, чтобы ошибочный выбор не превратился в успешный пропущенный прогон. Перед окончательной передачей или выпуском нужен полный применимый [quality gate](docs/quality-gates.md), а не результат выбранного файла. `npm ci` требуется при подготовке зависимостей, не перед каждым неизменным повтором теста.
 
 ### Backend скрипты
 
 - `BackgroundServices__Enabled=false Email__Enabled=false dotnet run` — локальный старт API из каталога `backend` (Bash), после подготовки почты и копии БД
-- `dotnet build` — сборка
-- `dotnet test` — тесты (если настроены)
+- `dotnet build backend/PayPlanner.Api.sln -c Release` — сборка из корня репозитория
+- `dotnet test backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj -c Release --filter "FullyQualifiedName~TaskBillingConcurrencyTests"` — пример адресной проверки после задания безопасной локальной среды ниже
 - `dotnet ef ...` — миграции EF Core
+
+Перед локальными backend-проверками явно задайте оба флага (PowerShell); настройки копии БД также должны быть изолированы по разделу [локальной почты](#локальная-почта-и-копия-бд):
+
+```powershell
+$env:BackgroundServices__Enabled = "false"
+$env:Email__Enabled = "false"
+```
+
+Для повторения тестов на неизменных исходниках после успешной сборки используйте ту же конфигурацию/output и `--no-build --no-restore`. При изменении C#, конфигурации или зависимостей сначала пересоберите затронутые проекты. Сам `--filter` не отменяет сборку. Полный выпускной backend проверяется в Release; необходимые PostgreSQL/browser-проверки и обязательный CI описаны в [quality gates](docs/quality-gates.md) и [workflow](.github/workflows/deploy.yml). Адресный прогон их не заменяет.
 
 ## Карточка клиента: раздел «Счета»
 

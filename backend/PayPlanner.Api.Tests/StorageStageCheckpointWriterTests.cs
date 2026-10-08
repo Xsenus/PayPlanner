@@ -24,7 +24,7 @@ public sealed partial class StorageStageCapacityServiceTests
     public async Task CheckpointWriterPersistsBothBoundariesBeforeWriteAndPreservesUnrelatedTrackedData(bool postgres)
     {
         var observer = new CheckpointCommitFault();
-        await using var f = await WriterProcessFixture.CreateAsync(postgres, observer);
+        await using var f = await CreateWriterFixtureAsync(postgres, observer);
         var ticket = await ReserveCheckpointAsync(f, StorageStageFileReceipt.MaximumBlockBytes + 4L);
         var client = new Client { Name = "persisted" };
         f.Db.Clients.Add(client); await f.Db.SaveChangesAsync(); client.Name = "unsaved";
@@ -66,7 +66,7 @@ public sealed partial class StorageStageCapacityServiceTests
     public async Task CheckpointWriterInitialUnknownCommitNeverGrantsUnprovedWriteAuthority(bool postgres, bool afterCommit)
     {
         var fault = new CheckpointCommitFault { AfterCommit = afterCommit };
-        await using var f = await WriterProcessFixture.CreateAsync(postgres, fault);
+        await using var f = await CreateWriterFixtureAsync(postgres, fault);
         var ticket = await ReserveCheckpointAsync(f);
         fault.Armed = true;
         try
@@ -97,7 +97,7 @@ public sealed partial class StorageStageCapacityServiceTests
     public async Task CheckpointWriterBlockUnknownCommitPreservesBoundaryAndSnapshotsCallerMemory(bool postgres, bool afterCommit)
     {
         var fault = new CheckpointCommitFault { AfterCommit = afterCommit };
-        await using var f = await WriterProcessFixture.CreateAsync(postgres, fault);
+        await using var f = await CreateWriterFixtureAsync(postgres, fault);
         var ticket = await ReserveCheckpointAsync(f);
         var bytes = new byte[] { 1, 2, 3, 4 };
         try
@@ -134,7 +134,7 @@ public sealed partial class StorageStageCapacityServiceTests
     [InlineData(true)]
     public async Task CheckpointWriterRejectsForgedAndClosedTicketsBeforeCreatingFile(bool postgres)
     {
-        await using var f = await WriterProcessFixture.CreateAsync(postgres);
+        await using var f = await CreateWriterFixtureAsync(postgres);
         var ticket = await ReserveCheckpointAsync(f);
         foreach (var forged in new[] { ticket with { BindingHash = new string('b', 64) }, ticket with { ObjectId = Guid.NewGuid() }, ticket with { SizeBytes = 8 } })
             await Assert.ThrowsAsync<InvalidOperationException>(() => f.Stages.OpenCheckpointWriterAsync(forged, default));
@@ -150,7 +150,7 @@ public sealed partial class StorageStageCapacityServiceTests
     [InlineData(true)]
     public async Task CheckpointWriterCloseWaitsForDescriptorAndStopsFurtherWrites(bool postgres)
     {
-        await using var f = await WriterProcessFixture.CreateAsync(postgres);
+        await using var f = await CreateWriterFixtureAsync(postgres);
         var ticket = await ReserveCheckpointAsync(f);
         StorageStageCheckpointWriter? writer = null;
         try
@@ -177,7 +177,7 @@ public sealed partial class StorageStageCapacityServiceTests
     {
         using var cancellation = new CancellationTokenSource();
         var fault = new CheckpointCommitFault { AfterCommit = true, OnCommitted = cancellation.Cancel };
-        await using var f = await WriterProcessFixture.CreateAsync(postgres, fault);
+        await using var f = await CreateWriterFixtureAsync(postgres, fault);
         var ticket = await ReserveCheckpointAsync(f);
         try
         {
@@ -204,7 +204,7 @@ public sealed partial class StorageStageCapacityServiceTests
     {
         var reads = new CheckpointReadFault();
         var fault = new CheckpointCommitFault { AfterCommit = true, OnCommitted = () => reads.Reject = true };
-        await using var f = await WriterProcessFixture.CreateAsync(postgres, fault, reads);
+        await using var f = await CreateWriterFixtureAsync(postgres, fault, reads);
         var ticket = await ReserveCheckpointAsync(f);
         try
         {
@@ -233,7 +233,7 @@ public sealed partial class StorageStageCapacityServiceTests
     [InlineData(true, true)]
     public async Task CheckpointWriterForeignFileOrChangedReceiptNeverGetsWriteAuthority(bool postgres, bool changedReceipt)
     {
-        await using var f = await WriterProcessFixture.CreateAsync(postgres);
+        await using var f = await CreateWriterFixtureAsync(postgres);
         var ticket = await ReserveCheckpointAsync(f);
         var foreign = new byte[] { 9, 8, 7, 6 };
         try

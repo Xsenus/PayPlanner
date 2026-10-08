@@ -62,7 +62,7 @@ public sealed partial class InternalChatControllerTests
     [InlineData(true, "expiryDuringRead")]
     public async Task ChatOriginalRecoveryUsesFrozenDurableBytesWithoutBrowserFiles(bool postgres, string scenario)
     {
-        await using var f = await Fixture.CreateMigratedAsync(postgres);
+        await using var f = await CreateMigratedFixtureAsync(postgres);
         var actor = await f.AddUserAsync("chat-recovery@example.test", "Автор");
         var thread = await CaptureChannelAsync(f, actor);
         var request = CaptureSnapshot(thread.Id, actor.Id);

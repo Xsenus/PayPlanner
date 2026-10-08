@@ -133,7 +133,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, "court")]
     public async Task GeneratedReservationWorkerRecoversOriginalBytesWithoutAnotherRequest(bool postgres, string kind)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 1, true);
+        await using var f = await CreateFixtureAsync(postgres, 1, true);
         var controller = f.Controller();
         controller.Request.Headers["X-Upload-Key"] = Guid.NewGuid().ToString("D");
         f.Local.LosePutAcknowledgement = true;

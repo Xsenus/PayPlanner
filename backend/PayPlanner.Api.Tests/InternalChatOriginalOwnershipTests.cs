@@ -16,7 +16,7 @@ public sealed partial class InternalChatControllerTests
     [InlineData(true, 2)]
     public async Task ChatOriginalCreateConflictPreservesForeignBytesAndPendingDebt(bool postgres, int collisionCall)
     {
-        await using var fixture = await Fixture.CreateMigratedAsync(postgres);
+        await using var fixture = await CreateMigratedFixtureAsync(postgres);
         var actor = await fixture.AddUserAsync("chat-ownership@example.test", "Автор");
         var thread = await CaptureChannelAsync(fixture, actor);
         var snapshot = CaptureSnapshot(thread.Id, actor.Id);

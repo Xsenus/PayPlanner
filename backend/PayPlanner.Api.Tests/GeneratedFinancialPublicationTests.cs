@@ -18,7 +18,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, GeneratedFinancialDocumentKind.Contract)]
     public async Task TypedFinancialPublicationCopiesFrozenGraphAndOriginalActorExactlyOnce(bool postgres, GeneratedFinancialDocumentKind kind)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var receipt = await CaptureFinancialPublicationAsync(f, kind);
         var frozen = Assert.IsType<GeneratedFinancialFrozenContent>(await new GeneratedFinancialDocumentRegistry(f.Db).ReadFrozenAsync(receipt, default));
         Assert.Equal("pending", (await f.PublishFinancial(receipt)).Status);
@@ -71,7 +71,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, GeneratedFinancialDocumentKind.Contract)]
     public async Task TypedFinancialPublicationLateFailureRollsBackFinanceDocumentAuditAndWinner(bool postgres, GeneratedFinancialDocumentKind kind)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var receipt = await CaptureFinancialPublicationAsync(f, kind);
         var originalHistory = f.Case.EventHistory;
         Assert.Equal("pending", (await f.PublishFinancial(receipt)).Status); await f.CopyPendingAsync();
@@ -106,7 +106,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     public async Task TypedFinancialPublicationLostCommitAckReturnsOriginalWinnerWithoutSecondFinance(bool postgres, GeneratedFinancialDocumentKind kind)
     {
         var fence = new FinancialCaptureCommitAckFailure();
-        await using var f = await Fixture.CreateAsync(postgres, 2, false, fence);
+        await using var f = await CreateFixtureAsync(postgres, 2, false, fence);
         var receipt = await CaptureFinancialPublicationAsync(f, kind);
         Assert.Equal("pending", (await f.PublishFinancial(receipt)).Status); await f.CopyPendingAsync();
         fence.Armed = true;
@@ -139,7 +139,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, GeneratedFinancialDocumentKind.Contract)]
     public async Task TypedFinancialPublicationPermissionLostDuringReadCannotPublish(bool postgres, GeneratedFinancialDocumentKind kind)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var receipt = await CaptureFinancialPublicationAsync(f, kind);
         Assert.Equal("pending", (await f.PublishFinancial(receipt)).Status); await f.CopyPendingAsync();
         var fired = false;
@@ -167,7 +167,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, GeneratedFinancialDocumentKind.Contract)]
     public async Task TypedFinancialPublicationRejectsDifferentBytesThanAcceptedCapture(bool postgres, GeneratedFinancialDocumentKind kind)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 1);
+        await using var f = await CreateFixtureAsync(postgres, 1);
         var receipt = await CaptureFinancialPublicationAsync(f, kind);
         await Assert.ThrowsAsync<InvalidOperationException>(() => f.PublishFinancial(receipt, corruptBytes: true));
         await using var observer = f.Observer();

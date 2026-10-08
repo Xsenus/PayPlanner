@@ -16,7 +16,7 @@ public sealed partial class StorageStageCapacityServiceTests
     public async Task CheckpointSettlementFreshTransactionRejectsChangedAdmission(bool postgres, bool confirm)
     {
         var transition = new CheckpointAdmissionTransition();
-        await using var f = await WriterProcessFixture.CreateAsync(postgres, transition);
+        await using var f = await CreateWriterFixtureAsync(postgres, transition);
         var ticket = await ReserveCheckpointAsync(f);
         var bytes = new byte[] { 1, 2, 3, 4 };
         try
@@ -62,7 +62,7 @@ public sealed partial class StorageStageCapacityServiceTests
     [InlineData(true)]
     public async Task CheckpointSettlementRejectsUnactivatedReservation(bool postgres)
     {
-        await using var f = await WriterProcessFixture.CreateAsync(postgres);
+        await using var f = await CreateWriterFixtureAsync(postgres);
         var ticket = await ReserveCheckpointAsync(f);
         var bytes = new byte[] { 1, 2, 3, 4 };
         try
@@ -98,7 +98,7 @@ public sealed partial class StorageStageCapacityServiceTests
     [InlineData(true, true, "dry-run")]
     public async Task CheckpointSettlementRetainsDebtForReplacedOrChangedFile(bool postgres, bool replacement, string operation)
     {
-        await using var f = await WriterProcessFixture.CreateAsync(postgres);
+        await using var f = await CreateWriterFixtureAsync(postgres);
         var ticket = await ReserveCheckpointAsync(f);
         var bytes = new byte[] { 1, 2, 3, 4 };
         try
@@ -145,7 +145,7 @@ public sealed partial class StorageStageCapacityServiceTests
     {
         var failure = new StageReleaseCommitFault(outcome == "before");
         var reads = new StageReleaseProofReadFault(failure, outcome == "unavailable");
-        await using var f = await WriterProcessFixture.CreateAsync(postgres, failure, reads);
+        await using var f = await CreateWriterFixtureAsync(postgres, failure, reads);
         var ticket = await ReserveCheckpointAsync(f);
         var bytes = new byte[] { 1, 2, 3, 4 };
         var marker = Path.Combine(f.Root, "objects", ".stage-writer-fences-v1", ticket.ObjectId.ToString("N") + ".lock");

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Xunit;
 
@@ -38,17 +39,11 @@ public sealed class LegalFeatureFlagCiGateTests
     }
 
     [Fact]
-    public void DeployWorkflow_RunsStrictLegalFlagGateBeforePublish()
+    public async Task DeployWorkflow_RunsStrictLegalFlagGateBeforeVpsDeploy()
     {
-        var root = FindRepositoryRoot();
-        var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "deploy.yml"));
-        var gateIndex = workflow.IndexOf("npm run test:legal-flags:strict", StringComparison.Ordinal);
-        var publishIndex = workflow.IndexOf("dotnet publish", StringComparison.Ordinal);
-
-        Assert.True(gateIndex >= 0, "deploy.yml must run npm run test:legal-flags:strict.");
-        Assert.True(publishIndex >= 0, "deploy.yml must publish backend after verification gates.");
-        Assert.True(gateIndex < publishIndex, "legal feature flag readiness gate must run before artifacts are published.");
-        Assert.Contains("PAYPLANNER_READINESS_API_URL", workflow, StringComparison.Ordinal);
+        var result = await ValidateDeployWorkflowAsync();
+        Assert.True(result.GetProperty("valid").GetBoolean());
+        Assert.Contains("frontend", result.GetProperty("deployNeeds").EnumerateArray().Select(item => item.GetString()));
     }
 
     [Fact]
@@ -73,35 +68,12 @@ public sealed class LegalFeatureFlagCiGateTests
     }
 
     [Fact]
-    public void DeployWorkflow_KeepsVerificationGatesBeforeArtifactsAndVpsDeploy()
+    public async Task DeployWorkflow_KeepsVerificationGatesBeforeArtifactsAndVpsDeploy()
     {
-        var root = FindRepositoryRoot();
-        var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "deploy.yml"));
-
-        AssertInOrder(
-            workflow,
-            [
-                "dotnet restore \"${{ env.BE_SLN }}\" --force -p:PayPlannerReleaseAudit=true",
-                "dotnet format",
-                "npm ci",
-                "npx playwright install --with-deps chromium chrome",
-                "npm install --global @playwright/cli@0.1.22",
-                "dotnet test backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-restore",
-                "npm run lint",
-                "npx tsc -p tsconfig.app.json --noEmit",
-                "npm run audit:dates:test",
-                "npm run audit:encoding",
-                "npm run audit:surface:test && npm run audit:surface",
-                "npm audit --audit-level=moderate",
-                "npm run test:ci",
-                "npm run test:integration",
-                "npm run test:legal-flags:strict",
-                "dotnet publish",
-                "npm run build",
-                "tar -czf",
-                "appleboy/scp-action",
-                "appleboy/ssh-action",
-            ]);
+        var result = await ValidateDeployWorkflowAsync();
+        Assert.Equal(new[] { "backend", "backend-format", "frontend" },
+            result.GetProperty("deployNeeds").EnumerateArray().Select(item => item.GetString()).OrderBy(item => item));
+        Assert.Equal(2, result.GetProperty("artifacts").GetArrayLength());
     }
 
     [Fact]
@@ -223,6 +195,39 @@ public sealed class LegalFeatureFlagCiGateTests
         Assert.Contains("warnings.Ignore(CoreEventId.FirstWithoutOrderByAndFilterWarning)", program, StringComparison.Ordinal);
         Assert.Contains("warnings.Throw(RelationalEventId.MultipleCollectionIncludeWarning)", program, StringComparison.Ordinal);
         Assert.Contains("warnings.Throw(CoreEventId.FirstWithoutOrderByAndFilterWarning)", program, StringComparison.Ordinal);
+    }
+
+    private static async Task<JsonElement> ValidateDeployWorkflowAsync()
+    {
+        var root = FindRepositoryRoot();
+        var start = new ProcessStartInfo("node")
+        {
+            WorkingDirectory = root,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        start.ArgumentList.Add(Path.Combine(root, "scripts", "validate-deploy-workflow.mjs"));
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("Workflow validator did not start.");
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        try
+        {
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30));
+            await Task.WhenAll(stdout, stderr).WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.True(process.ExitCode == 0, await stderr);
+            using var document = JsonDocument.Parse(await stdout);
+            return document.RootElement.Clone();
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            }
+        }
     }
 
     private static string FindRepositoryRoot()

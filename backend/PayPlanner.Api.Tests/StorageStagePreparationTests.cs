@@ -17,7 +17,7 @@ public sealed partial class StorageStageCapacityServiceTests
     [InlineData(true)]
     public async Task StageRuntimeContextsReuseInternalServicesWithScopedFaultInterceptors(bool postgres)
     {
-        await using var fixture = await WriterProcessFixture.CreateAsync(postgres, new PreparationReadObserver());
+        await using var fixture = await CreateWriterFixtureAsync(postgres, new PreparationReadObserver());
         await using var fresh = fixture.NewContext();
         await using var anotherFresh = fixture.NewContext();
         await using var faultContext = fixture.NewContext(new PreparationReadObserver());
@@ -35,7 +35,7 @@ public sealed partial class StorageStageCapacityServiceTests
     public async Task RecoveryEndsDurablePreparationBeforeDelayedProducerCanIssueWriter(bool postgres)
     {
         var pause = new PreparationPause();
-        await using var f = await WriterProcessFixture.CreateAsync(postgres, pause);
+        await using var f = await CreateWriterFixtureAsync(postgres, pause);
         Directory.CreateDirectory(Path.Combine(f.Root, "objects"));
         var path = Path.Combine(f.Root, "objects", "preparing.tmp");
         pause.Armed = true;
@@ -81,7 +81,7 @@ public sealed partial class StorageStageCapacityServiceTests
     {
         var pause = new PreparationPause();
         var activation = new PreparationActivationPause();
-        await using var f = await WriterProcessFixture.CreateAsync(postgres, pause, activation);
+        await using var f = await CreateWriterFixtureAsync(postgres, pause, activation);
         Directory.CreateDirectory(Path.Combine(f.Root, "objects"));
         pause.Armed = true;
         activation.Armed = true;
@@ -140,7 +140,7 @@ public sealed partial class StorageStageCapacityServiceTests
     public async Task PreparingRecoveryRetainsExistingBytesAndLegacyMissingMarker(bool postgres, bool legacy)
     {
         var pause = new PreparationPause();
-        await using var f = await WriterProcessFixture.CreateAsync(postgres, pause);
+        await using var f = await CreateWriterFixtureAsync(postgres, pause);
         Directory.CreateDirectory(Path.Combine(f.Root, "objects"));
         var path = Path.Combine(f.Root, "objects", "retained.tmp");
         pause.Armed = true;

@@ -56,9 +56,21 @@ public sealed class PaymentAdvanceReviewServiceTests
     }
 
     [Theory]
-    [MemberData(nameof(NotCandidateCases))]
-    public void IsUnallocatedAdvanceCandidate_ReturnsFalse_ForPaymentsOutsideRule(Payment payment)
-        => Assert.False(PaymentAdvanceReviewService.IsUnallocatedAdvanceCandidate(payment));
+    [InlineData("expense")]
+    [InlineData("cancelled")]
+    [InlineData("invoice")]
+    [InlineData("act")]
+    [InlineData("account")]
+    [InlineData("legacy-account")]
+    [InlineData("invoice-kind")]
+    [InlineData("zero-amount")]
+    [InlineData("both-counterparties")]
+    [InlineData("no-counterparty")]
+    public void IsUnallocatedAdvanceCandidate_ReturnsFalse_ForPaymentsOutsideRule(string scenario)
+    {
+        var payment = CreateNotCandidate(scenario);
+        Assert.False(PaymentAdvanceReviewService.IsUnallocatedAdvanceCandidate(payment));
+    }
 
     [Fact]
     public void UnallocatedAdvanceCandidatePredicate_MatchesInMemoryRule_ForCoreScenarios()
@@ -85,23 +97,25 @@ public sealed class PaymentAdvanceReviewServiceTests
         }
     }
 
-    public static IEnumerable<object[]> NotCandidateCases()
-    {
-        yield return [CreateCandidate(payment => payment.Type = PaymentType.Expense)];
-        yield return [CreateCandidate(payment => payment.Status = PaymentStatus.Cancelled)];
-        yield return [CreateCandidate(payment => payment.InvoiceId = 10)];
-        yield return [CreateCandidate(payment => payment.Acts.Add(new Act { Number = "ACT-12", Date = payment.Date }))];
-        yield return [CreateCandidate(payment => payment.Account = "INV-12")];
-        yield return [CreateCandidate(payment => payment.LegacyAccountNumber = "OLD-12")];
-        yield return [CreateCandidate(payment => payment.DocumentKind = DocumentKind.Invoice)];
-        yield return [CreateCandidate(payment => payment.Amount = 0m, paidAmount: 0m)];
-        yield return [CreateCandidate(payment =>
+    private static Payment CreateNotCandidate(string scenario)
+        => scenario switch
         {
-            payment.ClientId = 10;
-            payment.LegalEntityId = 20;
-        })];
-        yield return [CreateCandidate(payment => payment.ClientId = null)];
-    }
+            "expense" => CreateCandidate(payment => payment.Type = PaymentType.Expense),
+            "cancelled" => CreateCandidate(payment => payment.Status = PaymentStatus.Cancelled),
+            "invoice" => CreateCandidate(payment => payment.InvoiceId = 10),
+            "act" => CreateCandidate(payment => payment.Acts.Add(new Act { Number = "ACT-12", Date = payment.Date })),
+            "account" => CreateCandidate(payment => payment.Account = "INV-12"),
+            "legacy-account" => CreateCandidate(payment => payment.LegacyAccountNumber = "OLD-12"),
+            "invoice-kind" => CreateCandidate(payment => payment.DocumentKind = DocumentKind.Invoice),
+            "zero-amount" => CreateCandidate(payment => payment.Amount = 0m, paidAmount: 0m),
+            "both-counterparties" => CreateCandidate(payment =>
+            {
+                payment.ClientId = 10;
+                payment.LegalEntityId = 20;
+            }),
+            "no-counterparty" => CreateCandidate(payment => payment.ClientId = null),
+            _ => throw new ArgumentOutOfRangeException(nameof(scenario)),
+        };
 
     private static Payment CreateCandidate(Action<Payment>? configure = null, decimal paidAmount = 1_000m)
     {

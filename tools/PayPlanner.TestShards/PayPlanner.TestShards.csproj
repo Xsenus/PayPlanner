@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="TestShardsSdkVersion" Value="$(NETCoreSdkVersion)" />
+    <Reference Include="Microsoft.TestPlatform.VsTestConsole.TranslationLayer">
+      <HintPath>$(MSBuildSDKsPath)/../Microsoft.TestPlatform.VsTestConsole.TranslationLayer.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.TestPlatform.ObjectModel">
+      <HintPath>$(MSBuildSDKsPath)/../Microsoft.VisualStudio.TestPlatform.ObjectModel.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>

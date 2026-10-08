@@ -25,7 +25,7 @@ public sealed partial class StorageStageCapacityServiceTests
     [InlineData(true, "deadLetter")]
     public async Task CheckpointCopyBudgetChargesOnlyUnsettledRepairOperations(bool postgres, string status)
     {
-        await using var f = await WriterProcessFixture.CreateAsync(postgres);
+        await using var f = await CreateWriterFixtureAsync(postgres);
         var (stages, policy, root) = CreateCopyBudgetServices(f);
         const long copyBytes = 8L * 1024 * 1024;
         var operation = await AddOwnedCopyBudgetOperationAsync(f, copyBytes, status, "local");
@@ -66,7 +66,7 @@ public sealed partial class StorageStageCapacityServiceTests
     [InlineData(true, true)]
     public async Task CheckpointCopyBudgetRemoteDestinationChargesSpoolWithoutCloudQuotaIo(bool postgres, bool deny)
     {
-        await using var f = await WriterProcessFixture.CreateAsync(postgres);
+        await using var f = await CreateWriterFixtureAsync(postgres);
         var remote = new OwnedRemoteBudgetProvider();
         var (stages, policy, root) = CreateCopyBudgetServices(f, remote);
         const long copyBytes = 8L * 1024 * 1024;
@@ -119,7 +119,7 @@ public sealed partial class StorageStageCapacityServiceTests
     public async Task CheckpointCopyBudgetRejectsInvalidOrUnknownQueueBeforeCreateNew(bool postgres, string damage)
     {
         var probe = new CopyBudgetSqlProbe();
-        await using var f = await WriterProcessFixture.CreateAsync(postgres, probe);
+        await using var f = await CreateWriterFixtureAsync(postgres, probe);
         var unknown = new OwnedUnknownBudgetProvider();
         var (stages, _, root) = CreateCopyBudgetServices(f, unknown);
         var ticket = Assert.IsType<StorageStageCapacityTicket>((await stages.ReserveAsync(
@@ -155,7 +155,7 @@ public sealed partial class StorageStageCapacityServiceTests
     public async Task CheckpointCopyBudgetRechecksPolicyAfterCopySqlAwait(bool postgres)
     {
         var probe = new CopyBudgetSqlProbe();
-        await using var f = await WriterProcessFixture.CreateAsync(postgres, probe);
+        await using var f = await CreateWriterFixtureAsync(postgres, probe);
         var (stages, policy, root) = CreateCopyBudgetServices(f);
         var ticket = Assert.IsType<StorageStageCapacityTicket>((await stages.ReserveAsync(
             "copy-await:" + Guid.NewGuid().ToString("N"), Path.Combine(root, "await.tmp"), 4, default)).Ticket);
@@ -177,7 +177,7 @@ public sealed partial class StorageStageCapacityServiceTests
     [InlineData(true)]
     public async Task CheckpointCopyBudgetRejectsExcessiveDestinationGraphBeforeCreateNew(bool postgres)
     {
-        await using var f = await WriterProcessFixture.CreateAsync(postgres);
+        await using var f = await CreateWriterFixtureAsync(postgres);
         var (stages, _, root) = CreateCopyBudgetServices(f);
         var ticket = Assert.IsType<StorageStageCapacityTicket>((await stages.ReserveAsync(
             "copy-graph:" + Guid.NewGuid().ToString("N"), Path.Combine(root, "graph.tmp"), 4, default)).Ticket);

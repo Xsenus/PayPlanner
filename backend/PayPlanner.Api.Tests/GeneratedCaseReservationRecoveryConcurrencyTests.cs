@@ -12,7 +12,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task GeneratedReservationRecoveryHonorsBatchLimit(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 1, true);
+        await using var f = await CreateFixtureAsync(postgres, 1, true);
         await PrepareReservationAsync(f); await PrepareReservationAsync(f, "work-order");
         f.FinancialStorageOptions.WorkerBatchSize = 1;
         Assert.Equal(1, await f.ReservationRecovery().ProcessBatchAsync(default)); f.Db.ChangeTracker.Clear();
@@ -31,7 +31,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task GeneratedReservationRecoveryKeepsAcceptedVersionCollisionAsConflict(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 1, true);
+        await using var f = await CreateFixtureAsync(postgres, 1, true);
         await PrepareReservationAsync(f); await PrepareReservationAsync(f);
         f.FinancialStorageOptions.WorkerBatchSize = 1;
         Assert.Equal(1, await f.ReservationRecovery().ProcessBatchAsync(default));
@@ -50,7 +50,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task GeneratedReservationRecoveryRejectsRetiredAttemptBeforeProviderRead(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 1, true);
+        await using var f = await CreateFixtureAsync(postgres, 1, true);
         await PrepareReservationAsync(f);
         var original = await f.Db.StorageCapacityReservations.AsNoTracking().SingleAsync(r => r.ProductContextJson != null);
         using var intent = System.Text.Json.JsonDocument.Parse(original.ProductContextJson!);
@@ -82,7 +82,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task GeneratedReservationConcurrentWorkersClaimOnlyOneAttempt(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 1, true);
+        await using var f = await CreateFixtureAsync(postgres, 1, true);
         await PrepareReservationAsync(f); f.PrepareIdentityObservers();
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -111,7 +111,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task GeneratedReservationCancellationRetainsLeaseUntilExpiryAndThenRecovers(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 1, true);
+        await using var f = await CreateFixtureAsync(postgres, 1, true);
         await PrepareReservationAsync(f);
         f.FinancialStorageOptions.WorkerLeaseSeconds = 15;
         using var cancellation = new CancellationTokenSource();
@@ -140,7 +140,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task GeneratedReservationStaleWorkerCannotPublishOrOverwriteNewExecution(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 1, true);
+        await using var f = await CreateFixtureAsync(postgres, 1, true);
         await PrepareReservationAsync(f); f.FinancialStorageOptions.WorkerLeaseSeconds = 15; f.PrepareIdentityObservers();
         var firstClock = new FixedReservationRecoveryClock(DateTimeOffset.UtcNow);
         var winnerClock = new FixedReservationRecoveryClock(firstClock.GetUtcNow().AddMinutes(5));
@@ -211,7 +211,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, "removed-source")]
     public async Task GeneratedReservationRechecksAuthorityAfterReadingOriginalBytes(bool postgres, string boundary)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 1, true);
+        await using var f = await CreateFixtureAsync(postgres, 1, true);
         await PrepareReservationAsync(f, "work-order");
         var changed = false;
         f.Local.BeforeReadAsync = async ct =>

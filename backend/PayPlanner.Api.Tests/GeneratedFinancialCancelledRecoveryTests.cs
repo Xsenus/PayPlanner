@@ -16,7 +16,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     public async Task FinancialActionAfterCancelledLocalPutRestoresOriginalAcceptanceWithoutNewCapture(bool postgres,
         GeneratedFinancialDocumentKind kind)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2, true);
+        await using var f = await CreateFixtureAsync(postgres, 2, true);
         var controller = f.Controller(); var key = Guid.NewGuid();
         controller.Request.Headers["X-Upload-Key"] = key.ToString("D");
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -72,7 +72,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     public async Task FinancialRecoveryAfterCancelledLocalPutRestoresOriginalAcceptanceWithoutNewCapture(bool postgres,
         GeneratedFinancialDocumentKind kind)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2, true);
+        await using var f = await CreateFixtureAsync(postgres, 2, true);
         var receipt = await CaptureFinancialPublicationAsync(f, kind);
         var originalJson = (await f.Db.GeneratedFinancialDocumentAttempts.AsNoTracking().SingleAsync()).FrozenDomainJson;
         var originalBytes = (await f.Db.GeneratedFinancialDocumentContents.AsNoTracking().SingleAsync()).Bytes;

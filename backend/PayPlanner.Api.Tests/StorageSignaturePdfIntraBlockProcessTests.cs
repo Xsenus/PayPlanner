@@ -20,7 +20,7 @@ public sealed partial class StorageStageCapacityServiceTests
     {
         var phase = afterFirst ? "pdf-partial-next" : "pdf-partial-first";
         const int blockSize = StorageStageFileReceipt.MaximumBlockBytes;
-        await using var f = await WriterProcessFixture.CreateAsync(postgres);
+        await using var f = await CreateWriterFixtureAsync(postgres);
         var source = RandomNumberGenerator.GetBytes(blockSize * 2 + 4);
         "%PDF-1.7"u8.CopyTo(source);
         var sourceSha = Convert.ToHexString(SHA256.HashData(source)).ToLowerInvariant();

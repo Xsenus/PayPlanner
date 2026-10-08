@@ -18,7 +18,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, GeneratedFinancialDocumentKind.Contract)]
     public async Task FinancialRecoveryRestartsAcceptedSourceWithoutRenderingOrReallocating(bool postgres, GeneratedFinancialDocumentKind kind)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2, true);
+        await using var f = await CreateFixtureAsync(postgres, 2, true);
         var receipt = await CaptureFinancialPublicationAsync(f, kind);
         var before = await f.Db.GeneratedFinancialDocumentAttempts.AsNoTracking().SingleAsync();
         var bytes = (await f.Db.GeneratedFinancialDocumentContents.AsNoTracking().SingleAsync()).Bytes;
@@ -61,7 +61,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, "corrupt")]
     public async Task FinancialRecoveryRejectsDisabledRetiredRevokedAndDamagedSourcesBeforeProviderIO(bool postgres, string scenario)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2, true);
+        await using var f = await CreateFixtureAsync(postgres, 2, true);
         var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync();
         var result = await CaptureWithClaimsAsync(f.Db, f.Case.Id, orderId, f.User.Id, f.User.FullName, GeneratedFinancialDocumentKind.Invoice);
         var receipt = result.Receipt!; f.FinancialStorageOptions.WorkerEnabled = true;
@@ -90,7 +90,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task FinancialRecoveryConcurrentWorkersClaimOneLeaseBeforeLocalWrite(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2, true);
+        await using var f = await CreateFixtureAsync(postgres, 2, true);
         var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync();
         Assert.Equal("recorded", (await CaptureWithClaimsAsync(f.Db, f.Case.Id, orderId, f.User.Id, f.User.FullName, GeneratedFinancialDocumentKind.Invoice)).Status);
         f.FinancialStorageOptions.WorkerEnabled = true; f.PrepareIdentityObservers();
@@ -118,7 +118,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task FinancialRecoveryExpiredLeaseCannotPublishEvenWithOneRequiredCopy(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 1, true);
+        await using var f = await CreateFixtureAsync(postgres, 1, true);
         var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync();
         Assert.Equal("recorded", (await CaptureWithClaimsAsync(f.Db, f.Case.Id, orderId, f.User.Id, f.User.FullName, GeneratedFinancialDocumentKind.Invoice)).Status);
         f.FinancialStorageOptions.WorkerEnabled = true; f.FinancialStorageOptions.WorkerLeaseSeconds = 15;

@@ -19,7 +19,7 @@ public sealed partial class InternalChatControllerTests
     [InlineData(true)]
     public async Task ChatCaptureFreezesWholeRequestWithoutPublishingMessageAndSurvivesNewContext(bool postgres)
     {
-        await using var f = await Fixture.CreateMigratedAsync(postgres);
+        await using var f = await CreateMigratedFixtureAsync(postgres);
         var author = await f.AddUserAsync("capture-author@example.test", "Автор");
         var colleague = await f.AddUserAsync("capture-colleague@example.test", "Коллега");
         var thread = await CaptureChannelAsync(f, author, colleague);
@@ -67,7 +67,7 @@ public sealed partial class InternalChatControllerTests
     [InlineData(true)]
     public async Task ChatCaptureRejectsChangedRequestButKeepsIndependentActorsKeysAndThreads(bool postgres)
     {
-        await using var f = await Fixture.CreateMigratedAsync(postgres);
+        await using var f = await CreateMigratedFixtureAsync(postgres);
         var author = await f.AddUserAsync("capture-identity-author@example.test", "Автор");
         var colleague = await f.AddUserAsync("capture-identity-colleague@example.test", "Коллега");
         var thread = await CaptureChannelAsync(f, author, colleague);
@@ -110,7 +110,7 @@ public sealed partial class InternalChatControllerTests
     [InlineData(true)]
     public async Task ChatCaptureChecksFreshAuthorityReplyMentionsAndNeverAdoptsLegacySend(bool postgres)
     {
-        await using var f = await Fixture.CreateMigratedAsync(postgres);
+        await using var f = await CreateMigratedFixtureAsync(postgres);
         var author = await f.AddUserAsync("capture-scope-author@example.test", "Автор");
         var colleague = await f.AddUserAsync("capture-scope-colleague@example.test", "Коллега");
         var outsider = await f.AddUserAsync("capture-scope-outsider@example.test", "Посторонний");
@@ -145,7 +145,7 @@ public sealed partial class InternalChatControllerTests
     [InlineData(true)]
     public async Task ChatCaptureRejectsCorruptFrozenRowsWithoutProviderOrMessageWork(bool postgres)
     {
-        await using var f = await Fixture.CreateMigratedAsync(postgres);
+        await using var f = await CreateMigratedFixtureAsync(postgres);
         var author = await f.AddUserAsync("capture-corrupt-author@example.test", "Автор");
         var colleague = await f.AddUserAsync("capture-corrupt-colleague@example.test", "Коллега");
         var thread = await CaptureChannelAsync(f, author, colleague);
@@ -181,7 +181,7 @@ public sealed partial class InternalChatControllerTests
     public async Task ChatCaptureDoesNotFlushPendingCallerChangesAndFailureCannotResurrectAttempt(bool postgres)
     {
         var interceptor = new RejectChatCaptureSave();
-        await using var f = await Fixture.CreateMigratedAsync(postgres, false, interceptor);
+        await using var f = await CreateMigratedFixtureAsync(postgres, false, interceptor);
         var author = await f.AddUserAsync("capture-rollback-author@example.test", "Автор");
         var thread = await CaptureChannelAsync(f, author);
         var request = CaptureSnapshot(thread.Id, author.Id);
@@ -207,7 +207,7 @@ public sealed partial class InternalChatControllerTests
     [InlineData(true)]
     public async Task ChatCaptureConcurrentExactRequestsCreateOneFrozenAggregate(bool postgres)
     {
-        await using var f = await Fixture.CreateMigratedAsync(postgres, true);
+        await using var f = await CreateMigratedFixtureAsync(postgres, true);
         var author = await f.AddUserAsync("capture-race-author@example.test", "Автор");
         var thread = await CaptureChannelAsync(f, author);
         var request = CaptureSnapshot(thread.Id, author.Id);
@@ -230,7 +230,7 @@ public sealed partial class InternalChatControllerTests
     public async Task ChatCaptureLostCommitAcknowledgementReplaysOriginalAggregate(bool postgres)
     {
         var fault = new ChatCaptureCommitAckFailure();
-        await using var f = await Fixture.CreateMigratedAsync(postgres, false, fault);
+        await using var f = await CreateMigratedFixtureAsync(postgres, false, fault);
         var author = await f.AddUserAsync("capture-ack-author@example.test", "Автор");
         var thread = await CaptureChannelAsync(f, author);
         var request = CaptureSnapshot(thread.Id, author.Id);
@@ -255,7 +255,7 @@ public sealed partial class InternalChatControllerTests
     [InlineData(true)]
     public async Task ChatCaptureTaskMembershipChangesAndExplicitGuestScopeRemainFresh(bool postgres)
     {
-        await using var f = await Fixture.CreateMigratedAsync(postgres);
+        await using var f = await CreateMigratedFixtureAsync(postgres);
         var author = await f.AddUserAsync("capture-task-author@example.test", "Автор");
         var assignee = await f.AddUserAsync("capture-task-assignee@example.test", "Исполнитель");
         var observer = await f.AddUserAsync("capture-task-observer@example.test", "Наблюдатель");
@@ -288,7 +288,7 @@ public sealed partial class InternalChatControllerTests
     public async Task ChatCaptureRollsBackAuthorityLostAfterSaveBeforeCommit(bool postgres)
     {
         var fault = new ChatCaptureAuthorityFailure();
-        await using var f = await Fixture.CreateMigratedAsync(postgres, false, fault);
+        await using var f = await CreateMigratedFixtureAsync(postgres, false, fault);
         var author = await f.AddUserAsync("capture-authority-author@example.test", "Автор");
         var thread = await CaptureChannelAsync(f, author);
         var request = CaptureSnapshot(thread.Id, author.Id);

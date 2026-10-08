@@ -23,7 +23,7 @@ public sealed partial class StorageStageCapacityServiceTests
         var first = new byte[blockSize]; Array.Fill(first, (byte)0x31);
         var planned = afterFirst ? first.Concat(Enumerable.Repeat((byte)0x52, blockSize)).ToArray() : first;
         var physical = planned.AsSpan(0, (afterFirst ? blockSize : 0) + blockSize / 2).ToArray();
-        await using var f = await WriterProcessFixture.CreateAsync(postgres);
+        await using var f = await CreateWriterFixtureAsync(postgres);
         var assembly = Path.Combine(AppContext.BaseDirectory, "PayPlanner.StorageStageWriterProbe.dll");
         Assert.True(File.Exists(assembly));
         var start = new ProcessStartInfo("dotnet")

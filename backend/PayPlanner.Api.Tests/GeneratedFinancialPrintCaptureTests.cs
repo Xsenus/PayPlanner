@@ -25,7 +25,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, GeneratedFinancialDocumentKind.Contract, true)]
     public async Task FinancialPrintCaptureUsesActualRendererAndFreezesRequestDefaults(bool postgres, GeneratedFinancialDocumentKind kind, bool rounding)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var order = await f.Db.ClientCaseWorkOrders.Include(o => o.Items).SingleAsync();
         order.Items.Single().ServiceName = "Услуга <script>";
         order.Items.Single().SortOrder = 9;

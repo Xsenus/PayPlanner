@@ -20,7 +20,7 @@ public sealed partial class StorageStageCapacityServiceTests
     public async Task StageReleaseLostAcknowledgementUsesFreshExactState(bool postgres, bool physical, bool rejectBeforeCommit)
     {
         var failure = new StageReleaseCommitFault(rejectBeforeCommit);
-        await using var fixture = await WriterProcessFixture.CreateAsync(postgres, failure);
+        await using var fixture = await CreateWriterFixtureAsync(postgres, failure);
         var directory = Path.Combine(fixture.Root, "objects", ".ack-stage");
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, "original.tmp");
@@ -64,7 +64,7 @@ public sealed partial class StorageStageCapacityServiceTests
     {
         var failure = new StageReleaseCommitFault(false);
         var proof = new StageReleaseProofReadFault(failure, damage == "unavailable");
-        await using var fixture = await WriterProcessFixture.CreateAsync(postgres, failure, proof);
+        await using var fixture = await CreateWriterFixtureAsync(postgres, failure, proof);
         var directory = Path.Combine(fixture.Root, "objects", ".ack-stage");
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, "original.tmp");

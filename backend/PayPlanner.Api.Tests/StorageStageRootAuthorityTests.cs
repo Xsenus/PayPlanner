@@ -14,7 +14,7 @@ public sealed partial class StorageStageCapacityServiceTests
     [InlineData(true, true)]
     public async Task RootAuthorityMutationBeforeCreateNewNeverGrantsWriter(bool postgres, bool missing)
     {
-        await using var f = await WriterProcessFixture.CreateAsync(postgres);
+        await using var f = await CreateWriterFixtureAsync(postgres);
         var (stages, _, _, root) = CreateSharedBudgetServices(f);
         var ticket = Assert.IsType<StorageStageCapacityTicket>((await stages.ReserveAsync("root-mutation:" + Guid.NewGuid().ToString("N"),
             Path.Combine(root, "mutation.tmp"), 4, default)).Ticket);
@@ -48,7 +48,7 @@ public sealed partial class StorageStageCapacityServiceTests
     [InlineData(true, true, true)]
     public async Task RootRecoveryRetainsOriginalFilesWhenDirectoryWasReplacedOrProofMissing(bool postgres, bool missing, bool apply)
     {
-        await using var f = await WriterProcessFixture.CreateAsync(postgres);
+        await using var f = await CreateWriterFixtureAsync(postgres);
         var (stages, _, _, root) = CreateSharedBudgetServices(f);
         var bytes = new byte[] { 1, 2, 3, 4 };
         var ticket = Assert.IsType<StorageStageCapacityTicket>((await stages.ReserveAsync("root-recovery:" + Guid.NewGuid().ToString("N"),

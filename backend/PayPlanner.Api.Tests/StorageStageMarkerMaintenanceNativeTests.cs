@@ -22,7 +22,7 @@ public sealed partial class StorageStageCapacityServiceTests
     {
         var failure = new StageReleaseCommitFault(false);
         var proof = new StageReleaseProofReadFault(failure, true);
-        await using var fixture = await WriterProcessFixture.CreateAsync(postgres, failure, proof);
+        await using var fixture = await CreateWriterFixtureAsync(postgres, failure, proof);
         Directory.CreateDirectory(Path.Combine(fixture.Root, "objects"));
         var original = Path.Combine(fixture.Root, "objects", "original.tmp");
         var ticket = Assert.IsType<StorageStageCapacityTicket>((await fixture.Stages.ReserveAsync(

@@ -19,7 +19,7 @@ public sealed partial class StorageStageCapacityServiceTests
     [InlineData(true, "checkpoint-complete")]
     public async Task IndependentCheckpointWriterRetainsExactBoundaryAcrossKill(bool postgres, string phase)
     {
-        await using var f = await WriterProcessFixture.CreateAsync(postgres);
+        await using var f = await CreateWriterFixtureAsync(postgres);
         var assembly = Path.Combine(AppContext.BaseDirectory, "PayPlanner.StorageStageWriterProbe.dll");
         Assert.True(File.Exists(assembly));
         var start = new ProcessStartInfo("dotnet")

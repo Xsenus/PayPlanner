@@ -11,7 +11,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task FinancialCancellationBeforeLocalWritePreservesAcceptanceAndAllowsExplicitRetirement(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2, true);
+        await using var f = await CreateFixtureAsync(postgres, 2, true);
         var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync();
         var capture = await CaptureWithClaimsAsync(f.Db, f.Case.Id, orderId, f.User.Id, f.User.FullName, GeneratedFinancialDocumentKind.Invoice);
         var receipt = Assert.IsType<GeneratedFinancialDocumentReceipt>(capture.Receipt);

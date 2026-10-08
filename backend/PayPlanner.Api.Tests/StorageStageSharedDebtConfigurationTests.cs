@@ -20,7 +20,7 @@ public sealed partial class StorageStageCapacityServiceTests
     public async Task SharedStageBudgetRechecksPolicyAndRootAfterSqlAwait(bool postgres, bool changeRoot)
     {
         var fault = new SharedBudgetConfigurationFault();
-        await using var f = await WriterProcessFixture.CreateAsync(postgres, fault);
+        await using var f = await CreateWriterFixtureAsync(postgres, fault);
         var root = Path.Combine(f.Root, "objects");
         var replacementRoot = Path.Combine(f.Root, "changed-root");
         Directory.CreateDirectory(root);

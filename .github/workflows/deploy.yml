@@ -12,40 +12,105 @@ concurrency:
   group: payplanner-deploy
   cancel-in-progress: true
 
+env:
+  DOTNET_PROCESSOR_COUNT: "2"
+  DOTNET_gcServer: "0"
+  DOTNET_GCConserveMemory: "9"
+  BE_CSPROJ: backend/PayPlanner.Api.csproj
+  BE_SLN: backend/PayPlanner.Api.sln
+  OUT_DIR: out
+  TAR_NAME: payplanner_${{ github.sha }}.tar.gz
+  FE_API_URL: https://api.elitpravo.com/api
+  PUBLIC_API_URL: https://api.elitpravo.com
+  PUBLIC_API_HEALTH_URL: https://api.elitpravo.com/api/health
+  PUBLIC_FRONTEND_URL: https://crm.elitpravo.com/
+  VPS_HOST: 185.46.10.202
+  VPS_USER: root
+  VPS_PORT: 22
+
 jobs:
-  build-and-deploy:
+  frontend:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:17-alpine
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install FE deps
+        run: npm ci
+
+      - name: Verify release gate dependencies
+        run: node scripts/validate-deploy-workflow.mjs
+
+      - name: Test deploy backup retention
+        run: bash scripts/prune-deploy-backups.test.sh
+
+      - name: Test Data Protection key preservation
+        run: bash scripts/preserve-data-protection-keys.test.sh
+
+      - name: Test storage backfill CLI
+        run: node --test scripts/storage-legacy-backfill.node-tests.mjs
+
+      - name: Lint FE
+        run: npm run lint
+
+      - name: Typecheck FE
+        run: npx tsc -p tsconfig.app.json --noEmit
+
+      - name: Verify date/time audit
+        run: npm run audit:dates:test
+
+      - name: Verify source encoding
+        run: npm run audit:encoding
+
+      - name: Verify system surface inventory
+        run: npm run audit:surface:test && npm run audit:surface
+
+      - name: Audit FE packages
+        run: npm audit --audit-level=moderate
+
+      - name: Test FE guard and unit
+        run: npm run test:ci
+
+      - name: Test FE integration
+        run: npm run test:integration
+
+      - name: Test legal feature flags readiness
         env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
+          PAYPLANNER_READINESS_API_URL: ${{ env.FE_API_URL }}
+        run: npm run test:legal-flags:strict -- --warn-on-feature-flags-summary-failure
 
-    env:
-      DOTNET_PROCESSOR_COUNT: "2"
-      DOTNET_gcServer: "0"
-      DOTNET_GCConserveMemory: "9"
-      BE_CSPROJ: backend/PayPlanner.Api.csproj
-      BE_SLN: backend/PayPlanner.Api.sln
-      OUT_DIR: out
-      TAR_NAME: payplanner_${{ github.sha }}.tar.gz
-      FE_API_URL: https://api.elitpravo.com/api
-      PUBLIC_API_URL: https://api.elitpravo.com
-      PUBLIC_API_HEALTH_URL: https://api.elitpravo.com/api/health
-      PUBLIC_FRONTEND_URL: https://crm.elitpravo.com/
-      VPS_HOST: 185.46.10.202
-      VPS_USER: root
-      VPS_PORT: 22
+      - name: Build FE
+        env:
+          VITE_API_URL: ${{ env.FE_API_URL }}
+        run: npm run build
 
+      - name: Prepare FE artifacts
+        run: |
+          mkdir -p "${{ env.OUT_DIR }}/fe"
+          cp -r dist/* "${{ env.OUT_DIR }}/fe/"
+          printf '%s\n' "${{ github.sha }}" > "${{ env.OUT_DIR }}/fe/deploy-revision.txt"
+
+      - name: Pack frontend artifact
+        run: tar -czf frontend.tar.gz -C "${{ env.OUT_DIR }}" fe
+
+      - name: Upload frontend build artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: frontend-${{ github.sha }}
+          path: frontend.tar.gz
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
+
+  backend-format:
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -73,11 +138,135 @@ jobs:
           fi
           free -h
 
+      - name: Cache downloaded NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-v1-${{ hashFiles('**/*.csproj', '**/*.props', '**/*.targets', '**/NuGet.Config', '**/nuget.config', 'global.json') }}
+          restore-keys: ${{ runner.os }}-nuget-v1-
+
       - name: Restore backend
         run: dotnet restore "${{ env.BE_SLN }}" --force -p:PayPlannerReleaseAudit=true
 
       - name: Verify backend formatting
         run: dotnet format "${{ env.BE_SLN }}" --verify-no-changes --no-restore --verbosity minimal
+
+  backend-build:
+    runs-on: ubuntu-latest
+    outputs:
+      manifest-sha: ${{ steps.plan.outputs.manifest-sha }}
+      sdk-version: ${{ steps.plan.outputs.sdk-version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Prepare memory for backend compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The generated migration models require more than 6 GiB during
+          # compilation. Keep all analyzers and give smaller hosted runners
+          # additional virtual memory for the complete release gate.
+          memory_kib="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)"
+          if [ "$memory_kib" -lt 12582912 ]; then
+            swap_file="$RUNNER_TEMP/payplanner-build.swap"
+            test ! -e "$swap_file"
+            sudo fallocate -l 8G "$swap_file"
+            sudo chmod 600 "$swap_file"
+            sudo mkswap "$swap_file" >/dev/null
+            sudo swapon "$swap_file"
+          fi
+          free -h
+
+      - name: Cache downloaded NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-v1-${{ hashFiles('**/*.csproj', '**/*.props', '**/*.targets', '**/NuGet.Config', '**/nuget.config', 'global.json') }}
+          restore-keys: ${{ runner.os }}-nuget-v1-
+
+      - name: Restore backend
+        run: dotnet restore "${{ env.BE_SLN }}" --force -p:PayPlannerReleaseAudit=true
+
+      - name: Build backend with analyzers
+        run: dotnet build backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-restore -c Release
+
+      - name: Build test shard tool with analyzers
+        run: dotnet build tools/PayPlanner.TestShards/PayPlanner.TestShards.csproj --no-restore -c Release
+
+      - name: Discover complete backend test plan
+        id: plan
+        env:
+          BackgroundServices__Enabled: "false"
+          Email__Enabled: "false"
+        run: |
+          set -euo pipefail
+          dotnet tools/PayPlanner.TestShards/bin/Release/net9.0/PayPlanner.TestShards.dll discover --assembly backend/PayPlanner.Api.Tests/bin/Release/net9.0/PayPlanner.Api.Tests.dll --manifest test-plan.json --revision "${{ github.sha }}" --shards 4
+          printf 'manifest-sha=%s\n' "$(jq -er '.ManifestSha256' test-plan.summary.json)" >> "$GITHUB_OUTPUT"
+          printf 'sdk-version=%s\n' "$(dotnet --version)" >> "$GITHUB_OUTPUT"
+
+      - name: Pack compiled test runtime
+        run: tar -czf test-runtime.tar.gz test-plan.json test-plan.summary.json backend/PayPlanner.Api.Tests/bin/Release/net9.0 tools/PayPlanner.TestShards/bin/Release/net9.0
+
+      - name: Upload compiled test runtime
+        uses: actions/upload-artifact@v6
+        with:
+          name: test-runtime-${{ github.sha }}
+          path: test-runtime.tar.gz
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
+
+      - name: Publish backend
+        run: dotnet publish "${{ env.BE_CSPROJ }}" -c Release --no-build --no-restore -o "${{ env.OUT_DIR }}/be"
+
+      - name: Pack backend artifact
+        run: tar -czf backend.tar.gz -C "${{ env.OUT_DIR }}" be
+
+      - name: Upload backend build artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: backend-${{ github.sha }}
+          path: backend.tar.gz
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
+
+  backend-test:
+    needs: [backend-build]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ needs.backend-build.outputs.sdk-version }}
 
       - name: Install PostgreSQL 17 client for restore drill
         run: |
@@ -109,23 +298,102 @@ jobs:
           printf 'PAYPLANNER_TEST_PLAYWRIGHT_CLI=%s/@playwright/cli/playwright-cli.js\n' "$(npm root --global)" >> "$GITHUB_ENV"
           printf 'PAYPLANNER_TEST_BROWSER=chrome\n' >> "$GITHUB_ENV"
 
-      - name: Test backend
+      - name: Download compiled test runtime
+        uses: actions/download-artifact@v7
+        with:
+          name: test-runtime-${{ github.sha }}
+          path: test-artifacts
+
+      - name: Unpack compiled test runtime
+        run: tar -xzf test-artifacts/test-runtime.tar.gz
+
+      - name: Run exact backend test shard
         env:
           BackgroundServices__Enabled: "false"
           Email__Enabled: "false"
           PAYPLANNER_TEST_POSTGRES: Host=127.0.0.1;Port=5432;Database=postgres;Username=postgres;Password=postgres;Pooling=false
           PAYPLANNER_TEST_PG_DUMP: /usr/lib/postgresql/17/bin/pg_dump
           PAYPLANNER_TEST_PSQL: /usr/lib/postgresql/17/bin/psql
-        run: dotnet test backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-restore -c Release
+          EXPECTED_MANIFEST_SHA: ${{ needs.backend-build.outputs.manifest-sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p test-results
+          dotnet tools/PayPlanner.TestShards/bin/Release/net9.0/PayPlanner.TestShards.dll run --manifest test-plan.json --manifest-sha "$EXPECTED_MANIFEST_SHA" --shard ${{ matrix.shard }} --results test-results/shard-${{ matrix.shard }} 2>&1 | tee test-results/shard-${{ matrix.shard }}.log
 
-      - name: Test deploy backup retention
-        run: bash scripts/prune-deploy-backups.test.sh
+      - name: Preserve exact shard results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: backend-shard-${{ matrix.shard }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: test-results/
+          if-no-files-found: error
+          retention-days: 14
 
-      - name: Test Data Protection key preservation
-        run: bash scripts/preserve-data-protection-keys.test.sh
+  backend-browser:
+    needs: [backend-build]
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
 
-      - name: Test storage backfill CLI
-        run: node --test scripts/storage-legacy-backfill.node-tests.mjs
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ needs.backend-build.outputs.sdk-version }}
+
+      - name: Install PostgreSQL 17 client for restore drill
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl ca-certificates
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl --fail --silent --show-error -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          printf 'Types: deb\nURIs: https://apt.postgresql.org/pub/repos/apt\nSuites: %s-pgdg\nComponents: main\nSigned-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc\n' "$VERSION_CODENAME" | sudo tee /etc/apt/sources.list.d/pgdg.sources > /dev/null
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install FE deps
+        run: npm ci
+
+      - name: Install browsers for writable and restored CRM verification
+        run: npx playwright install --with-deps chromium chrome
+
+      - name: Install pinned Playwright CLI for writable CRM verification
+        run: |
+          npm install --global @playwright/cli@0.1.22
+          printf 'PAYPLANNER_TEST_PLAYWRIGHT_CLI=%s/@playwright/cli/playwright-cli.js\n' "$(npm root --global)" >> "$GITHUB_ENV"
+          printf 'PAYPLANNER_TEST_BROWSER=chrome\n' >> "$GITHUB_ENV"
+
+      - name: Download compiled test runtime
+        uses: actions/download-artifact@v7
+        with:
+          name: test-runtime-${{ github.sha }}
+          path: test-artifacts
+
+      - name: Unpack compiled test runtime
+        run: tar -xzf test-artifacts/test-runtime.tar.gz
 
       - name: Verify restored CRM through HTTP and browser
         env:
@@ -135,50 +403,113 @@ jobs:
           PAYPLANNER_TEST_POSTGRES: Host=127.0.0.1;Port=5432;Database=postgres;Username=postgres;Password=postgres;Pooling=false
           PAYPLANNER_TEST_PG_DUMP: /usr/lib/postgresql/17/bin/pg_dump
           PAYPLANNER_TEST_PSQL: /usr/lib/postgresql/17/bin/psql
-        run: dotnet test backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-build --no-restore -c Release --filter 'FullyQualifiedName~RestoredFullModelQualifiesProtectedSettingsWithCopiedKeysWithoutSourceRing|FullyQualifiedName~FullModelBackupRestoresReadableManagedGenerationsWithoutSource'
-
-      - name: Lint FE
-        run: npm run lint
-
-      - name: Typecheck FE
-        run: npx tsc -p tsconfig.app.json --noEmit
-
-      - name: Verify date/time audit
-        run: npm run audit:dates:test
-
-      - name: Verify source encoding
-        run: npm run audit:encoding
-
-      - name: Verify system surface inventory
-        run: npm run audit:surface:test && npm run audit:surface
-
-      - name: Audit FE packages
-        run: npm audit --audit-level=moderate
-
-      - name: Test FE guard and unit
-        run: npm run test:ci
-
-      - name: Test FE integration
-        run: npm run test:integration
-
-      - name: Test legal feature flags readiness
-        env:
-          PAYPLANNER_READINESS_API_URL: ${{ env.FE_API_URL }}
-        run: npm run test:legal-flags:strict -- --warn-on-feature-flags-summary-failure
-
-      - name: Publish backend
-        run: dotnet publish "${{ env.BE_CSPROJ }}" -c Release --no-build --no-restore -o "${{ env.OUT_DIR }}/be"
-
-      - name: Build FE
-        env:
-          VITE_API_URL: ${{ env.FE_API_URL }}
-        run: npm run build
-
-      - name: Prepare FE artifacts
+          EXPECTED_MANIFEST_SHA: ${{ needs.backend-build.outputs.manifest-sha }}
         run: |
-          mkdir -p "${{ env.OUT_DIR }}/fe"
-          cp -r dist/* "${{ env.OUT_DIR }}/fe/"
-          printf '%s\n' "${{ github.sha }}" > "${{ env.OUT_DIR }}/fe/deploy-revision.txt"
+          set -euo pipefail
+          mkdir -p test-results/restored-browser
+          printf '%s\n' '<RunSettings><RunConfiguration><TreatNoTestsAsError>true</TreatNoTestsAsError></RunConfiguration></RunSettings>' > test-results/restored-browser/gate.runsettings
+          native_exit=0
+          dotnet vstest backend/PayPlanner.Api.Tests/bin/Release/net9.0/PayPlanner.Api.Tests.dll --Settings:test-results/restored-browser/gate.runsettings --Logger:'trx;LogFileName=results.trx' --ResultsDirectory:test-results/restored-browser --TestCaseFilter:'FullyQualifiedName~RestoredFullModelQualifiesProtectedSettingsWithCopiedKeysWithoutSourceRing|FullyQualifiedName~FullModelBackupRestoresReadableManagedGenerationsWithoutSource' > test-results/restored-browser/test.log 2>&1 || native_exit=$?
+          cat test-results/restored-browser/test.log
+          dotnet tools/PayPlanner.TestShards/bin/Release/net9.0/PayPlanner.TestShards.dll verify-restored --manifest test-plan.json --manifest-sha "$EXPECTED_MANIFEST_SHA" --results test-results/restored-browser --exit-code "$native_exit"
+
+      - name: Preserve restored browser results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: restored-browser-${{ github.sha }}-${{ github.run_attempt }}
+          path: test-results/restored-browser/
+          if-no-files-found: error
+          retention-days: 14
+
+  backend:
+    needs: [backend-build, backend-test, backend-browser]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ needs.backend-build.outputs.sdk-version }}
+
+      - name: Download compiled test runtime
+        uses: actions/download-artifact@v7
+        with:
+          name: test-runtime-${{ github.sha }}
+          path: test-artifacts
+
+      - name: Unpack compiled test runtime
+        run: tar -xzf test-artifacts/test-runtime.tar.gz
+
+      - name: Download shard 0 results
+        uses: actions/download-artifact@v7
+        with:
+          name: backend-shard-0-${{ github.sha }}-${{ github.run_attempt }}
+          path: test-results
+
+      - name: Download shard 1 results
+        uses: actions/download-artifact@v7
+        with:
+          name: backend-shard-1-${{ github.sha }}-${{ github.run_attempt }}
+          path: test-results
+
+      - name: Download shard 2 results
+        uses: actions/download-artifact@v7
+        with:
+          name: backend-shard-2-${{ github.sha }}-${{ github.run_attempt }}
+          path: test-results
+
+      - name: Download shard 3 results
+        uses: actions/download-artifact@v7
+        with:
+          name: backend-shard-3-${{ github.sha }}-${{ github.run_attempt }}
+          path: test-results
+
+      - name: Verify complete backend case union
+        env:
+          EXPECTED_MANIFEST_SHA: ${{ needs.backend-build.outputs.manifest-sha }}
+        run: |
+          set -euo pipefail
+          dotnet tools/PayPlanner.TestShards/bin/Release/net9.0/PayPlanner.TestShards.dll verify --manifest test-plan.json --manifest-sha "$EXPECTED_MANIFEST_SHA" --results-root test-results
+
+  deploy:
+    needs: [frontend, backend-format, backend]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Download backend artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: backend-${{ github.sha }}
+          path: deploy-artifacts
+
+      - name: Download frontend artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: frontend-${{ github.sha }}
+          path: deploy-artifacts
+
+      - name: Unpack qualified artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ env.OUT_DIR }}"
+          tar -xzf deploy-artifacts/backend.tar.gz -C "${{ env.OUT_DIR }}"
+          tar -xzf deploy-artifacts/frontend.tar.gz -C "${{ env.OUT_DIR }}"
+          test -s "${{ env.OUT_DIR }}/be/PayPlanner.Api.dll"
+          test "$(cat "${{ env.OUT_DIR }}/fe/deploy-revision.txt")" = "${{ github.sha }}"
+          test -s "${{ env.OUT_DIR }}/fe/index.html"
+          test -s "${{ env.OUT_DIR }}/fe/payplanner-push-worker.js"
 
       - name: Prepare deploy scripts
         run: |

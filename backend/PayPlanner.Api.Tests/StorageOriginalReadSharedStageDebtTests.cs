@@ -17,7 +17,7 @@ public sealed partial class StorageStageCapacityServiceTests
     [InlineData(true, true)]
     public async Task OriginalReadProducerHonorsOtherPendingStageDebtAfterMinimumChanges(bool postgres, bool beforeCreate)
     {
-        await using var f = await WriterProcessFixture.CreateAsync(postgres);
+        await using var f = await CreateWriterFixtureAsync(postgres);
         var root = Path.Combine(f.Root, "objects");
         Directory.CreateDirectory(root);
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>

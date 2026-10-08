@@ -15,7 +15,7 @@ public sealed partial class InternalChatControllerTests
     [InlineData(true)]
     public async Task ChatManagedSubmitPublishesOrKeepsOnePendingFrozenAttempt(bool postgres)
     {
-        await using var f = await Fixture.CreateMigratedAsync(postgres);
+        await using var f = await CreateMigratedFixtureAsync(postgres);
         var actor = await f.AddUserAsync("chat-managed-submit@example.test", "Автор");
         var thread = await CaptureChannelAsync(f, actor);
         using var root = new ChatOriginalRoot();
@@ -105,7 +105,7 @@ public sealed partial class InternalChatControllerTests
     [InlineData(true, true)]
     public async Task ChatManagedSubmitLegacyCommitRechecksConcurrentIntentAndAccess(bool postgres, bool revokeAccess)
     {
-        await using var f = await Fixture.CreateMigratedAsync(postgres, true);
+        await using var f = await CreateMigratedFixtureAsync(postgres, true);
         var actor = await f.AddUserAsync("chat-legacy-race@example.test", "Автор");
         var thread = await CaptureChannelAsync(f, actor);
         var snapshot = CaptureSnapshot(thread.Id, actor.Id);

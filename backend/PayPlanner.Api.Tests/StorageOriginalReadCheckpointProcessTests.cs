@@ -20,7 +20,7 @@ public sealed partial class StorageStageCapacityServiceTests
     [InlineData(true, "original-complete")]
     public async Task IndependentOriginalReadProducerRetainsExactBoundaryAcrossKill(bool postgres, string phase)
     {
-        await using var f = await WriterProcessFixture.CreateAsync(postgres);
+        await using var f = await CreateWriterFixtureAsync(postgres);
         var assembly = Path.Combine(AppContext.BaseDirectory, "PayPlanner.StorageStageWriterProbe.dll");
         Assert.True(File.Exists(assembly));
         var start = new ProcessStartInfo("dotnet")

@@ -22,7 +22,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, GeneratedFinancialDocumentKind.Contract)]
     public async Task FinancialClaimsSoftDeletedCaseRetainsNumberAndOriginalBytesWithoutPublication(bool postgres, GeneratedFinancialDocumentKind kind)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync();
         var captured = await CaptureWithClaimsAsync(f.Db, f.Case.Id, orderId, f.User.Id, f.User.FullName, kind);
         var receipt = Assert.IsType<GeneratedFinancialDocumentReceipt>(captured.Receipt);
@@ -64,7 +64,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task FinancialClaimsInvoiceSourceAllowsOnlyOneActiveAttemptAcrossAuthors(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync();
         var role = new Role
         {
@@ -111,7 +111,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task FinancialClaimsConcurrentInvoiceSourceAcceptsExactlyOneAttempt(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync(); f.PrepareIdentityObservers();
         var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var tasks = Enumerable.Range(0, 4).Select(_ => Task.Run(async () =>
@@ -137,7 +137,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, GeneratedFinancialDocumentKind.Contract)]
     public async Task FinancialClaimsNumberPreservesHolesDateDefaultAndLength(bool postgres, GeneratedFinancialDocumentKind kind)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2); var date = new DateTime(2026, 10, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2); var date = new DateTime(2026, 10, 2);
         for (var ordinal = 1; ordinal <= 129; ordinal++)
         {
             if (ordinal == 7) continue;
@@ -163,7 +163,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, GeneratedFinancialDocumentKind.Contract)]
     public async Task FinancialClaimsPendingNumberRemainsReservedUntilExplicitRetirement(bool postgres, GeneratedFinancialDocumentKind kind)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync();
         var first = await CaptureWithClaimsAsync(f.Db, f.Case.Id, orderId, f.User.Id, f.User.FullName, kind);
         // Invoice source policy allows one pending attempt per order. Number
@@ -209,7 +209,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task FinancialClaimsActPreventsOverlapAndKeepsCancelledLedgerRules(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var order = await f.Db.ClientCaseWorkOrders.Include(o => o.Items).SingleAsync();
         order.Items.Add(new ClientCaseWorkOrderItem { ServiceName = "Вторая", Quantity = 1m, UnitPrice = 10m, SortOrder = 2 });
         order.Items.Add(new ClientCaseWorkOrderItem { ServiceName = "Третья", Quantity = 1m, UnitPrice = 20m, SortOrder = 3 });
@@ -250,7 +250,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, GeneratedFinancialDocumentKind.Contract)]
     public async Task FinancialClaimsConcurrentDifferentCasesReceiveDifferentNumbers(bool postgres, GeneratedFinancialDocumentKind kind)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         for (var i = 0; i < 3; i++) f.Db.ClientCaseWorkOrders.Add(new ClientCaseWorkOrder
         {
             ClientCase = new ClientCase { Title = "Другое дело " + i, ClientId = f.Case.ClientId, ResponsibleUserId = f.User.Id, Status = ClientCaseStatus.Open },
@@ -334,7 +334,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, GeneratedFinancialDocumentKind.Contract)]
     public async Task FinancialClaimsLateLedgerNumberCollisionBlocksSourceBeforeFileRead(bool postgres, GeneratedFinancialDocumentKind kind)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2); var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync();
+        await using var f = await CreateFixtureAsync(postgres, 2); var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync();
         var result = await CaptureWithClaimsAsync(f.Db, f.Case.Id, orderId, f.User.Id, f.User.FullName, kind);
         var receipt = result.Receipt!; var date = new DateTime(2026, 10, 2);
         if (kind == GeneratedFinancialDocumentKind.Invoice) f.Db.Invoices.Add(new Invoice { Number = "CLAIM", Date = date });
@@ -352,7 +352,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task FinancialClaimsLostClaimCannotBeReplacedByRenderingAgain(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2); var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync();
+        await using var f = await CreateFixtureAsync(postgres, 2); var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync();
         var result = await CaptureWithClaimsAsync(f.Db, f.Case.Id, orderId, f.User.Id, f.User.FullName, GeneratedFinancialDocumentKind.Act);
         var receipt = result.Receipt!;
         f.Db.GeneratedFinancialNumberClaims.Remove(await f.Db.GeneratedFinancialNumberClaims.SingleAsync()); await f.Db.SaveChangesAsync();

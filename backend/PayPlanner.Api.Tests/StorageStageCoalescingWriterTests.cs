@@ -19,7 +19,7 @@ public sealed partial class StorageStageCapacityServiceTests
     public async Task CoalescingCheckpointWriterCombinesCopyCallbacksAndClosesBeforeReturn(bool postgres, bool bytesAtATime)
     {
         var commits = new CheckpointCommitFault();
-        await using var f = await WriterProcessFixture.CreateAsync(postgres, commits);
+        await using var f = await CreateWriterFixtureAsync(postgres, commits);
         var bytes = new byte[bytesAtATime ? 33 : StorageStageFileReceipt.MaximumBlockBytes + 4];
         bytes[0] = 1; bytes[^1] = 2;
         var ticket = await ReserveCheckpointAsync(f, bytes.Length);
@@ -65,7 +65,7 @@ public sealed partial class StorageStageCapacityServiceTests
     public async Task CoalescingCheckpointWriterWaitsForDetachedWriteBeforeReleasingBuffer(bool postgres)
     {
         var pause = new CoalescingCommitPause();
-        await using var f = await WriterProcessFixture.CreateAsync(postgres, pause);
+        await using var f = await CreateWriterFixtureAsync(postgres, pause);
         var bytes = new byte[StorageStageFileReceipt.MaximumBlockBytes + 4];
         bytes[0] = 7; bytes[StorageStageFileReceipt.MaximumBlockBytes - 1] = 8; bytes[^1] = 9;
         var ticket = await ReserveCheckpointAsync(f, bytes.Length);
@@ -127,7 +127,7 @@ public sealed partial class StorageStageCapacityServiceTests
     [InlineData(true, true)]
     public async Task CoalescingCheckpointWriterFinalizesSuccessfulDisposedFacadeAndRealZip(bool postgres, bool zip)
     {
-        await using var f = await WriterProcessFixture.CreateAsync(postgres);
+        await using var f = await CreateWriterFixtureAsync(postgres);
         var ticket = await ReserveCheckpointAsync(f, 65536);
         var original = new byte[] { 1, 2, 3, 4 };
         try
@@ -166,7 +166,7 @@ public sealed partial class StorageStageCapacityServiceTests
     [InlineData(true, true)]
     public async Task CoalescingCheckpointWriterCallbackFailureOrCancellationNeverFlushesRemainingBuffer(bool postgres, bool cancellation)
     {
-        await using var f = await WriterProcessFixture.CreateAsync(postgres);
+        await using var f = await CreateWriterFixtureAsync(postgres);
         var ticket = await ReserveCheckpointAsync(f);
         using var cancelled = new CancellationTokenSource();
         try

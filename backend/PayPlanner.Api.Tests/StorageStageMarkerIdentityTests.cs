@@ -14,7 +14,7 @@ public sealed partial class StorageStageCapacityServiceTests
     [InlineData(true, true)]
     public async Task ReplacedMarkerWithEqualProofDoesNotEstablishOriginalWriterQuiescence(bool postgres, bool apply)
     {
-        await using var f = await WriterProcessFixture.CreateAsync(postgres);
+        await using var f = await CreateWriterFixtureAsync(postgres);
         var ticket = await ReserveCheckpointAsync(f, 4);
         await ticket.CloseWriterAsync();
         var marker = Path.Combine(f.Root, "objects", ".stage-writer-fences-v1", ticket.ObjectId.ToString("N") + ".lock");

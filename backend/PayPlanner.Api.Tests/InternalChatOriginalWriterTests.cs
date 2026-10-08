@@ -35,7 +35,7 @@ public sealed partial class InternalChatControllerTests
     [InlineData(true, "disabledCapacity")]
     public async Task ChatOriginalWriterKeepsAllOriginalsSeparateFromMessagePublication(bool postgres, string scenario)
     {
-        await using var f = await Fixture.CreateMigratedAsync(postgres);
+        await using var f = await CreateMigratedFixtureAsync(postgres);
         var author = await f.AddUserAsync("chat-original-author@example.test", "Автор");
         var thread = await CaptureChannelAsync(f, author);
         var request = CaptureSnapshot(thread.Id, author.Id);

@@ -23,7 +23,7 @@ public sealed partial class InternalChatControllerTests
     public async Task ChatSendHttpDoesNotReturnDtoWhoseScopeChangedAfterReceipt(bool postgres, string changed)
     {
         var mutation = new ChatHttpDtoScopeChange();
-        await using var f = await Fixture.CreateMigratedAsync(postgres, true, mutation);
+        await using var f = await CreateMigratedFixtureAsync(postgres, true, mutation);
         var actor = await f.AddUserAsync("chat-http-scope@example.test", "Автор");
         var other = await f.AddUserAsync("chat-http-scope-other@example.test", "Другой");
         var thread = await CaptureChannelAsync(f, actor, other);
@@ -73,7 +73,7 @@ public sealed partial class InternalChatControllerTests
     [InlineData(true)]
     public async Task ChatSendHttpCatalogRoutesKeepActorThreadAndCurrentAccess(bool postgres)
     {
-        await using var f = await Fixture.CreateMigratedAsync(postgres);
+        await using var f = await CreateMigratedFixtureAsync(postgres);
         var actor = await f.AddUserAsync("chat-http@example.test", "Автор");
         var other = await f.AddUserAsync("chat-http-other@example.test", "Другой");
         var outsider = await f.AddUserAsync("chat-http-outsider@example.test", "Посторонний");
@@ -130,7 +130,7 @@ public sealed partial class InternalChatControllerTests
     [InlineData(true)]
     public async Task ChatSendHttpExplicitResumePublishesWithoutHostedWorkerAndDispatchesOnce(bool postgres)
     {
-        await using var f = await Fixture.CreateMigratedAsync(postgres);
+        await using var f = await CreateMigratedFixtureAsync(postgres);
         var actor = await f.AddUserAsync("chat-http-resume@example.test", "Автор");
         var other = await f.AddUserAsync("chat-http-recipient@example.test", "Получатель");
         var thread = await CaptureChannelAsync(f, actor, other);
@@ -178,7 +178,7 @@ public sealed partial class InternalChatControllerTests
     [InlineData(true)]
     public async Task ChatSendHttpResumePreservesPendingOriginalsWhenCopiesOrFlagsBlockPublication(bool postgres)
     {
-        await using var f = await Fixture.CreateMigratedAsync(postgres);
+        await using var f = await CreateMigratedFixtureAsync(postgres);
         var actor = await f.AddUserAsync("chat-http-pending@example.test", "Автор");
         var thread = await CaptureChannelAsync(f, actor);
         var snapshot = CaptureSnapshot(thread.Id, actor.Id);

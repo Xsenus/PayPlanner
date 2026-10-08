@@ -14,7 +14,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task FinancialRetirementRequiresOwnedAttemptButNotPermissionToCreateAnotherInvoice(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync();
         var accepted = await CaptureWithClaimsAsync(f.Db, f.Case.Id, orderId, f.User.Id, f.User.FullName, GeneratedFinancialDocumentKind.Invoice);
         var receipt = Assert.IsType<GeneratedFinancialDocumentReceipt>(accepted.Receipt);
@@ -50,7 +50,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, true)]
     public async Task FinancialRetirementRejectsRevokedCaseEditOrInactiveAuthor(bool postgres, bool inactive)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync();
         var accepted = await CaptureWithClaimsAsync(f.Db, f.Case.Id, orderId, f.User.Id, f.User.FullName, GeneratedFinancialDocumentKind.Invoice);
         var receipt = Assert.IsType<GeneratedFinancialDocumentReceipt>(accepted.Receipt);
@@ -73,7 +73,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, GeneratedFinancialDocumentKind.Contract)]
     public async Task FinancialRetirementStopsOwnedAcceptanceBeforeStorageAndPreservesEvidence(bool postgres, GeneratedFinancialDocumentKind kind)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync();
         var accepted = await CaptureWithClaimsAsync(f.Db, f.Case.Id, orderId, f.User.Id, f.User.FullName, kind);
         Assert.Equal("recorded", accepted.Status);
@@ -104,7 +104,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task FinancialRetirementRejectsUnknownCorruptAndHistoricalPublishedAcceptance(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync();
         var accepted = await CaptureWithClaimsAsync(f.Db, f.Case.Id, orderId, f.User.Id, f.User.FullName, GeneratedFinancialDocumentKind.Invoice);
         var receipt = Assert.IsType<GeneratedFinancialDocumentReceipt>(accepted.Receipt);

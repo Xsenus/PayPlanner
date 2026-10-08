@@ -21,7 +21,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     {
         Fixture? fixture = null;
         var fence = new FinancialLegacySavedFlagFlip(kind, () => fixture!.FinancialStorageOptions.Enabled = true);
-        await using var f = await Fixture.CreateAsync(postgres, 2, false, fence); fixture = f;
+        await using var f = await CreateFixtureAsync(postgres, 2, false, fence); fixture = f;
         f.FinancialStorageOptions.Enabled = false;
         var key = Guid.NewGuid(); var controller = f.Controller();
         controller.Request.Headers["X-Upload-Key"] = key.ToString("D"); fence.Armed = true;
@@ -55,7 +55,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, GeneratedFinancialDocumentKind.Contract)]
     public async Task FinancialLegacyPreservesPendingNumberOfAnotherCase(bool postgres, GeneratedFinancialDocumentKind kind)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync();
         var captured = await CaptureWithClaimsAsync(f.Db, f.Case.Id, orderId, f.User.Id, f.User.FullName, kind);
         Assert.Equal("recorded", captured.Status); var receipt = captured.Receipt!;
@@ -113,7 +113,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, GeneratedFinancialDocumentKind.Contract, false)]
     public async Task FinancialLegacyCannotBypassAcceptedAttemptWithAnotherOrMissingKey(bool postgres, GeneratedFinancialDocumentKind kind, bool withKey)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var receipt = await CaptureFinancialPublicationAsync(f, kind);
         var legacy = f.Controller(useManagedStorage: false);
         if (withKey) legacy.Request.Headers["X-Upload-Key"] = Guid.NewGuid().ToString("D");
@@ -135,7 +135,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task FinancialLegacyInvoiceAndManagedCaptureSerializeToOneAcceptedResult(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync(); f.PrepareIdentityObservers();
         var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var managedTask = Task.Run(async () =>

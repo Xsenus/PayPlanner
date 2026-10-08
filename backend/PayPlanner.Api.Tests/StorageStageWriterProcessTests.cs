@@ -11,8 +11,16 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public sealed partial class StorageStageCapacityServiceTests
+public sealed partial class StorageStageCapacityServiceTests : IClassFixture<PostgreSqlMigratedTemplate>
 {
+    private readonly PostgreSqlMigratedTemplate writerPostgresTemplate;
+
+    public StorageStageCapacityServiceTests(PostgreSqlMigratedTemplate writerPostgresTemplate)
+        => this.writerPostgresTemplate = writerPostgresTemplate;
+
+    private Task<WriterProcessFixture> CreateWriterFixtureAsync(bool postgres, params IInterceptor[] interceptors)
+        => WriterProcessFixture.CreateFromTemplateAsync(writerPostgresTemplate, postgres, interceptors);
+
     [Theory]
     [InlineData(false, "live")]
     [InlineData(true, "live")]
@@ -28,7 +36,7 @@ public sealed partial class StorageStageCapacityServiceTests
     [InlineData(true, "changed-proof")]
     public async Task IndependentWriterFenceSurvivesAgeAndAllowsOnlyProvenRecovery(bool postgres, string scenario)
     {
-        await using var fixture = await WriterProcessFixture.CreateAsync(postgres);
+        await using var fixture = await CreateWriterFixtureAsync(postgres);
         var assembly = Path.Combine(AppContext.BaseDirectory, "PayPlanner.StorageStageWriterProbe.dll");
         Assert.True(File.Exists(assembly), "The process probe must be built with the test project.");
         var start = new ProcessStartInfo("dotnet")
@@ -151,16 +159,19 @@ public sealed partial class StorageStageCapacityServiceTests
         private const string Prefix = "pp_stage_fence_";
         private readonly string _name;
         private readonly NpgsqlConnection? _admin;
+        private readonly PostgreSqlMigratedTemplate.DatabaseLease? _databaseLease;
         private readonly string? _probeConnectionString;
         public string Root { get; }
         public PaymentContext Db { get; }
         public StorageStageCapacityService Stages { get; }
         public string? AdminConnectionString => _probeConnectionString;
 
-        private WriterProcessFixture(string name, string root, PaymentContext db, NpgsqlConnection? admin, string? probeConnectionString)
+        private WriterProcessFixture(string name, string root, PaymentContext db, NpgsqlConnection? admin, string? probeConnectionString,
+            PostgreSqlMigratedTemplate.DatabaseLease? databaseLease)
         {
             (_name, Root, Db, _admin) = (name, root, db, admin);
             _probeConnectionString = probeConnectionString;
+            _databaseLease = databaseLease;
             Stages = CreateStages(db);
         }
 
@@ -185,17 +196,37 @@ public sealed partial class StorageStageCapacityServiceTests
             : new PaymentContext(new DbContextOptionsBuilder<PaymentContext>()
                 .UseSqlite(Db.Database.GetConnectionString()).AddInterceptors(interceptors).Options);
 
-        public static async Task<WriterProcessFixture> CreateAsync(bool postgres, params IInterceptor[] interceptors)
+        // Explicit migration tests retain their fresh, uncached database path.
+        public static Task<WriterProcessFixture> CreateAsync(bool postgres, params IInterceptor[] interceptors)
+            => CreateCoreAsync(null, postgres, interceptors);
+
+        public static Task<WriterProcessFixture> CreateFromTemplateAsync(PostgreSqlMigratedTemplate template,
+            bool postgres, params IInterceptor[] interceptors)
+            => CreateCoreAsync(template, postgres, interceptors);
+
+        private static async Task<WriterProcessFixture> CreateCoreAsync(PostgreSqlMigratedTemplate? template,
+            bool postgres, IInterceptor[] interceptors)
         {
-            var name = Prefix + Guid.NewGuid().ToString("N");
-            var root = Path.Combine(Path.GetTempPath(), name);
-            Directory.CreateDirectory(root);
             PaymentContext? db = null;
             NpgsqlConnection? admin = null;
+            PostgreSqlMigratedTemplate.DatabaseLease? databaseLease = null;
             string? probeConnectionString = null;
             try
             {
-                if (postgres)
+                if (postgres && template is not null)
+                    databaseLease = await template.CreateDatabaseAsync(Prefix);
+                // The independent process derives its database name from this owned root.
+                var name = databaseLease?.Name ?? Prefix + Guid.NewGuid().ToString("N");
+                var root = Path.Combine(Path.GetTempPath(), name);
+                Directory.CreateDirectory(root);
+                if (databaseLease is not null)
+                {
+                    probeConnectionString = databaseLease.ConnectionString;
+                    db = new PostgreSqlPaymentContext(new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
+                        .UseNpgsql(probeConnectionString).AddInterceptors(interceptors).Options,
+                        useObjectAuditModel: false);
+                }
+                else if (postgres)
                 {
                     Assert.False(string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES")));
                     var settings = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES"))
@@ -233,13 +264,18 @@ public sealed partial class StorageStageCapacityServiceTests
                 if (emailSetting is null) db.SystemSettings.Add(new() { Key = "notifications.email.enabled", Value = "false" });
                 else emailSetting.Value = "false";
                 await db.SaveChangesAsync();
-                return new(name, root, db, admin, probeConnectionString);
+                return new(name, root, db, admin, probeConnectionString, databaseLease);
             }
-            catch
+            catch (Exception error)
             {
-                if (db is not null) await db.DisposeAsync();
-                if (admin is not null) await admin.DisposeAsync();
-                // Preserve a failed provision for diagnosis; do not force-drop it.
+                try
+                {
+                    if (db is not null) await db.DisposeAsync();
+                    if (databaseLease is not null) await databaseLease.DisposeAsync();
+                }
+                catch (Exception cleanup) { throw new AggregateException(error, cleanup); }
+                finally { if (admin is not null) await admin.DisposeAsync(); }
+                // Keep failed file/uncached database provisions available for diagnosis.
                 throw;
             }
         }
@@ -250,6 +286,7 @@ public sealed partial class StorageStageCapacityServiceTests
         public async ValueTask DisposeAsync()
         {
             await Db.DisposeAsync();
+            if (_databaseLease is not null) await _databaseLease.DisposeAsync();
             if (_admin is not null)
             {
                 Assert.StartsWith(Prefix, _name);

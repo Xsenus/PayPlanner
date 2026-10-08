@@ -19,7 +19,7 @@ public sealed partial class StorageStageCapacityServiceTests
     {
         var failure = new StageReleaseCommitFault(false);
         var proof = new StageReleaseProofReadFault(failure, true);
-        await using var fixture = await WriterProcessFixture.CreateAsync(postgres, failure, proof);
+        await using var fixture = await CreateWriterFixtureAsync(postgres, failure, proof);
         Directory.CreateDirectory(Path.Combine(fixture.Root, "objects"));
         var path = Path.Combine(fixture.Root, "objects", "original.tmp");
         var ticket = Assert.IsType<StorageStageCapacityTicket>((await fixture.Stages.ReserveAsync("marker:released", path, 4, default)).Ticket);
@@ -78,7 +78,7 @@ public sealed partial class StorageStageCapacityServiceTests
     [InlineData(true, "foreignBytes")]
     public async Task ReleasedMarkerCleanupNeverUsesAgeAsWriterOrByteOwnershipProof(bool postgres, string state)
     {
-        await using var fixture = await WriterProcessFixture.CreateAsync(postgres);
+        await using var fixture = await CreateWriterFixtureAsync(postgres);
         Directory.CreateDirectory(Path.Combine(fixture.Root, "objects"));
         var path = Path.Combine(fixture.Root, "objects", "foreign.tmp");
         var ticket = Assert.IsType<StorageStageCapacityTicket>((await fixture.Stages.ReserveAsync("marker:" + state, path, 4, default)).Ticket);
@@ -115,7 +115,7 @@ public sealed partial class StorageStageCapacityServiceTests
     public async Task ReleasedMarkerRequiresFreshUnchangedReceiptAfterAcquiringFence(bool postgres, bool unavailable)
     {
         var fault = new MarkerFreshProofFault(unavailable);
-        await using var fixture = await WriterProcessFixture.CreateAsync(postgres, fault);
+        await using var fixture = await CreateWriterFixtureAsync(postgres, fault);
         Directory.CreateDirectory(Path.Combine(fixture.Root, "objects"));
         var ticket = Assert.IsType<StorageStageCapacityTicket>((await fixture.Stages.ReserveAsync("marker:fresh",
             Path.Combine(fixture.Root, "objects", "fresh.tmp"), 4, default)).Ticket);
@@ -142,7 +142,7 @@ public sealed partial class StorageStageCapacityServiceTests
     [InlineData(true)]
     public async Task ReleasedMarkerPagesAreBoundedAndDirtyUnitsAndInvalidCursorsAreRejected(bool postgres)
     {
-        await using var fixture = await WriterProcessFixture.CreateAsync(postgres);
+        await using var fixture = await CreateWriterFixtureAsync(postgres);
         Directory.CreateDirectory(Path.Combine(fixture.Root, "objects"));
         var tickets = new List<StorageStageCapacityTicket>();
         try

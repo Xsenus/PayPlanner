@@ -17,7 +17,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, GeneratedFinancialDocumentKind.Contract)]
     public async Task FinancialActionWaitsForCopiesAndReplaysItsOriginalCompleteResult(bool postgres, GeneratedFinancialDocumentKind kind)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var originalActorName = f.User.FullName;
         var controller = f.Controller(); var key = Guid.NewGuid();
         controller.Request.Headers["X-Upload-Key"] = key.ToString("D");
@@ -71,7 +71,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, GeneratedFinancialDocumentKind.Contract)]
     public async Task FinancialActionRegistryOnlyAttemptBlocksLegacyFallback(bool postgres, GeneratedFinancialDocumentKind kind)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var receipt = await CaptureFinancialPublicationAsync(f, kind);
         Assert.Empty(await f.Db.StorageOperations.ToArrayAsync());
         Assert.Empty(await f.Db.StorageCapacityReservations.ToArrayAsync());

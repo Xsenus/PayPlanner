@@ -27,8 +27,20 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public sealed partial class ManagedGeneratedCaseDocumentTests
+public sealed partial class ManagedGeneratedCaseDocumentTests : IClassFixture<PostgreSqlMigratedTemplate>, IClassFixture<SqliteMigratedTemplate>
 {
+    private readonly PostgreSqlMigratedTemplate postgresTemplate;
+    private readonly SqliteMigratedTemplate sqliteTemplate;
+
+    public ManagedGeneratedCaseDocumentTests(PostgreSqlMigratedTemplate postgresTemplate, SqliteMigratedTemplate sqliteTemplate)
+    {
+        this.postgresTemplate = postgresTemplate;
+        this.sqliteTemplate = sqliteTemplate;
+    }
+
+    private Task<Fixture> CreateFixtureAsync(bool postgres, int copies, bool autoPublication = false, params IInterceptor[] interceptors)
+        => Fixture.CreateFromTemplateAsync(postgresTemplate, sqliteTemplate, postgres, copies, autoPublication, interceptors);
+
     [Theory]
     [InlineData(false, GeneratedFinancialDocumentKind.Invoice)]
     [InlineData(true, GeneratedFinancialDocumentKind.Invoice)]
@@ -38,7 +50,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, GeneratedFinancialDocumentKind.Contract)]
     public async Task FinancialIdentityReserveRemainsInvisibleAndCoexistsWithOrdinaryInserts(bool postgres, GeneratedFinancialDocumentKind kind)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 1);
+        await using var f = await CreateFixtureAsync(postgres, 1);
         GeneratedFinancialIdentity reserved;
         await using (var transaction = await f.Db.Database.BeginTransactionAsync())
         {
@@ -63,7 +75,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task FinancialIdentityRollbackDoesNotPublishOrFlushTrackedRecords(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 1);
+        await using var f = await CreateFixtureAsync(postgres, 1);
         var pending = new Act { Number = "owned-unsaved-act", Date = DateTime.UtcNow.Date, Amount = 1m };
         f.Db.Acts.Add(pending);
         GeneratedFinancialIdentity reserved;
@@ -85,7 +97,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task FinancialIdentityRequiresTransactionAndKnownKind(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 1);
+        await using var f = await CreateFixtureAsync(postgres, 1);
         var allocator = new GeneratedFinancialIdentityAllocator(f.Db);
         await Assert.ThrowsAsync<InvalidOperationException>(() => allocator.AllocateAsync(GeneratedFinancialDocumentKind.Invoice, default));
         await using var transaction = await f.Db.Database.BeginTransactionAsync();
@@ -99,7 +111,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task FinancialIdentityConcurrentTransactionsNeverAllocateSameId(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 1);
+        await using var f = await CreateFixtureAsync(postgres, 1);
         f.PrepareIdentityObservers();
         var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var workers = Enumerable.Range(0, 4).Select(_ => Task.Run(async () =>
@@ -151,7 +163,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     {
         var clock = new AdvancingClock();
         var fence = new CourtRecordsSavedInterceptor(() => clock.Advance(TimeSpan.FromHours(2)));
-        await using var f = await Fixture.CreateAsync(postgres, 2, autoPublication: true, fence);
+        await using var f = await CreateFixtureAsync(postgres, 2, autoPublication: true, fence);
         f.UseNotificationService = true;
         (await f.Db.RolePermissions.SingleAsync(p => p.RoleId == f.User.RoleId && p.Section == RolePermissionCatalog.Cases)).ViewScope = DataVisibilityScope.All;
         var recipient = new User
@@ -223,7 +235,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, true)]
     public async Task CourtHttpRestoresControlsAndOriginalSummaryAfterSourceReturns(bool postgres, bool disabledDuringReturn)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2, autoPublication: true);
+        await using var f = await CreateFixtureAsync(postgres, 2, autoPublication: true);
         f.UseNotificationService = true;
         var casePermission = await f.Db.RolePermissions.SingleAsync(p => p.RoleId == f.User.RoleId && p.Section == RolePermissionCatalog.Cases);
         casePermission.ViewScope = DataVisibilityScope.All;
@@ -323,7 +335,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, "tombstone")]
     public async Task CourtReappearingSourceRecoversOnlyTrustedForbiddenQueueAttempt(bool postgres, string scenario)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2, autoPublication: true);
+        await using var f = await CreateFixtureAsync(postgres, 2, autoPublication: true);
         var acceptingActor = f.User;
         if (scenario == "revoked")
         {
@@ -437,7 +449,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, true)]
     public async Task CourtAmbiguousLegacyFileNameRequiresExactSourceIdentity(bool postgres, bool exactLegacyKey)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 1);
+        await using var f = await CreateFixtureAsync(postgres, 1);
         const string originalTitle = "Апелляционное определение: вариант";
         const string fileName = "2026-10-01 - Сводка - Апелляционное определение_ вариант.html";
         var raw = $"{originalTitle}|2026-10-01|Результат|{f.Case.CourtUrl}";
@@ -512,7 +524,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task CourtSameFileNameForDifferentSourcesKeepsSeparateDocuments(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 1);
+        await using var f = await CreateFixtureAsync(postgres, 1);
         var firstUrl = f.Case.CourtUrl + "#first-act";
         var secondUrl = f.Case.CourtUrl + "#second-act";
         Assert.Equal(1, (await GenerateCourtAsync(f, CourtSourceWithSummary(f.Case.CourtUrl, "Первое событие", firstUrl))).CreatedCourtActDocuments);
@@ -559,7 +571,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, true, true)]
     public async Task CourtSurvivingVersionPreventsUnnecessaryRenewal(bool postgres, bool legacyKey, bool changedResult)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 1);
+        await using var f = await CreateFixtureAsync(postgres, 1);
         var source = CourtSourceWithSummary(f.Case.CourtUrl, "Исходная сводка");
         Assert.Equal(1, (await GenerateCourtAsync(f, source)).CreatedCourtActDocuments);
         var original = await f.Db.ClientCaseDocuments.AsNoTracking().SingleAsync();
@@ -618,7 +630,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, true)]
     public async Task CourtManualDocumentCollisionKeepsControlsWithoutTouchingManualFile(bool postgres, bool alreadyPending)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2, autoPublication: true);
+        await using var f = await CreateFixtureAsync(postgres, 2, autoPublication: true);
         var source = CourtSourceWithSummary(f.Case.CourtUrl, "Судебный источник при конфликте файла");
         if (alreadyPending) Assert.Equal(1, (await GenerateCourtAsync(f, source)).PendingCourtActDocuments);
         var name = "2026-10-01 - Сводка - Апелляционное определение.html".ToUpperInvariant();
@@ -683,7 +695,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task CourtHttpRenewsDeletedPublishedSummaryOnlyAfterFreshSourceAndRequiredCopies(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2, autoPublication: true);
+        await using var f = await CreateFixtureAsync(postgres, 2, autoPublication: true);
         Assert.Equal(1, (await GenerateCourtAsync(f, CourtSourceWithSummary(f.Case.CourtUrl, "Прежняя сводка"))).PendingCourtActDocuments);
         await f.CopyPendingAsync();
         Assert.Equal(1, (await f.RunCourtQueueAsync()).Succeeded);
@@ -746,7 +758,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task CourtBindingReportsPendingSummaryUntilQueuePublishesCopies(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2, autoPublication: true);
+        await using var f = await CreateFixtureAsync(postgres, 2, autoPublication: true);
         var source = CourtSourceWithSummary(f.Case.CourtUrl, "Сводка привязанной карточки");
         var request = new CasesV2Controller.ClientCaseCourtSyncBindRequest
         { SourceUrl = f.Case.CourtUrl, Instance = "appeal", ConfirmDifferences = true };
@@ -778,7 +790,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, true)]
     public async Task CourtHttpPreservesImmediateControlsAndFrozenSummaryAcrossCopyGate(bool postgres, bool queuePublication)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2, autoPublication: true);
+        await using var f = await CreateFixtureAsync(postgres, 2, autoPublication: true);
         var source = CourtSourceWithSummary(f.Case.CourtUrl, "Исходное содержание до копирования");
         var first = await GenerateCourtAsync(f, source);
         Assert.Equal(1, first.CreatedProceduralDeadlines);
@@ -831,7 +843,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task CourtHttpDoesNotFallbackToLegacyWhenDurableAttemptRoutingIsDisabled(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var source = CourtDeadlineSource(f.Case.CourtUrl);
         Assert.Equal(1, (await GenerateCourtAsync(f, source)).PendingCourtActDocuments);
         f.SetManagedEnabled(false);
@@ -855,7 +867,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task CourtSchedulerUsesManagedStorageAndPublishesOriginalSummaryAfterCopies(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2, autoPublication: true);
+        await using var f = await CreateFixtureAsync(postgres, 2, autoPublication: true);
         var source = CourtSourceWithSummary(f.Case.CourtUrl, "Сводка планировщика");
         Assert.Equal(1, await f.RunCourtSchedulerAsync(source));
         var attempt = await f.Db.CourtDocumentSourceAttempts.AsNoTracking().SingleAsync();
@@ -897,7 +909,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, "digest")]
     public async Task CourtPublicationQueueUsesOriginalProofAndRejectsStaleOrRetiredSources(bool postgres, string scenario)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2, autoPublication: scenario != "backfill");
+        await using var f = await CreateFixtureAsync(postgres, 2, autoPublication: scenario != "backfill");
         var key = "sudrf-act-" + new string('f', 32);
         var input = new CourtDocumentSourceInput(key, "court-queue.html", "Сводка для очереди", f.Case.CourtUrl,
             "<html>Original queued court event</html>");
@@ -956,7 +968,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task TypedCourtPublicationRejectsDifferentBytesWithMatchingMetadata(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var input = new CourtDocumentSourceInput("sudrf-act-" + new string('e', 32), "proof.html", "Доказательство",
             f.Case.CourtUrl, "<html>Original court content</html>");
         var receipt = Assert.Single((await new CourtDocumentSourceRegistry(f.Db).RecordAcceptedBatchAsync(f.Case.Id,
@@ -980,7 +992,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, true)]
     public async Task TypedCourtPublicationLinksExistingControlsAndRollsBackAllRecords(bool postgres, bool failLate)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var rolePermission = await f.Db.RolePermissions.SingleAsync(p => p.RoleId == f.User.RoleId && p.Section == RolePermissionCatalog.Cases);
         rolePermission.ViewScope = DataVisibilityScope.All;
         var actor = new User
@@ -1057,7 +1069,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, true)]
     public async Task CourtDeadlineControlsAreCommittedBeforeFirstSummaryWriteFailureAndSurviveRetry(bool postgres, bool duplicateSource)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 1);
+        await using var f = await CreateFixtureAsync(postgres, 1);
         var firstAct = CourtDeadlineSource(f.Case.CourtUrl).CourtActs[0];
         var source = new SudrfCourtCaseData
         {
@@ -1122,7 +1134,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, true)]
     public async Task CourtDeadlineIdentitySurvivesSummaryLinkRemovalWithoutReplacingManualValues(bool postgres, bool legacyKey)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 1);
+        await using var f = await CreateFixtureAsync(postgres, 1);
         var source = CourtDeadlineSource(f.Case.CourtUrl);
         await GenerateCourtAsync(f, source);
         var original = await f.Db.ClientCaseProceduralDeadlines.SingleAsync();
@@ -1177,7 +1189,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true)]
     public async Task CourtDeadlineIdentityDoesNotSilentlyClaimAmbiguousLegacyDeadlines(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 1);
+        await using var f = await CreateFixtureAsync(postgres, 1);
         var source = CourtDeadlineSource(f.Case.CourtUrl);
         await GenerateCourtAsync(f, source);
         var original = await f.Db.ClientCaseProceduralDeadlines.SingleAsync();
@@ -1226,7 +1238,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [MemberData(nameof(GeneratedPaths))]
     public async Task GenerationPublishesOnlyWithRequiredCopiesAndExactManagedBinding(bool postgres, string path, int copies)
     {
-        await using var f = await Fixture.CreateAsync(postgres, copies);
+        await using var f = await CreateFixtureAsync(postgres, copies);
         var controller = f.Controller();
         controller.Request.Headers["X-Upload-Key"] = Guid.NewGuid().ToString();
         var result = await GenerateAsync(controller, f.Case.Id, path);
@@ -1367,6 +1379,8 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
         private SqliteConnection? sqlite;
         private NpgsqlConnection? admin;
         private string? databaseName;
+        private PostgreSqlMigratedTemplate.DatabaseLease? databaseLease;
+        private SqliteMigratedTemplate.DatabaseLease? sqliteLease;
         private TestEnvironment environment = null!;
         private IConfiguration configuration = null!;
         private IManagedCaseDocumentUploadService managed = null!;
@@ -1380,13 +1394,30 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
         public IProductStorageReader Reader { get; private set; } = null!;
         public bool UseNotificationService { get; set; }
 
-        public static async Task<Fixture> CreateAsync(bool postgres, int copies, bool autoPublication = false, params IInterceptor[] interceptors)
+        // Migration/backfill tests and external fixture probes deliberately retain the uncached path.
+        public static Task<Fixture> CreateAsync(bool postgres, int copies, bool autoPublication = false, params IInterceptor[] interceptors)
+            => CreateCoreAsync(null, null, postgres, copies, autoPublication, interceptors);
+
+        public static Task<Fixture> CreateFromTemplateAsync(PostgreSqlMigratedTemplate template, SqliteMigratedTemplate sqliteTemplate, bool postgres, int copies,
+            bool autoPublication = false, params IInterceptor[] interceptors)
+            => CreateCoreAsync(template, sqliteTemplate, postgres, copies, autoPublication, interceptors);
+
+        private static async Task<Fixture> CreateCoreAsync(PostgreSqlMigratedTemplate? template, SqliteMigratedTemplate? sqliteTemplate, bool postgres, int copies,
+            bool autoPublication, IInterceptor[] interceptors)
         {
             var f = new Fixture();
             try
             {
                 Directory.CreateDirectory(f.root);
-                if (postgres)
+                if (postgres && template is not null)
+                {
+                    f.databaseLease = await template.CreateDatabaseAsync("pp_generated_case_");
+                    f.databaseName = f.databaseLease.Name;
+                    Console.WriteLine($"Owned generated case database: {f.databaseName}");
+                    f.Db = new PostgreSqlPaymentContext(new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
+                        .UseNpgsql(f.databaseLease.ConnectionString).AddInterceptors(interceptors).Options);
+                }
+                else if (postgres)
                 {
                     var raw = Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES");
                     Assert.False(string.IsNullOrWhiteSpace(raw), "Owned generated-document baseline requires local PostgreSQL.");
@@ -1404,12 +1435,20 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
                 }
                 else
                 {
-                    f.sqlite = new SqliteConnection("Data Source=:memory:");
-                    await f.sqlite.OpenAsync();
+                    if (sqliteTemplate is not null)
+                    {
+                        f.sqliteLease = await sqliteTemplate.CreateDatabaseAsync();
+                        f.sqlite = f.sqliteLease.Connection;
+                    }
+                    else
+                    {
+                        f.sqlite = new SqliteConnection("Data Source=:memory:");
+                        await f.sqlite.OpenAsync();
+                    }
                     f.Db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>()
                         .UseSqlite(f.sqlite).UsePayPlannerSqliteMigrations().AddInterceptors(interceptors).Options);
                 }
-                await f.Db.Database.MigrateAsync();
+                if (postgres ? template is null : sqliteTemplate is null) await f.Db.Database.MigrateAsync();
                 Assert.False(f.Db.Database.HasPendingModelChanges());
                 var email = await f.Db.SystemSettings.SingleOrDefaultAsync(s => s.Key == "notifications.email.enabled");
                 if (email is null) f.Db.SystemSettings.Add(new SystemSetting { Key = "notifications.email.enabled", Value = "false" });
@@ -1707,7 +1746,9 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
         public async ValueTask DisposeAsync()
         {
             if (Db is not null) await Db.DisposeAsync();
-            if (sqlite is not null) await sqlite.DisposeAsync();
+            if (sqliteLease is not null) await sqliteLease.DisposeAsync();
+            else if (sqlite is not null) await sqlite.DisposeAsync();
+            if (databaseLease is not null) await databaseLease.DisposeAsync();
             if (admin is not null)
             {
                 try

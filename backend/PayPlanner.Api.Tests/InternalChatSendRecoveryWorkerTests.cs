@@ -1,3 +1,6 @@
+using System.Data.Common;
+using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -19,7 +22,7 @@ public sealed partial class InternalChatControllerTests
     [InlineData(true)]
     public async Task ChatSendRecoveryConcurrentBatchesPublishOneGraph(bool postgres)
     {
-        await using var f = await Fixture.CreateMigratedAsync(postgres, true);
+        await using var f = await CreateMigratedFixtureAsync(postgres, true);
         var actor = await f.AddUserAsync("chat-batch-concurrent@example.test", "Автор");
         var thread = await CaptureChannelAsync(f, actor);
         var snapshot = CaptureSnapshot(thread.Id, actor.Id);
@@ -93,7 +96,11 @@ public sealed partial class InternalChatControllerTests
     [InlineData(true)]
     public async Task ChatSendRecoveryHostedWorkerUsesFreshScopeAfterCopyProcessing(bool postgres)
     {
-        await using var f = await Fixture.CreateMigratedAsync(postgres, true);
+        var workerDiagnostics = new ChatRecoveryWorkerDiagnostics();
+        workerDiagnostics.Mark("fixture-start");
+        await using var f = await CreateMigratedFixtureAsync(postgres, true);
+        workerDiagnostics.ObserveSeed(f.Db);
+        workerDiagnostics.Mark("fixture-ready");
         var actor = await f.AddUserAsync("chat-worker@example.test", "Автор");
         var thread = await CaptureChannelAsync(f, actor);
         var snapshot = CaptureSnapshot(thread.Id, actor.Id);
@@ -109,8 +116,8 @@ public sealed partial class InternalChatControllerTests
         var policy = new StoragePolicyService(monitor, providers);
         var seed = ChatPublicationCore(f.Db, providers, policy, monitor, environment, config);
         Assert.Equal("accepted", (await seed.Writer.WriteAsync(snapshot, ChatOriginalInputs(snapshot), default)).Status);
+        workerDiagnostics.Mark("seed-accepted");
         var signal = new ChatRecoveryPublicationSignal();
-        var workerDiagnostics = new ChatRecoveryWorkerDiagnostics();
         var services = new ServiceCollection();
         services.AddSingleton<IWebHostEnvironment>(environment);
         services.AddSingleton<IConfiguration>(config);
@@ -119,7 +126,12 @@ public sealed partial class InternalChatControllerTests
         services.AddSingleton<IStoragePolicyService>(policy);
         services.AddSingleton<ILogger<InternalChatSendRecovery>>(signal);
         services.AddSingleton<ILogger<StorageOriginalReadStagingService>>(NullLogger<StorageOriginalReadStagingService>.Instance);
-        services.AddScoped(_ => CaptureFreshDb(f, true));
+        services.AddScoped(_ =>
+        {
+            var context = CaptureFreshDb(f, true);
+            workerDiagnostics.ObserveScope(context);
+            return context;
+        });
         services.AddScoped<IStorageStageCapacityService, StorageStageCapacityService>();
         services.AddScoped<IStorageStageWriterMarkerRecoveryService, StorageStageCapacityService>();
         services.AddSingleton(TimeProvider.System);
@@ -129,22 +141,52 @@ public sealed partial class InternalChatControllerTests
         services.AddScoped<IProductStorageBindingService, ProductStorageBindingService>();
         services.AddInternalChatStorageRecovery();
         services.AddScoped<IStorageOperationProcessor>(sp => new ChatDirtyCopyProcessor(sp.GetRequiredService<PaymentContext>(), thread.Id, actor.Id,
-            () => workerDiagnostics.CopyProcessorEntered = true));
+            () => workerDiagnostics.MarkCopy(entered: true), () => workerDiagnostics.MarkCopy(entered: false)));
         await using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = true });
         using var worker = new StorageOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(), monitor,
             workerDiagnostics, provider.GetRequiredService<StorageStageMarkerMaintenance>());
+        workerDiagnostics.Mark("start-enter");
         await worker.StartAsync(default);
-        try { await signal.Published.Task.WaitAsync(TimeSpan.FromSeconds(15)); }
+        workerDiagnostics.Mark("start-return");
+        string? deadline = null;
+        var afterStop = "not-observed";
+        ExceptionDispatchInfo? stopFailure = null;
+        try
+        {
+            await signal.Published.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            workerDiagnostics.Mark("published-signal");
+        }
         catch (TimeoutException)
         {
-            Assert.Fail("Chat publication signal timed out at the original 15-second boundary. " + workerDiagnostics.Summary
-                + "; " + signal.Summary);
+            workerDiagnostics.Mark("publication-deadline");
+            deadline = workerDiagnostics.Summary + "; " + signal.Summary
+                + $"; Reads={local.ReadCalls}; Puts={local.PutCalls}; ExecuteState={worker.ExecuteTask?.Status}";
         }
         finally
         {
+            workerDiagnostics.Mark("stop-enter");
             using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            await worker.StopAsync(stop.Token);
+            try { await worker.StopAsync(stop.Token); }
+            catch (Exception error)
+            {
+                stopFailure = ExceptionDispatchInfo.Capture(error);
+                workerDiagnostics.ObserveDiagnosticError(error);
+            }
+            workerDiagnostics.Mark("stop-return");
+            // Never race this observation against an unfinished owned worker.
+            var joined = worker.ExecuteTask?.IsCompleted == true;
+            var metadata = deadline is not null && joined
+                ? await ReadStoppedChatMetadataAsync(f, workerDiagnostics)
+                : deadline is null ? "not-requested" : "skipped-unfinished-worker";
+            afterStop = $"Joined={joined}; ExecuteState={worker.ExecuteTask?.Status}; Metadata={metadata}; "
+                + $"Reads={local.ReadCalls}; Puts={local.PutCalls}; " + signal.Summary;
+            workerDiagnostics.Report(afterStop);
         }
+        // A later publication/cleanup cannot turn the original deadline into success.
+        if (deadline is not null)
+            Assert.Fail("Chat publication signal timed out at the original 15-second boundary. AtDeadline: " + deadline
+                + "; AfterStop: " + workerDiagnostics.Summary + "; " + afterStop);
+        stopFailure?.Throw();
         Assert.Empty(workerDiagnostics.Errors);
         await using var verify = CaptureFreshDb(f, true);
         var message = Assert.Single(await verify.InternalChatMessages.ToArrayAsync());
@@ -164,7 +206,7 @@ public sealed partial class InternalChatControllerTests
     public async Task ChatSendRecoveryRestartsAfterPreCommitFailureWithoutReadingOriginalsAgain(bool postgres)
     {
         var failure = new ChatPublicationBeforeCommitFailure();
-        await using var f = await Fixture.CreateMigratedAsync(postgres, true, failure);
+        await using var f = await CreateMigratedFixtureAsync(postgres, true, failure);
         var actor = await f.AddUserAsync("chat-restart@example.test", "Автор");
         var thread = await CaptureChannelAsync(f, actor);
         var snapshot = CaptureSnapshot(thread.Id, actor.Id);
@@ -201,24 +243,141 @@ public sealed partial class InternalChatControllerTests
     }
 
     private sealed class ChatDirtyCopyProcessor(PaymentContext context, int threadId, int actorId,
-        Action? entered = null) : IStorageOperationProcessor
+        Action? entered = null, Action? exited = null) : IStorageOperationProcessor
     {
         public Task<StorageOperationBatchResult> ProcessBatchAsync(string workerId, CancellationToken cancellationToken)
         {
             entered?.Invoke();
             context.InternalChatMessages.Add(new InternalChatMessage { ThreadId = threadId, AuthorUserId = actorId, Text = "Unsaved copy-scope sentinel" });
             Assert.True(context.ChangeTracker.HasChanges());
+            exited?.Invoke();
             return Task.FromResult(new StorageOperationBatchResult(0, 0, 0, 0, 0));
+        }
+    }
+
+    private static async Task<string> ReadStoppedChatMetadataAsync(Fixture fixture, ChatRecoveryWorkerDiagnostics diagnostics)
+    {
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            await using var db = CaptureFreshDb(fixture, true);
+            db.Database.SetCommandTimeout(2);
+            var now = DateTime.UtcNow;
+            var rows = await db.InternalChatSendAttempts.AsNoTracking().Select(item => new
+            {
+                Accepted = item.AcceptedAt.HasValue,
+                Published = item.PublishedMessageId.HasValue,
+                Due = item.RecoveryNextAttemptAt <= now,
+                LeasePresent = item.RecoveryLeaseToken.HasValue,
+                LeaseExpired = item.RecoveryLeaseExpiresAt <= now,
+                item.RecoveryLastStatus,
+                item.RecoveryAttemptCount,
+            }).Take(2).ToArrayAsync(timeout.Token);
+            if (rows.Length != 1) return $"rowCount={rows.Length}";
+            var row = rows[0];
+            var status = row.RecoveryLastStatus switch
+            {
+                null => "none",
+                "published" or "busy" or "unavailable" or "forbidden" or "conflict" or "invalid"
+                    or "deadLetter" or "needsInput" or "accepted" or "disabled" => row.RecoveryLastStatus,
+                _ => "other",
+            };
+            return $"rowCount=1,accepted={row.Accepted},published={row.Published},due={row.Due},leasePresent={row.LeasePresent},"
+                + $"leaseExpired={row.LeaseExpired},status={status},attempts={Math.Clamp(row.RecoveryAttemptCount, -1, 1000)}";
+        }
+        catch (Exception error)
+        {
+            diagnostics.ObserveDiagnosticError(error);
+            return "observation-failed";
         }
     }
 
     private sealed class ChatRecoveryWorkerDiagnostics : ILogger<StorageOperationWorker>
     {
         private readonly object _sync = new();
+        private readonly long _started = Stopwatch.GetTimestamp();
         private readonly HashSet<string> _errors = new(StringComparer.Ordinal);
-        public volatile bool CopyProcessorEntered;
+        private readonly HashSet<string> _diagnosticErrors = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, long> _stages = new(StringComparer.Ordinal);
+        private readonly List<PaymentContext> _contexts = [];
+        private readonly List<DbConnection> _connections = [];
+        private readonly List<string> _scopeIdentities = [];
+        private PaymentContext? _seedContext;
+        private DbConnection? _seedConnection;
+        private string? _target;
+        private bool _copyEntered, _copyExited;
+        private int _scopeCount;
         public string[] Errors { get { lock (_sync) return _errors.ToArray(); } }
-        public string Summary => $"CopyProcessorEntered={CopyProcessorEntered}; ErrorTypes={string.Join(",", Errors)}";
+        public string Summary
+        {
+            get
+            {
+                lock (_sync)
+                    return $"CopyProcessorEntered={_copyEntered}; CopyProcessorExited={_copyExited}; ScopeCount={_scopeCount}; "
+                        + $"StagesMs={string.Join(",", _stages.Select(item => item.Key + ":" + item.Value))}; "
+                        + $"ScopeIdentity={string.Join("|", _scopeIdentities)}; ErrorTypes={string.Join(",", _errors)}; "
+                        + $"DiagnosticErrorTypes={string.Join(",", _diagnosticErrors)}";
+            }
+        }
+        public void Mark(string stage)
+        {
+            lock (_sync)
+                if (_stages.Count < 16) _stages.TryAdd(stage, (long)Stopwatch.GetElapsedTime(_started).TotalMilliseconds);
+        }
+        public void MarkCopy(bool entered)
+        {
+            lock (_sync)
+            {
+                if (entered) _copyEntered = true; else _copyExited = true;
+                Mark(entered ? "copy-enter" : "copy-exit");
+            }
+        }
+        public void ObserveSeed(PaymentContext context)
+        {
+            try
+            {
+                _seedContext = context;
+                _seedConnection = context.Database.GetDbConnection();
+                _target = context.Database.GetConnectionString();
+            }
+            catch (Exception error) { ObserveDiagnosticError(error); }
+        }
+        public void ObserveScope(PaymentContext context)
+        {
+            try
+            {
+                lock (_sync)
+                {
+                    _scopeCount = Math.Min(1000, _scopeCount + 1);
+                    if (_scopeIdentities.Count >= 4) return;
+                    var connection = context.Database.GetDbConnection();
+                    _scopeIdentities.Add($"scope{_scopeCount}:seedContext={ReferenceEquals(context, _seedContext)},"
+                        + $"seedConnection={ReferenceEquals(connection, _seedConnection)},"
+                        + $"reusedContext={_contexts.Any(item => ReferenceEquals(item, context))},"
+                        + $"reusedConnection={_connections.Any(item => ReferenceEquals(item, connection))},"
+                        + $"sameTarget={context.Database.GetConnectionString() == _target}");
+                    _contexts.Add(context);
+                    _connections.Add(connection);
+                    Mark($"scope{_scopeCount}-created");
+                }
+            }
+            catch (Exception error) { ObserveDiagnosticError(error); }
+        }
+        public void ObserveDiagnosticError(Exception error)
+        {
+            lock (_sync) if (_diagnosticErrors.Count < 4) _diagnosticErrors.Add(SafeType(error));
+        }
+        public void Report(string details)
+        {
+            try { Console.WriteLine("Owned chat worker diagnostic: " + Summary + "; " + details); }
+            catch (Exception error) when (error is IOException or ObjectDisposedException) { }
+        }
+        private static string SafeType(Exception? error)
+        {
+            var name = error?.GetType().FullName ?? "unknown";
+            return name.Length <= 192 && System.Text.RegularExpressions.Regex.IsMatch(name, @"^[A-Za-z_][A-Za-z0-9_.+`<>]*$")
+                ? name : "unknown";
+        }
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
         public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Error;
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
@@ -226,10 +385,7 @@ public sealed partial class InternalChatControllerTests
         {
             if (!IsEnabled(logLevel)) return;
             // Test diagnostic only: never serialize formatter/state/message/Data.
-            var name = exception?.GetType().FullName ?? "unknown";
-            if (name.Length > 192 || !System.Text.RegularExpressions.Regex.IsMatch(name, @"^[A-Za-z_][A-Za-z0-9_.+`<>]*$"))
-                name = "unknown";
-            lock (_sync) if (_errors.Count < 4) _errors.Add(name);
+            lock (_sync) if (_errors.Count < 4) _errors.Add(SafeType(exception));
         }
     }
 

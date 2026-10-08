@@ -17,7 +17,7 @@ public sealed partial class StorageStageCapacityServiceTests
     {
         const string phase = "original-metrics";
         const int size = StorageStageFileReceipt.MaximumBlockBytes * 4 + 4;
-        await using var f = await WriterProcessFixture.CreateAsync(postgres);
+        await using var f = await CreateWriterFixtureAsync(postgres);
         var assembly = Path.Combine(AppContext.BaseDirectory, "PayPlanner.StorageStageWriterProbe.dll");
         Assert.True(File.Exists(assembly));
         var start = new ProcessStartInfo("dotnet")

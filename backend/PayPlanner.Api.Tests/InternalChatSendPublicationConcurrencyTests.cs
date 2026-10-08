@@ -19,7 +19,7 @@ public sealed partial class InternalChatControllerTests
     [InlineData(true)]
     public async Task ChatSendPublicationConcurrentConnectionsPublishOneGraph(bool postgres)
     {
-        await using var f = await Fixture.CreateMigratedAsync(postgres, true);
+        await using var f = await CreateMigratedFixtureAsync(postgres, true);
         var actor = await f.AddUserAsync("chat-concurrent@example.test", "Автор");
         var thread = await CaptureChannelAsync(f, actor);
         var snapshot = CaptureSnapshot(thread.Id, actor.Id);
@@ -96,7 +96,7 @@ public sealed partial class InternalChatControllerTests
     public async Task ChatSendPublicationFencesInterruptionAndRetainsOriginals(bool postgres, string scenario)
     {
         var failure = new ChatPublicationBeforeCommitFailure();
-        await using var f = await Fixture.CreateMigratedAsync(postgres, true, failure);
+        await using var f = await CreateMigratedFixtureAsync(postgres, true, failure);
         var actor = await f.AddUserAsync("chat-interruption@example.test", "Автор");
         var thread = await CaptureChannelAsync(f, actor);
         var snapshot = CaptureSnapshot(thread.Id, actor.Id);

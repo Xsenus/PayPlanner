@@ -16,7 +16,7 @@ public sealed partial class InternalChatControllerTests
     public async Task ChatOriginalCommittedPointersAndAcceptanceSurviveLostDatabaseAcknowledgement(bool postgres, string boundary)
     {
         var fault = new ChatOriginalAckState(boundary);
-        await using var f = await Fixture.CreateMigratedAsync(postgres, true, new ChatOriginalAckCommands(fault), new ChatOriginalAckCommit(fault));
+        await using var f = await CreateMigratedFixtureAsync(postgres, true, new ChatOriginalAckCommands(fault), new ChatOriginalAckCommit(fault));
         var actor = await f.AddUserAsync("chat-original-ack@example.test", "Автор");
         var thread = await CaptureChannelAsync(f, actor);
         var snapshot = CaptureSnapshot(thread.Id, actor.Id);

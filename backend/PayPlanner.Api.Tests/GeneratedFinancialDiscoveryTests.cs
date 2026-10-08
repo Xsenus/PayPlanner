@@ -18,7 +18,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, GeneratedFinancialDocumentKind.Contract)]
     public async Task FinancialDiscoveryFindsOwnedCaptureBeforeFileIntentAndProvesExplicitRetirement(bool postgres, GeneratedFinancialDocumentKind kind)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync();
         var accepted = await CaptureWithClaimsAsync(f.Db, f.Case.Id, orderId, f.User.Id, f.User.FullName, kind);
         var receipt = Assert.IsType<GeneratedFinancialDocumentReceipt>(accepted.Receipt);
@@ -44,7 +44,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     public async Task FinancialDiscoveryPagesBoundedMetadataAndExcludesOtherAuthorAndHistoricalPublication(bool postgres)
     {
         var trace = new FinancialDiscoveryQueryTrace();
-        await using var f = await Fixture.CreateAsync(postgres, 2, true, trace);
+        await using var f = await CreateFixtureAsync(postgres, 2, true, trace);
         var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync();
         var keys = new List<Guid>();
         for (var i = 0; i < 61; i++)

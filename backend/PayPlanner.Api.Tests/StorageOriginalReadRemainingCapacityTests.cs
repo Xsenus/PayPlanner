@@ -15,7 +15,7 @@ public sealed partial class StorageStageCapacityServiceTests
     [InlineData(true)]
     public async Task OriginalReadProducerRequiresUnwrittenHeadroomEvenWhenMinimumIsStillMet(bool postgres)
     {
-        await using var f = await WriterProcessFixture.CreateAsync(postgres);
+        await using var f = await CreateWriterFixtureAsync(postgres);
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             [LocalStoragePaths.RootConfigurationKey] = Path.Combine(f.Root, "objects"),

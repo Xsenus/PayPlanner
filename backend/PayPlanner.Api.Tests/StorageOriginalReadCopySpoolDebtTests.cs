@@ -19,7 +19,7 @@ public sealed partial class StorageStageCapacityServiceTests
     {
         var sql = new OriginalCopyBudgetMetrics();
         var commits = new CheckpointCommitFault();
-        await using var f = await WriterProcessFixture.CreateAsync(postgres, sql, commits);
+        await using var f = await CreateWriterFixtureAsync(postgres, sql, commits);
         const long availableBound = 64L * 1024 * 1024;
         var (_, service, policy, root) = CreateSharedBudgetServices(f,
             local => new OriginalCopyBudgetNativeProvider(local, availableBound));
@@ -109,7 +109,7 @@ public sealed partial class StorageStageCapacityServiceTests
     [InlineData(true, true)]
     public async Task OriginalReadProducerHonorsPendingLocalCopyAndSpoolDebtAfterMinimumChanges(bool postgres, bool beforeCreate)
     {
-        await using var f = await WriterProcessFixture.CreateAsync(postgres);
+        await using var f = await CreateWriterFixtureAsync(postgres);
         var (stages, service, policy, root) = CreateSharedBudgetServices(f);
         var native = LocalStorageCapacityProbe.Observe(root, "owned-local", 0);
         var spool = LocalStorageCapacityProbe.Observe(Path.GetTempPath(), "owned-spool", 0);

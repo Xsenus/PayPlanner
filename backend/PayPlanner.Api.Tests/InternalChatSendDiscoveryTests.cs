@@ -12,7 +12,7 @@ public sealed partial class InternalChatControllerTests
     [InlineData(true)]
     public async Task ChatSendDiscoveryPagesTiedTimestampsWithinCurrentAuthority(bool postgres)
     {
-        await using var f = await Fixture.CreateMigratedAsync(postgres);
+        await using var f = await CreateMigratedFixtureAsync(postgres);
         var actor = await f.AddUserAsync("chat-discovery@example.test", "Автор");
         var other = await f.AddUserAsync("chat-discovery-other@example.test", "Другой");
         var thread = await CaptureChannelAsync(f, actor, other);

@@ -15,7 +15,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, "transaction")]
     public async Task GeneratedReservationRecoveryDoesNotReadOrClaimWhenDisabledOrInsideTransaction(bool postgres, string boundary)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 1, true);
+        await using var f = await CreateFixtureAsync(postgres, 1, true);
         await PrepareReservationAsync(f);
         if (boundary == "automatic") f.FinancialStorageOptions.AutoCaseDocumentPublicationEnabled = false;
         if (boundary == "writes") f.FinancialStorageOptions.ProductWriteEnabledClasses = [];
@@ -39,7 +39,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, "writes")]
     public async Task GeneratedReservationRecoveryRechecksFlagsAfterOriginalRead(bool postgres, string boundary)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 1, true);
+        await using var f = await CreateFixtureAsync(postgres, 1, true);
         await PrepareReservationAsync(f);
         var changed = false;
         f.Local.BeforeReadAsync = _ =>

@@ -44,7 +44,7 @@ public sealed partial class InternalChatControllerTests
     public async Task ChatSendPublicationCommitsTheWholeFrozenGraph(bool postgres, string scenario)
     {
         var ack = new ChatPublicationCommitAckFailure();
-        await using var f = await Fixture.CreateMigratedAsync(postgres, false, ack);
+        await using var f = await CreateMigratedFixtureAsync(postgres, false, ack);
         var actor = await f.AddUserAsync("chat-publish@example.test", "Автор");
         var other = await f.AddUserAsync("chat-publish-other@example.test", "Участник");
         var thread = await CaptureChannelAsync(f, actor, other);

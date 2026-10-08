@@ -11,10 +11,11 @@ namespace PayPlanner.Api.Tests;
 public class FinancialPrecisionModelTests
 {
     [Theory]
-    [MemberData(nameof(CreateContexts))]
-    public void DecimalProperties_HaveExplicitPrecisionAndScale(DbContext context)
+    [InlineData(false)]
+    [InlineData(true)]
+    public void DecimalProperties_HaveExplicitPrecisionAndScale(bool postgres)
     {
-        using (context)
+        using (var context = CreateContext(postgres))
         {
             var decimalProperties = context.Model.GetEntityTypes()
                 .SelectMany(entity => entity.GetProperties().Select(property => new { Entity = entity, Property = property }))
@@ -34,10 +35,11 @@ public class FinancialPrecisionModelTests
     }
 
     [Theory]
-    [MemberData(nameof(CreateContexts))]
-    public void FinancialDecimalProperties_UseExpectedScale(DbContext context)
+    [InlineData(false)]
+    [InlineData(true)]
+    public void FinancialDecimalProperties_UseExpectedScale(bool postgres)
     {
-        using (context)
+        using (var context = CreateContext(postgres))
         {
             AssertPrecision<Payment>(context, nameof(Payment.Amount), precision: 18, scale: 2);
             AssertPrecision<Payment>(context, nameof(Payment.PaidAmount), precision: 18, scale: 2);
@@ -48,25 +50,31 @@ public class FinancialPrecisionModelTests
         }
     }
 
-    public static TheoryData<DbContext> CreateContexts()
+    private static DbContext CreateContext(bool postgres)
     {
-        var sqliteConnection = new SqliteConnection("Data Source=:memory:");
-        sqliteConnection.Open();
-
-        return new TheoryData<DbContext>
-        {
-            new PaymentContext(
-                new DbContextOptionsBuilder<PaymentContext>()
-                    .UseSqlite(sqliteConnection)
-                    .Options,
-                useObjectAuditModel: false),
-            new PostgreSqlPaymentContext(
+        if (postgres)
+            return new PostgreSqlPaymentContext(
                 new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
                     .UseNpgsql("Host=localhost;Database=payplanner_precision_model;Username=postgres;Password=postgres")
                     .Options,
                 new HttpContextAccessor(),
-                useObjectAuditModel: false)
-        };
+                useObjectAuditModel: false);
+
+        var sqliteConnection = new SqliteConnection("Data Source=:memory:");
+        try
+        {
+            sqliteConnection.Open();
+            return new PaymentContext(
+                new DbContextOptionsBuilder<PaymentContext>()
+                    .UseSqlite(sqliteConnection, contextOwnsConnection: true)
+                    .Options,
+                useObjectAuditModel: false);
+        }
+        catch
+        {
+            sqliteConnection.Dispose();
+            throw;
+        }
     }
 
     private static bool IsDecimal(IReadOnlyProperty property)

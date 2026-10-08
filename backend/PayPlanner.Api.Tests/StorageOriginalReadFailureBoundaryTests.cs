@@ -18,7 +18,7 @@ public sealed partial class StorageStageCapacityServiceTests
     public async Task OriginalReadProducerResolvesPlannedCommitAck(bool postgres, bool afterCommit)
     {
         var fault = new CheckpointCommitFault { AfterCommit = afterCommit };
-        await using var f = await WriterProcessFixture.CreateAsync(postgres, fault);
+        await using var f = await CreateWriterFixtureAsync(postgres, fault);
         var service = CreateOriginalBoundaryReader(f);
         var bytes = new byte[] { 1, 2, 3, 4 };
         var sha = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
@@ -57,7 +57,7 @@ public sealed partial class StorageStageCapacityServiceTests
     [InlineData(true, true)]
     public async Task OriginalReadProducerRetainsDebtAfterSourceFailureBeyondPhysicalBlock(bool postgres, bool cancel)
     {
-        await using var f = await WriterProcessFixture.CreateAsync(postgres);
+        await using var f = await CreateWriterFixtureAsync(postgres);
         var service = CreateOriginalBoundaryReader(f);
         var prefix = new byte[StorageStageFileReceipt.MaximumBlockBytes + 4];
         prefix[0] = 1; prefix[StorageStageFileReceipt.MaximumBlockBytes - 1] = 2; prefix[^1] = 3;

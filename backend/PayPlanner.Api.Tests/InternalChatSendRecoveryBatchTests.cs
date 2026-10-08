@@ -42,7 +42,7 @@ public sealed partial class InternalChatControllerTests
     {
         var ack = new ChatPublicationCommitAckFailure();
         var beforeCommit = new ChatPublicationBeforeCommitFailure();
-        await using var f = await Fixture.CreateMigratedAsync(postgres, false, ack, beforeCommit);
+        await using var f = await CreateMigratedFixtureAsync(postgres, false, ack, beforeCommit);
         var actor = await f.AddUserAsync("chat-batch@example.test", "Автор");
         var thread = await CaptureChannelAsync(f, actor);
         var request = CaptureSnapshot(thread.Id, actor.Id);

@@ -23,7 +23,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     [InlineData(true, GeneratedFinancialDocumentKind.Contract, false)]
     public async Task FinancialStatusRequiresAcceptedSourceAndNativeWinner(bool postgres, GeneratedFinancialDocumentKind kind, bool loseWinner)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2, true);
+        await using var f = await CreateFixtureAsync(postgres, 2, true);
         var receipt = await CaptureFinancialPublicationAsync(f, kind);
         Assert.Equal("pending", (await f.PublishFinancial(receipt)).Status);
         var pending = Assert.Single((await f.FinancialUploadStates([receipt.Proof.UploadKey]))!);
@@ -69,7 +69,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     public async Task FinancialStatusBatchUsesOneMetadataQueryWithoutFrozenGraphsOrProviderIO(bool postgres)
     {
         var trace = new FinancialStatusQueryTrace();
-        await using var f = await Fixture.CreateAsync(postgres, 2, true, trace);
+        await using var f = await CreateFixtureAsync(postgres, 2, true, trace);
         var keys = new List<Guid>();
         var orderId = await f.Db.ClientCaseWorkOrders.Select(o => o.Id).SingleAsync();
         foreach (var kind in new[] { GeneratedFinancialDocumentKind.Invoice, GeneratedFinancialDocumentKind.Act, GeneratedFinancialDocumentKind.Contract })

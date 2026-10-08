@@ -11,10 +11,11 @@ namespace PayPlanner.Api.Tests;
 public class UniqueIndexBusinessScopeTests
 {
     [Theory]
-    [MemberData(nameof(CreateContexts))]
-    public void BusinessDocumentNumbers_HaveExpectedUniquenessScope(DbContext context)
+    [InlineData(false)]
+    [InlineData(true)]
+    public void BusinessDocumentNumbers_HaveExpectedUniquenessScope(bool postgres)
     {
-        using (context)
+        using (var context = CreateContext(postgres))
         {
             AssertIndex<Invoice>(context, isUnique: false, nameof(Invoice.Number), nameof(Invoice.Date));
             AssertIndex<Act>(context, isUnique: false, nameof(Act.Number));
@@ -25,10 +26,11 @@ public class UniqueIndexBusinessScopeTests
     }
 
     [Theory]
-    [MemberData(nameof(CreateContexts))]
-    public void DictionaryCodes_HaveExpectedGlobalUniqueness(DbContext context)
+    [InlineData(false)]
+    [InlineData(true)]
+    public void DictionaryCodes_HaveExpectedGlobalUniqueness(bool postgres)
     {
-        using (context)
+        using (var context = CreateContext(postgres))
         {
             AssertIndex<OkinDictionaryItem>(context, isUnique: true, nameof(OkinDictionaryItem.Code));
             AssertIndex<OksoDictionaryItem>(context, isUnique: true, nameof(OksoDictionaryItem.Code));
@@ -37,35 +39,42 @@ public class UniqueIndexBusinessScopeTests
     }
 
     [Theory]
-    [MemberData(nameof(CreateContexts))]
-    public void SoftDeletedUniqueBusinessDocuments_UseGlobalUniquenessWithoutFilter(DbContext context)
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SoftDeletedUniqueBusinessDocuments_UseGlobalUniquenessWithoutFilter(bool postgres)
     {
-        using (context)
+        using (var context = CreateContext(postgres))
         {
             AssertGlobalUniqueIndex<CashOrder>(context, nameof(CashOrder.Number));
             AssertGlobalUniqueIndex<CashInventory>(context, nameof(CashInventory.Number));
         }
     }
 
-    public static TheoryData<DbContext> CreateContexts()
+    private static DbContext CreateContext(bool postgres)
     {
-        var sqliteConnection = new SqliteConnection("Data Source=:memory:");
-        sqliteConnection.Open();
-
-        return new TheoryData<DbContext>
-        {
-            new PaymentContext(
-                new DbContextOptionsBuilder<PaymentContext>()
-                    .UseSqlite(sqliteConnection)
-                    .Options,
-                useObjectAuditModel: false),
-            new PostgreSqlPaymentContext(
+        if (postgres)
+            return new PostgreSqlPaymentContext(
                 new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
                     .UseNpgsql("Host=localhost;Database=payplanner_unique_index_model;Username=postgres;Password=postgres")
                     .Options,
                 new HttpContextAccessor(),
-                useObjectAuditModel: false)
-        };
+                useObjectAuditModel: false);
+
+        var sqliteConnection = new SqliteConnection("Data Source=:memory:");
+        try
+        {
+            sqliteConnection.Open();
+            return new PaymentContext(
+                new DbContextOptionsBuilder<PaymentContext>()
+                    .UseSqlite(sqliteConnection, contextOwnsConnection: true)
+                    .Options,
+                useObjectAuditModel: false);
+        }
+        catch
+        {
+            sqliteConnection.Dispose();
+            throw;
+        }
     }
 
     private static void AssertIndex<TEntity>(

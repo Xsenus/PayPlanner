@@ -15,7 +15,7 @@ public sealed partial class StorageStageCapacityServiceTests
     public async Task StageReservationRefusesRootObjectReplacementDuringAdmission(bool postgres)
     {
         var swap = new RootReplacementAfterAdmissionCommit();
-        await using var f = await WriterProcessFixture.CreateAsync(postgres, swap);
+        await using var f = await CreateWriterFixtureAsync(postgres, swap);
         var (stages, _, _, root) = CreateSharedBudgetServices(f);
         var retainedRoot = Path.Combine(f.Root, "retained-objects");
         var sentinel = Path.Combine(root, "owned-before-root-swap.bin");

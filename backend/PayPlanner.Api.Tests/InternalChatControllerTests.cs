@@ -19,8 +19,17 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public sealed partial class InternalChatControllerTests
+public sealed partial class InternalChatControllerTests : IClassFixture<PostgreSqlMigratedTemplate>, IClassFixture<SqliteMigratedTemplate>
 {
+    private readonly PostgreSqlMigratedTemplate postgresTemplate;
+    private readonly SqliteMigratedTemplate sqliteTemplate;
+
+    public InternalChatControllerTests(PostgreSqlMigratedTemplate postgresTemplate, SqliteMigratedTemplate sqliteTemplate)
+        => (this.postgresTemplate, this.sqliteTemplate) = (postgresTemplate, sqliteTemplate);
+
+    private Task<Fixture> CreateMigratedFixtureAsync(bool postgres, bool independentSqliteConnections = false, params IInterceptor[] interceptors)
+        => Fixture.CreateFromTemplateAsync(postgresTemplate, sqliteTemplate, postgres, independentSqliteConnections, interceptors);
+
     [Fact]
     public async Task FailedNotificationRemainsPendingAndCanBeRetriedOnce()
     {
@@ -1301,7 +1310,7 @@ public sealed partial class InternalChatControllerTests
         var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), prefix + Guid.NewGuid().ToString("N")));
         try
         {
-            await using var fixture = await Fixture.CreateMigratedAsync(postgres);
+            await using var fixture = await CreateMigratedFixtureAsync(postgres);
             var author = await fixture.AddUserAsync("replay-author@example.test", "Автор");
             var outsider = await fixture.AddUserAsync("replay-outsider@example.test", "Посторонний");
             var thread = Assert.IsType<InternalChatThreadDto>(Assert.IsType<CreatedAtActionResult>(
@@ -1411,6 +1420,8 @@ public sealed partial class InternalChatControllerTests
         private readonly SqliteConnection? _connection;
         private NpgsqlConnection? _admin;
         private string? _databaseName;
+        private PostgreSqlMigratedTemplate.DatabaseLease? _databaseLease;
+        private SqliteMigratedTemplate.DatabaseLease? _sqliteLease;
         private string? _sqliteRoot;
         private readonly Role _role;
         public PaymentContext Db { get; }
@@ -1440,8 +1451,19 @@ public sealed partial class InternalChatControllerTests
             return new Fixture(connection, db, role);
         }
 
-        public static async Task<Fixture> CreateMigratedAsync(bool postgres, bool independentSqliteConnections = false, params IInterceptor[] interceptors)
+        // Upgrade/downgrade scenarios and external fixture callers retain real uncached migrations.
+        public static Task<Fixture> CreateMigratedAsync(bool postgres, bool independentSqliteConnections = false, params IInterceptor[] interceptors)
+            => CreateMigratedCoreAsync(null, null, postgres, independentSqliteConnections, interceptors);
+
+        public static Task<Fixture> CreateFromTemplateAsync(PostgreSqlMigratedTemplate template, SqliteMigratedTemplate sqliteTemplate, bool postgres,
+            bool independentSqliteConnections = false, params IInterceptor[] interceptors)
+            => CreateMigratedCoreAsync(template, sqliteTemplate, postgres, independentSqliteConnections, interceptors);
+
+        private static async Task<Fixture> CreateMigratedCoreAsync(PostgreSqlMigratedTemplate? template, SqliteMigratedTemplate? sqliteTemplate, bool postgres,
+            bool independentSqliteConnections, IInterceptor[] interceptors)
         {
+            PostgreSqlMigratedTemplate.DatabaseLease? databaseLease = null;
+            SqliteMigratedTemplate.DatabaseLease? sqliteLease = null;
             SqliteConnection? sqlite = null;
             NpgsqlConnection? admin = null;
             string? name = null;
@@ -1450,7 +1472,14 @@ public sealed partial class InternalChatControllerTests
             Fixture? fixture = null;
             try
             {
-                if (postgres)
+                if (postgres && template is not null)
+                {
+                    databaseLease = await template.CreateDatabaseAsync("pp_chat_replay_");
+                    name = databaseLease.Name;
+                    db = new PostgreSqlPaymentContext(new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
+                        .UseNpgsql(databaseLease.ConnectionString).AddInterceptors(interceptors).Options);
+                }
+                else if (postgres)
                 {
                     var raw = Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES");
                     Assert.False(string.IsNullOrWhiteSpace(raw), "Chat replay requires owned local PostgreSQL.");
@@ -1473,15 +1502,25 @@ public sealed partial class InternalChatControllerTests
                         sqliteRoot = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "pp_chat_registry_" + Guid.NewGuid().ToString("N")));
                         Directory.CreateDirectory(sqliteRoot);
                     }
-                    sqlite = new SqliteConnection(sqliteRoot is null ? "Data Source=:memory:"
-                        : new SqliteConnectionStringBuilder { DataSource = Path.Combine(sqliteRoot, "owned.sqlite"), Pooling = false }.ConnectionString);
-                    await sqlite.OpenAsync();
+                    if (sqliteTemplate is not null)
+                    {
+                        sqliteLease = sqliteRoot is null ? await sqliteTemplate.CreateDatabaseAsync()
+                            : await sqliteTemplate.CreateFileDatabaseAsync(Path.Combine(sqliteRoot, "owned.sqlite"));
+                        sqlite = sqliteLease.Connection;
+                    }
+                    else
+                    {
+                        sqlite = new SqliteConnection(sqliteRoot is null ? "Data Source=:memory:"
+                            : new SqliteConnectionStringBuilder { DataSource = Path.Combine(sqliteRoot, "owned.sqlite"), Pooling = false }.ConnectionString);
+                        await sqlite.OpenAsync();
+                    }
                     db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>()
                         .UseSqlite(sqlite).UsePayPlannerSqliteMigrations().AddInterceptors(interceptors).Options);
                 }
                 var role = new Role { Name = "chat-replay-employee", Description = "Сотрудник" };
-                fixture = new Fixture(sqlite, db, role) { _admin = admin, _databaseName = name, _sqliteRoot = sqliteRoot };
-                await db.Database.MigrateAsync();
+                fixture = new Fixture(sqlite, db, role)
+                { _admin = admin, _databaseName = name, _databaseLease = databaseLease, _sqliteLease = sqliteLease, _sqliteRoot = sqliteRoot };
+                if (databaseLease is null && sqliteLease is null) await db.Database.MigrateAsync();
                 Assert.False(db.Database.HasPendingModelChanges());
                 var email = await db.SystemSettings.SingleOrDefaultAsync(item => item.Key == "notifications.email.enabled");
                 if (email is null) db.SystemSettings.Add(new SystemSetting { Key = "notifications.email.enabled", Value = "false" });
@@ -1496,7 +1535,9 @@ public sealed partial class InternalChatControllerTests
                 else
                 {
                     if (db is not null) await db.DisposeAsync();
-                    if (sqlite is not null) await sqlite.DisposeAsync();
+                    if (sqliteLease is not null) await sqliteLease.DisposeAsync();
+                    else if (sqlite is not null) await sqlite.DisposeAsync();
+                    if (databaseLease is not null) await databaseLease.DisposeAsync();
                     if (admin is not null)
                     {
                         try { if (name is not null) await DropOwnedAsync(admin, name); }
@@ -1605,7 +1646,9 @@ public sealed partial class InternalChatControllerTests
         public async ValueTask DisposeAsync()
         {
             await Db.DisposeAsync();
-            if (_connection is not null) await _connection.DisposeAsync();
+            if (_sqliteLease is not null) await _sqliteLease.DisposeAsync();
+            else if (_connection is not null) await _connection.DisposeAsync();
+            if (_databaseLease is not null) await _databaseLease.DisposeAsync();
             if (_admin is not null)
             {
                 try { if (_databaseName is not null) await DropOwnedAsync(_admin, _databaseName); }

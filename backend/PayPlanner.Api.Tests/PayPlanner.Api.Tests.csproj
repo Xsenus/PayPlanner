@@ -41,4 +41,10 @@
     <None Update="Fixtures\\**\\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="../../tools/PayPlanner.TestShards/ShardPlan.cs" Link="TestShards/ShardPlan.cs" />
+    <Compile Include="../../tools/PayPlanner.TestShards/TrxVerifier.cs" Link="TestShards/TrxVerifier.cs" />
+    <Compile Include="../../tools/PayPlanner.TestShards/AssemblyCatalog.cs" Link="TestShards/AssemblyCatalog.cs" />
+  </ItemGroup>
+
 </Project>

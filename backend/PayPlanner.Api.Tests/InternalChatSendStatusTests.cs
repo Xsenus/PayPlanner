@@ -13,7 +13,7 @@ public sealed partial class InternalChatControllerTests
     [InlineData(true)]
     public async Task ChatSendStatusAcceptedOriginalsReenterRecoveryAfterNeedsInput(bool postgres)
     {
-        await using var f = await Fixture.CreateMigratedAsync(postgres);
+        await using var f = await CreateMigratedFixtureAsync(postgres);
         var actor = await f.AddUserAsync("chat-status-input@example.test", "Автор");
         var thread = await CaptureChannelAsync(f, actor);
         var snapshot = CaptureSnapshot(thread.Id, actor.Id);
@@ -58,7 +58,7 @@ public sealed partial class InternalChatControllerTests
     public async Task ChatSendStatusHidesReceiptWhenAccessIsRemovedDuringCatalogRead(bool postgres)
     {
         var revoke = new ChatStatusAccessRevocation();
-        await using var f = await Fixture.CreateMigratedAsync(postgres, true, revoke);
+        await using var f = await CreateMigratedFixtureAsync(postgres, true, revoke);
         var actor = await f.AddUserAsync("chat-status-revoked@example.test", "Автор");
         var thread = await CaptureChannelAsync(f, actor);
         var snapshot = CaptureSnapshot(thread.Id, actor.Id);
@@ -97,7 +97,7 @@ public sealed partial class InternalChatControllerTests
     [InlineData(true)]
     public async Task ChatSendStatusReadsOnlyOwnedCatalogWithoutChangingRecovery(bool postgres)
     {
-        await using var f = await Fixture.CreateMigratedAsync(postgres);
+        await using var f = await CreateMigratedFixtureAsync(postgres);
         var actor = await f.AddUserAsync("chat-status@example.test", "Автор");
         var other = await f.AddUserAsync("chat-status-other@example.test", "Другой");
         var thread = await CaptureChannelAsync(f, actor, other);
@@ -208,7 +208,7 @@ public sealed partial class InternalChatControllerTests
     [InlineData(true)]
     public async Task ChatSendStatusValidatesHistoricalPublicationWithWritesDisabled(bool postgres)
     {
-        await using var f = await Fixture.CreateMigratedAsync(postgres);
+        await using var f = await CreateMigratedFixtureAsync(postgres);
         var actor = await f.AddUserAsync("chat-status-published@example.test", "Автор");
         var thread = await CaptureChannelAsync(f, actor);
         var snapshot = CaptureSnapshot(thread.Id, actor.Id);

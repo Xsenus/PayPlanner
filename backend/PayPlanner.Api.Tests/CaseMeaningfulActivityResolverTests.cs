@@ -8,53 +8,25 @@ public sealed class CaseMeaningfulActivityResolverTests
     private static readonly DateTime CreatedAt =
         new(2026, 7, 1, 8, 0, 0, DateTimeKind.Utc);
 
-    public static TheoryData<CaseMeaningfulActivitySignals, string> MeaningfulSignals
-        => new()
-        {
-            {
-                new CaseMeaningfulActivitySignals(
-                    CreatedAt,
-                    LastTaskAt: CreatedAt.AddHours(1)),
-                CaseMeaningfulActivitySources.Task
-            },
-            {
-                new CaseMeaningfulActivitySignals(
-                    CreatedAt,
-                    LastTaskCommentAt: CreatedAt.AddHours(2)),
-                CaseMeaningfulActivitySources.TaskComment
-            },
-            {
-                new CaseMeaningfulActivitySignals(
-                    CreatedAt,
-                    LastDocumentAt: CreatedAt.AddHours(3)),
-                CaseMeaningfulActivitySources.Document
-            },
-            {
-                new CaseMeaningfulActivitySignals(
-                    CreatedAt,
-                    LastCourtEventAt: CreatedAt.AddHours(4)),
-                CaseMeaningfulActivitySources.CourtEvent
-            },
-            {
-                new CaseMeaningfulActivitySignals(
-                    CreatedAt,
-                    LastResponsibleViewAt: CreatedAt.AddHours(5)),
-                CaseMeaningfulActivitySources.ResponsibleView
-            },
-            {
-                new CaseMeaningfulActivitySignals(
-                    CreatedAt,
-                    LastActivityConfirmationAt: CreatedAt.AddHours(6)),
-                CaseMeaningfulActivitySources.ActivityConfirmation
-            },
-        };
-
     [Theory]
-    [MemberData(nameof(MeaningfulSignals))]
-    public void Resolve_RecognizesEveryMeaningfulSignal(
-        CaseMeaningfulActivitySignals signals,
-        string expectedSource)
+    [InlineData("task", CaseMeaningfulActivitySources.Task)]
+    [InlineData("task-comment", CaseMeaningfulActivitySources.TaskComment)]
+    [InlineData("document", CaseMeaningfulActivitySources.Document)]
+    [InlineData("court-event", CaseMeaningfulActivitySources.CourtEvent)]
+    [InlineData("responsible-view", CaseMeaningfulActivitySources.ResponsibleView)]
+    [InlineData("activity-confirmation", CaseMeaningfulActivitySources.ActivityConfirmation)]
+    public void Resolve_RecognizesEveryMeaningfulSignal(string scenario, string expectedSource)
     {
+        var signals = scenario switch
+        {
+            "task" => new CaseMeaningfulActivitySignals(CreatedAt, LastTaskAt: CreatedAt.AddHours(1)),
+            "task-comment" => new CaseMeaningfulActivitySignals(CreatedAt, LastTaskCommentAt: CreatedAt.AddHours(2)),
+            "document" => new CaseMeaningfulActivitySignals(CreatedAt, LastDocumentAt: CreatedAt.AddHours(3)),
+            "court-event" => new CaseMeaningfulActivitySignals(CreatedAt, LastCourtEventAt: CreatedAt.AddHours(4)),
+            "responsible-view" => new CaseMeaningfulActivitySignals(CreatedAt, LastResponsibleViewAt: CreatedAt.AddHours(5)),
+            "activity-confirmation" => new CaseMeaningfulActivitySignals(CreatedAt, LastActivityConfirmationAt: CreatedAt.AddHours(6)),
+            _ => throw new ArgumentOutOfRangeException(nameof(scenario)),
+        };
         var result = CaseMeaningfulActivityResolver.Resolve(signals);
 
         Assert.Equal(expectedSource, result.Source);
