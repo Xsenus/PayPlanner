@@ -1417,6 +1417,14 @@ public class InvoicesController : ControllerBase
             .Where(id => id > 0)
             .Distinct()
             .ToList();
+        await using var createTransaction = await _db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
+        if (_db.Database.IsNpgsql() && billingTaskIds.Count > 0)
+        {
+            // Both task edits and other billing operations must finish before eligibility is read.
+            await _db.Database.SqlQuery<int>($"SELECT \"Id\" FROM \"TaskJournalItems\" WHERE \"Id\" = ANY({billingTaskIds.ToArray()}) ORDER BY \"Id\" FOR UPDATE")
+                .ToListAsync(ct);
+        }
+
         var billingTasks = billingTaskIds.Count == 0
             ? []
             : await _db.TaskJournalItems
@@ -1508,8 +1516,6 @@ public class InvoicesController : ControllerBase
         }
 
         ApplyPaidFlags(payment, request.PaidDate, await ResolveInvoiceTodayAsync(ct));
-
-        await using var createTransaction = await _db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
 
         _db.Payments.Add(payment);
         await _db.SaveChangesAsync(ct);
@@ -1667,6 +1673,11 @@ public class InvoicesController : ControllerBase
         if (existingInvoiceEntityId.HasValue && existingInvoiceEntityId.Value > 0)
         {
             await LockInvoiceAggregateAsync(existingInvoiceEntityId.Value, ct);
+        }
+        else
+        {
+            // Legacy invoices still share their payment row with task billing links.
+            await LockInvoiceDeletionPaymentsAsync([payment], ct);
         }
 
         var linkedTaskBindings = await _db.TaskJournalItems

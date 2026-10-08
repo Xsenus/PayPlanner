@@ -78,9 +78,9 @@ public class ProviderSpecificSqlTests
             .Select(item => $"{Path.GetRelativePath(root, item.Path)}:{item.Line}:{item.Text.Trim()}")
             .ToList();
 
-        Assert.Equal(5, matches.Count);
-        Assert.Equal(2, matches.Count(match => match.Contains("InvoicesController.cs", StringComparison.Ordinal)));
-        Assert.Equal(3, matches.Count(match => match.Contains("TasksController.cs", StringComparison.Ordinal)));
+        Assert.Equal(7, matches.Count);
+        Assert.Equal(3, matches.Count(match => match.Contains("InvoicesController.cs", StringComparison.Ordinal)));
+        Assert.Equal(4, matches.Count(match => match.Contains("TasksController.cs", StringComparison.Ordinal)));
 
         var invoiceSource = File.ReadAllText(Path.Combine(root, "backend", "Controllers", "InvoicesController.cs"));
         var deletionLockStart = invoiceSource.IndexOf("private async Task LockInvoiceDeletionPaymentsAsync", StringComparison.Ordinal);
@@ -104,6 +104,20 @@ public class ProviderSpecificSqlTests
         var linkMethod = taskSource[linkStart..linkEnd];
         Assert.Contains("if (_db.Database.IsNpgsql())", linkMethod, StringComparison.Ordinal);
         Assert.Equal(2, linkMethod.Split("FOR UPDATE", StringSplitOptions.None).Length - 1);
+
+        var updateStart = taskSource.IndexOf("public async Task<ActionResult<TaskJournalItemDto>> UpdateTask(", StringComparison.Ordinal);
+        var updateEnd = taskSource.IndexOf("[HttpPatch(\"{id:int}/status\")]", updateStart, StringComparison.Ordinal);
+        Assert.True(updateStart >= 0 && updateEnd > updateStart);
+        var updateMethod = taskSource[updateStart..updateEnd];
+        Assert.Contains("if (_db.Database.IsNpgsql())", updateMethod, StringComparison.Ordinal);
+        Assert.Equal(1, updateMethod.Split("FOR UPDATE", StringSplitOptions.None).Length - 1);
+
+        var createStart = invoiceSource.IndexOf("public async Task<ActionResult<InvoiceDto>> Create(", StringComparison.Ordinal);
+        var createEnd = invoiceSource.IndexOf("[HttpPut(\"{id:int}\")]", createStart, StringComparison.Ordinal);
+        Assert.True(createStart >= 0 && createEnd > createStart);
+        var createMethod = invoiceSource[createStart..createEnd];
+        Assert.Contains("if (_db.Database.IsNpgsql() && billingTaskIds.Count > 0)", createMethod, StringComparison.Ordinal);
+        Assert.Equal(1, createMethod.Split("FOR UPDATE", StringSplitOptions.None).Length - 1);
     }
 
     private static string FindRepositoryRoot()

@@ -2979,7 +2979,10 @@ public class TasksController : ControllerBase
             if (managed.Status == "pending")
                 return StatusCode(503, new
                 {
-                    code = "task_file_copies_pending", taskId = id, uploadKey, fileId = (int?)null,
+                    code = "task_file_copies_pending",
+                    taskId = id,
+                    uploadKey,
+                    fileId = (int?)null,
                     message = "Файл сохранён, обязательные копии ещё не готовы. Вложение пока не добавлено; повторная отправка файла не требуется.",
                 });
             return StatusCode(503, new { message = "Обязательные копии файла ещё не готовы или загрузка временно отключена. Вложение пока не добавлено; повторите отправку того же файла позже." });
@@ -3709,6 +3712,14 @@ public class TasksController : ControllerBase
             return Unauthorized();
         }
 
+        await using var updateTransaction = await _db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
+        if (_db.Database.IsNpgsql())
+        {
+            // Read the billing binding only after concurrent invoice linking has finished.
+            await _db.Database.SqlQuery<int>($"SELECT 1 FROM \"TaskJournalItems\" WHERE \"Id\" = {id} FOR UPDATE")
+                .ToListAsync(ct);
+        }
+
         var entity = await BuildVisibleTasksQuery(access).FirstOrDefaultAsync(item => item.Id == id, ct);
         if (entity is null)
         {
@@ -3957,6 +3968,7 @@ public class TasksController : ControllerBase
             : null;
         await SyncContractorPaymentAsync(entity, await ResolveContractorPaymentResultBaseDateAsync(previousStatus, nextStatus, entity.UpdatedAt, ct), ct);
         await _db.SaveChangesAsync(ct);
+        await updateTransaction.CommitAsync(ct);
         await SynchronizeExistingTaskChatMembersAsync([entity], ct);
         await AppendTaskChatSystemMessagesAsync([(entity.Id, (IReadOnlyList<string>)changeLabels)], access, ct);
         await NotifyRecurringTaskCreatedAsync(nextRecurringTask, access, ct);

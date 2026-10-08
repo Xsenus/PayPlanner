@@ -18,9 +18,9 @@
 | backend/Controllers/MessengerDocumentDeliveriesController.cs:496 | ExecuteUpdateAsync |
 | backend/Controllers/MessengerDocumentDeliveriesController.cs:513 | ExecuteUpdateAsync |
 | backend/Controllers/StorageAdminController.cs:145 | ExecuteUpdateAsync |
-| backend/Controllers/TasksController.cs:3217 | ExecuteUpdateAsync |
-| backend/Controllers/TasksController.cs:4520 | ExecuteUpdateAsync |
-| backend/Controllers/TasksController.cs:4766 | ExecuteUpdateAsync |
+| backend/Controllers/TasksController.cs:3220 | ExecuteUpdateAsync |
+| backend/Controllers/TasksController.cs:4532 | ExecuteUpdateAsync |
+| backend/Controllers/TasksController.cs:4778 | ExecuteUpdateAsync |
 | backend/Controllers/UserActivityController.cs:418 | ExecuteUpdateAsync |
 | backend/Controllers/UserActivityController.cs:540 | ExecuteDeleteAsync |
 | backend/Controllers/V2/CasesV2Controller.cs:5710 | ExecuteUpdateAsync |
@@ -160,7 +160,7 @@ EF-операции `ExecuteUpdateAsync` и `ExecuteDeleteAsync` обходят 
 
 Операции ниже появились или переместились после исходной таблицы. Указанные места используют пакетное обновление для технического состояния, а не для незаметного изменения пользовательских полей. Условие по статусу, версии или идентификатору является границей конкурентного перехода; объектный аудит `ChangeTracker` на них не распространяется.
 
-- Чат и задача: `backend/Controllers/InternalChatController.cs:755`, `backend/Controllers/TasksController.cs:3217`, `backend/Controllers/TasksController.cs:4520`, `backend/Controllers/TasksController.cs:4766` — атомарные отметки активности, публикации и статуса с отдельной историей задачи/сообщения.
+- Чат и задача: `backend/Controllers/InternalChatController.cs:755`, `backend/Controllers/TasksController.cs:3220`, `backend/Controllers/TasksController.cs:4532`, `backend/Controllers/TasksController.cs:4778` — атомарные отметки активности, публикации и статуса с отдельной историей задачи/сообщения.
 - Legacy-отправка чата: `backend/Controllers/InternalChatController.cs:566` — no-op блокировка одной строки чата в короткой transaction перед повторной проверкой membership и managed identity; синхронизирована с capture и исключает обход сохранённой попытки при смене flags. Самостоятельного пользовательского изменения или отдельного audit event нет; сообщение и notification pending создаются вместе после этих проверок.
 - Судебное дело: `backend/Controllers/V2/CasesV2Controller.cs:6044`, `backend/Controllers/V2/CasesV2Controller.cs:10841` — условные переходы связанного технического состояния, отражаемые в истории дела.
 - Прежняя загрузка документа дела: `backend/Controllers/V2/CasesV2Controller.cs:5707` — блокировка дела сериализует финальную проверку retirement и известного managed intent перед сохранением записи. Сам Title не меняется; документ/история/audit/уведомления сохраняются прежним writer только после проверки, при отказе общий atomic helper откатывает граф и очищает только созданный им файл.
