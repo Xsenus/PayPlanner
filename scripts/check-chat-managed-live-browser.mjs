@@ -3,7 +3,8 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdir, readdir, readFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
-import { createServer } from 'vite';
+import { build, preview } from 'vite';
+import { createChatPostRecorder, createChatReadLifecycle, redactChatBrowserDiagnostic } from './chat-browser-read-lifecycle.mjs';
 
 const api = new URL(process.env.CASE_RETIREMENT_API);
 assert.equal(api.hostname, '127.0.0.1');
@@ -36,9 +37,21 @@ const channel = process.env.CASE_RETIREMENT_BROWSER ?? (process.platform === 'wi
 assert.ok(['msedge', 'chrome'].includes(channel));
 const session = `chat-managed-${basename(root).slice(-12)}`;
 const execute = promisify(execFile);
+const safe = value => redactChatBrowserDiagnostic(value,
+  [process.env.CASE_RETIREMENT_PASSWORD, process.env.CASE_RETIREMENT_EMAIL]);
 async function cli(...args) {
-  const result = await execute(process.execPath, [cliPath, `-s=${session}`, ...args], { timeout: 110000, maxBuffer: 1024 * 1024, windowsHide: true });
-  assert.ok(!result.stdout.includes('### Error'), result.stdout + result.stderr);
+  let result;
+  try {
+    result = await execute(process.execPath, [cliPath, `-s=${session}`, ...args], { timeout: 110000, maxBuffer: 1024 * 1024, windowsHide: true });
+  } catch (cause) {
+    throw new Error(safe(cause.stdout || cause.message));
+  }
+  // Forward only finite, payload-free counters, never run-code or credentials.
+  for (const match of result.stdout.matchAll(/PP_CHAT_BROWSER_READS phase=(?:before-lost-reload|before-draft-reload|pending|published|before-close) started=\d{1,6} finished=\d{1,6} failed=\d{1,6} locallyAborted=\d{1,6} pending=\d{1,6}/g))
+    console.log(match[0]);
+  for (const match of result.stdout.matchAll(/PP_CHAT_BROWSER_POST phase=(?:start|end|fail) elapsedMs=\d{1,9} apiReadsStarted=\d{1,6} apiReadsFinished=\d{1,6} apiReadsFailed=\d{1,6} apiReadsPending=\d{1,6}/g))
+    console.log(match[0]);
+  assert.ok(!result.stdout.includes('### Error'), safe(result.stdout + result.stderr));
   return result.stdout;
 }
 async function applyBoundary() {
@@ -61,25 +74,47 @@ process.env.VITE_API_URL = new URL('/api', api).href;
 const ui = `http://127.0.0.1:${port}`;
 const screenshots = resolve('output', 'playwright');
 await mkdir(screenshots, { recursive: true });
-let vite; let opened = false;
+let vite; let opened = false; let scenarioFailed = false;
 const settings = JSON.stringify({ api: api.origin, ui, threadId, email: process.env.CASE_RETIREMENT_EMAIL,
   password: process.env.CASE_RETIREMENT_PASSWORD, lostAcknowledgement: process.env.CASE_RETIREMENT_LOST_ACK === 'true',
   screenshots, suffix: basename(root).slice(-12) });
 try {
-  vite = await createServer({ envDir: root, cacheDir: join(root, 'vite-chat-cache'), server: { host: '127.0.0.1', port, strictPort: true }, logLevel: 'error' });
-  await vite.listen();
-  // Compile the actual entry before starting the browser navigation clock.
-  // The existing enclosing three-minute scenario budget includes this preparation.
-  const entry = await vite.transformRequest('/src/main.tsx');
-  assert.ok(entry?.code, 'The synthetic chat UI entry module must compile successfully.');
+  console.log('PP_CHAT_BROWSER_PHASE ui-build');
+  // Exercise the released React lifecycle, not development StrictMode's extra
+  // mount/cleanup cycle, which deliberately aborts the initial status read.
+  const outDir = join(root, 'chat-browser-ui-dist');
+  await mkdir(outDir);
+  const uiConfig = { envDir: root, cacheDir: join(root, 'vite-chat-cache'),
+    build: { outDir, emptyOutDir: false }, logLevel: 'error' };
+  const built = await build(uiConfig);
+  assert.ok((Array.isArray(built) ? built : [built]).some(output =>
+    output.output?.some(chunk => chunk.type === 'chunk' && chunk.isEntry && chunk.code.length > 0)),
+  'The synthetic chat UI entry module must compile successfully.');
+  // The existing enclosing three-minute scenario budget includes this build.
+  console.log('PP_CHAT_BROWSER_PHASE preview-listen');
+  vite = await preview({ ...uiConfig, preview: { host: '127.0.0.1', port, strictPort: true } });
   await cli('open', 'about:blank', '--browser', channel); opened = true;
   await cli('snapshot');
+  console.log('PP_CHAT_BROWSER_PHASE pending-scenario');
   const pending = await cli('run-code', String.raw`async (page) => {
     const settings = ${settings};
     const check = (value, message) => { if (!value) throw new Error(message); };
     const prefix = '/api/internal-chat/threads/' + settings.threadId;
     const outside = []; const errors = []; let sends = 0; let resumes = 0; let key;
     let allowStatus = !settings.lostAcknowledgement; let completeFirst;
+    const reads = (${createChatReadLifecycle.toString()})(page, request => {
+      const url = new URL(request.url());
+      return request.method() === 'GET' && url.origin === settings.api
+        && (url.pathname === prefix + '/sends' || url.pathname === prefix + '/sends/' + key);
+    }, 20000);
+    page.__ownedChatReads = reads;
+    const apiReads = (${createChatReadLifecycle.toString()})(page, request =>
+      request.method() === 'GET' && new URL(request.url()).origin === settings.api, 20000);
+    page.__ownedChatApiReads = apiReads;
+    page.__ownedChatPostTimings = [];
+    const recordFirstPost = (${createChatPostRecorder.toString()})(apiReads, page.__ownedChatPostTimings);
+    const readPhases = [];
+    const recordReads = phase => readPhases.push('PP_CHAT_BROWSER_READS phase=' + phase + ' ' + reads.describe());
     const firstAccepted = new Promise(resolve => { completeFirst = resolve; });
     page.setDefaultTimeout(20000);
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -95,11 +130,22 @@ try {
     await page.context().route('**/*', async route => {
       const url = new URL(route.request().url());
       if (![settings.api, settings.ui].includes(url.origin)) { outside.push(url.origin); return route.abort(); }
-      if (!allowStatus && url.pathname === prefix + '/sends/' + key && route.request().method() === 'GET')
+      if (!allowStatus && url.pathname === prefix + '/sends/' + key && route.request().method() === 'GET') {
+        reads.expectLocalAbort(route.request());
         return route.abort('failed');
+      }
       if (url.pathname === prefix + '/messages' && route.request().method() === 'POST') {
         sends++; check(sends <= (settings.lostAcknowledgement ? 2 : 1), 'Unexpected multipart submission');
-        const response = await route.fetch(); check(response.status() === 202, 'Send did not remain pending');
+        if (sends === 1) recordFirstPost('start');
+        let response;
+        try {
+          response = await route.fetch();
+          if (sends === 1) recordFirstPost('end');
+        } catch (cause) {
+          if (sends === 1) recordFirstPost('fail');
+          throw cause;
+        }
+        check(response.status() === 202, 'Send did not remain pending');
         const state = await response.json();
         if (key) check(state.clientRequestId === key, 'Exact retry changed identity');
         key = state.clientRequestId;
@@ -134,6 +180,7 @@ try {
         return storageKey ? JSON.parse(sessionStorage.getItem(storageKey)) : null;
       }, { threadId: settings.threadId, key });
       check(unconfirmed?.id === key && unconfirmed.managed !== true, 'Lost response unexpectedly confirmed the attempt');
+      await reads.drain(); recordReads('before-lost-reload');
       allowStatus = true;
       await page.reload({ waitUntil: 'domcontentloaded' });
       await page.getByRole('status').waitFor();
@@ -157,6 +204,7 @@ try {
     check(await page.getByText('first.txt', { exact: true }).count() === 1 && await page.getByText('second.txt', { exact: true }).count() === 1, 'Pending response erased selected files');
     await page.screenshot({ path: settings.screenshots + '/chat-managed-' + settings.suffix + '-pending-desktop.png' });
     await editor.fill('Новый черновик после прежней отправки');
+    await reads.drain(); recordReads('before-draft-reload');
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.getByRole('status').waitFor();
     check(await page.getByPlaceholder('Напишите сообщение…').inputValue() === 'Новый черновик после прежней отправки', 'Reload erased the changed draft');
@@ -169,13 +217,17 @@ try {
     await page.screenshot({ path: settings.screenshots + '/chat-managed-' + settings.suffix + '-pending-mobile.png' });
     await page.setViewportSize({ width: 1440, height: 900 });
     check(outside.length === 0 && errors.length === 0 && sends === (settings.lostAcknowledgement ? 2 : 1) && resumes === 0, 'Pending browser traffic or console errors');
+    await reads.drain(); recordReads('pending');
+    check(reads.snapshot().failed === 0, 'An owned chat status read failed before continuation.');
     await page.evaluate(proof => { window.__ownedChatProof = proof; }, { api: settings.api, ui: settings.ui,
       key, sends, threadId: settings.threadId, screenshots: settings.screenshots, suffix: settings.suffix });
-    return 'CHAT_PENDING_BROWSER_OK';
+    return 'CHAT_PENDING_BROWSER_OK\n' + readPhases.join('\n') + '\n' + page.__ownedChatPostTimings.join('\n');
   }`);
   assert.ok(pending.includes('CHAT_PENDING_BROWSER_OK'), pending);
   await cli('snapshot');
+  console.log('PP_CHAT_BROWSER_PHASE apply-boundary');
   await applyBoundary();
+  console.log('PP_CHAT_BROWSER_PHASE published-scenario');
   const completed = await cli('run-code', String.raw`async (page) => {
     const settings = await page.evaluate(() => window.__ownedChatProof);
     const errors = []; const outside = []; let resumes = 0; let sends = 0;
@@ -200,15 +252,40 @@ try {
     check([1, 2].includes(settings.sends) && sends === 0 && resumes === 1, 'Recovery submitted another message');
     check(outside.length === 0 && errors.length === 0, 'Browser network or console errors: ' + errors.join('; '));
     await page.screenshot({ path: settings.screenshots + '/chat-managed-' + settings.suffix + '-published.png' });
-    return 'CASE_RETIREMENT_BROWSER_OK ' + JSON.stringify({ sends: settings.sends, resumes, key: settings.key });
+    await page.__ownedChatReads.drain();
+    check(page.__ownedChatReads.snapshot().failed === 0, 'An owned chat status read failed after continuation.');
+    return 'CASE_RETIREMENT_BROWSER_OK ' + JSON.stringify({ sends: settings.sends, resumes, key: settings.key })
+      + '\nPP_CHAT_BROWSER_READS phase=published ' + page.__ownedChatReads.describe();
   }`);
   assert.ok(completed.includes('CASE_RETIREMENT_BROWSER_OK'), completed); console.log(completed);
 } catch (cause) {
-  if (opened) { console.error(await cli('snapshot')); console.error(await cli('console', 'error')); }
+  scenarioFailed = true;
+  if (opened) { console.error(safe(await cli('snapshot'))); console.error(safe(await cli('console', 'error'))); }
   // Avoid echoing run-code arguments containing synthetic credentials.
-  throw new Error((cause.stdout || cause.message.split('\n')[0])
-    .replaceAll(process.env.CASE_RETIREMENT_PASSWORD, '<password>').replaceAll(process.env.CASE_RETIREMENT_EMAIL, '<email>'));
+  throw new Error(safe(cause.stdout || cause.message));
 } finally {
-  try { if (opened) await cli('close'); }
+  try {
+    if (opened) {
+      let drainError;
+      try {
+        await cli('run-code', String.raw`async (page) => {
+          if (!page.__ownedChatReads) return 'CHAT_READ_OBSERVER_NOT_STARTED';
+          const postTimings = (page.__ownedChatPostTimings ?? []).join('\n');
+          try {
+            await page.__ownedChatReads.drain();
+            if (page.__ownedChatReads.snapshot().failed !== 0) throw new Error('An owned chat read failed before browser close.');
+            return 'PP_CHAT_BROWSER_READS phase=before-close ' + page.__ownedChatReads.describe()
+              + '\n' + postTimings;
+          } catch (cause) {
+            // Keep the first POST evidence even when the existing read drain fails.
+            throw new Error(postTimings + '\n' + cause.message);
+          } finally { page.__ownedChatReads.dispose(); page.__ownedChatApiReads?.dispose(); }
+        }`);
+      } catch (cause) { drainError = cause; }
+      finally { console.log('PP_CHAT_BROWSER_PHASE browser-close'); await cli('close'); }
+      // Cleanup diagnostics must not replace a failed scenario's primary error.
+      if (drainError && !scenarioFailed) throw drainError;
+    }
+  }
   finally { try { if (vite) await vite.close(); } finally { process.stdin.destroy(); } }
 }

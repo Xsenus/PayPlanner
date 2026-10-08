@@ -578,6 +578,9 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
                 while (await process.StandardOutput.ReadLineAsync(ct) is { } line)
                 {
                     output.AppendLine(line);
+                    if (chatAttachments && Regex.IsMatch(line,
+                        @"\APP_CHAT_BROWSER_(?:PHASE (?:ui-build|preview-listen|pending-scenario|apply-boundary|published-scenario|browser-close)|READS phase=(?:before-lost-reload|before-draft-reload|pending|published|before-close) started=\d{1,6} finished=\d{1,6} failed=\d{1,6} locallyAborted=\d{1,6} pending=\d{1,6}|POST phase=(?:start|end|fail) elapsedMs=\d{1,9} apiReadsStarted=\d{1,6} apiReadsFinished=\d{1,6} apiReadsFailed=\d{1,6} apiReadsPending=\d{1,6})\z",
+                        RegexOptions.CultureInvariant)) Console.WriteLine(line);
                     if (line != "CASE_RETIREMENT_BOUNDARY_READY") continue;
                     Assert.NotNull(applyBoundary);
                     Assert.False(applied, "The owned boundary must be applied exactly once.");
