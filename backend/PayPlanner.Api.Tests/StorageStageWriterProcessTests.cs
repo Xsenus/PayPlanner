@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Globalization;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -52,7 +51,7 @@ public sealed partial class StorageStageCapacityServiceTests
         start.ArgumentList.Add(fixture.Root);
         start.ArgumentList.Add(scenario is "partial" or "complete" ? scenario : "missing");
         using var writer = Process.Start(start) ?? throw new InvalidOperationException("Owned writer did not start.");
-        var started = writer.StartTime.ToUniversalTime();
+        var processIdentity = OwnedProcessIdentity.Capture(writer);
         var output = writer.StandardOutput.ReadToEndAsync();
         var errors = writer.StandardError.ReadToEndAsync();
         try
@@ -63,8 +62,7 @@ public sealed partial class StorageStageCapacityServiceTests
             Assert.True(File.Exists(readyPath), writer.HasExited ? await errors : "Writer readiness timed out.");
             using var ready = JsonDocument.Parse(await File.ReadAllTextAsync(readyPath));
             Assert.Equal(writer.Id, ready.RootElement.GetProperty("ProcessId").GetInt32());
-            Assert.Equal(started, DateTime.Parse(ready.RootElement.GetProperty("StartedUtc").GetString()!,
-                CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind));
+            Assert.Equal(processIdentity, ready.RootElement.GetProperty("ProcessIdentity").GetString());
             var ticket = ready.RootElement.GetProperty("Ticket").Deserialize<StorageStageCapacityTicket>()!;
             Assert.StartsWith("stage:writer-v1:", ticket.Key);
             var marker = Path.Combine(fixture.Root, "objects", ".stage-writer-fences-v1", ticket.ObjectId.ToString("N") + ".lock");
@@ -142,7 +140,7 @@ public sealed partial class StorageStageCapacityServiceTests
         {
             if (writer.HasExited) return;
             using var observed = Process.GetProcessById(writer.Id);
-            Assert.Equal(started, observed.StartTime.ToUniversalTime());
+            Assert.Equal(processIdentity, OwnedProcessIdentity.Capture(observed));
             writer.Kill();
             await writer.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
         }

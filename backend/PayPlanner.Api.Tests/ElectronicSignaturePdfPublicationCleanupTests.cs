@@ -1,6 +1,8 @@
 using System.Data.Common;
+using System.Runtime.InteropServices;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Win32.SafeHandles;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services.Storage;
 using Xunit;
@@ -98,7 +100,26 @@ public sealed partial class ElectronicSignatureServiceTests
     private sealed record PdfCleanupReplacement(string Path, string? RetainedOriginalPath, byte[] ExpectedBytes);
 
     private static FileStream OpenPdfCleanupObservation(string path)
-        => new(File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete), FileAccess.Read);
+    {
+        if (!OperatingSystem.IsLinux())
+            return new(File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete), FileAccess.Read);
+
+        // Observe the native object without requesting a second managed flock.
+        // The production snapshot keeps its exclusive lock during registration;
+        // Linux namespace replacement remains possible while that fd is held.
+        var descriptor = OpenPdfCleanupObservationLinux(path, 0x20000 | 0x80000 | 0x800); // O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK
+        if (descriptor < 0)
+        {
+            var error = Marshal.GetLastPInvokeError();
+            throw new IOException($"Could not open the native PDF observation (errno {error}).");
+        }
+        var handle = new SafeFileHandle(new IntPtr(descriptor), ownsHandle: true);
+        try { return new FileStream(handle, FileAccess.Read); }
+        catch { handle.Dispose(); throw; }
+    }
+
+    [DllImport("libc", EntryPoint = "open", ExactSpelling = true, SetLastError = true)]
+    private static extern int OpenPdfCleanupObservationLinux([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
 
     private static PdfCleanupReplacement ReplacePdfCleanupCandidate(string root, string path, string change, byte[] bytes)
     {

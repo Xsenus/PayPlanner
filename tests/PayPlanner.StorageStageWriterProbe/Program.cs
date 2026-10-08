@@ -16,6 +16,7 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Storage;
+using PayPlanner.Api.Tests;
 
 internal static class StageWriterProbe
 {
@@ -541,6 +542,7 @@ internal static class StageWriterProbe
             {
                 ProcessId = process.Id,
                 StartedUtc = process.StartTime.ToUniversalTime().ToString("O"),
+                ProcessIdentity = OwnedProcessIdentity.Capture(process),
                 Ticket = ticket
             }));
             File.Move(readyTemporary, Path.Combine(root, "writer-ready.json"), overwrite: false);
@@ -557,6 +559,7 @@ internal static class StageWriterProbe
         {
             ProcessId = process.Id,
             StartedUtc = process.StartTime.ToUniversalTime().ToString("O"),
+            ProcessIdentity = OwnedProcessIdentity.Capture(process),
             Ticket = ticket,
             Metrics = metrics
         }));

@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -45,7 +44,7 @@ public sealed partial class StorageStageCapacityServiceTests
         start.ArgumentList.Add(f.Root);
         start.ArgumentList.Add(phase);
         using var writer = Process.Start(start) ?? throw new InvalidOperationException("Owned checkpoint writer did not start.");
-        var started = writer.StartTime.ToUniversalTime();
+        var processIdentity = OwnedProcessIdentity.Capture(writer);
         var output = writer.StandardOutput.ReadToEndAsync();
         var errors = writer.StandardError.ReadToEndAsync();
         try
@@ -56,8 +55,7 @@ public sealed partial class StorageStageCapacityServiceTests
             Assert.True(File.Exists(readyPath), writer.HasExited ? await errors : "Checkpoint writer readiness timed out.");
             using var ready = JsonDocument.Parse(await File.ReadAllTextAsync(readyPath));
             Assert.Equal(writer.Id, ready.RootElement.GetProperty("ProcessId").GetInt32());
-            Assert.Equal(started, DateTime.Parse(ready.RootElement.GetProperty("StartedUtc").GetString()!,
-                CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind));
+            Assert.Equal(processIdentity, ready.RootElement.GetProperty("ProcessIdentity").GetString());
             var ticket = ready.RootElement.GetProperty("Ticket").Deserialize<StorageStageCapacityTicket>()!;
             var metrics = ready.RootElement.GetProperty("Metrics");
             Assert.Equal(size, metrics.GetProperty("SourceBytes").GetInt64());
@@ -129,7 +127,7 @@ public sealed partial class StorageStageCapacityServiceTests
         {
             if (writer.HasExited) return;
             using var observed = Process.GetProcessById(writer.Id);
-            Assert.Equal(started, observed.StartTime.ToUniversalTime());
+            Assert.Equal(processIdentity, OwnedProcessIdentity.Capture(observed));
             writer.Kill();
             await writer.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
         }

@@ -8,5 +8,6 @@
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="../../backend/PayPlanner.Api.csproj" />
+    <Compile Include="../../backend/PayPlanner.Api.Tests/OwnedProcessIdentity.cs" Link="OwnedProcessIdentity.cs" />
   </ItemGroup>
 </Project>

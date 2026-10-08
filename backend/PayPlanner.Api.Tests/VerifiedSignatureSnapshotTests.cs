@@ -86,27 +86,85 @@ public sealed class VerifiedSignatureSnapshotTests
     }
 
     [Fact]
-    public async Task LiveWindowsSnapshotBlocksWritesAndFileOrDirectoryReplacementUntilClosed()
+    public async Task LiveSnapshotProtectsHeldBytesAndDetectsOrBlocksNamespaceReplacementUntilClosed()
     {
-        Assert.True(OperatingSystem.IsWindows(), "This gate qualifies Windows sharing; Linux requires its own stand.");
+        Assert.True(OperatingSystem.IsWindows() || OperatingSystem.IsLinux(), "Snapshot protection requires a qualified Windows or Linux platform.");
         using var root = new SnapshotRoot();
         await using var snapshot = Assert.IsType<SnapshotLease>(await MoveAsync(root, Guid.NewGuid().ToString("N"), root.RootIdentity, root.FileIdentity));
+        var replacements = new List<(string Path, string Identity)>();
         Assert.Throws<IOException>(() =>
         {
             using var writer = File.OpenHandle(snapshot.Path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
         });
-        Assert.Throws<IOException>(() => File.Move(snapshot.Path, snapshot.Path + ".replacement"));
         var directory = Path.GetDirectoryName(snapshot.Path)!;
-        Assert.Throws<IOException>(() => Directory.Move(directory, directory + ".replacement"));
-        Assert.Throws<IOException>(() => Directory.Move(root.Root, root.Root + ".replacement"));
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Throws<IOException>(() => File.Move(snapshot.Path, snapshot.Path + ".replacement"));
+            Assert.Throws<IOException>(() => Directory.Move(directory, directory + ".replacement"));
+            Assert.Throws<IOException>(() => Directory.Move(root.Root, root.Root + ".replacement"));
+        }
+        else
+        {
+            // Linux permits renaming held inodes. Each same-byte replacement must
+            // fail namespace verification while the original descriptor stays valid.
+            replacements.Add(await AssertLinuxReplacementRejectedAsync(root, snapshot, snapshot.Path, false));
+            replacements.Add(await AssertLinuxReplacementRejectedAsync(root, snapshot, directory, true));
+            replacements.Add(await AssertLinuxReplacementRejectedAsync(root, snapshot, root.Root, true));
+        }
         Assert.True(await snapshot.VerifyAsync());
         await snapshot.DisposeAsync();
         Assert.Equal(root.Bytes, await File.ReadAllBytesAsync(snapshot.Path));
+        foreach (var replacement in replacements)
+        {
+            Assert.Equal(root.Bytes, await File.ReadAllBytesAsync(replacement.Path));
+            using var observed = File.OpenRead(replacement.Path);
+            Assert.Equal(replacement.Identity, StorageStageFileIdentity.Observe(observed.SafeFileHandle));
+        }
         var moved = root.Root + ".closed";
         Assert.StartsWith(root.OwnedBase + Path.DirectorySeparatorChar, Path.GetFullPath(moved));
         Directory.Move(root.Root, moved);
         Directory.Move(moved, root.Root);
         await File.AppendAllTextAsync(snapshot.Path, "Permitted only after ownership released");
+    }
+
+    private static async Task<(string Path, string Identity)> AssertLinuxReplacementRejectedAsync(
+        SnapshotRoot root, SnapshotLease snapshot, string replacedPath, bool isDirectory)
+    {
+        var displaced = replacedPath + ".replacement";
+        var preserved = replacedPath + ".foreign";
+        Assert.StartsWith(root.OwnedBase + Path.DirectorySeparatorChar, Path.GetFullPath(displaced));
+        Assert.StartsWith(root.OwnedBase + Path.DirectorySeparatorChar, Path.GetFullPath(preserved));
+        if (isDirectory) Directory.Move(replacedPath, displaced);
+        else File.Move(replacedPath, displaced);
+        Directory.CreateDirectory(Path.GetDirectoryName(snapshot.Path)!);
+        await File.WriteAllBytesAsync(snapshot.Path, root.Bytes);
+        string replacementIdentity;
+        using (var replacement = File.OpenRead(snapshot.Path))
+        {
+            replacementIdentity = Assert.IsType<string>(StorageStageFileIdentity.Observe(replacement.SafeFileHandle));
+            Assert.NotEqual(root.FileIdentity, replacementIdentity);
+        }
+        Assert.False(await snapshot.VerifyAsync());
+        Assert.Equal(root.FileIdentity, StorageStageFileIdentity.Observe(snapshot.Content.SafeFileHandle));
+        Assert.False(snapshot.Content.CanWrite);
+        snapshot.Content.Position = 0;
+        using var retained = new MemoryStream();
+        await snapshot.Content.CopyToAsync(retained);
+        Assert.Equal(root.Bytes, retained.ToArray());
+        var preservedFile = isDirectory ? Path.Combine(preserved, Path.GetRelativePath(replacedPath, snapshot.Path)) : preserved;
+        if (isDirectory)
+        {
+            Directory.Move(replacedPath, preserved);
+            Directory.Move(displaced, replacedPath);
+        }
+        else
+        {
+            File.Move(replacedPath, preserved);
+            File.Move(displaced, replacedPath);
+        }
+        Assert.True(await snapshot.VerifyAsync());
+        Assert.Equal(root.Bytes, await File.ReadAllBytesAsync(preservedFile));
+        return (preservedFile, replacementIdentity);
     }
 
     private static readonly Type SnapshotType = typeof(ElectronicSignatureService).Assembly.GetType("PayPlanner.Api.Services.Storage.VerifiedSignatureSnapshot", throwOnError: true)!;
