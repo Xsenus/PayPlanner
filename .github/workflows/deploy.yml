@@ -31,6 +31,9 @@ jobs:
           --health-retries 10
 
     env:
+      DOTNET_PROCESSOR_COUNT: "2"
+      DOTNET_gcServer: "0"
+      DOTNET_GCConserveMemory: "9"
       BE_CSPROJ: backend/PayPlanner.Api.csproj
       BE_SLN: backend/PayPlanner.Api.sln
       OUT_DIR: out
@@ -51,6 +54,24 @@ jobs:
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "9.0.x"
+
+      - name: Prepare memory for backend compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The generated migration models require more than 6 GiB during
+          # compilation. Keep all analyzers and give smaller hosted runners
+          # additional virtual memory for the complete release gate.
+          memory_kib="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)"
+          if [ "$memory_kib" -lt 12582912 ]; then
+            swap_file="$RUNNER_TEMP/payplanner-build.swap"
+            test ! -e "$swap_file"
+            sudo fallocate -l 8G "$swap_file"
+            sudo chmod 600 "$swap_file"
+            sudo mkswap "$swap_file" >/dev/null
+            sudo swapon "$swap_file"
+          fi
+          free -h
 
       - name: Restore backend
         run: dotnet restore "${{ env.BE_SLN }}" --force -p:PayPlannerReleaseAudit=true
@@ -95,10 +116,16 @@ jobs:
           PAYPLANNER_TEST_POSTGRES: Host=127.0.0.1;Port=5432;Database=postgres;Username=postgres;Password=postgres;Pooling=false
           PAYPLANNER_TEST_PG_DUMP: /usr/lib/postgresql/17/bin/pg_dump
           PAYPLANNER_TEST_PSQL: /usr/lib/postgresql/17/bin/psql
-        run: dotnet test backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-restore
+        run: dotnet test backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-restore -c Release
 
       - name: Test deploy backup retention
         run: bash scripts/prune-deploy-backups.test.sh
+
+      - name: Test Data Protection key preservation
+        run: bash scripts/preserve-data-protection-keys.test.sh
+
+      - name: Test storage backfill CLI
+        run: node --test scripts/storage-legacy-backfill.node-tests.mjs
 
       - name: Verify restored CRM through HTTP and browser
         env:
@@ -108,7 +135,7 @@ jobs:
           PAYPLANNER_TEST_POSTGRES: Host=127.0.0.1;Port=5432;Database=postgres;Username=postgres;Password=postgres;Pooling=false
           PAYPLANNER_TEST_PG_DUMP: /usr/lib/postgresql/17/bin/pg_dump
           PAYPLANNER_TEST_PSQL: /usr/lib/postgresql/17/bin/psql
-        run: dotnet test backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-build --no-restore --filter 'FullyQualifiedName~RestoredFullModelQualifiesProtectedSettingsWithCopiedKeysWithoutSourceRing|FullyQualifiedName~FullModelBackupRestoresReadableManagedGenerationsWithoutSource'
+        run: dotnet test backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-build --no-restore -c Release --filter 'FullyQualifiedName~RestoredFullModelQualifiesProtectedSettingsWithCopiedKeysWithoutSourceRing|FullyQualifiedName~FullModelBackupRestoresReadableManagedGenerationsWithoutSource'
 
       - name: Lint FE
         run: npm run lint
@@ -140,7 +167,7 @@ jobs:
         run: npm run test:legal-flags:strict -- --warn-on-feature-flags-summary-failure
 
       - name: Publish backend
-        run: dotnet publish "${{ env.BE_CSPROJ }}" -c Release --no-restore -o "${{ env.OUT_DIR }}/be"
+        run: dotnet publish "${{ env.BE_CSPROJ }}" -c Release --no-build --no-restore -o "${{ env.OUT_DIR }}/be"
 
       - name: Build FE
         env:
@@ -157,6 +184,7 @@ jobs:
         run: |
           mkdir -p "${{ env.OUT_DIR }}/deploy"
           cp scripts/prune-deploy-backups.sh "${{ env.OUT_DIR }}/deploy/"
+          cp scripts/preserve-data-protection-keys.sh "${{ env.OUT_DIR }}/deploy/"
 
       - name: Create tarball
         run: tar -czf "${{ env.TAR_NAME }}" -C "${{ env.OUT_DIR }}" .
@@ -204,6 +232,7 @@ jobs:
             RUNTIME_ENV_FILE="/opt/payplanner/shared/payplanner.env"
             SYSTEMD_ENV_DROPIN="/etc/systemd/system/payplanner.service.d/20-payplanner-runtime-env.conf"
             PERSISTENT_FILE_ROOT="/opt/payplanner/shared/files"
+            DATA_PROTECTION_KEYS="/opt/payplanner/shared/data-protection-keys"
             LEGACY_STORAGE_MIGRATION_MARKER="$PERSISTENT_FILE_ROOT/.legacy-app-data-migrated-v1"
             MIN_FREE_KB=262144
             BACKUP_ROOT="/opt/payplanner/deploy-backups"
@@ -282,6 +311,8 @@ jobs:
                   -e '/^FileStorage__RootPath=/d' \
                   -e '/^ProfilePhotos__StorageRoot=/d' \
                   -e '/^ElectronicSignature__StorageRoot=/d' \
+                  -e '/^DataProtection__KeysPath=/d' \
+                  -e '/^DataProtection__KeysDirectory=/d' \
                   "$RUNTIME_ENV_FILE" > "$existing_env"
               fi
 
@@ -290,8 +321,9 @@ jobs:
                 printf 'FileStorage__RootPath=%s\n' "$PERSISTENT_FILE_ROOT"
                 printf 'ProfilePhotos__StorageRoot=%s\n' "$PERSISTENT_FILE_ROOT/user-photos"
                 printf 'ElectronicSignature__StorageRoot=%s\n' "$PERSISTENT_FILE_ROOT/electronic-signatures"
-                printf 'DataProtection__KeysPath=%s\n' "/opt/payplanner/shared/data-protection-keys"
-                printf 'DataProtection__ApplicationName=%s\n' "PayPlanner"
+                printf 'DataProtection__KeysPath=%s\n' "$DATA_PROTECTION_KEYS"
+                # Preserve the existing ApplicationName, including its absence.
+                # Changing it invalidates ciphertext even when every key is present.
                 printf 'WebPush__Enabled=%s\n' "$webpush_enabled"
                 if [ -n "$webpush_public_key" ]; then printf 'WebPush__PublicKey=%s\n' "$webpush_public_key"; fi
                 if [ -n "$webpush_private_key" ]; then printf 'WebPush__PrivateKey=%s\n' "$webpush_private_key"; fi
@@ -310,6 +342,30 @@ jobs:
               rm -f "$tmp_env" "$existing_env"
               sudo mkdir -p "$(dirname "$SYSTEMD_ENV_DROPIN")"
               printf '[Service]\nEnvironmentFile=-%s\n' "$RUNTIME_ENV_FILE" | sudo tee "$SYSTEMD_ENV_DROPIN" >/dev/null
+              set -x
+            }
+
+            preserve_data_protection_keys() {
+              set +x
+              local previous_keys_path="" previous_keys_directory="" service_home
+              sudo mkdir -p "$BACKUP_DIR"
+              sudo chmod 700 "$BACKUP_DIR"
+              if sudo test -f "$RUNTIME_ENV_FILE"; then
+                sudo cp -a "$RUNTIME_ENV_FILE" "$BACKUP_DIR/payplanner.env.previous"
+                previous_keys_path="$(sudo sed -n 's/^DataProtection__KeysPath=//p' "$RUNTIME_ENV_FILE" | tail -n 1)"
+                previous_keys_directory="$(sudo sed -n 's/^DataProtection__KeysDirectory=//p' "$RUNTIME_ENV_FILE" | tail -n 1)"
+                previous_keys_path="${previous_keys_path#\"}"; previous_keys_path="${previous_keys_path%\"}"
+                previous_keys_directory="${previous_keys_directory#\"}"; previous_keys_directory="${previous_keys_directory%\"}"
+              fi
+              service_home="$(getent passwd payplanner | cut -d: -f6)"
+              # Merge both configuration aliases before KeysPath takes precedence.
+              # Older versions also used the service account's default ASP.NET ring.
+              sudo bash "$STAGE/deploy/preserve-data-protection-keys.sh" \
+                "$DATA_PROTECTION_KEYS" "$BACKUP_DIR/data-protection-keys.previous" existing \
+                "$previous_keys_path" "$previous_keys_directory" \
+                "$service_home/.aspnet/DataProtection-Keys" \
+                "/opt/payplanner/shared/dataprotection" \
+                "$BE_DIR/.aspnet/DataProtection-Keys"
               set -x
             }
 
@@ -363,7 +419,8 @@ jobs:
             echo "[3/14] Ensure target dirs"
             sudo mkdir -p "$BE_DIR" "$FE_APP_DIR" "$FE_PUBLIC_DIR" "$BACKUP_ROOT" /opt/payplanner/shared/backups "$PERSISTENT_FILE_ROOT" /opt/payplanner/shared/data-protection-keys
 
-            echo "[4/14] Configure runtime environment"
+            echo "[4/14] Preserve Data Protection keys and configure runtime environment"
+            preserve_data_protection_keys
             configure_runtime_env
 
             echo "[5/14] Backup current release"

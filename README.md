@@ -93,10 +93,12 @@ npm run dev
 
 ### Backend
 
+Перед запуском выполните [подготовку локальной почты и копии БД](#локальная-почта-и-копия-бд). Для каждого локального запуска оба отключающих флага обязательны.
+
 ```bash
 cd /workspace/PayPlanner/backend
 dotnet restore PayPlanner.Api.sln
-dotnet run --project PayPlanner.Api.csproj
+BackgroundServices__Enabled=false Email__Enabled=false dotnet run --project PayPlanner.Api.csproj
 ```
 
 - API поднимается на `<http://localhost:5080>` (порт может отличаться согласно `launchSettings.json`).
@@ -123,7 +125,7 @@ dotnet user-secrets set "ConnectionStrings:Default" "Host=localhost;Port=5432;Da
 dotnet user-secrets set "Jwt:Secret" "<at-least-32-random-characters>"
 ```
 
-Эквивалентные переменные окружения:
+Пример серверных переменных окружения для production; отключающие флаги локальной разработки в этот пример не входят:
 
 ```bash
 ConnectionStrings__Default=Host=localhost;Port=5432;Database=payplanner;Username=postgres;Password=<password>
@@ -145,6 +147,17 @@ Cors__AllowedOrigins__0=https://crm.example.com
 Production TLS/HSTS закреплены в [deploy runbook](docs/deploy-runbook.md): публичный HTTPS, редирект HTTP->HTTPS и заголовок `Strict-Transport-Security` должны обеспечиваться nginx, а backend слушает внутренний HTTP endpoint `127.0.0.1:5080`.
 В production `FileStorage__RootPath` должен указывать на постоянный каталог вне директории текущего релиза. Стандартный deploy использует `/opt/payplanner/shared/files`, чтобы вложения задач и документы дел сохранялись между обновлениями приложения.
 
+### Локальная почта и копия БД
+
+Перед каждым локальным, тестовым или предварительным запуском проверьте фактические настройки SMTP из `appsettings`, переменных окружения, user-secrets и БД. Имя окружения `Development` и адреса получателей с доменом `.local` не запрещают отправку через рабочий SMTP. Всегда задавайте `BackgroundServices__Enabled=false` и `Email__Enabled=false`, как в командах запуска ниже и выше.
+
+После каждого импорта или обновления копии production-БД, **до запуска backend**:
+
+1. Подтвердите, что подключение указывает на отдельную локальную копию. Следующие изменения выполняются только в ней.
+2. Установите в `SystemSettings` значение `notifications.email.enabled=false`: сохранённая настройка БД имеет приоритет над `Email__Enabled`. Удалите или замените рабочие SMTP host, username, password и адрес отправителя в настройках БД, конфигурации, окружении и секретах.
+3. Отключите почтовых отправителей `NotificationSenders` и очистите их SMTP-конфигурацию. Уберите из повторной отправки локальные записи `NotificationDeliveries` канала `email` со статусами `pending`/`failed`; очистите или отключите другие очереди и фоновые задания, способные отправлять письма.
+4. Убедитесь, что исходящая почта отключена либо направлена в локальный почтовый перехватчик без внешней доставки. Пока изоляция не подтверждена, не запускайте backend и сценарии, создающие уведомления, напоминания, согласования или платежи.
+
 ## Current developer setup
 
 From the repository root:
@@ -152,6 +165,8 @@ From the repository root:
 ```powershell
 npm ci
 dotnet restore backend\PayPlanner.Api.sln
+$env:BackgroundServices__Enabled = "false"
+$env:Email__Enabled = "false"
 dotnet run --project backend\PayPlanner.Api.csproj
 ```
 
@@ -162,7 +177,7 @@ $env:VITE_API_URL = "http://localhost:5080/api"
 npm run dev
 ```
 
-For local PostgreSQL development, provide `ConnectionStrings__Default` and `Jwt__Secret` through environment variables, `dotnet user-secrets`, or another local secret store. `Jwt__Secret` must contain at least 32 characters. Startup applies migrations, seed data, release sync, and data maintenance steps automatically; do not commit real secrets to `appsettings*.json`.
+For local PostgreSQL development, provide `ConnectionStrings__Default` and `Jwt__Secret` through environment variables, `dotnet user-secrets`, or another local secret store. `Jwt__Secret` must contain at least 32 characters. Before launching, follow [local email and copied-database preparation](#локальная-почта-и-копия-бд); the two environment flags alone do not override email settings stored in a copied database. Startup applies migrations, seed data, release sync, and data maintenance steps automatically; do not commit real secrets to `appsettings*.json`.
 
 Before a PR or deploy, use [quality gates](docs/quality-gates.md). For user-visible changes, follow [release note policy](docs/release-note-policy.md). Production operations, secrets, CORS, TLS/HSTS, startup migrations, backup/rollback, and health checks are documented in [deploy runbook](docs/deploy-runbook.md).
 
@@ -196,7 +211,7 @@ dotnet ef migrations add Init
 
 ### Backend скрипты
 
-- `dotnet run` — старт API
+- `BackgroundServices__Enabled=false Email__Enabled=false dotnet run` — локальный старт API из каталога `backend` (Bash), после подготовки почты и копии БД
 - `dotnet build` — сборка
 - `dotnet test` — тесты (если настроены)
 - `dotnet ef ...` — миграции EF Core
@@ -248,61 +263,44 @@ dotnet ef migrations add Init
 
 ## Актуальное состояние аудита и quality gates
 
-### Что проверено
+Состав проверок описан в [quality gates](docs/quality-gates.md), а точные команды и порядок выпуска — в [deploy workflow](.github/workflows/deploy.yml). Фактические результаты текущей интеграции и открытые барьеры собраны в [предпубликационном отчёте](docs/integration-deployment-2026-10-07.md). Наличие проверок в CI или успешный адресный тест сами по себе не подтверждают готовность всего выпуска.
 
-- `npm run lint` — линтер проходит без ошибок.
-- `npx tsc --noEmit -p tsconfig.app.json` — ошибок типизации не обнаружено (после исправлений).
-- `npm run build` — production-сборка успешна, но есть предупреждение о большом чанке (`~1.2MB`).
-- `dotnet test backend\PayPlanner.Api.sln --no-restore -c Debug` — backend tests проходят; `dotnet format backend\PayPlanner.Api.sln --verify-no-changes --no-restore --verbosity minimal` закреплен как gate.
+### Уже действующие проверки
 
-### Критические проблемы
+- Backend: обязательный аудит всех проектов при `dotnet restore --force -p:PayPlannerReleaseAudit=true`, проверка `dotnet format --verify-no-changes` и полный тестовый проект в конфигурации **Release**. CI предоставляет отдельный PostgreSQL для интеграционных и миграционных проверок.
+- Frontend: ESLint, `tsc -p tsconfig.app.json --noEmit`, аудиты дат, кодировки и реестра экранов/API, `npm audit --audit-level=moderate`, guard/unit и integration tests, строгая проверка legal feature flags и production-сборка.
+- CI также проверяет сохранение ключей интеграций, очистку копий развёртывания, перенос прежних файлов и восстановленную CRM через HTTP и браузер. Для восстановленной CRM используется та же Release-сборка с `--no-build`; публикация backend также повторно использует проверенную сборку.
+- Все эти проверки предшествуют загрузке артефактов на VPS. После установки дополнительно проверяются ожидаемая ревизия, API, frontend и служба; итоговый статус фиксируется по результатам, а не по факту `git push`.
 
-1. **Часть критичных TypeScript-проблем устранена**.
-   - Исправлены типы переводов с параметрами, сигнатуры callback'ов платёжных модалок, конфликты типов ролей и строгие проверки nullable-полей.
-   - Текущее состояние: `tsc --noEmit` проходит успешно, но важно удерживать это как обязательный quality gate.
+### Что изменилось со времени прежнего аудита
 
-2. **Слабая “защита от регрессий”**.
-   - В репозитории есть backend tests, frontend guard/unit/integration tests и отдельные smoke/readiness scripts.
-   - Deploy workflow запускает backend format/package audit/tests, frontend lint/typecheck/audit/tests и legal feature flag gate до публикации артефактов.
+Ранее были исправлены типы переводов, callback-функций платёжных форм, ролей и nullable-полей. Типизация и тесты уже закреплены в CI; задача перед каждым выпуском — сохранить их успешное прохождение на итоговых исходниках.
 
-3. **Проблема производительности frontend bundle**.
-   - Vite предупреждает о крупном JS-чанке после минификации.
-   - Нужны code splitting/ленивая загрузка тяжёлых страниц и/или ручное chunking-правило.
+Разделение frontend-кода уже реализовано: `src/App.tsx` загружает календарь, клиентов, платежи, отчёты и другие крупные страницы через `lazy`/`Suspense`. В `vite.config.ts` настроен `manualChunks` для React, SignalR, графиков, анимации и иконок. Размеры файлов и предупреждения нужно оценивать по текущему `npm run build`; прежняя оценка единого большого чанка не является актуальным измерением. Дальнейшую оптимизацию следует выбирать по замерам загрузки конкретных страниц, запросов и передаваемых данных.
 
-### Что доработать в первую очередь
+### Локальные команды и ресурсы
 
-1. **Закрепить достигнутую стабильность типов (P0)**
-   - Зафиксировать в CI обязательный gate: `tsc --noEmit` + запрет merge при падении компиляции.
-   - Добавить регрессионные проверки для зон, где были исправления (платежные модалки, роли, локализация).
+Для обычной разработки используются команды из [быстрого старта](#быстрый-старт): `npm ci`, `npm run dev`, `dotnet restore` и запуск backend с явными `BackgroundServices__Enabled=false` и `Email__Enabled=false` после [изоляции локальной почты](#локальная-почта-и-копия-бд). Frontend собирается командой `npm run build`. Перед выпуском выполняется полный применимый набор проверок; текущая конфигурация backend в CI — `dotnet test backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-restore -c Release`.
 
-2. **Поддерживать CI и quality gates**
-   - Стандартный набор команд описан в [quality gates](docs/quality-gates.md).
-   - Не ослаблять deploy gate без явного решения и причины.
+Полный локальный выпускной backend-прогон требует отдельного синтетического PostgreSQL и `PAYPLANNER_TEST_POSTGRES`, `PAYPLANNER_TEST_PG_DUMP`, `PAYPLANNER_TEST_PSQL`, `CI=true`, установленных браузеров и пинованного Playwright CLI с `PAYPLANNER_TEST_PLAYWRIGHT_CLI`/`PAYPLANNER_TEST_BROWSER`. Для HTTP/browser-проверок восстановленной CRM также задаётся `PAYPLANNER_TEST_RESTORED_BROWSER=true`. Точные зависимости и настройка — в [deploy workflow](.github/workflows/deploy.yml). Простой `dotnet test` без этой среды не подтверждает PostgreSQL и браузерные проверки.
 
-3. **Ускорить загрузку фронтенда (P1)**
-   - Вынести крупные разделы (Календарь/Клиенты/Платежи/Отчёты) в `React.lazy`.
-   - Настроить `manualChunks` в `vite.config.ts` (vendor/UI/charts).
+Для тяжёлой backend-сборки на машине с ограниченной памятью, например 16 ГБ, можно дополнительно задать в текущем PowerShell-сеансе настройки, используемые в CI:
 
-4. **Усилить наблюдаемость и диагностику (P1)**
-   - Единый формат логирования на бэке (уровни, correlation id).
-   - Централизованная обработка ошибок на фронте с кодами/контекстом.
+```powershell
+$env:DOTNET_PROCESSOR_COUNT = "2"
+$env:DOTNET_gcServer = "0"
+$env:DOTNET_GCConserveMemory = "9"
+```
 
-### Что можно реализовать дальше
+Они ограничивают параллелизм и настраивают расход памяти GC; анализаторы и проверки остаются включёнными. Для сборки также нужно свободное место для временных файлов и файла подкачки. Эти настройки ресурсов необязательны для обычного запуска; обязательные флаги локальной почты и фоновых служб сохраняются.
 
-- **Функциональность продукта**:
-  - уведомления о дедлайнах оплат (email/Telegram/внутренний inbox),
-  - автоматические recurring-платежи и шаблоны договоров,
-  - дашборд DSO/просрочка/кассовый разрыв с прогнозом.
+### Дальнейшая работа
 
-- **Для команды**:
-  - Storybook для UI-компонентов и визуальной регрессии,
-  - интеграционные тесты API (контракты + happy-path + edge-cases),
-  - ADR-документы для ключевых архитектурных решений.
-
-- **Для эксплуатации**:
-  - healthchecks + readiness/liveness,
-  - резервное копирование БД по расписанию + проверка восстановления,
-  - окружения staging/prod с одинаковыми миграционными процедурами.
+- Сохранять обязательные CI-проверки и добавлять адресные регрессии при изменении финансовых правил, прав доступа, интеграций и конкурентных операций.
+- Проверять загрузку тяжёлых страниц и совместимость с поддерживаемыми браузерами по фактическим измерениям и пользовательским сценариям.
+- Улучшать корреляцию серверных логов и диагностику frontend-ошибок по подтверждённым пробелам. Storybook, новые ADR и развитие staging остаются направлениями для отдельного согласования.
+- Регулярные платежи, развитие шаблонов договоров и прогнозы DSO/кассового разрыва сохранены как предложения прежнего аудита для отдельной оценки с учётом уже имеющихся возможностей; это не перечень отсутствующих функций.
+- Health-проверки, резервирование по расписанию и пробное восстановление уже существуют; их фактическую работу, сохранность файлов и ключей необходимо подтверждать при выпуске. Продуктовые идеи и ручная приёмка ведутся в [активном плане развития](docs/development-full-roadmap-2026-10-07.md), без автоматического закрытия по одному успешному тесту.
 
 ## Частые проблемы
 

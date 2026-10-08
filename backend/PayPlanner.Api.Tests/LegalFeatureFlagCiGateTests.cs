@@ -148,6 +148,28 @@ public sealed class LegalFeatureFlagCiGateTests
     }
 
     [Fact]
+    public void DeployWorkflow_PreservesHistoricalDataProtectionKeysBeforeChangingRuntimeOrRelease()
+    {
+        var root = FindRepositoryRoot();
+        var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "deploy.yml"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+
+        Assert.Contains("bash scripts/preserve-data-protection-keys.test.sh", workflow, StringComparison.Ordinal);
+        Assert.Contains("cp scripts/preserve-data-protection-keys.sh", workflow, StringComparison.Ordinal);
+        Assert.Contains("\"$previous_keys_path\" \"$previous_keys_directory\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("\"$service_home/.aspnet/DataProtection-Keys\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("\"$BACKUP_DIR/data-protection-keys.previous\" existing", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("printf 'DataProtection__ApplicationName=", workflow, StringComparison.Ordinal);
+        AssertInOrder(workflow,
+        [
+            "            preserve_data_protection_keys\n",
+            "            configure_runtime_env\n",
+            "sudo rsync -a --delete \"$STAGE/be/\"",
+            "sudo systemctl restart payplanner.service",
+        ]);
+    }
+
+    [Fact]
     public void DeployWorkflow_RestartsBackendOnlyOnceAfterFilesAreSynced()
     {
         var root = FindRepositoryRoot();
