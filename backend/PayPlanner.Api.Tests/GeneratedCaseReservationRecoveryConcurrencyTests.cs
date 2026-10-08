@@ -142,28 +142,66 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
     {
         await using var f = await Fixture.CreateAsync(postgres, 1, true);
         await PrepareReservationAsync(f); f.FinancialStorageOptions.WorkerLeaseSeconds = 15; f.PrepareIdentityObservers();
+        var firstClock = new FixedReservationRecoveryClock(DateTimeOffset.UtcNow);
+        var winnerClock = new FixedReservationRecoveryClock(firstClock.GetUtcNow().AddMinutes(5));
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var reads = 0;
         f.Local.BeforeReadAsync = async ct => { if (Interlocked.Increment(ref reads) == 1) { entered.TrySetResult(); await release.Task.WaitAsync(ct); } };
         await using var first = f.IdentityObserver(); await using var second = f.IdentityObserver();
-        var run = f.ReservationRecovery(first).ProcessBatchAsync(default);
-        var clock = new AdvancingClock(); clock.Advance(TimeSpan.FromMinutes(5));
+        var run = f.ReservationRecovery(first, firstClock).ProcessBatchAsync(default);
+        StorageCapacityReservation? original = null, winner = null;
+        Exception? primaryFailure = null;
+        var firstClaimed = 0;
+        var secondClaimed = 0;
         try
         {
             await entered.Task.WaitAsync(TimeSpan.FromSeconds(45));
-            Assert.Equal(1, await f.ReservationRecovery(second, clock).ProcessBatchAsync(default));
+            await using var observation = f.IdentityObserver();
+            original = await observation.StorageCapacityReservations.AsNoTracking().SingleAsync(r => r.ProductContextJson != null);
+            secondClaimed = await f.ReservationRecovery(second, winnerClock).ProcessBatchAsync(default);
+            winner = await observation.StorageCapacityReservations.AsNoTracking().SingleAsync(r =>
+                r.IdempotencyKey == original.IdempotencyKey && r.ResourceKey == original.ResourceKey);
         }
-        finally { release.TrySetResult(); }
-        Assert.Equal(1, await run); f.Local.BeforeReadAsync = null;
+        catch (Exception error) { primaryFailure = error; }
+        finally
+        {
+            release.TrySetResult();
+            try { firstClaimed = await run; }
+            catch (Exception) when (primaryFailure is not null) { /* Preserve the earlier failure after joining the old execution. */ }
+            finally { f.Local.BeforeReadAsync = null; }
+        }
+        if (primaryFailure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(primaryFailure).Throw();
+        Assert.Equal(1, secondClaimed); Assert.Equal(1, firstClaimed);
+        Assert.NotNull(original); Assert.NotNull(winner);
+        Assert.Equal(1, original.GeneratedRecoveryAttemptCount); Assert.NotNull(original.GeneratedRecoveryLeaseToken);
+        Assert.NotNull(original.GeneratedRecoveryLeaseExpiresAt);
+        // The old execution still considers its original lease valid; only the later execution may reclaim it.
+        Assert.True(original.GeneratedRecoveryLeaseExpiresAt > firstClock.GetUtcNow().UtcDateTime);
+        Assert.True(original.GeneratedRecoveryLeaseExpiresAt <= winnerClock.GetUtcNow().UtcDateTime);
+        // These values were captured before releasing the old execution.
+        Assert.Equal(2, winner.GeneratedRecoveryAttemptCount); Assert.Null(winner.GeneratedRecoveryLeaseToken);
+        Assert.Null(winner.GeneratedRecoveryLeaseExpiresAt); Assert.Equal("uploaded", winner.GeneratedRecoveryLastStatus);
+        Assert.Equal(original.ObjectId, winner.ObjectId);
         await using var proof = f.IdentityObserver();
         var reservation = await proof.StorageCapacityReservations.SingleAsync(r => r.ProductContextJson != null);
+        Assert.Equal(winner.ObjectId, reservation.ObjectId);
+        Assert.Equal(winner.GeneratedRecoveryNextAttemptAt, reservation.GeneratedRecoveryNextAttemptAt);
+        Assert.Equal(winner.GeneratedRecoveryLastStatus, reservation.GeneratedRecoveryLastStatus);
+        Assert.Equal(winner.GeneratedRecoveryAttemptCount, reservation.GeneratedRecoveryAttemptCount);
+        Assert.Equal(winner.GeneratedRecoveryLeaseToken, reservation.GeneratedRecoveryLeaseToken);
+        Assert.Equal(winner.GeneratedRecoveryLeaseExpiresAt, reservation.GeneratedRecoveryLeaseExpiresAt);
         Assert.Equal(2, reservation.GeneratedRecoveryAttemptCount); Assert.Null(reservation.GeneratedRecoveryLeaseToken);
         Assert.Equal("uploaded", reservation.GeneratedRecoveryLastStatus);
         Assert.Single(await proof.ClientCaseDocuments.ToArrayAsync()); Assert.Single(await proof.StorageObjects.ToArrayAsync());
         Assert.Single(await proof.StorageProductBindings.ToArrayAsync());
         Assert.Single(await proof.ObjectAuditEvents.Where(a => a.ObjectType == "client-case-document").ToArrayAsync());
         Assert.Equal(0, await FinancialRowsAsync(proof)); Assert.Equal(1, f.Local.PutCount);
+    }
+
+    private sealed class FixedReservationRecoveryClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 
     [Theory]
