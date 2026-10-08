@@ -7680,7 +7680,7 @@ function TaskAutomationPanel({
             className={`min-w-0 rounded-2xl border p-3 shadow-sm transition-shadow hover:shadow-md ${presentation.card}`}
           >
             <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
-              <div className="flex min-w-0 items-start gap-3">
+              <div className="flex min-w-0 max-w-full items-start gap-3">
                 <span className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full ring-1 ${avatarTone}`}>
                   <UsersRound className="h-5 w-5" />
                 </span>
