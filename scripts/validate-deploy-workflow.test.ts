@@ -18,7 +18,7 @@ describe('parallel deploy workflow release contract', () => {
       valid: true,
       gates: ['frontend', 'backend-format', 'backend'],
       deployNeeds: ['frontend', 'backend-format', 'backend'],
-      artifacts: ['backend-${{ github.sha }}', 'frontend-${{ github.sha }}'],
+      artifacts: ['${{ needs.backend.outputs.backend-artifact-id }}', '${{ needs.frontend.outputs.frontend-artifact-id }}'],
     });
   });
 
@@ -52,7 +52,7 @@ describe('parallel deploy workflow release contract', () => {
     ['analyzers disabled', 'run: dotnet build backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-restore -c Release', 'run: dotnet build backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-restore -c Release -p:RunAnalyzers=false'],
     ['wrong artifact revision', 'name: frontend-${{ github.sha }}', 'name: frontend-main'],
     ['missing artifact tolerated', 'if-no-files-found: error', 'if-no-files-found: warn'],
-    ['cross-run download', '          name: backend-${{ github.sha }}\n          path: deploy-artifacts', '          name: backend-${{ github.sha }}\n          run-id: 123\n          path: deploy-artifacts'],
+    ['cross-run download', '          artifact-ids: ${{ needs.backend.outputs.backend-artifact-id }}\n          path: deploy-artifacts', '          artifact-ids: ${{ needs.backend.outputs.backend-artifact-id }}\n          run-id: 123\n          path: deploy-artifacts'],
     ['conditional artifact upload', '      - name: Upload frontend build artifact\n', '      - name: Upload frontend build artifact\n        if: always()\n'],
     ['conditional readiness', '      - name: Check production deploy readiness\n', '      - name: Check production deploy readiness\n        if: false\n'],
     ['custom shell', '        run: npm run lint', '        shell: bash {0}\n        run: npm run lint'],
@@ -97,8 +97,8 @@ describe('parallel deploy workflow release contract', () => {
     ['runtime missing probe dependencies', ' backend/PayPlanner.Api.Tests/bin/Release/net9.0 tools/', ' backend/PayPlanner.Api.Tests/bin/Release/net9.0/PayPlanner.Api.Tests.dll tools/'],
     ['wrong shard result directory', 'path: test-results\n', 'path: test-results/shard-0\n'],
     ['precreated shard directory', 'mkdir -p test-results\n', 'mkdir -p test-results/shard-${{ matrix.shard }}\n'],
-    ['wrong shard artifact', 'name: backend-shard-3-${{ github.sha }}', 'name: backend-shard-2-${{ github.sha }}'],
-    ['wrong attempt results', 'name: backend-shard-0-${{ github.sha }}-${{ github.run_attempt }}', 'name: backend-shard-0-${{ github.sha }}-1'],
+    ['wrong shard artifact', 'name: qualified-backend-shard-3-${{ github.sha }}', 'name: qualified-backend-shard-2-${{ github.sha }}'],
+    ['wrong attempt diagnostics', 'name: backend-shard-${{ matrix.shard }}-${{ github.sha }}-${{ github.run_attempt }}', 'name: backend-shard-${{ matrix.shard }}-${{ github.sha }}-1'],
     ['results only on success', '        if: always()\n        uses: actions/upload-artifact@v6', '        uses: actions/upload-artifact@v6'],
     ['test SDK drift', 'dotnet-version: ${{ needs.backend-build.outputs.sdk-version }}', 'dotnet-version: "8.0.x"'],
     ['restored native exit replaced', '--exit-code "$native_exit"', '--exit-code 0'],
@@ -117,6 +117,88 @@ describe('parallel deploy workflow release contract', () => {
     const begin = workflow.indexOf('  backend-test:\n');
     const changed = workflow.slice(0, begin) + workflow.slice(begin).replace('    steps:\n', '    steps:\n      - name: Rebuild\n        run: dotnet build backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj\n');
     expect(() => validateDeployWorkflow(changed)).toThrow(/rebuilt/);
+  });
+
+  it.each([
+    ['alias on failure', '        if: success()\n', '        if: always()\n'],
+    ['alias without explicit success guard', '        if: success()\n', ''],
+    ['alias cannot replace prior success', '          overwrite: true\n', '          overwrite: false\n'],
+    ['alias missing manifest binding', '-${{ needs.backend-build.outputs.manifest-sha }}-${{ needs.backend-build.outputs.sdk-version }}', '-${{ needs.backend-build.outputs.sdk-version }}'],
+    ['alias missing SDK binding', '-${{ needs.backend-build.outputs.manifest-sha }}-${{ needs.backend-build.outputs.sdk-version }}', '-${{ needs.backend-build.outputs.manifest-sha }}'],
+    ['alias tied to current attempt', 'name: qualified-backend-shard-0-${{ github.sha }}', 'name: qualified-backend-shard-0-${{ github.sha }}-${{ github.run_attempt }}'],
+    ['diagnostics overwritten', '          name: backend-shard-${{ matrix.shard }}-${{ github.sha }}-${{ github.run_attempt }}\n', '          name: backend-shard-${{ matrix.shard }}-${{ github.sha }}-${{ github.run_attempt }}\n          overwrite: true\n'],
+    ['diagnostics history shortened', '          retention-days: 14\n', '          retention-days: 1\n'],
+    ['archive attempt omitted', 'name: test-runtime-${{ github.sha }}-${{ github.run_attempt }}', 'name: test-runtime-${{ github.sha }}'],
+    ['archive overwritten', '          name: frontend-${{ github.sha }}-${{ github.run_attempt }}\n', '          name: frontend-${{ github.sha }}-${{ github.run_attempt }}\n          overwrite: true\n'],
+    ['runtime ID not uploader output', 'runtime-artifact-id: ${{ steps.runtime-upload.outputs.artifact-id }}', 'runtime-artifact-id: ${{ github.run_id }}'],
+    ['frontend ID not uploader output', 'frontend-artifact-id: ${{ steps.frontend-upload.outputs.artifact-id }}', 'frontend-artifact-id: 123'],
+    ['backend ID not uploader output', 'backend-artifact-id: ${{ steps.backend-upload.outputs.artifact-id }}', 'backend-artifact-id: 123'],
+    ['aggregate substitutes backend ID', 'backend-artifact-id: ${{ needs.backend-build.outputs.backend-artifact-id }}', 'backend-artifact-id: 123'],
+    ['runtime falls back to name', 'artifact-ids: ${{ needs.backend-build.outputs.runtime-artifact-id }}', 'name: test-runtime-${{ github.sha }}'],
+    ['runtime allows multiple IDs', 'artifact-ids: ${{ needs.backend-build.outputs.runtime-artifact-id }}', 'artifact-ids: ${{ needs.backend-build.outputs.runtime-artifact-id }},123'],
+    ['runtime allows empty ID', '[[ "$RUNTIME_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]', 'true'],
+    ['runtime compares wrong SDK', 'test "$actual_sdk" = "$EXPECTED_SDK_VERSION"', 'test "$actual_sdk" = "9.0.100"'],
+    ['SDK check only echoes expected label', 'actual_sdk="$(dotnet --version)"', 'actual_sdk="$EXPECTED_SDK_VERSION"'],
+    ['SDK check hides command failure', 'actual_sdk="$(dotnet --version)"', 'actual_sdk="$(dotnet --version || true)"'],
+    ['deploy allows empty backend ID', '[[ "$BACKEND_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]', 'true'],
+    ['deploy allows empty frontend ID', '[[ "$FRONTEND_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]', 'true'],
+    ['deploy accepts same archive twice', '[[ "$BACKEND_ARTIFACT_ID" != "$FRONTEND_ARTIFACT_ID" ]]', 'true'],
+    ['deploy ID bypasses backend qualification', 'artifact-ids: ${{ needs.backend.outputs.backend-artifact-id }}', 'artifact-ids: ${{ needs.backend-build.outputs.backend-artifact-id }}'],
+    ['download arbitrary cross-run ID', '          artifact-ids: ${{ needs.backend-build.outputs.runtime-artifact-id }}\n', '          artifact-ids: ${{ needs.backend-build.outputs.runtime-artifact-id }}\n          github-token: ${{ github.token }}\n'],
+  ])('rejects unsafe rerun binding: %s', (_name, before, after) => {
+    expect(() => validateDeployWorkflow(replaceOnce(before, after))).toThrow();
+  });
+
+  it('requires completed shard diagnostics before publishing a qualified alias', () => {
+    const begin = workflow.indexOf('      - name: Publish qualified shard alias\n');
+    const end = workflow.indexOf('  backend-browser:\n', begin);
+    const alias = workflow.slice(begin, end);
+    const moved = (workflow.slice(0, begin) + workflow.slice(end)).replace('      - name: Preserve exact shard results\n', alias + '      - name: Preserve exact shard results\n');
+    expect(() => validateDeployWorkflow(moved)).toThrow(/evidence|alias/);
+  });
+
+  it('rejects an extra fallback download even when all exact aliases remain', () => {
+    const changed = workflow.replace('      - name: Verify complete backend case union\n', '      - name: Fallback\n        uses: actions/download-artifact@v7\n        with:\n          pattern: backend-shard-*\n          path: test-results\n\n      - name: Verify complete backend case union\n');
+    expect(() => validateDeployWorkflow(changed)).toThrow(/fallback/);
+  });
+
+  it.each(['backend-test', 'backend-browser'])('rejects a runtime fallback in %s', id => {
+    const begin = workflow.indexOf(`  ${id}:\n`);
+    const changed = workflow.slice(0, begin) + workflow.slice(begin).replace('    steps:\n', '    steps:\n      - name: Fallback runtime\n        uses: actions/download-artifact@v4\n        with:\n          pattern: test-runtime-*\n          path: test-artifacts\n');
+    expect(() => validateDeployWorkflow(changed)).toThrow(/fallback/);
+  });
+
+  it('keeps qualified shard keys stable for shard-only, browser-only and aggregate-only retries', () => {
+    const jobs = parseWorkflow(workflow).jobs;
+    const upload = jobs['backend-test'].steps.find(step => step.name === 'Publish qualified shard alias').with.name;
+    const downloads = jobs.backend.steps.filter(step => step.with?.name?.startsWith('qualified-backend-shard-'));
+    const context = { 'github.sha': 'a'.repeat(40), 'needs.backend-build.outputs.manifest-sha': 'b'.repeat(64), 'needs.backend-build.outputs.sdk-version': '9.0.318' };
+    function evaluate(template: string, attempt: number, shard: number, changes: Record<string, string> = {}) {
+      const values: Record<string, string> = { ...context, ...changes, 'github.run_attempt': String(attempt), 'matrix.shard': String(shard) };
+      return template.replace(/\$\{\{ (.*?) \}\}/g, (_match, key) => values[key]);
+    }
+    expect(downloads.length).toBe(4);
+    for (let index = 0; index < 4; index += 1) {
+      expect(evaluate(downloads[index].with.name, 2, index)).toBe(evaluate(upload, index === 1 ? 2 : 1, index));
+      expect(evaluate(downloads[index].with.name, 3, index)).toBe(evaluate(upload, 1, index));
+    }
+    expect(evaluate(upload, 1, 0) === evaluate(upload, 2, 0, { 'needs.backend-build.outputs.manifest-sha': 'c'.repeat(64) })).toBe(false);
+    expect(evaluate(upload, 1, 0) === evaluate(upload, 2, 0, { 'needs.backend-build.outputs.sdk-version': '9.0.319' })).toBe(false);
+    expect(evaluate(upload, 1, 0) === evaluate(upload, 2, 0, { 'github.sha': 'd'.repeat(40) })).toBe(false);
+  });
+
+  it('uses distinct immutable archive attempt names and exact producer IDs for rerun consumers', () => {
+    const jobs = parseWorkflow(workflow).jobs;
+    for (const [job, id] of [['frontend', 'frontend-upload'], ['backend-build', 'runtime-upload'], ['backend-build', 'backend-upload']]) {
+      const upload = jobs[job].steps.find(step => step.id === id);
+      expect(upload.with.name.includes('${{ github.sha }}-${{ github.run_attempt }}')).toBe(true);
+      expect(upload.with.name.replace('${{ github.run_attempt }}', '1') === upload.with.name.replace('${{ github.run_attempt }}', '2')).toBe(false);
+      expect(upload.with.overwrite).toBe(undefined);
+    }
+    for (const id of ['backend-test', 'backend-browser', 'backend']) {
+      const download = jobs[id].steps.find(step => step.name === 'Download compiled test runtime');
+      expect(download.with).toEqual({ 'artifact-ids': '${{ needs.backend-build.outputs.runtime-artifact-id }}', path: 'test-artifacts' });
+    }
   });
 
 });

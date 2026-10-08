@@ -26,15 +26,24 @@ public sealed partial class StorageStageCapacityServiceTests
     public async Task CheckpointCopyBudgetChargesOnlyUnsettledRepairOperations(bool postgres, string status)
     {
         await using var f = await CreateWriterFixtureAsync(postgres);
-        var (stages, policy, root) = CreateCopyBudgetServices(f);
+        const long availableBound = 64L * 1024 * 1024;
+        var (stages, policy, root) = CreateCopyBudgetServices(f,
+            local => new OriginalCopyBudgetNativeProvider(local, availableBound));
         const long copyBytes = 8L * 1024 * 1024;
         var operation = await AddOwnedCopyBudgetOperationAsync(f, copyBytes, status, "local");
         var ticket = Assert.IsType<StorageStageCapacityTicket>((await stages.ReserveAsync(
             "copy-state:" + Guid.NewGuid().ToString("N"), Path.Combine(root, "state.tmp"), 4, default)).Ticket);
         try
         {
-            var free = Assert.IsType<long>(LocalStorageCapacityProbe.Observe(root, "owned", 0).AvailableBytes);
-            policy.UploadMinimumFreeBytes = free - (4 + copyBytes / 2);
+            var native = LocalStorageCapacityProbe.Observe(root, "owned-native", 0);
+            var spool = LocalStorageCapacityProbe.Observe(Path.GetTempPath(), "owned-spool", 0);
+            Assert.False(string.IsNullOrWhiteSpace(native.GroupId));
+            Assert.Equal(native.GroupId, spool.GroupId);
+            Assert.True(native.AvailableBytes >= availableBound && spool.AvailableBytes >= availableBound,
+                $"Copy-state fixture requires at least {availableBound} native bytes; root={native.AvailableBytes}, spool={spool.AvailableBytes}.");
+            // Keep the copy-debt boundary fixed while native root/spool probes stay real.
+            // Incorrectly including a settled copy still activates the capped provider.
+            policy.UploadMinimumFreeBytes = availableBound - (4 + copyBytes / 2);
             var settled = status is StorageOperationStatuses.Succeeded or StorageOperationStatuses.DeadLetter;
             if (settled)
             {
@@ -49,7 +58,8 @@ public sealed partial class StorageStageCapacityServiceTests
             else
             {
                 async Task Open() { await using var writer = await stages.OpenCheckpointWriterAsync(ticket, default); }
-                await Assert.ThrowsAsync<InvalidOperationException>(Open);
+                var error = await Assert.ThrowsAsync<InvalidOperationException>(Open);
+                Assert.Equal("Stage pending copy, spool and reservation debt exceeds fresh physical headroom.", error.Message);
                 Assert.False(File.Exists(ticket.AbsolutePath));
                 Assert.Equal(StorageCapacityReservationStatuses.Pending, await f.StatusAsync(ticket.Key));
             }
@@ -198,6 +208,11 @@ public sealed partial class StorageStageCapacityServiceTests
 
     private static (StorageStageCapacityService Stages, StorageOrchestrationOptions Policy, string Root)
         CreateCopyBudgetServices(WriterProcessFixture f, params IStorageProvider[] additional)
+        => CreateCopyBudgetServices(f, local => local, additional);
+
+    private static (StorageStageCapacityService Stages, StorageOrchestrationOptions Policy, string Root)
+        CreateCopyBudgetServices(WriterProcessFixture f, Func<LocalStorageProvider, IStorageProvider> createLocal,
+            params IStorageProvider[] additional)
     {
         var root = Path.Combine(f.Root, "objects");
         Directory.CreateDirectory(root);
@@ -209,7 +224,7 @@ public sealed partial class StorageStageCapacityServiceTests
         }).Build();
         var environment = new TestEnvironment(f.Root);
         var policy = new StorageOrchestrationOptions { Enabled = true, UploadCapacityChecksEnabled = true, UploadMinimumFreeBytes = 0 };
-        return (new(f.Db, new StorageProviderRegistry(new IStorageProvider[] { new LocalStorageProvider(environment, configuration) }.Concat(additional)),
+        return (new(f.Db, new StorageProviderRegistry(new IStorageProvider[] { createLocal(new LocalStorageProvider(environment, configuration)) }.Concat(additional)),
             new StaticOptions(policy), environment, configuration), policy, root);
     }
 

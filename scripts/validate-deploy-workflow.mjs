@@ -101,6 +101,12 @@ const toolProject = 'tools/PayPlanner.TestShards/PayPlanner.TestShards.csproj';
 const tool = 'dotnet tools/PayPlanner.TestShards/bin/Release/net9.0/PayPlanner.TestShards.dll';
 const matrixShard = '${{ matrix.shard }}';
 const attempt = '${{ github.run_attempt }}';
+const producerManifest = '${{ needs.backend-build.outputs.manifest-sha }}';
+const producerSdk = '${{ needs.backend-build.outputs.sdk-version }}';
+const runtimeArtifactId = '${{ needs.backend-build.outputs.runtime-artifact-id }}';
+const frontendArtifactId = '${{ needs.frontend.outputs.frontend-artifact-id }}';
+const backendArtifactId = '${{ needs.backend.outputs.backend-artifact-id }}';
+const qualifiedShardName = shard => `qualified-backend-shard-${shard}-${sha}-${producerManifest}-${producerSdk}`;
 const restoredFilter = 'FullyQualifiedName~RestoredFullModelQualifiesProtectedSettingsWithCopiedKeysWithoutSourceRing|FullyQualifiedName~FullModelBackupRestoresReadableManagedGenerationsWithoutSource';
 const restore = 'dotnet restore "${{ env.BE_SLN }}" --force -p:PayPlannerReleaseAudit=true';
 const format = 'dotnet format "${{ env.BE_SLN }}" --verify-no-changes --no-restore --verbosity minimal';
@@ -122,6 +128,8 @@ export function validateDeployWorkflow(source) {
     requireValue(job.defaults === undefined, `${id}: custom job shell/defaults require explicit gate review`);
     requireValue(job['continue-on-error'] === undefined || job['continue-on-error'] === false, `${id}: continue-on-error bypass`);
     requireValue(Array.isArray(job.steps) && job.steps.length > 0, `${id}: missing steps`);
+    const stepIds = job.steps.filter(step => step.id !== undefined).map(step => step.id);
+    requireValue(new Set(stepIds).size === stepIds.length, `${id}: duplicate step output identity`);
     const needs = job.needs ?? [];
     requireValue(Array.isArray(needs) && [...needs].sort().join(',') === dependencies[id].join(','), `${id}: exact successful dependencies required`);
     if (id === 'backend-test') {
@@ -135,8 +143,11 @@ export function validateDeployWorkflow(source) {
       const diagnostic = step.uses === 'actions/upload-artifact@v6' && step.run === undefined && (
         (id === 'backend-test' && step.with?.name === `backend-shard-${matrixShard}-${sha}-${attempt}` && step.with?.path === 'test-results/')
         || (id === 'backend-browser' && step.with?.name === `restored-browser-${sha}-${attempt}` && step.with?.path === 'test-results/restored-browser/'));
-      requireValue(step.if === undefined || (diagnostic && step.if === 'always()'), `${id}: conditional step can skip a release gate`);
-      if (diagnostic) requireValue(step.if === 'always()', `${id}: preserve failure evidence unconditionally`);
+      const qualifiedAlias = id === 'backend-test' && step.uses === 'actions/upload-artifact@v6' && step.run === undefined
+        && step.with?.name === qualifiedShardName(matrixShard) && step.with?.path === 'test-results/';
+      requireValue(step.if === undefined || (diagnostic && step.if === 'always()') || (qualifiedAlias && step.if === 'success()'), `${id}: conditional step can skip a release gate`);
+      if (diagnostic) requireValue(step.if === 'always()' && step.with?.overwrite === undefined, `${id}: preserve immutable attempt evidence unconditionally`);
+      if (qualifiedAlias) requireValue(step.if === 'success()' && step.with?.overwrite === true, `${id}: only a successful qualified alias may be replaced`);
     }
   }
 
@@ -162,7 +173,21 @@ export function validateDeployWorkflow(source) {
     else requireValue(Object.keys(result.step.with).every(key => ['name', 'path'].includes(key)), `${job}: download must belong to this workflow run`);
     return result;
   }
-  const feUpload = artifact('frontend', 'upload', `frontend-${sha}`, 'frontend.tar.gz');
+  function archiveUpload(job, name, path, id, output) {
+    const uploaded = artifact(job, 'upload', name, path);
+    requireValue(uploaded.step.id === id && uploaded.step.if === undefined
+      && jobs[job].outputs?.[output] === `\${{ steps.${id}.outputs.artifact-id }}`
+      && Object.keys(uploaded.step.with).sort().join(',') === 'compression-level,if-no-files-found,name,path,retention-days'
+      && uploaded.step.with['retention-days'] === '3' && uploaded.step.with['compression-level'] === '0', `${job}: immutable archive attempt and exact uploader output required`);
+    return uploaded;
+  }
+  function downloadById(job, id, path) {
+    const found = jobs[job].steps.map((step, index) => ({ step, index })).filter(({ step }) => step.uses === 'actions/download-artifact@v7' && step.with?.['artifact-ids'] === id);
+    requireValue(found.length === 1 && found[0].step.with.path === path
+      && Object.keys(found[0].step.with).sort().join(',') === 'artifact-ids,path', `${job}: download one trusted same-run artifact ID without fallback`);
+    return found[0];
+  }
+  const feUpload = archiveUpload('frontend', `frontend-${sha}-${attempt}`, 'frontend.tar.gz', 'frontend-upload', 'frontend-artifact-id');
   const frontendCommands = [
     'npm ci', 'node scripts/validate-deploy-workflow.mjs',
     'bash scripts/prune-deploy-backups.test.sh', 'bash scripts/preserve-data-protection-keys.test.sh',
@@ -192,10 +217,10 @@ export function validateDeployWorkflow(source) {
   requireValue(discover.lines.includes(`printf 'manifest-sha=%s\\n' "$(jq -er '.ManifestSha256' test-plan.summary.json)" >> "$GITHUB_OUTPUT"`)
     && discover.lines.includes(`printf 'sdk-version=%s\\n' "$(dotnet --version)" >> "$GITHUB_OUTPUT"`), 'Discovery outputs must come from the producer summary and SDK');
   const runtimePack = command('backend-build', `tar -czf test-runtime.tar.gz test-plan.json test-plan.summary.json backend/PayPlanner.Api.Tests/bin/Release/net9.0 tools/PayPlanner.TestShards/bin/Release/net9.0`);
-  const runtimeUpload = artifact('backend-build', 'upload', `test-runtime-${sha}`, 'test-runtime.tar.gz');
+  const runtimeUpload = archiveUpload('backend-build', `test-runtime-${sha}-${attempt}`, 'test-runtime.tar.gz', 'runtime-upload', 'runtime-artifact-id');
   const publish = command('backend-build', 'dotnet publish "${{ env.BE_CSPROJ }}" -c Release --no-build --no-restore -o "${{ env.OUT_DIR }}/be"');
   const bePack = command('backend-build', 'tar -czf backend.tar.gz -C "${{ env.OUT_DIR }}" be');
-  const beUpload = artifact('backend-build', 'upload', `backend-${sha}`, 'backend.tar.gz');
+  const beUpload = archiveUpload('backend-build', `backend-${sha}-${attempt}`, 'backend.tar.gz', 'backend-upload', 'backend-artifact-id');
   const beOrder = [beRestore, build, toolBuild, discover, runtimePack, runtimeUpload, publish, bePack, beUpload].map(item => item.index);
   requireValue(beOrder.every((value, index) => index === 0 || value > beOrder[index - 1]), 'Backend strict restore/build/discover/artifact order');
   const shard = command('backend-test', `${tool} run --manifest test-plan.json --manifest-sha "$EXPECTED_MANIFEST_SHA" --shard ${matrixShard} --results test-results/shard-${matrixShard} 2>&1 | tee test-results/shard-${matrixShard}.log`);
@@ -215,10 +240,17 @@ export function validateDeployWorkflow(source) {
     requireValue(gate.lines[0] === 'set -euo pipefail', `${id}: preserve failure exit status`);
     const sdk = jobs[id].steps.filter(step => step.uses === 'actions/setup-dotnet@v5');
     requireValue(sdk.length === 1 && sdk[0].with?.['dotnet-version'] === '${{ needs.backend-build.outputs.sdk-version }}', `${id}: use producer SDK version`);
-    const downloaded = artifact(id, 'download', `test-runtime-${sha}`, 'test-artifacts');
+    const actualSdk = command(id, 'test "$actual_sdk" = "$EXPECTED_SDK_VERSION"');
+    requireValue(actualSdk.step.env?.EXPECTED_SDK_VERSION === producerSdk
+      && actualSdk.step.env?.RUNTIME_ARTIFACT_ID === runtimeArtifactId
+      && actualSdk.lines.join('\n') === 'set -euo pipefail\nactual_sdk="$(dotnet --version)"\ntest "$actual_sdk" = "$EXPECTED_SDK_VERSION"\n[[ "$RUNTIME_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]', `${id}: verify actual SDK and one nonempty producer runtime ID`);
+    const downloaded = downloadById(id, runtimeArtifactId, 'test-artifacts');
     const unpack = command(id, 'tar -xzf test-artifacts/test-runtime.tar.gz');
-    requireValue(downloaded.index < unpack.index && unpack.index < gate.index, `${id}: runtime must be downloaded/unpacked before execution`);
+    requireValue(jobs[id].steps.indexOf(sdk[0]) < actualSdk.index && actualSdk.index < downloaded.index
+      && downloaded.index < unpack.index && unpack.index < gate.index, `${id}: SDK check and downloaded runtime must precede execution`);
     requireValue(!jobs[id].steps.some(step => /dotnet (?:build|publish|restore)|\bMSBuild\b/.test(step.run ?? '')), `${id}: test runtime must not be rebuilt`);
+    if (id !== 'backend') requireValue(jobs[id].steps.filter(step => step.uses?.startsWith('actions/download-artifact@')).length === 1,
+      `${id}: download only the exact producer runtime; no fallback artifacts`);
   }
   for (const [id, gate] of [['backend-test', shard], ['backend-browser', restored]]) {
     requireValue(String(gate.step.env?.BackgroundServices__Enabled) === 'false' && String(gate.step.env?.Email__Enabled) === 'false', `${id}: test mail/background isolation missing`);
@@ -231,22 +263,35 @@ export function validateDeployWorkflow(source) {
       requireValue(command(id, prereq).index < gate.index, `${id}: complete prerequisites must precede tests`);
     }
   }
-  artifact('backend-test', 'upload', `backend-shard-${matrixShard}-${sha}-${attempt}`, 'test-results/');
-  artifact('backend-browser', 'upload', `restored-browser-${sha}-${attempt}`, 'test-results/restored-browser/');
+  const shardDiagnostic = artifact('backend-test', 'upload', `backend-shard-${matrixShard}-${sha}-${attempt}`, 'test-results/');
+  const restoredDiagnostic = artifact('backend-browser', 'upload', `restored-browser-${sha}-${attempt}`, 'test-results/restored-browser/');
+  const qualifiedAlias = artifact('backend-test', 'upload', qualifiedShardName(matrixShard), 'test-results/');
+  requireValue(shard.index < shardDiagnostic.index && shardDiagnostic.index < qualifiedAlias.index
+    && restored.index < restoredDiagnostic.index, 'Qualified aliases require successful tests and preserved attempt evidence first');
+  requireValue(shardDiagnostic.step.with['retention-days'] === '14' && restoredDiagnostic.step.with['retention-days'] === '14', 'Retain attempt diagnostics independently from qualified aliases');
+  requireValue(qualifiedAlias.step.with['retention-days'] === '14'
+    && Object.keys(qualifiedAlias.step.with).sort().join(',') === 'if-no-files-found,name,overwrite,path,retention-days', 'Qualified alias options must retain exact identity, mandatory contents and bounded retention');
   for (let index = 0; index < 4; index += 1) {
-    const result = artifact('backend', 'download', `backend-shard-${index}-${sha}-${attempt}`, 'test-results');
+    const result = artifact('backend', 'download', qualifiedShardName(index), 'test-results');
     requireValue(result.index < union.index, 'All four result artifacts must precede exact union verification');
   }
+  requireValue(jobs.backend.steps.filter(step => step.uses?.startsWith('actions/download-artifact@')).length === 5,
+    'Aggregate must download only the producer runtime and four exact qualified aliases; no fallback artifacts');
   for (const id of ['backend-format', 'backend-build']) {
     const sdk = jobs[id].steps.filter(step => step.uses === 'actions/setup-dotnet@v5');
     requireValue(sdk.length === 1 && sdk[0].with?.['dotnet-version'] === '9.0.x', `${id}: .NET 9 SDK required`);
   }
 
   const deploy = jobs.deploy.steps;
+  requireValue(jobs.backend.outputs?.['backend-artifact-id'] === '${{ needs.backend-build.outputs.backend-artifact-id }}', 'Aggregate must forward the same producer backend artifact ID after successful qualification');
   const downloads = deploy.map((step, index) => ({ step, index })).filter(({ step }) => step.uses?.startsWith('actions/download-artifact@'));
   requireValue(downloads.length === 2, 'Deploy must download exactly the two qualified artifacts');
-  requireValue(downloads.map(({ step }) => step.with?.name).sort().join(',') === `backend-${sha},frontend-${sha}`, 'Deploy artifact SHA mismatch');
-  requireValue(downloads.every(({ step }) => step.uses === 'actions/download-artifact@v7' && step.with?.path === 'deploy-artifacts' && Object.keys(step.with).every(key => ['name', 'path'].includes(key))), 'Downloads must come from this workflow run');
+  downloadById('deploy', backendArtifactId, 'deploy-artifacts');
+  downloadById('deploy', frontendArtifactId, 'deploy-artifacts');
+  const deployIds = command('deploy', '[[ "$BACKEND_ARTIFACT_ID" != "$FRONTEND_ARTIFACT_ID" ]]');
+  requireValue(deployIds.step.env?.BACKEND_ARTIFACT_ID === backendArtifactId && deployIds.step.env?.FRONTEND_ARTIFACT_ID === frontendArtifactId
+    && deployIds.lines.join('\n') === 'set -euo pipefail\n[[ "$BACKEND_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]\n[[ "$FRONTEND_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]\n[[ "$BACKEND_ARTIFACT_ID" != "$FRONTEND_ARTIFACT_ID" ]]'
+    && downloads.every(({ index }) => deployIds.index < index), 'Deploy must reject empty, multiple or substituted artifact IDs before downloading');
   const tar = command('deploy', 'tar -czf "${{ env.TAR_NAME }}" -C "${{ env.OUT_DIR }}" .');
   const unpackBackend = command('deploy', 'tar -xzf deploy-artifacts/backend.tar.gz -C "${{ env.OUT_DIR }}"');
   const unpackFrontend = command('deploy', 'tar -xzf deploy-artifacts/frontend.tar.gz -C "${{ env.OUT_DIR }}"');
@@ -257,7 +302,7 @@ export function validateDeployWorkflow(source) {
     && unpackBackend.index < tar.index && unpackFrontend.index < tar.index
     && tar.index < scp && scp < ssh && ssh < readiness.index, 'Deploy download/unpack/tar/scp/ssh/readiness order');
   requireValue(!deploy.some(step => /(?:dotnet (?:test|build|publish)|npm (?:ci|run build))/.test(step.run ?? '')), 'Deploy must use qualified artifacts without rebuilding');
-  return { valid: true, gates: ['frontend', 'backend-format', 'backend'], deployNeeds: jobs.deploy.needs, artifacts: downloads.map(({ step }) => step.with.name) };
+  return { valid: true, gates: ['frontend', 'backend-format', 'backend'], deployNeeds: jobs.deploy.needs, artifacts: downloads.map(({ step }) => step.with['artifact-ids']) };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

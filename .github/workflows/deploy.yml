@@ -31,6 +31,8 @@ env:
 jobs:
   frontend:
     runs-on: ubuntu-latest
+    outputs:
+      frontend-artifact-id: ${{ steps.frontend-upload.outputs.artifact-id }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -101,9 +103,10 @@ jobs:
         run: tar -czf frontend.tar.gz -C "${{ env.OUT_DIR }}" fe
 
       - name: Upload frontend build artifact
+        id: frontend-upload
         uses: actions/upload-artifact@v6
         with:
-          name: frontend-${{ github.sha }}
+          name: frontend-${{ github.sha }}-${{ github.run_attempt }}
           path: frontend.tar.gz
           if-no-files-found: error
           retention-days: 3
@@ -156,6 +159,8 @@ jobs:
     outputs:
       manifest-sha: ${{ steps.plan.outputs.manifest-sha }}
       sdk-version: ${{ steps.plan.outputs.sdk-version }}
+      runtime-artifact-id: ${{ steps.runtime-upload.outputs.artifact-id }}
+      backend-artifact-id: ${{ steps.backend-upload.outputs.artifact-id }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -214,9 +219,10 @@ jobs:
         run: tar -czf test-runtime.tar.gz test-plan.json test-plan.summary.json backend/PayPlanner.Api.Tests/bin/Release/net9.0 tools/PayPlanner.TestShards/bin/Release/net9.0
 
       - name: Upload compiled test runtime
+        id: runtime-upload
         uses: actions/upload-artifact@v6
         with:
-          name: test-runtime-${{ github.sha }}
+          name: test-runtime-${{ github.sha }}-${{ github.run_attempt }}
           path: test-runtime.tar.gz
           if-no-files-found: error
           retention-days: 3
@@ -229,9 +235,10 @@ jobs:
         run: tar -czf backend.tar.gz -C "${{ env.OUT_DIR }}" be
 
       - name: Upload backend build artifact
+        id: backend-upload
         uses: actions/upload-artifact@v6
         with:
-          name: backend-${{ github.sha }}
+          name: backend-${{ github.sha }}-${{ github.run_attempt }}
           path: backend.tar.gz
           if-no-files-found: error
           retention-days: 3
@@ -298,10 +305,20 @@ jobs:
           printf 'PAYPLANNER_TEST_PLAYWRIGHT_CLI=%s/@playwright/cli/playwright-cli.js\n' "$(npm root --global)" >> "$GITHUB_ENV"
           printf 'PAYPLANNER_TEST_BROWSER=chrome\n' >> "$GITHUB_ENV"
 
+      - name: Verify producer SDK and runtime artifact ID
+        env:
+          EXPECTED_SDK_VERSION: ${{ needs.backend-build.outputs.sdk-version }}
+          RUNTIME_ARTIFACT_ID: ${{ needs.backend-build.outputs.runtime-artifact-id }}
+        run: |
+          set -euo pipefail
+          actual_sdk="$(dotnet --version)"
+          test "$actual_sdk" = "$EXPECTED_SDK_VERSION"
+          [[ "$RUNTIME_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+
       - name: Download compiled test runtime
         uses: actions/download-artifact@v7
         with:
-          name: test-runtime-${{ github.sha }}
+          artifact-ids: ${{ needs.backend-build.outputs.runtime-artifact-id }}
           path: test-artifacts
 
       - name: Unpack compiled test runtime
@@ -328,6 +345,16 @@ jobs:
           path: test-results/
           if-no-files-found: error
           retention-days: 14
+      - name: Publish qualified shard alias
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qualified-backend-shard-${{ matrix.shard }}-${{ github.sha }}-${{ needs.backend-build.outputs.manifest-sha }}-${{ needs.backend-build.outputs.sdk-version }}
+          path: test-results/
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
+
 
   backend-browser:
     needs: [backend-build]
@@ -386,10 +413,20 @@ jobs:
           printf 'PAYPLANNER_TEST_PLAYWRIGHT_CLI=%s/@playwright/cli/playwright-cli.js\n' "$(npm root --global)" >> "$GITHUB_ENV"
           printf 'PAYPLANNER_TEST_BROWSER=chrome\n' >> "$GITHUB_ENV"
 
+      - name: Verify producer SDK and runtime artifact ID
+        env:
+          EXPECTED_SDK_VERSION: ${{ needs.backend-build.outputs.sdk-version }}
+          RUNTIME_ARTIFACT_ID: ${{ needs.backend-build.outputs.runtime-artifact-id }}
+        run: |
+          set -euo pipefail
+          actual_sdk="$(dotnet --version)"
+          test "$actual_sdk" = "$EXPECTED_SDK_VERSION"
+          [[ "$RUNTIME_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+
       - name: Download compiled test runtime
         uses: actions/download-artifact@v7
         with:
-          name: test-runtime-${{ github.sha }}
+          artifact-ids: ${{ needs.backend-build.outputs.runtime-artifact-id }}
           path: test-artifacts
 
       - name: Unpack compiled test runtime
@@ -425,6 +462,8 @@ jobs:
   backend:
     needs: [backend-build, backend-test, backend-browser]
     runs-on: ubuntu-latest
+    outputs:
+      backend-artifact-id: ${{ needs.backend-build.outputs.backend-artifact-id }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -434,10 +473,20 @@ jobs:
         with:
           dotnet-version: ${{ needs.backend-build.outputs.sdk-version }}
 
+      - name: Verify producer SDK and runtime artifact ID
+        env:
+          EXPECTED_SDK_VERSION: ${{ needs.backend-build.outputs.sdk-version }}
+          RUNTIME_ARTIFACT_ID: ${{ needs.backend-build.outputs.runtime-artifact-id }}
+        run: |
+          set -euo pipefail
+          actual_sdk="$(dotnet --version)"
+          test "$actual_sdk" = "$EXPECTED_SDK_VERSION"
+          [[ "$RUNTIME_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+
       - name: Download compiled test runtime
         uses: actions/download-artifact@v7
         with:
-          name: test-runtime-${{ github.sha }}
+          artifact-ids: ${{ needs.backend-build.outputs.runtime-artifact-id }}
           path: test-artifacts
 
       - name: Unpack compiled test runtime
@@ -446,25 +495,25 @@ jobs:
       - name: Download shard 0 results
         uses: actions/download-artifact@v7
         with:
-          name: backend-shard-0-${{ github.sha }}-${{ github.run_attempt }}
+          name: qualified-backend-shard-0-${{ github.sha }}-${{ needs.backend-build.outputs.manifest-sha }}-${{ needs.backend-build.outputs.sdk-version }}
           path: test-results
 
       - name: Download shard 1 results
         uses: actions/download-artifact@v7
         with:
-          name: backend-shard-1-${{ github.sha }}-${{ github.run_attempt }}
+          name: qualified-backend-shard-1-${{ github.sha }}-${{ needs.backend-build.outputs.manifest-sha }}-${{ needs.backend-build.outputs.sdk-version }}
           path: test-results
 
       - name: Download shard 2 results
         uses: actions/download-artifact@v7
         with:
-          name: backend-shard-2-${{ github.sha }}-${{ github.run_attempt }}
+          name: qualified-backend-shard-2-${{ github.sha }}-${{ needs.backend-build.outputs.manifest-sha }}-${{ needs.backend-build.outputs.sdk-version }}
           path: test-results
 
       - name: Download shard 3 results
         uses: actions/download-artifact@v7
         with:
-          name: backend-shard-3-${{ github.sha }}-${{ github.run_attempt }}
+          name: qualified-backend-shard-3-${{ github.sha }}-${{ needs.backend-build.outputs.manifest-sha }}-${{ needs.backend-build.outputs.sdk-version }}
           path: test-results
 
       - name: Verify complete backend case union
@@ -488,16 +537,26 @@ jobs:
           cache: "npm"
           cache-dependency-path: package-lock.json
 
+      - name: Verify qualified deployment artifact IDs
+        env:
+          BACKEND_ARTIFACT_ID: ${{ needs.backend.outputs.backend-artifact-id }}
+          FRONTEND_ARTIFACT_ID: ${{ needs.frontend.outputs.frontend-artifact-id }}
+        run: |
+          set -euo pipefail
+          [[ "$BACKEND_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$FRONTEND_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$BACKEND_ARTIFACT_ID" != "$FRONTEND_ARTIFACT_ID" ]]
+
       - name: Download backend artifact
         uses: actions/download-artifact@v7
         with:
-          name: backend-${{ github.sha }}
+          artifact-ids: ${{ needs.backend.outputs.backend-artifact-id }}
           path: deploy-artifacts
 
       - name: Download frontend artifact
         uses: actions/download-artifact@v7
         with:
-          name: frontend-${{ github.sha }}
+          artifact-ids: ${{ needs.frontend.outputs.frontend-artifact-id }}
           path: deploy-artifacts
 
       - name: Unpack qualified artifacts

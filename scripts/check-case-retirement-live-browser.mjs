@@ -5,6 +5,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { createServer as createControlServer } from 'node:http';
 import { createServer } from 'vite';
+import { createCaseReadLifecycle, createCaseRestartObserver, isCaseBoundaryRead } from './case-retirement-browser-lifecycle.mjs';
 
 const api = new URL(process.env.CASE_RETIREMENT_API);
 assert.equal(api.hostname, '127.0.0.1');
@@ -142,38 +143,22 @@ try {
     let manualRecovery = false;
     let finishRestart;
     const restartFinished = new Promise(resolve => { finishRestart = resolve; });
-    let reconnectProved = false;
+    let notifyInitialConnection;
     let notifyReconnect;
     let rightsApplied = false;
     const modal = settings.flow.includes('modal');
-    const navigationReads = new Set();
-    let navigationDraining = false;
-    let navigationReadFailures = 0;
-    if (modal) {
-      page.on('request', request => {
-        const url = new URL(request.url());
-        const activity = request.method() === 'POST'
-          && url.pathname === '/api/v2/cases/' + settings.caseId + '/activity';
-        if (url.origin === settings.api && ((request.method() === 'GET' && url.pathname.startsWith('/api/')) || activity))
-          navigationReads.add(request);
-      });
-      page.on('requestfinished', request => navigationReads.delete(request));
-      page.on('requestfailed', request => {
-        if (navigationReads.delete(request) && navigationDraining) navigationReadFailures++;
-      });
-    }
+    const caseReads = modal || restarted ? (${createCaseReadLifecycle})(page,
+      request => (${isCaseBoundaryRead})(request, settings.api, settings.caseId), 20000) : null;
     page.setDefaultTimeout(20000);
     page.on('pageerror', error => errors.push(error.message));
+    const restartObserver = (${createCaseRestartObserver})(settings.api, () => notifyReconnect?.());
     page.on('websocket', socket => {
-      const url = new URL(socket.url());
-      const createdDuringRestart = restarting || restartApplied;
-      if (url.origin.replace(/^ws/, 'http') !== settings.api || url.pathname !== '/hubs/notifications') return;
+      if (!restartObserver.observeSocket(socket)) return;
       socket.on('framereceived', frame => {
-        if (createdDuringRestart && restartApplied && frame.payload.toString().startsWith('{}\u001e')) {
-          reconnectProved = true;
-          notifyReconnect?.();
-        }
+        restartObserver.onHandshake(socket, frame.payload.toString());
+        if (restartObserver.snapshot().initialReady) notifyInitialConnection?.();
       });
+      socket.on('close', () => restartObserver.onClose(socket));
     });
     page.on('console', message => {
       if (message.type() !== 'error') return;
@@ -231,10 +216,20 @@ try {
         const response = await route.fetch(); check(response.status() === 200, 'Actual retirement failed');
         check((await response.json()).status === (publishedWinner ? 'uploaded' : 'retired'), 'Actual server returned the wrong terminal proof');
         if (restarted && retirePosts === 1) {
+          // Initial connection and existing reads share the same 20-second
+          // readiness deadline; only then can this fixture stop its server.
+          try {
+            await caseReads.drain('server-restart', async () => {
+              if (restartObserver.snapshot().initialReady) return;
+              await new Promise(resolveInitial => { notifyInitialConnection = resolveInitial; });
+            });
+          } finally { notifyInitialConnection = undefined; }
+          restartObserver.beginRestart();
           restarting = true;
           const boundary = await page.request.post(settings.controlUrl);
           check(boundary.status() === 200, 'Owned server restart failed: ' + await boundary.text());
           restartApplied = true;
+          restartObserver.acknowledgeRestart();
           restarting = false;
           finishRestart();
         }
@@ -266,35 +261,8 @@ try {
       sessionStorage.setItem('pp.case-document-upload-attempts.v1', JSON.stringify(rows));
     }, settings);
     if (modal) {
-      // Preserve the real full client navigation without aborting the case
-      // page's already-issued reads or owned activity write. This stays inside
-      // the original 3m budget; no replacement requests are created.
-      navigationDraining = true;
-      let navigationTimer;
-      try {
-        await Promise.race([
-          (async () => {
-            do {
-              await Promise.all([...navigationReads].map(async request => {
-                const response = await request.response();
-                check(response !== null, 'An existing case read failed before client navigation');
-                if (request.method() === 'POST')
-                  check(response.status() === 200, 'The owned case activity write must succeed before client navigation');
-                check(await response.finished() === null, 'An existing case response body failed before client navigation');
-              }));
-              await page.evaluate(() => new Promise(resolveFrame => requestAnimationFrame(() => resolveFrame())));
-              check(navigationReadFailures === 0, 'An existing case read was interrupted before client navigation');
-            } while (navigationReads.size);
-          })(),
-          new Promise((_, rejectNavigation) => {
-            navigationTimer = setTimeout(() => rejectNavigation(new Error('Existing case reads did not complete before client navigation within 20000ms')), 20000);
-          }),
-        ]);
-      } finally {
-        clearTimeout(navigationTimer);
-        navigationDraining = false;
-      }
-      check(navigationReads.size === 0, 'Client navigation must not abort existing case reads');
+      // Finish already-issued reads and the owned activity write before navigation.
+      await caseReads.drain('client-navigation');
       await page.goto(settings.ui + '/clients/' + settings.clientId, { waitUntil: 'domcontentloaded' });
       await page.locator('main').getByRole('button', { name: 'Дела', exact: true }).click();
       await page.getByRole('button', { name: 'Редактировать дело Synthetic retirement browser case', exact: true }).click();
@@ -408,11 +376,12 @@ try {
     check(filePosts === 2 && new Set(fileKeys).size === 2 && !fileKeys.includes(settings.key), 'Version identity was reused');
     }
     check(caseSaves === 0, 'Document actions saved unrelated case fields');
-    if (restarted && !reconnectProved) await new Promise((resolve, reject) => {
+    if (restarted && !restartObserver.hasProof()) await new Promise((resolve, reject) => {
       // The existing reconnect schedule includes a 30-second delay after a long outage.
-      const timer = setTimeout(() => { notifyReconnect = undefined; reject(new Error('Notifications did not reconnect after the owned server restart')); }, 40000);
+      const timer = setTimeout(() => { notifyReconnect = undefined; reject(new Error('Notifications did not reconnect after the owned server restart: ' + JSON.stringify(restartObserver.snapshot()))); }, 40000);
       notifyReconnect = () => { clearTimeout(timer); notifyReconnect = undefined; resolve(); };
     });
+    const reconnectProved = restarted && restartObserver.hasProof();
     if (restarted) check(reconnectProved, 'The restarted server did not acknowledge a new notification connection');
     check(outside.length === 0, 'Browser attempted an external request');
     check(errors.length === 0, 'Browser page errors: ' + JSON.stringify(errors));
