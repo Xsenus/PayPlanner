@@ -6,6 +6,7 @@ using System.Text.Json.Serialization;
 using Amazon.Runtime;
 using Amazon.S3;
 using Amazon.S3.Model;
+using Amazon.S3.Transfer;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.StaticFiles;
@@ -1029,6 +1030,7 @@ public sealed class S3StorageClientFactory(IConfiguration? configuration = null)
 
 public sealed class AwsS3StorageClient : IS3StorageClient
 {
+    private const long MultipartPartSize = 16L * 1024 * 1024;
     private readonly IAmazonS3 _client;
 
     public AwsS3StorageClient(IAmazonS3 client)
@@ -1134,28 +1136,54 @@ public sealed class AwsS3StorageClient : IS3StorageClient
     {
         try
         {
+            long? remainingLength = null;
+            try { remainingLength = checked(content.Length - content.Position); }
+            catch (NotSupportedException) { }
+            if (remainingLength is < 0)
+                throw new InvalidDataException("The stream position exceeds its declared length.");
+
+            // S3-compatible endpoints can reject a large single PUT. The SDK owns
+            // multipart completion/abort; one request at a time bounds memory and load.
+            if (remainingLength > MultipartPartSize)
+            {
+                // TransferUtility discovers forward-only EOF independently of Length.
+                // Reject a shortened or overlong source before it can complete the object.
+                using var checkedSource = !content.CanSeek
+                    ? new LengthCheckedReadStream(content, remainingLength.Value)
+                    : null;
+                using var transfer = new TransferUtility(_client, new TransferUtilityConfig
+                {
+                    MinSizeBeforePartUpload = MultipartPartSize,
+                    ConcurrentServiceRequests = 1,
+                });
+                await transfer.UploadAsync(new TransferUtilityUploadRequest
+                {
+                    BucketName = bucket,
+                    Key = key,
+                    InputStream = checkedSource ?? content,
+                    ContentType = contentType,
+                    PartSize = MultipartPartSize,
+                    AutoCloseStream = false,
+                    AutoResetStreamPosition = false,
+                }, cancellationToken);
+                return;
+            }
+
             var request = new PutObjectRequest
             {
                 BucketName = bucket,
                 Key = key,
                 InputStream = content,
                 ContentType = contentType,
+                // The caller owns the source and may verify its bytes after upload.
+                AutoCloseStream = false,
+                AutoResetStreamPosition = false,
             };
             // A streaming wrapper can know its size without supporting rewinds.
             // Preserve that information for S3 without buffering the entire file.
             if (!content.CanSeek)
             {
-                long? remainingLength = null;
-                try
-                {
-                    remainingLength = checked(content.Length - content.Position);
-                }
-                catch (NotSupportedException)
-                {
-                    // Unknown-length inputs retain the SDK's fail-closed behavior.
-                }
-                if (remainingLength is < 0)
-                    throw new InvalidDataException("The stream position exceeds its declared length.");
+                // Unknown-length inputs retain the SDK's fail-closed behavior.
                 if (remainingLength.HasValue)
                     request.Headers.ContentLength = remainingLength.Value;
                 if (remainingLength == 0)
@@ -1307,6 +1335,38 @@ public sealed class AwsS3StorageClient : IS3StorageClient
     {
         _client.Dispose();
         return ValueTask.CompletedTask;
+    }
+
+    private sealed class LengthCheckedReadStream(Stream source, long length) : Stream
+    {
+        private long _position;
+        public override bool CanRead => source.CanRead;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => length;
+        public override long Position { get => _position; set => throw new NotSupportedException(); }
+
+        private int ValidateRead(int read, int requested)
+        {
+            _position = checked(_position + read);
+            if (_position > length || (read == 0 && requested > 0 && _position != length))
+                throw new InvalidDataException("The stream does not match its declared length.");
+            return read;
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+            => ValidateRead(source.Read(buffer, offset, count), count);
+        public override int Read(Span<byte> buffer)
+            => ValidateRead(source.Read(buffer), buffer.Length);
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+            => ValidateRead(await source.ReadAsync(buffer, cancellationToken), buffer.Length);
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            => ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+        public override void Flush() => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        // Disposing this validation wrapper never closes the caller-owned source.
     }
 
     private static S3StorageOperationException MapException(AmazonS3Exception ex)

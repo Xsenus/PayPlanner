@@ -813,7 +813,7 @@ public sealed class YandexDiskService : IYandexDiskService
             null,
             cancellationToken);
 
-        using var streamContent = new StreamContent(content);
+        using var streamContent = new StreamContent(new BorrowedReadStream(content));
         if (!string.IsNullOrWhiteSpace(contentType))
         {
             streamContent.Headers.ContentType = MediaTypeHeaderValue.Parse(contentType);

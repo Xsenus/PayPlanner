@@ -918,6 +918,47 @@ public sealed class YandexDiskServiceTests
         Assert.Contains(requests, item => item.StartsWith("PUT https://upload.local/file", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(65536, false)]
+    [InlineData(0, true)]
+    [InlineData(65536, true)]
+    public async Task UploadKeepsCallerStreamOpenForBackupIntegrityVerification(int size, bool fail)
+    {
+        await using var scope = await CreateDbScopeAsync();
+        scope.Db.SystemSettings.Add(new SystemSetting { Key = "integrations.yandexDisk.oauthToken", Value = "synthetic-upload-token" });
+        await scope.Db.SaveChangesAsync();
+        var bytes = Enumerable.Range(0, size).Select(i => (byte)(i % 251)).ToArray();
+        var uploads = 0;
+        using var http = new HttpClient(new AsyncFakeYandexDiskHandler(async request =>
+        {
+            if (request.RequestUri?.Host == "upload.local")
+            {
+                uploads++;
+                Assert.Equal(bytes, await request.Content!.ReadAsByteArrayAsync());
+                return new HttpResponseMessage(fail ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.Created);
+            }
+            if (request.RequestUri?.AbsolutePath.EndsWith("/resources/upload", StringComparison.Ordinal) == true)
+                return JsonResponse("""{ "href": "https://upload.local/backup" }""");
+            return JsonResponse("{}");
+        }));
+        var service = new YandexDiskService(scope.Db, http);
+        using var content = new MemoryStream(bytes);
+        var upload = service.UploadAsync("backup.bin", content, "application/octet-stream", true, CancellationToken.None);
+        if (fail)
+        {
+            var error = await Assert.ThrowsAsync<YandexDiskOperationException>(() => upload);
+            Assert.True(error.OutcomeUnknown);
+        }
+        else await upload;
+
+        Assert.True(content.CanRead, "The backup service owns the source and verifies it after upload.");
+        content.Position = 0;
+        Assert.Equal(System.Security.Cryptography.SHA256.HashData(bytes),
+            await System.Security.Cryptography.SHA256.HashDataAsync(content));
+        Assert.Equal(1, uploads);
+    }
+
     [Fact]
     public async Task UploadAsync_CreatesNestedParentFoldersBeforeUploadingBackup()
     {
@@ -1084,6 +1125,12 @@ public sealed class YandexDiskServiceTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             => Task.FromResult(handler(request));
+    }
+
+    private sealed class AsyncFakeYandexDiskHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => handler(request);
     }
 
     private sealed class TrackingHttpContent(string content) : StringContent(content, Encoding.UTF8, "application/json")

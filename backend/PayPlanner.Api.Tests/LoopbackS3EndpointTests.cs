@@ -6,6 +6,43 @@ namespace PayPlanner.Api.Tests;
 
 public sealed class LoopbackS3EndpointTests
 {
+    [Fact]
+    public async Task SinglePutStartsAtCurrentPosition()
+    {
+        await using var endpoint = await LoopbackS3Endpoint.StartAsync();
+        await using var client = new S3StorageClientFactory().Create(endpoint.Connection);
+        var bytes = Enumerable.Range(0, 65536).Select(i => (byte)(i % 251)).ToArray();
+        using var content = new MemoryStream(bytes);
+        content.Position = 17;
+        await client.PutAsync(LoopbackS3Endpoint.Bucket, "fixture/remaining.bin", content,
+            "application/octet-stream", CancellationToken.None);
+        await using var downloaded = await client.OpenReadAsync(LoopbackS3Endpoint.Bucket, "fixture/remaining.bin", CancellationToken.None);
+        using var received = new MemoryStream();
+        await downloaded.Content.CopyToAsync(received);
+        Assert.Equal(bytes.AsSpan(17).ToArray(), received.ToArray());
+        Assert.True(content.CanRead);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(65536)]
+    public async Task UploadKeepsCallerStreamOpenForBackupIntegrityVerification(int size)
+    {
+        await using var endpoint = await LoopbackS3Endpoint.StartAsync();
+        await using var client = new S3StorageClientFactory().Create(endpoint.Connection);
+        var bytes = Enumerable.Range(0, size).Select(i => (byte)(i % 251)).ToArray();
+        using var content = new MemoryStream(bytes);
+
+        await client.PutAsync(LoopbackS3Endpoint.Bucket, "fixture/backup.bin", content,
+            "application/octet-stream", CancellationToken.None);
+
+        Assert.True(content.CanRead, "The backup service must recheck the same source stream after upload.");
+        content.Position = 0;
+        Assert.Equal(System.Security.Cryptography.SHA256.HashData(bytes),
+            await System.Security.Cryptography.SHA256.HashDataAsync(content));
+        Assert.Equal(1, endpoint.PutCount);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(3)]
