@@ -1154,6 +1154,62 @@ public class LegalEntitiesControllerTests
         Assert.IsType<NotFoundResult>(action.Result);
     }
 
+    [Fact]
+    public async Task Update_RejectsUnknownProfileStatus_AndBlocksDeactivatingOwnCompany()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db, roleName: "admin");
+        var entityId = await CreateLegalEntityAsync(db, "Своя компания");
+        var controller = CreateController(db, userId);
+
+        var unknown = await controller.Update(entityId, new LegalEntityRequest { ShortName = "Своя компания", ProfileStatus = "bogus" }, CancellationToken.None);
+        Assert.IsType<BadRequestObjectResult>(unknown.Result);
+
+        await controller.UpdateMainCompanySettings(
+            new UpdateMainCompanySettingsRequest { CompanyIds = [entityId], DefaultCompanyId = entityId },
+            CancellationToken.None);
+
+        var archive = await controller.Update(entityId, new LegalEntityRequest { ShortName = "Своя компания", ProfileStatus = "archived" }, CancellationToken.None);
+        Assert.IsType<ConflictObjectResult>(archive.Result);
+        Assert.Equal(CompanyProfileStatuses.Active, (await db.LegalEntities.AsNoTracking().SingleAsync(le => le.Id == entityId)).ProfileStatus);
+    }
+
+    [Fact]
+    public async Task Update_AllowsDraftAndArchive_ForCompanyThatIsNotOwn_AndKeepsStatusWhenOmitted()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db, roleName: "admin");
+        var entityId = await CreateLegalEntityAsync(db, "Черновик");
+        var controller = CreateController(db, userId);
+
+        await controller.Update(entityId, new LegalEntityRequest { ShortName = "Черновик", ProfileStatus = "Draft" }, CancellationToken.None);
+        await controller.Update(entityId, new LegalEntityRequest { ShortName = "Черновик 2" }, CancellationToken.None);
+
+        var saved = await db.LegalEntities.AsNoTracking().SingleAsync(le => le.Id == entityId);
+        Assert.Equal(CompanyProfileStatuses.Draft, saved.ProfileStatus);
+        Assert.Equal("Черновик 2", saved.ShortName);
+    }
+
+    [Fact]
+    public async Task UpdateMainCompanySettings_RefusesDraftAndArchivedCompanies()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db, roleName: "admin");
+        var activeId = await CreateLegalEntityAsync(db, "Активная");
+        var draftId = await CreateLegalEntityAsync(db, "Черновик");
+        (await db.LegalEntities.SingleAsync(le => le.Id == draftId)).ProfileStatus = CompanyProfileStatuses.Draft;
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId);
+
+        var refused = await controller.UpdateMainCompanySettings(
+            new UpdateMainCompanySettingsRequest { CompanyIds = [activeId, draftId] }, CancellationToken.None);
+        var accepted = await controller.UpdateMainCompanySettings(
+            new UpdateMainCompanySettingsRequest { CompanyIds = [activeId] }, CancellationToken.None);
+
+        Assert.IsType<ConflictObjectResult>(refused.Result);
+        Assert.IsType<OkObjectResult>(accepted.Result);
+    }
+
     private static async Task<int> CreateLegalEntityAsync(
         PaymentContext db,
         string shortName,

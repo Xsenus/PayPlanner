@@ -13,7 +13,7 @@
 | --- | --- |
 | backend/Controllers/InternalChatController.cs:566 | ExecuteUpdateAsync |
 | backend/Controllers/InternalChatController.cs:755 | ExecuteUpdateAsync |
-| backend/Controllers/LegalEntitiesController.cs:1000 | ExecuteDeleteAsync |
+| backend/Controllers/LegalEntitiesController.cs:1010 | ExecuteDeleteAsync |
 | backend/Controllers/MessengerDocumentDeliveriesController.cs:485 | ExecuteUpdateAsync |
 | backend/Controllers/MessengerDocumentDeliveriesController.cs:496 | ExecuteUpdateAsync |
 | backend/Controllers/MessengerDocumentDeliveriesController.cs:513 | ExecuteUpdateAsync |
@@ -131,7 +131,7 @@ EF-операции `ExecuteUpdateAsync` и `ExecuteDeleteAsync` обходят 
 | `backend/Services/AuthService.cs:743` | `ExecuteUpdateAsync` | Версия JWT и сводные поля выхода текущего пользователя | Объектное событие не создаётся; выход отражается временем и действием `logout` в самой записи пользователя. | Условное атомарное увеличение версии делает отзыв всех JWT мгновенным и не позволяет двум параллельным logout повторно изменить состояние. |
 | `backend/Controllers/UserActivityController.cs:418` | `ExecuteUpdateAsync` | Метаданные последней активности текущего пользователя | Объектное событие не создаётся; отдельная строка журнала активности является следом аудита. | Лёгкие поля присутствия обновляются без загрузки полного агрегата пользователя на каждый запрос. |
 | `backend/Controllers/UserActivityController.cs:540` | `ExecuteDeleteAsync` | Очистка журнала активности по запросу администратора | Построчный объектный аудит не создаётся; контроллер журналирует количество удалённых строк и возвращает результат обслуживания. | Операция намеренно пакетно очищает технический журнал активности. |
-| `backend/Controllers/LegalEntitiesController.cs:1000` | `ExecuteDeleteAsync` | Адреса юридического лица перед заменой коллекции | Построчный аудит адресов не создаётся; сохранение юридического лица фиксирует видимое изменение основной сущности. | Адреса являются заменяемыми дочерними строками формы юридического лица. |
+| `backend/Controllers/LegalEntitiesController.cs:1010` | `ExecuteDeleteAsync` | Адреса юридического лица перед заменой коллекции | Построчный аудит адресов не создаётся; сохранение юридического лица фиксирует видимое изменение основной сущности. | Адреса являются заменяемыми дочерними строками формы юридического лица. |
 | `backend/Services/UserActivity/UserActivityRetentionService.cs:109` | `ExecuteDeleteAsync` | Просроченные строки журнала активности | Построчный аудит не создаётся; сервис журналирует количество удалённых строк и границу хранения. | Регламентная очистка пакетно удаляет технические записи с истёкшим сроком хранения. |
 | `backend/Services/Notifications/NotificationDeliveryRetentionService.cs:150` | `ExecuteDeleteAsync` | Просроченные технические строки доставки уведомлений | Построчный аудит не создаётся; сервис сохраняет состояние системного задания и журналирует количество удалённых строк. | Регламентная очистка пакетно удаляет устаревшую диагностику доставки. |
 | `backend/Services/CalendarSyncLogRetentionService.cs:198` | `ExecuteDeleteAsync` | Просроченные строки синхронизации Google Календаря | Построчный аудит не создаётся; системное задание хранит число удалений по провайдеру и общий итог. | Диагностика синхронизации удаляется ограниченными порциями. |

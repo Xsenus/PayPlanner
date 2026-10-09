@@ -436,6 +436,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             ContactPhonesJson = entity.ContactPhonesJson,
             ContactEmailsJson = entity.ContactEmailsJson,
             Notes = entity.Notes,
+            ProfileStatus = entity.ProfileStatus,
             ClientsCount = visibleClientList.Count,
             CreatedAt = entity.CreatedAt,
             UpdatedAt = entity.UpdatedAt,
@@ -1096,6 +1097,14 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             return BadRequest(new { message = string.Join(" ", bankAccounts.Errors) });
         }
 
+        var profileStatus = request.ProfileStatus is null
+            ? CompanyProfileStatuses.Active
+            : CompanyProfileStatuses.NormalizeCompany(request.ProfileStatus);
+        if (profileStatus is null)
+        {
+            return BadRequest(new { message = "Неизвестный статус профиля компании." });
+        }
+
 
         var (clientIds, errorResult) = await ValidateClientIdsAsync(request.ClientIds, ct);
         if (errorResult is not null)
@@ -1162,6 +1171,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             ContactPhonesJson = NormalizeOptional(request.ContactPhonesJson),
             ContactEmailsJson = NormalizeOptional(request.ContactEmailsJson),
             Notes = NormalizeOptional(request.Notes),
+            ProfileStatus = profileStatus,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         };
@@ -1306,6 +1316,22 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
                 {
                     message = "Не удалось найти часть выбранных компаний.",
                     missingIds,
+                });
+            }
+
+            var inactiveIds = await _db.LegalEntities
+                .AsNoTracking()
+                .Where(le => normalizedIds.Contains(le.Id) && le.ProfileStatus != CompanyProfileStatuses.Active)
+                .Select(le => le.Id)
+                .OrderBy(id => id)
+                .ToArrayAsync(ct);
+
+            if (inactiveIds.Length > 0)
+            {
+                return Conflict(new
+                {
+                    message = "Собственной можно выбрать только активную компанию: часть выбранных в черновике или в архиве.",
+                    inactiveIds,
                 });
             }
         }
@@ -2103,6 +2129,21 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             return BadRequest(new { message = string.Join(" ", bankAccounts.Errors) });
         }
 
+        var profileStatus = request.ProfileStatus is null
+            ? entity.ProfileStatus
+            : CompanyProfileStatuses.NormalizeCompany(request.ProfileStatus);
+        if (profileStatus is null)
+        {
+            return BadRequest(new { message = "Неизвестный статус профиля компании." });
+        }
+
+        if (profileStatus != CompanyProfileStatuses.Active
+            && entity.ProfileStatus == CompanyProfileStatuses.Active
+            && (await LoadMainCompanySettingsStateAsync(ct)).CompanyIds.Contains(entity.Id))
+        {
+            return Conflict(new { message = "Компания выбрана собственной: сначала уберите её из списка собственных компаний." });
+        }
+
         var (clientIds, errorResult) = await ValidateClientIdsAsync(request.ClientIds, ct);
         if (errorResult is not null)
         {
@@ -2166,6 +2207,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         entity.ContactPhonesJson = NormalizeOptional(request.ContactPhonesJson);
         entity.ContactEmailsJson = NormalizeOptional(request.ContactEmailsJson);
         entity.Notes = NormalizeOptional(request.Notes);
+        entity.ProfileStatus = profileStatus;
         entity.UpdatedAt = DateTime.UtcNow;
 
         await EnsureAndNormalizeDictionaryValuesAsync(entity, ct);

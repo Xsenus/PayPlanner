@@ -662,6 +662,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.ContactEmailsJson).HasMaxLength(8000);
             entity.Property(e => e.Notes).HasMaxLength(1000);
             entity.Property(e => e.IsClientAndSupplier).HasDefaultValue(false);
+            entity.Property(e => e.ProfileStatus).HasMaxLength(16).IsRequired().HasDefaultValue(CompanyProfileStatuses.Active);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
 
             entity.HasMany(e => e.Clients)
@@ -685,6 +686,30 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.ClientStatusId).HasDatabaseName("IX_LegalEntities_ClientStatusId");
             entity.HasIndex(e => e.IsClientAndSupplier).HasDatabaseName("IX_LegalEntities_IsClientAndSupplier");
             entity.HasIndex(e => e.ResponsibleUserId).HasDatabaseName("IX_LegalEntities_ResponsibleUserId");
+        });
+
+        modelBuilder.Entity<CompanyBranch>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Kind).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Code).HasMaxLength(32);
+            entity.Property(e => e.Status).HasMaxLength(16).IsRequired().HasDefaultValue(CompanyProfileStatuses.Active);
+            entity.Property(e => e.Kpp).HasMaxLength(20);
+            entity.Property(e => e.Address).HasMaxLength(500);
+            entity.Property(e => e.BankAccountId).HasMaxLength(64);
+            entity.Property(e => e.SignerJson).HasMaxLength(8000);
+            entity.Property(e => e.Notes).HasMaxLength(1000);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.LegalEntity)
+                  .WithMany(le => le.Branches)
+                  .HasForeignKey(e => e.LegalEntityId)
+                  .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(e => new { e.LegalEntityId, e.Name })
+                  .IsUnique()
+                  .HasDatabaseName("IX_CompanyBranches_LegalEntityId_Name");
         });
 
         modelBuilder.Entity<Bank>(entity =>
@@ -3945,6 +3970,8 @@ public class PaymentContext : DbContext
 
         modelBuilder.Entity<ActLineItem>()
             .HasQueryFilter(item => Acts.Any(parent => parent.Id == item.ActId));
+        modelBuilder.Entity<CompanyBranch>()
+            .HasQueryFilter(item => LegalEntities.Any(parent => parent.Id == item.LegalEntityId));
         modelBuilder.Entity<ClientCaseCourtComplaint>()
             .HasQueryFilter(item => ClientCases.Any(parent => parent.Id == item.ClientCaseId)
                 && ClientCaseCourtInstances.Any(parent => parent.Id == item.CourtInstanceId));
@@ -4988,6 +5015,7 @@ public class PaymentContext : DbContext
     public DbSet<SpreadsheetImportBatchFile> SpreadsheetImportBatchFiles { get; set; }
     public DbSet<SpreadsheetImportBatchOperation> SpreadsheetImportBatchOperations { get; set; }
     public DbSet<UserCompanyAccess> UserCompanyAccesses { get; set; }
+    public DbSet<CompanyBranch> CompanyBranches { get; set; }
     public DbSet<UserExternalIdentity> UserExternalIdentities { get; set; }
     public DbSet<ExternalAuthRequest> ExternalAuthRequests { get; set; }
     public DbSet<TelegramAuthRequest> TelegramAuthRequests { get; set; }

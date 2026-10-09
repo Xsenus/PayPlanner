@@ -179,6 +179,11 @@ public class LegalEntity
     [MaxLength(1000)]
     public string? Notes { get; set; }
 
+    /// <summary>Состояние профиля собственной компании: черновик, активна или архив (<see cref="CompanyProfileStatuses"/>).</summary>
+    [Required]
+    [MaxLength(16)]
+    public string ProfileStatus { get; set; } = CompanyProfileStatuses.Active;
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public DateTime? UpdatedAt { get; set; }
@@ -192,4 +197,5 @@ public class LegalEntity
 
     public ICollection<AddressRecord> Addresses { get; set; } = new List<AddressRecord>();
     public ICollection<UserCompanyAccess> UserCompanyAccesses { get; set; } = new List<UserCompanyAccess>();
+    public ICollection<CompanyBranch> Branches { get; set; } = new List<CompanyBranch>();
 }

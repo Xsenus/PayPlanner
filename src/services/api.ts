@@ -6024,6 +6024,25 @@ export class ApiService {
     return this.request<void>(`/banks/${id}`, { method: 'DELETE' });
   }
 
+  async getCompanyBranches(companyId: number, includeArchived = false) {
+    const query = includeArchived ? '?includeArchived=true' : '';
+    return this.request<CompanyBranch[]>(`/legal-entities/${companyId}/branches${query}`);
+  }
+
+  async createCompanyBranch(companyId: number, payload: CompanyBranchInput) {
+    return this.request<CompanyBranch>(`/legal-entities/${companyId}/branches`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateCompanyBranch(companyId: number, branchId: number, payload: CompanyBranchInput) {
+    return this.request<CompanyBranch>(`/legal-entities/${companyId}/branches/${branchId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async createLegalEntity(payload: LegalEntityInput) {
     return this.request<LegalEntityDetail>('/legal-entities', {
       method: 'POST',
@@ -9197,6 +9216,8 @@ import type {
   ClientInput,
   ClientCaseFinanceSummary,
   ClientCaseExpenseDetail,
+  CompanyBranch,
+  CompanyBranchInput,
   LegalEntityDetail,
   LegalEntityInput,
   LegalEntityDadataDetails,

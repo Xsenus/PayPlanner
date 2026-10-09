@@ -183,6 +183,10 @@ public class LegalEntityRequest
     [MaxLength(1000)]
     public string? Notes { get; set; }
 
+    /// <summary>Draft, Active или Archived. Если не передан — статус не меняется (у нового профиля Active).</summary>
+    [MaxLength(16)]
+    public string? ProfileStatus { get; set; }
+
     public List<int> ClientIds { get; set; } = new();
 
     public List<LegalEntityAddressRequest>? Addresses { get; set; }

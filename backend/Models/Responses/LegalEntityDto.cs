@@ -75,6 +75,7 @@ public class LegalEntityListItemDto
     public string? ContactPhonesJson { get; set; }
     public string? ContactEmailsJson { get; set; }
     public string? Notes { get; set; }
+    public string ProfileStatus { get; set; } = CompanyProfileStatuses.Active;
     public int ClientsCount { get; set; }
     public int CasesCount { get; set; }
     public int ContractsCount { get; set; }

@@ -36,6 +36,7 @@ import type {
   LegalEntitySuggestion,
   LegalEntityDadataDetails,
   DadataAddressSuggestion,
+  CompanyProfileStatus,
 } from "../../types";
 import { ClientStatusBadge } from "../Clients/ClientStatusBadge";
 import {
@@ -89,6 +90,7 @@ import {
   type LegalEntityImageUploadProfile,
 } from "./legalEntityImageUtils";
 import { getLegalEntityImageFieldState } from "./legalEntityImageFieldUtils";
+import { CompanyBranchesSection } from "./CompanyBranchesSection";
 import { LegalEntityFinanceSection } from "./LegalEntityFinanceSection";
 
 interface LegalEntityModalProps {
@@ -196,6 +198,7 @@ interface FormState {
   treasuryCorrAccountNumber: string;
   treasuryKbk: string;
   notes: string;
+  profileStatus: CompanyProfileStatus;
 }
 
 type BankAccountItem = LegalEntityBankAccount;
@@ -724,6 +727,7 @@ const DEFAULT_STATE: FormState = {
   treasuryCorrAccountNumber: "",
   treasuryKbk: "",
   notes: "",
+  profileStatus: "Active",
 };
 
 export function LegalEntityModal({
@@ -1187,6 +1191,7 @@ export function LegalEntityModal({
         treasuryCorrAccountNumber: initial.treasuryCorrAccountNumber ?? "",
         treasuryKbk: initial.treasuryKbk ?? "",
         notes: initial.notes ?? "",
+        profileStatus: initial.profileStatus ?? "Active",
       });
       setSelectedClients(
         (initial.clients ?? []).map((client) =>
@@ -2078,6 +2083,7 @@ export function LegalEntityModal({
           contactEmails.filter((x) => x.trim()),
         ),
         notes: normalize(formState.notes),
+        profileStatus: formState.profileStatus,
         addresses: dedupedAddressInputs,
         clientIds,
       };
@@ -2182,6 +2188,7 @@ export function LegalEntityModal({
           saved.treasuryCorrAccountNumber ?? prev.treasuryCorrAccountNumber,
         treasuryKbk: saved.treasuryKbk ?? prev.treasuryKbk,
         notes: saved.notes ?? prev.notes,
+        profileStatus: saved.profileStatus ?? prev.profileStatus,
       }));
       setSelectedClients((prev) =>
         mergeClientAssociationItems(
@@ -4550,6 +4557,37 @@ export function LegalEntityModal({
             onCardsChange={setCards}
           />
         </div>
+
+        {isOwnLegalEntity && currentLegalEntityId !== null ? (
+          <>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <label className="text-sm font-medium text-slate-700" htmlFor="company-profile-status">
+                Состояние профиля компании
+              </label>
+              <SystemSelect
+                id="company-profile-status"
+                value={formState.profileStatus}
+                disabled={readOnly}
+                onChange={(event) =>
+                  setFormState((prev) => ({
+                    ...prev,
+                    profileStatus: event.target.value as CompanyProfileStatus,
+                  }))
+                }
+                className="rounded-xl border border-slate-300 px-3 py-2 text-sm"
+              >
+                <option value="Draft">Черновик</option>
+                <option value="Active">Активна</option>
+                <option value="Archived">В архиве</option>
+              </SystemSelect>
+            </div>
+            <CompanyBranchesSection
+              companyId={currentLegalEntityId}
+              bankAccounts={bankAccounts}
+              readOnly={readOnly}
+            />
+          </>
+        ) : null}
 
         {isOwnLegalEntity ? (
         <div className="mt-6 grid gap-6 lg:grid-cols-3">

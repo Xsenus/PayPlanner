@@ -50,3 +50,36 @@
 Совместимость: интерфейс карточки юрлица всегда перекодирует картинку в PNG/JPEG через canvas (`convertImageToFittingDataUrl`), поэтому штатная загрузка не затронута; отклоняются только запросы в обход интерфейса.
 Проверки: `InlineImageDataUrlValidatorTests` и весь `LegalEntitiesController*` — 74 теста зелёные.
 Остаётся по п. 8: права на файлы, подписанты и снимок реквизитов — шаги 4–6.
+
+## Шаг 4. Статус профиля компании и филиалы (PAY-33, пп. 5 и 6)
+
+Решения по «допущениям» из [матрицы](company-profile-gap-matrix-2026-10-09.md): филиал не имеет своего ИНН и названия юрлица; у него могут быть только собственные КПП, адрес, банковский счёт и подписант, всё остальное наследуется. Пустое поле = «как у компании».
+
+**База данных (парные миграции):**
+
+| Файл | Что |
+| --- | --- |
+| `backend/Models/CompanyBranch.cs` | Новая сущность `CompanyBranch` (вид: Branch/Office/Point/Direction; статус Active/Archived; КПП, адрес, `BankAccountId`, `SignerJson`, примечание) и справочники значений `CompanyProfileStatuses`, `CompanyBranchKinds`. |
+| `backend/Models/LegalEntity.cs` | Новое поле `ProfileStatus` (Draft/Active/Archived), по умолчанию `Active` — у всех существующих компаний значение `Active`. |
+| `backend/Data/PaymentContext.cs` | Таблица `CompanyBranches`, уникальный индекс `(LegalEntityId, Name)`, FK `Restrict`, фильтр запросов как у родителя (иначе EF предупреждает о фильтре и тест `EfWarningDiagnosticsTests` падает). |
+| `backend/Migrations/20261009103644_AddCompanyBranches*` | Миграция SQLite (создана `dotnet ef migrations add`). |
+| `backend/Migrations/PostgreSql/20261009104024_AddCompanyBranchesPostgres*` | Миграция PostgreSQL. Обе добавляют `LegalEntities.ProfileStatus NOT NULL DEFAULT 'Active'` и таблицу `CompanyBranches`; откат удаляет их. |
+
+**Серверная логика:**
+
+| Файл | Что |
+| --- | --- |
+| `backend/Controllers/CompanyBranchesController.cs` | `GET/POST api/legal-entities/{companyId}/branches`, `PUT .../{id}`, `GET .../{id}/effective-requisites`. Только администратор. Проверки: название обязательно и уникально внутри компании (в т.ч. при гонке — уникальный индекс → 409), вид и статус из списка, КПП 9 знаков, счёт обязан быть **активным счётом этой же компании** (чужой/архивный → 400), подписант — JSON-объект. В архивную компанию подразделения не добавляются. Удаления нет: подразделение архивируется. |
+| `backend/Services/Companies/CompanyRequisitesResolver.cs` | Чистая функция сборки реквизитов документа и тип `CompanyRequisitesSnapshot` (снимок на момент документа, п. 8–9). Заполненное поле филиала побеждает; архивный/чужой счёт даёт возврат к основному счёту компании; для каждого поля сохраняется источник (`company`/`branch`). |
+| `backend/Controllers/LegalEntitiesController.cs` | `ProfileStatus` принимается в создании/изменении (по умолчанию `Active`, неизвестное → 400, в ответе приходит). Компанию из списка собственных нельзя перевести в черновик/архив (409). В список собственных компаний (`main-companies/settings`) попадают только активные (409 иначе). |
+| `docs/batch-operations-audit-coverage-2026-06-10.md` | Обновлён номер строки `LegalEntitiesController.cs` (1000 → 1010): тест `BatchOperationAuditCoverageTests` сверяет номера строк. **Если снова править этот контроллер выше строки с `ExecuteDeleteAsync`, номер надо обновить.** |
+
+**Интерфейс:**
+
+| Файл | Что |
+| --- | --- |
+| `src/types/index.ts`, `src/services/api.ts` | Типы `CompanyBranch*`, `CompanyProfileStatus`, методы `getCompanyBranches`, `createCompanyBranch`, `updateCompanyBranch`. |
+| `src/components/LegalEntities/CompanyBranchesSection.tsx` | Новая компактная секция «Филиалы, офисы и точки» с таблицей, редактором, архивом. |
+| `src/components/LegalEntities/LegalEntityModal.tsx` | Для собственных компаний: выбор состояния профиля и секция подразделений. |
+
+**Тесты:** `CompanyRequisitesResolverTests`, `CompanyBranchesControllerTests` (17), три теста статуса в `LegalEntitiesControllerTests`; фронтенд `CompanyBranchesSection.test.tsx` (6). 

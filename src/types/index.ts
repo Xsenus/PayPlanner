@@ -118,6 +118,40 @@ export interface RelatedDocumentLink {
   amount?: number | null;
 }
 
+/** Состояние профиля собственной компании. */
+export type CompanyProfileStatus = 'Draft' | 'Active' | 'Archived';
+
+export type CompanyBranchKind = 'Branch' | 'Office' | 'Point' | 'Direction';
+
+/** Филиал, офис, точка или направление собственной компании; пустые поля наследуются от компании. */
+export interface CompanyBranch {
+  id: number;
+  legalEntityId: number;
+  kind: CompanyBranchKind;
+  name: string;
+  code?: string | null;
+  status: 'Active' | 'Archived';
+  kpp?: string | null;
+  address?: string | null;
+  bankAccountId?: string | null;
+  signerJson?: string | null;
+  notes?: string | null;
+  createdAt: string;
+  updatedAt?: string | null;
+}
+
+export interface CompanyBranchInput {
+  kind: CompanyBranchKind;
+  name: string;
+  code?: string | null;
+  status?: 'Active' | 'Archived';
+  kpp?: string | null;
+  address?: string | null;
+  bankAccountId?: string | null;
+  signerJson?: string | null;
+  notes?: string | null;
+}
+
 export interface LegalEntitySummary {
   id: number;
   shortName: string;
@@ -179,6 +213,7 @@ export interface LegalEntitySummary {
   contactPhonesJson?: string | null;
   contactEmailsJson?: string | null;
   notes?: string | null;
+  profileStatus?: CompanyProfileStatus;
   clientsCount: number;
   casesCount?: number;
   contractsCount?: number;
@@ -398,6 +433,7 @@ export interface LegalEntityInput {
   contactPhonesJson?: string | null;
   contactEmailsJson?: string | null;
   notes?: string | null;
+  profileStatus?: CompanyProfileStatus;
   addresses?: LegalEntityAddressInput[];
   clientIds: number[];
 }
