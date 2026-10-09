@@ -79,7 +79,9 @@ public sealed partial class StorageStageCapacityServiceTests
         await using var f = await CreateWriterFixtureAsync(postgres);
         var remote = new OwnedRemoteBudgetProvider();
         var (stages, policy, root) = CreateCopyBudgetServices(f, remote);
-        const long copyBytes = 8L * 1024 * 1024;
+        // This is queued metadata, not a physical allocation; the writer still emits four bytes.
+        // Exercise both sides of the copy debt with a gap that tolerates unrelated disk traffic.
+        const long copyBytes = 256L * 1024 * 1024;
         var operation = await AddOwnedCopyBudgetOperationAsync(f, copyBytes, StorageOperationStatuses.Pending, remote.Key);
         var ticket = Assert.IsType<StorageStageCapacityTicket>((await stages.ReserveAsync(
             "remote-copy:" + Guid.NewGuid().ToString("N"), Path.Combine(root, "remote.tmp"), 4, default)).Ticket);
@@ -88,11 +90,14 @@ public sealed partial class StorageStageCapacityServiceTests
         try
         {
             var free = Assert.IsType<long>(LocalStorageCapacityProbe.Observe(root, "owned", 0).AvailableBytes);
-            policy.UploadMinimumFreeBytes = free - (4 + (deny ? copyBytes / 2 : copyBytes + 1024 * 1024));
+            Assert.True(free >= copyBytes * 2,
+                $"Remote copy fixture requires at least {copyBytes * 2} native bytes; available={free}.");
+            policy.UploadMinimumFreeBytes = free - (4 + (deny ? copyBytes / 2 : copyBytes + copyBytes / 2));
             if (deny)
             {
                 async Task Open() { await using var writer = await stages.OpenCheckpointWriterAsync(ticket, default); }
-                await Assert.ThrowsAsync<InvalidOperationException>(Open);
+                var error = await Assert.ThrowsAsync<InvalidOperationException>(Open);
+                Assert.Equal("Stage pending copy, spool and reservation debt exceeds fresh physical headroom.", error.Message);
                 Assert.False(File.Exists(ticket.AbsolutePath));
                 Assert.Equal(StorageCapacityReservationStatuses.Pending, await f.StatusAsync(ticket.Key));
             }
