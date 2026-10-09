@@ -1,3 +1,4 @@
+using PayPlanner.Api.Services.Tax;
 using System.Text.Json;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
@@ -30,6 +31,7 @@ public static class InvoiceLineItemStorage
                 Quantity = Math.Max(item.Quantity, 0),
                 Unit = string.IsNullOrWhiteSpace(item.Unit) ? "шт" : item.Unit.Trim(),
                 Price = Math.Max(item.Price, 0),
+                VatRate = VatRates.Normalize(item.VatRate),
             })
             .ToList();
     }
@@ -72,6 +74,7 @@ public static class InvoiceLineItemStorage
                     Quantity = item.Quantity,
                     Unit = string.IsNullOrWhiteSpace(item.Unit) ? "шт" : item.Unit.Trim(),
                     Price = item.Price,
+                    VatRate = item.VatRate,
                 })
                 .ToList() ?? new List<InvoiceLineItemDto>();
         }

@@ -243,6 +243,10 @@ namespace PayPlanner.Api.Migrations
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("VatRate")
+                        .HasMaxLength(8)
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ActId")
@@ -6841,6 +6845,10 @@ namespace PayPlanner.Api.Migrations
 
                     b.Property<string>("UpdatedByUserName")
                         .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("VatRate")
+                        .HasMaxLength(8)
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");

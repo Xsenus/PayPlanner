@@ -4950,6 +4950,7 @@ public class InvoicesController : ControllerBase
                 Quantity = item.Quantity,
                 Unit = item.Unit,
                 Price = item.Price,
+                VatRate = item.VatRate,
             })
             .ToListAsync(ct);
 
@@ -4985,6 +4986,7 @@ public class InvoicesController : ControllerBase
                     Quantity = item.Quantity,
                     Unit = item.Unit,
                     Price = item.Price,
+                    VatRate = item.VatRate,
                 },
             })
             .ToListAsync(ct);
@@ -5955,6 +5957,7 @@ public class InvoicesController : ControllerBase
                             Quantity = item.Quantity,
                             Unit = item.Unit,
                             Price = item.Price,
+                            VatRate = item.VatRate,
                         })
                         .ToList(),
                 },
@@ -6180,6 +6183,7 @@ public class InvoicesController : ControllerBase
                 Quantity = item.Quantity,
                 Unit = item.Unit,
                 Price = item.Price,
+                VatRate = item.VatRate,
                 CreatedAt = DateTime.UtcNow,
             });
         }

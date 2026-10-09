@@ -16,7 +16,7 @@ public class ActsControllerInternalCoverageTests
             draftType!,
             BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public,
             binder: null,
-            args: new object?[] { 42, "db:42", 7, "Услуга", 3.5m, "час", 1_250m },
+            args: new object?[] { 42, "db:42", 7, "Услуга", 3.5m, "час", 1_250m, "22" },
             culture: null);
 
         Assert.NotNull(instance);
@@ -27,5 +27,6 @@ public class ActsControllerInternalCoverageTests
         Assert.Equal(3.5m, draftType.GetProperty("Quantity")!.GetValue(instance));
         Assert.Equal("час", draftType.GetProperty("Unit")!.GetValue(instance));
         Assert.Equal(1_250m, draftType.GetProperty("Price")!.GetValue(instance));
+        Assert.Equal("22", draftType.GetProperty("VatRate")!.GetValue(instance));
     }
 }

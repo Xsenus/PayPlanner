@@ -252,6 +252,10 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<string>("VatRate")
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ActId")
@@ -6991,6 +6995,10 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<string>("UpdatedByUserName")
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
+
+                    b.Property<string>("VatRate")
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
 
                     b.HasKey("Id");
 

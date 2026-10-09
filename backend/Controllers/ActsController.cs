@@ -17,6 +17,7 @@ using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Companies;
+using PayPlanner.Api.Services.Tax;
 using PayPlanner.Api.Services.Acts;
 using PayPlanner.Api.Services.Documents;
 using PayPlanner.Api.Services.Invoices;
@@ -765,6 +766,7 @@ public class ActsController : ControllerBase
                 Quantity = item.Quantity,
                 Unit = item.Unit,
                 Price = item.Price,
+                VatRate = item.VatRate,
                 CreatedAt = now,
                 UpdatedAt = now,
             });
@@ -1560,6 +1562,7 @@ public class ActsController : ControllerBase
                 Quantity = item.Quantity,
                 Unit = item.Unit,
                 Price = item.Price,
+                VatRate = item.VatRate,
             })
             .ToList(),
         CorrectionActs = act.CorrectionActs
@@ -1811,7 +1814,8 @@ public class ActsController : ControllerBase
                     remaining.Item.Name,
                     remaining.Remaining,
                     remaining.Item.Unit,
-                    remaining.Item.Price));
+                    remaining.Item.Price,
+                    remaining.Item.VatRate));
             }
         }
         else
@@ -1850,7 +1854,8 @@ public class ActsController : ControllerBase
                     remaining.Item.Name,
                     requested.Quantity,
                     remaining.Item.Unit,
-                    remaining.Item.Price));
+                    remaining.Item.Price,
+                    remaining.Item.VatRate));
             }
         }
 
@@ -1906,7 +1911,8 @@ public class ActsController : ControllerBase
                 name,
                 item.Quantity,
                 unit,
-                item.Price));
+                item.Price,
+                VatRates.Normalize(item.VatRate)));
         }
 
         return (null, resolved);
@@ -1929,6 +1935,7 @@ public class ActsController : ControllerBase
                 Quantity = item.Quantity,
                 Unit = item.Unit,
                 Price = item.Price,
+                VatRate = item.VatRate,
             })
             .ToListAsync(ct);
 
@@ -1963,6 +1970,7 @@ public class ActsController : ControllerBase
                 Quantity = item.Quantity,
                 Unit = item.Unit,
                 Price = item.Price,
+                VatRate = item.VatRate,
                 CreatedAt = DateTime.UtcNow,
             });
         }
@@ -2333,6 +2341,7 @@ public class ActsController : ControllerBase
                     Quantity = item.Quantity,
                     Unit = item.Unit,
                     Price = item.Price,
+                    VatRate = item.VatRate,
                 })
                 .ToList(),
             CorrectionActs = act.CorrectionActs
@@ -2368,5 +2377,6 @@ public class ActsController : ControllerBase
         string Name,
         decimal Quantity,
         string Unit,
-        decimal Price);
+        decimal Price,
+        string? VatRate = null);
 }

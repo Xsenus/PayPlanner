@@ -29,6 +29,7 @@ import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
 import { CounterpartyPickerModal, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
+import { VatRateSelect } from '../Documents/VatRateSelect';
 
 interface ActModalProps {
   open: boolean;
@@ -110,14 +111,15 @@ type ManualActLineItemRow = {
   quantity: string;
   unit: string;
   price: string;
+  vatRate: string;
 };
 
 const QUANTITY_EPSILON = 0.0001;
 const DEFAULT_MANUAL_LINE_ITEM_UNIT = 'шт';
 const MANUAL_LINE_ITEM_UNIT_OPTIONS = ['шт', 'усл.', 'час'];
 const LINE_ITEM_GRID_TEMPLATE =
-  'md:grid-cols-[minmax(24rem,2.7fr)_minmax(5.5rem,0.55fr)_minmax(6.5rem,0.7fr)_minmax(8.5rem,0.85fr)_minmax(8.5rem,0.85fr)_2.75rem]';
-const LINE_ITEM_GRID_MIN_WIDTH_CLASS = 'md:min-w-[58rem]';
+  'md:grid-cols-[minmax(24rem,2.7fr)_minmax(5.5rem,0.55fr)_minmax(6.5rem,0.7fr)_minmax(8.5rem,0.85fr)_minmax(6.5rem,0.7fr)_minmax(8.5rem,0.85fr)_2.75rem]';
+const LINE_ITEM_GRID_MIN_WIDTH_CLASS = 'md:min-w-[64rem]';
 const ACT_WORKFLOW_STATUS_ORDER: ActWorkflowStatus[] = [
   'Draft',
   'NotSigned',
@@ -228,6 +230,7 @@ function createManualActLineItemRow(seed?: Partial<ActLineItem> | null, index = 
       seed?.price !== undefined && seed.price !== null
         ? formatDecimalInput(Number(seed.price))
         : '',
+    vatRate: seed?.vatRate ?? '',
   };
 }
 
@@ -1405,6 +1408,7 @@ export function ActModal({
                 quantity: item.parsedQuantity,
                 unit: item.normalizedUnit,
                 price: item.parsedPrice,
+                vatRate: item.vatRate ? item.vatRate : null,
               },
             ],
           };
@@ -1876,6 +1880,7 @@ export function ActModal({
                           <span className="text-center">Кол-во</span>
                           <span>Ед.</span>
                           <span className="text-right">Цена</span>
+                          <span>НДС</span>
                           <span className="text-right">Сумма</span>
                           <span className="sr-only">Действия</span>
                         </div>
@@ -1934,6 +1939,11 @@ export function ActModal({
                                 aria-label="Цена позиции акта"
                                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-right text-sm tabular-nums focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
                               />
+                            </label>
+
+                            <label className="space-y-1">
+                              <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">НДС</span>
+                              <VatRateSelect value={item.vatRate} onChange={(value) => updateManualLineItem(item.id, { vatRate: value })} />
                             </label>
 
                             <div className="space-y-1">

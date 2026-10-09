@@ -1,6 +1,7 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { DocumentSellerPicker } from '../Documents/DocumentSellerPicker';
+import { VatRateSelect } from '../Documents/VatRateSelect';
 import { SystemSelect } from '../ui/SystemSelect';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Ban, Check, ChevronDown, Copy, Download, FileText, Link2, List, Loader2, Pencil, Plus, Printer, Send, Trash2, UploadCloud, UserRoundSearch, X } from 'lucide-react';
@@ -94,6 +95,7 @@ type LineItem = {
   quantity: string;
   unit: string;
   price: string;
+  vatRate?: string;
   serviceCategoryId: string;
   serviceId: string;
 };
@@ -150,8 +152,8 @@ type InvoiceCancellationRefundSource = 'Bank' | 'Cash' | 'Card' | 'EMoney';
 type InvoiceAmountReconciliationDecision = 'save' | 'manage' | 'cancel';
 
 const LINE_ITEM_GRID_TEMPLATE =
-  'md:grid-cols-[minmax(24rem,2.7fr)_minmax(5.5rem,0.55fr)_minmax(6.5rem,0.7fr)_minmax(8.5rem,0.85fr)_minmax(8.5rem,0.85fr)_2.75rem]';
-const LINE_ITEM_GRID_MIN_WIDTH_CLASS = 'md:min-w-[58rem]';
+  'md:grid-cols-[minmax(24rem,2.7fr)_minmax(5.5rem,0.55fr)_minmax(6.5rem,0.7fr)_minmax(8.5rem,0.85fr)_minmax(6.5rem,0.7fr)_minmax(8.5rem,0.85fr)_2.75rem]';
+const LINE_ITEM_GRID_MIN_WIDTH_CLASS = 'md:min-w-[64rem]';
 
 function formatMoneyValue(value: string | number | null | undefined): string {
   const parsed = parseMoneyInput(value);
@@ -237,6 +239,7 @@ function normalizeLineItems(source?: InvoiceLineItem[] | null, fallbackAmount?: 
       quantity: String(item.quantity ?? 0),
       unit: item.unit ?? 'шт',
       price: formatMoneyValue(item.price),
+      vatRate: item.vatRate ?? '',
       serviceCategoryId: '',
       serviceId: item.serviceId ? String(item.serviceId) : '',
     }));
@@ -249,6 +252,7 @@ function normalizeLineItems(source?: InvoiceLineItem[] | null, fallbackAmount?: 
       quantity: '1',
       unit: 'шт',
       price: formatMoneyValue(fallbackAmount ?? 0),
+      vatRate: '',
       serviceCategoryId: '',
       serviceId: '',
     },
@@ -2169,6 +2173,7 @@ export function InvoiceModal({
         quantity: '1',
         unit: unitOptions[0] || 'шт',
         price: formatMoneyDisplayValue(0),
+        vatRate: '',
         serviceCategoryId: '',
         serviceId: '',
       },
@@ -2750,6 +2755,7 @@ export function InvoiceModal({
           quantity: parseMoneyInput(item.quantity),
           unit: item.unit.trim() || 'шт',
           price: parseMoneyInput(item.price),
+          vatRate: item.vatRate ? item.vatRate : null,
         }))
         .filter((item) => item.name && Number.isFinite(item.quantity) && Number.isFinite(item.price) && item.quantity >= 0 && item.price >= 0),
       replaceInstallmentPlan: shouldReplaceInstallmentPlan || undefined,
@@ -4604,6 +4610,7 @@ export function InvoiceModal({
                                 <span className="text-center">Кол-во</span>
                                 <span>Ед.</span>
                                 <span className="text-right">Цена</span>
+                                <span>НДС</span>
                                 <span className="text-right">Сумма</span>
                                 <span className="sr-only">Действия</span>
                               </div>
@@ -4674,6 +4681,11 @@ export function InvoiceModal({
                                         aria-label="Цена"
                                         className="w-full rounded-lg border border-slate-300 px-3 py-2 text-right text-sm tabular-nums"
                                       />
+                                    </label>
+
+                                    <label className="space-y-1">
+                                      <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">НДС</span>
+                                      <VatRateSelect value={item.vatRate ?? ''} onChange={(value) => updateLineItem(item.id, { vatRate: value })} />
                                     </label>
 
                                     <div className="space-y-1">

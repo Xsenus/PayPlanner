@@ -105,4 +105,9 @@ public class InvoiceLineItemRequest
 
     [Range(0, double.MaxValue)]
     public decimal Price { get; set; }
+
+    /// <summary>Код ставки НДС: none, 0, 5, 7, 10, 20, 22; пусто — ставка не задана.</summary>
+    [PayPlanner.Api.Services.Tax.VatRateCode]
+    [MaxLength(8)]
+    public string? VatRate { get; set; }
 }

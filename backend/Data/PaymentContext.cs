@@ -415,6 +415,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Name).HasMaxLength(2000).IsRequired();
             entity.Property(e => e.Unit).HasMaxLength(32).IsRequired();
             entity.Property(e => e.Price).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.VatRate).HasMaxLength(8);
             entity.Property(e => e.Quantity).HasColumnType("decimal(18,4)");
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
 
@@ -599,6 +600,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Quantity).HasColumnType("decimal(18,4)");
             entity.Property(e => e.Unit).HasMaxLength(32).IsRequired();
             entity.Property(e => e.Price).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.VatRate).HasMaxLength(8);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.HasOne(e => e.Payment)
                 .WithMany(e => e.InvoiceLineItems)

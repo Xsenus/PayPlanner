@@ -441,6 +441,7 @@ public class AccountsController : ControllerBase
                             Quantity = item.Quantity,
                             Unit = item.Unit,
                             Price = item.Price,
+                            VatRate = item.VatRate,
                         })
                         .ToList(),
                     CreatedAt = act.CreatedAt,
@@ -1350,6 +1351,7 @@ public class AccountsController : ControllerBase
                     Quantity = item.Quantity,
                     Unit = item.Unit,
                     Price = item.Price,
+                    VatRate = item.VatRate,
                 },
             })
             .ToListAsync(ct);

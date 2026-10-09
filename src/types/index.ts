@@ -3390,6 +3390,8 @@ export interface ActLineItem {
   quantity: number;
   unit: string;
   price: number;
+  /** Код ставки НДС «в том числе»: none, 0, 5, 7, 10, 20, 22; пусто — ставка не задана. */
+  vatRate?: string | null;
 }
 
 export interface ActCorrectionLink {
@@ -3466,7 +3468,7 @@ export interface ActInput {
   legalEntityId?: number | null;
   responsibleId?: number | null;
   comment?: string | null;
-  lineItems?: Array<Pick<ActLineItem, 'sourceKey' | 'quantity'> & Partial<Pick<ActLineItem, 'name' | 'unit' | 'price'>>>;
+  lineItems?: Array<Pick<ActLineItem, 'sourceKey' | 'quantity'> & Partial<Pick<ActLineItem, 'name' | 'unit' | 'price' | 'vatRate'>>>;
 }
 
 export interface ActSummaryBucket {
@@ -3877,6 +3879,7 @@ export interface InvoiceLineItem {
   quantity: number;
   unit: string;
   price: number;
+  vatRate?: string | null;
 }
 
 export interface InvoiceInput {

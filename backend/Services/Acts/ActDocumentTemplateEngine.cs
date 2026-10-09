@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services.Tax;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
@@ -293,8 +294,11 @@ public static class ActDocumentTemplateEngine
                 ?? act.LegalEntity?.VatWithoutVat
                 ?? act.Client?.LegalEntity?.VatWithoutVat) == true
             : mainCompany?.VatWithoutVat == true;
-        var vatLabel = sellerWithoutVat ? "Без налога (НДС):" : "В том числе НДС:";
-        var vatValue = sellerWithoutVat ? "-" : "0,00";
+        var vatTotals = CalculateVat(effectiveLineItems);
+        // Если у позиций задана ставка НДС, документ считается построчно; иначе — прежние правила по признаку продавца.
+        var withoutVat = vatTotals.HasRates ? vatTotals.AllWithoutVat : sellerWithoutVat;
+        var vatLabel = withoutVat ? "Без налога (НДС):" : "В том числе НДС:";
+        var vatValue = withoutVat ? "-" : (vatTotals.HasRates ? FormatMoney(vatTotals.Vat) : "0,00");
 
         return $$"""
 <!doctype html>
@@ -674,6 +678,7 @@ public static class ActDocumentTemplateEngine
                     ["unit"] = Encode(item.Unit),
                     ["price"] = Encode(FormatMoney(item.Price)),
                     ["total"] = Encode(FormatMoney(item.Total)),
+                    ["vat"] = Encode(item.VatRate is null ? "—" : item.VatRate == VatRates.None ? "Без НДС" : VatRates.Label(item.VatRate)),
                 };
                 return ReplaceTokens(rowTemplate, rowTokens);
             }));
@@ -688,7 +693,7 @@ public static class ActDocumentTemplateEngine
             ["act.basis"] = Encode(BuildBasis(act)),
             ["act.total"] = Encode(FormatMoney(totalAmount)),
             ["act.totalWords"] = Encode(SpellMoney(totalAmount)),
-            ["act.vat"] = "0,00",
+            ["act.vat"] = ResolveVatToken(effectiveLineItems),
             ["act.itemsCount"] = effectiveLineItems.Count.ToString(CultureInfo.InvariantCulture),
             ["act.commentHtml"] = commentHtml,
             ["seller.requisitesHtml"] = seller.RequisitesHtml,
@@ -722,6 +727,20 @@ public static class ActDocumentTemplateEngine
         public string Html { get; set; } = string.Empty;
     }
 
+    private static VatTotals CalculateVat(IEnumerable<RenderedActLineItem> items)
+        => VatCalculator.Calculate(items.Select(item => new VatLine(item.Quantity, item.Price, item.VatRate)));
+
+    private static string ResolveVatToken(IReadOnlyCollection<RenderedActLineItem> items)
+    {
+        var totals = CalculateVat(items);
+        if (!totals.HasRates)
+        {
+            return "0,00";
+        }
+
+        return totals.AllWithoutVat ? "Без НДС" : FormatMoney(totals.Vat);
+    }
+
     private static List<RenderedActLineItem> BuildEffectiveLineItems(
         Act act,
         IReadOnlyCollection<ActLineItem> lineItems)
@@ -731,7 +750,7 @@ public static class ActDocumentTemplateEngine
             return lineItems
                 .OrderBy(item => item.SortOrder)
                 .ThenBy(item => item.Id)
-                .Select(item => new RenderedActLineItem(item.Name, item.Quantity, item.Unit, item.Price))
+                .Select(item => new RenderedActLineItem(item.Name, item.Quantity, item.Unit, item.Price, item.VatRate))
                 .ToList();
         }
 
@@ -1463,7 +1482,7 @@ public static class ActDocumentTemplateEngine
     private static string Encode(string? value)
         => WebUtility.HtmlEncode(value ?? string.Empty);
 
-    private sealed record RenderedActLineItem(string Name, decimal Quantity, string Unit, decimal Price)
+    private sealed record RenderedActLineItem(string Name, decimal Quantity, string Unit, decimal Price, string? VatRate = null)
     {
         public decimal Total => Quantity * Price;
     }

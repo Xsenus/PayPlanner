@@ -120,6 +120,7 @@ public class InvoiceLineItemDto
     public decimal Quantity { get; set; }
     public string Unit { get; set; } = "шт";
     public decimal Price { get; set; }
+    public string? VatRate { get; set; }
 }
 
 public class InvoiceResponsibleDto

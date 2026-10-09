@@ -8,6 +8,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Tax;
 using PayPlanner.Api.Services.LegalEntities;
 
 namespace PayPlanner.Api.Services.Invoices;
@@ -276,10 +277,18 @@ public static class InvoiceDocumentTemplateEngine
         var hasInstallmentSchedule = !string.IsNullOrWhiteSpace(installmentScheduleHtml);
         var vatText = ResolveVatText(seller);
         var lineItemVat = ResolveLineItemVat(seller);
+        var vatTotals = VatCalculator.Calculate(normalizedLineItems.Select(item => new VatLine(item.Quantity, item.Price, item.VatRate)));
         var orderSellerPosition = sellerLegalEntity is null ? string.Empty : directorPosition;
         var orderSellerSignatory = sellerLegalEntity is null ? seller.ShortName : directorShortName;
-        var orderVatLabel = seller.IsVatExempt ? "Без налога (НДС):" : "В том числе НДС:";
-        var orderVatValue = seller.IsVatExempt ? "-" : "0,00";
+        // Если у позиций задана ставка НДС, документ считается построчно; иначе — прежние правила по признаку продавца.
+        var withoutVat = vatTotals.HasRates ? vatTotals.AllWithoutVat : seller.IsVatExempt;
+        var orderVatLabel = withoutVat ? "Без налога (НДС):" : "В том числе НДС:";
+        var orderVatValue = withoutVat ? "-" : (vatTotals.HasRates ? FormatMoney(vatTotals.Vat) : "0,00");
+        if (vatTotals.HasRates)
+        {
+            vatText = vatTotals.AllWithoutVat ? "Без НДС" : $"В том числе НДС {FormatMoney(vatTotals.Vat)}";
+        }
+
         var dueDateHtml = !hasInstallmentSchedule && dueDate != invoiceDate
             ? $"<div class=\"invoice-meta-line\"><strong>Срок оплаты:</strong> {Encode(FormatDate(dueDate))}</div>"
             : string.Empty;
@@ -383,7 +392,7 @@ public static class InvoiceDocumentTemplateEngine
                     ["unit"] = Encode(string.IsNullOrWhiteSpace(item.Unit) ? "шт" : item.Unit),
                     ["price"] = Encode(FormatMoney(item.Price)),
                     ["total"] = Encode(FormatMoney(item.Quantity * item.Price)),
-                    ["vat"] = lineItemVat,
+                    ["vat"] = vatTotals.HasRates ? Encode(FormatLineVat(item.VatRate, vatTotals.Lines[index].Vat)) : lineItemVat,
                 })
                 .ToList(),
         };
@@ -872,6 +881,9 @@ public static class InvoiceDocumentTemplateEngine
 
         return "По реквизитам документа";
     }
+
+    private static string FormatLineVat(string? rate, decimal vat)
+        => rate is null ? "—" : rate == VatRates.None ? "Без НДС" : $"{VatRates.Label(rate)} / {FormatMoney(vat)}";
 
     private static string ResolveLineItemVat(SellerInfo seller)
         => seller.IsVatExempt ? "Без НДС" : "—";

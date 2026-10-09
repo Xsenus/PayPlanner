@@ -180,3 +180,18 @@
 - `npm run audit:surface` была устаревшей из-за новых контроллеров — `docs/system-surface-inventory.generated.md` перегенерирован (`npm run audit:surface:update`), проверка проходит; `audit:dates:test`, `audit:encoding`, `npm audit --audit-level=moderate` (0 уязвимостей) проходят.
 - `npm run test:integration`: 305 из 306; единственный отказ `vite.restored-browser.integration.test.ts` (родной браузер) воспроизводится на чистом `origin/main` — не связан с ветвью.
 - На чистом `origin/main` те же классы хранилища/чата/подписи/управляемых документов дают 522 отказа из 1105 — подтверждено, что массовые отказы полного backend в облачном окружении существовали до ветви.
+
+## Шаг 10. Ставка НДС по позициям счёта и акта (PAY-34, пп. 4–5, часть)
+
+Решения владельца (9 октября): ставка задаётся у каждой позиции; акт без счёта по-прежнему допустим.
+
+| Файл | Что |
+| --- | --- |
+| `backend/Services/Tax/VatCalculator.cs` | Коды ставок (`none`, 0, 5, 7, 10, 20, 22), расчёт НДС «в том числе»: `сумма × ставка / (100 + ставка)`, округление до копеек от нуля **построчно**, итог — сумма строк; «Без НДС» и ставка 0% различаются; атрибут проверки `VatRateCode`. |
+| `backend/Models/InvoiceLineItem.cs`, `ActLineItem.cs`, `Data/PaymentContext.cs`, миграции `20261009182038_AddLineItemVatRate*` и `.../PostgreSql/20261009182414_AddLineItemVatRatePostgres*` | Колонка `VatRate` (nullable, 8 символов). Существующие строки остаются без ставки. |
+| `backend/Models/Requests/*`, `Models/Responses/*`, `InvoicesController`, `ActsController`, `AccountsController`, `InvoiceLineItemStorage` | Ставка принимается (неизвестная → 400), нормализуется («22%» → «22»), сохраняется, возвращается; частичный/полный акт по счёту наследует ставку позиции счёта; корректирующий акт копирует её. |
+| `InvoiceDocumentTemplateEngine`, `ActDocumentTemplateEngine` | Если хотя бы у одной позиции есть ставка — НДС считается построчно (токены `vat` позиции, итог «В том числе НДС» или «Без налога (НДС)»); если ставок нет — прежнее поведение по признаку продавца (без регрессии). |
+| `src/components/Documents/VatRateSelect.tsx`, `InvoiceModal.tsx`, `ActModal.tsx`, типы | Столбец «НДС» в позициях счёта и ручного акта. |
+| `backend/AppReleases/releases.json` | Запись 1.14.59. |
+
+Не реализовано: режимы «сверху» и «без налога» (меняют сумму), даты действия ставок, авансы/возвраты, обязательные формы (СФ/УПД) — ждут бухгалтерской модели. Тесты: `VatCalculatorTests` (27), `LineItemVatRenderingTests` (8).

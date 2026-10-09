@@ -721,6 +721,14 @@ public sealed class ManagedCaseDocumentUploadServiceTests
         var migrations = f.Db.Database.GetMigrations().ToArray();
         var keyMigration = Assert.Single(migrations, m => m.Contains("_ExpandGeneratedCaseDocumentKeys", StringComparison.Ordinal));
         var precedingKeyMigration = migrations[Array.IndexOf(migrations, keyMigration) - 1];
+        // Миграции, добавленные после метки корня стадии, проверяются своими тестами: снимаем их заранее, чтобы
+        // проверка относилась именно к откату метки корня стадии (каждый откат SQLite — отдельная транзакция).
+        var stageRootMigration = Assert.Single(migrations, m => m.Contains("_AddStageRootIdentity", StringComparison.Ordinal));
+        if (!string.Equals(migrations[^1], stageRootMigration, StringComparison.Ordinal))
+        {
+            await f.Db.Database.MigrateAsync(stageRootMigration);
+        }
+
         var appliedBefore = (await f.Db.Database.GetAppliedMigrationsAsync()).ToArray();
         // Exercise this migration itself without discarding newer durable storage proof.
         if (postgres)

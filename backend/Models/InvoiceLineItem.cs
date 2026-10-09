@@ -24,6 +24,10 @@ public class InvoiceLineItem
 
     public decimal Price { get; set; }
 
+    /// <summary>Код ставки НДС «в том числе» (см. <c>VatRates</c>); пусто — ставка не задана.</summary>
+    [MaxLength(8)]
+    public string? VatRate { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }
 }

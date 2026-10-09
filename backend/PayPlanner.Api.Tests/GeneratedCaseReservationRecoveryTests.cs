@@ -27,6 +27,16 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
         var migrations = (await f.Db.Database.GetAppliedMigrationsAsync()).ToArray();
         var index = Array.FindIndex(migrations, m => m.Contains("AddGeneratedCaseReservationRecovery", StringComparison.Ordinal));
         Assert.True(index > 0);
+        // Миграции, добавленные после метки корня стадии, проверяются своими тестами. Здесь они снимаются заранее,
+        // чтобы проверка продолжала относиться к защитному откату именно метки корня стадии (SQLite применяет
+        // каждый откат отдельной транзакцией, и более новые откаты иначе успели бы выполниться до отказа).
+        var stageRootIndex = Array.FindIndex(migrations, m => m.Contains("AddStageRootIdentity", StringComparison.Ordinal));
+        Assert.True(stageRootIndex > index);
+        if (stageRootIndex < migrations.Length - 1)
+        {
+            await f.Db.Database.MigrateAsync(migrations[stageRootIndex]);
+            migrations = migrations[..(stageRootIndex + 1)];
+        }
         var rootBefore = new { row.StageRootIdentity, row.StageWriterMarkerIdentity, row.StageFileReceiptJson };
         // Physical staging uses a separate fenced reservation, not the document intent row.
         var stageProofBefore = await f.Db.StorageCapacityReservations.AsNoTracking()
@@ -115,6 +125,7 @@ public sealed partial class ManagedGeneratedCaseDocumentTests
 
         row.GeneratedRecoveryLeaseToken = null; row.GeneratedRecoveryLeaseExpiresAt = null;
         await f.Db.SaveChangesAsync(); f.Db.ChangeTracker.Clear();
+        await f.Db.Database.MigrateAsync();
         Assert.Empty(await f.Db.Database.GetPendingMigrationsAsync()); Assert.False(f.Db.Database.HasPendingModelChanges());
         row = await f.Db.StorageCapacityReservations.SingleAsync(r => r.IdempotencyKey == original.IdempotencyKey && r.ResourceKey == local);
         Assert.Null(row.GeneratedRecoveryLeaseToken); Assert.Equal(0, row.GeneratedRecoveryAttemptCount);
