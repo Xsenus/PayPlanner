@@ -429,6 +429,10 @@ public class PaymentContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Number).HasMaxLength(100).IsRequired();
             entity.Property(e => e.Title).HasMaxLength(200);
+            entity.Property(e => e.SellerSnapshotJson).HasMaxLength(16000);
+            // Связи без внешнего ключа: см. комментарий у Payment/Act.
+            entity.HasIndex(e => e.SellerCompanyId);
+            entity.HasIndex(e => e.SellerBranchId);
             entity.Property(e => e.Description).HasMaxLength(2000);
             entity.Property(e => e.BillingMode).HasMaxLength(32).HasDefaultValue(ContractBillingMode.Fixed).IsRequired();
             entity.Property(e => e.Status).HasMaxLength(32).HasDefaultValue(ContractStatus.Draft).IsRequired();

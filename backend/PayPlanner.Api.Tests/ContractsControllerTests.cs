@@ -922,6 +922,48 @@ public class ContractsControllerTests
     }
 
     [Fact]
+    public async Task SetSeller_SavesChoice_FreezesRequisitesOnExport_AndRejectsLaterChanges()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db, email: "client@example.com");
+        var company = new LegalEntity { ShortName = "ООО Продавец", Inn = "7707083893", Kpp = "770701001" };
+        db.LegalEntities.Add(company);
+        await db.SaveChangesAsync();
+        db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = $"[{company.Id}]" });
+        db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.defaultMainCompanyId", Value = company.Id.ToString() });
+        await db.SaveChangesAsync();
+        var controller = new ContractsController(db, new NoopFormRequirementsService());
+        var created = Assert.IsType<ContractDto>(Assert.IsType<CreatedResult>((await controller.Create(
+            new UpsertContractRequest
+            {
+                Number = "CT-SELLER-1",
+                Date = new DateTime(2026, 5, 21),
+                BillingMode = ContractBillingMode.Fixed,
+                Amount = 10_000m,
+                Clients = [new UpsertContractClientRequest { ClientId = client.Id }],
+            },
+            CancellationToken.None)).Result).Value);
+
+        var foreign = await controller.SetSeller(created.Id, new DocumentSellerRequest { CompanyId = 999 }, CancellationToken.None);
+        Assert.IsType<BadRequestObjectResult>(foreign.Result);
+
+        var ok = await controller.SetSeller(created.Id, new DocumentSellerRequest { CompanyId = company.Id }, CancellationToken.None);
+        Assert.IsType<OkObjectResult>(ok.Result);
+        Assert.Equal(company.Id, (await db.Contracts.AsNoTracking().SingleAsync()).SellerCompanyId);
+
+        await controller.GetDocument(created.Id, "html", templateKey: null, CancellationToken.None);
+        Assert.Null((await db.Contracts.AsNoTracking().SingleAsync()).SellerSnapshotJson);
+
+        await controller.GetDocument(created.Id, "word", templateKey: null, CancellationToken.None);
+        var frozen = await db.Contracts.AsNoTracking().SingleAsync();
+        Assert.NotNull(frozen.SellerSnapshotJson);
+        Assert.Contains("770701001", frozen.SellerSnapshotJson);
+
+        var locked = await controller.SetSeller(created.Id, new DocumentSellerRequest { CompanyId = null }, CancellationToken.None);
+        Assert.IsType<ConflictObjectResult>(locked.Result);
+    }
+
+    [Fact]
     public async Task GetDocument_RequiresContractExportPermission()
     {
         await using var db = await CreateContextAsync();

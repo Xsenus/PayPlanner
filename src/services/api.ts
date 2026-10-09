@@ -6035,6 +6035,13 @@ export class ApiService {
     });
   }
 
+  async setContractSeller(contractId: number, payload: { companyId: number | null; branchId: number | null }) {
+    return this.request<DocumentSellerSelection>(`/contracts/${contractId}/seller`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async setActSeller(actId: number, payload: { companyId: number | null; branchId: number | null }) {
     return this.request<DocumentSellerSelection>(`/acts/${actId}/seller`, {
       method: 'PUT',

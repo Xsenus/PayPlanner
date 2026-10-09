@@ -7,7 +7,7 @@ import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { SystemSelect } from '../ui/SystemSelect';
 
 interface DocumentSellerPickerProps {
-  kind: 'invoice' | 'act';
+  kind: 'invoice' | 'act' | 'contract';
   documentId: number;
   companyId?: number | null;
   branchId?: number | null;
@@ -21,7 +21,7 @@ const SELECT_CLASS =
   'rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100';
 
 /**
- * Выбор собственной компании и подразделения-продавца для счёта или акта.
+ * Выбор собственной компании и подразделения-продавца для счёта, акта или договора.
  * Показывается только если выбирать есть из чего: несколько компаний или у компании есть подразделения.
  * Пустой выбор означает компанию по умолчанию.
  */
@@ -75,6 +75,8 @@ export function DocumentSellerPicker({
     try {
       if (kind === 'invoice') {
         await apiService.setInvoiceSeller(documentId, next);
+      } else if (kind === 'contract') {
+        await apiService.setContractSeller(documentId, next);
       } else {
         await apiService.setActSeller(documentId, next);
       }

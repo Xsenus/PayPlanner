@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
+import { DocumentSellerPicker } from '../Documents/DocumentSellerPicker';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { apiService, type ContractRulesSettingsDto } from '../../services/api';
 import type { Act, Contract, ContractInput, ContractLegalEntity, Invoice, Payment } from '../../types';
@@ -1399,6 +1400,16 @@ export function ContractDetailPage({
             {contract.cancelledAt ? ` · аннулирован ${formatDate(contract.cancelledAt)}` : ''}
             {contract.terminationTerms ? ` · ${contract.terminationTerms}` : ''}
             {contract.cancelledReason ? ` · ${contract.cancelledReason}` : ''}
+          </div>
+          <div className="mt-2 text-sm">
+            <DocumentSellerPicker
+              kind="contract"
+              documentId={contract.id}
+              companyId={contract.sellerCompanyId}
+              branchId={contract.sellerBranchId}
+              frozen={contract.sellerFrozen}
+              canEdit={rolePermissions.contracts.canEdit}
+            />
           </div>
         </div>
       </div>

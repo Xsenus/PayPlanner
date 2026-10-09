@@ -119,3 +119,17 @@
 - Редактирование `InvoicesController.cs` ведётся с сохранением смешанных окончаний строк (файл частично CRLF): не пересохранять его утилитами, которые меняют окончания.
 
 **Тесты:** `SellerLegalEntityComposerTests`, `DocumentSellerServiceTests`, `ActSellerEndpointTests`, `OwnCompaniesControllerTests`, два теста в `InvoiceDocumentTemplateTests` (выбор продавца, фиксация, чужая компания); фронтенд `DocumentSellerPicker.test.tsx` (5). Запускались также все тесты счетов, актов и документов (424 зелёных) и миграционные/моделей на реальном PostgreSQL (`PAYPLANNER_TEST_POSTGRES`).
+
+## Шаг 6. Выбор компании и подразделения в договоре (PAY-33, п. 9, продолжение)
+
+То же, что в шаге 5, для договоров: файл договора и соглашение о расторжении раньше всегда брали «главную» компанию.
+
+| Файл | Что |
+| --- | --- |
+| `backend/Models/Contract.cs`, `backend/Data/PaymentContext.cs`, `backend/Models/Responses/ContractDto.cs` | Поля `SellerCompanyId`, `SellerBranchId`, `SellerSnapshotJson`, индексы, поля `sellerCompanyId/sellerBranchId/sellerFrozen` в ответе. |
+| `backend/Migrations/20261009125201_AddContractSellerSelection*`, `backend/Migrations/PostgreSql/20261009125621_AddContractSellerSelectionPostgres*` | Парные миграции (три nullable-колонки и два индекса). |
+| `backend/Controllers/ContractsController.cs` | `PUT api/contracts/{id}/seller` (право «изменение»); четыре места выдачи (документ, соглашение о расторжении, Яндекс.Диск, e-mail) используют `ResolveContractSellerAsync`; просмотр HTML реквизиты не фиксирует. |
+| `src/components/Contracts/ContractDetailPage.tsx`, `src/components/Documents/DocumentSellerPicker.tsx` | Выбор продавца в карточке договора (тот же компонент, вид `contract`); тестовые моки дополнены `getOwnCompanyOptions` и правами `contracts`. |
+| `backend/AppReleases/releases.json` | Запись 1.14.58 дополнена договором. |
+
+Тесты: `ContractsControllerTests.SetSeller_SavesChoice_FreezesRequisitesOnExport_AndRejectsLaterChanges`; фронтенд — существующие тесты договоров (12) с обновлёнными моками.

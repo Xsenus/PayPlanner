@@ -6,6 +6,10 @@ namespace PayPlanner.Api.Models.Responses;
 public class ContractDto
 {
     public int Id { get; set; }
+    public int? SellerCompanyId { get; set; }
+    public int? SellerBranchId { get; set; }
+    /// <summary>Реквизиты продавца зафиксированы при выдаче документа и больше не меняются.</summary>
+    public bool SellerFrozen { get; set; }
     public string Number { get; set; } = string.Empty;
     public string? Title { get; set; }
     public DateTime Date { get; set; }

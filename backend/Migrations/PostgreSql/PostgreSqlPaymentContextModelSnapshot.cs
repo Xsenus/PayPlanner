@@ -3952,6 +3952,16 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<int?>("SellerBranchId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("SellerCompanyId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SellerSnapshotJson")
+                        .HasMaxLength(16000)
+                        .HasColumnType("character varying(16000)");
+
                     b.Property<DateTime?>("SentForSigningAt")
                         .HasColumnType("timestamp without time zone");
 
@@ -4010,6 +4020,10 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("Number")
                         .HasDatabaseName("IX_Contracts_Number");
+
+                    b.HasIndex("SellerBranchId");
+
+                    b.HasIndex("SellerCompanyId");
 
                     b.HasIndex("Status")
                         .HasDatabaseName("IX_Contracts_Status");

@@ -3869,6 +3869,16 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("SellerBranchId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("SellerCompanyId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SellerSnapshotJson")
+                        .HasMaxLength(16000)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("SentForSigningAt")
                         .HasColumnType("TEXT");
 
@@ -3927,6 +3937,10 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("Number")
                         .HasDatabaseName("IX_Contracts_Number");
+
+                    b.HasIndex("SellerBranchId");
+
+                    b.HasIndex("SellerCompanyId");
 
                     b.HasIndex("Status")
                         .HasDatabaseName("IX_Contracts_Status");

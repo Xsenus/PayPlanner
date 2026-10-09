@@ -6,12 +6,21 @@ namespace PayPlanner.Api.Models;
 /// <summary>
 /// Модель договора между компанией и клиентами.
 /// </summary>
-public class Contract
+public class Contract : PayPlanner.Api.Services.Companies.IDocumentSeller
 {
     /// <summary>
     /// Уникальный идентификатор договора.
     /// </summary>
     public int Id { get; set; }
+
+    /// <summary>Собственная компания-продавец (сторона договора), выбранная для документа; пусто — компания по умолчанию.</summary>
+    public int? SellerCompanyId { get; set; }
+
+    /// <summary>Филиал, офис или точка компании; пусто — реквизиты самой компании.</summary>
+    public int? SellerBranchId { get; set; }
+
+    /// <summary>Снимок реквизитов, сохранённый при первой выдаче документа договора.</summary>
+    public string? SellerSnapshotJson { get; set; }
 
     /// <summary>
     /// Номер договора.

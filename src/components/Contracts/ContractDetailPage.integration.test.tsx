@@ -12,6 +12,7 @@ const { dialogConfirmMock, dialogPromptMock, rolePermissionsResult } = vi.hoiste
     accounts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     acts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     payments: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+    contracts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
   },
 }));
 
@@ -103,6 +104,7 @@ vi.mock('../ui/ObjectAuditModal', () => ({
 
 vi.mock('../../services/api', () => ({
   apiService: {
+    getOwnCompanyOptions: vi.fn().mockResolvedValue([]),
     getContract: vi.fn(),
     getContractRulesSettings: vi.fn(),
     getInvoices: vi.fn(),

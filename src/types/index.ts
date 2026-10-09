@@ -3512,6 +3512,10 @@ export type ContractStatus =
 
 export interface Contract {
   id: number;
+  sellerCompanyId?: number | null;
+  sellerBranchId?: number | null;
+  /** Реквизиты стороны договора зафиксированы при выдаче документа. */
+  sellerFrozen?: boolean;
   number: string;
   title?: string | null;
   date: string;

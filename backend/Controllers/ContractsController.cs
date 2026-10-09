@@ -13,6 +13,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Companies;
 using PayPlanner.Api.Services.Contracts;
 using PayPlanner.Api.Services.Documents;
 using PayPlanner.Api.Services.Invoices;
@@ -39,6 +40,7 @@ public class ContractsController : ControllerBase
     private const string ContractTerminationClientEmailsEnabledKey = "notifications.email.contractTerminationClientEnabled";
 
     private readonly PaymentContext _db;
+    private readonly IDocumentSellerService _documentSeller;
     private readonly IFormRequirementsService _formRequirements;
     private readonly IInvoiceDocumentPdfService? _invoiceDocumentPdfService;
     private readonly IEmailService? _emailService;
@@ -51,9 +53,11 @@ public class ContractsController : ControllerBase
         IInvoiceDocumentPdfService? invoiceDocumentPdfService = null,
         IEmailService? emailService = null,
         INotificationService? notificationService = null,
-        IYandexDiskService? yandexDiskService = null)
+        IYandexDiskService? yandexDiskService = null,
+        IDocumentSellerService? documentSellerService = null)
     {
         _db = db;
+        _documentSeller = documentSellerService ?? new DocumentSellerService(db);
         _formRequirements = formRequirements;
         _invoiceDocumentPdfService = invoiceDocumentPdfService;
         _emailService = emailService;
@@ -375,7 +379,7 @@ public class ContractsController : ControllerBase
         var contract = await LoadContractForDocumentAsync(id, ct);
         if (contract is null) return NotFound();
 
-        var mainCompany = await LoadMainCompanyAsync(ct);
+        var mainCompany = await ResolveContractSellerAsync(contract, await LoadMainCompanyAsync(ct), NormalizeDocumentFormat(format) != "html", ct);
         var template = await GetContractDocumentTemplateAsync(templateKey, ct);
         var documentHtml = ContractDocumentTemplateEngine.RenderHtml(template.Html, contract, mainCompany);
         var normalizedFormat = NormalizeDocumentFormat(format);
@@ -421,7 +425,7 @@ public class ContractsController : ControllerBase
             return BadRequest("Соглашение о расторжении доступно после расторжения договора с заполненными условиями.");
         }
 
-        var mainCompany = await LoadMainCompanyAsync(ct);
+        var mainCompany = await ResolveContractSellerAsync(contract, await LoadMainCompanyAsync(ct), NormalizeDocumentFormat(format) != "html", ct);
         var documentHtml = ContractDocumentTemplateEngine.RenderTerminationAgreementHtml(contract, mainCompany);
         var normalizedFormat = NormalizeDocumentFormat(format);
 
@@ -475,7 +479,7 @@ public class ContractsController : ControllerBase
         var contract = await LoadContractForDocumentAsync(id, ct);
         if (contract is null) return NotFound();
 
-        var mainCompany = await LoadMainCompanyAsync(ct);
+        var mainCompany = await ResolveContractSellerAsync(contract, await LoadMainCompanyAsync(ct), true, ct);
         var template = await GetContractDocumentTemplateAsync(templateKey, ct);
         var documentHtml = ContractDocumentTemplateEngine.RenderHtml(template.Html, contract, mainCompany);
         var normalizedFormat = NormalizeDocumentFormat(format);
@@ -592,7 +596,7 @@ public class ContractsController : ControllerBase
             return BadRequest("Recipient email is required.");
         }
 
-        var mainCompany = await LoadMainCompanyAsync(ct);
+        var mainCompany = await ResolveContractSellerAsync(contract, await LoadMainCompanyAsync(ct), true, ct);
         var template = await GetContractDocumentTemplateAsync(preferredTemplateKey: null, ct);
         var documentHtml = ContractDocumentTemplateEngine.RenderHtml(template.Html, contract, mainCompany);
         var normalizedFormat = NormalizeDocumentFormat(request.Format);
@@ -1281,6 +1285,9 @@ public class ContractsController : ControllerBase
     private static readonly Expression<Func<Contract, ContractDto>> MapToDtoExpression = contract => new ContractDto
     {
         Id = contract.Id,
+        SellerCompanyId = contract.SellerCompanyId,
+        SellerBranchId = contract.SellerBranchId,
+        SellerFrozen = contract.SellerSnapshotJson != null,
         Number = contract.Number,
         Title = contract.Title,
         Description = contract.Description,
@@ -1529,6 +1536,52 @@ public class ContractsController : ControllerBase
         }
 
         return _invoiceDocumentPdfService.RenderAsync(documentHtml, ct);
+    }
+
+    /// <summary>
+    /// Сторона договора — собственная компания. При выдаче файла (не просмотре) её реквизиты фиксируются
+    /// в договоре, чтобы последующие правки профиля уже выданный документ не меняли.
+    /// </summary>
+    private async Task<LegalEntity?> ResolveContractSellerAsync(Contract contract, LegalEntity? defaultCompany, bool freeze, CancellationToken ct)
+    {
+        var hadSnapshot = !string.IsNullOrWhiteSpace(contract.SellerSnapshotJson);
+        var seller = await _documentSeller.ResolveAsync(contract, defaultCompany, freeze, ct);
+        if (!hadSnapshot && !string.IsNullOrWhiteSpace(contract.SellerSnapshotJson))
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+
+        return seller;
+    }
+
+    /// <summary>
+    /// Выбор собственной компании и подразделения для договора. После первой выдачи документа реквизиты зафиксированы.
+    /// </summary>
+    [HttpPut("{id:int}/seller")]
+    public async Task<ActionResult<DocumentSellerResponse>> SetSeller(int id, [FromBody] DocumentSellerRequest request, CancellationToken ct)
+    {
+        var contract = await LoadEditableContractAsync(id, ct);
+        if (contract is null) return NotFound();
+        if (await RequireSectionPermissionAsync(RolePermissionCatalog.Contracts, permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var selectionError = await _documentSeller.ValidateSelectionAsync(request.CompanyId, request.BranchId, ct);
+        if (selectionError is not null)
+        {
+            return BadRequest(new { message = selectionError });
+        }
+
+        if (!string.IsNullOrWhiteSpace(contract.SellerSnapshotJson))
+        {
+            return Conflict(new { message = "Реквизиты стороны договора уже зафиксированы в выданном документе и не меняются." });
+        }
+
+        contract.SellerCompanyId = request.CompanyId;
+        contract.SellerBranchId = request.CompanyId.HasValue ? request.BranchId : null;
+        await _db.SaveChangesAsync(ct);
+        return Ok(new DocumentSellerResponse(contract.SellerCompanyId, contract.SellerBranchId, false));
     }
 
     private async Task<LegalEntity?> LoadMainCompanyAsync(CancellationToken ct)
@@ -1930,6 +1983,9 @@ public class ContractsController : ControllerBase
         return new ContractDto
         {
             Id = contract.Id,
+            SellerCompanyId = contract.SellerCompanyId,
+            SellerBranchId = contract.SellerBranchId,
+            SellerFrozen = contract.SellerSnapshotJson != null,
             Number = contract.Number,
             Title = contract.Title,
             Description = contract.Description,
