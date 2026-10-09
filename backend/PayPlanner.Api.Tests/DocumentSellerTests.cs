@@ -179,6 +179,26 @@ public class DocumentSellerServiceTests
     }
 
     [Fact]
+    public async Task ArchivedBranch_KeepsFrozenDocumentsAndMakesUnfrozenOnesFallBackToCompany()
+    {
+        await using var db = await CreateContextAsync();
+        var company = await AddCompanyAsync(db, "Своя", own: true, kpp: "111111111");
+        var branch = new CompanyBranch { LegalEntityId = company.Id, Name = "Офис", Kpp = "222222222" };
+        db.CompanyBranches.Add(branch);
+        await db.SaveChangesAsync();
+        var service = new DocumentSellerService(db);
+        var frozen = new Act { SellerCompanyId = company.Id, SellerBranchId = branch.Id };
+        var pending = new Act { SellerCompanyId = company.Id, SellerBranchId = branch.Id };
+        await service.ResolveAsync(frozen, company, freeze: true, default);
+
+        (await db.CompanyBranches.SingleAsync()).Status = CompanyProfileStatuses.Archived;
+        await db.SaveChangesAsync();
+
+        Assert.Equal("222222222", (await service.ResolveAsync(frozen, company, false, default))!.Kpp);
+        Assert.Equal("111111111", (await service.ResolveAsync(pending, company, false, default))!.Kpp);
+    }
+
+    [Fact]
     public async Task Snapshot_KeepsOnlyChosenAccount_SoItStaysSmallForManyAccounts()
     {
         await using var db = await CreateContextAsync();

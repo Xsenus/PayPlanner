@@ -1182,6 +1182,29 @@ public class LegalEntitiesControllerTests
     }
 
     [Fact]
+    public async Task BrandFiles_OfOwnCompany_CanBeChangedByRoleWithLegalEntityEditRight_AndNotWithoutIt()
+    {
+        await using var db = await CreateContextAsync();
+        var adminId = await CreateUserAsync(db, roleName: "admin");
+        var editorId = await CreateUserAsync(db);
+        var viewerId = await CreateUserAsync(db);
+        await SetLegalEntityPermissionAsync(db, editorId, canCreate: false, canEdit: true, canDelete: false);
+        await SetLegalEntityPermissionAsync(db, viewerId, canCreate: false, canEdit: false, canDelete: false);
+        var companyId = await CreateLegalEntityAsync(db, "Своя компания", responsibleUserId: editorId);
+        await CreateController(db, adminId).UpdateMainCompanySettings(
+            new UpdateMainCompanySettingsRequest { CompanyIds = [companyId], DefaultCompanyId = companyId },
+            CancellationToken.None);
+        var request = new LegalEntityRequest { ShortName = "Своя компания", SealDataUrl = "data:image/png;base64,QUFB" };
+
+        var denied = await CreateController(db, viewerId, isAdmin: false).Update(companyId, request, CancellationToken.None);
+        var allowed = await CreateController(db, editorId, isAdmin: false).Update(companyId, request, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(denied.Result);
+        Assert.IsType<OkObjectResult>(allowed.Result);
+        Assert.Equal("data:image/png;base64,QUFB", (await db.LegalEntities.AsNoTracking().SingleAsync(le => le.Id == companyId)).SealDataUrl);
+    }
+
+    [Fact]
     public async Task Update_RejectsUnknownProfileStatus_AndBlocksDeactivatingOwnCompany()
     {
         await using var db = await CreateContextAsync();
