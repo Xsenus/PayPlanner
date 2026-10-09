@@ -587,6 +587,133 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("Banks");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.BankConnection", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("AccessTokenExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AccessTokenProtected")
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<DateTime?>("LastAccountsSyncAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("LegalEntityId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RefreshTokenProtected")
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Scopes")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("Active");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LegalEntityId", "Provider")
+                        .HasDatabaseName("IX_BankConnections_LegalEntityId_Provider");
+
+                    b.ToTable("BankConnections");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.BankConnectionAccount", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AccountNumber")
+                        .IsRequired()
+                        .HasMaxLength(34)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("BankConnectionId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Bik")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExternalAccountId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsHidden")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastStatementSyncAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("StatementWatermark")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("StatementsEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("Open");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BankConnectionId", "ExternalAccountId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_BankConnectionAccounts_Connection_External");
+
+                    b.ToTable("BankConnectionAccounts");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.BankStatementImportBatch", b =>
                 {
                     b.Property<int>("Id")
@@ -728,6 +855,66 @@ namespace PayPlanner.Api.Migrations
                         .HasDatabaseName("IX_BankStatementImportRows_MoneyOperationId");
 
                     b.ToTable("BankStatementImportRows");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.BankStatementOperation", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("BankConnectionAccountId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CounterpartyAccount")
+                        .HasMaxLength(34)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CounterpartyInn")
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CounterpartyName")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExternalOperationId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ImportedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<bool>("IsBooked")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsIncome")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("OperationDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Purpose")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BankConnectionAccountId", "ExternalOperationId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_BankStatementOperations_Account_External");
+
+                    b.HasIndex("BankConnectionAccountId", "OperationDate")
+                        .HasDatabaseName("IX_BankStatementOperations_Account_Date");
+
+                    b.ToTable("BankStatementOperations");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.BaseCurrencyDictionaryItem", b =>
@@ -12450,6 +12637,17 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.BankConnectionAccount", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.BankConnection", "BankConnection")
+                        .WithMany("Accounts")
+                        .HasForeignKey("BankConnectionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("BankConnection");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.BankStatementImportRow", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.BankStatementImportBatch", "Batch")
@@ -12466,6 +12664,17 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Batch");
 
                     b.Navigation("MoneyOperation");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.BankStatementOperation", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.BankConnectionAccount", "BankConnectionAccount")
+                        .WithMany()
+                        .HasForeignKey("BankConnectionAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("BankConnectionAccount");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.CaseDocumentNotificationDispatch", b =>
@@ -14627,6 +14836,11 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Items");
 
                     b.Navigation("SeenByUsers");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.BankConnection", b =>
+                {
+                    b.Navigation("Accounts");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.BankStatementImportBatch", b =>

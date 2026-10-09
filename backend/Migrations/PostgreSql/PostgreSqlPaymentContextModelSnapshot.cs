@@ -606,6 +606,137 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("Banks");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.BankConnection", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime?>("AccessTokenExpiresAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("AccessTokenProtected")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<DateTime?>("LastAccountsSyncAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int>("LegalEntityId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("RefreshTokenProtected")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<string>("Scopes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("Active");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LegalEntityId", "Provider")
+                        .HasDatabaseName("IX_BankConnections_LegalEntityId_Provider");
+
+                    b.ToTable("BankConnections");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.BankConnectionAccount", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AccountNumber")
+                        .IsRequired()
+                        .HasMaxLength(34)
+                        .HasColumnType("character varying(34)");
+
+                    b.Property<int>("BankConnectionId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Bik")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
+                    b.Property<string>("ExternalAccountId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<bool>("IsHidden")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime?>("LastStatementSyncAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("StatementWatermark")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("StatementsEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("Open");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BankConnectionId", "ExternalAccountId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_BankConnectionAccounts_Connection_External");
+
+                    b.ToTable("BankConnectionAccounts");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.BankStatementImportBatch", b =>
                 {
                     b.Property<int>("Id")
@@ -751,6 +882,68 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasDatabaseName("IX_BankStatementImportRows_MoneyOperationId");
 
                     b.ToTable("BankStatementImportRows");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.BankStatementOperation", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("BankConnectionAccountId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CounterpartyAccount")
+                        .HasMaxLength(34)
+                        .HasColumnType("character varying(34)");
+
+                    b.Property<string>("CounterpartyInn")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("CounterpartyName")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("ExternalOperationId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime>("ImportedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<bool>("IsBooked")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsIncome")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("OperationDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Purpose")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BankConnectionAccountId", "ExternalOperationId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_BankStatementOperations_Account_External");
+
+                    b.HasIndex("BankConnectionAccountId", "OperationDate")
+                        .HasDatabaseName("IX_BankStatementOperations_Account_Date");
+
+                    b.ToTable("BankStatementOperations");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.BaseCurrencyDictionaryItem", b =>
@@ -12726,6 +12919,17 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.BankConnectionAccount", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.BankConnection", "BankConnection")
+                        .WithMany("Accounts")
+                        .HasForeignKey("BankConnectionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("BankConnection");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.BankStatementImportRow", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.BankStatementImportBatch", "Batch")
@@ -12742,6 +12946,17 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("Batch");
 
                     b.Navigation("MoneyOperation");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.BankStatementOperation", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.BankConnectionAccount", "BankConnectionAccount")
+                        .WithMany()
+                        .HasForeignKey("BankConnectionAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("BankConnectionAccount");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.CaseDocumentNotificationDispatch", b =>
@@ -14903,6 +15118,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("Items");
 
                     b.Navigation("SeenByUsers");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.BankConnection", b =>
+                {
+                    b.Navigation("Accounts");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.BankStatementImportBatch", b =>

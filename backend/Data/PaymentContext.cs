@@ -697,6 +697,48 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.ResponsibleUserId).HasDatabaseName("IX_LegalEntities_ResponsibleUserId");
         });
 
+        modelBuilder.Entity<BankConnection>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Provider).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.Status).HasMaxLength(16).IsRequired().HasDefaultValue(BankConnectionStatuses.Active);
+            entity.Property(e => e.AccessTokenProtected).HasMaxLength(4000);
+            entity.Property(e => e.RefreshTokenProtected).HasMaxLength(4000);
+            entity.Property(e => e.Scopes).HasMaxLength(500);
+            entity.Property(e => e.LastError).HasMaxLength(1000);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasIndex(e => new { e.LegalEntityId, e.Provider }).HasDatabaseName("IX_BankConnections_LegalEntityId_Provider");
+        });
+
+        modelBuilder.Entity<BankConnectionAccount>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ExternalAccountId).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.AccountNumber).HasMaxLength(34).IsRequired();
+            entity.Property(e => e.Bik).HasMaxLength(16);
+            entity.Property(e => e.Currency).HasMaxLength(8).IsRequired();
+            entity.Property(e => e.Status).HasMaxLength(16).IsRequired().HasDefaultValue(BankAccountStatuses.Open);
+            entity.Property(e => e.LastError).HasMaxLength(1000);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasOne(e => e.BankConnection).WithMany(c => c.Accounts).HasForeignKey(e => e.BankConnectionId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => new { e.BankConnectionId, e.ExternalAccountId }).IsUnique().HasDatabaseName("IX_BankConnectionAccounts_Connection_External");
+        });
+
+        modelBuilder.Entity<BankStatementOperation>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ExternalOperationId).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.Amount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.CounterpartyInn).HasMaxLength(20);
+            entity.Property(e => e.CounterpartyName).HasMaxLength(300);
+            entity.Property(e => e.CounterpartyAccount).HasMaxLength(34);
+            entity.Property(e => e.Purpose).HasMaxLength(2000);
+            entity.Property(e => e.ImportedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasOne(e => e.BankConnectionAccount).WithMany().HasForeignKey(e => e.BankConnectionAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => new { e.BankConnectionAccountId, e.ExternalOperationId }).IsUnique().HasDatabaseName("IX_BankStatementOperations_Account_External");
+            entity.HasIndex(e => new { e.BankConnectionAccountId, e.OperationDate }).HasDatabaseName("IX_BankStatementOperations_Account_Date");
+        });
+
         modelBuilder.Entity<CompanyBranch>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -5030,6 +5072,9 @@ public class PaymentContext : DbContext
     public DbSet<SpreadsheetImportBatchOperation> SpreadsheetImportBatchOperations { get; set; }
     public DbSet<UserCompanyAccess> UserCompanyAccesses { get; set; }
     public DbSet<CompanyBranch> CompanyBranches { get; set; }
+    public DbSet<BankConnection> BankConnections { get; set; }
+    public DbSet<BankConnectionAccount> BankConnectionAccounts { get; set; }
+    public DbSet<BankStatementOperation> BankStatementOperations { get; set; }
     public DbSet<UserExternalIdentity> UserExternalIdentities { get; set; }
     public DbSet<ExternalAuthRequest> ExternalAuthRequests { get; set; }
     public DbSet<TelegramAuthRequest> TelegramAuthRequests { get; set; }

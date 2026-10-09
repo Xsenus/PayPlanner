@@ -133,3 +133,17 @@
 | `backend/AppReleases/releases.json` | Запись 1.14.58 дополнена договором. |
 
 Тесты: `ContractsControllerTests.SetSeller_SavesChoice_FreezesRequisitesOnExport_AndRejectsLaterChanges`; фронтенд — существующие тесты договоров (12) с обновлёнными моками.
+
+## Шаг 7. Общая основа банковских подключений (PAY-36, пп. 2, 4, 5–9 частично)
+
+Реальных адаптеров Точки и Сбера нет: нет доступа к документации/ключам/sandbox. Подробно — [bank-integrations-api-verification-2026-10-09.md](bank-integrations-api-verification-2026-10-09.md).
+
+| Файл | Что |
+| --- | --- |
+| `backend/Models/BankConnection.cs` | `BankConnection`, `BankConnectionAccount`, `BankStatementOperation` и справочники статусов. |
+| `backend/Services/Banking/IBankProvider.cs` | Контракт адаптера банка (счета, страница выписки), исключение `BankAuthorizationException`. |
+| `backend/Services/Banking/BankSyncService.cs` | Общая логика: защищённое хранение токенов, идемпотентная загрузка счетов, выписок без дублей и потерь, изоляция ошибок. Зарегистрирован в `Program.cs`. |
+| `backend/Data/PaymentContext.cs`, миграции `20261009132119_AddBankConnections*`, `.../PostgreSql/20261009132451_AddBankConnectionsPostgres*` | Таблицы и уникальные индексы. |
+| `backend/PayPlanner.Api.Tests/BankSyncServiceTests.cs` | 9 тестов на поддельном банке: токены не в открытом виде, идемпотентность, чужой ИНН, отказ авторизации, все страницы, повтор и перекрытие, незавершённые операции, сбой посреди загрузки, изоляция счетов. |
+
+Пока нет: HTTP-методов и интерфейса подключения, фонового расписания, разнесения операций в платежи.
