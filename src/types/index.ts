@@ -194,6 +194,50 @@ export interface BankSyncLogPage {
   items: BankSyncLogItem[];
 }
 
+export interface TaxRegisterEntryItem {
+  id: number;
+  legalEntityId: number;
+  operationDate: string;
+  type: 'Income' | 'Expense' | 'Correction';
+  direction: 'Income' | 'Expense';
+  amount: number;
+  sign: 1 | -1;
+  status: 'Draft' | 'Approved' | 'Archived';
+  documentRef?: string | null;
+  description?: string | null;
+  category?: string | null;
+  bankStatementOperationId?: number | null;
+  correctsEntryId?: number | null;
+  correctedByEntryId?: number | null;
+  correctionReason?: string | null;
+  approvedAt?: string | null;
+}
+
+export interface TaxRegisterEntryPage {
+  total: number;
+  page: number;
+  pageSize: number;
+  items: TaxRegisterEntryItem[];
+}
+
+export interface TaxRegisterBook {
+  legalEntityId: number;
+  year: number;
+  isClosed: boolean;
+  totals: { income: number; expense: number; taxBase: number; entries: number };
+  entries: TaxRegisterEntryItem[];
+}
+
+export interface TaxRegisterEntryInput {
+  legalEntityId: number;
+  type: 'Income' | 'Expense';
+  operationDate: string;
+  amount: number;
+  documentRef?: string;
+  description?: string;
+  category?: string;
+}
+
 export interface RequisitesIssue {
   field: string;
   message: string;

@@ -93,6 +93,7 @@ import { getLegalEntityImageFieldState } from "./legalEntityImageFieldUtils";
 import { CompanyBankConnectionsSection } from "./CompanyBankConnectionsSection";
 import { CompanyBranchesSection } from "./CompanyBranchesSection";
 import { CompanyRequisitesCheck } from "./CompanyRequisitesCheck";
+import { CompanyTaxRegisterSection } from "./CompanyTaxRegisterSection";
 import { LegalEntityFinanceSection } from "./LegalEntityFinanceSection";
 
 interface LegalEntityModalProps {
@@ -4585,6 +4586,7 @@ export function LegalEntityModal({
             </div>
             <CompanyRequisitesCheck companyId={currentLegalEntityId} refreshKey={initial?.updatedAt} />
             <CompanyBankConnectionsSection companyId={currentLegalEntityId} />
+            <CompanyTaxRegisterSection companyId={currentLegalEntityId} />
             <CompanyBranchesSection
               companyId={currentLegalEntityId}
               bankAccounts={bankAccounts}

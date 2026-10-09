@@ -726,6 +726,44 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.BankConnectionId, e.ExternalAccountId }).IsUnique().HasDatabaseName("IX_BankConnectionAccounts_Connection_External");
         });
 
+        modelBuilder.Entity<TaxRegisterEntry>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.OperationDate).HasColumnType("date");
+            entity.Property(e => e.Type).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.Direction).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.SubType).HasMaxLength(32);
+            entity.Property(e => e.Amount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.DocumentRef).HasMaxLength(300);
+            entity.Property(e => e.Description).HasMaxLength(2000);
+            entity.Property(e => e.Category).HasMaxLength(200);
+            entity.Property(e => e.Status).HasMaxLength(16).IsRequired().HasDefaultValue(TaxRegisterStatuses.Draft);
+            entity.Property(e => e.CorrectionReason).HasMaxLength(1000);
+            // Индексы по ТЗ: компания, дата операции, статус, тип.
+            entity.HasIndex(e => new { e.LegalEntityId, e.OperationDate, e.Status, e.Type }).HasDatabaseName("IX_TaxRegisterEntries_Company_Date_Status_Type");
+            // Одна операция выписки — одна запись регистра.
+            entity.HasIndex(e => e.BankStatementOperationId).IsUnique().HasDatabaseName("IX_TaxRegisterEntries_BankOperation");
+            entity.HasIndex(e => e.CorrectsEntryId).HasDatabaseName("IX_TaxRegisterEntries_CorrectsEntryId");
+        });
+
+        modelBuilder.Entity<TaxRegisterEvent>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Action).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.FromStatus).HasMaxLength(16);
+            entity.Property(e => e.ToStatus).HasMaxLength(16);
+            entity.Property(e => e.Comment).HasMaxLength(1000);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasIndex(e => new { e.TaxRegisterEntryId, e.CreatedAt }).HasDatabaseName("IX_TaxRegisterEvents_Entry_CreatedAt");
+        });
+
+        modelBuilder.Entity<TaxRegisterYearClose>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.DataHash).HasMaxLength(64).IsRequired();
+            entity.HasIndex(e => new { e.LegalEntityId, e.Year }).IsUnique().HasDatabaseName("IX_TaxRegisterYearCloses_Company_Year");
+        });
+
         modelBuilder.Entity<BankSyncLog>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -5088,6 +5126,9 @@ public class PaymentContext : DbContext
     public DbSet<BankConnectionAccount> BankConnectionAccounts { get; set; }
     public DbSet<BankStatementOperation> BankStatementOperations { get; set; }
     public DbSet<BankSyncLog> BankSyncLogs { get; set; }
+    public DbSet<TaxRegisterEntry> TaxRegisterEntries { get; set; }
+    public DbSet<TaxRegisterEvent> TaxRegisterEvents { get; set; }
+    public DbSet<TaxRegisterYearClose> TaxRegisterYearCloses { get; set; }
     public DbSet<UserExternalIdentity> UserExternalIdentities { get; set; }
     public DbSet<ExternalAuthRequest> ExternalAuthRequests { get; set; }
     public DbSet<TelegramAuthRequest> TelegramAuthRequests { get; set; }

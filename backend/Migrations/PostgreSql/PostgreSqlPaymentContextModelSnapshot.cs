@@ -11617,6 +11617,190 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("TaskJournalTemplateParticipants");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.TaxRegisterEntry", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime?>("ApprovedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("ApprovedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("BankConnectionAccountId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("BankStatementOperationId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Category")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int?>("CorrectedByEntryId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CorrectionReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int?>("CorrectsEntryId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("Direction")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<int?>("DocumentId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DocumentRef")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<int>("LegalEntityId")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("NeedsClarification")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("OperationDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateTime>("PostingAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("Sign")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("Draft");
+
+                    b.Property<string>("SubType")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<bool>("TaxBaseIncludesVat")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BankStatementOperationId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_TaxRegisterEntries_BankOperation");
+
+                    b.HasIndex("CorrectsEntryId")
+                        .HasDatabaseName("IX_TaxRegisterEntries_CorrectsEntryId");
+
+                    b.HasIndex("LegalEntityId", "OperationDate", "Status", "Type")
+                        .HasDatabaseName("IX_TaxRegisterEntries_Company_Date_Status_Type");
+
+                    b.ToTable("TaxRegisterEntries");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.TaxRegisterEvent", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("FromStatus")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<int>("TaxRegisterEntryId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ToStatus")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TaxRegisterEntryId", "CreatedAt")
+                        .HasDatabaseName("IX_TaxRegisterEvents_Entry_CreatedAt");
+
+                    b.ToTable("TaxRegisterEvents");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.TaxRegisterYearClose", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("ClosedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("ClosedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DataHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("LegalEntityId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LegalEntityId", "Year")
+                        .IsUnique()
+                        .HasDatabaseName("IX_TaxRegisterYearCloses_Company_Year");
+
+                    b.ToTable("TaxRegisterYearCloses");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.TaxSystemDictionaryItem", b =>
                 {
                     b.Property<int>("Id")

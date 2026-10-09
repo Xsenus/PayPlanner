@@ -210,3 +210,17 @@
 | Тесты | `BankSyncServiceTests` (+6), `BankConnectionsControllerTests` (5), `TochkaAccountStatusTests`, фронтенд `CompanyBankConnectionsSection.test.tsx` (4). |
 
 Пользовательской записи «Что нового» нет: подключение банка создать пока нельзя, блок на экране не появится.
+
+## Шаг 12. Регистр книги доходов и расходов (PAY-35, основа)
+
+Источник: [ТЗ КУДиР](yougile-sources/2026-10-10/attachments/) и план `kudir-yougile-roadmap-2026-10-09.md`. Налоговые правила (форма книги, признание расходов, налоговая база по режиму) не придуманы — их определяет бухгалтерия.
+
+| Файл | Что |
+| --- | --- |
+| `backend/Models/TaxRegisterEntry.cs`, `Data/PaymentContext.cs`, миграции `20261009210141_AddTaxRegister*` и `.../PostgreSql/20261009210536_AddTaxRegisterPostgres*` | Таблицы `TaxRegisterEntries` (статусы Draft/Approved/Archived, типы Income/Expense/Correction, сумма положительная + знак, дата денег `OperationDate` отдельно от `PostingAt`), `TaxRegisterEvents` (история), `TaxRegisterYearCloses` (закрытие года + SHA-256). Уникальный индекс по `BankStatementOperationId`: одна операция выписки — одна запись. Колонки без внешних ключей. |
+| `backend/Services/Tax/TaxRegisterService.cs` | Создание/правка черновика (для записи из выписки дата, сумма и направление берутся из выписки; непроведённая операция отклоняется), утверждение (нужна ссылка на первичный документ, год не закрыт), архив (только черновик), корректировка сторно (причина обязательна, один раз на запись, корректировку нельзя исправить), закрытие года (нет черновиков, повторно нельзя), книга за год (только утверждённые, итоги со знаком), CSV с защитой от формул Excel. |
+| `backend/Controllers/TaxRegisterController.cs`, `Program.cs` | `api/tax-register/*`: `entries` (список с фильтрами и пагинацией), создание/правка, `approve`, `archive`, `correct`, `events`, `book`, `book/export.csv`, `close-year`. **Только администратор** до настройки прав PAY-18. |
+| `src/components/LegalEntities/CompanyTaxRegisterSection.tsx`, `api.ts`, `types`, `LegalEntityModal.tsx` | Блок «Книга доходов и расходов» в карточке собственной компании (виден, только если сервер отдал данные, то есть администратору): итоги, форма черновика, утверждение/архив, «Исправить», «Закрыть год», «Выгрузить CSV». |
+| `backend/AppReleases/releases.json` | Запись 1.14.62. |
+
+Не реализовано: PDF/Excel/XML, нумерация по году, журналы по делу, связь с делом и статьёй, исторический dry-run, права бухгалтера, закрытие года с правами руководителя. Тесты: `TaxRegisterServiceTests` (7), фронтенд `CompanyTaxRegisterSection.test.tsx` (5).

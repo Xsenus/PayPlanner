@@ -11364,6 +11364,184 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("TaskJournalTemplateParticipants");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.TaxRegisterEntry", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime?>("ApprovedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ApprovedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("BankConnectionAccountId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("BankStatementOperationId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Category")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("CorrectedByEntryId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CorrectionReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("CorrectsEntryId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Direction")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("DocumentId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DocumentRef")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("LegalEntityId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("NeedsClarification")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("OperationDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateTime>("PostingAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Sign")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("Draft");
+
+                    b.Property<string>("SubType")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("TaxBaseIncludesVat")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BankStatementOperationId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_TaxRegisterEntries_BankOperation");
+
+                    b.HasIndex("CorrectsEntryId")
+                        .HasDatabaseName("IX_TaxRegisterEntries_CorrectsEntryId");
+
+                    b.HasIndex("LegalEntityId", "OperationDate", "Status", "Type")
+                        .HasDatabaseName("IX_TaxRegisterEntries_Company_Date_Status_Type");
+
+                    b.ToTable("TaxRegisterEntries");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.TaxRegisterEvent", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("FromStatus")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("TaxRegisterEntryId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ToStatus")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TaxRegisterEntryId", "CreatedAt")
+                        .HasDatabaseName("IX_TaxRegisterEvents_Entry_CreatedAt");
+
+                    b.ToTable("TaxRegisterEvents");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.TaxRegisterYearClose", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("ClosedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ClosedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DataHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("LegalEntityId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LegalEntityId", "Year")
+                        .IsUnique()
+                        .HasDatabaseName("IX_TaxRegisterYearCloses_Company_Year");
+
+                    b.ToTable("TaxRegisterYearCloses");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.TaxSystemDictionaryItem", b =>
                 {
                     b.Property<int>("Id")

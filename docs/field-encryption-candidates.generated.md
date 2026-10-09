@@ -3,27 +3,34 @@
 Файл сформирован командой `npm run audit:encryption-inventory:update`.
 Он дополняет ручную карту и не является утверждённой бизнес-классификацией.
 
-Всего кандидатов вне ручной карты: 293.
+Всего кандидатов вне ручной карты: 340.
 
 - `Act`: `Act.Comment`, `Act.CounterpartyInn`
 - `ActLineItem`: `ActLineItem.Name`
 - `AppRelease`: `AppRelease.CreatedByUserName`, `AppRelease.UpdatedByUserName`
 - `AppReleaseItem`: `AppReleaseItem.Text`
 - `Bank`: `Bank.CorrespondentAccount`, `Bank.Name`
+- `BankConnection`: `BankConnection.AccessTokenExpiresAt`, `BankConnection.AccessTokenProtected`, `BankConnection.Accounts`, `BankConnection.LastAccountsSyncAt`, `BankConnection.RefreshTokenExpiresAt`, `BankConnection.RefreshTokenProtected`
+- `BankConnectionAccount`: `BankConnectionAccount.AccountNumber`, `BankConnectionAccount.ExternalAccountId`
 - `BankStatementImportBatch`: `BankStatementImportBatch.FileName`
+- `BankStatementOperation`: `BankStatementOperation.BankConnectionAccount`, `BankStatementOperation.BankConnectionAccountId`, `BankStatementOperation.CounterpartyAccount`, `BankStatementOperation.CounterpartyInn`, `BankStatementOperation.CounterpartyName`, `BankStatementOperation.Purpose`
+- `BankSyncLog`: `BankSyncLog.BankConnectionAccountId`
 - `BaseCurrencyDictionaryItem`: `BaseCurrencyDictionaryItem.Description`, `BaseCurrencyDictionaryItem.Name`
+- `CasePositionTemplate`: `CasePositionTemplate.Text`
 - `CashInventory`: `CashInventory.AccountName`, `CashInventory.AccountingBalance`, `CashInventory.Comment`
 - `CashOrder`: `CashOrder.Account`, `CashOrder.Comment`, `CashOrder.CreatedByUserName`, `CashOrder.PayerName`, `CashOrder.ReceiverName`, `CashOrder.UpdatedByUserName`
 - `Client`: `Client.Addresses`, `Client.AuditCreatedByUserName`, `Client.AuditDeletedByUserName`, `Client.AuditUpdatedByUserName`, `Client.Passports`, `Client.ResponsibleUserName`
 - `ClientBalanceTransaction`: `ClientBalanceTransaction.CreatedByUserName`, `ClientBalanceTransaction.Description`
-- `ClientCase`: `ClientCase.AccessRequestedByUserName`, `ClientCase.ActivityConfirmedByUserName`, `ClientCase.AuditCreatedByUserName`, `ClientCase.AuditDeletedByUserName`, `ClientCase.AuditUpdatedByUserName`, `ClientCase.ControlMarkedByUserName`, `ClientCase.CourtName`, `ClientCase.Description`, `ClientCase.HiddenFromExecutorByUserName`, `ClientCase.JudgeName`, `ClientCase.LastViewedByResponsibleUserName`, `ClientCase.LastViewedByUserName`
+- `ClientCase`: `ClientCase.AccessRequestedByUserName`, `ClientCase.ActivityConfirmedByUserName`, `ClientCase.AuditCreatedByUserName`, `ClientCase.AuditDeletedByUserName`, `ClientCase.AuditUpdatedByUserName`, `ClientCase.ClaimantInn`, `ClientCase.ClaimantOgrn`, `ClientCase.ControlMarkedByUserName`, `ClientCase.CourtName`, `ClientCase.DefendantInn`, `ClientCase.DefendantOgrn`, `ClientCase.Description`, `ClientCase.HiddenFromExecutorByUserName`, `ClientCase.JudgeName`, `ClientCase.LastViewedByResponsibleUserName`, `ClientCase.LastViewedByUserName`, `ClientCase.NextHearingConfirmedByName`, `ClientCase.PositionReviewedByName`
+- `ClientCaseAppealDecision`: `ClientCaseAppealDecision.Comment`, `ClientCaseAppealDecision.DecidedByUserName`
 - `ClientCaseCourt`: `ClientCaseCourt.Address`, `ClientCaseCourt.Contacts`, `ClientCaseCourt.CreatedByUserName`, `ClientCaseCourt.Name`, `ClientCaseCourt.UpdatedByUserName`
 - `ClientCaseCourtComplaint`: `ClientCaseCourtComplaint.CreatedByUserName`, `ClientCaseCourtComplaint.Notes`, `ClientCaseCourtComplaint.UpdatedByUserName`
-- `ClientCaseCourtEvent`: `ClientCaseCourtEvent.CourtName`, `ClientCaseCourtEvent.CreatedByUserName`, `ClientCaseCourtEvent.Description`, `ClientCaseCourtEvent.JudgeName`, `ClientCaseCourtEvent.SecretaryName`, `ClientCaseCourtEvent.UpdatedByUserName`
+- `ClientCaseCourtEvent`: `ClientCaseCourtEvent.CourtName`, `ClientCaseCourtEvent.CreatedByUserName`, `ClientCaseCourtEvent.Description`, `ClientCaseCourtEvent.HearingOutcomeRecordedByUserName`, `ClientCaseCourtEvent.JudgeName`, `ClientCaseCourtEvent.SecretaryName`, `ClientCaseCourtEvent.UpdatedByUserName`
 - `ClientCaseCourtEventHistory`: `ClientCaseCourtEventHistory.ActorUserName`
 - `ClientCaseCourtInstance`: `ClientCaseCourtInstance.CourtName`, `ClientCaseCourtInstance.CreatedByUserName`, `ClientCaseCourtInstance.JudgeName`, `ClientCaseCourtInstance.Notes`, `ClientCaseCourtInstance.SecretaryName`, `ClientCaseCourtInstance.UpdatedByUserName`
 - `ClientCaseCourtParty`: `ClientCaseCourtParty.CreatedByUserName`, `ClientCaseCourtParty.DisplayName`, `ClientCaseCourtParty.Notes`, `ClientCaseCourtParty.RelatedParty`, `ClientCaseCourtParty.RelatedPartyId`, `ClientCaseCourtParty.RepresentativeName`, `ClientCaseCourtParty.UpdatedByUserName`
 - `ClientCaseDocument`: `ClientCaseDocument.StoredFileName`, `ClientCaseDocument.UploadedByName`
+- `ClientCaseHearingPreparation`: `ClientCaseHearingPreparation.AuthorityCheckedByName`, `ClientCaseHearingPreparation.ContractCheckedByName`, `ClientCaseHearingPreparation.MaterialsCheckedByName`
 - `ClientCaseProceduralDeadline`: `ClientCaseProceduralDeadline.ClosedByUserName`, `ClientCaseProceduralDeadline.CreatedByUserName`, `ClientCaseProceduralDeadline.Description`, `ClientCaseProceduralDeadline.Notes`, `ClientCaseProceduralDeadline.UpdatedByUserName`
 - `ClientCaseRelatedParty`: `ClientCaseRelatedParty.ArchivedByUserName`, `ClientCaseRelatedParty.CreatedByUserName`, `ClientCaseRelatedParty.DisplayName`, `ClientCaseRelatedParty.Email`, `ClientCaseRelatedParty.ExternalContact`, `ClientCaseRelatedParty.ExternalContactId`, `ClientCaseRelatedParty.Notes`, `ClientCaseRelatedParty.OrganizationName`, `ClientCaseRelatedParty.Phone`
 - `ClientCaseWorkOrder`: `ClientCaseWorkOrder.ApprovalComment`, `ClientCaseWorkOrder.ApprovalDecisionByUserName`, `ClientCaseWorkOrder.ApprovalRequestedByUserName`, `ClientCaseWorkOrder.CreatedByUserName`, `ClientCaseWorkOrder.Notes`, `ClientCaseWorkOrder.UpdatedByUserName`
@@ -37,8 +44,11 @@
 - `ClientPortalSession`: `ClientPortalSession.Account`, `ClientPortalSession.ClientPortalAccountId`
 - `ClientStats`: `ClientStats.ClientName`
 - `ClientStatusEntity`: `ClientStatusEntity.Description`, `ClientStatusEntity.Name`
+- `CompanyBranch`: `CompanyBranch.Address`, `CompanyBranch.BankAccountId`, `CompanyBranch.Kpp`, `CompanyBranch.Name`, `CompanyBranch.Notes`
 - `Contract`: `Contract.Description`
 - `CountryDictionaryItem`: `CountryDictionaryItem.Description`, `CountryDictionaryItem.Name`
+- `CourtDocumentSourceAttempt`: `CourtDocumentSourceAttempt.ActorName`
+- `CourtDocumentSourceScope`: `CourtDocumentSourceScope.LastActorName`
 - `DealType`: `DealType.Description`, `DealType.Name`
 - `DepartmentDictionaryItem`: `DepartmentDictionaryItem.Description`, `DepartmentDictionaryItem.Name`
 - `DocumentStatusEntity`: `DocumentStatusEntity.Description`, `DocumentStatusEntity.Name`
@@ -48,11 +58,14 @@
 - `ExternalContact`: `ExternalContact.ContactType`, `ExternalContact.Inn`, `ExternalContact.ParentContact`, `ExternalContact.ParentContactId`, `ExternalContact.SyncToPhonebook`
 - `ExternalWorkOrderApprovalAttachment`: `ExternalWorkOrderApprovalAttachment.FileName`
 - `ExternalWorkOrderApprovalRequest`: `ExternalWorkOrderApprovalRequest.CreatedByUserName`, `ExternalWorkOrderApprovalRequest.DecisionComment`, `ExternalWorkOrderApprovalRequest.RevokedByUserName`
+- `GeneratedFinancialDocumentAttempt`: `GeneratedFinancialDocumentAttempt.ActorName`, `GeneratedFinancialDocumentAttempt.RecoveryLeaseToken`, `GeneratedFinancialDocumentAttempt.UploadKeyText`
 - `GoogleCalendarConnection`: `GoogleCalendarConnection.AccessTokenExpiresAt`, `GoogleCalendarConnection.DefaultCalendarName`, `GoogleCalendarConnection.DisplayName`
 - `GoogleCalendarSyncCalendar`: `GoogleCalendarSyncCalendar.Name`, `GoogleCalendarSyncCalendar.SyncToken`, `GoogleCalendarSyncCalendar.WatchToken`
 - `IncomeType`: `IncomeType.Description`, `IncomeType.Name`
 - `InternalChatAttachment`: `InternalChatAttachment.FileName`, `InternalChatAttachment.StoredFileName`
 - `InternalChatMessage`: `InternalChatMessage.IsPinned`, `InternalChatMessage.PinnedAt`, `InternalChatMessage.PinnedByUser`, `InternalChatMessage.PinnedByUserId`, `InternalChatMessage.Text`
+- `InternalChatSendAttempt`: `InternalChatSendAttempt.RecoveryLeaseToken`, `InternalChatSendAttempt.Text`
+- `InternalChatSendAttemptFile`: `InternalChatSendAttemptFile.FileName`
 - `InternalChatThread`: `InternalChatThread.Name`
 - `InvoiceItemNameDictionaryItem`: `InvoiceItemNameDictionaryItem.Description`, `InvoiceItemNameDictionaryItem.Name`
 - `InvoiceLineItem`: `InvoiceLineItem.Name`
@@ -90,6 +103,8 @@
 - `SpreadsheetImportBatchOperation`: `SpreadsheetImportBatchOperation.SourceFileName`
 - `StickyNote`: `StickyNote.AssignedUserName`, `StickyNote.AuthorUserName`, `StickyNote.IsPinned`
 - `StickyNoteBoard`: `StickyNoteBoard.Description`, `StickyNoteBoard.Notes`, `StickyNoteBoard.OwnerUserName`
+- `StorageCapacityReservation`: `StorageCapacityReservation.GeneratedRecoveryLeaseToken`, `StorageCapacityReservation.ProductContextJson`
+- `StorageObject`: `StorageObject.LogicalName`
 - `TaskJournalComment`: `TaskJournalComment.AuthorName`, `TaskJournalComment.ExternalCommentId`
 - `TaskJournalDeadlineChangeRequest`: `TaskJournalDeadlineChangeRequest.CreatedComment`, `TaskJournalDeadlineChangeRequest.CreatedCommentId`, `TaskJournalDeadlineChangeRequest.DecidedByName`, `TaskJournalDeadlineChangeRequest.DecisionComment`, `TaskJournalDeadlineChangeRequest.DecisionCommentEntry`, `TaskJournalDeadlineChangeRequest.DecisionCommentId`, `TaskJournalDeadlineChangeRequest.RequestedByName`, `TaskJournalDeadlineChangeRequest.ReviewerName`
 - `TaskJournalFile`: `TaskJournalFile.StoredFileName`, `TaskJournalFile.UploadedByName`
@@ -98,6 +113,8 @@
 - `TaskJournalTemplate`: `TaskJournalTemplate.AssigneeName`, `TaskJournalTemplate.CreatedByName`, `TaskJournalTemplate.Description`, `TaskJournalTemplate.Name`, `TaskJournalTemplate.TaskDescription`
 - `TaskJournalTemplateParticipant`: `TaskJournalTemplateParticipant.DisplayName`, `TaskJournalTemplateParticipant.Email`
 - `TaskStickerStyle`: `TaskStickerStyle.TextColor`
+- `TaxRegisterEntry`: `TaxRegisterEntry.BankConnectionAccountId`, `TaxRegisterEntry.Description`
+- `TaxRegisterEvent`: `TaxRegisterEvent.Comment`
 - `TaxSystemDictionaryItem`: `TaxSystemDictionaryItem.Description`, `TaxSystemDictionaryItem.Name`
 - `TaxSystemModeDictionaryItem`: `TaxSystemModeDictionaryItem.Description`, `TaxSystemModeDictionaryItem.Name`
 - `TimezoneDictionaryItem`: `TimezoneDictionaryItem.Description`, `TimezoneDictionaryItem.Name`

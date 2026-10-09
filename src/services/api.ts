@@ -6080,6 +6080,60 @@ export class ApiService {
     return this.request<BankSyncLogPage>(`/bank-connections/${connectionId}/logs?page=${page}&pageSize=${pageSize}`);
   }
 
+  async getTaxRegisterBook(companyId: number, year: number) {
+    return this.request<TaxRegisterBook>(`/tax-register/book?companyId=${companyId}&year=${year}`);
+  }
+
+  async getTaxRegisterDrafts(companyId: number, year: number) {
+    return this.request<TaxRegisterEntryPage>(
+      `/tax-register/entries?companyId=${companyId}&year=${year}&status=Draft&pageSize=200`,
+    );
+  }
+
+  async createTaxRegisterEntry(payload: TaxRegisterEntryInput) {
+    return this.request<TaxRegisterEntryItem>('/tax-register/entries', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  async approveTaxRegisterEntry(id: number) {
+    return this.request<TaxRegisterEntryItem>(`/tax-register/entries/${id}/approve`, { method: 'POST' });
+  }
+
+  async archiveTaxRegisterEntry(id: number) {
+    return this.request<TaxRegisterEntryItem>(`/tax-register/entries/${id}/archive`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  }
+
+  async correctTaxRegisterEntry(id: number, reason: string) {
+    return this.request<TaxRegisterEntryItem>(`/tax-register/entries/${id}/correct`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  }
+
+  async closeTaxRegisterYear(companyId: number, year: number) {
+    return this.request<{ year: number; closedAt: string; dataHash: string }>(
+      `/tax-register/close-year?companyId=${companyId}&year=${year}`,
+      { method: 'POST' },
+    );
+  }
+
+  async downloadTaxRegisterCsv(companyId: number, year: number) {
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/tax-register/book/export.csv?companyId=${companyId}&year=${year}`, {
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (!response.ok) {
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(text || `HTTP ${response.status} ${response.statusText}`);
+    }
+
+    return response.blob();
+  }
+
   async getOwnCompanyOptions() {
     return this.request<OwnCompanyOption[]>('/own-companies/options');
   }
@@ -9301,6 +9355,10 @@ import type {
   BankConnectionItem,
   BankStatementRun,
   BankSyncLogPage,
+  TaxRegisterBook,
+  TaxRegisterEntryInput,
+  TaxRegisterEntryItem,
+  TaxRegisterEntryPage,
   CompanyBranch,
   CompanyBranchInput,
   DocumentSellerSelection,

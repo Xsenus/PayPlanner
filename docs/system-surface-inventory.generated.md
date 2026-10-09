@@ -6,10 +6,10 @@
 ## Сводка
 
 - Разделов frontend: 54.
-- Backend-контроллеров: 87.
-- HTTP endpoints: 903; с прямой тестовой связью: 623.
-- HTTP endpoints с точной ссылкой из документации: 214; критичных без такой ссылки: 527.
-- Критичных endpoints без прямой тестовой связи: 234.
+- Backend-контроллеров: 88.
+- HTTP endpoints: 913; с прямой тестовой связью: 623.
+- HTTP endpoints с точной ссылкой из документации: 214; критичных без такой ссылки: 534.
+- Критичных endpoints без прямой тестовой связи: 241.
 - Реальных HTML-форм: 19; с найденной тестовой связью: 17.
 - Фоновых сервисов: 32; с найденной тестовой связью: 28.
 - Исходящих HTTP-интеграций: 12; с найденной тестовой связью: 12.
@@ -80,13 +80,13 @@
 | InvoiceModal | src/components/Accounts/InvoiceModal.tsx | 4402 | да | docs/date-time-inventory.md, docs/final-acceptance-2026-06-10.md, docs/financial-invoice-cancellation-current-state-2026-07-08.md, docs/full-project-audit-2026-06-10.md, docs/pay-33-36-implementation-log-2026-10-09.md, docs/tz-crm-release-stability-roadmap-2026-07-08.md |
 | ActModal | src/components/Acts/ActModal.tsx | 1509 | да | docs/date-time-inventory.md, docs/full-project-audit-2026-06-10.md, docs/pay-33-36-implementation-log-2026-10-09.md |
 | Login | src/components/Auth/Login.tsx | 73 | да | docs/external-authentication-security-and-performance.md, docs/field-encryption-candidates.generated.md, docs/field-encryption-data-inventory-2026-07-30.md, docs/full-project-audit-2026-06-10.md |
-| Register | src/components/Auth/Register.tsx | 94 | да | docs/date-time-inventory.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-resilience-runbook.md, docs/storage-s3-backup-audit-2026-09-22.md |
+| Register | src/components/Auth/Register.tsx | 94 | да | docs/date-time-inventory.md, docs/kudir-yougile-roadmap-2026-10-09.md, docs/pay-33-36-implementation-log-2026-10-09.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-resilience-runbook.md, docs/storage-s3-backup-audit-2026-09-22.md |
 | PaymentModal | src/components/Calendar/PaymentModal.tsx | 2931 | да | docs/date-time-inventory.md, docs/full-project-audit-2026-06-10.md, docs/technical-stabilization-log.md |
 | ClientDetail | src/components/Clients/ClientDetail.tsx | 6390 | да | docs/full-project-audit-2026-06-10.md, docs/unused-frontend-candidates-2026-06-10.md |
 | ClientModal | src/components/Clients/ClientModal.tsx | 240 | да | docs/claude-yougile-ui-development-spec-2026-10-10.md |
 | ContractCreatePage | src/components/Contracts/ContractCreatePage.tsx | 293 | нет | docs/full-project-audit-2026-06-10.md, docs/unused-frontend-candidates-2026-06-10.md |
 | ContractModal | src/components/Contracts/ContractModal.tsx | 366 | да | docs/full-project-audit-2026-06-10.md |
-| LegalEntityModal | src/components/LegalEntities/LegalEntityModal.tsx | 3836 | да | docs/full-project-audit-2026-06-10.md, docs/pay-33-36-implementation-log-2026-10-09.md |
+| LegalEntityModal | src/components/LegalEntities/LegalEntityModal.tsx | 3837 | да | docs/full-project-audit-2026-06-10.md, docs/pay-33-36-implementation-log-2026-10-09.md |
 | ClientPortalPage | src/components/Public/ClientPortalPage.tsx | 223 | да | нет |
 | RoleModal | src/components/Roles/RoleModal.tsx | 121 | нет | docs/full-project-audit-2026-06-10.md |
 | S3Storage | src/components/S3Storage/S3Storage.tsx | 773 | да | docs/date-time-inventory.md, docs/development-pause-plan-2026-09-30.md, docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md, docs/s3-storage-acceptance-checklist.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/unpushed-changes-map-2026-10-03.md |
@@ -219,6 +219,7 @@
 | StorageAdminController | backend/Controllers/StorageAdminController.cs | 13 | [Authorize(Policy = "Admin")] | да |
 | SystemJobsController | backend/Controllers/SystemJobsController.cs | 2 | [Authorize(Policy = "Admin")] | да |
 | TasksController | backend/Controllers/TasksController.cs | 47 | [Authorize] | да |
+| TaxRegisterController | backend/Controllers/TaxRegisterController.cs | 10 | [Authorize(Policy = "Admin")] | нет |
 | UserActivityController | backend/Controllers/UserActivityController.cs | 10 | [Authorize] | да |
 | UsersController | backend/Controllers/UsersController.cs | 11 | [Authorize(Policy = "Admin")] | да |
 | UserSettingsController | backend/Controllers/UserSettingsController.cs | 4 | [Authorize] | да |
@@ -246,18 +247,18 @@
 
 | Клиент или сервис | Регистрация | Файл:строка | Тест найден | Документация |
 | --- | --- | --- | --- | --- |
-| DadataLegalEntityEnrichmentService | AddHttpClient<ILegalEntityEnrichmentService, DadataLegalEntityEnrichmentService> | backend/Program.cs:293 | да | docs/full-project-audit-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/technical-stabilization-log.md |
+| DadataLegalEntityEnrichmentService | AddHttpClient<ILegalEntityEnrichmentService, DadataLegalEntityEnrichmentService> | backend/Program.cs:294 | да | docs/full-project-audit-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/technical-stabilization-log.md |
 | ExternalAuthService | IHttpClientFactory | backend/Services/ExternalAuthService.cs:29 | да | docs/batch-operations-audit-coverage-2026-06-10.md, docs/full-project-audit-2026-06-10.md |
 | GoogleCalendarSyncService | IHttpClientFactory | backend/Services/GoogleCalendarSyncService.cs:22 | да | docs/batch-operations-audit-coverage-2026-06-10.md, docs/calendar-completed-task-visibility-roadmap-2026-10-10.md, docs/date-time-inventory.md, docs/http-integration-error-coverage-2026-06-10.md, docs/tz-crm-acceptance-baseline-roadmap-2026-07-08.md |
-| MaxApiClient | AddHttpClient<IMaxApiClient, MaxApiClient> | backend/Program.cs:239 | да | нет |
-| SmsAeroProvider | AddHttpClient<SmsAeroProvider> | backend/Program.cs:231 | да | нет |
-| SmscRuProvider | AddHttpClient<SmscRuProvider> | backend/Program.cs:226 | да | нет |
-| SmsRuProvider | AddHttpClient<SmsRuProvider> | backend/Program.cs:221 | да | нет |
-| SudrfCourtSyncService | AddHttpClient<ISudrfCourtSyncService, SudrfCourtSyncService> | backend/Program.cs:294 | да | docs/crm-legal-module-gap-report-2026-05-25.md, docs/development-pause-plan-2026-09-30.md, docs/full-project-audit-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/tz-crm-acceptance-baseline-roadmap-2026-07-08.md, docs/tz-crm-court-sync-roadmap-2026-07-08.md |
+| MaxApiClient | AddHttpClient<IMaxApiClient, MaxApiClient> | backend/Program.cs:240 | да | нет |
+| SmsAeroProvider | AddHttpClient<SmsAeroProvider> | backend/Program.cs:232 | да | нет |
+| SmscRuProvider | AddHttpClient<SmscRuProvider> | backend/Program.cs:227 | да | нет |
+| SmsRuProvider | AddHttpClient<SmsRuProvider> | backend/Program.cs:222 | да | нет |
+| SudrfCourtSyncService | AddHttpClient<ISudrfCourtSyncService, SudrfCourtSyncService> | backend/Program.cs:295 | да | docs/crm-legal-module-gap-report-2026-05-25.md, docs/development-pause-plan-2026-09-30.md, docs/full-project-audit-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/tz-crm-acceptance-baseline-roadmap-2026-07-08.md, docs/tz-crm-court-sync-roadmap-2026-07-08.md |
 | TelegramBotUpdateService | IHttpClientFactory | backend/Services/Notifications/TelegramBotUpdateService.cs:13 | да | docs/hosted-service-lifecycle-coverage-2026-06-10.md, docs/unpushed-changes-map-2026-10-03.md |
 | TelegramNotificationService | IHttpClientFactory | backend/Services/Notifications/TelegramNotificationService.cs:8 | да | docs/http-integration-error-coverage-2026-06-10.md, docs/unpushed-changes-map-2026-10-03.md |
 | YandexCalendarSyncService | IHttpClientFactory | backend/Services/YandexCalendarSyncService.cs:21 | да | docs/batch-operations-audit-coverage-2026-06-10.md, docs/calendar-completed-task-visibility-roadmap-2026-10-10.md, docs/date-time-inventory.md, docs/http-integration-error-coverage-2026-06-10.md, docs/tz-crm-acceptance-baseline-roadmap-2026-07-08.md |
-| YandexDiskService | AddHttpClient<IYandexDiskService, YandexDiskService> | backend/Program.cs:295 | да | docs/development-pause-plan-2026-09-30.md, docs/full-project-audit-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/unpushed-changes-map-2026-10-03.md |
+| YandexDiskService | AddHttpClient<IYandexDiskService, YandexDiskService> | backend/Program.cs:296 | да | docs/development-pause-plan-2026-09-30.md, docs/full-project-audit-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/unpushed-changes-map-2026-10-03.md |
 
 ## Критичные endpoints без прямой тестовой связи
 
@@ -486,6 +487,13 @@
 | POST | api/storage/legacy-replicas | LegacyStorageMigrationController.Run | изменение данных | backend/Controllers/LegacyStorageMigrationController.cs:12 |
 | DELETE | api/storage/objects/{id:guid} | StorageAdminController.DeleteObject | изменение данных | backend/Controllers/StorageAdminController.cs:75 |
 | POST | api/storage/reconcile | StorageAdminController.Reconcile | изменение данных | backend/Controllers/StorageAdminController.cs:175 |
+| GET | api/tax-register/book/export.csv | TaxRegisterController.ExportCsv | чувствительные данные или операция | backend/Controllers/TaxRegisterController.cs:165 |
+| POST | api/tax-register/close-year | TaxRegisterController.CloseYear | изменение данных | backend/Controllers/TaxRegisterController.cs:177 |
+| POST | api/tax-register/entries | TaxRegisterController.Create | изменение данных | backend/Controllers/TaxRegisterController.cs:118 |
+| PUT | api/tax-register/entries/{id:int} | TaxRegisterController.Update | изменение данных | backend/Controllers/TaxRegisterController.cs:122 |
+| POST | api/tax-register/entries/{id:int}/approve | TaxRegisterController.Approve | изменение данных | backend/Controllers/TaxRegisterController.cs:126 |
+| POST | api/tax-register/entries/{id:int}/archive | TaxRegisterController.Archive | изменение данных | backend/Controllers/TaxRegisterController.cs:130 |
+| POST | api/tax-register/entries/{id:int}/correct | TaxRegisterController.Correct | изменение данных | backend/Controllers/TaxRegisterController.cs:134 |
 | GET | api/user-activity/filters | UserActivityController.GetFiltersAsync | чувствительные данные или операция | backend/Controllers/UserActivityController.cs:302 |
 | GET | api/users | UsersController.GetUsers | чувствительные данные или операция | backend/Controllers/UsersController.cs:167 |
 | GET | api/users/{id:int} | UsersController.GetUser | чувствительные данные или операция | backend/Controllers/UsersController.cs:115 |
@@ -1181,6 +1189,16 @@
 | POST | api/tasks/bulk/delete | TasksController | BulkDeleteTasks | backend/Controllers/TasksController.cs:4502 | [Authorize] | да | нет |
 | PATCH | api/tasks/{id:int}/approval | TasksController | UpdateApproval | backend/Controllers/TasksController.cs:4600 | [Authorize] | да | нет |
 | DELETE | api/tasks/{id:int} | TasksController | DeleteTask | backend/Controllers/TasksController.cs:4759 | [Authorize] | да | docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-resilience-runbook.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md |
+| GET | api/tax-register/entries | TaxRegisterController | List | backend/Controllers/TaxRegisterController.cs:87 | [Authorize(Policy = "Admin")] | нет | нет |
+| POST | api/tax-register/entries | TaxRegisterController | Create | backend/Controllers/TaxRegisterController.cs:118 | [Authorize(Policy = "Admin")] | нет | нет |
+| PUT | api/tax-register/entries/{id:int} | TaxRegisterController | Update | backend/Controllers/TaxRegisterController.cs:122 | [Authorize(Policy = "Admin")] | нет | нет |
+| POST | api/tax-register/entries/{id:int}/approve | TaxRegisterController | Approve | backend/Controllers/TaxRegisterController.cs:126 | [Authorize(Policy = "Admin")] | нет | нет |
+| POST | api/tax-register/entries/{id:int}/archive | TaxRegisterController | Archive | backend/Controllers/TaxRegisterController.cs:130 | [Authorize(Policy = "Admin")] | нет | нет |
+| POST | api/tax-register/entries/{id:int}/correct | TaxRegisterController | Correct | backend/Controllers/TaxRegisterController.cs:134 | [Authorize(Policy = "Admin")] | нет | нет |
+| GET | api/tax-register/entries/{id:int}/events | TaxRegisterController | Events | backend/Controllers/TaxRegisterController.cs:138 | [Authorize(Policy = "Admin")] | нет | нет |
+| GET | api/tax-register/book | TaxRegisterController | Book | backend/Controllers/TaxRegisterController.cs:153 | [Authorize(Policy = "Admin")] | нет | нет |
+| GET | api/tax-register/book/export.csv | TaxRegisterController | ExportCsv | backend/Controllers/TaxRegisterController.cs:165 | [Authorize(Policy = "Admin")] | нет | нет |
+| POST | api/tax-register/close-year | TaxRegisterController | CloseYear | backend/Controllers/TaxRegisterController.cs:177 | [Authorize(Policy = "Admin")] | нет | нет |
 | GET | api/user-activity | UserActivityController | GetAsync | backend/Controllers/UserActivityController.cs:62 | [Authorize]; [Authorize(Policy = "Admin")] | да | docs/development-pause-plan-2026-09-30.md, docs/full-project-audit-2026-06-10.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md, docs/storage-resilience-roadmap-2026-09-22.md |
 | GET | api/user-activity/online | UserActivityController | GetOnlineAsync | backend/Controllers/UserActivityController.cs:168 | [Authorize]; [Authorize(Policy = "Admin")] | да | нет |
 | GET | api/user-activity/filters | UserActivityController | GetFiltersAsync | backend/Controllers/UserActivityController.cs:302 | [Authorize]; [Authorize(Policy = "Admin")] | нет | нет |
