@@ -1,5 +1,6 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
+import { DocumentSellerPicker } from '../Documents/DocumentSellerPicker';
 import { SystemSelect } from '../ui/SystemSelect';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Ban, Check, ChevronDown, Copy, Download, FileText, Link2, List, Loader2, Pencil, Plus, Printer, Send, Trash2, UploadCloud, UserRoundSearch, X } from 'lucide-react';
@@ -4541,6 +4542,19 @@ export function InvoiceModal({
                                 buttonClassName="bg-white"
                               />
                             </div>
+
+                            {mode === 'edit' && invoice?.id && isIncome ? (
+                              <div className="text-sm">
+                                <DocumentSellerPicker
+                                  kind="invoice"
+                                  documentId={invoice.id}
+                                  companyId={invoice.sellerCompanyId}
+                                  branchId={invoice.sellerBranchId}
+                                  frozen={invoice.sellerFrozen}
+                                  canEdit
+                                />
+                              </div>
+                            ) : null}
 
                             <label className="flex flex-col gap-1 text-sm">
                               <span className="font-medium text-slate-700">Комментарий для клиента</span>

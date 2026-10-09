@@ -27,6 +27,10 @@ public class InvoiceDto
     public int? ExpenseClientId { get; set; }
     public int? ExpenseLegalEntityId { get; set; }
     public int? ContractId { get; set; }
+    public int? SellerCompanyId { get; set; }
+    public int? SellerBranchId { get; set; }
+    /// <summary>Реквизиты продавца уже зафиксированы в документе и больше не меняются.</summary>
+    public bool SellerFrozen { get; set; }
     public string? ClientName { get; set; }
     public string? LegalEntityName { get; set; }
     public string? LegalEntityInn { get; set; }

@@ -126,8 +126,21 @@ public sealed class CancelledInvoiceBillingMigrationTests
         var cancelledWorkflow = CreateInvoice("INV-OLD-WORKFLOW", date, PaymentStatus.Pending);
         cancelledWorkflow.InvoiceWorkflowStatus = InvoiceWorkflowStatus.Cancelled;
         var active = CreateInvoice("INV-ACTIVE", date, PaymentStatus.Pending);
+        // The current EF model already contains columns that later migrations add to Payments.
+        // Add them temporarily so the historical schema accepts the model insert, then drop them
+        // again so the real migration under test (or a later one) creates them itself.
+        string[] futureColumns = ["SellerCompanyId", "SellerBranchId", "SellerSnapshotJson"];
+        foreach (var column in futureColumns)
+        {
+            await context.Database.ExecuteSqlRawAsync($"ALTER TABLE \"Payments\" ADD COLUMN \"{column}\" {(column == "SellerSnapshotJson" ? "TEXT" : "INTEGER")} NULL");
+        }
+
         context.Payments.AddRange(cancelled, cancelledWorkflow, active);
         await context.SaveChangesAsync();
+        foreach (var column in futureColumns)
+        {
+            await context.Database.ExecuteSqlRawAsync($"ALTER TABLE \"Payments\" DROP COLUMN \"{column}\"");
+        }
 
         // Seed against the migrated historical schema, not the current EF model: newer
         // task columns do not exist yet at this point in an upgrade-path test.

@@ -17,6 +17,10 @@ public class ActDto
     public string? OriginalActNumber { get; set; }
     public PaymentType? Type { get; set; }
     public int? ContractId { get; set; }
+    public int? SellerCompanyId { get; set; }
+    public int? SellerBranchId { get; set; }
+    /// <summary>Реквизиты продавца уже зафиксированы в документе и больше не меняются.</summary>
+    public bool SellerFrozen { get; set; }
     public string? CounterpartyInn { get; set; }
     public ActStatus Status { get; set; }
     public string WorkflowStatus { get; set; } = ActWorkflowStatus.Draft;

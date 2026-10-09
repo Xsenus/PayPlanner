@@ -1097,6 +1097,75 @@ public class InvoiceDocumentTemplateTests
     }
 
     [Fact]
+    public async Task SetSeller_RendersChosenBranchRequisites_AndFreezesThemAfterFirstExport()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+
+        var company = new LegalEntity
+        {
+            ShortName = "ООО Тест",
+            FullName = "Общество с ограниченной ответственностью Тест",
+            Inn = "7700000000",
+            Kpp = "770001001",
+            Address = "Москва, тестовый адрес",
+            BankAccountsJson =
+                "[{\"id\":\"main\",\"bank\":\"Банк 1\",\"bik\":\"044525225\",\"accountNumber\":\"40802810000000000001\",\"isPrimary\":true}," +
+                "{\"id\":\"second\",\"bank\":\"Банк 2\",\"bik\":\"044525104\",\"accountNumber\":\"40802810000000000002\"}]",
+        };
+        db.LegalEntities.Add(company);
+        await db.SaveChangesAsync();
+        var branch = new CompanyBranch { LegalEntityId = company.Id, Name = "Офис СПб", Kpp = "780201001", BankAccountId = "second" };
+        db.CompanyBranches.Add(branch);
+        db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = $"[{company.Id}]" });
+        db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.defaultMainCompanyId", Value = company.Id.ToString() });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, isAdmin: true);
+
+        var before = Assert.IsType<ContentResult>(await controller.GetDocument(paymentId, "html", null, null, CancellationToken.None));
+        Assert.Contains("40802810000000000001", before.Content);
+        Assert.DoesNotContain("780201001", before.Content);
+
+        var set = await controller.SetSeller(paymentId, new DocumentSellerRequest { CompanyId = company.Id, BranchId = branch.Id }, CancellationToken.None);
+        Assert.IsType<OkObjectResult>(set.Result);
+
+        var chosen = Assert.IsType<ContentResult>(await controller.GetDocument(paymentId, "html", null, null, CancellationToken.None));
+        Assert.Contains("780201001", chosen.Content);
+        Assert.Contains("40802810000000000002", chosen.Content);
+        Assert.DoesNotContain("40802810000000000001", chosen.Content);
+        Assert.Null((await db.Payments.AsNoTracking().SingleAsync(p => p.Id == paymentId)).SellerSnapshotJson);
+
+        await controller.GetDocument(paymentId, "word", null, null, CancellationToken.None);
+        Assert.NotNull((await db.Payments.AsNoTracking().SingleAsync(p => p.Id == paymentId)).SellerSnapshotJson);
+
+        (await db.CompanyBranches.SingleAsync()).Kpp = "999999999";
+        await db.SaveChangesAsync();
+        var after = Assert.IsType<ContentResult>(await controller.GetDocument(paymentId, "html", null, null, CancellationToken.None));
+        Assert.Contains("780201001", after.Content);
+        Assert.DoesNotContain("999999999", after.Content);
+
+        var locked = await controller.SetSeller(paymentId, new DocumentSellerRequest { CompanyId = company.Id }, CancellationToken.None);
+        Assert.IsType<ConflictObjectResult>(locked.Result);
+    }
+
+    [Fact]
+    public async Task SetSeller_RejectsCompanyThatIsNotOwn()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var foreign = new LegalEntity { ShortName = "Чужая" };
+        db.LegalEntities.Add(foreign);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, isAdmin: true);
+
+        var result = await controller.SetSeller(paymentId, new DocumentSellerRequest { CompanyId = foreign.Id }, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Null((await db.Payments.AsNoTracking().SingleAsync(p => p.Id == paymentId)).SellerCompanyId);
+    }
+
+    [Fact]
     public async Task GetDocument_UsesBuyerProfilePassportFallback_WhenNormalizedPassportMissing()
     {
         await using var db = await CreateContextAsync();

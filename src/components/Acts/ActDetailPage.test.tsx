@@ -72,6 +72,7 @@ vi.mock('../../hooks/useToast', () => ({
 
 vi.mock('../../services/api', () => ({
   apiService: {
+    getOwnCompanyOptions: vi.fn().mockResolvedValue([]),
     getAct: getActMock,
     getClients: getClientsMock,
     getActResponsibles: getActResponsiblesMock,

@@ -140,6 +140,19 @@ export interface CompanyBranch {
   updatedAt?: string | null;
 }
 
+export interface OwnCompanyOption {
+  id: number;
+  shortName: string;
+  isDefault: boolean;
+  branches: Array<{ id: number; name: string; kind: CompanyBranchKind }>;
+}
+
+export interface DocumentSellerSelection {
+  companyId: number | null;
+  branchId: number | null;
+  frozen: boolean;
+}
+
 export interface CompanyBranchInput {
   kind: CompanyBranchKind;
   name: string;
@@ -3390,6 +3403,11 @@ export interface Act {
   originalActNumber?: string | null;
   type?: PaymentKind | null;
   contractId?: number | null;
+  /** Выбранная собственная компания-продавец; пусто — компания по умолчанию. */
+  sellerCompanyId?: number | null;
+  sellerBranchId?: number | null;
+  /** Реквизиты продавца зафиксированы при выдаче документа и больше не меняются. */
+  sellerFrozen?: boolean;
   counterpartyInn?: string | null;
   status: ActStatus;
   workflowStatus?: ActWorkflowStatus;
@@ -3784,6 +3802,11 @@ export interface Invoice {
   expenseLegalEntityName?: string | null;
   expenseLegalEntityInn?: string | null;
   contractId?: number | null;
+  /** Выбранная собственная компания-продавец; пусто — компания по умолчанию. */
+  sellerCompanyId?: number | null;
+  sellerBranchId?: number | null;
+  /** Реквизиты продавца зафиксированы при выдаче документа и больше не меняются. */
+  sellerFrozen?: boolean;
   documentKind?: DocumentKind;
   clientName?: string | null;
   clientCompany?: string | null;

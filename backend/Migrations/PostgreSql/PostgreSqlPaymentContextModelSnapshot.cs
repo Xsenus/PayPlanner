@@ -112,6 +112,16 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<int?>("ResponsibleId")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("SellerBranchId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("SellerCompanyId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SellerSnapshotJson")
+                        .HasMaxLength(16000)
+                        .HasColumnType("character varying(16000)");
+
                     b.Property<DateTime?>("SentForSigningAt")
                         .HasColumnType("timestamp without time zone");
 
@@ -171,6 +181,10 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("ResponsibleId")
                         .HasDatabaseName("IX_Acts_ResponsibleId");
+
+                    b.HasIndex("SellerBranchId");
+
+                    b.HasIndex("SellerCompanyId");
 
                     b.HasIndex("Status")
                         .HasDatabaseName("IX_Acts_Status");
@@ -8687,6 +8701,16 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("integer")
                         .HasDefaultValue(0);
 
+                    b.Property<int?>("SellerBranchId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("SellerCompanyId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SellerSnapshotJson")
+                        .HasMaxLength(16000)
+                        .HasColumnType("character varying(16000)");
+
                     b.Property<int?>("ServiceId")
                         .HasColumnType("integer");
 
@@ -8780,6 +8804,10 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("PlannedDate")
                         .HasDatabaseName("IX_Payments_PlannedDate");
+
+                    b.HasIndex("SellerBranchId");
+
+                    b.HasIndex("SellerCompanyId");
 
                     b.HasIndex("ServiceId")
                         .HasDatabaseName("IX_Payments_ServiceId");

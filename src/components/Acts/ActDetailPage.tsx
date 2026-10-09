@@ -17,6 +17,7 @@ import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { MessengerDocumentDeliveryModal } from '../Cases/MessengerDocumentDeliveryModal';
 import { ElectronicSignatureModal } from '../Documents/ElectronicSignatureModal';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
+import { DocumentSellerPicker } from '../Documents/DocumentSellerPicker';
 import { StatusChangeModal, type StatusChangeOption } from '../ui/StatusChangeModal';
 import { ActModal } from './ActModal';
 
@@ -967,6 +968,14 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
                     <p><span className="text-slate-500">Режим:</span> {creationModeLabel}</p>
                     <p><span className="text-slate-500">Дата акта:</span> {formatDate(act.date)}</p>
                     <p><span className="text-slate-500">Ответственный:</span> {selectedResponsibleLabel}</p>
+                    <DocumentSellerPicker
+                      kind="act"
+                      documentId={act.id}
+                      companyId={act.sellerCompanyId}
+                      branchId={act.sellerBranchId}
+                      frozen={act.sellerFrozen}
+                      canEdit={canEdit}
+                    />
                     {act.cancelledAt || act.cancelledReason ? (
                       <p><span className="text-slate-500">Аннулирование:</span> {[formatDate(act.cancelledAt), act.cancelledReason?.trim()].filter(Boolean).join(' · ')}</p>
                     ) : null}

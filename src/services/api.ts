@@ -6024,6 +6024,24 @@ export class ApiService {
     return this.request<void>(`/banks/${id}`, { method: 'DELETE' });
   }
 
+  async getOwnCompanyOptions() {
+    return this.request<OwnCompanyOption[]>('/own-companies/options');
+  }
+
+  async setInvoiceSeller(invoiceId: number, payload: { companyId: number | null; branchId: number | null }) {
+    return this.request<DocumentSellerSelection>(`/invoices/${invoiceId}/seller`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async setActSeller(actId: number, payload: { companyId: number | null; branchId: number | null }) {
+    return this.request<DocumentSellerSelection>(`/acts/${actId}/seller`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async getCompanyBranches(companyId: number, includeArchived = false) {
     const query = includeArchived ? '?includeArchived=true' : '';
     return this.request<CompanyBranch[]>(`/legal-entities/${companyId}/branches${query}`);
@@ -9218,6 +9236,8 @@ import type {
   ClientCaseExpenseDetail,
   CompanyBranch,
   CompanyBranchInput,
+  DocumentSellerSelection,
+  OwnCompanyOption,
   LegalEntityDetail,
   LegalEntityInput,
   LegalEntityDadataDetails,

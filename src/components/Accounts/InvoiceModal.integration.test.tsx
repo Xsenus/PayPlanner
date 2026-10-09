@@ -115,6 +115,7 @@ vi.mock('../../hooks/useToast', () => ({
 
 vi.mock('../../services/api', () => ({
   apiService: {
+    getOwnCompanyOptions: vi.fn().mockResolvedValue([]),
     downloadInvoiceDocument: vi
       .fn()
       .mockResolvedValue(new Blob(['<html><body>preview</body></html>'], { type: 'text/html' })),

@@ -16,6 +16,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Companies;
 using PayPlanner.Api.Services.Documents;
 using PayPlanner.Api.Services.Invoices;
 using PayPlanner.Api.Services.Notifications;
@@ -37,6 +38,7 @@ public class InvoicesController : ControllerBase
     private const string MainCompanyIdsSettingKey = "legalEntities.mainCompanyIds";
     private const string DefaultMainCompanyIdSettingKey = "legalEntities.defaultMainCompanyId";
     private readonly PaymentContext _db;
+    private readonly IDocumentSellerService _documentSeller;
     private readonly IEmailService _emailService;
     private readonly IFormRequirementsService _formRequirements;
     private readonly IInvoiceDocumentPdfService? _invoiceDocumentPdfService;
@@ -55,9 +57,11 @@ public class InvoicesController : ControllerBase
         IFormRequirementsService formRequirements,
         IInvoiceDocumentPdfService? invoiceDocumentPdfService = null,
         IYandexDiskService? yandexDiskService = null,
-        INotificationService? notificationService = null)
+        INotificationService? notificationService = null,
+        IDocumentSellerService? documentSellerService = null)
     {
         _db = db;
+        _documentSeller = documentSellerService ?? new DocumentSellerService(db);
         _emailService = emailService;
         _formRequirements = formRequirements;
         _invoiceDocumentPdfService = invoiceDocumentPdfService;
@@ -725,6 +729,67 @@ public class InvoicesController : ControllerBase
         var dto = await SaveAndReloadInvoiceAsync(payment, ct);
         await NotifyInvoiceChangedAsync(payment, BuildInvoiceStatusChangeLabels(originalStatus, payment.Status, originalWorkflowStatus, payment.InvoiceWorkflowStatus), ct);
         return Ok(dto);
+    }
+
+    /// <summary>
+    /// Выбор собственной компании и подразделения-продавца для счёта. Применяется ко всем платежам этого счёта.
+    /// После первой выдачи документа реквизиты зафиксированы, и продавца менять нельзя.
+    /// </summary>
+    [HttpPut("{id:int}/seller")]
+    public async Task<ActionResult<DocumentSellerResponse>> SetSeller(int id, [FromBody] DocumentSellerRequest request, CancellationToken ct)
+    {
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        if (visibility is null)
+        {
+            return MissingAccountsVisibilityResult();
+        }
+        if (await RequireAccountsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var payment = await BuildEditableInvoicePaymentsQuery(visibility).FirstOrDefaultAsync(p => p.Id == id, ct);
+        if (payment is null)
+        {
+            return NotFound();
+        }
+
+        if (payment.Type == PaymentType.Expense)
+        {
+            return BadRequest(new { message = "У расходного счёта продавец — контрагент, выбрать собственную компанию нельзя." });
+        }
+
+        var selectionError = await _documentSeller.ValidateSelectionAsync(request.CompanyId, request.BranchId, ct);
+        if (selectionError is not null)
+        {
+            return BadRequest(new { message = selectionError });
+        }
+
+        var invoiceEntityId = payment.InvoiceId ?? payment.Invoice?.Id;
+        var group = new List<Payment> { payment };
+        if (invoiceEntityId.HasValue && invoiceEntityId.Value > 0)
+        {
+            group.AddRange(await _db.Payments
+                .Where(candidate =>
+                    candidate.InvoiceId == invoiceEntityId.Value
+                    && candidate.Id != payment.Id
+                    && candidate.DocumentKind == DocumentKind.Invoice)
+                .ToListAsync(ct));
+        }
+
+        if (group.Any(item => !string.IsNullOrWhiteSpace(item.SellerSnapshotJson)))
+        {
+            return Conflict(new { message = "Реквизиты продавца уже зафиксированы в выданном документе и не меняются." });
+        }
+
+        foreach (var item in group)
+        {
+            item.SellerCompanyId = request.CompanyId;
+            item.SellerBranchId = request.CompanyId.HasValue ? request.BranchId : null;
+        }
+
+        await _db.SaveChangesAsync(ct);
+        return Ok(new DocumentSellerResponse(payment.SellerCompanyId, payment.SellerBranchId, false));
     }
 
     [HttpPost("{id:int}/mark-signed")]
@@ -3138,7 +3203,7 @@ public class InvoicesController : ControllerBase
         var documentSettings = await GetInvoiceDocumentTemplateSettingsAsync(ct);
         var template = SelectInvoiceDocumentTemplate(documentSettings, templateKey);
         await RememberInvoiceDocumentTemplateAsync(payment, template.Key, ct);
-        var mainCompany = await LoadMainCompanyAsync(ct);
+        var mainCompany = await ResolveInvoiceSellerAsync(payment, await LoadMainCompanyAsync(ct), normalizedFormat != "html", ct);
         var shouldIncludeSignatureAndSeal = includeSignatureAndSeal ?? documentSettings.PrintWithSignatureAndSealByDefault;
         var documentHtml = InvoiceDocumentTemplateEngine.RenderHtml(
             template.Html,
@@ -3223,7 +3288,7 @@ public class InvoicesController : ControllerBase
         var documentSettings = await GetInvoiceDocumentTemplateSettingsAsync(ct);
         var template = SelectInvoiceDocumentTemplate(documentSettings, templateKey);
         await RememberInvoiceDocumentTemplateAsync(payment, template.Key, ct);
-        var mainCompany = await LoadMainCompanyAsync(ct);
+        var mainCompany = await ResolveInvoiceSellerAsync(payment, await LoadMainCompanyAsync(ct), true, ct);
         var shouldIncludeSignatureAndSeal = includeSignatureAndSeal ?? documentSettings.PrintWithSignatureAndSealByDefault;
         var documentHtml = InvoiceDocumentTemplateEngine.RenderHtml(
             template.Html,
@@ -3374,7 +3439,7 @@ public class InvoicesController : ControllerBase
         var installmentDocumentContext = await BuildInstallmentDocumentContextAsync(payment, lineItems, ct);
         var documentSettings = await GetInvoiceDocumentTemplateSettingsAsync(ct);
         var template = SelectInvoiceDocumentTemplate(documentSettings, null);
-        var mainCompany = await LoadMainCompanyAsync(ct);
+        var mainCompany = await ResolveInvoiceSellerAsync(payment, await LoadMainCompanyAsync(ct), true, ct);
         var documentHtml = InvoiceDocumentTemplateEngine.RenderHtml(
             template.Html,
             payment,
@@ -4414,6 +4479,9 @@ public class InvoicesController : ControllerBase
         AuditDeletedByUserName = EF.Property<string?>(x.Payment, "DeletedByUserName"),
         DocumentKind = x.Payment.DocumentKind,
         SystemNotes = x.Payment.SystemNotes,
+        SellerCompanyId = x.Payment.SellerCompanyId,
+        SellerBranchId = x.Payment.SellerBranchId,
+        SellerFrozen = x.Payment.SellerSnapshotJson != null,
     };
 
     private static InvoiceDto MapFromRaw(InvoiceProjectionRaw raw)
@@ -4485,6 +4553,9 @@ public class InvoicesController : ControllerBase
             AuditDeletedByUserName = raw.AuditDeletedByUserName,
             DocumentKind = raw.DocumentKind,
             LineItems = InvoiceLineItemStorage.ExtractFromSystemNotes(raw.SystemNotes),
+            SellerCompanyId = raw.SellerCompanyId,
+            SellerBranchId = raw.SellerBranchId,
+            SellerFrozen = raw.SellerFrozen,
         };
     }
 
@@ -7119,6 +7190,34 @@ public class InvoicesController : ControllerBase
         return builder.ToString();
     }
 
+    /// <summary>
+    /// Продавец для печатной формы счёта. При выдаче файла (не просмотре) реквизиты фиксируются в счёте,
+    /// чтобы последующие правки профиля компании уже выданный документ не меняли. Расходные счета
+    /// строятся от контрагента и собственной компании не используют.
+    /// </summary>
+    private async Task<LegalEntity?> ResolveInvoiceSellerAsync(Payment payment, LegalEntity? defaultCompany, bool freeze, CancellationToken ct)
+    {
+        if (payment.Type == PaymentType.Expense)
+        {
+            return defaultCompany;
+        }
+
+        var hadSnapshot = !string.IsNullOrWhiteSpace(payment.SellerSnapshotJson);
+        var seller = await _documentSeller.ResolveAsync(payment, defaultCompany, freeze, ct);
+        if (!hadSnapshot && !string.IsNullOrWhiteSpace(payment.SellerSnapshotJson))
+        {
+            var tracked = await _db.Payments.FirstOrDefaultAsync(item => item.Id == payment.Id, ct);
+            if (tracked is not null && string.IsNullOrWhiteSpace(tracked.SellerSnapshotJson))
+            {
+                tracked.SellerCompanyId = payment.SellerCompanyId;
+                tracked.SellerSnapshotJson = payment.SellerSnapshotJson;
+                await _db.SaveChangesAsync(ct);
+            }
+        }
+
+        return seller;
+    }
+
     private async Task<LegalEntity?> LoadMainCompanyAsync(CancellationToken ct)
     {
         var settings = await _db.SystemSettings
@@ -7310,6 +7409,9 @@ public class InvoicesController : ControllerBase
     private sealed class InvoiceProjectionRaw
     {
         public int Id { get; init; }
+        public int? SellerCompanyId { get; init; }
+        public int? SellerBranchId { get; init; }
+        public bool SellerFrozen { get; init; }
         public int? InvoiceEntityId { get; init; }
         public string Number { get; init; } = string.Empty;
         public DateTime Date { get; init; }

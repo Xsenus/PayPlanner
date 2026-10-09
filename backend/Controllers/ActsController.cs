@@ -16,6 +16,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Companies;
 using PayPlanner.Api.Services.Acts;
 using PayPlanner.Api.Services.Documents;
 using PayPlanner.Api.Services.Invoices;
@@ -34,6 +35,7 @@ public class ActsController : ControllerBase
     private const string MainCompanyIdsSettingKey = "legalEntities.mainCompanyIds";
     private const string DefaultMainCompanyIdSettingKey = "legalEntities.defaultMainCompanyId";
     private readonly PaymentContext _db;
+    private readonly IDocumentSellerService _documentSeller;
     private readonly IFormRequirementsService _formRequirements;
     private readonly IInvoiceDocumentPdfService? _invoiceDocumentPdfService;
     private readonly IEmailService? _emailService;
@@ -46,9 +48,11 @@ public class ActsController : ControllerBase
         IInvoiceDocumentPdfService? invoiceDocumentPdfService = null,
         IEmailService? emailService = null,
         IYandexDiskService? yandexDiskService = null,
-        INotificationService? notificationService = null)
+        INotificationService? notificationService = null,
+        IDocumentSellerService? documentSellerService = null)
     {
         _db = db;
+        _documentSeller = documentSellerService ?? new DocumentSellerService(db);
         _formRequirements = formRequirements;
         _invoiceDocumentPdfService = invoiceDocumentPdfService;
         _emailService = emailService;
@@ -460,6 +464,41 @@ public class ActsController : ControllerBase
         await _db.SaveChangesAsync(ct);
         await NotifyActChangedAsync(act, BuildActStatusChangeLabels(originalStatus, act.Status, originalWorkflowStatus, act.WorkflowStatus), ct);
         return Ok(Map(act));
+    }
+
+    /// <summary>
+    /// Выбор собственной компании и подразделения-продавца для акта.
+    /// После первой выдачи документа реквизиты зафиксированы, и продавца менять нельзя.
+    /// </summary>
+    [HttpPut("{id:int}/seller")]
+    public async Task<ActionResult<DocumentSellerResponse>> SetSeller(int id, [FromBody] DocumentSellerRequest request, CancellationToken ct)
+    {
+        if (await RequireActsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var act = await LoadActForWorkflowAsync(id, ct);
+        if (act is null)
+        {
+            return NotFound();
+        }
+
+        var selectionError = await _documentSeller.ValidateSelectionAsync(request.CompanyId, request.BranchId, ct);
+        if (selectionError is not null)
+        {
+            return BadRequest(new { message = selectionError });
+        }
+
+        if (!string.IsNullOrWhiteSpace(act.SellerSnapshotJson))
+        {
+            return Conflict(new { message = "Реквизиты продавца уже зафиксированы в выданном документе и не меняются." });
+        }
+
+        act.SellerCompanyId = request.CompanyId;
+        act.SellerBranchId = request.CompanyId.HasValue ? request.BranchId : null;
+        await _db.SaveChangesAsync(ct);
+        return Ok(new DocumentSellerResponse(act.SellerCompanyId, act.SellerBranchId, false));
     }
 
     [HttpPost("{id:int}/mark-signed")]
@@ -1214,7 +1253,7 @@ public class ActsController : ControllerBase
         var normalizedFormat = NormalizeDocumentFormat(format);
         var documentSettings = await GetActDocumentTemplateSettingsAsync(ct);
         var template = SelectActDocumentTemplate(documentSettings);
-        var mainCompany = await LoadMainCompanyAsync(ct);
+        var mainCompany = await ResolveActSellerAsync(act, await LoadMainCompanyAsync(ct), normalizedFormat != "html", ct);
         var documentHtml = ActDocumentTemplateEngine.RenderHtml(
             template.Html,
             act,
@@ -1285,7 +1324,7 @@ public class ActsController : ControllerBase
 
         var documentSettings = await GetActDocumentTemplateSettingsAsync(ct);
         var template = SelectActDocumentTemplate(documentSettings);
-        var mainCompany = await LoadMainCompanyAsync(ct);
+        var mainCompany = await ResolveActSellerAsync(act, await LoadMainCompanyAsync(ct), true, ct);
         var documentHtml = ActDocumentTemplateEngine.RenderHtml(
             template.Html,
             act,
@@ -1420,7 +1459,7 @@ public class ActsController : ControllerBase
 
         var documentSettings = await GetActDocumentTemplateSettingsAsync(ct);
         var template = SelectActDocumentTemplate(documentSettings);
-        var mainCompany = await LoadMainCompanyAsync(ct);
+        var mainCompany = await ResolveActSellerAsync(act, await LoadMainCompanyAsync(ct), true, ct);
         var documentHtml = ActDocumentTemplateEngine.RenderHtml(
             template.Html,
             act,
@@ -1505,6 +1544,9 @@ public class ActsController : ControllerBase
         ResponsibleId = act.ResponsibleId,
         ResponsibleName = act.Responsible != null ? act.Responsible.FullName : null,
         Comment = act.Comment,
+        SellerCompanyId = act.SellerCompanyId,
+        SellerBranchId = act.SellerBranchId,
+        SellerFrozen = act.SellerSnapshotJson != null,
         LineItems = act.LineItems
             .OrderBy(item => item.SortOrder)
             .ThenBy(item => item.Id)
@@ -1577,6 +1619,9 @@ public class ActsController : ControllerBase
         ResponsibleId = act.ResponsibleId,
         ResponsibleName = act.Responsible != null ? act.Responsible.FullName : null,
         Comment = act.Comment,
+        SellerCompanyId = act.SellerCompanyId,
+        SellerBranchId = act.SellerBranchId,
+        SellerFrozen = act.SellerSnapshotJson != null,
         CreatedAt = ActDomainService.NormalizeUtcInstant(act.CreatedAt),
         UpdatedAt = ActDomainService.NormalizeUtcInstant(act.UpdatedAt),
         AuditCreatedByUserId = EF.Property<int?>(act, "CreatedByUserId"),
@@ -2012,6 +2057,28 @@ public class ActsController : ControllerBase
         return legalEntity?.ShortName ?? legalEntity?.FullName;
     }
 
+    /// <summary>
+    /// Продавец для печатной формы акта. При выдаче файла (не просмотре) реквизиты фиксируются в акте,
+    /// чтобы последующие правки профиля компании уже выданный документ не меняли.
+    /// </summary>
+    private async Task<LegalEntity?> ResolveActSellerAsync(Act act, LegalEntity? defaultCompany, bool freeze, CancellationToken ct)
+    {
+        var hadSnapshot = !string.IsNullOrWhiteSpace(act.SellerSnapshotJson);
+        var seller = await _documentSeller.ResolveAsync(act, defaultCompany, freeze, ct);
+        if (!hadSnapshot && !string.IsNullOrWhiteSpace(act.SellerSnapshotJson))
+        {
+            var tracked = await _db.Acts.FirstOrDefaultAsync(item => item.Id == act.Id, ct);
+            if (tracked is not null && string.IsNullOrWhiteSpace(tracked.SellerSnapshotJson))
+            {
+                tracked.SellerCompanyId = act.SellerCompanyId;
+                tracked.SellerSnapshotJson = act.SellerSnapshotJson;
+                await _db.SaveChangesAsync(ct);
+            }
+        }
+
+        return seller;
+    }
+
     private async Task<LegalEntity?> LoadMainCompanyAsync(CancellationToken ct)
     {
         var settings = await _db.SystemSettings
@@ -2249,6 +2316,9 @@ public class ActsController : ControllerBase
             ResponsibleId = act.ResponsibleId,
             ResponsibleName = act.Responsible?.FullName,
             Comment = act.Comment,
+            SellerCompanyId = act.SellerCompanyId,
+            SellerBranchId = act.SellerBranchId,
+            SellerFrozen = act.SellerSnapshotJson != null,
             LineItems = act.LineItems
                 .OrderBy(item => item.SortOrder)
                 .ThenBy(item => item.Id)

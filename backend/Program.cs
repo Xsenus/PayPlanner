@@ -46,6 +46,7 @@ builder.Services.AddSingleton<IStorageProviderHealthTracker, StorageProviderHeal
 builder.Services.Configure<StorageOrchestrationOptions>(
     builder.Configuration.GetSection(StorageOrchestrationOptions.SectionName));
 builder.Services.AddScoped<IStoragePolicyService, StoragePolicyService>();
+builder.Services.AddScoped<PayPlanner.Api.Services.Companies.IDocumentSellerService, PayPlanner.Api.Services.Companies.DocumentSellerService>();
 builder.Services.AddScoped<IStorageOperationProcessor, StorageOperationProcessor>();
 builder.Services.AddScoped<IStorageObjectService, StorageObjectService>();
 builder.Services.AddScoped<StorageStageCapacityService>();

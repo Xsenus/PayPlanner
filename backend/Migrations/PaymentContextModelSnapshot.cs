@@ -105,6 +105,16 @@ namespace PayPlanner.Api.Migrations
                     b.Property<int?>("ResponsibleId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int?>("SellerBranchId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("SellerCompanyId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SellerSnapshotJson")
+                        .HasMaxLength(16000)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("SentForSigningAt")
                         .HasColumnType("TEXT");
 
@@ -164,6 +174,10 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("ResponsibleId")
                         .HasDatabaseName("IX_Acts_ResponsibleId");
+
+                    b.HasIndex("SellerBranchId");
+
+                    b.HasIndex("SellerCompanyId");
 
                     b.HasIndex("Status")
                         .HasDatabaseName("IX_Acts_Status");
@@ -8504,6 +8518,16 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("INTEGER")
                         .HasDefaultValue(0);
 
+                    b.Property<int?>("SellerBranchId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("SellerCompanyId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SellerSnapshotJson")
+                        .HasMaxLength(16000)
+                        .HasColumnType("TEXT");
+
                     b.Property<int?>("ServiceId")
                         .HasColumnType("INTEGER");
 
@@ -8597,6 +8621,10 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("PlannedDate")
                         .HasDatabaseName("IX_Payments_PlannedDate");
+
+                    b.HasIndex("SellerBranchId");
+
+                    b.HasIndex("SellerCompanyId");
 
                     b.HasIndex("ServiceId")
                         .HasDatabaseName("IX_Payments_ServiceId");

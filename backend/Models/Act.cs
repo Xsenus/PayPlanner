@@ -1,6 +1,6 @@
 namespace PayPlanner.Api.Models;
 
-public class Act
+public class Act : PayPlanner.Api.Services.Companies.IDocumentSeller
 {
     public int Id { get; set; }
     public string Number { get; set; } = string.Empty;
@@ -28,6 +28,18 @@ public class Act
     public int? ResponsibleId { get; set; }
     public User? Responsible { get; set; }
     public string? Comment { get; set; }
+
+    /// <summary>Собственная компания-продавец, выбранная для документа; пусто — компания по умолчанию.</summary>
+    public int? SellerCompanyId { get; set; }
+
+    /// <summary>Филиал, офис или точка компании-продавца; пусто — реквизиты самой компании.</summary>
+    public int? SellerBranchId { get; set; }
+
+    /// <summary>
+    /// Снимок реквизитов продавца, сохранённый при первом оформлении документа
+    /// (см. <c>DocumentSellerService</c>). После этого правки профиля компании документ не меняют.
+    /// </summary>
+    public string? SellerSnapshotJson { get; set; }
     public ICollection<ActLineItem> LineItems { get; set; } = new List<ActLineItem>();
     public ICollection<ContractAct> ContractActs { get; set; } = new List<ContractAct>();
     public ICollection<Act> CorrectionActs { get; set; } = new List<Act>();

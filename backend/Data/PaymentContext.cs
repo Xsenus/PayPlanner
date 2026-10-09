@@ -349,6 +349,11 @@ public class PaymentContext : DbContext
             entity.Property(e => e.CreationMode).HasMaxLength(32).HasDefaultValue(ActCreationMode.Manual).IsRequired();
             entity.Property(e => e.InvoiceNumber).HasMaxLength(100);
             entity.Property(e => e.CounterpartyInn).HasMaxLength(32);
+            entity.Property(e => e.SellerSnapshotJson).HasMaxLength(16000);
+            // Связи без внешнего ключа: на SQLite добавление ограничения пересобирает крупные таблицы счетов и актов.
+            // Принадлежность подразделения компании проверяет DocumentSellerService при выборе продавца.
+            entity.HasIndex(e => e.SellerCompanyId);
+            entity.HasIndex(e => e.SellerBranchId);
             entity.Property(e => e.Comment);
             entity.Property(e => e.Amount).HasColumnType("decimal(18,2)");
             entity.Property(e => e.OriginalActId);
@@ -800,6 +805,11 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Description);
             entity.Property(e => e.CounterpartyName).HasMaxLength(200);
             entity.Property(e => e.ClientCaseReference).HasMaxLength(300);
+            entity.Property(e => e.SellerSnapshotJson).HasMaxLength(16000);
+            // Связи без внешнего ключа: на SQLite добавление ограничения пересобирает крупные таблицы счетов и актов.
+            // Принадлежность подразделения компании проверяет DocumentSellerService при выборе продавца.
+            entity.HasIndex(e => e.SellerCompanyId);
+            entity.HasIndex(e => e.SellerBranchId);
             entity.Property(e => e.Notes).HasMaxLength(1000);
             entity.Property(e => e.IsNotForAccounting).HasDefaultValue(false);
             entity.Property(p => p.SystemNotes).HasMaxLength(4000);

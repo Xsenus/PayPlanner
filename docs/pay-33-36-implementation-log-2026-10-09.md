@@ -83,3 +83,39 @@
 | `src/components/LegalEntities/LegalEntityModal.tsx` | Для собственных компаний: выбор состояния профиля и секция подразделений. |
 
 **Тесты:** `CompanyRequisitesResolverTests`, `CompanyBranchesControllerTests` (17), три теста статуса в `LegalEntitiesControllerTests`; фронтенд `CompanyBranchesSection.test.tsx` (6). 
+
+## Шаг 5. Выбор компании и подразделения-продавца в счёте и акте (PAY-33, п. 9)
+
+Что и зачем: раньше счёт и акт всегда брали реквизиты единственной «главной» компании (`LoadMainCompanyAsync` → `BuildSeller`). Теперь у документа можно выбрать собственную компанию и подразделение, а реквизиты при выдаче файла **фиксируются** в документе — последующая правка профиля уже выданный документ не меняет.
+
+**База данных (парные миграции, только новые nullable-колонки, без внешних ключей — на SQLite они пересобирали бы крупные таблицы):**
+
+| Файл | Что |
+| --- | --- |
+| `backend/Models/Payment.cs`, `backend/Models/Act.cs` | Поля `SellerCompanyId`, `SellerBranchId`, `SellerSnapshotJson`; оба класса реализуют `IDocumentSeller`. |
+| `backend/Data/PaymentContext.cs` | Длина снимка 16 000, индексы по `SellerCompanyId`/`SellerBranchId`. |
+| `backend/Migrations/20261009120639_AddDocumentSellerSelection*`, `backend/Migrations/PostgreSql/20261009121033_AddDocumentSellerSelectionPostgres*` | Добавляют три колонки и два индекса в `Payments` и `Acts`. |
+| `backend/PayPlanner.Api.Tests/CancelledInvoiceBillingMigrationTests.cs` | Тест апгрейда сеял платежи моделью EF на старой схеме. Теперь он временно добавляет новые колонки перед вставкой и удаляет их, чтобы реальная миграция создала их сама. |
+
+**Серверная логика:**
+
+| Файл | Что |
+| --- | --- |
+| `backend/Services/Companies/DocumentSellerService.cs` | `SellerLegalEntityComposer` собирает «виртуальное юрлицо» (компания + переопределения подразделения: КПП, адрес, подписант, выбранный счёт), поэтому генераторы документов не переписывались; снимок хранит только текстовые реквизиты (печать и подпись берутся у компании). `DocumentSellerService`: проверка выбора (компания собственная, активная; подразделение её и активное), выбор продавца для печати, фиксация снимка. Зарегистрирован в `Program.cs`. |
+| `backend/Controllers/InvoicesController.cs`, `ActsController.cs` | Новые методы `PUT api/invoices/{id}/seller`, `PUT api/acts/{id}/seller` (право «изменение»; 400 при неверном выборе, 409 если реквизиты уже зафиксированы; для счёта применяется ко всем платежам этого счёта; расходный счёт — отказ, продавец там контрагент). Печать/выдача файла и отправка (Word/PDF, Яндекс.Диск, e-mail) фиксируют реквизиты, **просмотр HTML — нет**. В DTO добавлены `sellerCompanyId`, `sellerBranchId`, `sellerFrozen`. |
+| `backend/Controllers/OwnCompaniesController.cs` | `GET api/own-companies/options` — активные собственные компании с активными подразделениями (только названия и id) для выпадающих списков; доступен любому авторизованному. |
+
+**Интерфейс:**
+
+| Файл | Что |
+| --- | --- |
+| `src/components/Documents/DocumentSellerPicker.tsx` | Компактный выбор компании и подразделения; не показывается, если выбирать не из чего; после фиксации — только текст. |
+| `src/components/Acts/ActDetailPage.tsx`, `src/components/Accounts/InvoiceModal.tsx` | Подключён выбор продавца (в счёте — только для доходных, в режиме редактирования). |
+| `src/services/api.ts`, `src/types/index.ts` | Методы и типы. |
+
+**Важно для проверяющего:**
+- Документы без явного выбора по-прежнему берут компанию по умолчанию; их реквизиты фиксируются при ближайшей выдаче файла.
+- Договоры (`ContractsController`) пока используют прежнюю «главную компанию» — отдельный шаг при необходимости.
+- Редактирование `InvoicesController.cs` ведётся с сохранением смешанных окончаний строк (файл частично CRLF): не пересохранять его утилитами, которые меняют окончания.
+
+**Тесты:** `SellerLegalEntityComposerTests`, `DocumentSellerServiceTests`, `ActSellerEndpointTests`, `OwnCompaniesControllerTests`, два теста в `InvoiceDocumentTemplateTests` (выбор продавца, фиксация, чужая компания); фронтенд `DocumentSellerPicker.test.tsx` (5). Запускались также все тесты счетов, актов и документов (424 зелёных) и миграционные/моделей на реальном PostgreSQL (`PAYPLANNER_TEST_POSTGRES`).

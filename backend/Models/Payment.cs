@@ -6,7 +6,7 @@ namespace PayPlanner.Api.Models
     /// <summary>
     /// Сущность платежа (приход или расход).
     /// </summary>
-    public class Payment
+    public class Payment : PayPlanner.Api.Services.Companies.IDocumentSeller
     {
         /// <summary>
         /// Счет.
@@ -106,6 +106,18 @@ namespace PayPlanner.Api.Models
         /// Юридическое лицо, к которому относится расходный счет.
         /// </summary>
         public int? ExpenseLegalEntityId { get; set; }
+
+        /// <summary>Собственная компания-продавец, выбранная для документа; пусто — компания по умолчанию.</summary>
+        public int? SellerCompanyId { get; set; }
+
+        /// <summary>Филиал, офис или точка компании-продавца; пусто — реквизиты самой компании.</summary>
+        public int? SellerBranchId { get; set; }
+
+        /// <summary>
+        /// Снимок реквизитов продавца, сохранённый при первом оформлении документа
+        /// (см. <c>DocumentSellerService</c>). После этого правки профиля компании документ не меняют.
+        /// </summary>
+        public string? SellerSnapshotJson { get; set; }
 
         /// <summary>
         /// Навигация на юридическое лицо, к которому относится расходный счет.
