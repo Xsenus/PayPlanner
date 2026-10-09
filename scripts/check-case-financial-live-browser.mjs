@@ -95,7 +95,9 @@ try {
   // Prepare the real entry within the existing scenario budget before browser navigation.
   const entry = await vite.transformRequest('/src/main.tsx');
   assert.ok(entry?.code, 'The synthetic financial UI entry module must compile successfully.');
-  await cli('open', ui + '/cases/' + caseId, '--browser', browser); opened = true;
+  await vite.waitForRequestsIdle();
+  await cli('open', 'about:blank', '--browser', browser); opened = true;
+  await cli('goto', ui + '/cases/' + caseId);
   await cli('snapshot');
   const settings = JSON.stringify({ api: api.origin, ui, caseId, clientId, flow, controlUrl,
     downloadPath: join(root, 'financial-browser-download.html'),

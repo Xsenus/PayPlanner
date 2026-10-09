@@ -185,6 +185,7 @@ try {
   console.log('TASK_UPLOAD_STAGE_VITE_ENTRY_PREPARING');
   const entry = await vite.transformRequest('/src/main.tsx');
   assert.ok(entry?.code, 'The synthetic task UI entry module must compile successfully.');
+  await vite.waitForRequestsIdle();
   console.log('TASK_UPLOAD_STAGE_VITE_ENTRY_READY');
   for (const channel of ['msedge', 'chrome', undefined]) {
     console.log(`TASK_UPLOAD_STAGE_BROWSER_STARTING_${channel ?? 'bundled'}`);

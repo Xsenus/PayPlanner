@@ -69,7 +69,9 @@ try {
   // Prepare the real entry within the existing scenario budget before browser navigation.
   const entry = await vite.transformRequest('/src/main.tsx');
   assert.ok(entry?.code, 'The synthetic generated-document UI entry module must compile successfully.');
-  await cli('open', ui + (flow === 'generated-modal' ? '/clients/' + clientId : '/cases/' + caseId), '--browser', browser); opened = true;
+  await vite.waitForRequestsIdle();
+  await cli('open', 'about:blank', '--browser', browser); opened = true;
+  await cli('goto', ui + (flow === 'generated-modal' ? '/clients/' + clientId : '/cases/' + caseId));
   await cli('snapshot');
   const settings = JSON.stringify({ api: api.origin, ui, caseId, clientId, flow, email: process.env.CASE_RETIREMENT_EMAIL, password: process.env.CASE_RETIREMENT_PASSWORD });
   const result = await cli('run-code', String.raw`async (page) => {

@@ -104,8 +104,12 @@ try {
   // Prepare the real entry within the existing scenario budget before browser navigation.
   const entry = await vite.transformRequest('/src/main.tsx');
   assert.ok(entry?.code, 'The synthetic case-document UI entry module must compile successfully.');
-  await cli('open', ui + '/cases/' + caseId, '--browser', browser);
+  // Finish the initial static-import crawl within the unchanged scenario budget.
+  await vite.waitForRequestsIdle();
+  // Own the browser before navigation so a failed page load still closes it.
+  await cli('open', 'about:blank', '--browser', browser);
   opened = true;
+  await cli('goto', ui + '/cases/' + caseId);
   await cli('snapshot');
   const settings = JSON.stringify({ api: api.origin, ui, caseId, key, flow, clientId, sourceDocumentId, documentKey, controlUrl,
     pending: flow.includes('writ') ? { fileName: 'retirement-browser-owned.pdf', contentType: 'application/pdf',
