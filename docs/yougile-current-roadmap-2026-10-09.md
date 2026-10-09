@@ -31,7 +31,7 @@
 | Приоритет | Блок | Активный план | Прогресс |
 | --- | --- | --- | --- |
 | P0, завершён | Полный backup и исправление текущей ошибки | [Закрытый план](archive/roadmaps/backup-recovery-roadmap-2026-10-09.md) | 8/8, 100% |
-| P1 | PAY-33, собственные компании и филиалы | [Профиль компании](company-profile-yougile-roadmap-2026-10-09.md) | 1/10, 10% |
+| P1 | PAY-33, собственные компании и филиалы | [Профиль компании](company-profile-yougile-roadmap-2026-10-09.md) | 4/10, 40% (ветка `claude/admiring-newton-nyddyv`, не в `main`) |
 | P1 | PAY-34, счета/первичка/НДС/печатные формы | [Первичные документы](accounting-documents-yougile-roadmap-2026-10-09.md) | 1/12, 8% |
 | P1 | PAY-31, заявки и автоматизация | [Существующий план](tz-crm-applications-automation-roadmap-2026-10-07.md) | 0/24, 0% |
 | P2 | PAY-36, Точка/Сбер и выписки | [Банковские подключения](bank-integrations-yougile-roadmap-2026-10-09.md) | 1/12, 8% |
