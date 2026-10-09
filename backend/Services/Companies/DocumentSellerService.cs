@@ -39,7 +39,6 @@ public static class SellerLegalEntityComposer
         string? Email,
         string? Director,
         string? DocumentDirectorJson,
-        string? ChiefAccountantJson,
         string? BankAccountsJson,
         string? TreasuryBankName,
         string? TreasuryBankBik,
@@ -55,14 +54,22 @@ public static class SellerLegalEntityComposer
         }
 
         var companyAddress = LegalEntityAddressResolver.ResolvePreferredAddress(company);
-        var accountsJson = company.BankAccountsJson;
+        // В виртуальное юрлицо попадает ровно один счёт — тот, что подставит документ: выбранный у подразделения
+        // либо основной активный. Так снимок не раздувается списком всех счетов компании.
+        System.Text.Json.Nodes.JsonObject? chosenAccount = null;
         if (branch is not null
-            && CompanyRequisitesResolver.TryFindActiveAccount(company, branch.BankAccountId, out var branchAccount)
-            && branchAccount is not null)
+            && CompanyRequisitesResolver.TryFindActiveAccount(company, branch.BankAccountId, out var branchAccount))
         {
-            var chosen = (System.Text.Json.Nodes.JsonObject)branchAccount.DeepClone();
-            chosen["isPrimary"] = true;
-            accountsJson = new System.Text.Json.Nodes.JsonArray(chosen).ToJsonString(
+            chosenAccount = branchAccount;
+        }
+
+        chosenAccount ??= CompanyBankAccountList.FindPrimaryActive(company.BankAccountsJson);
+        string? accountsJson = null;
+        if (chosenAccount is not null)
+        {
+            var clone = (System.Text.Json.Nodes.JsonObject)chosenAccount.DeepClone();
+            clone["isPrimary"] = true;
+            accountsJson = new System.Text.Json.Nodes.JsonArray(clone).ToJsonString(
                 new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
         }
 
@@ -84,7 +91,6 @@ public static class SellerLegalEntityComposer
             Email = company.Email,
             Director = company.Director,
             DocumentDirectorJson = Pick(branch?.SignerJson, company.DocumentDirectorJson),
-            ChiefAccountantJson = company.ChiefAccountantJson,
             BankAccountsJson = accountsJson,
             TreasuryBankName = company.TreasuryBankName,
             TreasuryBankBik = company.TreasuryBankBik,
@@ -101,7 +107,7 @@ public static class SellerLegalEntityComposer
             seller.Id, seller.ShortName, seller.FullName, seller.OrganizationForm, seller.Inn, seller.Kpp,
             seller.Ogrn, seller.Okpo, seller.Okved, seller.TaxSystem, seller.VatWithoutVat,
             seller.Address, seller.Phone, seller.Email, seller.Director, seller.DocumentDirectorJson,
-            seller.ChiefAccountantJson, seller.BankAccountsJson, seller.TreasuryBankName,
+            seller.BankAccountsJson, seller.TreasuryBankName,
             seller.TreasuryBankBik, seller.TreasuryAccountNumber, seller.TreasuryCorrAccountNumber),
             new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
 
@@ -146,7 +152,6 @@ public static class SellerLegalEntityComposer
             Email = data.Email,
             Director = data.Director,
             DocumentDirectorJson = data.DocumentDirectorJson,
-            ChiefAccountantJson = data.ChiefAccountantJson,
             BankAccountsJson = data.BankAccountsJson,
             TreasuryBankName = data.TreasuryBankName,
             TreasuryBankBik = data.TreasuryBankBik,
@@ -176,6 +181,7 @@ public interface IDocumentSellerService
 
 public sealed class DocumentSellerService : IDocumentSellerService
 {
+    public const int MaxSnapshotLength = 16000;
     private const string MainCompanyIdsSettingKey = "legalEntities.mainCompanyIds";
     private const string LegacyMainCompanySettingKey = "legalEntities.mainCompanyId";
 
@@ -258,6 +264,20 @@ public sealed class DocumentSellerService : IDocumentSellerService
             return defaultCompany;
         }
 
+        // Выбор мог устареть после сохранения: компанию убрали из собственных, архивировали, подразделение закрыли.
+        // Такой выбор не применяется и не фиксируется в документе — берётся компания по умолчанию.
+        var selectionIsUsable = !document.SellerCompanyId.HasValue
+            || await ValidateSelectionAsync(document.SellerCompanyId, document.SellerBranchId, ct) is null;
+        if (!selectionIsUsable)
+        {
+            if (defaultCompany is null)
+            {
+                return null;
+            }
+
+            companyId = defaultCompany.Id;
+        }
+
         var company = await LoadCompanyAsync(companyId.Value, defaultCompany, ct);
         if (company is null)
         {
@@ -265,7 +285,7 @@ public sealed class DocumentSellerService : IDocumentSellerService
         }
 
         CompanyBranch? branch = null;
-        if (document.SellerBranchId.HasValue)
+        if (selectionIsUsable && document.SellerBranchId.HasValue)
         {
             branch = await _db.CompanyBranches
                 .AsNoTracking()
@@ -275,8 +295,14 @@ public sealed class DocumentSellerService : IDocumentSellerService
         var composed = SellerLegalEntityComposer.Compose(company, branch);
         if (freeze)
         {
-            document.SellerCompanyId ??= company.Id;
-            document.SellerSnapshotJson = SellerLegalEntityComposer.ToSnapshotJson(composed);
+            var snapshot = SellerLegalEntityComposer.ToSnapshotJson(composed);
+            // Колонка ограничена; слишком большой снимок не фиксируем (документ остаётся «живым»), а не падаем при выдаче.
+            if (snapshot.Length <= MaxSnapshotLength)
+            {
+                document.SellerCompanyId = company.Id;
+                document.SellerBranchId = branch?.Id;
+                document.SellerSnapshotJson = snapshot;
+            }
         }
 
         return composed;

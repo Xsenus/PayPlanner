@@ -20,7 +20,11 @@ public static class CompanyBankAccountList
         public bool IsValid => Errors.Count == 0;
     }
 
-    public static Result Normalize(string? rawJson, Func<string>? idFactory = null)
+    /// <param name="previousJson">
+    /// Ранее сохранённый список. Дубли, которые уже были в нём (старые и импортированные данные), остаются
+    /// предупреждением и не мешают сохранить карточку; ошибкой становится только вновь появившийся дубль.
+    /// </param>
+    public static Result Normalize(string? rawJson, Func<string>? idFactory = null, string? previousJson = null)
     {
         if (string.IsNullOrWhiteSpace(rawJson))
         {
@@ -102,6 +106,7 @@ public static class CompanyBankAccountList
         }
 
         var activeKeys = new HashSet<string>(StringComparer.Ordinal);
+        var previousDuplicates = FindActiveDuplicateKeys(previousJson);
         for (var i = 0; i < items.Count; i++)
         {
             var item = items[i];
@@ -116,7 +121,15 @@ public static class CompanyBankAccountList
 
             if (ReadBool(item, "isArchived") != true && !activeKeys.Add($"{bik}|{number}"))
             {
-                errors.Add($"{label}: счёт {number} с таким БИК уже есть в списке.");
+                var message = $"{label}: счёт {number} с таким БИК уже есть в списке.";
+                if (previousDuplicates.Contains($"{bik}|{number}"))
+                {
+                    warnings.Add(message);
+                }
+                else
+                {
+                    errors.Add(message);
+                }
             }
 
             if (bik is not null && !RussianRequisitesValidator.IsValidBik(bik))
@@ -170,6 +183,76 @@ public static class CompanyBankAccountList
             .Where(item => ReadBool(item, "isArchived") != true && ReadString(item, "accountNumber") is not null)
             .OrderByDescending(item => ReadBool(item, "isPrimary") == true)
             .FirstOrDefault();
+    }
+
+    /// <summary>Идентификаторы действующих (не архивных) счетов нормализованного списка.</summary>
+    public static HashSet<string> ActiveAccountIds(string? normalizedJson)
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(normalizedJson))
+        {
+            return ids;
+        }
+
+        try
+        {
+            if (JsonNode.Parse(normalizedJson) is JsonArray array)
+            {
+                foreach (var item in array.OfType<JsonObject>())
+                {
+                    var id = ReadString(item, "id");
+                    if (id is not null && ReadBool(item, "isArchived") != true)
+                    {
+                        ids.Add(id);
+                    }
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // Некорректный список не содержит действующих счетов.
+        }
+
+        return ids;
+    }
+
+    private static HashSet<string> FindActiveDuplicateKeys(string? json)
+    {
+        var duplicates = new HashSet<string>(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return duplicates;
+        }
+
+        try
+        {
+            if (JsonNode.Parse(json) is not JsonArray array)
+            {
+                return duplicates;
+            }
+
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var item in array.OfType<JsonObject>())
+            {
+                var number = ReadString(item, "accountNumber");
+                if (number is null || ReadBool(item, "isArchived") == true)
+                {
+                    continue;
+                }
+
+                var key = $"{ReadString(item, "bik")}|{number}";
+                if (!seen.Add(key))
+                {
+                    duplicates.Add(key);
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // Некорректный прежний список просто не даёт исключений.
+        }
+
+        return duplicates;
     }
 
     private static string? ReadString(JsonObject item, string name)

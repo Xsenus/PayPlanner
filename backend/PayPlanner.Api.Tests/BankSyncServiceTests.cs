@@ -17,10 +17,23 @@ public class BankSyncServiceTests
         public Dictionary<string, List<List<BankOperationInfo>>> Pages { get; } = new();
         public HashSet<string> FailingAccounts { get; } = [];
         public bool Unauthorized { get; set; }
+        public bool RefreshFails { get; set; }
+        public int RefreshCalls { get; private set; }
+        public string? LastAccessToken { get; private set; }
+
+        public Task<BankTokens> RefreshTokensAsync(string refreshToken, CancellationToken ct)
+        {
+            RefreshCalls++;
+            if (RefreshFails) throw new BankAuthorizationException("refresh rejected");
+            return Task.FromResult(new BankTokens("new-access", "new-refresh", DateTime.UtcNow.AddHours(1)));
+        }
         public int StatementCalls { get; private set; }
+        public int? FailOnPage { get; set; }
+        public DateTime? LastFrom { get; private set; }
 
         public Task<IReadOnlyList<BankAccountInfo>> ListAccountsAsync(BankCredentials credentials, CancellationToken ct)
         {
+            LastAccessToken = credentials.AccessToken;
             if (Unauthorized) throw new BankAuthorizationException("token revoked");
             return Task.FromResult<IReadOnlyList<BankAccountInfo>>(Accounts);
         }
@@ -28,10 +41,12 @@ public class BankSyncServiceTests
         public Task<BankStatementPage> GetStatementPageAsync(BankCredentials credentials, string externalAccountId, DateTime from, DateTime to, string? cursor, CancellationToken ct)
         {
             StatementCalls++;
+            LastFrom = from;
             if (Unauthorized) throw new BankAuthorizationException("token revoked");
             if (FailingAccounts.Contains(externalAccountId)) throw new InvalidOperationException("bank unavailable");
             var pages = Pages.GetValueOrDefault(externalAccountId) ?? [];
             var index = cursor is null ? 0 : int.Parse(cursor);
+            if (FailOnPage == index) throw new InvalidOperationException("bank unavailable");
             var items = index < pages.Count ? pages[index] : [];
             return Task.FromResult(new BankStatementPage(items, index + 1 < pages.Count ? (index + 1).ToString() : null));
         }
@@ -227,5 +242,93 @@ public class BankSyncServiceTests
 
         Assert.NotNull(result.Error);
         Assert.Equal(0, bank.StatementCalls);
+    }
+
+    [Fact]
+    public async Task ExpiredAccessToken_IsRefreshedAndStored_BeforeCallingBank()
+    {
+        var (db, service, bank, connection) = await CreateAsync();
+        await using var _ = db;
+        connection.AccessTokenExpiresAt = DateTime.UtcNow.AddMinutes(-5);
+        await db.SaveChangesAsync();
+        bank.Accounts = [Account("a")];
+
+        var result = await service.SyncAccountsAsync(connection.Id, default);
+
+        Assert.Null(result.Error);
+        Assert.Equal(1, bank.RefreshCalls);
+        Assert.Equal("new-access", bank.LastAccessToken);
+        var stored = await db.BankConnections.AsNoTracking().SingleAsync();
+        Assert.True(stored.AccessTokenExpiresAt > DateTime.UtcNow);
+        Assert.Equal(BankConnectionStatuses.Active, stored.Status);
+    }
+
+    [Fact]
+    public async Task RejectedRefresh_RequiresReauthorization_WithoutCallingBankData()
+    {
+        var (db, service, bank, connection) = await CreateAsync();
+        await using var _ = db;
+        connection.AccessTokenExpiresAt = DateTime.UtcNow.AddMinutes(-5);
+        await db.SaveChangesAsync();
+        bank.RefreshFails = true;
+        bank.Accounts = [Account("a")];
+
+        var result = await service.SyncAccountsAsync(connection.Id, default);
+
+        Assert.NotNull(result.Error);
+        Assert.Null(bank.LastAccessToken);
+        Assert.Equal(BankConnectionStatuses.ReauthRequired, (await db.BankConnections.AsNoTracking().SingleAsync()).Status);
+    }
+
+    [Fact]
+    public async Task SyncAccounts_SkipsAccountsWithOversizedIdentifiers_InsteadOfFailingTheWholeRun()
+    {
+        var (db, service, bank, connection) = await CreateAsync();
+        await using var _ = db;
+        bank.Accounts = [Account(new string('x', 200)), Account("ok", "40702810200000000009")];
+
+        var result = await service.SyncAccountsAsync(connection.Id, default);
+
+        Assert.Null(result.Error);
+        Assert.Equal(1, result.Added);
+        Assert.Equal(1, result.Skipped);
+    }
+
+    [Fact]
+    public async Task SyncStatement_SavesEveryPage_SoLateFailureKeepsEarlierOperations()
+    {
+        var (db, service, bank, connection) = await CreateAsync();
+        await using var _ = db;
+        bank.Accounts = [Account("a")];
+        await service.SyncAccountsAsync(connection.Id, default);
+        var accountId = (await db.BankConnectionAccounts.SingleAsync()).Id;
+        bank.Pages["a"] = [[Op("1", 1)], [Op("2", 2)]];
+        bank.FailOnPage = 1;
+
+        var result = await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), default);
+
+        Assert.NotNull(result.Error);
+        Assert.Equal(1, await db.BankStatementOperations.CountAsync());
+        Assert.Null((await db.BankConnectionAccounts.AsNoTracking().SingleAsync()).StatementWatermark);
+
+        bank.FailOnPage = null;
+        var retry = await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), default);
+        Assert.Null(retry.Error);
+        Assert.Equal(2, await db.BankStatementOperations.CountAsync());
+    }
+
+    [Fact]
+    public async Task SyncStatement_DoesNotRereadWholeHistory_WhenAccountHasNoBookedOperationsYet()
+    {
+        var (db, service, bank, connection) = await CreateAsync();
+        await using var _ = db;
+        bank.Accounts = [Account("a")];
+        await service.SyncAccountsAsync(connection.Id, default);
+        var accountId = (await db.BankConnectionAccounts.SingleAsync()).Id;
+
+        await service.SyncStatementAsync(accountId, new DateTime(2026, 1, 1), DateTime.UtcNow, default);
+        await service.SyncStatementAsync(accountId, new DateTime(2026, 1, 1), DateTime.UtcNow, default);
+
+        Assert.True(bank.LastFrom > new DateTime(2026, 1, 1));
     }
 }

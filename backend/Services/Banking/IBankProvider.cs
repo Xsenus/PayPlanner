@@ -3,6 +3,9 @@ namespace PayPlanner.Api.Services.Banking;
 /// <summary>Открытые данные доступа к банку для одного вызова адаптера.</summary>
 public sealed record BankCredentials(string AccessToken, string? RefreshToken);
 
+/// <summary>Новая пара токенов после обновления; <c>RefreshToken</c> пуст, если банк не выдал новый.</summary>
+public sealed record BankTokens(string AccessToken, string? RefreshToken, DateTime? ExpiresAt);
+
 public sealed record BankAccountInfo(
     string ExternalId,
     string AccountNumber,
@@ -39,6 +42,9 @@ public sealed class BankAuthorizationException : Exception
 public interface IBankProvider
 {
     string Key { get; }
+
+    /// <summary>Обновляет токены по refresh-токену. Отказ банка — <see cref="BankAuthorizationException"/>.</summary>
+    Task<BankTokens> RefreshTokensAsync(string refreshToken, CancellationToken ct);
 
     Task<IReadOnlyList<BankAccountInfo>> ListAccountsAsync(BankCredentials credentials, CancellationToken ct);
 

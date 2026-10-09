@@ -1104,6 +1104,33 @@ public class LegalEntitiesControllerTests
     }
 
     [Fact]
+    public async Task Update_RefusesToArchiveAccountThatActiveBranchUses()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db, roleName: "admin");
+        var entityId = await CreateLegalEntityAsync(db, "Своя компания");
+        (await db.LegalEntities.SingleAsync(le => le.Id == entityId)).BankAccountsJson =
+            "[{\"id\":\"a\",\"accountNumber\":\"1\",\"isPrimary\":true},{\"id\":\"b\",\"accountNumber\":\"2\"}]";
+        db.CompanyBranches.Add(new CompanyBranch { LegalEntityId = entityId, Name = "Офис", BankAccountId = "b" });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId);
+
+        var archive = await controller.Update(entityId, new LegalEntityRequest
+        {
+            ShortName = "Своя компания",
+            BankAccountsJson = "[{\"id\":\"a\",\"accountNumber\":\"1\",\"isPrimary\":true},{\"id\":\"b\",\"accountNumber\":\"2\",\"isArchived\":true}]",
+        }, CancellationToken.None);
+        var keep = await controller.Update(entityId, new LegalEntityRequest
+        {
+            ShortName = "Своя компания",
+            BankAccountsJson = "[{\"id\":\"a\",\"accountNumber\":\"1\",\"isPrimary\":true},{\"id\":\"b\",\"accountNumber\":\"2\"}]",
+        }, CancellationToken.None);
+
+        Assert.IsType<ConflictObjectResult>(archive.Result);
+        Assert.IsType<OkObjectResult>(keep.Result);
+    }
+
+    [Fact]
     public async Task Update_RejectsDuplicateActiveBankAccount_WithoutChangingStoredList()
     {
         await using var db = await CreateContextAsync();

@@ -1150,6 +1150,42 @@ public class InvoiceDocumentTemplateTests
     }
 
     [Fact]
+    public async Task Export_FreezesSellerForEveryPaymentOfTheSameInvoice()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var first = await db.Payments.AsNoTracking().SingleAsync(p => p.Id == paymentId);
+        var sibling = new Payment
+        {
+            Account = first.Account,
+            AccountDate = first.AccountDate,
+            InvoiceId = first.InvoiceId,
+            ClientId = first.ClientId,
+            DocumentKind = DocumentKind.Invoice,
+            Date = first.Date,
+            PlannedDate = first.PlannedDate,
+            Amount = 5_000m,
+            Status = PaymentStatus.Pending,
+            Type = PaymentType.Income,
+        };
+        db.Payments.Add(sibling);
+        var company = new LegalEntity { ShortName = "ООО Тест", Inn = "7700000000", Kpp = "770001001" };
+        db.LegalEntities.Add(company);
+        await db.SaveChangesAsync();
+        db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = $"[{company.Id}]" });
+        db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.defaultMainCompanyId", Value = company.Id.ToString() });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, isAdmin: true);
+
+        await controller.GetDocument(paymentId, "word", null, null, CancellationToken.None);
+
+        var snapshots = await db.Payments.AsNoTracking().Where(p => p.InvoiceId == first.InvoiceId)
+            .Select(p => p.SellerSnapshotJson).ToListAsync();
+        Assert.Equal(2, snapshots.Count);
+        Assert.All(snapshots, snapshot => Assert.Contains("770001001", snapshot));
+    }
+
+    [Fact]
     public async Task SetSeller_RejectsCompanyThatIsNotOwn()
     {
         await using var db = await CreateContextAsync();

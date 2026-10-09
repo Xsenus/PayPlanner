@@ -7210,7 +7210,26 @@ public class InvoicesController : ControllerBase
             if (tracked is not null && string.IsNullOrWhiteSpace(tracked.SellerSnapshotJson))
             {
                 tracked.SellerCompanyId = payment.SellerCompanyId;
+                tracked.SellerBranchId = payment.SellerBranchId;
                 tracked.SellerSnapshotJson = payment.SellerSnapshotJson;
+                // Все платежи одного счёта должны печататься с одними и теми же реквизитами продавца.
+                var invoiceEntityId = tracked.InvoiceId;
+                if (invoiceEntityId.HasValue && invoiceEntityId.Value > 0)
+                {
+                    var siblings = await _db.Payments
+                        .Where(candidate => candidate.InvoiceId == invoiceEntityId.Value
+                            && candidate.Id != tracked.Id
+                            && candidate.DocumentKind == DocumentKind.Invoice
+                            && candidate.Type != PaymentType.Expense
+                            && candidate.SellerSnapshotJson == null)
+                        .ToListAsync(ct);
+                    foreach (var sibling in siblings)
+                    {
+                        sibling.SellerCompanyId = tracked.SellerCompanyId;
+                        sibling.SellerBranchId = tracked.SellerBranchId;
+                        sibling.SellerSnapshotJson = tracked.SellerSnapshotJson;
+                    }
+                }
                 await _db.SaveChangesAsync(ct);
             }
         }

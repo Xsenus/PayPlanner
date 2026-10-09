@@ -134,6 +134,19 @@ public class CompanyBankAccountListTests
     }
 
     [Fact]
+    public void Normalize_ToleratesDuplicatesThatAlreadyExistedBefore_ButRejectsNewOnes()
+    {
+        const string duplicated = "[{\"bik\":\"044525225\",\"accountNumber\":\"1\"},{\"bik\":\"044525225\",\"accountNumber\":\"1\"}]";
+
+        var legacy = CompanyBankAccountList.Normalize(duplicated, previousJson: duplicated);
+        var fresh = CompanyBankAccountList.Normalize(duplicated, previousJson: "[{\"bik\":\"044525225\",\"accountNumber\":\"1\"}]");
+
+        Assert.True(legacy.IsValid);
+        Assert.NotEmpty(legacy.Warnings);
+        Assert.False(fresh.IsValid);
+    }
+
+    [Fact]
     public void Normalize_ReportsFormatProblemsAsWarningsOnly()
     {
         var result = CompanyBankAccountList.Normalize("[{\"bik\":\"123\",\"accountNumber\":\"12\"}]");

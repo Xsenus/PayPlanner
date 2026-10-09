@@ -2071,6 +2071,7 @@ public class ActsController : ControllerBase
             if (tracked is not null && string.IsNullOrWhiteSpace(tracked.SellerSnapshotJson))
             {
                 tracked.SellerCompanyId = act.SellerCompanyId;
+                tracked.SellerBranchId = act.SellerBranchId;
                 tracked.SellerSnapshotJson = act.SellerSnapshotJson;
                 await _db.SaveChangesAsync(ct);
             }

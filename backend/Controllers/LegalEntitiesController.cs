@@ -2123,10 +2123,28 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             return duplicateInnError;
         }
 
-        var bankAccounts = CompanyBankAccountList.Normalize(request.BankAccountsJson);
+        var bankAccounts = CompanyBankAccountList.Normalize(request.BankAccountsJson, previousJson: entity.BankAccountsJson);
         if (!bankAccounts.IsValid)
         {
             return BadRequest(new { message = string.Join(" ", bankAccounts.Errors) });
+        }
+
+        var activeAccountIds = CompanyBankAccountList.ActiveAccountIds(bankAccounts.Json);
+        var brokenBranches = await _db.CompanyBranches
+            .AsNoTracking()
+            .Where(b => b.LegalEntityId == entity.Id && b.Status == CompanyProfileStatuses.Active && b.BankAccountId != null)
+            .Select(b => new { b.Name, b.BankAccountId })
+            .ToListAsync(ct);
+        var brokenNames = brokenBranches
+            .Where(b => !activeAccountIds.Contains(b.BankAccountId!))
+            .Select(b => b.Name)
+            .ToList();
+        if (brokenNames.Count > 0)
+        {
+            return Conflict(new
+            {
+                message = $"Счёт, выбранный у подразделений ({string.Join(", ", brokenNames)}), нельзя удалить или перенести в архив: сначала выберите другой счёт у этих подразделений.",
+            });
         }
 
         var profileStatus = request.ProfileStatus is null

@@ -63,7 +63,7 @@ public sealed class BankSyncService : IBankSyncService
             return new BankAccountsSyncResult(0, 0, 0, "Подключение не найдено.");
         }
 
-        var (provider, credentials, setupError) = Prepare(connection);
+        var (provider, credentials, setupError) = await PrepareAsync(connection, ct);
         if (provider is null || credentials is null)
         {
             return new BankAccountsSyncResult(0, 0, 0, setupError);
@@ -95,6 +95,15 @@ public sealed class BankSyncService : IBankSyncService
         int added = 0, updated = 0, skipped = 0;
         foreach (var info in remote)
         {
+            var externalId = Trim(info.ExternalId, 128);
+            var number = Trim(info.AccountNumber, 34);
+            // Без устойчивого идентификатора или номера счёт нельзя сопоставить повторно: пропускаем, а не искажаем.
+            if (externalId is null || number is null || info.ExternalId.Trim().Length > 128 || info.AccountNumber.Trim().Length > 34)
+            {
+                skipped++;
+                continue;
+            }
+
             // Чужой ИНН владельца — счёт другой компании: не привязываем.
             if (!string.IsNullOrWhiteSpace(info.OwnerInn) && !string.IsNullOrWhiteSpace(companyInn)
                 && !string.Equals(info.OwnerInn.Trim(), companyInn.Trim(), StringComparison.Ordinal))
@@ -104,15 +113,17 @@ public sealed class BankSyncService : IBankSyncService
             }
 
             var status = BankAccountStatuses.All.Contains(info.Status) ? info.Status : BankAccountStatuses.Unavailable;
-            if (existing.TryGetValue(info.ExternalId, out var account))
+            var bik = Trim(info.Bik, 16);
+            var currency = Trim(info.Currency, 8) ?? "RUB";
+            if (existing.TryGetValue(externalId, out var account))
             {
-                var changed = account.AccountNumber != info.AccountNumber || account.Bik != info.Bik
-                    || account.Currency != info.Currency || account.Status != status;
+                var changed = account.AccountNumber != number || account.Bik != bik
+                    || account.Currency != currency || account.Status != status;
                 if (changed)
                 {
-                    account.AccountNumber = info.AccountNumber;
-                    account.Bik = info.Bik;
-                    account.Currency = info.Currency;
+                    account.AccountNumber = number;
+                    account.Bik = bik;
+                    account.Currency = currency;
                     account.Status = status;
                     account.UpdatedAt = DateTime.UtcNow;
                     updated++;
@@ -123,14 +134,14 @@ public sealed class BankSyncService : IBankSyncService
                 var created = new BankConnectionAccount
                 {
                     BankConnectionId = connection.Id,
-                    ExternalAccountId = info.ExternalId,
-                    AccountNumber = info.AccountNumber,
-                    Bik = info.Bik,
-                    Currency = info.Currency,
+                    ExternalAccountId = externalId,
+                    AccountNumber = number,
+                    Bik = bik,
+                    Currency = currency,
                     Status = status,
                 };
                 _db.BankConnectionAccounts.Add(created);
-                existing[info.ExternalId] = created;
+                existing[externalId] = created;
                 added++;
             }
         }
@@ -138,7 +149,17 @@ public sealed class BankSyncService : IBankSyncService
         connection.LastAccountsSyncAt = DateTime.UtcNow;
         connection.LastError = null;
         connection.UpdatedAt = DateTime.UtcNow;
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex)
+        {
+            // Параллельная загрузка тех же счетов: уникальный индекс защитил от дублей, результат даст соседний запуск.
+            _db.ChangeTracker.Clear();
+            return new BankAccountsSyncResult(0, 0, skipped, Trim(ex.GetBaseException().Message));
+        }
+
         return new BankAccountsSyncResult(added, updated, skipped, null);
     }
 
@@ -157,28 +178,78 @@ public sealed class BankSyncService : IBankSyncService
             return new BankStatementSyncResult(0, 0, account.StatementWatermark, "Загрузка выписки для счёта отключена или счёт недоступен.");
         }
 
-        var (provider, credentials, setupError) = Prepare(account.BankConnection);
+        var (provider, credentials, setupError) = await PrepareAsync(account.BankConnection, ct);
         if (provider is null || credentials is null)
         {
             return await FailAccountAsync(account, setupError, ct);
         }
 
-        // Повторно берём небольшой хвост до отметки: банк мог изменить незавершённые операции.
-        var start = account.StatementWatermark.HasValue && account.StatementWatermark.Value - OverlapWindow > from
-            ? account.StatementWatermark.Value - OverlapWindow
-            : from;
+        // Начало периода: после отметки (или после прошлой успешной загрузки, если подтверждённых операций ещё нет)
+        // с небольшим перекрытием; незавершённые операции перечитываем с самой ранней из них.
+        var anchor = account.StatementWatermark ?? account.LastStatementSyncAt;
+        var start = anchor.HasValue && anchor.Value - OverlapWindow > from ? anchor.Value - OverlapWindow : from;
+        var earliestPending = await _db.BankStatementOperations.AsNoTracking()
+            .Where(item => item.BankConnectionAccountId == account.Id && !item.IsBooked)
+            .Select(item => (DateTime?)item.OperationDate)
+            .MinAsync(ct);
+        if (earliestPending.HasValue && earliestPending.Value < start)
+        {
+            start = earliestPending.Value > from ? earliestPending.Value : from;
+        }
 
-        var fetched = new Dictionary<string, BankOperationInfo>(StringComparer.Ordinal);
+        int inserted = 0, updatedCount = 0;
+        DateTime? lastBooked = null;
+        DateTime? firstPending = null;
         try
         {
             string? cursor = null;
             for (var page = 0; page < MaxPages; page++)
             {
                 var result = await provider.GetStatementPageAsync(credentials, account.ExternalAccountId, start, to, cursor, ct);
-                foreach (var item in result.Items)
+                var items = result.Items
+                    .Where(item => !string.IsNullOrWhiteSpace(item.ExternalId) && item.ExternalId.Trim().Length <= 128)
+                    .GroupBy(item => item.ExternalId.Trim(), StringComparer.Ordinal)
+                    .Select(group => group.Last())
+                    .ToList();
+
+                var ids = items.Select(item => item.ExternalId.Trim()).ToList();
+                var known = await _db.BankStatementOperations
+                    .Where(item => item.BankConnectionAccountId == account.Id && ids.Contains(item.ExternalOperationId))
+                    .ToDictionaryAsync(item => item.ExternalOperationId, StringComparer.Ordinal, ct);
+
+                foreach (var info in items)
                 {
-                    fetched[item.ExternalId] = item;
+                    var key = info.ExternalId.Trim();
+                    if (info.IsBooked)
+                    {
+                        lastBooked = lastBooked.HasValue && lastBooked > info.Date ? lastBooked : info.Date;
+                    }
+                    else
+                    {
+                        firstPending = firstPending.HasValue && firstPending < info.Date ? firstPending : info.Date;
+                    }
+
+                    if (known.TryGetValue(key, out var row))
+                    {
+                        // Подтверждённая операция больше не меняется; незавершённая обновляется.
+                        if (!row.IsBooked)
+                        {
+                            Apply(row, info);
+                            updatedCount++;
+                        }
+
+                        continue;
+                    }
+
+                    var created = new BankStatementOperation { BankConnectionAccountId = account.Id, ExternalOperationId = key };
+                    Apply(created, info);
+                    _db.BankStatementOperations.Add(created);
+                    inserted++;
                 }
+
+                // Страница сохраняется сразу: память ограничена размером страницы, а сбой на поздней странице
+                // не теряет уже полученное (повтор безопасен благодаря уникальному индексу).
+                await _db.SaveChangesAsync(ct);
 
                 cursor = result.NextCursor;
                 if (string.IsNullOrEmpty(cursor))
@@ -198,55 +269,22 @@ public sealed class BankSyncService : IBankSyncService
             account.BankConnection.LastError = Trim(ex.Message);
             return await FailAccountAsync(account, ex.Message, ct);
         }
+        catch (DbUpdateException ex)
+        {
+            // Параллельная загрузка того же счёта вставила те же операции: уникальный индекс защитил от дублей.
+            _db.ChangeTracker.Clear();
+            return new BankStatementSyncResult(inserted, updatedCount, account.StatementWatermark, Trim(ex.GetBaseException().Message));
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return await FailAccountAsync(account, ex.Message, ct);
         }
 
-        var ids = fetched.Keys.ToList();
-        var known = await _db.BankStatementOperations
-            .Where(item => item.BankConnectionAccountId == account.Id && ids.Contains(item.ExternalOperationId))
-            .ToDictionaryAsync(item => item.ExternalOperationId, StringComparer.Ordinal, ct);
-
-        int inserted = 0, updatedCount = 0;
-        foreach (var info in fetched.Values)
-        {
-            if (known.TryGetValue(info.ExternalId, out var row))
-            {
-                // Подтверждённая операция больше не меняется; незавершённая обновляется.
-                if (!row.IsBooked)
-                {
-                    Apply(row, info);
-                    updatedCount++;
-                }
-
-                continue;
-            }
-
-            var created = new BankStatementOperation { BankConnectionAccountId = account.Id, ExternalOperationId = info.ExternalId };
-            Apply(created, info);
-            _db.BankStatementOperations.Add(created);
-            inserted++;
-        }
-
-        // Отметка сдвигается только после успешного сохранения операций и не заходит за незавершённые.
-        var lastBooked = fetched.Values.Where(item => item.IsBooked).Select(item => (DateTime?)item.Date).Max();
-        var firstPending = fetched.Values.Where(item => !item.IsBooked).Select(item => (DateTime?)item.Date).Min();
+        // Отметка сдвигается только после успешного сохранения всех страниц и не заходит за незавершённые операции.
         DateTime? newWatermark = lastBooked;
         if (newWatermark.HasValue && firstPending.HasValue && firstPending.Value <= newWatermark.Value)
         {
             newWatermark = firstPending.Value.AddTicks(-1);
-        }
-
-        try
-        {
-            await _db.SaveChangesAsync(ct);
-        }
-        catch (DbUpdateException ex)
-        {
-            // Параллельная загрузка того же счёта вставила те же операции: уникальный индекс защитил от дублей.
-            _db.ChangeTracker.Clear();
-            return new BankStatementSyncResult(0, 0, account.StatementWatermark, Trim(ex.GetBaseException().Message));
         }
 
         if (newWatermark.HasValue && (!account.StatementWatermark.HasValue || newWatermark > account.StatementWatermark))
@@ -286,7 +324,9 @@ public sealed class BankSyncService : IBankSyncService
         return results;
     }
 
-    private (IBankProvider? Provider, BankCredentials? Credentials, string? Error) Prepare(BankConnection connection)
+    private async Task<(IBankProvider? Provider, BankCredentials? Credentials, string? Error)> PrepareAsync(
+        BankConnection connection,
+        CancellationToken ct)
     {
         if (connection.Status != BankConnectionStatuses.Active)
         {
@@ -303,16 +343,48 @@ public sealed class BankSyncService : IBankSyncService
             return (null, null, "Для подключения не сохранён токен доступа.");
         }
 
+        string access;
+        string? refresh;
         try
         {
-            var access = _protector.Unprotect(connection.AccessTokenProtected);
-            var refresh = string.IsNullOrEmpty(connection.RefreshTokenProtected) ? null : _protector.Unprotect(connection.RefreshTokenProtected);
-            return (provider, new BankCredentials(access, refresh), null);
+            access = _protector.Unprotect(connection.AccessTokenProtected);
+            refresh = string.IsNullOrEmpty(connection.RefreshTokenProtected) ? null : _protector.Unprotect(connection.RefreshTokenProtected);
         }
         catch (System.Security.Cryptography.CryptographicException)
         {
             return (null, null, "Токен доступа не удалось расшифровать: подключите банк заново.");
         }
+
+        // Токен, срок которого вышел (или выходит через минуту), обновляем до обращения к банку.
+        if (connection.AccessTokenExpiresAt.HasValue && connection.AccessTokenExpiresAt.Value <= DateTime.UtcNow.AddMinutes(1))
+        {
+            if (refresh is null)
+            {
+                connection.Status = BankConnectionStatuses.ReauthRequired;
+                connection.LastError = "Срок доступа истёк, а токен обновления не сохранён.";
+                await _db.SaveChangesAsync(ct);
+                return (null, null, connection.LastError);
+            }
+
+            try
+            {
+                var renewed = await provider.RefreshTokensAsync(refresh, ct);
+                StoreTokens(connection, renewed.AccessToken, renewed.RefreshToken, renewed.ExpiresAt);
+                // Новые токены сохраняем сразу: старый refresh-токен у многих банков после обмена недействителен.
+                await _db.SaveChangesAsync(ct);
+                access = renewed.AccessToken;
+                refresh = renewed.RefreshToken ?? refresh;
+            }
+            catch (BankAuthorizationException ex)
+            {
+                connection.Status = BankConnectionStatuses.ReauthRequired;
+                connection.LastError = Trim(ex.Message);
+                await _db.SaveChangesAsync(ct);
+                return (null, null, connection.LastError);
+            }
+        }
+
+        return (provider, new BankCredentials(access, refresh), null);
     }
 
     private async Task<BankAccountsSyncResult> FailConnectionAsync(BankConnection connection, string status, string message, CancellationToken ct)
@@ -345,5 +417,13 @@ public sealed class BankSyncService : IBankSyncService
     }
 
     private static string? Trim(string? value, int max = 1000)
-        => string.IsNullOrWhiteSpace(value) ? null : (value.Length <= max ? value.Trim() : value[..max]);
+    {
+        var trimmed = value?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            return null;
+        }
+
+        return trimmed.Length <= max ? trimmed : trimmed[..max];
+    }
 }

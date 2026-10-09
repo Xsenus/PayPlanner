@@ -35,7 +35,8 @@ public class SellerLegalEntityComposerTests
 
         Assert.Equal("770701001", seller.Kpp);
         Assert.Equal("Москва", seller.Address);
-        Assert.Equal(Company().BankAccountsJson, seller.BankAccountsJson);
+        Assert.Contains("\"main\"", seller.BankAccountsJson);
+        Assert.DoesNotContain("\"second\"", seller.BankAccountsJson);
         Assert.Equal("УСН", seller.TaxSystem);
     }
 
@@ -159,6 +160,42 @@ public class DocumentSellerServiceTests
         await db.SaveChangesAsync();
         var later = await service.ResolveAsync(act, tracked, freeze: true, default);
         Assert.Equal("770701001", later!.Kpp);
+    }
+
+    [Fact]
+    public async Task Resolve_IgnoresStaleSelection_AndNeverFreezesIt()
+    {
+        await using var db = await CreateContextAsync();
+        var defaultCompany = await AddCompanyAsync(db, "По умолчанию", own: true, kpp: "111111111");
+        var removed = await AddCompanyAsync(db, "Убрана из собственных", own: false, kpp: "222222222");
+        var service = new DocumentSellerService(db);
+        var act = new Act { SellerCompanyId = removed.Id };
+
+        var seller = await service.ResolveAsync(act, defaultCompany, freeze: true, default);
+
+        Assert.Equal("111111111", seller!.Kpp);
+        Assert.Equal(defaultCompany.Id, act.SellerCompanyId);
+        Assert.Contains("111111111", act.SellerSnapshotJson);
+    }
+
+    [Fact]
+    public async Task Snapshot_KeepsOnlyChosenAccount_SoItStaysSmallForManyAccounts()
+    {
+        await using var db = await CreateContextAsync();
+        var company = await AddCompanyAsync(db, "Много счетов", own: true);
+        var accounts = Enumerable.Range(1, 40).Select(i =>
+            $"{{\"id\":\"a{i}\",\"bank\":\"Банк {i}\",\"bik\":\"044525225\",\"accountNumber\":\"4070281020000000{i:0000}\"}}");
+        company.BankAccountsJson = "[" + string.Join(",", accounts) + "]";
+        await db.SaveChangesAsync();
+        var service = new DocumentSellerService(db);
+        var act = new Act();
+
+        await service.ResolveAsync(act, company, freeze: true, default);
+
+        Assert.NotNull(act.SellerSnapshotJson);
+        Assert.True(act.SellerSnapshotJson!.Length < 3000);
+        Assert.Contains("a1", act.SellerSnapshotJson);
+        Assert.DoesNotContain("a2\\\"", act.SellerSnapshotJson);
     }
 
     [Fact]
