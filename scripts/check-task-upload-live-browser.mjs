@@ -128,13 +128,15 @@ function recordCompletionTransfer(event, transfer) {
 }
 async function waitForCardReadsBeforeLeaving() {
   // A deliberate navigation is not part of the upload being exercised. Let its
-  // actual reads finish before unmounting useClientCases or closing the page.
+  // actual reads, including the inbox refresh, finish before unmounting the
+  // card or disposing the browser's request context.
   await expect.poll(() => [...pendingRequests.keys()].filter(request => {
     const url = new URL(request.url());
     return request.method() === 'GET' && url.origin === api.origin
-      && (url.pathname === '/api/v1/cases' || url.pathname.startsWith('/api/tasks'));
+      && (url.pathname === '/api/v1/cases' || url.pathname.startsWith('/api/tasks')
+        || url.pathname === '/api/notifications/inbox' || url.pathname === '/api/notifications/inbox/unread-count');
   }).map(request => new URL(request.url()).pathname), {
-    message: 'Actual task and case reads must finish before this test leaves the card.',
+    message: 'Actual task, case and inbox reads must finish before this test leaves the card.',
   }).toEqual([]);
 }
 async function waitForInitialTaskCardData() {
@@ -502,6 +504,7 @@ try {
     console.log('TASK_UPLOAD_STAGE_PENDING_CARD');
     if (queueReplay) {
       // Use the real back button: close the card without reloading the entire application.
+      await waitForCardReadsBeforeLeaving();
       await card.getByRole('button', { name: mode === 'modern' ? 'К журналу' : 'Журнал задач', exact: true }).click();
       await expect(card).toHaveCount(0);
       await completeOwnedQueue();
