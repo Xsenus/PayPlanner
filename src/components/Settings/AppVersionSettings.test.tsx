@@ -62,7 +62,7 @@ describe('AppVersionSettings', () => {
     await waitFor(() => expect(mocks.getAdminAppReleasesPaged).toHaveBeenCalledTimes(1));
 
     expect(mocks.getAdminAppReleasesPaged).toHaveBeenCalledWith({ page: 1, pageSize: 20, search: '' });
-    expect(screen.getByText('855')).toBeTruthy();
+    expect(await screen.findByText('855')).toBeTruthy();
 
     expect(screen.getByTestId('app-release-settings').className).toContain('grid-cols-[minmax(0,1fr)]');
     expect(screen.getByTestId('app-release-settings').className).toContain('xl:grid-cols-[320px_minmax(0,1fr)]');
@@ -76,7 +76,7 @@ describe('AppVersionSettings', () => {
     render(<AppVersionSettings />);
     await waitFor(() => expect(mocks.getAdminAppReleasesPaged).toHaveBeenCalledTimes(1));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Вперёд' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Вперёд' }));
 
     await waitFor(() =>
       expect(mocks.getAdminAppReleasesPaged).toHaveBeenLastCalledWith({

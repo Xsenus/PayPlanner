@@ -130,7 +130,7 @@
 | `backend/Migrations/20261009125201_AddContractSellerSelection*`, `backend/Migrations/PostgreSql/20261009125621_AddContractSellerSelectionPostgres*` | Парные миграции (три nullable-колонки и два индекса). |
 | `backend/Controllers/ContractsController.cs` | `PUT api/contracts/{id}/seller` (право «изменение»); четыре места выдачи (документ, соглашение о расторжении, Яндекс.Диск, e-mail) используют `ResolveContractSellerAsync`; просмотр HTML реквизиты не фиксирует. |
 | `src/components/Contracts/ContractDetailPage.tsx`, `src/components/Documents/DocumentSellerPicker.tsx` | Выбор продавца в карточке договора (тот же компонент, вид `contract`); тестовые моки дополнены `getOwnCompanyOptions` и правами `contracts`. |
-| `backend/AppReleases/releases.json` | Запись 1.14.58 дополнена договором. |
+| `backend/AppReleases/releases.json` | Запись 1.14.59 дополнена договором (номер 1.14.58 занят выпуском main). |
 
 Тесты: `ContractsControllerTests.SetSeller_SavesChoice_FreezesRequisitesOnExport_AndRejectsLaterChanges`; фронтенд — существующие тесты договоров (12) с обновлёнными моками.
 
@@ -192,6 +192,6 @@
 | `backend/Models/Requests/*`, `Models/Responses/*`, `InvoicesController`, `ActsController`, `AccountsController`, `InvoiceLineItemStorage` | Ставка принимается (неизвестная → 400), нормализуется («22%» → «22»), сохраняется, возвращается; частичный/полный акт по счёту наследует ставку позиции счёта; корректирующий акт копирует её. |
 | `InvoiceDocumentTemplateEngine`, `ActDocumentTemplateEngine` | Если хотя бы у одной позиции есть ставка — НДС считается построчно (токены `vat` позиции, итог «В том числе НДС» или «Без налога (НДС)»); если ставок нет — прежнее поведение по признаку продавца (без регрессии). |
 | `src/components/Documents/VatRateSelect.tsx`, `InvoiceModal.tsx`, `ActModal.tsx`, типы | Столбец «НДС» в позициях счёта и ручного акта. |
-| `backend/AppReleases/releases.json` | Запись 1.14.59. |
+| `backend/AppReleases/releases.json` | Запись 1.14.60. |
 
 Не реализовано: режимы «сверху» и «без налога» (меняют сумму), даты действия ставок, авансы/возвраты, обязательные формы (СФ/УПД) — ждут бухгалтерской модели. Тесты: `VatCalculatorTests` (27), `LineItemVatRenderingTests` (8).

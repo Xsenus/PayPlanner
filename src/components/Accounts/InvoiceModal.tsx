@@ -30,6 +30,7 @@ import type {
 import { fromInputToApiDate, todayYMDInTimeZone, toDateInputValue } from '../../utils/dateUtils';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useInvoiceReferenceDictionaries } from '../../hooks/useInvoiceReferenceDictionaries';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { apiService } from '../../services/api';
@@ -930,6 +931,9 @@ export function InvoiceModal({
 }: InvoiceModalProps) {
   const { user: currentUser } = useAuth();
   const isAdmin = (currentUser?.role?.name ?? '').toLowerCase() === 'admin';
+  const permissions = useRolePermissions(currentUser?.role?.id);
+  const canViewPayments = isAdmin || permissions.payments.canView;
+  const canExport = isAdmin || permissions.accounts.canExport;
   const { t } = useTranslation();
   const { confirm, prompt } = useDialog();
   const toast = useToast();
@@ -1318,9 +1322,7 @@ export function InvoiceModal({
       setDocumentPreviewLoading(true);
       setDocumentPreviewError(null);
       try {
-        const blob = await apiService.downloadInvoiceDocument(invoice.id, 'html', {
-          includeSignatureAndSeal: false,
-        });
+        const blob = await apiService.getInvoicePreview(invoice.id);
         const html = await blob.text();
         if (!active) return;
         setDocumentPreviewHtml(html);
@@ -1420,7 +1422,7 @@ export function InvoiceModal({
     ?? (selectedExpenseLegalEntity ? getLegalEntityDisplayName(selectedExpenseLegalEntity) : '');
 
   useEffect(() => {
-    if (!open || !isIncome || (!form.clientId && !form.legalEntityId)) {
+    if (!open || !canViewPayments || pageViewMode || !isIncome || (!form.clientId && !form.legalEntityId)) {
       setCounterpartyBalance(null);
       setCounterpartyBalanceLoading(false);
       return;
@@ -1460,7 +1462,7 @@ export function InvoiceModal({
     return () => {
       cancelled = true;
     };
-  }, [form.clientId, form.legalEntityId, isIncome, open]);
+  }, [form.clientId, form.legalEntityId, isIncome, open, canViewPayments, pageViewMode]);
 
   const selectedCounterpartyPickerValue = useMemo<CounterpartySelection[]>(() => {
     if (clientPickerMode === 'expense') {
@@ -1906,7 +1908,7 @@ export function InvoiceModal({
 
   useEffect(() => {
     const linkedInvoiceId = invoice?.invoiceEntityId ?? invoice?.id ?? null;
-    if (!open || mode !== 'edit' || !linkedInvoiceId) {
+    if (!open || !canViewPayments || mode !== 'edit' || !linkedInvoiceId) {
       setLinkedMoneyOperations([]);
       setLinkedMoneyOperationsError(null);
       setLinkedMoneyOperationsLoading(false);
@@ -1937,7 +1939,7 @@ export function InvoiceModal({
     return () => {
       cancelled = true;
     };
-  }, [invoice?.id, invoice?.invoiceEntityId, mode, open]);
+  }, [invoice?.id, invoice?.invoiceEntityId, mode, open, canViewPayments]);
 
   useEffect(() => {
     if (!open || mode !== 'create') return;
@@ -4269,7 +4271,7 @@ export function InvoiceModal({
 
           <div className="flex flex-wrap items-start gap-2 rounded-lg border border-slate-300 bg-white p-2 [&_button]:h-10 [&_button]:whitespace-nowrap">
             <div className="flex flex-wrap gap-1 rounded-md border border-slate-200 bg-slate-50 p-1">
-            <button type="button" onClick={() => void handlePageAction('send')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"><Send className="h-4 w-4" />Отправить</button>
+            <button type="button" onClick={() => void handlePageAction('send')} disabled={!canExport} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm disabled:opacity-60"><Send className="h-4 w-4" />Отправить</button>
             {isAdmin && invoice && (invoice.type === 'Expense' ? invoice.expenseClientId : invoice.clientId) ? (
               <button type="button" onClick={() => setMessengerDeliveryOpen(true)} className="inline-flex items-center justify-center gap-2 rounded border border-violet-200 bg-white px-3 py-2 text-sm text-violet-700"><Send className="h-4 w-4" />Мессенджер</button>
             ) : null}
@@ -4286,6 +4288,7 @@ export function InvoiceModal({
                   setDownloadMenuOpen(false);
                 }}
                 aria-expanded={printMenuOpen}
+                disabled={!canExport}
                 className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"
               >
                 <Printer className="h-4 w-4" />Печать<ChevronDown className="h-4 w-4" />
@@ -4329,7 +4332,7 @@ export function InvoiceModal({
             <button
               type="button"
               onClick={() => void handleUploadDocumentToYandexDisk()}
-              disabled={yandexDiskUploading}
+              disabled={yandexDiskUploading || !canExport || (!isAdmin && !permissions.yandexDisk.canCreate)}
               className="inline-flex items-center justify-center gap-2 rounded border border-sky-200 bg-white px-3 py-2 text-sm text-sky-700 disabled:opacity-60"
             >
               {yandexDiskUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
@@ -4342,6 +4345,7 @@ export function InvoiceModal({
                   setDownloadMenuOpen((prev) => !prev);
                   setPrintMenuOpen(false);
                 }}
+                disabled={!canExport}
                 className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"
               >
                 <Download className="h-4 w-4" />Скачать<ChevronDown className="h-4 w-4" />

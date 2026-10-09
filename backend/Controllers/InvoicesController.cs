@@ -3177,6 +3177,31 @@ public class InvoicesController : ControllerBase
     }
 
 
+    [HttpGet("{id:int}/preview")]
+    public async Task<IActionResult> GetPreview(int id, CancellationToken ct = default)
+    {
+        if (await RequireAccountsPermissionAsync(permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var payment = await LoadInvoiceDocumentPaymentAsync(id, ct, requireVisibleInvoice: true);
+        if (payment is null)
+        {
+            return NotFound();
+        }
+
+        var lineItems = await LoadInvoiceLineItemsAsync(payment.Id, payment.SystemNotes, ct);
+        var installmentContext = await BuildInstallmentDocumentContextAsync(payment, lineItems, ct);
+        var settings = await GetInvoiceDocumentTemplateSettingsAsync(ct);
+        var template = SelectInvoiceDocumentTemplate(settings, null);
+        var mainCompany = await ResolveInvoiceSellerAsync(payment, await LoadMainCompanyAsync(ct), false, ct);
+        var html = InvoiceDocumentTemplateEngine.RenderHtml(
+            template.Html, payment, installmentContext.LineItems, mainCompany,
+            false, installmentContext.ScheduleHtml);
+        return Content(html, "text/html; charset=utf-8");
+    }
+
     [HttpGet("{id:int}/document")]
     public async Task<IActionResult> GetDocument(
         int id,
@@ -7014,7 +7039,7 @@ public class InvoicesController : ControllerBase
         return html.ToString();
     }
 
-    private async Task<Payment?> LoadInvoiceDocumentPaymentAsync(int id, CancellationToken ct)
+    private async Task<Payment?> LoadInvoiceDocumentPaymentAsync(int id, CancellationToken ct, bool requireVisibleInvoice = false)
     {
         var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
         if (visibility is null)
@@ -7022,9 +7047,11 @@ public class InvoicesController : ControllerBase
             return null;
         }
 
-        return await _db.Payments
-            .AsNoTracking()
-            .ApplyPaymentVisibility(visibility)
+        var payments = requireVisibleInvoice
+            ? BuildVisibleInvoicePaymentsQuery(trackChanges: false, visibility)
+            : _db.Payments.AsNoTracking().ApplyPaymentVisibility(visibility);
+
+        return await payments
             .Include(p => p.Invoice)
             .Include(p => p.Client)
                 .ThenInclude(client => client!.Addresses)
