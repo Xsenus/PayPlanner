@@ -3786,6 +3786,9 @@ describe('CaseDetailPage', () => {
     await screen.findByText('ЗЕМЦОВ - банкротство');
     fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
     const sourceInput = await screen.findByPlaceholderText('https://...sudrf.ru/...');
+    // The court-instance request initializes this draft after the tab renders.
+    // Wait for that initialization before editing the source and searching.
+    await screen.findByDisplayValue('Арбитражный суд Самарской области');
     fireEvent.change(sourceInput, {
       target: { value: 'https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42' },
     });
