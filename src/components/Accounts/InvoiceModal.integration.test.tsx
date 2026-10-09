@@ -20,6 +20,12 @@ import type {
 import type { BaseDictItem } from '../../types/dictionaries';
 import { apiService, type PagedResult } from '../../services/api';
 import { storeInvoiceEditorDraft } from '../../utils/invoiceEditorBridge';
+import { defaultRolePermissions, type RolePermissions } from '../../types/permissions';
+
+const permissionState = vi.hoisted(() => ({ value: null as RolePermissions | null }));
+vi.mock('../../hooks/useRolePermissions', () => ({
+  useRolePermissions: () => permissionState.value ?? defaultRolePermissions,
+}));
 
 type ContractModalMockProps = {
   open: boolean;
@@ -115,6 +121,7 @@ vi.mock('../../hooks/useToast', () => ({
 
 vi.mock('../../services/api', () => ({
   apiService: {
+    getInvoicePreview: vi.fn().mockResolvedValue(new Blob(['<html><body>preview</body></html>'], { type: 'text/html' })),
     downloadInvoiceDocument: vi
       .fn()
       .mockResolvedValue(new Blob(['<html><body>preview</body></html>'], { type: 'text/html' })),
@@ -283,7 +290,35 @@ async function selectPickerOption(name: string): Promise<void> {
 describe('InvoiceModal integration', () => {
   const storeInvoiceEditorDraftMock = vi.mocked(storeInvoiceEditorDraft);
 
+  it('opens invoice preview without requesting financial data or enabling export', async () => {
+    permissionState.value = {
+      ...defaultRolePermissions,
+      accounts: { ...defaultRolePermissions.accounts, canExport: false },
+      payments: { ...defaultRolePermissions.payments, canView: false },
+    };
+    const invoice = {
+      id: 689, number: '689', date: '2026-10-09', dueDate: '2026-10-10',
+      amount: 11000, type: 'Income', status: 'Pending', clientId: 69,
+      lineItems: [{ name: 'Юридические услуги', quantity: 1, unit: 'усл.', price: 11000 }],
+    } as unknown as Invoice;
+    render(<InvoiceModal open mode="edit" invoice={invoice} onClose={vi.fn()}
+      onSubmit={vi.fn()} submitting={false} clients={[]} responsibles={[]} presentation="page"
+      lookupsLoading={false} relatedPayments={[]} />);
+
+    await screen.findByTitle('Печатный шаблон счета 689');
+    expect(apiService.getInvoicePreview).toHaveBeenCalledWith(689);
+    expect(apiService.getMoneyOperationsPaged).not.toHaveBeenCalled();
+    expect(apiService.getClientBalance).not.toHaveBeenCalled();
+    expect(apiService.getLegalEntityBalance).not.toHaveBeenCalled();
+    expect(apiService.downloadInvoiceDocument).not.toHaveBeenCalled();
+    for (const name of ['Скачать', 'Печать', 'Отправить', 'Я.Диск']) {
+      expect((screen.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true);
+    }
+  });
+
   beforeEach(() => {
+    permissionState.value = null;
+    vi.mocked(apiService.getInvoicePreview).mockClear();
     caseModalSubmitPayloadRef.current = {
       title: 'Case from invoice',
       description: 'Created from invoice',

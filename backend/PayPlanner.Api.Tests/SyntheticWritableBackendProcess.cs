@@ -29,6 +29,7 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
     private Process _process;
     private bool _started;
     private readonly int _browserPort;
+    private readonly System.Net.Sockets.TcpListener _browserPortReservation;
     public string Root { get; }
     public string DatabasePath => Path.Combine(Root, "synthetic.db");
     public string Email { get; } = "synthetic-admin@payplanner.local";
@@ -41,10 +42,9 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
     {
         Root = Path.Combine(Path.GetTempPath(), Prefix + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Root);
-        using var reservation = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
-        reservation.Start();
-        _browserPort = ((System.Net.IPEndPoint)reservation.LocalEndpoint).Port;
-        reservation.Stop();
+        _browserPortReservation = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        _browserPortReservation.Start();
+        _browserPort = ((System.Net.IPEndPoint)_browserPortReservation.LocalEndpoint).Port;
         var start = new ProcessStartInfo("dotnet")
         {
             UseShellExecute = false,
@@ -364,6 +364,9 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
             Assert.Equal(Path.GetFullPath(expected), Path.GetFullPath(changedStagePath));
             start.Environment["STORAGE_CAPACITY_WRITER_ROOT"] = Root;
         }
+        // Keep the UI port reserved while the API and synthetic providers bind
+        // their own ephemeral ports. Release it only for the browser server.
+        _browserPortReservation.Stop();
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Browser fixture could not start.");
         var phases = new System.Collections.Concurrent.ConcurrentQueue<string>();
         var receivedPhases = 0;
@@ -471,6 +474,7 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
             start.Environment["TASK_UPLOAD_COMPLETION_USER_ID"] = completionUserId.GetValueOrDefault()
                 .ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
+        _browserPortReservation.Stop();
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Browser fixture could not start.");
         var stderr = process.StandardError.ReadToEndAsync();
         var latestStage = "starting";
@@ -560,6 +564,7 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
         start.Environment["CASE_RETIREMENT_SOURCE_DOCUMENT_ID"] = sourceDocumentId.ToString(System.Globalization.CultureInfo.InvariantCulture);
         start.Environment["CASE_RETIREMENT_DOCUMENT_KEY"] = documentKey ?? "";
         start.Environment["CASE_RETIREMENT_BOUNDARY"] = applyBoundary is not null ? "true" : "false";
+        _browserPortReservation.Stop();
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Browser fixture could not start.");
         var stderr = process.StandardError.ReadToEndAsync();
         try
@@ -614,6 +619,7 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        _browserPortReservation.Stop();
         Client?.Dispose();
         if (_started && !_process.HasExited)
         {

@@ -1263,6 +1263,110 @@ public class InvoiceDocumentTemplateTests
     }
 
     [Fact]
+    public async Task GetPreview_AllowsViewingWithoutExport_AndDoesNotRememberTemplate()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var user = await CreateAccountsUserAsync(db, "preview-no-export", canExport: false);
+        var payment = await db.Payments.SingleAsync(item => item.Id == paymentId);
+        var originalTemplate = payment.InvoiceDocumentTemplateKey;
+        var controller = CreateController(db, isAdmin: false, userId: user.Id);
+
+        var result = Assert.IsType<ContentResult>(await controller.GetPreview(paymentId));
+
+        Assert.Equal("text/html; charset=utf-8", result.ContentType);
+        Assert.Contains("Юридические услуги", result.Content);
+        Assert.Equal(originalTemplate, payment.InvoiceDocumentTemplateKey);
+        Assert.IsType<ForbidResult>(await controller.GetDocument(paymentId, "word"));
+        Assert.IsType<ForbidResult>(await controller.GetDocument(paymentId, "pdf"));
+    }
+
+    [Fact]
+    public async Task GetPreview_ForbidsUserWithoutViewPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var user = await CreateAccountsUserAsync(db, "preview-no-view", canExport: true);
+        user.Role!.Permissions.Single().CanView = false;
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, isAdmin: false, userId: user.Id);
+
+        Assert.IsType<ForbidResult>(await controller.GetPreview(paymentId));
+    }
+
+    [Fact]
+    public async Task GetPreview_DoesNotExposeInvoiceOutsideUserScope()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var current = await CreateAccountsUserAsync(db, "preview-own", canExport: false, viewScope: DataVisibilityScope.Own);
+        var owner = await CreateAccountsUserAsync(db, "preview-owner", canExport: true);
+        var payment = await db.Payments.Include(item => item.Client).SingleAsync(item => item.Id == paymentId);
+        payment.Client!.ResponsibleUserId = owner.Id;
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, isAdmin: false, userId: current.Id);
+
+        Assert.IsType<NotFoundResult>(await controller.GetPreview(paymentId));
+    }
+
+    [Theory]
+    [InlineData(DocumentKind.Accrual)]
+    [InlineData(DocumentKind.Payment)]
+    public async Task GetPreview_DoesNotExposeStandaloneFinancialDocument(DocumentKind documentKind)
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var user = await CreateAccountsUserAsync(db, "preview-financial", canExport: false);
+        var payment = await db.Payments.SingleAsync(item => item.Id == paymentId);
+        payment.InvoiceId = null;
+        payment.DocumentKind = documentKind;
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, isAdmin: false, userId: user.Id);
+
+        Assert.IsType<NotFoundResult>(await controller.GetPreview(paymentId));
+    }
+
+    [Fact]
+    public async Task GetPreview_DoesNotExposeNonrepresentativeLinkedPayment()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var user = await CreateAccountsUserAsync(db, "preview-linked-payment", canExport: false);
+        var invoicePayment = await db.Payments.SingleAsync(item => item.Id == paymentId);
+        var linkedPayment = new Payment
+        {
+            InvoiceId = invoicePayment.InvoiceId,
+            ClientId = invoicePayment.ClientId,
+            DocumentKind = DocumentKind.Payment,
+            Date = invoicePayment.Date,
+            Amount = 500m,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+        };
+        db.Payments.Add(linkedPayment);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, isAdmin: false, userId: user.Id);
+
+        Assert.IsType<NotFoundResult>(await controller.GetPreview(linkedPayment.Id));
+    }
+
+    [Fact]
+    public async Task GetPreview_AllowsLegacyPaymentRepresentingVisibleInvoice()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var user = await CreateAccountsUserAsync(db, "preview-legacy-representative", canExport: false);
+        var payment = await db.Payments.SingleAsync(item => item.Id == paymentId);
+        payment.DocumentKind = DocumentKind.Payment;
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, isAdmin: false, userId: user.Id);
+
+        var result = Assert.IsType<ContentResult>(await controller.GetPreview(paymentId));
+
+        Assert.Contains("Юридические услуги", result.Content);
+    }
+
+    [Fact]
     public async Task GetDocument_ReturnsNotFoundForHiddenInvoice()
     {
         await using var db = await CreateContextAsync();

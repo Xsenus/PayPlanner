@@ -4632,6 +4632,19 @@ export class ApiService {
     return this.request<PayablesDashboard>(`/accounts/payables-dashboard${q}`);
   }
 
+  async getInvoicePreview(id: number) {
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/invoices/${id}/preview`, {
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    if (!response.ok) {
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(text || `HTTP ${response.status} ${response.statusText}`);
+    }
+    return response.blob();
+  }
+
   async downloadInvoiceDocument(
     id: number,
     format: 'word' | 'pdf' | 'html' = 'word',
