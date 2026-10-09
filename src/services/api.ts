@@ -6024,6 +6024,10 @@ export class ApiService {
     return this.request<void>(`/banks/${id}`, { method: 'DELETE' });
   }
 
+  async getCompanyRequisitesCheck(companyId: number) {
+    return this.request<RequisitesCheck>(`/legal-entities/${companyId}/requisites-check`);
+  }
+
   async getOwnCompanyOptions() {
     return this.request<OwnCompanyOption[]>('/own-companies/options');
   }
@@ -9245,6 +9249,7 @@ import type {
   CompanyBranchInput,
   DocumentSellerSelection,
   OwnCompanyOption,
+  RequisitesCheck,
   LegalEntityDetail,
   LegalEntityInput,
   LegalEntityDadataDetails,

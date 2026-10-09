@@ -140,6 +140,16 @@ export interface CompanyBranch {
   updatedAt?: string | null;
 }
 
+export interface RequisitesIssue {
+  field: string;
+  message: string;
+}
+
+export interface RequisitesCheck {
+  legalEntityId: number;
+  issues: RequisitesIssue[];
+}
+
 export interface OwnCompanyOption {
   id: number;
   shortName: string;

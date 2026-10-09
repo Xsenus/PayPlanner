@@ -91,6 +91,7 @@ import {
 } from "./legalEntityImageUtils";
 import { getLegalEntityImageFieldState } from "./legalEntityImageFieldUtils";
 import { CompanyBranchesSection } from "./CompanyBranchesSection";
+import { CompanyRequisitesCheck } from "./CompanyRequisitesCheck";
 import { LegalEntityFinanceSection } from "./LegalEntityFinanceSection";
 
 interface LegalEntityModalProps {
@@ -4581,6 +4582,7 @@ export function LegalEntityModal({
                 <option value="Archived">В архиве</option>
               </SystemSelect>
             </div>
+            <CompanyRequisitesCheck companyId={currentLegalEntityId} refreshKey={initial?.updatedAt} />
             <CompanyBranchesSection
               companyId={currentLegalEntityId}
               bankAccounts={bankAccounts}
