@@ -90,6 +90,7 @@ import {
   type LegalEntityImageUploadProfile,
 } from "./legalEntityImageUtils";
 import { getLegalEntityImageFieldState } from "./legalEntityImageFieldUtils";
+import { CompanyBankConnectionsSection } from "./CompanyBankConnectionsSection";
 import { CompanyBranchesSection } from "./CompanyBranchesSection";
 import { CompanyRequisitesCheck } from "./CompanyRequisitesCheck";
 import { LegalEntityFinanceSection } from "./LegalEntityFinanceSection";
@@ -4583,6 +4584,7 @@ export function LegalEntityModal({
               </SystemSelect>
             </div>
             <CompanyRequisitesCheck companyId={currentLegalEntityId} refreshKey={initial?.updatedAt} />
+            <CompanyBankConnectionsSection companyId={currentLegalEntityId} />
             <CompanyBranchesSection
               companyId={currentLegalEntityId}
               bankAccounts={bankAccounts}

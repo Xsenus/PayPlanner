@@ -140,6 +140,60 @@ export interface CompanyBranch {
   updatedAt?: string | null;
 }
 
+export type BankAccountStatus = 'Open' | 'Limited' | 'Preliminary' | 'Closed' | 'Unavailable' | 'Pending' | 'NotFoundInBank';
+
+export interface BankAccountItem {
+  id: number;
+  externalAccountId: string;
+  accountNumber: string;
+  bik?: string | null;
+  currency: string;
+  status: BankAccountStatus;
+  isHidden: boolean;
+  isDefault: boolean;
+  statementsEnabled: boolean;
+  statusChangedAt?: string | null;
+  statementWatermark?: string | null;
+  lastStatementSyncAt?: string | null;
+  lastError?: string | null;
+}
+
+export interface BankConnectionItem {
+  id: number;
+  legalEntityId: number;
+  provider: string;
+  status: 'Active' | 'TokenExpiring' | 'ReauthRequired' | 'AuthError' | 'Disconnected';
+  lastError?: string | null;
+  lastAccountsSyncAt?: string | null;
+  accounts: BankAccountItem[];
+}
+
+export interface BankStatementRun {
+  status: 'Success' | 'Partial' | 'Error';
+  succeeded: number;
+  total: number;
+  accounts: Array<{ accountId: number; inserted: number; updated: number; error?: string | null }>;
+}
+
+export interface BankSyncLogItem {
+  id: number;
+  accountId?: number | null;
+  kind: string;
+  periodFrom?: string | null;
+  periodTo?: string | null;
+  result: string;
+  operationsCount: number;
+  error?: string | null;
+  createdAt: string;
+}
+
+export interface BankSyncLogPage {
+  total: number;
+  page: number;
+  pageSize: number;
+  items: BankSyncLogItem[];
+}
+
 export interface RequisitesIssue {
   field: string;
   message: string;

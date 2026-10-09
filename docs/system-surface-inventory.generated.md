@@ -6,9 +6,9 @@
 ## Сводка
 
 - Разделов frontend: 54.
-- Backend-контроллеров: 86.
-- HTTP endpoints: 896; с прямой тестовой связью: 616.
-- HTTP endpoints с точной ссылкой из документации: 213; критичных без такой ссылки: 523.
+- Backend-контроллеров: 87.
+- HTTP endpoints: 903; с прямой тестовой связью: 623.
+- HTTP endpoints с точной ссылкой из документации: 214; критичных без такой ссылки: 527.
 - Критичных endpoints без прямой тестовой связи: 234.
 - Реальных HTML-форм: 19; с найденной тестовой связью: 17.
 - Фоновых сервисов: 32; с найденной тестовой связью: 28.
@@ -86,12 +86,12 @@
 | ClientModal | src/components/Clients/ClientModal.tsx | 240 | да | docs/claude-yougile-ui-development-spec-2026-10-10.md |
 | ContractCreatePage | src/components/Contracts/ContractCreatePage.tsx | 293 | нет | docs/full-project-audit-2026-06-10.md, docs/unused-frontend-candidates-2026-06-10.md |
 | ContractModal | src/components/Contracts/ContractModal.tsx | 366 | да | docs/full-project-audit-2026-06-10.md |
-| LegalEntityModal | src/components/LegalEntities/LegalEntityModal.tsx | 3835 | да | docs/full-project-audit-2026-06-10.md, docs/pay-33-36-implementation-log-2026-10-09.md |
+| LegalEntityModal | src/components/LegalEntities/LegalEntityModal.tsx | 3836 | да | docs/full-project-audit-2026-06-10.md, docs/pay-33-36-implementation-log-2026-10-09.md |
 | ClientPortalPage | src/components/Public/ClientPortalPage.tsx | 223 | да | нет |
 | RoleModal | src/components/Roles/RoleModal.tsx | 121 | нет | docs/full-project-audit-2026-06-10.md |
 | S3Storage | src/components/S3Storage/S3Storage.tsx | 773 | да | docs/date-time-inventory.md, docs/development-pause-plan-2026-09-30.md, docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md, docs/s3-storage-acceptance-checklist.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/unpushed-changes-map-2026-10-03.md |
 | TaskJournalSettings | src/components/Settings/TaskJournalSettings.tsx | 961 | да | docs/task-template-current-state-2026-07-09.md |
-| TaskJournal | src/components/Tasks/TaskJournal.tsx | 10444 | да | docs/calendar-completed-task-visibility-roadmap-2026-10-10.md, docs/claude-yougile-ui-development-spec-2026-10-10.md, docs/date-time-inventory.md, docs/development-pause-plan-2026-09-30.md, docs/development-release-preparation-2026-10-06.md, docs/development-roadmap-2026-10-06.md, docs/development-roadmap-details-2026-10-06.md, docs/ef-production-warning-cleanup-plan-2026-06-22.md, docs/field-encryption-candidates.generated.md, docs/field-encryption-data-inventory-2026-07-30.md, docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md, docs/release-security-roadmap-2026-10-06.md, docs/release-verification-history-2026-10-06.md, docs/storage-backup-snapshot-boundary-audit-2026-09-28.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-resilience-runbook.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/task-critical-events-matrix-2026-07-09.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-participants-current-state-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md, docs/task-template-current-state-2026-07-09.md, docs/tz-crm-acceptance-baseline-roadmap-2026-07-08.md, docs/unpushed-changes-map-2026-10-03.md, docs/yougile-clarifications-drafts-2026-10-09.md |
+| TaskJournal | src/components/Tasks/TaskJournal.tsx | 10451 | да | docs/calendar-completed-task-visibility-roadmap-2026-10-10.md, docs/claude-yougile-ui-development-spec-2026-10-10.md, docs/date-time-inventory.md, docs/development-pause-plan-2026-09-30.md, docs/development-release-preparation-2026-10-06.md, docs/development-roadmap-2026-10-06.md, docs/development-roadmap-details-2026-10-06.md, docs/ef-production-warning-cleanup-plan-2026-06-22.md, docs/field-encryption-candidates.generated.md, docs/field-encryption-data-inventory-2026-07-30.md, docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md, docs/release-security-roadmap-2026-10-06.md, docs/release-verification-history-2026-10-06.md, docs/storage-backup-snapshot-boundary-audit-2026-09-28.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-resilience-runbook.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/task-critical-events-matrix-2026-07-09.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-participants-current-state-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md, docs/task-template-current-state-2026-07-09.md, docs/tz-crm-acceptance-baseline-roadmap-2026-07-08.md, docs/unpushed-changes-map-2026-10-03.md, docs/yougile-clarifications-drafts-2026-10-09.md |
 | FormPromptModal | src/components/ui/FormPromptModal.tsx | 65 | да | нет |
 | TextPromptModal | src/components/ui/TextPromptModal.tsx | 55 | да | docs/full-project-audit-2026-06-10.md |
 | YandexDisk | src/components/YandexDisk/YandexDisk.tsx | 722 | да | docs/development-pause-plan-2026-09-30.md, docs/field-encryption-candidates.generated.md, docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md, docs/release-verification-history-2026-10-06.md, docs/storage-backup-snapshot-boundary-audit-2026-09-28.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/unpushed-changes-map-2026-10-03.md, docs/yandex-disk-integration-delivery-report.md |
@@ -161,6 +161,7 @@
 | AppVersionController | backend/Controllers/AppVersionController.cs | 8 | [Authorize] | да |
 | AuthController | backend/Controllers/AuthController.cs | 5 | не задано | да |
 | AuthProvidersAdminController | backend/Controllers/AuthProvidersAdminController.cs | 8 | [Authorize(Policy = "Admin")] | да |
+| BankConnectionsController | backend/Controllers/BankConnectionsController.cs | 7 | [Authorize(Policy = "Admin")] | да |
 | BanksController | backend/Controllers/BanksController.cs | 5 | [Authorize] | да |
 | CalendarSyncController | backend/Controllers/CalendarSyncController.cs | 5 | [Authorize] | да |
 | CasesController | backend/Controllers/CasesController.cs | 5 | [Authorize] | да |
@@ -559,6 +560,13 @@
 | PUT | api/auth/admin/providers/telegram/bot | AuthProvidersAdminController | UpdateTelegramBotSettings | backend/Controllers/AuthProvidersAdminController.cs:101 | [Authorize(Policy = "Admin")] | нет | нет |
 | PUT | api/auth/admin/providers/telegram/widget | AuthProvidersAdminController | UpdateTelegramWidgetSettings | backend/Controllers/AuthProvidersAdminController.cs:116 | [Authorize(Policy = "Admin")] | нет | нет |
 | POST | api/auth/admin/providers/telegram/sync | AuthProvidersAdminController | SyncTelegram | backend/Controllers/AuthProvidersAdminController.cs:131 | [Authorize(Policy = "Admin")] | нет | нет |
+| GET | api/bank-connections | BankConnectionsController | List | backend/Controllers/BankConnectionsController.cs:113 | [Authorize(Policy = "Admin")] | да | docs/pay-33-36-implementation-log-2026-10-09.md |
+| POST | api/bank-connections/{id:int}/sync-accounts | BankConnectionsController | SyncAccounts | backend/Controllers/BankConnectionsController.cs:142 | [Authorize(Policy = "Admin")] | да | нет |
+| POST | api/bank-connections/{id:int}/sync-statements | BankConnectionsController | SyncAllStatements | backend/Controllers/BankConnectionsController.cs:154 | [Authorize(Policy = "Admin")] | да | нет |
+| POST | api/bank-connections/accounts/{accountId:int}/sync-statement | BankConnectionsController | SyncStatement | backend/Controllers/BankConnectionsController.cs:171 | [Authorize(Policy = "Admin")] | да | нет |
+| PATCH | api/bank-connections/accounts/{accountId:int} | BankConnectionsController | UpdateAccount | backend/Controllers/BankConnectionsController.cs:188 | [Authorize(Policy = "Admin")] | да | нет |
+| GET | api/bank-connections/accounts/{accountId:int}/operations | BankConnectionsController | GetOperations | backend/Controllers/BankConnectionsController.cs:201 | [Authorize(Policy = "Admin")] | да | нет |
+| GET | api/bank-connections/{id:int}/logs | BankConnectionsController | GetLogs | backend/Controllers/BankConnectionsController.cs:241 | [Authorize(Policy = "Admin")] | да | нет |
 | GET | api/banks | BanksController | GetBanks | backend/Controllers/BanksController.cs:31 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
 | GET | api/banks/{id:int} | BanksController | GetBank | backend/Controllers/BanksController.cs:62 | [Authorize] | да | нет |
 | POST | api/banks | BanksController | CreateBank | backend/Controllers/BanksController.cs:79 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |

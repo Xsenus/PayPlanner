@@ -108,8 +108,10 @@ public class BankSyncServiceTests
         Assert.Equal(1, third.Updated);
         var accounts = await db.BankConnectionAccounts.AsNoTracking().OrderBy(a => a.ExternalAccountId).ToListAsync();
         Assert.Equal(BankAccountStatuses.Limited, accounts[0].Status);
-        Assert.Equal(BankAccountStatuses.Open, accounts[1].Status);
+        Assert.Equal(BankAccountStatuses.NotFoundInBank, accounts[1].Status);
         Assert.False(BankAccountStatuses.AllowsNewDocuments(accounts[0].Status));
+        Assert.False(BankAccountStatuses.AllowsNewDocuments(accounts[1].Status));
+        Assert.Equal(2, await db.BankConnectionAccounts.CountAsync());
     }
 
     [Fact]
@@ -330,5 +332,185 @@ public class BankSyncServiceTests
         await service.SyncStatementAsync(accountId, new DateTime(2026, 1, 1), DateTime.UtcNow, default);
 
         Assert.True(bank.LastFrom > new DateTime(2026, 1, 1));
+    }
+
+    [Fact]
+    public async Task SyncAccounts_DoesNotMarkEverythingNotFound_WhenBankReturnsEmptyList()
+    {
+        var (db, service, bank, connection) = await CreateAsync();
+        await using var _ = db;
+        bank.Accounts = [Account("a")];
+        await service.SyncAccountsAsync(connection.Id, default);
+        bank.Accounts = [];
+
+        var result = await service.SyncAccountsAsync(connection.Id, default);
+
+        Assert.NotNull(result.Error);
+        Assert.Equal(BankAccountStatuses.Open, (await db.BankConnectionAccounts.AsNoTracking().SingleAsync()).Status);
+    }
+
+    [Fact]
+    public async Task SyncAccounts_RestoresAccountThatReappears_AndRecordsStatusChangeTime()
+    {
+        var (db, service, bank, connection) = await CreateAsync();
+        await using var _ = db;
+        bank.Accounts = [Account("a"), Account("b", "40702810200000000002")];
+        await service.SyncAccountsAsync(connection.Id, default);
+        bank.Accounts = [Account("a")];
+        await service.SyncAccountsAsync(connection.Id, default);
+        var missing = await db.BankConnectionAccounts.AsNoTracking().SingleAsync(a => a.ExternalAccountId == "b");
+        Assert.NotNull(missing.StatusChangedAt);
+        Assert.NotNull(missing.LastError);
+
+        bank.Accounts = [Account("a"), Account("b", "40702810200000000002")];
+        var back = await service.SyncAccountsAsync(connection.Id, default);
+
+        Assert.Equal(1, back.Updated);
+        var restored = await db.BankConnectionAccounts.AsNoTracking().SingleAsync(a => a.ExternalAccountId == "b");
+        Assert.Equal(BankAccountStatuses.Open, restored.Status);
+        Assert.Null(restored.LastError);
+    }
+
+    [Fact]
+    public async Task ClosingAccountAtBank_DropsDefaultMark_ButKeepsHistoricalOperations()
+    {
+        var (db, service, bank, connection) = await CreateAsync();
+        await using var _ = db;
+        bank.Accounts = [Account("a")];
+        await service.SyncAccountsAsync(connection.Id, default);
+        var accountId = (await db.BankConnectionAccounts.SingleAsync()).Id;
+        bank.Pages["a"] = [[Op("1", 1)]];
+        await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), default);
+        Assert.True((await service.UpdateAccountSettingsAsync(accountId, true, null, null, default)).Success);
+
+        bank.Accounts = [Account("a", status: BankAccountStatuses.Closed)];
+        await service.SyncAccountsAsync(connection.Id, default);
+
+        var account = await db.BankConnectionAccounts.AsNoTracking().SingleAsync();
+        Assert.Equal(BankAccountStatuses.Closed, account.Status);
+        Assert.False(account.IsDefault);
+        Assert.Equal(1, await db.BankStatementOperations.CountAsync());
+    }
+
+    [Fact]
+    public async Task UpdateAccountSettings_AllowsOneDefaultPerCompany_OnlyForOpenVisibleAccounts()
+    {
+        var (db, service, bank, connection) = await CreateAsync();
+        await using var _ = db;
+        bank.Accounts = [Account("a"), Account("b", "40702810200000000002"), Account("c", "40702810200000000003", BankAccountStatuses.Closed)];
+        await service.SyncAccountsAsync(connection.Id, default);
+        var ids = await db.BankConnectionAccounts.AsNoTracking().ToDictionaryAsync(a => a.ExternalAccountId, a => a.Id);
+
+        Assert.True((await service.UpdateAccountSettingsAsync(ids["a"], true, null, null, default)).Success);
+        Assert.True((await service.UpdateAccountSettingsAsync(ids["b"], true, null, null, default)).Success);
+        Assert.False((await service.UpdateAccountSettingsAsync(ids["c"], true, null, null, default)).Success);
+        Assert.True((await service.UpdateAccountSettingsAsync(ids["a"], null, true, null, default)).Success);
+        Assert.False((await service.UpdateAccountSettingsAsync(ids["a"], true, null, null, default)).Success);
+
+        var defaults = await db.BankConnectionAccounts.AsNoTracking().Where(a => a.IsDefault).Select(a => a.ExternalAccountId).ToListAsync();
+        Assert.Equal(["b"], defaults);
+        Assert.False((await service.UpdateAccountSettingsAsync(9999, true, null, null, default)).Success);
+    }
+
+    [Fact]
+    public async Task UpdateAccountSettings_HidingDefaultAccountClearsDefault_AndStatementsCanBeSwitchedOff()
+    {
+        var (db, service, bank, connection) = await CreateAsync();
+        await using var _ = db;
+        bank.Accounts = [Account("a")];
+        await service.SyncAccountsAsync(connection.Id, default);
+        var id = (await db.BankConnectionAccounts.SingleAsync()).Id;
+        await service.UpdateAccountSettingsAsync(id, true, null, null, default);
+
+        await service.UpdateAccountSettingsAsync(id, null, true, false, default);
+
+        var account = await db.BankConnectionAccounts.AsNoTracking().SingleAsync();
+        Assert.True(account.IsHidden);
+        Assert.False(account.IsDefault);
+        Assert.False(account.StatementsEnabled);
+    }
+
+    [Fact]
+    public async Task SyncAllStatements_SkipsClosedPendingAndHiddenFlagDoesNotStopLoading()
+    {
+        var (db, service, bank, connection) = await CreateAsync();
+        await using var _ = db;
+        bank.Accounts =
+        [
+            Account("open"),
+            Account("limited", "40702810200000000002", BankAccountStatuses.Limited),
+            Account("closed", "40702810200000000003", BankAccountStatuses.Closed),
+            Account("pending", "40702810200000000004", BankAccountStatuses.Pending),
+        ];
+        await service.SyncAccountsAsync(connection.Id, default);
+        var openId = (await db.BankConnectionAccounts.SingleAsync(a => a.ExternalAccountId == "open")).Id;
+        await service.UpdateAccountSettingsAsync(openId, null, true, null, default);
+        bank.Pages["open"] = [[Op("1", 1)]];
+        bank.Pages["limited"] = [[Op("2", 2)]];
+
+        var results = await service.SyncAllStatementsForPeriodAsync(connection.Id, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), default);
+
+        Assert.Equal(2, results.Count);
+        Assert.Equal(2, await db.BankStatementOperations.CountAsync());
+    }
+
+    [Fact]
+    public async Task SyncRuns_AreRecordedInJournalWithPeriodAndResult()
+    {
+        var (db, service, bank, connection) = await CreateAsync();
+        await using var _ = db;
+        bank.Accounts = [Account("a")];
+        await service.SyncAccountsAsync(connection.Id, default);
+        var accountId = (await db.BankConnectionAccounts.SingleAsync()).Id;
+        bank.Pages["a"] = [[Op("1", 1), Op("2", 2)]];
+        await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), default);
+        bank.FailingAccounts.Add("a");
+        await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), default);
+
+        var logs = await db.BankSyncLogs.AsNoTracking().OrderBy(l => l.Id).ToListAsync();
+
+        Assert.Equal(["accounts", "statement", "statement"], logs.Select(l => l.Kind).ToArray());
+        Assert.Equal(["ok", "ok", "error"], logs.Select(l => l.Result).ToArray());
+        Assert.Equal(2, logs[1].OperationsCount);
+        Assert.Equal(new DateTime(2026, 10, 9), logs[1].PeriodTo);
+        Assert.NotNull(logs[2].Error);
+    }
+}
+
+public class TochkaAccountStatusTests
+{
+    [Theory]
+    [InlineData("Enabled", BankAccountStatuses.Open)]
+    [InlineData("Disabled", BankAccountStatuses.Limited)]
+    [InlineData("Deleted", BankAccountStatuses.Closed)]
+    [InlineData("ProForma", BankAccountStatuses.Preliminary)]
+    [InlineData("Pending", BankAccountStatuses.Pending)]
+    [InlineData("Something", BankAccountStatuses.Unavailable)]
+    [InlineData(null, BankAccountStatuses.Unavailable)]
+    public void Map_FollowsSpecificationTable(string? code, string expected)
+        => Assert.Equal(expected, TochkaAccountStatus.Map(code));
+
+    [Theory]
+    [InlineData("40702810200000000001/044525225", true, "40702810200000000001", "044525225")]
+    [InlineData("40702810200000000001", false, "", "")]
+    [InlineData("/044525225", false, "", "")]
+    [InlineData("40702810200000000001/", false, "", "")]
+    [InlineData("1/2/3", false, "", "")]
+    public void TryParseAccountId_SplitsNumberAndBik(string input, bool ok, string number, string bik)
+    {
+        Assert.Equal(ok, TochkaAccountStatus.TryParseAccountId(input, out var parsedNumber, out var parsedBik));
+        Assert.Equal(number, parsedNumber);
+        Assert.Equal(bik, parsedBik);
+    }
+
+    [Fact]
+    public void ConnectionDescribe_WarnsTwoWeeksBeforeTokenExpiry()
+    {
+        var now = new DateTime(2026, 10, 10, 0, 0, 0, DateTimeKind.Utc);
+
+        Assert.Equal(BankConnectionStatuses.TokenExpiring, BankConnectionStatuses.Describe(BankConnectionStatuses.Active, now.AddDays(10), now));
+        Assert.Equal(BankConnectionStatuses.Active, BankConnectionStatuses.Describe(BankConnectionStatuses.Active, now.AddDays(30), now));
+        Assert.Equal(BankConnectionStatuses.ReauthRequired, BankConnectionStatuses.Describe(BankConnectionStatuses.ReauthRequired, now.AddDays(1), now));
+        Assert.Equal(BankConnectionStatuses.Active, BankConnectionStatuses.Describe(BankConnectionStatuses.Active, null, now));
     }
 }

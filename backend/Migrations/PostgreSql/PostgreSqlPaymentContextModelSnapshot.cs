@@ -645,6 +645,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
 
+                    b.Property<DateTime?>("RefreshTokenExpiresAt")
+                        .HasColumnType("timestamp without time zone");
+
                     b.Property<string>("RefreshTokenProtected")
                         .HasMaxLength(4000)
                         .HasColumnType("character varying(4000)");
@@ -706,6 +709,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("IsHidden")
                         .HasColumnType("boolean");
 
@@ -728,6 +734,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)")
                         .HasDefaultValue("Open");
+
+                    b.Property<DateTime?>("StatusChangedAt")
+                        .HasColumnType("timestamp without time zone");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp without time zone");
@@ -948,6 +957,56 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasDatabaseName("IX_BankStatementOperations_Account_Date");
 
                     b.ToTable("BankStatementOperations");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.BankSyncLog", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("BankConnectionAccountId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("BankConnectionId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<int>("OperationsCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("PeriodFrom")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("PeriodTo")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Result")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BankConnectionId", "CreatedAt")
+                        .HasDatabaseName("IX_BankSyncLogs_Connection_CreatedAt");
+
+                    b.ToTable("BankSyncLogs");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.BaseCurrencyDictionaryItem", b =>

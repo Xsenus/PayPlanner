@@ -81,6 +81,7 @@ vi.mock('../../services/api', () => ({
   apiService: {
     getCompanyRequisitesCheck: vi.fn().mockResolvedValue({ legalEntityId: 9, issues: [] }),
     getCompanyBranches: vi.fn().mockResolvedValue([]),
+    getBankConnections: vi.fn().mockResolvedValue([]),
     getActResponsibles: vi.fn().mockResolvedValue([]),
     getActs: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 5 }),
     getActsSummary: vi.fn().mockResolvedValue(emptyActsSummary),

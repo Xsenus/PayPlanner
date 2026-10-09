@@ -6041,6 +6041,45 @@ export class ApiService {
     return this.request<RequisitesCheck>(`/legal-entities/${companyId}/requisites-check`);
   }
 
+  async getBankConnections(companyId: number) {
+    return this.request<BankConnectionItem[]>(`/bank-connections?companyId=${companyId}`);
+  }
+
+  async syncBankConnectionAccounts(connectionId: number) {
+    return this.request<{ added: number; updated: number; skipped: number; error?: string | null }>(
+      `/bank-connections/${connectionId}/sync-accounts`,
+      { method: 'POST' },
+    );
+  }
+
+  async syncBankConnectionStatements(connectionId: number, period: { from: string; to: string }) {
+    return this.request<BankStatementRun>(`/bank-connections/${connectionId}/sync-statements`, {
+      method: 'POST',
+      body: JSON.stringify(period),
+    });
+  }
+
+  async syncBankAccountStatement(accountId: number, period: { from: string; to: string }) {
+    return this.request<BankStatementRun>(`/bank-connections/accounts/${accountId}/sync-statement`, {
+      method: 'POST',
+      body: JSON.stringify(period),
+    });
+  }
+
+  async updateBankAccountSettings(
+    accountId: number,
+    payload: { isDefault?: boolean; isHidden?: boolean; statementsEnabled?: boolean },
+  ) {
+    return this.request<BankAccountItem>(`/bank-connections/accounts/${accountId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getBankSyncLogs(connectionId: number, page = 1, pageSize = 20) {
+    return this.request<BankSyncLogPage>(`/bank-connections/${connectionId}/logs?page=${page}&pageSize=${pageSize}`);
+  }
+
   async getOwnCompanyOptions() {
     return this.request<OwnCompanyOption[]>('/own-companies/options');
   }
@@ -9258,6 +9297,10 @@ import type {
   ClientInput,
   ClientCaseFinanceSummary,
   ClientCaseExpenseDetail,
+  BankAccountItem,
+  BankConnectionItem,
+  BankStatementRun,
+  BankSyncLogPage,
   CompanyBranch,
   CompanyBranchInput,
   DocumentSellerSelection,

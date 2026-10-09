@@ -17,7 +17,15 @@ public interface IBankSyncService
 
     /// <summary>Загружает выписки всех разрешённых счетов подключения. Ошибка одного счёта не останавливает остальные.</summary>
     Task<IReadOnlyDictionary<int, BankStatementSyncResult>> SyncAllStatementsAsync(int connectionId, DateTime to, CancellationToken ct);
+
+    /// <summary>Загружает выписки всех открытых и ограниченных счетов подключения за указанный период.</summary>
+    Task<IReadOnlyDictionary<int, BankStatementSyncResult>> SyncAllStatementsForPeriodAsync(int connectionId, DateTime from, DateTime to, CancellationToken ct);
+
+    /// <summary>Меняет пользовательские настройки счёта: «по умолчанию», скрытие, загрузка выписок. Статус счёта вручную не меняется.</summary>
+    Task<AccountSettingsResult> UpdateAccountSettingsAsync(int accountId, bool? isDefault, bool? isHidden, bool? statementsEnabled, CancellationToken ct);
 }
+
+public sealed record AccountSettingsResult(bool Success, string? Error);
 
 /// <summary>
 /// Общая часть работы с банками: загрузка счетов и выписок без дублей и потерь, независимо от адаптера.
@@ -112,7 +120,9 @@ public sealed class BankSyncService : IBankSyncService
                 continue;
             }
 
-            var status = BankAccountStatuses.All.Contains(info.Status) ? info.Status : BankAccountStatuses.Unavailable;
+            var status = BankAccountStatuses.All.Contains(info.Status) && info.Status != BankAccountStatuses.NotFoundInBank
+                ? info.Status
+                : BankAccountStatuses.Unavailable;
             var bik = Trim(info.Bik, 16);
             var currency = Trim(info.Currency, 8) ?? "RUB";
             if (existing.TryGetValue(externalId, out var account))
@@ -121,10 +131,21 @@ public sealed class BankSyncService : IBankSyncService
                     || account.Currency != currency || account.Status != status;
                 if (changed)
                 {
+                    if (account.Status != status)
+                    {
+                        account.StatusChangedAt = DateTime.UtcNow;
+                        // Закрытый или не открытый счёт не может оставаться счётом «по умолчанию».
+                        if (!BankAccountStatuses.AllowsNewDocuments(status))
+                        {
+                            account.IsDefault = false;
+                        }
+                    }
+
                     account.AccountNumber = number;
                     account.Bik = bik;
                     account.Currency = currency;
                     account.Status = status;
+                    account.LastError = null;
                     account.UpdatedAt = DateTime.UtcNow;
                     updated++;
                 }
@@ -139,6 +160,7 @@ public sealed class BankSyncService : IBankSyncService
                     Bik = bik,
                     Currency = currency,
                     Status = status,
+                    StatusChangedAt = DateTime.UtcNow,
                 };
                 _db.BankConnectionAccounts.Add(created);
                 existing[externalId] = created;
@@ -146,9 +168,39 @@ public sealed class BankSyncService : IBankSyncService
             }
         }
 
+        // Счёт, который банк больше не возвращает, не удаляется и не закрывается: он помечается «Не найден в банке»
+        // и ждёт проверки пользователем. Пустой ответ при уже известных счетах считаем сбоем банка, а не закрытием всех счетов.
+        var returnedIds = remote.Select(item => item.ExternalId?.Trim()).Where(id => !string.IsNullOrEmpty(id)).ToHashSet(StringComparer.Ordinal);
+        if (remote.Count == 0 && existing.Count > 0)
+        {
+            return await FailConnectionAsync(connection, connection.Status, "Банк вернул пустой список счетов: статусы не изменены.", ct);
+        }
+
+        var notFound = 0;
+        foreach (var known in existing.Values)
+        {
+            if (known.Id != 0 && !returnedIds.Contains(known.ExternalAccountId)
+                && known.Status is not (BankAccountStatuses.Closed or BankAccountStatuses.NotFoundInBank))
+            {
+                known.Status = BankAccountStatuses.NotFoundInBank;
+                known.StatusChangedAt = DateTime.UtcNow;
+                known.IsDefault = false;
+                known.LastError = "Банк больше не возвращает этот счёт: проверьте его вручную.";
+                known.UpdatedAt = DateTime.UtcNow;
+                notFound++;
+            }
+        }
+
         connection.LastAccountsSyncAt = DateTime.UtcNow;
         connection.LastError = null;
         connection.UpdatedAt = DateTime.UtcNow;
+        _db.BankSyncLogs.Add(new BankSyncLog
+        {
+            BankConnectionId = connection.Id,
+            Kind = "accounts",
+            Result = "ok",
+            OperationsCount = added + updated + notFound,
+        });
         try
         {
             await _db.SaveChangesAsync(ct);
@@ -173,7 +225,7 @@ public sealed class BankSyncService : IBankSyncService
             return new BankStatementSyncResult(0, 0, null, "Счёт не найден.");
         }
 
-        if (!account.StatementsEnabled || account.Status == BankAccountStatuses.Unavailable)
+        if (!account.StatementsEnabled || account.Status is BankAccountStatuses.Unavailable or BankAccountStatuses.NotFoundInBank)
         {
             return new BankStatementSyncResult(0, 0, account.StatementWatermark, "Загрузка выписки для счёта отключена или счёт недоступен.");
         }
@@ -181,7 +233,7 @@ public sealed class BankSyncService : IBankSyncService
         var (provider, credentials, setupError) = await PrepareAsync(account.BankConnection, ct);
         if (provider is null || credentials is null)
         {
-            return await FailAccountAsync(account, setupError, ct);
+            return await FailAccountAsync(account, setupError, ct, from, to);
         }
 
         // Начало периода: после отметки (или после прошлой успешной загрузки, если подтверждённых операций ещё нет)
@@ -267,7 +319,7 @@ public sealed class BankSyncService : IBankSyncService
         {
             account.BankConnection.Status = BankConnectionStatuses.ReauthRequired;
             account.BankConnection.LastError = Trim(ex.Message);
-            return await FailAccountAsync(account, ex.Message, ct);
+            return await FailAccountAsync(account, ex.Message, ct, from, to);
         }
         catch (DbUpdateException ex)
         {
@@ -277,7 +329,7 @@ public sealed class BankSyncService : IBankSyncService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return await FailAccountAsync(account, ex.Message, ct);
+            return await FailAccountAsync(account, ex.Message, ct, from, to);
         }
 
         // Отметка сдвигается только после успешного сохранения всех страниц и не заходит за незавершённые операции.
@@ -295,25 +347,42 @@ public sealed class BankSyncService : IBankSyncService
         account.LastStatementSyncAt = DateTime.UtcNow;
         account.LastError = null;
         account.UpdatedAt = DateTime.UtcNow;
+        _db.BankSyncLogs.Add(new BankSyncLog
+        {
+            BankConnectionId = account.BankConnectionId,
+            BankConnectionAccountId = account.Id,
+            Kind = "statement",
+            PeriodFrom = start,
+            PeriodTo = to,
+            Result = "ok",
+            OperationsCount = inserted + updatedCount,
+        });
         await _db.SaveChangesAsync(ct);
         return new BankStatementSyncResult(inserted, updatedCount, account.StatementWatermark, null);
     }
 
-    public async Task<IReadOnlyDictionary<int, BankStatementSyncResult>> SyncAllStatementsAsync(int connectionId, DateTime to, CancellationToken ct)
+    public Task<IReadOnlyDictionary<int, BankStatementSyncResult>> SyncAllStatementsAsync(int connectionId, DateTime to, CancellationToken ct)
+        => SyncAllCoreAsync(connectionId, null, to, ct);
+
+    public Task<IReadOnlyDictionary<int, BankStatementSyncResult>> SyncAllStatementsForPeriodAsync(int connectionId, DateTime from, DateTime to, CancellationToken ct)
+        => SyncAllCoreAsync(connectionId, from, to, ct);
+
+    private async Task<IReadOnlyDictionary<int, BankStatementSyncResult>> SyncAllCoreAsync(int connectionId, DateTime? from, DateTime to, CancellationToken ct)
     {
-        var accountIds = await _db.BankConnectionAccounts.AsNoTracking()
-            .Where(item => item.BankConnectionId == connectionId && item.StatementsEnabled && item.Status != BankAccountStatuses.Unavailable)
+        var accounts = await _db.BankConnectionAccounts.AsNoTracking()
+            .Where(item => item.BankConnectionId == connectionId && item.StatementsEnabled
+                && (item.Status == BankAccountStatuses.Open || item.Status == BankAccountStatuses.Limited))
             .OrderBy(item => item.Id)
             .Select(item => new { item.Id, item.CreatedAt })
             .ToListAsync(ct);
 
         var results = new Dictionary<int, BankStatementSyncResult>();
-        foreach (var item in accountIds)
+        foreach (var item in accounts)
         {
             ct.ThrowIfCancellationRequested();
             try
             {
-                results[item.Id] = await SyncStatementAsync(item.Id, item.CreatedAt.AddDays(-90), to, ct);
+                results[item.Id] = await SyncStatementAsync(item.Id, from ?? item.CreatedAt.AddDays(-90), to, ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -322,6 +391,65 @@ public sealed class BankSyncService : IBankSyncService
         }
 
         return results;
+    }
+
+    public async Task<AccountSettingsResult> UpdateAccountSettingsAsync(int accountId, bool? isDefault, bool? isHidden, bool? statementsEnabled, CancellationToken ct)
+    {
+        var account = await _db.BankConnectionAccounts
+            .Include(item => item.BankConnection)
+            .FirstOrDefaultAsync(item => item.Id == accountId, ct);
+        if (account is null)
+        {
+            return new AccountSettingsResult(false, "Счёт не найден.");
+        }
+
+        if (isDefault == true)
+        {
+            if (!BankAccountStatuses.AllowsNewDocuments(account.Status))
+            {
+                return new AccountSettingsResult(false, "Счётом по умолчанию можно назначить только открытый счёт.");
+            }
+
+            if (account.IsHidden || isHidden == true)
+            {
+                return new AccountSettingsResult(false, "Скрытый счёт нельзя назначить счётом по умолчанию.");
+            }
+
+            // У компании такой счёт один: снимаем отметку у остальных счетов всех её подключений.
+            var companyId = account.BankConnection.LegalEntityId;
+            var others = await _db.BankConnectionAccounts
+                .Where(item => item.IsDefault && item.Id != account.Id && item.BankConnection.LegalEntityId == companyId)
+                .ToListAsync(ct);
+            foreach (var other in others)
+            {
+                other.IsDefault = false;
+                other.UpdatedAt = DateTime.UtcNow;
+            }
+
+            account.IsDefault = true;
+        }
+        else if (isDefault == false)
+        {
+            account.IsDefault = false;
+        }
+
+        if (isHidden.HasValue)
+        {
+            account.IsHidden = isHidden.Value;
+            if (isHidden.Value)
+            {
+                account.IsDefault = false;
+            }
+        }
+
+        if (statementsEnabled.HasValue)
+        {
+            account.StatementsEnabled = statementsEnabled.Value;
+        }
+
+        account.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+        return new AccountSettingsResult(true, null);
     }
 
     private async Task<(IBankProvider? Provider, BankCredentials? Credentials, string? Error)> PrepareAsync(
@@ -396,10 +524,20 @@ public sealed class BankSyncService : IBankSyncService
         return new BankAccountsSyncResult(0, 0, 0, connection.LastError);
     }
 
-    private async Task<BankStatementSyncResult> FailAccountAsync(BankConnectionAccount account, string? message, CancellationToken ct)
+    private async Task<BankStatementSyncResult> FailAccountAsync(BankConnectionAccount account, string? message, CancellationToken ct, DateTime? from = null, DateTime? to = null)
     {
         account.LastError = Trim(message);
         account.UpdatedAt = DateTime.UtcNow;
+        _db.BankSyncLogs.Add(new BankSyncLog
+        {
+            BankConnectionId = account.BankConnectionId,
+            BankConnectionAccountId = account.Id,
+            Kind = "statement",
+            PeriodFrom = from,
+            PeriodTo = to,
+            Result = "error",
+            Error = account.LastError,
+        });
         await _db.SaveChangesAsync(ct);
         return new BankStatementSyncResult(0, 0, account.StatementWatermark, account.LastError);
     }

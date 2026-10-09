@@ -726,6 +726,16 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.BankConnectionId, e.ExternalAccountId }).IsUnique().HasDatabaseName("IX_BankConnectionAccounts_Connection_External");
         });
 
+        modelBuilder.Entity<BankSyncLog>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Kind).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.Result).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.Error).HasMaxLength(1000);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasIndex(e => new { e.BankConnectionId, e.CreatedAt }).HasDatabaseName("IX_BankSyncLogs_Connection_CreatedAt");
+        });
+
         modelBuilder.Entity<BankStatementOperation>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -5077,6 +5087,7 @@ public class PaymentContext : DbContext
     public DbSet<BankConnection> BankConnections { get; set; }
     public DbSet<BankConnectionAccount> BankConnectionAccounts { get; set; }
     public DbSet<BankStatementOperation> BankStatementOperations { get; set; }
+    public DbSet<BankSyncLog> BankSyncLogs { get; set; }
     public DbSet<UserExternalIdentity> UserExternalIdentities { get; set; }
     public DbSet<ExternalAuthRequest> ExternalAuthRequests { get; set; }
     public DbSet<TelegramAuthRequest> TelegramAuthRequests { get; set; }

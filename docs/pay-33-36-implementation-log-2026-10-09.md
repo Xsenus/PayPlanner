@@ -195,3 +195,18 @@
 | `backend/AppReleases/releases.json` | Запись 1.14.60. |
 
 Не реализовано: режимы «сверху» и «без налога» (меняют сумму), даты действия ставок, авансы/возвраты, обязательные формы (СФ/УПД) — ждут бухгалтерской модели. Тесты: `VatCalculatorTests` (27), `LineItemVatRenderingTests` (8).
+
+## Шаг 11. Банки по ТЗ v1.1: статусы счетов, настройки, журнал, выписки по всем счетам (PAY-36)
+
+Источник: [ТЗ v1.1](yougile-sources/2026-10-10/attachments/PAY-36-1791504514347-Specifikaciya_Bankovskie_integracii_Tochka_Sber_v2.txt). Реальные адаптеры Точки и Сбера по-прежнему не написаны (нет доступа и sandbox).
+
+| Файл | Что |
+| --- | --- |
+| `backend/Models/BankConnection.cs`, миграции `20261009202438_ExtendBankConnections*`, `.../PostgreSql/20261009202808_ExtendBankConnectionsPostgres*` | Статусы счёта `Pending`, `NotFoundInBank`; поля `IsDefault`, `StatusChangedAt`, `RefreshTokenExpiresAt`; таблица журнала `BankSyncLogs`; `BankConnectionStatuses.Describe` (за 14 дней до окончания токена — «Токен скоро истечёт»). |
+| `backend/Services/Banking/BankSyncService.cs` | Счёт, пропавший из ответа банка, → «Не найден в банке» (не удаляется; пустой ответ — сбой, статусы не меняются); закрытие снимает «по умолчанию»; `UpdateAccountSettingsAsync` (один счёт по умолчанию на компанию — только открытый и не скрытый); загрузка «по всем счетам» только по Открытым/Ограниченным с включёнными выписками; записи журнала. |
+| `backend/Services/Banking/TochkaAccountStatus.cs` | Сопоставление статусов Точки (Enabled/Disabled/Deleted/ProForma/Pending) и разбор `accountId` «номер/БИК». |
+| `backend/Controllers/BankConnectionsController.cs` | `GET api/bank-connections`, `POST {id}/sync-accounts`, `POST {id}/sync-statements`, `POST accounts/{id}/sync-statement`, `PATCH accounts/{id}`, `GET accounts/{id}/operations`, `GET {id}/logs`. **Только администратор** — роли руководителя/бухгалтера ждут настройки прав PAY-18. Токены не возвращаются. Период ≤ 366 дней, страницы ≤ 200. |
+| `src/components/LegalEntities/CompanyBankConnectionsSection.tsx`, `api.ts`, `types` | Блок «Банковские подключения» в карточке собственной компании (показывается, только если подключение есть): статусы, чекбоксы, «Обновить счета», «Загрузить выписки по всем счетам» с итогом по каждому счёту, журнал. |
+| Тесты | `BankSyncServiceTests` (+6), `BankConnectionsControllerTests` (5), `TochkaAccountStatusTests`, фронтенд `CompanyBankConnectionsSection.test.tsx` (4). |
+
+Пользовательской записи «Что нового» нет: подключение банка создать пока нельзя, блок на экране не появится.
