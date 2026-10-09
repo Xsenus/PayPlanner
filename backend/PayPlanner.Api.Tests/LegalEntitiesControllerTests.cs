@@ -1079,6 +1079,81 @@ public class LegalEntitiesControllerTests
         return client.Id;
     }
 
+    [Fact]
+    public async Task Update_NormalizesBankAccounts_ToSingleActivePrimaryWithStableIds()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db, roleName: "admin");
+        var entityId = await CreateLegalEntityAsync(db, "Своя компания");
+        var controller = CreateController(db, userId);
+
+        var action = await controller.Update(entityId, new LegalEntityRequest
+        {
+            ShortName = "Своя компания",
+            BankAccountsJson = "[{\"bik\":\"044525225\",\"accountNumber\":\"40702810200000000001\",\"isPrimary\":true},"
+                + "{\"bik\":\"044525225\",\"accountNumber\":\"40702810200000000002\",\"isPrimary\":true},"
+                + "{\"bik\":\"044525225\",\"accountNumber\":\"40702810200000000003\",\"isArchived\":true}]",
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(action.Result);
+        var saved = (await db.LegalEntities.AsNoTracking().SingleAsync(le => le.Id == entityId)).BankAccountsJson;
+        var items = System.Text.Json.Nodes.JsonNode.Parse(saved!)!.AsArray();
+        Assert.Equal([true, false, false], items.Select(i => (bool)i!["isPrimary"]!).ToArray());
+        Assert.All(items, i => Assert.False(string.IsNullOrWhiteSpace((string?)i!["id"])));
+        Assert.Equal(3, items.Select(i => (string?)i!["id"]).Distinct().Count());
+    }
+
+    [Fact]
+    public async Task Update_RejectsDuplicateActiveBankAccount_WithoutChangingStoredList()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db, roleName: "admin");
+        var entityId = await CreateLegalEntityAsync(db, "Своя компания");
+        var controller = CreateController(db, userId);
+
+        var action = await controller.Update(entityId, new LegalEntityRequest
+        {
+            ShortName = "Своя компания",
+            BankAccountsJson = "[{\"bik\":\"044525225\",\"accountNumber\":\"1\"},{\"bik\":\"044525225\",\"accountNumber\":\"1\"}]",
+        }, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(action.Result);
+        Assert.Null((await db.LegalEntities.AsNoTracking().SingleAsync(le => le.Id == entityId)).BankAccountsJson);
+    }
+
+    [Fact]
+    public async Task CheckRequisites_ReportsInnKppOgrnAndAccountProblems()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db, roleName: "admin");
+        var entityId = await CreateLegalEntityAsync(db, "Своя компания");
+        var entity = await db.LegalEntities.SingleAsync(le => le.Id == entityId);
+        entity.Inn = "7707083894";
+        entity.Kpp = "123";
+        entity.Ogrn = "1027700132196";
+        entity.BankAccountsJson = "[{\"bik\":\"044525225\",\"accountNumber\":\"40702810200000000009\"}]";
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId);
+
+        var action = await controller.CheckRequisites(entityId, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var response = Assert.IsType<RequisitesCheckResponse>(ok.Value);
+        Assert.Equal(new[] { "inn", "kpp", "ogrn", "bankAccounts" }, response.Issues.Select(i => i.Field).ToArray());
+    }
+
+    [Fact]
+    public async Task CheckRequisites_ReturnsNotFound_ForUnknownCompany()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db, roleName: "admin");
+        var controller = CreateController(db, userId);
+
+        var action = await controller.CheckRequisites(999, CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(action.Result);
+    }
+
     private static async Task<int> CreateLegalEntityAsync(
         PaymentContext db,
         string shortName,

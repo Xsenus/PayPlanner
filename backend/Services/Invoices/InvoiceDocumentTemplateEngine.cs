@@ -503,7 +503,9 @@ public static class InvoiceDocumentTemplateEngine
     private static SellerInfo BuildSeller(LegalEntity? mainCompany)
     {
         var bankAccount = ParseBankAccounts(mainCompany?.BankAccountsJson)
-            .OrderByDescending(account => string.Equals(account.AccountType?.Trim(), "Основной", StringComparison.OrdinalIgnoreCase))
+            .Where(account => account.IsArchived != true)
+            .OrderByDescending(account => account.IsPrimary == true)
+            .ThenByDescending(account => string.Equals(account.AccountType?.Trim(), "Основной", StringComparison.OrdinalIgnoreCase))
             .ThenBy(account => string.IsNullOrWhiteSpace(account.AccountNumber) ? 1 : 0)
             .FirstOrDefault(account => !string.IsNullOrWhiteSpace(account.AccountNumber))
             ?? new BankAccountInfo();
@@ -1650,6 +1652,8 @@ public static class InvoiceDocumentTemplateEngine
         public string? CorrAccountNumber { get; set; }
         public string? City { get; set; }
         public bool? IsForeignBank { get; set; }
+        public bool? IsPrimary { get; set; }
+        public bool? IsArchived { get; set; }
     }
 
     private sealed class PersonInfo

@@ -8,6 +8,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Companies;
 using PayPlanner.Api.Services.LegalEntities;
 using System.Globalization;
 using System.Text.Json;
@@ -1081,6 +1082,12 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             return duplicateInnError;
         }
 
+        var bankAccounts = CompanyBankAccountList.Normalize(request.BankAccountsJson);
+        if (!bankAccounts.IsValid)
+        {
+            return BadRequest(new { message = string.Join(" ", bankAccounts.Errors) });
+        }
+
 
         var (clientIds, errorResult) = await ValidateClientIdsAsync(request.ClientIds, ct);
         if (errorResult is not null)
@@ -1135,7 +1142,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             TreasuryAccountNumber = NormalizeOptional(request.TreasuryAccountNumber),
             TreasuryCorrAccountNumber = NormalizeOptional(request.TreasuryCorrAccountNumber),
             TreasuryKbk = NormalizeOptional(request.TreasuryKbk),
-            BankAccountsJson = NormalizeOptional(request.BankAccountsJson),
+            BankAccountsJson = bankAccounts.Json,
             CashRegistersJson = NormalizeOptional(request.CashRegistersJson),
             CardsJson = NormalizeOptional(request.CardsJson),
             RequisitesEnglishJson = NormalizeOptional(request.RequisitesEnglishJson),
@@ -1840,6 +1847,49 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         return Ok(await MapDetailForCurrentUserAsync(entity, ct));
     }
 
+    /// <summary>
+    /// Проверка реквизитов компании: форматы и контрольные разряды ИНН, КПП, ОГРН, БИК и счетов.
+    /// Ничего не меняет и не блокирует сохранение — возвращает список замечаний для экрана профиля компании.
+    /// </summary>
+    [HttpGet("{id:int}/requisites-check")]
+    [Authorize(Policy = "Admin")]
+    public async Task<ActionResult<RequisitesCheckResponse>> CheckRequisites(int id, CancellationToken ct)
+    {
+        var entity = await _db.LegalEntities
+            .AsNoTracking()
+            .FirstOrDefaultAsync(le => le.Id == id, ct);
+        if (entity is null)
+        {
+            return NotFound();
+        }
+
+        var issues = new List<RequisitesIssue>();
+        if (string.IsNullOrWhiteSpace(entity.Inn))
+        {
+            issues.Add(new RequisitesIssue("inn", "ИНН не указан."));
+        }
+        else if (!RussianRequisitesValidator.IsValidInn(entity.Inn))
+        {
+            issues.Add(new RequisitesIssue("inn", "ИНН не проходит проверку контрольных разрядов."));
+        }
+
+        if (!string.IsNullOrWhiteSpace(entity.Kpp) && !RussianRequisitesValidator.IsValidKpp(entity.Kpp))
+        {
+            issues.Add(new RequisitesIssue("kpp", "КПП должен состоять из 9 знаков."));
+        }
+
+        if (!string.IsNullOrWhiteSpace(entity.Ogrn) && !RussianRequisitesValidator.IsValidOgrn(entity.Ogrn))
+        {
+            issues.Add(new RequisitesIssue("ogrn", "ОГРН не проходит проверку контрольной цифры."));
+        }
+
+        var accounts = CompanyBankAccountList.Normalize(entity.BankAccountsJson);
+        issues.AddRange(accounts.Errors.Select(message => new RequisitesIssue("bankAccounts", message)));
+        issues.AddRange(accounts.Warnings.Select(message => new RequisitesIssue("bankAccounts", message)));
+
+        return Ok(new RequisitesCheckResponse(entity.Id, issues));
+    }
+
     private async Task<bool> IsDatabaseAdminAsync(CancellationToken ct)
     {
         var userId = User.GetUserId();
@@ -2039,6 +2089,12 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             return duplicateInnError;
         }
 
+        var bankAccounts = CompanyBankAccountList.Normalize(request.BankAccountsJson);
+        if (!bankAccounts.IsValid)
+        {
+            return BadRequest(new { message = string.Join(" ", bankAccounts.Errors) });
+        }
+
         var (clientIds, errorResult) = await ValidateClientIdsAsync(request.ClientIds, ct);
         if (errorResult is not null)
         {
@@ -2090,7 +2146,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         entity.TreasuryAccountNumber = NormalizeOptional(request.TreasuryAccountNumber);
         entity.TreasuryCorrAccountNumber = NormalizeOptional(request.TreasuryCorrAccountNumber);
         entity.TreasuryKbk = NormalizeOptional(request.TreasuryKbk);
-        entity.BankAccountsJson = NormalizeOptional(request.BankAccountsJson);
+        entity.BankAccountsJson = bankAccounts.Json;
         entity.CashRegistersJson = NormalizeOptional(request.CashRegistersJson);
         entity.CardsJson = NormalizeOptional(request.CardsJson);
         entity.RequisitesEnglishJson = NormalizeOptional(request.RequisitesEnglishJson);

@@ -274,6 +274,8 @@ export interface BankDirectoryItem {
 }
 
 export interface LegalEntityBankAccount {
+  /** Стабильный идентификатор счёта; присваивает сервер при сохранении компании. */
+  id?: string;
   bankId?: number | null;
   bank: string;
   name: string;
@@ -284,6 +286,10 @@ export interface LegalEntityBankAccount {
   corrAccountNumber?: string | null;
   city?: string | null;
   isForeignBank?: boolean | null;
+  /** Основной активный счёт компании (на сервере такой счёт ровно один). */
+  isPrimary?: boolean;
+  /** Архивный счёт не выбирается в документах и не может быть основным. */
+  isArchived?: boolean;
 }
 
 export interface LegalEntityCashRegister {

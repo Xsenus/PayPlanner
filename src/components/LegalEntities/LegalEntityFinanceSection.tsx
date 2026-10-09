@@ -23,6 +23,12 @@ import type {
 } from '../../types';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 
+import {
+  isActivePrimaryBankAccount,
+  setBankAccountArchived,
+  upsertBankAccount,
+} from './legalEntityBankAccountUtils';
+
 type FinanceTab = 'bankAccounts' | 'cashRegisters' | 'cards';
 
 interface LegalEntityFinanceSectionProps {
@@ -303,7 +309,7 @@ export function LegalEntityFinanceSection({
   const [editorError, setEditorError] = useState<string | null>(null);
 
   const hasPrimaryBankAccount = useMemo(
-    () => bankAccounts.some((item) => item.accountType?.trim().toLowerCase() === 'основной'),
+    () => bankAccounts.some(isActivePrimaryBankAccount),
     [bankAccounts],
   );
   const hasPrimaryCashRegister = useMemo(
@@ -426,29 +432,7 @@ export function LegalEntityFinanceSection({
     }
 
     const normalized = mapFormToBankAccount(bankAccountForm);
-    const normalizedType = normalized.accountType.trim().toLowerCase();
-
-    onBankAccountsChange((prev) => {
-      const targetIndex = editorState.index;
-      const next =
-        targetIndex === null
-          ? [...prev, normalized]
-          : prev.map((item, index) => (index === targetIndex ? normalized : item));
-
-      if (normalizedType !== 'основной') {
-        return next;
-      }
-
-      const actualIndex = targetIndex === null ? next.length - 1 : targetIndex;
-      return next.map((item, index) =>
-        index === actualIndex
-          ? item
-          : {
-              ...item,
-              accountType: 'Дополнительный',
-            },
-      );
-    });
+    onBankAccountsChange((prev) => upsertBankAccount(prev, editorState.index, normalized));
 
     closeEditor();
   };
@@ -516,6 +500,15 @@ export function LegalEntityFinanceSection({
     });
 
     closeEditor();
+  };
+
+  const toggleBankAccountArchived = (index: number) => {
+    const archived = !bankAccounts[index]?.isArchived;
+    onBankAccountsChange((prev) => setBankAccountArchived(prev, index, archived));
+    toast.success(
+      archived ? 'Банковский счет перенесен в архив.' : 'Банковский счет возвращен из архива.',
+      'Реквизиты',
+    );
   };
 
   const deleteBankAccount = async (index: number) => {
@@ -674,8 +667,13 @@ export function LegalEntityFinanceSection({
               </tr>
             ) : (
               bankAccounts.map((item, index) => (
-                <tr key={`bank-account-${index}`}>
-                  <td className="px-4 py-3 font-medium text-slate-900">{item.bank}</td>
+                <tr key={item.id ?? `bank-account-${index}`} className={item.isArchived ? 'bg-slate-50 text-slate-400' : undefined}>
+                  <td className="px-4 py-3 font-medium text-slate-900">
+                    {item.bank}
+                    {item.isArchived ? (
+                      <span className="ml-2 rounded-full bg-slate-200 px-2 py-0.5 text-xs font-normal text-slate-600">Архив</span>
+                    ) : null}
+                  </td>
                   <td className="px-4 py-3 text-slate-700">{formatOptional(item.name)}</td>
                   <td className="px-4 py-3 text-slate-700">{formatOptional(item.bik)}</td>
                   <td className="px-4 py-3 text-slate-700">{formatOptional(item.currency)}</td>
@@ -692,6 +690,15 @@ export function LegalEntityFinanceSection({
                           title="Редактировать счет"
                         >
                           <Pencil className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={readOnly}
+                          onClick={() => toggleBankAccountArchived(index)}
+                          className="inline-flex h-9 items-center justify-center rounded-xl border border-slate-200 px-3 text-xs text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          title={item.isArchived ? 'Вернуть счет из архива' : 'Перенести счет в архив'}
+                        >
+                          {item.isArchived ? 'Из архива' : 'В архив'}
                         </button>
                         <button
                           type="button"
