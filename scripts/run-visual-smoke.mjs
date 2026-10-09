@@ -296,12 +296,48 @@ export function safeResourceUrl(value) {
   }
 }
 
+export function observeFetchCancellations() {
+  // Keep caller-signal proof; the network observer separately requires that
+  // dispatch never started. Raw URLs stay inside this browser page.
+  const nativeFetch = globalThis.fetch;
+  globalThis.__payplannerVisualCancelledFetches = [];
+  globalThis.fetch = function (input, options) {
+    const request = input instanceof Request ? input : null;
+    const signal = options?.signal ?? request?.signal;
+    if (!signal) return Reflect.apply(nativeFetch, this, [input, options]);
+    const recordCancellation = () => {
+      try {
+        const url = new URL(request?.url ?? String(input), globalThis.location.href);
+        url.hash = '';
+        const records = globalThis.__payplannerVisualCancelledFetches;
+        if (records.length >= 128) records.shift();
+        records.push({ url: url.href, method: String(options?.method ?? request?.method ?? 'GET').toUpperCase() });
+      } catch { /* Invalid metadata must not change native fetch behavior. */ }
+    };
+    const cleanup = () => signal?.removeEventListener('abort', recordCancellation);
+    if (signal?.aborted) recordCancellation();
+    else signal?.addEventListener('abort', recordCancellation, { once: true });
+    try {
+      const pending = Reflect.apply(nativeFetch, this, [input, options]);
+      if (signal) void pending.then(cleanup, cleanup);
+      return pending;
+    } catch (error) {
+      cleanup();
+      throw error;
+    }
+  };
+}
+
 export async function withRouteDiagnostics(page, inspect) {
   const consoleErrors = [];
   const pageErrors = [];
   const networkErrors = [];
   const expectedNavigationAborts = [];
+  const expectedPreDispatchAborts = [];
+  const expectedNoContentCompletions = [];
+  const pendingPreDispatchAborts = [];
   const observedRequests = new WeakSet();
+  const responseStatuses = new WeakMap();
   let navigationStartedAt;
   let navigationPending = false;
   const requestLabel = request => `${request.method()} ${safeResourceUrl(request.url())}`;
@@ -314,6 +350,7 @@ export async function withRouteDiagnostics(page, inspect) {
     pageerror(error) { pageErrors.push(error.message); },
     request(request) { observedRequests.add(request); },
     response(response) {
+      responseStatuses.set(response.request(), response.status());
       if (response.status() >= 400)
         networkErrors.push(`HTTP ${response.status()}: ${requestLabel(response.request())}`);
     },
@@ -322,6 +359,12 @@ export async function withRouteDiagnostics(page, inspect) {
       const reason = /^(net::ERR_[A-Z0-9_]+|NS_ERROR_[A-Z0-9_]+)$/.test(rawReason) ? rawReason : 'unknown-transport-error';
       let startedAt;
       try { startedAt = request.timing().startTime; } catch { /* Missing timing cannot qualify an expected abort. */ }
+      // Chromium can report ERR_ABORTED after a 204 response, which has no body.
+      // The actual response is required; other statuses/transport failures fail.
+      if (reason === 'net::ERR_ABORTED' && responseStatuses.get(request) === 204) {
+        expectedNoContentCompletions.push(requestLabel(request));
+        return;
+      }
       // Only an older request cancelled during our explicit next-document
       // navigation is an expected teardown. New/current requests still fail.
       if (navigationPending && !observedRequests.has(request) && reason === 'net::ERR_ABORTED'
@@ -329,12 +372,31 @@ export async function withRouteDiagnostics(page, inspect) {
         expectedNavigationAborts.push(requestLabel(request));
         return;
       }
+      if (reason === 'net::ERR_ABORTED' && startedAt === 0 && observedRequests.has(request))
+        pendingPreDispatchAborts.push({ request, index: networkErrors.length });
       networkErrors.push(`requestfailed: ${requestLabel(request)} (${reason})`);
     },
   };
   for (const [event, listener] of Object.entries(listeners)) page.on(event, listener);
   try {
     return await inspect({ consoleErrors, pageErrors, networkErrors, expectedNavigationAborts,
+      expectedPreDispatchAborts, expectedNoContentCompletions,
+      async confirmPreDispatchAborts() {
+        if (pendingPreDispatchAborts.length === 0) return;
+        const records = await page.evaluate(() => globalThis.__payplannerVisualCancelledFetches ?? []);
+        if (!Array.isArray(records) || records.length > 128) throw new Error('Browser cancellation proof exceeded its bound.');
+        const confirmed = new Set();
+        for (const pending of pendingPreDispatchAborts) {
+          const index = records.findIndex(record => record.url === pending.request.url() && record.method === pending.request.method());
+          if (index < 0) continue;
+          records.splice(index, 1); // Each browser cancellation proves at most one event.
+          confirmed.add(pending.index);
+          expectedPreDispatchAborts.push(requestLabel(pending.request));
+        }
+        const remaining = networkErrors.filter((_value, index) => !confirmed.has(index));
+        networkErrors.splice(0, networkErrors.length, ...remaining);
+        pendingPreDispatchAborts.length = 0;
+      },
       beginNavigation() { navigationStartedAt = Date.now(); navigationPending = true; },
       endNavigation() { navigationPending = false; },
     });
@@ -349,6 +411,40 @@ export async function withRouteDiagnostics(page, inspect) {
 
 async function checkPage(options) {
   return withRouteDiagnostics(options.page, diagnostics => checkObservedPage({ ...options, diagnostics }));
+}
+
+export async function dismissNavigationPrompts(page) {
+  // The release portal covers the daily reminder. Close only these informational
+  // prompts, from top to bottom; never acknowledge an unrelated business dialog.
+  let closed = 0;
+  for (const [name, button] of [['Что нового', 'Понятно'], ['Внимание!', 'Закрыть']]) {
+    const dialog = page.getByRole('dialog', { name, exact: true });
+    if (await dialog.count() === 0) continue;
+    await dialog.getByRole('button', { name: button, exact: true }).click({ timeout: 1000 });
+    await dialog.waitFor({ state: 'hidden', timeout: 1000 });
+    closed++;
+  }
+  return closed;
+}
+
+export async function withFreshRoutePage(context, viewport, inspect) {
+  const page = await context.newPage();
+  let primaryFailure;
+  try {
+    await page.addInitScript(observeFetchCancellations);
+    await page.setViewportSize(viewport);
+    return await inspect(page);
+  } catch (error) {
+    primaryFailure = error;
+    throw error;
+  } finally {
+    try {
+      await page.close();
+    } catch (error) {
+      if (!primaryFailure) throw error;
+      console.error('Visual route page cleanup failed after the primary check failure.');
+    }
+  }
 }
 
 async function checkObservedPage({ page, frontendUrl, route, viewportName, themeName, timeoutMs, artifactDir, toastPreview, selectionPreview, diagnostics }) {
@@ -379,7 +475,8 @@ async function checkObservedPage({ page, frontendUrl, route, viewportName, theme
     return !lines.some((line) => /^(Загрузка|Загружаем).*\.\.\.$/i.test(line));
   }, undefined, { timeout: timeoutMs }).catch(() => undefined);
   await page.waitForTimeout(150);
-  await page.getByRole('button', { name: /Понятно|Закрыть/i }).first().click({ timeout: 1000 }).catch(() => undefined);
+  if (await dismissNavigationPrompts(page) > 0)
+    await page.waitForLoadState('networkidle', { timeout: timeoutMs });
 
   if (themeName) {
     await page.evaluate((theme) => {
@@ -715,9 +812,12 @@ async function checkObservedPage({ page, frontendUrl, route, viewportName, theme
   for (const text of pageErrors) {
     failures.push(`pageerror: ${text}`);
   }
+  await diagnostics.confirmPreDispatchAborts();
   failures.push(...networkErrors);
   if (expectedNavigationAborts.length > 0)
     console.log(`Expected prior-page navigation aborts [${viewportName}] ${route.name}: ${expectedNavigationAborts.length}`);
+  if (diagnostics.expectedPreDispatchAborts.length || diagnostics.expectedNoContentCompletions.length)
+    console.log(`Confirmed network completions [${viewportName}] ${route.name}: pre-dispatch caller cancellations=${diagnostics.expectedPreDispatchAborts.length}; HTTP 204 completions=${diagnostics.expectedNoContentCompletions.length}`);
 
   return {
     route: route.name,
@@ -725,6 +825,8 @@ async function checkObservedPage({ page, frontendUrl, route, viewportName, theme
     url: metrics.url,
     title: metrics.title,
     theme: themeName ?? (metrics.theme || 'server-default'),
+    preDispatchCancellationCount: diagnostics.expectedPreDispatchAborts.length,
+    noContentCompletionCount: diagnostics.expectedNoContentCompletions.length,
     failures,
   };
 }
@@ -795,24 +897,20 @@ export async function runVisualSmoke(options) {
     const rows = [];
 
     for (const viewportName of viewportNames) {
-      const page = await context.newPage();
-      await page.setViewportSize(VIEWPORTS[viewportName]);
+      for (const themeName of themeNames) {
+        for (const route of routes) {
+          // A fresh document cannot inherit requests from the previous route.
+          // Context/browser caches stay shared, and only one route page is open.
+          const result = await withFreshRoutePage(context, VIEWPORTS[viewportName], page =>
+            checkPage({ page, frontendUrl, route, viewportName, themeName, timeoutMs, artifactDir, toastPreview, selectionPreview }));
+          rows.push(result);
 
-      try {
-        for (const themeName of themeNames) {
-          for (const route of routes) {
-            const result = await checkPage({ page, frontendUrl, route, viewportName, themeName, timeoutMs, artifactDir, toastPreview, selectionPreview });
-            rows.push(result);
-
-            if (result.failures.length > 0) {
-              for (const failure of result.failures) {
-                failures.push(formatPageFailure(route.name, `${viewportName}/${themeName ?? 'server-default'}`, failure));
-              }
+          if (result.failures.length > 0) {
+            for (const failure of result.failures) {
+              failures.push(formatPageFailure(route.name, `${viewportName}/${themeName ?? 'server-default'}`, failure));
             }
           }
         }
-      } finally {
-        await page.close();
       }
     }
 
