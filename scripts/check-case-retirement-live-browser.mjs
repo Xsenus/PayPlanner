@@ -104,6 +104,14 @@ try {
   // Prepare the real entry within the existing scenario budget before browser navigation.
   const entry = await vite.transformRequest('/src/main.tsx');
   assert.ok(entry?.code, 'The synthetic case-document UI entry module must compile successfully.');
+  // These real route modules are lazy imports, outside the entry's static crawl.
+  // Compile only the routes this scenario opens, within its existing deadline.
+  const routeModules = ['/src/components/Cases/CaseDetailPage.tsx'];
+  if (flow.includes('modal')) routeModules.push('/src/components/Clients/ClientDetail.tsx');
+  for (const routeModule of routeModules) {
+    const compiled = await vite.transformRequest(routeModule);
+    assert.ok(compiled?.code, 'The synthetic case-document route must compile: ' + routeModule);
+  }
   // Finish the initial static-import crawl within the unchanged scenario budget.
   await vite.waitForRequestsIdle();
   // Own the browser before navigation so a failed page load still closes it.
@@ -155,7 +163,8 @@ try {
       request => (${isCaseBoundaryRead})(request, settings.api, settings.caseId), 20000) : null;
     page.setDefaultTimeout(20000);
     page.on('pageerror', error => errors.push(error.message));
-    const restartObserver = (${createCaseRestartObserver})(settings.api, () => notifyReconnect?.());
+    const createRestartObserver = (${createCaseRestartObserver});
+    let restartObserver = createRestartObserver(settings.api, () => notifyReconnect?.());
     page.on('websocket', socket => {
       if (!restartObserver.observeSocket(socket)) return;
       socket.on('framereceived', frame => {
@@ -267,6 +276,10 @@ try {
     if (modal) {
       // Finish already-issued reads and the owned activity write before navigation.
       await caseReads.drain('client-navigation');
+      // Playwright clears its socket registry on main-document navigation without
+      // delivering close events for every old socket. Observe the new document
+      // before goto so its initial handshake and every restart socket are retained.
+      restartObserver = createRestartObserver(settings.api, () => notifyReconnect?.());
       await page.goto(settings.ui + '/clients/' + settings.clientId, { waitUntil: 'domcontentloaded' });
       await page.locator('main').getByRole('button', { name: 'Дела', exact: true }).click();
       await page.getByRole('button', { name: 'Редактировать дело Synthetic retirement browser case', exact: true }).click();
