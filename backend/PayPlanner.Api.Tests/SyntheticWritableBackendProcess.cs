@@ -592,9 +592,9 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
                 }
                 if (applyBoundary is not null && !applied)
                 {
-                    var diagnostic = financialDocuments || chatAttachments ? (output + Environment.NewLine + await stderr)
+                    var diagnostic = (output + Environment.NewLine + await stderr)
                         .Replace(Password, "<password>", StringComparison.Ordinal)
-                        .Replace(Email, "<email>", StringComparison.Ordinal) : "";
+                        .Replace(Email, "<email>", StringComparison.Ordinal);
                     Assert.True(applied, "The browser never reached the owned boundary." + Environment.NewLine + diagnostic
                         + Environment.NewLine + ServerFailureDiagnostic());
                 }
