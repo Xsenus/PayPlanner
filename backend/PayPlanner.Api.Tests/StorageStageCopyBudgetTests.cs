@@ -77,11 +77,11 @@ public sealed partial class StorageStageCapacityServiceTests
     public async Task CheckpointCopyBudgetRemoteDestinationChargesSpoolWithoutCloudQuotaIo(bool postgres, bool deny)
     {
         await using var f = await CreateWriterFixtureAsync(postgres);
-        var remote = new OwnedRemoteBudgetProvider();
-        var (stages, policy, root) = CreateCopyBudgetServices(f, remote);
         // This is queued metadata, not a physical allocation; the writer still emits four bytes.
         // Exercise both sides of the copy debt with a gap that tolerates unrelated disk traffic.
         const long copyBytes = 256L * 1024 * 1024;
+        var remote = new OwnedRemoteBudgetProvider(copyBytes * 2);
+        var (stages, policy, root) = CreateCopyBudgetServices(f, remote);
         var operation = await AddOwnedCopyBudgetOperationAsync(f, copyBytes, StorageOperationStatuses.Pending, remote.Key);
         var ticket = Assert.IsType<StorageStageCapacityTicket>((await stages.ReserveAsync(
             "remote-copy:" + Guid.NewGuid().ToString("N"), Path.Combine(root, "remote.tmp"), 4, default)).Ticket);
@@ -272,7 +272,7 @@ public sealed partial class StorageStageCapacityServiceTests
         public Task<StorageDeleteResult> DeleteAsync(string locator, CancellationToken ct) => throw new InvalidOperationException("No provider deletes in budget fixture.");
     }
 
-    private sealed class OwnedRemoteBudgetProvider : OwnedUnknownBudgetProvider, IStorageProvider, IStorageCapacityProvider
+    private sealed class OwnedRemoteBudgetProvider(long availableBytes) : OwnedUnknownBudgetProvider, IStorageProvider, IStorageCapacityProvider
     {
         public override string Key => "owned-remote";
         public StorageCapacityDomain CapacityDomain => StorageCapacityDomain.Remote;
@@ -281,7 +281,7 @@ public sealed partial class StorageStageCapacityServiceTests
         {
             ct.ThrowIfCancellationRequested();
             Observations++;
-            return Task.FromResult(new StorageCapacityResource(key, "owned-remote-account", 128L * 1024 * 1024, minimum, DateTimeOffset.UtcNow));
+            return Task.FromResult(new StorageCapacityResource(key, "owned-remote-account", availableBytes, minimum, DateTimeOffset.UtcNow));
         }
     }
 
