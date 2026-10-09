@@ -129,18 +129,15 @@ public sealed class CancelledInvoiceBillingMigrationTests
         // The current EF model already contains columns that later migrations add to Payments.
         // Add them temporarily so the historical schema accepts the model insert, then drop them
         // again so the real migration under test (or a later one) creates them itself.
-        string[] futureColumns = ["SellerCompanyId", "SellerBranchId", "SellerSnapshotJson"];
-        foreach (var column in futureColumns)
-        {
-            await context.Database.ExecuteSqlRawAsync($"ALTER TABLE \"Payments\" ADD COLUMN \"{column}\" {(column == "SellerSnapshotJson" ? "TEXT" : "INTEGER")} NULL");
-        }
+        await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Payments\" ADD COLUMN \"SellerCompanyId\" INTEGER NULL");
+        await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Payments\" ADD COLUMN \"SellerBranchId\" INTEGER NULL");
+        await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Payments\" ADD COLUMN \"SellerSnapshotJson\" TEXT NULL");
 
         context.Payments.AddRange(cancelled, cancelledWorkflow, active);
         await context.SaveChangesAsync();
-        foreach (var column in futureColumns)
-        {
-            await context.Database.ExecuteSqlRawAsync($"ALTER TABLE \"Payments\" DROP COLUMN \"{column}\"");
-        }
+        await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Payments\" DROP COLUMN \"SellerCompanyId\"");
+        await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Payments\" DROP COLUMN \"SellerBranchId\"");
+        await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Payments\" DROP COLUMN \"SellerSnapshotJson\"");
 
         // Seed against the migrated historical schema, not the current EF model: newer
         // task columns do not exist yet at this point in an upgrade-path test.
