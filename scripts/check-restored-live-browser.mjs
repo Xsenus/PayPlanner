@@ -17,6 +17,10 @@ process.env.VITE_RESTORED_RUNTIME_INSTANCE_ID = process.env.RESTORED_SMOKE_INSTA
 process.env.VITE_API_URL = new URL('/api', api).href;
 const port = Number(process.env.RESTORED_SMOKE_PORT);
 assert.ok(Number.isInteger(port) && port > 0 && port < 65536, 'A preconfigured local UI port is required.');
+const configuredBrowser = process.env.PAYPLANNER_TEST_BROWSER;
+assert.ok(!configuredBrowser || ['msedge', 'chrome'].includes(configuredBrowser), 'Use the configured installed Edge or Chrome channel.');
+const browserChannels = configuredBrowser ? [configuredBrowser]
+  : process.platform === 'win32' ? ['msedge', 'chrome', undefined] : ['chrome', undefined, 'msedge'];
 let browser;
 let vite;
 let page;
@@ -65,18 +69,26 @@ try {
   await mkdir(outDir);
   const uiConfig = { envDir: runtimeRoot, cacheDir: join(runtimeRoot, 'vite-browser-cache'),
     build: { outDir, emptyOutDir: false }, logLevel: 'error' };
-  // Both build and preview remain inside the original 60-second browser budget.
-  const built = await build(uiConfig);
+  // Independent preparation shares the original 60-second budget. Wait for both
+  // outcomes so even a failed build retains ownership of a launched browser.
+  const browserPreparation = (async () => {
+    for (const channel of browserChannels) {
+      recordBrowserPhase(`launch-${channel ?? 'chromium'}`);
+      try { return await chromium.launch({ headless: true, channel }); }
+      catch (error) { recordBrowserPhase(`launch-${channel ?? 'chromium'}`, 'attempt-failed', error); /* Never download a browser. */ }
+    }
+    assert.fail('An installed Chromium-compatible browser is required.');
+  })();
+  const [uiResult, browserResult] = await Promise.allSettled([build(uiConfig), browserPreparation]);
+  if (browserResult.status === 'fulfilled') browser = browserResult.value;
+  if (uiResult.status === 'rejected') throw uiResult.reason;
+  if (browserResult.status === 'rejected') throw browserResult.reason;
+  const built = uiResult.value;
   assert.ok((Array.isArray(built) ? built : [built]).some(output =>
     output.output?.some(chunk => chunk.type === 'chunk' && chunk.isEntry && chunk.code.length > 0)),
   'The restored UI entry module must compile successfully.');
   recordBrowserPhase('preview-listen');
   vite = await preview({ ...uiConfig, preview: { host: '127.0.0.1', port, strictPort: true } });
-  for (const channel of ['msedge', 'chrome', undefined]) {
-    recordBrowserPhase(`launch-${channel ?? 'chromium'}`);
-    try { browser = await chromium.launch({ headless: true, channel }); break; }
-    catch (error) { recordBrowserPhase(browserPhase, 'attempt-failed', error); /* Never download a browser. */ }
-  }
   assert.ok(browser, 'An installed Chromium-compatible browser is required.');
   recordBrowserPhase('browser-context');
   const context = await browser.newContext();
