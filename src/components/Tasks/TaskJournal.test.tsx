@@ -4301,6 +4301,23 @@ describe('TaskJournal', () => {
     expect(screen.getByTestId('task-view-timeline').getAttribute('aria-pressed')).toBe('true');
   });
 
+  it.each([
+    ['hide', false],
+    ['color', true],
+  ])('keeps completed tasks in the task list but shows them in the calendar only when the action is %s', async (action, completedVisible) => {
+    const settings = await apiMock.getCalendarSyncSettings();
+    apiMock.getCalendarSyncSettings.mockResolvedValue({ ...settings, completedTaskCalendarAction: action });
+
+    await renderJournal([
+      createTask({ id: 101, title: 'Открытая календарная задача', status: 'inProgress', dueAt: todayAt(10) }),
+      createTask({ id: 102, title: 'Готовая календарная задача', status: 'done', dueAt: todayAt(12) }),
+    ], { initialView: 'calendar', waitForTitle: null });
+
+    await waitFor(() => expect(screen.getByTestId('task-calendar-task-101')).toBeTruthy());
+    await waitFor(() => expect(apiMock.getCalendarSyncSettings).toHaveBeenCalled());
+    await waitFor(() => expect(Boolean(screen.queryByTestId('task-calendar-task-102'))).toBe(completedVisible));
+  });
+
   it('saves and applies the selected task calendar color mode', async () => {
     await renderJournal([createTask({ priority: 'high' })], { initialView: 'calendar' });
 

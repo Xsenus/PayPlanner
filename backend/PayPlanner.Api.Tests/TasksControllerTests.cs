@@ -7782,6 +7782,39 @@ public class TasksControllerTests
         Assert.Equal(0, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == lostCase.Id));
     }
 
+    [Theory]
+    [InlineData("hide", false)]
+    [InlineData("color", true)]
+    [InlineData(null, true)]
+    [InlineData("несуществующее", true)]
+    public async Task ExportCalendar_HidesCompletedTasksOnlyInHideMode(string? action, bool completedIsExported)
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "ics-hide@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var open = await CreateTaskAsync(db, author.Id, client.Id, dueAt: new DateTime(2026, 5, 10, 9, 0, 0, DateTimeKind.Unspecified));
+        open.Title = "Открытая задача ICS";
+        var done = await CreateTaskAsync(db, author.Id, client.Id, status: "done", dueAt: new DateTime(2026, 5, 11, 9, 0, 0, DateTimeKind.Unspecified));
+        done.Title = "Выполненная задача ICS";
+        if (action is not null)
+        {
+            db.SystemSettings.Add(new SystemSetting
+            {
+                Key = "calendarSync.settings",
+                Value = System.Text.Json.JsonSerializer.Serialize(new { completedTaskCalendarAction = action }),
+            });
+        }
+
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.ExportCalendar(null, null, null, null, null, null, CancellationToken.None);
+
+        var content = Encoding.UTF8.GetString(Assert.IsType<FileContentResult>(result).FileContents);
+        Assert.Contains("SUMMARY:Открытая задача ICS", content);
+        Assert.Equal(completedIsExported, content.Contains("SUMMARY:Выполненная задача ICS", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task ExportCalendar_ReturnsIcsWithTaskDuration()
     {

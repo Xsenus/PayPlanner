@@ -2651,6 +2651,8 @@ export function TaskJournal({
   const [viewMode, setViewMode] = useState<ViewMode>(initialPreferences.viewMode);
   const [boardGroupMode, setBoardGroupMode] = useState<'due' | 'status'>('due');
   const shouldUseCalendarVisibility = viewMode === 'calendar' || initialView === 'calendar';
+  const keepsCompletedInCalendar = completedTaskCalendarAction === 'color'
+    && (viewMode === 'calendar' || viewMode === 'timeline' || initialView === 'calendar' || initialView === 'timeline');
   const shouldUseOfflineCalendar = shouldUseCalendarVisibility
     || viewMode === 'timeline'
     || initialView === 'timeline';
@@ -3191,7 +3193,9 @@ export function TaskJournal({
 
     return {
       search: debouncedSearch.trim() || undefined,
-      status: statusFilter,
+      // В календаре и на временной шкале выполненные задачи остаются, пока в настройках выбрано «оставить с отметкой»:
+      // фильтр «Активные» по умолчанию иначе скрывал бы их независимо от этой настройки.
+      status: keepsCompletedInCalendar && statusFilter === 'active' ? 'all' : statusFilter,
       type: typeFilter === 'all' ? undefined : typeFilter,
       priority: priorityFilter === 'all' ? undefined : priorityFilter,
       underControl: underControlOnly || activeQuickFilter === 'underControl' || undefined,
@@ -3225,6 +3229,7 @@ export function TaskJournal({
     dateToFilter,
     debouncedSearch,
     isApprovalsMode,
+    keepsCompletedInCalendar,
     metricFilter,
     periodMode,
     priorityFilter,
@@ -4207,7 +4212,9 @@ export function TaskJournal({
     const nextTasks = scopeFilteredTasks
       .filter((task) => {
         const due = new Date(task.dueAt);
-        const statusOk = matchesStatusFilter(task, statusFilter);
+        const statusOk = keepsCompletedInCalendar && statusFilter === 'active'
+          ? matchesStatusFilter(task, 'active') || task.status === 'done'
+          : matchesStatusFilter(task, statusFilter);
         const periodOk = !shouldApplyPeriodFilter
           ? true
           : viewMode === 'list'
@@ -4222,7 +4229,7 @@ export function TaskJournal({
     return viewMode === 'list'
       ? nextTasks
       : nextTasks.sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
-  }, [dateFromFilter, dateToFilter, metricFilter, periodMode, scopeFilteredTasks, statusFilter, viewMode]);
+  }, [dateFromFilter, dateToFilter, keepsCompletedInCalendar, metricFilter, periodMode, scopeFilteredTasks, statusFilter, viewMode]);
 
   const filteredTasks = useMemo(() => {
     const nowDate = getCurrentCalendarDate();
