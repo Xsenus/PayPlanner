@@ -589,7 +589,15 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             return "Суммарный размер логотипа, печати и подписи слишком большой для одного запроса. Уменьшите изображения и попробуйте снова.";
         }
 
-        return null;
+        var formatError = InlineImageDataUrlValidator.Validate(request.LogoDataUrl) is { } logoError
+            ? $"Логотип компании: {logoError}"
+            : InlineImageDataUrlValidator.Validate(request.SealDataUrl) is { } sealError
+                ? $"Печать компании: {sealError}"
+                : InlineImageDataUrlValidator.Validate(request.DirectorSignatureDataUrl) is { } signatureError
+                    ? $"Подпись руководителя: {signatureError}"
+                    : null;
+
+        return formatError;
     }
 
     private async Task EnsureAndNormalizeDictionaryValuesAsync(LegalEntity entity, CancellationToken ct)

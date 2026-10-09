@@ -36,3 +36,17 @@
 Проверки: `RussianRequisitesValidatorTests` (22), `CompanyBankAccountListTests`, четыре новых теста в `LegalEntitiesControllerTests` (нормализация, дубликат, check-requisites), плюс прогон `InvoiceDocumentTemplateTests`/`ActDocument*` — зелёные; `legalEntityBankAccountUtils.test.ts` (5) и все тесты `src/components/LegalEntities` (34) зелёные; `tsc` и `eslint` чисты.
 
 Не сделано на этом шаге: миграции не нужны (формат лежит в существующем JSON-поле); выбор счёта в документе — шаг 9.
+
+## Шаг 3. Проверка формата фирменных изображений (PAY-33, п. 8, часть 1)
+
+Что изменено:
+
+| Файл | Что и зачем |
+| --- | --- |
+| `backend/Services/Companies/InlineImageDataUrlValidator.cs` | Новый. Логотип, печать и подпись хранятся как data-URL; теперь допускаются только PNG, JPEG, WebP в корректном base64. SVG, GIF, HTML и т.п. отклоняются (риск скриптов и плохой рендер в печатных формах). |
+| `backend/Controllers/LegalEntitiesController.cs` (`ValidateInlineAssetPayload`) | Формат проверяется **после** проверок размера, чтобы не менять прежние сообщения о лимитах. Ошибка → 400 с понятным текстом («Логотип компании: …»). |
+| `backend/PayPlanner.Api.Tests/CompanyRequisitesTests.cs` | Тесты валидатора. |
+
+Совместимость: интерфейс карточки юрлица всегда перекодирует картинку в PNG/JPEG через canvas (`convertImageToFittingDataUrl`), поэтому штатная загрузка не затронута; отклоняются только запросы в обход интерфейса.
+Проверки: `InlineImageDataUrlValidatorTests` и весь `LegalEntitiesController*` — 74 теста зелёные.
+Остаётся по п. 8: права на файлы, подписанты и снимок реквизитов — шаги 4–6.

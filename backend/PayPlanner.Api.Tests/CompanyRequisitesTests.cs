@@ -153,3 +153,27 @@ public class CompanyBankAccountListTests
         Assert.Null(CompanyBankAccountList.FindPrimaryActive(null));
     }
 }
+
+public class InlineImageDataUrlValidatorTests
+{
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("data:image/png;base64,QUFBQUFB")]
+    [InlineData("data:image/jpeg;base64,QUFBQUFB")]
+    [InlineData("DATA:IMAGE/WEBP;BASE64,QUFBQUFB")]
+    public void Validate_AcceptsEmptyValuesAndRasterImages(string? value)
+        => Assert.Null(InlineImageDataUrlValidator.Validate(value));
+
+    [Theory]
+    [InlineData("QUFBQUFB")]
+    [InlineData("data:image/svg+xml;base64,QUFBQUFB")]
+    [InlineData("data:image/gif;base64,QUFBQUFB")]
+    [InlineData("data:text/html;base64,QUFBQUFB")]
+    [InlineData("data:image/png,QUFBQUFB")]
+    [InlineData("data:image/png;base64,")]
+    [InlineData("data:image/png;base64,***not-base64***")]
+    public void Validate_RejectsOtherTypesAndBrokenContent(string value)
+        => Assert.NotNull(InlineImageDataUrlValidator.Validate(value));
+}
