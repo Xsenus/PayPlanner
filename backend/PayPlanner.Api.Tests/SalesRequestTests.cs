@@ -302,4 +302,48 @@ public class SalesRequestTests
         Assert.Equal(409, stale.Status);
         Assert.Equal(before, await f.Db.ClientCases.CountAsync());
     }
+
+    [Fact]
+    public async Task ReplaceRules_ValidatesAndAffectsOnlyFutureTransitions()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        await f.Service.EnsureDefaultsAsync(default);
+        var qualification = StatusId(f.Db, "qualification");
+
+        Assert.False((await f.Service.ReplaceRulesAsync(qualification, [new SalesRequestRuleInput(" ", null, 10)], default)).Ok);
+        Assert.False((await f.Service.ReplaceRulesAsync(qualification, [new SalesRequestRuleInput("Позвонить", null, 0)], default)).Ok);
+        Assert.Equal(404, (await f.Service.ReplaceRulesAsync(qualification, [new SalesRequestRuleInput("Позвонить", 9999, 10)], default)).Status);
+        var ok = await f.Service.ReplaceRulesAsync(qualification, [new SalesRequestRuleInput("Позвонить клиенту", f.Admin.Id, 15), new SalesRequestRuleInput("Проверить документы", null, 60)], default);
+
+        Assert.True(ok.Ok);
+        var request = (await f.Service.CreateAsync(NewRequest(f.Client), f.Manager.Id, default)).Value!;
+        await f.Service.TransitionAsync(request.Id, new SalesRequestTransitionInput(qualification, request.Version, null, false, null), f.Manager.Id, default);
+        var tasks = f.Db.TaskJournalItems.Where(t => t.SalesRequestId == request.Id && t.Title.Contains("Позвонить") || t.Title.Contains("Проверить")).ToList();
+        Assert.Equal(f.Admin.Id, tasks.Single(t => t.Title.StartsWith("Позвонить")).AssigneeUserId);
+        Assert.Equal(f.Manager.Id, tasks.Single(t => t.Title.StartsWith("Проверить")).AssigneeUserId);
+    }
+
+    [Fact]
+    public async Task SaveStatus_CreatesRenamesAndProtectsFunnelInvariants()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        await f.Service.EnsureDefaultsAsync(default);
+
+        var created = await f.Service.SaveStatusAsync(null, "Ожидание документов", null, null, null, default);
+        var renamed = await f.Service.SaveStatusAsync(created.Value!.Id, "Ждём документы", null, null, null, default);
+        var changeFinal = await f.Service.SaveStatusAsync(StatusId(f.Db, "paid"), null, "Failure", null, null, default);
+        var blank = await f.Service.SaveStatusAsync(null, " ", null, null, null, default);
+        var paid = StatusId(f.Db, "paid");
+        var disablePaid = await f.Service.SaveStatusAsync(paid, null, null, null, false, default);
+        var request = (await f.Service.CreateAsync(NewRequest(f.Client), f.Manager.Id, default)).Value!;
+        var disableNew = await f.Service.SaveStatusAsync(request.StatusId, null, null, null, false, default);
+
+        Assert.Equal("Ждём документы", renamed.Value!.Title);
+        Assert.Equal(409, changeFinal.Status);
+        Assert.False(blank.Ok);
+        Assert.Equal(409, disablePaid.Status);
+        Assert.Equal(409, disableNew.Status);
+    }
 }

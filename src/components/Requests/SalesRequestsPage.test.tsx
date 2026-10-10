@@ -27,6 +27,8 @@ vi.mock('../../services/api', () => ({
     transitionSalesRequest: vi.fn(),
     createSalesRequestTask: vi.fn(),
     getSalesRequestReport: vi.fn(),
+    replaceSalesRequestRules: vi.fn(),
+    saveSalesRequestStatus: vi.fn(),
   },
 }));
 
@@ -132,6 +134,35 @@ describe('SalesRequestsPage', () => {
     await waitFor(() => expect(confirm).toHaveBeenCalled());
     await waitFor(() =>
       expect(apiService.transitionSalesRequest).toHaveBeenLastCalledWith(7, expect.objectContaining({ toStatusId: 3, forceCloseTasks: true })),
+    );
+  });
+});
+
+describe('SalesRequestFunnelSettings', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(apiService.getSalesRequestStatuses).mockResolvedValue([
+      { id: 1, key: 'new', title: 'Новая', sortOrder: 1, finalKind: 'None', rules: [{ id: 5, title: 'Принять заявку', dueInMinutes: 30 }] },
+    ]);
+    vi.mocked(apiService.getTaskJournalAssignees).mockResolvedValue([{ id: 1, name: 'Аня', email: 'a@x' }]);
+    vi.mocked(apiService.getSalesRequests).mockResolvedValue({ total: 0, page: 1, pageSize: 50, items: [] });
+  });
+
+  it('is hidden without the configure right and saves edited rules for admins', async () => {
+    const { unmount } = render(<SalesRequestsPage allowCreate allowEdit allowAnalytics={false} />);
+    await screen.findByText('Заявок нет.');
+    expect(screen.queryByRole('button', { name: 'Настройка воронки' })).toBeNull();
+    unmount();
+
+    vi.mocked(apiService.replaceSalesRequestRules).mockResolvedValue([]);
+    render(<SalesRequestsPage allowCreate allowEdit allowAnalytics={false} allowConfigure />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Настройка воронки' }));
+    await userEvent.click(await screen.findByRole('button', { name: /правил: 1/ }));
+    await userEvent.selectOptions(screen.getByLabelText('Исполнитель правила'), '1');
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить правила' }));
+
+    await waitFor(() =>
+      expect(apiService.replaceSalesRequestRules).toHaveBeenCalledWith(1, [{ title: 'Принять заявку', assigneeUserId: 1, dueInMinutes: 30 }]),
     );
   });
 });

@@ -69,6 +69,26 @@ public sealed class SalesRequestTaskRequest
     public DateTime? DueAt { get; set; }
 }
 
+public sealed class SalesRequestStatusRequest
+{
+    public string? Title { get; set; }
+    public string? FinalKind { get; set; }
+    public int? SortOrder { get; set; }
+    public bool? IsActive { get; set; }
+}
+
+public sealed class SalesRequestRulesRequest
+{
+    public List<SalesRequestRuleRequest> Rules { get; set; } = [];
+}
+
+public sealed class SalesRequestRuleRequest
+{
+    public string? Title { get; set; }
+    public int? AssigneeUserId { get; set; }
+    public int DueInMinutes { get; set; }
+}
+
 /// <summary>
 /// Заявки воронки продаж. Доступ — по разделу прав «requests»: пока роли не получили права, раздел недоступен
 /// (в том числе юристам); видимость «свои/все» определяет область просмотра роли. Заявка не раскрывается через дело.
@@ -110,6 +130,42 @@ public class SalesRequestsController : ControllerBase
         var rules = await _db.SalesRequestStatusTaskRules.AsNoTracking().Where(item => item.IsActive).ToListAsync(ct);
         return Ok(statuses.Select(item => new SalesRequestStatusDto(item.Id, item.Key, item.Title, item.SortOrder, item.FinalKind,
             rules.Where(rule => rule.StatusId == item.Id).Select(rule => new SalesRequestRuleDto(rule.Id, rule.Title, rule.AssigneeUserId, rule.DueInMinutes)).ToList())).ToList());
+    }
+
+    [HttpPost("statuses")]
+    public async Task<ActionResult<SalesRequestStatusDto>> CreateStatus([FromBody] SalesRequestStatusRequest request, CancellationToken ct)
+        => await SaveStatusAsync(null, request, ct);
+
+    [HttpPut("statuses/{id:int}")]
+    public async Task<ActionResult<SalesRequestStatusDto>> UpdateStatus(int id, [FromBody] SalesRequestStatusRequest request, CancellationToken ct)
+        => await SaveStatusAsync(id, request, ct);
+
+    [HttpPut("statuses/{id:int}/rules")]
+    public async Task<ActionResult<List<SalesRequestRuleDto>>> ReplaceRules(int id, [FromBody] SalesRequestRulesRequest request, CancellationToken ct)
+    {
+        if (!await _db.IsUserAdminOrLegacyFallbackAsync(User, ct))
+        {
+            return Denied();
+        }
+
+        var result = await _service.ReplaceRulesAsync(id, request.Rules.Select(rule => new SalesRequestRuleInput(rule.Title, rule.AssigneeUserId, rule.DueInMinutes)).ToList(), ct);
+        return result.Ok
+            ? Ok(result.Value!.Select(rule => new SalesRequestRuleDto(rule.Id, rule.Title, rule.AssigneeUserId, rule.DueInMinutes)).ToList())
+            : StatusCode(result.Status, new { message = result.Error });
+    }
+
+    private async Task<ActionResult<SalesRequestStatusDto>> SaveStatusAsync(int? id, SalesRequestStatusRequest request, CancellationToken ct)
+    {
+        // Настройка воронки меняет правила для всех сотрудников, поэтому только администратор.
+        if (!await _db.IsUserAdminOrLegacyFallbackAsync(User, ct))
+        {
+            return Denied();
+        }
+
+        var result = await _service.SaveStatusAsync(id, request.Title, request.FinalKind, request.SortOrder, request.IsActive, ct);
+        return result.Ok
+            ? Ok(new SalesRequestStatusDto(result.Value!.Id, result.Value.Key, result.Value.Title, result.Value.SortOrder, result.Value.FinalKind, []))
+            : StatusCode(result.Status, new { message = result.Error });
     }
 
     [HttpGet]

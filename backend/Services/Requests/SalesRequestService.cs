@@ -28,6 +28,8 @@ public sealed record SalesRequestUpdateInput(string? Summary, string? Type, deci
 
 public sealed record SalesRequestTransitionInput(int ToStatusId, int ExpectedVersion, int? PaidPaymentId, bool ForceCloseTasks, string? Comment);
 
+public sealed record SalesRequestRuleInput(string? Title, int? AssigneeUserId, int DueInMinutes);
+
 public sealed record OpenTaskInfo(int Id, string Title, int? AssigneeUserId, string Status);
 
 public sealed record SalesRequestReport(
@@ -43,6 +45,8 @@ public interface ISalesRequestService
     Task<SalesRequestResult<SalesRequest>> UpdateAsync(int id, SalesRequestUpdateInput input, int userId, CancellationToken ct);
     Task<SalesRequestResult<SalesRequest>> TransitionAsync(int id, SalesRequestTransitionInput input, int userId, CancellationToken ct);
     Task<SalesRequestResult<TaskJournalItem>> CreateManualTaskAsync(int id, int assigneeUserId, string? title, DateTime? dueAt, int userId, CancellationToken ct);
+    Task<SalesRequestResult<SalesRequestStatus>> SaveStatusAsync(int? id, string? title, string? finalKind, int? sortOrder, bool? isActive, CancellationToken ct);
+    Task<SalesRequestResult<IReadOnlyList<SalesRequestStatusTaskRule>>> ReplaceRulesAsync(int statusId, IReadOnlyList<SalesRequestRuleInput> rules, CancellationToken ct);
     Task<SalesRequestReport> BuildReportAsync(DateTime from, DateTime to, IReadOnlyCollection<int>? visibleResponsibleUserIds, CancellationToken ct);
 }
 
@@ -399,6 +403,130 @@ public sealed class SalesRequestService : ISalesRequestService
         AddEvent(id, SalesRequestEventKinds.TaskCreated, null, null, userId, text);
         await _db.SaveChangesAsync(ct);
         return new(task);
+    }
+
+    public async Task<SalesRequestResult<SalesRequestStatus>> SaveStatusAsync(int? id, string? title, string? finalKind, int? sortOrder, bool? isActive, CancellationToken ct)
+    {
+        await EnsureDefaultsAsync(ct);
+        SalesRequestStatus status;
+        if (id is int statusId)
+        {
+            var existing = await _db.SalesRequestStatuses.FirstOrDefaultAsync(item => item.Id == statusId, ct);
+            if (existing is null)
+            {
+                return SalesRequestResult<SalesRequestStatus>.Fail("Статус не найден.", 404);
+            }
+
+            // Смысл финала уже вошёл в историю и отчёты, поэтому у существующего статуса он не меняется.
+            if (finalKind is not null && finalKind != existing.FinalKind)
+            {
+                return SalesRequestResult<SalesRequestStatus>.Fail("Тип финала существующего статуса менять нельзя — создайте новый статус.", 409);
+            }
+
+            status = existing;
+        }
+        else
+        {
+            var kind = finalKind ?? SalesRequestFinalKinds.None;
+            if (kind is not (SalesRequestFinalKinds.None or SalesRequestFinalKinds.Success or SalesRequestFinalKinds.Failure))
+            {
+                return SalesRequestResult<SalesRequestStatus>.Fail("Неизвестный тип финала.");
+            }
+
+            status = new SalesRequestStatus { Key = $"custom-{Guid.NewGuid():N}"[..20], FinalKind = kind, SortOrder = (await _db.SalesRequestStatuses.MaxAsync(item => (int?)item.SortOrder, ct) ?? 0) + 1 };
+            _db.SalesRequestStatuses.Add(status);
+        }
+
+        if (title is not null)
+        {
+            var text = title.Trim();
+            if (text.Length == 0 || text.Length > 100)
+            {
+                return SalesRequestResult<SalesRequestStatus>.Fail("Название статуса — от 1 до 100 символов.");
+            }
+
+            status.Title = text;
+        }
+        else if (id is null)
+        {
+            return SalesRequestResult<SalesRequestStatus>.Fail("Укажите название статуса.");
+        }
+
+        if (sortOrder.HasValue)
+        {
+            status.SortOrder = sortOrder.Value;
+        }
+
+        if (isActive.HasValue && isActive.Value != status.IsActive)
+        {
+            if (!isActive.Value)
+            {
+                if (await _db.SalesRequests.AnyAsync(item => item.StatusId == status.Id && item.FinalKind == SalesRequestFinalKinds.None, ct))
+                {
+                    return SalesRequestResult<SalesRequestStatus>.Fail("В этом статусе есть заявки в работе — сначала переведите их.", 409);
+                }
+
+                // В воронке всегда остаются начальный статус, успешный финал и провальный финал.
+                var remaining = await _db.SalesRequestStatuses.Where(item => item.IsActive && item.Id != status.Id).Select(item => item.FinalKind).ToListAsync(ct);
+                if (status.FinalKind != SalesRequestFinalKinds.None && !remaining.Contains(status.FinalKind))
+                {
+                    return SalesRequestResult<SalesRequestStatus>.Fail("Нельзя отключить последний финальный статус этого типа.", 409);
+                }
+
+                if (status.FinalKind == SalesRequestFinalKinds.None && !remaining.Contains(SalesRequestFinalKinds.None))
+                {
+                    return SalesRequestResult<SalesRequestStatus>.Fail("Нельзя отключить последний рабочий статус.", 409);
+                }
+            }
+
+            status.IsActive = isActive.Value;
+        }
+
+        await _db.SaveChangesAsync(ct);
+        return new(status);
+    }
+
+    public async Task<SalesRequestResult<IReadOnlyList<SalesRequestStatusTaskRule>>> ReplaceRulesAsync(int statusId, IReadOnlyList<SalesRequestRuleInput> rules, CancellationToken ct)
+    {
+        if (!await _db.SalesRequestStatuses.AnyAsync(item => item.Id == statusId, ct))
+        {
+            return SalesRequestResult<IReadOnlyList<SalesRequestStatusTaskRule>>.Fail("Статус не найден.", 404);
+        }
+
+        if (rules.Count > 20)
+        {
+            return SalesRequestResult<IReadOnlyList<SalesRequestStatusTaskRule>>.Fail("Не больше 20 правил на статус.");
+        }
+
+        var assigneeIds = rules.Where(rule => rule.AssigneeUserId.HasValue).Select(rule => rule.AssigneeUserId!.Value).Distinct().ToList();
+        var activeUsers = await _db.Users.Where(user => assigneeIds.Contains(user.Id) && user.IsActive).Select(user => user.Id).ToListAsync(ct);
+        var prepared = new List<SalesRequestStatusTaskRule>();
+        foreach (var rule in rules)
+        {
+            var text = rule.Title?.Trim();
+            if (string.IsNullOrEmpty(text) || text.Length > 300)
+            {
+                return SalesRequestResult<IReadOnlyList<SalesRequestStatusTaskRule>>.Fail("Текст задачи — от 1 до 300 символов.");
+            }
+
+            if (rule.DueInMinutes is < 1 or > 60 * 24 * 365)
+            {
+                return SalesRequestResult<IReadOnlyList<SalesRequestStatusTaskRule>>.Fail("Срок задачи — от 1 минуты до года.");
+            }
+
+            if (rule.AssigneeUserId.HasValue && !activeUsers.Contains(rule.AssigneeUserId.Value))
+            {
+                return SalesRequestResult<IReadOnlyList<SalesRequestStatusTaskRule>>.Fail("Исполнитель правила не найден.", 404);
+            }
+
+            prepared.Add(new SalesRequestStatusTaskRule { StatusId = statusId, Title = text, AssigneeUserId = rule.AssigneeUserId, DueInMinutes = rule.DueInMinutes });
+        }
+
+        // Правила применяются только к будущим переходам; уже созданные задачи заявок не меняются.
+        _db.SalesRequestStatusTaskRules.RemoveRange(_db.SalesRequestStatusTaskRules.Where(rule => rule.StatusId == statusId));
+        _db.SalesRequestStatusTaskRules.AddRange(prepared);
+        await _db.SaveChangesAsync(ct);
+        return new(prepared);
     }
 
     public async Task<SalesRequestReport> BuildReportAsync(DateTime from, DateTime to, IReadOnlyCollection<int>? visibleResponsibleUserIds, CancellationToken ct)

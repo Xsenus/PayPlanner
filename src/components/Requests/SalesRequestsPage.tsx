@@ -11,12 +11,14 @@ import type {
   SalesRequestStatusItem,
 } from '../../types';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { SalesRequestFunnelSettings } from './SalesRequestFunnelSettings';
 import type { TaskJournalAssignee } from '../../utils/taskJournalStore';
 
 interface SalesRequestsPageProps {
   allowCreate: boolean;
   allowEdit: boolean;
   allowAnalytics: boolean;
+  allowConfigure?: boolean;
 }
 
 const SOURCE_LABELS: Record<SalesRequestSource, string> = {
@@ -56,7 +58,7 @@ const emptyForm = () => ({
  * Раздел «Заявки»: список, создание с поиском клиента и проверкой дел, карточка с переходами по статусам.
  * Доступ задаёт серверный раздел прав «requests»; здесь только отображение и подсказки.
  */
-export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics }: SalesRequestsPageProps) {
+export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allowConfigure = false }: SalesRequestsPageProps) {
   const toast = useToast();
   const dialog = useDialog();
   const [statuses, setStatuses] = useState<SalesRequestStatusItem[]>([]);
@@ -73,6 +75,7 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics }: Sa
   const [paymentId, setPaymentId] = useState('');
   const [taskForm, setTaskForm] = useState({ assigneeUserId: '', title: '' });
   const [report, setReport] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const statusById = useMemo(() => new Map(statuses.map((item) => [item.id, item])), [statuses]);
   const userName = useCallback((id?: number | null) => assignees.find((item) => item.id === id)?.name ?? (id ? `№${id}` : ''), [assignees]);
@@ -93,10 +96,14 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics }: Sa
     }
   }, [filters, toast]);
 
-  useEffect(() => {
+  const loadStatuses = useCallback(() => {
     void apiService.getSalesRequestStatuses().then(setStatuses).catch(() => setStatuses([]));
-    void apiService.getTaskJournalAssignees().then(setAssignees).catch(() => setAssignees([]));
   }, []);
+
+  useEffect(() => {
+    loadStatuses();
+    void apiService.getTaskJournalAssignees().then(setAssignees).catch(() => setAssignees([]));
+  }, [loadStatuses]);
 
   useEffect(() => {
     void loadList();
@@ -196,6 +203,11 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics }: Sa
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-xl font-semibold text-slate-900">Заявки</h1>
         <div className="flex gap-2">
+          {allowConfigure ? (
+            <button type="button" className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm hover:bg-slate-50" onClick={() => setSettingsOpen((value) => !value)}>
+              Настройка воронки
+            </button>
+          ) : null}
           {allowAnalytics ? (
             <button
               type="button"
@@ -223,6 +235,7 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics }: Sa
           ) : null}
         </div>
       </div>
+      {settingsOpen && allowConfigure ? <SalesRequestFunnelSettings statuses={statuses} assignees={assignees} onChanged={loadStatuses} /> : null}
       {report ? <p className="rounded-lg bg-slate-50 p-2 text-sm text-slate-700" data-testid="sales-requests-report">{report}</p> : null}
 
       <div className="flex flex-wrap items-end gap-2 text-sm">

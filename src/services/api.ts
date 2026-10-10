@@ -6169,6 +6169,20 @@ export class ApiService {
     return this.request<SalesRequestDetail['tasks'][number]>(`/requests/${id}/tasks`, { method: 'POST', body: JSON.stringify(payload) });
   }
 
+  async saveSalesRequestStatus(id: number | null, payload: { title?: string; finalKind?: string; sortOrder?: number; isActive?: boolean }) {
+    return this.request<SalesRequestStatusItem>(id ? `/requests/statuses/${id}` : '/requests/statuses', {
+      method: id ? 'PUT' : 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async replaceSalesRequestRules(statusId: number, rules: Array<{ title: string; assigneeUserId?: number | null; dueInMinutes: number }>) {
+    return this.request<SalesRequestStatusItem['rules']>(`/requests/statuses/${statusId}/rules`, {
+      method: 'PUT',
+      body: JSON.stringify({ rules }),
+    });
+  }
+
   async getSalesRequestReport(from: string, to: string) {
     return this.request<SalesRequestReport>(`/requests/report${buildQuery({ from, to })}`);
   }

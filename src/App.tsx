@@ -1343,6 +1343,7 @@ function AppContent() {
                 allowCreate={permissions.requests?.canCreate === true}
                 allowEdit={permissions.requests?.canEdit === true}
                 allowAnalytics={permissions.requests?.canViewAnalytics === true}
+                allowConfigure={isAdminRole}
               />
             )
           : renderNoAccess('Раздел заявок недоступен для вашей роли.');
