@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services.Notifications;
 
 namespace PayPlanner.Api.Services.Requests;
 
@@ -62,8 +63,16 @@ public sealed class SalesRequestService : ISalesRequestService
     private static readonly string[] ClosedTaskStatuses = ["done", "cancelled"];
 
     private readonly PaymentContext _db;
+    private readonly INotificationService? _notifications;
+    private readonly ILogger<SalesRequestService>? _logger;
+    private readonly List<(TaskJournalItem Task, int ActorUserId)> _pendingNotifications = [];
 
-    public SalesRequestService(PaymentContext db) => _db = db;
+    public SalesRequestService(PaymentContext db, INotificationService? notifications = null, ILogger<SalesRequestService>? logger = null)
+    {
+        _db = db;
+        _notifications = notifications;
+        _logger = logger;
+    }
 
     public async Task EnsureDefaultsAsync(CancellationToken ct)
     {
@@ -180,6 +189,7 @@ public sealed class SalesRequestService : ISalesRequestService
         AddEvent(request.Id, SalesRequestEventKinds.Created, null, first.Id, userId, null);
         await CreateRuleTasksAsync(request, first.Id, userId, ct);
         await _db.SaveChangesAsync(ct);
+        await FlushNotificationsAsync(ct);
         return new(request);
     }
 
@@ -376,6 +386,11 @@ public sealed class SalesRequestService : ISalesRequestService
         if (saved.Ok)
         {
             await transaction.CommitAsync(ct);
+            await FlushNotificationsAsync(ct);
+        }
+        else
+        {
+            _pendingNotifications.Clear();
         }
 
         return saved;
@@ -409,6 +424,8 @@ public sealed class SalesRequestService : ISalesRequestService
         _db.TaskJournalItems.Add(task);
         AddEvent(id, SalesRequestEventKinds.TaskCreated, null, null, userId, text);
         await _db.SaveChangesAsync(ct);
+        _pendingNotifications.Add((task, userId));
+        await FlushNotificationsAsync(ct);
         return new(task);
     }
 
@@ -668,6 +685,7 @@ public sealed class SalesRequestService : ISalesRequestService
             }
 
             _db.TaskJournalItems.Add(task);
+            _pendingNotifications.Add((task, userId));
             AddEvent(request.Id, SalesRequestEventKinds.TaskCreated, null, statusId, userId, task.Title);
         }
     }
@@ -694,8 +712,32 @@ public sealed class SalesRequestService : ISalesRequestService
             AuthorName = author ?? string.Empty,
             DueAt = dueAt,
             TagsJson = tag is null ? "[]" : JsonSerializer.Serialize(new[] { tag }),
+            ChannelsJson = JsonSerializer.Serialize(new[] { NotificationChannels.InApp }),
             CreatedAt = DateTime.UtcNow,
         };
+    }
+
+    private async Task FlushNotificationsAsync(CancellationToken ct)
+    {
+        var pending = _pendingNotifications.ToList();
+        _pendingNotifications.Clear();
+        if (_notifications is null)
+        {
+            return;
+        }
+
+        foreach (var (task, actorUserId) in pending)
+        {
+            try
+            {
+                // Уведомление не должно ломать воронку: задача уже создана, сбой доставки только пишется в журнал.
+                await _notifications.NotifyTaskAssignedAsync(task, "Заявки", actorUserId, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger?.LogWarning(ex, "Не удалось уведомить об автозадаче заявки {TaskId}.", task.Id);
+            }
+        }
     }
 
     private async Task<List<TaskJournalItem>> LoadOpenTasksAsync(int requestId, CancellationToken ct)

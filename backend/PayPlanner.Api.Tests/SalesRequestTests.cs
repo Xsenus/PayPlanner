@@ -7,6 +7,7 @@ using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services.Requests;
+using PayPlanner.Api.Services.Notifications;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -390,5 +391,49 @@ public class SalesRequestTests
         Assert.False(fromFinal.Ok);
         Assert.Equal(StatusId(f.Db, "approval"), configured);
         Assert.Null(cleared.Value!.AutoAdvanceToStatusId);
+    }
+
+    public class NotificationRecorder : System.Reflection.DispatchProxy
+    {
+        public List<(int TaskId, int RecipientAssignee, int Actor)> Assigned { get; } = [];
+        public bool Fail { get; set; }
+
+        protected override object? Invoke(System.Reflection.MethodInfo? targetMethod, object?[]? args)
+        {
+            if (targetMethod?.Name != nameof(INotificationService.NotifyTaskAssignedAsync))
+            {
+                throw new NotSupportedException(targetMethod?.Name);
+            }
+
+            if (Fail)
+            {
+                throw new InvalidOperationException("push unavailable");
+            }
+
+            var task = (TaskJournalItem)args![0]!;
+            Assigned.Add((task.Id, task.AssigneeUserId ?? 0, (int)args[2]!));
+            return Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+        }
+    }
+
+    [Fact]
+    public async Task AutoTasks_NotifyAssignee_AndNotificationFailureDoesNotBreakTheFunnel()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var proxy = System.Reflection.DispatchProxy.Create<INotificationService, NotificationRecorder>();
+        var recorder = (NotificationRecorder)(object)proxy;
+        var service = new SalesRequestService(f.Db, proxy);
+
+        var request = (await service.CreateAsync(NewRequest(f.Client), f.Admin.Id, default)).Value!;
+        Assert.Single(recorder.Assigned);
+        Assert.Equal(f.Admin.Id, recorder.Assigned[0].RecipientAssignee);
+        Assert.Contains("inApp", f.Db.TaskJournalItems.Single(t => t.Id == recorder.Assigned[0].TaskId).ChannelsJson);
+
+        recorder.Fail = true;
+        var moved = await service.TransitionAsync(request.Id, new SalesRequestTransitionInput(StatusId(f.Db, "qualification"), request.Version, null, false, null), f.Manager.Id, default);
+
+        Assert.True(moved.Ok);
+        Assert.Contains(f.Db.TaskJournalItems, t => t.SalesRequestId == request.Id && t.Title.StartsWith("Квалифицировать"));
     }
 }
