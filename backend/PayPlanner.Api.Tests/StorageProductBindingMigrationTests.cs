@@ -114,8 +114,11 @@ public sealed class StorageProductBindingMigrationTests
         var client = new Client { Name = "Миграция связей" };
         var clientCase = new ClientCase { Client = client, Title = "Дело" };
         var task = new TaskJournalItem { ClientCase = clientCase, Title = "Задача", DueAt = DateTime.UtcNow };
+        // Схема ещё старая, а модель знает SalesRequestId: колонка нужна только на время вставки, её добавит настоящая миграция.
+        await db.Database.ExecuteSqlRawAsync("ALTER TABLE \"TaskJournalItems\" ADD COLUMN \"SalesRequestId\" INTEGER NULL");
         db.TaskJournalItems.Add(task);
         await db.SaveChangesAsync();
+        await db.Database.ExecuteSqlRawAsync("ALTER TABLE \"TaskJournalItems\" DROP COLUMN \"SalesRequestId\"");
         var uploadedAt = new DateTime(2026, 9, 29, 12, 0, 0, DateTimeKind.Utc);
         var keys = new[] { new string('a', 64), "ambiguous", "mismatch", "inverse", "inverse" };
         for (var i = 0; i < keys.Length; i++)
