@@ -232,3 +232,7 @@
 | миграции `20261010031400_TaxRegisterUniqueCorrection*`, `.../PostgreSql/20261010031710_TaxRegisterUniqueCorrectionPostgres*` | Индекс `IX_TaxRegisterEntries_CorrectsEntryId` стал уникальным: две параллельные корректировки одной записи не пройдут на уровне БД; сервис превращает отказ в 409. |
 | `TaxRegisterService.GetJournalAsync`, `GET api/tax-register/journal` | Журнал событий компании (создание, утверждение, корректировка, архив) с фильтрами по периоду и действию, пагинацией (≤ 200) и подписанной суммой. |
 | Тесты | `TaxRegisterServiceTests` (+2: журнал и отказ БД на вторую корректировку). Миграции проверены на PostgreSQL. |
+
+### Шаг 12б. Выгрузка книги в Excel (PAY-35)
+
+`TaxRegisterXlsxWriter` собирает `.xlsx` без новых зависимостей (один лист, текст — inline-строки, управляющие символы удаляются), `GET api/tax-register/book/export.xlsx`, кнопка «Выгрузить Excel» в блоке книги. Это рабочая таблица, не официальная форма. Тесты: чтение файла через ExcelDataReader, фронтенд-тест кнопки.

@@ -23,7 +23,7 @@ vi.mock('../../services/api', () => ({
     archiveTaxRegisterEntry: vi.fn(),
     correctTaxRegisterEntry: vi.fn(),
     closeTaxRegisterYear: vi.fn(),
-    downloadTaxRegisterCsv: vi.fn(),
+    downloadTaxRegisterExport: vi.fn(),
   },
 }));
 
@@ -112,6 +112,17 @@ describe('CompanyTaxRegisterSection', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Исправить' }));
 
     await waitFor(() => expect(apiService.correctTaxRegisterEntry).toHaveBeenCalledWith(1, 'Ошибка суммы'));
+  });
+
+  it('downloads the book as Excel', async () => {
+    vi.mocked(apiService.downloadTaxRegisterExport).mockResolvedValue(new Blob(['x']));
+    URL.createObjectURL = vi.fn(() => 'blob:x');
+    URL.revokeObjectURL = vi.fn();
+    render(<CompanyTaxRegisterSection companyId={5} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Выгрузить Excel' }));
+
+    await waitFor(() => expect(apiService.downloadTaxRegisterExport).toHaveBeenCalledWith(5, new Date().getFullYear(), 'xlsx'));
   });
 
   it('hides editing for a closed year', async () => {

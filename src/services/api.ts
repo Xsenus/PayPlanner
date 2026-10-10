@@ -6119,9 +6119,9 @@ export class ApiService {
     );
   }
 
-  async downloadTaxRegisterCsv(companyId: number, year: number) {
+  async downloadTaxRegisterExport(companyId: number, year: number, format: 'csv' | 'xlsx' = 'csv') {
     const token = getAuthToken();
-    const response = await fetch(`${API_BASE_URL}/tax-register/book/export.csv?companyId=${companyId}&year=${year}`, {
+    const response = await fetch(`${API_BASE_URL}/tax-register/book/export.${format}?companyId=${companyId}&year=${year}`, {
       method: 'GET',
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });

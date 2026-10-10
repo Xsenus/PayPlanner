@@ -65,12 +65,12 @@ export function CompanyTaxRegisterSection({ companyId }: CompanyTaxRegisterSecti
   const amount = Number(form.amount.replace(',', '.'));
   const canAdd = !book.isClosed && form.operationDate !== '' && Number.isFinite(amount) && amount > 0;
 
-  const download = async () => {
-    const blob = await apiService.downloadTaxRegisterCsv(companyId, year);
+  const download = async (format: 'csv' | 'xlsx') => {
+    const blob = await apiService.downloadTaxRegisterExport(companyId, year, format);
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `kudir-${year}.csv`;
+    link.download = `kudir-${year}.${format}`;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -96,10 +96,18 @@ export function CompanyTaxRegisterSection({ companyId }: CompanyTaxRegisterSecti
           <button
             type="button"
             disabled={busy}
-            onClick={() => void run(download, 'Не удалось выгрузить книгу.')}
+            onClick={() => void run(() => download('csv'), 'Не удалось выгрузить книгу.')}
             className="rounded-lg border border-slate-200 px-2 py-1 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
           >
             Выгрузить CSV
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void run(() => download('xlsx'), 'Не удалось выгрузить книгу.')}
+            className="rounded-lg border border-slate-200 px-2 py-1 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            Выгрузить Excel
           </button>
           <button
             type="button"

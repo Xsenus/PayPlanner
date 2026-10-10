@@ -191,4 +191,25 @@ public class TaxRegisterServiceTests
 
         await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
     }
+
+    [Fact]
+    public void Xlsx_ContainsRowsTotalsAndEscapesText()
+    {
+        System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+        var entry = new TaxRegisterEntry { Id = 1, OperationDate = new DateTime(2025, 1, 1), Direction = "Income", Amount = 12.5m, Sign = 1, DocumentRef = "=A1 & <b>", Description = "x\u0001y" };
+        var bytes = TaxRegisterXlsxWriter.Build(new TaxRegisterBook(1, 2025, false, [entry], new TaxRegisterBookTotals(12.5m, 0m, 12.5m, 1)));
+
+        using var reader = ExcelDataReader.ExcelReaderFactory.CreateReader(new MemoryStream(bytes));
+        var rows = new List<string?[]>();
+        while (reader.Read())
+        {
+            rows.Add(Enumerable.Range(0, reader.FieldCount).Select(i => reader.GetValue(i)?.ToString()).ToArray());
+        }
+
+        Assert.Equal("Книга доходов и расходов, 2025 год", rows[0][0]);
+        Assert.Equal("12.5", rows[2][4]);
+        Assert.Equal("=A1 & <b>", rows[2][5]);
+        Assert.Equal("xy", rows[2][6]);
+        Assert.Equal("Разность", rows[^1][3]);
+    }
 }

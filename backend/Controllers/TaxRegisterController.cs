@@ -180,6 +180,18 @@ public class TaxRegisterController : ControllerBase, IAsyncActionFilter
         return File(Encoding.UTF8.GetBytes(TaxRegisterService.ToCsv(book)), "text/csv; charset=utf-8", $"kudir-{companyId}-{year}.csv");
     }
 
+    [HttpGet("book/export.xlsx")]
+    public async Task<IActionResult> ExportXlsx([FromQuery] int companyId, [FromQuery] int year, CancellationToken ct)
+    {
+        if (year is < 2000 or > 2100)
+        {
+            return BadRequest(new { message = "Укажите корректный год." });
+        }
+
+        var book = await _service.BuildBookAsync(companyId, year, ct);
+        return File(TaxRegisterXlsxWriter.Build(book), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"kudir-{companyId}-{year}.xlsx");
+    }
+
     [HttpPost("close-year")]
     public async Task<ActionResult<object>> CloseYear([FromQuery] int companyId, [FromQuery] int year, CancellationToken ct)
     {
