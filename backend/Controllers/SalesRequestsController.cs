@@ -14,7 +14,7 @@ public sealed record SalesRequestDto(
     bool LinkedCaseWasClosed, string Type, string Summary, int StatusId, DateTime StatusEnteredAt, int ResponsibleUserId,
     decimal? Amount, string? Comment, string FinalKind, DateTime? ClosedAt, int? PaidPaymentId, int? ResultClientCaseId, int Version);
 
-public sealed record SalesRequestStatusDto(int Id, string Key, string Title, int SortOrder, string FinalKind, IReadOnlyList<SalesRequestRuleDto> Rules);
+public sealed record SalesRequestStatusDto(int Id, string Key, string Title, int SortOrder, string FinalKind, int? AutoAdvanceToStatusId, IReadOnlyList<SalesRequestRuleDto> Rules);
 
 public sealed record SalesRequestRuleDto(int Id, string Title, int? AssigneeUserId, int DueInMinutes);
 
@@ -75,6 +75,8 @@ public sealed class SalesRequestStatusRequest
     public string? FinalKind { get; set; }
     public int? SortOrder { get; set; }
     public bool? IsActive { get; set; }
+    public int? AutoAdvanceToStatusId { get; set; }
+    public bool ClearAutoAdvance { get; set; }
 }
 
 public sealed class SalesRequestRulesRequest
@@ -128,7 +130,7 @@ public class SalesRequestsController : ControllerBase
         await _service.EnsureDefaultsAsync(ct);
         var statuses = await _db.SalesRequestStatuses.AsNoTracking().Where(item => item.IsActive).OrderBy(item => item.SortOrder).ToListAsync(ct);
         var rules = await _db.SalesRequestStatusTaskRules.AsNoTracking().Where(item => item.IsActive).ToListAsync(ct);
-        return Ok(statuses.Select(item => new SalesRequestStatusDto(item.Id, item.Key, item.Title, item.SortOrder, item.FinalKind,
+        return Ok(statuses.Select(item => new SalesRequestStatusDto(item.Id, item.Key, item.Title, item.SortOrder, item.FinalKind, item.AutoAdvanceToStatusId,
             rules.Where(rule => rule.StatusId == item.Id).Select(rule => new SalesRequestRuleDto(rule.Id, rule.Title, rule.AssigneeUserId, rule.DueInMinutes)).ToList())).ToList());
     }
 
@@ -162,9 +164,9 @@ public class SalesRequestsController : ControllerBase
             return Denied();
         }
 
-        var result = await _service.SaveStatusAsync(id, request.Title, request.FinalKind, request.SortOrder, request.IsActive, ct);
+        var result = await _service.SaveStatusAsync(id, request.Title, request.FinalKind, request.SortOrder, request.IsActive, ct, request.AutoAdvanceToStatusId, request.ClearAutoAdvance);
         return result.Ok
-            ? Ok(new SalesRequestStatusDto(result.Value!.Id, result.Value.Key, result.Value.Title, result.Value.SortOrder, result.Value.FinalKind, []))
+            ? Ok(new SalesRequestStatusDto(result.Value!.Id, result.Value.Key, result.Value.Title, result.Value.SortOrder, result.Value.FinalKind, result.Value.AutoAdvanceToStatusId, []))
             : StatusCode(result.Status, new { message = result.Error });
     }
 

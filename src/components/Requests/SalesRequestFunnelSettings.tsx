@@ -78,6 +78,32 @@ export function SalesRequestFunnelSettings({ statuses, assignees, onChanged }: S
                     <button type="button" className="text-rose-600" onClick={() => setRules((prev) => prev.filter((_, i) => i !== index))}>Удалить</button>
                   </div>
                 ))}
+                {status.finalKind === 'None' ? (
+                  <label className="flex flex-wrap items-center gap-2">
+                    После выполнения всех задач этапа перейти в
+                    <select
+                      aria-label="Автопереход"
+                      value={status.autoAdvanceToStatusId ?? ''}
+                      disabled={busy}
+                      onChange={(event) =>
+                        void run(async () => {
+                          await apiService.saveSalesRequestStatus(
+                            status.id,
+                            event.target.value ? { autoAdvanceToStatusId: Number(event.target.value) } : { clearAutoAdvance: true },
+                          );
+                        }, 'Не удалось сохранить автопереход.')
+                      }
+                      className="rounded-lg border border-slate-300 px-2 py-1"
+                    >
+                      <option value="">не переходить</option>
+                      {statuses
+                        .filter((item) => item.id !== status.id)
+                        .map((item) => (
+                          <option key={item.id} value={item.id}>{item.title}</option>
+                        ))}
+                    </select>
+                  </label>
+                ) : null}
                 <div className="flex gap-2">
                   <button type="button" className="rounded-lg border border-slate-200 px-2 py-1" onClick={() => setRules((prev) => [...prev, { title: '', assigneeUserId: '', dueInMinutes: '60' }])}>+ Правило</button>
                   <button

@@ -11,7 +11,7 @@
 - HTTP endpoints с точной ссылкой из документации: 223; критичных без такой ссылки: 537.
 - Критичных endpoints без прямой тестовой связи: 248.
 - Реальных HTML-форм: 19; с найденной тестовой связью: 17.
-- Фоновых сервисов: 32; с найденной тестовой связью: 28.
+- Фоновых сервисов: 33; с найденной тестовой связью: 28.
 - Исходящих HTTP-интеграций: 12; с найденной тестовой связью: 12.
 
 ## Разделы frontend
@@ -92,7 +92,7 @@
 | RoleModal | src/components/Roles/RoleModal.tsx | 121 | нет | docs/full-project-audit-2026-06-10.md |
 | S3Storage | src/components/S3Storage/S3Storage.tsx | 773 | да | docs/date-time-inventory.md, docs/development-pause-plan-2026-09-30.md, docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md, docs/s3-storage-acceptance-checklist.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/unpushed-changes-map-2026-10-03.md |
 | TaskJournalSettings | src/components/Settings/TaskJournalSettings.tsx | 961 | да | docs/task-template-current-state-2026-07-09.md |
-| TaskJournal | src/components/Tasks/TaskJournal.tsx | 10451 | да | docs/calendar-completed-task-visibility-roadmap-2026-10-10.md, docs/claude-yougile-ui-development-spec-2026-10-10.md, docs/date-time-inventory.md, docs/development-pause-plan-2026-09-30.md, docs/development-release-preparation-2026-10-06.md, docs/development-roadmap-2026-10-06.md, docs/development-roadmap-details-2026-10-06.md, docs/ef-production-warning-cleanup-plan-2026-06-22.md, docs/field-encryption-candidates.generated.md, docs/field-encryption-data-inventory-2026-07-30.md, docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md, docs/pay-33-36-implementation-log-2026-10-09.md, docs/release-security-roadmap-2026-10-06.md, docs/release-verification-history-2026-10-06.md, docs/storage-backup-snapshot-boundary-audit-2026-09-28.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-resilience-runbook.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/task-critical-events-matrix-2026-07-09.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-participants-current-state-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md, docs/task-template-current-state-2026-07-09.md, docs/tz-crm-acceptance-baseline-roadmap-2026-07-08.md, docs/unpushed-changes-map-2026-10-03.md, docs/yougile-clarifications-drafts-2026-10-09.md |
+| TaskJournal | src/components/Tasks/TaskJournal.tsx | 10464 | да | docs/calendar-completed-task-visibility-roadmap-2026-10-10.md, docs/claude-yougile-ui-development-spec-2026-10-10.md, docs/date-time-inventory.md, docs/development-pause-plan-2026-09-30.md, docs/development-release-preparation-2026-10-06.md, docs/development-roadmap-2026-10-06.md, docs/development-roadmap-details-2026-10-06.md, docs/ef-production-warning-cleanup-plan-2026-06-22.md, docs/field-encryption-candidates.generated.md, docs/field-encryption-data-inventory-2026-07-30.md, docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md, docs/pay-33-36-implementation-log-2026-10-09.md, docs/release-security-roadmap-2026-10-06.md, docs/release-verification-history-2026-10-06.md, docs/storage-backup-snapshot-boundary-audit-2026-09-28.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-resilience-runbook.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/task-critical-events-matrix-2026-07-09.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-participants-current-state-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md, docs/task-template-current-state-2026-07-09.md, docs/tz-crm-acceptance-baseline-roadmap-2026-07-08.md, docs/unpushed-changes-map-2026-10-03.md, docs/yougile-clarifications-drafts-2026-10-09.md |
 | FormPromptModal | src/components/ui/FormPromptModal.tsx | 65 | да | нет |
 | TextPromptModal | src/components/ui/TextPromptModal.tsx | 55 | да | docs/full-project-audit-2026-06-10.md |
 | YandexDisk | src/components/YandexDisk/YandexDisk.tsx | 722 | да | docs/development-pause-plan-2026-09-30.md, docs/field-encryption-candidates.generated.md, docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md, docs/release-verification-history-2026-10-06.md, docs/storage-backup-snapshot-boundary-audit-2026-09-28.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/unpushed-changes-map-2026-10-03.md, docs/yandex-disk-integration-delivery-report.md |
@@ -136,6 +136,7 @@
 | TelegramBotPollingService | backend/Services/Notifications/TelegramBotPollingService.cs | 3 | да | docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md |
 | PaymentAdvanceReviewMonitoringService | backend/Services/PaymentAdvanceReviewMonitoringService.cs | 8 | да | нет |
 | PaymentStatusUpdater | backend/Services/PaymentStatusUpdater.cs | 12 | да | docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md |
+| SalesRequestAutomationService | backend/Services/Requests/SalesRequestAutomationService.cs | 9 | нет | docs/pay-33-36-implementation-log-2026-10-09.md |
 | StorageOperationWorker | backend/Services/Storage/StorageOperationProcessor.cs | 886 | да | docs/development-pause-plan-2026-09-30.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md, docs/managed-internal-chat-attachments-roadmap-2026-10-03.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-resilience-runbook.md |
 | TaskJournalAutomationSchedulerService | backend/Services/TaskJournalAutomationSchedulerService.cs | 10 | да | docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md |
 | UserActivityRetentionService | backend/Services/UserActivity/UserActivityRetentionService.cs | 7 | да | docs/batch-operations-audit-coverage-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md |
@@ -150,6 +151,7 @@
 | MessengerDocumentOutboxWorker | backend/Services/MessengerDocumentOutboxService.cs:288 | нет |
 | CaseDocumentNotificationDispatchWorker | backend/Services/Notifications/CaseDocumentNotificationDispatchWorker.cs:3 | docs/unpushed-changes-map-2026-10-03.md |
 | MaxOutboxWorker | backend/Services/Notifications/MaxOutboxService.cs:454 | нет |
+| SalesRequestAutomationService | backend/Services/Requests/SalesRequestAutomationService.cs:9 | docs/pay-33-36-implementation-log-2026-10-09.md |
 
 ## Контроллеры
 
@@ -474,12 +476,12 @@
 | GET | api/portal/cases/{casePublicId:guid} | ClientPortalController.GetCase | публичный доступ | backend/Controllers/ClientPortalController.cs:91 |
 | GET | api/portal/home | ClientPortalController.Home | публичный доступ | backend/Controllers/ClientPortalController.cs:69 |
 | GET | api/profile | ProfileController.GetProfile | чувствительные данные или операция | backend/Controllers/ProfileController.cs:46 |
-| PUT | api/requests/{id:int} | SalesRequestsController.Update | изменение данных | backend/Controllers/SalesRequestsController.cs:260 |
-| POST | api/requests/{id:int}/tasks | SalesRequestsController.CreateTask | изменение данных | backend/Controllers/SalesRequestsController.cs:284 |
-| POST | api/requests/{id:int}/transition | SalesRequestsController.Transition | изменение данных | backend/Controllers/SalesRequestsController.cs:272 |
-| POST | api/requests/statuses | SalesRequestsController.CreateStatus | изменение данных | backend/Controllers/SalesRequestsController.cs:135 |
-| PUT | api/requests/statuses/{id:int} | SalesRequestsController.UpdateStatus | изменение данных | backend/Controllers/SalesRequestsController.cs:139 |
-| PUT | api/requests/statuses/{id:int}/rules | SalesRequestsController.ReplaceRules | изменение данных | backend/Controllers/SalesRequestsController.cs:143 |
+| PUT | api/requests/{id:int} | SalesRequestsController.Update | изменение данных | backend/Controllers/SalesRequestsController.cs:262 |
+| POST | api/requests/{id:int}/tasks | SalesRequestsController.CreateTask | изменение данных | backend/Controllers/SalesRequestsController.cs:286 |
+| POST | api/requests/{id:int}/transition | SalesRequestsController.Transition | изменение данных | backend/Controllers/SalesRequestsController.cs:274 |
+| POST | api/requests/statuses | SalesRequestsController.CreateStatus | изменение данных | backend/Controllers/SalesRequestsController.cs:137 |
+| PUT | api/requests/statuses/{id:int} | SalesRequestsController.UpdateStatus | изменение данных | backend/Controllers/SalesRequestsController.cs:141 |
+| PUT | api/requests/statuses/{id:int}/rules | SalesRequestsController.ReplaceRules | изменение данных | backend/Controllers/SalesRequestsController.cs:145 |
 | GET | api/role-permissions/calendar-users | RolePermissionsController.GetCalendarUsers | чувствительные данные или операция | backend/Controllers/RolePermissionsController.cs:152 |
 | GET | api/roles | RolesController.GetRoles | чувствительные данные или операция | backend/Controllers/RolesController.cs:29 |
 | GET | api/roles/{id:int} | RolesController.GetRole | чувствительные данные или операция | backend/Controllers/RolesController.cs:78 |
@@ -1121,18 +1123,18 @@
 | POST | api/s3-storages/{id}/move | S3StorageController | MoveObject | backend/Controllers/S3StorageController.cs:230 | [Authorize] | нет | нет |
 | GET | api/s3-storages/{id}/text | S3StorageController | GetTextFile | backend/Controllers/S3StorageController.cs:247 | [Authorize] | нет | нет |
 | PUT | api/s3-storages/{id}/text | S3StorageController | SaveTextFile | backend/Controllers/S3StorageController.cs:259 | [Authorize] | нет | нет |
-| GET | api/requests/statuses | SalesRequestsController | Statuses | backend/Controllers/SalesRequestsController.cs:120 | [Authorize] | нет | docs/pay-33-36-implementation-log-2026-10-09.md |
-| POST | api/requests/statuses | SalesRequestsController | CreateStatus | backend/Controllers/SalesRequestsController.cs:135 | [Authorize] | нет | docs/pay-33-36-implementation-log-2026-10-09.md |
-| PUT | api/requests/statuses/{id:int} | SalesRequestsController | UpdateStatus | backend/Controllers/SalesRequestsController.cs:139 | [Authorize] | нет | docs/pay-33-36-implementation-log-2026-10-09.md |
-| PUT | api/requests/statuses/{id:int}/rules | SalesRequestsController | ReplaceRules | backend/Controllers/SalesRequestsController.cs:143 | [Authorize] | нет | docs/pay-33-36-implementation-log-2026-10-09.md |
-| GET | api/requests | SalesRequestsController | List | backend/Controllers/SalesRequestsController.cs:171 | [Authorize] | да | docs/pay-33-36-implementation-log-2026-10-09.md |
-| GET | api/requests/{id:int} | SalesRequestsController | Get | backend/Controllers/SalesRequestsController.cs:200 | [Authorize] | да | нет |
-| GET | api/requests/clients/search | SalesRequestsController | SearchClients | backend/Controllers/SalesRequestsController.cs:221 | [Authorize] | нет | нет |
-| POST | api/requests | SalesRequestsController | Create | backend/Controllers/SalesRequestsController.cs:246 | [Authorize] | да | docs/pay-33-36-implementation-log-2026-10-09.md |
-| PUT | api/requests/{id:int} | SalesRequestsController | Update | backend/Controllers/SalesRequestsController.cs:260 | [Authorize] | нет | нет |
-| POST | api/requests/{id:int}/transition | SalesRequestsController | Transition | backend/Controllers/SalesRequestsController.cs:272 | [Authorize] | нет | нет |
-| POST | api/requests/{id:int}/tasks | SalesRequestsController | CreateTask | backend/Controllers/SalesRequestsController.cs:284 | [Authorize] | нет | нет |
-| GET | api/requests/report | SalesRequestsController | Report | backend/Controllers/SalesRequestsController.cs:298 | [Authorize] | нет | нет |
+| GET | api/requests/statuses | SalesRequestsController | Statuses | backend/Controllers/SalesRequestsController.cs:122 | [Authorize] | нет | docs/pay-33-36-implementation-log-2026-10-09.md |
+| POST | api/requests/statuses | SalesRequestsController | CreateStatus | backend/Controllers/SalesRequestsController.cs:137 | [Authorize] | нет | docs/pay-33-36-implementation-log-2026-10-09.md |
+| PUT | api/requests/statuses/{id:int} | SalesRequestsController | UpdateStatus | backend/Controllers/SalesRequestsController.cs:141 | [Authorize] | нет | docs/pay-33-36-implementation-log-2026-10-09.md |
+| PUT | api/requests/statuses/{id:int}/rules | SalesRequestsController | ReplaceRules | backend/Controllers/SalesRequestsController.cs:145 | [Authorize] | нет | docs/pay-33-36-implementation-log-2026-10-09.md |
+| GET | api/requests | SalesRequestsController | List | backend/Controllers/SalesRequestsController.cs:173 | [Authorize] | да | docs/pay-33-36-implementation-log-2026-10-09.md |
+| GET | api/requests/{id:int} | SalesRequestsController | Get | backend/Controllers/SalesRequestsController.cs:202 | [Authorize] | да | нет |
+| GET | api/requests/clients/search | SalesRequestsController | SearchClients | backend/Controllers/SalesRequestsController.cs:223 | [Authorize] | нет | нет |
+| POST | api/requests | SalesRequestsController | Create | backend/Controllers/SalesRequestsController.cs:248 | [Authorize] | да | docs/pay-33-36-implementation-log-2026-10-09.md |
+| PUT | api/requests/{id:int} | SalesRequestsController | Update | backend/Controllers/SalesRequestsController.cs:262 | [Authorize] | нет | нет |
+| POST | api/requests/{id:int}/transition | SalesRequestsController | Transition | backend/Controllers/SalesRequestsController.cs:274 | [Authorize] | нет | нет |
+| POST | api/requests/{id:int}/tasks | SalesRequestsController | CreateTask | backend/Controllers/SalesRequestsController.cs:286 | [Authorize] | нет | нет |
+| GET | api/requests/report | SalesRequestsController | Report | backend/Controllers/SalesRequestsController.cs:300 | [Authorize] | нет | нет |
 | GET | api/[controller]/month | StatsController | Month | backend/Controllers/StatsController.cs:21 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Payments)] | да | нет |
 | GET | api/sticky-notes/boards | StickyNotesController | GetBoards | backend/Controllers/StickyNotesController.cs:62 | [Authorize] | да | нет |
 | POST | api/sticky-notes/boards | StickyNotesController | CreateBoard | backend/Controllers/StickyNotesController.cs:99 | [Authorize] | нет | нет |

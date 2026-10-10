@@ -346,4 +346,49 @@ public class SalesRequestTests
         Assert.Equal(409, disablePaid.Status);
         Assert.Equal(409, disableNew.Status);
     }
+
+    [Fact]
+    public async Task AdvanceCompleted_MovesRequestOnlyWhenAllStageTasksAreDone()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var request = (await f.Service.CreateAsync(NewRequest(f.Client), f.Manager.Id, default)).Value!;
+        await f.Service.TransitionAsync(request.Id, new SalesRequestTransitionInput(StatusId(f.Db, "documents-prep"), request.Version, null, false, null), f.Manager.Id, default);
+        var stage = f.Db.TaskJournalItems.Single(t => t.SalesRequestId == request.Id && t.Title.StartsWith("Подготовить счёт"));
+
+        Assert.Equal(0, await f.Service.AdvanceCompletedAsync(default));
+
+        stage.Status = "cancelled";
+        await f.Db.SaveChangesAsync();
+        Assert.Equal(0, await f.Service.AdvanceCompletedAsync(default));
+
+        stage.Status = "done";
+        await f.Db.SaveChangesAsync();
+        Assert.Equal(1, await f.Service.AdvanceCompletedAsync(default));
+
+        var moved = await f.Db.SalesRequests.AsNoTracking().SingleAsync(r => r.Id == request.Id);
+        Assert.Equal(StatusId(f.Db, "documents-sent"), moved.StatusId);
+        Assert.Contains(f.Db.TaskJournalItems, t => t.SalesRequestId == request.Id && t.Title.StartsWith("Отправить документы") && t.Status == "new");
+        Assert.Equal(0, await f.Service.AdvanceCompletedAsync(default));
+    }
+
+    [Fact]
+    public async Task SaveStatus_ConfiguresAndValidatesAutoAdvance()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        await f.Service.EnsureDefaultsAsync(default);
+        var calc = StatusId(f.Db, "calculation");
+
+        var self = await f.Service.SaveStatusAsync(calc, null, null, null, null, default, calc);
+        var fromFinal = await f.Service.SaveStatusAsync(StatusId(f.Db, "paid"), null, null, null, null, default, calc);
+        var ok = await f.Service.SaveStatusAsync(calc, null, null, null, null, default, StatusId(f.Db, "approval"));
+        var configured = ok.Value!.AutoAdvanceToStatusId;
+        var cleared = await f.Service.SaveStatusAsync(calc, null, null, null, null, default, clearAutoAdvance: true);
+
+        Assert.False(self.Ok);
+        Assert.False(fromFinal.Ok);
+        Assert.Equal(StatusId(f.Db, "approval"), configured);
+        Assert.Null(cleared.Value!.AutoAdvanceToStatusId);
+    }
 }

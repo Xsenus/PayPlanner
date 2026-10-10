@@ -123,6 +123,9 @@ public class SalesRequestStatus
     public string FinalKind { get; set; } = SalesRequestFinalKinds.None;
 
     public bool IsActive { get; set; } = true;
+
+    /// <summary>Статус, в который заявка переходит сама, когда выполнены все задачи этого статуса (без ручного перехода).</summary>
+    public int? AutoAdvanceToStatusId { get; set; }
 }
 
 /// <summary>Правило «при входе в статус создать задачу».</summary>

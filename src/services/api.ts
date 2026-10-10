@@ -6169,7 +6169,7 @@ export class ApiService {
     return this.request<SalesRequestDetail['tasks'][number]>(`/requests/${id}/tasks`, { method: 'POST', body: JSON.stringify(payload) });
   }
 
-  async saveSalesRequestStatus(id: number | null, payload: { title?: string; finalKind?: string; sortOrder?: number; isActive?: boolean }) {
+  async saveSalesRequestStatus(id: number | null, payload: { title?: string; finalKind?: string; sortOrder?: number; isActive?: boolean; autoAdvanceToStatusId?: number; clearAutoAdvance?: boolean }) {
     return this.request<SalesRequestStatusItem>(id ? `/requests/statuses/${id}` : '/requests/statuses', {
       method: id ? 'PUT' : 'POST',
       body: JSON.stringify(payload),

@@ -9502,6 +9502,9 @@ namespace PayPlanner.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<int?>("AutoAdvanceToStatusId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("FinalKind")
                         .IsRequired()
                         .ValueGeneratedOnAdd()

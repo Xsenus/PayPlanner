@@ -9713,6 +9713,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("AutoAdvanceToStatusId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("FinalKind")
                         .IsRequired()
                         .ValueGeneratedOnAdd()

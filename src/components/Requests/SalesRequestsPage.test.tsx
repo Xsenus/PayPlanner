@@ -173,3 +173,23 @@ describe('SalesRequestFunnelSettings', () => {
     );
   });
 });
+
+describe('SalesRequestFunnelSettings auto advance', () => {
+  it('saves the auto advance target of a working status', async () => {
+    vi.clearAllMocks();
+    vi.mocked(apiService.getSalesRequestStatuses).mockResolvedValue([
+      { id: 1, key: 'prep', title: 'Подготовка', sortOrder: 1, finalKind: 'None', rules: [] },
+      { id: 2, key: 'sent', title: 'Отправлено', sortOrder: 2, finalKind: 'None', rules: [] },
+    ]);
+    vi.mocked(apiService.getTaskJournalAssignees).mockResolvedValue([]);
+    vi.mocked(apiService.getSalesRequests).mockResolvedValue({ total: 0, page: 1, pageSize: 50, items: [] });
+    vi.mocked(apiService.saveSalesRequestStatus).mockResolvedValue(statuses[0]);
+    render(<SalesRequestsPage allowCreate allowEdit allowAnalytics={false} allowConfigure />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Настройка воронки' }));
+    await userEvent.click(await screen.findByRole('button', { name: /Подготовка/ }));
+    await userEvent.selectOptions(screen.getByLabelText('Автопереход'), '2');
+
+    await waitFor(() => expect(apiService.saveSalesRequestStatus).toHaveBeenCalledWith(1, { autoAdvanceToStatusId: 2 }));
+  });
+});

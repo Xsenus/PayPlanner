@@ -45,8 +45,9 @@ public interface ISalesRequestService
     Task<SalesRequestResult<SalesRequest>> UpdateAsync(int id, SalesRequestUpdateInput input, int userId, CancellationToken ct);
     Task<SalesRequestResult<SalesRequest>> TransitionAsync(int id, SalesRequestTransitionInput input, int userId, CancellationToken ct);
     Task<SalesRequestResult<TaskJournalItem>> CreateManualTaskAsync(int id, int assigneeUserId, string? title, DateTime? dueAt, int userId, CancellationToken ct);
-    Task<SalesRequestResult<SalesRequestStatus>> SaveStatusAsync(int? id, string? title, string? finalKind, int? sortOrder, bool? isActive, CancellationToken ct);
+    Task<SalesRequestResult<SalesRequestStatus>> SaveStatusAsync(int? id, string? title, string? finalKind, int? sortOrder, bool? isActive, CancellationToken ct, int? autoAdvanceToStatusId = null, bool clearAutoAdvance = false);
     Task<SalesRequestResult<IReadOnlyList<SalesRequestStatusTaskRule>>> ReplaceRulesAsync(int statusId, IReadOnlyList<SalesRequestRuleInput> rules, CancellationToken ct);
+    Task<int> AdvanceCompletedAsync(CancellationToken ct);
     Task<SalesRequestReport> BuildReportAsync(DateTime from, DateTime to, IReadOnlyCollection<int>? visibleResponsibleUserIds, CancellationToken ct);
 }
 
@@ -98,6 +99,12 @@ public sealed class SalesRequestService : ISalesRequestService
             }
         }
 
+        await _db.SaveChangesAsync(ct);
+
+        // Цепочка из ТЗ: когда выполнены задачи подготовки документов, заявка сама уходит дальше.
+        var byKey = await _db.SalesRequestStatuses.ToDictionaryAsync(item => item.Key, ct);
+        byKey["documents-prep"].AutoAdvanceToStatusId = byKey["documents-sent"].Id;
+        byKey["documents-sent"].AutoAdvanceToStatusId = byKey["awaiting-payment"].Id;
         await _db.SaveChangesAsync(ct);
     }
 
@@ -405,7 +412,7 @@ public sealed class SalesRequestService : ISalesRequestService
         return new(task);
     }
 
-    public async Task<SalesRequestResult<SalesRequestStatus>> SaveStatusAsync(int? id, string? title, string? finalKind, int? sortOrder, bool? isActive, CancellationToken ct)
+    public async Task<SalesRequestResult<SalesRequestStatus>> SaveStatusAsync(int? id, string? title, string? finalKind, int? sortOrder, bool? isActive, CancellationToken ct, int? autoAdvanceToStatusId = null, bool clearAutoAdvance = false)
     {
         await EnsureDefaultsAsync(ct);
         SalesRequestStatus status;
@@ -455,6 +462,21 @@ public sealed class SalesRequestService : ISalesRequestService
         if (sortOrder.HasValue)
         {
             status.SortOrder = sortOrder.Value;
+        }
+
+        if (clearAutoAdvance)
+        {
+            status.AutoAdvanceToStatusId = null;
+        }
+        else if (autoAdvanceToStatusId.HasValue)
+        {
+            var target = await _db.SalesRequestStatuses.AsNoTracking().FirstOrDefaultAsync(item => item.Id == autoAdvanceToStatusId.Value && item.IsActive, ct);
+            if (target is null || target.Id == status.Id || status.FinalKind != SalesRequestFinalKinds.None)
+            {
+                return SalesRequestResult<SalesRequestStatus>.Fail("Автопереход возможен только из рабочего статуса в другой действующий статус.");
+            }
+
+            status.AutoAdvanceToStatusId = target.Id;
         }
 
         if (isActive.HasValue && isActive.Value != status.IsActive)
@@ -527,6 +549,50 @@ public sealed class SalesRequestService : ISalesRequestService
         _db.SalesRequestStatusTaskRules.AddRange(prepared);
         await _db.SaveChangesAsync(ct);
         return new(prepared);
+    }
+
+    public async Task<int> AdvanceCompletedAsync(CancellationToken ct)
+    {
+        var advancing = await _db.SalesRequestStatuses.AsNoTracking()
+            .Where(item => item.IsActive && item.AutoAdvanceToStatusId != null)
+            .ToDictionaryAsync(item => item.Id, item => item.AutoAdvanceToStatusId!.Value, ct);
+        if (advancing.Count == 0)
+        {
+            return 0;
+        }
+
+        var statusIds = advancing.Keys.ToList();
+        var candidates = await _db.SalesRequests.AsNoTracking()
+            .Where(item => item.FinalKind == SalesRequestFinalKinds.None && statusIds.Contains(item.StatusId))
+            .Select(item => new { item.Id, item.StatusId, item.Version })
+            .Take(200)
+            .ToListAsync(ct);
+        var moved = 0;
+        foreach (var candidate in candidates)
+        {
+            var tag = StatusTag(candidate.StatusId);
+            var tasks = await _db.TaskJournalItems.AsNoTracking()
+                .Where(task => task.SalesRequestId == candidate.Id && task.TagsJson.Contains(tag))
+                .Select(task => task.Status)
+                .ToListAsync(ct);
+            // Идёт дальше только когда задачи этапа были и ни одна не осталась открытой; если все отменены, решает человек.
+            if (tasks.Count == 0 || tasks.Any(status => !ClosedTaskStatuses.Contains(status)) || !tasks.Contains("done"))
+            {
+                continue;
+            }
+
+            var result = await TransitionAsync(candidate.Id, new SalesRequestTransitionInput(advancing[candidate.StatusId], candidate.Version, null, false, "Автоматически: задачи этапа выполнены"), 0, ct);
+            if (result.Ok)
+            {
+                moved++;
+            }
+            else
+            {
+                _db.ChangeTracker.Clear();
+            }
+        }
+
+        return moved;
     }
 
     public async Task<SalesRequestReport> BuildReportAsync(DateTime from, DateTime to, IReadOnlyCollection<int>? visibleResponsibleUserIds, CancellationToken ct)

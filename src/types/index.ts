@@ -271,6 +271,7 @@ export interface SalesRequestStatusItem {
   title: string;
   sortOrder: number;
   finalKind: SalesRequestFinalKind;
+  autoAdvanceToStatusId?: number | null;
   rules: Array<{ id: number; title: string; assigneeUserId?: number | null; dueInMinutes: number }>;
 }
 

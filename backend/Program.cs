@@ -379,6 +379,7 @@ if (builder.Configuration.GetValue("BackgroundServices:Enabled", true))
     builder.Services.AddHostedService(sp => sp.GetRequiredService<CourtSyncMetricsRollupService>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<UserActivityRetentionService>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<YandexDiskCrmSyncSchedulerService>());
+    builder.Services.AddHostedService<SalesRequestAutomationService>();
 }
 
 builder.Services.AddCors(options =>
