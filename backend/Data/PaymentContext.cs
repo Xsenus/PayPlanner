@@ -743,7 +743,8 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.LegalEntityId, e.OperationDate, e.Status, e.Type }).HasDatabaseName("IX_TaxRegisterEntries_Company_Date_Status_Type");
             // Одна операция выписки — одна запись регистра.
             entity.HasIndex(e => e.BankStatementOperationId).IsUnique().HasDatabaseName("IX_TaxRegisterEntries_BankOperation");
-            entity.HasIndex(e => e.CorrectsEntryId).HasDatabaseName("IX_TaxRegisterEntries_CorrectsEntryId");
+            // Одну запись исправляют не более одной корректировкой, даже при гонке двух запросов.
+            entity.HasIndex(e => e.CorrectsEntryId).IsUnique().HasDatabaseName("IX_TaxRegisterEntries_CorrectsEntryId");
         });
 
         modelBuilder.Entity<TaxRegisterEvent>(entity =>

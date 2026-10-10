@@ -7,8 +7,8 @@
 
 - Разделов frontend: 54.
 - Backend-контроллеров: 88.
-- HTTP endpoints: 913; с прямой тестовой связью: 623.
-- HTTP endpoints с точной ссылкой из документации: 214; критичных без такой ссылки: 534.
+- HTTP endpoints: 914; с прямой тестовой связью: 623.
+- HTTP endpoints с точной ссылкой из документации: 215; критичных без такой ссылки: 534.
 - Критичных endpoints без прямой тестовой связи: 241.
 - Реальных HTML-форм: 19; с найденной тестовой связью: 17.
 - Фоновых сервисов: 32; с найденной тестовой связью: 28.
@@ -80,7 +80,7 @@
 | InvoiceModal | src/components/Accounts/InvoiceModal.tsx | 4402 | да | docs/date-time-inventory.md, docs/final-acceptance-2026-06-10.md, docs/financial-invoice-cancellation-current-state-2026-07-08.md, docs/full-project-audit-2026-06-10.md, docs/pay-33-36-implementation-log-2026-10-09.md, docs/tz-crm-release-stability-roadmap-2026-07-08.md |
 | ActModal | src/components/Acts/ActModal.tsx | 1509 | да | docs/date-time-inventory.md, docs/full-project-audit-2026-06-10.md, docs/pay-33-36-implementation-log-2026-10-09.md |
 | Login | src/components/Auth/Login.tsx | 73 | да | docs/external-authentication-security-and-performance.md, docs/field-encryption-candidates.generated.md, docs/field-encryption-data-inventory-2026-07-30.md, docs/full-project-audit-2026-06-10.md |
-| Register | src/components/Auth/Register.tsx | 94 | да | docs/date-time-inventory.md, docs/kudir-yougile-roadmap-2026-10-09.md, docs/pay-33-36-implementation-log-2026-10-09.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-resilience-runbook.md, docs/storage-s3-backup-audit-2026-09-22.md |
+| Register | src/components/Auth/Register.tsx | 94 | да | docs/date-time-inventory.md, docs/field-encryption-candidates.generated.md, docs/kudir-yougile-roadmap-2026-10-09.md, docs/pay-33-36-implementation-log-2026-10-09.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-resilience-runbook.md, docs/storage-s3-backup-audit-2026-09-22.md |
 | PaymentModal | src/components/Calendar/PaymentModal.tsx | 2931 | да | docs/date-time-inventory.md, docs/full-project-audit-2026-06-10.md, docs/technical-stabilization-log.md |
 | ClientDetail | src/components/Clients/ClientDetail.tsx | 6390 | да | docs/full-project-audit-2026-06-10.md, docs/unused-frontend-candidates-2026-06-10.md |
 | ClientModal | src/components/Clients/ClientModal.tsx | 240 | да | docs/claude-yougile-ui-development-spec-2026-10-10.md |
@@ -219,7 +219,7 @@
 | StorageAdminController | backend/Controllers/StorageAdminController.cs | 13 | [Authorize(Policy = "Admin")] | да |
 | SystemJobsController | backend/Controllers/SystemJobsController.cs | 2 | [Authorize(Policy = "Admin")] | да |
 | TasksController | backend/Controllers/TasksController.cs | 47 | [Authorize] | да |
-| TaxRegisterController | backend/Controllers/TaxRegisterController.cs | 10 | [Authorize(Policy = "Admin")] | нет |
+| TaxRegisterController | backend/Controllers/TaxRegisterController.cs | 11 | [Authorize(Policy = "Admin")] | нет |
 | UserActivityController | backend/Controllers/UserActivityController.cs | 10 | [Authorize] | да |
 | UsersController | backend/Controllers/UsersController.cs | 11 | [Authorize(Policy = "Admin")] | да |
 | UserSettingsController | backend/Controllers/UserSettingsController.cs | 4 | [Authorize] | да |
@@ -487,8 +487,8 @@
 | POST | api/storage/legacy-replicas | LegacyStorageMigrationController.Run | изменение данных | backend/Controllers/LegacyStorageMigrationController.cs:12 |
 | DELETE | api/storage/objects/{id:guid} | StorageAdminController.DeleteObject | изменение данных | backend/Controllers/StorageAdminController.cs:75 |
 | POST | api/storage/reconcile | StorageAdminController.Reconcile | изменение данных | backend/Controllers/StorageAdminController.cs:175 |
-| GET | api/tax-register/book/export.csv | TaxRegisterController.ExportCsv | чувствительные данные или операция | backend/Controllers/TaxRegisterController.cs:165 |
-| POST | api/tax-register/close-year | TaxRegisterController.CloseYear | изменение данных | backend/Controllers/TaxRegisterController.cs:177 |
+| GET | api/tax-register/book/export.csv | TaxRegisterController.ExportCsv | чувствительные данные или операция | backend/Controllers/TaxRegisterController.cs:171 |
+| POST | api/tax-register/close-year | TaxRegisterController.CloseYear | изменение данных | backend/Controllers/TaxRegisterController.cs:183 |
 | POST | api/tax-register/entries | TaxRegisterController.Create | изменение данных | backend/Controllers/TaxRegisterController.cs:118 |
 | PUT | api/tax-register/entries/{id:int} | TaxRegisterController.Update | изменение данных | backend/Controllers/TaxRegisterController.cs:122 |
 | POST | api/tax-register/entries/{id:int}/approve | TaxRegisterController.Approve | изменение данных | backend/Controllers/TaxRegisterController.cs:126 |
@@ -1196,9 +1196,10 @@
 | POST | api/tax-register/entries/{id:int}/archive | TaxRegisterController | Archive | backend/Controllers/TaxRegisterController.cs:130 | [Authorize(Policy = "Admin")] | нет | нет |
 | POST | api/tax-register/entries/{id:int}/correct | TaxRegisterController | Correct | backend/Controllers/TaxRegisterController.cs:134 | [Authorize(Policy = "Admin")] | нет | нет |
 | GET | api/tax-register/entries/{id:int}/events | TaxRegisterController | Events | backend/Controllers/TaxRegisterController.cs:138 | [Authorize(Policy = "Admin")] | нет | нет |
-| GET | api/tax-register/book | TaxRegisterController | Book | backend/Controllers/TaxRegisterController.cs:153 | [Authorize(Policy = "Admin")] | нет | нет |
-| GET | api/tax-register/book/export.csv | TaxRegisterController | ExportCsv | backend/Controllers/TaxRegisterController.cs:165 | [Authorize(Policy = "Admin")] | нет | нет |
-| POST | api/tax-register/close-year | TaxRegisterController | CloseYear | backend/Controllers/TaxRegisterController.cs:177 | [Authorize(Policy = "Admin")] | нет | нет |
+| GET | api/tax-register/journal | TaxRegisterController | Journal | backend/Controllers/TaxRegisterController.cs:153 | [Authorize(Policy = "Admin")] | нет | docs/kudir-yougile-roadmap-2026-10-09.md, docs/pay-33-36-implementation-log-2026-10-09.md |
+| GET | api/tax-register/book | TaxRegisterController | Book | backend/Controllers/TaxRegisterController.cs:159 | [Authorize(Policy = "Admin")] | нет | нет |
+| GET | api/tax-register/book/export.csv | TaxRegisterController | ExportCsv | backend/Controllers/TaxRegisterController.cs:171 | [Authorize(Policy = "Admin")] | нет | нет |
+| POST | api/tax-register/close-year | TaxRegisterController | CloseYear | backend/Controllers/TaxRegisterController.cs:183 | [Authorize(Policy = "Admin")] | нет | нет |
 | GET | api/user-activity | UserActivityController | GetAsync | backend/Controllers/UserActivityController.cs:62 | [Authorize]; [Authorize(Policy = "Admin")] | да | docs/development-pause-plan-2026-09-30.md, docs/full-project-audit-2026-06-10.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md, docs/storage-resilience-roadmap-2026-09-22.md |
 | GET | api/user-activity/online | UserActivityController | GetOnlineAsync | backend/Controllers/UserActivityController.cs:168 | [Authorize]; [Authorize(Policy = "Admin")] | да | нет |
 | GET | api/user-activity/filters | UserActivityController | GetFiltersAsync | backend/Controllers/UserActivityController.cs:302 | [Authorize]; [Authorize(Policy = "Admin")] | нет | нет |

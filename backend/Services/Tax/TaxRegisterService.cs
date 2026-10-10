@@ -26,6 +26,12 @@ public sealed record TaxRegisterResult<T>(T? Value, string? Error = null, int St
     public static TaxRegisterResult<T> Fail(string error, int status = 400) => new(default, error, status);
 }
 
+public sealed record TaxRegisterJournalItem(
+    int EventId, int EntryId, string Action, string? FromStatus, string? ToStatus, int UserId, string? Comment,
+    DateTime CreatedAt, string Direction, decimal SignedAmount, string? DocumentRef);
+
+public sealed record TaxRegisterJournalPage(int Total, int Page, int PageSize, IReadOnlyList<TaxRegisterJournalItem> Items);
+
 public sealed record TaxRegisterBookTotals(decimal Income, decimal Expense, decimal TaxBase, int Entries);
 
 public sealed record TaxRegisterBook(
@@ -44,6 +50,7 @@ public interface ITaxRegisterService
     Task<TaxRegisterResult<TaxRegisterEntry>> CorrectAsync(int id, string reason, int userId, CancellationToken ct);
     Task<TaxRegisterResult<TaxRegisterYearClose>> CloseYearAsync(int legalEntityId, int year, int userId, CancellationToken ct);
     Task<TaxRegisterBook> BuildBookAsync(int legalEntityId, int year, CancellationToken ct);
+    Task<TaxRegisterJournalPage> GetJournalAsync(int legalEntityId, DateTime? from, DateTime? to, string? action, int page, int pageSize, CancellationToken ct);
 }
 
 /// <summary>
@@ -207,7 +214,16 @@ public sealed class TaxRegisterService : ITaxRegisterService
             ApprovedAt = now,
         };
         _db.TaxRegisterEntries.Add(correction);
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Уникальный индекс по CorrectsEntryId: параллельный запрос уже создал корректировку этой записи.
+            _db.Entry(correction).State = EntityState.Detached;
+            return TaxRegisterResult<TaxRegisterEntry>.Fail("Запись уже исправлена корректировкой.", 409);
+        }
 
         original.CorrectedByEntryId = correction.Id;
         AddEvent(original.Id, TaxRegisterActions.Corrected, original.Status, original.Status, userId, Trim(reason, 1000));
@@ -249,6 +265,35 @@ public sealed class TaxRegisterService : ITaxRegisterService
         _db.TaxRegisterYearCloses.Add(close);
         await _db.SaveChangesAsync(ct);
         return new(close);
+    }
+
+    public async Task<TaxRegisterJournalPage> GetJournalAsync(int legalEntityId, DateTime? from, DateTime? to, string? action, int page, int pageSize, CancellationToken ct)
+    {
+        var query = from entry in _db.TaxRegisterEntries.AsNoTracking()
+                    where entry.LegalEntityId == legalEntityId
+                    join history in _db.TaxRegisterEvents.AsNoTracking() on entry.Id equals history.TaxRegisterEntryId
+                    select new { history, entry.Amount, entry.Sign, entry.Direction, entry.DocumentRef };
+        if (from.HasValue)
+        {
+            query = query.Where(item => item.history.CreatedAt >= from.Value);
+        }
+
+        if (to.HasValue)
+        {
+            query = query.Where(item => item.history.CreatedAt < to.Value.Date.AddDays(1));
+        }
+
+        if (!string.IsNullOrWhiteSpace(action))
+        {
+            query = query.Where(item => item.history.Action == action);
+        }
+
+        var total = await query.CountAsync(ct);
+        var rows = await query.OrderByDescending(item => item.history.CreatedAt).ThenByDescending(item => item.history.Id)
+            .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
+        return new TaxRegisterJournalPage(total, page, pageSize, rows.Select(item => new TaxRegisterJournalItem(
+            item.history.Id, item.history.TaxRegisterEntryId, item.history.Action, item.history.FromStatus, item.history.ToStatus,
+            item.history.UserId, item.history.Comment, item.history.CreatedAt, item.Direction, item.Sign * item.Amount, item.DocumentRef)).ToList());
     }
 
     public async Task<TaxRegisterBook> BuildBookAsync(int legalEntityId, int year, CancellationToken ct)

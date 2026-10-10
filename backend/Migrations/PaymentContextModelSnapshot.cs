@@ -11460,6 +11460,7 @@ namespace PayPlanner.Api.Migrations
                         .HasDatabaseName("IX_TaxRegisterEntries_BankOperation");
 
                     b.HasIndex("CorrectsEntryId")
+                        .IsUnique()
                         .HasDatabaseName("IX_TaxRegisterEntries_CorrectsEntryId");
 
                     b.HasIndex("LegalEntityId", "OperationDate", "Status", "Type")

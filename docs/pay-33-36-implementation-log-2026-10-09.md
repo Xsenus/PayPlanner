@@ -224,3 +224,11 @@
 | `backend/AppReleases/releases.json` | Запись 1.14.62. |
 
 Не реализовано: PDF/Excel/XML, нумерация по году, журналы по делу, связь с делом и статьёй, исторический dry-run, права бухгалтера, закрытие года с правами руководителя. Тесты: `TaxRegisterServiceTests` (7), фронтенд `CompanyTaxRegisterSection.test.tsx` (5).
+
+### Шаг 12а. Защита корректировок и журнал регистра (PAY-35)
+
+| Файл | Что |
+| --- | --- |
+| миграции `20261010031400_TaxRegisterUniqueCorrection*`, `.../PostgreSql/20261010031710_TaxRegisterUniqueCorrectionPostgres*` | Индекс `IX_TaxRegisterEntries_CorrectsEntryId` стал уникальным: две параллельные корректировки одной записи не пройдут на уровне БД; сервис превращает отказ в 409. |
+| `TaxRegisterService.GetJournalAsync`, `GET api/tax-register/journal` | Журнал событий компании (создание, утверждение, корректировка, архив) с фильтрами по периоду и действию, пагинацией (≤ 200) и подписанной суммой. |
+| Тесты | `TaxRegisterServiceTests` (+2: журнал и отказ БД на вторую корректировку). Миграции проверены на PostgreSQL. |

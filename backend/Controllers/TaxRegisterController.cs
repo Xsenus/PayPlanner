@@ -150,6 +150,12 @@ public class TaxRegisterController : ControllerBase, IAsyncActionFilter
         return Ok(events.Select(item => new TaxRegisterEventDto(item.Id, item.Action, item.FromStatus, item.ToStatus, item.UserId, item.Comment, item.CreatedAt)).ToList());
     }
 
+    [HttpGet("journal")]
+    public async Task<ActionResult<TaxRegisterJournalPage>> Journal(
+        [FromQuery] int companyId, [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] string? action,
+        [FromQuery] int page = 1, [FromQuery] int pageSize = 50, CancellationToken ct = default)
+        => Ok(await _service.GetJournalAsync(companyId, from, to, action, Math.Max(1, page), Math.Clamp(pageSize, 1, MaxPageSize), ct));
+
     [HttpGet("book")]
     public async Task<ActionResult<TaxRegisterBookDto>> Book([FromQuery] int companyId, [FromQuery] int year, CancellationToken ct)
     {

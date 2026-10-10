@@ -155,4 +155,40 @@ public class TaxRegisterServiceTests
         Assert.Contains("\"'=HYPERLINK(\"\"x\"\")\"", csv);
         Assert.Contains("\"a;b\"", csv);
     }
+
+    [Fact]
+    public async Task Journal_ListsEventsOfCompanyWithFiltersAndPaging()
+    {
+        var (db, service, company) = await CreateAsync();
+        await using var _ = db;
+        var first = (await service.CreateAsync(Input(company), 1, default)).Value!;
+        await service.ApproveAsync(first.Id, 1, default);
+        await service.CreateAsync(Input(company, "Expense", 50m), 1, default);
+
+        var all = await service.GetJournalAsync(company, null, null, null, 1, 50, default);
+        var approvals = await service.GetJournalAsync(company, null, null, "Approved", 1, 50, default);
+        var paged = await service.GetJournalAsync(company, null, null, null, 2, 2, default);
+        var foreign = await service.GetJournalAsync(company + 1, null, null, null, 1, 50, default);
+
+        Assert.Equal(3, all.Total);
+        Assert.Single(approvals.Items);
+        Assert.Equal(1000m, approvals.Items[0].SignedAmount);
+        Assert.Single(paged.Items);
+        Assert.Equal(3, paged.Total);
+        Assert.Equal(0, foreign.Total);
+    }
+
+    [Fact]
+    public async Task DatabaseRefusesSecondCorrectionOfSameEntry()
+    {
+        var (db, service, company) = await CreateAsync();
+        await using var _ = db;
+        var entry = (await service.CreateAsync(Input(company), 1, default)).Value!;
+        await service.ApproveAsync(entry.Id, 1, default);
+        await service.CorrectAsync(entry.Id, "первая", 1, default);
+
+        db.TaxRegisterEntries.Add(new TaxRegisterEntry { LegalEntityId = company, OperationDate = new DateTime(2025, 3, 15), Amount = 1m, Type = "Correction", Direction = "Income", Sign = -1, Status = "Approved", CorrectsEntryId = entry.Id });
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+    }
 }
