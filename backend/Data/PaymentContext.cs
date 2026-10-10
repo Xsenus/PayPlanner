@@ -726,6 +726,48 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.BankConnectionId, e.ExternalAccountId }).IsUnique().HasDatabaseName("IX_BankConnectionAccounts_Connection_External");
         });
 
+        modelBuilder.Entity<SalesRequest>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Source).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.ClientName).HasMaxLength(300);
+            entity.Property(e => e.ClientPhone).HasMaxLength(64);
+            entity.Property(e => e.Type).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.Summary).HasMaxLength(4000).IsRequired();
+            entity.Property(e => e.Amount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Comment).HasMaxLength(2000);
+            entity.Property(e => e.FinalKind).HasMaxLength(16).IsRequired().HasDefaultValue(SalesRequestFinalKinds.None);
+            entity.Property(e => e.Version).IsConcurrencyToken();
+            entity.HasIndex(e => new { e.StatusId, e.ResponsibleUserId }).HasDatabaseName("IX_SalesRequests_Status_Responsible");
+            entity.HasIndex(e => new { e.ClientId, e.CreatedAt }).HasDatabaseName("IX_SalesRequests_Client_CreatedAt");
+            entity.HasIndex(e => e.CreatedAt).HasDatabaseName("IX_SalesRequests_CreatedAt");
+        });
+
+        modelBuilder.Entity<SalesRequestStatus>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Key).HasMaxLength(40).IsRequired();
+            entity.Property(e => e.Title).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.FinalKind).HasMaxLength(16).IsRequired().HasDefaultValue(SalesRequestFinalKinds.None);
+            entity.HasIndex(e => e.Key).IsUnique().HasDatabaseName("IX_SalesRequestStatuses_Key");
+        });
+
+        modelBuilder.Entity<SalesRequestStatusTaskRule>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Title).HasMaxLength(300).IsRequired();
+            entity.HasIndex(e => e.StatusId).HasDatabaseName("IX_SalesRequestStatusTaskRules_Status");
+        });
+
+        modelBuilder.Entity<SalesRequestEvent>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Kind).HasMaxLength(24).IsRequired();
+            entity.Property(e => e.Comment).HasMaxLength(1000);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasIndex(e => new { e.SalesRequestId, e.CreatedAt }).HasDatabaseName("IX_SalesRequestEvents_Request_CreatedAt");
+        });
+
         modelBuilder.Entity<TaxRegisterEntry>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -3179,6 +3221,7 @@ public class PaymentContext : DbContext
         modelBuilder.Entity<TaskJournalItem>(entity =>
         {
             entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.SalesRequestId).HasDatabaseName("IX_TaskJournalItems_SalesRequestId");
             entity.HasOne(e => e.Client)
                 .WithMany()
                 .HasForeignKey(e => e.ClientId)
@@ -5127,6 +5170,10 @@ public class PaymentContext : DbContext
     public DbSet<BankConnectionAccount> BankConnectionAccounts { get; set; }
     public DbSet<BankStatementOperation> BankStatementOperations { get; set; }
     public DbSet<BankSyncLog> BankSyncLogs { get; set; }
+    public DbSet<SalesRequest> SalesRequests { get; set; }
+    public DbSet<SalesRequestStatus> SalesRequestStatuses { get; set; }
+    public DbSet<SalesRequestStatusTaskRule> SalesRequestStatusTaskRules { get; set; }
+    public DbSet<SalesRequestEvent> SalesRequestEvents { get; set; }
     public DbSet<TaxRegisterEntry> TaxRegisterEntries { get; set; }
     public DbSet<TaxRegisterEvent> TaxRegisterEvents { get; set; }
     public DbSet<TaxRegisterYearClose> TaxRegisterYearCloses { get; set; }

@@ -12,6 +12,9 @@ public class TaskJournalItem
     public int? LegalEntityId { get; set; }
     public LegalEntity? LegalEntity { get; set; }
 
+    /// <summary>Заявка воронки продаж, по которой создана задача (ссылка без внешнего ключа).</summary>
+    public int? SalesRequestId { get; set; }
+
     public int? ClientCaseId { get; set; }
     public ClientCase? ClientCase { get; set; }
 

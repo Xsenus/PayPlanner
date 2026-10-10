@@ -18,6 +18,19 @@ public static class DataVisibilityQueryExtensions
             && visibleUserIds.Contains(client.ResponsibleUserId.Value));
     }
 
+    public static IQueryable<SalesRequest> ApplySalesRequestVisibility(
+        this IQueryable<SalesRequest> query,
+        DataVisibilityAccess? access)
+    {
+        if (access is null) return query.Where(_ => false);
+        if (access.SeesAll) return query;
+
+        var visibleUserIds = access.VisibleUserIds.Append(access.UserId).Distinct().ToArray();
+        return query.Where(request =>
+            visibleUserIds.Contains(request.ResponsibleUserId)
+            || visibleUserIds.Contains(request.CreatedByUserId));
+    }
+
     public static IQueryable<LegalEntity> ApplyLegalEntityVisibility(
         this IQueryable<LegalEntity> query,
         DataVisibilityAccess? access)

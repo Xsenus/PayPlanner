@@ -13,6 +13,7 @@ public static class RolePermissionCatalog
     public const string LegalEntities = "legalEntities";
     public const string Clients = "clients";
     public const string Cases = "cases";
+    public const string Requests = "requests";
     public const string Accounts = "accounts";
     public const string Acts = "acts";
     public const string Payments = "payments";
@@ -35,6 +36,7 @@ public static class RolePermissionCatalog
         LegalEntities,
         Clients,
         Cases,
+        Requests,
         Accounts,
         Acts,
         Payments,
@@ -55,6 +57,7 @@ public static class RolePermissionCatalog
         LegalEntities,
         Clients,
         Cases,
+        Requests,
         Accounts,
         Acts,
         Payments,
@@ -182,6 +185,14 @@ public static class RolePermissionCatalog
                 allowRoleManagement,
                 false,
                 GetDefaultViewScope(YandexDisk, allowRoleManagement)),
+            [Requests] = new(
+                allowRoleManagement,
+                allowRoleManagement,
+                allowRoleManagement,
+                allowRoleManagement,
+                allowRoleManagement,
+                allowRoleManagement,
+                GetDefaultViewScope(Requests, allowRoleManagement)),
             [S3Storage] = new(
                 allowRoleManagement,
                 allowRoleManagement,
@@ -206,6 +217,7 @@ public static class RolePermissionCatalog
             LegalEntities = ToSection(defaults[LegalEntities]),
             Clients = ToSection(defaults[Clients]),
             Cases = ToSection(defaults[Cases]),
+            Requests = ToSection(defaults[Requests]),
             Accounts = ToSection(defaults[Accounts]),
             Acts = ToSection(defaults[Acts]),
             Payments = ToSection(defaults[Payments]),

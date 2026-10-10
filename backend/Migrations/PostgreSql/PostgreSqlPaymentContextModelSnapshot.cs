@@ -9558,6 +9558,223 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("RolePermissions");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.SalesRequest", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal?>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int?>("ClientCaseId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ClientId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ClientName")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("ClientPhone")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("ClosedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("ClosedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("FinalKind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("None");
+
+                    b.Property<bool>("LinkedCaseWasClosed")
+                        .HasColumnType("boolean");
+
+                    b.Property<int?>("PaidPaymentId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ResponsibleUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTime>("StatusEnteredAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("StatusId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Summary")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt")
+                        .HasDatabaseName("IX_SalesRequests_CreatedAt");
+
+                    b.HasIndex("ClientId", "CreatedAt")
+                        .HasDatabaseName("IX_SalesRequests_Client_CreatedAt");
+
+                    b.HasIndex("StatusId", "ResponsibleUserId")
+                        .HasDatabaseName("IX_SalesRequests_Status_Responsible");
+
+                    b.ToTable("SalesRequests");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.SalesRequestEvent", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int?>("FromStatusId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)");
+
+                    b.Property<int>("SalesRequestId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("ToStatusId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SalesRequestId", "CreatedAt")
+                        .HasDatabaseName("IX_SalesRequestEvents_Request_CreatedAt");
+
+                    b.ToTable("SalesRequestEvents");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.SalesRequestStatus", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("FinalKind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("None");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Key")
+                        .IsUnique()
+                        .HasDatabaseName("IX_SalesRequestStatuses_Key");
+
+                    b.ToTable("SalesRequestStatuses");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.SalesRequestStatusTaskRule", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("AssigneeUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("DueInMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("StatusId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StatusId")
+                        .HasDatabaseName("IX_SalesRequestStatusTaskRules_Status");
+
+                    b.ToTable("SalesRequestStatusTaskRules");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.ServiceCategoryDictionaryItem", b =>
                 {
                     b.Property<int>("Id")
@@ -11190,6 +11407,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(4000)
                         .HasColumnType("character varying(4000)");
 
+                    b.Property<int?>("SalesRequestId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -11288,6 +11508,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .IsUnique()
                         .HasDatabaseName("IX_TaskJournalItems_RecurrencePreviousTaskId")
                         .HasFilter("\"RecurrencePreviousTaskId\" IS NOT NULL");
+
+                    b.HasIndex("SalesRequestId")
+                        .HasDatabaseName("IX_TaskJournalItems_SalesRequestId");
 
                     b.HasIndex("Status")
                         .HasDatabaseName("IX_TaskJournalItems_Status");

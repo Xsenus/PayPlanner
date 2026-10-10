@@ -32,6 +32,7 @@ public class RolePermissionsDto
     public MenuSectionPermissionsDto Calculator { get; set; } = new();
     public MenuSectionPermissionsDto Clients { get; set; } = new();
     public MenuSectionPermissionsDto Cases { get; set; } = new();
+    public MenuSectionPermissionsDto Requests { get; set; } = new();
     public MenuSectionPermissionsDto LegalEntities { get; set; } = new();
     public MenuSectionPermissionsDto Accounts { get; set; } = new();
     public MenuSectionPermissionsDto Acts { get; set; } = new();

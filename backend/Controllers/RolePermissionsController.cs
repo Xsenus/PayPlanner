@@ -428,6 +428,9 @@ public class RolePermissionsController : ControllerBase
                 case RolePermissionCatalog.Integrations:
                     dto.Integrations = ToSection(permission);
                     break;
+                case RolePermissionCatalog.Requests:
+                    dto.Requests = ToSection(permission);
+                    break;
                 case RolePermissionCatalog.YandexDisk:
                     dto.YandexDisk = ToSection(permission);
                     break;
@@ -469,6 +472,7 @@ public class RolePermissionsController : ControllerBase
             Roles = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Roles]),
             Audit = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Audit]),
             Integrations = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Integrations]),
+            Requests = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Requests]),
             YandexDisk = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.YandexDisk]),
             S3Storage = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.S3Storage])
         };
@@ -757,6 +761,7 @@ public class RolePermissionsController : ControllerBase
             [RolePermissionCatalog.Roles] = ToValues(dto.Roles),
             [RolePermissionCatalog.Audit] = ToValues(dto.Audit),
             [RolePermissionCatalog.Integrations] = ToValues(dto.Integrations),
+            [RolePermissionCatalog.Requests] = ToValues(dto.Requests),
             [RolePermissionCatalog.YandexDisk] = ToValues(dto.YandexDisk),
             [RolePermissionCatalog.S3Storage] = ToValues(dto.S3Storage),
         };

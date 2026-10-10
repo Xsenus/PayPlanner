@@ -6,10 +6,10 @@
 ## Сводка
 
 - Разделов frontend: 54.
-- Backend-контроллеров: 88.
-- HTTP endpoints: 915; с прямой тестовой связью: 623.
-- HTTP endpoints с точной ссылкой из документации: 217; критичных без такой ссылки: 534.
-- Критичных endpoints без прямой тестовой связи: 242.
+- Backend-контроллеров: 89.
+- HTTP endpoints: 924; с прямой тестовой связью: 626.
+- HTTP endpoints с точной ссылкой из документации: 219; критичных без такой ссылки: 537.
+- Критичных endpoints без прямой тестовой связи: 245.
 - Реальных HTML-форм: 19; с найденной тестовой связью: 17.
 - Фоновых сервисов: 32; с найденной тестовой связью: 28.
 - Исходящих HTTP-интеграций: 12; с найденной тестовой связью: 12.
@@ -23,7 +23,7 @@
 | messenger | () => true | да | docs/case-document-new-upload-attempt-roadmap-2026-10-01.md, docs/development-release-preparation-2026-10-06.md, docs/development-roadmap-details-2026-10-06.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md, docs/managed-internal-chat-attachments-roadmap-2026-10-03.md, docs/public-access-link-security.md, docs/release-security-roadmap-2026-10-06.md, docs/storage-backup-snapshot-boundary-audit-2026-09-28.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/unpushed-changes-map-2026-10-03.md |
 | profile | () => true | да | docs/development-pause-plan-2026-09-30.md, docs/development-release-preparation-2026-10-06.md, docs/development-roadmap-2026-10-06.md, docs/development-roadmap-details-2026-10-06.md, docs/full-project-audit-2026-06-10.md, docs/release-security-roadmap-2026-10-06.md, docs/release-verification-history-2026-10-06.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-resilience-runbook.md, docs/storage-s3-backup-audit-2026-09-22.md |
 | calendar | (permissions) => permissions.calendar.canView | да | docs/date-time-inventory.md, docs/final-acceptance-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/legal-feature-flag-ci-gate-2026-06-10.md, docs/storage-resilience-roadmap-2026-09-22.md |
-| tasks | (permissions) => permissions.tasks.canView | да | docs/crm-legal-module-gap-report-2026-05-25.md, docs/development-release-preparation-2026-10-06.md, docs/final-acceptance-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/release-security-roadmap-2026-10-06.md, docs/release-verification-history-2026-10-06.md, docs/report-inventory-2026-08-09.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-resilience-runbook.md, docs/task-critical-events-matrix-2026-07-09.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-journal-query-optimization.md, docs/task-result-approval-current-state-2026-07-09.md, docs/task-template-current-state-2026-07-09.md |
+| tasks | (permissions) => permissions.tasks.canView | да | docs/crm-legal-module-gap-report-2026-05-25.md, docs/development-release-preparation-2026-10-06.md, docs/final-acceptance-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/pay-33-36-implementation-log-2026-10-09.md, docs/release-security-roadmap-2026-10-06.md, docs/release-verification-history-2026-10-06.md, docs/report-inventory-2026-08-09.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-resilience-runbook.md, docs/task-critical-events-matrix-2026-07-09.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-journal-query-optimization.md, docs/task-result-approval-current-state-2026-07-09.md, docs/task-template-current-state-2026-07-09.md |
 | tasksUntriaged | (permissions) => permissions.tasks.canView | да | нет |
 | tasksControl | (permissions) => permissions.tasks.canView | да | нет |
 | tasksApprovals | (permissions) => permissions.tasks.canView | да | docs/full-project-audit-2026-06-10.md |
@@ -91,7 +91,7 @@
 | RoleModal | src/components/Roles/RoleModal.tsx | 121 | нет | docs/full-project-audit-2026-06-10.md |
 | S3Storage | src/components/S3Storage/S3Storage.tsx | 773 | да | docs/date-time-inventory.md, docs/development-pause-plan-2026-09-30.md, docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md, docs/s3-storage-acceptance-checklist.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/unpushed-changes-map-2026-10-03.md |
 | TaskJournalSettings | src/components/Settings/TaskJournalSettings.tsx | 961 | да | docs/task-template-current-state-2026-07-09.md |
-| TaskJournal | src/components/Tasks/TaskJournal.tsx | 10451 | да | docs/calendar-completed-task-visibility-roadmap-2026-10-10.md, docs/claude-yougile-ui-development-spec-2026-10-10.md, docs/date-time-inventory.md, docs/development-pause-plan-2026-09-30.md, docs/development-release-preparation-2026-10-06.md, docs/development-roadmap-2026-10-06.md, docs/development-roadmap-details-2026-10-06.md, docs/ef-production-warning-cleanup-plan-2026-06-22.md, docs/field-encryption-candidates.generated.md, docs/field-encryption-data-inventory-2026-07-30.md, docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md, docs/release-security-roadmap-2026-10-06.md, docs/release-verification-history-2026-10-06.md, docs/storage-backup-snapshot-boundary-audit-2026-09-28.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-resilience-runbook.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/task-critical-events-matrix-2026-07-09.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-participants-current-state-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md, docs/task-template-current-state-2026-07-09.md, docs/tz-crm-acceptance-baseline-roadmap-2026-07-08.md, docs/unpushed-changes-map-2026-10-03.md, docs/yougile-clarifications-drafts-2026-10-09.md |
+| TaskJournal | src/components/Tasks/TaskJournal.tsx | 10451 | да | docs/calendar-completed-task-visibility-roadmap-2026-10-10.md, docs/claude-yougile-ui-development-spec-2026-10-10.md, docs/date-time-inventory.md, docs/development-pause-plan-2026-09-30.md, docs/development-release-preparation-2026-10-06.md, docs/development-roadmap-2026-10-06.md, docs/development-roadmap-details-2026-10-06.md, docs/ef-production-warning-cleanup-plan-2026-06-22.md, docs/field-encryption-candidates.generated.md, docs/field-encryption-data-inventory-2026-07-30.md, docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md, docs/pay-33-36-implementation-log-2026-10-09.md, docs/release-security-roadmap-2026-10-06.md, docs/release-verification-history-2026-10-06.md, docs/storage-backup-snapshot-boundary-audit-2026-09-28.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-resilience-runbook.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/task-critical-events-matrix-2026-07-09.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-participants-current-state-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md, docs/task-template-current-state-2026-07-09.md, docs/tz-crm-acceptance-baseline-roadmap-2026-07-08.md, docs/unpushed-changes-map-2026-10-03.md, docs/yougile-clarifications-drafts-2026-10-09.md |
 | FormPromptModal | src/components/ui/FormPromptModal.tsx | 65 | да | нет |
 | TextPromptModal | src/components/ui/TextPromptModal.tsx | 55 | да | docs/full-project-audit-2026-06-10.md |
 | YandexDisk | src/components/YandexDisk/YandexDisk.tsx | 722 | да | docs/development-pause-plan-2026-09-30.md, docs/field-encryption-candidates.generated.md, docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md, docs/release-verification-history-2026-10-06.md, docs/storage-backup-snapshot-boundary-audit-2026-09-28.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/unpushed-changes-map-2026-10-03.md, docs/yandex-disk-integration-delivery-report.md |
@@ -214,6 +214,7 @@
 | RolePermissionsController | backend/Controllers/RolePermissionsController.cs | 6 | [Authorize] | да |
 | RolesController | backend/Controllers/RolesController.cs | 7 | [Authorize] | нет |
 | S3StorageController | backend/Controllers/S3StorageController.cs | 13 | [Authorize] | да |
+| SalesRequestsController | backend/Controllers/SalesRequestsController.cs | 9 | [Authorize] | да |
 | StatsController | backend/Controllers/StatsController.cs | 1 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Payments)] | да |
 | StickyNotesController | backend/Controllers/StickyNotesController.cs | 14 | [Authorize] | да |
 | StorageAdminController | backend/Controllers/StorageAdminController.cs | 13 | [Authorize(Policy = "Admin")] | да |
@@ -247,18 +248,18 @@
 
 | Клиент или сервис | Регистрация | Файл:строка | Тест найден | Документация |
 | --- | --- | --- | --- | --- |
-| DadataLegalEntityEnrichmentService | AddHttpClient<ILegalEntityEnrichmentService, DadataLegalEntityEnrichmentService> | backend/Program.cs:294 | да | docs/full-project-audit-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/technical-stabilization-log.md |
+| DadataLegalEntityEnrichmentService | AddHttpClient<ILegalEntityEnrichmentService, DadataLegalEntityEnrichmentService> | backend/Program.cs:295 | да | docs/full-project-audit-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/technical-stabilization-log.md |
 | ExternalAuthService | IHttpClientFactory | backend/Services/ExternalAuthService.cs:29 | да | docs/batch-operations-audit-coverage-2026-06-10.md, docs/full-project-audit-2026-06-10.md |
 | GoogleCalendarSyncService | IHttpClientFactory | backend/Services/GoogleCalendarSyncService.cs:22 | да | docs/batch-operations-audit-coverage-2026-06-10.md, docs/calendar-completed-task-visibility-roadmap-2026-10-10.md, docs/date-time-inventory.md, docs/http-integration-error-coverage-2026-06-10.md, docs/tz-crm-acceptance-baseline-roadmap-2026-07-08.md |
-| MaxApiClient | AddHttpClient<IMaxApiClient, MaxApiClient> | backend/Program.cs:240 | да | нет |
-| SmsAeroProvider | AddHttpClient<SmsAeroProvider> | backend/Program.cs:232 | да | нет |
-| SmscRuProvider | AddHttpClient<SmscRuProvider> | backend/Program.cs:227 | да | нет |
-| SmsRuProvider | AddHttpClient<SmsRuProvider> | backend/Program.cs:222 | да | нет |
-| SudrfCourtSyncService | AddHttpClient<ISudrfCourtSyncService, SudrfCourtSyncService> | backend/Program.cs:295 | да | docs/crm-legal-module-gap-report-2026-05-25.md, docs/development-pause-plan-2026-09-30.md, docs/full-project-audit-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/tz-crm-acceptance-baseline-roadmap-2026-07-08.md, docs/tz-crm-court-sync-roadmap-2026-07-08.md |
+| MaxApiClient | AddHttpClient<IMaxApiClient, MaxApiClient> | backend/Program.cs:241 | да | нет |
+| SmsAeroProvider | AddHttpClient<SmsAeroProvider> | backend/Program.cs:233 | да | нет |
+| SmscRuProvider | AddHttpClient<SmscRuProvider> | backend/Program.cs:228 | да | нет |
+| SmsRuProvider | AddHttpClient<SmsRuProvider> | backend/Program.cs:223 | да | нет |
+| SudrfCourtSyncService | AddHttpClient<ISudrfCourtSyncService, SudrfCourtSyncService> | backend/Program.cs:296 | да | docs/crm-legal-module-gap-report-2026-05-25.md, docs/development-pause-plan-2026-09-30.md, docs/full-project-audit-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/tz-crm-acceptance-baseline-roadmap-2026-07-08.md, docs/tz-crm-court-sync-roadmap-2026-07-08.md |
 | TelegramBotUpdateService | IHttpClientFactory | backend/Services/Notifications/TelegramBotUpdateService.cs:13 | да | docs/hosted-service-lifecycle-coverage-2026-06-10.md, docs/unpushed-changes-map-2026-10-03.md |
 | TelegramNotificationService | IHttpClientFactory | backend/Services/Notifications/TelegramNotificationService.cs:8 | да | docs/http-integration-error-coverage-2026-06-10.md, docs/unpushed-changes-map-2026-10-03.md |
 | YandexCalendarSyncService | IHttpClientFactory | backend/Services/YandexCalendarSyncService.cs:21 | да | docs/batch-operations-audit-coverage-2026-06-10.md, docs/calendar-completed-task-visibility-roadmap-2026-10-10.md, docs/date-time-inventory.md, docs/http-integration-error-coverage-2026-06-10.md, docs/tz-crm-acceptance-baseline-roadmap-2026-07-08.md |
-| YandexDiskService | AddHttpClient<IYandexDiskService, YandexDiskService> | backend/Program.cs:296 | да | docs/development-pause-plan-2026-09-30.md, docs/full-project-audit-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/unpushed-changes-map-2026-10-03.md |
+| YandexDiskService | AddHttpClient<IYandexDiskService, YandexDiskService> | backend/Program.cs:297 | да | docs/development-pause-plan-2026-09-30.md, docs/full-project-audit-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/unpushed-changes-map-2026-10-03.md |
 
 ## Критичные endpoints без прямой тестовой связи
 
@@ -472,6 +473,9 @@
 | GET | api/portal/cases/{casePublicId:guid} | ClientPortalController.GetCase | публичный доступ | backend/Controllers/ClientPortalController.cs:91 |
 | GET | api/portal/home | ClientPortalController.Home | публичный доступ | backend/Controllers/ClientPortalController.cs:69 |
 | GET | api/profile | ProfileController.GetProfile | чувствительные данные или операция | backend/Controllers/ProfileController.cs:46 |
+| PUT | api/requests/{id:int} | SalesRequestsController.Update | изменение данных | backend/Controllers/SalesRequestsController.cs:204 |
+| POST | api/requests/{id:int}/tasks | SalesRequestsController.CreateTask | изменение данных | backend/Controllers/SalesRequestsController.cs:228 |
+| POST | api/requests/{id:int}/transition | SalesRequestsController.Transition | изменение данных | backend/Controllers/SalesRequestsController.cs:216 |
 | GET | api/role-permissions/calendar-users | RolePermissionsController.GetCalendarUsers | чувствительные данные или операция | backend/Controllers/RolePermissionsController.cs:152 |
 | GET | api/roles | RolesController.GetRoles | чувствительные данные или операция | backend/Controllers/RolesController.cs:29 |
 | GET | api/roles/{id:int} | RolesController.GetRole | чувствительные данные или операция | backend/Controllers/RolesController.cs:78 |
@@ -1113,6 +1117,15 @@
 | POST | api/s3-storages/{id}/move | S3StorageController | MoveObject | backend/Controllers/S3StorageController.cs:230 | [Authorize] | нет | нет |
 | GET | api/s3-storages/{id}/text | S3StorageController | GetTextFile | backend/Controllers/S3StorageController.cs:247 | [Authorize] | нет | нет |
 | PUT | api/s3-storages/{id}/text | S3StorageController | SaveTextFile | backend/Controllers/S3StorageController.cs:259 | [Authorize] | нет | нет |
+| GET | api/requests/statuses | SalesRequestsController | Statuses | backend/Controllers/SalesRequestsController.cs:100 | [Authorize] | нет | нет |
+| GET | api/requests | SalesRequestsController | List | backend/Controllers/SalesRequestsController.cs:115 | [Authorize] | да | docs/pay-33-36-implementation-log-2026-10-09.md |
+| GET | api/requests/{id:int} | SalesRequestsController | Get | backend/Controllers/SalesRequestsController.cs:144 | [Authorize] | да | нет |
+| GET | api/requests/clients/search | SalesRequestsController | SearchClients | backend/Controllers/SalesRequestsController.cs:165 | [Authorize] | нет | нет |
+| POST | api/requests | SalesRequestsController | Create | backend/Controllers/SalesRequestsController.cs:190 | [Authorize] | да | docs/pay-33-36-implementation-log-2026-10-09.md |
+| PUT | api/requests/{id:int} | SalesRequestsController | Update | backend/Controllers/SalesRequestsController.cs:204 | [Authorize] | нет | нет |
+| POST | api/requests/{id:int}/transition | SalesRequestsController | Transition | backend/Controllers/SalesRequestsController.cs:216 | [Authorize] | нет | нет |
+| POST | api/requests/{id:int}/tasks | SalesRequestsController | CreateTask | backend/Controllers/SalesRequestsController.cs:228 | [Authorize] | нет | нет |
+| GET | api/requests/report | SalesRequestsController | Report | backend/Controllers/SalesRequestsController.cs:242 | [Authorize] | нет | нет |
 | GET | api/[controller]/month | StatsController | Month | backend/Controllers/StatsController.cs:21 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Payments)] | да | нет |
 | GET | api/sticky-notes/boards | StickyNotesController | GetBoards | backend/Controllers/StickyNotesController.cs:62 | [Authorize] | да | нет |
 | POST | api/sticky-notes/boards | StickyNotesController | CreateBoard | backend/Controllers/StickyNotesController.cs:99 | [Authorize] | нет | нет |

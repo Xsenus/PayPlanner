@@ -9353,6 +9353,215 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("RolePermissions");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.SalesRequest", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<decimal?>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int?>("ClientCaseId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ClientId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ClientName")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ClientPhone")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("ClosedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ClosedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("FinalKind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("None");
+
+                    b.Property<bool>("LinkedCaseWasClosed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("PaidPaymentId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ResponsibleUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("StatusEnteredAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("StatusId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Summary")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt")
+                        .HasDatabaseName("IX_SalesRequests_CreatedAt");
+
+                    b.HasIndex("ClientId", "CreatedAt")
+                        .HasDatabaseName("IX_SalesRequests_Client_CreatedAt");
+
+                    b.HasIndex("StatusId", "ResponsibleUserId")
+                        .HasDatabaseName("IX_SalesRequests_Status_Responsible");
+
+                    b.ToTable("SalesRequests");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.SalesRequestEvent", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int?>("FromStatusId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SalesRequestId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("ToStatusId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SalesRequestId", "CreatedAt")
+                        .HasDatabaseName("IX_SalesRequestEvents_Request_CreatedAt");
+
+                    b.ToTable("SalesRequestEvents");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.SalesRequestStatus", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("FinalKind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("None");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Key")
+                        .IsUnique()
+                        .HasDatabaseName("IX_SalesRequestStatuses_Key");
+
+                    b.ToTable("SalesRequestStatuses");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.SalesRequestStatusTaskRule", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("AssigneeUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("DueInMinutes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("StatusId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StatusId")
+                        .HasDatabaseName("IX_SalesRequestStatusTaskRules_Status");
+
+                    b.ToTable("SalesRequestStatusTaskRules");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.ServiceCategoryDictionaryItem", b =>
                 {
                     b.Property<int>("Id")
@@ -10943,6 +11152,9 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(4000)
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("SalesRequestId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -11041,6 +11253,9 @@ namespace PayPlanner.Api.Migrations
                         .IsUnique()
                         .HasDatabaseName("IX_TaskJournalItems_RecurrencePreviousTaskId")
                         .HasFilter("\"RecurrencePreviousTaskId\" IS NOT NULL");
+
+                    b.HasIndex("SalesRequestId")
+                        .HasDatabaseName("IX_TaskJournalItems_SalesRequestId");
 
                     b.HasIndex("Status")
                         .HasDatabaseName("IX_TaskJournalItems_Status");

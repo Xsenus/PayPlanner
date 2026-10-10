@@ -236,3 +236,18 @@
 ### Шаг 12б. Выгрузка книги в Excel (PAY-35)
 
 `TaxRegisterXlsxWriter` собирает `.xlsx` без новых зависимостей (один лист, текст — inline-строки, управляющие символы удаляются), `GET api/tax-register/book/export.xlsx`, кнопка «Выгрузить Excel» в блоке книги. Это рабочая таблица, не официальная форма. Тесты: чтение файла через ExcelDataReader, фронтенд-тест кнопки.
+
+## Шаг 13. Заявки воронки продаж — серверная основа (PAY-31)
+
+Источник: [полное ТЗ](yougile-sources/2026-10-10/attachments/PAY-31-specification-full-text.txt). Решения владельца: «Оплачено» = фактический платёж в CRM; юристы заявок не видят.
+
+| Файл | Что |
+| --- | --- |
+| `backend/Models/SalesRequest.cs`, миграции `20261010061819_AddSalesRequests*` и `.../PostgreSql/20261010062233_AddSalesRequestsPostgres*` | `SalesRequest`, `SalesRequestStatus` (финал успех/провал), `SalesRequestStatusTaskRule` («при входе в статус создать задачу»), `SalesRequestEvent`; `TaskJournalItem.SalesRequestId`. Клиент и дело — ссылки без внешних ключей. |
+| `RolePermissionCatalog`, `RolePermissionsDto`, `RolePermissionsController` | Новый раздел прав `requests` с областью «свои/все»; у всех ролей, кроме администратора, по умолчанию закрыт — юристы заявок не видят. |
+| `Extensions/DataVisibilityQueryExtensions.cs` | `ApplySalesRequestVisibility`, подключён к матрице прав. |
+| `Services/Requests/SalesRequestService.cs` | Стандартные 10 статусов и правила задач из ТЗ (исполнитель — ответственный по заявке, пока админ не задаст другого), создание с поиском/созданием клиента и блокировкой дубля по телефону, привязка к делу, переходы с оптимистичной блокировкой, закрытие автозадач прежнего статуса, блок финала при открытых задачах и принудительное закрытие, успех только при платеже клиента с поступившей оплатой, ручные задачи, отчёт. |
+| `Controllers/SalesRequestsController.cs` | `api/requests`: `statuses`, список, карточка, `clients/search`, создание, правка, `transition`, `tasks`, `report`. |
+| Тесты | `SalesRequestTests` (9), матрица прав `requests`. |
+
+Не реализовано: интерфейс (раздел заявок, права в редакторе ролей), автосоздание дела при оплате, генерация документов, SLA и конструктор триггеров, уведомления, кнопки в карточках задач, перенос старых обращений.

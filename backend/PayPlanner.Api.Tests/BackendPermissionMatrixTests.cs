@@ -761,6 +761,17 @@ public class BackendPermissionMatrixTests
                     await db.SaveChangesAsync();
                     return (visible.Id, hidden.Id);
                 }
+            case RolePermissionCatalog.Requests:
+                {
+                    var client = new Client { Name = "Request client", Phone = "+79000000009" };
+                    db.Clients.Add(client);
+                    await db.SaveChangesAsync();
+                    var visible = new SalesRequest { ClientId = client.Id, Summary = "visible", ResponsibleUserId = visibleUserId, CreatedByUserId = visibleUserId };
+                    var hidden = new SalesRequest { ClientId = client.Id, Summary = "hidden", ResponsibleUserId = hiddenUserId, CreatedByUserId = hiddenUserId };
+                    db.SalesRequests.AddRange(visible, hidden);
+                    await db.SaveChangesAsync();
+                    return (visible.Id, hidden.Id);
+                }
             case RolePermissionCatalog.Calendar:
                 {
                     var visible = new TaskJournalItem
@@ -876,6 +887,8 @@ public class BackendPermissionMatrixTests
                 db.Clients.ApplyClientVisibility(access).AnyAsync(item => item.Id == id),
             RolePermissionCatalog.Cases =>
                 db.ClientCases.ApplyClientCaseVisibility(access).AnyAsync(item => item.Id == id),
+            RolePermissionCatalog.Requests =>
+                db.SalesRequests.ApplySalesRequestVisibility(access).AnyAsync(item => item.Id == id),
             RolePermissionCatalog.Accounts or RolePermissionCatalog.Payments =>
                 db.Payments.ApplyPaymentVisibility(access).AnyAsync(item => item.Id == id),
             RolePermissionCatalog.Acts =>
