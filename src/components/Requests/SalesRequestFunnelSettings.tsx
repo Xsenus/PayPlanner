@@ -14,7 +14,10 @@ interface SalesRequestFunnelSettingsProps {
 
 const FINAL_LABELS: Record<string, string> = { None: '', Success: ' · финал: успех', Failure: ' · финал: провал' };
 
-type RuleDraft = { title: string; assigneeUserId: string; dueInMinutes: string };
+type RuleDraft = { title: string; assigneeUserId: string; dueInMinutes: string; amount: string; source: string; requestType: string };
+
+const SOURCES: Array<[string, string]> = [['Call', 'Звонок'], ['Max', 'Макс'], ['Avito', 'Авито'], ['Site', 'Сайт'], ['Other', 'Другое']];
+const TYPES: Array<[string, string]> = [['New', 'Новый'], ['Fixed', 'Фиксированный'], ['PerCase', 'По факту']];
 
 /**
  * Настройка воронки заявок (только администратор): названия статусов, новые статусы и правила
@@ -41,13 +44,22 @@ export function SalesRequestFunnelSettings({ statuses, assignees, onChanged }: S
 
   const open = (status: SalesRequestStatusItem) => {
     setOpenId(status.id);
-    setRules(status.rules.map((rule) => ({ title: rule.title, assigneeUserId: rule.assigneeUserId ? String(rule.assigneeUserId) : '', dueInMinutes: String(rule.dueInMinutes) })));
+    setRules(
+      status.rules.map((rule) => ({
+        title: rule.title,
+        assigneeUserId: rule.assigneeUserId ? String(rule.assigneeUserId) : '',
+        dueInMinutes: String(rule.dueInMinutes),
+        amount: rule.amountGreaterThan ? String(rule.amountGreaterThan) : '',
+        source: rule.source ?? '',
+        requestType: rule.requestType ?? '',
+      })),
+    );
   };
 
   const updateRule = (index: number, patch: Partial<RuleDraft>) =>
     setRules((prev) => prev.map((rule, i) => (i === index ? { ...rule, ...patch } : rule)));
 
-  const rulesValid = rules.every((rule) => rule.title.trim() !== '' && Number(rule.dueInMinutes) >= 1);
+  const rulesValid = rules.every((rule) => rule.title.trim() !== '' && Number(rule.dueInMinutes) >= 1 && (rule.amount === '' || Number(rule.amount.replace(',', '.')) >= 0));
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-3" data-testid="sales-request-funnel-settings">
@@ -75,9 +87,42 @@ export function SalesRequestFunnelSettings({ statuses, assignees, onChanged }: S
                     </select>
                     <input aria-label="Срок в минутах" inputMode="numeric" value={rule.dueInMinutes} onChange={(event) => updateRule(index, { dueInMinutes: event.target.value })} className="w-24 rounded-lg border border-slate-300 px-2 py-1" />
                     <span className="text-xs text-slate-500">мин</span>
+                    <input aria-label="Условие: сумма больше" placeholder="сумма >" inputMode="decimal" value={rule.amount} onChange={(event) => updateRule(index, { amount: event.target.value })} className="w-24 rounded-lg border border-slate-300 px-2 py-1" />
+                    <select aria-label="Условие: источник" value={rule.source} onChange={(event) => updateRule(index, { source: event.target.value })} className="rounded-lg border border-slate-300 px-2 py-1">
+                      <option value="">любой источник</option>
+                      {SOURCES.map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                    <select aria-label="Условие: тип" value={rule.requestType} onChange={(event) => updateRule(index, { requestType: event.target.value })} className="rounded-lg border border-slate-300 px-2 py-1">
+                      <option value="">любой тип</option>
+                      {TYPES.map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
                     <button type="button" className="text-rose-600" onClick={() => setRules((prev) => prev.filter((_, i) => i !== index))}>Удалить</button>
                   </div>
                 ))}
+                {status.finalKind === 'None' ? (
+                  <label className="flex flex-wrap items-center gap-2">
+                    Лимит времени на этап (SLA), мин
+                    <input
+                      aria-label="SLA в минутах"
+                      inputMode="numeric"
+                      defaultValue={status.slaMinutes ?? ''}
+                      disabled={busy}
+                      onBlur={(event) => {
+                        const value = Number(event.target.value);
+                        if (event.target.value === '' && status.slaMinutes) {
+                          void run(async () => { await apiService.saveSalesRequestStatus(status.id, { clearSla: true }); }, 'Не удалось сохранить SLA.');
+                        } else if (value >= 1 && value !== status.slaMinutes) {
+                          void run(async () => { await apiService.saveSalesRequestStatus(status.id, { slaMinutes: value }); }, 'Не удалось сохранить SLA.');
+                        }
+                      }}
+                      className="w-24 rounded-lg border border-slate-300 px-2 py-1"
+                    />
+                  </label>
+                ) : null}
                 {status.finalKind === 'None' ? (
                   <label className="flex flex-wrap items-center gap-2">
                     После выполнения всех задач этапа перейти в
@@ -105,7 +150,7 @@ export function SalesRequestFunnelSettings({ statuses, assignees, onChanged }: S
                   </label>
                 ) : null}
                 <div className="flex gap-2">
-                  <button type="button" className="rounded-lg border border-slate-200 px-2 py-1" onClick={() => setRules((prev) => [...prev, { title: '', assigneeUserId: '', dueInMinutes: '60' }])}>+ Правило</button>
+                  <button type="button" className="rounded-lg border border-slate-200 px-2 py-1" onClick={() => setRules((prev) => [...prev, { title: '', assigneeUserId: '', dueInMinutes: '60', amount: '', source: '', requestType: '' }])}>+ Правило</button>
                   <button
                     type="button"
                     disabled={busy || !rulesValid}
@@ -114,7 +159,14 @@ export function SalesRequestFunnelSettings({ statuses, assignees, onChanged }: S
                       void run(async () => {
                         await apiService.replaceSalesRequestRules(
                           status.id,
-                          rules.map((rule) => ({ title: rule.title.trim(), assigneeUserId: rule.assigneeUserId ? Number(rule.assigneeUserId) : null, dueInMinutes: Number(rule.dueInMinutes) })),
+                          rules.map((rule) => ({
+                            title: rule.title.trim(),
+                            assigneeUserId: rule.assigneeUserId ? Number(rule.assigneeUserId) : null,
+                            dueInMinutes: Number(rule.dueInMinutes),
+                            amountGreaterThan: rule.amount ? Number(rule.amount.replace(',', '.')) : null,
+                            source: rule.source || null,
+                            requestType: rule.requestType || null,
+                          })),
                         );
                         setOpenId(null);
                       }, 'Не удалось сохранить правила.')

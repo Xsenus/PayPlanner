@@ -263,6 +263,7 @@ export interface SalesRequestItem {
   paidPaymentId?: number | null;
   resultClientCaseId?: number | null;
   version: number;
+  slaDueAt?: string | null;
 }
 
 export interface SalesRequestStatusItem {
@@ -272,7 +273,8 @@ export interface SalesRequestStatusItem {
   sortOrder: number;
   finalKind: SalesRequestFinalKind;
   autoAdvanceToStatusId?: number | null;
-  rules: Array<{ id: number; title: string; assigneeUserId?: number | null; dueInMinutes: number }>;
+  slaMinutes?: number | null;
+  rules: Array<{ id: number; title: string; assigneeUserId?: number | null; dueInMinutes: number; amountGreaterThan?: number | null; source?: string | null; requestType?: string | null }>;
 }
 
 export interface SalesRequestPage {
@@ -317,6 +319,7 @@ export interface SalesRequestReport {
   wonAmount: number;
   lostAmount: number;
   bySource: Array<{ source: string; total: number; succeeded: number; conversionPercent: number }>;
+  lossByStage: Array<{ stage: string; count: number; lostAmount: number }>;
 }
 
 export interface RequisitesIssue {

@@ -9520,6 +9520,9 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(40)
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("SlaMinutes")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("SortOrder")
                         .HasColumnType("INTEGER");
 
@@ -9545,6 +9548,18 @@ namespace PayPlanner.Api.Migrations
 
                     b.Property<int?>("AssigneeUserId")
                         .HasColumnType("INTEGER");
+
+                    b.Property<decimal?>("ConditionAmountGreaterThan")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("ConditionSource")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConditionType")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
 
                     b.Property<int>("DueInMinutes")
                         .HasColumnType("INTEGER");

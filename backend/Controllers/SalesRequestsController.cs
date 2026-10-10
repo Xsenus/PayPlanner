@@ -12,11 +12,11 @@ namespace PayPlanner.Api.Controllers;
 public sealed record SalesRequestDto(
     int Id, DateTime CreatedAt, string Source, int ClientId, string ClientName, string ClientPhone, int? ClientCaseId,
     bool LinkedCaseWasClosed, string Type, string Summary, int StatusId, DateTime StatusEnteredAt, int ResponsibleUserId,
-    decimal? Amount, string? Comment, string FinalKind, DateTime? ClosedAt, int? PaidPaymentId, int? ResultClientCaseId, int Version);
+    decimal? Amount, string? Comment, string FinalKind, DateTime? ClosedAt, int? PaidPaymentId, int? ResultClientCaseId, int Version, DateTime? SlaDueAt = null);
 
-public sealed record SalesRequestStatusDto(int Id, string Key, string Title, int SortOrder, string FinalKind, int? AutoAdvanceToStatusId, IReadOnlyList<SalesRequestRuleDto> Rules);
+public sealed record SalesRequestStatusDto(int Id, string Key, string Title, int SortOrder, string FinalKind, int? AutoAdvanceToStatusId, int? SlaMinutes, IReadOnlyList<SalesRequestRuleDto> Rules);
 
-public sealed record SalesRequestRuleDto(int Id, string Title, int? AssigneeUserId, int DueInMinutes);
+public sealed record SalesRequestRuleDto(int Id, string Title, int? AssigneeUserId, int DueInMinutes, decimal? AmountGreaterThan, string? Source, string? RequestType);
 
 public sealed record SalesRequestTaskDto(int Id, string Title, string Status, int? AssigneeUserId, string AssigneeName, DateTime DueAt);
 
@@ -77,6 +77,8 @@ public sealed class SalesRequestStatusRequest
     public bool? IsActive { get; set; }
     public int? AutoAdvanceToStatusId { get; set; }
     public bool ClearAutoAdvance { get; set; }
+    public int? SlaMinutes { get; set; }
+    public bool ClearSla { get; set; }
 }
 
 public sealed class SalesRequestRulesRequest
@@ -89,6 +91,9 @@ public sealed class SalesRequestRuleRequest
     public string? Title { get; set; }
     public int? AssigneeUserId { get; set; }
     public int DueInMinutes { get; set; }
+    public decimal? AmountGreaterThan { get; set; }
+    public string? Source { get; set; }
+    public string? RequestType { get; set; }
 }
 
 /// <summary>
@@ -130,8 +135,8 @@ public class SalesRequestsController : ControllerBase
         await _service.EnsureDefaultsAsync(ct);
         var statuses = await _db.SalesRequestStatuses.AsNoTracking().Where(item => item.IsActive).OrderBy(item => item.SortOrder).ToListAsync(ct);
         var rules = await _db.SalesRequestStatusTaskRules.AsNoTracking().Where(item => item.IsActive).ToListAsync(ct);
-        return Ok(statuses.Select(item => new SalesRequestStatusDto(item.Id, item.Key, item.Title, item.SortOrder, item.FinalKind, item.AutoAdvanceToStatusId,
-            rules.Where(rule => rule.StatusId == item.Id).Select(rule => new SalesRequestRuleDto(rule.Id, rule.Title, rule.AssigneeUserId, rule.DueInMinutes)).ToList())).ToList());
+        return Ok(statuses.Select(item => new SalesRequestStatusDto(item.Id, item.Key, item.Title, item.SortOrder, item.FinalKind, item.AutoAdvanceToStatusId, item.SlaMinutes,
+            rules.Where(rule => rule.StatusId == item.Id).Select(rule => new SalesRequestRuleDto(rule.Id, rule.Title, rule.AssigneeUserId, rule.DueInMinutes, rule.ConditionAmountGreaterThan, rule.ConditionSource, rule.ConditionType)).ToList())).ToList());
     }
 
     [HttpPost("statuses")]
@@ -150,9 +155,9 @@ public class SalesRequestsController : ControllerBase
             return Denied();
         }
 
-        var result = await _service.ReplaceRulesAsync(id, request.Rules.Select(rule => new SalesRequestRuleInput(rule.Title, rule.AssigneeUserId, rule.DueInMinutes)).ToList(), ct);
+        var result = await _service.ReplaceRulesAsync(id, request.Rules.Select(rule => new SalesRequestRuleInput(rule.Title, rule.AssigneeUserId, rule.DueInMinutes, rule.AmountGreaterThan, rule.Source, rule.RequestType)).ToList(), ct);
         return result.Ok
-            ? Ok(result.Value!.Select(rule => new SalesRequestRuleDto(rule.Id, rule.Title, rule.AssigneeUserId, rule.DueInMinutes)).ToList())
+            ? Ok(result.Value!.Select(rule => new SalesRequestRuleDto(rule.Id, rule.Title, rule.AssigneeUserId, rule.DueInMinutes, rule.ConditionAmountGreaterThan, rule.ConditionSource, rule.ConditionType)).ToList())
             : StatusCode(result.Status, new { message = result.Error });
     }
 
@@ -165,8 +170,13 @@ public class SalesRequestsController : ControllerBase
         }
 
         var result = await _service.SaveStatusAsync(id, request.Title, request.FinalKind, request.SortOrder, request.IsActive, ct, request.AutoAdvanceToStatusId, request.ClearAutoAdvance);
+        if (result.Ok && (request.SlaMinutes.HasValue || request.ClearSla))
+        {
+            result = await _service.SetSlaAsync(result.Value!.Id, request.ClearSla ? null : request.SlaMinutes, ct);
+        }
+
         return result.Ok
-            ? Ok(new SalesRequestStatusDto(result.Value!.Id, result.Value.Key, result.Value.Title, result.Value.SortOrder, result.Value.FinalKind, result.Value.AutoAdvanceToStatusId, []))
+            ? Ok(new SalesRequestStatusDto(result.Value!.Id, result.Value.Key, result.Value.Title, result.Value.SortOrder, result.Value.FinalKind, result.Value.AutoAdvanceToStatusId, result.Value.SlaMinutes, []))
             : StatusCode(result.Status, new { message = result.Error });
     }
 
@@ -194,9 +204,10 @@ public class SalesRequestsController : ControllerBase
             query = query.Where(item => item.ClientName.Contains(text) || item.ClientPhone.Contains(text) || item.Summary.Contains(text));
         }
 
+        var limits = await SlaLimitsAsync(ct);
         var total = await query.CountAsync(ct);
         var items = await query.OrderByDescending(item => item.CreatedAt).ThenByDescending(item => item.Id).Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
-        return Ok(new { total, page, pageSize, items = items.Select(Map).ToList() });
+        return Ok(new { total, page, pageSize, items = items.Select(item => Map(item, limits)).ToList() });
     }
 
     [HttpGet("{id:int}")]
@@ -217,7 +228,7 @@ public class SalesRequestsController : ControllerBase
             .Select(task => new SalesRequestTaskDto(task.Id, task.Title, task.Status, task.AssigneeUserId, task.AssigneeName, task.DueAt)).ToListAsync(ct);
         var events = await _db.SalesRequestEvents.AsNoTracking().Where(item => item.SalesRequestId == id).OrderBy(item => item.CreatedAt).ThenBy(item => item.Id)
             .Select(item => new SalesRequestEventDto(item.Id, item.Kind, item.FromStatusId, item.ToStatusId, item.UserId, item.Comment, item.CreatedAt)).ToListAsync(ct);
-        return Ok(new SalesRequestDetailDto(Map(request), tasks, events));
+        return Ok(new SalesRequestDetailDto(Map(request, await SlaLimitsAsync(ct)), tasks, events));
     }
 
     [HttpGet("clients/search")]
@@ -297,6 +308,31 @@ public class SalesRequestsController : ControllerBase
             : StatusCode(result.Status, new { message = result.Error });
     }
 
+    [HttpGet("journal")]
+    public async Task<ActionResult<object>> Journal(
+        [FromQuery] string? kind, [FromQuery] DateTime? from, [FromQuery] DateTime? to,
+        [FromQuery] int page = 1, [FromQuery] int pageSize = 50, CancellationToken ct = default)
+    {
+        if (await AccessAsync(ct) is not { } access || !Allowed(access, p => p.CanView && p.CanViewAnalytics))
+        {
+            return Denied();
+        }
+
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, MaxPageSize);
+        var visibleRequests = _db.SalesRequests.AsNoTracking().ApplySalesRequestVisibility(access.Visibility).Select(item => item.Id);
+        var query = _db.SalesRequestEvents.AsNoTracking().Where(item => visibleRequests.Contains(item.SalesRequestId));
+        if (!string.IsNullOrWhiteSpace(kind)) query = query.Where(item => item.Kind == kind);
+        if (from.HasValue) query = query.Where(item => item.CreatedAt >= from.Value.Date);
+        if (to.HasValue) query = query.Where(item => item.CreatedAt < to.Value.Date.AddDays(1));
+        var total = await query.CountAsync(ct);
+        var items = await query.OrderByDescending(item => item.CreatedAt).ThenByDescending(item => item.Id)
+            .Skip((page - 1) * pageSize).Take(pageSize)
+            .Select(item => new { item.Id, item.SalesRequestId, item.Kind, item.FromStatusId, item.ToStatusId, item.UserId, item.Comment, item.CreatedAt })
+            .ToListAsync(ct);
+        return Ok(new { total, page, pageSize, items });
+    }
+
     [HttpGet("report")]
     public async Task<ActionResult<SalesRequestReport>> Report([FromQuery] DateTime from, [FromQuery] DateTime to, CancellationToken ct)
     {
@@ -314,6 +350,9 @@ public class SalesRequestsController : ControllerBase
         return Ok(await _service.BuildReportAsync(from, to, visible, ct));
     }
 
+    private async Task<Dictionary<int, int>> SlaLimitsAsync(CancellationToken ct)
+        => await _db.SalesRequestStatuses.AsNoTracking().Where(item => item.SlaMinutes != null).ToDictionaryAsync(item => item.Id, item => item.SlaMinutes!.Value, ct);
+
     private async Task<SectionAccessContext?> GuardAsync(int id, Func<RolePermissionValues, bool> check, CancellationToken ct)
     {
         if (await AccessAsync(ct) is not { } access || !Allowed(access, check))
@@ -328,8 +367,9 @@ public class SalesRequestsController : ControllerBase
     private ActionResult<SalesRequestDto> ToResult(SalesRequestResult<SalesRequest> result)
         => result.Ok ? Ok(Map(result.Value!)) : StatusCode(result.Status, new { message = result.Error, details = result.Details });
 
-    private static SalesRequestDto Map(SalesRequest item) => new(
+    private static SalesRequestDto Map(SalesRequest item, IReadOnlyDictionary<int, int>? slaLimits = null) => new(
         item.Id, item.CreatedAt, item.Source, item.ClientId, item.ClientName, item.ClientPhone, item.ClientCaseId,
         item.LinkedCaseWasClosed, item.Type, item.Summary, item.StatusId, item.StatusEnteredAt, item.ResponsibleUserId,
-        item.Amount, item.Comment, item.FinalKind, item.ClosedAt, item.PaidPaymentId, item.ResultClientCaseId, item.Version);
+        item.Amount, item.Comment, item.FinalKind, item.ClosedAt, item.PaidPaymentId, item.ResultClientCaseId, item.Version,
+        item.FinalKind == SalesRequestFinalKinds.None && slaLimits is not null && slaLimits.TryGetValue(item.StatusId, out var limit) ? item.StatusEnteredAt.AddMinutes(limit) : null);
 }

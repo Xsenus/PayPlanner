@@ -45,6 +45,9 @@ public sealed class SalesRequestAutomationService : BackgroundService
     public async Task<int> RunOnceAsync(CancellationToken ct = default)
     {
         using var scope = _scopeFactory.CreateScope();
-        return await scope.ServiceProvider.GetRequiredService<ISalesRequestService>().AdvanceCompletedAsync(ct);
+        var service = scope.ServiceProvider.GetRequiredService<ISalesRequestService>();
+        var moved = await service.AdvanceCompletedAsync(ct);
+        await service.MarkSlaBreachesAsync(ct);
+        return moved;
     }
 }

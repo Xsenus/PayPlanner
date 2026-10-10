@@ -756,6 +756,9 @@ public class PaymentContext : DbContext
         {
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Title).HasMaxLength(300).IsRequired();
+            entity.Property(e => e.ConditionAmountGreaterThan).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.ConditionSource).HasMaxLength(16);
+            entity.Property(e => e.ConditionType).HasMaxLength(16);
             entity.HasIndex(e => e.StatusId).HasDatabaseName("IX_SalesRequestStatusTaskRules_Status");
         });
 

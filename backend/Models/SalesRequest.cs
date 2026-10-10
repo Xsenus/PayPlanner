@@ -37,6 +37,7 @@ public static class SalesRequestEventKinds
     public const string TaskCreated = "TaskCreated";
     public const string TasksForceClosed = "TasksForceClosed";
     public const string CaseCreated = "CaseCreated";
+    public const string SlaBreached = "SlaBreached";
 }
 
 /// <summary>
@@ -126,6 +127,9 @@ public class SalesRequestStatus
 
     /// <summary>Статус, в который заявка переходит сама, когда выполнены все задачи этого статуса (без ручного перехода).</summary>
     public int? AutoAdvanceToStatusId { get; set; }
+
+    /// <summary>Лимит времени на этап в минутах; по истечении в истории заявки появляется событие о нарушении срока.</summary>
+    public int? SlaMinutes { get; set; }
 }
 
 /// <summary>Правило «при входе в статус создать задачу».</summary>
@@ -146,6 +150,17 @@ public class SalesRequestStatusTaskRule
     public int DueInMinutes { get; set; } = 60;
 
     public bool IsActive { get; set; } = true;
+
+    /// <summary>Условие «сумма заявки больше»: правило срабатывает, только если сумма заявки известна и превышает порог.</summary>
+    public decimal? ConditionAmountGreaterThan { get; set; }
+
+    /// <summary>Условие «источник равен».</summary>
+    [MaxLength(16)]
+    public string? ConditionSource { get; set; }
+
+    /// <summary>Условие «тип заявки равен».</summary>
+    [MaxLength(16)]
+    public string? ConditionType { get; set; }
 }
 
 public class SalesRequestEvent

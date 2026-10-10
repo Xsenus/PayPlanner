@@ -169,7 +169,7 @@ describe('SalesRequestFunnelSettings', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Сохранить правила' }));
 
     await waitFor(() =>
-      expect(apiService.replaceSalesRequestRules).toHaveBeenCalledWith(1, [{ title: 'Принять заявку', assigneeUserId: 1, dueInMinutes: 30 }]),
+      expect(apiService.replaceSalesRequestRules).toHaveBeenCalledWith(1, [{ title: 'Принять заявку', assigneeUserId: 1, dueInMinutes: 30, amountGreaterThan: null, source: null, requestType: null }]),
     );
   });
 });
@@ -191,5 +191,34 @@ describe('SalesRequestFunnelSettings auto advance', () => {
     await userEvent.selectOptions(screen.getByLabelText('Автопереход'), '2');
 
     await waitFor(() => expect(apiService.saveSalesRequestStatus).toHaveBeenCalledWith(1, { autoAdvanceToStatusId: 2 }));
+  });
+});
+
+describe('SalesRequestFunnelSettings conditions and SLA', () => {
+  it('saves a rule condition and the stage SLA', async () => {
+    vi.clearAllMocks();
+    vi.mocked(apiService.getSalesRequestStatuses).mockResolvedValue([
+      { id: 1, key: 'new', title: 'Новая', sortOrder: 1, finalKind: 'None', rules: [{ id: 5, title: 'Принять заявку', dueInMinutes: 30 }] },
+    ]);
+    vi.mocked(apiService.getTaskJournalAssignees).mockResolvedValue([]);
+    vi.mocked(apiService.getSalesRequests).mockResolvedValue({ total: 0, page: 1, pageSize: 50, items: [] });
+    vi.mocked(apiService.replaceSalesRequestRules).mockResolvedValue([]);
+    vi.mocked(apiService.saveSalesRequestStatus).mockResolvedValue(statuses[0]);
+    render(<SalesRequestsPage allowCreate allowEdit allowAnalytics={false} allowConfigure />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Настройка воронки' }));
+    await userEvent.click(await screen.findByRole('button', { name: /правил: 1/ }));
+    await userEvent.type(screen.getByLabelText('Условие: сумма больше'), '50000');
+    await userEvent.selectOptions(screen.getByLabelText('Условие: источник'), 'Avito');
+    await userEvent.type(screen.getByLabelText('SLA в минутах'), '120');
+    await userEvent.tab();
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить правила' }));
+
+    await waitFor(() =>
+      expect(apiService.replaceSalesRequestRules).toHaveBeenCalledWith(1, [
+        { title: 'Принять заявку', assigneeUserId: null, dueInMinutes: 30, amountGreaterThan: 50000, source: 'Avito', requestType: null },
+      ]),
+    );
+    await waitFor(() => expect(apiService.saveSalesRequestStatus).toHaveBeenCalledWith(1, { slaMinutes: 120 }));
   });
 });

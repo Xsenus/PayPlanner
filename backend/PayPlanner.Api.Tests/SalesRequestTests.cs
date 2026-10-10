@@ -436,4 +436,64 @@ public class SalesRequestTests
         Assert.True(moved.Ok);
         Assert.Contains(f.Db.TaskJournalItems, t => t.SalesRequestId == request.Id && t.Title.StartsWith("Квалифицировать"));
     }
+
+    [Fact]
+    public async Task RuleConditions_AmountSourceAndTypeDecideWhetherTheTaskIsCreated()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        await f.Service.EnsureDefaultsAsync(default);
+        var qualification = StatusId(f.Db, "qualification");
+        Assert.False((await f.Service.ReplaceRulesAsync(qualification, [new SalesRequestRuleInput("x", null, 5, null, "Радио", null)], default)).Ok);
+        Assert.False((await f.Service.ReplaceRulesAsync(qualification, [new SalesRequestRuleInput("x", null, 5, -1m, null, null)], default)).Ok);
+        await f.Service.ReplaceRulesAsync(qualification,
+        [
+            new SalesRequestRuleInput("Крупная заявка", f.Admin.Id, 30, 50_000m, null, null),
+            new SalesRequestRuleInput("Только Авито", null, 30, null, "Avito", null),
+            new SalesRequestRuleInput("Только фиксированный", null, 30, null, null, "Fixed"),
+            new SalesRequestRuleInput("Всегда", null, 30),
+        ], default);
+        var small = (await f.Service.CreateAsync(NewRequest(f.Client, "Call") with { Amount = 1_000m }, f.Manager.Id, default)).Value!;
+        var big = (await f.Service.CreateAsync(NewRequest(f.Client, "Avito") with { Amount = 90_000m }, f.Manager.Id, default)).Value!;
+
+        await f.Service.TransitionAsync(small.Id, new SalesRequestTransitionInput(qualification, small.Version, null, false, null), f.Manager.Id, default);
+        await f.Service.TransitionAsync(big.Id, new SalesRequestTransitionInput(qualification, big.Version, null, false, null), f.Manager.Id, default);
+
+        var smallTitles = f.Db.TaskJournalItems.Where(t => t.SalesRequestId == small.Id).Select(t => t.Title).ToList();
+        var bigTitles = f.Db.TaskJournalItems.Where(t => t.SalesRequestId == big.Id).Select(t => t.Title).ToList();
+        Assert.Contains(smallTitles, t => t.StartsWith("Всегда"));
+        Assert.DoesNotContain(smallTitles, t => t.StartsWith("Крупная") || t.StartsWith("Только"));
+        Assert.Contains(bigTitles, t => t.StartsWith("Крупная"));
+        Assert.Contains(bigTitles, t => t.StartsWith("Только Авито"));
+        Assert.DoesNotContain(bigTitles, t => t.StartsWith("Только фиксированный"));
+    }
+
+    [Fact]
+    public async Task Sla_MarksBreachOncePerStageEntry_AndLossReportGroupsByStage()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        await f.Service.EnsureDefaultsAsync(default);
+        var qualification = StatusId(f.Db, "qualification");
+        Assert.False((await f.Service.SetSlaAsync(StatusId(f.Db, "paid"), 30, default)).Ok);
+        Assert.False((await f.Service.SetSlaAsync(qualification, 0, default)).Ok);
+        Assert.True((await f.Service.SetSlaAsync(qualification, 60, default)).Ok);
+        var request = (await f.Service.CreateAsync(NewRequest(f.Client) with { Amount = 700m }, f.Manager.Id, default)).Value!;
+        var moved = (await f.Service.TransitionAsync(request.Id, new SalesRequestTransitionInput(qualification, request.Version, null, false, null), f.Manager.Id, default)).Value!;
+
+        Assert.Equal(0, await f.Service.MarkSlaBreachesAsync(default));
+        moved.StatusEnteredAt = DateTime.UtcNow.AddMinutes(-90);
+        await f.Db.SaveChangesAsync();
+        Assert.Equal(1, await f.Service.MarkSlaBreachesAsync(default));
+        Assert.Equal(0, await f.Service.MarkSlaBreachesAsync(default));
+        Assert.Single(f.Db.SalesRequestEvents.Where(e => e.Kind == "SlaBreached"));
+
+        var failed = await f.Service.TransitionAsync(request.Id, new SalesRequestTransitionInput(StatusId(f.Db, "declined"), moved.Version, null, true, null), f.Manager.Id, default);
+        var report = await f.Service.BuildReportAsync(DateTime.UtcNow.AddDays(-1), DateTime.UtcNow, null, default);
+
+        Assert.True(failed.Ok);
+        var stage = Assert.Single(report.LossByStage);
+        Assert.Equal("Квалификация", stage.Stage);
+        Assert.Equal(700m, stage.LostAmount);
+    }
 }

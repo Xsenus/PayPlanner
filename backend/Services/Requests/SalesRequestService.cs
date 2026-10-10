@@ -29,15 +29,18 @@ public sealed record SalesRequestUpdateInput(string? Summary, string? Type, deci
 
 public sealed record SalesRequestTransitionInput(int ToStatusId, int ExpectedVersion, int? PaidPaymentId, bool ForceCloseTasks, string? Comment);
 
-public sealed record SalesRequestRuleInput(string? Title, int? AssigneeUserId, int DueInMinutes);
+public sealed record SalesRequestRuleInput(string? Title, int? AssigneeUserId, int DueInMinutes, decimal? AmountGreaterThan = null, string? Source = null, string? RequestType = null);
 
 public sealed record OpenTaskInfo(int Id, string Title, int? AssigneeUserId, string Status);
 
 public sealed record SalesRequestReport(
     int Total, int Succeeded, int Failed, int InProgress, decimal ConversionPercent, decimal WonAmount, decimal LostAmount,
-    IReadOnlyList<SalesRequestSourceReport> BySource);
+    IReadOnlyList<SalesRequestSourceReport> BySource,
+    IReadOnlyList<SalesRequestStageLoss> LossByStage);
 
 public sealed record SalesRequestSourceReport(string Source, int Total, int Succeeded, decimal ConversionPercent);
+
+public sealed record SalesRequestStageLoss(string Stage, int Count, decimal LostAmount);
 
 public interface ISalesRequestService
 {
@@ -49,6 +52,8 @@ public interface ISalesRequestService
     Task<SalesRequestResult<SalesRequestStatus>> SaveStatusAsync(int? id, string? title, string? finalKind, int? sortOrder, bool? isActive, CancellationToken ct, int? autoAdvanceToStatusId = null, bool clearAutoAdvance = false);
     Task<SalesRequestResult<IReadOnlyList<SalesRequestStatusTaskRule>>> ReplaceRulesAsync(int statusId, IReadOnlyList<SalesRequestRuleInput> rules, CancellationToken ct);
     Task<int> AdvanceCompletedAsync(CancellationToken ct);
+    Task<int> MarkSlaBreachesAsync(CancellationToken ct);
+    Task<SalesRequestResult<SalesRequestStatus>> SetSlaAsync(int statusId, int? slaMinutes, CancellationToken ct);
     Task<SalesRequestReport> BuildReportAsync(DateTime from, DateTime to, IReadOnlyCollection<int>? visibleResponsibleUserIds, CancellationToken ct);
 }
 
@@ -558,7 +563,31 @@ public sealed class SalesRequestService : ISalesRequestService
                 return SalesRequestResult<IReadOnlyList<SalesRequestStatusTaskRule>>.Fail("Исполнитель правила не найден.", 404);
             }
 
-            prepared.Add(new SalesRequestStatusTaskRule { StatusId = statusId, Title = text, AssigneeUserId = rule.AssigneeUserId, DueInMinutes = rule.DueInMinutes });
+            if (rule.AmountGreaterThan is < 0)
+            {
+                return SalesRequestResult<IReadOnlyList<SalesRequestStatusTaskRule>>.Fail("Порог суммы не может быть отрицательным.");
+            }
+
+            if (!string.IsNullOrEmpty(rule.Source) && !SalesRequestSources.All.Contains(rule.Source))
+            {
+                return SalesRequestResult<IReadOnlyList<SalesRequestStatusTaskRule>>.Fail("Неизвестный источник в условии.");
+            }
+
+            if (!string.IsNullOrEmpty(rule.RequestType) && !SalesRequestTypes.All.Contains(rule.RequestType))
+            {
+                return SalesRequestResult<IReadOnlyList<SalesRequestStatusTaskRule>>.Fail("Неизвестный тип заявки в условии.");
+            }
+
+            prepared.Add(new SalesRequestStatusTaskRule
+            {
+                StatusId = statusId,
+                Title = text,
+                AssigneeUserId = rule.AssigneeUserId,
+                DueInMinutes = rule.DueInMinutes,
+                ConditionAmountGreaterThan = rule.AmountGreaterThan,
+                ConditionSource = string.IsNullOrEmpty(rule.Source) ? null : rule.Source,
+                ConditionType = string.IsNullOrEmpty(rule.RequestType) ? null : rule.RequestType,
+            });
         }
 
         // Правила применяются только к будущим переходам; уже созданные задачи заявок не меняются.
@@ -566,6 +595,68 @@ public sealed class SalesRequestService : ISalesRequestService
         _db.SalesRequestStatusTaskRules.AddRange(prepared);
         await _db.SaveChangesAsync(ct);
         return new(prepared);
+    }
+
+    private static bool RuleApplies(SalesRequestStatusTaskRule rule, SalesRequest request)
+        => (rule.ConditionAmountGreaterThan is not decimal threshold || (request.Amount is decimal amount && amount > threshold))
+            && (string.IsNullOrEmpty(rule.ConditionSource) || rule.ConditionSource == request.Source)
+            && (string.IsNullOrEmpty(rule.ConditionType) || rule.ConditionType == request.Type);
+
+    public async Task<SalesRequestResult<SalesRequestStatus>> SetSlaAsync(int statusId, int? slaMinutes, CancellationToken ct)
+    {
+        var status = await _db.SalesRequestStatuses.FirstOrDefaultAsync(item => item.Id == statusId, ct);
+        if (status is null)
+        {
+            return SalesRequestResult<SalesRequestStatus>.Fail("Статус не найден.", 404);
+        }
+
+        if (slaMinutes is < 1 or > 60 * 24 * 365 || (slaMinutes.HasValue && status.FinalKind != SalesRequestFinalKinds.None))
+        {
+            return SalesRequestResult<SalesRequestStatus>.Fail("SLA задаётся для рабочего статуса, от 1 минуты до года.");
+        }
+
+        status.SlaMinutes = slaMinutes;
+        await _db.SaveChangesAsync(ct);
+        return new(status);
+    }
+
+    public async Task<int> MarkSlaBreachesAsync(CancellationToken ct)
+    {
+        var limits = await _db.SalesRequestStatuses.AsNoTracking().Where(item => item.IsActive && item.SlaMinutes != null)
+            .ToDictionaryAsync(item => item.Id, item => item.SlaMinutes!.Value, ct);
+        if (limits.Count == 0)
+        {
+            return 0;
+        }
+
+        var ids = limits.Keys.ToList();
+        var now = DateTime.UtcNow;
+        var open = await _db.SalesRequests.AsNoTracking()
+            .Where(item => item.FinalKind == SalesRequestFinalKinds.None && ids.Contains(item.StatusId))
+            .Select(item => new { item.Id, item.StatusId, item.StatusEnteredAt })
+            .Take(500)
+            .ToListAsync(ct);
+        var marked = 0;
+        foreach (var item in open.Where(item => item.StatusEnteredAt.AddMinutes(limits[item.StatusId]) <= now))
+        {
+            // Одно событие на каждый вход в этап: повторные проходы службы его не дублируют.
+            var already = await _db.SalesRequestEvents.AnyAsync(e => e.SalesRequestId == item.Id && e.Kind == SalesRequestEventKinds.SlaBreached
+                && e.ToStatusId == item.StatusId && e.CreatedAt >= item.StatusEnteredAt, ct);
+            if (already)
+            {
+                continue;
+            }
+
+            AddEvent(item.Id, SalesRequestEventKinds.SlaBreached, null, item.StatusId, null, $"Превышен срок этапа ({limits[item.StatusId]} мин)");
+            marked++;
+        }
+
+        if (marked > 0)
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+
+        return marked;
     }
 
     public async Task<int> AdvanceCompletedAsync(CancellationToken ct)
@@ -621,9 +712,25 @@ public sealed class SalesRequestService : ISalesRequestService
             query = query.Where(item => visibleResponsibleUserIds.Contains(item.ResponsibleUserId) || visibleResponsibleUserIds.Contains(item.CreatedByUserId));
         }
 
-        var rows = await query.Select(item => new { item.Source, item.FinalKind, item.Amount }).ToListAsync(ct);
+        var rows = await query.Select(item => new { item.Id, item.Source, item.FinalKind, item.Amount }).ToListAsync(ct);
         var succeeded = rows.Count(item => item.FinalKind == SalesRequestFinalKinds.Success);
         var failed = rows.Count(item => item.FinalKind == SalesRequestFinalKinds.Failure);
+        var failedIds = rows.Where(item => item.FinalKind == SalesRequestFinalKinds.Failure).Select(item => item.Id).ToList();
+        var stageByRequest = failedIds.Count == 0
+            ? new Dictionary<int, int?>()
+            : (await _db.SalesRequestEvents.AsNoTracking()
+                .Where(e => failedIds.Contains(e.SalesRequestId) && e.Kind == SalesRequestEventKinds.StatusChanged)
+                .OrderBy(e => e.Id)
+                .Select(e => new { e.SalesRequestId, e.FromStatusId })
+                .ToListAsync(ct))
+                .GroupBy(e => e.SalesRequestId)
+                .ToDictionary(group => group.Key, group => group.Last().FromStatusId);
+        var titles = await _db.SalesRequestStatuses.AsNoTracking().ToDictionaryAsync(item => item.Id, item => item.Title, ct);
+        var loss = rows.Where(item => item.FinalKind == SalesRequestFinalKinds.Failure)
+            .GroupBy(item => stageByRequest.GetValueOrDefault(item.Id) is int stageId && titles.TryGetValue(stageId, out var title) ? title : "Не определён")
+            .OrderByDescending(group => group.Count())
+            .Select(group => new SalesRequestStageLoss(group.Key, group.Count(), group.Sum(item => item.Amount ?? 0m)))
+            .ToList();
         return new SalesRequestReport(
             rows.Count,
             succeeded,
@@ -634,7 +741,8 @@ public sealed class SalesRequestService : ISalesRequestService
             rows.Where(item => item.FinalKind == SalesRequestFinalKinds.Failure).Sum(item => item.Amount ?? 0m),
             rows.GroupBy(item => item.Source).OrderBy(group => group.Key)
                 .Select(group => new SalesRequestSourceReport(group.Key, group.Count(), group.Count(item => item.FinalKind == SalesRequestFinalKinds.Success), Percent(group.Count(item => item.FinalKind == SalesRequestFinalKinds.Success), group.Count())))
-                .ToList());
+                .ToList(),
+            loss);
     }
 
     private async Task<SalesRequestResult<Client>> ResolveClientAsync(SalesRequestCreateInput input, int userId, CancellationToken ct)
@@ -675,7 +783,7 @@ public sealed class SalesRequestService : ISalesRequestService
     private async Task CreateRuleTasksAsync(SalesRequest request, int statusId, int userId, CancellationToken ct)
     {
         var rules = await _db.SalesRequestStatusTaskRules.AsNoTracking().Where(rule => rule.StatusId == statusId && rule.IsActive).OrderBy(rule => rule.Id).ToListAsync(ct);
-        foreach (var rule in rules)
+        foreach (var rule in rules.Where(item => RuleApplies(item, request)))
         {
             var due = DateTime.UtcNow.AddMinutes(rule.DueInMinutes);
             var task = await BuildTaskAsync(request, rule.AssigneeUserId ?? request.ResponsibleUserId, $"{rule.Title}, заявка №{request.Id}", due, userId, StatusTag(statusId), ct);

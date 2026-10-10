@@ -227,7 +227,8 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
                   .getSalesRequestReport(from.toISOString().slice(0, 10), to.toISOString().slice(0, 10))
                   .then((r) =>
                     setReport(
-                      `За месяц: заявок ${r.total}, оплачено ${r.succeeded}, брошено/отказ ${r.failed}, в работе ${r.inProgress}, конверсия ${r.conversionPercent}% · получено ${money(r.wonAmount)}, потеряно ${money(r.lostAmount)}`,
+                      `За месяц: заявок ${r.total}, оплачено ${r.succeeded}, брошено/отказ ${r.failed}, в работе ${r.inProgress}, конверсия ${r.conversionPercent}% · получено ${money(r.wonAmount)}, потеряно ${money(r.lostAmount)}` +
+                      (r.lossByStage.length > 0 ? `. Провалы по этапам: ${r.lossByStage.map((item) => `${item.stage} — ${item.count} (${money(item.lostAmount)})`).join(', ')}` : ''),
                     ),
                   )
                   .catch((error) => toast.error(extractDisplayErrorMessage(error, 'Не удалось построить отчёт.'), 'Заявки'));
@@ -287,7 +288,10 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
                 <td className="px-2 py-1">{item.createdAt.slice(0, 10)}</td>
                 <td className="px-2 py-1">{item.clientName}<span className="ml-1 text-xs text-slate-500">{item.clientPhone}</span></td>
                 <td className="px-2 py-1">{SOURCE_LABELS[item.source] ?? item.source}</td>
-                <td className="px-2 py-1">{statusById.get(item.statusId)?.title ?? item.statusId}</td>
+                <td className="px-2 py-1">
+                  {statusById.get(item.statusId)?.title ?? item.statusId}
+                  {item.slaDueAt && new Date(item.slaDueAt).getTime() < Date.now() ? <span className="ml-1 text-xs text-rose-600" title="Срок этапа истёк">просрочено</span> : null}
+                </td>
                 <td className="px-2 py-1">{userName(item.responsibleUserId)}</td>
                 <td className="px-2 py-1 text-right">{item.amount ? money(item.amount) : ''}</td>
               </tr>

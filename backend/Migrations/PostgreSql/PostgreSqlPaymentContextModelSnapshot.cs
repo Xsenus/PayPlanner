@@ -9731,6 +9731,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(40)
                         .HasColumnType("character varying(40)");
 
+                    b.Property<int?>("SlaMinutes")
+                        .HasColumnType("integer");
+
                     b.Property<int>("SortOrder")
                         .HasColumnType("integer");
 
@@ -9758,6 +9761,18 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.Property<int?>("AssigneeUserId")
                         .HasColumnType("integer");
+
+                    b.Property<decimal?>("ConditionAmountGreaterThan")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("ConditionSource")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("ConditionType")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
 
                     b.Property<int>("DueInMinutes")
                         .HasColumnType("integer");
