@@ -6906,6 +6906,7 @@ public class TasksController : ControllerBase
             LegalEntityId = entity.LegalEntityId,
             LegalEntityName = binding?.LegalEntityName ?? GetLegalEntityName(entity.LegalEntity),
             IsInternal = !entity.ClientId.HasValue && !entity.LegalEntityId.HasValue,
+            SalesRequestId = entity.SalesRequestId,
             ClientCaseId = entity.ClientCaseId,
             ClientCaseTitle = binding?.ClientCaseTitle ?? entity.ClientCase?.Title ?? string.Empty,
             ClientBillingClassification = entity.ClientBillingClassification,

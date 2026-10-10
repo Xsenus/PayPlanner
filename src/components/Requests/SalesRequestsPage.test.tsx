@@ -76,6 +76,13 @@ describe('SalesRequestsPage', () => {
     expect(screen.queryByRole('button', { name: 'Отчёт за месяц' })).toBeNull();
   });
 
+  it('opens the request from a task link', async () => {
+    render(<SalesRequestsPage allowCreate allowEdit allowAnalytics={false} initialRequestId={7} />);
+
+    expect(await screen.findByTestId('sales-request-detail')).toBeTruthy();
+    expect(apiService.getSalesRequest).toHaveBeenCalledWith(7);
+  });
+
   it('hides creation without the create right', async () => {
     render(<SalesRequestsPage allowCreate={false} allowEdit={false} allowAnalytics={false} />);
 

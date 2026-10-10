@@ -1344,6 +1344,7 @@ function AppContent() {
                 allowEdit={permissions.requests?.canEdit === true}
                 allowAnalytics={permissions.requests?.canViewAnalytics === true}
                 allowConfigure={isAdminRole}
+                initialRequestId={Number(new URLSearchParams(window.location.search).get('requestId')) || null}
               />
             )
           : renderNoAccess('Раздел заявок недоступен для вашей роли.');

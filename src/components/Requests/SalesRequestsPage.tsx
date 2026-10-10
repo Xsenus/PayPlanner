@@ -19,6 +19,7 @@ interface SalesRequestsPageProps {
   allowEdit: boolean;
   allowAnalytics: boolean;
   allowConfigure?: boolean;
+  initialRequestId?: number | null;
 }
 
 const SOURCE_LABELS: Record<SalesRequestSource, string> = {
@@ -58,7 +59,7 @@ const emptyForm = () => ({
  * Раздел «Заявки»: список, создание с поиском клиента и проверкой дел, карточка с переходами по статусам.
  * Доступ задаёт серверный раздел прав «requests»; здесь только отображение и подсказки.
  */
-export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allowConfigure = false }: SalesRequestsPageProps) {
+export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allowConfigure = false, initialRequestId = null }: SalesRequestsPageProps) {
   const toast = useToast();
   const dialog = useDialog();
   const [statuses, setStatuses] = useState<SalesRequestStatusItem[]>([]);
@@ -95,6 +96,13 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
       toast.error(extractDisplayErrorMessage(error, 'Не удалось загрузить заявки.'), 'Заявки');
     }
   }, [filters, toast]);
+
+  useEffect(() => {
+    if (initialRequestId) {
+      void openDetail(initialRequestId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialRequestId]);
 
   const loadStatuses = useCallback(() => {
     void apiService.getSalesRequestStatuses().then(setStatuses).catch(() => setStatuses([]));

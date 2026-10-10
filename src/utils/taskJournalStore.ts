@@ -103,6 +103,7 @@ export interface TaskJournalItem {
   legalEntityName?: string;
   isInternal?: boolean;
   isUntriaged?: boolean;
+  salesRequestId?: number | null;
   clientCaseId?: number | null;
   clientCaseTitle?: string;
   clientBillingClassification?: TaskClientBillingClassification;

@@ -1382,6 +1382,10 @@ function buildTaskTooltipLines(task: TaskJournalItem) {
     lines.push(`Дело: ${caseTitle}`);
   }
 
+  if (task.salesRequestId) {
+    lines.push(`Заявка: №${task.salesRequestId}`);
+  }
+
   lines.push(
     `Время: ${dueDateLabel || formatDateOnly(due)} ${dueTimeLabel || formatTimeOnly(due)}-${endTimeLabel || formatTimeOnly(end)}`,
     `Исполнитель: ${assignees}`,
@@ -8299,6 +8303,15 @@ function TaskTable({
                       ) : (
                         <div className="mt-1 text-sm text-slate-500">{caseTitle}</div>
                       )
+                    ) : null}
+                    {task.salesRequestId ? (
+                      <a
+                        href={`/?ppTab=requests&requestId=${task.salesRequestId}`}
+                        className="mt-1 block max-w-full text-left text-sm text-blue-700 underline-offset-2 hover:underline"
+                        title="Открыть заявку"
+                      >
+                        Открыть заявку №{task.salesRequestId}
+                      </a>
                     ) : null}
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {task.isUnderControl ? (
