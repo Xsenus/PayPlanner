@@ -36,6 +36,7 @@ public static class SalesRequestEventKinds
     public const string FieldsChanged = "FieldsChanged";
     public const string TaskCreated = "TaskCreated";
     public const string TasksForceClosed = "TasksForceClosed";
+    public const string CaseCreated = "CaseCreated";
 }
 
 /// <summary>
@@ -94,6 +95,9 @@ public class SalesRequest
 
     /// <summary>Фактический платёж в CRM, подтвердивший оплату (обязателен для успешного финала).</summary>
     public int? PaidPaymentId { get; set; }
+
+    /// <summary>Дело, созданное из заявки при оплате (ссылка без внешнего ключа; повторно не создаётся).</summary>
+    public int? ResultClientCaseId { get; set; }
 
     /// <summary>Номер версии для оптимистичной блокировки: два одновременных перехода не пройдут оба.</summary>
     public int Version { get; set; }

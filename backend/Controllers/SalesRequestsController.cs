@@ -12,7 +12,7 @@ namespace PayPlanner.Api.Controllers;
 public sealed record SalesRequestDto(
     int Id, DateTime CreatedAt, string Source, int ClientId, string ClientName, string ClientPhone, int? ClientCaseId,
     bool LinkedCaseWasClosed, string Type, string Summary, int StatusId, DateTime StatusEnteredAt, int ResponsibleUserId,
-    decimal? Amount, string? Comment, string FinalKind, DateTime? ClosedAt, int? PaidPaymentId, int Version);
+    decimal? Amount, string? Comment, string FinalKind, DateTime? ClosedAt, int? PaidPaymentId, int? ResultClientCaseId, int Version);
 
 public sealed record SalesRequestStatusDto(int Id, string Key, string Title, int SortOrder, string FinalKind, IReadOnlyList<SalesRequestRuleDto> Rules);
 
@@ -273,5 +273,5 @@ public class SalesRequestsController : ControllerBase
     private static SalesRequestDto Map(SalesRequest item) => new(
         item.Id, item.CreatedAt, item.Source, item.ClientId, item.ClientName, item.ClientPhone, item.ClientCaseId,
         item.LinkedCaseWasClosed, item.Type, item.Summary, item.StatusId, item.StatusEnteredAt, item.ResponsibleUserId,
-        item.Amount, item.Comment, item.FinalKind, item.ClosedAt, item.PaidPaymentId, item.Version);
+        item.Amount, item.Comment, item.FinalKind, item.ClosedAt, item.PaidPaymentId, item.ResultClientCaseId, item.Version);
 }

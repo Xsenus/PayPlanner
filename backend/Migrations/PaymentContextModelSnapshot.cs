@@ -9411,6 +9411,9 @@ namespace PayPlanner.Api.Migrations
                     b.Property<int>("ResponsibleUserId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int?>("ResultClientCaseId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Source")
                         .IsRequired()
                         .HasMaxLength(16)

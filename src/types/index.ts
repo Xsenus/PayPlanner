@@ -261,6 +261,7 @@ export interface SalesRequestItem {
   finalKind: SalesRequestFinalKind;
   closedAt?: string | null;
   paidPaymentId?: number | null;
+  resultClientCaseId?: number | null;
   version: number;
 }
 

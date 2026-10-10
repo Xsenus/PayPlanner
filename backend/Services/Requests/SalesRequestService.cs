@@ -328,6 +328,26 @@ public sealed class SalesRequestService : ISalesRequestService
         }
 
         var fromStatusId = request.StatusId;
+        // Дело создаётся только для обращения без привязки к делу и только один раз; ошибка сохранения откатывает и дело.
+        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+        if (target.FinalKind == SalesRequestFinalKinds.Success && request.ClientCaseId is null && request.ResultClientCaseId is null)
+        {
+            var title = request.Summary.Length > 200 ? request.Summary[..200] : request.Summary;
+            var created = new ClientCase { ClientId = request.ClientId, Title = title, Status = ClientCaseStatus.Open, ResponsibleUserId = request.ResponsibleUserId };
+            _db.ClientCases.Add(created);
+            try
+            {
+                await _db.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return SalesRequestResult<SalesRequest>.Fail("Заявку одновременно изменил другой сотрудник. Обновите карточку.", 409);
+            }
+
+            request.ResultClientCaseId = created.Id;
+            AddEvent(request.Id, SalesRequestEventKinds.CaseCreated, null, target.Id, userId, $"Создано дело №{created.Id}");
+        }
+
         request.StatusId = target.Id;
         request.StatusEnteredAt = now;
         request.Version++;
@@ -341,7 +361,13 @@ public sealed class SalesRequestService : ISalesRequestService
 
         AddEvent(request.Id, SalesRequestEventKinds.StatusChanged, fromStatusId, target.Id, userId, Trim(input.Comment, 1000));
         await CreateRuleTasksAsync(request, target.Id, userId, ct);
-        return await SaveAsync(request, ct);
+        var saved = await SaveAsync(request, ct);
+        if (saved.Ok)
+        {
+            await transaction.CommitAsync(ct);
+        }
+
+        return saved;
     }
 
     public async Task<SalesRequestResult<TaskJournalItem>> CreateManualTaskAsync(int id, int assigneeUserId, string? title, DateTime? dueAt, int userId, CancellationToken ct)
@@ -467,7 +493,7 @@ public sealed class SalesRequestService : ISalesRequestService
             Title = title.Length > 500 ? title[..500] : title,
             SalesRequestId = request.Id,
             ClientId = request.ClientId,
-            ClientCaseId = request.ClientCaseId,
+            ClientCaseId = request.ResultClientCaseId ?? request.ClientCaseId,
             AssigneeUserId = assignee.Id,
             AssigneeName = assignee.FullName,
             AuthorUserId = authorUserId == 0 ? null : authorUserId,

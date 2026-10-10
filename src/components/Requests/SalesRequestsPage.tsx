@@ -390,7 +390,12 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics }: Sa
               ))}
             </div>
           ) : null}
-          {finalClosed ? <p className="mt-2 text-sm text-slate-600">Заявка закрыта {detail.request.closedAt?.slice(0, 10)}.</p> : null}
+          {finalClosed ? (
+            <p className="mt-2 text-sm text-slate-600">
+              Заявка закрыта {detail.request.closedAt?.slice(0, 10)}.
+              {detail.request.resultClientCaseId ? ` Создано дело №${detail.request.resultClientCaseId}.` : ''}
+            </p>
+          ) : null}
 
           <h3 className="mt-3 text-sm font-semibold text-slate-700">Задачи по заявке</h3>
           <ul className="mt-1 space-y-0.5 text-sm" data-testid="sales-request-tasks">

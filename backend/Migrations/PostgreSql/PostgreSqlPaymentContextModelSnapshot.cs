@@ -9618,6 +9618,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<int>("ResponsibleUserId")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("ResultClientCaseId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Source")
                         .IsRequired()
                         .HasMaxLength(16)

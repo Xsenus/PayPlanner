@@ -255,4 +255,51 @@ public class SalesRequestTests
         Assert.IsType<OkObjectResult>(managerOwn.Result);
         Assert.Contains("\"total\":2", System.Text.Json.JsonSerializer.Serialize(Assert.IsType<OkObjectResult>(adminList.Result).Value));
     }
+
+    [Fact]
+    public async Task Paid_CreatesCaseOnceForNewInquiry_AndNotForRequestLinkedToCase()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var payment = new Payment { ClientId = f.Client.Id, Amount = 100m, PaidAmount = 100m, Description = "x" };
+        var existing = new ClientCase { ClientId = f.Client.Id, Status = ClientCaseStatus.Open, CaseNumber = "5", Title = "Текущее" };
+        f.Db.AddRange(payment, existing);
+        await f.Db.SaveChangesAsync();
+        var fresh = (await f.Service.CreateAsync(NewRequest(f.Client), f.Manager.Id, default)).Value!;
+        var linked = (await f.Service.CreateAsync(NewRequest(f.Client) with { ClientCaseId = existing.Id }, f.Manager.Id, default)).Value!;
+        var paid = StatusId(f.Db, "paid");
+
+        var casesBefore = await f.Db.ClientCases.CountAsync();
+        var done = await f.Service.TransitionAsync(fresh.Id, new SalesRequestTransitionInput(paid, fresh.Version, payment.Id, true, null), f.Manager.Id, default);
+        var linkedDone = await f.Service.TransitionAsync(linked.Id, new SalesRequestTransitionInput(paid, linked.Version, payment.Id, true, null), f.Manager.Id, default);
+
+        Assert.True(done.Ok);
+        Assert.NotNull(done.Value!.ResultClientCaseId);
+        var created = await f.Db.ClientCases.FindAsync(done.Value.ResultClientCaseId);
+        Assert.Equal(f.Client.Id, created!.ClientId);
+        Assert.Equal("Спор с застройщиком", created.Title);
+        Assert.Equal(casesBefore + 1, await f.Db.ClientCases.CountAsync());
+        Assert.Null(linkedDone.Value!.ResultClientCaseId);
+        Assert.Contains(f.Db.SalesRequestEvents, e => e.Kind == "CaseCreated" && e.SalesRequestId == fresh.Id);
+        var lawyerTask = f.Db.TaskJournalItems.Single(t => t.SalesRequestId == fresh.Id && t.Title.StartsWith("Назначить юриста"));
+        Assert.Equal(created.Id, lawyerTask.ClientCaseId);
+    }
+
+    [Fact]
+    public async Task FailedPaidTransition_DoesNotLeaveCaseBehind()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var payment = new Payment { ClientId = f.Client.Id, Amount = 100m, PaidAmount = 100m, Description = "x" };
+        f.Db.Payments.Add(payment);
+        await f.Db.SaveChangesAsync();
+        var request = (await f.Service.CreateAsync(NewRequest(f.Client), f.Manager.Id, default)).Value!;
+        await f.Db.Database.ExecuteSqlRawAsync("UPDATE SalesRequests SET Version = Version + 1 WHERE Id = {0}", request.Id);
+        var before = await f.Db.ClientCases.CountAsync();
+
+        var stale = await f.Service.TransitionAsync(request.Id, new SalesRequestTransitionInput(StatusId(f.Db, "paid"), request.Version, payment.Id, true, null), f.Manager.Id, default);
+
+        Assert.Equal(409, stale.Status);
+        Assert.Equal(before, await f.Db.ClientCases.CountAsync());
+    }
 }
