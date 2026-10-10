@@ -20,6 +20,7 @@ using PayPlanner.Api.Services.Companies;
 using PayPlanner.Api.Services.Documents;
 using PayPlanner.Api.Services.Invoices;
 using PayPlanner.Api.Services.Notifications;
+using PayPlanner.Api.Services.Tax;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -1471,6 +1472,10 @@ public class InvoicesController : ControllerBase
             return lineItemServiceValidationError;
         }
 
+        if (request.LineItems is { Count: > 0 } && request.LineItems.Any(item => VatRates.Normalize(item.VatRate) != null)
+            && request.Amount != VatCalculator.DocumentTotal(request.LineItems.Select(item => new VatLine(item.Quantity, item.Price, item.VatRate))))
+            return BadRequest(new { message = "Сумма счёта должна совпадать с суммой округлённых позиций." });
+
         var caseOwner = ResolveInvoiceCaseOwner(request);
         var clientCaseValidation = await ValidateInvoiceClientCasesAsync(caseOwner.ClientId, caseOwner.LegalEntityId, request, ct);
         if (clientCaseValidation.Error is not null)
@@ -1718,6 +1723,10 @@ public class InvoicesController : ControllerBase
         {
             return lineItemServiceValidationError;
         }
+
+        if (request.LineItems is { Count: > 0 } && request.LineItems.Any(item => VatRates.Normalize(item.VatRate) != null)
+            && request.Amount != VatCalculator.DocumentTotal(request.LineItems.Select(item => new VatLine(item.Quantity, item.Price, item.VatRate))))
+            return BadRequest(new { message = "Сумма счёта должна совпадать с суммой округлённых позиций." });
 
         var caseOwner = ResolveInvoiceCaseOwner(request);
         var clientCaseValidation = await ValidateInvoiceClientCasesAsync(caseOwner.ClientId, caseOwner.LegalEntityId, request, ct);
@@ -6120,6 +6129,12 @@ public class InvoicesController : ControllerBase
         {
             return null;
         }
+
+        if (lineItems.Any(item => item is null))
+            return BadRequest(new { message = "Позиция счёта не может быть пустой." });
+
+        if (lineItems.Any(item => !InvoiceLineItemStorage.HasStorablePrecision(item.Quantity, item.Price)))
+            return BadRequest(new { message = InvoiceLineItemStorage.PrecisionError });
 
         var requestedServiceIds = lineItems
             .Where(item => item?.ServiceId is > 0)

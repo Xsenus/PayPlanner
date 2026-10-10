@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
 import { apiService } from '../../services/api';
 import type { TaxRegisterBook, TaxRegisterEntryItem } from '../../types';
-import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { extractDisplayErrorMessage, isHttpErrorStatus } from '../../utils/errorUtils';
 
 interface CompanyTaxRegisterSectionProps {
   companyId: number;
@@ -25,25 +25,38 @@ export function CompanyTaxRegisterSection({ companyId }: CompanyTaxRegisterSecti
   const [year, setYear] = useState(new Date().getFullYear());
   const [book, setBook] = useState<TaxRegisterBook | null>(null);
   const [drafts, setDrafts] = useState<TaxRegisterEntryItem[]>([]);
+  const [draftPage, setDraftPage] = useState(1);
+  const [draftTotal, setDraftTotal] = useState(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const loadSequence = useRef(0);
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState(emptyForm);
 
   const load = useCallback(async () => {
+    const sequence = ++loadSequence.current;
     try {
       const [loadedBook, loadedDrafts] = await Promise.all([
         apiService.getTaxRegisterBook(companyId, year),
-        apiService.getTaxRegisterDrafts(companyId, year),
+        apiService.getTaxRegisterDrafts(companyId, year, draftPage),
       ]);
+      if (sequence !== loadSequence.current) return;
       setBook(loadedBook);
       setDrafts(loadedDrafts.items);
-    } catch {
+      setDraftTotal(loadedDrafts.total);
+      setLoadError(null);
+      if (loadedDrafts.items.length === 0 && draftPage > 1) setDraftPage(draftPage - 1);
+    } catch (error) {
+      if (sequence !== loadSequence.current) return;
       setBook(null);
       setDrafts([]);
+      setLoadError(isHttpErrorStatus(error, 403) || isHttpErrorStatus(error, 401) ? null : extractDisplayErrorMessage(error, 'Не удалось загрузить книгу доходов и расходов.'));
     }
-  }, [companyId, year]);
+  }, [companyId, year, draftPage]);
 
   useEffect(() => {
     void load();
+    const sequence = loadSequence;
+    return () => { sequence.current++; };
   }, [load]);
 
   const run = async (action: () => Promise<void>, failure: string) => {
@@ -58,8 +71,13 @@ export function CompanyTaxRegisterSection({ companyId }: CompanyTaxRegisterSecti
     }
   };
 
-  if (!book) {
-    return null;
+  if (!book || book.legalEntityId !== companyId || book.year !== year) {
+    return loadError ? (
+      <section className="mt-3 rounded-lg border border-slate-200 p-3">
+        <p role="alert" className="text-sm text-red-700">{loadError}</p>
+        <button type="button" className="mt-2 rounded-lg border px-2 py-1 text-sm" onClick={() => void load()}>Повторить загрузку</button>
+      </section>
+    ) : null;
   }
 
   const amount = Number(form.amount.replace(',', '.'));
@@ -89,7 +107,14 @@ export function CompanyTaxRegisterSection({ companyId }: CompanyTaxRegisterSecti
               value={year}
               min={2000}
               max={2100}
-              onChange={(event) => setYear(Number(event.target.value) || year)}
+              onChange={(event) => {
+                const nextYear = Number(event.target.value);
+                if (Number.isInteger(nextYear) && nextYear >= 2000 && nextYear <= 2100) {
+                  setDraftPage(1);
+                  setYear(nextYear);
+                  setForm(emptyForm());
+                }
+              }}
               className="w-24 rounded-lg border border-slate-300 px-2 py-1"
             />
           </label>
@@ -209,7 +234,14 @@ export function CompanyTaxRegisterSection({ companyId }: CompanyTaxRegisterSecti
 
       {drafts.length > 0 ? (
         <div className="mt-3" data-testid="tax-register-drafts">
-          <h4 className="text-sm font-semibold text-slate-700">Черновики ({drafts.length})</h4>
+          <h4 className="text-sm font-semibold text-slate-700">Черновики ({draftTotal})</h4>
+          {draftTotal > 200 ? (
+            <div className="mt-1 flex items-center gap-2 text-sm">
+              <button type="button" disabled={busy || draftPage === 1} onClick={() => setDraftPage(draftPage - 1)}>Предыдущие черновики</button>
+              <span>Страница {draftPage} из {Math.ceil(draftTotal / 200)}</span>
+              <button type="button" disabled={busy || draftPage * 200 >= draftTotal} onClick={() => setDraftPage(draftPage + 1)}>Следующие черновики</button>
+            </div>
+          ) : null}
           <ul className="mt-1 divide-y divide-slate-100 text-sm">
             {drafts.map((draft) => (
               <li key={draft.id} className="flex flex-wrap items-center justify-between gap-2 py-1">

@@ -1,3 +1,4 @@
+import { hasStorableLineItemPrecision, lineItemPrecisionError, roundedLineTotal } from '../../utils/lineItemMoney';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { ArrowLeft, ChevronDown, Link2, Loader2, X } from 'lucide-react';
@@ -77,6 +78,7 @@ type InvoiceLineAvailabilityRow = {
   name: string;
   unit: string;
   price: number;
+  vatRate?: string | null;
   totalQuantity: number;
   usedByOtherActsQuantity: number;
   availableQuantity: number;
@@ -190,8 +192,11 @@ function formatDecimalInput(value: number): string {
 function calculateLineItemAmountValue(
   quantity: string | number | null | undefined,
   price: string | number | null | undefined,
+  roundLine = false,
 ): string {
-  return formatDecimalInput((parseDecimalInput(String(quantity ?? '')) ?? 0) * (parseDecimalInput(String(price ?? '')) ?? 0));
+  const parsedQuantity = parseDecimalInput(String(quantity ?? '')) ?? 0;
+  const parsedPrice = parseDecimalInput(String(price ?? '')) ?? 0;
+  return formatDecimalInput(roundLine ? roundedLineTotal(parsedQuantity, parsedPrice) : parsedQuantity * parsedPrice);
 }
 
 function quantitiesEqual(left: number, right: number): boolean {
@@ -519,6 +524,7 @@ export function ActModal({
   const [selectedLineQuantities, setSelectedLineQuantities] = useState<Record<string, string>>({});
   const selectionSeedRef = useRef<string | null>(null);
   const [manualLineItems, setManualLineItems] = useState<ManualActLineItemRow[]>([]);
+  const roundManualLineAmounts = useMemo(() => manualLineItems.some((item) => Boolean(item.vatRate)), [manualLineItems]);
   const manualLineItemsSeedRef = useRef<string | null>(null);
   const [lineItemPickerOpen, setLineItemPickerOpen] = useState(false);
   const [counterpartyPickerOpen, setCounterpartyPickerOpen] = useState(false);
@@ -871,6 +877,7 @@ export function ActModal({
           name: item.name,
           unit: item.unit,
           price: Number(item.price ?? 0),
+          vatRate: item.vatRate,
           totalQuantity,
           usedByOtherActsQuantity: usedQuantity,
           availableQuantity,
@@ -1073,7 +1080,10 @@ export function ActModal({
   }, [invoiceLineAvailability, isUsingInvoiceItems, selectedLineQuantities]);
 
   const computedAmount = useMemo(
-    () => selectedLineItems.reduce((sum, item) => sum + item.lineAmount, 0),
+    () => {
+      const roundLines = selectedLineItems.some((item) => Boolean(item.vatRate));
+      return selectedLineItems.reduce((sum, item) => sum + (roundLines ? roundedLineTotal(item.selectedQuantity, item.price) : item.lineAmount), 0);
+    },
     [selectedLineItems],
   );
 
@@ -1100,10 +1110,10 @@ export function ActModal({
           parsedPrice,
           hasContent,
           isValid: Boolean(normalizedName && parsedQuantity !== null && parsedQuantity > 0 && parsedPrice !== null && parsedPrice >= 0),
-          lineAmount: (parsedQuantity ?? 0) * (parsedPrice ?? 0),
+          lineAmount: roundManualLineAmounts ? roundedLineTotal(parsedQuantity ?? 0, parsedPrice ?? 0) : (parsedQuantity ?? 0) * (parsedPrice ?? 0),
         };
       }),
-    [manualLineItems],
+    [manualLineItems, roundManualLineAmounts],
   );
   const manualLineItemsWithContent = useMemo(
     () => preparedManualLineItems.filter((item) => item.hasContent),
@@ -1355,6 +1365,11 @@ export function ActModal({
         return;
       }
 
+      if (lineItems.some((item) => !hasStorableLineItemPrecision(Number(item.quantity ?? 0), 0))) {
+        setLocalError(lineItemPrecisionError);
+        return;
+      }
+
       creationMode = allAvailableSelected ? 'Full' : 'Partial';
       amount = computedAmount;
     } else {
@@ -1398,6 +1413,10 @@ export function ActModal({
             };
           }
 
+          if (!hasStorableLineItemPrecision(item.parsedQuantity, item.parsedPrice)) {
+            return { error: lineItemPrecisionError, items: accumulator.items };
+          }
+
           return {
             error: null,
             items: [
@@ -1422,8 +1441,12 @@ export function ActModal({
         lineItems = manualPayload.items;
 
         if (lineItems.length > 0) {
+          const roundLines = lineItems.some((line) => Boolean(line.vatRate));
           amount = lineItems.reduce(
-            (sum, item) => sum + Number(item.quantity ?? 0) * Number(item.price ?? 0),
+            (sum, item) => {
+              const value = Number(item.quantity ?? 0) * Number(item.price ?? 0);
+              return sum + (roundLines ? roundedLineTotal(Number(item.quantity ?? 0), Number(item.price ?? 0)) : value);
+            },
             0,
           );
         } else {
@@ -1949,7 +1972,7 @@ export function ActModal({
                             <div className="space-y-1">
                               <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 md:hidden">Сумма</span>
                               <output className="inline-flex min-h-10 w-full items-center justify-end rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-right text-sm font-medium tabular-nums text-slate-700">
-                                {calculateLineItemAmountValue(item.quantity, item.price)}
+                                {calculateLineItemAmountValue(item.quantity, item.price, roundManualLineAmounts)}
                               </output>
                             </div>
 

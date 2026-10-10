@@ -64,7 +64,65 @@ public sealed class TaxRegisterService : ITaxRegisterService
 
     public TaxRegisterService(PaymentContext db) => _db = db;
 
-    public async Task<TaxRegisterResult<TaxRegisterEntry>> CreateAsync(TaxRegisterEntryInput input, int userId, CancellationToken ct)
+
+    // The company row is the common database lock for every register mutation, including year closure.
+    // SQLite obtains its write lock here; PostgreSQL serializes writers on the same company row.
+    private async Task<TaxRegisterResult<T>> WriteAsync<T>(int companyId, Func<Task<TaxRegisterResult<T>>> write, CancellationToken ct)
+    {
+        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+        if (await _db.LegalEntities.Where(item => item.Id == companyId)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.ShortName, item => item.ShortName), ct) != 1)
+            return TaxRegisterResult<T>.Fail("Компания не найдена.", 404);
+        try
+        {
+            var result = await write();
+            if (result.Ok) await transaction.CommitAsync(ct);
+            else
+            {
+                await transaction.RollbackAsync(ct);
+                ClearRegisterTracking();
+            }
+            return result;
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            ClearRegisterTracking();
+            throw;
+        }
+    }
+
+    private void ClearRegisterTracking()
+    {
+        foreach (var entry in _db.ChangeTracker.Entries().Where(item => item.Entity is TaxRegisterEntry or TaxRegisterEvent or TaxRegisterYearClose).ToList())
+            entry.State = EntityState.Detached;
+    }
+
+    private async Task<TaxRegisterResult<TaxRegisterEntry>> WriteEntryAsync(int id, Func<Task<TaxRegisterResult<TaxRegisterEntry>>> write, CancellationToken ct)
+    {
+        var company = await _db.TaxRegisterEntries.AsNoTracking().Where(item => item.Id == id).Select(item => (int?)item.LegalEntityId).FirstOrDefaultAsync(ct);
+        return company.HasValue ? await WriteAsync(company.Value, async () =>
+        {
+            var tracked = _db.TaxRegisterEntries.Local.FirstOrDefault(item => item.Id == id);
+            if (tracked is not null) await _db.Entry(tracked).ReloadAsync(ct);
+            return await write();
+        }, ct) : TaxRegisterResult<TaxRegisterEntry>.Fail("Запись не найдена.", 404);
+    }
+
+    public Task<TaxRegisterResult<TaxRegisterEntry>> CreateAsync(TaxRegisterEntryInput input, int userId, CancellationToken ct)
+        => WriteAsync(input.LegalEntityId, () => CreateCoreAsync(input, userId, ct), ct);
+    public Task<TaxRegisterResult<TaxRegisterEntry>> UpdateDraftAsync(int id, TaxRegisterEntryInput input, int userId, CancellationToken ct)
+        => WriteEntryAsync(id, () => UpdateDraftCoreAsync(id, input, userId, ct), ct);
+    public Task<TaxRegisterResult<TaxRegisterEntry>> ApproveAsync(int id, int userId, CancellationToken ct)
+        => WriteEntryAsync(id, () => ApproveCoreAsync(id, userId, ct), ct);
+    public Task<TaxRegisterResult<TaxRegisterEntry>> ArchiveAsync(int id, int userId, string? comment, CancellationToken ct)
+        => WriteEntryAsync(id, () => ArchiveCoreAsync(id, userId, comment, ct), ct);
+    public Task<TaxRegisterResult<TaxRegisterEntry>> CorrectAsync(int id, string reason, int userId, CancellationToken ct)
+        => WriteEntryAsync(id, () => CorrectCoreAsync(id, reason, userId, ct), ct);
+    public Task<TaxRegisterResult<TaxRegisterYearClose>> CloseYearAsync(int legalEntityId, int year, int userId, CancellationToken ct)
+        => WriteAsync(legalEntityId, () => CloseYearCoreAsync(legalEntityId, year, userId, ct), ct);
+
+    private async Task<TaxRegisterResult<TaxRegisterEntry>> CreateCoreAsync(TaxRegisterEntryInput input, int userId, CancellationToken ct)
     {
         var entry = new TaxRegisterEntry { CreatedByUserId = userId, PostingAt = DateTime.UtcNow };
         var error = await ApplyInputAsync(entry, input, ct);
@@ -80,7 +138,7 @@ public sealed class TaxRegisterService : ITaxRegisterService
         return new(entry);
     }
 
-    public async Task<TaxRegisterResult<TaxRegisterEntry>> UpdateDraftAsync(int id, TaxRegisterEntryInput input, int userId, CancellationToken ct)
+    private async Task<TaxRegisterResult<TaxRegisterEntry>> UpdateDraftCoreAsync(int id, TaxRegisterEntryInput input, int userId, CancellationToken ct)
     {
         var entry = await _db.TaxRegisterEntries.FirstOrDefaultAsync(item => item.Id == id, ct);
         if (entry is null)
@@ -108,7 +166,7 @@ public sealed class TaxRegisterService : ITaxRegisterService
         return new(entry);
     }
 
-    public async Task<TaxRegisterResult<TaxRegisterEntry>> ApproveAsync(int id, int userId, CancellationToken ct)
+    private async Task<TaxRegisterResult<TaxRegisterEntry>> ApproveCoreAsync(int id, int userId, CancellationToken ct)
     {
         var entry = await _db.TaxRegisterEntries.FirstOrDefaultAsync(item => item.Id == id, ct);
         if (entry is null)
@@ -140,7 +198,7 @@ public sealed class TaxRegisterService : ITaxRegisterService
         return new(entry);
     }
 
-    public async Task<TaxRegisterResult<TaxRegisterEntry>> ArchiveAsync(int id, int userId, string? comment, CancellationToken ct)
+    private async Task<TaxRegisterResult<TaxRegisterEntry>> ArchiveCoreAsync(int id, int userId, string? comment, CancellationToken ct)
     {
         var entry = await _db.TaxRegisterEntries.FirstOrDefaultAsync(item => item.Id == id, ct);
         if (entry is null)
@@ -160,7 +218,7 @@ public sealed class TaxRegisterService : ITaxRegisterService
         return new(entry);
     }
 
-    public async Task<TaxRegisterResult<TaxRegisterEntry>> CorrectAsync(int id, string reason, int userId, CancellationToken ct)
+    private async Task<TaxRegisterResult<TaxRegisterEntry>> CorrectCoreAsync(int id, string reason, int userId, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(reason))
         {
@@ -218,7 +276,7 @@ public sealed class TaxRegisterService : ITaxRegisterService
         {
             await _db.SaveChangesAsync(ct);
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException ex) when (IsCorrectionDuplicate(ex))
         {
             // Уникальный индекс по CorrectsEntryId: параллельный запрос уже создал корректировку этой записи.
             _db.Entry(correction).State = EntityState.Detached;
@@ -232,7 +290,7 @@ public sealed class TaxRegisterService : ITaxRegisterService
         return new(correction);
     }
 
-    public async Task<TaxRegisterResult<TaxRegisterYearClose>> CloseYearAsync(int legalEntityId, int year, int userId, CancellationToken ct)
+    private async Task<TaxRegisterResult<TaxRegisterYearClose>> CloseYearCoreAsync(int legalEntityId, int year, int userId, CancellationToken ct)
     {
         if (year < 2000 || year > DateTime.UtcNow.Year)
         {
@@ -365,6 +423,14 @@ public sealed class TaxRegisterService : ITaxRegisterService
         return cell.Contains(';') || cell.Contains('"') ? "\"" + cell.Replace("\"", "\"\"") + "\"" : cell;
     }
 
+    private static bool IsCorrectionDuplicate(DbUpdateException ex) => ex.InnerException switch
+    {
+        Npgsql.PostgresException { SqlState: "23505", ConstraintName: "IX_TaxRegisterEntries_CorrectsEntryId" } => true,
+        Microsoft.Data.Sqlite.SqliteException { SqliteExtendedErrorCode: 2067 } sqlite
+            => sqlite.Message.Contains("TaxRegisterEntries.CorrectsEntryId", StringComparison.Ordinal),
+        _ => false,
+    };
+
     private Task<bool> IsYearClosedAsync(int legalEntityId, int year, CancellationToken ct)
         => _db.TaxRegisterYearCloses.AnyAsync(item => item.LegalEntityId == legalEntityId && item.Year == year, ct);
 
@@ -397,7 +463,10 @@ public sealed class TaxRegisterService : ITaxRegisterService
         var date = input.OperationDate?.Date;
         var amount = input.Amount;
 
-        if (input.BankStatementOperationId is int operationId)
+        if (entry.BankStatementOperationId.HasValue && input.BankStatementOperationId.HasValue && entry.BankStatementOperationId != input.BankStatementOperationId)
+            return ("Банковскую операцию существующей записи менять нельзя.", 409);
+
+        if ((entry.BankStatementOperationId ?? input.BankStatementOperationId) is int operationId)
         {
             var operation = await _db.BankStatementOperations.AsNoTracking()
                 .Where(item => item.Id == operationId)
@@ -436,6 +505,10 @@ public sealed class TaxRegisterService : ITaxRegisterService
             return ("Укажите дату операции.", 400);
         }
 
+        if (date.Value.Year is < 2000 or > 2100)
+            return ("Укажите корректный год операции (2000–2100).", 400);
+
+        if (amount.HasValue) amount = decimal.Round(amount.Value, 2, MidpointRounding.AwayFromZero);
         if (amount is not > 0m || amount > 1_000_000_000_000m)
         {
             return ("Сумма должна быть положительной.", 400);

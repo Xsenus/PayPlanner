@@ -6084,9 +6084,9 @@ export class ApiService {
     return this.request<TaxRegisterBook>(`/tax-register/book?companyId=${companyId}&year=${year}`);
   }
 
-  async getTaxRegisterDrafts(companyId: number, year: number) {
+  async getTaxRegisterDrafts(companyId: number, year: number, page = 1) {
     return this.request<TaxRegisterEntryPage>(
-      `/tax-register/entries?companyId=${companyId}&year=${year}&status=Draft&pageSize=200`,
+      `/tax-register/entries?companyId=${companyId}&year=${year}&status=Draft&pageSize=200&page=${page}`,
     );
   }
 

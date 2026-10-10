@@ -26,6 +26,86 @@ namespace PayPlanner.Api.Tests;
 
 public class NotificationServiceTests
 {
+    [Theory]
+    [InlineData("own", false, false, true, false, false)]
+    [InlineData("own", true, false, true, true, false)]
+    [InlineData("department", false, true, true, true, false)]
+    [InlineData("department", false, false, true, false, false)]
+    [InlineData("all", false, false, true, true, false)]
+    [InlineData("all", false, false, false, false, false)]
+    [InlineData("own", false, false, true, false, true)]
+    [InlineData("own", true, false, true, true, true)]
+    [InlineData("department", false, true, true, true, true)]
+    [InlineData("department", false, false, true, false, true)]
+    [InlineData("all", false, false, true, true, true)]
+    [InlineData("all", false, false, false, false, true)]
+    public async Task SalesRequestTaskNotification_RespectsCurrentRequestScopeAcrossChannels(
+        string scope, bool ownsRequest, bool sameDepartment, bool canView, bool expected, bool envelope)
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "request-owner@example.test");
+        (await db.Roles.SingleAsync(role => role.Id == owner.RoleId)).Name = "privacy-owner";
+        await db.SaveChangesAsync();
+        var recipient = await CreateUserAsync(db, "request-recipient@example.test", chatId: 123456);
+        owner.Department = "Sales";
+        recipient.Department = sameDepartment ? "Sales" : "Other";
+        db.RolePermissions.AddRange(
+            new RolePermission { RoleId = recipient.RoleId, Section = RolePermissionCatalog.Tasks, CanView = true, ViewScope = DataVisibilityScope.All },
+            new RolePermission { RoleId = recipient.RoleId, Section = RolePermissionCatalog.Requests, CanView = canView, ViewScope = scope });
+        var status = new SalesRequestStatus { Key = "privacy", Title = "Privacy" };
+        db.SalesRequestStatuses.Add(status);
+        await db.SaveChangesAsync();
+        var request = new SalesRequest
+        {
+            StatusId = status.Id,
+            ResponsibleUserId = ownsRequest ? recipient.Id : owner.Id,
+            CreatedByUserId = owner.Id,
+            Summary = "Private sales information"
+        };
+        db.SalesRequests.Add(request);
+        await db.SaveChangesAsync();
+        var task = new TaskJournalItem
+        {
+            Title = "Private sales task",
+            SalesRequestId = request.Id,
+            AssigneeUserId = recipient.Id,
+            AuthorUserId = owner.Id,
+            DueAt = DateTime.UtcNow.AddDays(1),
+            ChannelsJson = JsonSerializer.Serialize(new[] { NotificationChannels.InApp, NotificationChannels.Email, NotificationChannels.Telegram })
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+        var email = new RecordingEmailService();
+        var telegram = new RecordingTelegramService();
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(db, email, telegram, realtime, webPush);
+        if (envelope)
+        {
+            var created = await service.NotifyAsync(new NotificationEventEnvelope(recipient.Id, UserNotificationTypes.TaskAssigned,
+                $"request:{request.Id}:privacy", task.Title, task.Title, "task", task.Id, task.Id, Task: task));
+            Assert.Equal(expected, created);
+        }
+        else
+        {
+            var deliveries = await service.NotifyTaskAssignedAsync(task, "Owner", owner.Id);
+            if (!expected) Assert.Empty(deliveries);
+        }
+        if (expected)
+        {
+            Assert.Single(await db.UserNotifications.ToListAsync());
+            Assert.Single(realtime.Notifications);
+        }
+        else
+        {
+            Assert.Empty(await db.UserNotifications.ToListAsync());
+            Assert.Empty(realtime.Notifications);
+            Assert.Empty(webPush.Notifications);
+            Assert.Empty(email.Messages);
+            Assert.Empty(telegram.Messages);
+        }
+    }
+
     [Fact]
     public async Task NotifyPendingRegistrationAsync_LoadsTemplatesOnceForAllAdmins()
     {

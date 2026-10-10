@@ -169,6 +169,13 @@ public class SalesRequestsController : ControllerBase
             return Denied();
         }
 
+        if (!request.ClearSla && request.SlaMinutes.HasValue)
+        {
+            var kind = id.HasValue ? await _db.SalesRequestStatuses.Where(item => item.Id == id.Value).Select(item => item.FinalKind).FirstOrDefaultAsync(ct)
+                : request.FinalKind ?? SalesRequestFinalKinds.None;
+            if (request.SlaMinutes is < 1 or > 60 * 24 * 365 || (kind is not null && kind != SalesRequestFinalKinds.None))
+                return BadRequest(new { message = "Срок этапа задаётся только для рабочего статуса, от 1 минуты до года." });
+        }
         var result = await _service.SaveStatusAsync(id, request.Title, request.FinalKind, request.SortOrder, request.IsActive, ct, request.AutoAdvanceToStatusId, request.ClearAutoAdvance);
         if (result.Ok && (request.SlaMinutes.HasValue || request.ClearSla))
         {
@@ -192,6 +199,8 @@ public class SalesRequestsController : ControllerBase
 
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, MaxPageSize);
+        if ((long)(page - 1) * pageSize > int.MaxValue)
+            return BadRequest(new { message = "Укажите корректную страницу." });
         var query = _db.SalesRequests.AsNoTracking().ApplySalesRequestVisibility(access.Visibility);
 
         if (statusId.HasValue) query = query.Where(item => item.StatusId == statusId.Value);
@@ -320,6 +329,8 @@ public class SalesRequestsController : ControllerBase
 
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, MaxPageSize);
+        if ((long)(page - 1) * pageSize > int.MaxValue || to?.Date == DateTime.MaxValue.Date || (from.HasValue && to.HasValue && from.Value.Date > to.Value.Date))
+            return BadRequest(new { message = "Укажите корректный период и страницу." });
         var visibleRequests = _db.SalesRequests.AsNoTracking().ApplySalesRequestVisibility(access.Visibility).Select(item => item.Id);
         var query = _db.SalesRequestEvents.AsNoTracking().Where(item => visibleRequests.Contains(item.SalesRequestId));
         if (!string.IsNullOrWhiteSpace(kind)) query = query.Where(item => item.Kind == kind);
@@ -341,7 +352,7 @@ public class SalesRequestsController : ControllerBase
             return Denied();
         }
 
-        if (to < from || (to - from).TotalDays > 732)
+        if (to.Date == DateTime.MaxValue.Date || to < from || (to - from).TotalDays > 732)
         {
             return BadRequest(new { message = "Период отчёта должен быть не длиннее двух лет." });
         }

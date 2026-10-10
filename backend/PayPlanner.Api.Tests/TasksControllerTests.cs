@@ -4604,7 +4604,9 @@ public class TasksControllerTests
         var response = await controller.GetTask(task.Id, CancellationToken.None);
 
         Assert.Equal(task.Id, Assert.IsType<TaskJournalItemDto>(Assert.IsType<OkObjectResult>(response.Result).Value).Id);
-        Assert.Single(interceptor.Commands, command => command.Contains("RolePermissions", StringComparison.Ordinal));
+        // Task projections embed the sales-access predicate; count only the live permission lookup.
+        Assert.Single(interceptor.Commands, command => command.Contains("RolePermissions", StringComparison.Ordinal)
+            && !command.Contains("FROM \"TaskJournalItems\"", StringComparison.Ordinal));
         Assert.Empty(db.ChangeTracker.Entries<RolePermission>());
         AssertTaskReadQueriesAreMinimal(interceptor.Commands);
     }

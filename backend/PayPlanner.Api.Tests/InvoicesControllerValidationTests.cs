@@ -15,8 +15,71 @@ namespace PayPlanner.Api.Tests;
 
 public class InvoicesControllerValidationTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Save_RejectsNullLineItemWithoutChangingFinancialData(bool update)
+    {
+        await using var db = await CreateContextAsync();
+        var clientId = await CreateClientAsync(db, "Null line client");
+        var date = new DateTime(2026, 10, 10);
+        if (update) await CreateActiveInvoiceAsync(db, "NULL-LINE", date, clientId);
+        var existingId = update ? (await db.Payments.SingleAsync()).Id : 0;
+        var request = CreateRequest("NULL-LINE", clientId, date);
+        request.Amount = 10m;
+        request.LineItems = [null!, new InvoiceLineItemRequest { Name = "Service", Quantity = 1m, Price = 10m, VatRate = "20" }];
+        var controller = CreateController(db, true, null);
+        var action = update ? await controller.Update(existingId, request, default) : await controller.Create(request, default);
+        var badRequest = Assert.IsType<BadRequestObjectResult>(action.Result);
+        Assert.Contains("Позиция счёта не может быть пустой", System.Text.Json.JsonSerializer.Serialize(badRequest.Value,
+            new System.Text.Json.JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+        db.ChangeTracker.Clear();
+        Assert.Equal(update ? 1 : 0, await db.Payments.CountAsync());
+        if (update) Assert.Equal(10_000m, (await db.Payments.SingleAsync()).Amount);
+        Assert.Empty(await db.InvoiceLineItems.ToListAsync());
+    }
+
+    [Theory]
+    [InlineData("1.5", "10.075")]
+    [InlineData("1.50001", "10")]
+    public async Task Create_RejectsLinePrecisionThatWouldChangeAfterStorage(string quantity, string price)
+    {
+        await using var db = await CreateContextAsync();
+        var clientId = await CreateClientAsync(db, "Precision client");
+        var request = CreateRequest("PRECISION", clientId, new DateTime(2026, 10, 10));
+        var q = decimal.Parse(quantity, System.Globalization.CultureInfo.InvariantCulture);
+        var p = decimal.Parse(price, System.Globalization.CultureInfo.InvariantCulture);
+        request.Amount = Math.Round(q * p, 2, MidpointRounding.AwayFromZero);
+        request.LineItems = [new InvoiceLineItemRequest { Name = "Service", Quantity = q, Price = p, VatRate = "20" }];
+        var action = await CreateController(db, true, null).Create(request, default);
+        Assert.IsType<BadRequestObjectResult>(action.Result);
+        Assert.Empty(await db.Payments.ToListAsync());
+        Assert.Empty(await db.InvoiceLineItems.ToListAsync());
+    }
+
     private const string LongInvoiceLineItemName =
         "Юридические услуги / ОКАЗАНИЕ ЮРИДИЧЕСКИХ УСЛУГ В РАМКАХ ДОГОВОРА № 1-20/03-2026 ОТ 20.03.2026 Г. по вопросу оказания услуг реализации транспортного средства, организации подачи объявлений на площадках в сети интернет, организация просмотра транспортного средства, подготовки договора для продажи транспортного средства LADA VESTA GFL110; идентификационный номер (vin): XTAGFL110NY628724; год выпуска: октябрь 2021; государственный регистрационный номер: Е506ОХ763; номер кузова: XTAGFL110NY628724";
+
+    [Theory]
+    [InlineData("1.5", "10.075")]
+    [InlineData("1.50001", "10")]
+    public async Task Update_RejectsLinePrecisionWithoutChangingExistingInvoice(string quantity, string price)
+    {
+        await using var db = await CreateContextAsync();
+        var clientId = await CreateClientAsync(db, "Precision client");
+        var date = new DateTime(2026, 10, 10);
+        await CreateActiveInvoiceAsync(db, "PRECISION-UPDATE", date, clientId);
+        var invoice = await db.Payments.SingleAsync();
+        var request = CreateRequest("PRECISION-UPDATE", clientId, date);
+        var q = decimal.Parse(quantity, System.Globalization.CultureInfo.InvariantCulture);
+        var p = decimal.Parse(price, System.Globalization.CultureInfo.InvariantCulture);
+        request.Amount = Math.Round(q * p, 2, MidpointRounding.AwayFromZero);
+        request.LineItems = [new InvoiceLineItemRequest { Name = "Service", Quantity = q, Price = p, VatRate = "20" }];
+        Assert.IsType<BadRequestObjectResult>((await CreateController(db, true, null).Update(invoice.Id, request, default)).Result);
+        db.ChangeTracker.Clear();
+        Assert.Equal(10_000m, (await db.Payments.SingleAsync()).Amount);
+        Assert.Empty(await db.InvoiceLineItems.ToListAsync());
+    }
 
     [Fact]
     public async Task Create_IgnoresOrphanInvoiceRecord_WhenCheckingDuplicateNumber()

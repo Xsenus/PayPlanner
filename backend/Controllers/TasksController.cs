@@ -2330,7 +2330,7 @@ public class TasksController : ControllerBase
             return Forbid();
         }
 
-        var task = await ProjectTaskReadItems(_db.TaskJournalItems.ApplyTaskVisibility(access.Visibility)
+        var task = await ProjectTaskReadItems(_db.TaskJournalItems.ApplyTaskVisibility(access.Visibility, _db)
             .AsNoTracking()
             .Where(item => item.Id == id))
             .FirstOrDefaultAsync(ct);
@@ -5720,7 +5720,7 @@ public class TasksController : ControllerBase
         });
 
     private IQueryable<TaskJournalItem> BuildVisibleTaskBaseQuery(TaskAccess access)
-        => _db.TaskJournalItems.ApplyTaskVisibility(access.Visibility);
+        => _db.TaskJournalItems.ApplyTaskVisibility(access.Visibility, _db);
 
     private async Task<SectionAccessContext?> GetTaskReadAccessAsync(CancellationToken ct)
     {

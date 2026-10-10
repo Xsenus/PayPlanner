@@ -880,7 +880,7 @@ public class BackendPermissionMatrixTests
         => section switch
         {
             RolePermissionCatalog.Calendar or RolePermissionCatalog.Tasks =>
-                db.TaskJournalItems.ApplyTaskVisibility(access).AnyAsync(item => item.Id == id),
+                db.TaskJournalItems.ApplyTaskVisibility(access, db).AnyAsync(item => item.Id == id),
             RolePermissionCatalog.LegalEntities =>
                 db.LegalEntities.ApplyLegalEntityVisibility(access).AnyAsync(item => item.Id == id),
             RolePermissionCatalog.Clients =>

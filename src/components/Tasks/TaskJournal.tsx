@@ -2656,7 +2656,7 @@ export function TaskJournal({
   const [boardGroupMode, setBoardGroupMode] = useState<'due' | 'status'>('due');
   const shouldUseCalendarVisibility = viewMode === 'calendar' || initialView === 'calendar';
   const keepsCompletedInCalendar = completedTaskCalendarAction === 'color'
-    && (viewMode === 'calendar' || viewMode === 'timeline' || initialView === 'calendar' || initialView === 'timeline');
+    && (viewMode === 'calendar' || viewMode === 'timeline');
   const shouldUseOfflineCalendar = shouldUseCalendarVisibility
     || viewMode === 'timeline'
     || initialView === 'timeline';

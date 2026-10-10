@@ -89,10 +89,9 @@ public sealed partial class StorageStageCapacityServiceTests : IClassFixture<Pos
             }
             if (scenario == "live") return;
             await StopOwnedWriterAsync();
-            if (scenario is "missing-marker" or "changed-proof")
             {
                 // Process exit and kernel handle rundown are separate events.
-                // Prepare tampering only after the SAME marker can be opened
+                // Recover or prepare tampering only after the SAME marker can be opened
                 // exclusively; do not weaken either live-writer assertion.
                 var quiescentDeadline = DateTime.UtcNow.AddSeconds(5);
                 while (true)

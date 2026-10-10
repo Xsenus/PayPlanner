@@ -651,7 +651,7 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
                 NotificationChannels.Toast,
                 NotificationChannels.WebPush,
             ]),
-            cancellationToken);
+            cancellationToken, task: task);
         var externalRecipientIds = recipientUserIds
             .Where(userId => channels.Any(recipientNotificationChannels[userId].Contains))
             .ToList();
@@ -740,7 +740,7 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
                 NotificationChannels.Toast,
                 NotificationChannels.WebPush,
             ]),
-            cancellationToken);
+            cancellationToken, task: task);
         var externalDeliveryRecipientIds = recipients
             .Where(userId => channels.Any(recipientNotificationChannels[userId].Contains))
             .ToList();
@@ -854,7 +854,7 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
                 NotificationChannels.Toast,
                 NotificationChannels.WebPush,
             ]),
-            cancellationToken);
+            cancellationToken, task: task);
         var changedRecipientNotificationChannels = await ResolveUserNotificationChannelsAsync(
             changedRecipients,
             UserNotificationTypes.TaskChanged,
@@ -863,7 +863,7 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
                 NotificationChannels.Toast,
                 NotificationChannels.WebPush,
             ]),
-            cancellationToken);
+            cancellationToken, task: task);
         var deliveryRecipientIds = currentAssigneeRecipients
             .Where(userId => channels.Any(currentAssigneeNotificationChannels[userId].Contains))
             .Concat(changedRecipients.Where(userId => channels.Any(changedRecipientNotificationChannels[userId].Contains)))
@@ -1070,7 +1070,7 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
             task.AuthorUserId.Value,
             UserNotificationTypes.TaskCompleted,
             [NotificationChannels.Email, NotificationChannels.Telegram],
-            cancellationToken);
+            cancellationToken, task: task);
         return enabledChannels.Count == 0
             ? Array.Empty<NotificationDelivery>()
             : await SendToUserAsync(
@@ -1110,7 +1110,7 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
                 NotificationChannels.Toast,
                 NotificationChannels.WebPush,
             ]),
-            cancellationToken);
+            cancellationToken, task: task);
         var deliveryRecipientIds = recipients
             .Where(userId => channels.Any(recipientNotificationChannels[userId].Contains))
             .ToList();
@@ -3328,7 +3328,7 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
                 NotificationChannels.Toast,
                 NotificationChannels.WebPush,
             ]),
-            cancellationToken);
+            cancellationToken, task: task);
         var templateDefinition = NotificationTemplateCatalog.Find(NotificationTemplateKeys.CaseInactivityControl);
         var templateStorage = templateDefinition is null
             ? new NotificationTemplateStorage()
@@ -3448,7 +3448,7 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
                 NotificationChannels.Toast,
                 NotificationChannels.WebPush,
             ]),
-            cancellationToken);
+            cancellationToken, task: task);
         var templateDefinition = NotificationTemplateCatalog.Find(NotificationTemplateKeys.TaskScheduleConflict);
         var templateStorage = templateDefinition is null
             ? new NotificationTemplateStorage()
@@ -3534,7 +3534,7 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
                 NotificationChannels.Toast,
                 NotificationChannels.WebPush,
             ]),
-            cancellationToken);
+            cancellationToken, task: task);
         var templateDefinition = NotificationTemplateCatalog.Find(NotificationTemplateKeys.TaskApprovalRequested);
         var templateStorage = templateDefinition is null
             ? new NotificationTemplateStorage()
@@ -3631,7 +3631,7 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
                 NotificationChannels.Toast,
                 NotificationChannels.WebPush,
             ]),
-            cancellationToken);
+            cancellationToken, task: task);
         var templateDefinition = NotificationTemplateCatalog.Find(templateKey);
         var templateStorage = templateDefinition is null
             ? new NotificationTemplateStorage()
@@ -3718,7 +3718,7 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
                 NotificationChannels.Toast,
                 NotificationChannels.WebPush,
             ]),
-            cancellationToken);
+            cancellationToken, task: task);
         var templateDefinition = NotificationTemplateCatalog.Find(NotificationTemplateKeys.TaskChanged);
         var templateStorage = templateDefinition is null
             ? new NotificationTemplateStorage()
@@ -3846,7 +3846,7 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
                 NotificationChannels.Toast,
                 NotificationChannels.WebPush,
             ]),
-            cancellationToken);
+            cancellationToken, task: task);
         var templateDefinition = NotificationTemplateCatalog.Find(NotificationTemplateKeys.TaskChanged);
         var templateStorage = templateDefinition is null
             ? new NotificationTemplateStorage()
@@ -3960,7 +3960,7 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
                 NotificationChannels.Toast,
                 NotificationChannels.WebPush,
             ]),
-            cancellationToken);
+            cancellationToken, task: task);
         var templateDefinition = NotificationTemplateCatalog.Find(NotificationTemplateKeys.TaskApprovalOverdue);
         var templateStorage = templateDefinition is null
             ? new NotificationTemplateStorage()
@@ -4063,7 +4063,7 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
                 NotificationChannels.Toast,
                 NotificationChannels.WebPush,
             ]),
-            cancellationToken);
+            cancellationToken, task: task);
         var templateDefinition = NotificationTemplateCatalog.Find(NotificationTemplateKeys.TaskChanged);
         var templateStorage = templateDefinition is null
             ? new NotificationTemplateStorage()
@@ -4148,7 +4148,7 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
                 NotificationChannels.Toast,
                 NotificationChannels.WebPush,
             ]),
-            cancellationToken);
+            cancellationToken, task: task);
         var templateDefinition = NotificationTemplateCatalog.Find(NotificationTemplateKeys.TaskComment);
         var templateStorage = templateDefinition is null
             ? new NotificationTemplateStorage()
@@ -4922,7 +4922,9 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
         var objectType = notificationEvent.ObjectType.Trim().ToLowerInvariant();
         if (objectType == "task" && notificationEvent.Task is not null)
         {
-            return true;
+            return notificationEvent.Task.SalesRequestId is not int requestId
+                || await _context.Users.WithSalesRequestAccess(requestId, _context)
+                    .AnyAsync(user => user.Id == notificationEvent.RecipientUserId, cancellationToken);
         }
 
         return objectType switch
@@ -4933,7 +4935,7 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
                 async (access, ct) => await _context.TaskJournalItems
                     .AsNoTracking()
                     .Where(item => item.Id == objectId)
-                    .ApplyTaskVisibility(access)
+                    .ApplyTaskVisibility(access, _context)
                     .AnyAsync(ct),
                 cancellationToken),
             "payment" => await CanRecipientSeeDataScopedObjectAsync(
@@ -5070,8 +5072,13 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
         int recipientUserId,
         string type,
         IEnumerable<string> channels,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TaskJournalItem? task = null)
     {
+        if (task?.SalesRequestId is int requestId
+            && !await _context.Users.WithSalesRequestAccess(requestId, _context).AnyAsync(user => user.Id == recipientUserId, cancellationToken))
+            return [];
+
         var normalizedChannels = NormalizeChannels(channels);
         if (normalizedChannels.Count == 0)
         {
@@ -5107,7 +5114,8 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
         IEnumerable<int> recipientUserIds,
         string type,
         IEnumerable<string> channels,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TaskJournalItem? task = null)
     {
         var userIds = recipientUserIds
             .Where(userId => userId > 0)
@@ -5130,6 +5138,15 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
             return userIds.ToDictionary(
                 userId => userId,
                 _ => (IReadOnlySet<string>)new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        }
+
+        HashSet<int>? requestRecipients = null;
+        if (task?.SalesRequestId is int requestId)
+        {
+            requestRecipients = (await _context.Users.Where(user => userIds.Contains(user.Id))
+                .WithSalesRequestAccess(requestId, _context).Select(user => user.Id).ToListAsync(cancellationToken)).ToHashSet();
+            if (requestRecipients.Count == 0)
+                return userIds.ToDictionary(userId => userId, _ => (IReadOnlySet<string>)new HashSet<string>(StringComparer.OrdinalIgnoreCase));
         }
 
         var settingRows = await _context.UserSettings
@@ -5216,6 +5233,7 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
         return userIds.ToDictionary(
             userId => userId,
             userId => (IReadOnlySet<string>)normalizedChannels
+                .Where(_ => requestRecipients is null || requestRecipients.Contains(userId))
                 .Where(channel => IsChannelAvailableForNotificationType(type, channel))
                 .Where(channel => channel != NotificationChannels.Sms
                                   || (!smsPolicy.EmergencyStop && smsPolicy.IsEventEnabled(type)))

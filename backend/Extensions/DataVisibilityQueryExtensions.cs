@@ -1,10 +1,23 @@
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Data;
 
 namespace PayPlanner.Api.Extensions;
 
 public static class DataVisibilityQueryExtensions
 {
+    // Keep assignment and every notification channel within the same live request scope as task reads.
+    public static IQueryable<User> WithSalesRequestAccess(this IQueryable<User> users, int requestId, PaymentContext db)
+        => users.Where(user => user.IsActive && user.IsApproved && user.Role != null
+            && db.SalesRequests.Any(request => request.Id == requestId
+                && (user.Role.Name.ToLower() == "admin" || user.Role.Permissions.Any(permission => permission.Section == RolePermissionCatalog.Requests
+                    && permission.CanView && (permission.ViewScope == DataVisibilityScope.All
+                        || request.ResponsibleUserId == user.Id || request.CreatedByUserId == user.Id
+                        || (permission.ViewScope == DataVisibilityScope.Department && db.Users.Any(member => member.IsActive
+                            && ((user.DepartmentId != null && member.DepartmentId == user.DepartmentId)
+                                || (user.Department != null && user.Department.Trim() != "" && member.Department == user.Department.Trim()))
+                            && (member.Id == request.ResponsibleUserId || member.Id == request.CreatedByUserId))))))));
+
     public static IQueryable<Client> ApplyClientVisibility(
         this IQueryable<Client> query,
         DataVisibilityAccess? access)
@@ -66,9 +79,22 @@ public static class DataVisibilityQueryExtensions
 
     public static IQueryable<TaskJournalItem> ApplyTaskVisibility(
         this IQueryable<TaskJournalItem> query,
-        DataVisibilityAccess? access)
+        DataVisibilityAccess? access,
+        PaymentContext db)
     {
         if (access is null) return query.Where(_ => false);
+        if (!access.IsAdmin)
+        {
+            // A broad task/calendar permission must not disclose the separate sales section.
+            query = query.Where(task => task.SalesRequestId == null || db.Users.Any(user => user.Id == access.UserId && user.IsActive && user.IsApproved
+                && user.Role != null && user.Role.Permissions.Any(permission => permission.Section == RolePermissionCatalog.Requests && permission.CanView
+                    && (permission.ViewScope == DataVisibilityScope.All || db.SalesRequests.Any(request => request.Id == task.SalesRequestId
+                        && (request.ResponsibleUserId == user.Id || request.CreatedByUserId == user.Id
+                            || (permission.ViewScope == DataVisibilityScope.Department && db.Users.Any(member => member.IsActive
+                                && ((user.DepartmentId != null && member.DepartmentId == user.DepartmentId)
+                                    || (user.Department != null && user.Department.Trim() != "" && member.Department == user.Department.Trim()))
+                                && (member.Id == request.ResponsibleUserId || member.Id == request.CreatedByUserId)))))))));
+        }
         if (access.SeesAll) return query;
 
         var visibleUserIds = access.VisibleUserIds.ToArray();

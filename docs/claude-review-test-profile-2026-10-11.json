@@ -1,0 +1,1730 @@
+{
+  "SourceRevision": "9e70ca626ddf51c097f7b1054cd2060dbebcdcc7",
+  "ManifestSha256": "51C307F2A3E7DCC9F26A6E996558EC6B118F5CE6875F04F1CD96D2FE28F84BE9",
+  "QualifiedCases": 7028,
+  "Scope": "Local review of uncommitted changes; not a CI artifact of the later commit",
+  "ElapsedNote": "Class seconds are summed TRX test elapsed durations, not CPU time or parallel wall time",
+  "Cases": 7028,
+  "WallSeconds": 11762,
+  "CaseElapsedSeconds": 23125.9,
+  "ConcurrentHosts": 2,
+  "ProcessorCountPerHost": 1,
+  "Shards": [
+    {
+      "Shard": 0,
+      "StartedUtc": "2026-10-10T19:57:43.7347162Z",
+      "FinishedUtc": "2026-10-10T21:38:48.0127339Z",
+      "Seconds": 6065
+    },
+    {
+      "Shard": 1,
+      "StartedUtc": "2026-10-10T19:57:55.1577425Z",
+      "FinishedUtc": "2026-10-10T21:36:22.2638332Z",
+      "Seconds": 5907
+    },
+    {
+      "Shard": 2,
+      "StartedUtc": "2026-10-10T21:38:49.1851911Z",
+      "FinishedUtc": "2026-10-10T23:07:53.1842401Z",
+      "Seconds": 5344
+    },
+    {
+      "Shard": 3,
+      "StartedUtc": "2026-10-10T21:36:24.4146822Z",
+      "FinishedUtc": "2026-10-10T23:13:45.3553773Z",
+      "Seconds": 5841
+    }
+  ],
+  "ClassCosts": [
+    {
+      "Class": "PayPlanner.Api.Tests.ManagedGeneratedCaseDocumentTests",
+      "Cases": 432,
+      "Seconds": 5473.9
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ManagedCaseDocumentUploadServiceTests",
+      "Cases": 455,
+      "Seconds": 2969.4
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ManagedCaseDocumentWireTests",
+      "Cases": 65,
+      "Seconds": 2708.9
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.InternalChatControllerTests",
+      "Cases": 308,
+      "Seconds": 2134.8
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StorageStageCapacityServiceTests",
+      "Cases": 295,
+      "Seconds": 1504
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CaseDocumentRetirementBrowserTests",
+      "Cases": 16,
+      "Seconds": 812
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ElectronicSignaturePreparationRaceTests",
+      "Cases": 47,
+      "Seconds": 751
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.TaskFileQueueWireIntegrationTests",
+      "Cases": 13,
+      "Seconds": 544.7
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CasesV2ControllerTests",
+      "Cases": 292,
+      "Seconds": 384.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CourtDocumentSourceRegistryTests",
+      "Cases": 21,
+      "Seconds": 371.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.LegacyStorageBackfillTests",
+      "Cases": 84,
+      "Seconds": 345.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StorageStagePhysicalSizeTests",
+      "Cases": 50,
+      "Seconds": 300.9
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.InternalChatManagedWireTests",
+      "Cases": 6,
+      "Seconds": 274.4
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.MessengerSnapshotPreparationRaceTests",
+      "Cases": 26,
+      "Seconds": 263.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StorageReconciliationPostgreSqlTests",
+      "Cases": 9,
+      "Seconds": 190.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DatabaseBackupServiceS3Tests",
+      "Cases": 173,
+      "Seconds": 188.6
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DatabaseRestoreDrillEndToEndPostgreSqlTests",
+      "Cases": 14,
+      "Seconds": 178.6
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.PostgreSqlMigratedTemplateTests",
+      "Cases": 14,
+      "Seconds": 151.9
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SqliteMigratedTemplateTests",
+      "Cases": 15,
+      "Seconds": 131.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.TasksControllerTests",
+      "Cases": 329,
+      "Seconds": 109
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DatabaseRestoreManagedReplicasTests",
+      "Cases": 28,
+      "Seconds": 101.4
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.MessengerDocumentPostgreSqlTests",
+      "Cases": 4,
+      "Seconds": 101.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SyntheticWritableBackendProcessTests",
+      "Cases": 3,
+      "Seconds": 97.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StorageCorruptRepairWireTests",
+      "Cases": 5,
+      "Seconds": 92.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ElectronicSignaturePostgreSqlTests",
+      "Cases": 4,
+      "Seconds": 87.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ManagedTaskFilePostgreSqlTests",
+      "Cases": 1,
+      "Seconds": 86.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ElectronicSignatureServiceTests",
+      "Cases": 161,
+      "Seconds": 78.4
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ClaudeBranchRegressionTests",
+      "Cases": 9,
+      "Seconds": 77.4
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StorageStageWriterRecoveryWireTests",
+      "Cases": 3,
+      "Seconds": 77
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CourtDeadlineSourceIdentityMigrationTests",
+      "Cases": 6,
+      "Seconds": 75.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StorageCapacityReservationMigrationTests",
+      "Cases": 5,
+      "Seconds": 73.8
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ClientCaseFinalReportPostgreSqlTests",
+      "Cases": 2,
+      "Seconds": 68.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StorageOperationProcessorTests",
+      "Cases": 89,
+      "Seconds": 68.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DatabaseBackupSnapshotInventoryTests",
+      "Cases": 23,
+      "Seconds": 67.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StorageOperationLeaseTests",
+      "Cases": 17,
+      "Seconds": 66.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StorageStageReleasedMarkerWireTests",
+      "Cases": 2,
+      "Seconds": 57.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StorageStageRecoveryWireTests",
+      "Cases": 2,
+      "Seconds": 56
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.TaskBillingConcurrencyTests",
+      "Cases": 10,
+      "Seconds": 54
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CancelledInvoiceBillingMigrationTests",
+      "Cases": 5,
+      "Seconds": 52.6
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.LegacyStorageBackfillCliTests",
+      "Cases": 2,
+      "Seconds": 51.8
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StorageProductBindingMigrationTests",
+      "Cases": 4,
+      "Seconds": 51.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.NotificationServiceTests",
+      "Cases": 197,
+      "Seconds": 51
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.InternalChatSendRequestMigrationTests",
+      "Cases": 4,
+      "Seconds": 50.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SudrfCourtSummaryMigrationTests",
+      "Cases": 5,
+      "Seconds": 50.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DatabaseBackupCatalogMigrationTests",
+      "Cases": 7,
+      "Seconds": 49.9
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CaseWritSubmissionMigrationTests",
+      "Cases": 3,
+      "Seconds": 49.7
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CaseHearingPreparationMigrationTests",
+      "Cases": 5,
+      "Seconds": 49.6
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CaseDocumentNotificationDispatchMigrationTests",
+      "Cases": 4,
+      "Seconds": 49.4
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ManagedTaskFileUploadServiceTests",
+      "Cases": 102,
+      "Seconds": 49.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CaseCourtRecoveryMigrationTests",
+      "Cases": 5,
+      "Seconds": 47.8
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StorageUploadProductContextMigrationTests",
+      "Cases": 4,
+      "Seconds": 45.6
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CasePositionTemplateMigrationTests",
+      "Cases": 5,
+      "Seconds": 44.9
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.MessengerDocumentDeliveryServiceTests",
+      "Cases": 98,
+      "Seconds": 44.6
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StorageCasePublicationQueuePostgresTests",
+      "Cases": 2,
+      "Seconds": 38.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StorageReconciliationPagingTests",
+      "Cases": 20,
+      "Seconds": 35.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.BackendPermissionMatrixTests",
+      "Cases": 137,
+      "Seconds": 32.7
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ProductStorageReaderTests",
+      "Cases": 38,
+      "Seconds": 32.6
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StorageObjectServiceTests",
+      "Cases": 60,
+      "Seconds": 31.7
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CourtSyncDatabaseIntegrationTests",
+      "Cases": 2,
+      "Seconds": 31.4
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SalesRequestTests",
+      "Cases": 33,
+      "Seconds": 29.6
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.AppealComplaintFiledByMigrationTests",
+      "Cases": 3,
+      "Seconds": 24.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ManagedProfilePhotoPostgreSqlTests",
+      "Cases": 1,
+      "Seconds": 23.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DatabaseAdminControllerSpreadsheetImportTests",
+      "Cases": 20,
+      "Seconds": 22.9
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CaseWritMilestoneMigrationTests",
+      "Cases": 3,
+      "Seconds": 22.8
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.InvoiceDocumentTemplateTests",
+      "Cases": 69,
+      "Seconds": 22.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.AuthControllerSecurityTests",
+      "Cases": 16,
+      "Seconds": 22.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CasesRegistryPostgreSqlTests",
+      "Cases": 1,
+      "Seconds": 22.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ActsControllerTests",
+      "Cases": 84,
+      "Seconds": 22.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ClientCaseFinalReportMigrationTests",
+      "Cases": 3,
+      "Seconds": 20.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ClientPassportControllerTests",
+      "Cases": 8,
+      "Seconds": 19.8
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.NextHearingConfirmationMigrationTests",
+      "Cases": 3,
+      "Seconds": 19.6
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests",
+      "Cases": 45,
+      "Seconds": 18.8
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StorageCasePublicationQueueWireTests",
+      "Cases": 1,
+      "Seconds": 18.4
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CasePositionReviewMigrationTests",
+      "Cases": 3,
+      "Seconds": 18.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ContractsControllerTests",
+      "Cases": 58,
+      "Seconds": 18.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DataVisibilityServiceTests",
+      "Cases": 22,
+      "Seconds": 17.7
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ObjectAuditControllerTests",
+      "Cases": 7,
+      "Seconds": 17.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ClientReferenceDataControllerTests",
+      "Cases": 5,
+      "Seconds": 16.9
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ExternalAuthControllerSecurityTests",
+      "Cases": 8,
+      "Seconds": 16.9
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StorageAdminRetryTests",
+      "Cases": 10,
+      "Seconds": 15.8
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.OutboxLeaseConcurrencyTests",
+      "Cases": 1,
+      "Seconds": 15.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.FinancialConcurrencyTests",
+      "Cases": 1,
+      "Seconds": 15.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ClientBirthdayTaskSchedulerServiceTests",
+      "Cases": 9,
+      "Seconds": 14.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.InvoicesControllerCrudTests",
+      "Cases": 49,
+      "Seconds": 14.4
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DadataLegalEntityEnrichmentServiceTests",
+      "Cases": 20,
+      "Seconds": 14.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.InvoicesControllerValidationTests",
+      "Cases": 53,
+      "Seconds": 13.8
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SystemJobsControllerTests",
+      "Cases": 37,
+      "Seconds": 13.4
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.YandexDiskServiceTests",
+      "Cases": 58,
+      "Seconds": 12.8
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.InvoicesControllerInternalCoverageTests",
+      "Cases": 48,
+      "Seconds": 12.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.InternalChatNoReplyPostgreSqlTests",
+      "Cases": 1,
+      "Seconds": 12.4
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ClientPassportEncryptionMigrationTests",
+      "Cases": 1,
+      "Seconds": 12.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StickyNotesControllerTests",
+      "Cases": 34,
+      "Seconds": 11.9
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SqliteMigrationSmokeTests",
+      "Cases": 1,
+      "Seconds": 11
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.MoneyOperationsControllerTests",
+      "Cases": 99,
+      "Seconds": 10.8
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.NotificationDeliveryMigrationTests",
+      "Cases": 2,
+      "Seconds": 10.7
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests",
+      "Cases": 37,
+      "Seconds": 10.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ClientsControllerTests",
+      "Cases": 34,
+      "Seconds": 10.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CourtSyncHealthMigrationTests",
+      "Cases": 2,
+      "Seconds": 10.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.InvoicesControllerCoverageTests",
+      "Cases": 37,
+      "Seconds": 10
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ContactsControllerTests",
+      "Cases": 32,
+      "Seconds": 9.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StorageCatalogMigrationTests",
+      "Cases": 3,
+      "Seconds": 9.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DatabaseBackupPostgreSqlCancellationTests",
+      "Cases": 1,
+      "Seconds": 9.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.LegalEntitiesControllerTests",
+      "Cases": 33,
+      "Seconds": 9.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ReportsControllerTests",
+      "Cases": 95,
+      "Seconds": 8.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.PaymentsControllerTests",
+      "Cases": 125,
+      "Seconds": 8.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CashOrdersControllerTests",
+      "Cases": 23,
+      "Seconds": 7.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.YandexDiskNativeWireTests",
+      "Cases": 23,
+      "Seconds": 7.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.NotificationInboxControllerTests",
+      "Cases": 17,
+      "Seconds": 7
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ProductStorageBindingServiceTests",
+      "Cases": 15,
+      "Seconds": 6.7
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.YandexDiskControllerTests",
+      "Cases": 28,
+      "Seconds": 6.6
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.LegalEntitiesControllerCoverageTests",
+      "Cases": 23,
+      "Seconds": 6.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SpreadsheetImportServiceTests",
+      "Cases": 21,
+      "Seconds": 6.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.TaskFilePublicationAuthorizationServiceTests",
+      "Cases": 28,
+      "Seconds": 6
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.WebPushNotificationServiceTests",
+      "Cases": 21,
+      "Seconds": 5.8
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.AccountsControllerTests",
+      "Cases": 21,
+      "Seconds": 5.8
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.MaxOutboxServiceTests",
+      "Cases": 19,
+      "Seconds": 5.6
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.BankSyncServiceTests",
+      "Cases": 22,
+      "Seconds": 5.4
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.NavigationSettingsSeedServiceTests",
+      "Cases": 3,
+      "Seconds": 5.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.AppVersionControllerTests",
+      "Cases": 21,
+      "Seconds": 5.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DeleteBehaviorContractTests",
+      "Cases": 12,
+      "Seconds": 5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.UserActivityAuditCancellationTests",
+      "Cases": 4,
+      "Seconds": 5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SudrfCourtSyncServiceTests",
+      "Cases": 37,
+      "Seconds": 4.7
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StorageAdminHealthTests",
+      "Cases": 22,
+      "Seconds": 4.6
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.InvoicePaymentConsistencyTests",
+      "Cases": 13,
+      "Seconds": 4.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.TaxRegisterServiceTests",
+      "Cases": 15,
+      "Seconds": 4.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ClientCaseCourtSyncSchedulerServiceTests",
+      "Cases": 6,
+      "Seconds": 4.4
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DatabaseImportServiceTests",
+      "Cases": 2,
+      "Seconds": 4.4
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.NotificationCreationInventoryTests",
+      "Cases": 1,
+      "Seconds": 4.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.BatchOperationAuditCoverageTests",
+      "Cases": 1,
+      "Seconds": 4.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SpreadsheetImportServiceOneCXmlTests",
+      "Cases": 9,
+      "Seconds": 4.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DatabaseBackupSnapshotSessionTests",
+      "Cases": 4,
+      "Seconds": 4.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StorageStageMarkerMaintenanceTests",
+      "Cases": 17,
+      "Seconds": 4.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ProviderSpecificSqlTests",
+      "Cases": 3,
+      "Seconds": 3.9
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.PowerOfAttorneyControllerTests",
+      "Cases": 2,
+      "Seconds": 3.8
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.AdminUsersControllerTests",
+      "Cases": 2,
+      "Seconds": 3.8
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.MaxWebhookServiceTests",
+      "Cases": 8,
+      "Seconds": 3.7
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DatabaseRestoreDrillPostgreSqlTests",
+      "Cases": 1,
+      "Seconds": 3.7
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ExternalWorkOrderApprovalServiceTests",
+      "Cases": 9,
+      "Seconds": 3.6
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ManagedProfilePhotoUploadServiceTests",
+      "Cases": 10,
+      "Seconds": 3.6
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ClientsControllerCoverageTests",
+      "Cases": 12,
+      "Seconds": 3.4
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.AwsS3MultipartUploadTests",
+      "Cases": 12,
+      "Seconds": 3.4
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.AppFeatureFlagsTests",
+      "Cases": 17,
+      "Seconds": 3.4
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DocumentWorkflowStatusTests",
+      "Cases": 6,
+      "Seconds": 3.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.RestoredRuntimeDataProtectionTests",
+      "Cases": 23,
+      "Seconds": 3.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ManagedProfilePhotoMiddlewareTests",
+      "Cases": 10,
+      "Seconds": 3.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.RolePermissionsAuditTests",
+      "Cases": 12,
+      "Seconds": 3.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ClientPortalServiceTests",
+      "Cases": 9,
+      "Seconds": 3.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.AuthServiceUserCompanyAccessTests",
+      "Cases": 9,
+      "Seconds": 3.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CompanyBranchesControllerTests",
+      "Cases": 11,
+      "Seconds": 3.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SeedDataServiceTests",
+      "Cases": 4,
+      "Seconds": 3.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.PaymentStatusUpdaterTests",
+      "Cases": 3,
+      "Seconds": 3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ProfileControllerTests",
+      "Cases": 12,
+      "Seconds": 3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CaseProceduralDeadlineReminderNotificationServiceTests",
+      "Cases": 7,
+      "Seconds": 2.9
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.InvoicesControllerListTests",
+      "Cases": 8,
+      "Seconds": 2.6
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CasesControllerTests",
+      "Cases": 9,
+      "Seconds": 2.6
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.EfWarningDiagnosticsTests",
+      "Cases": 2,
+      "Seconds": 2.4
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.BankConnectionsControllerTests",
+      "Cases": 6,
+      "Seconds": 2.4
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.S3StorageServiceTests",
+      "Cases": 15,
+      "Seconds": 2.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.S3StorageControllerTests",
+      "Cases": 9,
+      "Seconds": 2.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.PaymentContextAuditTests",
+      "Cases": 10,
+      "Seconds": 2.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.VerifiedStorageReadLoadTests",
+      "Cases": 2,
+      "Seconds": 2.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.UserActivityControllerOnlineTests",
+      "Cases": 8,
+      "Seconds": 2.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.PushSubscriptionsControllerTests",
+      "Cases": 7,
+      "Seconds": 2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.LoopbackS3EndpointTests",
+      "Cases": 10,
+      "Seconds": 1.9
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.NotesHubTests",
+      "Cases": 7,
+      "Seconds": 1.8
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SpreadsheetImportServiceImportModesTests",
+      "Cases": 4,
+      "Seconds": 1.8
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.TelegramNotificationServiceHttpErrorTests",
+      "Cases": 8,
+      "Seconds": 1.7
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.NavigationSettingsControllerTests",
+      "Cases": 6,
+      "Seconds": 1.7
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DatabaseBackupManagedArchiveTests",
+      "Cases": 34,
+      "Seconds": 1.7
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ExternalCalendarTaskSyncOutboxServiceTests",
+      "Cases": 3,
+      "Seconds": 1.6
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CasesV1ControllerTests",
+      "Cases": 4,
+      "Seconds": 1.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SmsDeliveryStatusReconciliationServiceTests",
+      "Cases": 6,
+      "Seconds": 1.4
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ExpenseInvoiceCaseBackfillServiceTests",
+      "Cases": 5,
+      "Seconds": 1.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.TestShardCoverageTests",
+      "Cases": 44,
+      "Seconds": 1.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DocumentSellerServiceTests",
+      "Cases": 6,
+      "Seconds": 1.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ClientsControllerInternalCoverageTests",
+      "Cases": 8,
+      "Seconds": 1.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ClientPassportEncryptionDualWriteTests",
+      "Cases": 5,
+      "Seconds": 1.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.LegalEntitiesControllerInternalCoverageTests",
+      "Cases": 10,
+      "Seconds": 1.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.TaskContractorPaymentBackfillServiceTests",
+      "Cases": 4,
+      "Seconds": 1.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.LocalStorageProviderTests",
+      "Cases": 14,
+      "Seconds": 1.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.AppearanceSettingsControllerTests",
+      "Cases": 5,
+      "Seconds": 1.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.BanksControllerTests",
+      "Cases": 4,
+      "Seconds": 1.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.UserSettingsControllerTests",
+      "Cases": 5,
+      "Seconds": 1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ClientPassportEncryptionBackfillServiceTests",
+      "Cases": 4,
+      "Seconds": 1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StatsSummaryServiceTests",
+      "Cases": 4,
+      "Seconds": 1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.RussianSmsProviderTests",
+      "Cases": 11,
+      "Seconds": 0.9
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ExternalCalendarSyncCoordinatorTests",
+      "Cases": 7,
+      "Seconds": 0.9
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.UsersControllerTests",
+      "Cases": 3,
+      "Seconds": 0.8
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.FormRequirementsServiceTests",
+      "Cases": 3,
+      "Seconds": 0.8
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ContractExpirationNotificationServiceTests",
+      "Cases": 2,
+      "Seconds": 0.8
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.InvoiceDeletionTests",
+      "Cases": 3,
+      "Seconds": 0.8
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StorageCasePublicationQueueReaderTests",
+      "Cases": 3,
+      "Seconds": 0.8
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DadataIntegrationSettingsControllerTests",
+      "Cases": 3,
+      "Seconds": 0.8
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.AuthProvidersAdminControllerTests",
+      "Cases": 2,
+      "Seconds": 0.7
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.OwnCompaniesControllerTests",
+      "Cases": 2,
+      "Seconds": 0.7
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ActSellerEndpointTests",
+      "Cases": 1,
+      "Seconds": 0.7
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StickyNoteReminderMigrationTests",
+      "Cases": 2,
+      "Seconds": 0.7
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.RestoredRuntimeFieldEncryptionTests",
+      "Cases": 17,
+      "Seconds": 0.6
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.MaxMessengerServiceTests",
+      "Cases": 3,
+      "Seconds": 0.6
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.TimezoneDictionaryCatalogTests",
+      "Cases": 2,
+      "Seconds": 0.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DictionariesAdminServiceTests",
+      "Cases": 5,
+      "Seconds": 0.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DatabaseBackupInventoryReaderTests",
+      "Cases": 23,
+      "Seconds": 0.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.FormRequirementsControllerTests",
+      "Cases": 2,
+      "Seconds": 0.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.LegalFeatureFlagCiGateTests",
+      "Cases": 11,
+      "Seconds": 0.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DatabaseRestoreRuntimeNotificationIsolationTests",
+      "Cases": 8,
+      "Seconds": 0.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CountryDictionaryCatalogTests",
+      "Cases": 2,
+      "Seconds": 0.5
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CaseNotificationInventoryTests",
+      "Cases": 4,
+      "Seconds": 0.4
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CourtSyncMetricsRollupServiceTests",
+      "Cases": 5,
+      "Seconds": 0.4
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DatabaseBackupFileLayoutTests",
+      "Cases": 29,
+      "Seconds": 0.4
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SudrfCourtContractFixtureTests",
+      "Cases": 5,
+      "Seconds": 0.4
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.LineItemVatPersistenceTests",
+      "Cases": 2,
+      "Seconds": 0.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DatabaseBackupNativeBindingsTests",
+      "Cases": 25,
+      "Seconds": 0.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CaseInactivityAutomationQueryTests",
+      "Cases": 1,
+      "Seconds": 0.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CaseDocumentTemplateCatalogTests",
+      "Cases": 9,
+      "Seconds": 0.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CalendarTimeZoneHelperTests",
+      "Cases": 8,
+      "Seconds": 0.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.InvoicesControllerNotificationOptimizationTests",
+      "Cases": 1,
+      "Seconds": 0.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DatabaseBackupFileBindingResolverTests",
+      "Cases": 45,
+      "Seconds": 0.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.RestoredDataProtectionRecoveryTests",
+      "Cases": 18,
+      "Seconds": 0.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DatabaseBackupInventoryScannerTests",
+      "Cases": 7,
+      "Seconds": 0.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.PaymentSummaryQueryTests",
+      "Cases": 1,
+      "Seconds": 0.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.VerifiedSignatureSnapshotTests",
+      "Cases": 8,
+      "Seconds": 0.3
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.FinancialNotificationInventoryTests",
+      "Cases": 4,
+      "Seconds": 0.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SyntheticYandexHostingActivationTests",
+      "Cases": 17,
+      "Seconds": 0.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.RestoredRuntimeDatabaseIdentityTests",
+      "Cases": 10,
+      "Seconds": 0.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.PackageMetadataTests",
+      "Cases": 3,
+      "Seconds": 0.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CalendarNotificationInventoryTests",
+      "Cases": 2,
+      "Seconds": 0.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SqliteTestContextFactoryTests",
+      "Cases": 2,
+      "Seconds": 0.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StorageStageFileIdentityTests",
+      "Cases": 5,
+      "Seconds": 0.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.LineItemVatRenderingTests",
+      "Cases": 6,
+      "Seconds": 0.2
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.LegacyLocalStorageProviderAliasTests",
+      "Cases": 5,
+      "Seconds": 0.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.HostedServiceLifecycleCoverageTests",
+      "Cases": 2,
+      "Seconds": 0.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StartupDataMaintenanceObservabilityTests",
+      "Cases": 1,
+      "Seconds": 0.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DatabaseConnectionOperationTests",
+      "Cases": 5,
+      "Seconds": 0.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.AnonymousIntegrationSecurityTests",
+      "Cases": 3,
+      "Seconds": 0.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ProductionLoggingConfigurationTests",
+      "Cases": 2,
+      "Seconds": 0.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SlowRequestLoggingMiddlewareTests",
+      "Cases": 3,
+      "Seconds": 0.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SlowDbCommandInterceptorTests",
+      "Cases": 3,
+      "Seconds": 0.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ProductionTlsResponsibilityTests",
+      "Cases": 4,
+      "Seconds": 0.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CurrentUserClaimsTransformationTests",
+      "Cases": 8,
+      "Seconds": 0.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.InvoiceStandardWordDocumentRendererTests",
+      "Cases": 2,
+      "Seconds": 0.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SmsProviderResilienceExecutorTests",
+      "Cases": 9,
+      "Seconds": 0.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.TaskInactivityControlMigrationTests",
+      "Cases": 1,
+      "Seconds": 0.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.PublicAccessSecurityTests",
+      "Cases": 2,
+      "Seconds": 0.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CompanyRequisitesResolverTests",
+      "Cases": 6,
+      "Seconds": 0.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.OwnedTaskReadDiagnosticsTests",
+      "Cases": 31,
+      "Seconds": 0.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ActWordDocumentRendererTests",
+      "Cases": 2,
+      "Seconds": 0.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CashOrderWordDocumentRendererTests",
+      "Cases": 2,
+      "Seconds": 0.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.PaymentsControllerNotificationOptimizationTests",
+      "Cases": 2,
+      "Seconds": 0.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DocumentationProcessTests",
+      "Cases": 4,
+      "Seconds": 0.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.RestoredRuntimeIsolationTests",
+      "Cases": 15,
+      "Seconds": 0.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CourtSyncLoggingSafetyTests",
+      "Cases": 2,
+      "Seconds": 0.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DatabaseBackupArchiveHashTests",
+      "Cases": 15,
+      "Seconds": 0.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ExternalCalendarCommentBlockServiceTests",
+      "Cases": 6,
+      "Seconds": 0.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.RestoredConnectionDiagnosticsTests",
+      "Cases": 51,
+      "Seconds": 0.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CorsPolicyConfigurationTests",
+      "Cases": 4,
+      "Seconds": 0.1
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ActJournalMigrationTests",
+      "Cases": 1,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StorageStageFileObservationTests",
+      "Cases": 4,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ActsControllerInternalCoverageTests",
+      "Cases": 1,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StorageStageRootIdentityTests",
+      "Cases": 6,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DatabaseBackupSetStateEvaluatorTests",
+      "Cases": 10,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DataVisibilityQueryExtensionsTests",
+      "Cases": 5,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.InvoiceLineItemStorageTests",
+      "Cases": 3,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StorageStageFileReceiptTests",
+      "Cases": 14,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.AuthSessionMigrationTests",
+      "Cases": 1,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ApiErrorContractTests",
+      "Cases": 4,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.InlineImageDataUrlValidatorTests",
+      "Cases": 13,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DatabaseRestoreDrillSqliteTests",
+      "Cases": 3,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.UploadValidationHelperTests",
+      "Cases": 9,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.UniqueIndexBusinessScopeTests",
+      "Cases": 6,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.TochkaAccountStatusTests",
+      "Cases": 13,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.UserActivityLoggingFilterTests",
+      "Cases": 1,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.FieldEncryptionServiceTests",
+      "Cases": 8,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.UserPhotoStoragePathsTests",
+      "Cases": 5,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.TestRepositoryTests",
+      "Cases": 7,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.FileUploadLimitsDocumentationTests",
+      "Cases": 1,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.VatCalculatorTests",
+      "Cases": 27,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.TaskRecurrencePolicyTests",
+      "Cases": 6,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.AdminAccessInventoryTests",
+      "Cases": 11,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.InvoiceLineItemStorageVatTests",
+      "Cases": 1,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.FinancialPrecisionModelTests",
+      "Cases": 4,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.AnonymousEndpointProtectionCoverageTests",
+      "Cases": 1,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ExclusiveUploadFileWriterTests",
+      "Cases": 4,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DatabaseProviderResolverTests",
+      "Cases": 3,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SudrfCourtRequestPolicyTests",
+      "Cases": 4,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.DatabaseRestoreNativeCapacityTests",
+      "Cases": 4,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StorageWorkerAvailabilityTests",
+      "Cases": 1,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.TaskJournalMigrationTests",
+      "Cases": 2,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.PaymentAdvanceReviewServiceTests",
+      "Cases": 16,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StickyNoteNotificationInventoryTests",
+      "Cases": 4,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StorageProviderHealthTrackerTests",
+      "Cases": 2,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.RussianRequisitesValidatorTests",
+      "Cases": 22,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.RussianPhoneNumberCanonicalizerTests",
+      "Cases": 8,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.RestoredRuntimeRequestGuardTests",
+      "Cases": 26,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.RestoredRuntimeLaunchSafetyTests",
+      "Cases": 24,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.RestoredRuntimeAuthenticationTests",
+      "Cases": 6,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.RestoredBackendLogCaptureTests",
+      "Cases": 6,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ResponseCompressionTests",
+      "Cases": 2,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ConnectedStorageLocatorTests",
+      "Cases": 8,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ReportQueryPeriodResolverTests",
+      "Cases": 5,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.QueryExtensionsSortTests",
+      "Cases": 4,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CompanyBankAccountListTests",
+      "Cases": 10,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ClientPortalControllerSecurityTests",
+      "Cases": 4,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CashOrderMigrationTests",
+      "Cases": 1,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ProceduralDeadlineCalculatorTests",
+      "Cases": 4,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.OwnedAuditFailureDiagnosticsTests",
+      "Cases": 9,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.ClaimsPrincipalExtensionsTests",
+      "Cases": 3,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.OwnedProcessIdentityTests",
+      "Cases": 20,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.OwnedTaskQueryTimingObserverTests",
+      "Cases": 1,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.PaymentJournalMigrationTests",
+      "Cases": 3,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.PaymentDomainServiceTests",
+      "Cases": 8,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.PaymentDisplayNameServiceTests",
+      "Cases": 2,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CourtSyncMetricsTests",
+      "Cases": 3,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.InvoicePaymentStateServiceTests",
+      "Cases": 2,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.S3EndpointSecurityPolicyTests",
+      "Cases": 16,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.LocalStorageCapacityProbeTests",
+      "Cases": 10,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StoragePolicyServiceTests",
+      "Cases": 4,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CalendarCompletedTaskSettingsTests",
+      "Cases": 7,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CalendarMigrationTests",
+      "Cases": 2,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CaseInactivityAutomationSchedulePolicyTests",
+      "Cases": 5,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.StorageCapacityBudgetTests",
+      "Cases": 14,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CaseInactivityControlCyclePolicyTests",
+      "Cases": 4,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CaseInactivityControlStateMachineTests",
+      "Cases": 21,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.JwtConfigurationTests",
+      "Cases": 3,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CaseMeaningfulActivityResolverTests",
+      "Cases": 8,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SmsSegmentCalculatorTests",
+      "Cases": 16,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SmsRateLimitPolicyTests",
+      "Cases": 8,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SmsQuietHoursPolicyTests",
+      "Cases": 7,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SmsProviderFailureClassifierTests",
+      "Cases": 21,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SmsProviderContractsTests",
+      "Cases": 19,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SmsPhoneNumberSelectorTests",
+      "Cases": 10,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SmsPhoneNumberNormalizerTests",
+      "Cases": 23,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SmsMessageValidatorTests",
+      "Cases": 10,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SmsMessageProtectorTests",
+      "Cases": 15,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SmsChannelMonitoringServiceTests",
+      "Cases": 9,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SignalRRealtimeNotificationPublisherTests",
+      "Cases": 1,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.SellerLegalEntityComposerTests",
+      "Cases": 4,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.CourtSyncNormalizationTests",
+      "Cases": 29,
+      "Seconds": 0
+    },
+    {
+      "Class": "PayPlanner.Api.Tests.RestoredConnectionDiagnosticCaptureTests",
+      "Cases": 5,
+      "Seconds": 0
+    }
+  ]
+}

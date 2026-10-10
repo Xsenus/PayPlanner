@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
@@ -65,7 +65,7 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
   const [statuses, setStatuses] = useState<SalesRequestStatusItem[]>([]);
   const [items, setItems] = useState<SalesRequestItem[]>([]);
   const [total, setTotal] = useState(0);
-  const [filters, setFilters] = useState({ statusId: '', source: '', q: '', closed: false });
+  const [filters, setFilters] = useState({ statusId: '', source: '', q: '', closed: false, page: 1 });
   const [assignees, setAssignees] = useState<TaskJournalAssignee[]>([]);
   const [detail, setDetail] = useState<SalesRequestDetail | null>(null);
   const [creating, setCreating] = useState(false);
@@ -78,10 +78,14 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
   const [report, setReport] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
+  const listSequence = useRef(0);
+  const detailSequence = useRef(0);
+
   const statusById = useMemo(() => new Map(statuses.map((item) => [item.id, item])), [statuses]);
   const userName = useCallback((id?: number | null) => assignees.find((item) => item.id === id)?.name ?? (id ? `№${id}` : ''), [assignees]);
 
   const loadList = useCallback(async () => {
+    const sequence = ++listSequence.current;
     try {
       const page = await apiService.getSalesRequests({
         statusId: filters.statusId ? Number(filters.statusId) : undefined,
@@ -89,11 +93,13 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
         q: filters.q.trim() || undefined,
         closed: filters.closed,
         pageSize: 50,
+        page: filters.page,
       });
+      if (sequence !== listSequence.current) return;
       setItems(page.items);
       setTotal(page.total);
     } catch (error) {
-      toast.error(extractDisplayErrorMessage(error, 'Не удалось загрузить заявки.'), 'Заявки');
+      if (sequence === listSequence.current) toast.error(extractDisplayErrorMessage(error, 'Не удалось загрузить заявки.'), 'Заявки');
     }
   }, [filters, toast]);
 
@@ -115,6 +121,8 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
 
   useEffect(() => {
     void loadList();
+    const sequence = listSequence;
+    return () => { sequence.current++; };
   }, [loadList]);
 
   useEffect(() => {
@@ -123,15 +131,19 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
       setOptions([]);
       return;
     }
+    let active = true;
     const handle = window.setTimeout(() => {
-      void apiService.searchSalesRequestClients(text).then(setOptions).catch(() => setOptions([]));
+      void apiService.searchSalesRequestClients(text).then((items) => { if (active) setOptions(items); }).catch(() => { if (active) setOptions([]); });
     }, 250);
-    return () => window.clearTimeout(handle);
+    return () => { active = false; window.clearTimeout(handle); };
   }, [creating, form.clientId, form.newClient, form.query]);
 
   const openDetail = async (id: number) => {
+    const sequence = ++detailSequence.current;
     try {
-      setDetail(await apiService.getSalesRequest(id));
+      const loaded = await apiService.getSalesRequest(id);
+      if (sequence !== detailSequence.current) return;
+      setDetail(loaded);
       setPaymentId('');
     } catch (error) {
       toast.error(extractDisplayErrorMessage(error, 'Не удалось открыть заявку.'), 'Заявки');
@@ -248,21 +260,21 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
       {report ? <p className="rounded-lg bg-slate-50 p-2 text-sm text-slate-700" data-testid="sales-requests-report">{report}</p> : null}
 
       <div className="flex flex-wrap items-end gap-2 text-sm">
-        <select aria-label="Статус" value={filters.statusId} onChange={(event) => setFilters((prev) => ({ ...prev, statusId: event.target.value }))} className="rounded-lg border border-slate-300 px-2 py-1">
+        <select aria-label="Статус" value={filters.statusId} onChange={(event) => setFilters((prev) => ({ ...prev, statusId: event.target.value, page: 1 }))} className="rounded-lg border border-slate-300 px-2 py-1">
           <option value="">Все статусы</option>
           {statuses.map((item) => (
             <option key={item.id} value={item.id}>{item.title}</option>
           ))}
         </select>
-        <select aria-label="Источник" value={filters.source} onChange={(event) => setFilters((prev) => ({ ...prev, source: event.target.value }))} className="rounded-lg border border-slate-300 px-2 py-1">
+        <select aria-label="Источник" value={filters.source} onChange={(event) => setFilters((prev) => ({ ...prev, source: event.target.value, page: 1 }))} className="rounded-lg border border-slate-300 px-2 py-1">
           <option value="">Все источники</option>
           {Object.entries(SOURCE_LABELS).map(([key, label]) => (
             <option key={key} value={key}>{label}</option>
           ))}
         </select>
-        <input aria-label="Поиск" placeholder="Клиент, телефон, суть" value={filters.q} onChange={(event) => setFilters((prev) => ({ ...prev, q: event.target.value }))} className="w-56 rounded-lg border border-slate-300 px-2 py-1" />
+        <input aria-label="Поиск" placeholder="Клиент, телефон, суть" value={filters.q} onChange={(event) => setFilters((prev) => ({ ...prev, q: event.target.value, page: 1 }))} className="w-56 rounded-lg border border-slate-300 px-2 py-1" />
         <label className="flex items-center gap-1">
-          <input type="checkbox" checked={filters.closed} onChange={(event) => setFilters((prev) => ({ ...prev, closed: event.target.checked }))} />
+          <input type="checkbox" checked={filters.closed} onChange={(event) => setFilters((prev) => ({ ...prev, closed: event.target.checked, page: 1 }))} />
           Закрытые
         </label>
         <span className="text-slate-500">Всего: {total}</span>
@@ -301,13 +313,21 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
         {items.length === 0 ? <p className="py-3 text-sm text-slate-500">Заявок нет.</p> : null}
       </div>
 
+      {total > 50 ? (
+        <div className="flex items-center gap-3 text-sm">
+          <button type="button" disabled={filters.page === 1} onClick={() => setFilters((prev) => ({ ...prev, page: prev.page - 1 }))}>Предыдущие заявки</button>
+          <span>Страница {filters.page} из {Math.ceil(total / 50)}</span>
+          <button type="button" disabled={filters.page * 50 >= total} onClick={() => setFilters((prev) => ({ ...prev, page: prev.page + 1 }))}>Следующие заявки</button>
+        </div>
+      ) : null}
+
       {creating ? (
         <div className="rounded-2xl border border-slate-200 bg-white p-3" data-testid="sales-request-create">
           <h2 className="font-semibold text-slate-900">Новая заявка</h2>
           <div className="mt-2 grid gap-2 text-sm md:grid-cols-2">
             <label className="flex flex-col gap-1">
               Источник
-              <select aria-label="Источник заявки" value={form.source} onChange={(event) => setForm((prev) => ({ ...prev, source: event.target.value as SalesRequestSource }))} className="rounded-lg border border-slate-300 px-2 py-1">
+              <select aria-label="Источник заявки" value={form.source} onChange={(event) => setForm((prev) => ({ ...prev, source: event.target.value as SalesRequestSource, page: 1 }))} className="rounded-lg border border-slate-300 px-2 py-1">
                 <option value="">Выберите</option>
                 {Object.entries(SOURCE_LABELS).map(([key, label]) => (
                   <option key={key} value={key}>{label}</option>

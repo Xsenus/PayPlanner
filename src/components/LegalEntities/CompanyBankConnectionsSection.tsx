@@ -1,10 +1,10 @@
 import { RefreshCw } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useToast } from '../../hooks/useToast';
 import { apiService } from '../../services/api';
 import type { BankAccountItem, BankConnectionItem, BankStatementRun, BankSyncLogItem } from '../../types';
-import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { extractDisplayErrorMessage, isHttpErrorStatus } from '../../utils/errorUtils';
 
 interface CompanyBankConnectionsSectionProps {
   companyId: number;
@@ -46,27 +46,41 @@ export function CompanyBankConnectionsSection({ companyId }: CompanyBankConnecti
   const toast = useToast();
   const [connections, setConnections] = useState<BankConnectionItem[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [loadedCompanyId, setLoadedCompanyId] = useState<number | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const loadSequence = useRef(0);
   const [busy, setBusy] = useState(false);
   const [period, setPeriod] = useState(() => {
     const to = new Date();
     const from = new Date(to.getTime() - 30 * 24 * 3600 * 1000);
     return { from: toDateInput(from), to: toDateInput(to) };
   });
-  const [lastRun, setLastRun] = useState<BankStatementRun | null>(null);
+  const [lastRun, setLastRun] = useState<(BankStatementRun & { connectionId: number }) | null>(null);
   const [logs, setLogs] = useState<{ connectionId: number; items: BankSyncLogItem[] } | null>(null);
 
   const load = useCallback(async () => {
+    const sequence = ++loadSequence.current;
     try {
-      setConnections(await apiService.getBankConnections(companyId));
-    } catch {
+      const result = await apiService.getBankConnections(companyId);
+      if (sequence !== loadSequence.current) return;
+      setConnections(result);
+      setLoadError(null);
+    } catch (error) {
+      if (sequence !== loadSequence.current) return;
       setConnections([]);
+      setLoadError(isHttpErrorStatus(error, 403) || isHttpErrorStatus(error, 401) ? null : extractDisplayErrorMessage(error, 'Не удалось загрузить банковские подключения.'));
     } finally {
-      setLoaded(true);
+      if (sequence === loadSequence.current) {
+        setLoaded(true);
+        setLoadedCompanyId(companyId);
+      }
     }
   }, [companyId]);
 
   useEffect(() => {
     void load();
+    const sequence = loadSequence;
+    return () => { sequence.current++; };
   }, [load]);
 
   const run = async (action: () => Promise<void>, failure: string) => {
@@ -81,8 +95,13 @@ export function CompanyBankConnectionsSection({ companyId }: CompanyBankConnecti
     }
   };
 
-  if (!loaded || connections.length === 0) {
-    return null;
+  if (!loaded || loadedCompanyId !== companyId || connections.length === 0) {
+    return loadedCompanyId === companyId && loadError ? (
+      <section className="mt-3 rounded-lg border border-slate-200 p-3">
+        <p role="alert" className="text-sm text-red-700">{loadError}</p>
+        <button type="button" className="mt-2 rounded-lg border px-2 py-1 text-sm" onClick={() => void load()}>Повторить загрузку</button>
+      </section>
+    ) : null;
   }
 
   const accountLabel = (accountId: number) => {
@@ -129,6 +148,7 @@ export function CompanyBankConnectionsSection({ companyId }: CompanyBankConnecti
                 disabled={busy}
                 onClick={() =>
                   void apiService.getBankSyncLogs(connection.id).then((page) => setLogs({ connectionId: connection.id, items: page.items }))
+                    .catch((error) => toast.error(extractDisplayErrorMessage(error, 'Не удалось загрузить журнал банка.'), 'Банковские подключения'))
                 }
                 className="rounded-lg border border-slate-200 px-2 py-1 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
               >
@@ -161,7 +181,8 @@ export function CompanyBankConnectionsSection({ companyId }: CompanyBankConnecti
               disabled={busy || !period.from || !period.to}
               onClick={() =>
                 void run(async () => {
-                  setLastRun(await apiService.syncBankConnectionStatements(connection.id, period));
+                  const result = await apiService.syncBankConnectionStatements(connection.id, period);
+                  setLastRun({ ...result, connectionId: connection.id });
                 }, 'Не удалось загрузить выписки.')
               }
               className="rounded-lg bg-blue-600 px-3 py-1.5 text-white hover:bg-blue-700 disabled:opacity-50"
@@ -170,7 +191,7 @@ export function CompanyBankConnectionsSection({ companyId }: CompanyBankConnecti
             </button>
           </div>
 
-          {lastRun ? (
+          {lastRun?.connectionId === connection.id ? (
             <div className="mt-2 text-sm" data-testid="bank-statement-run">
               <p className="font-medium">
                 {RUN_LABELS[lastRun.status]}

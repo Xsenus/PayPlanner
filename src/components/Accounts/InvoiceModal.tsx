@@ -1,3 +1,4 @@
+import { hasStorableLineItemPrecision, lineItemPrecisionError, roundedLineTotal } from '../../utils/lineItemMoney';
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { DocumentSellerPicker } from '../Documents/DocumentSellerPicker';
@@ -220,8 +221,11 @@ function formatMoneyDisplayValue(value: string | number | null | undefined): str
 function calculateLineItemAmountValue(
   quantity: string | number | null | undefined,
   price: string | number | null | undefined,
+  roundLine = false,
 ): string {
-  return formatMoneyDisplayValue(parseMoneyInput(quantity) * parseMoneyInput(price));
+  const parsedQuantity = parseMoneyInput(quantity);
+  const parsedPrice = parseMoneyInput(price);
+  return formatMoneyDisplayValue(roundLine ? roundedLineTotal(parsedQuantity, parsedPrice) : parsedQuantity * parsedPrice);
 }
 
 function normalizeLookupName(value: string | null | undefined): string {
@@ -952,6 +956,7 @@ export function InvoiceModal({
     normalizeInvoiceToForm(invoice, defaultClientId, defaultLegalEntityId, defaultResponsibleId, defaultType, defaultExpenseClientId, defaultExpenseLegalEntityId, profileTimeZoneId),
   );
   const [lineItems, setLineItems] = useState<LineItem[]>([]);
+  const roundLineAmounts = useMemo(() => lineItems.some((item) => Boolean(item.vatRate)), [lineItems]);
   const [lineItemLookupState, setLineItemLookupState] = useState<LineItemLookupState>(null);
   const [lineItemLookupQuery, setLineItemLookupQuery] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
@@ -1048,7 +1053,11 @@ export function InvoiceModal({
 
   const calculateLineItemsTotal = useCallback(
     (items: LineItem[]) => {
-      const total = items.reduce((sum, item) => sum + parseMoneyInput(item.quantity) * parseMoneyInput(item.price), 0);
+      const roundLines = items.some((item) => Boolean(item.vatRate));
+      const total = items.reduce((sum, item) => {
+        const value = parseMoneyInput(item.quantity) * parseMoneyInput(item.price);
+        return sum + (roundLines ? roundedLineTotal(parseMoneyInput(item.quantity), parseMoneyInput(item.price)) : value);
+      }, 0);
       return formatMoneyDisplayValue(total);
     },
     [],
@@ -2932,6 +2941,11 @@ export function InvoiceModal({
       return;
     }
 
+    if (lineItems.some((item) => item.name.trim() && !hasStorableLineItemPrecision(parseMoneyInput(item.quantity), parseMoneyInput(item.price)))) {
+      setLocalError(lineItemPrecisionError);
+      return;
+    }
+
     if (installmentPlanAmountMismatch) {
       setLocalError('Сумма счета изменилась после настройки рассрочки. Пересчитайте график.');
       return;
@@ -4619,7 +4633,7 @@ export function InvoiceModal({
                                 <span className="sr-only">Действия</span>
                               </div>
                               {lineItems.map((item) => {
-                                const lineItemTotal = calculateLineItemAmountValue(item.quantity, item.price);
+                                const lineItemTotal = calculateLineItemAmountValue(item.quantity, item.price, roundLineAmounts);
 
                                 return (
                                   <div

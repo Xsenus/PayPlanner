@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services.Tax;
@@ -9,11 +10,10 @@ namespace PayPlanner.Api.Tests;
 
 public class TaxRegisterServiceTests
 {
-    private static async Task<(PaymentContext Db, TaxRegisterService Service, int CompanyId)> CreateAsync()
+    private static async Task<(PaymentContext Db, TaxRegisterService Service, int CompanyId)> CreateAsync(params IInterceptor[] interceptors)
     {
-        var sqlite = new SqliteConnection("Data Source=:memory:");
-        await sqlite.OpenAsync();
-        var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(sqlite).Options);
+        var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite("Data Source=:memory:").AddInterceptors(interceptors).Options);
+        await db.Database.OpenConnectionAsync();
         await db.Database.EnsureCreatedAsync();
         var company = new LegalEntity { ShortName = "Своя", Inn = "7707083893" };
         db.LegalEntities.Add(company);
@@ -23,6 +23,79 @@ public class TaxRegisterServiceTests
 
     private static TaxRegisterEntryInput Input(int companyId, string type = "Income", decimal amount = 1000m, string? doc = "Счёт № 1", int year = 2025, int? bankOp = null)
         => new(companyId, type, new DateTime(year, 3, 15), amount, doc, null, "Оплата", null, null, false, bankOp);
+
+    private sealed class RejectHistorySave : SaveChangesInterceptor
+    {
+        public bool Enabled { get; set; }
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (Enabled && eventData.Context!.ChangeTracker.Entries<TaxRegisterEvent>().Any(e => e.State == EntityState.Added))
+                throw new InvalidOperationException("history storage failure");
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FailedHistorySave_RollsBackEntryAndCorrection(bool correction)
+    {
+        var failure = new RejectHistorySave();
+        var (db, service, company) = await CreateAsync(failure);
+        await using var _ = db;
+        var original = correction ? (await service.CreateAsync(Input(company), 1, default)).Value! : null;
+        if (original is not null) await service.ApproveAsync(original.Id, 1, default);
+        failure.Enabled = true;
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            if (original is null) await service.CreateAsync(Input(company), 1, default);
+            else await service.CorrectAsync(original.Id, "Ошибка", 1, default);
+        });
+        db.ChangeTracker.Clear();
+        Assert.Equal(correction ? 1 : 0, await db.TaxRegisterEntries.CountAsync());
+        if (original is not null)
+            Assert.Null((await db.TaxRegisterEntries.SingleAsync()).CorrectedByEntryId);
+    }
+
+    [Fact]
+    public async Task BankDraft_OmittedSourceCannotOverrideStatementValues()
+    {
+        var (db, service, company) = await CreateAsync();
+        await using var _ = db;
+        var operation = new BankStatementOperation
+        {
+            BankConnectionAccount = new BankConnectionAccount
+            {
+                BankConnection = new BankConnection { LegalEntityId = company, Provider = "sber" },
+                ExternalAccountId = "source",
+            },
+            ExternalOperationId = "source-operation",
+            OperationDate = new DateTime(2025, 5, 2),
+            Amount = 250m,
+            IsIncome = false,
+        };
+        db.BankStatementOperations.Add(operation);
+        await db.SaveChangesAsync();
+        var draft = (await service.CreateAsync(Input(company, bankOp: operation.Id), 1, default)).Value!;
+        var edited = await service.UpdateDraftAsync(draft.Id, Input(company, amount: 999m), 1, default);
+        Assert.True(edited.Ok);
+        Assert.Equal(operation.Id, edited.Value!.BankStatementOperationId);
+        Assert.Equal(250m, edited.Value.Amount);
+        Assert.Equal("Expense", edited.Value.Direction);
+        Assert.Equal(operation.OperationDate, edited.Value.OperationDate);
+    }
+
+    [Theory]
+    [InlineData("0.001")]
+    [InlineData("0.004")]
+    public async Task RoundedZeroAmount_IsRejected(string amount)
+    {
+        var (db, service, company) = await CreateAsync();
+        await using var _ = db;
+        var result = await service.CreateAsync(Input(company, amount: decimal.Parse(amount, System.Globalization.CultureInfo.InvariantCulture)), 1, default);
+        Assert.Equal(400, result.Status);
+        Assert.Empty(await db.TaxRegisterEntries.ToListAsync());
+    }
 
     [Fact]
     public async Task Approve_RequiresDocument_AndMovesToApprovedWithHistory()
@@ -196,20 +269,20 @@ public class TaxRegisterServiceTests
     public void Xlsx_ContainsRowsTotalsAndEscapesText()
     {
         System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
-        var entry = new TaxRegisterEntry { Id = 1, OperationDate = new DateTime(2025, 1, 1), Direction = "Income", Amount = 12.5m, Sign = 1, DocumentRef = "=A1 & <b>", Description = "x\u0001y" };
+        var entry = new TaxRegisterEntry { Id = 1, OperationDate = new DateTime(2025, 1, 1), Direction = "Income", Amount = 12.5m, Sign = 1, DocumentRef = "=A1 & <b>", Description = "x\u0001y 📄" };
         var bytes = TaxRegisterXlsxWriter.Build(new TaxRegisterBook(1, 2025, false, [entry], new TaxRegisterBookTotals(12.5m, 0m, 12.5m, 1)));
 
         using var reader = ExcelDataReader.ExcelReaderFactory.CreateReader(new MemoryStream(bytes));
         var rows = new List<string?[]>();
         while (reader.Read())
         {
-            rows.Add(Enumerable.Range(0, reader.FieldCount).Select(i => reader.GetValue(i)?.ToString()).ToArray());
+            rows.Add(Enumerable.Range(0, reader.FieldCount).Select(i => Convert.ToString(reader.GetValue(i), System.Globalization.CultureInfo.InvariantCulture)).ToArray());
         }
 
         Assert.Equal("Книга доходов и расходов, 2025 год", rows[0][0]);
         Assert.Equal("12.5", rows[2][4]);
         Assert.Equal("=A1 & <b>", rows[2][5]);
-        Assert.Equal("xy", rows[2][6]);
+        Assert.Equal("xy 📄", rows[2][6]);
         Assert.Equal("Разность", rows[^1][3]);
     }
 }

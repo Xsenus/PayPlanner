@@ -7928,6 +7928,20 @@ describe('TaskJournal', () => {
     expect(taskCard.className).toContain('bg-slate-200');
   });
 
+  it('restores the active-only filter after switching from the completed-task calendar to the list', async () => {
+    window.localStorage.setItem('pp.task_journal.filters.v1.user:7', JSON.stringify({
+      quickFilter: 'all', viewMode: 'calendar', periodMode: 'week', statusFilter: 'active',
+    }));
+    await renderJournal([
+      createTask({ id: 101, title: 'Завершённая календарная задача', status: 'done', result: 'Готово', dueAt: todayAt(11) }),
+      createTask({ id: 102, title: 'Активная календарная задача', status: 'new', dueAt: todayAt(12) }),
+    ], { initialView: 'calendar', waitForTitle: null });
+    expect(await screen.findByTestId('task-calendar-task-101')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('task-view-list'));
+    expect(await screen.findByText('Активная календарная задача')).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText('Завершённая календарная задача')).toBeNull());
+  });
+
   it('updates task duration from the calendar load panel', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     // Полдень UTC сохраняет один календарный день и в UTC окружения CI,

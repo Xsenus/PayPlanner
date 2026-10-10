@@ -2111,7 +2111,7 @@ public class ReportsController : ControllerBase
             ? new List<LegalWorkTaskRow>()
             : await _db.TaskJournalItems
                 .AsNoTracking()
-                .ApplyTaskVisibility(tasksVisibility)
+                .ApplyTaskVisibility(tasksVisibility, _db)
                 .Where(item => item.ClientCaseId.HasValue && caseIds.Contains(item.ClientCaseId.Value))
                 .Select(item => new LegalWorkTaskRow(
                     item.Id,
@@ -4853,7 +4853,7 @@ public class ReportsController : ControllerBase
             ? new List<LegalWorkTaskRow>()
             : await _db.TaskJournalItems
                 .AsNoTracking()
-                .ApplyTaskVisibility(tasksVisibility)
+                .ApplyTaskVisibility(tasksVisibility, _db)
                 .Where(item => item.ClientCaseId.HasValue && caseIds.Contains(item.ClientCaseId.Value))
                 .Select(item => new LegalWorkTaskRow(
                     item.Id,
@@ -5022,7 +5022,7 @@ public class ReportsController : ControllerBase
     {
         var query = _db.TaskJournalItems
             .AsNoTracking()
-            .ApplyTaskVisibility(tasksVisibility);
+            .ApplyTaskVisibility(tasksVisibility, _db);
 
         if (assigneeUserId.HasValue)
         {
@@ -5204,7 +5204,7 @@ public class ReportsController : ControllerBase
             ? new List<LawyerWorkloadTaskRow>()
             : await _db.TaskJournalItems
                 .AsNoTracking()
-                .ApplyTaskVisibility(tasksVisibility)
+                .ApplyTaskVisibility(tasksVisibility, _db)
                 .Where(item => item.ClientCaseId.HasValue && caseIds.Contains(item.ClientCaseId.Value))
                 .Select(item => new LawyerWorkloadTaskRow(
                     item.AssigneeUserId,

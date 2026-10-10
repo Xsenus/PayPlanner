@@ -28,6 +28,82 @@ namespace PayPlanner.Api.Tests;
 
 public class ActsControllerTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Save_RejectsNullActLineItemWithoutChangingFinancialData(bool update)
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var date = new DateTime(2026, 10, 10);
+        var existing = new Act { Number = "NULL-LINE", Date = date, ClientId = client.Id, Amount = 10_000m };
+        if (update) { db.Acts.Add(existing); await db.SaveChangesAsync(); }
+        var request = new UpsertActRequest
+        {
+            Number = "NULL-LINE",
+            Date = date,
+            ClientId = client.Id,
+            Status = ActStatus.Created,
+            CreationMode = ActCreationMode.Manual,
+            LineItems = [null!, new ActLineItemRequest { SourceKey = "manual:valid", Name = "Service", Quantity = 1m, Price = 10m, VatRate = "20" }]
+        };
+        var controller = new ActsController(db, new NoopFormRequirementsService());
+        var action = update ? await controller.Update(existing.Id, request, default) : await controller.Create(request, default);
+        var error = Assert.IsType<ObjectResult>(action.Result);
+        var details = Assert.IsType<ValidationProblemDetails>(error.Value);
+        Assert.Contains("Позиция акта не может быть пустой.", details.Errors.SelectMany(item => item.Value));
+        db.ChangeTracker.Clear();
+        Assert.Equal(update ? 1 : 0, await db.Acts.CountAsync());
+        if (update) Assert.Equal(10_000m, (await db.Acts.SingleAsync()).Amount);
+        Assert.Empty(await db.Set<ActLineItem>().ToListAsync());
+    }
+
+    [Fact]
+    public async Task Create_PartialModeRejectsQuantityThatWouldChangeAfterStorage()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var invoice = await CreateInvoiceAsync(db, "PRECISION-PARTIAL", new DateTime(2026, 10, 10), client.Id,
+            [new InvoiceLineItem { Name = "Service", Quantity = 2, Price = 10, VatRate = "20" }]);
+        var item = await db.InvoiceLineItems.SingleAsync();
+        var action = await new ActsController(db, new NoopFormRequirementsService()).Create(new UpsertActRequest
+        {
+            Number = "PRECISION-PARTIAL",
+            Date = new DateTime(2026, 10, 10),
+            ClientId = client.Id,
+            InvoiceId = invoice.Id,
+            Status = ActStatus.Created,
+            CreationMode = ActCreationMode.Partial,
+            LineItems = [new ActLineItemRequest { SourceKey = $"db:{item.Id}", Quantity = 1.50001m }]
+        }, default);
+        Assert.IsType<BadRequestObjectResult>(action.Result);
+        Assert.Empty(await db.Acts.ToListAsync());
+    }
+
+    [Theory]
+    [InlineData("1.5", "10.075")]
+    [InlineData("1.50001", "10")]
+    public async Task Create_RejectsLinePrecisionThatWouldChangeAfterStorage(string quantity, string price)
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var action = await new ActsController(db, new NoopFormRequirementsService()).Create(new UpsertActRequest
+        {
+            Number = "PRECISION",
+            Date = new DateTime(2026, 10, 10),
+            ClientId = client.Id,
+            Status = ActStatus.Created,
+            CreationMode = ActCreationMode.Manual,
+            LineItems = [new ActLineItemRequest { SourceKey = "manual:precision", Name = "Service",
+                Quantity = decimal.Parse(quantity, CultureInfo.InvariantCulture), Price = decimal.Parse(price, CultureInfo.InvariantCulture), VatRate = "20" }]
+        }, default);
+        var error = Assert.IsType<ObjectResult>(action.Result);
+        var details = Assert.IsType<ValidationProblemDetails>(error.Value);
+        Assert.Contains("В цене допускается до двух знаков после запятой, в количестве — до четырёх.", details.Errors.SelectMany(item => item.Value));
+        Assert.Empty(await db.Acts.ToListAsync());
+        Assert.Empty(await db.Set<ActLineItem>().ToListAsync());
+    }
+
     [Fact]
     public void DocumentTemplateSettings_ReplacesRetiredCondensedDefault_AndPreservesCustomTemplates()
     {

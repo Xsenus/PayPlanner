@@ -257,7 +257,8 @@ public static class InvoiceDocumentTemplateEngine
                 },
             };
 
-        var total = normalizedLineItems.Sum(item => item.Quantity * item.Price);
+        var vatTotals = VatCalculator.Calculate(normalizedLineItems.Select(item => new VatLine(item.Quantity, item.Price, item.VatRate)));
+        var total = vatTotals.HasRates ? vatTotals.Total : normalizedLineItems.Sum(item => item.Quantity * item.Price);
         var sellerLegalEntity = ResolveSellerLegalEntity(payment, mainCompany);
         var seller = BuildSeller(payment, mainCompany);
         var buyer = BuildBuyer(payment, mainCompany);
@@ -277,7 +278,6 @@ public static class InvoiceDocumentTemplateEngine
         var hasInstallmentSchedule = !string.IsNullOrWhiteSpace(installmentScheduleHtml);
         var vatText = ResolveVatText(seller);
         var lineItemVat = ResolveLineItemVat(seller);
-        var vatTotals = VatCalculator.Calculate(normalizedLineItems.Select(item => new VatLine(item.Quantity, item.Price, item.VatRate)));
         var orderSellerPosition = sellerLegalEntity is null ? string.Empty : directorPosition;
         var orderSellerSignatory = sellerLegalEntity is null ? seller.ShortName : directorShortName;
         // Если у позиций задана ставка НДС, документ считается построчно; иначе — прежние правила по признаку продавца.
@@ -391,7 +391,7 @@ public static class InvoiceDocumentTemplateEngine
                     ["quantity"] = Encode(item.Quantity.ToString("0.##", RuCulture)),
                     ["unit"] = Encode(string.IsNullOrWhiteSpace(item.Unit) ? "шт" : item.Unit),
                     ["price"] = Encode(FormatMoney(item.Price)),
-                    ["total"] = Encode(FormatMoney(item.Quantity * item.Price)),
+                    ["total"] = Encode(FormatMoney(vatTotals.HasRates ? vatTotals.Lines[index].Total : item.Quantity * item.Price)),
                     ["vat"] = vatTotals.HasRates ? Encode(FormatLineVat(item.VatRate, vatTotals.Lines[index].Vat)) : lineItemVat,
                 })
                 .ToList(),

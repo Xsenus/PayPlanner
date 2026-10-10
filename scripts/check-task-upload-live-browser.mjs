@@ -46,6 +46,7 @@ const outside = [];
 const inboxFrames = [];
 const liveFrames = [];
 const pendingRequests = new Map();
+let lastSuccessfulUnreadCountRequestStartedAt = 0;
 const recentResponses = [];
 let separateIconRequests = 0;
 let queueNoticeActions;
@@ -69,6 +70,7 @@ const automationReadPaths = new Set([
   '/api/tasks/settings',
   '/api/profile',
   '/api/notifications/inbox',
+  '/api/notifications/inbox/unread-count',
 ]);
 function readTaskBrowserResourceTiming(request) {
   try {
@@ -139,6 +141,15 @@ async function waitForCardReadsBeforeLeaving() {
     message: 'Actual task, case and inbox reads must finish before this test leaves the card.',
   }).toEqual([]);
 }
+async function waitForNotificationRefreshBeforeClosing() {
+  // TopBar debounces realtime count refreshes by 800 ms. An empty request map
+  // does not mean that this scheduled real GET has started or completed yet.
+  // Wait for that actual successful read instead of cancelling it at close.
+  await expect.poll(async () => {
+    const dueAt = await page.evaluate(() => window.__taskUploadNotificationRefreshDueAt ?? 0);
+    return dueAt === 0 || lastSuccessfulUnreadCountRequestStartedAt >= dueAt;
+  }, { message: 'The real unread-count refresh scheduled by the latest notification must finish before browser close.' }).toBe(true);
+}
 async function waitForInitialTaskCardData() {
   const readResponse = async path => {
     const response = await page.waitForResponse(candidate => {
@@ -197,6 +208,12 @@ try {
   assert.ok(browser, 'An installed Chromium-compatible browser is required.');
   console.log('TASK_UPLOAD_STAGE_BROWSER_READY');
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, timezoneId: 'Asia/Novosibirsk' });
+  await context.addInitScript(() => {
+    window.__taskUploadNotificationRefreshDueAt = 0;
+    window.addEventListener('payplanner:user-notifications-changed', event => {
+      window.__taskUploadNotificationRefreshDueAt = Date.now() + (event.detail?.source === 'realtime' ? 800 : 0);
+    });
+  });
   if (completionFlow) {
     const completionUserId = Number(process.env.TASK_UPLOAD_COMPLETION_USER_ID);
     assert.ok(Number.isSafeInteger(completionUserId) && completionUserId > 0);
@@ -237,6 +254,10 @@ try {
     }
   });
   page.on('requestfinished', request => {
+    const pending = pendingRequests.get(request);
+    if (request.method() === 'GET' && new URL(request.url()).origin === api.origin
+      && pending?.path === '/api/notifications/inbox/unread-count' && pending.status === 200)
+      lastSuccessfulUnreadCountRequestStartedAt = Math.max(lastSuccessfulUnreadCountRequestStartedAt, pending.started);
     pendingRequests.delete(request);
     const read = automationReadDiagnostics.get(request);
     if (read) recordAutomationReadEvent('finished', read, false, request);
@@ -255,6 +276,8 @@ try {
     completionTransfers.delete(request);
   });
   page.on('response', response => {
+    const pending = pendingRequests.get(response.request());
+    if (pending) pending.status = response.status();
     const transfer = completionTransfers.get(response.request());
     if (transfer) {
       transfer.status = response.status();
@@ -528,6 +551,13 @@ try {
       await expect(card).toHaveCount(0);
       queueNoticeActions = await notice.getByRole('button').allTextContents();
       await Promise.all([
+        page.waitForResponse(response => new URL(response.url()).pathname === `/api/tasks/${taskId}/files`
+          && response.request().method() === 'GET').then(async response => {
+          assert.equal(response.status(), 200);
+          const files = await response.json();
+          assert.ok(Array.isArray(files) && files.some(file => file.originalFileName === fileName),
+            'Reopening the published task must return its actual file before checking the rendered list.');
+        }),
         page.waitForResponse(response => /\/api\/notifications\/inbox\/\d+\/read$/.test(new URL(response.url()).pathname)
           && response.request().method() === 'PATCH' && response.status() === 200),
         notice.getByRole('button', { name: 'Открыть задачу', exact: true }).click(),
@@ -569,6 +599,7 @@ try {
   assert.equal(separateIconRequests, 0, 'The UI must not load the full icon export graph as separate browser requests.');
   if (delayCardSettings) assert.equal(delayedSettingsChecked, true, 'The actual settings response must have been held and checked.');
   recordTaskReadBoundary('before-teardown');
+  await waitForNotificationRefreshBeforeClosing();
   await waitForCardReadsBeforeLeaving();
   recordTaskReadBoundary('teardown-after-drain');
   console.log('TASK_UPLOAD_BROWSER_OK');

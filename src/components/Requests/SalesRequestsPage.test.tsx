@@ -7,9 +7,10 @@ import { apiService } from '../../services/api';
 import type { SalesRequestItem, SalesRequestStatusItem } from '../../types';
 
 const confirm = vi.fn().mockResolvedValue(true);
+const toast = { success: vi.fn(), error: vi.fn(), info: vi.fn() };
 
 vi.mock('../../hooks/useToast', () => ({
-  useToast: () => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }),
+  useToast: () => toast,
 }));
 
 vi.mock('../../hooks/useDialog', () => ({
@@ -74,6 +75,15 @@ describe('SalesRequestsPage', () => {
     expect(await screen.findByText('Иванов Иван')).toBeTruthy();
     expect(await screen.findByText('Аня')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Отчёт за месяц' })).toBeNull();
+  });
+
+  it('opens the next page and resets pagination when filtering', async () => {
+    vi.mocked(apiService.getSalesRequests).mockResolvedValue({ total: 51, page: 1, pageSize: 50, items: [request()] });
+    render(<SalesRequestsPage allowCreate allowEdit allowAnalytics={false} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Следующие заявки' }));
+    await waitFor(() => expect(apiService.getSalesRequests).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 })));
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Источник' }), 'Call');
+    await waitFor(() => expect(apiService.getSalesRequests).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, source: 'Call' })));
   });
 
   it('opens the request from a task link', async () => {

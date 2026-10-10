@@ -769,7 +769,7 @@ public sealed class YandexDiskController : ControllerBase
             .Include(item => item.LegalEntity)
             .Include(item => item.ClientCase)
             .Include(item => item.Participants)
-            .ApplyTaskVisibility(visibility)
+            .ApplyTaskVisibility(visibility, _db)
             .FirstOrDefaultAsync(item => item.Id == taskId, ct);
         if (task is null)
         {

@@ -215,7 +215,10 @@ public sealed class BankSyncService : IBankSyncService
         return new BankAccountsSyncResult(added, updated, skipped, null);
     }
 
-    public async Task<BankStatementSyncResult> SyncStatementAsync(int accountId, DateTime from, DateTime to, CancellationToken ct)
+    public Task<BankStatementSyncResult> SyncStatementAsync(int accountId, DateTime from, DateTime to, CancellationToken ct)
+        => SyncStatementCoreAsync(accountId, from, to, false, ct);
+
+    private async Task<BankStatementSyncResult> SyncStatementCoreAsync(int accountId, DateTime from, DateTime to, bool incremental, CancellationToken ct)
     {
         var account = await _db.BankConnectionAccounts
             .Include(item => item.BankConnection)
@@ -238,7 +241,7 @@ public sealed class BankSyncService : IBankSyncService
 
         // Начало периода: после отметки (или после прошлой успешной загрузки, если подтверждённых операций ещё нет)
         // с небольшим перекрытием; незавершённые операции перечитываем с самой ранней из них.
-        var anchor = account.StatementWatermark ?? account.LastStatementSyncAt;
+        var anchor = incremental ? account.StatementWatermark ?? account.LastStatementSyncAt : null;
         var start = anchor.HasValue && anchor.Value - OverlapWindow > from ? anchor.Value - OverlapWindow : from;
         var earliestPending = await _db.BankStatementOperations.AsNoTracking()
             .Where(item => item.BankConnectionAccountId == account.Id && !item.IsBooked)
@@ -296,12 +299,14 @@ public sealed class BankSyncService : IBankSyncService
                     var created = new BankStatementOperation { BankConnectionAccountId = account.Id, ExternalOperationId = key };
                     Apply(created, info);
                     _db.BankStatementOperations.Add(created);
+                    known.Add(key, created);
                     inserted++;
                 }
 
                 // Страница сохраняется сразу: память ограничена размером страницы, а сбой на поздней странице
                 // не теряет уже полученное (повтор безопасен благодаря уникальному индексу).
                 await _db.SaveChangesAsync(ct);
+                foreach (var operation in known.Values) _db.Entry(operation).State = EntityState.Detached;
 
                 cursor = result.NextCursor;
                 if (string.IsNullOrEmpty(cursor))
@@ -382,7 +387,7 @@ public sealed class BankSyncService : IBankSyncService
             ct.ThrowIfCancellationRequested();
             try
             {
-                results[item.Id] = await SyncStatementAsync(item.Id, from ?? item.CreatedAt.AddDays(-90), to, ct);
+                results[item.Id] = await SyncStatementCoreAsync(item.Id, from ?? item.CreatedAt.AddDays(-90), to, !from.HasValue, ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -395,6 +400,15 @@ public sealed class BankSyncService : IBankSyncService
 
     public async Task<AccountSettingsResult> UpdateAccountSettingsAsync(int accountId, bool? isDefault, bool? isHidden, bool? statementsEnabled, CancellationToken ct)
     {
+        var companyId = await _db.BankConnectionAccounts.AsNoTracking().Where(item => item.Id == accountId)
+            .Select(item => (int?)item.BankConnection.LegalEntityId).FirstOrDefaultAsync(ct);
+        if (!companyId.HasValue) return new AccountSettingsResult(false, "Счёт не найден.");
+        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+        if (await _db.LegalEntities.Where(item => item.Id == companyId.Value)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.ShortName, item => item.ShortName), ct) != 1)
+            return new AccountSettingsResult(false, "Компания не найдена.");
+        var tracked = _db.BankConnectionAccounts.Local.FirstOrDefault(item => item.Id == accountId);
+        if (tracked is not null) await _db.Entry(tracked).ReloadAsync(ct);
         var account = await _db.BankConnectionAccounts
             .Include(item => item.BankConnection)
             .FirstOrDefaultAsync(item => item.Id == accountId, ct);
@@ -416,12 +430,12 @@ public sealed class BankSyncService : IBankSyncService
             }
 
             // У компании такой счёт один: снимаем отметку у остальных счетов всех её подключений.
-            var companyId = account.BankConnection.LegalEntityId;
             var others = await _db.BankConnectionAccounts
-                .Where(item => item.IsDefault && item.Id != account.Id && item.BankConnection.LegalEntityId == companyId)
+                .Where(item => item.IsDefault && item.Id != account.Id && item.BankConnection.LegalEntityId == companyId.Value)
                 .ToListAsync(ct);
             foreach (var other in others)
             {
+                await _db.Entry(other).ReloadAsync(ct);
                 other.IsDefault = false;
                 other.UpdatedAt = DateTime.UtcNow;
             }
@@ -449,6 +463,7 @@ public sealed class BankSyncService : IBankSyncService
 
         account.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
         return new AccountSettingsResult(true, null);
     }
 

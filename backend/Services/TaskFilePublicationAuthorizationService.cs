@@ -27,7 +27,7 @@ public sealed class TaskFilePublicationAuthorizationService(PaymentContext db) :
         var access = await db.ResolveSectionAccessAsync(principal, RolePermissionCatalog.Tasks, ct,
             requireApprovedUser: true);
         if (access is null || (!access.Visibility.IsAdmin && access.Permission?.CanView != true)) return false;
-        var task = await db.TaskJournalItems.AsNoTracking().ApplyTaskVisibility(access.Visibility)
+        var task = await db.TaskJournalItems.AsNoTracking().ApplyTaskVisibility(access.Visibility, db)
             .Where(t => t.Id == taskId)
             .Select(t => new
             {

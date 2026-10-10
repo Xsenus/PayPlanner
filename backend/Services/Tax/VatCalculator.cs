@@ -76,6 +76,15 @@ public sealed record VatTotals(decimal Total, decimal Vat, IReadOnlyList<VatLine
 /// </summary>
 public static class VatCalculator
 {
+    /// <summary>New documents with explicit line rates use rounded line totals; legacy documents retain their previous arithmetic.</summary>
+    public static decimal DocumentTotal(IEnumerable<VatLine> lines)
+    {
+        var items = lines.ToList();
+        return items.Any(item => item.VatRate is not null)
+            ? items.Sum(item => LineTotal(item.Quantity, item.Price))
+            : items.Sum(item => item.Quantity * item.Price);
+    }
+
     public static decimal LineTotal(decimal quantity, decimal price)
         => Math.Round(quantity * price, 2, MidpointRounding.AwayFromZero);
 

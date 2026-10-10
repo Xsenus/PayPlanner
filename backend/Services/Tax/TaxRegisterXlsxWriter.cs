@@ -86,7 +86,19 @@ public static class TaxRegisterXlsxWriter
 
     /// <summary>Убирает управляющие символы, недопустимые в XML 1.0.</summary>
     private static string Clean(string text)
-        => new(text.Where(ch => ch is '\t' or '\n' or '\r' || (ch >= ' ' && ch != '￾' && ch != '￿' && !char.IsSurrogate(ch))).ToArray());
+    {
+        var result = new StringBuilder(text.Length);
+        for (var i = 0; i < text.Length; i++)
+        {
+            var ch = text[i];
+            if (char.IsHighSurrogate(ch) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
+            {
+                result.Append(ch).Append(text[++i]);
+            }
+            else if (System.Xml.XmlConvert.IsXmlChar(ch)) result.Append(ch);
+        }
+        return result.ToString();
+    }
 
     private static void Add(ZipArchive zip, string path, string content)
     {

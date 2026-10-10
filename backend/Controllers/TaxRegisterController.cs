@@ -91,6 +91,8 @@ public class TaxRegisterController : ControllerBase, IAsyncActionFilter
     {
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, MaxPageSize);
+        if (year is < 2000 or > 2100 || (long)(page - 1) * pageSize > int.MaxValue)
+            return BadRequest(new { message = "Укажите корректный год и страницу." });
         var query = _db.TaxRegisterEntries.AsNoTracking().Where(item => item.LegalEntityId == companyId);
         if (year.HasValue)
         {
@@ -154,7 +156,13 @@ public class TaxRegisterController : ControllerBase, IAsyncActionFilter
     public async Task<ActionResult<TaxRegisterJournalPage>> Journal(
         [FromQuery] int companyId, [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] string? action,
         [FromQuery] int page = 1, [FromQuery] int pageSize = 50, CancellationToken ct = default)
-        => Ok(await _service.GetJournalAsync(companyId, from, to, action, Math.Max(1, page), Math.Clamp(pageSize, 1, MaxPageSize), ct));
+    {
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, MaxPageSize);
+        if ((long)(page - 1) * pageSize > int.MaxValue || to?.Date == DateTime.MaxValue.Date || (from.HasValue && to.HasValue && from.Value.Date > to.Value.Date))
+            return BadRequest(new { message = "Укажите корректный период и страницу." });
+        return Ok(await _service.GetJournalAsync(companyId, from, to, action, page, pageSize, ct));
+    }
 
     [HttpGet("book")]
     public async Task<ActionResult<TaxRegisterBookDto>> Book([FromQuery] int companyId, [FromQuery] int year, CancellationToken ct)

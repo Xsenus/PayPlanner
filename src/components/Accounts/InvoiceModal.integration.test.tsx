@@ -3472,6 +3472,28 @@ describe('InvoiceModal integration', () => {
     });
   });
 
+  it.each([
+    { quantity: '1.5', price: '10.075' },
+    { quantity: '1.50001', price: '10' },
+  ])('prevents saving line precision that changes in storage: $quantity × $price', async ({ quantity, price }) => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const invoice = {
+      id: 955, invoiceEntityId: 955, number: 'PRECISION', date: '2026-10-10', amount: 15,
+      type: 'Income', status: 'Pending', clientId: 1,
+      lineItems: [{ name: 'Service', quantity: 1.5, price: 10, unit: 'шт', vatRate: '20' }],
+    } as unknown as Invoice;
+    render(<InvoiceModal open mode="edit" invoice={invoice} onClose={vi.fn()} onSubmit={onSubmit}
+      submitting={false} clients={[createTestClient(1, 'Client owner')]} responsibles={[]}
+      lookupsLoading={false} relatedPayments={[]} />);
+    fireEvent.change(screen.getByLabelText('Количество'), { target: { value: quantity } });
+    fireEvent.change(screen.getByLabelText('Цена'), { target: { value: price } });
+    fireEvent.submit(document.getElementById('invoice-edit-form')!);
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith(
+      'В цене допускается до двух знаков после запятой, в количестве — до четырёх.', 'Проверьте данные счета',
+    ));
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it('prints the established HTML form with the requested signature and seal mode', async () => {
     const downloadMock = vi.mocked(apiService.downloadInvoiceDocument);
     downloadMock.mockClear();

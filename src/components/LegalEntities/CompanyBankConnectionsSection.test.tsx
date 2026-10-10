@@ -44,6 +44,26 @@ describe('CompanyBankConnectionsSection', () => {
     expect(container.textContent).toBe('');
   });
 
+  it('shows a retry after a technical failure', async () => {
+    vi.mocked(apiService.getBankConnections).mockRejectedValueOnce(new Error('Failed to fetch'));
+    render(<CompanyBankConnectionsSection companyId={5} />);
+    expect(await screen.findByRole('alert')).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'Повторить загрузку' }));
+    expect(await screen.findByText('Токен скоро истечёт')).toBeTruthy();
+  });
+
+  it('ignores the old company response', async () => {
+    let finishOld!: (value: BankConnectionItem[]) => void;
+    vi.mocked(apiService.getBankConnections).mockImplementationOnce(() => new Promise((resolve) => { finishOld = resolve; }));
+    const { rerender } = render(<CompanyBankConnectionsSection companyId={5} />);
+    vi.mocked(apiService.getBankConnections).mockResolvedValue([{ ...connection(), id: 2, legalEntityId: 6, status: 'Active' }]);
+    rerender(<CompanyBankConnectionsSection companyId={6} />);
+    expect(await screen.findByText('Активно')).toBeTruthy();
+    finishOld([connection()]);
+    await waitFor(() => expect(screen.queryByText('Токен скоро истечёт')).toBeNull());
+    expect(screen.getByText('Активно')).toBeTruthy();
+  });
+
   it('shows statuses and prevents closed account from becoming default', async () => {
     render(<CompanyBankConnectionsSection companyId={5} />);
 

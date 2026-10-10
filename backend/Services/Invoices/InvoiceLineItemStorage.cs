@@ -7,6 +7,11 @@ namespace PayPlanner.Api.Services.Invoices;
 
 public static class InvoiceLineItemStorage
 {
+    public const string PrecisionError = "В цене допускается до двух знаков после запятой, в количестве — до четырёх.";
+
+    public static bool HasStorablePrecision(decimal quantity, decimal price)
+        => Math.Round(quantity, 4) == quantity && Math.Round(price, 2) == price;
+
     public const string Marker = "[pp:invoice-items]";
     private static readonly JsonSerializerOptions LegacyJsonOptions = new()
     {

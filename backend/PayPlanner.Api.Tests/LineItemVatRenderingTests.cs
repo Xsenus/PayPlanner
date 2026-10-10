@@ -9,6 +9,22 @@ namespace PayPlanner.Api.Tests;
 
 public class LineItemVatRenderingTests
 {
+    [Fact]
+    public void ExplicitRates_FractionalLinesAndPrintedTotalsAgree_AndLegacyArithmeticIsPreserved()
+    {
+        var actLines = new[]
+        {
+            new ActLineItem { Name = "A", Quantity = 1.5m, Price = 0.01m, VatRate = "22" },
+            new ActLineItem { Name = "B", Quantity = 1.5m, Price = 0.01m },
+        };
+        var invoiceLines = actLines.Select(l => new InvoiceLineItemDto { Name = l.Name, Quantity = l.Quantity, Price = l.Price, VatRate = l.VatRate }).ToArray();
+        var invoice = new Payment { Amount = 0.04m, Type = PaymentType.Income };
+        var act = new Act { Amount = 0.04m, Date = new DateTime(2026, 10, 10) };
+        Assert.Equal("0,04|0,02;0,02;", Plain(InvoiceDocumentTemplateEngine.RenderHtml("{{invoice.total}}|{{#lineItems}}{{total}};{{/lineItems}}", invoice, invoiceLines, null, false)));
+        Assert.Equal("0,04|0,02;0,02;", Plain(ActDocumentTemplateEngine.RenderHtml("{{act.total}}|{{#lineItems}}{{total}};{{/lineItems}}", act, actLines, null, false)));
+        Assert.Equal(0.04m, PayPlanner.Api.Services.Tax.VatCalculator.DocumentTotal(invoiceLines.Select(l => new PayPlanner.Api.Services.Tax.VatLine(l.Quantity, l.Price, l.VatRate))));
+        Assert.Equal(0.03m, PayPlanner.Api.Services.Tax.VatCalculator.DocumentTotal(invoiceLines.Select(l => new PayPlanner.Api.Services.Tax.VatLine(l.Quantity, l.Price, null))));
+    }
     private static string Plain(string html) => System.Net.WebUtility.HtmlDecode(html).Replace(" ", " ").Replace(" ", " ");
 
     private static string RenderAct(LegalEntity? company, params ActLineItem[] lines)
@@ -107,10 +123,9 @@ public class LineItemVatPersistenceTests
     [Fact]
     public async Task ManualAct_StoresAndReturnsLineVatRate_AndCorrectionCopiesIt()
     {
-        var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
-        await connection.OpenAsync();
         await using var db = new PayPlanner.Api.Data.PaymentContext(
-            new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<PayPlanner.Api.Data.PaymentContext>().UseSqlite(connection).Options);
+            new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<PayPlanner.Api.Data.PaymentContext>().UseSqlite("Data Source=:memory:").Options);
+        await db.Database.OpenConnectionAsync();
         await db.Database.EnsureCreatedAsync();
         var client = new Client { Name = "Клиент" };
         db.Clients.Add(client);
@@ -132,9 +147,9 @@ public class LineItemVatPersistenceTests
         }, CancellationToken.None);
 
         var dto = Assert.IsType<ActDto>(Assert.IsType<Microsoft.AspNetCore.Mvc.CreatedResult>(created.Result).Value);
-        Assert.Equal(["22", null], dto.LineItems.Select(l => l.VatRate).ToArray());
+        Assert.Equal(new string?[] { "22", null }.AsEnumerable(), dto.LineItems.Select(l => l.VatRate));
         var stored = await db.Set<ActLineItem>().AsNoTracking().OrderBy(l => l.SortOrder).Select(l => l.VatRate).ToListAsync();
-        Assert.Equal(["22", null], stored.ToArray());
+        Assert.Equal(new string?[] { "22", null }.AsEnumerable(), stored);
     }
 }
 
@@ -150,6 +165,6 @@ public class InvoiceLineItemStorageVatTests
             new PayPlanner.Api.Models.Requests.InvoiceLineItemRequest { Name = "C", Quantity = 1, Price = 10m, VatRate = "none" },
         ]);
 
-        Assert.Equal(["10", null, "none"], items.Select(i => i.VatRate).ToArray());
+        Assert.Equal(new string?[] { "10", null, "none" }.AsEnumerable(), items.Select(i => i.VatRate));
     }
 }

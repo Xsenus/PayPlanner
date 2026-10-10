@@ -1,11 +1,14 @@
-## Актуальная инвентаризация — 6 октября 2026
+## Актуальная инвентаризация — 11 октября 2026
 
-Всего **102** места ExecuteUpdateAsync/ExecuteDeleteAsync по неизменному предикату BatchOperationAuditCoverageTests. Предыдущие описания ниже сохранены как история решений по аудиту; после форматирования их номера строк могут отличаться. Текущие номера приведены в полном перечне здесь. Перечень обновлён по фактическим исходникам после адресных исправлений и форматирования; подготовленные overlays не используются.
+Всего **107** места ExecuteUpdateAsync/ExecuteDeleteAsync по неизменному предикату BatchOperationAuditCoverageTests. Предыдущие описания ниже сохранены как история решений по аудиту; после форматирования их номера строк могут отличаться. Текущие номера приведены в полном перечне здесь. Перечень обновлён по фактическим исходникам после адресных исправлений и форматирования; подготовленные overlays не используются.
 
 Два дополнительных технических UPDATE:
 
 - backend/Services/Storage/StorageStageCapacityService.cs:205 — запись наблюдённой нативной идентичности маркера writer. CAS проверяет точный ключ, физический ресурс, объект, группу, binding, размер, locator, состояние Pending, завершённый admission и неизменную идентичность корня. Выполняется в той же транзакции активации writer; результат строго одна строка, несовпадение запрещает активацию. Это техническое свидетельство владения, а не изменение документа: построчное объектное событие не создаётся, tracked edits не сохраняются, долг не снимается.
 - backend/Services/Storage/StorageStageFileCheckpoints.cs:98 — запись точного предшествующего и следующего StageFileReceiptJson вместе с UpdatedAt. Serializable-транзакция повторно подтверждает владение checkpoint и нативным дескриптором, точную длину и полный binding; CAS включает корень/маркер, старый receipt, Pending, завершённый admission и отсутствие ProductContext. После UPDATE проверяются ровно одна строка и прежний дескриптор. Неясный исход commit подтверждается новым чтением того же полного состояния, а не даёт новое право записи. Это технический receipt стадии; продуктовые документы, финансовые записи и их аудит не меняются.
+
+
+Пять добавленных UPDATE в SalesRequestService (3), TaxRegisterService (1) и BankSyncService (1) присваивают полю его прежнее значение для блокировки существующей строки внутри транзакции. Это не самостоятельное изменение бизнес-данных: сохранение заявки/задач/банковских счетов выполняется через ChangeTracker, а запись регистра — вместе с явным журналом в той же транзакции. SQL-блокировка не должна создавать фиктивное объектное событие. Конкурентные сценарии перехода заявки, корректировки/закрытия года и выбора основного счёта покрыты регрессионными тестами.
 
 ### Полный текущий перечень
 
@@ -23,11 +26,12 @@
 | backend/Controllers/TasksController.cs:4778 | ExecuteUpdateAsync |
 | backend/Controllers/UserActivityController.cs:418 | ExecuteUpdateAsync |
 | backend/Controllers/UserActivityController.cs:540 | ExecuteDeleteAsync |
+| backend/Controllers/V2/CasesV2Controller.cs:10844 | ExecuteUpdateAsync |
 | backend/Controllers/V2/CasesV2Controller.cs:5710 | ExecuteUpdateAsync |
 | backend/Controllers/V2/CasesV2Controller.cs:6047 | ExecuteUpdateAsync |
-| backend/Controllers/V2/CasesV2Controller.cs:10844 | ExecuteUpdateAsync |
 | backend/Services/AuthService.cs:261 | ExecuteUpdateAsync |
 | backend/Services/AuthService.cs:743 | ExecuteUpdateAsync |
+| backend/Services/Banking/BankSyncService.cs:408 | ExecuteUpdateAsync |
 | backend/Services/CalendarSyncLogRetentionService.cs:198 | ExecuteDeleteAsync |
 | backend/Services/CalendarSyncLogRetentionService.cs:209 | ExecuteDeleteAsync |
 | backend/Services/DatabaseBackupService.cs:1110 | ExecuteUpdateAsync |
@@ -46,11 +50,14 @@
 | backend/Services/Notifications/InternalChatNotificationRecoveryService.cs:56 | ExecuteUpdateAsync |
 | backend/Services/Notifications/MaxWebhookService.cs:241 | ExecuteDeleteAsync |
 | backend/Services/Notifications/NotificationDeliveryRetentionService.cs:150 | ExecuteDeleteAsync |
+| backend/Services/Requests/SalesRequestService.cs:298 | ExecuteUpdateAsync |
+| backend/Services/Requests/SalesRequestService.cs:436 | ExecuteUpdateAsync |
+| backend/Services/Requests/SalesRequestService.cs:696 | ExecuteUpdateAsync |
 | backend/Services/Storage/CaseDocumentPublicationProcessor.cs:172 | ExecuteUpdateAsync |
 | backend/Services/Storage/CaseDocumentPublicationProcessor.cs:187 | ExecuteUpdateAsync |
 | backend/Services/Storage/CaseDocumentUploadRetirementService.cs:25 | ExecuteUpdateAsync |
-| backend/Services/Storage/CourtDocumentSourceRegistry.cs:50 | ExecuteUpdateAsync |
 | backend/Services/Storage/CourtDocumentSourceRegistry.cs:413 | ExecuteUpdateAsync |
+| backend/Services/Storage/CourtDocumentSourceRegistry.cs:50 | ExecuteUpdateAsync |
 | backend/Services/Storage/GeneratedCaseReservationRecovery.cs:37 | ExecuteUpdateAsync |
 | backend/Services/Storage/GeneratedCaseReservationRecovery.cs:51 | ExecuteUpdateAsync |
 | backend/Services/Storage/GeneratedCaseReservationRecovery.cs:98 | ExecuteUpdateAsync |
@@ -68,11 +75,11 @@
 | backend/Services/Storage/InternalChatOriginalWriter.cs:173 | ExecuteUpdateAsync |
 | backend/Services/Storage/InternalChatSendAttemptRegistry.cs:122 | ExecuteUpdateAsync |
 | backend/Services/Storage/InternalChatSendContinuation.cs:34 | ExecuteUpdateAsync |
-| backend/Services/Storage/InternalChatSendPublication.cs:60 | ExecuteUpdateAsync |
 | backend/Services/Storage/InternalChatSendPublication.cs:111 | ExecuteUpdateAsync |
 | backend/Services/Storage/InternalChatSendPublication.cs:119 | ExecuteUpdateAsync |
 | backend/Services/Storage/InternalChatSendPublication.cs:123 | ExecuteUpdateAsync |
 | backend/Services/Storage/InternalChatSendPublication.cs:131 | ExecuteUpdateAsync |
+| backend/Services/Storage/InternalChatSendPublication.cs:60 | ExecuteUpdateAsync |
 | backend/Services/Storage/InternalChatSendRecoveryBatch.cs:70 | ExecuteUpdateAsync |
 | backend/Services/Storage/LegacyStorageReplicaMigrationService.cs:119 | ExecuteUpdateAsync |
 | backend/Services/Storage/ManagedCaseDocumentUploadService.cs:540 | ExecuteUpdateAsync |
@@ -90,7 +97,6 @@
 | backend/Services/Storage/StorageObjectService.cs:684 | ExecuteUpdateAsync |
 | backend/Services/Storage/StorageObjectService.cs:720 | ExecuteUpdateAsync |
 | backend/Services/Storage/StorageOperationLeaseScope.cs:45 | ExecuteUpdateAsync |
-| backend/Services/Storage/StorageOperationProcessor.cs:86 | ExecuteUpdateAsync |
 | backend/Services/Storage/StorageOperationProcessor.cs:216 | ExecuteUpdateAsync |
 | backend/Services/Storage/StorageOperationProcessor.cs:270 | ExecuteUpdateAsync |
 | backend/Services/Storage/StorageOperationProcessor.cs:305 | ExecuteUpdateAsync |
@@ -100,6 +106,7 @@
 | backend/Services/Storage/StorageOperationProcessor.cs:422 | ExecuteUpdateAsync |
 | backend/Services/Storage/StorageOperationProcessor.cs:423 | ExecuteUpdateAsync |
 | backend/Services/Storage/StorageOperationProcessor.cs:821 | ExecuteUpdateAsync |
+| backend/Services/Storage/StorageOperationProcessor.cs:86 | ExecuteUpdateAsync |
 | backend/Services/Storage/StorageReconciliationService.cs:243 | ExecuteUpdateAsync |
 | backend/Services/Storage/StorageReconciliationService.cs:257 | ExecuteUpdateAsync |
 | backend/Services/Storage/StorageStageCapacityService.cs:185 | ExecuteUpdateAsync |
@@ -111,10 +118,9 @@
 | backend/Services/Storage/TaskFilePublicationProcessor.cs:147 | ExecuteUpdateAsync |
 | backend/Services/Storage/TaskFilePublicationProcessor.cs:200 | ExecuteUpdateAsync |
 | backend/Services/Storage/TaskFilePublicationProcessor.cs:266 | ExecuteUpdateAsync |
+| backend/Services/Tax/TaxRegisterService.cs:74 | ExecuteUpdateAsync |
 | backend/Services/UserActivity/UserActivityRetentionService.cs:109 | ExecuteDeleteAsync |
 | backend/Services/YandexCalendarSyncService.cs:195 | ExecuteUpdateAsync |
-
----
 
 # Пакетные операции и покрытие аудитом
 

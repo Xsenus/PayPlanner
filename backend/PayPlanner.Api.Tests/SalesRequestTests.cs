@@ -8,19 +8,50 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services.Requests;
 using PayPlanner.Api.Services.Notifications;
+using PayPlanner.Api.Extensions;
+using PayPlanner.Api.Services;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
 public class SalesRequestTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ManualTask_RequiresAssigneeAccessToTheSpecificRequest(bool ownsRequest)
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var request = (await f.Service.CreateAsync(NewRequest(f.Client), ownsRequest ? f.Manager.Id : f.Admin.Id, default)).Value!;
+        var before = await f.Db.TaskJournalItems.CountAsync();
+        var result = await f.Service.CreateManualTaskAsync(request.Id, f.Manager.Id, "Private request task", null, f.Admin.Id, default);
+        Assert.Equal(ownsRequest, result.Ok);
+        Assert.Equal(before + (ownsRequest ? 1 : 0), await f.Db.TaskJournalItems.CountAsync());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RuleTask_RequiresFixedAssigneeAccessToTheSpecificRequest(bool ownsRequest)
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        await f.Service.EnsureDefaultsAsync(default);
+        var firstStatus = await f.Db.SalesRequestStatuses.OrderBy(status => status.SortOrder).FirstAsync();
+        Assert.True((await f.Service.ReplaceRulesAsync(firstStatus.Id, [new("Private rule", f.Manager.Id, 60)], default)).Ok);
+        var result = await f.Service.CreateAsync(NewRequest(f.Client), ownsRequest ? f.Manager.Id : f.Admin.Id, default);
+        Assert.True(result.Ok);
+        var tasks = await f.Db.TaskJournalItems.Where(task => task.SalesRequestId == result.Value!.Id).ToArrayAsync();
+        Assert.Equal(ownsRequest ? 1 : 0, tasks.Length);
+    }
+
     private sealed record Fixture(PaymentContext Db, SalesRequestService Service, User Manager, User Admin, Client Client);
 
     private static async Task<Fixture> CreateAsync()
     {
-        var sqlite = new SqliteConnection("Data Source=:memory:");
-        await sqlite.OpenAsync();
-        var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(sqlite).Options);
+        var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite("Data Source=:memory:").Options);
+        await db.Database.OpenConnectionAsync();
         await db.Database.EnsureCreatedAsync();
         var adminRole = new Role { Name = "admin", Description = "admin" };
         var managerRole = new Role
@@ -41,6 +72,116 @@ public class SalesRequestTests
         => new(source, client.Id, null, null, null, null, null, "Спор с застройщиком", null, null, null);
 
     private static int StatusId(PaymentContext db, string key) => db.SalesRequestStatuses.Single(item => item.Key == key).Id;
+
+    [Fact]
+    public async Task RequestTasks_StayPrivateEvenWithBroadTaskAndCalendarAccess()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var lawyer = new User
+        {
+            Email = "lawyer@x.test",
+            FullName = "Юрист",
+            PasswordHash = "x",
+            IsActive = true,
+            IsApproved = true,
+            Role = new Role { Name = "lawyer", Description = "lawyer" }
+        };
+        f.Db.Users.Add(lawyer);
+        await f.Db.SaveChangesAsync();
+        var request = (await f.Service.CreateAsync(NewRequest(f.Client), f.Manager.Id, default)).Value!;
+        Assert.Equal(400, (await f.Service.CreateAsync(NewRequest(f.Client) with { ResponsibleUserId = lawyer.Id }, f.Manager.Id, default)).Status);
+        Assert.False((await f.Service.CreateManualTaskAsync(request.Id, lawyer.Id, "Продажи", null, f.Manager.Id, default)).Ok);
+        foreach (var section in new[] { RolePermissionCatalog.Tasks, RolePermissionCatalog.Calendar })
+        {
+            var denied = new DataVisibilityAccess(lawyer.Id, false, section, DataVisibilityScope.All, [lawyer.Id]);
+            Assert.Empty(await f.Db.TaskJournalItems.ApplyTaskVisibility(denied, f.Db).ToListAsync());
+            var owner = new DataVisibilityAccess(f.Manager.Id, false, section, DataVisibilityScope.All, [f.Manager.Id]);
+            Assert.Single(await f.Db.TaskJournalItems.ApplyTaskVisibility(owner, f.Db).ToListAsync());
+        }
+    }
+
+    [Theory]
+    [InlineData(true, true, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, false, false)]
+    [InlineData(false, false, false)]
+    [InlineData(true, true, true)]
+    [InlineData(false, true, true)]
+    [InlineData(true, false, true)]
+    [InlineData(false, false, true)]
+    public async Task RequestTasks_DepartmentScopeMatchesRequestAccess(bool memberActive, bool sameDepartment, bool useDictionary)
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        f.Manager.Department = useDictionary ? null : "  Продажи  ";
+        f.Admin.Department = useDictionary ? null : sameDepartment ? "Продажи" : "Другой отдел";
+        if (useDictionary)
+        {
+            var department = new DepartmentDictionaryItem { Name = "Продажи" };
+            var other = new DepartmentDictionaryItem { Name = "Другой отдел" };
+            f.Db.AddRange(department, other);
+            await f.Db.SaveChangesAsync();
+            f.Manager.DepartmentId = department.Id;
+            f.Admin.DepartmentId = sameDepartment ? department.Id : other.Id;
+        }
+        f.Manager.Role!.Permissions.Single().ViewScope = DataVisibilityScope.Department;
+        await f.Db.SaveChangesAsync();
+        var request = (await f.Service.CreateAsync(NewRequest(f.Client), f.Admin.Id, default)).Value!;
+        f.Admin.IsActive = memberActive;
+        await f.Db.SaveChangesAsync();
+        var access = await f.Db.ResolveDataVisibilityAsync(ControllerFor(f.Db, f.Manager).User, RolePermissionCatalog.Requests, default);
+        var requestVisible = await f.Db.SalesRequests.ApplySalesRequestVisibility(access).AnyAsync(item => item.Id == request.Id);
+        Assert.Equal(memberActive && sameDepartment, requestVisible);
+        var taskAccess = new DataVisibilityAccess(f.Manager.Id, false, RolePermissionCatalog.Tasks, DataVisibilityScope.All, [f.Manager.Id]);
+        var taskVisible = await f.Db.TaskJournalItems.ApplyTaskVisibility(taskAccess, f.Db).AnyAsync(item => item.SalesRequestId == request.Id);
+        Assert.Equal(requestVisible, taskVisible);
+    }
+
+    [Fact]
+    public async Task Automation_ProcessesEligibleRequestsBeyondFirstBatch()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        await f.Service.EnsureDefaultsAsync(default);
+        var stage = StatusId(f.Db, "documents-prep");
+        await f.Service.SetSlaAsync(stage, 60, default);
+        var requests = Enumerable.Range(0, 501).Select(i => new SalesRequest
+        {
+            ClientId = f.Client.Id,
+            ResponsibleUserId = f.Manager.Id,
+            CreatedByUserId = f.Manager.Id,
+            StatusId = stage,
+            Summary = $"Обращение {i}",
+            StatusEnteredAt = DateTime.UtcNow.AddHours(-2),
+        }).ToList();
+        f.Db.SalesRequests.AddRange(requests);
+        await f.Db.SaveChangesAsync();
+        f.Db.TaskJournalItems.AddRange(requests.Select((r, i) => new TaskJournalItem
+        {
+            SalesRequestId = r.Id,
+            Title = "Подготовить документы",
+            Status = i == 500 ? "done" : "new",
+            TagsJson = System.Text.Json.JsonSerializer.Serialize(new[] { $"request-status:{stage}" }),
+        }));
+        await f.Db.SaveChangesAsync();
+        Assert.Equal(501, await f.Service.MarkSlaBreachesAsync(default));
+        Assert.Equal(0, await f.Service.MarkSlaBreachesAsync(default));
+        Assert.Equal(1, await f.Service.AdvanceCompletedAsync(default));
+        Assert.Equal(StatusId(f.Db, "documents-sent"), (await f.Db.SalesRequests.AsNoTracking().SingleAsync(r => r.Id == requests[500].Id)).StatusId);
+    }
+
+    [Fact]
+    public async Task Creation_RejectsInvalidInputWithoutCreatingClient()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var input = NewRequest(f.Client) with { ClientId = null, NewClientName = "Новый", NewClientPhone = "89005554433", Type = "invalid" };
+        Assert.Equal(400, (await f.Service.CreateAsync(input, f.Manager.Id, default)).Status);
+        Assert.Equal(1, await f.Db.Clients.CountAsync());
+        Assert.Equal(400, (await f.Service.CreateAsync(NewRequest(f.Client) with { Summary = new string('x', 4001) }, f.Manager.Id, default)).Status);
+        Assert.Equal(404, (await f.Service.CreateAsync(NewRequest(f.Client) with { ResponsibleUserId = 99999 }, f.Manager.Id, default)).Status);
+    }
 
     [Fact]
     public async Task Create_ValidatesFieldsCreatesFirstStatusTaskAndEvent()
@@ -116,7 +257,8 @@ public class SalesRequestTests
         Assert.True(moved.Ok);
         var tasks = f.Db.TaskJournalItems.Where(t => t.SalesRequestId == request.Id).OrderBy(t => t.Id).ToList();
         Assert.Equal(2, tasks.Count);
-        Assert.Equal("done", tasks[0].Status);
+        Assert.Equal("cancelled", tasks[0].Status);
+        Assert.Contains("сменой этапа", tasks[0].Result);
         Assert.Equal("new", tasks[1].Status);
         Assert.Contains("Квалифицировать", tasks[1].Title);
     }
@@ -385,6 +527,8 @@ public class SalesRequestTests
         var fromFinal = await f.Service.SaveStatusAsync(StatusId(f.Db, "paid"), null, null, null, null, default, calc);
         var ok = await f.Service.SaveStatusAsync(calc, null, null, null, null, default, StatusId(f.Db, "approval"));
         var configured = ok.Value!.AutoAdvanceToStatusId;
+        Assert.False((await f.Service.SaveStatusAsync(StatusId(f.Db, "approval"), null, null, null, null, default, calc)).Ok);
+        Assert.False((await f.Service.SaveStatusAsync(calc, null, null, null, null, default, StatusId(f.Db, "paid"))).Ok);
         var cleared = await f.Service.SaveStatusAsync(calc, null, null, null, null, default, clearAutoAdvance: true);
 
         Assert.False(self.Ok);

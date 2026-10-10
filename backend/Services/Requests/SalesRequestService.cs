@@ -1,8 +1,12 @@
 using System.Text.Json;
+using System.Security.Claims;
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services.Notifications;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Services.Requests;
 
@@ -86,6 +90,11 @@ public sealed class SalesRequestService : ISalesRequestService
             return;
         }
 
+        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+        if (_db.Database.IsNpgsql())
+            await _db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(831031)", ct);
+        if (await _db.SalesRequestStatuses.AnyAsync(ct)) return;
+
         // (ключ, название, финал, правила задач: название, срок в минутах)
         var defaults = new (string Key, string Title, string Final, (string Title, int Minutes)[] Rules)[]
         {
@@ -120,6 +129,7 @@ public sealed class SalesRequestService : ISalesRequestService
         byKey["documents-prep"].AutoAdvanceToStatusId = byKey["documents-sent"].Id;
         byKey["documents-sent"].AutoAdvanceToStatusId = byKey["awaiting-payment"].Id;
         await _db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
     }
 
     public async Task<SalesRequestResult<SalesRequest>> CreateAsync(SalesRequestCreateInput input, int userId, CancellationToken ct)
@@ -131,11 +141,20 @@ public sealed class SalesRequestService : ISalesRequestService
         }
 
         var summary = input.Summary?.Trim();
-        if (string.IsNullOrEmpty(summary))
+        if (string.IsNullOrEmpty(summary) || summary.Length > 4000)
         {
             return SalesRequestResult<SalesRequest>.Fail("Опишите суть запроса.");
         }
 
+        if (input.Type is not null && !SalesRequestTypes.All.Contains(input.Type))
+            return SalesRequestResult<SalesRequest>.Fail("Неизвестный тип заявки.");
+        if (input.Amount is < 0 or > 1_000_000_000_000m)
+            return SalesRequestResult<SalesRequest>.Fail("Сумма должна быть от 0 до 1 000 000 000 000.");
+        if (!await _db.Users.AnyAsync(item => item.Id == (input.ResponsibleUserId ?? userId) && item.IsActive, ct))
+            return SalesRequestResult<SalesRequest>.Fail("Ответственный не найден.", 404);
+        if (!await CanViewRequestsAsync(input.ResponsibleUserId ?? userId, ct))
+            return SalesRequestResult<SalesRequest>.Fail("У ответственного нет доступа к заявкам.", 400);
+        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
         var clientResult = await ResolveClientAsync(input, userId, ct);
         if (!clientResult.Ok)
         {
@@ -168,7 +187,7 @@ public sealed class SalesRequestService : ISalesRequestService
             type = input.Type;
         }
 
-        var first = await _db.SalesRequestStatuses.Where(item => item.IsActive).OrderBy(item => item.SortOrder).FirstAsync(ct);
+        var first = await _db.SalesRequestStatuses.Where(item => item.IsActive && item.FinalKind == SalesRequestFinalKinds.None).OrderBy(item => item.SortOrder).ThenBy(item => item.Id).FirstAsync(ct);
         var now = DateTime.UtcNow;
         var request = new SalesRequest
         {
@@ -194,6 +213,7 @@ public sealed class SalesRequestService : ISalesRequestService
         AddEvent(request.Id, SalesRequestEventKinds.Created, null, first.Id, userId, null);
         await CreateRuleTasksAsync(request, first.Id, userId, ct);
         await _db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
         await FlushNotificationsAsync(ct);
         return new(request);
     }
@@ -219,7 +239,7 @@ public sealed class SalesRequestService : ISalesRequestService
         if (input.Summary is not null)
         {
             var summary = input.Summary.Trim();
-            if (summary.Length == 0)
+            if (summary.Length == 0 || summary.Length > 4000)
             {
                 return SalesRequestResult<SalesRequest>.Fail("Суть запроса не может быть пустой.");
             }
@@ -239,7 +259,7 @@ public sealed class SalesRequestService : ISalesRequestService
 
         if (input.Amount.HasValue)
         {
-            if (input.Amount.Value < 0)
+            if (input.Amount.Value < 0 || input.Amount.Value > 1_000_000_000_000m)
             {
                 return SalesRequestResult<SalesRequest>.Fail("Сумма не может быть отрицательной.");
             }
@@ -259,6 +279,9 @@ public sealed class SalesRequestService : ISalesRequestService
                 return SalesRequestResult<SalesRequest>.Fail("Ответственный не найден.", 404);
             }
 
+            if (!await CanViewRequestsAsync(input.ResponsibleUserId.Value, ct))
+                return SalesRequestResult<SalesRequest>.Fail("У ответственного нет доступа к заявкам.", 400);
+
             request.ResponsibleUserId = input.ResponsibleUserId.Value;
         }
 
@@ -270,6 +293,12 @@ public sealed class SalesRequestService : ISalesRequestService
 
     public async Task<SalesRequestResult<SalesRequest>> TransitionAsync(int id, SalesRequestTransitionInput input, int userId, CancellationToken ct)
     {
+        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+        if (await _db.SalesRequests.Where(item => item.Id == id)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.Version, item => item.Version), ct) != 1)
+            return SalesRequestResult<SalesRequest>.Fail("Заявка не найдена.", 404);
+        var tracked = _db.SalesRequests.Local.FirstOrDefault(item => item.Id == id);
+        if (tracked is not null) await _db.Entry(tracked).ReloadAsync(ct);
         var request = await _db.SalesRequests.FirstOrDefaultAsync(item => item.Id == id, ct);
         if (request is null)
         {
@@ -336,8 +365,8 @@ public sealed class SalesRequestService : ISalesRequestService
         var now = DateTime.UtcNow;
         foreach (var task in leavingTasks)
         {
-            task.Status = "done";
-            task.Result = "Закрыта при переходе заявки в следующий статус";
+            task.Status = "cancelled";
+            task.Result = "Отменена в связи со сменой этапа заявки";
             task.UpdatedAt = now;
         }
 
@@ -355,7 +384,6 @@ public sealed class SalesRequestService : ISalesRequestService
 
         var fromStatusId = request.StatusId;
         // Дело создаётся только для обращения без привязки к делу и только один раз; ошибка сохранения откатывает и дело.
-        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
         if (target.FinalKind == SalesRequestFinalKinds.Success && request.ClientCaseId is null && request.ResultClientCaseId is null)
         {
             var title = request.Summary.Length > 200 ? request.Summary[..200] : request.Summary;
@@ -403,6 +431,10 @@ public sealed class SalesRequestService : ISalesRequestService
 
     public async Task<SalesRequestResult<TaskJournalItem>> CreateManualTaskAsync(int id, int assigneeUserId, string? title, DateTime? dueAt, int userId, CancellationToken ct)
     {
+        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+        if (await _db.SalesRequests.Where(item => item.Id == id)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.Version, item => item.Version), ct) != 1)
+            return SalesRequestResult<TaskJournalItem>.Fail("Заявка не найдена.", 404);
         var request = await _db.SalesRequests.AsNoTracking().FirstOrDefaultAsync(item => item.Id == id, ct);
         if (request is null)
         {
@@ -429,6 +461,7 @@ public sealed class SalesRequestService : ISalesRequestService
         _db.TaskJournalItems.Add(task);
         AddEvent(id, SalesRequestEventKinds.TaskCreated, null, null, userId, text);
         await _db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
         _pendingNotifications.Add((task, userId));
         await FlushNotificationsAsync(ct);
         return new(task);
@@ -498,6 +531,19 @@ public sealed class SalesRequestService : ISalesRequestService
                 return SalesRequestResult<SalesRequestStatus>.Fail("Автопереход возможен только из рабочего статуса в другой действующий статус.");
             }
 
+            if (target.FinalKind == SalesRequestFinalKinds.Success)
+                return SalesRequestResult<SalesRequestStatus>.Fail("Оплата требует указания фактического платежа и не выполняется автопереходом.");
+            var transitions = await _db.SalesRequestStatuses.AsNoTracking().Where(item => item.IsActive)
+                .ToDictionaryAsync(item => item.Id, item => item.AutoAdvanceToStatusId, ct);
+            var seen = new HashSet<int> { status.Id };
+            int? next = target.Id;
+            while (next.HasValue)
+            {
+                if (!seen.Add(next.Value))
+                    return SalesRequestResult<SalesRequestStatus>.Fail("Цепочка автопереходов не должна возвращаться в уже пройденный этап.");
+                next = transitions.GetValueOrDefault(next.Value);
+            }
+
             status.AutoAdvanceToStatusId = target.Id;
         }
 
@@ -543,7 +589,10 @@ public sealed class SalesRequestService : ISalesRequestService
         }
 
         var assigneeIds = rules.Where(rule => rule.AssigneeUserId.HasValue).Select(rule => rule.AssigneeUserId!.Value).Distinct().ToList();
-        var activeUsers = await _db.Users.Where(user => assigneeIds.Contains(user.Id) && user.IsActive).Select(user => user.Id).ToListAsync(ct);
+        var activeUsers = (await _db.Users.Where(user => assigneeIds.Contains(user.Id) && user.IsActive && user.IsApproved
+                && user.Role != null && (user.Role.Name.ToLower() == "admin"
+                    || user.Role.Permissions.Any(permission => permission.Section == RolePermissionCatalog.Requests && permission.CanView)))
+            .Select(user => user.Id).ToListAsync(ct)).ToHashSet();
         var prepared = new List<SalesRequestStatusTaskRule>();
         foreach (var rule in rules)
         {
@@ -624,38 +673,37 @@ public sealed class SalesRequestService : ISalesRequestService
     {
         var limits = await _db.SalesRequestStatuses.AsNoTracking().Where(item => item.IsActive && item.SlaMinutes != null)
             .ToDictionaryAsync(item => item.Id, item => item.SlaMinutes!.Value, ct);
-        if (limits.Count == 0)
-        {
-            return 0;
-        }
-
+        if (limits.Count == 0) return 0;
         var ids = limits.Keys.ToList();
         var now = DateTime.UtcNow;
-        var open = await _db.SalesRequests.AsNoTracking()
-            .Where(item => item.FinalKind == SalesRequestFinalKinds.None && ids.Contains(item.StatusId))
-            .Select(item => new { item.Id, item.StatusId, item.StatusEnteredAt })
-            .Take(500)
-            .ToListAsync(ct);
+        var lastId = 0;
         var marked = 0;
-        foreach (var item in open.Where(item => item.StatusEnteredAt.AddMinutes(limits[item.StatusId]) <= now))
+        while (true)
         {
-            // Одно событие на каждый вход в этап: повторные проходы службы его не дублируют.
-            var already = await _db.SalesRequestEvents.AnyAsync(e => e.SalesRequestId == item.Id && e.Kind == SalesRequestEventKinds.SlaBreached
-                && e.ToStatusId == item.StatusId && e.CreatedAt >= item.StatusEnteredAt, ct);
-            if (already)
+            var batch = await _db.SalesRequests.AsNoTracking()
+                .Where(item => item.Id > lastId && item.FinalKind == SalesRequestFinalKinds.None && ids.Contains(item.StatusId)
+                    && !_db.SalesRequestEvents.Any(e => e.SalesRequestId == item.Id && e.Kind == SalesRequestEventKinds.SlaBreached
+                        && e.ToStatusId == item.StatusId && e.CreatedAt >= item.StatusEnteredAt))
+                .OrderBy(item => item.Id).Select(item => new { item.Id, item.StatusId, item.StatusEnteredAt }).Take(500).ToListAsync(ct);
+            if (batch.Count == 0) break;
+            lastId = batch[^1].Id;
+            var due = batch.Where(item => item.StatusEnteredAt.AddMinutes(limits[item.StatusId]) <= now).ToList();
+            foreach (var item in due)
             {
-                continue;
+                await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+                if (await _db.SalesRequests.Where(r => r.Id == item.Id && r.StatusId == item.StatusId
+                    && r.StatusEnteredAt == item.StatusEnteredAt && r.FinalKind == SalesRequestFinalKinds.None)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(r => r.Version, r => r.Version), ct) != 1) continue;
+                if (await _db.SalesRequestEvents.AnyAsync(e => e.SalesRequestId == item.Id && e.Kind == SalesRequestEventKinds.SlaBreached
+                    && e.ToStatusId == item.StatusId && e.CreatedAt >= item.StatusEnteredAt, ct)) continue;
+                AddEvent(item.Id, SalesRequestEventKinds.SlaBreached, null, item.StatusId, null, $"Превышен срок этапа ({limits[item.StatusId]} мин)");
+                await _db.SaveChangesAsync(ct);
+                await transaction.CommitAsync(ct);
+                marked++;
+                foreach (var e in _db.ChangeTracker.Entries<SalesRequestEvent>().Where(e => e.Entity.SalesRequestId == item.Id).ToList())
+                    e.State = EntityState.Detached;
             }
-
-            AddEvent(item.Id, SalesRequestEventKinds.SlaBreached, null, item.StatusId, null, $"Превышен срок этапа ({limits[item.StatusId]} мин)");
-            marked++;
         }
-
-        if (marked > 0)
-        {
-            await _db.SaveChangesAsync(ct);
-        }
-
         return marked;
     }
 
@@ -664,42 +712,31 @@ public sealed class SalesRequestService : ISalesRequestService
         var advancing = await _db.SalesRequestStatuses.AsNoTracking()
             .Where(item => item.IsActive && item.AutoAdvanceToStatusId != null)
             .ToDictionaryAsync(item => item.Id, item => item.AutoAdvanceToStatusId!.Value, ct);
-        if (advancing.Count == 0)
-        {
-            return 0;
-        }
-
+        if (advancing.Count == 0) return 0;
         var statusIds = advancing.Keys.ToList();
-        var candidates = await _db.SalesRequests.AsNoTracking()
-            .Where(item => item.FinalKind == SalesRequestFinalKinds.None && statusIds.Contains(item.StatusId))
-            .Select(item => new { item.Id, item.StatusId, item.Version })
-            .Take(200)
-            .ToListAsync(ct);
+        var lastId = 0;
         var moved = 0;
-        foreach (var candidate in candidates)
+        while (true)
         {
-            var tag = StatusTag(candidate.StatusId);
-            var tasks = await _db.TaskJournalItems.AsNoTracking()
-                .Where(task => task.SalesRequestId == candidate.Id && task.TagsJson.Contains(tag))
-                .Select(task => task.Status)
-                .ToListAsync(ct);
-            // Идёт дальше только когда задачи этапа были и ни одна не осталась открытой; если все отменены, решает человек.
-            if (tasks.Count == 0 || tasks.Any(status => !ClosedTaskStatuses.Contains(status)) || !tasks.Contains("done"))
+            var candidates = await _db.SalesRequests.AsNoTracking()
+                .Where(item => item.Id > lastId && item.FinalKind == SalesRequestFinalKinds.None && statusIds.Contains(item.StatusId))
+                .OrderBy(item => item.Id).Select(item => new { item.Id, item.StatusId, item.Version }).Take(200).ToListAsync(ct);
+            if (candidates.Count == 0) break;
+            lastId = candidates[^1].Id;
+            var requestIds = candidates.Select(item => item.Id).ToList();
+            var tasks = (await _db.TaskJournalItems.AsNoTracking().Where(task => task.SalesRequestId != null && requestIds.Contains(task.SalesRequestId.Value))
+                .Select(task => new { task.SalesRequestId, task.TagsJson, task.Status }).ToListAsync(ct)).ToLookup(task => task.SalesRequestId!.Value);
+            foreach (var candidate in candidates)
             {
-                continue;
-            }
-
-            var result = await TransitionAsync(candidate.Id, new SalesRequestTransitionInput(advancing[candidate.StatusId], candidate.Version, null, false, "Автоматически: задачи этапа выполнены"), 0, ct);
-            if (result.Ok)
-            {
-                moved++;
-            }
-            else
-            {
+                var tag = $"\"{StatusTag(candidate.StatusId)}\"";
+                var stageTasks = tasks[candidate.Id].Where(task => task.TagsJson.Contains(tag, StringComparison.Ordinal)).ToList();
+                if (stageTasks.Count == 0 || stageTasks.Any(task => !ClosedTaskStatuses.Contains(task.Status)) || !stageTasks.Any(task => task.Status == "done")) continue;
+                var result = await TransitionAsync(candidate.Id, new SalesRequestTransitionInput(advancing[candidate.StatusId], candidate.Version, null, false,
+                    "Автоматически: задачи этапа выполнены"), 0, ct);
+                if (result.Ok) moved++;
                 _db.ChangeTracker.Clear();
             }
         }
-
         return moved;
     }
 
@@ -766,12 +803,16 @@ public sealed class SalesRequestService : ISalesRequestService
             return SalesRequestResult<Client>.Fail("Телефон указан неполностью.");
         }
 
-        // Блокировка дублей: клиент с тем же телефоном уже есть — выбираем его, а не создаём второго.
-        var candidates = await _db.Clients.AsNoTracking().Where(item => item.Phone != "").Select(item => new { item.Id, item.Name, item.Phone }).ToListAsync(ct);
-        var duplicate = candidates.FirstOrDefault(item => Digits(item.Phone).EndsWith(digits[^10..], StringComparison.Ordinal));
-        if (duplicate is not null)
+        // The caller owns a write transaction. SQLite serializes its writers; PostgreSQL needs a phone-scoped lock.
+        var suffix = digits[^10..];
+        if (_db.Database.IsNpgsql())
+            await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(831032, hashtext({suffix}))", ct);
+        var pattern = "%" + string.Join('%', suffix.ToCharArray()) + "%";
+        var candidates = _db.Clients.AsNoTracking().Where(item => EF.Functions.Like(item.Phone, pattern)).Select(item => new { item.Id, item.Name, item.Phone });
+        await foreach (var duplicate in candidates.AsAsyncEnumerable().WithCancellation(ct))
         {
-            return SalesRequestResult<Client>.Fail("Клиент с таким телефоном уже есть. Выберите его из списка.", 409, new { existingClientId = duplicate.Id, duplicate.Name });
+            if (Digits(duplicate.Phone).EndsWith(suffix, StringComparison.Ordinal))
+                return SalesRequestResult<Client>.Fail("Клиент с таким телефоном уже есть. Выберите его из списка.", 409, new { existingClientId = duplicate.Id, duplicate.Name });
         }
 
         var client = new Client { Name = name, Phone = phone, Email = input.NewClientEmail?.Trim() ?? string.Empty };
@@ -800,6 +841,7 @@ public sealed class SalesRequestService : ISalesRequestService
 
     private async Task<TaskJournalItem?> BuildTaskAsync(SalesRequest request, int assigneeUserId, string title, DateTime dueAt, int authorUserId, string? tag, CancellationToken ct)
     {
+        if (!await _db.Users.WithSalesRequestAccess(request.Id, _db).AnyAsync(user => user.Id == assigneeUserId, ct)) return null;
         var assignee = await _db.Users.AsNoTracking().Where(item => item.Id == assigneeUserId && item.IsActive).Select(item => new { item.Id, item.FullName }).FirstOrDefaultAsync(ct);
         if (assignee is null)
         {
@@ -846,6 +888,14 @@ public sealed class SalesRequestService : ISalesRequestService
                 _logger?.LogWarning(ex, "Не удалось уведомить об автозадаче заявки {TaskId}.", task.Id);
             }
         }
+    }
+
+    private async Task<bool> CanViewRequestsAsync(int userId, CancellationToken ct)
+    {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture))], "request-assignment"));
+        var access = await _db.ResolveSectionAccessAsync(principal, RolePermissionCatalog.Requests, ct, requireApprovedUser: true);
+        return access is not null && (access.Visibility.IsAdmin || access.Permission?.CanView == true);
     }
 
     private async Task<List<TaskJournalItem>> LoadOpenTasksAsync(int requestId, CancellationToken ct)

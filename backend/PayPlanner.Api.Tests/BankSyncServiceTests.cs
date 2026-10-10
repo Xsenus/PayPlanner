@@ -57,9 +57,8 @@ public class BankSyncServiceTests
 
     private static async Task<(PaymentContext Db, BankSyncService Service, FakeBank Bank, BankConnection Connection)> CreateAsync(string companyInn = "7707083893")
     {
-        var connection = new SqliteConnection("Data Source=:memory:");
-        await connection.OpenAsync();
-        var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection).Options);
+        var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite("Data Source=:memory:").Options);
+        await db.Database.OpenConnectionAsync();
         await db.Database.EnsureCreatedAsync();
         var company = new LegalEntity { ShortName = "Своя", Inn = companyInn };
         db.LegalEntities.Add(company);
@@ -76,6 +75,26 @@ public class BankSyncServiceTests
 
     private static BankAccountInfo Account(string id, string number = "40702810200000000001", string status = BankAccountStatuses.Open, string? inn = "7707083893")
         => new(id, number, "044525225", "RUB", status, inn);
+
+    [Fact]
+    public async Task ExplicitPeriod_IgnoresNewerWatermark_AndReleasesTrackedPages()
+    {
+        var (db, service, bank, connection) = await CreateAsync();
+        await using var _ = db;
+        bank.Accounts = [Account("a")];
+        await service.SyncAccountsAsync(connection.Id, default);
+        var account = await db.BankConnectionAccounts.SingleAsync();
+        account.StatementWatermark = new DateTime(2026, 10, 20);
+        await db.SaveChangesAsync();
+        bank.Pages["a"] = Enumerable.Range(1, 25).Select(i => new List<BankOperationInfo> { Op($"op{i}", 2) }).ToList();
+        var from = new DateTime(2026, 10, 1);
+        var results = await service.SyncAllStatementsForPeriodAsync(connection.Id, from, new DateTime(2026, 10, 9), default);
+        Assert.Null(results[account.Id].Error);
+        Assert.Equal(from, bank.LastFrom);
+        Assert.Equal(25, await db.BankStatementOperations.CountAsync());
+        Assert.Empty(db.ChangeTracker.Entries<BankStatementOperation>());
+        Assert.Equal(new DateTime(2026, 10, 20), results[account.Id].Watermark);
+    }
 
     [Fact]
     public async Task StoreTokens_NeverKeepsPlainTextInDatabase()
@@ -320,7 +339,7 @@ public class BankSyncServiceTests
     }
 
     [Fact]
-    public async Task SyncStatement_DoesNotRereadWholeHistory_WhenAccountHasNoBookedOperationsYet()
+    public async Task IncrementalSync_DoesNotRereadWholeHistory_WhenAccountHasNoBookedOperationsYet()
     {
         var (db, service, bank, connection) = await CreateAsync();
         await using var _ = db;
@@ -328,8 +347,8 @@ public class BankSyncServiceTests
         await service.SyncAccountsAsync(connection.Id, default);
         var accountId = (await db.BankConnectionAccounts.SingleAsync()).Id;
 
-        await service.SyncStatementAsync(accountId, new DateTime(2026, 1, 1), DateTime.UtcNow, default);
-        await service.SyncStatementAsync(accountId, new DateTime(2026, 1, 1), DateTime.UtcNow, default);
+        await service.SyncAllStatementsAsync(connection.Id, DateTime.UtcNow, default);
+        await service.SyncAllStatementsAsync(connection.Id, DateTime.UtcNow, default);
 
         Assert.True(bank.LastFrom > new DateTime(2026, 1, 1));
     }

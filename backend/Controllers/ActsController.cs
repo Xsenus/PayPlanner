@@ -1736,7 +1736,7 @@ public class ActsController : ControllerBase
             }
 
             var manualAmount = manualLineItems.LineItems.Count > 0
-                ? manualLineItems.LineItems.Sum(item => item.Quantity * item.Price)
+                ? VatCalculator.DocumentTotal(manualLineItems.LineItems.Select(item => new VatLine(item.Quantity, item.Price, item.VatRate)))
                 : request.Amount;
 
             return (null, ActCreationMode.Manual, manualAmount, manualLineItems.LineItems);
@@ -1752,7 +1752,7 @@ public class ActsController : ControllerBase
             }
 
             var manualAmount = manualLineItems.LineItems.Count > 0
-                ? manualLineItems.LineItems.Sum(item => item.Quantity * item.Price)
+                ? VatCalculator.DocumentTotal(manualLineItems.LineItems.Select(item => new VatLine(item.Quantity, item.Price, item.VatRate)))
                 : request.Amount;
 
             return (null, ActCreationMode.Manual, manualAmount, manualLineItems.LineItems);
@@ -1768,7 +1768,7 @@ public class ActsController : ControllerBase
             }
 
             var manualAmount = manualLineItems.LineItems.Count > 0
-                ? manualLineItems.LineItems.Sum(item => item.Quantity * item.Price)
+                ? VatCalculator.DocumentTotal(manualLineItems.LineItems.Select(item => new VatLine(item.Quantity, item.Price, item.VatRate)))
                 : request.Amount;
 
             return (null, ActCreationMode.Manual, manualAmount, manualLineItems.LineItems);
@@ -1864,7 +1864,10 @@ public class ActsController : ControllerBase
             return (BadRequest("По счету не осталось услуг, доступных для выставления акта."), creationMode, 0m, new List<ActLineItemDraft>());
         }
 
-        var amount = resolved.Sum(item => item.Quantity * item.Price);
+        if (resolved.Any(item => !InvoiceLineItemStorage.HasStorablePrecision(item.Quantity, item.Price)))
+            return (BadRequest(new { message = InvoiceLineItemStorage.PrecisionError }), creationMode, 0m, new List<ActLineItemDraft>());
+
+        var amount = VatCalculator.DocumentTotal(resolved.Select(item => new VatLine(item.Quantity, item.Price, item.VatRate)));
         return (null, creationMode, amount, resolved);
     }
 
@@ -1880,6 +1883,9 @@ public class ActsController : ControllerBase
         for (var index = 0; index < requestLineItems.Count; index++)
         {
             var item = requestLineItems[index];
+            if (item is null)
+                return (ValidationError($"{nameof(UpsertActRequest.LineItems)}[{index}]", "Позиция акта не может быть пустой."), new List<ActLineItemDraft>());
+
             var sourceKey = Normalize(item.SourceKey);
             var name = Normalize(item.Name);
             var unit = Normalize(item.Unit) ?? "шт";
@@ -1903,6 +1909,9 @@ public class ActsController : ControllerBase
             {
                 return (ValidationError($"{nameof(UpsertActRequest.LineItems)}[{index}].{nameof(ActLineItemRequest.Price)}", "Цена позиции акта не может быть отрицательной."), new List<ActLineItemDraft>());
             }
+
+            if (!InvoiceLineItemStorage.HasStorablePrecision(item.Quantity, item.Price))
+                return (ValidationError($"{nameof(UpsertActRequest.LineItems)}[{index}]", InvoiceLineItemStorage.PrecisionError), new List<ActLineItemDraft>());
 
             resolved.Add(new ActLineItemDraft(
                 null,

@@ -3428,7 +3428,8 @@ public class ReportsControllerTests
         Assert.Equal("LEGAL-VISIBLE", Assert.Single(report.OverdueDeadlines).CaseNumber);
         Assert.DoesNotContain(report.Responsibles, item => item.ResponsibleUserId == hiddenUser.Id);
         Assert.Equal(2, interceptor.Commands.Count(command =>
-            command.Contains("RolePermissions", StringComparison.Ordinal)));
+            command.Contains("FROM \"RolePermissions\"", StringComparison.Ordinal)
+            && !command.Contains("FROM \"TaskJournalItems\"", StringComparison.Ordinal)));
     }
 
     [Fact]

@@ -747,10 +747,11 @@ public static class ActDocumentTemplateEngine
     {
         if (lineItems.Count > 0)
         {
+            var roundTotal = lineItems.Any(line => line.VatRate != null);
             return lineItems
                 .OrderBy(item => item.SortOrder)
                 .ThenBy(item => item.Id)
-                .Select(item => new RenderedActLineItem(item.Name, item.Quantity, item.Unit, item.Price, item.VatRate))
+                .Select(item => new RenderedActLineItem(item.Name, item.Quantity, item.Unit, item.Price, item.VatRate, roundTotal))
                 .ToList();
         }
 
@@ -1482,9 +1483,9 @@ public static class ActDocumentTemplateEngine
     private static string Encode(string? value)
         => WebUtility.HtmlEncode(value ?? string.Empty);
 
-    private sealed record RenderedActLineItem(string Name, decimal Quantity, string Unit, decimal Price, string? VatRate = null)
+    private sealed record RenderedActLineItem(string Name, decimal Quantity, string Unit, decimal Price, string? VatRate = null, bool RoundTotal = false)
     {
-        public decimal Total => Quantity * Price;
+        public decimal Total => RoundTotal ? VatCalculator.LineTotal(Quantity, Price) : Quantity * Price;
     }
 
     private sealed record SellerInfo(

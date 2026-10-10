@@ -57,11 +57,38 @@ describe('CompanyTaxRegisterSection', () => {
   });
 
   it('renders nothing when the server refuses access', async () => {
-    vi.mocked(apiService.getTaxRegisterBook).mockRejectedValue(new Error('403'));
+    vi.mocked(apiService.getTaxRegisterBook).mockRejectedValue(new Error('HTTP 403'));
     const { container } = render(<CompanyTaxRegisterSection companyId={5} />);
 
     await waitFor(() => expect(apiService.getTaxRegisterBook).toHaveBeenCalled());
     expect(container.textContent).toBe('');
+  });
+
+  it('shows a retry after a technical failure instead of hiding the section', async () => {
+    vi.mocked(apiService.getTaxRegisterBook).mockRejectedValueOnce(new Error('Failed to fetch'));
+    render(<CompanyTaxRegisterSection companyId={5} />);
+    expect(await screen.findByRole('alert')).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'Повторить загрузку' }));
+    expect(await screen.findByTestId('tax-register-totals')).toBeTruthy();
+  });
+
+  it('can load drafts beyond the first 200 entries', async () => {
+    vi.mocked(apiService.getTaxRegisterDrafts).mockResolvedValue({ total: 201, page: 1, pageSize: 200, items: [entry({ status: 'Draft' })] });
+    render(<CompanyTaxRegisterSection companyId={5} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Следующие черновики' }));
+    await waitFor(() => expect(apiService.getTaxRegisterDrafts).toHaveBeenCalledWith(5, 2026, 2));
+  });
+
+  it('ignores an old company response after switching companies', async () => {
+    let finishOld!: (value: TaxRegisterBook) => void;
+    vi.mocked(apiService.getTaxRegisterBook).mockImplementationOnce(() => new Promise((resolve) => { finishOld = resolve; }));
+    const { rerender } = render(<CompanyTaxRegisterSection companyId={5} />);
+    vi.mocked(apiService.getTaxRegisterBook).mockResolvedValue(book({ legalEntityId: 6, entries: [entry({ documentRef: 'Компания 6' })] }));
+    rerender(<CompanyTaxRegisterSection companyId={6} />);
+    expect(await screen.findByText('Компания 6')).toBeTruthy();
+    finishOld(book({ entries: [entry({ documentRef: 'Компания 5' })] }));
+    await waitFor(() => expect(screen.queryByText('Компания 5')).toBeNull());
+    expect(screen.getByText('Компания 6')).toBeTruthy();
   });
 
   it('shows totals and the approved entry', async () => {

@@ -539,7 +539,12 @@ describe('ActModal integration', () => {
     expect(payload.lineItems).toEqual([]);
   });
 
-  it('allows adding manual act positions when the linked invoice has no positions', async () => {
+  it.each([
+    { quantity: '2', price: '1500', vatRate: '', amount: 3000, valid: true },
+    { quantity: '1.0075', price: '10', vatRate: '20', amount: 10.08, valid: true },
+    { quantity: '1.5', price: '10.075', vatRate: '20', amount: 15.11, valid: false },
+    { quantity: '1.50001', price: '10', vatRate: '20', amount: 15, valid: false },
+  ])('keeps displayed totals and validates stored precision: $quantity × $price, VAT $vatRate', async ({ quantity, price, vatRate, amount, valid }) => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const invoiceWithoutLines = {
       id: 880,
@@ -580,13 +585,21 @@ describe('ActModal integration', () => {
 
     fireEvent.change(screen.getByLabelText('Номер акта'), { target: { value: 'ACT-880' } });
     fireEvent.change(screen.getByLabelText('Название позиции акта'), { target: { value: 'Консультация' } });
-    fireEvent.change(screen.getByLabelText('Количество позиции акта'), { target: { value: '2' } });
+    fireEvent.change(screen.getByLabelText('Количество позиции акта'), { target: { value: quantity } });
     fireEvent.change(screen.getByLabelText('Единица измерения позиции акта'), { target: { value: 'час' } });
-    fireEvent.change(screen.getByLabelText('Цена позиции акта'), { target: { value: '1500' } });
+    fireEvent.change(screen.getByLabelText('Цена позиции акта'), { target: { value: price } });
+    fireEvent.change(screen.getByTestId('line-item-vat-rate'), { target: { value: vatRate } });
 
-    expect(screen.getByDisplayValue('3000').hasAttribute('readonly')).toBe(true);
+    expect(screen.getByDisplayValue(String(amount)).hasAttribute('readonly')).toBe(true);
+    expect(screen.getByText(String(amount), { selector: 'output' })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Создать' }));
+
+    if (!valid) {
+      expect(screen.getByText('В цене допускается до двух знаков после запятой, в количестве — до четырёх.')).toBeTruthy();
+      expect(onSubmit).not.toHaveBeenCalled();
+      return;
+    }
 
     await waitFor(() => {
       expect(onSubmit).toHaveBeenCalledTimes(1);
@@ -595,7 +608,7 @@ describe('ActModal integration', () => {
     const payload = onSubmit.mock.calls[0]?.[0];
     expect(payload).toMatchObject({
       number: 'ACT-880',
-      amount: 3000,
+      amount,
       creationMode: 'Manual',
       invoiceId: 880,
       invoiceNumber: 'INV-880',
@@ -605,9 +618,9 @@ describe('ActModal integration', () => {
     expect(payload.lineItems).toEqual([
       expect.objectContaining({
         name: 'Консультация',
-        quantity: 2,
+        quantity: Number(quantity),
         unit: 'час',
-        price: 1500,
+        price: Number(price),
       }),
     ]);
   });

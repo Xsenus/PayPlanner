@@ -788,7 +788,7 @@ public class NotificationInboxController : ControllerBase
 
         var visibleTaskIds = context.TaskJournalItems
             .IgnoreQueryFilters()
-            .ApplyTaskVisibility(visibility.Tasks)
+            .ApplyTaskVisibility(visibility.Tasks, context)
             .Select(task => task.Id);
         var visibleCaseIds = context.ClientCases
             .ApplyClientCaseVisibility(visibility.Cases)
