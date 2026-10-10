@@ -40,6 +40,7 @@ import {
   Inbox,
   Bell,
   Briefcase,
+  ClipboardList,
   StickyNote,
   GripVertical,
   LayoutGrid,
@@ -319,6 +320,9 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
       if (!permissions.tasks.canView) {
         items.push({ id: 'courtCases', tab: 'courtCases' as Tab, label: 'Судебные дела', icon: Scale });
       }
+    }
+    if (permissions.requests?.canView) {
+      items.push({ id: 'requests', tab: 'requests' as Tab, label: 'Заявки', icon: ClipboardList });
     }
     if (permissions.clients.canView || permissions.legalEntities.canView) {
       const contactChildren: SidebarChild[] = [

@@ -238,6 +238,85 @@ export interface TaxRegisterEntryInput {
   category?: string;
 }
 
+export type SalesRequestSource = 'Call' | 'Max' | 'Avito' | 'Site' | 'Other';
+export type SalesRequestType = 'New' | 'Fixed' | 'PerCase';
+export type SalesRequestFinalKind = 'None' | 'Success' | 'Failure';
+
+export interface SalesRequestItem {
+  id: number;
+  createdAt: string;
+  source: SalesRequestSource;
+  clientId: number;
+  clientName: string;
+  clientPhone: string;
+  clientCaseId?: number | null;
+  linkedCaseWasClosed: boolean;
+  type: SalesRequestType;
+  summary: string;
+  statusId: number;
+  statusEnteredAt: string;
+  responsibleUserId: number;
+  amount?: number | null;
+  comment?: string | null;
+  finalKind: SalesRequestFinalKind;
+  closedAt?: string | null;
+  paidPaymentId?: number | null;
+  version: number;
+}
+
+export interface SalesRequestStatusItem {
+  id: number;
+  key: string;
+  title: string;
+  sortOrder: number;
+  finalKind: SalesRequestFinalKind;
+  rules: Array<{ id: number; title: string; assigneeUserId?: number | null; dueInMinutes: number }>;
+}
+
+export interface SalesRequestPage {
+  total: number;
+  page: number;
+  pageSize: number;
+  items: SalesRequestItem[];
+}
+
+export interface SalesRequestDetail {
+  request: SalesRequestItem;
+  tasks: Array<{ id: number; title: string; status: string; assigneeUserId?: number | null; assigneeName: string; dueAt: string }>;
+  events: Array<{ id: number; kind: string; fromStatusId?: number | null; toStatusId?: number | null; userId?: number | null; comment?: string | null; createdAt: string }>;
+}
+
+export interface SalesRequestClientOption {
+  id: number;
+  name: string;
+  phone: string;
+  email: string;
+  cases: Array<{ id: number; caseNumber: string; title: string; status: string }>;
+}
+
+export interface SalesRequestCreateInput {
+  source: SalesRequestSource;
+  clientId?: number;
+  newClientName?: string;
+  newClientPhone?: string;
+  newClientEmail?: string;
+  clientCaseId?: number;
+  summary: string;
+  amount?: number;
+  comment?: string;
+}
+
+export interface SalesRequestReport {
+  total: number;
+  succeeded: number;
+  failed: number;
+  inProgress: number;
+  conversionPercent: number;
+  wonAmount: number;
+  lostAmount: number;
+  bySource: Array<{ source: string; total: number; succeeded: number; conversionPercent: number }>;
+}
+
 export interface RequisitesIssue {
   field: string;
   message: string;

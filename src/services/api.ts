@@ -6134,6 +6134,45 @@ export class ApiService {
     return response.blob();
   }
 
+  async getSalesRequestStatuses() {
+    return this.request<SalesRequestStatusItem[]>('/requests/statuses');
+  }
+
+  async getSalesRequests(params: { statusId?: number; source?: string; q?: string; closed?: boolean; page?: number; pageSize?: number }) {
+    return this.request<SalesRequestPage>(`/requests${buildQuery(params)}`);
+  }
+
+  async getSalesRequest(id: number) {
+    return this.request<SalesRequestDetail>(`/requests/${id}`);
+  }
+
+  async searchSalesRequestClients(q: string) {
+    return this.request<SalesRequestClientOption[]>(`/requests/clients/search${buildQuery({ q })}`);
+  }
+
+  async createSalesRequest(payload: SalesRequestCreateInput) {
+    return this.request<SalesRequestItem>('/requests', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  async updateSalesRequest(id: number, payload: { version: number; amount?: number; comment?: string; summary?: string; responsibleUserId?: number }) {
+    return this.request<SalesRequestItem>(`/requests/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  }
+
+  async transitionSalesRequest(
+    id: number,
+    payload: { toStatusId: number; version: number; paidPaymentId?: number; forceCloseTasks?: boolean; comment?: string },
+  ) {
+    return this.request<SalesRequestItem>(`/requests/${id}/transition`, { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  async createSalesRequestTask(id: number, payload: { assigneeUserId: number; title: string; dueAt?: string }) {
+    return this.request<SalesRequestDetail['tasks'][number]>(`/requests/${id}/tasks`, { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  async getSalesRequestReport(from: string, to: string) {
+    return this.request<SalesRequestReport>(`/requests/report${buildQuery({ from, to })}`);
+  }
+
   async getOwnCompanyOptions() {
     return this.request<OwnCompanyOption[]>('/own-companies/options');
   }
@@ -9356,6 +9395,13 @@ import type {
   BankStatementRun,
   BankSyncLogPage,
   TaxRegisterBook,
+  SalesRequestClientOption,
+  SalesRequestCreateInput,
+  SalesRequestDetail,
+  SalesRequestItem,
+  SalesRequestPage,
+  SalesRequestReport,
+  SalesRequestStatusItem,
   TaxRegisterEntryInput,
   TaxRegisterEntryItem,
   TaxRegisterEntryPage,

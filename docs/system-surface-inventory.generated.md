@@ -5,7 +5,7 @@
 
 ## Сводка
 
-- Разделов frontend: 54.
+- Разделов frontend: 55.
 - Backend-контроллеров: 89.
 - HTTP endpoints: 924; с прямой тестовой связью: 626.
 - HTTP endpoints с точной ссылкой из документации: 219; критичных без такой ссылки: 537.
@@ -35,6 +35,7 @@
 | cases | (permissions) => permissions.cases.canView | да | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/case-registry-query-optimization.md, docs/crm-legal-module-acceptance-checklist.md, docs/full-project-audit-2026-06-10.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-resilience-runbook.md |
 | courtCases | (permissions) => permissions.cases.canView | да | нет |
 | caseDetail | (permissions) => permissions.cases.canView | да | docs/full-project-audit-2026-06-10.md |
+| requests | (permissions) => permissions.requests?.canView === true | нет | docs/pay-33-36-implementation-log-2026-10-09.md, docs/tz-crm-applications-automation-roadmap-2026-10-07.md |
 | clients | (permissions) => permissions.clients.canView | да | docs/development-pause-plan-2026-09-30.md, docs/final-acceptance-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md |
 | contacts | (permissions) => permissions.clients.canView \|\| permissions.legalEntities.canView | да | docs/contacts-directory-implementation-log.md, docs/full-project-audit-2026-06-10.md |
 | contactsClients | (permissions) => permissions.clients.canView | да | docs/full-project-audit-2026-06-10.md |

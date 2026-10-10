@@ -209,6 +209,7 @@ const InternalMessenger = lazy(() => import('./components/Messenger/InternalMess
 const Reports = lazy(() => import('./components/Reports/Reports').then((module) => ({ default: module.Reports })));
 const Calculator = lazy(() => import('./components/Calculator/Calculator').then((module) => ({ default: module.Calculator })));
 const Clients = lazy(() => import('./components/Clients/Clients').then((module) => ({ default: module.Clients })));
+const SalesRequestsPage = lazy(() => import('./components/Requests/SalesRequestsPage').then((module) => ({ default: module.SalesRequestsPage })));
 const CasesRegistry = lazy(() => import('./components/Cases/CasesRegistry').then((module) => ({ default: module.CasesRegistry })));
 const CourtCasesRegistry = lazy(() => import('./components/Cases/CourtCasesRegistry').then((module) => ({ default: module.CourtCasesRegistry })));
 const CaseDetailPage = lazy(() => import('./components/Cases/CaseDetailPage').then((module) => ({ default: module.CaseDetailPage })));
@@ -379,6 +380,7 @@ function AppContent() {
         { tab: 'calculator' as Tab, allowed: permissions.calculator.canView },
         { tab: 'legalEntities' as Tab, allowed: permissions.legalEntities.canView },
         { tab: 'cases' as Tab, allowed: permissions.cases.canView },
+        { tab: 'requests' as Tab, allowed: permissions.requests?.canView },
         { tab: 'courtCases' as Tab, allowed: permissions.cases.canView },
         { tab: 'clients' as Tab, allowed: permissions.clients.canView },
         { tab: 'contacts' as Tab, allowed: permissions.clients.canView || permissions.legalEntities.canView },
@@ -1333,6 +1335,17 @@ function AppContent() {
               />
             )
           : renderNoAccess('Раздел юридических лиц недоступен для вашей роли.');
+
+      case 'requests':
+        return permissions.requests?.canView
+          ? (
+              <SalesRequestsPage
+                allowCreate={permissions.requests?.canCreate === true}
+                allowEdit={permissions.requests?.canEdit === true}
+                allowAnalytics={permissions.requests?.canViewAnalytics === true}
+              />
+            )
+          : renderNoAccess('Раздел заявок недоступен для вашей роли.');
 
       case 'cases':
         return permissions.cases.canView

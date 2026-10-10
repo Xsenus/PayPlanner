@@ -13,6 +13,7 @@ export const ALL_TABS = [
   'calculator',
   'legalEntities',
   'cases',
+  'requests',
   'courtCases',
   'caseDetail',
   'clients',

@@ -5,6 +5,7 @@ import {
   BarChart3,
   Banknote,
   Briefcase,
+  ClipboardList,
   Building2,
   Calculator,
   CalendarDays,
@@ -124,6 +125,12 @@ const SECTION_CONFIG: Record<MenuSectionKey, SectionConfig> = {
     description: 'Доступ к реестру дел, карточкам дел и юридическому рабочему контуру.',
     icon: Briefcase,
   },
+  requests: {
+    key: 'requests',
+    title: 'Заявки',
+    description: 'Воронка заявок до оплаты. По умолчанию закрыто всем ролям, юристы заявок не видят.',
+    icon: ClipboardList,
+  },
   accounts: {
     key: 'accounts',
     title: 'Счета',
@@ -203,7 +210,7 @@ const GROUPS: GroupConfig[] = [
     key: 'crm',
     title: 'Клиенты и документы',
     description: 'Карточки клиентов, юрлица, договоры и справочники.',
-    sections: ['legalEntities', 'clients', 'cases', 'contracts', 'dictionaries'],
+    sections: ['legalEntities', 'clients', 'cases', 'requests', 'contracts', 'dictionaries'],
   },
   {
     key: 'finance',
@@ -225,6 +232,7 @@ const DATA_SCOPE_SECTIONS = new Set<MenuSectionKey>([
   'legalEntities',
   'clients',
   'cases',
+  'requests',
   'accounts',
   'acts',
   'payments',

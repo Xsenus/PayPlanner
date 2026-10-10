@@ -51,6 +51,7 @@ export const TAB_ACCESS_RULES = {
   cases: (permissions) => permissions.cases.canView,
   courtCases: (permissions) => permissions.cases.canView,
   caseDetail: (permissions) => permissions.cases.canView,
+  requests: (permissions) => permissions.requests?.canView === true,
   clients: (permissions) => permissions.clients.canView,
   contacts: (permissions) => permissions.clients.canView || permissions.legalEntities.canView,
   contactsClients: (permissions) => permissions.clients.canView,
