@@ -10,6 +10,10 @@ vi.mock('../../hooks/useToast', () => ({
   useToast: () => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }),
 }));
 
+vi.mock('../../hooks/useDialog', () => ({
+  useDialog: () => ({ confirm: vi.fn().mockResolvedValue(true), prompt: vi.fn().mockResolvedValue('Ошибка суммы') }),
+}));
+
 vi.mock('../../services/api', () => ({
   apiService: {
     getTaxRegisterBook: vi.fn(),
@@ -99,6 +103,15 @@ describe('CompanyTaxRegisterSection', () => {
     expect(apiService.createTaxRegisterEntry).toHaveBeenCalledWith(
       expect.objectContaining({ legalEntityId: 5, type: 'Income', operationDate: '2026-04-01', amount: 250.5, documentRef: 'Акт № 3' }),
     );
+  });
+
+  it('corrects an approved entry with a reason from the dialog', async () => {
+    vi.mocked(apiService.correctTaxRegisterEntry).mockResolvedValue(entry({ id: 9, type: 'Correction', sign: -1 }));
+    render(<CompanyTaxRegisterSection companyId={5} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Исправить' }));
+
+    await waitFor(() => expect(apiService.correctTaxRegisterEntry).toHaveBeenCalledWith(1, 'Ошибка суммы'));
   });
 
   it('hides editing for a closed year', async () => {

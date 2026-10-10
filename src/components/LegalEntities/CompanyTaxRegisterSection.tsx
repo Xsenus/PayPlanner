@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
+import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
 import { apiService } from '../../services/api';
 import type { TaxRegisterBook, TaxRegisterEntryItem } from '../../types';
@@ -20,6 +21,7 @@ const emptyForm = () => ({ type: 'Income' as 'Income' | 'Expense', operationDate
  */
 export function CompanyTaxRegisterSection({ companyId }: CompanyTaxRegisterSectionProps) {
   const toast = useToast();
+  const dialog = useDialog();
   const [year, setYear] = useState(new Date().getFullYear());
   const [book, setBook] = useState<TaxRegisterBook | null>(null);
   const [drafts, setDrafts] = useState<TaxRegisterEntryItem[]>([]);
@@ -102,13 +104,22 @@ export function CompanyTaxRegisterSection({ companyId }: CompanyTaxRegisterSecti
           <button
             type="button"
             disabled={busy || book.isClosed}
-            onClick={() => {
-              if (window.confirm(`Закрыть ${year} год? После закрытия записи года менять нельзя.`)) {
-                void run(async () => {
-                  await apiService.closeTaxRegisterYear(companyId, year);
-                }, 'Не удалось закрыть год.');
-              }
-            }}
+            onClick={() =>
+              void (async () => {
+                const confirmed = await dialog.confirm({
+                  title: `Закрыть ${year} год?`,
+                  description: 'После закрытия записи года менять нельзя.',
+                  confirmLabel: 'Закрыть год',
+                  cancelLabel: 'Отмена',
+                  variant: 'danger',
+                });
+                if (confirmed) {
+                  await run(async () => {
+                    await apiService.closeTaxRegisterYear(companyId, year);
+                  }, 'Не удалось закрыть год.');
+                }
+              })()
+            }
             className="rounded-lg border border-slate-200 px-2 py-1 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
           >
             {book.isClosed ? 'Год закрыт' : 'Закрыть год'}
@@ -247,12 +258,20 @@ export function CompanyTaxRegisterSection({ companyId }: CompanyTaxRegisterSecti
                     <button
                       type="button"
                       disabled={busy}
-                      onClick={() => {
-                        const reason = window.prompt('Причина корректировки');
-                        if (reason?.trim()) {
-                          void run(async () => { await apiService.correctTaxRegisterEntry(entry.id, reason.trim()); }, 'Не удалось создать корректировку.');
-                        }
-                      }}
+                      onClick={() =>
+                        void (async () => {
+                          const reason = (await dialog.prompt({
+                            title: 'Причина корректировки',
+                            label: 'Причина',
+                            multiline: true,
+                            confirmLabel: 'Исправить',
+                            cancelLabel: 'Отмена',
+                          }))?.trim();
+                          if (reason) {
+                            await run(async () => { await apiService.correctTaxRegisterEntry(entry.id, reason); }, 'Не удалось создать корректировку.');
+                          }
+                        })()
+                      }
                       className="rounded-lg border border-slate-200 px-2 py-0.5 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                     >
                       Исправить
