@@ -4135,6 +4135,43 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("CompanyBranches");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.CompanyBrandImageVersion", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("DataUrl")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<int>("LegalEntityId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LegalEntityId", "Kind", "Sha256")
+                        .IsUnique()
+                        .HasDatabaseName("IX_CompanyBrandImageVersions_Company_Kind_Hash");
+
+                    b.ToTable("CompanyBrandImageVersions");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.Contract", b =>
                 {
                     b.Property<int>("Id")

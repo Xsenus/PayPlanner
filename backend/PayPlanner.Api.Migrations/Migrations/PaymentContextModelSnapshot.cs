@@ -4046,6 +4046,41 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("CompanyBranches");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.CompanyBrandImageVersion", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DataUrl")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("LegalEntityId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LegalEntityId", "Kind", "Sha256")
+                        .IsUnique()
+                        .HasDatabaseName("IX_CompanyBrandImageVersions_Company_Kind_Hash");
+
+                    b.ToTable("CompanyBrandImageVersions");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.Contract", b =>
                 {
                     b.Property<int>("Id")

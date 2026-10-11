@@ -739,6 +739,16 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.BankConnectionId, e.ExternalAccountId }).IsUnique().HasDatabaseName("IX_BankConnectionAccounts_Connection_External");
         });
 
+        modelBuilder.Entity<CompanyBrandImageVersion>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Kind).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.Sha256).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.DataUrl).IsRequired();
+            // Одна версия на содержимое: повторная фиксация того же изображения не плодит копии.
+            entity.HasIndex(e => new { e.LegalEntityId, e.Kind, e.Sha256 }).IsUnique().HasDatabaseName("IX_CompanyBrandImageVersions_Company_Kind_Hash");
+        });
+
         modelBuilder.Entity<SalesRequest>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -5186,6 +5196,7 @@ public class PaymentContext : DbContext
     public DbSet<BankConnectionAccount> BankConnectionAccounts { get; set; }
     public DbSet<BankStatementOperation> BankStatementOperations { get; set; }
     public DbSet<BankSyncLog> BankSyncLogs { get; set; }
+    public DbSet<CompanyBrandImageVersion> CompanyBrandImageVersions { get; set; }
     public DbSet<SalesRequest> SalesRequests { get; set; }
     public DbSet<SalesRequestStatus> SalesRequestStatuses { get; set; }
     public DbSet<SalesRequestStatusTaskRule> SalesRequestStatusTaskRules { get; set; }

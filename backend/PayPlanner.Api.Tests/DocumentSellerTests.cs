@@ -362,3 +362,141 @@ public class OwnCompaniesControllerTests
         Assert.Empty(Assert.IsType<List<OwnCompanyOption>>(Assert.IsType<OkObjectResult>(result.Result).Value));
     }
 }
+
+/// <summary>Неизменяемость фирменных изображений в снимке продавца: версии по содержимому, замена и удаление в профиле.</summary>
+public class DocumentSellerImmutabilityTests : IClassFixture<PostgreSqlMigratedTemplate>
+{
+    private const string Logo1 = "data:image/png;base64,TE9HTzE=";
+    private const string Seal1 = "data:image/png;base64,U0VBTDE=";
+    private const string Signature1 = "data:image/png;base64,U0lHTjE=";
+    private readonly PostgreSqlMigratedTemplate postgresTemplate;
+
+    public DocumentSellerImmutabilityTests(PostgreSqlMigratedTemplate postgresTemplate) => this.postgresTemplate = postgresTemplate;
+
+    private async Task<(PaymentContext Db, IAsyncDisposable? Lease)> CreateAsync(bool postgres)
+    {
+        if (postgres)
+        {
+            var lease = await postgresTemplate.CreateDatabaseAsync("pp_sellerimg_");
+            return (new PostgreSqlPaymentContext(new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(lease.ConnectionString).Options), lease);
+        }
+
+        var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection).Options);
+        await db.Database.EnsureCreatedAsync();
+        return (db, null);
+    }
+
+    private static async Task<LegalEntity> AddOwnCompanyAsync(PaymentContext db, string? logo = Logo1, string? seal = Seal1, string? signature = Signature1)
+    {
+        var company = new LegalEntity
+        {
+            ShortName = "Своя",
+            Inn = "7707083893",
+            Kpp = "770701001",
+            ProfileStatus = CompanyProfileStatuses.Active,
+            LogoDataUrl = logo,
+            SealDataUrl = seal,
+            DirectorSignatureDataUrl = signature,
+        };
+        db.LegalEntities.Add(company);
+        await db.SaveChangesAsync();
+        db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = $"[{company.Id}]" });
+        await db.SaveChangesAsync();
+        return company;
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task IssuedDocument_KeepsImagesAfterReplacementAndDeletionInProfile(bool postgres)
+    {
+        var (db, lease) = await CreateAsync(postgres);
+        await using var _ = db;
+        await using var __ = lease;
+        var company = await AddOwnCompanyAsync(db);
+        var service = new DocumentSellerService(db);
+        var first = new Act { Number = "A-1" };
+
+        await service.ResolveAsync(first, company, freeze: true, default);
+        await db.SaveChangesAsync();
+
+        Assert.DoesNotContain("data:image", first.SellerSnapshotJson);
+        Assert.Contains("\"ImagesFrozen\":true", first.SellerSnapshotJson);
+        var tracked = await db.LegalEntities.SingleAsync(item => item.Id == company.Id);
+        tracked.SealDataUrl = "data:image/png;base64,U0VBTDI=";
+        tracked.LogoDataUrl = null;
+        await db.SaveChangesAsync();
+
+        var reissued = await service.ResolveAsync(first, tracked, freeze: true, default);
+        Assert.Equal(Seal1, reissued!.SealDataUrl);
+        Assert.Equal(Logo1, reissued.LogoDataUrl);
+        Assert.Equal(Signature1, reissued.DirectorSignatureDataUrl);
+
+        var second = new Act { Number = "A-2" };
+        var fresh = await service.ResolveAsync(second, tracked, freeze: true, default);
+        Assert.Equal("data:image/png;base64,U0VBTDI=", fresh!.SealDataUrl);
+        Assert.Null(fresh.LogoDataUrl);
+        Assert.Equal(Seal1, (await service.ResolveAsync(first, tracked, freeze: false, default))!.SealDataUrl);
+    }
+
+    [Fact]
+    public async Task SameImage_ReusesOneVersionPerKind_AndDifferentContentAddsAnother()
+    {
+        var (db, _) = await CreateAsync(false);
+        await using var _1 = db;
+        var company = await AddOwnCompanyAsync(db);
+        var service = new DocumentSellerService(db);
+
+        await service.ResolveAsync(new Act { Number = "A-1" }, company, freeze: true, default);
+        await service.ResolveAsync(new Act { Number = "A-2" }, company, freeze: true, default);
+        Assert.Equal(3, await db.CompanyBrandImageVersions.CountAsync());
+
+        var tracked = await db.LegalEntities.SingleAsync(item => item.Id == company.Id);
+        tracked.SealDataUrl = "data:image/png;base64,U0VBTDI=";
+        await db.SaveChangesAsync();
+        await service.ResolveAsync(new Act { Number = "A-3" }, tracked, freeze: true, default);
+
+        Assert.Equal(4, await db.CompanyBrandImageVersions.CountAsync());
+        Assert.Equal(2, await db.CompanyBrandImageVersions.CountAsync(item => item.Kind == CompanyBrandImageKinds.Seal));
+    }
+
+    [Fact]
+    public async Task CompanyWithoutImagesAtIssue_DoesNotGainThemLater_ButLegacySnapshotStillFollowsProfile()
+    {
+        var (db, _) = await CreateAsync(false);
+        await using var _1 = db;
+        var company = await AddOwnCompanyAsync(db, logo: null, seal: null, signature: null);
+        var service = new DocumentSellerService(db);
+        var document = new Act { Number = "A-1" };
+        await service.ResolveAsync(document, company, freeze: true, default);
+
+        var tracked = await db.LegalEntities.SingleAsync(item => item.Id == company.Id);
+        tracked.SealDataUrl = Seal1;
+        await db.SaveChangesAsync();
+
+        Assert.Null((await service.ResolveAsync(document, tracked, freeze: false, default))!.SealDataUrl);
+        var legacy = new Act { Number = "A-OLD", SellerCompanyId = company.Id, SellerSnapshotJson = SellerLegalEntityComposer.ToSnapshotJson(SellerLegalEntityComposer.Compose(tracked, null)) };
+        Assert.Equal(Seal1, (await service.ResolveAsync(legacy, tracked, freeze: false, default))!.SealDataUrl);
+    }
+
+    [Fact]
+    public async Task OversizedRequisites_StopIssuanceWithExplicitErrorInsteadOfSilentlyStayingLive()
+    {
+        var (db, _) = await CreateAsync(false);
+        await using var _1 = db;
+        var company = await AddOwnCompanyAsync(db);
+        var tracked = await db.LegalEntities.SingleAsync(item => item.Id == company.Id);
+        tracked.Address = new string('А', DocumentSellerService.MaxSnapshotLength + 10);
+        await db.SaveChangesAsync();
+        var document = new Act { Number = "A-BIG" };
+
+        var error = await Assert.ThrowsAsync<SellerSnapshotTooLargeException>(() =>
+            new DocumentSellerService(db).ResolveAsync(document, tracked, freeze: true, default));
+
+        Assert.True(error.Length > error.Limit);
+        Assert.Null(document.SellerSnapshotJson);
+        Assert.Contains("Сократите", error.Message);
+    }
+}

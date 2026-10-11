@@ -43,7 +43,11 @@ public static class SellerLegalEntityComposer
         string? TreasuryBankName,
         string? TreasuryBankBik,
         string? TreasuryAccountNumber,
-        string? TreasuryCorrAccountNumber);
+        string? TreasuryCorrAccountNumber,
+        int? LogoVersionId = null,
+        int? SealVersionId = null,
+        int? SignatureVersionId = null,
+        bool? ImagesFrozen = null);
 
     public static LegalEntity Compose(LegalEntity company, CompanyBranch? branch)
     {
@@ -102,17 +106,40 @@ public static class SellerLegalEntityComposer
         };
     }
 
-    public static string ToSnapshotJson(LegalEntity seller)
+    public static string ToSnapshotJson(LegalEntity seller, int? logoVersionId = null, int? sealVersionId = null, int? signatureVersionId = null, bool imagesFrozen = false)
         => JsonSerializer.Serialize(new SellerSnapshotData(
             seller.Id, seller.ShortName, seller.FullName, seller.OrganizationForm, seller.Inn, seller.Kpp,
             seller.Ogrn, seller.Okpo, seller.Okved, seller.TaxSystem, seller.VatWithoutVat,
             seller.Address, seller.Phone, seller.Email, seller.Director, seller.DocumentDirectorJson,
             seller.BankAccountsJson, seller.TreasuryBankName,
-            seller.TreasuryBankBik, seller.TreasuryAccountNumber, seller.TreasuryCorrAccountNumber),
+            seller.TreasuryBankBik, seller.TreasuryAccountNumber, seller.TreasuryCorrAccountNumber,
+            logoVersionId, sealVersionId, signatureVersionId, imagesFrozen ? true : null),
             new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
 
-    /// <summary>Восстанавливает продавца из снимка; печать и подпись берутся у <paramref name="liveCompany"/>, если он известен.</summary>
-    public static LegalEntity? FromSnapshot(string? json, LegalEntity? liveCompany)
+    /// <summary>Номера версий фирменных изображений из снимка (пусто у старых снимков, где изображения берутся из профиля).</summary>
+    public static IReadOnlyList<int> ReadImageVersionIds(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return [];
+        }
+
+        try
+        {
+            var data = JsonSerializer.Deserialize<SellerSnapshotData>(json);
+            return data is null ? [] : new int?[] { data.LogoVersionId, data.SealVersionId, data.SignatureVersionId }.Where(id => id.HasValue).Select(id => id!.Value).ToList();
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Восстанавливает продавца из снимка. Изображения берутся из неизменяемых версий (<paramref name="versionImages"/>),
+    /// а у старых снимков без версий — из профиля <paramref name="liveCompany"/>, если он известен.
+    /// </summary>
+    public static LegalEntity? FromSnapshot(string? json, LegalEntity? liveCompany, IReadOnlyDictionary<int, string>? versionImages = null)
     {
         if (string.IsNullOrWhiteSpace(json))
         {
@@ -157,14 +184,28 @@ public static class SellerLegalEntityComposer
             TreasuryBankBik = data.TreasuryBankBik,
             TreasuryAccountNumber = data.TreasuryAccountNumber,
             TreasuryCorrAccountNumber = data.TreasuryCorrAccountNumber,
-            LogoDataUrl = liveCompany?.LogoDataUrl,
-            SealDataUrl = liveCompany?.SealDataUrl,
-            DirectorSignatureDataUrl = liveCompany?.DirectorSignatureDataUrl,
+            LogoDataUrl = ImageOf(data.ImagesFrozen, data.LogoVersionId, liveCompany?.LogoDataUrl, versionImages),
+            SealDataUrl = ImageOf(data.ImagesFrozen, data.SealVersionId, liveCompany?.SealDataUrl, versionImages),
+            DirectorSignatureDataUrl = ImageOf(data.ImagesFrozen, data.SignatureVersionId, liveCompany?.DirectorSignatureDataUrl, versionImages),
         };
     }
 
+    // Снимок с зафиксированными изображениями: берём только сохранённую версию (или «изображения не было»), даже если
+    // профиль уже изменён. У старого снимка без пометки изображения по-прежнему берутся из профиля.
+    private static string? ImageOf(bool? imagesFrozen, int? versionId, string? live, IReadOnlyDictionary<int, string>? versionImages)
+        => imagesFrozen == true
+            ? (versionId.HasValue && versionImages is not null && versionImages.TryGetValue(versionId.Value, out var stored) ? stored : null)
+            : live;
+
     private static string? Pick(string? branchValue, string? companyValue)
         => string.IsNullOrWhiteSpace(branchValue) ? companyValue : branchValue.Trim();
+}
+
+/// <summary>Реквизиты продавца не помещаются в снимок документа: выдачу нужно остановить, а не оставлять документ без фиксации.</summary>
+public sealed class SellerSnapshotTooLargeException(int length, int limit) : Exception($"Реквизиты продавца ({length} символов) не помещаются в снимок документа (предел {limit}). Сократите адрес, данные подписанта или лишние поля в профиле компании.")
+{
+    public int Length { get; } = length;
+    public int Limit { get; } = limit;
 }
 
 public interface IDocumentSellerService
@@ -252,7 +293,13 @@ public sealed class DocumentSellerService : IDocumentSellerService
         if (!string.IsNullOrWhiteSpace(document.SellerSnapshotJson))
         {
             var live = companyId.HasValue ? await LoadCompanyAsync(companyId.Value, defaultCompany, ct) : null;
-            var fromSnapshot = SellerLegalEntityComposer.FromSnapshot(document.SellerSnapshotJson, live);
+            var versionIds = SellerLegalEntityComposer.ReadImageVersionIds(document.SellerSnapshotJson);
+            var versionImages = versionIds.Count == 0
+                ? null
+                : await _db.CompanyBrandImageVersions.AsNoTracking()
+                    .Where(version => versionIds.Contains(version.Id))
+                    .ToDictionaryAsync(version => version.Id, version => version.DataUrl, ct);
+            var fromSnapshot = SellerLegalEntityComposer.FromSnapshot(document.SellerSnapshotJson, live, versionImages);
             if (fromSnapshot is not null)
             {
                 return fromSnapshot;
@@ -295,17 +342,61 @@ public sealed class DocumentSellerService : IDocumentSellerService
         var composed = SellerLegalEntityComposer.Compose(company, branch);
         if (freeze)
         {
-            var snapshot = SellerLegalEntityComposer.ToSnapshotJson(composed);
-            // Колонка ограничена; слишком большой снимок не фиксируем (документ остаётся «живым»), а не падаем при выдаче.
-            if (snapshot.Length <= MaxSnapshotLength)
+            // Текст ограничен колонкой, а изображения лежат в неизменяемых версиях и в JSON попадают только номерами.
+            var logo = await EnsureImageVersionAsync(company.Id, CompanyBrandImageKinds.Logo, composed.LogoDataUrl, ct);
+            var seal = await EnsureImageVersionAsync(company.Id, CompanyBrandImageKinds.Seal, composed.SealDataUrl, ct);
+            var signature = await EnsureImageVersionAsync(company.Id, CompanyBrandImageKinds.Signature, composed.DirectorSignatureDataUrl, ct);
+            var snapshot = SellerLegalEntityComposer.ToSnapshotJson(composed, logo, seal, signature, imagesFrozen: true);
+            if (snapshot.Length > MaxSnapshotLength)
             {
-                document.SellerCompanyId = company.Id;
-                document.SellerBranchId = branch?.Id;
-                document.SellerSnapshotJson = snapshot;
+                // Молча оставить документ «живым» нельзя: выданный файл потеряет защиту от правок профиля.
+                throw new SellerSnapshotTooLargeException(snapshot.Length, MaxSnapshotLength);
             }
+
+            document.SellerCompanyId = company.Id;
+            document.SellerBranchId = branch?.Id;
+            document.SellerSnapshotJson = snapshot;
         }
 
         return composed;
+    }
+
+    /// <summary>
+    /// Возвращает номер неизменяемой версии изображения (создаёт её при первой фиксации такого содержимого).
+    /// Параллельная фиксация того же изображения обрабатывается уникальным индексом: проигравший читает версию победителя.
+    /// </summary>
+    private async Task<int?> EnsureImageVersionAsync(int companyId, string kind, string? dataUrl, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(dataUrl))
+        {
+            return null;
+        }
+
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(dataUrl)));
+        var existing = await _db.CompanyBrandImageVersions.AsNoTracking()
+            .Where(item => item.LegalEntityId == companyId && item.Kind == kind && item.Sha256 == hash)
+            .Select(item => (int?)item.Id)
+            .FirstOrDefaultAsync(ct);
+        if (existing.HasValue)
+        {
+            return existing;
+        }
+
+        var version = new CompanyBrandImageVersion { LegalEntityId = companyId, Kind = kind, Sha256 = hash, DataUrl = dataUrl };
+        _db.CompanyBrandImageVersions.Add(version);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+            return version.Id;
+        }
+        catch (DbUpdateException)
+        {
+            _db.Entry(version).State = EntityState.Detached;
+            return await _db.CompanyBrandImageVersions.AsNoTracking()
+                .Where(item => item.LegalEntityId == companyId && item.Kind == kind && item.Sha256 == hash)
+                .Select(item => (int?)item.Id)
+                .FirstAsync(ct);
+        }
     }
 
     private async Task<LegalEntity?> LoadCompanyAsync(int id, LegalEntity? defaultCompany, CancellationToken ct)

@@ -23,6 +23,14 @@ public static class ApiErrorContractExtensions
                 var logger = context.RequestServices
                     .GetRequiredService<ILoggerFactory>()
                     .CreateLogger("PayPlanner.ApiErrorContract");
+                if (exception is PayPlanner.Api.Services.Companies.SellerSnapshotTooLargeException tooLarge)
+                {
+                    // Ожидаемая ситуация данных профиля, а не сбой сервера: сообщаем, что исправить.
+                    logger.LogWarning("Seller snapshot is too large: {Length}/{Limit}", tooLarge.Length, tooLarge.Limit);
+                    await WriteProblemAsync(context, StatusCodes.Status422UnprocessableEntity, "SellerSnapshotTooLarge", tooLarge.Message);
+                    return;
+                }
+
                 logger.LogError(exception, "Unhandled API exception");
 
                 await WriteProblemAsync(
