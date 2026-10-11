@@ -41,7 +41,7 @@ const scenarios = [
   },
   {
     name: 'legal-integrations-diagnostics',
-    auth: false,
+    auth: true,
     run: () => checkJsonEndpoint('/features/legal-integrations/diagnostics', 'legal integrations diagnostics', (payload) => {
       assertObject(payload, 'legal integrations diagnostics response');
       assertArray(payload.items, 'legal integrations diagnostics items');
