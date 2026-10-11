@@ -1,6 +1,6 @@
 ## Актуальная инвентаризация — 11 октября 2026
 
-Всего **107** места ExecuteUpdateAsync/ExecuteDeleteAsync по неизменному предикату BatchOperationAuditCoverageTests. Предыдущие описания ниже сохранены как история решений по аудиту; после форматирования их номера строк могут отличаться. Текущие номера приведены в полном перечне здесь. Перечень обновлён по фактическим исходникам после адресных исправлений и форматирования; подготовленные overlays не используются.
+Всего **111** мест ExecuteUpdateAsync/ExecuteDeleteAsync по неизменному предикату BatchOperationAuditCoverageTests. Предыдущие описания ниже сохранены как история решений по аудиту; после форматирования их номера строк могут отличаться. Текущие номера приведены в полном перечне здесь. Перечень обновлён по фактическим исходникам после адресных исправлений и форматирования; подготовленные overlays не используются.
 
 Два дополнительных технических UPDATE:
 
@@ -9,6 +9,15 @@
 
 
 Пять добавленных UPDATE в SalesRequestService (3), TaxRegisterService (1) и BankSyncService (1) присваивают полю его прежнее значение для блокировки существующей строки внутри транзакции. Это не самостоятельное изменение бизнес-данных: сохранение заявки/задач/банковских счетов выполняется через ChangeTracker, а запись регистра — вместе с явным журналом в той же транзакции. SQL-блокировка не должна создавать фиктивное объектное событие. Конкурентные сценарии перехода заявки, корректировки/закрытия года и выбора основного счёта покрыты регрессионными тестами.
+
+Четыре UPDATE долговечной очереди уведомлений заявок в SalesRequestService:
+
+- Захват: условное обновление NextAttemptAt по ID, отсутствию финального результата и точному прежнему NextAttemptAt. Пять минут аренды отсчитываются отдельно от захвата каждой записи, а не от начала всего пакета из максимум 50 записей.
+- Прекращение для закрытой/отсутствующей задачи: сохраняются AbandonedAt и ограниченная причина только при собственной прежней аренде и отсутствии финального результата.
+- Подтверждение доставки: DeliveredAt и LastError меняются только по той же собственной аренде и незавершённому состоянию; счётчик результата растёт только при обновлении одной строки. Время передаётся параметром, совместимым с существующим UTC-преобразованием PostgreSQL.
+- Повтор/прекращение после ошибки: AttemptCount, NextAttemptAt, AbandonedAt и LastError изменяются только по собственной аренде. Устаревший обработчик не отменяет результат другой попытки и не сокращает её аренду. Ошибка ограничена 500 символами; отмена сохраняет аренду до истечения.
+
+Это технические состояния доставки. Заявка, задача и их предметная история сохраняются обычным ChangeTracker в исходной транзакции, в которую также добавляется запись очереди. Сама доставка проходит существующий сервис уведомлений с проверкой доступности задачи и стабильным ключом события. Внешняя отправка выполняется вне транзакции; неизвестный исход может потребовать повтора и не объявляется гарантией единственной внешней отправки. Дополнительный построчный объектный аудит технической очереди не создаётся. Проверяются успех, повтор, закрытая/удалённая задача, замена аренды, уже доставленный/прекращённый результат и оба провайдера БД.
 
 ### Полный текущий перечень
 
@@ -50,9 +59,13 @@
 | backend/Services/Notifications/InternalChatNotificationRecoveryService.cs:56 | ExecuteUpdateAsync |
 | backend/Services/Notifications/MaxWebhookService.cs:241 | ExecuteDeleteAsync |
 | backend/Services/Notifications/NotificationDeliveryRetentionService.cs:150 | ExecuteDeleteAsync |
-| backend/Services/Requests/SalesRequestService.cs:298 | ExecuteUpdateAsync |
-| backend/Services/Requests/SalesRequestService.cs:436 | ExecuteUpdateAsync |
-| backend/Services/Requests/SalesRequestService.cs:696 | ExecuteUpdateAsync |
+| backend/Services/Requests/SalesRequestService.cs:1002 | ExecuteUpdateAsync |
+| backend/Services/Requests/SalesRequestService.cs:325 | ExecuteUpdateAsync |
+| backend/Services/Requests/SalesRequestService.cs:488 | ExecuteUpdateAsync |
+| backend/Services/Requests/SalesRequestService.cs:749 | ExecuteUpdateAsync |
+| backend/Services/Requests/SalesRequestService.cs:969 | ExecuteUpdateAsync |
+| backend/Services/Requests/SalesRequestService.cs:981 | ExecuteUpdateAsync |
+| backend/Services/Requests/SalesRequestService.cs:991 | ExecuteUpdateAsync |
 | backend/Services/Storage/CaseDocumentPublicationProcessor.cs:172 | ExecuteUpdateAsync |
 | backend/Services/Storage/CaseDocumentPublicationProcessor.cs:187 | ExecuteUpdateAsync |
 | backend/Services/Storage/CaseDocumentUploadRetirementService.cs:25 | ExecuteUpdateAsync |
@@ -118,7 +131,7 @@
 | backend/Services/Storage/TaskFilePublicationProcessor.cs:147 | ExecuteUpdateAsync |
 | backend/Services/Storage/TaskFilePublicationProcessor.cs:200 | ExecuteUpdateAsync |
 | backend/Services/Storage/TaskFilePublicationProcessor.cs:266 | ExecuteUpdateAsync |
-| backend/Services/Tax/TaxRegisterService.cs:74 | ExecuteUpdateAsync |
+| backend/Services/Tax/TaxRegisterService.cs:87 | ExecuteUpdateAsync |
 | backend/Services/UserActivity/UserActivityRetentionService.cs:109 | ExecuteDeleteAsync |
 | backend/Services/YandexCalendarSyncService.cs:195 | ExecuteUpdateAsync |
 

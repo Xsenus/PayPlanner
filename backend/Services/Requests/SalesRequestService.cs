@@ -963,7 +963,7 @@ public sealed class SalesRequestService : ISalesRequestService
         var delivered = 0;
         foreach (var row in due)
         {
-            var leaseUntil = now.AddMinutes(5);
+            var leaseUntil = DateTime.UtcNow.AddMinutes(5);
             var claimed = await _db.SalesRequestNotificationOutbox
                 .Where(item => item.Id == row.Id && item.DeliveredAt == null && item.AbandonedAt == null && item.NextAttemptAt == row.NextAttemptAt)
                 .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.NextAttemptAt, leaseUntil), ct);
@@ -975,17 +975,21 @@ public sealed class SalesRequestService : ISalesRequestService
             var task = await _db.TaskJournalItems.Include(item => item.Participants).AsNoTracking().FirstOrDefaultAsync(item => item.Id == row.TaskId, ct);
             if (task is null || ClosedTaskStatuses.Contains(task.Status))
             {
-                await _db.SalesRequestNotificationOutbox.Where(item => item.Id == row.Id)
-                    .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.AbandonedAt, DateTime.UtcNow).SetProperty(item => item.LastError, "Задача закрыта или удалена."), ct);
+                var closedAt = DateTime.UtcNow;
+                await _db.SalesRequestNotificationOutbox.Where(item => item.Id == row.Id
+                    && item.DeliveredAt == null && item.AbandonedAt == null && item.NextAttemptAt == leaseUntil)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.AbandonedAt, closedAt).SetProperty(item => item.LastError, "Задача закрыта или удалена."), ct);
                 continue;
             }
 
             try
             {
                 await _notifications.NotifyTaskAssignedAsync(task, "Заявки", row.ActorUserId, ct);
-                await _db.SalesRequestNotificationOutbox.Where(item => item.Id == row.Id)
-                    .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.DeliveredAt, DateTime.UtcNow).SetProperty(item => item.LastError, (string?)null), ct);
-                delivered++;
+                var deliveredAt = DateTime.UtcNow;
+                var completed = await _db.SalesRequestNotificationOutbox.Where(item => item.Id == row.Id
+                    && item.DeliveredAt == null && item.AbandonedAt == null && item.NextAttemptAt == leaseUntil)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.DeliveredAt, deliveredAt).SetProperty(item => item.LastError, (string?)null), ct);
+                if (completed == 1) delivered++;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -993,7 +997,8 @@ public sealed class SalesRequestService : ISalesRequestService
                 var message = ex.Message.Length > 500 ? ex.Message[..500] : ex.Message;
                 var retryAt = DateTime.UtcNow.AddSeconds(Math.Min(3600, 30 * Math.Pow(2, Math.Min(attempts, 7))));
                 DateTime? abandonedAt = attempts >= 8 ? DateTime.UtcNow : null;
-                await _db.SalesRequestNotificationOutbox.Where(item => item.Id == row.Id)
+                await _db.SalesRequestNotificationOutbox.Where(item => item.Id == row.Id
+                    && item.DeliveredAt == null && item.AbandonedAt == null && item.NextAttemptAt == leaseUntil)
                     .ExecuteUpdateAsync(setters => setters
                         .SetProperty(item => item.AttemptCount, attempts)
                         .SetProperty(item => item.NextAttemptAt, retryAt)
