@@ -185,14 +185,24 @@ Before a PR or deploy, use [quality gates](docs/quality-gates.md). For user-visi
 
 ## Миграции БД и сидирование
 
-Генерация миграции:
+Миграции находятся в отдельном проекте `backend/PayPlanner.Api.Migrations`, а API служит стартовым проектом. Выполняйте команды из корня репозитория и явно выбирайте контекст: `PaymentContext` для SQLite или `PostgreSqlPaymentContext` для PostgreSQL. Имя новой миграции должно описывать изменение; существующую начальную миграцию повторно создавать не нужно.
+
+Пример генерации миграции SQLite:
 
 ```bash
-cd /workspace/PayPlanner/backend
-dotnet ef migrations add Init
+dotnet ef migrations add AddExampleField --project backend/PayPlanner.Api.Migrations/PayPlanner.Api.Migrations.csproj --startup-project backend/PayPlanner.Api.csproj --context PaymentContext --output-dir Migrations
 ```
 
-Применение миграций и первичное наполнение (сидирование):
+Для PostgreSQL используйте `--context PostgreSqlPaymentContext --output-dir Migrations/PostgreSql` и задайте `PAYPLANNER_PG_MIGRATIONS_CONNECTION` через локальное хранилище секретов. Для SQLite можно задать `PAYPLANNER_SQLITE_MIGRATIONS_CONNECTION`; оба контекста также используют `ConnectionStrings__Default`. Не применяйте команды обновления к рабочей production-БД для проверки.
+
+Просмотр миграций без подключения к базе:
+
+```bash
+dotnet ef migrations list --no-connect --project backend/PayPlanner.Api.Migrations/PayPlanner.Api.Migrations.csproj --startup-project backend/PayPlanner.Api.csproj --context PaymentContext
+dotnet ef migrations list --no-connect --project backend/PayPlanner.Api.Migrations/PayPlanner.Api.Migrations.csproj --startup-project backend/PayPlanner.Api.csproj --context PostgreSqlPaymentContext
+```
+
+Перед любым локальным запуском выполните [изоляцию почты](#локальная-почта-и-копия-бд). При старте API миграции выбранного провайдера применяются автоматически, затем выполняются первичное наполнение, синхронизация выпусков и обслуживание данных.
 
 - При старте приложения вызывается `SeedDataService.SeedAsync(PaymentContext)` и, если БД пустая (нет клиентов), вносятся тестовые данные.
 
@@ -220,7 +230,7 @@ dotnet ef migrations add Init
 - `BackgroundServices__Enabled=false Email__Enabled=false dotnet run` — локальный старт API из каталога `backend` (Bash), после подготовки почты и копии БД
 - `dotnet build backend/PayPlanner.Api.sln -c Release` — сборка из корня репозитория
 - `dotnet test backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj -c Release --filter "FullyQualifiedName~TaskBillingConcurrencyTests"` — пример адресной проверки после задания безопасной локальной среды ниже
-- `dotnet ef ...` — миграции EF Core
+- `dotnet ef ... --project backend/PayPlanner.Api.Migrations/PayPlanner.Api.Migrations.csproj --startup-project backend/PayPlanner.Api.csproj --context PaymentContext` — миграции SQLite из корня репозитория; для PostgreSQL выберите `PostgreSqlPaymentContext`
 
 Перед локальными backend-проверками явно задайте оба флага (PowerShell); настройки копии БД также должны быть изолированы по разделу [локальной почты](#локальная-почта-и-копия-бд):
 
