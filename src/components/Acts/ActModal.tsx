@@ -1,4 +1,4 @@
-import { hasStorableLineItemPrecision, lineItemPrecisionError, roundedLineTotal } from '../../utils/lineItemMoney';
+import { hasStorableLineItemPrecision, lineItemPrecisionError, roundedLineTotal, sumLineAmounts } from '../../utils/lineItemMoney';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { ArrowLeft, ChevronDown, Link2, Loader2, X } from 'lucide-react';
@@ -1082,7 +1082,7 @@ export function ActModal({
   const computedAmount = useMemo(
     () => {
       const roundLines = selectedLineItems.some((item) => Boolean(item.vatRate));
-      return selectedLineItems.reduce((sum, item) => sum + (roundLines ? roundedLineTotal(item.selectedQuantity, item.price) : item.lineAmount), 0);
+      return sumLineAmounts(selectedLineItems.map((item) => roundLines ? roundedLineTotal(item.selectedQuantity, item.price) : item.lineAmount), roundLines);
     },
     [selectedLineItems],
   );
@@ -1124,8 +1124,8 @@ export function ActModal({
     [preparedManualLineItems],
   );
   const manualLineItemsAmount = useMemo(
-    () => preparedManualLineItems.reduce((sum, item) => sum + item.lineAmount, 0),
-    [preparedManualLineItems],
+    () => sumLineAmounts(preparedManualLineItems.map((item) => item.lineAmount), roundManualLineAmounts),
+    [preparedManualLineItems, roundManualLineAmounts],
   );
   const canEditManualLineItems = linkedInvoiceId === null || !hasInvoiceLineItems;
   const isUsingManualLineItems = canEditManualLineItems && form.creationMode === 'Manual' && manualLineItemsWithContent.length > 0;
@@ -1442,12 +1442,12 @@ export function ActModal({
 
         if (lineItems.length > 0) {
           const roundLines = lineItems.some((line) => Boolean(line.vatRate));
-          amount = lineItems.reduce(
-            (sum, item) => {
+          amount = sumLineAmounts(
+            lineItems.map((item) => {
               const value = Number(item.quantity ?? 0) * Number(item.price ?? 0);
-              return sum + (roundLines ? roundedLineTotal(Number(item.quantity ?? 0), Number(item.price ?? 0)) : value);
-            },
-            0,
+              return roundLines ? roundedLineTotal(Number(item.quantity ?? 0), Number(item.price ?? 0)) : value;
+            }),
+            roundLines,
           );
         } else {
           const parsedAmount = parseDecimalInput(form.amount);

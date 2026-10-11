@@ -625,6 +625,36 @@ describe('ActModal integration', () => {
     ]);
   });
 
+  it.each(['invoice', 'manual'])('submits exact cents for two rated lines in %s mode', async (mode) => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    getInvoiceMock.mockResolvedValue({
+      id: 881, number: 'INV-881', date: '2026-04-15', amount: 0.3, type: 'Income', clientId: 7,
+      lineItems: mode === 'invoice' ? [
+        { id: 8811, sourceKey: 'db:8811', name: 'Первая', quantity: 1, price: 0.1, vatRate: '20', unit: 'шт', sortOrder: 0 },
+        { id: 8812, sourceKey: 'db:8812', name: 'Вторая', quantity: 1, price: 0.2, vatRate: '20', unit: 'шт', sortOrder: 1 },
+      ] : [], acts: [],
+    } as unknown as Invoice);
+    render(<ActModal open mode="create" act={null} onClose={vi.fn()} onSubmit={onSubmit} submitting={false}
+      clients={[createClient(7, 'Иван Иванов')]} responsibles={[]} lookupsLoading={false}
+      initialValues={{ invoiceId: 881 }} presentation="page" />);
+    await waitFor(() => expect(getInvoiceMock).toHaveBeenCalledWith(881));
+    fireEvent.change(screen.getByLabelText('Номер акта'), { target: { value: 'ACT-CENTS' } });
+    if (mode === 'manual') {
+      fireEvent.click(screen.getByRole('button', { name: /Добавить позицию/ }));
+      for (let i = 0; i < 2; i++) {
+        fireEvent.change(screen.getAllByLabelText('Название позиции акта')[i], { target: { value: `Услуга ${i}` } });
+        fireEvent.change(screen.getAllByLabelText('Количество позиции акта')[i], { target: { value: '1' } });
+        fireEvent.change(screen.getAllByLabelText('Цена позиции акта')[i], { target: { value: i === 0 ? '0.1' : '0.2' } });
+        fireEvent.change(screen.getAllByTestId('line-item-vat-rate')[i], { target: { value: '20' } });
+      }
+    } else {
+      fireEvent.click(screen.getByRole('button', { name: 'По счету' }));
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Создать' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0].amount).toBe(0.3);
+  });
+
   it('does not submit stale invoice positions when linked act is switched to manual mode', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const invoice = {

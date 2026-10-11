@@ -43,17 +43,22 @@ export interface CalendarPermissions extends MenuSectionPermissions {
   visibleUserIds?: number[];
 }
 
+export interface RequestSectionPermissions extends MenuSectionPermissions {
+  canViewAnalytics?: boolean;
+}
+
 export interface TaskSectionPermissions extends MenuSectionPermissions {
   canEditOthers: boolean;
   canCompleteOthers: boolean;
   canDeleteOthers: boolean;
 }
 
-type OtherSectionKey = Exclude<MenuSectionKey, 'calendar' | 'tasks'>;
+type OtherSectionKey = Exclude<MenuSectionKey, 'calendar' | 'tasks' | 'requests'>;
 
 export type RolePermissions = {
   calendar: CalendarPermissions;
   tasks: TaskSectionPermissions;
+  requests: RequestSectionPermissions;
 } & {
   [K in OtherSectionKey]: MenuSectionPermissions;
 };
@@ -125,7 +130,7 @@ export const defaultRolePermissions: RolePermissions = {
   legalEntities: { ...defaultMenuPermissions },
   clients: { ...defaultMenuPermissions },
   cases: { ...defaultMenuPermissions },
-  requests: { ...defaultMenuPermissions },
+  requests: { ...defaultMenuPermissions, canViewAnalytics: false },
   accounts: { ...defaultMenuPermissions },
   acts: { ...defaultMenuPermissions },
   payments: { ...defaultMenuPermissions },
@@ -157,7 +162,7 @@ export const defaultRestrictedRolePermissions: RolePermissions = {
   legalEntities: { ...defaultRestrictedMenuPermissions },
   clients: { ...defaultRestrictedMenuPermissions },
   cases: { ...defaultRestrictedMenuPermissions },
-  requests: { ...defaultRestrictedMenuPermissions },
+  requests: { ...defaultRestrictedMenuPermissions, canViewAnalytics: false },
   accounts: { ...defaultRestrictedMenuPermissions },
   acts: { ...defaultRestrictedMenuPermissions },
   payments: { ...defaultRestrictedMenuPermissions },

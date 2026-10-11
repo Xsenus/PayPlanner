@@ -1342,7 +1342,7 @@ function AppContent() {
               <SalesRequestsPage
                 allowCreate={permissions.requests?.canCreate === true}
                 allowEdit={permissions.requests?.canEdit === true}
-                allowAnalytics={permissions.requests?.canViewAnalytics === true}
+                allowAnalytics={isAdminRole || permissions.requests?.canViewAnalytics === true}
                 allowConfigure={isAdminRole}
                 initialRequestId={Number(new URLSearchParams(window.location.search).get('requestId')) || null}
               />

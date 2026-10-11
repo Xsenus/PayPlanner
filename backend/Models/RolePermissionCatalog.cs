@@ -217,7 +217,7 @@ public static class RolePermissionCatalog
             LegalEntities = ToSection(defaults[LegalEntities]),
             Clients = ToSection(defaults[Clients]),
             Cases = ToSection(defaults[Cases]),
-            Requests = ToSection(defaults[Requests]),
+            Requests = ToRequests(defaults[Requests]),
             Accounts = ToSection(defaults[Accounts]),
             Acts = ToSection(defaults[Acts]),
             Payments = ToSection(defaults[Payments]),
@@ -308,6 +308,18 @@ public static class RolePermissionCatalog
             CanDelete = values.CanDelete,
             CanExport = values.CanExport,
             ViewScope = values.ViewScope
+        };
+
+    public static RequestSectionPermissionsDto ToRequests(RolePermissionValues values)
+        => new()
+        {
+            CanView = values.CanView,
+            CanCreate = values.CanCreate,
+            CanEdit = values.CanEdit,
+            CanDelete = values.CanDelete,
+            CanExport = values.CanExport,
+            CanViewAnalytics = values.CanViewAnalytics,
+            ViewScope = values.ViewScope,
         };
 
     public static TaskSectionPermissionsDto ToTasks(RolePermissionValues values)

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CompanyTaxRegisterSection } from './CompanyTaxRegisterSection';
 import { apiService } from '../../services/api';
-import type { TaxRegisterBook, TaxRegisterEntryItem } from '../../types';
+import type { TaxRegisterBook, TaxRegisterEntryItem, TaxRegisterJournalPage } from '../../types';
 
 vi.mock('../../hooks/useToast', () => ({
   useToast: () => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }),
@@ -213,7 +213,7 @@ describe('CompanyTaxRegisterSection journal and book pages', () => {
   });
 
   it('ignores a stale journal response that arrives after a newer filter', async () => {
-    let resolveFirst: (value: unknown) => void = () => {};
+    let resolveFirst: (value: TaxRegisterJournalPage) => void = () => {};
     vi.mocked(apiService.getTaxRegisterJournal)
       .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
       .mockResolvedValueOnce({ total: 1, page: 1, pageSize: 20, items: [journalItem(3, 'Archived')] });

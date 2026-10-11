@@ -332,6 +332,36 @@ public class SalesRequestTests
     }
 
     [Fact]
+    public async Task Paid_RejectsExpenseWithoutClosingTasksOrCreatingCase()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var request = (await f.Service.CreateAsync(NewRequest(f.Client), f.Manager.Id, default)).Value!;
+        var expense = new Payment { ClientId = f.Client.Id, Type = PaymentType.Expense, Amount = 100m, PaidAmount = 100m };
+        f.Db.Payments.Add(expense);
+        await f.Db.SaveChangesAsync();
+        var originalVersion = request.Version;
+        var originalStatus = request.StatusId;
+        var eventCount = await f.Db.SalesRequestEvents.CountAsync();
+
+        var result = await f.Service.TransitionAsync(request.Id,
+            new SalesRequestTransitionInput(StatusId(f.Db, "paid"), originalVersion, expense.Id, true, null), f.Manager.Id, default);
+
+        Assert.Equal(409, result.Status);
+        f.Db.ChangeTracker.Clear();
+        var stored = await f.Db.SalesRequests.SingleAsync(item => item.Id == request.Id);
+        Assert.Equal(originalVersion, stored.Version);
+        Assert.Equal(originalStatus, stored.StatusId);
+        Assert.Equal(SalesRequestFinalKinds.None, stored.FinalKind);
+        Assert.Null(stored.PaidPaymentId);
+        Assert.Null(stored.ResultClientCaseId);
+        Assert.False(await f.Db.ClientCases.AnyAsync());
+        Assert.Equal(eventCount, await f.Db.SalesRequestEvents.CountAsync());
+        Assert.All(await f.Db.TaskJournalItems.Where(item => item.SalesRequestId == request.Id).ToListAsync(),
+            task => Assert.DoesNotContain(task.Status, new[] { "done", "cancelled" }));
+    }
+
+    [Fact]
     public async Task Report_CountsConversionBySource()
     {
         var f = await CreateAsync();
@@ -355,6 +385,29 @@ public class SalesRequestTests
         Assert.Equal(500m, report.WonAmount);
         Assert.Equal(70m, report.LostAmount);
         Assert.Equal(50m, report.BySource.Single(s => s.Source == "Avito").ConversionPercent);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task Report_RequiresAnalyticsAndPreservesRequestVisibility(bool analytics, bool admin)
+    {
+        var f = await CreateAsync();
+        await using var db = f.Db;
+        db.RolePermissions.Single(item => item.RoleId == f.Manager.RoleId).CanViewAnalytics = analytics;
+        await db.SaveChangesAsync();
+        await f.Service.CreateAsync(NewRequest(f.Client), f.Manager.Id, default);
+        await f.Service.CreateAsync(NewRequest(f.Client), f.Admin.Id, default);
+        var controller = ControllerFor(db, admin ? f.Admin : f.Manager, admin);
+        var response = await controller.Report(DateTime.UtcNow.AddDays(-1), DateTime.UtcNow, default);
+        if (!analytics && !admin)
+        {
+            Assert.IsType<ForbidResult>(response.Result);
+            return;
+        }
+        var report = Assert.IsType<SalesRequestReport>(Assert.IsType<OkObjectResult>(response.Result).Value);
+        Assert.Equal(admin ? 2 : 1, report.Total);
     }
 
     private static SalesRequestsController ControllerFor(PaymentContext db, User user, bool admin = false)

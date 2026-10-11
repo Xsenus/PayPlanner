@@ -429,7 +429,10 @@ public class RolePermissionsController : ControllerBase
                     dto.Integrations = ToSection(permission);
                     break;
                 case RolePermissionCatalog.Requests:
-                    dto.Requests = ToSection(permission);
+                    dto.Requests = RolePermissionCatalog.ToRequests(new RolePermissionValues(
+                        permission.CanView, permission.CanCreate, permission.CanEdit, permission.CanDelete,
+                        permission.CanExport, permission.CanViewAnalytics,
+                        NormalizeViewScope(permission.Section, permission.ViewScope)));
                     break;
                 case RolePermissionCatalog.YandexDisk:
                     dto.YandexDisk = ToSection(permission);
@@ -472,7 +475,7 @@ public class RolePermissionsController : ControllerBase
             Roles = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Roles]),
             Audit = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Audit]),
             Integrations = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Integrations]),
-            Requests = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Requests]),
+            Requests = RolePermissionCatalog.ToRequests(defaults[RolePermissionCatalog.Requests]),
             YandexDisk = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.YandexDisk]),
             S3Storage = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.S3Storage])
         };
@@ -722,6 +725,7 @@ public class RolePermissionsController : ControllerBase
 
     private static bool HasRestrictedCapability(RolePermission permission)
         => (!string.Equals(permission.Section, RolePermissionCatalog.Calendar, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(permission.Section, RolePermissionCatalog.Requests, StringComparison.OrdinalIgnoreCase)
                 && permission.CanViewAnalytics)
             || (string.Equals(permission.Section, RolePermissionCatalog.Roles, StringComparison.OrdinalIgnoreCase)
                 && permission.CanExport)
@@ -802,7 +806,8 @@ public class RolePermissionsController : ControllerBase
             ? false
             : values.CanExport;
 
-        var canViewAnalytics = string.Equals(section, RolePermissionCatalog.Calendar, StringComparison.OrdinalIgnoreCase)
+        var canViewAnalytics = (string.Equals(section, RolePermissionCatalog.Calendar, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(section, RolePermissionCatalog.Requests, StringComparison.OrdinalIgnoreCase))
             ? values.CanViewAnalytics
             : false;
 
@@ -893,6 +898,9 @@ public class RolePermissionsController : ControllerBase
             section.CanExport,
             false,
             DataVisibilityScope.Normalize(section.ViewScope, DataVisibilityScope.Own));
+
+    private static RolePermissionValues ToValues(RequestSectionPermissionsDto section)
+        => ToValues((MenuSectionPermissionsDto)section) with { CanViewAnalytics = section.CanViewAnalytics };
 
     private static RolePermissionValues ToValues(TaskSectionPermissionsDto section)
         => new(

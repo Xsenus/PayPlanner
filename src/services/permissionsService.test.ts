@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./api', () => ({
   apiService: {
@@ -11,6 +11,23 @@ vi.mock('./api', () => ({
 }));
 
 describe('permissionsService', () => {
+  beforeEach(() => vi.clearAllMocks());
+  it('preserves request analytics explicitly granted by the server and restricts missing grants', async () => {
+    vi.resetModules();
+    const { apiService } = await import('./api');
+    const { getRolePermissions, refreshRolePermissions } = await import('./permissionsService');
+    expect(getRolePermissions(undefined).requests.canViewAnalytics).toBe(false);
+    vi.mocked(apiService.getRolePermissions).mockResolvedValue({
+      requests: { canView: true, canViewAnalytics: true, viewScope: 'own' },
+    } as never);
+    await refreshRolePermissions(81);
+    expect(getRolePermissions(81).requests.canViewAnalytics).toBe(true);
+    expect(getRolePermissions(81).requests.viewScope).toBe('own');
+    vi.mocked(apiService.getRolePermissions).mockResolvedValue({ requests: { canView: true } } as never);
+    await refreshRolePermissions(82);
+    expect(getRolePermissions(82).requests.canViewAnalytics).toBe(false);
+  });
+
   it('keeps permissions restricted when role id is not available yet', async () => {
     vi.resetModules();
     const { apiService } = await import('./api');

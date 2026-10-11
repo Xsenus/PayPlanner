@@ -7,8 +7,8 @@
 
 - Разделов frontend: 55.
 - Backend-контроллеров: 89.
-- HTTP endpoints: 929; с прямой тестовой связью: 628.
-- HTTP endpoints с точной ссылкой из документации: 224; критичных без такой ссылки: 537.
+- HTTP endpoints: 929; с прямой тестовой связью: 629.
+- HTTP endpoints с точной ссылкой из документации: 225; критичных без такой ссылки: 537.
 - Критичных endpoints без прямой тестовой связи: 248.
 - Реальных HTML-форм: 19; с найденной тестовой связью: 17.
 - Фоновых сервисов: 33; с найденной тестовой связью: 28.
@@ -32,11 +32,11 @@
 | reports | (permissions) => permissions.reports.canView | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md, docs/full-project-audit-2026-06-10.md, docs/report-inventory-2026-08-09.md |
 | calculator | (permissions) => permissions.calculator.canView | да | docs/full-project-audit-2026-06-10.md |
 | legalEntities | (permissions) => permissions.legalEntities.canView | да | docs/full-project-audit-2026-06-10.md |
-| cases | (permissions) => permissions.cases.canView | да | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/case-registry-query-optimization.md, docs/crm-legal-module-acceptance-checklist.md, docs/full-project-audit-2026-06-10.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-resilience-runbook.md |
+| cases | (permissions) => permissions.cases.canView | да | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/case-registry-query-optimization.md, docs/crm-legal-module-acceptance-checklist.md, docs/full-project-audit-2026-06-10.md, docs/pay-33-36-implementation-log-2026-10-09.md, docs/storage-resilience-roadmap-2026-09-22.md, docs/storage-resilience-runbook.md |
 | courtCases | (permissions) => permissions.cases.canView | да | нет |
 | caseDetail | (permissions) => permissions.cases.canView | да | docs/full-project-audit-2026-06-10.md |
 | requests | (permissions) => permissions.requests?.canView === true | нет | docs/claude-branch-review-2026-10-10.md, docs/pay-33-36-implementation-log-2026-10-09.md, docs/tz-crm-applications-automation-roadmap-2026-10-07.md |
-| clients | (permissions) => permissions.clients.canView | да | docs/development-pause-plan-2026-09-30.md, docs/final-acceptance-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md |
+| clients | (permissions) => permissions.clients.canView | да | docs/development-pause-plan-2026-09-30.md, docs/final-acceptance-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md, docs/pay-33-36-implementation-log-2026-10-09.md |
 | contacts | (permissions) => permissions.clients.canView \|\| permissions.legalEntities.canView | да | docs/contacts-directory-implementation-log.md, docs/full-project-audit-2026-06-10.md |
 | contactsClients | (permissions) => permissions.clients.canView | да | docs/full-project-audit-2026-06-10.md |
 | contactsLegal | (permissions) => permissions.legalEntities.canView | да | docs/full-project-audit-2026-06-10.md |
@@ -673,7 +673,7 @@
 | GET | api/contacts/phonebook/yealink/{token} | ContactsController | GetYealinkRemotePhonebook | backend/Controllers/ContactsController.cs:742 | публичный ([AllowAnonymous]) | да | docs/contacts-directory-implementation-log.md |
 | POST | api/contacts/imports/yealink | ContactsController | ImportYealinkXml | backend/Controllers/ContactsController.cs:786 | [Authorize] | нет | docs/contacts-directory-implementation-log.md |
 | POST | merge/preview | ContactsController | PreviewMerge | backend/Controllers/ContactsController.Merge.cs:39 | не задано | да | нет |
-| POST | merge | ContactsController | MergeContacts | backend/Controllers/ContactsController.Merge.cs:52 | не задано | да | docs/claude-yougile-operations-development-spec-2026-10-10.md, docs/date-time-inventory.md, docs/development-full-roadmap-2026-10-07.md, docs/development-roadmap-details-2026-10-06.md, docs/frontend-hook-test-coverage-2026-06-10.md, docs/tz-gap-client-portal-roadmap-2026-07-29.md |
+| POST | merge | ContactsController | MergeContacts | backend/Controllers/ContactsController.Merge.cs:52 | не задано | да | docs/claude-merge-review-2026-10-11.md, docs/claude-yougile-operations-development-spec-2026-10-10.md, docs/date-time-inventory.md, docs/development-full-roadmap-2026-10-07.md, docs/development-roadmap-details-2026-10-06.md, docs/frontend-hook-test-coverage-2026-06-10.md, docs/tz-gap-client-portal-roadmap-2026-07-29.md |
 | GET | api/[controller] | ContractsController | Get | backend/Controllers/ContractsController.cs:313 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
 | GET | api/[controller]/{id:int} | ContractsController | GetById | backend/Controllers/ContractsController.cs:346 | [Authorize] | да | нет |
 | GET | api/[controller]/{id:int}/document | ContractsController | GetDocument | backend/Controllers/ContractsController.cs:367 | [Authorize] | да | нет |
@@ -1130,13 +1130,13 @@
 | GET | api/requests | SalesRequestsController | List | backend/Controllers/SalesRequestsController.cs:193 | [Authorize] | да | docs/pay-33-36-implementation-log-2026-10-09.md, docs/tz-crm-applications-automation-roadmap-2026-10-07.md |
 | GET | api/requests/{id:int} | SalesRequestsController | Get | backend/Controllers/SalesRequestsController.cs:225 | [Authorize] | да | нет |
 | GET | api/requests/clients/search | SalesRequestsController | SearchClients | backend/Controllers/SalesRequestsController.cs:246 | [Authorize] | да | нет |
-| GET | api/requests/clients/{clientId:int}/cases | SalesRequestsController | ClientCases | backend/Controllers/SalesRequestsController.cs:270 | [Authorize] | да | нет |
+| GET | api/requests/clients/{clientId:int}/cases | SalesRequestsController | ClientCases | backend/Controllers/SalesRequestsController.cs:270 | [Authorize] | да | docs/pay-33-36-implementation-log-2026-10-09.md |
 | POST | api/requests | SalesRequestsController | Create | backend/Controllers/SalesRequestsController.cs:299 | [Authorize] | да | docs/pay-33-36-implementation-log-2026-10-09.md, docs/tz-crm-applications-automation-roadmap-2026-10-07.md |
 | PUT | api/requests/{id:int} | SalesRequestsController | Update | backend/Controllers/SalesRequestsController.cs:313 | [Authorize] | нет | нет |
 | POST | api/requests/{id:int}/transition | SalesRequestsController | Transition | backend/Controllers/SalesRequestsController.cs:325 | [Authorize] | нет | нет |
 | POST | api/requests/{id:int}/tasks | SalesRequestsController | CreateTask | backend/Controllers/SalesRequestsController.cs:337 | [Authorize] | нет | нет |
 | GET | api/requests/journal | SalesRequestsController | Journal | backend/Controllers/SalesRequestsController.cs:351 | [Authorize] | нет | docs/pay-33-36-implementation-log-2026-10-09.md, docs/tz-crm-applications-automation-roadmap-2026-10-07.md |
-| GET | api/requests/report | SalesRequestsController | Report | backend/Controllers/SalesRequestsController.cs:378 | [Authorize] | нет | нет |
+| GET | api/requests/report | SalesRequestsController | Report | backend/Controllers/SalesRequestsController.cs:378 | [Authorize] | да | нет |
 | GET | api/[controller]/month | StatsController | Month | backend/Controllers/StatsController.cs:21 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Payments)] | да | нет |
 | GET | api/sticky-notes/boards | StickyNotesController | GetBoards | backend/Controllers/StickyNotesController.cs:62 | [Authorize] | да | нет |
 | POST | api/sticky-notes/boards | StickyNotesController | CreateBoard | backend/Controllers/StickyNotesController.cs:99 | [Authorize] | нет | нет |
@@ -1221,7 +1221,7 @@
 | POST | api/tax-register/entries/{id:int}/archive | TaxRegisterController | Archive | backend/Controllers/TaxRegisterController.cs:132 | [Authorize(Policy = "Admin")] | нет | нет |
 | POST | api/tax-register/entries/{id:int}/correct | TaxRegisterController | Correct | backend/Controllers/TaxRegisterController.cs:136 | [Authorize(Policy = "Admin")] | нет | нет |
 | GET | api/tax-register/entries/{id:int}/events | TaxRegisterController | Events | backend/Controllers/TaxRegisterController.cs:140 | [Authorize(Policy = "Admin")] | нет | нет |
-| GET | api/tax-register/journal | TaxRegisterController | Journal | backend/Controllers/TaxRegisterController.cs:155 | [Authorize(Policy = "Admin")] | нет | docs/claude-next-development-prompt-2026-10-10.md, docs/kudir-yougile-roadmap-2026-10-09.md, docs/pay-33-36-implementation-log-2026-10-09.md |
+| GET | api/tax-register/journal | TaxRegisterController | Journal | backend/Controllers/TaxRegisterController.cs:155 | [Authorize(Policy = "Admin")] | нет | docs/claude-next-development-prompt-2026-10-10.md, docs/pay-33-36-implementation-log-2026-10-09.md |
 | GET | api/tax-register/book | TaxRegisterController | Book | backend/Controllers/TaxRegisterController.cs:167 | [Authorize(Policy = "Admin")] | нет | docs/pay-33-36-implementation-log-2026-10-09.md |
 | GET | api/tax-register/book/export.csv | TaxRegisterController | ExportCsv | backend/Controllers/TaxRegisterController.cs:187 | [Authorize(Policy = "Admin")] | нет | нет |
 | GET | api/tax-register/book/export.xlsx | TaxRegisterController | ExportXlsx | backend/Controllers/TaxRegisterController.cs:202 | [Authorize(Policy = "Admin")] | нет | docs/pay-33-36-implementation-log-2026-10-09.md |

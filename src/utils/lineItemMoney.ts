@@ -8,6 +8,13 @@ const decimal = (value: number): { integer: bigint; scale: number } => {
 
 export const lineItemPrecisionError = 'В цене допускается до двух знаков после запятой, в количестве — до четырёх.';
 
+/** Sum rounded line amounts as integer cents so JSON retains the exact document total. */
+export function sumLineAmounts(amounts: readonly number[], roundLines: boolean): number {
+  return roundLines
+    ? amounts.reduce((sum, amount) => sum + Math.round(amount * 100), 0) / 100
+    : amounts.reduce((sum, amount) => sum + amount, 0);
+}
+
 export function hasStorableLineItemPrecision(quantity: number, price: number): boolean {
   return Number.isFinite(quantity) && Number.isFinite(price)
     && decimal(quantity).scale <= 4 && decimal(price).scale <= 2;

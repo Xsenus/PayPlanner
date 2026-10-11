@@ -87,7 +87,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="$(MigrationsOutputDll)" Condition="Exists('$(MigrationsOutputDll)')" Link="PayPlanner.Api.Migrations.dll" CopyToOutputDirectory="Never" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="$(MigrationsOutputDll)" Link="PayPlanner.Api.Migrations.dll" CopyToOutputDirectory="Never" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <Target Name="BuildMigrationsAssembly" AfterTargets="CopyFilesToOutputDirectory" Condition="'$(PayPlannerSkipMigrationsBuild)' != 'true'">

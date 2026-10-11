@@ -16,6 +16,11 @@ public class CalendarPermissionsDto : MenuSectionPermissionsDto
     public List<int>? VisibleUserIds { get; set; }
 }
 
+public class RequestSectionPermissionsDto : MenuSectionPermissionsDto
+{
+    public bool CanViewAnalytics { get; set; }
+}
+
 public class TaskSectionPermissionsDto : MenuSectionPermissionsDto
 {
     public bool CanEditOthers { get; set; }
@@ -32,7 +37,7 @@ public class RolePermissionsDto
     public MenuSectionPermissionsDto Calculator { get; set; } = new();
     public MenuSectionPermissionsDto Clients { get; set; } = new();
     public MenuSectionPermissionsDto Cases { get; set; } = new();
-    public MenuSectionPermissionsDto Requests { get; set; } = new();
+    public RequestSectionPermissionsDto Requests { get; set; } = new();
     public MenuSectionPermissionsDto LegalEntities { get; set; } = new();
     public MenuSectionPermissionsDto Accounts { get; set; } = new();
     public MenuSectionPermissionsDto Acts { get; set; } = new();

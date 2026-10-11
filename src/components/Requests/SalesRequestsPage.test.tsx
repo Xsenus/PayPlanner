@@ -1,10 +1,11 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SalesRequestsPage } from './SalesRequestsPage';
 import { apiService } from '../../services/api';
 import type { SalesRequestItem, SalesRequestStatusItem } from '../../types';
+import { formatLocalYMD } from '../../utils/dateUtils';
 
 const confirm = vi.fn().mockResolvedValue(true);
 const toast = { success: vi.fn(), error: vi.fn(), info: vi.fn() };
@@ -115,6 +116,51 @@ describe('SalesRequestsPage', () => {
 
     await screen.findByText('Иванов Иван');
     expect(screen.queryByRole('button', { name: 'Новая заявка' })).toBeNull();
+  });
+
+  it.each(['-1', 'wrong', '1000000000001'])('rejects invalid amount %s instead of silently omitting it', async (amount) => {
+    render(<SalesRequestsPage allowCreate allowEdit allowAnalytics={false} initialRequestId={7} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Изменить данные заявки' }));
+    await userEvent.type(screen.getByLabelText('Сумма (правка)'), amount);
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить правки' }));
+
+    expect(toast.error).toHaveBeenCalledWith('Укажите сумму от 0 до 1 000 000 000 000.', 'Заявки');
+    expect(apiService.updateSalesRequest).not.toHaveBeenCalled();
+  });
+
+  it('does not reopen a card closed while its edit is being saved', async () => {
+    let resolveSave!: (value: SalesRequestItem) => void;
+    vi.mocked(apiService.updateSalesRequest).mockImplementation(() => new Promise((resolve) => { resolveSave = resolve; }));
+    render(<SalesRequestsPage allowCreate allowEdit allowAnalytics={false} initialRequestId={7} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Изменить данные заявки' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить правки' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Закрыть' }));
+    vi.mocked(apiService.getSalesRequest).mockClear();
+    await act(async () => { resolveSave(request()); });
+
+    expect(apiService.getSalesRequest).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('sales-request-detail')).toBeNull();
+  });
+
+  it('drops unsaved edits when another request is opened', async () => {
+    vi.mocked(apiService.getSalesRequests).mockResolvedValue({ total: 2, page: 1, pageSize: 50, items: [request(), request({ id: 8, clientName: 'Другой клиент' })] });
+    vi.mocked(apiService.getSalesRequest).mockImplementation(async (id) => detail(request({ id })));
+    render(<SalesRequestsPage allowCreate allowEdit allowAnalytics={false} initialRequestId={7} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Изменить данные заявки' }));
+    await userEvent.type(screen.getByLabelText('Суть запроса (правка)'), ' правки первого');
+    await userEvent.click(await screen.findByText('Другой клиент'));
+
+    await waitFor(() => expect(screen.queryByLabelText('Суть запроса (правка)')).toBeNull());
+    expect(apiService.updateSalesRequest).not.toHaveBeenCalled();
+  });
+
+  it('uses calendar dates for the monthly report without shifting the first day into the previous month', async () => {
+    const today = new Date();
+    vi.mocked(apiService.getSalesRequestReport).mockResolvedValue({ total: 0, succeeded: 0, failed: 0, inProgress: 0, conversionPercent: 0, wonAmount: 0, lostAmount: 0, bySource: [], lossByStage: [] });
+    render(<SalesRequestsPage allowCreate allowEdit allowAnalytics />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Отчёт за месяц' }));
+
+    expect(apiService.getSalesRequestReport).toHaveBeenCalledWith(formatLocalYMD(new Date(today.getFullYear(), today.getMonth(), 1)), formatLocalYMD(today));
   });
 
   it('creates a request for a found client and offers existing cases', async () => {

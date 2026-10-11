@@ -236,6 +236,12 @@ public class PaymentContext : DbContext
 
     /// <summary>Имя сборки с миграциями EF обеих баз.</summary>
     public const string MigrationsAssemblyName = "PayPlanner.Api.Migrations";
+    // The API cannot reference this project without a cycle. A published API's deps.json therefore
+    // has no entry for the copied DLL; load its absolute path instead of resolving by assembly name.
+    private static readonly Lazy<System.Reflection.Assembly> MigrationsAssembly = new(() =>
+        System.Reflection.Assembly.LoadFrom(Path.Combine(
+            Path.GetDirectoryName(typeof(PaymentContext).Assembly.Location) ?? AppContext.BaseDirectory,
+            MigrationsAssemblyName + ".dll")));
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
@@ -244,10 +250,10 @@ public class PaymentContext : DbContext
         // Миграции вынесены в сборку PayPlanner.Api.Migrations; задаём её для любого способа создания контекста
         // (приложение, фабрика времени разработки, тесты), если сборка миграций не указана явно.
         var relational = optionsBuilder.Options.Extensions.OfType<RelationalOptionsExtension>().FirstOrDefault();
-        if (relational is not null && string.IsNullOrEmpty(relational.MigrationsAssembly))
+        if (relational is not null && string.IsNullOrEmpty(relational.MigrationsAssembly) && relational.MigrationsAssemblyObject is null)
         {
             ((IDbContextOptionsBuilderInfrastructure)optionsBuilder).AddOrUpdateExtension(
-                relational.WithMigrationsAssembly(MigrationsAssemblyName));
+                relational.WithMigrationsAssembly(MigrationsAssembly.Value));
         }
 
         base.OnConfiguring(optionsBuilder);

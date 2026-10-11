@@ -487,7 +487,7 @@ function getEnabledPermissionCount(sectionKey: MenuSectionKey, permissions: Role
     count += TASK_OTHER_PERMISSION_META.filter((permission) => permissions.tasks[permission.key]).length;
   }
 
-  if (sectionKey === 'calendar' && permissions.calendar.canViewAnalytics) {
+  if ((sectionKey === 'calendar' || sectionKey === 'requests') && permissions[sectionKey].canViewAnalytics) {
     count += 1;
   }
 
@@ -495,7 +495,7 @@ function getEnabledPermissionCount(sectionKey: MenuSectionKey, permissions: Role
 }
 
 function getTotalPermissionCount(sectionKey: MenuSectionKey) {
-  if (sectionKey === 'calendar') {
+  if (sectionKey === 'calendar' || sectionKey === 'requests') {
     return MENU_PERMISSION_KEYS.length + 1;
   }
 
@@ -646,8 +646,8 @@ export function RolePermissionsModal({
           }
         });
 
-        if (sectionKey === 'calendar') {
-          (updated as RolePermissions['calendar']).canViewAnalytics = false;
+        if (sectionKey === 'calendar' || sectionKey === 'requests') {
+          (updated as RolePermissions['calendar' | 'requests']).canViewAnalytics = false;
         }
         if (sectionKey === 'tasks') {
           const taskSection = updated as RolePermissions['tasks'];
@@ -661,8 +661,8 @@ export function RolePermissionsModal({
     });
   };
 
-  const toggleCalendarAnalytics = () => {
-    updateSection('calendar', (section) => ({
+  const toggleSectionAnalytics = (sectionKey: 'calendar' | 'requests') => {
+    updateSection(sectionKey, (section) => ({
       ...section,
       canViewAnalytics: !section.canViewAnalytics,
     }));
@@ -745,8 +745,8 @@ export function RolePermissionsModal({
         canExport: sectionKey === 'roles' ? false : value,
       } as typeof section;
 
-      if (sectionKey === 'calendar') {
-        (next as RolePermissions['calendar']).canViewAnalytics = value;
+      if (sectionKey === 'calendar' || sectionKey === 'requests') {
+        (next as RolePermissions['calendar' | 'requests']).canViewAnalytics = value;
       }
       if (sectionKey === 'tasks') {
         const taskSection = next as RolePermissions['tasks'];
@@ -800,9 +800,9 @@ export function RolePermissionsModal({
           continue;
         }
 
-        if (key === 'calendar') {
-          next.calendar = {
-            ...prev.calendar,
+        if (key === 'calendar' || key === 'requests') {
+          next[key] = {
+            ...prev[key],
             canView: value,
             canCreate: value,
             canEdit: value,
@@ -1150,17 +1150,17 @@ export function RolePermissionsModal({
                             ))
                           : null}
 
-                        {sectionKey === 'calendar' ? (
+                        {sectionKey === 'calendar' || sectionKey === 'requests' ? (
                           <PermissionToggle
-                            label="Аналитика календаря"
-                            description="Просмотр аналитических блоков и расширенных представлений календаря."
-                            checked={permissions.calendar.canViewAnalytics}
-                            onChange={toggleCalendarAnalytics}
+                            label={sectionKey === 'calendar' ? 'Аналитика календаря' : 'Аналитика заявок'}
+                            description={sectionKey === 'calendar' ? 'Просмотр аналитических блоков и расширенных представлений календаря.' : 'Просмотр отчёта и журнала заявок в разрешённой области видимости.'}
+                            checked={permissions[sectionKey].canViewAnalytics === true}
+                            onChange={() => toggleSectionAnalytics(sectionKey)}
                             disabled={
                               isReadOnly
                               || saving
                               || resetting
-                              || !permissions.calendar.canView
+                              || !permissions[sectionKey].canView
                             }
                           />
                         ) : null}

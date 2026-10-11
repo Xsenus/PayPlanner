@@ -16,6 +16,32 @@ namespace PayPlanner.Api.Tests;
 
 public class RolePermissionsAuditTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Update_PreservesRequestAnalyticsOnlyWhenViewingIsAllowed(bool canView)
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "request-analyst" };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+        db.RolePermissions.AddRange(RolePermissionCatalog.CreateEntities(role.Id, allowRoleManagement: false));
+        await db.SaveChangesAsync();
+        var admin = await CreateAdminUserAsync(db);
+        var controller = CreateController(db, CreateAdminPrincipal(admin.Id));
+        var request = RolePermissionCatalog.CreateDto(allowRoleManagement: false);
+        request.Requests.CanView = canView;
+        request.Requests.CanViewAnalytics = true;
+        request.Requests.ViewScope = DataVisibilityScope.Own;
+
+        Assert.IsType<NoContentResult>(await controller.Update(role.Id, request, CancellationToken.None));
+        var dto = AssertOk<RolePermissionsDto>(await controller.Get(role.Id, CancellationToken.None));
+        Assert.Equal(canView, dto.Requests.CanViewAnalytics);
+        Assert.Equal(DataVisibilityScope.Own, dto.Requests.ViewScope);
+        var audit = AssertOk<RolePermissionAuditReportDto>(await controller.GetAudit(CancellationToken.None));
+        Assert.Empty(Assert.Single(audit.Roles, item => item.RoleName == role.Name).RestrictedCapabilitySections);
+    }
+
     [Fact]
     public async Task GetAudit_ReturnsReadyRole_WhenCatalogPermissionsAreComplete()
     {

@@ -12,6 +12,7 @@ import type {
   SalesRequestStatusItem,
 } from '../../types';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { formatLocalYMD } from '../../utils/dateUtils';
 import { SalesRequestFunnelSettings } from './SalesRequestFunnelSettings';
 import type { TaskJournalAssignee } from '../../utils/taskJournalStore';
 
@@ -152,9 +153,12 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
       const loaded = await apiService.getSalesRequest(id);
       if (sequence !== detailSequence.current) return;
       setDetail(loaded);
+      setEditing(null);
+      setConflict(false);
+      setTaskForm({ assigneeUserId: '', title: '' });
       setPaymentId('');
     } catch (error) {
-      toast.error(extractDisplayErrorMessage(error, 'Не удалось открыть заявку.'), 'Заявки');
+      if (sequence === detailSequence.current) toast.error(extractDisplayErrorMessage(error, 'Не удалось открыть заявку.'), 'Заявки');
     }
   };
 
@@ -202,27 +206,32 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
     run(async () => {
       if (!detail || !editing) return;
       const amount = editing.amount.trim() === '' ? undefined : Number(editing.amount.replace(',', '.'));
+      if (amount !== undefined && (!Number.isFinite(amount) || amount < 0 || amount > 1_000_000_000_000)) {
+        toast.error('Укажите сумму от 0 до 1 000 000 000 000.', 'Заявки');
+        return;
+      }
+      const sequence = detailSequence.current;
       try {
         await apiService.updateSalesRequest(detail.request.id, {
           version: detail.request.version,
           summary: editing.summary.trim(),
           type: editing.type,
           source: editing.source,
-          amount: amount !== undefined && Number.isFinite(amount) ? amount : undefined,
+          amount,
           comment: editing.comment,
           responsibleUserId: Number(editing.responsibleUserId),
         });
       } catch (error) {
         // Версия устарела: данные никто не затирает, сотрудник сначала перечитывает актуальную карточку.
         if (error instanceof Error && error.message.includes('уже изменили')) {
-          setConflict(true);
+          if (sequence === detailSequence.current) setConflict(true);
           return;
         }
         throw error;
       }
-      setEditing(null);
+      if (sequence === detailSequence.current) setEditing(null);
       await loadList();
-      await openDetail(detail.request.id);
+      if (sequence === detailSequence.current) await openDetail(detail.request.id);
     }, 'Не удалось сохранить заявку.');
 
   const run = async (action: () => Promise<void>, failure: string) => {
@@ -245,16 +254,22 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
 
   const submitCreate = () =>
     run(async () => {
+      if (form.amount.trim() !== '' && (!Number.isFinite(amountValue) || amountValue < 0 || amountValue > 1_000_000_000_000)) {
+        toast.error('Укажите сумму от 0 до 1 000 000 000 000.', 'Заявки');
+        return;
+      }
       const created = await apiService.createSalesRequest({
         source: form.source as SalesRequestSource,
         ...(form.clientId ? { clientId: form.clientId } : { newClientName: form.newName.trim(), newClientPhone: form.newPhone.trim(), newClientEmail: form.newEmail.trim() || undefined }),
         clientCaseId: form.caseId ?? undefined,
         summary: form.summary.trim(),
-        amount: Number.isFinite(amountValue) && amountValue > 0 ? amountValue : undefined,
+        amount: form.amount.trim() === '' ? undefined : amountValue,
       });
       setCreating(false);
       setForm(emptyForm());
       setSelectedClient(null);
+      setClientCases({ items: [], hasMore: false });
+      caseSequence.current++;
       await loadList();
       await openDetail(created.id);
     }, 'Не удалось создать заявку.');
@@ -262,6 +277,7 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
   const transition = (target: SalesRequestStatusItem, force = false) =>
     run(async () => {
       if (!detail) return;
+      const sequence = detailSequence.current;
       try {
         const updated = await apiService.transitionSalesRequest(detail.request.id, {
           toStatusId: target.id,
@@ -270,7 +286,7 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
           forceCloseTasks: force || undefined,
         });
         await loadList();
-        await openDetail(updated.id);
+        if (sequence === detailSequence.current) await openDetail(updated.id);
       } catch (error) {
         const message = error instanceof Error ? error.message : '';
         if (!force && message.includes('незакрытые задачи')) {
@@ -294,7 +310,7 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
   const finalClosed = detail ? detail.request.finalKind !== 'None' : false;
 
   return (
-    <section className="space-y-4 p-4" data-testid="sales-requests-page">
+    <section className="space-y-3 p-3 lg:p-4" data-testid="sales-requests-page">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-xl font-semibold text-slate-900">Заявки</h1>
         <div className="flex gap-2">
@@ -311,10 +327,10 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
                 const to = new Date();
                 const from = new Date(to.getFullYear(), to.getMonth(), 1);
                 void apiService
-                  .getSalesRequestReport(from.toISOString().slice(0, 10), to.toISOString().slice(0, 10))
+                  .getSalesRequestReport(formatLocalYMD(from), formatLocalYMD(to))
                   .then((r) =>
                     setReport(
-                      `За месяц: заявок ${r.total}, оплачено ${r.succeeded}, брошено/отказ ${r.failed}, в работе ${r.inProgress}, конверсия ${r.conversionPercent}% · получено ${money(r.wonAmount)}, потеряно ${money(r.lostAmount)}` +
+                      `За месяц: заявок ${r.total}, оплачено ${r.succeeded}, брошено/отказ ${r.failed}, в работе ${r.inProgress}, конверсия ${r.conversionPercent}% · сумма оплаченных заявок ${money(r.wonAmount)}, сумма потерянных заявок ${money(r.lostAmount)}` +
                       (r.lossByStage.length > 0 ? `. Провалы по этапам: ${r.lossByStage.map((item) => `${item.stage} — ${item.count} (${money(item.lostAmount)})`).join(', ')}` : ''),
                     ),
                   )
@@ -426,6 +442,9 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
               Клиент: <b>{selectedClient?.name ?? form.query}</b>{' '}
               <button type="button" className="text-blue-600 underline" onClick={() => {
                   setSelectedClient(null);
+                  caseSequence.current++;
+                  setClientCases({ items: [], hasMore: false });
+                  setCasesLoading(false);
                   setForm((prev) => ({ ...prev, clientId: null, caseId: null }));
                 }}>изменить</button>
             </p>
@@ -488,7 +507,14 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
           </label>
           <div className="mt-2 flex gap-2">
             <button type="button" disabled={!canSubmit} onClick={() => void submitCreate()} className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50">Сохранить</button>
-            <button type="button" onClick={() => { setCreating(false); setForm(emptyForm()); }} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm">Отмена</button>
+            <button type="button" disabled={busy} onClick={() => {
+              setCreating(false);
+              setForm(emptyForm());
+              setSelectedClient(null);
+              caseSequence.current++;
+              setClientCases({ items: [], hasMore: false });
+              setCasesLoading(false);
+            }} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm">Отмена</button>
           </div>
         </div>
       ) : null}
@@ -595,9 +621,9 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
                 disabled={busy || !taskForm.assigneeUserId || !taskForm.title.trim()}
                 onClick={() =>
                   void run(async () => {
+                    const sequence = detailSequence.current;
                     await apiService.createSalesRequestTask(detail.request.id, { assigneeUserId: Number(taskForm.assigneeUserId), title: taskForm.title.trim() });
-                    setTaskForm({ assigneeUserId: '', title: '' });
-                    await openDetail(detail.request.id);
+                    if (sequence === detailSequence.current) await openDetail(detail.request.id);
                   }, 'Не удалось поставить задачу.')
                 }
                 className="rounded-lg border border-slate-200 px-2 py-1 disabled:opacity-50"

@@ -382,10 +382,15 @@ public sealed class SalesRequestService : ISalesRequestService
             }
 
             var payment = await _db.Payments.AsNoTracking().Where(item => item.Id == paymentId)
-                .Select(item => new { item.ClientId, item.PaidAmount }).FirstOrDefaultAsync(ct);
+                .Select(item => new { item.ClientId, item.PaidAmount, item.Type }).FirstOrDefaultAsync(ct);
             if (payment is null || payment.ClientId != request.ClientId)
             {
                 return SalesRequestResult<SalesRequest>.Fail("Платёж не найден у клиента заявки.", 404);
+            }
+
+            if (payment.Type != PaymentType.Income)
+            {
+                return SalesRequestResult<SalesRequest>.Fail("Расход не подтверждает оплату заявки: выберите поступление от клиента.", 409);
             }
 
             if (payment.PaidAmount <= 0)

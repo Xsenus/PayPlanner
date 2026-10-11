@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { hasStorableLineItemPrecision, roundedLineTotal } from './lineItemMoney';
+import { hasStorableLineItemPrecision, roundedLineTotal, sumLineAmounts } from './lineItemMoney';
 
 describe('roundedLineTotal', () => {
+  it('sums rounded lines without binary fractions in the JSON payload while preserving legacy arithmetic', () => {
+    expect(sumLineAmounts([0.1, 0.2], true)).toBe(0.3);
+    expect(JSON.stringify({ amount: sumLineAmounts([0.1, 0.2], true) })).toBe('{"amount":0.3}');
+    expect(sumLineAmounts([10.08, 15.11, -0.02], true)).toBe(25.17);
+    expect(sumLineAmounts([0.1, 0.2], false)).toBe(0.1 + 0.2);
+  });
   it.each([
     [1.0075, 10, true], [1.5, 0.01, true], [0.0001, 0.29, true], [1, 10.075, false],
     [1.50001, 10, false], [1e-5, 1, false], [1, 1e-3, false], [Number.NaN, 1, false],
