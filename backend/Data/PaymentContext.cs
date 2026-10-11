@@ -785,6 +785,15 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.StatusId).HasDatabaseName("IX_SalesRequestStatusTaskRules_Status");
         });
 
+        modelBuilder.Entity<SalesRequestNotificationOutbox>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Key).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.LastError).HasMaxLength(500);
+            entity.HasIndex(e => e.Key).IsUnique().HasDatabaseName("IX_SalesRequestNotificationOutbox_Key");
+            entity.HasIndex(e => new { e.DeliveredAt, e.AbandonedAt, e.NextAttemptAt }).HasDatabaseName("IX_SalesRequestNotificationOutbox_Pending");
+        });
+
         modelBuilder.Entity<SalesRequestEvent>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -5201,6 +5210,7 @@ public class PaymentContext : DbContext
     public DbSet<SalesRequestStatus> SalesRequestStatuses { get; set; }
     public DbSet<SalesRequestStatusTaskRule> SalesRequestStatusTaskRules { get; set; }
     public DbSet<SalesRequestEvent> SalesRequestEvents { get; set; }
+    public DbSet<SalesRequestNotificationOutbox> SalesRequestNotificationOutbox { get; set; }
     public DbSet<TaxRegisterEntry> TaxRegisterEntries { get; set; }
     public DbSet<TaxRegisterEvent> TaxRegisterEvents { get; set; }
     public DbSet<TaxRegisterYearClose> TaxRegisterYearCloses { get; set; }

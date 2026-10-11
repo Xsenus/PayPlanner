@@ -9742,6 +9742,56 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("SalesRequestEvents");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.SalesRequestNotificationOutbox", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime?>("AbandonedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("ActorUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("DeliveredAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime>("NextAttemptAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("TaskId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Key")
+                        .IsUnique()
+                        .HasDatabaseName("IX_SalesRequestNotificationOutbox_Key");
+
+                    b.HasIndex("DeliveredAt", "AbandonedAt", "NextAttemptAt")
+                        .HasDatabaseName("IX_SalesRequestNotificationOutbox_Pending");
+
+                    b.ToTable("SalesRequestNotificationOutbox");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.SalesRequestStatus", b =>
                 {
                     b.Property<int>("Id")

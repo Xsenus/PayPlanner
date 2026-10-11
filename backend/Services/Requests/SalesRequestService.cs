@@ -31,7 +31,7 @@ public sealed record SalesRequestCreateInput(
 
 public sealed record SalesRequestUpdateInput(string? Summary, string? Type, decimal? Amount, string? Comment, int? ResponsibleUserId, int ExpectedVersion);
 
-public sealed record SalesRequestTransitionInput(int ToStatusId, int ExpectedVersion, int? PaidPaymentId, bool ForceCloseTasks, string? Comment);
+public sealed record SalesRequestTransitionInput(int ToStatusId, int ExpectedVersion, int? PaidPaymentId, bool ForceCloseTasks, string? Comment, int? AutoFromStatusId = null);
 
 public sealed record SalesRequestRuleInput(string? Title, int? AssigneeUserId, int DueInMinutes, decimal? AmountGreaterThan = null, string? Source = null, string? RequestType = null);
 
@@ -57,6 +57,7 @@ public interface ISalesRequestService
     Task<SalesRequestResult<IReadOnlyList<SalesRequestStatusTaskRule>>> ReplaceRulesAsync(int statusId, IReadOnlyList<SalesRequestRuleInput> rules, CancellationToken ct);
     Task<int> AdvanceCompletedAsync(CancellationToken ct);
     Task<int> MarkSlaBreachesAsync(CancellationToken ct);
+    Task<int> DeliverPendingNotificationsAsync(CancellationToken ct);
     Task<SalesRequestResult<SalesRequestStatus>> SetSlaAsync(int statusId, int? slaMinutes, CancellationToken ct);
     Task<SalesRequestReport> BuildReportAsync(DateTime from, DateTime to, IReadOnlyCollection<int>? visibleResponsibleUserIds, CancellationToken ct);
 }
@@ -213,8 +214,9 @@ public sealed class SalesRequestService : ISalesRequestService
         AddEvent(request.Id, SalesRequestEventKinds.Created, null, first.Id, userId, null);
         await CreateRuleTasksAsync(request, first.Id, userId, ct);
         await _db.SaveChangesAsync(ct);
+        await PersistOutboxAsync(ct);
         await transaction.CommitAsync(ct);
-        await FlushNotificationsAsync(ct);
+        await DeliverPendingNotificationsAsync(ct);
         return new(request);
     }
 
@@ -326,6 +328,25 @@ public sealed class SalesRequestService : ISalesRequestService
             return SalesRequestResult<SalesRequest>.Fail("Заявка уже в этом статусе.", 409);
         }
 
+        if (input.AutoFromStatusId is int autoFrom)
+        {
+            // Автопереход проверяется заново под блокировкой заявки: пока обработчик читал данные, задачи могли
+            // быть переоткрыты или отменены, а статус — измениться. В финальные статусы автоматика не ведёт никогда
+            // (в «Оплачено» заявку переводит только человек по фактическому платежу).
+            if (request.StatusId != autoFrom || target.FinalKind != SalesRequestFinalKinds.None)
+            {
+                return SalesRequestResult<SalesRequest>.Fail("Условия автоперехода уже не выполняются.", 409);
+            }
+
+            var stageStatuses = await _db.TaskJournalItems.AsNoTracking()
+                .Where(task => task.SalesRequestId == request.Id && task.TagsJson.Contains("\"" + StatusTag(autoFrom) + "\""))
+                .Select(task => task.Status).ToListAsync(ct);
+            if (stageStatuses.Count == 0 || stageStatuses.Any(status => !ClosedTaskStatuses.Contains(status)) || !stageStatuses.Contains("done"))
+            {
+                return SalesRequestResult<SalesRequest>.Fail("Условия автоперехода уже не выполняются.", 409);
+            }
+        }
+
         var isFinal = target.FinalKind != SalesRequestFinalKinds.None;
         if (target.FinalKind == SalesRequestFinalKinds.Success)
         {
@@ -418,8 +439,9 @@ public sealed class SalesRequestService : ISalesRequestService
         var saved = await SaveAsync(request, ct);
         if (saved.Ok)
         {
+            await PersistOutboxAsync(ct);
             await transaction.CommitAsync(ct);
-            await FlushNotificationsAsync(ct);
+            await DeliverPendingNotificationsAsync(ct);
         }
         else
         {
@@ -461,9 +483,10 @@ public sealed class SalesRequestService : ISalesRequestService
         _db.TaskJournalItems.Add(task);
         AddEvent(id, SalesRequestEventKinds.TaskCreated, null, null, userId, text);
         await _db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
         _pendingNotifications.Add((task, userId));
-        await FlushNotificationsAsync(ct);
+        await PersistOutboxAsync(ct);
+        await transaction.CommitAsync(ct);
+        await DeliverPendingNotificationsAsync(ct);
         return new(task);
     }
 
@@ -526,7 +549,7 @@ public sealed class SalesRequestService : ISalesRequestService
         else if (autoAdvanceToStatusId.HasValue)
         {
             var target = await _db.SalesRequestStatuses.AsNoTracking().FirstOrDefaultAsync(item => item.Id == autoAdvanceToStatusId.Value && item.IsActive, ct);
-            if (target is null || target.Id == status.Id || status.FinalKind != SalesRequestFinalKinds.None)
+            if (target is null || target.Id == status.Id || status.FinalKind != SalesRequestFinalKinds.None || target.FinalKind != SalesRequestFinalKinds.None)
             {
                 return SalesRequestResult<SalesRequestStatus>.Fail("Автопереход возможен только из рабочего статуса в другой действующий статус.");
             }
@@ -732,7 +755,7 @@ public sealed class SalesRequestService : ISalesRequestService
                 var stageTasks = tasks[candidate.Id].Where(task => task.TagsJson.Contains(tag, StringComparison.Ordinal)).ToList();
                 if (stageTasks.Count == 0 || stageTasks.Any(task => !ClosedTaskStatuses.Contains(task.Status)) || !stageTasks.Any(task => task.Status == "done")) continue;
                 var result = await TransitionAsync(candidate.Id, new SalesRequestTransitionInput(advancing[candidate.StatusId], candidate.Version, null, false,
-                    "Автоматически: задачи этапа выполнены"), 0, ct);
+                    "Автоматически: задачи этапа выполнены", candidate.StatusId), 0, ct);
                 if (result.Ok) moved++;
                 _db.ChangeTracker.Clear();
             }
@@ -867,27 +890,90 @@ public sealed class SalesRequestService : ISalesRequestService
         };
     }
 
-    private async Task FlushNotificationsAsync(CancellationToken ct)
+    /// <summary>Записывает ожидающие уведомления в очередь в той же транзакции, что и задачи (после того как у задач появились номера).</summary>
+    private async Task PersistOutboxAsync(CancellationToken ct)
     {
-        var pending = _pendingNotifications.ToList();
-        _pendingNotifications.Clear();
-        if (_notifications is null)
+        if (_pendingNotifications.Count == 0)
         {
             return;
         }
 
-        foreach (var (task, actorUserId) in pending)
+        var now = DateTime.UtcNow;
+        foreach (var (task, actorUserId) in _pendingNotifications)
         {
+            _db.SalesRequestNotificationOutbox.Add(new SalesRequestNotificationOutbox
+            {
+                TaskId = task.Id,
+                ActorUserId = actorUserId,
+                Key = $"task:{task.Id}:assigned",
+                CreatedAt = now,
+                NextAttemptAt = now,
+            });
+        }
+
+        _pendingNotifications.Clear();
+        await _db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Доставляет уведомления из очереди: строка захватывается условным обновлением (два обработчика не берут одну и ту же),
+    /// при сбое назначается повтор с нарастающей паузой, после 8 попыток доставка прекращается. Внешняя отправка идёт вне транзакций.
+    /// </summary>
+    public async Task<int> DeliverPendingNotificationsAsync(CancellationToken ct)
+    {
+        if (_notifications is null)
+        {
+            return 0;
+        }
+
+        var now = DateTime.UtcNow;
+        var due = await _db.SalesRequestNotificationOutbox.AsNoTracking()
+            .Where(row => row.DeliveredAt == null && row.AbandonedAt == null && row.NextAttemptAt <= now)
+            .OrderBy(row => row.Id).Take(50).ToListAsync(ct);
+        var delivered = 0;
+        foreach (var row in due)
+        {
+            var leaseUntil = now.AddMinutes(5);
+            var claimed = await _db.SalesRequestNotificationOutbox
+                .Where(item => item.Id == row.Id && item.DeliveredAt == null && item.AbandonedAt == null && item.NextAttemptAt == row.NextAttemptAt)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.NextAttemptAt, leaseUntil), ct);
+            if (claimed != 1)
+            {
+                continue;
+            }
+
+            var task = await _db.TaskJournalItems.Include(item => item.Participants).AsNoTracking().FirstOrDefaultAsync(item => item.Id == row.TaskId, ct);
+            if (task is null || ClosedTaskStatuses.Contains(task.Status))
+            {
+                await _db.SalesRequestNotificationOutbox.Where(item => item.Id == row.Id)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.AbandonedAt, DateTime.UtcNow).SetProperty(item => item.LastError, "Задача закрыта или удалена."), ct);
+                continue;
+            }
+
             try
             {
-                // Уведомление не должно ломать воронку: задача уже создана, сбой доставки только пишется в журнал.
-                await _notifications.NotifyTaskAssignedAsync(task, "Заявки", actorUserId, ct);
+                await _notifications.NotifyTaskAssignedAsync(task, "Заявки", row.ActorUserId, ct);
+                await _db.SalesRequestNotificationOutbox.Where(item => item.Id == row.Id)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.DeliveredAt, DateTime.UtcNow).SetProperty(item => item.LastError, (string?)null), ct);
+                delivered++;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger?.LogWarning(ex, "Не удалось уведомить об автозадаче заявки {TaskId}.", task.Id);
+                var attempts = row.AttemptCount + 1;
+                var message = ex.Message.Length > 500 ? ex.Message[..500] : ex.Message;
+                var retryAt = DateTime.UtcNow.AddSeconds(Math.Min(3600, 30 * Math.Pow(2, Math.Min(attempts, 7))));
+                DateTime? abandonedAt = attempts >= 8 ? DateTime.UtcNow : null;
+                await _db.SalesRequestNotificationOutbox.Where(item => item.Id == row.Id)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(item => item.AttemptCount, attempts)
+                        .SetProperty(item => item.NextAttemptAt, retryAt)
+                        .SetProperty(item => item.AbandonedAt, abandonedAt)
+                        .SetProperty(item => item.LastError, message), ct);
+                _logger?.LogWarning(ex, "Не удалось доставить уведомление по задаче заявки {TaskId}, попытка {Attempt}.", row.TaskId, attempts);
             }
         }
+
+        return delivered;
     }
 
     private async Task<bool> CanViewRequestsAsync(int userId, CancellationToken ct)

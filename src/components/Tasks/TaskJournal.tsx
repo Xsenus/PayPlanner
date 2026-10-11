@@ -13403,6 +13403,11 @@ function TaskModal({
                       <ExternalLink className="h-4 w-4" />
                     </button>
                   ) : null}
+                  {state?.task?.salesRequestId ? (
+                    <a href={`/?ppTab=requests&requestId=${state.task.salesRequestId}`} target="_blank" rel="noopener noreferrer" className="inline-flex h-10 shrink-0 items-center justify-center rounded-lg border border-blue-200 bg-white px-2 text-sm text-blue-700 transition hover:bg-blue-50" aria-label="Открыть заявку" title="Открыть заявку в новой вкладке">
+                      Заявка №{state.task.salesRequestId}
+                    </a>
+                  ) : null}
                 </div>
               </section>
 
@@ -13914,6 +13919,11 @@ function TaskModal({
                   <button type="button" onClick={openSelectedCase} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-amber-200 bg-amber-50 text-amber-700 transition hover:bg-amber-100" aria-label="Открыть карточку дела" title="Открыть карточку дела">
                     <ExternalLink className="h-4 w-4" />
                   </button>
+                ) : null}
+                {state?.task?.salesRequestId ? (
+                  <a href={`/?ppTab=requests&requestId=${state.task.salesRequestId}`} target="_blank" rel="noopener noreferrer" className="inline-flex h-11 shrink-0 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-3 text-sm text-blue-700 transition hover:bg-blue-100" aria-label="Открыть заявку" title="Открыть заявку в новой вкладке">
+                    Заявка №{state.task.salesRequestId}
+                  </a>
                 ) : null}
               </div>
             </Field>

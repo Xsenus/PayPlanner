@@ -1522,6 +1522,27 @@ describe('TaskJournal', () => {
     expect(onOpenCase).toHaveBeenCalledWith(100, 10);
   });
 
+  it.each(['legacy', 'modern'] as const)('links a task to its sales request from the %s task card', async (taskCardWindowMode) => {
+    await renderJournal([createTask({ salesRequestId: 77 })], { settings: { taskCardWindowMode } });
+
+    fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    const link = within(card).getByRole('link', { name: 'Открыть заявку' }) as HTMLAnchorElement;
+
+    expect(link.getAttribute('href')).toBe('/?ppTab=requests&requestId=77');
+    expect(link.target).toBe('_blank');
+    expect(link.rel).toContain('noopener');
+  });
+
+  it.each(['legacy', 'modern'] as const)('does not show a sales request link for an ordinary task in the %s card', async (taskCardWindowMode) => {
+    await renderJournal([createTask()], { settings: { taskCardWindowMode } });
+
+    fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+
+    expect(within(card).queryByRole('link', { name: 'Открыть заявку' })).toBeNull();
+  });
+
   it('shows contractor payment controls in the modern task card for an external assignee', async () => {
     await renderJournal([createTask()], {
       waitForTitle: null,

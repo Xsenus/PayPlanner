@@ -9531,6 +9531,54 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("SalesRequestEvents");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.SalesRequestNotificationOutbox", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("AbandonedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ActorUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("DeliveredAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("NextAttemptAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("TaskId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Key")
+                        .IsUnique()
+                        .HasDatabaseName("IX_SalesRequestNotificationOutbox_Key");
+
+                    b.HasIndex("DeliveredAt", "AbandonedAt", "NextAttemptAt")
+                        .HasDatabaseName("IX_SalesRequestNotificationOutbox_Pending");
+
+                    b.ToTable("SalesRequestNotificationOutbox");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.SalesRequestStatus", b =>
                 {
                     b.Property<int>("Id")

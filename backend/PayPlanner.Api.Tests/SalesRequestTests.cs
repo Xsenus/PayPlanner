@@ -640,4 +640,84 @@ public class SalesRequestTests
         Assert.Equal("Квалификация", stage.Stage);
         Assert.Equal(700m, stage.LostAmount);
     }
+
+    [Fact]
+    public async Task Outbox_SurvivesNotificationFailure_RetriesWithBackoff_AndDeliversExactlyOnce()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var proxy = System.Reflection.DispatchProxy.Create<INotificationService, NotificationRecorder>();
+        var recorder = (NotificationRecorder)(object)proxy;
+        var service = new SalesRequestService(f.Db, proxy);
+        recorder.Fail = true;
+
+        var request = (await service.CreateAsync(NewRequest(f.Client), f.Admin.Id, default)).Value!;
+
+        var row = Assert.Single(f.Db.SalesRequestNotificationOutbox.AsNoTracking());
+        Assert.Equal(1, row.AttemptCount);
+        Assert.Null(row.DeliveredAt);
+        Assert.True(row.NextAttemptAt > DateTime.UtcNow);
+        Assert.Contains("push unavailable", row.LastError);
+        Assert.Empty(recorder.Assigned);
+        Assert.Equal(0, await service.DeliverPendingNotificationsAsync(default));
+
+        await f.Db.SalesRequestNotificationOutbox.ExecuteUpdateAsync(s => s.SetProperty(r => r.NextAttemptAt, DateTime.UtcNow.AddSeconds(-1)));
+        recorder.Fail = false;
+        Assert.Equal(1, await service.DeliverPendingNotificationsAsync(default));
+        Assert.Equal(0, await service.DeliverPendingNotificationsAsync(default));
+
+        Assert.Single(recorder.Assigned);
+        Assert.NotNull((await f.Db.SalesRequestNotificationOutbox.AsNoTracking().SingleAsync()).DeliveredAt);
+        Assert.Equal($"task:{recorder.Assigned[0].TaskId}:assigned", row.Key);
+        Assert.True(request.Id > 0);
+    }
+
+    [Fact]
+    public async Task Outbox_IsRolledBackWithTheTransaction_AndClosedTasksAreAbandoned()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var proxy = System.Reflection.DispatchProxy.Create<INotificationService, NotificationRecorder>();
+        var recorder = (NotificationRecorder)(object)proxy;
+        var service = new SalesRequestService(f.Db, proxy);
+        var request = (await service.CreateAsync(NewRequest(f.Client), f.Admin.Id, default)).Value!;
+        var before = await f.Db.SalesRequestNotificationOutbox.CountAsync();
+
+        var stale = await service.TransitionAsync(request.Id, new SalesRequestTransitionInput(StatusId(f.Db, "qualification"), request.Version + 5, null, false, null), f.Manager.Id, default);
+
+        Assert.Equal(409, stale.Status);
+        Assert.Equal(before, await f.Db.SalesRequestNotificationOutbox.CountAsync());
+        await f.Db.SalesRequestNotificationOutbox.ExecuteUpdateAsync(s => s.SetProperty(r => r.DeliveredAt, (DateTime?)null).SetProperty(r => r.NextAttemptAt, DateTime.UtcNow.AddSeconds(-1)));
+        await f.Db.TaskJournalItems.ExecuteUpdateAsync(s => s.SetProperty(t => t.Status, "cancelled"));
+
+        Assert.Equal(0, await service.DeliverPendingNotificationsAsync(default));
+        Assert.NotNull((await f.Db.SalesRequestNotificationOutbox.AsNoTracking().FirstAsync()).AbandonedAt);
+    }
+
+    [Fact]
+    public async Task AutoAdvance_IsRecheckedUnderTheLock_AndNeverLeadsToAFinalStatus()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var request = (await f.Service.CreateAsync(NewRequest(f.Client), f.Manager.Id, default)).Value!;
+        var prep = StatusId(f.Db, "documents-prep");
+        var moved = (await f.Service.TransitionAsync(request.Id, new SalesRequestTransitionInput(prep, request.Version, null, false, null), f.Manager.Id, default)).Value!;
+        var stage = f.Db.TaskJournalItems.Single(t => t.SalesRequestId == request.Id && t.Title.StartsWith("Подготовить счёт"));
+        var sent = StatusId(f.Db, "documents-sent");
+
+        // Задача ещё открыта (например, переоткрыта между чтением и переходом): автопереход не выполняется.
+        var tooEarly = await f.Service.TransitionAsync(request.Id, new SalesRequestTransitionInput(sent, moved.Version, null, false, "auto", prep), 0, default);
+        stage.Status = "done";
+        await f.Db.SaveChangesAsync();
+        var toFinal = await f.Service.TransitionAsync(request.Id, new SalesRequestTransitionInput(StatusId(f.Db, "paid"), moved.Version, null, true, "auto", prep), 0, default);
+        var wrongStage = await f.Service.TransitionAsync(request.Id, new SalesRequestTransitionInput(sent, moved.Version, null, false, "auto", StatusId(f.Db, "approval")), 0, default);
+        var ok = await f.Service.TransitionAsync(request.Id, new SalesRequestTransitionInput(sent, moved.Version, null, false, "auto", prep), 0, default);
+
+        Assert.Equal(409, tooEarly.Status);
+        Assert.Equal(409, toFinal.Status);
+        Assert.Equal(409, wrongStage.Status);
+        Assert.True(ok.Ok);
+        var saveToFinal = await f.Service.SaveStatusAsync(prep, null, null, null, null, default, StatusId(f.Db, "declined"));
+        Assert.False(saveToFinal.Ok);
+    }
 }

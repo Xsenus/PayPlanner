@@ -48,6 +48,7 @@ public sealed class SalesRequestAutomationService : BackgroundService
         var service = scope.ServiceProvider.GetRequiredService<ISalesRequestService>();
         var moved = await service.AdvanceCompletedAsync(ct);
         await service.MarkSlaBreachesAsync(ct);
+        await service.DeliverPendingNotificationsAsync(ct);
         return moved;
     }
 }

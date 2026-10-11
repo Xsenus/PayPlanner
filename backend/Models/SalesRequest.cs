@@ -184,3 +184,34 @@ public class SalesRequestEvent
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
+
+/// <summary>
+/// Долговечная очередь уведомлений о задачах заявки. Строка создаётся в той же транзакции, что и задача,
+/// поэтому уведомление не теряется при сбое или перезапуске после коммита. Ключ идемпотентности — задача и вид события.
+/// </summary>
+public class SalesRequestNotificationOutbox
+{
+    [Key]
+    public int Id { get; set; }
+
+    public int TaskId { get; set; }
+
+    public int ActorUserId { get; set; }
+
+    [Required, MaxLength(100)]
+    public string Key { get; set; } = string.Empty;
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public int AttemptCount { get; set; }
+
+    public DateTime NextAttemptAt { get; set; } = DateTime.UtcNow;
+
+    public DateTime? DeliveredAt { get; set; }
+
+    /// <summary>Доставка прекращена (задача закрыта или удалена, исчерпаны повторы) — запись остаётся для разбора.</summary>
+    public DateTime? AbandonedAt { get; set; }
+
+    [MaxLength(500)]
+    public string? LastError { get; set; }
+}
