@@ -18,7 +18,13 @@ public sealed partial class StorageStageCapacityServiceTests
     public async Task SharedStageBudgetCreditsOnlyItsConfirmedPhysicalPrefix(bool postgres)
     {
         await using var f = await CreateWriterFixtureAsync(postgres);
-        var (stages, service, policy, root) = CreateSharedBudgetServices(f);
+        const long availableBound = 64L * 1024 * 1024;
+        const long copyBytes = 4;
+        var (stages, service, policy, root) = CreateSharedBudgetServices(f,
+            local => new OriginalCopyBudgetNativeProvider(local, availableBound));
+        // A real pending copy activates the existing capped native observation. Root and spool
+        // identities stay real, but concurrent database writes cannot move this 1 MiB boundary.
+        var copy = await AddOwnedCopyBudgetOperationAsync(f, copyBytes, StorageOperationStatuses.Pending, "local");
         const long otherUpper = 8L * 1024 * 1024;
         var other = Assert.IsType<StorageStageCapacityTicket>((await stages.ReserveAsync("credit-other:" + Guid.NewGuid().ToString("N"),
             Path.Combine(root, "credit-other.tmp"), otherUpper, default)).Ticket);
@@ -35,8 +41,8 @@ public sealed partial class StorageStageCapacityServiceTests
                         var own = await f.Db.StorageCapacityReservations.AsNoTracking().SingleAsync(r => r.ObjectId != other.ObjectId);
                         Assert.True(StorageStageFileReceipt.TryParse(own.StageFileReceiptJson, out var proof));
                         Assert.Equal(StorageStageFileReceipt.MaximumBlockBytes, proof!.PlannedBytes);
-                        var current = Assert.IsType<long>(LocalStorageCapacityProbe.Observe(root, "owned-observation", 0).AvailableBytes);
-                        policy.UploadMinimumFreeBytes = current - (otherUpper + 4 + 1024 * 1024);
+                        Assert.True(LocalStorageCapacityProbe.Observe(root, "owned-observation", 0).AvailableBytes >= availableBound);
+                        policy.UploadMinimumFreeBytes = availableBound - (otherUpper + 4 + 2 * copyBytes + 1024 * 1024);
                         raised++;
                     }), bytes.LongLength)), default);
             Assert.NotNull(result);
@@ -45,6 +51,8 @@ public sealed partial class StorageStageCapacityServiceTests
             result.Seek(-1, SeekOrigin.End);
             Assert.Equal(2, result.ReadByte());
             Assert.Equal(1, raised);
+            Assert.Equal(StorageOperationStatuses.Pending, await f.Db.StorageOperations
+                .Where(operation => operation.Id == copy.Id).Select(operation => operation.Status).SingleAsync());
             Assert.Equal(StorageCapacityReservationStatuses.Pending, await f.StatusAsync(other.Key));
             Assert.Equal(StorageCapacityReservationStatuses.Released, await f.Db.StorageCapacityReservations
                 .Where(r => r.ObjectId != other.ObjectId).Select(r => r.Status).SingleAsync());
@@ -58,7 +66,11 @@ public sealed partial class StorageStageCapacityServiceTests
     public async Task SharedStageBudgetCompletionDoesNotChargeUnusedUpperBound(bool postgres)
     {
         await using var f = await CreateWriterFixtureAsync(postgres);
-        var (stages, _, policy, root) = CreateSharedBudgetServices(f);
+        const long availableBound = 64L * 1024 * 1024;
+        const long copyBytes = 4;
+        var (stages, _, policy, root) = CreateSharedBudgetServices(f,
+            local => new OriginalCopyBudgetNativeProvider(local, availableBound));
+        var copy = await AddOwnedCopyBudgetOperationAsync(f, copyBytes, StorageOperationStatuses.Pending, "local");
         const long upper = 8L * 1024 * 1024;
         var other = Assert.IsType<StorageStageCapacityTicket>((await stages.ReserveAsync("unused-other:" + Guid.NewGuid().ToString("N"),
             Path.Combine(root, "unused-other.tmp"), upper, default)).Ticket);
@@ -69,8 +81,8 @@ public sealed partial class StorageStageCapacityServiceTests
             await using (var writer = await stages.OpenCheckpointWriterAsync(own, default))
             {
                 await writer.WriteBlockAsync(new byte[] { 1, 2, 3, 4 }, default);
-                var current = Assert.IsType<long>(LocalStorageCapacityProbe.Observe(root, "owned-observation", 0).AvailableBytes);
-                policy.UploadMinimumFreeBytes = current - (upper + 1024 * 1024);
+                Assert.True(LocalStorageCapacityProbe.Observe(root, "owned-observation", 0).AvailableBytes >= availableBound);
+                policy.UploadMinimumFreeBytes = availableBound - (upper + 2 * copyBytes + 1024 * 1024);
                 var receipt = await writer.CompleteAsync(default);
                 Assert.Equal(4, receipt.PlannedBytes);
             }
@@ -78,6 +90,8 @@ public sealed partial class StorageStageCapacityServiceTests
             await stages.SettlePhysicalAsync(confirmed, default);
             Assert.Equal(StorageCapacityReservationStatuses.Released, await f.StatusAsync(own.Key));
             Assert.Equal(StorageCapacityReservationStatuses.Pending, await f.StatusAsync(other.Key));
+            Assert.Equal(StorageOperationStatuses.Pending, await f.Db.StorageOperations
+                .Where(operation => operation.Id == copy.Id).Select(operation => operation.Status).SingleAsync());
             Assert.Equal(new byte[] { 1, 2, 3, 4 }, await File.ReadAllBytesAsync(own.AbsolutePath));
         }
         finally { await own.CloseWriterAsync(); await other.CloseWriterAsync(); }
