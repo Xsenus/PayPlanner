@@ -50,25 +50,50 @@
     </EmbeddedResource>
 
     <Compile Remove="PayPlanner.Api.Tests\**\*.cs" />
+    <Compile Remove="PayPlanner.Api.Migrations\**\*.cs" />
     <Compile Remove=".codex-build\**\*.cs" />
     <Compile Remove="obj\**\*.cs" />
     <Compile Remove="backend\**\*.cs" />
     <Compile Remove="publish\**\*.cs" />
     <Content Remove="PayPlanner.Api.Tests\**\*" />
+    <Content Remove="PayPlanner.Api.Migrations\**\*" />
     <Content Remove=".codex-build\**\*" />
     <Content Remove="obj\**\*" />
     <Content Remove="backend\**\*" />
     <Content Remove="publish\**\*" />
     <EmbeddedResource Remove="PayPlanner.Api.Tests\**\*" />
+    <EmbeddedResource Remove="PayPlanner.Api.Migrations\**\*" />
     <EmbeddedResource Remove=".codex-build\**\*" />
     <EmbeddedResource Remove="obj\**\*" />
     <EmbeddedResource Remove="backend\**\*" />
     <EmbeddedResource Remove="publish\**\*" />
     <None Remove="PayPlanner.Api.Tests\**\*" />
+    <None Remove="PayPlanner.Api.Migrations\**\*" />
     <None Remove=".codex-build\**\*" />
     <None Remove="obj\**\*" />
     <None Remove="backend\**\*" />
     <None Remove="publish\**\*" />
   </ItemGroup>
+
+  <!--
+    Миграции живут в отдельной сборке PayPlanner.Api.Migrations. Прямая ссылка проекта API на неё невозможна
+    (она ссылается на API), поэтому сборка запускается вложенным вызовом после компиляции API, а её DLL
+    копируется в выходной каталог и в публикацию. Пропустить шаг можно только свойством
+    PayPlannerSkipMigrationsBuild=true (например, когда сборку миграций уже выполнил граф проектов).
+  -->
+  <PropertyGroup>
+    <MigrationsProjectPath>$(MSBuildProjectDirectory)\PayPlanner.Api.Migrations\PayPlanner.Api.Migrations.csproj</MigrationsProjectPath>
+    <MigrationsOutputDll>$(MSBuildProjectDirectory)\PayPlanner.Api.Migrations\bin\$(Configuration)\$(TargetFramework)\PayPlanner.Api.Migrations.dll</MigrationsOutputDll>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="$(MigrationsOutputDll)" Condition="Exists('$(MigrationsOutputDll)')" Link="PayPlanner.Api.Migrations.dll" CopyToOutputDirectory="Never" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Target Name="BuildMigrationsAssembly" AfterTargets="CopyFilesToOutputDirectory" Condition="'$(PayPlannerSkipMigrationsBuild)' != 'true'">
+    <MSBuild Projects="$(MigrationsProjectPath)" Targets="Restore" Properties="Configuration=$(Configuration);MSBuildRestoreSessionId=$([System.Guid]::NewGuid())" />
+    <MSBuild Projects="$(MigrationsProjectPath)" Targets="Build" Properties="Configuration=$(Configuration);BuildProjectReferences=false" />
+    <Copy SourceFiles="$(MigrationsOutputDll)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

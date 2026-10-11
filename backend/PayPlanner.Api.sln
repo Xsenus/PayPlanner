@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PayPlanner.Api.Tests", "Pay
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PayPlanner.TestShards", "..\tools\PayPlanner.TestShards\PayPlanner.TestShards.csproj", "{F58BB942-2DA0-4108-9D05-07A438A1CBCC}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PayPlanner.Api.Migrations", "PayPlanner.Api.Migrations\PayPlanner.Api.Migrations.csproj", "{9408495B-D542-4856-8A32-2E7DC6EB12DC}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -55,6 +57,18 @@ Global
 		{F58BB942-2DA0-4108-9D05-07A438A1CBCC}.Release|x64.Build.0 = Release|Any CPU
 		{F58BB942-2DA0-4108-9D05-07A438A1CBCC}.Release|x86.ActiveCfg = Release|Any CPU
 		{F58BB942-2DA0-4108-9D05-07A438A1CBCC}.Release|x86.Build.0 = Release|Any CPU
+		{9408495B-D542-4856-8A32-2E7DC6EB12DC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9408495B-D542-4856-8A32-2E7DC6EB12DC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9408495B-D542-4856-8A32-2E7DC6EB12DC}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{9408495B-D542-4856-8A32-2E7DC6EB12DC}.Debug|x64.Build.0 = Debug|Any CPU
+		{9408495B-D542-4856-8A32-2E7DC6EB12DC}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{9408495B-D542-4856-8A32-2E7DC6EB12DC}.Debug|x86.Build.0 = Debug|Any CPU
+		{9408495B-D542-4856-8A32-2E7DC6EB12DC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9408495B-D542-4856-8A32-2E7DC6EB12DC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9408495B-D542-4856-8A32-2E7DC6EB12DC}.Release|x64.ActiveCfg = Release|Any CPU
+		{9408495B-D542-4856-8A32-2E7DC6EB12DC}.Release|x64.Build.0 = Release|Any CPU
+		{9408495B-D542-4856-8A32-2E7DC6EB12DC}.Release|x86.ActiveCfg = Release|Any CPU
+		{9408495B-D542-4856-8A32-2E7DC6EB12DC}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

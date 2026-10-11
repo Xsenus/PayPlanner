@@ -234,9 +234,22 @@ public class PaymentContext : DbContext
         _clientPassportEncryption = clientPassportEncryption;
     }
 
+    /// <summary>Имя сборки с миграциями EF обеих баз.</summary>
+    public const string MigrationsAssemblyName = "PayPlanner.Api.Migrations";
+
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
         optionsBuilder.ReplaceService<IModelCacheKeyFactory, PaymentContextModelCacheKeyFactory>();
+
+        // Миграции вынесены в сборку PayPlanner.Api.Migrations; задаём её для любого способа создания контекста
+        // (приложение, фабрика времени разработки, тесты), если сборка миграций не указана явно.
+        var relational = optionsBuilder.Options.Extensions.OfType<RelationalOptionsExtension>().FirstOrDefault();
+        if (relational is not null && string.IsNullOrEmpty(relational.MigrationsAssembly))
+        {
+            ((IDbContextOptionsBuilderInfrastructure)optionsBuilder).AddOrUpdateExtension(
+                relational.WithMigrationsAssembly(MigrationsAssemblyName));
+        }
+
         base.OnConfiguring(optionsBuilder);
     }
 

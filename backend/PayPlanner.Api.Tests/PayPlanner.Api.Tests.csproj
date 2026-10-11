@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\\PayPlanner.Api.csproj" />
+    <ProjectReference Include="..\\PayPlanner.Api.Migrations\\PayPlanner.Api.Migrations.csproj" />
     <ProjectReference Include="../../tests/PayPlanner.StorageStageWriterProbe/PayPlanner.StorageStageWriterProbe.csproj"
                       ReferenceOutputAssembly="false" />
   </ItemGroup>

@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Сгенерированные миграции EF и снимки модели (≈1,8 млн строк) вынесены из PayPlanner.Api, чтобы изменение
+    контроллера или сервиса не пересобирало их. Проект ссылается на API только ради типов контекстов
+    ([DbContext(typeof(...))]); эталонная сборка API не меняется при правке тел методов, поэтому эта сборка
+    пересобирается только при изменении миграций или публичного контракта API.
+    PayPlanner.Api собирает этот проект вложенным вызовом (см. PayPlanner.Api.csproj) и копирует DLL рядом с собой.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>PayPlanner.Api.Migrations</AssemblyName>
+    <RootNamespace>PayPlanner.Api</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <AssemblyVersion>1.0.0.6</AssemblyVersion>
+    <FileVersion>1.0.0.6</FileVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PayPlanner.Api.csproj" />
+  </ItemGroup>
+
+</Project>
