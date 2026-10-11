@@ -4,6 +4,7 @@ import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
 import { apiService } from '../../services/api';
 import type {
+  SalesRequestClientCaseOption,
   SalesRequestClientOption,
   SalesRequestDetail,
   SalesRequestItem,
@@ -29,6 +30,8 @@ const SOURCE_LABELS: Record<SalesRequestSource, string> = {
   Site: 'Сайт',
   Other: 'Другое',
 };
+
+const CONTRACT_MODE_LABELS: Record<string, string> = { Fixed: 'фиксированный', Actual: 'по факту', Mixed: 'разные условия', None: 'нет действующего' };
 
 const TYPE_LABELS: Record<string, string> = { New: 'Новый', Fixed: 'Фиксированный', PerCase: 'По факту' };
 
@@ -65,13 +68,17 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
   const [statuses, setStatuses] = useState<SalesRequestStatusItem[]>([]);
   const [items, setItems] = useState<SalesRequestItem[]>([]);
   const [total, setTotal] = useState(0);
-  const [filters, setFilters] = useState({ statusId: '', source: '', q: '', closed: false, page: 1 });
+  const [filters, setFilters] = useState({ statusId: '', source: '', responsibleUserId: '', q: '', closed: false, page: 1 });
   const [assignees, setAssignees] = useState<TaskJournalAssignee[]>([]);
   const [detail, setDetail] = useState<SalesRequestDetail | null>(null);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [options, setOptions] = useState<SalesRequestClientOption[]>([]);
   const [selectedClient, setSelectedClient] = useState<SalesRequestClientOption | null>(null);
+  const [clientCases, setClientCases] = useState<{ items: SalesRequestClientCaseOption[]; hasMore: boolean }>({ items: [], hasMore: false });
+  const [casesLoading, setCasesLoading] = useState(false);
+  const [editing, setEditing] = useState<{ summary: string; type: string; source: string; amount: string; comment: string; responsibleUserId: string } | null>(null);
+  const [conflict, setConflict] = useState(false);
   const [busy, setBusy] = useState(false);
   const [paymentId, setPaymentId] = useState('');
   const [taskForm, setTaskForm] = useState({ assigneeUserId: '', title: '' });
@@ -90,6 +97,7 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
       const page = await apiService.getSalesRequests({
         statusId: filters.statusId ? Number(filters.statusId) : undefined,
         source: filters.source || undefined,
+        responsibleUserId: filters.responsibleUserId ? Number(filters.responsibleUserId) : undefined,
         q: filters.q.trim() || undefined,
         closed: filters.closed,
         pageSize: 50,
@@ -149,6 +157,73 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
       toast.error(extractDisplayErrorMessage(error, 'Не удалось открыть заявку.'), 'Заявки');
     }
   };
+
+  const closeDetail = () => {
+    // Ответ запроса, отправленного до закрытия карточки, не должен её снова открыть.
+    detailSequence.current++;
+    setDetail(null);
+    setEditing(null);
+    setConflict(false);
+  };
+
+  const caseSequence = useRef(0);
+  const loadClientCases = async (clientId: number, skip: number) => {
+    const sequence = ++caseSequence.current;
+    setCasesLoading(true);
+    try {
+      const page = await apiService.getSalesRequestClientCases(clientId, skip, 20);
+      if (sequence !== caseSequence.current) return;
+      setClientCases((prev) => ({ items: skip === 0 ? page.items : [...prev.items, ...page.items], hasMore: page.hasMore }));
+    } catch (error) {
+      if (sequence === caseSequence.current) toast.error(extractDisplayErrorMessage(error, 'Не удалось загрузить дела клиента.'), 'Заявки');
+    } finally {
+      if (sequence === caseSequence.current) setCasesLoading(false);
+    }
+  };
+
+  const closeEditAfterReload = () => {
+    setEditing(null);
+    setConflict(false);
+  };
+
+  const startEdit = (request: SalesRequestItem) => {
+    setConflict(false);
+    setEditing({
+      summary: request.summary,
+      type: request.type,
+      source: request.source,
+      amount: request.amount ? String(request.amount) : '',
+      comment: request.comment ?? '',
+      responsibleUserId: String(request.responsibleUserId),
+    });
+  };
+
+  const saveEdit = () =>
+    run(async () => {
+      if (!detail || !editing) return;
+      const amount = editing.amount.trim() === '' ? undefined : Number(editing.amount.replace(',', '.'));
+      try {
+        await apiService.updateSalesRequest(detail.request.id, {
+          version: detail.request.version,
+          summary: editing.summary.trim(),
+          type: editing.type,
+          source: editing.source,
+          amount: amount !== undefined && Number.isFinite(amount) ? amount : undefined,
+          comment: editing.comment,
+          responsibleUserId: Number(editing.responsibleUserId),
+        });
+      } catch (error) {
+        // Версия устарела: данные никто не затирает, сотрудник сначала перечитывает актуальную карточку.
+        if (error instanceof Error && error.message.includes('уже изменили')) {
+          setConflict(true);
+          return;
+        }
+        throw error;
+      }
+      setEditing(null);
+      await loadList();
+      await openDetail(detail.request.id);
+    }, 'Не удалось сохранить заявку.');
 
   const run = async (action: () => Promise<void>, failure: string) => {
     setBusy(true);
@@ -272,6 +347,12 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
             <option key={key} value={key}>{label}</option>
           ))}
         </select>
+        <select aria-label="Ответственный" value={filters.responsibleUserId} onChange={(event) => setFilters((prev) => ({ ...prev, responsibleUserId: event.target.value, page: 1 }))} className="rounded-lg border border-slate-300 px-2 py-1">
+          <option value="">Все ответственные</option>
+          {assignees.map((item) => (
+            <option key={item.id} value={item.id}>{item.name}</option>
+          ))}
+        </select>
         <input aria-label="Поиск" placeholder="Клиент, телефон, суть" value={filters.q} onChange={(event) => setFilters((prev) => ({ ...prev, q: event.target.value, page: 1 }))} className="w-56 rounded-lg border border-slate-300 px-2 py-1" />
         <label className="flex items-center gap-1">
           <input type="checkbox" checked={filters.closed} onChange={(event) => setFilters((prev) => ({ ...prev, closed: event.target.checked, page: 1 }))} />
@@ -362,10 +443,12 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
                   <li key={option.id}>
                     <button type="button" className="w-full px-2 py-1 text-left hover:bg-slate-50" onClick={() => {
                         setSelectedClient(option);
+                        setClientCases({ items: [], hasMore: false });
+                        void loadClientCases(option.id, 0);
                         setForm((prev) => ({ ...prev, clientId: option.id }));
                       }}>
                       {option.name} <span className="text-xs text-slate-500">{option.phone}</span>
-                      <span className="ml-2 text-xs text-slate-500">дел: {option.cases.length}</span>
+                      <span className="ml-2 text-xs text-slate-500">дел: {option.casesCount}</span>
                     </button>
                   </li>
                 ))}
@@ -374,19 +457,28 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
             </div>
           )}
 
-          {selectedClient && selectedClient.cases.length > 0 ? (
+          {selectedClient && selectedClient.casesCount > 0 ? (
             <fieldset className="mt-2 text-sm" data-testid="sales-request-cases">
-              <legend className="font-medium">У клиента есть дела — по какому обращение?</legend>
+              <legend className="font-medium">У клиента дел: {selectedClient.casesCount} — по какому обращение?</legend>
               <label className="flex items-center gap-2">
                 <input type="radio" name="request-case" checked={form.caseId === null} onChange={() => setForm((prev) => ({ ...prev, caseId: null }))} />
                 Новое обращение
               </label>
-              {selectedClient.cases.map((item) => (
-                <label key={item.id} className="flex items-center gap-2">
+              {clientCases.items.map((item) => (
+                <label key={item.id} className="flex flex-wrap items-center gap-2">
                   <input type="radio" name="request-case" checked={form.caseId === item.id} onChange={() => setForm((prev) => ({ ...prev, caseId: item.id }))} />
-                  №{item.caseNumber} {item.title} <span className="text-xs text-slate-500">{item.status}</span>
+                  №{item.caseNumber} {item.title}
+                  <span className="text-xs text-slate-500">
+                    {item.status}{item.lawyerName ? ` · юрист ${item.lawyerName}` : ''} · договор: {CONTRACT_MODE_LABELS[item.contractMode]}
+                    {item.lastActivityAt ? ` · последнее действие ${item.lastActivityAt.slice(0, 10)}` : ''}
+                  </span>
                 </label>
               ))}
+              {clientCases.hasMore ? (
+                <button type="button" disabled={casesLoading} className="mt-1 text-blue-600 underline" onClick={() => void loadClientCases(selectedClient.id, clientCases.items.length)}>
+                  Показать ещё дела
+                </button>
+              ) : null}
             </fieldset>
           ) : null}
 
@@ -411,10 +503,48 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
                 {detail.request.linkedCaseWasClosed ? ' · по закрытому делу' : ''}
               </p>
             </div>
-            <button type="button" className="text-sm text-slate-500 hover:text-slate-800" onClick={() => setDetail(null)}>Закрыть</button>
+            <button type="button" className="text-sm text-slate-500 hover:text-slate-800" onClick={closeDetail}>Закрыть</button>
           </div>
           <p className="mt-2 whitespace-pre-wrap text-sm">{detail.request.summary}</p>
           {detail.request.comment ? <p className="mt-1 text-xs text-slate-500">{detail.request.comment}</p> : null}
+          {allowEdit && !finalClosed ? (
+            editing ? (
+              <div className="mt-2 grid gap-2 rounded-lg border border-slate-200 p-2 text-sm" data-testid="sales-request-edit">
+                {conflict ? (
+                  <p role="alert" className="text-rose-700">
+                    Заявку уже изменил другой сотрудник. Ваши правки не сохранены.{' '}
+                    <button type="button" className="underline" onClick={() => void openDetail(detail.request.id).then(closeEditAfterReload)}>Загрузить актуальную карточку</button>
+                  </p>
+                ) : null}
+                <textarea aria-label="Суть запроса (правка)" rows={3} value={editing.summary} onChange={(event) => setEditing((prev) => (prev ? { ...prev, summary: event.target.value } : prev))} className="rounded-lg border border-slate-300 px-2 py-1" />
+                <div className="flex flex-wrap gap-2">
+                  <select aria-label="Источник (правка)" value={editing.source} onChange={(event) => setEditing((prev) => (prev ? { ...prev, source: event.target.value } : prev))} className="rounded-lg border border-slate-300 px-2 py-1">
+                    {Object.entries(SOURCE_LABELS).map(([key, label]) => (
+                      <option key={key} value={key}>{label}</option>
+                    ))}
+                  </select>
+                  <select aria-label="Тип (правка)" value={editing.type} onChange={(event) => setEditing((prev) => (prev ? { ...prev, type: event.target.value } : prev))} className="rounded-lg border border-slate-300 px-2 py-1">
+                    {Object.entries(TYPE_LABELS).map(([key, label]) => (
+                      <option key={key} value={key}>{label}</option>
+                    ))}
+                  </select>
+                  <select aria-label="Ответственный (правка)" value={editing.responsibleUserId} onChange={(event) => setEditing((prev) => (prev ? { ...prev, responsibleUserId: event.target.value } : prev))} className="rounded-lg border border-slate-300 px-2 py-1">
+                    {assignees.map((item) => (
+                      <option key={item.id} value={item.id}>{item.name}</option>
+                    ))}
+                  </select>
+                  <input aria-label="Сумма (правка)" inputMode="decimal" value={editing.amount} onChange={(event) => setEditing((prev) => (prev ? { ...prev, amount: event.target.value } : prev))} className="w-32 rounded-lg border border-slate-300 px-2 py-1" />
+                </div>
+                <textarea aria-label="Комментарий (правка)" rows={2} value={editing.comment} onChange={(event) => setEditing((prev) => (prev ? { ...prev, comment: event.target.value } : prev))} className="rounded-lg border border-slate-300 px-2 py-1" />
+                <div className="flex gap-2">
+                  <button type="button" disabled={busy || editing.summary.trim() === ''} onClick={() => void saveEdit()} className="rounded-lg bg-blue-600 px-3 py-1 text-white disabled:opacity-50">Сохранить правки</button>
+                  <button type="button" onClick={() => { setEditing(null); setConflict(false); }} className="rounded-lg border border-slate-200 px-3 py-1">Отмена</button>
+                </div>
+              </div>
+            ) : (
+              <button type="button" className="mt-2 text-sm text-blue-600 underline" onClick={() => startEdit(detail.request)}>Изменить данные заявки</button>
+            )
+          ) : null}
 
           {allowEdit && !finalClosed ? (
             <div className="mt-3 flex flex-wrap items-end gap-2 text-sm">

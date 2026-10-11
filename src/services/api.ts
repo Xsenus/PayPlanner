@@ -6145,7 +6145,7 @@ export class ApiService {
     return this.request<SalesRequestStatusItem[]>('/requests/statuses');
   }
 
-  async getSalesRequests(params: { statusId?: number; source?: string; q?: string; closed?: boolean; page?: number; pageSize?: number }) {
+  async getSalesRequests(params: { statusId?: number; source?: string; responsibleUserId?: number; q?: string; closed?: boolean; page?: number; pageSize?: number }) {
     return this.request<SalesRequestPage>(`/requests${buildQuery(params)}`);
   }
 
@@ -6157,11 +6157,15 @@ export class ApiService {
     return this.request<SalesRequestClientOption[]>(`/requests/clients/search${buildQuery({ q })}`);
   }
 
+  async getSalesRequestClientCases(clientId: number, skip = 0, take = 20) {
+    return this.request<SalesRequestClientCasePage>(`/requests/clients/${clientId}/cases${buildQuery({ skip, take })}`);
+  }
+
   async createSalesRequest(payload: SalesRequestCreateInput) {
     return this.request<SalesRequestItem>('/requests', { method: 'POST', body: JSON.stringify(payload) });
   }
 
-  async updateSalesRequest(id: number, payload: { version: number; amount?: number; comment?: string; summary?: string; responsibleUserId?: number }) {
+  async updateSalesRequest(id: number, payload: { version: number; amount?: number; comment?: string; summary?: string; responsibleUserId?: number; type?: string; source?: string }) {
     return this.request<SalesRequestItem>(`/requests/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
   }
 
@@ -9416,6 +9420,7 @@ import type {
   BankStatementRun,
   BankSyncLogPage,
   TaxRegisterBook,
+  SalesRequestClientCasePage,
   SalesRequestClientOption,
   SalesRequestCreateInput,
   SalesRequestDetail,

@@ -318,7 +318,22 @@ export interface SalesRequestClientOption {
   name: string;
   phone: string;
   email: string;
-  cases: Array<{ id: number; caseNumber: string; title: string; status: string }>;
+  casesCount: number;
+}
+
+export interface SalesRequestClientCaseOption {
+  id: number;
+  caseNumber: string;
+  title: string;
+  status: string;
+  lastActivityAt?: string | null;
+  lawyerName?: string | null;
+  contractMode: 'Fixed' | 'Actual' | 'Mixed' | 'None';
+}
+
+export interface SalesRequestClientCasePage {
+  items: SalesRequestClientCaseOption[];
+  hasMore: boolean;
 }
 
 export interface SalesRequestCreateInput {

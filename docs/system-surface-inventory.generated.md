@@ -7,7 +7,7 @@
 
 - Разделов frontend: 55.
 - Backend-контроллеров: 89.
-- HTTP endpoints: 928; с прямой тестовой связью: 626.
+- HTTP endpoints: 929; с прямой тестовой связью: 628.
 - HTTP endpoints с точной ссылкой из документации: 224; критичных без такой ссылки: 537.
 - Критичных endpoints без прямой тестовой связи: 248.
 - Реальных HTML-форм: 19; с найденной тестовой связью: 17.
@@ -217,7 +217,7 @@
 | RolePermissionsController | backend/Controllers/RolePermissionsController.cs | 6 | [Authorize] | да |
 | RolesController | backend/Controllers/RolesController.cs | 7 | [Authorize] | нет |
 | S3StorageController | backend/Controllers/S3StorageController.cs | 13 | [Authorize] | да |
-| SalesRequestsController | backend/Controllers/SalesRequestsController.cs | 13 | [Authorize] | да |
+| SalesRequestsController | backend/Controllers/SalesRequestsController.cs | 14 | [Authorize] | да |
 | StatsController | backend/Controllers/StatsController.cs | 1 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Payments)] | да |
 | StickyNotesController | backend/Controllers/StickyNotesController.cs | 14 | [Authorize] | да |
 | StorageAdminController | backend/Controllers/StorageAdminController.cs | 13 | [Authorize(Policy = "Admin")] | да |
@@ -476,12 +476,12 @@
 | GET | api/portal/cases/{casePublicId:guid} | ClientPortalController.GetCase | публичный доступ | backend/Controllers/ClientPortalController.cs:91 |
 | GET | api/portal/home | ClientPortalController.Home | публичный доступ | backend/Controllers/ClientPortalController.cs:69 |
 | GET | api/profile | ProfileController.GetProfile | чувствительные данные или операция | backend/Controllers/ProfileController.cs:46 |
-| PUT | api/requests/{id:int} | SalesRequestsController.Update | изменение данных | backend/Controllers/SalesRequestsController.cs:282 |
-| POST | api/requests/{id:int}/tasks | SalesRequestsController.CreateTask | изменение данных | backend/Controllers/SalesRequestsController.cs:306 |
-| POST | api/requests/{id:int}/transition | SalesRequestsController.Transition | изменение данных | backend/Controllers/SalesRequestsController.cs:294 |
-| POST | api/requests/statuses | SalesRequestsController.CreateStatus | изменение данных | backend/Controllers/SalesRequestsController.cs:142 |
-| PUT | api/requests/statuses/{id:int} | SalesRequestsController.UpdateStatus | изменение данных | backend/Controllers/SalesRequestsController.cs:146 |
-| PUT | api/requests/statuses/{id:int}/rules | SalesRequestsController.ReplaceRules | изменение данных | backend/Controllers/SalesRequestsController.cs:150 |
+| PUT | api/requests/{id:int} | SalesRequestsController.Update | изменение данных | backend/Controllers/SalesRequestsController.cs:313 |
+| POST | api/requests/{id:int}/tasks | SalesRequestsController.CreateTask | изменение данных | backend/Controllers/SalesRequestsController.cs:337 |
+| POST | api/requests/{id:int}/transition | SalesRequestsController.Transition | изменение данных | backend/Controllers/SalesRequestsController.cs:325 |
+| POST | api/requests/statuses | SalesRequestsController.CreateStatus | изменение данных | backend/Controllers/SalesRequestsController.cs:145 |
+| PUT | api/requests/statuses/{id:int} | SalesRequestsController.UpdateStatus | изменение данных | backend/Controllers/SalesRequestsController.cs:149 |
+| PUT | api/requests/statuses/{id:int}/rules | SalesRequestsController.ReplaceRules | изменение данных | backend/Controllers/SalesRequestsController.cs:153 |
 | GET | api/role-permissions/calendar-users | RolePermissionsController.GetCalendarUsers | чувствительные данные или операция | backend/Controllers/RolePermissionsController.cs:152 |
 | GET | api/roles | RolesController.GetRoles | чувствительные данные или операция | backend/Controllers/RolesController.cs:29 |
 | GET | api/roles/{id:int} | RolesController.GetRole | чувствительные данные или операция | backend/Controllers/RolesController.cs:78 |
@@ -1123,19 +1123,20 @@
 | POST | api/s3-storages/{id}/move | S3StorageController | MoveObject | backend/Controllers/S3StorageController.cs:230 | [Authorize] | нет | нет |
 | GET | api/s3-storages/{id}/text | S3StorageController | GetTextFile | backend/Controllers/S3StorageController.cs:247 | [Authorize] | нет | нет |
 | PUT | api/s3-storages/{id}/text | S3StorageController | SaveTextFile | backend/Controllers/S3StorageController.cs:259 | [Authorize] | нет | нет |
-| GET | api/requests/statuses | SalesRequestsController | Statuses | backend/Controllers/SalesRequestsController.cs:127 | [Authorize] | нет | docs/pay-33-36-implementation-log-2026-10-09.md |
-| POST | api/requests/statuses | SalesRequestsController | CreateStatus | backend/Controllers/SalesRequestsController.cs:142 | [Authorize] | нет | docs/pay-33-36-implementation-log-2026-10-09.md |
-| PUT | api/requests/statuses/{id:int} | SalesRequestsController | UpdateStatus | backend/Controllers/SalesRequestsController.cs:146 | [Authorize] | нет | docs/pay-33-36-implementation-log-2026-10-09.md |
-| PUT | api/requests/statuses/{id:int}/rules | SalesRequestsController | ReplaceRules | backend/Controllers/SalesRequestsController.cs:150 | [Authorize] | нет | docs/pay-33-36-implementation-log-2026-10-09.md |
-| GET | api/requests | SalesRequestsController | List | backend/Controllers/SalesRequestsController.cs:190 | [Authorize] | да | docs/pay-33-36-implementation-log-2026-10-09.md, docs/tz-crm-applications-automation-roadmap-2026-10-07.md |
-| GET | api/requests/{id:int} | SalesRequestsController | Get | backend/Controllers/SalesRequestsController.cs:222 | [Authorize] | да | нет |
-| GET | api/requests/clients/search | SalesRequestsController | SearchClients | backend/Controllers/SalesRequestsController.cs:243 | [Authorize] | нет | нет |
-| POST | api/requests | SalesRequestsController | Create | backend/Controllers/SalesRequestsController.cs:268 | [Authorize] | да | docs/pay-33-36-implementation-log-2026-10-09.md, docs/tz-crm-applications-automation-roadmap-2026-10-07.md |
-| PUT | api/requests/{id:int} | SalesRequestsController | Update | backend/Controllers/SalesRequestsController.cs:282 | [Authorize] | нет | нет |
-| POST | api/requests/{id:int}/transition | SalesRequestsController | Transition | backend/Controllers/SalesRequestsController.cs:294 | [Authorize] | нет | нет |
-| POST | api/requests/{id:int}/tasks | SalesRequestsController | CreateTask | backend/Controllers/SalesRequestsController.cs:306 | [Authorize] | нет | нет |
-| GET | api/requests/journal | SalesRequestsController | Journal | backend/Controllers/SalesRequestsController.cs:320 | [Authorize] | нет | docs/pay-33-36-implementation-log-2026-10-09.md, docs/tz-crm-applications-automation-roadmap-2026-10-07.md |
-| GET | api/requests/report | SalesRequestsController | Report | backend/Controllers/SalesRequestsController.cs:347 | [Authorize] | нет | нет |
+| GET | api/requests/statuses | SalesRequestsController | Statuses | backend/Controllers/SalesRequestsController.cs:130 | [Authorize] | нет | docs/pay-33-36-implementation-log-2026-10-09.md |
+| POST | api/requests/statuses | SalesRequestsController | CreateStatus | backend/Controllers/SalesRequestsController.cs:145 | [Authorize] | нет | docs/pay-33-36-implementation-log-2026-10-09.md |
+| PUT | api/requests/statuses/{id:int} | SalesRequestsController | UpdateStatus | backend/Controllers/SalesRequestsController.cs:149 | [Authorize] | нет | docs/pay-33-36-implementation-log-2026-10-09.md |
+| PUT | api/requests/statuses/{id:int}/rules | SalesRequestsController | ReplaceRules | backend/Controllers/SalesRequestsController.cs:153 | [Authorize] | нет | docs/pay-33-36-implementation-log-2026-10-09.md |
+| GET | api/requests | SalesRequestsController | List | backend/Controllers/SalesRequestsController.cs:193 | [Authorize] | да | docs/pay-33-36-implementation-log-2026-10-09.md, docs/tz-crm-applications-automation-roadmap-2026-10-07.md |
+| GET | api/requests/{id:int} | SalesRequestsController | Get | backend/Controllers/SalesRequestsController.cs:225 | [Authorize] | да | нет |
+| GET | api/requests/clients/search | SalesRequestsController | SearchClients | backend/Controllers/SalesRequestsController.cs:246 | [Authorize] | да | нет |
+| GET | api/requests/clients/{clientId:int}/cases | SalesRequestsController | ClientCases | backend/Controllers/SalesRequestsController.cs:270 | [Authorize] | да | нет |
+| POST | api/requests | SalesRequestsController | Create | backend/Controllers/SalesRequestsController.cs:299 | [Authorize] | да | docs/pay-33-36-implementation-log-2026-10-09.md, docs/tz-crm-applications-automation-roadmap-2026-10-07.md |
+| PUT | api/requests/{id:int} | SalesRequestsController | Update | backend/Controllers/SalesRequestsController.cs:313 | [Authorize] | нет | нет |
+| POST | api/requests/{id:int}/transition | SalesRequestsController | Transition | backend/Controllers/SalesRequestsController.cs:325 | [Authorize] | нет | нет |
+| POST | api/requests/{id:int}/tasks | SalesRequestsController | CreateTask | backend/Controllers/SalesRequestsController.cs:337 | [Authorize] | нет | нет |
+| GET | api/requests/journal | SalesRequestsController | Journal | backend/Controllers/SalesRequestsController.cs:351 | [Authorize] | нет | docs/pay-33-36-implementation-log-2026-10-09.md, docs/tz-crm-applications-automation-roadmap-2026-10-07.md |
+| GET | api/requests/report | SalesRequestsController | Report | backend/Controllers/SalesRequestsController.cs:378 | [Authorize] | нет | нет |
 | GET | api/[controller]/month | StatsController | Month | backend/Controllers/StatsController.cs:21 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Payments)] | да | нет |
 | GET | api/sticky-notes/boards | StickyNotesController | GetBoards | backend/Controllers/StickyNotesController.cs:62 | [Authorize] | да | нет |
 | POST | api/sticky-notes/boards | StickyNotesController | CreateBoard | backend/Controllers/StickyNotesController.cs:99 | [Authorize] | нет | нет |

@@ -24,9 +24,11 @@ public sealed record SalesRequestEventDto(int Id, string Kind, int? FromStatusId
 
 public sealed record SalesRequestDetailDto(SalesRequestDto Request, IReadOnlyList<SalesRequestTaskDto> Tasks, IReadOnlyList<SalesRequestEventDto> Events);
 
-public sealed record SalesRequestClientCaseDto(int Id, string CaseNumber, string Title, string Status, DateTime? LastActivityAt);
+public sealed record SalesRequestClientCaseDto(int Id, string CaseNumber, string Title, string Status, DateTime? LastActivityAt, string? LawyerName, string ContractMode);
 
-public sealed record SalesRequestClientDto(int Id, string Name, string Phone, string Email, IReadOnlyList<SalesRequestClientCaseDto> Cases);
+public sealed record SalesRequestClientCasePageDto(IReadOnlyList<SalesRequestClientCaseDto> Items, bool HasMore);
+
+public sealed record SalesRequestClientDto(int Id, string Name, string Phone, string Email, int CasesCount);
 
 public sealed class SalesRequestCreateRequest
 {
@@ -45,6 +47,7 @@ public sealed class SalesRequestCreateRequest
 
 public sealed class SalesRequestUpdateRequest
 {
+    public string? Source { get; set; }
     public string? Summary { get; set; }
     public string? Type { get; set; }
     public decimal? Amount { get; set; }
@@ -254,15 +257,43 @@ public class SalesRequestsController : ControllerBase
             return Ok(new List<SalesRequestClientDto>());
         }
 
+        // Поиск ограничен десятью клиентами, дела догружаются отдельным запросом по выбранному клиенту.
         var clients = await _db.Clients.AsNoTracking()
             .Where(item => item.Name.Contains(text) || item.Phone.Contains(text) || item.Email.Contains(text))
             .OrderBy(item => item.Name).Take(10).Select(item => new { item.Id, item.Name, item.Phone, item.Email }).ToListAsync(ct);
         var ids = clients.Select(item => item.Id).ToList();
-        var cases = await _db.ClientCases.AsNoTracking().Where(item => item.ClientId != null && ids.Contains(item.ClientId.Value))
-            .OrderByDescending(item => item.Id).Select(item => new { item.Id, ClientId = item.ClientId!.Value, item.CaseNumber, item.Title, item.Status }).ToListAsync(ct);
-        return Ok(clients.Select(client => new SalesRequestClientDto(client.Id, client.Name, client.Phone, client.Email,
-            cases.Where(item => item.ClientId == client.Id).Take(20)
-                .Select(item => new SalesRequestClientCaseDto(item.Id, item.CaseNumber, item.Title, item.Status.ToString(), null)).ToList())).ToList());
+        var counts = await _db.ClientCases.AsNoTracking().Where(item => item.ClientId != null && ids.Contains(item.ClientId.Value))
+            .GroupBy(item => item.ClientId!.Value).Select(group => new { ClientId = group.Key, Count = group.Count() }).ToDictionaryAsync(group => group.ClientId, group => group.Count, ct);
+        return Ok(clients.Select(client => new SalesRequestClientDto(client.Id, client.Name, client.Phone, client.Email, counts.GetValueOrDefault(client.Id))).ToList());
+    }
+
+    [HttpGet("clients/{clientId:int}/cases")]
+    public async Task<ActionResult<SalesRequestClientCasePageDto>> ClientCases(int clientId, [FromQuery] int skip = 0, [FromQuery] int take = 20, CancellationToken ct = default)
+    {
+        if (await AccessAsync(ct) is not { } access || !Allowed(access, p => p.CanCreate))
+        {
+            return Denied();
+        }
+
+        skip = Math.Max(0, skip);
+        take = Math.Clamp(take, 1, 50);
+        var page = await _db.ClientCases.AsNoTracking().Where(item => item.ClientId == clientId)
+            .OrderByDescending(item => item.Id).Skip(skip).Take(take + 1)
+            .Select(item => new { item.Id, item.CaseNumber, item.Title, item.Status, item.CreatedAt, item.AuditUpdatedAt, item.ResponsibleUserId }).ToListAsync(ct);
+        var hasMore = page.Count > take;
+        var rows = page.Take(take).ToList();
+        var caseIds = rows.Select(item => item.Id).ToList();
+        var lawyerIds = rows.Where(item => item.ResponsibleUserId.HasValue).Select(item => item.ResponsibleUserId!.Value).Distinct().ToList();
+        var lawyers = await _db.Users.AsNoTracking().Where(user => lawyerIds.Contains(user.Id)).ToDictionaryAsync(user => user.Id, user => user.FullName, ct);
+        var modes = (await _db.ClientCaseContracts.AsNoTracking()
+            .Where(link => caseIds.Contains(link.ClientCaseId) && link.Contract.Status == ContractStatus.Concluded)
+            .Select(link => new { link.ClientCaseId, link.Contract.BillingMode }).ToListAsync(ct))
+            .GroupBy(item => item.ClientCaseId)
+            .ToDictionary(group => group.Key, group => group.Select(item => item.BillingMode).Distinct().Count() > 1 ? "Mixed" : group.First().BillingMode);
+        return Ok(new SalesRequestClientCasePageDto(rows.Select(item => new SalesRequestClientCaseDto(
+            item.Id, item.CaseNumber, item.Title, item.Status.ToString(), item.AuditUpdatedAt ?? item.CreatedAt,
+            item.ResponsibleUserId.HasValue ? lawyers.GetValueOrDefault(item.ResponsibleUserId.Value) : null,
+            modes.GetValueOrDefault(item.Id, "None"))).ToList(), hasMore));
     }
 
     [HttpPost]
@@ -288,7 +319,7 @@ public class SalesRequestsController : ControllerBase
         }
 
         return ToResult(await _service.UpdateAsync(id, new SalesRequestUpdateInput(request.Summary, request.Type, request.Amount,
-            request.Comment, request.ResponsibleUserId, request.Version), access.Visibility.UserId, ct));
+            request.Comment, request.ResponsibleUserId, request.Version, request.Source), access.Visibility.UserId, ct));
     }
 
     [HttpPost("{id:int}/transition")]

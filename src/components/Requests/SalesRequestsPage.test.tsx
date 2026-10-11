@@ -24,6 +24,8 @@ vi.mock('../../services/api', () => ({
     getSalesRequest: vi.fn(),
     getTaskJournalAssignees: vi.fn(),
     searchSalesRequestClients: vi.fn(),
+    getSalesRequestClientCases: vi.fn(),
+    updateSalesRequest: vi.fn(),
     createSalesRequest: vi.fn(),
     transitionSalesRequest: vi.fn(),
     createSalesRequestTask: vi.fn(),
@@ -73,7 +75,7 @@ describe('SalesRequestsPage', () => {
     render(<SalesRequestsPage allowCreate allowEdit allowAnalytics={false} />);
 
     expect(await screen.findByText('Иванов Иван')).toBeTruthy();
-    expect(await screen.findByText('Аня')).toBeTruthy();
+    expect((await screen.findAllByText('Аня')).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Отчёт за месяц' })).toBeNull();
   });
 
@@ -93,6 +95,21 @@ describe('SalesRequestsPage', () => {
     expect(apiService.getSalesRequest).toHaveBeenCalledWith(7);
   });
 
+  it('does not overwrite a request changed by someone else and reloads on demand', async () => {
+    vi.mocked(apiService.updateSalesRequest).mockRejectedValue(new Error('Заявку уже изменили, обновите карточку.'));
+    render(<SalesRequestsPage allowCreate allowEdit allowAnalytics={false} initialRequestId={7} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Изменить данные заявки' }));
+    await userEvent.type(screen.getByLabelText('Суть запроса (правка)'), ' ещё');
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить правки' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('Ваши правки не сохранены');
+
+    vi.mocked(apiService.getSalesRequest).mockClear();
+    await userEvent.click(screen.getByRole('button', { name: 'Загрузить актуальную карточку' }));
+    await waitFor(() => expect(apiService.getSalesRequest).toHaveBeenCalledWith(7));
+    await waitFor(() => expect(screen.queryByLabelText('Суть запроса (правка)')).toBeNull());
+  });
+
   it('hides creation without the create right', async () => {
     render(<SalesRequestsPage allowCreate={false} allowEdit={false} allowAnalytics={false} />);
 
@@ -102,8 +119,11 @@ describe('SalesRequestsPage', () => {
 
   it('creates a request for a found client and offers existing cases', async () => {
     vi.mocked(apiService.searchSalesRequestClients).mockResolvedValue([
-      { id: 3, name: 'Иванов Иван', phone: '+7 900', email: '', cases: [{ id: 87, caseNumber: '87', title: 'Старое дело', status: 'Closed' }] },
+      { id: 3, name: 'Иванов Иван', phone: '+7 900', email: '', casesCount: 21 },
     ]);
+    vi.mocked(apiService.getSalesRequestClientCases)
+      .mockResolvedValueOnce({ items: [{ id: 87, caseNumber: '87', title: 'Старое дело', status: 'Closed', lawyerName: 'Юрист', contractMode: 'Fixed' }], hasMore: true })
+      .mockResolvedValueOnce({ items: [{ id: 88, caseNumber: '88', title: 'Другое дело', status: 'Open', contractMode: 'None' }], hasMore: false });
     vi.mocked(apiService.createSalesRequest).mockResolvedValue(request({ id: 8 }));
     render(<SalesRequestsPage allowCreate allowEdit allowAnalytics={false} />);
 
@@ -111,6 +131,10 @@ describe('SalesRequestsPage', () => {
     await userEvent.type(screen.getByLabelText('Поиск клиента'), 'Иванов');
     await userEvent.click(await screen.findByRole('button', { name: /Иванов Иван/ }));
     expect(await screen.findByTestId('sales-request-cases')).toBeTruthy();
+    await userEvent.click(await screen.findByRole('button', { name: 'Показать ещё дела' }));
+    expect(await screen.findByLabelText(/Другое дело/)).toBeTruthy();
+    expect(apiService.getSalesRequestClientCases).toHaveBeenLastCalledWith(3, 1, 20);
+    expect(screen.queryByRole('button', { name: 'Показать ещё дела' })).toBeNull();
     await userEvent.click(screen.getByLabelText(/Старое дело/));
     await userEvent.selectOptions(screen.getByLabelText('Источник заявки'), 'Call');
     await userEvent.type(screen.getByLabelText('Суть запроса'), 'Нужен дубликат акта');

@@ -720,4 +720,92 @@ public class SalesRequestTests
         var saveToFinal = await f.Service.SaveStatusAsync(prep, null, null, null, null, default, StatusId(f.Db, "declined"));
         Assert.False(saveToFinal.Ok);
     }
+
+    private async Task<ClientCase> AddCaseWithContractAsync(Fixture f, string? billingMode, string contractStatus = ContractStatus.Concluded, ClientCaseStatus caseStatus = ClientCaseStatus.Open)
+    {
+        var clientCase = new ClientCase { ClientId = f.Client.Id, Status = caseStatus, CaseNumber = "N" + Guid.NewGuid().ToString("N")[..4], Title = "Дело", ResponsibleUserId = f.Manager.Id };
+        f.Db.ClientCases.Add(clientCase);
+        await f.Db.SaveChangesAsync();
+        if (billingMode is not null)
+        {
+            var contract = new Contract { Number = "К-" + clientCase.Id, BillingMode = billingMode, Status = contractStatus, Title = "Договор" };
+            f.Db.Contracts.Add(contract);
+            await f.Db.SaveChangesAsync();
+            f.Db.ClientCaseContracts.Add(new ClientCaseContract { ClientCaseId = clientCase.Id, ContractId = contract.Id });
+            await f.Db.SaveChangesAsync();
+        }
+
+        return clientCase;
+    }
+
+    [Fact]
+    public async Task AutoType_ComesOnlyFromTheActualConcludedContractOfTheCase()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var fixedCase = await AddCaseWithContractAsync(f, ContractBillingMode.Fixed);
+        var actualCase = await AddCaseWithContractAsync(f, ContractBillingMode.Actual);
+        var draftContractCase = await AddCaseWithContractAsync(f, ContractBillingMode.Fixed, ContractStatus.Draft);
+        var noContractCase = await AddCaseWithContractAsync(f, null);
+        var closedFixedCase = await AddCaseWithContractAsync(f, ContractBillingMode.Fixed, caseStatus: ClientCaseStatus.Closed);
+
+        async Task<SalesRequest> For(ClientCase c) => (await f.Service.CreateAsync(NewRequest(f.Client) with { ClientCaseId = c.Id }, f.Manager.Id, default)).Value!;
+
+        Assert.Equal("Fixed", (await For(fixedCase)).Type);
+        Assert.Equal("PerCase", (await For(actualCase)).Type);
+        var draft = await For(draftContractCase);
+        var none = await For(noContractCase);
+        var closed = await For(closedFixedCase);
+        Assert.Equal("PerCase", draft.Type);
+        Assert.Contains("уточнит квалификатор", draft.Comment);
+        Assert.Equal("PerCase", none.Type);
+        Assert.Contains("уточнит квалификатор", none.Comment);
+        Assert.Equal("PerCase", closed.Type);
+        Assert.Contains("По закрытому делу", closed.Comment);
+        var overridden = (await f.Service.CreateAsync(NewRequest(f.Client) with { ClientCaseId = fixedCase.Id, Type = "New" }, f.Manager.Id, default)).Value!;
+        Assert.Equal("New", overridden.Type);
+    }
+
+    [Fact]
+    public async Task Update_AllowsChangingSource_RejectsUnknownOne_AndKeepsVersionConflictProtection()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var request = (await f.Service.CreateAsync(NewRequest(f.Client, "Call"), f.Manager.Id, default)).Value!;
+
+        var bad = await f.Service.UpdateAsync(request.Id, new SalesRequestUpdateInput(null, null, null, null, null, request.Version, "Радио"), f.Manager.Id, default);
+        var ok = await f.Service.UpdateAsync(request.Id, new SalesRequestUpdateInput(null, null, null, null, null, request.Version, "Avito"), f.Manager.Id, default);
+        var stale = await f.Service.UpdateAsync(request.Id, new SalesRequestUpdateInput("Новая суть", null, null, null, null, request.Version - 1 < 0 ? 99 : request.Version - 1, null), f.Manager.Id, default);
+
+        Assert.False(bad.Ok);
+        Assert.Equal("Avito", ok.Value!.Source);
+        Assert.Equal(409, stale.Status);
+    }
+
+    [Fact]
+    public async Task ClientCasesEndpoint_PagesCasesWithLawyerContractAndLastActivity_AndSearchDoesNotLoadCases()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        for (var i = 0; i < 25; i++)
+        {
+            await AddCaseWithContractAsync(f, i == 0 ? ContractBillingMode.Fixed : null);
+        }
+
+        var controller = ControllerFor(f.Db, f.Admin, admin: true);
+        var first = Assert.IsType<OkObjectResult>((await controller.ClientCases(f.Client.Id, 0, 20, default)).Result);
+        var firstPage = Assert.IsType<SalesRequestClientCasePageDto>(first.Value);
+        var second = Assert.IsType<SalesRequestClientCasePageDto>(Assert.IsType<OkObjectResult>((await controller.ClientCases(f.Client.Id, 20, 20, default)).Result).Value);
+        var search = Assert.IsType<List<SalesRequestClientDto>>(Assert.IsType<OkObjectResult>((await controller.SearchClients("Иванов", default)).Result).Value);
+
+        Assert.Equal(20, firstPage.Items.Count);
+        Assert.True(firstPage.HasMore);
+        Assert.Equal(5, second.Items.Count);
+        Assert.False(second.HasMore);
+        Assert.Equal(25, firstPage.Items.Count + second.Items.Count);
+        Assert.Equal("Аня", firstPage.Items[0].LawyerName);
+        Assert.Contains(second.Items, item => item.ContractMode == "Fixed");
+        Assert.All(firstPage.Items, item => Assert.NotNull(item.LastActivityAt));
+        Assert.Equal(25, Assert.Single(search).CasesCount);
+    }
 }

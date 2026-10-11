@@ -29,7 +29,7 @@ public sealed record SalesRequestCreateInput(
     string? Comment,
     int? ResponsibleUserId);
 
-public sealed record SalesRequestUpdateInput(string? Summary, string? Type, decimal? Amount, string? Comment, int? ResponsibleUserId, int ExpectedVersion);
+public sealed record SalesRequestUpdateInput(string? Summary, string? Type, decimal? Amount, string? Comment, int? ResponsibleUserId, int ExpectedVersion, string? Source = null);
 
 public sealed record SalesRequestTransitionInput(int ToStatusId, int ExpectedVersion, int? PaidPaymentId, bool ForceCloseTasks, string? Comment, int? AutoFromStatusId = null);
 
@@ -175,8 +175,23 @@ public sealed class SalesRequestService : ISalesRequestService
             }
 
             linkedClosed = linked.Status is ClientCaseStatus.Closed or ClientCaseStatus.Lost;
-            // Тип по договору (фиксированный/по факту) пока не определяется автоматически: по делу ставим «По факту», уточняет квалификатор.
-            type = SalesRequestTypes.PerCase;
+            // Тип определяется только по фактическому действующему договору дела: фиксированный → «Фиксированный»,
+            // по факту → «По факту». Закрытое дело, отсутствие или расхождение договоров дают «По факту» с пометкой
+            // для квалификатора, который вправе уточнить тип вручную.
+            var modes = await _db.ClientCaseContracts.AsNoTracking()
+                .Where(link => link.ClientCaseId == caseId && link.Contract.Status == ContractStatus.Concluded)
+                .Select(link => link.Contract.BillingMode).Distinct().ToListAsync(ct);
+            if (!linkedClosed && modes.Count == 1 && ContractBillingMode.Normalize(modes[0]) == ContractBillingMode.Fixed)
+            {
+                type = SalesRequestTypes.Fixed;
+            }
+            else
+            {
+                type = SalesRequestTypes.PerCase;
+                autoComment = linkedClosed
+                    ? "По закрытому делу: тип уточнит квалификатор"
+                    : modes.Count == 1 ? null : "Нет единственного действующего договора по делу: тип уточнит квалификатор";
+            }
         }
         else if (!await _db.ClientCases.AsNoTracking().AnyAsync(item => item.ClientId == client.Id, ct))
         {
@@ -247,6 +262,16 @@ public sealed class SalesRequestService : ISalesRequestService
             }
 
             request.Summary = summary;
+        }
+
+        if (input.Source is not null)
+        {
+            if (!SalesRequestSources.All.Contains(input.Source))
+            {
+                return SalesRequestResult<SalesRequest>.Fail("Неизвестный источник заявки.");
+            }
+
+            request.Source = input.Source;
         }
 
         if (input.Type is not null)
