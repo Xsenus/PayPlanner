@@ -497,9 +497,9 @@
 | POST | api/storage/legacy-replicas | LegacyStorageMigrationController.Run | изменение данных | backend/Controllers/LegacyStorageMigrationController.cs:12 |
 | DELETE | api/storage/objects/{id:guid} | StorageAdminController.DeleteObject | изменение данных | backend/Controllers/StorageAdminController.cs:75 |
 | POST | api/storage/reconcile | StorageAdminController.Reconcile | изменение данных | backend/Controllers/StorageAdminController.cs:175 |
-| GET | api/tax-register/book/export.csv | TaxRegisterController.ExportCsv | чувствительные данные или операция | backend/Controllers/TaxRegisterController.cs:179 |
-| GET | api/tax-register/book/export.xlsx | TaxRegisterController.ExportXlsx | чувствительные данные или операция | backend/Controllers/TaxRegisterController.cs:191 |
-| POST | api/tax-register/close-year | TaxRegisterController.CloseYear | изменение данных | backend/Controllers/TaxRegisterController.cs:203 |
+| GET | api/tax-register/book/export.csv | TaxRegisterController.ExportCsv | чувствительные данные или операция | backend/Controllers/TaxRegisterController.cs:187 |
+| GET | api/tax-register/book/export.xlsx | TaxRegisterController.ExportXlsx | чувствительные данные или операция | backend/Controllers/TaxRegisterController.cs:202 |
+| POST | api/tax-register/close-year | TaxRegisterController.CloseYear | изменение данных | backend/Controllers/TaxRegisterController.cs:216 |
 | POST | api/tax-register/entries | TaxRegisterController.Create | изменение данных | backend/Controllers/TaxRegisterController.cs:120 |
 | PUT | api/tax-register/entries/{id:int} | TaxRegisterController.Update | изменение данных | backend/Controllers/TaxRegisterController.cs:124 |
 | POST | api/tax-register/entries/{id:int}/approve | TaxRegisterController.Approve | изменение данных | backend/Controllers/TaxRegisterController.cs:128 |
@@ -1222,9 +1222,9 @@
 | GET | api/tax-register/entries/{id:int}/events | TaxRegisterController | Events | backend/Controllers/TaxRegisterController.cs:140 | [Authorize(Policy = "Admin")] | нет | нет |
 | GET | api/tax-register/journal | TaxRegisterController | Journal | backend/Controllers/TaxRegisterController.cs:155 | [Authorize(Policy = "Admin")] | нет | docs/claude-next-development-prompt-2026-10-10.md, docs/kudir-yougile-roadmap-2026-10-09.md, docs/pay-33-36-implementation-log-2026-10-09.md |
 | GET | api/tax-register/book | TaxRegisterController | Book | backend/Controllers/TaxRegisterController.cs:167 | [Authorize(Policy = "Admin")] | нет | docs/pay-33-36-implementation-log-2026-10-09.md |
-| GET | api/tax-register/book/export.csv | TaxRegisterController | ExportCsv | backend/Controllers/TaxRegisterController.cs:179 | [Authorize(Policy = "Admin")] | нет | нет |
-| GET | api/tax-register/book/export.xlsx | TaxRegisterController | ExportXlsx | backend/Controllers/TaxRegisterController.cs:191 | [Authorize(Policy = "Admin")] | нет | docs/pay-33-36-implementation-log-2026-10-09.md |
-| POST | api/tax-register/close-year | TaxRegisterController | CloseYear | backend/Controllers/TaxRegisterController.cs:203 | [Authorize(Policy = "Admin")] | нет | нет |
+| GET | api/tax-register/book/export.csv | TaxRegisterController | ExportCsv | backend/Controllers/TaxRegisterController.cs:187 | [Authorize(Policy = "Admin")] | нет | нет |
+| GET | api/tax-register/book/export.xlsx | TaxRegisterController | ExportXlsx | backend/Controllers/TaxRegisterController.cs:202 | [Authorize(Policy = "Admin")] | нет | docs/pay-33-36-implementation-log-2026-10-09.md |
+| POST | api/tax-register/close-year | TaxRegisterController | CloseYear | backend/Controllers/TaxRegisterController.cs:216 | [Authorize(Policy = "Admin")] | нет | нет |
 | GET | api/user-activity | UserActivityController | GetAsync | backend/Controllers/UserActivityController.cs:62 | [Authorize]; [Authorize(Policy = "Admin")] | да | docs/development-pause-plan-2026-09-30.md, docs/full-project-audit-2026-06-10.md, docs/managed-generated-case-documents-roadmap-2026-10-01.md, docs/storage-resilience-roadmap-2026-09-22.md |
 | GET | api/user-activity/online | UserActivityController | GetOnlineAsync | backend/Controllers/UserActivityController.cs:168 | [Authorize]; [Authorize(Policy = "Admin")] | да | нет |
 | GET | api/user-activity/filters | UserActivityController | GetFiltersAsync | backend/Controllers/UserActivityController.cs:302 | [Authorize]; [Authorize(Policy = "Admin")] | нет | нет |

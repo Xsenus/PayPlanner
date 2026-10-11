@@ -30,7 +30,7 @@ public sealed record TaxRegisterEntryDto(
 
 public sealed record TaxRegisterEventDto(int Id, string Action, string? FromStatus, string? ToStatus, int UserId, string? Comment, DateTime CreatedAt);
 
-public sealed record TaxRegisterBookDto(int LegalEntityId, int Year, bool IsClosed, TaxRegisterBookTotals Totals, IReadOnlyList<TaxRegisterEntryDto> Entries);
+public sealed record TaxRegisterBookDto(int LegalEntityId, int Year, bool IsClosed, TaxRegisterBookTotals Totals, IReadOnlyList<TaxRegisterEntryDto> Entries, int Page, int PageSize);
 
 public sealed class TaxRegisterEntryRequest
 {
@@ -165,15 +165,23 @@ public class TaxRegisterController : ControllerBase, IAsyncActionFilter
     }
 
     [HttpGet("book")]
-    public async Task<ActionResult<TaxRegisterBookDto>> Book([FromQuery] int companyId, [FromQuery] int year, CancellationToken ct)
+    public async Task<ActionResult<TaxRegisterBookDto>> Book(
+        [FromQuery] int companyId, [FromQuery] int year, [FromQuery] int page = 1, [FromQuery] int pageSize = 100, CancellationToken ct = default)
     {
         if (year is < 2000 or > 2100)
         {
             return BadRequest(new { message = "Укажите корректный год." });
         }
 
-        var book = await _service.BuildBookAsync(companyId, year, ct);
-        return Ok(new TaxRegisterBookDto(book.LegalEntityId, book.Year, book.IsClosed, book.Totals, book.Entries.Select(Map).ToList()));
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, MaxPageSize);
+        if ((long)(page - 1) * pageSize > int.MaxValue)
+        {
+            return BadRequest(new { message = "Укажите корректную страницу." });
+        }
+
+        var book = await _service.GetBookPageAsync(companyId, year, page, pageSize, ct);
+        return Ok(new TaxRegisterBookDto(book.LegalEntityId, book.Year, book.IsClosed, book.Totals, book.Entries.Select(Map).ToList(), book.Page, book.PageSize));
     }
 
     [HttpGet("book/export.csv")]
@@ -184,8 +192,11 @@ public class TaxRegisterController : ControllerBase, IAsyncActionFilter
             return BadRequest(new { message = "Укажите корректный год." });
         }
 
-        var book = await _service.BuildBookAsync(companyId, year, ct);
-        return File(Encoding.UTF8.GetBytes(TaxRegisterService.ToCsv(book)), "text/csv; charset=utf-8", $"kudir-{companyId}-{year}.csv");
+        // Заголовки фиксируются до первой записи в поток; тело пишется партиями без накопления года в памяти.
+        Response.ContentType = "text/csv; charset=utf-8";
+        Response.Headers.ContentDisposition = $"attachment; filename=\"kudir-{companyId}-{year}.csv\"";
+        await TaxRegisterExport.WriteCsvAsync(Response.Body, _service.StreamBookEntriesAsync(companyId, year, ct), ct);
+        return new EmptyResult();
     }
 
     [HttpGet("book/export.xlsx")]
@@ -196,8 +207,10 @@ public class TaxRegisterController : ControllerBase, IAsyncActionFilter
             return BadRequest(new { message = "Укажите корректный год." });
         }
 
-        var book = await _service.BuildBookAsync(companyId, year, ct);
-        return File(TaxRegisterXlsxWriter.Build(book), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"kudir-{companyId}-{year}.xlsx");
+        Response.ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        Response.Headers.ContentDisposition = $"attachment; filename=\"kudir-{companyId}-{year}.xlsx\"";
+        await TaxRegisterExport.WriteXlsxAsync(Response.Body, year, _service.StreamBookEntriesAsync(companyId, year, ct), ct);
+        return new EmptyResult();
     }
 
     [HttpPost("close-year")]

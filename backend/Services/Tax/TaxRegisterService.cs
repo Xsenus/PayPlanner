@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
@@ -41,6 +42,15 @@ public sealed record TaxRegisterBook(
     IReadOnlyList<TaxRegisterEntry> Entries,
     TaxRegisterBookTotals Totals);
 
+public sealed record TaxRegisterBookPage(
+    int LegalEntityId,
+    int Year,
+    bool IsClosed,
+    TaxRegisterBookTotals Totals,
+    int Page,
+    int PageSize,
+    IReadOnlyList<TaxRegisterEntry> Entries);
+
 public interface ITaxRegisterService
 {
     Task<TaxRegisterResult<TaxRegisterEntry>> CreateAsync(TaxRegisterEntryInput input, int userId, CancellationToken ct);
@@ -50,6 +60,9 @@ public interface ITaxRegisterService
     Task<TaxRegisterResult<TaxRegisterEntry>> CorrectAsync(int id, string reason, int userId, CancellationToken ct);
     Task<TaxRegisterResult<TaxRegisterYearClose>> CloseYearAsync(int legalEntityId, int year, int userId, CancellationToken ct);
     Task<TaxRegisterBook> BuildBookAsync(int legalEntityId, int year, CancellationToken ct);
+    Task<TaxRegisterBookPage> GetBookPageAsync(int legalEntityId, int year, int page, int pageSize, CancellationToken ct);
+    IAsyncEnumerable<TaxRegisterEntry> StreamBookEntriesAsync(int legalEntityId, int year, CancellationToken ct);
+    Task<bool> IsYearClosedPublicAsync(int legalEntityId, int year, CancellationToken ct);
     Task<TaxRegisterJournalPage> GetJournalAsync(int legalEntityId, DateTime? from, DateTime? to, string? action, int page, int pageSize, CancellationToken ct);
 }
 
@@ -311,14 +324,13 @@ public sealed class TaxRegisterService : ITaxRegisterService
             return TaxRegisterResult<TaxRegisterYearClose>.Fail($"В году остались черновики ({drafts}): утвердите или архивируйте их перед закрытием.", 409);
         }
 
-        var book = await BuildBookAsync(legalEntityId, year, ct);
         var close = new TaxRegisterYearClose
         {
             LegalEntityId = legalEntityId,
             Year = year,
             ClosedAt = DateTime.UtcNow,
             ClosedByUserId = userId,
-            DataHash = ComputeHash(book.Entries),
+            DataHash = await ComputeYearHashAsync(legalEntityId, year, ct),
         };
         _db.TaxRegisterYearCloses.Add(close);
         await _db.SaveChangesAsync(ct);
@@ -354,6 +366,115 @@ public sealed class TaxRegisterService : ITaxRegisterService
             item.history.UserId, item.history.Comment, item.history.CreatedAt, item.Direction, item.Sign * item.Amount, item.DocumentRef)).ToList());
     }
 
+    private const int BatchSize = 1000;
+
+    private IQueryable<TaxRegisterEntry> ApprovedOfYear(int legalEntityId, int year)
+    {
+        var from = new DateTime(year, 1, 1);
+        var to = from.AddYears(1);
+        return _db.TaxRegisterEntries.AsNoTracking()
+            .Where(item => item.LegalEntityId == legalEntityId && item.Status == TaxRegisterStatuses.Approved
+                && item.OperationDate >= from && item.OperationDate < to);
+    }
+
+    public Task<bool> IsYearClosedPublicAsync(int legalEntityId, int year, CancellationToken ct) => IsYearClosedAsync(legalEntityId, year, ct);
+
+    /// <summary>Утверждённые записи года по порядку книги партиями по ключу (дата, номер): память ограничена размером партии.</summary>
+    public async IAsyncEnumerable<TaxRegisterEntry> StreamBookEntriesAsync(int legalEntityId, int year, [EnumeratorCancellation] CancellationToken ct)
+    {
+        DateTime? lastDate = null;
+        var lastId = 0;
+        while (true)
+        {
+            var query = ApprovedOfYear(legalEntityId, year);
+            if (lastDate.HasValue)
+            {
+                var date = lastDate.Value;
+                var id = lastId;
+                query = query.Where(item => item.OperationDate > date || (item.OperationDate == date && item.Id > id));
+            }
+
+            var batch = await query.OrderBy(item => item.OperationDate).ThenBy(item => item.Id).Take(BatchSize).ToListAsync(ct);
+            foreach (var entry in batch)
+            {
+                yield return entry;
+            }
+
+            if (batch.Count < BatchSize)
+            {
+                yield break;
+            }
+
+            lastDate = batch[^1].OperationDate;
+            lastId = batch[^1].Id;
+        }
+    }
+
+    /// <summary>Итоги считаются на сервере по тонкой проекции партиями; записи целиком в память не загружаются.</summary>
+    private async Task<TaxRegisterBookTotals> ScanTotalsAsync(int legalEntityId, int year, CancellationToken ct)
+    {
+        decimal income = 0m, expense = 0m;
+        var count = 0;
+        var lastId = 0;
+        while (true)
+        {
+            var id = lastId;
+            var batch = await ApprovedOfYear(legalEntityId, year).Where(item => item.Id > id).OrderBy(item => item.Id)
+                .Select(item => new { item.Id, item.Direction, item.Sign, item.Amount }).Take(BatchSize * 2).ToListAsync(ct);
+            foreach (var row in batch)
+            {
+                if (row.Direction == TaxRegisterTypes.Income) income += row.Sign * row.Amount;
+                else if (row.Direction == TaxRegisterTypes.Expense) expense += row.Sign * row.Amount;
+            }
+
+            count += batch.Count;
+            if (batch.Count < BatchSize * 2)
+            {
+                return new TaxRegisterBookTotals(income, expense, income - expense, count);
+            }
+
+            lastId = batch[^1].Id;
+        }
+    }
+
+    public async Task<TaxRegisterBookPage> GetBookPageAsync(int legalEntityId, int year, int page, int pageSize, CancellationToken ct)
+    {
+        var totals = await ScanTotalsAsync(legalEntityId, year, ct);
+        var entries = await ApprovedOfYear(legalEntityId, year)
+            .OrderBy(item => item.OperationDate).ThenBy(item => item.Id)
+            .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
+        return new TaxRegisterBookPage(legalEntityId, year, await IsYearClosedAsync(legalEntityId, year, ct), totals, page, pageSize, entries);
+    }
+
+    /// <summary>Контрольная сумма года тем же форматом, что и <see cref="ComputeHash"/>, но без загрузки всех записей.</summary>
+    private async Task<string> ComputeYearHashAsync(int legalEntityId, int year, CancellationToken ct)
+    {
+        var inv = CultureInfo.InvariantCulture;
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var first = true;
+        var lastId = 0;
+        while (true)
+        {
+            var id = lastId;
+            var batch = await ApprovedOfYear(legalEntityId, year).Where(item => item.Id > id).OrderBy(item => item.Id)
+                .Take(BatchSize).ToListAsync(ct);
+            foreach (var item in batch)
+            {
+                var line = string.Join('|', item.Id.ToString(inv), item.OperationDate.ToString("yyyy-MM-dd", inv), item.Direction,
+                    item.Sign.ToString(inv), item.Amount.ToString("0.00", inv), item.DocumentRef ?? string.Empty);
+                hash.AppendData(Encoding.UTF8.GetBytes(first ? line : "\n" + line));
+                first = false;
+            }
+
+            if (batch.Count < BatchSize)
+            {
+                return Convert.ToHexString(hash.GetHashAndReset());
+            }
+
+            lastId = batch[^1].Id;
+        }
+    }
+
     public async Task<TaxRegisterBook> BuildBookAsync(int legalEntityId, int year, CancellationToken ct)
     {
         var from = new DateTime(year, 1, 1);
@@ -371,32 +492,6 @@ public sealed class TaxRegisterService : ITaxRegisterService
         return new TaxRegisterBook(legalEntityId, year, closed, entries, new TaxRegisterBookTotals(income, expense, income - expense, entries.Count));
     }
 
-    public static string ToCsv(TaxRegisterBook book)
-    {
-        var inv = CultureInfo.InvariantCulture;
-        var sb = new StringBuilder();
-        sb.Append('﻿');
-        sb.Append("№;Дата операции;Направление;Тип;Сумма со знаком;Первичный документ;Описание;Категория\r\n");
-        var number = 0;
-        foreach (var entry in book.Entries)
-        {
-            number++;
-            sb.Append(number.ToString(inv)).Append(';')
-              .Append(entry.OperationDate.ToString("dd.MM.yyyy", inv)).Append(';')
-              .Append(entry.Direction == TaxRegisterTypes.Income ? "Доход" : "Расход").Append(';')
-              .Append(entry.Type == TaxRegisterTypes.Correction ? "Корректировка" : "Обычная").Append(';')
-              .Append((entry.Sign * entry.Amount).ToString("0.00", inv)).Append(';')
-              .Append(CsvCell(entry.DocumentRef)).Append(';')
-              .Append(CsvCell(entry.Description)).Append(';')
-              .Append(CsvCell(entry.Category)).Append("\r\n");
-        }
-
-        sb.Append(";;;Итого доходов;").Append(book.Totals.Income.ToString("0.00", inv)).Append(";;;\r\n");
-        sb.Append(";;;Итого расходов;").Append(book.Totals.Expense.ToString("0.00", inv)).Append(";;;\r\n");
-        sb.Append(";;;Разность;").Append(book.Totals.TaxBase.ToString("0.00", inv)).Append(";;;\r\n");
-        return sb.ToString();
-    }
-
     internal static string ComputeHash(IEnumerable<TaxRegisterEntry> entries)
     {
         var inv = CultureInfo.InvariantCulture;
@@ -404,23 +499,6 @@ public sealed class TaxRegisterService : ITaxRegisterService
             string.Join('|', item.Id.ToString(inv), item.OperationDate.ToString("yyyy-MM-dd", inv), item.Direction,
                 item.Sign.ToString(inv), item.Amount.ToString("0.00", inv), item.DocumentRef ?? string.Empty)));
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
-    }
-
-    private static string CsvCell(string? value)
-    {
-        if (string.IsNullOrEmpty(value))
-        {
-            return string.Empty;
-        }
-
-        var cell = value.Replace("\r", " ").Replace("\n", " ");
-        // Защита от формул Excel: ячейка не должна начинаться с управляющего символа формулы.
-        if (cell[0] is '=' or '+' or '-' or '@' or '\t')
-        {
-            cell = "'" + cell;
-        }
-
-        return cell.Contains(';') || cell.Contains('"') ? "\"" + cell.Replace("\"", "\"\"") + "\"" : cell;
     }
 
     private static bool IsCorrectionDuplicate(DbUpdateException ex) => ex.InnerException switch

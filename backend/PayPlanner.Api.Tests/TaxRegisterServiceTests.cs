@@ -57,6 +57,23 @@ public class TaxRegisterServiceTests
             Assert.Null((await db.TaxRegisterEntries.SingleAsync()).CorrectedByEntryId);
     }
 
+    private static async IAsyncEnumerable<TaxRegisterEntry> Rows(params TaxRegisterEntry[] entries)
+    {
+        foreach (var entry in entries)
+        {
+            yield return entry;
+        }
+
+        await Task.CompletedTask;
+    }
+
+    private static async Task<string> CsvAsync(params TaxRegisterEntry[] entries)
+    {
+        using var stream = new MemoryStream();
+        await TaxRegisterExport.WriteCsvAsync(stream, Rows(entries), default);
+        return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+    }
+
     [Fact]
     public async Task BankDraft_OmittedSourceCannotOverrideStatementValues()
     {
@@ -159,8 +176,14 @@ public class TaxRegisterServiceTests
         Assert.Equal(300.56m, book.Totals.Expense);
         Assert.Equal(699.44m, book.Totals.TaxBase);
         Assert.Equal(2, book.Entries.Count);
-        var csv = TaxRegisterService.ToCsv(book);
+        var streamed = new List<TaxRegisterEntry>();
+        await foreach (var row in service.StreamBookEntriesAsync(company, 2025, default)) streamed.Add(row);
+        Assert.Equal(book.Entries.Select(e => e.Id), streamed.Select(e => e.Id));
+        var csv = await CsvAsync(streamed.ToArray());
         Assert.Contains("Итого доходов;1000.00", csv);
+        var page = await service.GetBookPageAsync(company, 2025, 1, 1, default);
+        Assert.Equal(book.Totals, page.Totals);
+        Assert.Single(page.Entries);
     }
 
     [Fact]
@@ -220,10 +243,10 @@ public class TaxRegisterServiceTests
     }
 
     [Fact]
-    public void Csv_NeutralisesFormulaInjection()
+    public async Task Csv_NeutralisesFormulaInjection()
     {
         var entry = new TaxRegisterEntry { Id = 1, OperationDate = new DateTime(2025, 1, 1), Direction = "Income", Amount = 1m, Sign = 1, DocumentRef = "=HYPERLINK(\"x\")", Description = "a;b" };
-        var csv = TaxRegisterService.ToCsv(new TaxRegisterBook(1, 2025, false, [entry], new TaxRegisterBookTotals(1m, 0m, 1m, 1)));
+        var csv = await CsvAsync(entry);
 
         Assert.Contains("\"'=HYPERLINK(\"\"x\"\")\"", csv);
         Assert.Contains("\"a;b\"", csv);
@@ -266,11 +289,13 @@ public class TaxRegisterServiceTests
     }
 
     [Fact]
-    public void Xlsx_ContainsRowsTotalsAndEscapesText()
+    public async Task Xlsx_ContainsRowsTotalsAndEscapesText()
     {
         System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
         var entry = new TaxRegisterEntry { Id = 1, OperationDate = new DateTime(2025, 1, 1), Direction = "Income", Amount = 12.5m, Sign = 1, DocumentRef = "=A1 & <b>", Description = "x\u0001y 📄" };
-        var bytes = TaxRegisterXlsxWriter.Build(new TaxRegisterBook(1, 2025, false, [entry], new TaxRegisterBookTotals(12.5m, 0m, 12.5m, 1)));
+        using var stream = new MemoryStream();
+        await TaxRegisterExport.WriteXlsxAsync(stream, 2025, Rows(entry), default);
+        var bytes = stream.ToArray();
 
         using var reader = ExcelDataReader.ExcelReaderFactory.CreateReader(new MemoryStream(bytes));
         var rows = new List<string?[]>();
@@ -284,5 +309,55 @@ public class TaxRegisterServiceTests
         Assert.Equal("=A1 & <b>", rows[2][5]);
         Assert.Equal("xy 📄", rows[2][6]);
         Assert.Equal("Разность", rows[^1][3]);
+    }
+}
+
+public class TaxRegisterStreamingTests
+{
+    [Fact]
+    public async Task LargeYear_IsReadInBatches_TotalsMatchAndYearHashIsStableAcrossBatches()
+    {
+        var sqlite = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
+        await sqlite.OpenAsync();
+        await using var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(sqlite).Options);
+        await db.Database.EnsureCreatedAsync();
+        var company = new LegalEntity { ShortName = "Своя", Inn = "7707083893" };
+        db.LegalEntities.Add(company);
+        await db.SaveChangesAsync();
+        for (var i = 0; i < 2300; i++)
+        {
+            db.TaxRegisterEntries.Add(new TaxRegisterEntry
+            {
+                LegalEntityId = company.Id,
+                OperationDate = new DateTime(2025, 1, 1).AddDays(i % 300),
+                Type = i % 3 == 0 ? "Expense" : "Income",
+                Direction = i % 3 == 0 ? "Expense" : "Income",
+                Amount = 10.01m,
+                Sign = 1,
+                DocumentRef = "Док " + i,
+                Status = "Approved",
+            });
+        }
+
+        await db.SaveChangesAsync();
+        var service = new TaxRegisterService(db);
+
+        var ids = new List<int>();
+        await foreach (var entry in service.StreamBookEntriesAsync(company.Id, 2025, default)) ids.Add(entry.Id);
+        var page = await service.GetBookPageAsync(company.Id, 2025, 3, 1000, default);
+        var closed = await service.CloseYearAsync(company.Id, 2025, 1, default);
+
+        Assert.Equal(2300, ids.Count);
+        Assert.Equal(ids.Count, ids.Distinct().Count());
+        Assert.Equal(2300, page.Totals.Entries);
+        Assert.Equal(1533 * 10.01m, page.Totals.Income);
+        Assert.Equal(767 * 10.01m, page.Totals.Expense);
+        Assert.Equal(300, page.Entries.Count);
+        var all = await db.TaxRegisterEntries.AsNoTracking().Where(e => e.Status == "Approved").ToListAsync();
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(string.Join('\n',
+            all.OrderBy(e => e.Id).Select(e => string.Join('|', e.Id.ToString(inv), e.OperationDate.ToString("yyyy-MM-dd", inv), e.Direction,
+                e.Sign.ToString(inv), e.Amount.ToString("0.00", inv), e.DocumentRef ?? string.Empty))))));
+        Assert.Equal(expected, closed.Value!.DataHash);
     }
 }

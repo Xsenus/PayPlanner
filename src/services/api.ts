@@ -6080,8 +6080,15 @@ export class ApiService {
     return this.request<BankSyncLogPage>(`/bank-connections/${connectionId}/logs?page=${page}&pageSize=${pageSize}`);
   }
 
-  async getTaxRegisterBook(companyId: number, year: number) {
-    return this.request<TaxRegisterBook>(`/tax-register/book?companyId=${companyId}&year=${year}`);
+  async getTaxRegisterBook(companyId: number, year: number, page = 1, pageSize = 100) {
+    return this.request<TaxRegisterBook>(`/tax-register/book${buildQuery({ companyId, year, page, pageSize })}`);
+  }
+
+  async getTaxRegisterJournal(
+    companyId: number,
+    params: { from?: string; to?: string; action?: string; page?: number; pageSize?: number } = {},
+  ) {
+    return this.request<TaxRegisterJournalPage>(`/tax-register/journal${buildQuery({ companyId, ...params })}`);
   }
 
   async getTaxRegisterDrafts(companyId: number, year: number, page = 1) {
@@ -9419,6 +9426,7 @@ import type {
   TaxRegisterEntryInput,
   TaxRegisterEntryItem,
   TaxRegisterEntryPage,
+  TaxRegisterJournalPage,
   CompanyBranch,
   CompanyBranchInput,
   DocumentSellerSelection,

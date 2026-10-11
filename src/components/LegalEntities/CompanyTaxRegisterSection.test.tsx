@@ -18,6 +18,8 @@ vi.mock('../../services/api', () => ({
   apiService: {
     getTaxRegisterBook: vi.fn(),
     getTaxRegisterDrafts: vi.fn(),
+    getTaxRegisterJournal: vi.fn(),
+    getTaskJournalAssignees: vi.fn(),
     createTaxRegisterEntry: vi.fn(),
     approveTaxRegisterEntry: vi.fn(),
     archiveTaxRegisterEntry: vi.fn(),
@@ -46,6 +48,8 @@ const book = (overrides: Partial<TaxRegisterBook> = {}): TaxRegisterBook => ({
   isClosed: false,
   totals: { income: 1000, expense: 0, taxBase: 1000, entries: 1 },
   entries: [entry()],
+  page: 1,
+  pageSize: 100,
   ...overrides,
 });
 
@@ -159,5 +163,77 @@ describe('CompanyTaxRegisterSection', () => {
     expect(((await screen.findByRole('button', { name: 'Год закрыт' })) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.queryByRole('button', { name: 'Добавить черновик' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Исправить' })).toBeNull();
+  });
+});
+
+describe('CompanyTaxRegisterSection journal and book pages', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(apiService.getTaxRegisterBook).mockResolvedValue(book());
+    vi.mocked(apiService.getTaxRegisterDrafts).mockResolvedValue({ total: 0, page: 1, pageSize: 200, items: [] });
+    vi.mocked(apiService.getTaskJournalAssignees).mockResolvedValue([{ id: 7, name: 'Анна', email: 'a@x' }]);
+  });
+
+  const journalItem = (id: number, action = 'Approved') => ({
+    eventId: id,
+    entryId: 10 + id,
+    action,
+    userId: 7,
+    createdAt: '2026-10-11T09:30:00',
+    direction: 'Income' as const,
+    signedAmount: 1000,
+    comment: null,
+  });
+
+  it('loads the journal with filters and shows author names', async () => {
+    vi.mocked(apiService.getTaxRegisterJournal).mockResolvedValue({ total: 1, page: 1, pageSize: 20, items: [journalItem(1)] });
+    render(<CompanyTaxRegisterSection companyId={5} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Журнал событий' }));
+    await waitFor(() => expect(screen.getByTestId('tax-register-journal-list').textContent).toContain('Утверждена'));
+    await waitFor(() => expect(screen.getByTestId('tax-register-journal-list').textContent).toContain('Анна'));
+    await userEvent.selectOptions(screen.getByLabelText('Журнал: действие'), 'Corrected');
+
+    await waitFor(() =>
+      expect(apiService.getTaxRegisterJournal).toHaveBeenLastCalledWith(5, expect.objectContaining({ action: 'Corrected', page: 1, pageSize: 20 })),
+    );
+  });
+
+  it('offers a retry after a journal failure', async () => {
+    vi.mocked(apiService.getTaxRegisterJournal)
+      .mockRejectedValueOnce(new Error('Сеть недоступна'))
+      .mockResolvedValueOnce({ total: 1, page: 1, pageSize: 20, items: [journalItem(2, 'Created')] });
+    render(<CompanyTaxRegisterSection companyId={5} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Журнал событий' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('Сеть недоступна');
+    await userEvent.click(screen.getByRole('button', { name: 'Повторить загрузку' }));
+
+    await waitFor(() => expect(screen.getByTestId('tax-register-journal-list').textContent).toContain('Создана'));
+  });
+
+  it('ignores a stale journal response that arrives after a newer filter', async () => {
+    let resolveFirst: (value: unknown) => void = () => {};
+    vi.mocked(apiService.getTaxRegisterJournal)
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockResolvedValueOnce({ total: 1, page: 1, pageSize: 20, items: [journalItem(3, 'Archived')] });
+    render(<CompanyTaxRegisterSection companyId={5} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Журнал событий' }));
+    await userEvent.selectOptions(screen.getByLabelText('Журнал: действие'), 'Archived');
+    await waitFor(() => expect(screen.getByTestId('tax-register-journal-list').textContent).toContain('Отправлена в архив'));
+    resolveFirst({ total: 1, page: 1, pageSize: 20, items: [journalItem(4, 'Created')] });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(screen.getByTestId('tax-register-journal-list').textContent).not.toContain('Создана');
+  });
+
+  it('requests the next page of a large book', async () => {
+    vi.mocked(apiService.getTaxRegisterBook).mockResolvedValue(book({ totals: { income: 1, expense: 0, taxBase: 1, entries: 250 } }));
+    render(<CompanyTaxRegisterSection companyId={5} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Следующие записи' }));
+
+    await waitFor(() => expect(apiService.getTaxRegisterBook).toHaveBeenLastCalledWith(5, expect.any(Number), 2));
   });
 });

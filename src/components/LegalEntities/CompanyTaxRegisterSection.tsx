@@ -5,6 +5,7 @@ import { useToast } from '../../hooks/useToast';
 import { apiService } from '../../services/api';
 import type { TaxRegisterBook, TaxRegisterEntryItem } from '../../types';
 import { extractDisplayErrorMessage, isHttpErrorStatus } from '../../utils/errorUtils';
+import { TaxRegisterJournal } from './TaxRegisterJournal';
 
 interface CompanyTaxRegisterSectionProps {
   companyId: number;
@@ -27,6 +28,8 @@ export function CompanyTaxRegisterSection({ companyId }: CompanyTaxRegisterSecti
   const [drafts, setDrafts] = useState<TaxRegisterEntryItem[]>([]);
   const [draftPage, setDraftPage] = useState(1);
   const [draftTotal, setDraftTotal] = useState(0);
+  const [bookPage, setBookPage] = useState(1);
+  const [journalToken, setJournalToken] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const loadSequence = useRef(0);
   const [busy, setBusy] = useState(false);
@@ -36,7 +39,7 @@ export function CompanyTaxRegisterSection({ companyId }: CompanyTaxRegisterSecti
     const sequence = ++loadSequence.current;
     try {
       const [loadedBook, loadedDrafts] = await Promise.all([
-        apiService.getTaxRegisterBook(companyId, year),
+        apiService.getTaxRegisterBook(companyId, year, bookPage),
         apiService.getTaxRegisterDrafts(companyId, year, draftPage),
       ]);
       if (sequence !== loadSequence.current) return;
@@ -51,7 +54,11 @@ export function CompanyTaxRegisterSection({ companyId }: CompanyTaxRegisterSecti
       setDrafts([]);
       setLoadError(isHttpErrorStatus(error, 403) || isHttpErrorStatus(error, 401) ? null : extractDisplayErrorMessage(error, 'Не удалось загрузить книгу доходов и расходов.'));
     }
-  }, [companyId, year, draftPage]);
+  }, [companyId, year, draftPage, bookPage]);
+
+  useEffect(() => {
+    setBookPage(1);
+  }, [companyId]);
 
   useEffect(() => {
     void load();
@@ -63,6 +70,7 @@ export function CompanyTaxRegisterSection({ companyId }: CompanyTaxRegisterSecti
     setBusy(true);
     try {
       await action();
+      setJournalToken((value) => value + 1);
       await load();
     } catch (error) {
       toast.error(extractDisplayErrorMessage(error, failure), 'Книга доходов и расходов');
@@ -111,6 +119,7 @@ export function CompanyTaxRegisterSection({ companyId }: CompanyTaxRegisterSecti
                 const nextYear = Number(event.target.value);
                 if (Number.isInteger(nextYear) && nextYear >= 2000 && nextYear <= 2100) {
                   setDraftPage(1);
+                  setBookPage(1);
                   setYear(nextYear);
                   setForm(emptyForm());
                 }
@@ -326,6 +335,14 @@ export function CompanyTaxRegisterSection({ companyId }: CompanyTaxRegisterSecti
         </table>
         {book.entries.length === 0 ? <p className="py-2 text-sm text-slate-500">Утверждённых записей за {year} год нет.</p> : null}
       </div>
+      {book.totals.entries > book.pageSize ? (
+        <div className="mt-2 flex items-center gap-2 text-sm" data-testid="tax-register-book-pages">
+          <button type="button" disabled={busy || bookPage <= 1} onClick={() => setBookPage(bookPage - 1)} className="rounded-lg border px-2 py-0.5 disabled:opacity-50">Предыдущие записи</button>
+          <span>Страница {book.page} из {Math.ceil(book.totals.entries / book.pageSize)}</span>
+          <button type="button" disabled={busy || book.page * book.pageSize >= book.totals.entries} onClick={() => setBookPage(bookPage + 1)} className="rounded-lg border px-2 py-0.5 disabled:opacity-50">Следующие записи</button>
+        </div>
+      ) : null}
+      <TaxRegisterJournal companyId={companyId} refreshToken={journalToken} />
     </section>
   );
 }

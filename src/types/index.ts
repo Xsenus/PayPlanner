@@ -226,6 +226,29 @@ export interface TaxRegisterBook {
   isClosed: boolean;
   totals: { income: number; expense: number; taxBase: number; entries: number };
   entries: TaxRegisterEntryItem[];
+  page: number;
+  pageSize: number;
+}
+
+export interface TaxRegisterJournalItem {
+  eventId: number;
+  entryId: number;
+  action: string;
+  fromStatus?: string | null;
+  toStatus?: string | null;
+  userId: number;
+  comment?: string | null;
+  createdAt: string;
+  direction: 'Income' | 'Expense';
+  signedAmount: number;
+  documentRef?: string | null;
+}
+
+export interface TaxRegisterJournalPage {
+  total: number;
+  page: number;
+  pageSize: number;
+  items: TaxRegisterJournalItem[];
 }
 
 export interface TaxRegisterEntryInput {
