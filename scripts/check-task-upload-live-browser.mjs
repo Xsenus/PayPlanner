@@ -4,6 +4,7 @@ import { createServer } from 'vite';
 import { basename, join } from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { runTaskUploadRoute } from './task-upload-route-lifecycle.mjs';
+import { installTaskNotificationRefreshObserver } from './task-notification-refresh-observer.mjs';
 
 console.log('TASK_UPLOAD_STAGE_MODULES_READY');
 
@@ -46,7 +47,6 @@ const outside = [];
 const inboxFrames = [];
 const liveFrames = [];
 const pendingRequests = new Map();
-let lastSuccessfulUnreadCountRequestStartedAt = 0;
 const recentResponses = [];
 let separateIconRequests = 0;
 let queueNoticeActions;
@@ -145,10 +145,10 @@ async function waitForNotificationRefreshBeforeClosing() {
   // TopBar debounces realtime count refreshes by 800 ms. An empty request map
   // does not mean that this scheduled real GET has started or completed yet.
   // Wait for that actual successful read instead of cancelling it at close.
-  await expect.poll(async () => {
-    const dueAt = await page.evaluate(() => window.__taskUploadNotificationRefreshDueAt ?? 0);
-    return dueAt === 0 || lastSuccessfulUnreadCountRequestStartedAt >= dueAt;
-  }, { message: 'The real unread-count refresh scheduled by the latest notification must finish before browser close.' }).toBe(true);
+  await expect.poll(() => page.evaluate(() =>
+    window.__taskUploadUnreadCountRefreshRevision >= window.__taskUploadNotificationRevision), {
+    message: 'The real unread-count refresh after the latest notification must succeed before browser close.',
+  }).toBe(true);
 }
 async function waitForInitialTaskCardData() {
   const readResponse = async path => {
@@ -208,12 +208,7 @@ try {
   assert.ok(browser, 'An installed Chromium-compatible browser is required.');
   console.log('TASK_UPLOAD_STAGE_BROWSER_READY');
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, timezoneId: 'Asia/Novosibirsk' });
-  await context.addInitScript(() => {
-    window.__taskUploadNotificationRefreshDueAt = 0;
-    window.addEventListener('payplanner:user-notifications-changed', event => {
-      window.__taskUploadNotificationRefreshDueAt = Date.now() + (event.detail?.source === 'realtime' ? 800 : 0);
-    });
-  });
+  await context.addInitScript(installTaskNotificationRefreshObserver, api.origin);
   if (completionFlow) {
     const completionUserId = Number(process.env.TASK_UPLOAD_COMPLETION_USER_ID);
     assert.ok(Number.isSafeInteger(completionUserId) && completionUserId > 0);
@@ -254,10 +249,6 @@ try {
     }
   });
   page.on('requestfinished', request => {
-    const pending = pendingRequests.get(request);
-    if (request.method() === 'GET' && new URL(request.url()).origin === api.origin
-      && pending?.path === '/api/notifications/inbox/unread-count' && pending.status === 200)
-      lastSuccessfulUnreadCountRequestStartedAt = Math.max(lastSuccessfulUnreadCountRequestStartedAt, pending.started);
     pendingRequests.delete(request);
     const read = automationReadDiagnostics.get(request);
     if (read) recordAutomationReadEvent('finished', read, false, request);
@@ -419,7 +410,13 @@ try {
     await card.getByPlaceholder(mode === 'modern' ? 'Напишите комментарий...' : 'Введите первый комментарий', { exact: true })
       .fill('Synthetic creation: Первый комментарий.');
     await card.locator('input[type="file"]').first().setInputFiles({ name: fileName, mimeType: 'text/plain', buffer: bytes });
-    await card.getByRole('button', { name: 'Создать задачу', exact: true }).click();
+    await Promise.all([
+      page.waitForResponse(response => new URL(response.url()).pathname === `/api/tasks/${taskId}/files`
+        && response.request().method() === 'POST' && response.status() === 503).then(async response => {
+          assert.equal(await response.finished(), null, 'The pending upload acknowledgement must be fully received.');
+        }),
+      card.getByRole('button', { name: 'Создать задачу', exact: true }).click(),
+    ]);
     await expect(page.getByTestId(`task-${mode}-card-window`).getByRole('region', { name: 'Состояние ваших загрузок', exact: true })).toBeVisible();
     await expect(page.getByText(/Задача создана. Файлы ещё ожидают прикрепления:/)).toBeVisible();
     assert.equal(taskCreateCount, 1);
@@ -570,10 +567,24 @@ try {
   if (mode === 'modern') await card.getByRole('tab', { name: /^Файлы \d+$/ }).click();
   // No edit/status action: use the ordinary working upload button in the view card.
   if (!queueReplay) {
+    // Rendering starts after the actual lost acknowledgement has been recovered, not when
+    // the file chooser dispatches its change event while the real upload is still in flight.
+    const recoveredUpload = page.waitForResponse(async response => {
+      if (!uploadKey || new URL(response.url()).pathname !== `/api/tasks/${taskId}/files/uploads`
+        || response.request().method() !== 'GET' || response.status() !== 200) return false;
+      const states = await response.json();
+      return Array.isArray(states) && states.some(state => state.uploadKey === uploadKey && state.status === 'uploaded');
+    });
+    const publishedFiles = page.waitForResponse(async response => {
+      if (!savedId || new URL(response.url()).pathname !== `/api/tasks/${taskId}/files`
+        || response.request().method() !== 'GET' || response.status() !== 200) return false;
+      const files = await response.json();
+      return Array.isArray(files) && files.some(file => file.id === savedId && file.originalFileName === fileName);
+    });
     const uploadButton = (mode === 'modern' ? card.locator('main') : card)
       .getByRole('button', { name: 'Добавить файл', exact: true });
     const [chooser] = await Promise.all([page.waitForEvent('filechooser'), uploadButton.click()]);
-    await chooser.setFiles({ name: fileName, mimeType: 'text/plain', buffer: bytes });
+    await Promise.all([recoveredUpload, publishedFiles, chooser.setFiles({ name: fileName, mimeType: 'text/plain', buffer: bytes })]);
   }
   const article = card.locator('article').filter({ hasText: fileName })
     .filter({ has: page.getByRole('button', { name: /Скачать/ }) });

@@ -59,6 +59,9 @@ jobs:
       - name: Test storage backfill CLI
         run: node --test scripts/storage-legacy-backfill.node-tests.mjs
 
+      - name: Test browser notification refresh observer
+        run: node --test scripts/task-notification-refresh-observer.node-tests.mjs
+
       - name: Lint FE
         run: npm run lint
 
