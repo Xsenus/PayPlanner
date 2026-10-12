@@ -1322,6 +1322,19 @@ describe('CaseDetailPage', () => {
     expect(screen.getByText('3 записи')).toBeTruthy();
   });
 
+  it('PAY-21: quick access opens existing case sections and marks the current one', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
+
+    const menu = screen.getByRole('navigation', { name: 'Быстрый доступ к разделам дела' });
+    expect(within(menu).queryByRole('button', { name: /ЕФРСБ|Почта/ })).toBeNull();
+
+    fireEvent.click(within(menu).getByRole('button', { name: 'Быстрый доступ: Документы' }));
+    expect(await screen.findByText('Заявление.docx')).toBeTruthy();
+    expect(within(menu).getByRole('button', { name: 'Быстрый доступ: Документы' }).getAttribute('aria-current')).toBe('page');
+    expect(within(menu).getByRole('button', { name: 'Быстрый доступ: История' }).getAttribute('aria-current')).toBeNull();
+  });
+
   it('shows imported court data that moved to the archive as inactive', async () => {
     vi.mocked(apiService.getCaseCourtEvents).mockResolvedValue([
       {
@@ -1433,7 +1446,7 @@ describe('CaseDetailPage', () => {
       }).length).toBeGreaterThan(0);
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /Документы/u }));
+    fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
     expect(await screen.findByText('Заявление.docx')).toBeTruthy();
     await waitFor(() => {
       expect(screen.getAllByText((_text, element) => {

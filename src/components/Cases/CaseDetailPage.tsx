@@ -288,6 +288,43 @@ const DETAIL_TABS: Array<{ key: CaseDetailTab; label: string }> = [
   { key: 'history', label: 'История' },
 ];
 
+const QUICK_ACCESS_HINTS: Partial<Record<CaseDetailTab, string>> = {
+  participants: 'Стороны и контакты',
+  tasks: 'Текущие и просроченные',
+  court: 'Судебные дела и заседания',
+  finance: 'Счета и платежи',
+  workOrder: 'Работы и согласование',
+  documents: 'Все документы по делу',
+  conversation: 'Сообщения и письма',
+  history: 'Логи и действия',
+};
+
+/** Правая колонка «Быстрый доступ» (PAY-21): переключает уже существующие разделы дела, ничего не загружая сама. */
+function CaseQuickAccess({ tabs, activeTab, onSelect }: {
+  tabs: Array<{ key: CaseDetailTab; label: string }>;
+  activeTab: CaseDetailTab;
+  onSelect: (tab: CaseDetailTab) => void;
+}) {
+  return (
+    <nav aria-label="Быстрый доступ к разделам дела" className="space-y-1">
+      <h3 className="mb-2 text-sm font-semibold text-slate-900">Быстрый доступ</h3>
+      {tabs.filter((tab) => tab.key !== 'overview').map((tab) => (
+        <button
+          key={tab.key}
+          type="button"
+          aria-label={`Быстрый доступ: ${tab.label}`}
+          aria-current={activeTab === tab.key ? 'page' : undefined}
+          onClick={() => onSelect(tab.key)}
+          className={`block w-full rounded-lg border px-3 py-2 text-left ${activeTab === tab.key ? 'border-blue-300 bg-blue-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
+        >
+          <span className="block text-sm font-semibold text-slate-900">{tab.label}</span>
+          {QUICK_ACCESS_HINTS[tab.key] ? <span className="block text-xs text-slate-500">{QUICK_ACCESS_HINTS[tab.key]}</span> : null}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
 const FALLBACK_DOCUMENT_TEMPLATE_OPTIONS: ClientCaseDocumentTemplate[] = [
   { key: 'case-summary', label: 'Справка по делу', documentType: 'Карточка дела' },
   { key: 'claim', label: 'Исковое заявление', documentType: 'Иск' },
@@ -4128,7 +4165,7 @@ export function CaseDetailPage({
         ) : null}
 
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="grid gap-5 xl:grid-cols-[300px_minmax(0,1fr)]">
+          <div className="grid gap-5 xl:grid-cols-[300px_minmax(0,1fr)_220px]">
             <CaseClientSidebar
               caseItem={caseItem}
               canRevealSensitive={canRevealCaseSensitiveData}
@@ -4138,7 +4175,10 @@ export function CaseDetailPage({
               onCreateInvoice={canViewFinance ? onCreateInvoice : undefined}
               onCreatePayment={canViewFinance ? onCreatePayment : undefined}
             />
-            <div className="min-w-0">
+            <div className="xl:order-3">
+              <CaseQuickAccess tabs={visibleDetailTabs} activeTab={activeTab} onSelect={setActiveTab} />
+            </div>
+            <div className="min-w-0 xl:order-2">
           <div className="mb-5 flex flex-wrap gap-2">
             {visibleDetailTabs.map((tab) => (
               <button
