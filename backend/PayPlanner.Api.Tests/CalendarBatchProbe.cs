@@ -1,5 +1,7 @@
 using System.Data.Common;
 using System.Net;
+using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 
@@ -35,6 +37,61 @@ internal sealed class CalendarBatchQueryProbe(string provider) : DbCommandInterc
             LinkSelects++;
         }
         return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+    }
+}
+
+internal sealed class CalendarBatchColorProbe(HttpMessageHandler inner, Func<Task> verifyFirstPage,
+    string? yandexDuplicateReport = null) : DelegatingHandler(inner)
+{
+    public Dictionary<string, List<string>> PutBodies { get; } = [];
+    public List<string> CalendarReadQueries { get; } = [];
+    public List<string> DeletedPaths { get; } = [];
+    public int DeleteCount { get; private set; }
+    private bool _pageVerified;
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var path = request.RequestUri!.AbsolutePath;
+        if ((request.Method == HttpMethod.Get && path.Contains("/events", StringComparison.Ordinal))
+            || request.Method.Method == "REPORT")
+        {
+            CalendarReadQueries.Add(request.RequestUri.Query);
+        }
+        if (request.Method.Method == "REPORT" && yandexDuplicateReport is not null && CalendarReadQueries.Count > 1)
+        {
+            return new HttpResponseMessage((HttpStatusCode)207)
+            {
+                Content = new StringContent(yandexDuplicateReport, Encoding.UTF8, "application/xml"),
+            };
+        }
+        if (request.Method == HttpMethod.Delete)
+        {
+            DeleteCount++;
+            DeletedPaths.Add(path);
+        }
+        if (request.Method == HttpMethod.Put && path.Contains("bulk-event-", StringComparison.Ordinal))
+        {
+            if (!PutBodies.TryGetValue(path, out var bodies))
+            {
+                bodies = [];
+                PutBodies.Add(path, bodies);
+            }
+            bodies.Add(await request.Content!.ReadAsStringAsync(cancellationToken));
+            if (!_pageVerified && path.Contains("bulk-event-501", StringComparison.Ordinal))
+            {
+                _pageVerified = true;
+                await verifyFirstPage();
+            }
+            if (request.Content.Headers.ContentType?.MediaType == "application/json")
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(JsonSerializer.Serialize(new { id = path.Split('/').Last(), etag = "synthetic-color-etag" }),
+                        Encoding.UTF8, "application/json"),
+                };
+            }
+        }
+        return await base.SendAsync(request, cancellationToken);
     }
 }
 

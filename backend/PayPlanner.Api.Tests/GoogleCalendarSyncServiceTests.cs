@@ -1618,6 +1618,110 @@ public class GoogleCalendarSyncServiceTests
         Assert.All(handler.DeleteAttempts, item => Assert.Equal((failOnce || cancelAfterFirstPage) && item.Key.Contains("bulk-event-501", StringComparison.Ordinal) ? 2 : 1, item.Value));
     }
 
+    [Fact]
+    public async Task SyncNowAsync_Colors502EventsInBoundedPagesWithoutRewritingOnRepeat()
+    {
+        var queryProbe = new CalendarBatchQueryProbe("Google");
+        await using var db = await CreateContextAsync(queryProbe);
+        var user = await CreateUserAsync(db, "bulk-owner@example.local", "user");
+        var hidden = await CreateUserAsync(db, "bulk-hidden@example.local", "user");
+        await EnableGoogleSettingsAsync(db);
+        await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 10, completedTaskCalendarAction: "color");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        var calendar = await CreateCalendarAsync(db, connection.Id, "bulk-calendar", "PayPlanner задачи");
+        var dueAt = DateTime.UtcNow.Date.AddDays(7).AddHours(9);
+        var tasks = Enumerable.Range(1, 502).Select(index => new TaskJournalItem
+        {
+            ObjectName = "Synthetic bulk",
+            Title = $"Bulk task {index}",
+            AssigneeUserId = user.Id,
+            AssigneeName = "User",
+            DueAt = dueAt,
+            PlannedDurationMinutes = 60,
+            Priority = "normal",
+            Status = index % 2 == 0 ? "done" : "cancelled",
+        }).ToArray();
+        db.TaskJournalItems.AddRange(tasks);
+        await db.SaveChangesAsync();
+        for (var index = 0; index < tasks.Length; index++)
+        {
+            var eventId = $"bulk-event-{index + 1}";
+            db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
+            {
+                ConnectionId = connection.Id,
+                CalendarSyncCalendarId = calendar.Id,
+                TaskJournalItemId = tasks[index].Id,
+                GoogleCalendarId = calendar.GoogleCalendarId,
+                GoogleEventId = eventId,
+                SyncStatus = "active",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+        }
+        await db.SaveChangesAsync();
+        await CreateTaskAsync(db, hidden.Id, "Not visible", dueAt: dueAt);
+        await CreateTaskAsync(db, user.Id, "Outside sync window", dueAt: DateTime.UtcNow.AddDays(366));
+        var firstPageIds = tasks.Take(500).Select(item => item.Id).ToArray();
+        var inner = new RecordingGoogleHandler();
+        var handler = new CalendarBatchColorProbe(inner, async () =>
+        {
+            Assert.Equal(500, await db.GoogleCalendarTaskLinks.AsNoTracking()
+                .CountAsync(item => firstPageIds.Contains(item.TaskJournalItemId)
+                    && item.SyncStatus == "active" && item.LastCrmHash != null));
+            Assert.Equal(2, db.ChangeTracker.Entries<GoogleCalendarTaskLink>().Count());
+        });
+        db.ChangeTracker.Clear();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+        queryProbe.Reset();
+
+        var result = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+
+        Assert.Equal(502, result.ProcessedTasks);
+        Assert.Equal(0, result.ErrorCount);
+        Assert.Equal(new[] { 500, 500 }, queryProbe.TaskPageLimits);
+        Assert.InRange(queryProbe.LinkSelects, 2, 4);
+        Assert.Equal(502, handler.PutBodies.Count);
+        Assert.All(handler.PutBodies.Values, bodies => Assert.Single(bodies));
+        Assert.Equal(0, handler.DeleteCount);
+        Assert.Equal(502, await db.GoogleCalendarTaskLinks.AsNoTracking()
+            .CountAsync(item => item.SyncStatus == "active" && item.LastCrmHash != null));
+        Assert.All(handler.PutBodies.Values, bodies =>
+        {
+            using var payload = JsonDocument.Parse(Assert.Single(bodies));
+            Assert.Equal("8", payload.RootElement.GetProperty("colorId").GetString());
+        });
+        Assert.Contains(handler.PutBodies.Values, bodies =>
+        {
+            using var payload = JsonDocument.Parse(bodies[0]);
+            return payload.RootElement.GetProperty("summary").GetString()!.StartsWith("[Отменено]", StringComparison.Ordinal);
+        });
+        Assert.Contains(handler.PutBodies.Values, bodies =>
+        {
+            using var payload = JsonDocument.Parse(bodies[0]);
+            return payload.RootElement.GetProperty("summary").GetString()!.StartsWith("[Готово]", StringComparison.Ordinal);
+        });
+        Assert.Equal(1, handler.CalendarReadQueries.Count(query => !query.Contains("privateExtendedProperty=", StringComparison.Ordinal)));
+        Assert.Equal(502, handler.CalendarReadQueries.Count(query => query.Contains("privateExtendedProperty=", StringComparison.Ordinal)));
+        var taskIds = tasks.Select(item => item.Id).ToArray();
+        Assert.Equal(502, await db.TaskJournalItems.CountAsync(item => taskIds.Contains(item.Id)
+            && (item.Status == "done" || item.Status == "cancelled")));
+        db.ChangeTracker.Clear();
+        queryProbe.Reset();
+        handler.CalendarReadQueries.Clear();
+        service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var retry = await service.SyncDueConnectionsAsync(10, CancellationToken.None);
+
+        Assert.Equal(502, retry.ProcessedTasks);
+        Assert.Equal(0, retry.ErrorCount);
+        Assert.Equal(502, handler.PutBodies.Count);
+        Assert.All(handler.PutBodies.Values, bodies => Assert.Single(bodies));
+        Assert.Equal(0, handler.DeleteCount);
+        Assert.Single(handler.CalendarReadQueries);
+        Assert.Equal(new[] { 500, 500 }, queryProbe.TaskPageLimits);
+        Assert.InRange(queryProbe.LinkSelects, 2, 4);
+    }
+
     private static async Task<PaymentContext> CreateContextAsync(CalendarBatchQueryProbe? queryProbe = null)
     {
         var connection = new SqliteConnection("DataSource=:memory:");

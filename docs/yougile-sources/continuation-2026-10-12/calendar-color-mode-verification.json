@@ -1,0 +1,118 @@
+{
+  "verifiedAtUtc": "2026-10-12T19:07:51.543406+00:00",
+  "branch": "claude/practical-bardeen-pglcf3",
+  "baseRevision": "0d7078d1c29353ae392b0eff980b52df5a4753ea",
+  "verificationPerformedBeforeCommit": true,
+  "deployed": false,
+  "yougilePublished": false,
+  "scope": "502-event color mode for both providers; Yandex per-page duplicate snapshot limited to visible current task IDs",
+  "codeHashNormalization": "CRLF converted to LF; bytes otherwise unchanged",
+  "codeFiles": {
+    "backend/Services/YandexCalendarSyncService.cs": "e616f773f22b432fead5be4833e881cc9e7d1f05d39ee6ea2466956c500f493a",
+    "backend/PayPlanner.Api.Tests/CalendarBatchProbe.cs": "b033b71575558ddb432bd005f03058b0650382cd4de19210bf1b5d0eadd3edec",
+    "backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs": "e9647867a8107185a96384b77bb4fc71eac2f01e9e8e582f432f062f88509f56",
+    "backend/PayPlanner.Api.Tests/YandexCalendarSyncServiceTests.cs": "8f5a56925ef1de46437ea596a6b71eb531f95b6336fdad8e2b931bbd77bb596a",
+    "backend/AppReleases/releases.json": "0081b5040c878c7b59628f16b91541b94e6bb1d3cb50942d53acbc3e2ac61b5b"
+  },
+  "workingTreeCodeFilesSha256": {
+    "backend/Services/YandexCalendarSyncService.cs": "6a38693e2965463df9bb44443618c3adfb31a41636698869cd8b59e7f8fea1bd",
+    "backend/PayPlanner.Api.Tests/CalendarBatchProbe.cs": "8da265006b5495085d17283d9de1845bfb8a7645ff957a07686519baf8e688bb",
+    "backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs": "c5ccf15311a636c08c057f1aeb3a9aeec4b74ef692c05750a6b7c5271b379d59",
+    "backend/PayPlanner.Api.Tests/YandexCalendarSyncServiceTests.cs": "ad0e5b542f8bb587f518cf567f8f507b193e3364052bb286bf9bdfc4d7e8bdcc",
+    "backend/AppReleases/releases.json": "e1ecc52f9125b8f65b993aa4bab1579dbf8d255b69e6f054952f26289102d7d1"
+  },
+  "baseline": {
+    "sourceHashes": {
+      "backend/Services/YandexCalendarSyncService.cs": "51f4ea45caa1d1a50bc1fc50a13f0c4d636e1b7c72a6a1a535e8bf892cd231d5",
+      "backend/Services/GoogleCalendarSyncService.cs": "741028f52646cd5cc9a673a9c24b115650c6e62e4b06b45e4fde63f0caff73eb",
+      "backend/PayPlanner.Api.Tests/CalendarBatchProbe.cs": "53245f833c84a816cf53b7250cd196408a02f3e47dfc7a48b50fa7bde3f19b68",
+      "backend/PayPlanner.Api.Tests/YandexCalendarSyncServiceTests.cs": "4e79b2a0a12d261b87318ec5f7e968c5168bd9e681fdbbf87701e57155558b56",
+      "backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs": "a696c1868ee1f09d0cd4d4ad043899452da4af10e5faacb17122d59b96600aa9"
+    },
+    "baselineOutcome": {
+      "googlePassed": true,
+      "yandexFailed": true,
+      "expectedCalendarReads": 3,
+      "actualCalendarReads": 503
+    },
+    "assemblyHashes": {
+      "PayPlanner.Api": "85c0709705c143854524e6c0debdb5cb0a11b335839cdda2d3f607dabf105471",
+      "PayPlanner.Api.Tests": "10ddb8e5d980c287bcce211a2114c557796fc10a01062328f7a06f1136da6d90"
+    },
+    "baseRevision": "0d7078d1c29353ae392b0eff980b52df5a4753ea",
+    "containsUncommittedRegressionTests": true
+  },
+  "baselineTrxSha256": "32709816b3cb2d07513f86411d0c4bbcb95b870bfb59b66f5caff45b426d935f",
+  "massColorCases": {
+    "passed": 3,
+    "failed": 0,
+    "total": 3,
+    "skipped": 0,
+    "trx": "calendar-color-optimized.trx",
+    "trxSha256": "5445f2f0d4054a4108c5c09b0de6803cd72ce3e8d4d8770435fffac1b5cab84e"
+  },
+  "finalRelatedRegression": {
+    "passed": 135,
+    "failed": 0,
+    "total": 135,
+    "skipped": 0,
+    "trx": "calendar-color-regressions.trx",
+    "trxSha256": "98697c5ac65a9fa71e0f6df5a7e02520d0cbd5d0c6035d0081d9f9840c9d6372"
+  },
+  "calendarReadsFor502YandexTasks": {
+    "before": 503,
+    "after": 3,
+    "afterUnchangedRepeat": 1
+  },
+  "checks": [
+    "Both done/cancelled receive the configured Google color and Yandex status caption",
+    "All 502 existing events are updated without task status changes",
+    "Page 1 is persisted before event 501 is written",
+    "Foreign and out-of-period tasks excluded",
+    "Yandex duplicates deleted on both pages; active and foreign events preserved",
+    "An unchanged repeat writes and deletes no further events",
+    "Per-page links remain bounded and fetched without N+1 queries"
+  ],
+  "releaseBuild": {
+    "passed": true,
+    "warnings": 0,
+    "errors": 0,
+    "log": "calendar-color-final-build.log"
+  },
+  "assemblySha256": {
+    "api": "10eb76f66336bd2d6fafbba9b9ef7c999c323b2ed5ff4fc52fd9d380492cd72d",
+    "tests": "f8dc0344d2732158e856aee4291f4bf751e872b8f9b5d1b3dc4719f94bb34d3a"
+  },
+  "format": {
+    "passed": true,
+    "log": "calendar-color-format-final.log"
+  },
+  "encoding": {
+    "state": "passed",
+    "checkedFiles": 3102,
+    "log": "calendar-color-encoding-final.log"
+  },
+  "frontendGate": {
+    "revision": "431658c2fea8c1fe887803fac35524b21041b0f6",
+    "passed": 2592,
+    "reusedBecauseFrontendAndPublicApiUnchanged": true
+  },
+  "providerPayloadLimitation": "Yandex still returns the full selected calendar period per REPORT; only current page task records are retained in the duplicate lookup. No server-side pagination is claimed.",
+  "remaining": [
+    "Reproduce and fix retry after duplicate-list/delete failure, including single-task persistence",
+    "Memoize failed Yandex duplicate reads within the page without masking task errors",
+    "Full backend gate of the final calendar revision",
+    "Identify the actual owner-reported annulled task",
+    "Real environment acceptance and separately authorized publication/deployment"
+  ],
+  "calendarRoadmap": {
+    "completed": 0,
+    "total": 7,
+    "percent": 0
+  },
+  "overallRoadmap": {
+    "completed": 1,
+    "total": 31,
+    "percent": 3
+  }
+}

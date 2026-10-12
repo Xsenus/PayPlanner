@@ -1,0 +1,54 @@
+{
+  "recordedAtUtc": "2026-10-12T19:07:51.837156+00:00",
+  "source": "Read-only aggregate query on production VPS, no data changes",
+  "taskStatuses": [
+    {
+      "count": 13,
+      "status": "cancelled"
+    },
+    {
+      "count": 770,
+      "status": "done"
+    },
+    {
+      "count": 11,
+      "status": "inProgress"
+    },
+    {
+      "count": 197,
+      "status": "new"
+    },
+    {
+      "count": 1,
+      "status": "onApproval"
+    },
+    {
+      "count": 2,
+      "status": "overdueApproval"
+    },
+    {
+      "count": 10,
+      "status": "waiting"
+    }
+  ],
+  "statusRelatedColumns": [
+    "BillingInvoiceId",
+    "ContractorPaymentOnResult",
+    "ContractorPaymentResultDelayDays",
+    "CreatedAt",
+    "Result",
+    "Status",
+    "UpdatedAt"
+  ],
+  "serviceActive": true,
+  "standaloneAnnulledStatusFound": false,
+  "actualOwnerTaskIdentified": false,
+  "servedFrontend": {
+    "entryUrl": "https://crm.elitpravo.com/assets/index-BV9juOMV.js",
+    "taskJournalUrl": "https://crm.elitpravo.com/assets/TaskJournal-C_ITWrp1.js",
+    "downloadedTaskJournalTextSha256": "44ba3c878a498b166e33c1100b01eebec66d1380dd7bfd0834493611a9b4b96d",
+    "cancelledLabel": "Отменена",
+    "annulledWordingOccursInInvoiceWarning": true
+  },
+  "limitation": "Aggregate values and served captions do not identify the owner-reported task or prove the invoice-derived business case."
+}

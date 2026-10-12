@@ -1349,6 +1349,122 @@ END:VCALENDAR
         Assert.All(handler.DeleteAttempts, item => Assert.Equal((failOnce || cancelAfterFirstPage) && item.Key.Contains("bulk-event-501", StringComparison.Ordinal) ? 2 : 1, item.Value));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SyncNowAsync_Colors502EventsInBoundedPagesWithoutRewritingOnRepeat(bool withDuplicates)
+    {
+        var queryProbe = new CalendarBatchQueryProbe("Yandex");
+        await using var db = await CreateContextAsync(queryProbe);
+        var user = await CreateUserAsync(db, "bulk-owner@example.local", "user");
+        var hidden = await CreateUserAsync(db, "bulk-hidden@example.local", "user");
+        await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 10, completedTaskCalendarAction: "color");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        var calendar = await CreateCalendarAsync(db, connection.Id, "bulk-calendar", "PayPlanner задачи");
+        var dueAt = DateTime.UtcNow.Date.AddDays(7).AddHours(9);
+        var tasks = Enumerable.Range(1, 502).Select(index => new TaskJournalItem
+        {
+            ObjectName = "Synthetic bulk",
+            Title = $"Bulk task {index}",
+            AssigneeUserId = user.Id,
+            AssigneeName = "User",
+            DueAt = dueAt,
+            PlannedDurationMinutes = 60,
+            Priority = "normal",
+            Status = index % 2 == 0 ? "done" : "cancelled",
+        }).ToArray();
+        db.TaskJournalItems.AddRange(tasks);
+        await db.SaveChangesAsync();
+        for (var index = 0; index < tasks.Length; index++)
+        {
+            var eventId = $"bulk-event-{index + 1}";
+            db.YandexCalendarTaskLinks.Add(new YandexCalendarTaskLink
+            {
+                ConnectionId = connection.Id,
+                CalendarSyncCalendarId = calendar.Id,
+                TaskJournalItemId = tasks[index].Id,
+                YandexCalendarId = calendar.YandexCalendarId,
+                YandexEventId = eventId,
+                YandexEventUrl = $"{calendar.CalendarUrl}{eventId}.ics",
+                SyncStatus = "active",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+        }
+        await db.SaveChangesAsync();
+        var foreignTask = await CreateTaskAsync(db, hidden.Id, "Not visible", dueAt: dueAt);
+        await CreateTaskAsync(db, user.Id, "Outside sync window", dueAt: DateTime.UtcNow.AddDays(366));
+        var firstPageIds = tasks.Take(500).Select(item => item.Id).ToArray();
+        var inner = new RecordingYandexHandler();
+        string BuildDuplicateIcs(int taskId, string eventId) => $"""
+BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:{eventId}
+DTSTART:{dueAt:yyyyMMdd'T'HHmmss'Z'}
+DTEND:{dueAt.AddHours(1):yyyyMMdd'T'HHmmss'Z'}
+SUMMARY:Synthetic duplicate
+X-PAYPLANNER-TASK-ID:{taskId}
+END:VEVENT
+END:VCALENDAR
+""";
+        var duplicateReport = withDuplicates ? BuildYandexReportResponseForEvents(
+            (calendar.CalendarUrl, "duplicate-first", BuildDuplicateIcs(tasks[0].Id, "duplicate-first")),
+            (calendar.CalendarUrl, "duplicate-second", BuildDuplicateIcs(tasks[500].Id, "duplicate-second")),
+            (calendar.CalendarUrl, "bulk-event-1", BuildDuplicateIcs(tasks[0].Id, "bulk-event-1")),
+            (calendar.CalendarUrl, "foreign-duplicate", BuildDuplicateIcs(foreignTask.Id, "foreign-duplicate"))) : null;
+        var handler = new CalendarBatchColorProbe(inner, async () =>
+        {
+            Assert.Equal(500, await db.YandexCalendarTaskLinks.AsNoTracking()
+                .CountAsync(item => firstPageIds.Contains(item.TaskJournalItemId)
+                    && item.SyncStatus == "active" && item.LastCrmHash != null));
+            Assert.Equal(2, db.ChangeTracker.Entries<YandexCalendarTaskLink>().Count());
+        }, yandexDuplicateReport: duplicateReport);
+        db.ChangeTracker.Clear();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+        queryProbe.Reset();
+
+        var result = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+
+        Assert.Equal(502, result.ProcessedTasks);
+        Assert.Equal(0, result.ErrorCount);
+        Assert.Equal(new[] { 500, 500 }, queryProbe.TaskPageLimits);
+        Assert.InRange(queryProbe.LinkSelects, 2, 4);
+        Assert.Equal(502, handler.PutBodies.Count);
+        Assert.All(handler.PutBodies.Values, bodies => Assert.Single(bodies));
+        Assert.Equal(withDuplicates ? 2 : 0, handler.DeleteCount);
+        Assert.Equal(502, await db.YandexCalendarTaskLinks.AsNoTracking()
+            .CountAsync(item => item.SyncStatus == "active" && item.LastCrmHash != null));
+        Assert.Contains(handler.PutBodies.Values, bodies => bodies[0].Contains("SUMMARY:[Отменено]", StringComparison.Ordinal));
+        Assert.Contains(handler.PutBodies.Values, bodies => bodies[0].Contains("SUMMARY:[Готово]", StringComparison.Ordinal));
+        Assert.Equal(3, handler.CalendarReadQueries.Count); // import + one duplicate snapshot per page
+        if (withDuplicates)
+        {
+            Assert.Contains(handler.DeletedPaths, path => path.EndsWith("duplicate-first.ics", StringComparison.Ordinal));
+            Assert.Contains(handler.DeletedPaths, path => path.EndsWith("duplicate-second.ics", StringComparison.Ordinal));
+            Assert.DoesNotContain(handler.DeletedPaths, path => path.EndsWith("bulk-event-1.ics", StringComparison.Ordinal)
+                || path.EndsWith("foreign-duplicate.ics", StringComparison.Ordinal));
+        }
+        var taskIds = tasks.Select(item => item.Id).ToArray();
+        Assert.Equal(502, await db.TaskJournalItems.CountAsync(item => taskIds.Contains(item.Id)
+            && (item.Status == "done" || item.Status == "cancelled")));
+        db.ChangeTracker.Clear();
+        queryProbe.Reset();
+        handler.CalendarReadQueries.Clear();
+        service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var retry = await service.SyncDueConnectionsAsync(10, CancellationToken.None);
+
+        Assert.Equal(502, retry.ProcessedTasks);
+        Assert.Equal(0, retry.ErrorCount);
+        Assert.Equal(502, handler.PutBodies.Count);
+        Assert.All(handler.PutBodies.Values, bodies => Assert.Single(bodies));
+        Assert.Equal(withDuplicates ? 2 : 0, handler.DeleteCount);
+        Assert.Single(handler.CalendarReadQueries);
+        Assert.Equal(new[] { 500, 500 }, queryProbe.TaskPageLimits);
+        Assert.InRange(queryProbe.LinkSelects, 2, 4);
+    }
+
     private static async Task<PaymentContext> CreateContextAsync(CalendarBatchQueryProbe? queryProbe = null)
     {
         var connection = new SqliteConnection("DataSource=:memory:");

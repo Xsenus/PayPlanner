@@ -575,6 +575,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         await foreach (var tasks in CalendarSyncTaskPager.ReadPagesAsync(tasksQuery, cancellationToken))
         {
             var taskIds = tasks.Select(item => item.Id).ToArray();
+            var duplicateSnapshot = new YandexBatchDuplicateSnapshot(taskIds.ToHashSet());
             var links = await _db.YandexCalendarTaskLinks
                 .Where(item => item.ConnectionId == connection.Id && taskIds.Contains(item.TaskJournalItemId))
                 .ToDictionaryAsync(item => item.TaskJournalItemId, cancellationToken);
@@ -594,7 +595,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
                             connection,
                             task,
                             externalCommentsByTask.GetValueOrDefault(task.Id) ?? [],
-                            cancellationToken, links);
+                            cancellationToken, links, duplicateSnapshot);
                     }
 
                     processedTasks++;
@@ -947,7 +948,8 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         TaskJournalItem task,
         IReadOnlyCollection<TaskJournalComment> externalComments,
         CancellationToken cancellationToken,
-        IReadOnlyDictionary<int, YandexCalendarTaskLink>? knownLinks = null)
+        IReadOnlyDictionary<int, YandexCalendarTaskLink>? knownLinks = null,
+        YandexBatchDuplicateSnapshot? duplicateSnapshot = null)
     {
         var accessToken = await ResolveAccessTokenAsync(connection, cancellationToken);
         var calendar = await EnsureCalendarForTaskAsync(connection, task, accessToken, cancellationToken);
@@ -1019,7 +1021,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             task.Id,
             eventId,
             accessToken,
-            cancellationToken);
+            cancellationToken, duplicateSnapshot);
     }
 
     private async Task EnsureAdminAssigneeCalendarsAsync(
@@ -1834,9 +1836,26 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         int taskId,
         string activeEventId,
         string accessToken,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        YandexBatchDuplicateSnapshot? duplicateSnapshot = null)
     {
-        var events = await ListYandexEventsAsync(accessToken, calendar, cancellationToken);
+        IEnumerable<YandexEventItem> events;
+        if (duplicateSnapshot is null)
+        {
+            events = await ListYandexEventsAsync(accessToken, calendar, cancellationToken);
+        }
+        else
+        {
+            if (!duplicateSnapshot.CalendarEvents.TryGetValue(calendar.Id, out var byTask))
+            {
+                var calendarEvents = await ListYandexEventsAsync(accessToken, calendar, cancellationToken);
+                byTask = calendarEvents
+                    .Where(item => item.PayPlannerTaskId.HasValue && duplicateSnapshot.TaskIds.Contains(item.PayPlannerTaskId.Value))
+                    .ToLookup(item => item.PayPlannerTaskId!.Value);
+                duplicateSnapshot.CalendarEvents.Add(calendar.Id, byTask);
+            }
+            events = byTask[taskId];
+        }
         foreach (var duplicate in events.Where(item =>
             item.PayPlannerTaskId == taskId &&
             !item.Deleted &&
@@ -2932,6 +2951,12 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         }
 
         return NormalizeOptional(normalized[(closing + 1)..]);
+    }
+
+    private sealed class YandexBatchDuplicateSnapshot(IReadOnlySet<int> taskIds)
+    {
+        public IReadOnlySet<int> TaskIds { get; } = taskIds;
+        public Dictionary<int, ILookup<int, YandexEventItem>> CalendarEvents { get; } = [];
     }
 
     private sealed record YandexSettings(bool Enabled, string? ClientId, string? ClientSecret, string? Scopes)
