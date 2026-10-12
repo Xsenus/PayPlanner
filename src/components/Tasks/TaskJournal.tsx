@@ -1,4 +1,5 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
+import { CALENDAR_TASK_VISIBILITY_SETTINGS_HREF } from '../../utils/calendarSettingsNavigation';
 import { TaskUploadStatusPanel } from './TaskUploadStatusPanel';
 import { submitTaskFileUpload, TaskFileUploadWaitingError } from '../../services/taskFileUpload';
 import { SystemDateInput } from '../ui/SystemDateInput';
@@ -5928,6 +5929,16 @@ export function TaskJournal({
             </div>
 
             <div className="flex min-w-0 max-w-full flex-wrap gap-2">
+              {isAdminUser && !embedded && mode === 'journal' && (viewMode === 'calendar' || viewMode === 'timeline') ? (
+                <a
+                  href={CALENDAR_TASK_VISIBILITY_SETTINGS_HREF}
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  title="Общая настройка показа выполненных задач для всех сотрудников"
+                >
+                  <CalendarDays className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  Выполненные задачи в календарях
+                </a>
+              ) : null}
               {canExportTasks ? (
                 <>
                   <button

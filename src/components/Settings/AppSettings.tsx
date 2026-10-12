@@ -83,6 +83,7 @@ type MergeKind = 'countries' | 'base-currencies' | 'service-languages' | 'organi
 const DETAILS_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 const SHOW_LEGACY_SQLITE_IMPORT = false;
 const SETTINGS_SECTION_PARAM = 'settingsSection';
+const INTEGRATION_TAB_PARAM = 'integrationTab';
 const NOTIFICATION_CHANNEL_PARAM = 'notificationChannel';
 const NOTIFICATION_SENDER_PARAM = 'notificationSender';
 const SETTINGS_NAV_ITEM_CLASS = 'pp-settings-nav-item w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition';
@@ -152,11 +153,23 @@ function readSettingsSectionFromUrl(): SettingsSection {
   return isSettingsSection(section) ? section : 'general';
 }
 
-function pushSettingsSectionToUrl(section: SettingsSection) {
+function readIntegrationTabFromUrl(): IntegrationSettingsTab {
+  if (typeof window === 'undefined') return 'dadata';
+  const tab = new URLSearchParams(window.location.search).get(INTEGRATION_TAB_PARAM);
+  return INTEGRATION_SETTINGS_TABS.find((item) => item.id === tab)?.id ?? 'dadata';
+}
+
+function pushSettingsSectionToUrl(section: SettingsSection, integrationTab: IntegrationSettingsTab) {
   if (typeof window === 'undefined') return;
 
   const url = new URL(window.location.href);
   url.searchParams.set(SETTINGS_SECTION_PARAM, section);
+  if (section === 'integrations') {
+    url.searchParams.set(INTEGRATION_TAB_PARAM, integrationTab);
+  } else {
+    url.searchParams.delete(INTEGRATION_TAB_PARAM);
+    if (url.hash === '#completed-task-calendar') url.hash = '';
+  }
   url.searchParams.delete(NOTIFICATION_CHANNEL_PARAM);
   url.searchParams.delete(NOTIFICATION_SENDER_PARAM);
 
@@ -177,7 +190,7 @@ export function AppSettings({ initialSection, onOpenCase }: AppSettingsProps = {
   const [activeSection, setActiveSection] = useState<SettingsSection>(() => initialSection ?? readSettingsSectionFromUrl());
   const [activeFinancialRulesSubsection, setActiveFinancialRulesSubsection] = useState<FinancialRulesSubsection>('invoices');
   const [activeDatabaseOperationsSubsection, setActiveDatabaseOperationsSubsection] = useState<DatabaseOperationsSubsection>('invoices');
-  const [activeIntegrationTab, setActiveIntegrationTab] = useState<IntegrationSettingsTab>('dadata');
+  const [activeIntegrationTab, setActiveIntegrationTab] = useState<IntegrationSettingsTab>(readIntegrationTabFromUrl);
   const [loading, setLoading] = useState(false);
   const [validateWithDadata, setValidateWithDadata] = useState(true);
   const [result, setResult] = useState<LegacyAddressMigrationResult | null>(null);
@@ -241,11 +254,23 @@ export function AppSettings({ initialSection, onOpenCase }: AppSettingsProps = {
 
   const selectSection = useCallback((section: SettingsSection) => {
     setActiveSection(section);
-    pushSettingsSectionToUrl(section);
+    pushSettingsSectionToUrl(section, activeIntegrationTab);
+  }, [activeIntegrationTab]);
+
+  const selectIntegrationTab = useCallback((tab: IntegrationSettingsTab) => {
+    setActiveIntegrationTab(tab);
+    const url = new URL(window.location.href);
+    url.searchParams.set(SETTINGS_SECTION_PARAM, 'integrations');
+    url.searchParams.set(INTEGRATION_TAB_PARAM, tab);
+    if (url.hash === '#completed-task-calendar') url.hash = '';
+    window.history.pushState(null, '', `${url.pathname}${url.search}${url.hash}`);
   }, []);
 
   useEffect(() => {
-    const handlePopState = () => setActiveSection(readSettingsSectionFromUrl());
+    const handlePopState = () => {
+      setActiveSection(readSettingsSectionFromUrl());
+      setActiveIntegrationTab(readIntegrationTabFromUrl());
+    };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
@@ -794,9 +819,12 @@ export function AppSettings({ initialSection, onOpenCase }: AppSettingsProps = {
   };
 
   useEffect(() => {
-    if (activeSection === 'integrations' && canViewIntegrationSettings) {
+    if (activeSection === 'integrations' && activeIntegrationTab === 'dadata' && canViewIntegrationSettings) {
       void loadDaDataCredentials();
     }
+  }, [activeSection, activeIntegrationTab, canViewIntegrationSettings, loadDaDataCredentials]);
+
+  useEffect(() => {
     if (activeSection === 'general') {
       void loadInvoiceNumbering();
       void loadInvoiceRules();
@@ -812,7 +840,7 @@ export function AppSettings({ initialSection, onOpenCase }: AppSettingsProps = {
     if (activeSection === 'form-requirements') {
       void loadFormRequirements();
     }
-  }, [activeDatabaseOperationsSubsection, activeSection, canViewIntegrationSettings, loadDaDataCredentials, loadDatabaseStatus, loadDuplicates, mergeKind]);
+  }, [activeDatabaseOperationsSubsection, activeSection, loadDatabaseStatus, loadDuplicates, mergeKind]);
 
   return (
     <div className="p-3 lg:p-4">
@@ -1670,8 +1698,8 @@ export function AppSettings({ initialSection, onOpenCase }: AppSettingsProps = {
 
 
             {activeSection === 'integrations' && canViewIntegrationSettings && (
-              <div className="space-y-6">
-                <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+              <div className="space-y-3">
+                <div className="rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
                   <div className="flex flex-col gap-4">
                     <div>
                       <h4 className="text-xl font-semibold text-gray-900">Разделы интеграций</h4>
@@ -1679,7 +1707,7 @@ export function AppSettings({ initialSection, onOpenCase }: AppSettingsProps = {
                         Настройки разнесены по вкладкам, чтобы ключи, календарная синхронизация и судебные проверки не смешивались на одном экране.
                       </p>
                     </div>
-                    <div className="grid gap-3 lg:grid-cols-4" role="tablist" aria-label="Разделы ключей интеграций">
+                    <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4" role="tablist" aria-label="Разделы ключей интеграций">
                       {INTEGRATION_SETTINGS_TABS.map((tab) => {
                         const Icon = tab.icon;
                         const isActive = activeIntegrationTab === tab.id;
@@ -1689,7 +1717,7 @@ export function AppSettings({ initialSection, onOpenCase }: AppSettingsProps = {
                             type="button"
                             role="tab"
                             aria-selected={isActive}
-                            onClick={() => setActiveIntegrationTab(tab.id)}
+                            onClick={() => selectIntegrationTab(tab.id)}
                             className={`flex min-h-[104px] items-start gap-3 rounded-2xl border px-4 py-3 text-left transition ${
                               isActive
                                 ? 'border-blue-200 bg-blue-50 text-blue-950 shadow-sm'

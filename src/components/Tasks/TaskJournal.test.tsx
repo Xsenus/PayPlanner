@@ -7962,6 +7962,20 @@ describe('TaskJournal', () => {
     })));
   });
 
+  it('links an administrator from task calendar to the exact shared visibility setting', async () => {
+    await renderJournal([], { initialView: 'calendar', waitForTitle: null });
+    const link = await screen.findByRole('link', { name: 'Выполненные задачи в календарях' });
+    expect(link.getAttribute('href')).toBe('/?ppTab=settings&settingsSection=integrations&integrationTab=calendars#completed-task-calendar');
+    fireEvent.click(screen.getByTestId('task-view-list'));
+    expect(screen.queryByRole('link', { name: 'Выполненные задачи в календарях' })).toBeNull();
+  });
+
+  it('does not expose the administrative visibility link to an employee', async () => {
+    authState.isAdmin = false;
+    await renderJournal([], { initialView: 'calendar', waitForTitle: null });
+    expect(screen.queryByRole('link', { name: 'Выполненные задачи в календарях' })).toBeNull();
+  });
+
   it('hides completed tasks from the task calendar when the calendar setting says to hide them', async () => {
     window.localStorage.setItem('pp.task_journal.filters.v1.user:7', JSON.stringify({
       quickFilter: 'all',

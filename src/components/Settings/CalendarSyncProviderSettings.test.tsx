@@ -26,6 +26,7 @@ vi.mock('../../services/authService', () => ({
 
 describe('CalendarSyncProviderSettings', () => {
   beforeEach(() => {
+    window.history.replaceState(null, '', '/');
     vi.clearAllMocks();
     apiMock.getUserSetting.mockResolvedValue({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
     apiMock.getCalendarSyncProviders.mockResolvedValue([
@@ -183,6 +184,24 @@ describe('CalendarSyncProviderSettings', () => {
       notes: payload.notes,
       updatedAt: '2026-05-26T17:10:00Z',
     }));
+  });
+
+  it('focuses the shared visibility setting only after its data loads and never saves on navigation', async () => {
+    window.history.replaceState(null, '', '/?ppTab=settings#completed-task-calendar');
+    render(<CalendarSyncProviderSettings />);
+    await screen.findByText('Выполненные задачи в календарях');
+    const section = document.getElementById('completed-task-calendar');
+    await waitFor(() => expect(document.activeElement).toBe(section));
+    expect(screen.getByText(/Общая настройка для всех сотрудников/)).toBeTruthy();
+    fireEvent.change(screen.getByDisplayValue('Выделять цветом'), { target: { value: 'hide' } });
+    expect(apiMock.updateCalendarSyncSettings).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(section);
+  });
+
+  it('preserves normal focus when calendar settings are opened without an anchor', async () => {
+    render(<CalendarSyncProviderSettings />);
+    await screen.findByText('Выполненные задачи в календарях');
+    expect(document.activeElement).not.toBe(document.getElementById('completed-task-calendar'));
   });
 
   it('shows provider diagnostics and readiness checklist', async () => {

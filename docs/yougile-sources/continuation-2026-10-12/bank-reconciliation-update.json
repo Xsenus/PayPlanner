@@ -1,0 +1,24 @@
+{
+  "checkedAtUtc": "2026-10-12 14:56:28 UTC",
+  "project": "PayPlanner",
+  "projectId": "daa8d6c1-cce6-4c0c-985a-6bdc5a4b5eb4",
+  "totalItems": 38,
+  "nextCursor": null,
+  "newCards": [],
+  "messagesSince": "2026-10-12T21:00:00+07:00",
+  "changedCards": [
+    {
+      "id": "fd9524b4-9723-45b4-b762-f37561e119a2",
+      "taskId": "PAY-36",
+      "title": "ИНТЕГРАЦИИ С БАНКОМ",
+      "complete": false,
+      "archived": false,
+      "messages": [
+        {
+          "timestamp": 1791815465729,
+          "text": "прошу полностью взять функционал который подключен в кубе\nкак при закруке выписке в ручном режиме таки в автоматическом всплывает модальное окно и разносятся платежи"
+        }
+      ]
+    }
+  ]
+}

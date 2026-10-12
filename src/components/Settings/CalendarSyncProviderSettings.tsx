@@ -2,7 +2,8 @@ import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { Activity, AlertTriangle, CalendarDays, CheckCircle2, ExternalLink, Filter, HelpCircle, Power, RefreshCw, Save, ShieldCheck, X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { COMPLETED_TASK_CALENDAR_ANCHOR } from '../../utils/calendarSettingsNavigation';
 import { authService, type User } from '../../services/authService';
 import {
   apiService,
@@ -63,6 +64,14 @@ export function CalendarSyncProviderSettings() {
   const [logs, setLogs] = useState<CalendarSyncLogPageDto | null>(null);
   const [settings, setSettings] = useState<CalendarSyncSettingsDto | null>(null);
   const [draft, setDraft] = useState<CalendarSyncSettingsDto | null>(null);
+  const completedTasksSectionRef = useRef<HTMLDivElement>(null);
+  const settingsLoaded = draft !== null;
+  useEffect(() => {
+    if (settingsLoaded && window.location.hash === `#${COMPLETED_TASK_CALENDAR_ANCHOR}`) {
+      completedTasksSectionRef.current?.focus({ preventScroll: true });
+      completedTasksSectionRef.current?.scrollIntoView?.({ block: 'center' });
+    }
+  }, [settingsLoaded]);
   const [users, setUsers] = useState<User[]>([]);
   const [logFilters, setLogFilters] = useState<CalendarLogFilters>(defaultLogFilters);
   const [loading, setLoading] = useState(false);
@@ -344,15 +353,21 @@ export function CalendarSyncProviderSettings() {
           </div>
           </div>
 
-          <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4">
+          <div
+            id={COMPLETED_TASK_CALENDAR_ANCHOR}
+            ref={completedTasksSectionRef}
+            tabIndex={-1}
+            aria-labelledby="completed-task-calendar-heading"
+            className="mt-4 scroll-mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/70 p-3 focus:outline-none focus:ring-2 focus:ring-sky-500"
+          >
             <div className="flex flex-col gap-1">
-              <h6 className="text-sm font-semibold text-gray-900">Выполненные задачи в календарях</h6>
+              <h6 id="completed-task-calendar-heading" className="text-sm font-semibold text-gray-900">Выполненные задачи в календарях</h6>
               <p className="text-xs leading-5 text-gray-600">
-                Администратор выбирает, оставлять готовые задачи во внутреннем календаре и внешних календарях с отдельной отметкой или убирать их после выполнения.
+                Общая настройка для всех сотрудников: оставлять готовые задачи во внутреннем календаре и внешних календарях с отдельной отметкой или убирать их после выполнения. Выбор применяется после нажатия «Сохранить» вверху этого блока настроек.
               </p>
             </div>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
-              <label className="block">
+              <label className="block min-w-0">
                 <span className="text-xs font-semibold text-gray-700">Действие после выполнения</span>
                 <SystemSelect
                   value={draft.completedTaskCalendarAction}
@@ -364,7 +379,7 @@ export function CalendarSyncProviderSettings() {
                   ))}
                 </SystemSelect>
               </label>
-              <label className="block">
+              <label className="block min-w-0">
                 <span className="text-xs font-semibold text-gray-700">Цвет готовых задач в Google</span>
                 <SystemSelect
                   value={draft.completedTaskGoogleColorId}
@@ -381,7 +396,7 @@ export function CalendarSyncProviderSettings() {
           </div>
 
           <div className="mt-4 grid gap-3 lg:grid-cols-2">
-            <label className="block">
+            <label className="block min-w-0">
               <span className="inline-flex items-center gap-1 text-xs font-semibold text-gray-700">
                 Главный источник событий
                 <SettingHelpButton helpKey="syncMode" onOpen={setActiveSettingHelpKey} />
@@ -397,7 +412,7 @@ export function CalendarSyncProviderSettings() {
               </SystemSelect>
             </label>
 
-            <label className="block">
+            <label className="block min-w-0">
               <span className="inline-flex items-center gap-1 text-xs font-semibold text-gray-700">
                 Правило спорных изменений
                 <SettingHelpButton helpKey="conflictResolutionMode" onOpen={setActiveSettingHelpKey} />
@@ -426,7 +441,7 @@ export function CalendarSyncProviderSettings() {
             </div>
 
             <div className="mt-4 grid gap-3 lg:grid-cols-3">
-              <label className="block">
+              <label className="block min-w-0">
                 <span className="inline-flex items-center gap-1 text-xs font-semibold text-gray-700">
                   Кто управляет
                   <SettingHelpButton helpKey="userControlMode" onOpen={setActiveSettingHelpKey} />
@@ -442,7 +457,7 @@ export function CalendarSyncProviderSettings() {
                 </SystemSelect>
               </label>
 
-              <label className="block">
+              <label className="block min-w-0">
                 <span className="inline-flex items-center gap-1 text-xs font-semibold text-gray-700">
                   Дата начала по умолчанию
                   <SettingHelpButton helpKey="defaultSyncFromDate" onOpen={setActiveSettingHelpKey} />
@@ -455,7 +470,7 @@ export function CalendarSyncProviderSettings() {
                 />
               </label>
 
-              <label className="block">
+              <label className="block min-w-0">
                 <span className="inline-flex items-center gap-1 text-xs font-semibold text-gray-700">
                   При потере доступа
                   <SettingHelpButton helpKey="inactiveUserAction" onOpen={setActiveSettingHelpKey} />
@@ -591,7 +606,7 @@ export function CalendarSyncProviderSettings() {
             Фильтры журнала
           </div>
           <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-            <label className="block">
+            <label className="block min-w-0">
               <span className="text-[11px] font-semibold uppercase text-slate-500">Провайдер</span>
               <SystemSelect
                 value={logFilters.provider}
@@ -603,7 +618,7 @@ export function CalendarSyncProviderSettings() {
                 <option value="yandex-calendar">Яндекс Календарь</option>
               </SystemSelect>
             </label>
-            <label className="block">
+            <label className="block min-w-0">
               <span className="text-[11px] font-semibold uppercase text-slate-500">Сотрудник</span>
               <SystemSelect
                 value={logFilters.userId}
@@ -616,7 +631,7 @@ export function CalendarSyncProviderSettings() {
                 ))}
               </SystemSelect>
             </label>
-            <label className="block">
+            <label className="block min-w-0">
               <span className="text-[11px] font-semibold uppercase text-slate-500">Действие</span>
               <SystemSelect
                 value={logFilters.operation}
@@ -629,7 +644,7 @@ export function CalendarSyncProviderSettings() {
                 ))}
               </SystemSelect>
             </label>
-            <label className="block">
+            <label className="block min-w-0">
               <span className="text-[11px] font-semibold uppercase text-slate-500">Статус</span>
               <SystemSelect
                 value={logFilters.status}
@@ -643,7 +658,7 @@ export function CalendarSyncProviderSettings() {
                 <option value="skipped">Пропущено</option>
               </SystemSelect>
             </label>
-            <label className="block">
+            <label className="block min-w-0">
               <span className="text-[11px] font-semibold uppercase text-slate-500">С даты и времени</span>
               <SystemDateInput
                 type="datetime-local"
@@ -652,7 +667,7 @@ export function CalendarSyncProviderSettings() {
                 className="mt-1 h-9 w-full rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-800 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100"
               />
             </label>
-            <label className="block">
+            <label className="block min-w-0">
               <span className="text-[11px] font-semibold uppercase text-slate-500">По дату и время</span>
               <SystemDateInput
                 type="datetime-local"
@@ -838,7 +853,7 @@ function CalendarIntervalInput({
   onChange: (value: number) => void;
 }) {
   return (
-    <label className="block">
+    <label className="block min-w-0">
       <span className="text-xs font-semibold text-gray-700">{label}</span>
       <div className="mt-1 flex items-center gap-2">
         <input

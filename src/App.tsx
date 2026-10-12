@@ -979,6 +979,8 @@ function AppContent() {
     url.searchParams.delete('ppCaseTab');
     if (activeTab !== 'settings') {
       url.searchParams.delete('settingsSection');
+      url.searchParams.delete('integrationTab');
+      if (url.hash === '#completed-task-calendar') url.hash = '';
     }
 
     window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);

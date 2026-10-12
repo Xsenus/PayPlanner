@@ -1,8 +1,12 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { defaultRestrictedRolePermissions, defaultRolePermissions, type RolePermissions } from '../../types/permissions';
 import { AppSettings } from './AppSettings';
+
+vi.mock('./CalendarSyncProviderSettings', () => ({
+  CalendarSyncProviderSettings: () => <div>Настройки календарей mock</div>,
+}));
 
 const authMockState = vi.hoisted(() => ({
   isAdmin: true,
@@ -105,6 +109,7 @@ function buildPermissions(overrides: Partial<RolePermissions> = {}): RolePermiss
 
 describe('AppSettings', () => {
   beforeEach(() => {
+    window.history.replaceState(null, '', '/');
     authMockState.isAdmin = true;
     permissionsMockState.permissions = defaultRolePermissions;
 
@@ -126,6 +131,48 @@ describe('AppSettings', () => {
         headers: { 'content-type': 'application/json' },
       });
     }));
+  });
+
+  it('opens the calendar tab from a direct URL without loading DaData credentials', async () => {
+    window.history.replaceState(null, '', '/?ppTab=settings&settingsSection=integrations&integrationTab=calendars#completed-task-calendar');
+    render(<AppSettings />);
+    expect(await screen.findByText('Настройки календарей mock')).toBeTruthy();
+    expect(screen.getByRole('tab', { name: /Календари/ }).getAttribute('aria-selected')).toBe('true');
+    expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).includes('/integrations/dadata/settings'))).toBe(false);
+  });
+
+  it('persists the integration tab and restores it on browser history navigation', async () => {
+    render(<AppSettings initialSection="integrations" />);
+    fireEvent.click(screen.getByRole('tab', { name: /Календари/ }));
+    expect(new URLSearchParams(window.location.search).get('integrationTab')).toBe('calendars');
+    expect(screen.getByText('Настройки календарей mock')).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: /DaData/ }));
+    expect(new URLSearchParams(window.location.search).get('integrationTab')).toBe('dadata');
+    window.history.replaceState(null, '', '/?ppTab=settings&settingsSection=integrations&integrationTab=calendars');
+    fireEvent(window, new PopStateEvent('popstate'));
+    await waitFor(() => expect(screen.getByText('Настройки календарей mock')).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: 'Основные компании' }));
+    expect(new URLSearchParams(window.location.search).has('integrationTab')).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: /Ключи интеграций/ }));
+    expect(screen.getByText('Настройки календарей mock')).toBeTruthy();
+    expect(new URLSearchParams(window.location.search).get('integrationTab')).toBe('calendars');
+  });
+
+  it('falls back safely for an unknown integration tab', async () => {
+    window.history.replaceState(null, '', '/?settingsSection=integrations&integrationTab=unknown');
+    render(<AppSettings />);
+    expect(await screen.findByPlaceholderText('Сохранён: ••••6314')).toBeTruthy();
+    expect(screen.getByRole('tab', { name: /DaData/ }).getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('does not grant integration access through a direct calendar URL', async () => {
+    authMockState.isAdmin = false;
+    permissionsMockState.permissions = buildPermissions({ notifications: { ...defaultRestrictedRolePermissions.notifications, canView: true } });
+    window.history.replaceState(null, '', '/?settingsSection=integrations&integrationTab=calendars');
+    render(<AppSettings />);
+    expect(await screen.findByText('Настройки уведомлений mock')).toBeTruthy();
+    expect(screen.queryByText('Настройки календарей mock')).toBeNull();
+    expect(screen.queryByRole('tab', { name: /Календари/ })).toBeNull();
   });
 
   it('keeps the settings menu in its own scroll area', () => {

@@ -1,0 +1,148 @@
+{
+  "scope": "PAY-37 navigation to existing administrative calendar visibility setting",
+  "branch": "claude/practical-bardeen-pglcf3",
+  "deployed": false,
+  "yougilePublished": false,
+  "tests": {
+    "targetedSettings": 22,
+    "targetedJournal": 2,
+    "fullUnit": {
+      "files": 244,
+      "passed": 2578,
+      "failed": 0,
+      "pending": 0,
+      "command": "npx vitest run --exclude '**/*.integration.test.*' --maxWorkers=3 --reporter=json"
+    },
+    "fullJournal": 378,
+    "lastNavigationRefinement": "targeted 11/11 and final full unit rerun passed; final lint, both type checks, and build passed"
+  },
+  "visual": {
+    "viewports": [
+      390,
+      1024,
+      1440
+    ],
+    "themes": [
+      "light",
+      "graphite"
+    ],
+    "overflow": false,
+    "keyboardEnter": true,
+    "focusedAfterLoad": true,
+    "directReload": true,
+    "browserBack": true,
+    "originalThemeRestored": true,
+    "menuReturn": true,
+    "reloadAfterMenuReturn": true
+  },
+  "localRuntime": {
+    "emailEnabled": false,
+    "backgroundServicesEnabled": false,
+    "productionDataUsed": false,
+    "data": "owned synthetic SQLite"
+  },
+  "screenshots": [
+    {
+      "file": "calendar-nav-calendar-1024.png",
+      "sha256": "eba169a25a94c0fb5eeda076923c41085d47681fe477f767fc25915b5bd642c1",
+      "width": 1024,
+      "theme": "light"
+    },
+    {
+      "file": "calendar-nav-calendar-1440.png",
+      "sha256": "0137b8076da96f87a07a14b7c069cf8ba11f22a93bdedfda36b2fbcb7b8e7a96",
+      "width": 1440,
+      "theme": "light"
+    },
+    {
+      "file": "calendar-nav-calendar-390.png",
+      "sha256": "c2857bb894523e2de1591220d43cee9ab1cde42cd200e26a6db46bc2a8f2b9ff",
+      "width": 390,
+      "theme": "light"
+    },
+    {
+      "file": "calendar-nav-calendar-dark-1024.png",
+      "sha256": "81a57e01b5993e846e55affcf4efd805a31742889ec9652b1d5b323f0e2eb868",
+      "width": 1024,
+      "theme": "graphite"
+    },
+    {
+      "file": "calendar-nav-calendar-dark-1440.png",
+      "sha256": "8aea92e5b87dc55ef594461df6e188cfb4af3f94e2db8b8a9613ae7f24f34591",
+      "width": 1440,
+      "theme": "graphite"
+    },
+    {
+      "file": "calendar-nav-calendar-dark-390.png",
+      "sha256": "2044047432b8a77cc0cca28ef2fbcc2b8da2c3b16b917178702e49dcef58601a",
+      "width": 390,
+      "theme": "graphite"
+    },
+    {
+      "file": "calendar-nav-settings-1024.png",
+      "sha256": "b4bbbe13452ae47aad2d4933f26f378de8d42a0ba7d8712c34db49e6f2cc32c9",
+      "width": 1024,
+      "theme": "light"
+    },
+    {
+      "file": "calendar-nav-settings-1440.png",
+      "sha256": "18409fc2b181c14ebc760982d0d9135ea13ed7f733c22aa085cb20d6d849fc19",
+      "width": 1440,
+      "theme": "light"
+    },
+    {
+      "file": "calendar-nav-settings-390.png",
+      "sha256": "d81dc8ab497aeeb62d21c01a1571a777398c35193c62fb9b502712a54b3f025a",
+      "width": 390,
+      "theme": "light"
+    },
+    {
+      "file": "calendar-nav-settings-dark-1024.png",
+      "sha256": "9da09e92278cf8417a24dc0c335eb28ce37702cb0021c5205aa593bf08eafe16",
+      "width": 1024,
+      "theme": "graphite"
+    },
+    {
+      "file": "calendar-nav-settings-dark-1440.png",
+      "sha256": "f93d161f08b4819cac90708555a6a1e04e2c483367dc07b25a54094b54e13cde",
+      "width": 1440,
+      "theme": "graphite"
+    },
+    {
+      "file": "calendar-nav-settings-dark-390.png",
+      "sha256": "83491ea875abfa6e5b4f9e5ea75bf6fb6ec04095c544a5b13059e1c990e4d58c",
+      "width": 390,
+      "theme": "graphite"
+    }
+  ],
+  "lint": "passed",
+  "typeCheckApp": "passed",
+  "typeCheckRoot": "passed",
+  "productionBuild": "passed",
+  "encoding": "passed",
+  "surfaceInventory": "passed",
+  "permissions": {
+    "executor": {
+      "read": 200,
+      "write": 403
+    },
+    "observer": {
+      "read": 200,
+      "write": 403
+    },
+    "settingsUnchangedAfterDeniedWrites": true
+  },
+  "sourceHashes": {
+    "normalization": "UTF-8 text with LF newlines",
+    "files": {
+      "src/App.tsx": "ccb51b06442973809d6423070450b780d2237bc47c0f20744310386dcdf804e3",
+      "src/components/Settings/AppSettings.tsx": "39fb731b39701e07bda1ff2d445ff9d61c60ab2f7810ad06b9c5f40f09173a79",
+      "src/components/Settings/AppSettings.test.tsx": "3a020d5b5a99c7f7d6ab2202f852bd4e7b9df2548f3bb28a28b4136802aa97cf",
+      "src/components/Settings/CalendarSyncProviderSettings.tsx": "9c33820254f33363de72ab44d0c56b8ddb55fc9a6880377b472a749af153ddd5",
+      "src/components/Settings/CalendarSyncProviderSettings.test.tsx": "07ce8418bb7bd0f46c9fd5607577706e4cd1c956aa5b2800569ab621e8264e21",
+      "src/components/Tasks/TaskJournal.tsx": "dc96b8f9dbba9430a75b7962c4a2fa64a730dea621ef1275c41b44006911f827",
+      "src/components/Tasks/TaskJournal.test.tsx": "8e1758d0a5881e39392e596f423c393a2bc094efe4461ce94ca9b571fdb8b1c7",
+      "src/utils/calendarSettingsNavigation.ts": "ddcd443b65dfa2943012c251a9a0131e7f5ece5dce99766eb3cca919f627d1f2"
+    }
+  }
+}
