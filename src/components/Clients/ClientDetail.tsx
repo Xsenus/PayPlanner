@@ -978,6 +978,9 @@ const PROFILE_DELETE_ICON_BUTTON_CLASS =
 const PROFILE_SECONDARY_ICON_BUTTON_CLASS =
   "inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-60";
 
+/** Профильные группы, свёрнутые в блок «Дополнительная информация» (PAY-32). Данные групп не удаляются. */
+const PROFILE_ADDITIONAL_GROUPS: readonly string[] = ["education", "professions", "workplaces", "relatives", "poa"];
+
 const MARITAL_STATUS_OPTIONS: Array<{
   value: Exclude<ClientMaritalStatus, "">;
   label: string;
@@ -1641,6 +1644,7 @@ export function ClientDetail({
     | "militaryIds"
     | "poa"
   >("main");
+  const [profileAdditionalOpen, setProfileAdditionalOpen] = useState(false);
   const [legalEntityPromptOpen, setLegalEntityPromptOpen] = useState(false);
   const [legalEntityPromptSubmitting, setLegalEntityPromptSubmitting] =
     useState(false);
@@ -6572,24 +6576,28 @@ export function ClientDetail({
                         },
                         {
                           id: "education",
+                          additional: true,
                           label: "Образование (ОКСО)",
                           requiredKeys: ["Education"],
                           values: clientFormState.education,
                         },
                         {
                           id: "professions",
+                          additional: true,
                           label: "Профессии (ОКПДТР)",
                           requiredKeys: ["Professions"],
                           values: clientFormState.professions,
                         },
                         {
                           id: "workplaces",
+                          additional: true,
                           label: "Работа и должности",
                           requiredKeys: ["Workplaces"],
                           values: clientFormState.workplaces,
                         },
                         {
                           id: "relatives",
+                          additional: true,
                           label: "Родственники",
                           requiredKeys: ["Relatives"],
                           values: clientFormState.relatives,
@@ -6608,11 +6616,12 @@ export function ClientDetail({
                         },
                         {
                           id: "poa",
+                          additional: true,
                           label: "Доверенности",
                           requiredKeys: ["PowersOfAttorney"],
                           values: powersOfAttorney,
                         },
-                      ].map((tab) => (
+                      ].filter((tab) => !tab.additional || profileAdditionalOpen).map((tab) => (
                         <button
                           key={tab.id}
                           type="button"
@@ -6645,6 +6654,19 @@ export function ClientDetail({
                           {hasAnyRequiredList(tab.requiredKeys) ? " *" : ""}
                         </button>
                       ))}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (profileAdditionalOpen && PROFILE_ADDITIONAL_GROUPS.includes(activeProfileGroup)) {
+                            setActiveProfileGroup("main");
+                          }
+                          setProfileAdditionalOpen((open) => !open);
+                        }}
+                        aria-expanded={profileAdditionalOpen}
+                        className="rounded-lg border border-dashed border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                      >
+                        {profileAdditionalOpen ? "Скрыть дополнительную информацию" : "Дополнительная информация"}
+                      </button>
                     </div>
                   </div>
                 </>

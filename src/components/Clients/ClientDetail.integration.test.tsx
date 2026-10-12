@@ -853,6 +853,12 @@ describe('ClientDetail integration', () => {
     expect(apiService.getOkpdtrDictionary).not.toHaveBeenCalled();
     expect(apiService.getClientPowersOfAttorney).not.toHaveBeenCalled();
 
+    // Раскрытие блока «Дополнительная информация» само по себе ничего не загружает.
+    await user.click(screen.getByRole('button', { name: 'Дополнительная информация' }));
+    expect(apiService.getOksoDictionary).not.toHaveBeenCalled();
+    expect(apiService.getOkpdtrDictionary).not.toHaveBeenCalled();
+    expect(apiService.getClientPowersOfAttorney).not.toHaveBeenCalled();
+
     await user.click(screen.getByRole('button', { name: /Образование/ }));
     await waitFor(() => {
       expect(apiService.getOksoDictionary).toHaveBeenCalledTimes(1);
@@ -892,6 +898,7 @@ describe('ClientDetail integration', () => {
     render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
     await screen.findByRole('heading', { name: 'Карточка клиента' });
     await user.click(screen.getByRole('button', { name: 'Редактировать' }));
+    await user.click(screen.getByRole('button', { name: 'Дополнительная информация' }));
     await user.click(screen.getByRole('button', { name: /Образование/ }));
     await waitFor(() => expect(apiService.getOksoDictionary).toHaveBeenCalledTimes(1));
     const firstOksoSignal = vi.mocked(apiService.getOksoDictionary).mock.calls[0][1]?.signal;
@@ -998,6 +1005,13 @@ describe('ClientDetail integration', () => {
     await user.click(screen.getByRole('button', { name: 'Адреса' }));
     expect((await screen.findAllByRole('button', { name: 'Удалить адрес' })).length).toBeGreaterThan(0);
 
+    // PAY-32: прежние личные данные не удалены, а свёрнуты в «Дополнительную информацию».
+    expect(screen.queryByRole('button', { name: 'Образование (ОКСО)' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Доверенности' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Дополнительная информация' }).getAttribute('aria-expanded')).toBe('false');
+    await user.click(screen.getByRole('button', { name: 'Дополнительная информация' }));
+    expect(screen.getByRole('button', { name: 'Скрыть дополнительную информацию' }).getAttribute('aria-expanded')).toBe('true');
+
     await user.click(screen.getByRole('button', { name: 'Образование (ОКСО)' }));
     expect(await screen.findByDisplayValue('НГУ')).toBeTruthy();
     expect(screen.getByDisplayValue('МГУ')).toBeTruthy();
@@ -1054,6 +1068,7 @@ describe('ClientDetail integration', () => {
 
     await screen.findByDisplayValue('Иванов');
     await user.click(screen.getByRole('button', { name: 'Редактировать' }));
+    await user.click(screen.getByRole('button', { name: 'Дополнительная информация' }));
     await user.click(screen.getByRole('button', { name: 'Доверенности' }));
 
     expect(await screen.findByText('Кем выдана: Старый нотариус')).toBeTruthy();
