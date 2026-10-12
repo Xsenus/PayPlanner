@@ -13,6 +13,11 @@ if ($syntheticValues.ConnectionStrings__Default -ne ('Data Source=' + $expectedD
 if (-not (Test-Path -LiteralPath (Join-Path $syntheticRoot 'seed-summary.json'))) { throw 'Сидирование не завершено.' }
 foreach ($property in $syntheticValues.PSObject.Properties) { [Environment]::SetEnvironmentVariable($property.Name, [string]$property.Value, 'Process') }
 $env:DataProtection__ApplicationName = 'PayPlanner.Claude.Synthetic'
+$env:Cors__AllowedOrigins__0 = 'http://127.0.0.1:5301'
+$env:FileStorage__RootPath = Join-Path $syntheticRoot 'files'
+$env:ProfilePhotos__StorageRoot = Join-Path $syntheticRoot 'photos'
+$env:ElectronicSignature__StorageRoot = Join-Path $syntheticRoot 'electronic-signatures'
+$env:StorageOrchestration__LocalRoot = Join-Path $syntheticRoot 'storage-objects'
 $env:BackgroundServices__Enabled = 'false'
 $env:Email__Enabled = 'false'
 $env:MessengerDocumentDelivery__Enabled = 'false'

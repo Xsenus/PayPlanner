@@ -4,6 +4,8 @@ $ErrorActionPreference = 'Stop'
 $headers = @{ 'X-PayPlanner-Restored-Instance' = $env:RestoredRuntimeIsolation__InstanceId }
 $identity = Invoke-RestMethod 'http://127.0.0.1:5300/api/restored-runtime/identity'
 if (-not $identity.isolated -or $identity.instanceId -ne $env:RestoredRuntimeIsolation__InstanceId) { throw 'Не совпадает идентичность синтетической среды.' }
+$browserIdentity = Invoke-WebRequest 'http://127.0.0.1:5300/api/restored-runtime/identity' -Headers @{ Origin = 'http://127.0.0.1:5301' }
+if ($browserIdentity.Headers['Access-Control-Allow-Origin'] -ne 'http://127.0.0.1:5301') { throw 'Браузеру синтетического frontend не разрешён доступ к API (CORS).' }
 if ((Invoke-WebRequest 'http://127.0.0.1:5300/api/health' -Headers $headers).StatusCode -ne 200) { throw 'Backend health failed.' }
 if ((Invoke-WebRequest 'http://127.0.0.1:5300/api/health' -SkipHttpErrorCheck).StatusCode -ne 409) { throw 'Не сработала защита запроса без instance header.' }
 $actors = Get-Content -LiteralPath (Join-Path $Repository '.codex-build/claude-synthetic/credentials.local.json') -Raw | ConvertFrom-Json

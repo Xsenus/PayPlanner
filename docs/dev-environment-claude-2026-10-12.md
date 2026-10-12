@@ -69,6 +69,7 @@ Dot-source [Use-SyntheticEnvironment.ps1](../scripts/claude-preparation/Use-Synt
 | --- | --- |
 | ASPNETCORE_ENVIRONMENT | ClaudeSynthetic, без Development user-secrets и production-конфигурации |
 | ASPNETCORE_URLS | http://127.0.0.1:5300 |
+| Cors__AllowedOrigins__0 | http://127.0.0.1:5301; имя ClaudeSynthetic не включает development CORS автоматически |
 | Database__Provider / ConnectionStrings__Default | sqlite / путь собственной synthetic.db, формируется Seed |
 | BackgroundServices__Enabled / Email__Enabled | false / false, обязательно при каждом backend-запуске |
 | RestoredRuntimeIsolation__Enabled | true: существующая защита блокирует внешние HTTP-запросы и опасные интеграционные операции |
@@ -77,12 +78,16 @@ Dot-source [Use-SyntheticEnvironment.ps1](../scripts/claude-preparation/Use-Synt
 | DataProtection__ApplicationName | PayPlanner.Claude.Synthetic |
 | MessengerDocumentDelivery__Enabled / Providers__Max__Enabled | false / false |
 | ElectronicSignature__Enabled | false |
+| FileStorage__RootPath / ProfilePhotos__StorageRoot | собственные `claude-synthetic/files` / `claude-synthetic/photos` |
+| ElectronicSignature__StorageRoot / StorageOrchestration__LocalRoot | собственные `claude-synthetic/electronic-signatures` / `claude-synthetic/storage-objects` |
 | FieldEncryption__Enabled / ClientPassportDualWriteEnabled | false / false для новых синтетических записей |
 | PAYPLANNER_SKIP_CLIENT_SEED | 1, стандартный набор клиентов не нужен |
 | VITE_API_URL | http://127.0.0.1:5300/api |
 | VITE_RESTORED_RUNTIME_ISOLATION / INSTANCE_ID | true / тот же GUID; существующая browser policy и отдельное пространство сессий |
 
 Seed явно устанавливает в БД `notifications.email.enabled=false`, `notifications.max.enabled=false`, `notifications.telegram.enabled=false`. Даже при отсутствии SMTP-реквизитов нельзя полагаться только на название окружения. Базу production не восстанавливать в этот каталог. Изолированный backend отказывает запросам без заголовка `X-PayPlanner-Restored-Instance`; frontend добавляет его через существующий механизм. Публичен только handshake идентичности; обычный health без заголовка возвращает **409**, с правильным — **200**.
+
+После перезапуска backend вход выполняется заново: restored-runtime создаёт временный секрет сессии на каждый запуск. Для каждой роли используйте отдельный чистый профиль браузера. Не очищайте целиком localStorage уже работающего профиля: там хранится отметка изолированной среды, и guard справедливо откажет открывать профиль с оставшимися данными без этой отметки. Для смены пользователя используйте обычный выход или отдельный новый профиль. Отдельные проверки паспортного шифрования запускаются на одноразовых тестовых БД; синтетическая UI-среда специально использует отключённое шифрование, как указано выше.
 
 ## Backend и frontend вместе
 

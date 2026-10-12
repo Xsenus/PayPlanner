@@ -123,6 +123,11 @@ await File.WriteAllTextAsync(artifact, JsonSerializer.Serialize(new
 var environment = new Dictionary<string, string>
 {
     ["ASPNETCORE_ENVIRONMENT"] = "ClaudeSynthetic", ["ASPNETCORE_URLS"] = "http://127.0.0.1:5300",
+    ["Cors__AllowedOrigins__0"] = "http://127.0.0.1:5301",
+    ["FileStorage__RootPath"] = Path.Combine(state, "files"),
+    ["ProfilePhotos__StorageRoot"] = Path.Combine(state, "photos"),
+    ["ElectronicSignature__StorageRoot"] = Path.Combine(state, "electronic-signatures"),
+    ["StorageOrchestration__LocalRoot"] = Path.Combine(state, "storage-objects"),
     ["BackgroundServices__Enabled"] = "false", ["Email__Enabled"] = "false",
     ["Database__Provider"] = "sqlite", ["ConnectionStrings__Default"] = connectionString,
     ["RestoredRuntimeIsolation__Enabled"] = "true", ["RestoredRuntimeIsolation__InstanceId"] = instanceId.ToString("N"),

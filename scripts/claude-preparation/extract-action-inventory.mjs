@@ -42,6 +42,13 @@ function containingFunction(node) {
   }
   return 'module';
 }
+function scopeFunction(node) {
+  let owner = containingFunction(node);
+  for (let p = node.parent; p; p = p.parent) {
+    if (ts.isFunctionDeclaration(p) && p.name) owner = p.name.text;
+  }
+  return owner;
+}
 for (const file of files) {
   const source = ts.createSourceFile(file, fs.readFileSync(path.join(root, file), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   function visit(node) {
@@ -78,7 +85,7 @@ for (const file of files) {
           }
         }
         rows.push({ file, line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1,
-          function: containingFunction(node), tag, label, fieldLabel, attributes, conditions });
+          function: containingFunction(node), scopeFunction: scopeFunction(node), tag, label, fieldLabel, attributes, conditions });
       }
     }
     ts.forEachChild(node, visit);
@@ -104,9 +111,13 @@ function candidate(row, map) {
   if (map === 20) return /comment|file|chat|result|description|Комментарии|Результат|Описание|Вложен/i.test(s) ? 'Основная область/вкладки обсуждения, файлов и результата' : /title|Название/i.test(s) ? 'Шапка задачи' : 'Правая панель параметров/меню действий; сохранить бизнес-условие';
   return /passport|snils|inn|document|Паспорт|СНИЛС|ИНН/i.test(s) ? 'Документы, сохранение защищённых полей' : /address|email|phone|Телефон|Email|Адрес/i.test(s) ? 'Контактная информация' : /section|activeSection|Case|Invoice|Payment|Contract/i.test(s) ? 'Связанные разделы/правое меню' : 'Основная или свёрнутая дополнительная информация; прежнее поле не удалять';
 }
+// Use semantic owners: line thresholds become wrong after inserting journal UI.
+const taskCardScopes = new Set(['TaskCardSettingsGate', 'ModernTaskModal', 'TaskModal', 'TaskRecurrenceEditor', 'ModernTaskQuickField', 'ModernParticipantRow']);
+const sharedCardScopes = new Set(['TaskCompletionResultPrompt', 'TaskDecisionSnoozeMenu', 'TaskApprovalDecisionPrompt',
+  'TaskDeadlineChangeDecisionPrompt', 'TaskBillingEditDialog', 'TaskDaySchedulePanel', 'TaskWeekScheduleDialog', 'QuickTaskCreateModal', 'TaskBillingCreateWizard']);
 const definitions = [
-  { id: 19, document: 'docs/action-map-pay-19-journal-2026-10-12.md', choose: r => r.file.includes('TaskJournalColumnSettings') || r.file.includes('TaskTemplatesPanel') || (r.file.endsWith('TaskJournal.tsx') && r.line < 10833) },
-  { id: 20, document: 'docs/action-map-pay-20-task-cards-2026-10-12.md', choose: r => (r.file.endsWith('TaskJournal.tsx') && (r.line >= 10833 || (r.line >= 6898 && r.line < 7402) || (r.line >= 10184 && r.line < 10442) || (r.line >= 8546 && r.line < 8706))) || (r.file.includes('InternalMessenger') && ['ChatConversation', 'TaskChatPanel', 'renderInlineFormattedText', 'renderFormattedText', 'renderPlainFormattedText'].includes(r.function)) },
+  { id: 19, document: 'docs/action-map-pay-19-journal-2026-10-12.md', choose: r => r.file.includes('TaskJournalColumnSettings') || r.file.includes('TaskTemplatesPanel') || (r.file.endsWith('TaskJournal.tsx') && !taskCardScopes.has(r.scopeFunction)) },
+  { id: 20, document: 'docs/action-map-pay-20-task-cards-2026-10-12.md', choose: r => (r.file.endsWith('TaskJournal.tsx') && (taskCardScopes.has(r.scopeFunction) || sharedCardScopes.has(r.scopeFunction))) || (r.file.includes('InternalMessenger') && ['ChatConversation', 'TaskChatPanel', 'renderInlineFormattedText', 'renderFormattedText', 'renderPlainFormattedText'].includes(r.function)) },
   { id: 32, document: 'docs/action-map-pay-32-individual-client-2026-10-12.md', choose: r => r.file.includes('/Clients/') },
 ];
 for (const definition of definitions) {
