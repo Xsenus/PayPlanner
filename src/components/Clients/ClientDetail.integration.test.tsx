@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ClientDetail } from './ClientDetail';
 import type { Act, Client, Contract, Invoice, Payment, PowerOfAttorney } from '../../types';
 import { apiService } from '../../services/api';
+import * as timeZoneHook from '../../hooks/useUserTimeZone';
 
 const CLIENT_PROFILE_NOTES_PREFIX = '__PP_CLIENT_PROFILE_V2__:';
 
@@ -626,6 +627,28 @@ describe('ClientDetail integration', () => {
       page: 1,
       pageSize: 20,
     });
+  });
+
+  it('PAY-32 review: does not invent an age for an impossible birth date', async () => {
+    vi.mocked(apiService.getClient).mockResolvedValue(createClient({ birthDate: '2000-02-31' }));
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+    const summary = await screen.findByLabelText('Краткие сведения о клиенте');
+    expect(summary.textContent).not.toMatch(/\(\d+ (год|года|лет)\)/);
+  });
+
+  it('PAY-32 review: keeps the birth date and computes age in the selected time zone at midnight', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-12T00:30:00Z'));
+    const timeZoneSpy = vi.spyOn(timeZoneHook, 'useUserTimeZone').mockReturnValue('America/Los_Angeles');
+    try {
+      vi.mocked(apiService.getClient).mockResolvedValue(createClient({ birthDate: '2000-10-12' }));
+      render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+      const summary = await screen.findByLabelText('Краткие сведения о клиенте');
+      expect(within(summary).getByText('12.10.2000 (25 лет)')).toBeTruthy();
+    } finally {
+      timeZoneSpy.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it('PAY-32: shows short client facts in the header and service facts next to the section menu', async () => {

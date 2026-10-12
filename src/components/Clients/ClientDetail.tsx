@@ -94,7 +94,7 @@ import { CaseModal } from "./CaseModal";
 import { TwoTypeStats } from "../Statistics/TwoTypeStats";
 import { formatCurrencySmart } from "../../utils/formatters";
 import { formatDateTimeInTimeZone } from "../../utils/timeZoneDate";
-import { formatClientDate } from "./clientFormatters";
+import { formatClientBirthDate, formatClientDate, getClientAgeLabel } from "./clientFormatters";
 import { ActModal } from "../Acts/ActModal";
 import { InvoiceModal } from "../Accounts/InvoiceModal";
 import { ContractModal } from "../Contracts/ContractModal";
@@ -979,21 +979,6 @@ const PROFILE_DELETE_ICON_BUTTON_CLASS =
   "inline-flex h-9 w-9 items-center justify-center rounded-lg text-rose-600 transition-colors hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60";
 const PROFILE_SECONDARY_ICON_BUTTON_CLASS =
   "inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-60";
-
-/** Возраст в полных годах по дате рождения YYYY-MM-DD; пусто, если дата не распознана. */
-function getAgeLabel(birthDate?: string | null): string {
-  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(birthDate ?? "");
-  if (!match) return "";
-  const [, y, m, d] = match.map(Number);
-  const now = new Date();
-  let age = now.getFullYear() - y;
-  if (now.getMonth() + 1 < m || (now.getMonth() + 1 === m && now.getDate() < d)) age -= 1;
-  if (age < 0 || age > 150) return "";
-  const lastTwo = age % 100;
-  const last = age % 10;
-  const word = lastTwo >= 11 && lastTwo <= 14 ? "лет" : last === 1 ? "год" : last >= 2 && last <= 4 ? "года" : "лет";
-  return `${age} ${word}`;
-}
 
 /** Профильные группы, свёрнутые в блок «Дополнительная информация» (PAY-32). Данные групп не удаляются. */
 const PROFILE_ADDITIONAL_GROUPS: readonly string[] = ["education", "professions", "workplaces", "relatives", "poa"];
@@ -6151,7 +6136,7 @@ export function ClientDetail({
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-[calc(100vw-2rem)] mx-auto p-6">
+      <div className="w-full min-w-0 p-3 lg:p-4">
         <div className="mb-6 flex flex-wrap items-center gap-3">
           <button
             onClick={onBack}
@@ -6176,10 +6161,10 @@ export function ClientDetail({
           {(() => {
             const isIndividual = clientFormState.kind === "individual";
             const birth = isIndividual ? clientFormState.birthDate : "";
-            const age = getAgeLabel(birth);
+            const age = getClientAgeLabel(birth, profileTimeZoneId);
             const items = [
               birth
-                ? `${formatClientDate(birth, profileTimeZoneId)}${age ? ` (${age})` : ""}`
+                ? `${formatClientBirthDate(birth)}${age ? ` (${age})` : ""}`
                 : "",
               clientData?.phone ?? "",
               clientData?.email ?? "",
@@ -6238,10 +6223,10 @@ export function ClientDetail({
           </div>
         </div>
 
-        <div className="flex flex-col gap-6 lg:flex-row">
-          <aside className="order-first shrink-0 lg:order-last lg:w-60">
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-row flex-wrap gap-2 lg:flex-col lg:gap-1" role="navigation" aria-label="Разделы клиента">
+        <div className="flex flex-col gap-3 xl:flex-row">
+          <aside className="order-first shrink-0 xl:order-last xl:w-60">
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-row flex-wrap gap-2 xl:flex-col xl:gap-1" role="navigation" aria-label="Разделы клиента">
             {visibleSections.map((section) => {
               const meta = SECTION_META[section];
               const isActive = activeSection === section;
@@ -6250,7 +6235,8 @@ export function ClientDetail({
                   key={section}
                   type="button"
                   onClick={() => setActiveSection(section)}
-                  className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors lg:w-full lg:text-left ${
+                  aria-current={isActive ? "page" : undefined}
+                  className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors xl:w-full xl:text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 ${
                     isActive
                       ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
                       : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
@@ -6368,7 +6354,7 @@ export function ClientDetail({
           </aside>
           <div className="min-w-0 flex-1">
         {activeSection === "profile" ? (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 mb-6 p-6">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 mb-3 p-3">
             <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">
@@ -6528,7 +6514,7 @@ export function ClientDetail({
                     >
                       Основная информация
                     </h3>
-                  <div className="grid gap-3 md:grid-cols-4">
+                  <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(min(100%,150px),1fr))]">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         {"Фамилия" + requiredMark("LastName")}
@@ -7792,7 +7778,7 @@ export function ClientDetail({
                     onChange={handleClientFormChange}
                     rows={3}
                     disabled={!canEditClientProfile}
-                    className={`w-full px-3 py-2 border rounded-lg focus:ring-2 disabled:bg-gray-100 ${requiredInputClass("Comment", clientFormState.comment)}`}
+                    className={`w-full px-3 py-2 border rounded-lg focus:ring-2 ${canEditClientProfile ? "bg-white" : "bg-gray-100"} ${requiredInputClass("Comment", clientFormState.comment)}`}
                     placeholder={t("additionalInfo")}
                   />
                 </div>
@@ -7806,7 +7792,7 @@ export function ClientDetail({
                     onChange={handleClientFormChange}
                     rows={3}
                     disabled={!canEditClientProfile}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
+                    className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 ${canEditClientProfile ? "bg-white" : "bg-gray-100"}`}
                     placeholder={t("notes") || "Заметки"}
                   />
                 </div>

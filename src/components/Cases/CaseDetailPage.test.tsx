@@ -1322,6 +1322,72 @@ describe('CaseDetailPage', () => {
     expect(screen.getByText('3 записи')).toBeTruthy();
   });
 
+  it('PAY-25 review: sorts UTC timestamps without a suffix consistently with explicit UTC timestamps', async () => {
+    vi.mocked(apiService.getCaseCourtEvents).mockResolvedValue([
+      { canRecordHearingOutcome: false, id: 51, clientCaseId: 15, eventType: 'hearing', eventTypeLabel: 'Заседание',
+        title: 'Граница: ранее', scheduledAt: '2026-10-12T09:30:00Z', allDay: false, courtInstance: 'first',
+        courtInstanceLabel: 'Первая инстанция', movementStatus: 'scheduled', movementStatusLabel: 'Назначено',
+        sourceType: 'manual', createdAt: '2026-10-01T00:00:00Z', isOverdue: false },
+      { canRecordHearingOutcome: false, id: 52, clientCaseId: 15, eventType: 'hearing', eventTypeLabel: 'Заседание',
+        title: 'Граница: позже', scheduledAt: '2026-10-12T10:00:00', allDay: false, courtInstance: 'first',
+        courtInstanceLabel: 'Первая инстанция', movementStatus: 'scheduled', movementStatusLabel: 'Назначено',
+        sourceType: 'manual', createdAt: '2026-10-01T00:00:00Z', isOverdue: false },
+    ]);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'События' }));
+    const journal = await screen.findByLabelText('Журнал событий дела');
+    await waitFor(() => expect(within(journal).getAllByText(/^Граница:/u).map(node => node.textContent))
+      .toEqual(['Граница: позже', 'Граница: ранее']));
+  });
+
+  it('PAY-25 review: uses the loaded profile time zone, preserves all-day dates and skips forbidden data', async () => {
+    let resolveTimeZone!: (value: { key: string; value: string }) => void;
+    const pendingTimeZone = new Promise<{ key: string; value: string }>(resolve => { resolveTimeZone = resolve; });
+    vi.mocked(apiService.getUserSetting).mockImplementation(key => key === 'profile.timeZoneId' ? pendingTimeZone : Promise.resolve(null));
+    const event = { canRecordHearingOutcome: false, id: 61, clientCaseId: 15, eventType: 'hearing', eventTypeLabel: 'Заседание',
+      title: 'Заседание у границы суток', scheduledAt: '2026-10-12T23:30:00Z', allDay: false, courtInstance: 'first',
+      courtInstanceLabel: 'Первая инстанция', movementStatus: 'scheduled', movementStatusLabel: 'Назначено',
+      sourceType: 'manual', createdAt: '2026-10-01T00:00:00Z', isOverdue: false };
+    vi.mocked(apiService.getCaseCourtEvents).mockResolvedValue([event,
+      { ...event, id: 62, title: 'Календарный день', scheduledAt: '2026-10-12T00:00:00Z', allDay: true }]);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canViewTasks={false} canViewFinance={false} />);
+    expect(screen.queryByRole('button', { name: 'События' })).toBeNull();
+    await act(async () => { resolveTimeZone({ key: 'profile.timeZoneId', value: 'Europe/Samara' }); });
+    fireEvent.click(await screen.findByRole('button', { name: 'События' }));
+    const journal = await screen.findByLabelText('Журнал событий дела');
+    await within(journal).findByText('Заседание у границы суток');
+    await waitFor(() => expect(within(journal).getByText('13.10.2026, 03:30')).toBeTruthy());
+    expect(within(journal).getByText('12.10.2026 · весь день')).toBeTruthy();
+    expect(apiService.getCaseFinance).not.toHaveBeenCalled();
+    expect(apiService.getTaskJournalItems).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Быстрый доступ: Финансы' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Быстрый доступ: Задачи' })).toBeNull();
+  });
+
+  it('PAY-25 review: ignores delayed court events after switching cases', async () => {
+    type Events = Awaited<ReturnType<typeof apiService.getCaseCourtEvents>>;
+    let finishOld!: (events: Events) => void;
+    const oldEvents = new Promise<Events>(resolve => { finishOld = resolve; });
+    const event = { canRecordHearingOutcome: false, id: 71, clientCaseId: 16, eventType: 'hearing', eventTypeLabel: 'Заседание',
+      title: 'Событие текущего дела', scheduledAt: '2026-10-12T10:00:00Z', allDay: false, courtInstance: 'first',
+      courtInstanceLabel: 'Первая инстанция', movementStatus: 'scheduled', movementStatusLabel: 'Назначено',
+      sourceType: 'manual', createdAt: '2026-10-01T00:00:00Z', isOverdue: false };
+    vi.mocked(apiService.getCaseCourtEvents).mockImplementation(id => id === 15 ? oldEvents : Promise.resolve([event]));
+    vi.mocked(apiService.getCaseV2).mockImplementation(async id => createCase({ id, title: `Дело ${id}` }));
+    const view = render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('Дело 15');
+    fireEvent.click(screen.getByRole('button', { name: 'События' }));
+    await waitFor(() => expect(apiService.getCaseCourtEvents).toHaveBeenCalledWith(15));
+    view.rerender(<CaseDetailPage caseId={16} onBack={vi.fn()} />);
+    await screen.findByText('Дело 16');
+    fireEvent.click(screen.getByRole('button', { name: 'События' }));
+    const journal = await screen.findByLabelText('Журнал событий дела');
+    await within(journal).findByText('Событие текущего дела');
+    await act(async () => { finishOld([{ ...event, id: 70, clientCaseId: 15, title: 'Запоздалое событие прошлого дела' }]); });
+    expect(within(journal).getByText('Событие текущего дела')).toBeTruthy();
+    expect(screen.queryByText('Запоздалое событие прошлого дела')).toBeNull();
+  });
+
   it('PAY-25: shows the event journal newest first, marks the source and leads to the court tab to add an event', async () => {
     vi.mocked(apiService.getCaseCourtEvents).mockResolvedValue([
       {
@@ -1388,22 +1454,87 @@ describe('CaseDetailPage', () => {
     expect(onOpenTask).toHaveBeenCalledWith(expect.any(Number));
   });
 
+  it('PAY-23 review: uses one document search and keeps filters available after an empty result', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    await screen.findByText('Заявление.docx');
+    expect(screen.getAllByLabelText(/Поиск (?:по )?документ(?:ам|ов) дела/u)).toHaveLength(1);
+
+    const search = screen.getByLabelText('Поиск документов дела');
+    fireEvent.change(search, { target: { value: 'несуществующий файл' } });
+    expect(screen.queryByText('Заявление.docx')).toBeNull();
+    expect(screen.getByText('Показано 0 из 1')).toBeTruthy();
+    expect(screen.getByLabelText('Фильтр документов по типу')).toBeTruthy();
+    expect(screen.getByLabelText('Фильтр документов по статусу')).toBeTruthy();
+    expect(screen.getByLabelText('Только актуальные версии')).toBeTruthy();
+    fireEvent.change(search, { target: { value: '' } });
+    expect(screen.getByText('Заявление.docx')).toBeTruthy();
+  });
+
+  it('PAY-23 review: renders the upload panel and document list with distinct React keys', async () => {
+    const consoleError = vi.spyOn(console, 'error');
+    try {
+      render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+      await screen.findByText('Заявление.docx');
+      const duplicateKeys = consoleError.mock.calls.filter(([message]) => String(message).includes('same key'));
+      expect(duplicateKeys).toHaveLength(0);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it('PAY-23 review: searches template metadata without losing document version history', async () => {
+    vi.mocked(apiService.getCaseDocuments).mockResolvedValue([1, 2].map((version) => ({
+      id: 90 + version, clientCaseId: 15, documentKey: 'template-history', version,
+      originalFileName: `Синтетический документ v${version}.pdf`, documentType: 'Иск', status: 'Подготовлен',
+      uploadedByName: 'Синтетический автор', templateLabel: version === 2 ? 'Шаблон для поиска' : undefined,
+      contentType: 'application/pdf', sizeBytes: 1, uploadedAt: '2026-10-11T12:00:00Z', isLatestVersion: version === 2,
+    })));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    await screen.findByText('Синтетический документ v2.pdf');
+    const calls = vi.mocked(apiService.getCaseDocuments).mock.calls.length;
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Поиск документов дела' }), { target: { value: 'ШАБЛОН ДЛЯ' } });
+    expect(screen.queryByText('Синтетический документ v1.pdf')).toBeNull();
+    expect(screen.getByText('Синтетический документ v2.pdf')).toBeTruthy();
+    expect(screen.getByText('История версий: v1, v2 · последняя v2')).toBeTruthy();
+    expect(screen.getByText('Показано 1 из 2')).toBeTruthy();
+    expect(apiService.getCaseDocuments).toHaveBeenCalledTimes(calls);
+  });
+
+  it('PAY-23 review: searches legacy documents with missing text fields without crashing', async () => {
+    vi.mocked(apiService.getCaseDocuments).mockResolvedValue([{
+      id: 99, clientCaseId: 15, documentKey: 'legacy-doc', version: 1,
+      originalFileName: 'legacy.pdf', documentType: null, status: 'Draft', uploadedByName: null,
+      contentType: 'application/pdf', sizeBytes: 1, uploadedAt: '2026-10-11T12:00:00Z', isLatestVersion: true,
+    } as unknown as ClientCaseDocument]);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    await screen.findByText('legacy.pdf');
+    const search = screen.getByRole('searchbox', { name: 'Поиск документов дела' });
+    fireEvent.change(search, { target: { value: 'отсутствует' } });
+    expect(screen.getByText('По текущим фильтрам документов нет.')).toBeTruthy();
+    fireEvent.change(search, { target: { value: 'LEGACY' } });
+    expect(screen.getByText('legacy.pdf')).toBeTruthy();
+  });
+
   it('PAY-23: searches the loaded case documents and shows an honest empty state', async () => {
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
     expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
     expect(await screen.findByText('Заявление.docx')).toBeTruthy();
-    expect(screen.getByText(/Документов: \d+/u)).toBeTruthy();
+    expect(screen.getByText(/Показано \d+ из \d+/u)).toBeTruthy();
 
-    const search = screen.getByRole('searchbox', { name: 'Поиск по документам дела' });
+    const search = screen.getByRole('searchbox', { name: 'Поиск документов дела' });
     fireEvent.change(search, { target: { value: 'ЗАЯВЛ' } });
     expect(screen.getByText('Заявление.docx')).toBeTruthy();
-    expect(screen.getByText(/Найдено \d+ из \d+/u)).toBeTruthy();
+    expect(screen.getByText(/Показано \d+ из \d+/u)).toBeTruthy();
 
     fireEvent.change(search, { target: { value: 'несуществующий файл' } });
     expect(screen.queryByText('Заявление.docx')).toBeNull();
-    expect(screen.getByText(/документов не найдено/u)).toBeTruthy();
+    expect(screen.getByText('По текущим фильтрам документов нет.')).toBeTruthy();
 
     fireEvent.change(search, { target: { value: '' } });
     expect(screen.getByText('Заявление.docx')).toBeTruthy();

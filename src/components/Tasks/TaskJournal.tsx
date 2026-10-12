@@ -3,7 +3,7 @@ import { TaskUploadStatusPanel } from './TaskUploadStatusPanel';
 import { submitTaskFileUpload, TaskFileUploadWaitingError } from '../../services/taskFileUpload';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import {
   AlarmClock,
   ArrowDown,
@@ -2759,6 +2759,7 @@ export function TaskJournal({
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [templatesPanelOpen, setTemplatesPanelOpen] = useState(false);
   const [filtersPanelCollapsed, setFiltersPanelCollapsed] = useState(() => readTaskFiltersPanelCollapsed(currentUserId));
+  const filtersPanelId = useId();
   useEffect(() => {
     setFiltersPanelCollapsed(readTaskFiltersPanelCollapsed(currentUserId));
   }, [currentUserId]);
@@ -3806,6 +3807,23 @@ export function TaskJournal({
     () => filterCounterpartyOptions.find((counterparty) => counterparty.value === counterpartyFilter) ?? null,
     [counterpartyFilter, filterCounterpartyOptions],
   );
+
+  const activeFilterLabels = [
+    activeQuickFilter !== 'all' ? QUICK_FILTER_OPTIONS.find((option) => option.value === activeQuickFilter)?.label : null,
+    metricFilter !== 'none' ? ({ active: 'Активные задачи', overdue: 'Просроченные задачи', today: 'Задачи на сегодня', highPriority: 'Высокий приоритет' }[metricFilter]) : null,
+    search.trim() ? `Поиск: ${search.trim()}` : null,
+    statusFilter !== 'all' ? `Статус: ${statusFilter === 'active' ? 'Активные без закрытых' : statusFilter === 'overdue' ? 'Просроченные' : STATUS_OPTIONS.find((option) => option.value === statusFilter)?.label ?? statusFilter}` : null,
+    counterpartyFilter !== 'all' ? `Контрагент: ${selectedFilterCounterparty?.label ?? 'выбран'}` : null,
+    caseFilter !== 'all' ? `Дело: ${caseFilterOptions.find((option) => String(option.id) === caseFilter)?.label ?? 'выбрано'}` : null,
+    assigneeFilter !== 'all' ? `Исполнитель: ${assigneeOptions.find((option) => String(option.id) === assigneeFilter)?.name ?? 'выбран'}` : null,
+    typeFilter !== 'all' ? `Тип: ${TYPE_OPTIONS.find((option) => option.value === typeFilter)?.label ?? typeFilter}` : null,
+    priorityFilter !== 'all' ? `Приоритет: ${getPriorityLabel(priorityFilter)}` : null,
+    dateFromFilter ? `Дата с: ${dateFromFilter}` : null,
+    dateToFilter ? `Дата по: ${dateToFilter}` : null,
+    !dateFromFilter && !dateToFilter && metricFilter === 'none' && periodMode !== 'all' && (viewMode === 'list' || viewMode === 'board')
+      ? `Период: ${{ day: 'День', week: 'Неделя', month: 'Месяц' }[periodMode]}` : null,
+    billingFilter ? `Оплата: ${{ unbilled: 'Без счёта', fixed: 'Фиксированный договор', internal: 'Неоплачиваемые', invoiced: 'Включены в счёт', legacy: 'Классификация не указана' }[billingFilter]}` : null,
+  ].filter(isKeyword);
 
   const counterpartySearchOptions = useMemo(() => {
     const normalizedSearch = search.trim().toLocaleLowerCase('ru');
@@ -6096,14 +6114,21 @@ export function TaskJournal({
               writeTaskFiltersPanelCollapsed(currentUserId, next);
             }}
             aria-expanded={!filtersPanelCollapsed}
-            aria-controls="task-filters-and-views-body"
+            aria-controls={filtersPanelId}
             data-testid="task-filters-toggle"
-            className="flex w-full items-center gap-2 text-left text-sm font-semibold text-slate-800"
+            className="flex w-full items-center gap-2 rounded text-left text-sm font-semibold text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
           >
             {filtersPanelCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
             Фильтры и представления
           </button>
-          <div id="task-filters-and-views-body" hidden={filtersPanelCollapsed} className="mt-3">
+          {filtersPanelCollapsed ? (
+            <div aria-label="Действующие фильтры задач" className="mt-2 flex flex-wrap gap-1.5 text-xs text-slate-600">
+              {activeFilterLabels.length > 0 ? activeFilterLabels.map((label) => (
+                <span key={label} className="max-w-full break-words rounded-md bg-slate-100 px-2 py-1">{label}</span>
+              )) : <span>Без ограничений</span>}
+            </div>
+          ) : null}
+          <div id={filtersPanelId} hidden={filtersPanelCollapsed} className="mt-3">
         <section className="mb-4 flex min-w-0 max-w-full flex-wrap items-center justify-between gap-3">
           {!untriagedOnly ? <div className="flex max-w-full flex-wrap overflow-x-auto rounded-xl bg-slate-100 p-1" data-testid="task-quick-filter-row">
             {QUICK_FILTER_OPTIONS.map(({ value, label, description, icon: Icon }) => (
@@ -7770,12 +7795,12 @@ function TaskAutomationPanel({
                   <div className="mt-1 font-semibold leading-5 text-slate-800">{candidate.reason}</div>
                 </div>
               </section>
-              <section className="flex items-start gap-3 rounded-xl border border-stone-200 bg-stone-50/90 px-3 py-3" data-testid={`task-automation-next-step-${candidate.clientCaseId}`}>
-                <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-stone-600 ring-1 ring-stone-200">
+              <section className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/90 px-3 py-3" data-testid={`task-automation-next-step-${candidate.clientCaseId}`}>
+                <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-slate-600 ring-1 ring-slate-200">
                   <MessageSquare className="h-4 w-4" />
                 </span>
                 <div className="min-w-0">
-                  <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-stone-600">Что произойдёт дальше</div>
+                  <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-600">Что произойдёт дальше</div>
                   <div className="mt-1 text-xs leading-5 text-slate-700">{getAutomationCandidateNextStep(candidate, automationState)}</div>
                 </div>
               </section>

@@ -711,11 +711,53 @@ describe('TaskJournal', () => {
     expect(screen.getByText('БАНКРОТСТВО')).toBeTruthy();
   });
 
+  it('PAY-19 review: shows active constraints while the filter panel is collapsed', async () => {
+    window.localStorage.setItem('pp.task_journal.filters.v1.user:7', JSON.stringify({
+      quickFilter: 'all', periodMode: 'all', search: 'договор', priorityFilter: 'high',
+    }));
+    await renderJournal([], { waitForTitle: null });
+    fireEvent.click(screen.getByTestId('task-filters-toggle'));
+    const summary = screen.getByLabelText('Действующие фильтры задач');
+    expect(summary.textContent).toContain('Поиск: договор');
+    expect(summary.textContent).toContain('Приоритет: Высокий');
+    expect(summary.closest('[hidden]')).toBeNull();
+    fireEvent.click(screen.getByTestId('task-filters-toggle'));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Поиск по контрагенту, делу или наименованию задачи' }), { target: { value: '' } });
+    fireEvent.click(screen.getByTestId('task-filters-toggle'));
+    expect(screen.getByLabelText('Действующие фильтры задач').textContent).not.toContain('Поиск:');
+  });
+
+  it('PAY-19 review: links each filter toggle to its own panel when two journals are mounted', async () => {
+    await renderJournal([], { waitForTitle: null });
+    render(<TaskJournal />);
+    const toggles = await screen.findAllByTestId('task-filters-toggle');
+    const ids = toggles.map((toggle) => toggle.getAttribute('aria-controls'));
+    expect(new Set(ids).size).toBe(2);
+    for (const id of ids) expect(document.getElementById(id!)).toBeTruthy();
+  });
+
+  it('PAY-19 review: restores collapse state independently after switching users', async () => {
+    window.localStorage.setItem('pp.task_journal.filters_panel.v1.user:7', 'collapsed');
+    window.localStorage.setItem('pp.task_journal.filters_panel.v1.user:9', 'expanded');
+    const view = await renderJournal([], { waitForTitle: null });
+    expect(screen.getByTestId('task-filters-toggle').getAttribute('aria-expanded')).toBe('false');
+    authState.user = { ...authState.user, id: 9 };
+    view.rerender(<TaskJournal />);
+    await waitFor(() => expect(screen.getByTestId('task-filters-toggle').getAttribute('aria-expanded')).toBe('true'));
+    fireEvent.click(screen.getByTestId('task-filters-toggle'));
+    expect(window.localStorage.getItem('pp.task_journal.filters_panel.v1.user:9')).toBe('collapsed');
+    expect(window.localStorage.getItem('pp.task_journal.filters_panel.v1.user:7')).toBe('collapsed');
+    fireEvent.click(screen.getByTestId('task-filters-toggle'));
+    authState.user = { ...authState.user, id: 7 };
+    view.rerender(<TaskJournal />);
+    await waitFor(() => expect(screen.getByTestId('task-filters-toggle').getAttribute('aria-expanded')).toBe('false'));
+  });
+
   it('PAY-19: collapses the filters and views panel without losing filter state and remembers the choice', async () => {
     await renderJournal([], { waitForTitle: null });
 
     const toggle = screen.getByTestId('task-filters-toggle');
-    const body = document.getElementById('task-filters-and-views-body') as HTMLElement;
+    const body = document.getElementById(toggle.getAttribute('aria-controls')!) as HTMLElement;
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
     expect(body.hidden).toBe(false);
     expect(within(body).getByTestId('task-saved-view-select')).toBeTruthy();
@@ -5357,7 +5399,7 @@ describe('TaskJournal', () => {
     await renderJournal([createTask()], { onOpenCase });
 
     expect(screen.getByRole('heading', { name: 'Все дела без активных задач' })).toBeTruthy();
-    expect(screen.getByLabelText('Всего дел без активных задач: 3')).toBeTruthy();
+    expect(await screen.findByLabelText('Всего дел без активных задач: 3')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Критические: 1' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Пора создать: 1' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Ожидают срока: 1' })).toBeTruthy();
@@ -5374,7 +5416,7 @@ describe('TaskJournal', () => {
     expect(screen.getAllByText('Почему дело здесь')).toHaveLength(3);
     expect(screen.getAllByText('Что произойдёт дальше')).toHaveLength(3);
     expect(screen.getByTestId('task-automation-reason-100').className).toContain('bg-rose-50/80');
-    expect(screen.getByTestId('task-automation-next-step-100').className).toContain('bg-stone-50/90');
+    expect(screen.getByTestId('task-automation-next-step-100').className).toContain('bg-slate-50/90');
     expect(screen.getByTestId('task-automation-responsible-100').className).toContain('bg-blue-50');
     expect(screen.getByTestId('task-automation-responsible-101').className).toContain('bg-amber-50');
     expect(screen.getByTestId('task-automation-activity-100').className).toContain('bg-slate-50/90');
