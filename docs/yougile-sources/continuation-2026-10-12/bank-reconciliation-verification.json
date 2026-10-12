@@ -20,16 +20,16 @@
   },
   "checks": {
     "fullBackendFormat": true,
-    "sourceEncodingFiles": 3090,
+    "sourceEncodingFiles": 3092,
     "previousReleaseEntriesPreserved": true,
     "releaseBuild": true
   },
   "fullBackend": {
-    "status": "running sequentially on SSD; no qualified full result",
+    "status": "running sequentially on SSD with ICU ru-RU; no qualified full result",
     "expectedCases": 7078,
     "manifestSha256": "95ba710a5ae3f4969a6a99bb9719076e1c970d5160f3d8bc519f8b85ef1fef9b",
     "interruptedInitialRun": "PostgreSQL shared-lock exhaustion and cleanup timeout; no successful full result claimed.",
-    "retry": "Failed HDD runs are preserved. The same isolated PostgreSQL registration/login test passed on a fresh SSD loopback cluster (1/1, no skips). All four Release shards now run sequentially on SSD with one logical processor per process. All 7078 cases, assertions, test timeouts and artifact pins are unchanged.",
+    "retry": "HDD runs and the first SSD run are preserved as unsuccessful. The unchanged Russian case-insensitive search test failed with C libc locale and passed with ICU ru-RU (1/1, no skips); SQL directly confirmed Russian case folding false for C and true for ICU. All four Release shards now run sequentially on SSD/ICU, one logical processor per test process. All 7078 cases, assertions, test timeouts and artifact pins are unchanged.",
     "configuration": "Release",
     "runtimeProcessorCountReference": "https://learn.microsoft.com/et-ee/dotnet/core/compatibility/core-libraries/6.0/environment-processorcount-on-windows",
     "resourceProbe": {
@@ -38,6 +38,14 @@
       "ssdPassed": 1,
       "ssdFailed": 0,
       "notExecuted": 0
+    },
+    "localeRecovery": {
+      "provider": "icu",
+      "locale": "ru-RU",
+      "passed": 1,
+      "failed": 0,
+      "notExecuted": 0,
+      "reference": "https://www.postgresql.org/docs/17/app-initdb.html"
     }
   },
   "availability": {

@@ -1,0 +1,43 @@
+{
+  "observedOnLocalDate": "2026-10-13",
+  "environment": "owned synthetic CRM on loopback; no production changes",
+  "emailEnabled": false,
+  "backgroundServicesEnabled": false,
+  "productionSmtpSettingsPresent": false,
+  "externalCalendarProvidersEnabled": false,
+  "frontendAndCalendarSourceRevision": "2ec07dc2",
+  "sourceHashes": {
+    "src/components/Tasks/TaskJournal.tsx": "dc96b8f9dbba9430a75b7962c4a2fa64a730dea621ef1275c41b44006911f827",
+    "backend/Controllers/TasksController.cs": "8d3314c275c62e0fbf0357adfba9570276cb5cfabc8806ba1d254456b433445a",
+    "backend/Services/GoogleCalendarSyncService.cs": "b5ea6ea72905335c4732e641fce2a168777424387216fe3ed8d781db735c425c",
+    "backend/Services/YandexCalendarSyncService.cs": "31e2b2b07d917d9b30f0f833a55f516eb6f7415287c24802a3096758fcb249b5"
+  },
+  "calendarActionDuringReproduction": "hide",
+  "statusFilter": "all",
+  "view": "calendar/week",
+  "tasks": [
+    {
+      "id": 8,
+      "status": "inProgress",
+      "observedVisible": true
+    },
+    {
+      "id": 9,
+      "status": "cancelled",
+      "observedVisible": true
+    }
+  ],
+  "expectedCancelledVisible": false,
+  "defectReproduced": true,
+  "statusLabelObserved": {
+    "legacy": "Отменена",
+    "modern": "Отменена"
+  },
+  "readOnlyFormSnapshotsObserved": true,
+  "taskStatusNotMutated": true,
+  "settingsRestoredAfterCapture": true,
+  "additionalObservation": "The cancelled task also contributed to 2-hour day load and a same-time conflict warning with the active task. Verify workload after hiding; do not change unrelated financial state.",
+  "productionAnnulledTaskIdentified": false,
+  "implementationComplete": false,
+  "screenshot": "calendar-cancelled-hide-reproduction.png"
+}
