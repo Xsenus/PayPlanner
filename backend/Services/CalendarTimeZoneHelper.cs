@@ -92,8 +92,10 @@ public static class CalendarTimeZoneHelper
 
     public static string FormatOffsetDateTime(DateTime value, TimeZoneInfo timeZone)
     {
-        var local = ToUserLocal(value, timeZone);
-        var offset = timeZone.GetUtcOffset(local);
+        var instant = NormalizeUtcInstant(value);
+        var local = ToUserLocal(instant, timeZone);
+        // During a repeated local hour, the UTC instant identifies which offset applies.
+        var offset = timeZone.GetUtcOffset(instant);
         return new DateTimeOffset(DateTime.SpecifyKind(local, DateTimeKind.Unspecified), offset)
             .ToString("yyyy-MM-dd'T'HH:mm:ss.FFFFFFFzzz", CultureInfo.InvariantCulture);
     }

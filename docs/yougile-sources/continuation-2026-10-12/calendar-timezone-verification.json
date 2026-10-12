@@ -1,0 +1,253 @@
+{
+  "recordedAtUtc": "2026-10-12T21:22:01.036127+00:00",
+  "baseRevision": "0bfe415e5142498d284d4a8cc5e1fa06b85d8225",
+  "branch": "claude/practical-bardeen-pglcf3",
+  "verificationPerformedBeforeCommit": true,
+  "codeHashNormalization": "CRLF converted to LF; bytes otherwise unchanged",
+  "codeFiles": {
+    "backend/Services/GoogleCalendarSyncService.cs": "c94c3d4a6d6cd47a5e197ba4b35abc71e8b72e99e062daf6b3f139b9abbd3d05",
+    "backend/Services/YandexCalendarSyncService.cs": "1102be2fc862c58bb8f1b90d02cebf75fe117a4f6f8247cca524c3ca217ef821",
+    "backend/Services/CalendarTimeZoneHelper.cs": "a465ae7fd13302af8b1a59b9924b78e928330a67c2a1026229c2ab3d47d788ee",
+    "backend/PayPlanner.Api.Tests/CalendarBatchProbe.cs": "9b13336a4368404937e18bd35e081aaf943bcfb8c52478c0fa0eb11a90c78480",
+    "backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs": "137cd07edd9651cd8d0ef6efdf03fc3ef6bf0e9136c945108195b37417e825c6",
+    "backend/PayPlanner.Api.Tests/YandexCalendarSyncServiceTests.cs": "b311c9492758e21f577ffed0cbe07e7f591af648c8b1a4439bb10220c4487842",
+    "backend/PayPlanner.Api.Tests/CalendarTimeZoneHelperTests.cs": "ff4510ee2db789977a1e891396c7987263bc7f057c49ace300f69b77362e54dc",
+    "backend/AppReleases/releases.json": "7bcf53c9914b9cb9b8448a10e2c167dd5ce3a1b1a5fbabd5804730acd09e1092"
+  },
+  "scope": "Bounded per-page/per-single-task profile timezone reads; changed Yandex profile on same service; Google UTC instant preserved during daylight-saving fold",
+  "deployed": false,
+  "yougilePublished": false,
+  "baseline": {
+    "artifactRoot": "D:\\PayPlannerReview-20261012\\calendar-timezone-baseline-evidence",
+    "apiSha256": "9e5c04a8bbf9a8f349fe0c8f7afefa05be7c688f46e4ac45d8aeb843175e8c42",
+    "testAssemblySha256": "7586f05c2fde6985c728aa278f2fc989a18601f6193c9355fdc80c6925c0ca37",
+    "trxSha256": "34db42e5c98814d11f6e190024526bed326e147835e6da137efa38dcc2395726",
+    "counts": {
+      "passed": 9,
+      "failed": 7,
+      "total": 16
+    },
+    "results": [
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.SyncNowAsync_Colors502EventsInBoundedPagesWithoutRewritingOnRepeat(withDuplicates: True, failBatchRead: False)",
+        "outcome": "Passed",
+        "message": ""
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Synchronization_RefreshesProfileTimeZoneOnSameService(singleTask: False, newTimeZone: null)",
+        "outcome": "Passed",
+        "message": ""
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.SyncNowAsync_Colors502EventsInBoundedPagesWithoutRewritingOnRepeat(withDuplicates: False, failBatchRead: False)",
+        "outcome": "Passed",
+        "message": ""
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesProfileTimeZoneOnSameService(singleTask: True, newTimeZone: \"Unknown/Timezone\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 2\r\nActual:   1"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Synchronization_RefreshesProfileTimeZoneOnSameService(singleTask: False, newTimeZone: \"Unknown/Timezone\")",
+        "outcome": "Passed",
+        "message": ""
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.SyncNowAsync_Colors502EventsInBoundedPagesWithoutRewritingOnRepeat",
+        "outcome": "Failed",
+        "message": "Assert.InRange() Failure: Value not in range\r\nRange:  (1 - 2)\r\nActual: 1004"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesProfileTimeZoneOnSameService(singleTask: False, newTimeZone: \"America/New_York\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 2\r\nActual:   1"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesProfileTimeZoneOnSameService(singleTask: False, newTimeZone: null)",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 2\r\nActual:   1"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Synchronization_RefreshesProfileTimeZoneOnSameService(singleTask: True, newTimeZone: \"America/New_York\")",
+        "outcome": "Passed",
+        "message": ""
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesProfileTimeZoneOnSameService(singleTask: False, newTimeZone: \"Unknown/Timezone\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 2\r\nActual:   1"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Synchronization_RefreshesProfileTimeZoneOnSameService(singleTask: True, newTimeZone: \"Unknown/Timezone\")",
+        "outcome": "Passed",
+        "message": ""
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Synchronization_RefreshesProfileTimeZoneOnSameService(singleTask: False, newTimeZone: \"America/New_York\")",
+        "outcome": "Passed",
+        "message": ""
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Synchronization_RefreshesProfileTimeZoneOnSameService(singleTask: True, newTimeZone: null)",
+        "outcome": "Passed",
+        "message": ""
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesProfileTimeZoneOnSameService(singleTask: True, newTimeZone: null)",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 2\r\nActual:   1"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesProfileTimeZoneOnSameService(singleTask: True, newTimeZone: \"America/New_York\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 2\r\nActual:   1"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.SyncNowAsync_Colors502EventsInBoundedPagesWithoutRewritingOnRepeat(withDuplicates: False, failBatchRead: True)",
+        "outcome": "Passed",
+        "message": ""
+      }
+    ],
+    "buildWarnings": 0,
+    "buildErrors": 0,
+    "dstReadOnlyProbe": [
+      {
+        "utc": "2026-11-01T05:30:00Z",
+        "actual": "2026-11-01T01:30:00-05:00",
+        "instantPreserved": false,
+        "runtimeOffsetAtUtc": "-04:00:00"
+      },
+      {
+        "utc": "2026-11-01T06:30:00Z",
+        "actual": "2026-11-01T01:30:00-05:00",
+        "instantPreserved": true,
+        "runtimeOffsetAtUtc": "-05:00:00"
+      },
+      {
+        "utc": "2026-11-01T07:30:00Z",
+        "actual": "2026-11-01T02:30:00-05:00",
+        "instantPreserved": true,
+        "runtimeOffsetAtUtc": "-05:00:00"
+      },
+      {
+        "utc": "2026-03-08T06:30:00Z",
+        "actual": "2026-03-08T01:30:00-05:00",
+        "instantPreserved": true,
+        "runtimeOffsetAtUtc": "-05:00:00"
+      },
+      {
+        "utc": "2026-03-08T07:30:00Z",
+        "actual": "2026-03-08T03:30:00-04:00",
+        "instantPreserved": true,
+        "runtimeOffsetAtUtc": "-04:00:00"
+      }
+    ],
+    "sourceHashes": {
+      "backend/Services/GoogleCalendarSyncService.cs": "a5ef6f0ba4a7e6f2964e23c70d3253af0f73514f95ff9557af9e015337e2ec30",
+      "backend/Services/YandexCalendarSyncService.cs": "6f37e6a585cabbe2330461004a0df451579014510c48ecad4c4ec13187367cef",
+      "backend/Services/CalendarTimeZoneHelper.cs": "d81b5212e596f3e4258bfc29961e843c236d22c69bbbeec2013a951208ff23ac",
+      "backend/PayPlanner.Api.Tests/CalendarBatchProbe.cs": "9b13336a4368404937e18bd35e081aaf943bcfb8c52478c0fa0eb11a90c78480",
+      "backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs": "0b7e2896fc1304920c2eaa13f4c15174b081840fc77ade1090b86fc770600d84",
+      "backend/PayPlanner.Api.Tests/YandexCalendarSyncServiceTests.cs": "33848af7bbb2aeb9db4ab26c86990ca0b3b76bec9f63ffd642a8f69510c3aaaf"
+    }
+  },
+  "currentBuild": {
+    "status": "passed after fixture correction",
+    "failedInitialBuild": {
+      "errors": 4,
+      "cause": "New Yandex fixture used 4 arguments; existing helper accepts 3. Corrected fixture, production API built successfully.",
+      "log": "calendar-timezone-final-build.log"
+    },
+    "log": "calendar-timezone-corrected-build.log",
+    "warnings": 0,
+    "errors": 0
+  },
+  "relatedTests": {
+    "status": "passed",
+    "passed": 187,
+    "failed": 0,
+    "skipped": 0,
+    "newCases": 22,
+    "log": "calendar-timezone-regressions.log",
+    "trxSha256": "e5e484aef5a7d62e081f6dd8600847a05fe76b0a47ac7e9d9614f9136a10763e",
+    "artifactRoot": "D:\\PayPlannerReview-20261012\\calendar-timezone-export-evidence",
+    "apiSha256": "6e5d6a2051a2d35b2bbdc639b8494a92e5d7bd0f5b51a7b1f556f50be25a8833",
+    "testAssemblySha256": "868c2133fa22c397ec4fadf533c7c547a4b9ca530c78c878d3b5ea2de6aa52d2",
+    "measurements": [
+      "CalendarTimezoneOwners provider=Google; assignee=False; settings=2",
+      "CalendarTimezoneOwners provider=Google; assignee=False; settings=2",
+      "CalendarTimezoneOwners provider=Google; assignee=False; settings=2",
+      "CalendarTimezoneOwners provider=Google; assignee=False; settings=2",
+      "CalendarTimezoneOwners provider=Google; assignee=True; settings=3",
+      "CalendarTimezoneOwners provider=Google; assignee=True; settings=3",
+      "CalendarTimezoneOwners provider=Google; assignee=True; settings=3",
+      "CalendarTimezoneOwners provider=Google; assignee=True; settings=3",
+      "CalendarTimezoneRefresh provider=Google; single=False; setting=America/New_York; settings=1",
+      "CalendarTimezoneRefresh provider=Google; single=False; setting=Unknown/Timezone; settings=1",
+      "CalendarTimezoneRefresh provider=Google; single=True; setting=missing; settings=1",
+      "CalendarTimezoneRefresh provider=Google; single=False; setting=missing; settings=1",
+      "CalendarTimezoneRefresh provider=Google; single=True; setting=America/New_York; settings=1",
+      "CalendarTimezoneRefresh provider=Google; single=True; setting=Unknown/Timezone; settings=1",
+      "CalendarTimezoneQueries provider=Google; phase=first; settings=2",
+      "CalendarTimezoneQueries provider=Google; phase=retry; settings=2",
+      "CalendarTimezoneQueries provider=Yandex; phase=first; settings=2",
+      "CalendarTimezoneQueries provider=Yandex; phase=retry; settings=2",
+      "CalendarTimezoneQueries provider=Yandex; phase=first; settings=2",
+      "CalendarTimezoneQueries provider=Yandex; phase=retry; settings=2",
+      "CalendarTimezoneQueries provider=Yandex; phase=first; settings=2",
+      "CalendarTimezoneQueries provider=Yandex; phase=retry; settings=2",
+      "CalendarTimezoneRefresh provider=Yandex; single=False; setting=missing; settings=1",
+      "CalendarTimezoneRefresh provider=Yandex; single=False; setting=Unknown/Timezone; settings=1",
+      "CalendarTimezoneRefresh provider=Yandex; single=True; setting=missing; settings=1",
+      "CalendarTimezoneRefresh provider=Yandex; single=True; setting=America/New_York; settings=1",
+      "CalendarTimezoneRefresh provider=Yandex; single=False; setting=America/New_York; settings=1",
+      "CalendarTimezoneRefresh provider=Yandex; single=True; setting=Unknown/Timezone; settings=1",
+      "CalendarTimezoneOwners provider=Yandex; assignee=False; settings=2",
+      "CalendarTimezoneOwners provider=Yandex; assignee=False; settings=2",
+      "CalendarTimezoneOwners provider=Yandex; assignee=False; settings=2",
+      "CalendarTimezoneOwners provider=Yandex; assignee=False; settings=2",
+      "CalendarTimezoneOwners provider=Yandex; assignee=True; settings=3",
+      "CalendarTimezoneOwners provider=Yandex; assignee=True; settings=3",
+      "CalendarTimezoneOwners provider=Yandex; assignee=True; settings=3",
+      "CalendarTimezoneOwners provider=Yandex; assignee=True; settings=3"
+    ],
+    "counterScope": "All SELECT statements from UserSettings in synthetic SQLite service tests; not all SQL, not a PostgreSQL production benchmark"
+  },
+  "format": {
+    "apiPassed": true,
+    "testsPassed": true,
+    "correctedYandexPassed": true
+  },
+  "safeLocalSettings": {
+    "Email__Enabled": false,
+    "BackgroundServices__Enabled": false,
+    "testData": "Synthetic SQLite and fake HTTP; no real messages or production DB"
+  },
+  "frontendGateReused": {
+    "revision": "d2e9508752a1bbca1c3ea28bd6e242284e5c00a4",
+    "passed": 2596,
+    "reason": "Frontend and public API signatures unchanged"
+  },
+  "fullCurrentBackendGate": "not_started",
+  "remaining": [
+    "Removing Yandex service cache makes import ResolveTaskTimeZoneAsync read settings per changed event; replace with explicitly scoped bounded import-page lookups and add public import budget test before considering timezone wave finished",
+    "Old events before sync-from still loaded as one list",
+    "Owner preparatory user list still loaded as one list; timezone lookups are chunked",
+    "Remaining Google authorization/settings SELECTs",
+    "Full backend gate of final calendar revision",
+    "Actual reported annulled task not identified",
+    "Real provider/environment acceptance and separately approved publication"
+  ],
+  "encoding": {
+    "passed": true,
+    "checkedFiles": 3109,
+    "log": "calendar-timezone-encoding.log"
+  },
+  "roadmapProgressAudit": {
+    "passed": true,
+    "log": "calendar-timezone-roadmap-progress.log"
+  },
+  "currentWaveComplete": false,
+  "verifiedAtUtc": "2026-10-12T21:31:04.315849+00:00"
+}

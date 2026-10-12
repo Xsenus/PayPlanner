@@ -1638,6 +1638,7 @@ public class GoogleCalendarSyncServiceTests
         await using var db = await CreateContextAsync(queryProbe);
         var user = await CreateUserAsync(db, "bulk-owner@example.local", "user");
         var hidden = await CreateUserAsync(db, "bulk-hidden@example.local", "user");
+        await SetUserTimeZoneAsync(db, user.Id, "Europe/Samara");
         await EnableGoogleSettingsAsync(db);
         await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 10, completedTaskCalendarAction: "color");
         var connection = await CreateConnectionAsync(db, user.Id);
@@ -1714,6 +1715,8 @@ public class GoogleCalendarSyncServiceTests
         }
         Console.WriteLine($"CalendarLogQueries provider=Google; scenario=color; case=normal; phase=first; metadata={queryProbe.LogMetadataSelects}; total={queryProbe.TotalSelects}");
         Assert.InRange(queryProbe.LogMetadataSelects, 0, 8);
+        Console.WriteLine($"CalendarTimezoneQueries provider=Google; phase=first; settings={queryProbe.TimeZoneSelects}");
+        Assert.InRange(queryProbe.TimeZoneSelects, 1, 2);
         Assert.Equal(502, handler.PutBodies.Count);
         Assert.All(handler.PutBodies.Values, bodies => Assert.Single(bodies));
         Assert.Equal(0, handler.DeleteCount);
@@ -1750,6 +1753,8 @@ public class GoogleCalendarSyncServiceTests
         Assert.Equal(0, retry.ErrorCount);
         Console.WriteLine($"CalendarLogQueries provider=Google; scenario=color; case=normal; phase=retry; metadata={queryProbe.LogMetadataSelects}; total={queryProbe.TotalSelects}");
         Assert.InRange(queryProbe.LogMetadataSelects, 0, 8);
+        Console.WriteLine($"CalendarTimezoneQueries provider=Google; phase=retry; settings={queryProbe.TimeZoneSelects}");
+        Assert.InRange(queryProbe.TimeZoneSelects, 1, 2);
         Assert.Equal(502, handler.PutBodies.Count);
         Assert.All(handler.PutBodies.Values, bodies => Assert.Single(bodies));
         Assert.Equal(0, handler.DeleteCount);
@@ -2039,6 +2044,525 @@ public class GoogleCalendarSyncServiceTests
         db.Users.Add(user);
         await db.SaveChangesAsync();
         return user;
+    }
+
+
+    [Theory]
+    [InlineData(false, "America/New_York")]
+    [InlineData(true, "America/New_York")]
+    [InlineData(false, "Unknown/Timezone")]
+    [InlineData(true, "Unknown/Timezone")]
+    [InlineData(false, null)]
+    [InlineData(true, null)]
+    public async Task Synchronization_RefreshesProfileTimeZoneOnSameService(bool singleTask, string? newTimeZone)
+    {
+        var queryProbe = new CalendarBatchQueryProbe("Google");
+        await using var db = await CreateContextAsync(queryProbe);
+        var user = await CreateUserAsync(db, "timezone-refresh@example.local", "user");
+        await EnableGoogleSettingsAsync(db);
+        await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 10);
+        await SetUserTimeZoneAsync(db, user.Id, "Europe/Samara");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        await CreateCalendarAsync(db, connection.Id, "timezone-calendar", "Synthetic timezone calendar");
+        var dueAt = DateTime.UtcNow.Date.AddDays(7).AddHours(23).AddMinutes(30);
+        var task = await CreateTaskAsync(db, user.Id, "Synthetic timezone refresh", dueAt: dueAt);
+        var handler = new RecordingGoogleHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+        db.ChangeTracker.Clear();
+
+        async Task RunAsync()
+        {
+            if (singleTask)
+            {
+                await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+            }
+            else
+            {
+                await db.GoogleCalendarConnections.ExecuteUpdateAsync(setters => setters
+                    .SetProperty(item => item.LastFullSyncAt, (DateTime?)null)
+                    .SetProperty(item => item.LastIncrementalSyncAt, (DateTime?)null));
+                db.ChangeTracker.Clear();
+                var result = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+                Assert.Equal(1, result.ProcessedTasks);
+                Assert.Equal(0, result.ErrorCount);
+            }
+        }
+
+        await RunAsync();
+        var oldHash = await db.GoogleCalendarTaskLinks.AsNoTracking().Select(item => item.LastCrmHash).SingleAsync();
+        var settingQuery = db.UserSettings.Where(item => item.UserId == user.Id
+            && item.Key == CalendarTimeZoneHelper.UserTimeZoneSettingKey);
+        if (newTimeZone is null)
+        {
+            await settingQuery.ExecuteDeleteAsync();
+        }
+        else
+        {
+            await settingQuery.ExecuteUpdateAsync(setters => setters.SetProperty(item => item.Value, newTimeZone));
+        }
+        queryProbe.Reset();
+        await RunAsync();
+        var writes = handler.Requests.Where(request => ((request.Method == HttpMethod.Post || request.Method == HttpMethod.Put) && request.RequestUri!.AbsolutePath.Contains("/events", StringComparison.Ordinal))).ToArray();
+        Assert.Equal(2, writes.Length);
+        Assert.NotEqual(oldHash, await db.GoogleCalendarTaskLinks.AsNoTracking().Select(item => item.LastCrmHash).SingleAsync());
+        var expectedZone = CalendarTimeZoneHelper.ResolveTimeZone(newTimeZone);
+        var expectedId = CalendarTimeZoneHelper.ResolveIanaTimeZoneId(expectedZone);
+        using var payload = JsonDocument.Parse(await writes[1].Content!.ReadAsStringAsync());
+        Assert.Equal(expectedId, payload.RootElement.GetProperty("start").GetProperty("timeZone").GetString());
+        Assert.Equal(CalendarTimeZoneHelper.FormatOffsetDateTime(dueAt, expectedZone),
+            payload.RootElement.GetProperty("start").GetProperty("dateTime").GetString());
+        Assert.Equal(CalendarTimeZoneHelper.FormatOffsetDateTime(dueAt.AddHours(1), expectedZone),
+            payload.RootElement.GetProperty("end").GetProperty("dateTime").GetString());
+        Assert.Contains(handler.Requests, request => request.Method == HttpMethod.Patch
+            && request.RequestUri!.AbsolutePath.EndsWith("/calendars/timezone-calendar", StringComparison.Ordinal));
+        Console.WriteLine($"CalendarTimezoneRefresh provider=Google; single={singleTask}; setting={newTimeZone ?? "missing"}; settings={queryProbe.TimeZoneSelects}");
+        Assert.InRange(queryProbe.TimeZoneSelects, 1, 2);
+        await RunAsync();
+        Assert.Equal(2, handler.Requests.Count(request => ((request.Method == HttpMethod.Post || request.Method == HttpMethod.Put) && request.RequestUri!.AbsolutePath.Contains("/events", StringComparison.Ordinal))));
+        Assert.False(await db.GoogleCalendarTaskLinks.AnyAsync(item => item.LastError != null));
+    }
+
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SyncNowAsync_BatchesTimeZonesFor502TasksAndPreservesCalendarOwner(bool assigneeMode)
+    {
+        var queryProbe = new CalendarBatchQueryProbe("Google");
+        await using var db = await CreateContextAsync(queryProbe);
+        var admin = await CreateUserAsync(db, "timezone-batch-admin@example.local", "admin", "Synthetic Admin");
+        var owners = new[]
+        {
+            await CreateUserAsync(db, "timezone-batch-first@example.local", "user", "Synthetic First"),
+            await CreateUserAsync(db, "timezone-batch-invalid@example.local", "user", "Synthetic Invalid"),
+            await CreateUserAsync(db, "timezone-batch-missing@example.local", "user", "Synthetic Missing"),
+        };
+        await EnableGoogleSettingsAsync(db);
+        await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 10);
+        await SetUserTimeZoneAsync(db, admin.Id, "Europe/Samara");
+        await SetUserTimeZoneAsync(db, owners[0].Id, "America/New_York");
+        await SetUserTimeZoneAsync(db, owners[1].Id, "Unknown/Timezone");
+        var connection = await CreateConnectionAsync(db, admin.Id, calendarMode: assigneeMode ? "adminByAssignee" : "personal");
+        var personalCalendar = await CreateCalendarAsync(db, connection.Id, "personal-calendar", "Synthetic personal calendar");
+        var calendars = new Dictionary<int, GoogleCalendarSyncCalendar>();
+        foreach (var owner in owners)
+        {
+            calendars.Add(owner.Id, await CreateCalendarAsync(db, connection.Id, $"owner-calendar-{owner.Id}", owner.FullName, owner.Id));
+        }
+        var firstDate = DateTime.UtcNow.Date.AddDays(7).AddHours(23).AddMinutes(30);
+        var tasks = Enumerable.Range(0, 502).Select(index => new TaskJournalItem
+        {
+            ObjectName = "Synthetic timezone batch",
+            Title = $"Timezone task {index + 1}",
+            AssigneeUserId = owners[index % owners.Length].Id,
+            AssigneeName = owners[index % owners.Length].FullName,
+            DueAt = index % 2 == 0 ? firstDate : firstDate.AddDays(180),
+            PlannedDurationMinutes = 60,
+            Priority = "normal",
+            Status = "new",
+        }).ToArray();
+        db.TaskJournalItems.AddRange(tasks);
+        await db.SaveChangesAsync();
+        for (var index = 0; index < tasks.Length; index++)
+        {
+            var calendar = assigneeMode ? calendars[tasks[index].AssigneeUserId!.Value] : personalCalendar;
+            db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
+            {
+                ConnectionId = connection.Id,
+                CalendarSyncCalendarId = calendar.Id,
+                TaskJournalItemId = tasks[index].Id,
+                GoogleCalendarId = calendar.GoogleCalendarId,
+                GoogleEventId = $"bulk-event-{index + 1}",
+                SyncStatus = "active",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+        }
+        await db.SaveChangesAsync();
+        var handler = new CalendarBatchColorProbe(new RecordingGoogleHandler(), () => Task.CompletedTask);
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+        db.ChangeTracker.Clear();
+
+        async Task RunAsync()
+        {
+            await db.GoogleCalendarConnections.ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.LastFullSyncAt, (DateTime?)null)
+                .SetProperty(item => item.LastIncrementalSyncAt, (DateTime?)null));
+            db.ChangeTracker.Clear();
+            queryProbe.Reset();
+            var result = await service.SyncNowAsync(admin.Id, CreateHttpRequest(admin.Id, "admin"), CancellationToken.None);
+            Assert.Equal(502, result.ProcessedTasks);
+            Assert.Equal(0, result.ErrorCount);
+            Assert.Equal(new[] { 500, 500 }, queryProbe.TaskPageLimits);
+            Console.WriteLine($"CalendarTimezoneOwners provider=Google; assignee={assigneeMode}; settings={queryProbe.TimeZoneSelects}");
+            Assert.InRange(queryProbe.TimeZoneSelects, 2, assigneeMode ? 3 : 2);
+            if (!assigneeMode)
+            {
+                Assert.Equal(2, queryProbe.TimeZoneUserIds.Count);
+                Assert.All(queryProbe.TimeZoneUserIds, ids => Assert.Equal(new[] { admin.Id }, ids));
+            }
+        }
+
+        await RunAsync();
+        Assert.Equal(502, handler.PutBodies.Count);
+        for (var index = 0; index < tasks.Length; index++)
+        {
+            var task = tasks[index];
+            var body = Assert.Single(handler.PutBodies.Single(pair => pair.Key.EndsWith($"/bulk-event-{index + 1}", StringComparison.Ordinal)).Value);
+            var zone = CalendarTimeZoneHelper.ResolveTimeZone(assigneeMode
+                ? (task.AssigneeUserId == owners[0].Id ? "America/New_York" : null) : "Europe/Samara");
+            using var payload = JsonDocument.Parse(body);
+            Assert.Equal(CalendarTimeZoneHelper.ResolveIanaTimeZoneId(zone), payload.RootElement.GetProperty("start").GetProperty("timeZone").GetString());
+            Assert.Equal(CalendarTimeZoneHelper.FormatOffsetDateTime(task.DueAt, zone), payload.RootElement.GetProperty("start").GetProperty("dateTime").GetString());
+            Assert.Equal(CalendarTimeZoneHelper.FormatOffsetDateTime(task.DueAt.AddHours(1), zone), payload.RootElement.GetProperty("end").GetProperty("dateTime").GetString());
+        }
+        await RunAsync();
+        Assert.All(handler.PutBodies.Values, bodies => Assert.Single(bodies));
+        await db.UserSettings.Where(item => item.UserId == owners[0].Id && item.Key == CalendarTimeZoneHelper.UserTimeZoneSettingKey)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.Value, "Asia/Kamchatka"));
+        await RunAsync();
+        Assert.Equal(assigneeMode ? 168 : 0, handler.PutBodies.Values.Count(bodies => bodies.Count == 2));
+        Assert.All(handler.PutBodies.Values, bodies => Assert.InRange(bodies.Count, 1, 2));
+        await RunAsync();
+        Assert.Equal(assigneeMode ? 168 : 0, handler.PutBodies.Values.Count(bodies => bodies.Count == 2));
+        Assert.Equal(0, handler.DeleteCount);
+        Assert.Equal(502, await db.GoogleCalendarTaskLinks.CountAsync(item => item.SyncStatus == "active" && item.LastError == null));
+    }
+
+    [Fact]
+    public async Task SyncTaskForConnectedUsersAsync_PreservesBothOccurrencesOfDaylightSavingFold()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "timezone-fold@example.local", "user");
+        await EnableGoogleSettingsAsync(db);
+        await SetUserTimeZoneAsync(db, user.Id, "America/New_York");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        var calendar = await CreateCalendarAsync(db, connection.Id, "fold-calendar", "Synthetic fold calendar");
+        var first = await CreateTaskAsync(db, user.Id, "First occurrence",
+            dueAt: new DateTime(2026, 11, 1, 5, 30, 0, DateTimeKind.Utc));
+        var second = await CreateTaskAsync(db, user.Id, "Second occurrence",
+            dueAt: first.DueAt.AddHours(1));
+        var tasks = new[] { first, second };
+        for (var index = 0; index < tasks.Length; index++)
+        {
+            db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
+            {
+                ConnectionId = connection.Id,
+                CalendarSyncCalendarId = calendar.Id,
+                TaskJournalItemId = tasks[index].Id,
+                GoogleCalendarId = calendar.GoogleCalendarId,
+                GoogleEventId = $"bulk-event-{index + 1}",
+                SyncStatus = "active",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+        }
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var handler = new CalendarBatchColorProbe(new RecordingGoogleHandler(), () => Task.CompletedTask);
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        foreach (var task in tasks)
+        {
+            await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+        }
+
+        var expectedStarts = new[] { "2026-11-01T01:30:00-04:00", "2026-11-01T01:30:00-05:00" };
+        var expectedEnds = new[] { "2026-11-01T01:30:00-05:00", "2026-11-01T02:30:00-05:00" };
+        for (var index = 0; index < tasks.Length; index++)
+        {
+            using var payload = JsonDocument.Parse(Assert.Single(handler.PutBodies.Single(pair =>
+                pair.Key.EndsWith($"/bulk-event-{index + 1}", StringComparison.Ordinal)).Value));
+            var start = payload.RootElement.GetProperty("start").GetProperty("dateTime").GetString();
+            var end = payload.RootElement.GetProperty("end").GetProperty("dateTime").GetString();
+            Assert.Equal(expectedStarts[index], start);
+            Assert.Equal(expectedEnds[index], end);
+            Assert.Equal(tasks[index].DueAt, DateTimeOffset.Parse(start!).UtcDateTime);
+            Assert.Equal(tasks[index].DueAt.AddHours(1), DateTimeOffset.Parse(end!).UtcDateTime);
+        }
+        Assert.Equal(0, handler.DeleteCount);
+    }
+
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SyncDueConnectionsAsync_BoundsTimezoneReadsFor502ImportsAndRefreshesOwnerProfile(bool assigneeCalendar)
+    {
+        var queryProbe = new CalendarBatchQueryProbe("Google");
+        await using var db = await CreateContextAsync(queryProbe);
+        var owner = await CreateUserAsync(db, "timezone-import-owner@example.local", "user");
+        var actor = assigneeCalendar ? await CreateUserAsync(db, "timezone-import-admin@example.local", "admin") : owner;
+        await EnableGoogleSettingsAsync(db);
+        await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 10);
+        await SetUserTimeZoneAsync(db, owner.Id, "Europe/Samara");
+        if (assigneeCalendar)
+        {
+            await SetUserTimeZoneAsync(db, actor.Id, "Asia/Kamchatka");
+        }
+        var connection = await CreateConnectionAsync(db, actor.Id, calendarMode: assigneeCalendar ? "adminByAssignee" : "personal");
+        var calendar = await CreateCalendarAsync(db, connection.Id, "timezone-import", "Synthetic import calendar",
+            assigneeCalendar ? owner.Id : null);
+        calendar.SyncToken = "synthetic-existing-sync";
+        // Import deliberately covers linked tasks beyond the export window, so
+        // these incremental changes are legal without full-sync date filters,
+        // and setting reads cannot be attributed to export upserts.
+        var dueAt = DateTime.UtcNow.Date.AddDays(400).AddHours(9);
+        var tasks = Enumerable.Range(1, 502).Select(index => new TaskJournalItem
+        {
+            ObjectName = "Synthetic timezone import",
+            Title = $"Before import {index}",
+            AssigneeUserId = owner.Id,
+            AssigneeName = owner.FullName,
+            DueAt = dueAt,
+            PlannedDurationMinutes = 60,
+            Priority = "normal",
+            Status = "new",
+        }).ToArray();
+        db.TaskJournalItems.AddRange(tasks);
+        await db.SaveChangesAsync();
+        for (var index = 0; index < tasks.Length; index++)
+        {
+            db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
+            {
+                ConnectionId = connection.Id,
+                CalendarSyncCalendarId = calendar.Id,
+                TaskJournalItemId = tasks[index].Id,
+                GoogleCalendarId = calendar.GoogleCalendarId,
+                GoogleEventId = $"import-event-{index + 1}",
+                SyncStatus = "active",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+        }
+        await db.SaveChangesAsync();
+        var handler = new CalendarTimezoneImportProbe(new RecordingGoogleHandler(), google: true);
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        void PrepareResponse(int round)
+        {
+            handler.GoogleEvents = tasks.Select((task, index) => (object)new
+            {
+                id = $"import-event-{index + 1}",
+                etag = $"synthetic-import-{round}-{index + 1}",
+                status = "confirmed",
+                summary = $"[Новая] Imported {round}-{index + 1}",
+                start = new { dateTime = task.DueAt.AddDays(round + 1).ToString("O") },
+                end = new { dateTime = task.DueAt.AddDays(round + 1).AddHours(1).ToString("O") },
+                extendedProperties = new
+                {
+                    @private = new Dictionary<string, string> { ["payPlannerTaskId"] = task.Id.ToString() },
+                },
+            }).ToArray();
+        }
+
+        async Task RunAsync(int round, bool unchanged)
+        {
+            await db.GoogleCalendarConnections.ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.LastFullSyncAt, (DateTime?)DateTime.UtcNow)
+                .SetProperty(item => item.LastIncrementalSyncAt, (DateTime?)DateTime.UtcNow.AddHours(-1)));
+            db.ChangeTracker.Clear();
+            if (!unchanged)
+            {
+                PrepareResponse(round);
+            }
+            queryProbe.Reset();
+            handler.ResetReads();
+            var result = await service.SyncDueConnectionsAsync(10, CancellationToken.None);
+            Assert.Equal(0, result.ErrorCount);
+            Assert.Equal(0, result.ProcessedTasks);
+            Assert.Equal(unchanged ? 0 : 502, result.ImportedEvents);
+            Assert.Equal(2, handler.EventListReads);
+            var updatedTasks = await db.TaskJournalItems.AsNoTracking().OrderBy(item => item.Id).ToListAsync();
+            Assert.Equal(502, updatedTasks.Count);
+            Assert.All(updatedTasks, task => Assert.Equal(dueAt.AddDays(round + 1), task.DueAt));
+            Assert.All(updatedTasks, task => Assert.Equal(60, task.PlannedDurationMinutes));
+            Assert.All(updatedTasks, task => Assert.Equal("new", task.Status));
+            Assert.All(updatedTasks, task => Assert.Equal(owner.Id, task.AssigneeUserId));
+            if (!unchanged)
+            {
+                var logs = await db.GoogleCalendarSyncLogs.AsNoTracking()
+                    .Where(item => item.Direction == "google-to-crm" && item.Operation == "update-task")
+                    .OrderByDescending(item => item.Id).Take(502).ToListAsync();
+                Assert.Equal(502, logs.Count);
+                var zone = CalendarTimeZoneHelper.ResolveTimeZone(round == 0 ? "Europe/Samara" : "America/New_York");
+                var expectedTime = CalendarTimeZoneHelper.FormatUserDateTime(dueAt.AddDays(round + 1), zone);
+                Assert.All(logs, log =>
+                {
+                    using var details = JsonDocument.Parse(log.DetailsJson!);
+                    Assert.Contains(expectedTime, details.RootElement.GetProperty("detail").GetString());
+                });
+            }
+            Console.WriteLine($"CalendarTimezoneImport provider=Google; assignee={assigneeCalendar}; round={round}; unchanged={unchanged}; settings={queryProbe.TimeZoneSelects}");
+            Assert.Equal((assigneeCalendar ? 1 : 0) + (unchanged ? 0 : 2), queryProbe.TimeZoneSelects);
+        }
+
+        await RunAsync(0, unchanged: false);
+        await db.UserSettings.Where(item => item.UserId == owner.Id && item.Key == CalendarTimeZoneHelper.UserTimeZoneSettingKey)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.Value, "America/New_York"));
+        await RunAsync(1, unchanged: false);
+        await RunAsync(1, unchanged: true);
+    }
+
+
+    [Theory]
+    [InlineData("normal")]
+    [InlineData("emptyFirst")]
+    [InlineData("secondFailure")]
+    [InlineData("cancelSecond")]
+    [InlineData("goneFirst")]
+    [InlineData("goneSecond")]
+    [InlineData("goneTwice")]
+    [InlineData("cycle")]
+    [InlineData("missingFinal")]
+    public async Task SyncDueConnectionsAsync_PaginatesAndCommitsOnlyCompletedGoogleSyncToken(string scenario)
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "pagination-owner@example.local", "user");
+        await EnableGoogleSettingsAsync(db);
+        await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 10);
+        var connection = await CreateConnectionAsync(db, user.Id);
+        var calendar = await CreateCalendarAsync(db, connection.Id, "timezone-import", "Synthetic paginated calendar");
+        var dueAt = DateTime.UtcNow.Date.AddDays(14).AddHours(9);
+        var first = await CreateTaskAsync(db, user.Id, "Before first page", dueAt: dueAt);
+        var second = await CreateTaskAsync(db, user.Id, "Before second page", dueAt: dueAt);
+        var tasks = new[] { first, second };
+        for (var index = 0; index < tasks.Length; index++)
+        {
+            db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
+            {
+                ConnectionId = connection.Id,
+                CalendarSyncCalendarId = calendar.Id,
+                TaskJournalItemId = tasks[index].Id,
+                GoogleCalendarId = calendar.GoogleCalendarId,
+                GoogleEventId = $"import-event-{index + 1}",
+                SyncStatus = "active",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+        }
+        await db.SaveChangesAsync();
+        var handler = new CalendarTimezoneImportProbe(new RecordingGoogleHandler(), google: true);
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+        // Record real CRM hashes first: a failed import must not overwrite unread
+        // provider changes merely because synthetic links lacked their CRM hash.
+        foreach (var task in tasks)
+        {
+            await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+        }
+        await db.GoogleCalendarSyncCalendars.ExecuteUpdateAsync(setters => setters
+            .SetProperty(item => item.SyncToken, "synthetic-old-sync")
+            .SetProperty(item => item.LastSyncedAt, (DateTime?)null));
+        db.ChangeTracker.Clear();
+        var initialWrites = handler.EventWrites;
+        using var cancellation = new CancellationTokenSource();
+        var faultsEnabled = true;
+        var goneUsed = false;
+        handler.GooglePageResponse = (request, ordinal, token) =>
+        {
+            var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(request.RequestUri!.Query);
+            var next = query.ContainsKey("pageToken");
+            if (faultsEnabled && scenario == "cancelSecond" && next)
+            {
+                cancellation.Cancel();
+                token.ThrowIfCancellationRequested();
+            }
+            if (faultsEnabled && ((scenario == "goneFirst" && !goneUsed && !next)
+                || (scenario == "goneSecond" && !goneUsed && next)
+                || scenario == "goneTwice"))
+            {
+                goneUsed = true;
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Gone));
+            }
+            if (faultsEnabled && scenario == "secondFailure" && next)
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadRequest)
+                {
+                    Content = new StringContent("Synthetic second-page error"),
+                });
+            }
+            var indices = next && scenario == "emptyFirst" ? new[] { 0, 1 }
+                : !next && scenario == "emptyFirst" ? [] : new[] { next ? 1 : 0 };
+            var events = indices.Select(index => new
+            {
+                id = $"import-event-{index + 1}",
+                etag = $"synthetic-page-{index + 1}",
+                status = "confirmed",
+                summary = $"[Новая] After page {index + 1}",
+                start = new { dateTime = dueAt.AddDays(1).ToString("O") },
+                end = new { dateTime = dueAt.AddDays(1).AddHours(1).ToString("O") },
+                extendedProperties = new
+                {
+                    @private = new Dictionary<string, string> { ["payPlannerTaskId"] = tasks[index].Id.ToString() },
+                },
+            }).ToArray();
+            var body = JsonSerializer.Serialize(new
+            {
+                items = events,
+                nextPageToken = !next || (faultsEnabled && scenario == "cycle") ? "timezone-next" : null,
+                // Deliberately include a premature token on the first page.
+                nextSyncToken = !next ? "synthetic-premature-sync"
+                    : faultsEnabled && scenario == "missingFinal" ? null : "synthetic-final-sync",
+            });
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json"),
+            });
+        };
+
+        handler.ResetReads();
+        var failure = scenario is "secondFailure" or "goneTwice" or "cycle" or "missingFinal";
+        if (scenario == "cancelSecond")
+        {
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.SyncDueConnectionsAsync(10, cancellation.Token));
+        }
+        else
+        {
+            var result = await service.SyncDueConnectionsAsync(10, CancellationToken.None);
+            Assert.Equal(failure ? 1 : 0, result.ErrorCount);
+            if (!failure)
+            {
+                Assert.Equal(2, result.ImportedEvents);
+            }
+        }
+        var storedCalendar = await db.GoogleCalendarSyncCalendars.AsNoTracking().SingleAsync();
+        var expectedToken = scenario == "goneTwice" ? null
+            : failure || scenario == "cancelSecond" ? "synthetic-old-sync" : "synthetic-final-sync";
+        Assert.Equal(expectedToken, storedCalendar.SyncToken);
+        if (failure || scenario == "cancelSecond")
+        {
+            Assert.Null(storedCalendar.LastSyncedAt);
+        }
+        Assert.Equal(initialWrites, handler.EventWrites);
+        Assert.Equal(scenario == "goneFirst" ? 3 : scenario == "goneSecond" ? 4 : 2, handler.EventListReads);
+        var firstQueries = handler.EventListQueries.Select(Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery).ToArray();
+        Assert.All(firstQueries, query => Assert.Equal("500", query["maxResults"].ToString()));
+        Assert.Equal("synthetic-old-sync", firstQueries[0]["syncToken"].ToString());
+        Assert.All(firstQueries.Where(query => query.ContainsKey("syncToken")), query =>
+        {
+            Assert.Equal("synthetic-old-sync", query["syncToken"].ToString());
+            Assert.False(query.ContainsKey("timeMin"));
+            Assert.False(query.ContainsKey("timeMax"));
+        });
+        var fullQueries = firstQueries.Where(query => !query.ContainsKey("syncToken")).ToArray();
+        if (fullQueries.Length > 0)
+        {
+            Assert.All(fullQueries, query =>
+            {
+                Assert.Equal(fullQueries[0]["timeMin"].ToString(), query["timeMin"].ToString());
+                Assert.Equal(fullQueries[0]["timeMax"].ToString(), query["timeMax"].ToString());
+            });
+        }
+        faultsEnabled = false;
+        db.ChangeTracker.Clear();
+        handler.ResetReads();
+        var retry = await service.SyncDueConnectionsAsync(10, CancellationToken.None);
+        Assert.Equal(0, retry.ErrorCount);
+        Assert.Equal("synthetic-final-sync", await db.GoogleCalendarSyncCalendars.AsNoTracking().Select(item => item.SyncToken).SingleAsync());
+        Assert.All(await db.TaskJournalItems.AsNoTracking().ToListAsync(), task => Assert.Equal(dueAt.AddDays(1), task.DueAt));
+        Assert.Equal(2, await db.GoogleCalendarSyncLogs.CountAsync(item => item.Direction == "google-to-crm" && item.Operation == "update-task"));
+        Assert.Equal(initialWrites, handler.EventWrites);
+        Assert.Equal(2, handler.EventListReads);
     }
 
     private static async Task SetUserTimeZoneAsync(PaymentContext db, int userId, string timeZoneId)

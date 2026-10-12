@@ -1,0 +1,391 @@
+{
+  "recordedAtUtc": "2026-10-12 21:58:45 UTC",
+  "projectId": "daa8d6c1-cce6-4c0c-985a-6bdc5a4b5eb4",
+  "cards": [
+    {
+      "id": "99465014-bfd6-46b1-9130-cc4b5ab6f80c",
+      "title": "РЕДИЗАН КАРТОЧКИ КЛИЕНТА ФИЗ. ЛИЦА",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "complete": false,
+      "archived": false,
+      "messageCount": 4,
+      "lastMessageAt": 1791149790463,
+      "newMessages": []
+    },
+    {
+      "id": "15eb93b8-7fde-4a2f-9c08-439dee8b8d32",
+      "title": "РЕДИЗАЙН МЕССЕНДЖЕРА В СРМ",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "complete": false,
+      "archived": false,
+      "messageCount": 2,
+      "lastMessageAt": 1791174384648,
+      "newMessages": []
+    },
+    {
+      "id": "56e92dc9-3186-4cb1-ae7f-d05901712565",
+      "title": "СДЕЛАТЬ РЕДЕЗАН - РАЗДЕЛА  ФИНАНСЫ  В КАРТОЧКЕ ДЕЛА",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "complete": false,
+      "archived": false,
+      "messageCount": 2,
+      "lastMessageAt": 1791174471015,
+      "newMessages": []
+    },
+    {
+      "id": "403a558a-e1b8-4329-b6d4-ae0e36ed7a8c",
+      "title": "СДЕЛАТЬ РЕДЕЗАН - РАЗДЕЛА  ПОЧТА РФ  В КАРТОЧКЕ ДЕЛА",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "complete": false,
+      "archived": false,
+      "messageCount": 2,
+      "lastMessageAt": 1791174476171,
+      "newMessages": []
+    },
+    {
+      "id": "f9294faf-6260-45b6-b7fd-efee790c59aa",
+      "title": "СДЕЛАТЬ РЕДЕЗАН - РАЗДЕЛА  ФССП В КАРТОЧКЕ ДЕЛА",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "complete": false,
+      "archived": false,
+      "messageCount": 2,
+      "lastMessageAt": 1791174480618,
+      "newMessages": []
+    },
+    {
+      "id": "6c6ec9ef-c343-4c3b-af62-3f4228f8ad5a",
+      "title": "СДЕЛАТЬ РЕДЕЗАН - РАЗДЕЛА  СОБЫТИЯ В КАРТОЧКЕ ДЕЛА",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "complete": false,
+      "archived": false,
+      "messageCount": 1,
+      "lastMessageAt": 1790625640893,
+      "newMessages": []
+    },
+    {
+      "id": "0d9fb0ef-2ad0-4799-b049-29d72b761851",
+      "title": "СДЕЛАТЬ РЕДЕЗАН - РАЗДЕЛА  ЗАДАЧИ В КАРТОЧКЕ ДЕЛА",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "complete": false,
+      "archived": false,
+      "messageCount": 2,
+      "lastMessageAt": 1791174486617,
+      "newMessages": []
+    },
+    {
+      "id": "7d72c480-1fcc-481b-bab7-dd7f1d52f37b",
+      "title": "СДЕЛАТЬ РЕДЕЗАН - РАЗДЕЛА  ДОКУМЕНТЫ В КАРТОЧКЕ ДЕЛА",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "complete": false,
+      "archived": false,
+      "messageCount": 2,
+      "lastMessageAt": 1791174489668,
+      "newMessages": []
+    },
+    {
+      "id": "9a50de8b-d880-4cdc-92f3-e4f536b471fa",
+      "title": "СДЕЛАТЬ РЕДЕЗАН - РАЗДЕЛА СУД В КАРДОЧКЕ ДЕЛА",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "complete": false,
+      "archived": false,
+      "messageCount": 6,
+      "lastMessageAt": 1791174498786,
+      "newMessages": []
+    },
+    {
+      "id": "65d94840-3e9b-48fc-bb1d-00510fad1d2b",
+      "title": "СДЕЛАТЬ РЕДИЗАЙН ЖУРАНАЛА ЗАДАЧ",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "complete": false,
+      "archived": false,
+      "messageCount": 5,
+      "lastMessageAt": 1791174538243,
+      "newMessages": []
+    },
+    {
+      "id": "c3448093-93ac-4385-b175-11d24c033438",
+      "title": "РЕАЛИЗОВАТЬ СИНХРОНИЗАЦИЮ СПРАВОЧНИКА КОНТАКТОВ СРМ  И СПРАВОЧНИКА ТЕЛЕФОНА",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "complete": false,
+      "archived": false,
+      "messageCount": 8,
+      "lastMessageAt": 1790229283675,
+      "newMessages": []
+    },
+    {
+      "id": "b714cbd0-6f92-4345-9dea-dfe0785a2ee1",
+      "title": "РЕАЛИЗОВАТЬ ТРИГЕР ТЕЛЕФОНИИ В СРМ  НА БАЗЕ pbx",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "complete": false,
+      "archived": false,
+      "messageCount": 7,
+      "lastMessageAt": 1790229700086,
+      "newMessages": []
+    },
+    {
+      "id": "cf0f1b97-e3fa-4ac0-b47c-7ded0e0c2942",
+      "title": "БЛОК БИЗНЕС ПРОЦЕССЫ\nПИШЕТСЯ",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "complete": false,
+      "archived": false,
+      "messageCount": 0,
+      "lastMessageAt": 0,
+      "newMessages": []
+    },
+    {
+      "id": "2ff4816e-8bec-415d-8420-f394df4fec8d",
+      "title": "ПЕРЕРАБОТКА  РАЗДЕЛА НАСТРОЙКА ПРАВ СОТРУДНИКОВ В НОРМАЛЬНЫЙ ВИД - ПИШЕТСЯ",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "complete": false,
+      "archived": false,
+      "messageCount": 0,
+      "lastMessageAt": 0,
+      "newMessages": []
+    },
+    {
+      "id": "975c7db0-a7bc-4711-9db7-2b0850a5c6dd",
+      "title": "РАЗДЕЛ ЗАРПЛАТА -ЗАДАНИЕ ПИШЕТСЯ",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "complete": false,
+      "archived": false,
+      "messageCount": 1,
+      "lastMessageAt": 1790227403152,
+      "newMessages": []
+    },
+    {
+      "id": "ec9decc2-06b0-4247-96f2-51e916ee7e6c",
+      "title": "СДЕЛАТЬ РЕДИЗАЙН КАРТОЧКИ ДЕЛА",
+      "columnId": "6cf1730a-d731-4978-81cc-e9e55ad2d36c",
+      "complete": false,
+      "archived": false,
+      "messageCount": 4,
+      "lastMessageAt": 1791174677595,
+      "newMessages": []
+    },
+    {
+      "id": "5358047f-22c4-4d02-a633-8ddbdec263b9",
+      "title": "КОНТРОЛЬ И ОБЪЕДЕНЕНИЕ ДУБЛЕЙ КОНТАКТОВ",
+      "columnId": "7242f4f8-301f-438e-9078-d102ad91fa58",
+      "complete": false,
+      "archived": false,
+      "messageCount": 11,
+      "lastMessageAt": 1790603809435,
+      "newMessages": []
+    },
+    {
+      "id": "fd9524b4-9723-45b4-b762-f37561e119a2",
+      "title": "ИНТЕГРАЦИИ С БАНКОМ",
+      "columnId": "7242f4f8-301f-438e-9078-d102ad91fa58",
+      "complete": false,
+      "archived": false,
+      "messageCount": 4,
+      "lastMessageAt": 1791815465729,
+      "newMessages": []
+    },
+    {
+      "id": "cb0bf4b0-a1e5-46f8-b31c-48bd20472425",
+      "title": "НУЖНА КОНСУЛЬТАЦИЯ - АЛИСА",
+      "columnId": "7242f4f8-301f-438e-9078-d102ad91fa58",
+      "complete": false,
+      "archived": false,
+      "messageCount": 4,
+      "lastMessageAt": 1791794490460,
+      "newMessages": []
+    },
+    {
+      "id": "c80f2e24-63cd-457e-aa60-7a0047e2746f",
+      "title": "КАЛЕНДАРЬ - ВИДИМОСТЬ ЗАДАЧ",
+      "columnId": "7242f4f8-301f-438e-9078-d102ad91fa58",
+      "complete": false,
+      "archived": false,
+      "messageCount": 16,
+      "lastMessageAt": 1791818039273,
+      "newMessages": []
+    },
+    {
+      "id": "11864365-b470-43f0-893a-a33d076be15e",
+      "title": "КНИГА УЧЕТА И ПРОДАЖ",
+      "columnId": "38768f75-7e1d-4368-be67-d552474c14ee",
+      "complete": false,
+      "archived": false,
+      "messageCount": 4,
+      "lastMessageAt": 1791793892606,
+      "newMessages": []
+    },
+    {
+      "id": "c9b411c2-500a-4536-99e9-21b12a736f0f",
+      "title": "СРОЧНО  БУХ. ПЕРВИЧНЫЕ . ДОКУМЕНТЫ -КУБ",
+      "columnId": "38768f75-7e1d-4368-be67-d552474c14ee",
+      "complete": false,
+      "archived": false,
+      "messageCount": 12,
+      "lastMessageAt": 1791794283212,
+      "newMessages": []
+    },
+    {
+      "id": "ae426978-a839-4230-a5f0-474d0e9dd4e9",
+      "title": "СРОЧНО .  ПРОФИЛЬ КОМПАНИИ - КУБ24",
+      "columnId": "38768f75-7e1d-4368-be67-d552474c14ee",
+      "complete": false,
+      "archived": false,
+      "messageCount": 3,
+      "lastMessageAt": 1791770142887,
+      "newMessages": []
+    },
+    {
+      "id": "5bab0eae-ec0a-4056-9dea-548d64a3df77",
+      "title": "СОЗДАТЬ РАЗДЕЛ СРМ \nТЗ ВНУТРИ",
+      "columnId": "38768f75-7e1d-4368-be67-d552474c14ee",
+      "complete": false,
+      "archived": false,
+      "messageCount": 4,
+      "lastMessageAt": 1791794390214,
+      "newMessages": []
+    },
+    {
+      "id": "510afd33-fee8-4ec2-89a2-09c736004350",
+      "title": "СДЕЛАТЬ РЕДИЗАЙН КАРТОКИ ЗАДАЧИ",
+      "columnId": "38768f75-7e1d-4368-be67-d552474c14ee",
+      "complete": false,
+      "archived": false,
+      "messageCount": 6,
+      "lastMessageAt": 1791543205880,
+      "newMessages": []
+    },
+    {
+      "id": "f5832f5b-6106-411d-84ef-ff1700530a70",
+      "title": "КОРРЕКТИРОВАКА КАРТОЧКИ  ЗАДАЧИ -логика по  привязанным счетам",
+      "columnId": "38768f75-7e1d-4368-be67-d552474c14ee",
+      "complete": false,
+      "archived": false,
+      "messageCount": 3,
+      "lastMessageAt": 1791534791188,
+      "newMessages": []
+    },
+    {
+      "id": "694a87e3-c960-4ed4-bf8e-43a0f6866fb2",
+      "title": "ПОДКЛЮЧИТЬ БОТА В МАКС \nДЛЯ ПОЛУЧЕНИЯ ВСЕХ УВЕДОМЛЕНИЙ",
+      "columnId": "38768f75-7e1d-4368-be67-d552474c14ee",
+      "complete": false,
+      "archived": false,
+      "messageCount": 14,
+      "lastMessageAt": 1791793697118,
+      "newMessages": []
+    },
+    {
+      "id": "cb50ccfa-6b11-40d5-ae41-2a5e5b07324c",
+      "title": "доработка расписания в задачах",
+      "columnId": "38768f75-7e1d-4368-be67-d552474c14ee",
+      "complete": false,
+      "archived": false,
+      "messageCount": 6,
+      "lastMessageAt": 1791534790262,
+      "newMessages": []
+    },
+    {
+      "id": "d40a2a79-5f1f-40be-83b0-ca5b88ddc927",
+      "title": "РАЗРАБОТКА РАЗДЕЛА СУД",
+      "columnId": "38768f75-7e1d-4368-be67-d552474c14ee",
+      "complete": false,
+      "archived": false,
+      "messageCount": 35,
+      "lastMessageAt": 1791543285556,
+      "newMessages": []
+    },
+    {
+      "id": "ea6cd6db-5814-4aa8-b244-9283086a2056",
+      "title": "РЕАЛИЗОВАТЬ  ЧАТЫ КАК В yougile",
+      "columnId": "38768f75-7e1d-4368-be67-d552474c14ee",
+      "complete": false,
+      "archived": false,
+      "messageCount": 25,
+      "lastMessageAt": 1791534789504,
+      "newMessages": []
+    },
+    {
+      "id": "c3bf8980-9183-4fcc-8a56-3d3368582e7b",
+      "title": "ПРОВЕРКА УВЕДОМЛЕНИЙ ПО ЗАДАЧАМ",
+      "columnId": "38768f75-7e1d-4368-be67-d552474c14ee",
+      "complete": false,
+      "archived": false,
+      "messageCount": 12,
+      "lastMessageAt": 1791543222877,
+      "newMessages": []
+    },
+    {
+      "id": "ea9352d2-66ba-4f8a-b7b4-98385b58ecac",
+      "title": "СДЕЛАТЬ НАСТРАЕВЫМАЕЙ ТРИГЕР ДНИ РОЖДЕНИЯ КЛИЕНТОВ И СОТРУДНИКОВ",
+      "columnId": "38768f75-7e1d-4368-be67-d552474c14ee",
+      "complete": false,
+      "archived": false,
+      "messageCount": 3,
+      "lastMessageAt": 1790596930214,
+      "newMessages": []
+    },
+    {
+      "id": "ea106e5b-267d-4477-90cf-2b5755cd04b0",
+      "title": "В ЧАТАХ НЕ ВИДНО К КОМУ ОБРАЩАЕШЬСЯ",
+      "columnId": "38768f75-7e1d-4368-be67-d552474c14ee",
+      "complete": false,
+      "archived": false,
+      "messageCount": 4,
+      "lastMessageAt": 1790339054129,
+      "newMessages": []
+    },
+    {
+      "id": "096030ea-ca1b-45c0-a0d4-811e0773753a",
+      "title": "ЛОГИКА БЫСТРЫХ ЗАДАЧ",
+      "columnId": "9e22950b-be55-4eba-ab35-2b0c60264c91",
+      "complete": true,
+      "archived": false,
+      "messageCount": 4,
+      "lastMessageAt": 1790339044921,
+      "newMessages": []
+    },
+    {
+      "id": "255b5186-0b00-4c85-9507-0292e361b3b3",
+      "title": "ЖЕРНАЛ ЗАДАЧ - КОРРЕКТИРОВКА",
+      "columnId": "9e22950b-be55-4eba-ab35-2b0c60264c91",
+      "complete": true,
+      "archived": false,
+      "messageCount": 4,
+      "lastMessageAt": 1790601661406,
+      "newMessages": []
+    },
+    {
+      "id": "c5bc6377-efec-4741-ad30-5548d8adb153",
+      "title": "НЕТ КНОПКИ ЗАПРОСИТЬ ПЕРЕНОС - ПРОВЕРИТЬ  В ЗАДАЧАХ",
+      "columnId": "9e22950b-be55-4eba-ab35-2b0c60264c91",
+      "complete": true,
+      "archived": false,
+      "messageCount": 3,
+      "lastMessageAt": 1790339046271,
+      "newMessages": []
+    },
+    {
+      "id": "b718dc5f-d69e-4509-81b4-90405e313d1b",
+      "title": "ПЕРЕРАБОТКА  В НОРМАЛЬНЫЙ ВИД КАРТОЧКИ  ДЕЛА ТЗ ПИЩЕТСЯ",
+      "columnId": "9e22950b-be55-4eba-ab35-2b0c60264c91",
+      "complete": false,
+      "archived": false,
+      "messageCount": 0,
+      "lastMessageAt": 0,
+      "newMessages": []
+    },
+    {
+      "id": "701f83cf-391e-4246-a644-7029891a3eab",
+      "title": "ЖУРНАЛ ЗАДАЧ - ТАБЛИЦА НАСТРОЙКА КОЛОНОК",
+      "columnId": "9e22950b-be55-4eba-ab35-2b0c60264c91",
+      "complete": true,
+      "archived": false,
+      "messageCount": 10,
+      "lastMessageAt": 1790338646694,
+      "newMessages": []
+    }
+  ],
+  "cardCount": 38,
+  "nextCursor": null,
+  "newMessageCount": 0,
+  "scope": "Card IDs/titles/columns/complete/archive flags and chat message counts; descriptions not reread in this poll",
+  "yougileChangesMade": false
+}

@@ -25,7 +25,7 @@
     "releaseBuild": true
   },
   "fullBackend": {
-    "status": "running sequentially on SSD with ICU ru-RU; no qualified full result",
+    "status": "Two qualified shards, 3540/7078 cases; shard 2 confirmed live in original session 2664; no qualified full result",
     "expectedCases": 7078,
     "manifestSha256": "95ba710a5ae3f4969a6a99bb9719076e1c970d5160f3d8bc519f8b85ef1fef9b",
     "interruptedInitialRun": "PostgreSQL shared-lock exhaustion and cleanup timeout; no successful full result claimed.",
@@ -46,7 +46,24 @@
       "failed": 0,
       "notExecuted": 0,
       "reference": "https://www.postgresql.org/docs/17/app-initdb.html"
-    }
+    },
+    "qualifiedShards": [
+      {
+        "shard": 0,
+        "cases": 1770,
+        "qualified": true,
+        "trxSha256": "7460e97063f312289ced29f8b2188d2d5d61958051a37c4f1167cc980d090dcb"
+      },
+      {
+        "shard": 1,
+        "cases": 1770,
+        "qualified": true,
+        "trxSha256": "71dde639775ef8212f3c90d629213889f84ded8b9465bc6bf306c18d48067a87"
+      }
+    ],
+    "qualifiedCasesSoFar": 3540,
+    "runningShard": 2,
+    "checkedAtUtc": "2026-10-12T21:20:22.094639+00:00"
   },
   "availability": {
     "branchOnly": true,

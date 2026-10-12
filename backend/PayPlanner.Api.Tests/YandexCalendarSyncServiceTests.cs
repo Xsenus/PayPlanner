@@ -1363,6 +1363,7 @@ END:VCALENDAR
         await using var db = await CreateContextAsync(queryProbe);
         var user = await CreateUserAsync(db, "bulk-owner@example.local", "user");
         var hidden = await CreateUserAsync(db, "bulk-hidden@example.local", "user");
+        await SetUserTimeZoneAsync(db, user.Id, "Europe/Samara");
         await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 10, completedTaskCalendarAction: "color");
         var connection = await CreateConnectionAsync(db, user.Id);
         var calendar = await CreateCalendarAsync(db, connection.Id, "bulk-calendar", "PayPlanner задачи");
@@ -1456,6 +1457,8 @@ END:VCALENDAR
         }
         Console.WriteLine($"CalendarLogQueries provider=Yandex; scenario=color; case={withDuplicates}-{failBatchRead}; phase=first; metadata={queryProbe.LogMetadataSelects}; total={queryProbe.TotalSelects}");
         Assert.InRange(queryProbe.LogMetadataSelects, 0, 8);
+        Console.WriteLine($"CalendarTimezoneQueries provider=Yandex; phase=first; settings={queryProbe.TimeZoneSelects}");
+        Assert.InRange(queryProbe.TimeZoneSelects, 1, 2);
         Assert.Equal(502, handler.PutBodies.Count);
         Assert.All(handler.PutBodies.Values, bodies => Assert.Single(bodies));
         Assert.Equal(withDuplicates ? 2 : 0, handler.DeleteCount);
@@ -1488,6 +1491,8 @@ END:VCALENDAR
         Assert.Equal(0, retry.ErrorCount);
         Console.WriteLine($"CalendarLogQueries provider=Yandex; scenario=color; case={withDuplicates}-{failBatchRead}; phase=retry; metadata={queryProbe.LogMetadataSelects}; total={queryProbe.TotalSelects}");
         Assert.InRange(queryProbe.LogMetadataSelects, 0, 8);
+        Console.WriteLine($"CalendarTimezoneQueries provider=Yandex; phase=retry; settings={queryProbe.TimeZoneSelects}");
+        Assert.InRange(queryProbe.TimeZoneSelects, 1, 2);
         Assert.Equal(502, handler.PutBodies.Count);
         Assert.All(handler.PutBodies.Values, bodies => Assert.Single(bodies));
         Assert.Equal(withDuplicates ? 2 : 0, handler.DeleteCount);
@@ -1825,6 +1830,312 @@ END:VCALENDAR
         return user;
     }
 
+
+    [Theory]
+    [InlineData(false, "America/New_York")]
+    [InlineData(true, "America/New_York")]
+    [InlineData(false, "Unknown/Timezone")]
+    [InlineData(true, "Unknown/Timezone")]
+    [InlineData(false, null)]
+    [InlineData(true, null)]
+    public async Task Synchronization_RefreshesProfileTimeZoneOnSameService(bool singleTask, string? newTimeZone)
+    {
+        var queryProbe = new CalendarBatchQueryProbe("Yandex");
+        await using var db = await CreateContextAsync(queryProbe);
+        var user = await CreateUserAsync(db, "timezone-refresh@example.local", "user");
+        await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 10);
+        await SetUserTimeZoneAsync(db, user.Id, "Europe/Samara");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        await CreateCalendarAsync(db, connection.Id, "timezone-calendar", "Synthetic timezone calendar");
+        var dueAt = DateTime.UtcNow.Date.AddDays(7).AddHours(23).AddMinutes(30);
+        var task = await CreateTaskAsync(db, user.Id, "Synthetic timezone refresh", dueAt: dueAt);
+        var handler = new RecordingYandexHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+        db.ChangeTracker.Clear();
+
+        async Task RunAsync()
+        {
+            if (singleTask)
+            {
+                await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+            }
+            else
+            {
+                await db.YandexCalendarConnections.ExecuteUpdateAsync(setters => setters
+                    .SetProperty(item => item.LastFullSyncAt, (DateTime?)null)
+                    .SetProperty(item => item.LastIncrementalSyncAt, (DateTime?)null));
+                db.ChangeTracker.Clear();
+                var result = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+                Assert.Equal(1, result.ProcessedTasks);
+                Assert.Equal(0, result.ErrorCount);
+            }
+        }
+
+        await RunAsync();
+        var oldHash = await db.YandexCalendarTaskLinks.AsNoTracking().Select(item => item.LastCrmHash).SingleAsync();
+        var settingQuery = db.UserSettings.Where(item => item.UserId == user.Id
+            && item.Key == CalendarTimeZoneHelper.UserTimeZoneSettingKey);
+        if (newTimeZone is null)
+        {
+            await settingQuery.ExecuteDeleteAsync();
+        }
+        else
+        {
+            await settingQuery.ExecuteUpdateAsync(setters => setters.SetProperty(item => item.Value, newTimeZone));
+        }
+        queryProbe.Reset();
+        await RunAsync();
+        var writes = handler.Requests.Where(request => request.Method == HttpMethod.Put).ToArray();
+        Assert.Equal(2, writes.Length);
+        Assert.NotEqual(oldHash, await db.YandexCalendarTaskLinks.AsNoTracking().Select(item => item.LastCrmHash).SingleAsync());
+        var expectedZone = CalendarTimeZoneHelper.ResolveTimeZone(newTimeZone);
+        var expectedId = CalendarTimeZoneHelper.ResolveIanaTimeZoneId(expectedZone);
+        var payload = await writes[1].Content!.ReadAsStringAsync();
+        Assert.Contains($"X-PAYPLANNER-TIMEZONE:{expectedId}", payload);
+        Assert.Contains($"DTSTART:{CalendarTimeZoneHelper.FormatUtcIcsDateTime(dueAt, expectedZone)}", payload);
+        Assert.Contains($"DTEND:{CalendarTimeZoneHelper.FormatUtcIcsDateTime(dueAt.AddHours(1), expectedZone)}", payload);
+        Assert.Contains(handler.Requests, request => request.Method.Method == "PROPPATCH"
+            && WebUtility.HtmlDecode(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult()).Contains($"TZID:{expectedId}", StringComparison.Ordinal));
+        Console.WriteLine($"CalendarTimezoneRefresh provider=Yandex; single={singleTask}; setting={newTimeZone ?? "missing"}; settings={queryProbe.TimeZoneSelects}");
+        Assert.InRange(queryProbe.TimeZoneSelects, 1, 2);
+        await RunAsync();
+        Assert.Equal(2, handler.Requests.Count(request => request.Method == HttpMethod.Put));
+        Assert.False(await db.YandexCalendarTaskLinks.AnyAsync(item => item.LastError != null));
+    }
+
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SyncNowAsync_BatchesTimeZonesFor502TasksAndPreservesCalendarOwner(bool assigneeMode)
+    {
+        var queryProbe = new CalendarBatchQueryProbe("Yandex");
+        await using var db = await CreateContextAsync(queryProbe);
+        var admin = await CreateUserAsync(db, "timezone-batch-admin@example.local", "admin");
+        var owners = new[]
+        {
+            await CreateUserAsync(db, "timezone-batch-first@example.local", "user"),
+            await CreateUserAsync(db, "timezone-batch-invalid@example.local", "user"),
+            await CreateUserAsync(db, "timezone-batch-missing@example.local", "user"),
+        };
+        admin.FullName = "Synthetic Admin";
+        for (var index = 0; index < owners.Length; index++)
+        {
+            owners[index].FullName = $"Synthetic Owner {index + 1}";
+        }
+        await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 10);
+        await SetUserTimeZoneAsync(db, admin.Id, "Europe/Samara");
+        await SetUserTimeZoneAsync(db, owners[0].Id, "America/New_York");
+        await SetUserTimeZoneAsync(db, owners[1].Id, "Unknown/Timezone");
+        var connection = await CreateConnectionAsync(db, admin.Id, calendarMode: assigneeMode ? "adminByAssignee" : "personal");
+        var personalCalendar = await CreateCalendarAsync(db, connection.Id, "personal-calendar", "Synthetic personal calendar");
+        var calendars = new Dictionary<int, YandexCalendarSyncCalendar>();
+        foreach (var owner in owners)
+        {
+            calendars.Add(owner.Id, await CreateCalendarAsync(db, connection.Id, $"owner-calendar-{owner.Id}", owner.FullName, owner.Id, $"https://caldav.yandex.ru/calendars/user/owner-{owner.Id}/"));
+        }
+        var firstDate = DateTime.UtcNow.Date.AddDays(7).AddHours(23).AddMinutes(30);
+        var tasks = Enumerable.Range(0, 502).Select(index => new TaskJournalItem
+        {
+            ObjectName = "Synthetic timezone batch",
+            Title = $"Timezone task {index + 1}",
+            AssigneeUserId = owners[index % owners.Length].Id,
+            AssigneeName = owners[index % owners.Length].FullName,
+            DueAt = index % 2 == 0 ? firstDate : firstDate.AddDays(180),
+            PlannedDurationMinutes = 60,
+            Priority = "normal",
+            Status = "new",
+        }).ToArray();
+        db.TaskJournalItems.AddRange(tasks);
+        await db.SaveChangesAsync();
+        for (var index = 0; index < tasks.Length; index++)
+        {
+            var calendar = assigneeMode ? calendars[tasks[index].AssigneeUserId!.Value] : personalCalendar;
+            db.YandexCalendarTaskLinks.Add(new YandexCalendarTaskLink
+            {
+                ConnectionId = connection.Id,
+                CalendarSyncCalendarId = calendar.Id,
+                TaskJournalItemId = tasks[index].Id,
+                YandexCalendarId = calendar.YandexCalendarId,
+                YandexEventId = $"bulk-event-{index + 1}",
+                YandexEventUrl = $"{calendar.CalendarUrl}bulk-event-{index + 1}.ics",
+                SyncStatus = "active",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+        }
+        await db.SaveChangesAsync();
+        var handler = new CalendarBatchColorProbe(new RecordingYandexHandler(), () => Task.CompletedTask);
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+        db.ChangeTracker.Clear();
+
+        async Task RunAsync()
+        {
+            await db.YandexCalendarConnections.ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.LastFullSyncAt, (DateTime?)null)
+                .SetProperty(item => item.LastIncrementalSyncAt, (DateTime?)null));
+            db.ChangeTracker.Clear();
+            queryProbe.Reset();
+            var result = await service.SyncNowAsync(admin.Id, CreateHttpRequest(admin.Id, "admin"), CancellationToken.None);
+            Assert.Equal(502, result.ProcessedTasks);
+            Assert.Equal(0, result.ErrorCount);
+            Assert.Equal(new[] { 500, 500 }, queryProbe.TaskPageLimits);
+            Console.WriteLine($"CalendarTimezoneOwners provider=Yandex; assignee={assigneeMode}; settings={queryProbe.TimeZoneSelects}");
+            Assert.InRange(queryProbe.TimeZoneSelects, 2, assigneeMode ? 3 : 2);
+            if (!assigneeMode)
+            {
+                Assert.Equal(2, queryProbe.TimeZoneUserIds.Count);
+                Assert.All(queryProbe.TimeZoneUserIds, ids => Assert.Equal(new[] { admin.Id }, ids));
+            }
+        }
+
+        await RunAsync();
+        Assert.Equal(502, handler.PutBodies.Count);
+        for (var index = 0; index < tasks.Length; index++)
+        {
+            var task = tasks[index];
+            var body = Assert.Single(handler.PutBodies.Single(pair => pair.Key.EndsWith($"/bulk-event-{index + 1}.ics", StringComparison.Ordinal)).Value);
+            var zone = CalendarTimeZoneHelper.ResolveTimeZone(assigneeMode
+                ? (task.AssigneeUserId == owners[0].Id ? "America/New_York" : null) : "Europe/Samara");
+            Assert.Contains($"X-PAYPLANNER-TIMEZONE:{CalendarTimeZoneHelper.ResolveIanaTimeZoneId(zone)}", body);
+            Assert.Contains($"DTSTART:{CalendarTimeZoneHelper.FormatUtcIcsDateTime(task.DueAt, zone)}", body);
+            Assert.Contains($"DTEND:{CalendarTimeZoneHelper.FormatUtcIcsDateTime(task.DueAt.AddHours(1), zone)}", body);
+        }
+        await RunAsync();
+        Assert.All(handler.PutBodies.Values, bodies => Assert.Single(bodies));
+        await db.UserSettings.Where(item => item.UserId == owners[0].Id && item.Key == CalendarTimeZoneHelper.UserTimeZoneSettingKey)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.Value, "Asia/Kamchatka"));
+        await RunAsync();
+        Assert.Equal(assigneeMode ? 168 : 0, handler.PutBodies.Values.Count(bodies => bodies.Count == 2));
+        Assert.All(handler.PutBodies.Values, bodies => Assert.InRange(bodies.Count, 1, 2));
+        await RunAsync();
+        Assert.Equal(assigneeMode ? 168 : 0, handler.PutBodies.Values.Count(bodies => bodies.Count == 2));
+        Assert.Equal(0, handler.DeleteCount);
+        Assert.Equal(502, await db.YandexCalendarTaskLinks.CountAsync(item => item.SyncStatus == "active" && item.LastError == null));
+    }
+
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SyncDueConnectionsAsync_BoundsTimezoneReadsFor502ImportsAndRefreshesOwnerProfile(bool assigneeCalendar)
+    {
+        var queryProbe = new CalendarBatchQueryProbe("Yandex");
+        await using var db = await CreateContextAsync(queryProbe);
+        var owner = await CreateUserAsync(db, "timezone-import-owner@example.local", "user");
+        var actor = assigneeCalendar ? await CreateUserAsync(db, "timezone-import-admin@example.local", "admin") : owner;
+        await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 10);
+        await SetUserTimeZoneAsync(db, owner.Id, "Europe/Samara");
+        if (assigneeCalendar)
+        {
+            await SetUserTimeZoneAsync(db, actor.Id, "Asia/Kamchatka");
+        }
+        var connection = await CreateConnectionAsync(db, actor.Id, calendarMode: assigneeCalendar ? "adminByAssignee" : "personal");
+        var calendar = await CreateCalendarAsync(db, connection.Id, "timezone-import", "Synthetic import calendar",
+            assigneeCalendar ? owner.Id : null);
+        calendar.SyncToken = "synthetic-existing-sync";
+        // Import deliberately covers linked tasks beyond the export window, so
+        // these incremental changes are legal without full-sync date filters,
+        // and setting reads cannot be attributed to export upserts.
+        var dueAt = DateTime.UtcNow.Date.AddDays(400).AddHours(9);
+        var tasks = Enumerable.Range(1, 502).Select(index => new TaskJournalItem
+        {
+            ObjectName = "Synthetic timezone import",
+            Title = $"Before import {index}",
+            AssigneeUserId = owner.Id,
+            AssigneeName = owner.FullName,
+            DueAt = dueAt,
+            PlannedDurationMinutes = 60,
+            Priority = "normal",
+            Status = "new",
+        }).ToArray();
+        db.TaskJournalItems.AddRange(tasks);
+        await db.SaveChangesAsync();
+        for (var index = 0; index < tasks.Length; index++)
+        {
+            db.YandexCalendarTaskLinks.Add(new YandexCalendarTaskLink
+            {
+                ConnectionId = connection.Id,
+                CalendarSyncCalendarId = calendar.Id,
+                TaskJournalItemId = tasks[index].Id,
+                YandexCalendarId = calendar.YandexCalendarId,
+                YandexEventId = $"import-event-{index + 1}",
+                YandexEventUrl = $"{calendar.CalendarUrl}import-event-{index + 1}.ics",
+                SyncStatus = "active",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+        }
+        await db.SaveChangesAsync();
+        var handler = new CalendarTimezoneImportProbe(new RecordingYandexHandler(), google: false);
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        void PrepareResponse(int round)
+        {
+            handler.YandexReport = BuildYandexReportResponseForEvents(tasks.Select((task, index) =>
+                (calendar.CalendarUrl, $"import-event-{index + 1}", $"""
+BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:import-event-{index + 1}
+DTSTART:{task.DueAt.AddDays(round + 1):yyyyMMdd'T'HHmmss'Z'}
+DTEND:{task.DueAt.AddDays(round + 1).AddHours(1):yyyyMMdd'T'HHmmss'Z'}
+SUMMARY:Imported {round}-{index + 1}
+X-PAYPLANNER-TASK-ID:{task.Id}
+X-PAYPLANNER-HASH:synthetic-import-{round}-{index + 1}
+END:VEVENT
+END:VCALENDAR
+""")).ToArray());
+        }
+
+        async Task RunAsync(int round, bool unchanged)
+        {
+            await db.YandexCalendarConnections.ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.LastFullSyncAt, (DateTime?)DateTime.UtcNow)
+                .SetProperty(item => item.LastIncrementalSyncAt, (DateTime?)DateTime.UtcNow.AddHours(-1)));
+            db.ChangeTracker.Clear();
+            if (!unchanged)
+            {
+                PrepareResponse(round);
+            }
+            queryProbe.Reset();
+            handler.ResetReads();
+            var result = await service.SyncDueConnectionsAsync(10, CancellationToken.None);
+            Assert.Equal(0, result.ErrorCount);
+            Assert.Equal(0, result.ProcessedTasks);
+            Assert.Equal(unchanged ? 0 : 502, result.ImportedEvents);
+            Assert.Equal(1, handler.EventListReads);
+            var updatedTasks = await db.TaskJournalItems.AsNoTracking().OrderBy(item => item.Id).ToListAsync();
+            Assert.Equal(502, updatedTasks.Count);
+            Assert.All(updatedTasks, task => Assert.Equal(dueAt.AddDays(round + 1), task.DueAt));
+            Assert.All(updatedTasks, task => Assert.Equal(60, task.PlannedDurationMinutes));
+            Assert.All(updatedTasks, task => Assert.Equal("new", task.Status));
+            Assert.All(updatedTasks, task => Assert.Equal(owner.Id, task.AssigneeUserId));
+            if (!unchanged)
+            {
+                var logs = await db.YandexCalendarSyncLogs.AsNoTracking()
+                    .Where(item => item.Direction == "yandex-to-crm" && item.Operation == "update-task")
+                    .OrderByDescending(item => item.Id).Take(502).ToListAsync();
+                Assert.Equal(502, logs.Count);
+                var zone = CalendarTimeZoneHelper.ResolveTimeZone(round == 0 ? "Europe/Samara" : "America/New_York");
+                var expectedTime = CalendarTimeZoneHelper.FormatUserDateTime(dueAt.AddDays(round + 1), zone);
+                Assert.All(logs, log =>
+                {
+                    using var details = JsonDocument.Parse(log.DetailsJson!);
+                    Assert.Contains(expectedTime, details.RootElement.GetProperty("detail").GetString());
+                });
+            }
+            Console.WriteLine($"CalendarTimezoneImport provider=Yandex; assignee={assigneeCalendar}; round={round}; unchanged={unchanged}; settings={queryProbe.TimeZoneSelects}");
+            Assert.Equal((assigneeCalendar ? 1 : 0) + (unchanged ? 0 : 2), queryProbe.TimeZoneSelects);
+        }
+
+        await RunAsync(0, unchanged: false);
+        await db.UserSettings.Where(item => item.UserId == owner.Id && item.Key == CalendarTimeZoneHelper.UserTimeZoneSettingKey)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.Value, "America/New_York"));
+        await RunAsync(1, unchanged: false);
+        await RunAsync(1, unchanged: true);
+    }
+
     private static async Task SetUserTimeZoneAsync(PaymentContext db, int userId, string timeZoneId)
     {
         db.UserSettings.Add(new UserSetting
@@ -1836,6 +2147,67 @@ END:VCALENDAR
             UpdatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SyncDueConnectionsAsync_PersistsImportedTaskBeforeReadingExportPage(bool movesOutsideWindow)
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "import-export-owner@example.local", "user");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        var calendar = await CreateCalendarAsync(db, connection.Id, "timezone-import", "Synthetic import/export calendar");
+        var dueAt = DateTime.UtcNow.Date.AddDays(14).AddHours(9);
+        var task = await CreateTaskAsync(db, user.Id, "Before import", dueAt: dueAt);
+        db.YandexCalendarTaskLinks.Add(new YandexCalendarTaskLink
+        {
+            ConnectionId = connection.Id,
+            CalendarSyncCalendarId = calendar.Id,
+            TaskJournalItemId = task.Id,
+            YandexCalendarId = calendar.YandexCalendarId,
+            YandexEventId = "import-event-1",
+            YandexEventUrl = $"{calendar.CalendarUrl}import-event-1.ics",
+            SyncStatus = "active",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var inner = new RecordingYandexHandler();
+        var handler = new CalendarTimezoneImportProbe(inner, google: false);
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+        await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+        var initialWrites = inner.Requests.Count(request => request.Method == HttpMethod.Put);
+        var importedDueAt = movesOutsideWindow ? dueAt.AddDays(400) : dueAt.AddDays(1);
+        handler.YandexReport = BuildYandexReportResponse(calendar.CalendarUrl, "import-event-1", $"""
+BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:import-event-1
+DTSTART:{importedDueAt:yyyyMMdd'T'HHmmss'Z'}
+DTEND:{importedDueAt.AddHours(1):yyyyMMdd'T'HHmmss'Z'}
+SUMMARY:After import
+X-PAYPLANNER-TASK-ID:{task.Id}
+X-PAYPLANNER-HASH:synthetic-import-export-hash
+END:VEVENT
+END:VCALENDAR
+""");
+        db.ChangeTracker.Clear();
+
+        var result = await service.SyncDueConnectionsAsync(10, CancellationToken.None);
+        Assert.Equal(0, result.ErrorCount);
+        Assert.Equal(1, result.ImportedEvents);
+        Assert.Equal(movesOutsideWindow ? 0 : 1, result.ProcessedTasks);
+        var saved = await db.TaskJournalItems.AsNoTracking().SingleAsync();
+        Assert.Equal(importedDueAt, saved.DueAt);
+        Assert.Equal("After import", saved.Title);
+        Assert.Equal(initialWrites, inner.Requests.Count(request => request.Method == HttpMethod.Put));
+        db.ChangeTracker.Clear();
+        var repeat = await service.SyncDueConnectionsAsync(10, CancellationToken.None);
+        Assert.Equal(0, repeat.ErrorCount);
+        Assert.Equal(0, repeat.ImportedEvents);
+        Assert.Equal(initialWrites, inner.Requests.Count(request => request.Method == HttpMethod.Put));
+        Assert.Equal(1, await db.YandexCalendarSyncLogs.CountAsync(item => item.Direction == "yandex-to-crm" && item.Operation == "update-task"));
     }
 
     private static async Task<YandexCalendarConnection> CreateConnectionAsync(

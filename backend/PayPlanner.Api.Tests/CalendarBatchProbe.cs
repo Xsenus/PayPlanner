@@ -13,6 +13,8 @@ internal sealed class CalendarBatchQueryProbe(string provider) : DbCommandInterc
     public int LinkSelects { get; private set; }
     public int LogMetadataSelects { get; private set; }
     public int TotalSelects { get; private set; }
+    public int TimeZoneSelects { get; private set; }
+    public List<int[]> TimeZoneUserIds { get; } = [];
 
     public void Reset()
     {
@@ -20,6 +22,8 @@ internal sealed class CalendarBatchQueryProbe(string provider) : DbCommandInterc
         LinkSelects = 0;
         LogMetadataSelects = 0;
         TotalSelects = 0;
+        TimeZoneSelects = 0;
+        TimeZoneUserIds.Clear();
     }
 
     public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
@@ -30,6 +34,24 @@ internal sealed class CalendarBatchQueryProbe(string provider) : DbCommandInterc
         if (sql.StartsWith("SELECT", StringComparison.Ordinal))
         {
             TotalSelects++;
+        }
+        if (sql.StartsWith("SELECT", StringComparison.Ordinal)
+            && sql.Contains("FROM \"UserSettings\"", StringComparison.Ordinal))
+        {
+            TimeZoneSelects++;
+            var userIds = new List<int>();
+            foreach (DbParameter parameter in command.Parameters)
+            {
+                if (parameter.Value is int userId)
+                {
+                    userIds.Add(userId);
+                }
+                else if (parameter.Value is string json && json.TrimStart().StartsWith('['))
+                {
+                    userIds.AddRange(JsonSerializer.Deserialize<int[]>(json) ?? []);
+                }
+            }
+            TimeZoneUserIds.Add(userIds.Distinct().ToArray());
         }
         if (sql.Contains(" AS \"UserName\"", StringComparison.Ordinal)
             || sql.Contains(" AS \"OwnerName\"", StringComparison.Ordinal)
@@ -51,6 +73,67 @@ internal sealed class CalendarBatchQueryProbe(string provider) : DbCommandInterc
             LinkSelects++;
         }
         return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+    }
+}
+
+internal sealed class CalendarTimezoneImportProbe(HttpMessageHandler inner, bool google) : DelegatingHandler(inner)
+{
+    public object[] GoogleEvents { get; set; } = [];
+    public string YandexReport { get; set; } = string.Empty;
+    public int EventListReads { get; private set; }
+    public List<string> EventListQueries { get; } = [];
+    public int EventWrites { get; private set; }
+    public Func<HttpRequestMessage, int, CancellationToken, Task<HttpResponseMessage>>? GooglePageResponse { get; set; }
+
+    public void ResetReads()
+    {
+        EventListReads = 0;
+        EventListQueries.Clear();
+    }
+
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var path = request.RequestUri!.AbsolutePath;
+        if (google && request.Method == HttpMethod.Put && path.Contains("/events/", StringComparison.Ordinal))
+        {
+            EventWrites++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(new { id = path.Split('/').Last(), etag = "synthetic-import-write" }),
+                    Encoding.UTF8, "application/json"),
+            });
+        }
+        if (google && request.Method == HttpMethod.Get
+            && path.EndsWith("/calendars/timezone-import/events", StringComparison.Ordinal)
+            && !request.RequestUri.Query.Contains("privateExtendedProperty=", StringComparison.Ordinal))
+        {
+            EventListReads++;
+            EventListQueries.Add(request.RequestUri.Query);
+            if (GooglePageResponse is not null)
+            {
+                return GooglePageResponse(request, EventListReads, cancellationToken);
+            }
+            var start = request.RequestUri.Query.Contains("pageToken=timezone-next", StringComparison.Ordinal) ? 500 : 0;
+            var body = JsonSerializer.Serialize(new
+            {
+                items = GoogleEvents.Skip(start).Take(500).ToArray(),
+                nextPageToken = start + 500 < GoogleEvents.Length ? "timezone-next" : null,
+                nextSyncToken = start + 500 >= GoogleEvents.Length ? "synthetic-import-sync" : null,
+            });
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json"),
+            });
+        }
+        if (!google && request.Method.Method == "REPORT")
+        {
+            EventListReads++;
+            return Task.FromResult(new HttpResponseMessage((HttpStatusCode)207)
+            {
+                Content = new StringContent(YandexReport, Encoding.UTF8, "application/xml"),
+            });
+        }
+        return base.SendAsync(request, cancellationToken);
     }
 }
 

@@ -104,6 +104,23 @@ public sealed class CalendarTimeZoneHelperTests
         Assert.Equal("2026-06-04T16:00:00+04:00", formatted);
     }
 
+    [Theory]
+    [InlineData("2026-11-01T05:30:00Z", "2026-11-01T01:30:00-04:00")]
+    [InlineData("2026-11-01T06:30:00Z", "2026-11-01T01:30:00-05:00")]
+    [InlineData("2026-11-01T07:30:00Z", "2026-11-01T02:30:00-05:00")]
+    [InlineData("2026-03-08T06:30:00Z", "2026-03-08T01:30:00-05:00")]
+    [InlineData("2026-03-08T07:30:00Z", "2026-03-08T03:30:00-04:00")]
+    public void FormatOffsetDateTime_PreservesUtcInstantAcrossDaylightSavingTransition(string instant, string expected)
+    {
+        var utc = DateTimeOffset.Parse(instant, CultureInfo.InvariantCulture).UtcDateTime;
+        var timeZone = CalendarTimeZoneHelper.ResolveTimeZone("America/New_York");
+
+        var formatted = CalendarTimeZoneHelper.FormatOffsetDateTime(utc, timeZone);
+
+        Assert.Equal(expected, formatted);
+        Assert.Equal(utc, DateTimeOffset.Parse(formatted, CultureInfo.InvariantCulture).UtcDateTime);
+    }
+
     [Fact]
     public void FormatUtcIcsDateTime_AlwaysEmitsUtcInstant()
     {

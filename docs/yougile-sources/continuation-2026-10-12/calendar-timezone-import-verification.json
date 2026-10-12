@@ -1,0 +1,237 @@
+{
+  "recordedAtUtc": "2026-10-12T22:19:30.933809+00:00",
+  "baseRevision": "0bfe415e5142498d284d4a8cc5e1fa06b85d8225",
+  "verificationPerformedBeforeCommit": true,
+  "codeHashNormalization": "CRLF converted to LF; bytes otherwise unchanged",
+  "codeFiles": {
+    "backend/Services/GoogleCalendarSyncService.cs": "ff49850a2ce72e76c8d423af88a05295c7c6df6c18b9f8de70e5abc4ccd4ee64",
+    "backend/Services/YandexCalendarSyncService.cs": "037e1660afc41affa4f5641c1d26f8e970e5c8f0078dd9fde3df4cc9e8cb0a1a",
+    "backend/Services/CalendarTimeZoneHelper.cs": "a465ae7fd13302af8b1a59b9924b78e928330a67c2a1026229c2ab3d47d788ee",
+    "backend/PayPlanner.Api.Tests/CalendarBatchProbe.cs": "60b3c21e1f1daa60a5065824249e6facd87724148890021d1d8944efa02703b2",
+    "backend/PayPlanner.Api.Tests/CalendarTimeZoneHelperTests.cs": "ff4510ee2db789977a1e891396c7987263bc7f057c49ace300f69b77362e54dc",
+    "backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs": "e9f516aa21b73879681f2bbd5d49a86684671665ae6084dd67654837a02bd124",
+    "backend/PayPlanner.Api.Tests/YandexCalendarSyncServiceTests.cs": "3b90fa27e336ced125e6e06c666142cfaa0b85b7a5445a199e0cfd6d8c8eb032",
+    "backend/AppReleases/releases.json": "f56b5660ba77032b31632814b4cac597b715b3f750dcdf8f6dac3159351adace"
+  },
+  "scope": "Profile timezone export/DST/import and all Google event pages; page-scoped display lookup, unchanged link/conflict checks",
+  "baseline": {
+    "artifactRoot": "D:\\PayPlannerReview-20261012\\calendar-timezone-import-baseline-evidence",
+    "apiSha256": "6e5d6a2051a2d35b2bbdc639b8494a92e5d7bd0f5b51a7b1f556f50be25a8833",
+    "testAssemblySha256": "0e00ddb815bf079f62b35c956b3268ea20559eb37d57102964a764dda120cfc5",
+    "trxSha256": "6de9a636cec4902953163c0f774359b6b7985cc3eb52ae665f5cf5f19b2b1278",
+    "counts": {
+      "total": 4,
+      "passed": 0,
+      "failed": 4,
+      "skipped": 0
+    },
+    "fixture": "Incremental scheduler request using an existing sync token; no date filters. Full-sync fixture remains preserved as initial evidence.",
+    "results": [
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.SyncDueConnectionsAsync_BoundsTimezoneReadsFor502ImportsAndRefreshesOwnerProfile(assigneeCalendar: False)",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 2\r\nActual:   502"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.SyncDueConnectionsAsync_BoundsTimezoneReadsFor502ImportsAndRefreshesOwnerProfile(assigneeCalendar: True)",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 502\r\nActual:   500"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.SyncDueConnectionsAsync_BoundsTimezoneReadsFor502ImportsAndRefreshesOwnerProfile(assigneeCalendar: True)",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 3\r\nActual:   503"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.SyncDueConnectionsAsync_BoundsTimezoneReadsFor502ImportsAndRefreshesOwnerProfile(assigneeCalendar: False)",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 502\r\nActual:   500"
+      }
+    ]
+  },
+  "final": {
+    "artifactRoot": "D:\\PayPlannerReview-20261012\\calendar-timezone-import-final-evidence",
+    "apiSha256": "66ef9e402c812910fb70263a10670038de817738aa095a765d4ed1e2f9b4c5dc",
+    "testAssemblySha256": "d7822717333cf81ce43c71d4c89ec9fd70e26386911ef1ebe61c3477034ce5b1",
+    "trxSha256": "e667a07fffb9acab70d4fecd23ed8dabbacd2213860dfafde46a3a9c0a02b5f6",
+    "counts": {
+      "total": 202,
+      "executed": 202,
+      "passed": 202,
+      "failed": 0,
+      "error": 0,
+      "timeout": 0,
+      "aborted": 0,
+      "inconclusive": 0,
+      "passedButRunAborted": 0,
+      "notRunnable": 0,
+      "notExecuted": 0,
+      "disconnected": 0,
+      "warning": 0,
+      "completed": 0,
+      "inProgress": 0,
+      "pending": 0
+    },
+    "metrics": [
+      "CalendarTimezoneImport provider=Google; assignee=False; round=0; unchanged=False; settings=2",
+      "CalendarTimezoneImport provider=Google; assignee=False; round=1; unchanged=False; settings=2",
+      "CalendarTimezoneImport provider=Google; assignee=False; round=1; unchanged=True; settings=0",
+      "CalendarTimezoneImport provider=Google; assignee=True; round=0; unchanged=False; settings=3",
+      "CalendarTimezoneImport provider=Google; assignee=True; round=1; unchanged=False; settings=3",
+      "CalendarTimezoneImport provider=Google; assignee=True; round=1; unchanged=True; settings=1",
+      "CalendarTimezoneImport provider=Yandex; assignee=False; round=0; unchanged=False; settings=2",
+      "CalendarTimezoneImport provider=Yandex; assignee=False; round=1; unchanged=False; settings=2",
+      "CalendarTimezoneImport provider=Yandex; assignee=False; round=1; unchanged=True; settings=0",
+      "CalendarTimezoneImport provider=Yandex; assignee=True; round=0; unchanged=False; settings=3",
+      "CalendarTimezoneImport provider=Yandex; assignee=True; round=1; unchanged=False; settings=3",
+      "CalendarTimezoneImport provider=Yandex; assignee=True; round=1; unchanged=True; settings=1"
+    ],
+    "database": "Synthetic SQLite; HTTP providers are local fakes; not a PostgreSQL production benchmark",
+    "emailEnabled": false,
+    "backgroundServicesEnabled": false,
+    "releaseBuild": {
+      "warnings": 0,
+      "errors": 0,
+      "logSha256": "d7ef04fc243d271593efc2c5f3b336b8575a11d6cc68195977d379ebe43d9a74"
+    },
+    "failedScenarioRecheck": {
+      "passed": 11,
+      "failed": 0,
+      "skipped": 0,
+      "trxSha256": "3829e73c920647cb49e5c1aa23cf2ad6f380a490d161bc9d0c5e618ae40c6a4b"
+    },
+    "format": {
+      "apiChangedFiles": "passed",
+      "testChangedFiles": "passed",
+      "mode": "whitespace --verify-no-changes"
+    }
+  },
+  "previousExportAndDstEvidence": "calendar-timezone-verification.json",
+  "importExportSeamBaseline": {
+    "counts": {
+      "total": "200",
+      "executed": "200",
+      "passed": "191",
+      "failed": "9",
+      "error": "0",
+      "timeout": "0",
+      "aborted": "0",
+      "inconclusive": "0",
+      "passedButRunAborted": "0",
+      "notRunnable": "0",
+      "notExecuted": "0",
+      "disconnected": "0",
+      "warning": "0",
+      "completed": "0",
+      "inProgress": "0",
+      "pending": "0"
+    },
+    "apiSha256": "8b06fe84845c5df630cfa16deeeb0f7640ad24a08056e4dd98d2f25fa7c8d87c",
+    "testAssemblySha256": "4cd06baa18eff5d2c8dfc556984408d6e4e69536ff8974b7fd15d85458297854",
+    "trxSha256": "f700203c74d8ef8794dd318906cdc9e6dde3c41fa57c62ac03f6c5424c6b6422",
+    "artifactRoot": "D:\\PayPlannerReview-20261012\\calendar-timezone-import-seam-baseline-evidence",
+    "failed": [
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.SyncDueConnectionsAsync_PaginatesAndCommitsOnlyCompletedGoogleSyncToken(scenario: \"emptyFirst\")",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 2\r\nActual:   4"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.SyncDueConnectionsAsync_PaginatesAndCommitsOnlyCompletedGoogleSyncToken(scenario: \"goneFirst\")",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 2\r\nActual:   4"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.SyncDueConnectionsAsync_PaginatesAndCommitsOnlyCompletedGoogleSyncToken(scenario: \"normal\")",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 2\r\nActual:   4"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.SyncDueConnectionsAsync_PaginatesAndCommitsOnlyCompletedGoogleSyncToken(scenario: \"cycle\")",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 2\r\nActual:   4"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.SyncDueConnectionsAsync_PaginatesAndCommitsOnlyCompletedGoogleSyncToken(scenario: \"goneTwice\")",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 2\r\nActual:   4"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.SyncDueConnectionsAsync_PaginatesAndCommitsOnlyCompletedGoogleSyncToken(scenario: \"goneSecond\")",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 2\r\nActual:   4"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.SyncDueConnectionsAsync_PaginatesAndCommitsOnlyCompletedGoogleSyncToken(scenario: \"secondFailure\")",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 2\r\nActual:   3"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.SyncDueConnectionsAsync_PaginatesAndCommitsOnlyCompletedGoogleSyncToken(scenario: \"cancelSecond\")",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 2\r\nActual:   4"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.SyncDueConnectionsAsync_PaginatesAndCommitsOnlyCompletedGoogleSyncToken(scenario: \"missingFinal\")",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 2\r\nActual:   4"
+      }
+    ],
+    "yandexSeamTests": {
+      "counts": {
+        "total": "2",
+        "executed": "2",
+        "passed": "0",
+        "failed": "2",
+        "error": "0",
+        "timeout": "0",
+        "aborted": "0",
+        "inconclusive": "0",
+        "passedButRunAborted": "0",
+        "notRunnable": "0",
+        "notExecuted": "0",
+        "disconnected": "0",
+        "warning": "0",
+        "completed": "0",
+        "inProgress": "0",
+        "pending": "0"
+      },
+      "testAssemblySha256": "d7822717333cf81ce43c71d4c89ec9fd70e26386911ef1ebe61c3477034ce5b1",
+      "snapshot": "D:\\PayPlannerReview-20261012\\calendar-timezone-import-seam-baseline-evidence\\yandex-seam-test-snapshot",
+      "trxSha256": "bbee86d34b0eb073a7558caee54351ce23d9f7c68db3d8304a41dfa0722c3a25",
+      "failed": [
+        {
+          "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.SyncDueConnectionsAsync_PersistsImportedTaskBeforeReadingExportPage(movesOutsideWindow: False)",
+          "message": "Assert.Equal() Failure: Values differ\r\nExpected: 1\r\nActual:   2"
+        },
+        {
+          "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.SyncDueConnectionsAsync_PersistsImportedTaskBeforeReadingExportPage(movesOutsideWindow: True)",
+          "message": "Assert.Equal() Failure: Values differ\r\nExpected: 0\r\nActual:   1"
+        }
+      ]
+    }
+  },
+  "protocolSources": [
+    "https://developers.google.com/workspace/calendar/api/guides/sync",
+    "https://developers.google.com/workspace/calendar/api/v3/reference/events/list"
+  ],
+  "deployed": false,
+  "yougilePublished": false,
+  "finalFullBackendGatePassed": false,
+  "remaining": [
+    "Unbounded preparatory owners list and outside-sync-window cleanup",
+    "Other Google visibility/settings reads require measurement; no auth/token caching introduced",
+    "CalDAV full response and tracked import entities/logs remain; no claim of bounded total import memory",
+    "Identify actual owner-reported annulled task, final backend gate and live acceptance",
+    "Repeated cancelled Google events after full-sync reset: journal idempotence needs a separate scenario; confirmed events are covered"
+  ],
+  "staticChecks": {
+    "encoding": {
+      "passed": true,
+      "textFiles": 3111,
+      "logSha256": "7e02f8c732f9f2b8f8c661d845986ecddcf703da619c8e0c6c700bc48e51bf48"
+    },
+    "roadmapProgress": {
+      "passed": true,
+      "logSha256": "dd29040cf99b11fe6d96dcf1f68618bc73b316220977c13a9e93ab665d81da4b"
+    },
+    "previousReleaseEntriesUnchanged": true,
+    "finalDiffCheckPassed": true
+  },
+  "frontendGateReused": {
+    "revision": "d2e9508752a1bbca1c3ea28bd6e242284e5c00a4",
+    "passed": 2596,
+    "reason": "Frontend and public DTO contracts unchanged"
+  }
+}

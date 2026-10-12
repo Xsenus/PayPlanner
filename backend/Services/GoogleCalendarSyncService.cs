@@ -612,6 +612,9 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             await AddLogAsync(connection.Id, null, null, "google-to-crm", "import", "error", "Не удалось загрузить изменения из Google Calendar.", ex.Message, cancellationToken);
         }
 
+        // Export pages are no-tracking database reads. Preserve imported changes
+        // (including successful pages before a provider error) before reading them.
+        await _db.SaveChangesAsync(cancellationToken);
         var settings = await LoadCalendarSyncSettingsAsync(cancellationToken);
         errors += await DeleteLinksOutsideSyncWindowAsync(connection, cancellationToken);
 
@@ -621,12 +624,19 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         await foreach (var tasks in CalendarSyncTaskPager.ReadPagesAsync(tasksQuery, cancellationToken))
         {
             var logContext = new CalendarSyncLogContext(connection.Id, connection.User, tasks);
+            var exportTasks = tasks.Where(item => !ShouldHideCompletedTask(settings, item)).ToArray();
+            IEnumerable<int> timeZoneUserIds = exportTasks.Length == 0 ? []
+                : string.Equals(connection.CalendarMode, "adminByAssignee", StringComparison.Ordinal)
+                    ? exportTasks.Select(item => item.AssigneeUserId ?? connection.UserId).Append(connection.UserId)
+                    : [connection.UserId];
+            var timeZones = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
+                _db, timeZoneUserIds, cancellationToken);
             var taskIds = tasks.Select(item => item.Id).ToArray();
             var links = await _db.GoogleCalendarTaskLinks
                 .Where(item => item.ConnectionId == connection.Id && taskIds.Contains(item.TaskJournalItemId))
                 .ToDictionaryAsync(item => item.TaskJournalItemId, cancellationToken);
             var externalCommentsByTask = await LoadExternalCalendarCommentsAsync(
-                tasks.Where(item => !ShouldHideCompletedTask(settings, item)).Select(item => item.Id), cancellationToken);
+                exportTasks.Select(item => item.Id), cancellationToken);
             foreach (var task in tasks)
             {
                 try
@@ -642,7 +652,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
                             task,
                             settings,
                             externalCommentsByTask.GetValueOrDefault(task.Id) ?? [],
-                            cancellationToken, links, logContext);
+                            cancellationToken, links, logContext, timeZones);
                     }
 
                     processedTasks++;
@@ -934,22 +944,58 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         var accessToken = await ResolveAccessTokenAsync(connection, cancellationToken);
         foreach (var calendar in connection.Calendars.ToList())
         {
-            var response = await ListEventsAsync(accessToken, calendar, forceFull, cancellationToken);
-            if (response.ResetRequired)
+            var windowAnchor = DateTime.UtcNow;
+            var fullSync = forceFull;
+            var resetPerformed = false;
+            string? pageToken = null;
+            string? completedSyncToken = null;
+            var seenPageTokens = new HashSet<string>(StringComparer.Ordinal);
+            while (true)
             {
-                calendar.SyncToken = null;
-                response = await ListEventsAsync(accessToken, calendar, forceFull: true, cancellationToken);
-            }
-
-            foreach (var googleEvent in response.Events)
-            {
-                if (await ApplyGoogleEventAsync(connection, calendar, googleEvent, accessToken, cancellationToken))
+                var response = await ListEventsAsync(accessToken, calendar, fullSync, cancellationToken, pageToken, windowAnchor);
+                if (response.ResetRequired)
                 {
-                    imported++;
+                    if (resetPerformed)
+                    {
+                        throw new InvalidOperationException("Google не принял повторную полную загрузку календаря.");
+                    }
+                    calendar.SyncToken = null;
+                    fullSync = true;
+                    resetPerformed = true;
+                    pageToken = null;
+                    seenPageTokens.Clear();
+                    continue;
                 }
+
+                foreach (var eventPage in response.Events.Chunk(CalendarSyncTaskPager.PageSize))
+                {
+                    // Only display timezones for this page; link/conflict guards run first.
+                    var importTimeZones = new Dictionary<int, TimeZoneInfo>();
+                    foreach (var googleEvent in eventPage)
+                    {
+                        if (await ApplyGoogleEventAsync(connection, calendar, googleEvent, accessToken, cancellationToken, importTimeZones))
+                        {
+                            imported++;
+                        }
+                    }
+                }
+
+                var nextPageToken = NormalizeOptional(response.NextPageToken);
+                if (nextPageToken is null)
+                {
+                    completedSyncToken = NormalizeOptional(response.NextSyncToken)
+                        ?? throw new InvalidOperationException("Google не подтвердил завершение загрузки календаря.");
+                    break;
+                }
+                if (!seenPageTokens.Add(nextPageToken))
+                {
+                    throw new InvalidOperationException("Google повторно вернул ту же страницу календаря.");
+                }
+                pageToken = nextPageToken;
             }
 
-            calendar.SyncToken = response.NextSyncToken ?? calendar.SyncToken;
+            // Advance only after all pages, keeping the original token on failure/cancellation.
+            calendar.SyncToken = completedSyncToken;
             calendar.LastSyncedAt = DateTime.UtcNow;
             calendar.LastError = null;
             calendar.UpdatedAt = DateTime.UtcNow;
@@ -963,7 +1009,8 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         GoogleCalendarSyncCalendar calendar,
         GoogleEventItem googleEvent,
         string accessToken,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Dictionary<int, TimeZoneInfo> importTimeZones)
     {
         var taskId = googleEvent.PayPlannerTaskId;
         GoogleCalendarTaskLink? link = null;
@@ -1056,7 +1103,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         var task = link.TaskJournalItem;
         var changed = false;
         var changes = new List<string>();
-        var timeZone = await ResolveTaskTimeZoneAsync(connection, calendar, task, cancellationToken);
+        var timeZone = await ResolveTaskTimeZoneAsync(connection, calendar, task, cancellationToken, importTimeZones: importTimeZones);
         var importedStartAt = googleEvent.StartAt.HasValue ? CalendarTimeZoneHelper.NormalizeUtcInstant(googleEvent.StartAt.Value) : (DateTime?)null;
         var importedEndAt = googleEvent.EndAt.HasValue ? CalendarTimeZoneHelper.NormalizeUtcInstant(googleEvent.EndAt.Value) : (DateTime?)null;
         if (importedStartAt.HasValue && task.DueAt != importedStartAt.Value)
@@ -1133,12 +1180,19 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         IReadOnlyCollection<TaskJournalComment> externalComments,
         CancellationToken cancellationToken,
         IReadOnlyDictionary<int, GoogleCalendarTaskLink>? knownLinks = null,
-        CalendarSyncLogContext? logContext = null)
+        CalendarSyncLogContext? logContext = null,
+        IReadOnlyDictionary<int, TimeZoneInfo>? timeZones = null)
     {
+        if (timeZones is null)
+        {
+            int[] timeZoneUserIds = string.Equals(connection.CalendarMode, "adminByAssignee", StringComparison.Ordinal)
+                ? [connection.UserId, task.AssigneeUserId ?? connection.UserId] : [connection.UserId];
+            timeZones = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(_db, timeZoneUserIds, cancellationToken);
+        }
         var accessToken = await ResolveAccessTokenAsync(connection, cancellationToken);
-        var calendar = await EnsureCalendarForTaskAsync(connection, task, accessToken, cancellationToken);
+        var calendar = await EnsureCalendarForTaskAsync(connection, task, accessToken, cancellationToken, timeZones);
         logContext?.RememberCalendar(calendar.Id, calendar.Name, calendar.OwnerUserId, calendar.OwnerUser);
-        var timeZone = await ResolveTaskTimeZoneAsync(connection, null, task, cancellationToken);
+        var timeZone = await ResolveTaskTimeZoneAsync(connection, null, task, cancellationToken, timeZones);
         var crmHash = BuildCrmHash(task, timeZone, externalComments);
         var closedTaskColorId = ResolveCompletedTaskGoogleColorId(task, settings);
         if (closedTaskColorId is not null)
@@ -1277,9 +1331,14 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             .Select(item => new { item.Id, item.FullName })
             .ToListAsync(cancellationToken);
 
-        foreach (var owner in owners)
+        foreach (var ownerPage in owners.Chunk(CalendarSyncTaskPager.PageSize))
         {
-            await EnsureCalendarForOwnerAsync(connection, owner.Id, owner.FullName, accessToken, cancellationToken);
+            var timeZones = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
+                _db, ownerPage.Select(owner => owner.Id), cancellationToken);
+            foreach (var owner in ownerPage)
+            {
+                await EnsureCalendarForOwnerAsync(connection, owner.Id, owner.FullName, accessToken, cancellationToken, timeZones);
+            }
         }
 
         if (visibleUserIds is not null)
@@ -1307,13 +1366,14 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         GoogleCalendarConnection connection,
         TaskJournalItem task,
         string accessToken,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<int, TimeZoneInfo>? timeZones = null)
     {
         var visibility = await ResolveConnectionCalendarVisibilityAsync(connection.UserId, cancellationToken);
         var ownerUserId = IsAssigneeCalendarMode(connection, visibility) ? task.AssigneeUserId : null;
         var ownerName = ownerUserId.HasValue ? NormalizeOptional(task.AssigneeName) : null;
 
-        return await EnsureCalendarForOwnerAsync(connection, ownerUserId, ownerName, accessToken, cancellationToken);
+        return await EnsureCalendarForOwnerAsync(connection, ownerUserId, ownerName, accessToken, cancellationToken, timeZones);
     }
 
     private async Task<GoogleCalendarSyncCalendar> EnsureCalendarForOwnerAsync(
@@ -1321,7 +1381,8 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         int? ownerUserId,
         string? ownerName,
         string accessToken,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<int, TimeZoneInfo>? timeZones = null)
     {
         var name = ownerUserId.HasValue
             ? $"PayPlanner - {NormalizeOptional(ownerName) ?? $"сотрудник #{ownerUserId.Value}"}"
@@ -1331,7 +1392,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             .Where(item => item.ConnectionId == connection.Id && item.OwnerUserId == ownerUserId)
             .OrderBy(item => item.Id)
             .FirstOrDefaultAsync(cancellationToken);
-        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, ownerUserId ?? connection.UserId, cancellationToken);
+        var timeZone = await ResolveUserTimeZoneAsync(ownerUserId ?? connection.UserId, cancellationToken, timeZones);
         if (calendar is not null)
         {
             await EnsureGoogleCalendarTimeZoneAsync(accessToken, calendar, timeZone, cancellationToken);
@@ -1478,11 +1539,19 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         await SendGoogleJsonAsync(request, cancellationToken);
     }
 
+    private async Task<TimeZoneInfo> ResolveUserTimeZoneAsync(int userId, CancellationToken cancellationToken,
+        IReadOnlyDictionary<int, TimeZoneInfo>? timeZones = null)
+        => timeZones is not null && timeZones.TryGetValue(userId, out var knownTimeZone)
+            ? knownTimeZone
+            : await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, userId, cancellationToken);
+
     private async Task<TimeZoneInfo> ResolveTaskTimeZoneAsync(
         GoogleCalendarConnection connection,
         GoogleCalendarSyncCalendar? calendar,
         TaskJournalItem task,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<int, TimeZoneInfo>? timeZones = null,
+        Dictionary<int, TimeZoneInfo>? importTimeZones = null)
     {
         var ownerUserId = calendar?.OwnerUserId;
         if (!ownerUserId.HasValue)
@@ -1493,7 +1562,14 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
                 : connection.UserId;
         }
 
-        return await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, ownerUserId ?? connection.UserId, cancellationToken);
+        var userId = ownerUserId ?? connection.UserId;
+        if (importTimeZones is not null && importTimeZones.TryGetValue(userId, out var knownTimeZone))
+        {
+            return knownTimeZone;
+        }
+        var timeZone = await ResolveUserTimeZoneAsync(userId, cancellationToken, timeZones);
+        importTimeZones?.TryAdd(userId, timeZone);
+        return timeZone;
     }
 
     private async Task<int> DeleteLinksOutsideSyncWindowAsync(GoogleCalendarConnection connection, CancellationToken cancellationToken)
@@ -2050,14 +2126,22 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         string accessToken,
         GoogleCalendarSyncCalendar calendar,
         bool forceFull,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? pageToken = null,
+        DateTime? windowAnchor = null)
     {
         var query = new Dictionary<string, string?>
         {
             ["singleEvents"] = "true",
             ["showDeleted"] = "true",
-            ["maxResults"] = "2500",
+            ["maxResults"] = CalendarSyncTaskPager.PageSize.ToString(CultureInfo.InvariantCulture),
         };
+
+        if (!string.IsNullOrWhiteSpace(pageToken))
+        {
+            query["pageToken"] = pageToken;
+        }
+        var anchor = windowAnchor ?? DateTime.UtcNow;
 
         if (!forceFull && !string.IsNullOrWhiteSpace(calendar.SyncToken))
         {
@@ -2065,8 +2149,8 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         }
         else
         {
-            query["timeMin"] = DateTime.UtcNow.AddDays(-30).ToString("O", CultureInfo.InvariantCulture);
-            query["timeMax"] = DateTime.UtcNow.AddDays(365).ToString("O", CultureInfo.InvariantCulture);
+            query["timeMin"] = anchor.AddDays(-30).ToString("O", CultureInfo.InvariantCulture);
+            query["timeMax"] = anchor.AddDays(365).ToString("O", CultureInfo.InvariantCulture);
         }
 
         var url = QueryHelpers.AddQueryString($"{GoogleApiBaseUrl}/calendars/{Uri.EscapeDataString(calendar.GoogleCalendarId)}/events", query!);
@@ -2104,7 +2188,8 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             }
         }
 
-        return new GoogleEventsResponse(events, ReadString(document.RootElement, "nextSyncToken"), ResetRequired: false);
+        return new GoogleEventsResponse(events, ReadString(document.RootElement, "nextSyncToken"), ResetRequired: false,
+            NextPageToken: ReadString(document.RootElement, "nextPageToken"));
     }
 
     private async Task<JsonDocument> SendGoogleJsonAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -2992,7 +3077,8 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         }
     }
 
-    private sealed record GoogleEventsResponse(IReadOnlyList<GoogleEventItem> Events, string? NextSyncToken, bool ResetRequired);
+    private sealed record GoogleEventsResponse(IReadOnlyList<GoogleEventItem> Events, string? NextSyncToken, bool ResetRequired,
+        string? NextPageToken = null);
     private sealed record GoogleEventItem(string Id, string? Etag, string? Status, string? Summary, DateTime? StartAt, DateTime? EndAt, int? PayPlannerTaskId);
     private sealed record ConnectionSyncResult(int ProcessedTasks, int ImportedEvents, int ErrorCount);
 
