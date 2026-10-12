@@ -3,6 +3,7 @@ import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import {
   ArrowLeft,
+  ChevronDown,
   Ban,
   Users,
   TrendingUp,
@@ -6123,6 +6124,31 @@ export function ClientDetail({
     );
   }
 
+  const profileCardTitles = {
+    contacts: "Контактные данные",
+    documents: "Документы",
+  };
+  const profileCardGroupValues: Record<string, unknown[]> = {
+    main: [...clientFormState.phones, ...clientFormState.emails],
+    addresses: clientFormState.addressEntries,
+    passports: clientFormState.passportEntries,
+    birthCertificates: clientFormState.birthCertificateEntries,
+    militaryIds: clientFormState.militaryIdEntries,
+  };
+  const profileCardRequiredKeys: Record<string, string[]> = {
+    main: ["Phones", "Emails"],
+    addresses: ["Addresses"],
+    passports: ["Passports"],
+    birthCertificates: ["BirthCertificates"],
+    militaryIds: ["MilitaryIds"],
+  };
+  const profileCardTone = (groups: string[]) =>
+    groups.some((group) =>
+      hasMissingRequiredList(profileCardRequiredKeys[group], profileCardGroupValues[group] ?? []),
+    )
+      ? "text-red-700"
+      : "text-gray-900";
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-[calc(100vw-2rem)] mx-auto p-6">
@@ -6610,126 +6636,6 @@ export function ClientDetail({
                       </SystemSelect>
                     </div>
                   </div>
-
-                  <div className="md:col-span-2">
-                    <div className="mb-3 flex flex-wrap gap-2">
-                      {[
-                        {
-                          id: "main",
-                          label: "Контакты",
-                          requiredKeys: ["Phones", "Emails"],
-                          values: [
-                            ...clientFormState.phones,
-                            ...clientFormState.emails,
-                          ],
-                        },
-                        {
-                          id: "passports",
-                          label: "Паспорта",
-                          requiredKeys: ["Passports"],
-                          values: clientFormState.passportEntries,
-                        },
-                        {
-                          id: "addresses",
-                          label: "Адреса",
-                          requiredKeys: ["Addresses"],
-                          values: clientFormState.addressEntries,
-                        },
-                        {
-                          id: "education",
-                          additional: true,
-                          label: "Образование (ОКСО)",
-                          requiredKeys: ["Education"],
-                          values: clientFormState.education,
-                        },
-                        {
-                          id: "professions",
-                          additional: true,
-                          label: "Профессии (ОКПДТР)",
-                          requiredKeys: ["Professions"],
-                          values: clientFormState.professions,
-                        },
-                        {
-                          id: "workplaces",
-                          additional: true,
-                          label: "Работа и должности",
-                          requiredKeys: ["Workplaces"],
-                          values: clientFormState.workplaces,
-                        },
-                        {
-                          id: "relatives",
-                          additional: true,
-                          label: "Родственники",
-                          requiredKeys: ["Relatives"],
-                          values: clientFormState.relatives,
-                        },
-                        {
-                          id: "birthCertificates",
-                          label: "Свидетельства о рождении",
-                          requiredKeys: ["BirthCertificates"],
-                          values: clientFormState.birthCertificateEntries,
-                        },
-                        {
-                          id: "militaryIds",
-                          label: "Военные билеты",
-                          requiredKeys: ["MilitaryIds"],
-                          values: clientFormState.militaryIdEntries,
-                        },
-                        {
-                          id: "poa",
-                          additional: true,
-                          label: "Доверенности",
-                          requiredKeys: ["PowersOfAttorney"],
-                          values: powersOfAttorney,
-                        },
-                      ].filter((tab) => !tab.additional || profileAdditionalOpen).map((tab) => (
-                        <button
-                          key={tab.id}
-                          type="button"
-                          onClick={() =>
-                            setActiveProfileGroup(
-                              tab.id as typeof activeProfileGroup,
-                            )
-                          }
-                          className={`rounded-lg border px-3 py-1.5 text-sm ${(() => {
-                            const isActive = activeProfileGroup === tab.id;
-                            const missing = hasMissingRequiredList(
-                              tab.requiredKeys,
-                              tab.values ?? [],
-                            );
-                            const requiredAndFilled =
-                              hasAnyRequiredList(tab.requiredKeys) && !missing;
-                            if (isActive && missing)
-                              return "border-red-500 bg-red-50 text-red-700";
-                            if (isActive && requiredAndFilled)
-                              return "border-emerald-500 bg-emerald-50 text-emerald-700";
-                            if (isActive)
-                              return "border-emerald-500 bg-emerald-50 text-emerald-700";
-                            if (missing) return "border-red-300 text-red-700";
-                            if (requiredAndFilled)
-                              return "border-emerald-300 text-emerald-700";
-                            return "border-gray-300 text-gray-700";
-                          })()}`}
-                        >
-                          {tab.label}
-                          {hasAnyRequiredList(tab.requiredKeys) ? " *" : ""}
-                        </button>
-                      ))}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (profileAdditionalOpen && PROFILE_ADDITIONAL_GROUPS.includes(activeProfileGroup)) {
-                            setActiveProfileGroup("main");
-                          }
-                          setProfileAdditionalOpen((open) => !open);
-                        }}
-                        aria-expanded={profileAdditionalOpen}
-                        className="rounded-lg border border-dashed border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
-                      >
-                        {profileAdditionalOpen ? "Скрыть дополнительную информацию" : "Дополнительная информация"}
-                      </button>
-                    </div>
-                  </div>
                 </>
               ) : (
                 <div className="md:col-span-2">
@@ -6816,896 +6722,1050 @@ export function ClientDetail({
                 </div>
               )}
 
-              {clientFormState.kind === "individual" &&
-                activeProfileGroup === "passports" && (
-                  <ClientPassportEntriesForm
-                    entries={clientFormState.passportEntries}
-                    canEdit={canEditClientProfile}
-                    dateInputClassName={DATE_INPUT_CLASS}
-                    onUpdateEntry={updatePassportEntry}
-                    onRemoveEntry={removePassportEntry}
-                    onAddEntry={addPassportEntry}
-                  />
-                )}
-
-              {clientFormState.kind === "individual" &&
-                activeProfileGroup === "addresses" && (
-                  <ClientAddressEntriesForm
-                    entries={clientFormState.addressEntries}
-                    canEdit={canEditClientProfile}
-                    addressTypeOptions={ADDRESS_TYPE_OPTIONS}
-                    suggestionsByIndex={addressSuggestionsByIndex}
-                    onUpdateEntry={updateAddressFormEntry}
-                    onSetPrimary={setPrimaryAddressFormEntry}
-                    onRemoveEntry={removeAddressEntry}
-                    onAddEntry={addAddressEntry}
-                    onToggleAdditionalType={toggleAddressAdditionalType}
-                    onScheduleSuggestions={scheduleAddressSuggestions}
-                    onFindAddress={(index) => {
-                      void fillAddressEntryByDaData(index);
-                    }}
-                    onApplySuggestion={applyAddressSuggestion}
-                  />
-                )}
-
-              {clientFormState.kind === "individual" &&
-                activeProfileGroup === "main" && (
-                  <div className="md:col-span-2 grid gap-4 md:grid-cols-2">
-                    {(["phones", "emails"] as const).map((field) => (
-                      <div key={field}>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          {field === "phones" ? "Телефоны" : "Email"}
-                        </label>
-                        <div className="space-y-2">
-                          {clientFormState[field].map((value, index) => (
-                            <div
-                              key={`${field}-${index}`}
-                              className="flex gap-2"
-                            >
-                              <input
-                                type={field === "emails" ? "email" : "text"}
-                                value={value}
-                                onChange={(event) =>
-                                  updateListField(
-                                    field,
-                                    index,
-                                    event.target.value,
-                                  )
-                                }
-                                disabled={!canEditClientProfile}
-                                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  void removeListFieldRow(field, index);
-                                }}
-                                disabled={!canEditClientProfile}
-                                className={PROFILE_DELETE_ICON_BUTTON_CLASS}
-                                title={
-                                  field === "phones"
-                                    ? "Удалить телефон"
-                                    : "Удалить email"
-                                }
-                                aria-label={
-                                  field === "phones"
-                                    ? "Удалить телефон"
-                                    : "Удалить email"
-                                }
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </div>
-                          ))}
-                          <button
-                            type="button"
-                            onClick={() => addListFieldRow(field)}
-                            disabled={!canEditClientProfile}
-                            className="text-sm text-emerald-600"
-                          >
-                            + Добавить
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-              {clientFormState.kind === "individual" &&
-                activeProfileGroup === "education" && (
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Образование (ОКСО)
-                    </label>
-                    <div className="space-y-2">
-                      {clientFormState.education.map((item, index) => (
-                        <div
-                          key={`education-${index}`}
-                          className="rounded-lg border border-gray-200 p-3"
-                        >
-                          <div className="grid items-start gap-2 md:grid-cols-12">
-                            <input
-                              value={item.institution}
-                              onChange={(e) =>
-                                updateEducation(
-                                  index,
-                                  "institution",
-                                  e.target.value,
-                                )
-                              }
-                              placeholder="Учебное заведение"
-                              disabled={!canEditClientProfile}
-                              className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4"
-                            />
-                            <input
-                              value={item.specialty}
-                              onChange={(e) =>
-                                updateEducation(
-                                  index,
-                                  "specialty",
-                                  e.target.value,
-                                )
-                              }
-                              placeholder="Специальность"
-                              disabled={!canEditClientProfile}
-                              className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3"
-                            />
-                            <input
-                              value={item.diplomaNumber}
-                              onChange={(e) =>
-                                updateEducation(
-                                  index,
-                                  "diplomaNumber",
-                                  e.target.value,
-                                )
-                              }
-                              placeholder="№ диплома"
-                              disabled={!canEditClientProfile}
-                              className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-2"
-                            />
-                            <div className="md:col-span-2">
-                              <input
-                                value={item.oksoCode}
-                                onFocus={() => setOksoSearch(item.oksoCode)}
-                                onChange={(e) => {
-                                  const value = e.target.value;
-                                  updateEducation(index, "oksoCode", value);
-                                  setOksoSearch(value);
-                                }}
-                                placeholder="Код ОКСО"
-                                list="okso-codes"
-                                aria-busy={oksoLoading}
-                                disabled={!canEditClientProfile}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                              />
-                              {oksoLoading && (
-                                <p className="mt-1 text-xs text-gray-500">Ищем по ОКСО…</p>
-                              )}
-                            </div>
-                            <div className="flex items-center justify-end md:col-span-1">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  void removeEducation(index);
-                                }}
-                                disabled={!canEditClientProfile}
-                                className={PROFILE_DELETE_ICON_BUTTON_CLASS}
-                                title="Удалить образование"
-                                aria-label="Удалить образование"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setClientFormState((prev) => ({
-                            ...prev,
-                            education: [
-                              ...prev.education,
-                              createEmptyEducation(),
-                            ],
-                          }))
-                        }
-                        disabled={!canEditClientProfile}
-                        className="text-sm text-emerald-600"
-                      >
-                        + Добавить образование
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-              <datalist id="okso-codes">
-                {oksoOptions.map((item) => (
-                  <option key={item.code} value={item.code}>
-                    {item.name}
-                  </option>
-                ))}
-              </datalist>
-              <datalist id="okpdtr-codes">
-                {okpdtrOptions.map((item) => (
-                  <option key={item.code} value={item.code}>
-                    {item.name}
-                  </option>
-                ))}
-              </datalist>
-
-              {clientFormState.kind === "individual" &&
-                activeProfileGroup === "professions" && (
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Профессии (ОКПДТР)
-                    </label>
-                    <div className="space-y-2">
-                      {clientFormState.professions.map((item, index) => (
-                        <div
-                          key={`profession-${index}`}
-                          className="rounded-lg border border-gray-200 p-3"
-                        >
-                          <div className="grid items-start gap-2 md:grid-cols-12">
-                            <input
-                              value={item.profession}
-                              onChange={(e) =>
-                                updateProfession(
-                                  index,
-                                  "profession",
-                                  e.target.value,
-                                )
-                              }
-                              placeholder="Профессия"
-                              disabled={!canEditClientProfile}
-                              className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-7"
-                            />
-                            <div className="md:col-span-4">
-                              <input
-                                value={item.okpdtrCode}
-                                onFocus={() => setOkpdtrSearch(item.okpdtrCode)}
-                                onChange={(e) => {
-                                  const value = e.target.value;
-                                  updateProfession(index, "okpdtrCode", value);
-                                  setOkpdtrSearch(value);
-                                }}
-                                placeholder="Код ОКПДТР"
-                                list="okpdtr-codes"
-                                aria-busy={okpdtrLoading}
-                                disabled={!canEditClientProfile}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                              />
-                              {okpdtrLoading && (
-                                <p className="mt-1 text-xs text-gray-500">Ищем по ОКПДТР…</p>
-                              )}
-                            </div>
-                            <div className="flex items-center justify-end md:col-span-1">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  void removeProfession(index);
-                                }}
-                                disabled={!canEditClientProfile}
-                                className={PROFILE_DELETE_ICON_BUTTON_CLASS}
-                                title="Удалить профессию"
-                                aria-label="Удалить профессию"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setClientFormState((prev) => ({
-                            ...prev,
-                            professions: [
-                              ...prev.professions,
-                              createEmptyProfession(),
-                            ],
-                          }))
-                        }
-                        disabled={!canEditClientProfile}
-                        className="text-sm text-emerald-600"
-                      >
-                        + Добавить профессию
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-              {clientFormState.kind === "individual" &&
-                activeProfileGroup === "workplaces" && (
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Места работы и должности
-                    </label>
-                    <div className="space-y-2">
-                      {clientFormState.workplaces.map((item, index) => (
-                        <div
-                          key={`workplace-${index}`}
-                          className="rounded-lg border border-gray-200 p-3"
-                        >
-                          <div className="grid items-start gap-2 md:grid-cols-12">
-                            <input
-                              value={item.organizationName}
-                              onChange={(e) =>
-                                updateWorkplace(
-                                  index,
-                                  "organizationName",
-                                  e.target.value,
-                                )
-                              }
-                              placeholder="Организация"
-                              disabled={!canEditClientProfile}
-                              className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4"
-                            />
-                            <input
-                              value={item.position}
-                              onChange={(e) =>
-                                updateWorkplace(
-                                  index,
-                                  "position",
-                                  e.target.value,
-                                )
-                              }
-                              placeholder="Должность"
-                              disabled={!canEditClientProfile}
-                              className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3"
-                            />
-                            <div className="md:col-span-2">
-                              <SystemDateInput
-                                type="date"
-                                value={item.startDate}
-                                onChange={(e) =>
-                                  updateWorkplace(
-                                    index,
-                                    "startDate",
-                                    e.target.value,
-                                  )
-                                }
-                                disabled={!canEditClientProfile}
-                                className={DATE_INPUT_CLASS}
-                              />
-                            </div>
-                            <div className="md:col-span-2">
-                              <SystemDateInput
-                                type="date"
-                                value={item.endDate}
-                                onChange={(e) =>
-                                  updateWorkplace(
-                                    index,
-                                    "endDate",
-                                    e.target.value,
-                                  )
-                                }
-                                disabled={!canEditClientProfile}
-                                className={DATE_INPUT_CLASS}
-                              />
-                            </div>
-                            <div className="flex items-center justify-end md:col-span-1">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  void removeWorkplace(index);
-                                }}
-                                disabled={!canEditClientProfile}
-                                className={PROFILE_DELETE_ICON_BUTTON_CLASS}
-                                title="Удалить место работы"
-                                aria-label="Удалить место работы"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setClientFormState((prev) => ({
-                            ...prev,
-                            workplaces: [
-                              ...prev.workplaces,
-                              createEmptyWorkplace(),
-                            ],
-                          }))
-                        }
-                        disabled={!canEditClientProfile}
-                        className="text-sm text-emerald-600"
-                      >
-                        + Добавить место работы
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!canEditClientProfile}
-                        onClick={() => {
-                          setLegalEntityPromptError(null);
-                          setLegalEntityDraft({ shortName: "", inn: "" });
-                          setLegalEntityPromptOpen(true);
-                        }}
-                        className="text-sm text-indigo-600"
-                      >
-                        + Добавить организацию
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-              {clientFormState.kind === "individual" &&
-                activeProfileGroup === "relatives" && (
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Близкие родственники
-                    </label>
-                    <div className="space-y-2">
-                      {clientFormState.relatives.map((item, index) => (
-                        <div
-                          key={`relative-${index}`}
-                          className="rounded-lg border border-gray-200 p-3"
-                        >
-                          <div className="grid items-start gap-2 md:grid-cols-12">
-                            <input
-                              value={item.relation}
-                              onChange={(e) =>
-                                updateRelative(
-                                  index,
-                                  "relation",
-                                  e.target.value,
-                                )
-                              }
-                              placeholder="Степень родства"
-                              disabled={!canEditClientProfile}
-                              className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-2"
-                            />
-                            <input
-                              value={item.fullName}
-                              onChange={(e) =>
-                                updateRelative(
-                                  index,
-                                  "fullName",
-                                  e.target.value,
-                                )
-                              }
-                              placeholder="ФИО"
-                              disabled={!canEditClientProfile}
-                              className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4"
-                            />
-                            <input
-                              value={item.birthYear}
-                              onChange={(e) =>
-                                updateRelative(
-                                  index,
-                                  "birthYear",
-                                  e.target.value,
-                                )
-                              }
-                              placeholder="Год рождения"
-                              disabled={!canEditClientProfile}
-                              className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-2"
-                            />
-                            <input
-                              value={item.phone}
-                              onChange={(e) =>
-                                updateRelative(index, "phone", e.target.value)
-                              }
-                              placeholder="Номер телефона"
-                              disabled={!canEditClientProfile}
-                              inputMode="tel"
-                              className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3"
-                            />
-                            <div className="flex items-center justify-end md:col-span-1">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  void removeRelative(index);
-                                }}
-                                disabled={!canEditClientProfile}
-                                className={PROFILE_DELETE_ICON_BUTTON_CLASS}
-                                title="Удалить родственника"
-                                aria-label="Удалить родственника"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setClientFormState((prev) => ({
-                            ...prev,
-                            relatives: [
-                              ...prev.relatives,
-                              createEmptyRelative(),
-                            ],
-                          }))
-                        }
-                        disabled={!canEditClientProfile}
-                        className="text-sm text-emerald-600"
-                      >
-                        + Добавить родственника
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-              {clientFormState.kind === "individual" &&
-                activeProfileGroup === "birthCertificates" && (
-                  <div className="md:col-span-2 space-y-4">
-                    <div>
-                      <div className="mb-2 flex items-center justify-between">
-                        <label className="block text-sm font-medium text-gray-700">
-                          Свидетельства о рождении
-                        </label>
-                        <button
-                          type="button"
-                          onClick={addBirthCertificateEntry}
-                          disabled={!canEditClientProfile}
-                          className="text-sm text-emerald-600"
-                        >
-                          + Добавить свидетельство
-                        </button>
-                      </div>
-                      <div className="space-y-2">
-                        {clientFormState.birthCertificateEntries.map(
-                          (doc, index) => (
-                            <div
-                              key={`birth-certificate-${index}`}
-                              className="rounded-lg border border-gray-200 p-3"
-                            >
-                              <div className="grid items-start gap-2 md:grid-cols-12">
-                                <input
-                                  value={doc.series}
-                                  onChange={(e) =>
-                                    updateBirthCertificateEntry(
-                                      index,
-                                      "series",
-                                      e.target.value,
-                                    )
-                                  }
-                                  placeholder="Серия"
-                                  disabled={!canEditClientProfile}
-                                  className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3"
-                                />
-                                <input
-                                  value={doc.number}
-                                  onChange={(e) =>
-                                    updateBirthCertificateEntry(
-                                      index,
-                                      "number",
-                                      e.target.value,
-                                    )
-                                  }
-                                  placeholder="Номер"
-                                  disabled={!canEditClientProfile}
-                                  className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3"
-                                />
-                                <div className="md:col-span-5">
-                                  <SystemDateInput
-                                    type="date"
-                                    value={doc.issueDate}
-                                    onChange={(e) =>
-                                      updateBirthCertificateEntry(
-                                        index,
-                                        "issueDate",
-                                        e.target.value,
-                                      )
-                                    }
-                                    disabled={!canEditClientProfile}
-                                    className={DATE_INPUT_CLASS}
-                                  />
-                                </div>
-                                <div className="flex items-center justify-end md:col-span-1">
+              {clientFormState.kind === "individual" && (
+                <section
+                  className="md:col-span-2 rounded-xl border border-gray-200 bg-gray-50/50 p-4"
+                  aria-labelledby="client-profile-card-contacts"
+                >
+                  <h3
+                    id="client-profile-card-contacts"
+                    className={`mb-3 text-base font-semibold ${profileCardTone(["main", "addresses"])}`}
+                  >
+                    {profileCardTitles.contacts}
+                  </h3>
+                  <div className="grid gap-4 md:grid-cols-2">
+                      {clientFormState.kind === "individual" && (
+                          <div className="md:col-span-2 grid gap-4 md:grid-cols-2">
+                            {(["phones", "emails"] as const).map((field) => (
+                              <div key={field}>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                  {field === "phones" ? "Телефоны" : "Email"}
+                                </label>
+                                <div className="space-y-2">
+                                  {clientFormState[field].map((value, index) => (
+                                    <div
+                                      key={`${field}-${index}`}
+                                      className="flex gap-2"
+                                    >
+                                      <input
+                                        type={field === "emails" ? "email" : "text"}
+                                        value={value}
+                                        onChange={(event) =>
+                                          updateListField(
+                                            field,
+                                            index,
+                                            event.target.value,
+                                          )
+                                        }
+                                        disabled={!canEditClientProfile}
+                                        className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          void removeListFieldRow(field, index);
+                                        }}
+                                        disabled={!canEditClientProfile}
+                                        className={PROFILE_DELETE_ICON_BUTTON_CLASS}
+                                        title={
+                                          field === "phones"
+                                            ? "Удалить телефон"
+                                            : "Удалить email"
+                                        }
+                                        aria-label={
+                                          field === "phones"
+                                            ? "Удалить телефон"
+                                            : "Удалить email"
+                                        }
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </button>
+                                    </div>
+                                  ))}
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      void removeBirthCertificateEntry(index);
-                                    }}
+                                    onClick={() => addListFieldRow(field)}
                                     disabled={!canEditClientProfile}
-                                    className={PROFILE_DELETE_ICON_BUTTON_CLASS}
-                                    title="Удалить свидетельство о рождении"
-                                    aria-label="Удалить свидетельство о рождении"
+                                    className="text-sm text-emerald-600"
                                   >
-                                    <Trash2 className="h-4 w-4" />
+                                    + Добавить
                                   </button>
                                 </div>
-                                <input
-                                  value={doc.actRecordNumber}
-                                  onChange={(e) =>
-                                    updateBirthCertificateEntry(
-                                      index,
-                                      "actRecordNumber",
-                                      e.target.value,
-                                    )
-                                  }
-                                  placeholder="№ актовой записи"
-                                  disabled={!canEditClientProfile}
-                                  className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4"
-                                />
-                                <input
-                                  value={doc.childFullName}
-                                  onChange={(e) =>
-                                    updateBirthCertificateEntry(
-                                      index,
-                                      "childFullName",
-                                      e.target.value,
-                                    )
-                                  }
-                                  placeholder="ФИО ребенка"
-                                  disabled={!canEditClientProfile}
-                                  className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-8"
-                                />
-                                <input
-                                  value={doc.issuedBy}
-                                  onChange={(e) =>
-                                    updateBirthCertificateEntry(
-                                      index,
-                                      "issuedBy",
-                                      e.target.value,
-                                    )
-                                  }
-                                  placeholder="Кем выдано"
-                                  disabled={!canEditClientProfile}
-                                  className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-12"
-                                />
                               </div>
-                            </div>
-                          ),
+                            ))}
+                          </div>
                         )}
-                      </div>
-                    </div>
+                      {clientFormState.kind === "individual" && (
+                          <ClientAddressEntriesForm
+                            entries={clientFormState.addressEntries}
+                            canEdit={canEditClientProfile}
+                            addressTypeOptions={ADDRESS_TYPE_OPTIONS}
+                            suggestionsByIndex={addressSuggestionsByIndex}
+                            onUpdateEntry={updateAddressFormEntry}
+                            onSetPrimary={setPrimaryAddressFormEntry}
+                            onRemoveEntry={removeAddressEntry}
+                            onAddEntry={addAddressEntry}
+                            onToggleAdditionalType={toggleAddressAdditionalType}
+                            onScheduleSuggestions={scheduleAddressSuggestions}
+                            onFindAddress={(index) => {
+                              void fillAddressEntryByDaData(index);
+                            }}
+                            onApplySuggestion={applyAddressSuggestion}
+                          />
+                        )}
                   </div>
-                )}
+                </section>
+              )}
 
-              {clientFormState.kind === "individual" &&
-                activeProfileGroup === "militaryIds" && (
-                  <div className="md:col-span-2 space-y-4">
-                    <div>
-                      <div className="mb-2 flex items-center justify-between">
-                        <label className="block text-sm font-medium text-gray-700">
-                          Военные билеты
-                        </label>
-                        <button
-                          type="button"
-                          onClick={addMilitaryIdEntry}
-                          disabled={!canEditClientProfile}
-                          className="text-sm text-emerald-600"
-                        >
-                          + Добавить военный билет
-                        </button>
-                      </div>
-                      <div className="space-y-2">
-                        {clientFormState.militaryIdEntries.map((doc, index) => (
-                          <div
-                            key={`military-id-${index}`}
-                            className="rounded-lg border border-gray-200 p-3"
-                          >
-                            <div className="grid items-start gap-2 md:grid-cols-12">
-                              <input
-                                value={doc.series}
-                                onChange={(e) =>
-                                  updateMilitaryIdEntry(
-                                    index,
-                                    "series",
-                                    e.target.value,
-                                  )
-                                }
-                                placeholder="Серия"
-                                disabled={!canEditClientProfile}
-                                className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3"
-                              />
-                              <input
-                                value={doc.number}
-                                onChange={(e) =>
-                                  updateMilitaryIdEntry(
-                                    index,
-                                    "number",
-                                    e.target.value,
-                                  )
-                                }
-                                placeholder="Номер"
-                                disabled={!canEditClientProfile}
-                                className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3"
-                              />
-                              <div className="md:col-span-5">
-                                <SystemDateInput
-                                  type="date"
-                                  value={doc.issueDate}
-                                  onChange={(e) =>
-                                    updateMilitaryIdEntry(
-                                      index,
-                                      "issueDate",
-                                      e.target.value,
-                                    )
-                                  }
-                                  disabled={!canEditClientProfile}
-                                  className={DATE_INPUT_CLASS}
-                                />
-                              </div>
-                              <div className="flex items-center justify-end md:col-span-1">
+              {clientFormState.kind === "individual" && (
+                <section
+                  className="md:col-span-2 rounded-xl border border-gray-200 bg-gray-50/50 p-4"
+                  aria-labelledby="client-profile-card-documents"
+                >
+                  <h3
+                    id="client-profile-card-documents"
+                    className={`mb-3 text-base font-semibold ${profileCardTone(["passports", "birthCertificates", "militaryIds"])}`}
+                  >
+                    {profileCardTitles.documents}
+                  </h3>
+                  <div className="grid gap-4 md:grid-cols-2">
+                      {clientFormState.kind === "individual" && (
+                          <ClientPassportEntriesForm
+                            entries={clientFormState.passportEntries}
+                            canEdit={canEditClientProfile}
+                            dateInputClassName={DATE_INPUT_CLASS}
+                            onUpdateEntry={updatePassportEntry}
+                            onRemoveEntry={removePassportEntry}
+                            onAddEntry={addPassportEntry}
+                          />
+                        )}
+                      {clientFormState.kind === "individual" && (
+                          <div className="md:col-span-2 space-y-4">
+                            <div>
+                              <div className="mb-2 flex items-center justify-between">
+                                <label className="block text-sm font-medium text-gray-700">
+                                  Свидетельства о рождении
+                                </label>
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    void removeMilitaryIdEntry(index);
-                                  }}
+                                  onClick={addBirthCertificateEntry}
                                   disabled={!canEditClientProfile}
-                                  className={PROFILE_DELETE_ICON_BUTTON_CLASS}
-                                  title="Удалить военный билет"
-                                  aria-label="Удалить военный билет"
+                                  className="text-sm text-emerald-600"
                                 >
-                                  <Trash2 className="h-4 w-4" />
+                                  + Добавить свидетельство
                                 </button>
                               </div>
-                              <input
-                                value={doc.rank}
-                                onChange={(e) =>
-                                  updateMilitaryIdEntry(
-                                    index,
-                                    "rank",
-                                    e.target.value,
-                                  )
-                                }
-                                placeholder="Воинское звание"
-                                disabled={!canEditClientProfile}
-                                className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4"
-                              />
-                              <input
-                                value={doc.category}
-                                onChange={(e) =>
-                                  updateMilitaryIdEntry(
-                                    index,
-                                    "category",
-                                    e.target.value,
-                                  )
-                                }
-                                placeholder="Категория запаса"
-                                disabled={!canEditClientProfile}
-                                className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4"
-                              />
-                              <input
-                                value={doc.fitnessCategory}
-                                onChange={(e) =>
-                                  updateMilitaryIdEntry(
-                                    index,
-                                    "fitnessCategory",
-                                    e.target.value,
-                                  )
-                                }
-                                placeholder="Категория годности"
-                                disabled={!canEditClientProfile}
-                                className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4"
-                              />
-                              <input
-                                value={doc.vusCode}
-                                onChange={(e) =>
-                                  updateMilitaryIdEntry(
-                                    index,
-                                    "vusCode",
-                                    e.target.value,
-                                  )
-                                }
-                                placeholder="Код ВУС"
-                                disabled={!canEditClientProfile}
-                                className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-12"
-                              />
-                              <input
-                                value={doc.issuedBy}
-                                onChange={(e) =>
-                                  updateMilitaryIdEntry(
-                                    index,
-                                    "issuedBy",
-                                    e.target.value,
-                                  )
-                                }
-                                placeholder="Кем выдан"
-                                disabled={!canEditClientProfile}
-                                className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-12"
-                              />
-                              <input
-                                value={doc.militaryCommissariat}
-                                onChange={(e) =>
-                                  updateMilitaryIdEntry(
-                                    index,
-                                    "militaryCommissariat",
-                                    e.target.value,
-                                  )
-                                }
-                                placeholder="Военный комиссариат"
-                                disabled={!canEditClientProfile}
-                                className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-12"
-                              />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-              {clientFormState.kind === "individual" &&
-                activeProfileGroup === "poa" && (
-                  <div className="md:col-span-2">
-                    <div className="mb-2 flex items-center justify-between">
-                      <label className="block text-sm font-medium text-gray-700">
-                        Доверенности
-                      </label>
-                      <button
-                        type="button"
-                        disabled={!canEditClientProfile}
-                        onClick={openCreatePoaPrompt}
-                        className="text-sm text-emerald-600"
-                      >
-                        + Добавить доверенность
-                      </button>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      {powersOfAttorney.length === 0 ? (
-                        <p className="text-sm text-gray-500">
-                          Доверенности не найдены.
-                        </p>
-                      ) : (
-                        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                          {powersOfAttorney.map((poa) => (
-                            <div
-                              key={poa.id}
-                              data-poa-card="true"
-                              className="rounded border border-gray-200 px-3 py-3 text-sm"
-                            >
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0 space-y-1">
-                                  <div className="font-medium text-slate-800">
-                                    №{poa.number}
-                                  </div>
-                                  <div className="text-slate-600">
-                                    {toRuDate(poa.issuedAt)}{" "}
-                                    {poa.validUntil
-                                      ? `— до ${toRuDate(poa.validUntil)}`
-                                      : ""}
-                                  </div>
-                                  {poa.issuer ? (
-                                    <div className="text-slate-500">
-                                      Кем выдана: {poa.issuer}
+                              <div className="space-y-2">
+                                {clientFormState.birthCertificateEntries.map(
+                                  (doc, index) => (
+                                    <div
+                                      key={`birth-certificate-${index}`}
+                                      className="rounded-lg border border-gray-200 p-3"
+                                    >
+                                      <div className="grid items-start gap-2 md:grid-cols-12">
+                                        <input
+                                          value={doc.series}
+                                          onChange={(e) =>
+                                            updateBirthCertificateEntry(
+                                              index,
+                                              "series",
+                                              e.target.value,
+                                            )
+                                          }
+                                          placeholder="Серия"
+                                          disabled={!canEditClientProfile}
+                                          className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3"
+                                        />
+                                        <input
+                                          value={doc.number}
+                                          onChange={(e) =>
+                                            updateBirthCertificateEntry(
+                                              index,
+                                              "number",
+                                              e.target.value,
+                                            )
+                                          }
+                                          placeholder="Номер"
+                                          disabled={!canEditClientProfile}
+                                          className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3"
+                                        />
+                                        <div className="md:col-span-5">
+                                          <SystemDateInput
+                                            type="date"
+                                            value={doc.issueDate}
+                                            onChange={(e) =>
+                                              updateBirthCertificateEntry(
+                                                index,
+                                                "issueDate",
+                                                e.target.value,
+                                              )
+                                            }
+                                            disabled={!canEditClientProfile}
+                                            className={DATE_INPUT_CLASS}
+                                          />
+                                        </div>
+                                        <div className="flex items-center justify-end md:col-span-1">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              void removeBirthCertificateEntry(index);
+                                            }}
+                                            disabled={!canEditClientProfile}
+                                            className={PROFILE_DELETE_ICON_BUTTON_CLASS}
+                                            title="Удалить свидетельство о рождении"
+                                            aria-label="Удалить свидетельство о рождении"
+                                          >
+                                            <Trash2 className="h-4 w-4" />
+                                          </button>
+                                        </div>
+                                        <input
+                                          value={doc.actRecordNumber}
+                                          onChange={(e) =>
+                                            updateBirthCertificateEntry(
+                                              index,
+                                              "actRecordNumber",
+                                              e.target.value,
+                                            )
+                                          }
+                                          placeholder="№ актовой записи"
+                                          disabled={!canEditClientProfile}
+                                          className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4"
+                                        />
+                                        <input
+                                          value={doc.childFullName}
+                                          onChange={(e) =>
+                                            updateBirthCertificateEntry(
+                                              index,
+                                              "childFullName",
+                                              e.target.value,
+                                            )
+                                          }
+                                          placeholder="ФИО ребенка"
+                                          disabled={!canEditClientProfile}
+                                          className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-8"
+                                        />
+                                        <input
+                                          value={doc.issuedBy}
+                                          onChange={(e) =>
+                                            updateBirthCertificateEntry(
+                                              index,
+                                              "issuedBy",
+                                              e.target.value,
+                                            )
+                                          }
+                                          placeholder="Кем выдано"
+                                          disabled={!canEditClientProfile}
+                                          className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-12"
+                                        />
+                                      </div>
                                     </div>
-                                  ) : null}
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => openEditPoaPrompt(poa)}
-                                    disabled={!canEditClientProfile}
-                                    className={
-                                      PROFILE_SECONDARY_ICON_BUTTON_CLASS
-                                    }
-                                    title="Изменить доверенность"
-                                    aria-label="Изменить доверенность"
-                                  >
-                                    <Edit className="h-4 w-4" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      void deletePowerOfAttorney(poa)
-                                    }
-                                    disabled={!canEditClientProfile}
-                                    className={PROFILE_DELETE_ICON_BUTTON_CLASS}
-                                    title="Удалить доверенность"
-                                    aria-label="Удалить доверенность"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </button>
-                                </div>
+                                  ),
+                                )}
                               </div>
                             </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                          </div>
+                        )}
+                      {clientFormState.kind === "individual" && (
+                          <div className="md:col-span-2 space-y-4">
+                            <div>
+                              <div className="mb-2 flex items-center justify-between">
+                                <label className="block text-sm font-medium text-gray-700">
+                                  Военные билеты
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={addMilitaryIdEntry}
+                                  disabled={!canEditClientProfile}
+                                  className="text-sm text-emerald-600"
+                                >
+                                  + Добавить военный билет
+                                </button>
+                              </div>
+                              <div className="space-y-2">
+                                {clientFormState.militaryIdEntries.map((doc, index) => (
+                                  <div
+                                    key={`military-id-${index}`}
+                                    className="rounded-lg border border-gray-200 p-3"
+                                  >
+                                    <div className="grid items-start gap-2 md:grid-cols-12">
+                                      <input
+                                        value={doc.series}
+                                        onChange={(e) =>
+                                          updateMilitaryIdEntry(
+                                            index,
+                                            "series",
+                                            e.target.value,
+                                          )
+                                        }
+                                        placeholder="Серия"
+                                        disabled={!canEditClientProfile}
+                                        className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3"
+                                      />
+                                      <input
+                                        value={doc.number}
+                                        onChange={(e) =>
+                                          updateMilitaryIdEntry(
+                                            index,
+                                            "number",
+                                            e.target.value,
+                                          )
+                                        }
+                                        placeholder="Номер"
+                                        disabled={!canEditClientProfile}
+                                        className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3"
+                                      />
+                                      <div className="md:col-span-5">
+                                        <SystemDateInput
+                                          type="date"
+                                          value={doc.issueDate}
+                                          onChange={(e) =>
+                                            updateMilitaryIdEntry(
+                                              index,
+                                              "issueDate",
+                                              e.target.value,
+                                            )
+                                          }
+                                          disabled={!canEditClientProfile}
+                                          className={DATE_INPUT_CLASS}
+                                        />
+                                      </div>
+                                      <div className="flex items-center justify-end md:col-span-1">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            void removeMilitaryIdEntry(index);
+                                          }}
+                                          disabled={!canEditClientProfile}
+                                          className={PROFILE_DELETE_ICON_BUTTON_CLASS}
+                                          title="Удалить военный билет"
+                                          aria-label="Удалить военный билет"
+                                        >
+                                          <Trash2 className="h-4 w-4" />
+                                        </button>
+                                      </div>
+                                      <input
+                                        value={doc.rank}
+                                        onChange={(e) =>
+                                          updateMilitaryIdEntry(
+                                            index,
+                                            "rank",
+                                            e.target.value,
+                                          )
+                                        }
+                                        placeholder="Воинское звание"
+                                        disabled={!canEditClientProfile}
+                                        className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4"
+                                      />
+                                      <input
+                                        value={doc.category}
+                                        onChange={(e) =>
+                                          updateMilitaryIdEntry(
+                                            index,
+                                            "category",
+                                            e.target.value,
+                                          )
+                                        }
+                                        placeholder="Категория запаса"
+                                        disabled={!canEditClientProfile}
+                                        className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4"
+                                      />
+                                      <input
+                                        value={doc.fitnessCategory}
+                                        onChange={(e) =>
+                                          updateMilitaryIdEntry(
+                                            index,
+                                            "fitnessCategory",
+                                            e.target.value,
+                                          )
+                                        }
+                                        placeholder="Категория годности"
+                                        disabled={!canEditClientProfile}
+                                        className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4"
+                                      />
+                                      <input
+                                        value={doc.vusCode}
+                                        onChange={(e) =>
+                                          updateMilitaryIdEntry(
+                                            index,
+                                            "vusCode",
+                                            e.target.value,
+                                          )
+                                        }
+                                        placeholder="Код ВУС"
+                                        disabled={!canEditClientProfile}
+                                        className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-12"
+                                      />
+                                      <input
+                                        value={doc.issuedBy}
+                                        onChange={(e) =>
+                                          updateMilitaryIdEntry(
+                                            index,
+                                            "issuedBy",
+                                            e.target.value,
+                                          )
+                                        }
+                                        placeholder="Кем выдан"
+                                        disabled={!canEditClientProfile}
+                                        className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-12"
+                                      />
+                                      <input
+                                        value={doc.militaryCommissariat}
+                                        onChange={(e) =>
+                                          updateMilitaryIdEntry(
+                                            index,
+                                            "militaryCommissariat",
+                                            e.target.value,
+                                          )
+                                        }
+                                        placeholder="Военный комиссариат"
+                                        disabled={!canEditClientProfile}
+                                        className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-12"
+                                      />
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        )}
                   </div>
-                )}
+                </section>
+              )}
+
+              {clientFormState.kind === "individual" && (
+                <section
+                  className="md:col-span-2 rounded-xl border border-gray-200 bg-gray-50/50 p-4"
+                  aria-label="Дополнительная информация"
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (profileAdditionalOpen && PROFILE_ADDITIONAL_GROUPS.includes(activeProfileGroup)) {
+                        setActiveProfileGroup("main");
+                      }
+                      setProfileAdditionalOpen((open) => !open);
+                    }}
+                    aria-expanded={profileAdditionalOpen}
+                    className="flex w-full items-center justify-between text-left text-base font-semibold text-gray-900"
+                  >
+                    <span>{profileAdditionalOpen ? "Скрыть дополнительную информацию" : "Дополнительная информация"}</span>
+                    <ChevronDown className={`h-5 w-5 transition-transform ${profileAdditionalOpen ? "rotate-180" : ""}`} />
+                  </button>
+                  {profileAdditionalOpen ? (
+                    <div className="mt-3 grid gap-4 md:grid-cols-2">
+                          <div className="md:col-span-2">
+                            <div className="mb-3 flex flex-wrap gap-2" role="group" aria-label="Дополнительные группы данных">
+                              {[
+                                {
+                                  id: "main",
+                                  label: "Контакты",
+                                  requiredKeys: ["Phones", "Emails"],
+                                  values: [
+                                    ...clientFormState.phones,
+                                    ...clientFormState.emails,
+                                  ],
+                                },
+                                {
+                                  id: "passports",
+                                  label: "Паспорта",
+                                  requiredKeys: ["Passports"],
+                                  values: clientFormState.passportEntries,
+                                },
+                                {
+                                  id: "addresses",
+                                  label: "Адреса",
+                                  requiredKeys: ["Addresses"],
+                                  values: clientFormState.addressEntries,
+                                },
+                                {
+                                  id: "education",
+                                  additional: true,
+                                  label: "Образование (ОКСО)",
+                                  requiredKeys: ["Education"],
+                                  values: clientFormState.education,
+                                },
+                                {
+                                  id: "professions",
+                                  additional: true,
+                                  label: "Профессии (ОКПДТР)",
+                                  requiredKeys: ["Professions"],
+                                  values: clientFormState.professions,
+                                },
+                                {
+                                  id: "workplaces",
+                                  additional: true,
+                                  label: "Работа и должности",
+                                  requiredKeys: ["Workplaces"],
+                                  values: clientFormState.workplaces,
+                                },
+                                {
+                                  id: "relatives",
+                                  additional: true,
+                                  label: "Родственники",
+                                  requiredKeys: ["Relatives"],
+                                  values: clientFormState.relatives,
+                                },
+                                {
+                                  id: "birthCertificates",
+                                  label: "Свидетельства о рождении",
+                                  requiredKeys: ["BirthCertificates"],
+                                  values: clientFormState.birthCertificateEntries,
+                                },
+                                {
+                                  id: "militaryIds",
+                                  label: "Военные билеты",
+                                  requiredKeys: ["MilitaryIds"],
+                                  values: clientFormState.militaryIdEntries,
+                                },
+                                {
+                                  id: "poa",
+                                  additional: true,
+                                  label: "Доверенности",
+                                  requiredKeys: ["PowersOfAttorney"],
+                                  values: powersOfAttorney,
+                                },
+                              ].filter((tab) => tab.additional).map((tab) => (
+                                <button
+                                  key={tab.id}
+                                  type="button"
+                                  onClick={() =>
+                                    setActiveProfileGroup(
+                                      tab.id as typeof activeProfileGroup,
+                                    )
+                                  }
+                                  className={`rounded-lg border px-3 py-1.5 text-sm ${(() => {
+                                    const isActive = activeProfileGroup === tab.id;
+                                    const missing = hasMissingRequiredList(
+                                      tab.requiredKeys,
+                                      tab.values ?? [],
+                                    );
+                                    const requiredAndFilled =
+                                      hasAnyRequiredList(tab.requiredKeys) && !missing;
+                                    if (isActive && missing)
+                                      return "border-red-500 bg-red-50 text-red-700";
+                                    if (isActive && requiredAndFilled)
+                                      return "border-emerald-500 bg-emerald-50 text-emerald-700";
+                                    if (isActive)
+                                      return "border-emerald-500 bg-emerald-50 text-emerald-700";
+                                    if (missing) return "border-red-300 text-red-700";
+                                    if (requiredAndFilled)
+                                      return "border-emerald-300 text-emerald-700";
+                                    return "border-gray-300 text-gray-700";
+                                  })()}`}
+                                >
+                                  {tab.label}
+                                  {hasAnyRequiredList(tab.requiredKeys) ? " *" : ""}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                      {clientFormState.kind === "individual" &&
+                        profileAdditionalOpen &&
+                        activeProfileGroup === "education" && (
+                          <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Образование (ОКСО)
+                            </label>
+                            <div className="space-y-2">
+                              {clientFormState.education.map((item, index) => (
+                                <div
+                                  key={`education-${index}`}
+                                  className="rounded-lg border border-gray-200 p-3"
+                                >
+                                  <div className="grid items-start gap-2 md:grid-cols-12">
+                                    <input
+                                      value={item.institution}
+                                      onChange={(e) =>
+                                        updateEducation(
+                                          index,
+                                          "institution",
+                                          e.target.value,
+                                        )
+                                      }
+                                      placeholder="Учебное заведение"
+                                      disabled={!canEditClientProfile}
+                                      className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4"
+                                    />
+                                    <input
+                                      value={item.specialty}
+                                      onChange={(e) =>
+                                        updateEducation(
+                                          index,
+                                          "specialty",
+                                          e.target.value,
+                                        )
+                                      }
+                                      placeholder="Специальность"
+                                      disabled={!canEditClientProfile}
+                                      className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3"
+                                    />
+                                    <input
+                                      value={item.diplomaNumber}
+                                      onChange={(e) =>
+                                        updateEducation(
+                                          index,
+                                          "diplomaNumber",
+                                          e.target.value,
+                                        )
+                                      }
+                                      placeholder="№ диплома"
+                                      disabled={!canEditClientProfile}
+                                      className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-2"
+                                    />
+                                    <div className="md:col-span-2">
+                                      <input
+                                        value={item.oksoCode}
+                                        onFocus={() => setOksoSearch(item.oksoCode)}
+                                        onChange={(e) => {
+                                          const value = e.target.value;
+                                          updateEducation(index, "oksoCode", value);
+                                          setOksoSearch(value);
+                                        }}
+                                        placeholder="Код ОКСО"
+                                        list="okso-codes"
+                                        aria-busy={oksoLoading}
+                                        disabled={!canEditClientProfile}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                                      />
+                                      {oksoLoading && (
+                                        <p className="mt-1 text-xs text-gray-500">Ищем по ОКСО…</p>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center justify-end md:col-span-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          void removeEducation(index);
+                                        }}
+                                        disabled={!canEditClientProfile}
+                                        className={PROFILE_DELETE_ICON_BUTTON_CLASS}
+                                        title="Удалить образование"
+                                        aria-label="Удалить образование"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setClientFormState((prev) => ({
+                                    ...prev,
+                                    education: [
+                                      ...prev.education,
+                                      createEmptyEducation(),
+                                    ],
+                                  }))
+                                }
+                                disabled={!canEditClientProfile}
+                                className="text-sm text-emerald-600"
+                              >
+                                + Добавить образование
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                      <datalist id="okso-codes">
+                        {oksoOptions.map((item) => (
+                          <option key={item.code} value={item.code}>
+                            {item.name}
+                          </option>
+                        ))}
+                      </datalist>
+                      <datalist id="okpdtr-codes">
+                        {okpdtrOptions.map((item) => (
+                          <option key={item.code} value={item.code}>
+                            {item.name}
+                          </option>
+                        ))}
+                      </datalist>
+                      {clientFormState.kind === "individual" &&
+                        profileAdditionalOpen &&
+                        activeProfileGroup === "professions" && (
+                          <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Профессии (ОКПДТР)
+                            </label>
+                            <div className="space-y-2">
+                              {clientFormState.professions.map((item, index) => (
+                                <div
+                                  key={`profession-${index}`}
+                                  className="rounded-lg border border-gray-200 p-3"
+                                >
+                                  <div className="grid items-start gap-2 md:grid-cols-12">
+                                    <input
+                                      value={item.profession}
+                                      onChange={(e) =>
+                                        updateProfession(
+                                          index,
+                                          "profession",
+                                          e.target.value,
+                                        )
+                                      }
+                                      placeholder="Профессия"
+                                      disabled={!canEditClientProfile}
+                                      className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-7"
+                                    />
+                                    <div className="md:col-span-4">
+                                      <input
+                                        value={item.okpdtrCode}
+                                        onFocus={() => setOkpdtrSearch(item.okpdtrCode)}
+                                        onChange={(e) => {
+                                          const value = e.target.value;
+                                          updateProfession(index, "okpdtrCode", value);
+                                          setOkpdtrSearch(value);
+                                        }}
+                                        placeholder="Код ОКПДТР"
+                                        list="okpdtr-codes"
+                                        aria-busy={okpdtrLoading}
+                                        disabled={!canEditClientProfile}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                                      />
+                                      {okpdtrLoading && (
+                                        <p className="mt-1 text-xs text-gray-500">Ищем по ОКПДТР…</p>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center justify-end md:col-span-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          void removeProfession(index);
+                                        }}
+                                        disabled={!canEditClientProfile}
+                                        className={PROFILE_DELETE_ICON_BUTTON_CLASS}
+                                        title="Удалить профессию"
+                                        aria-label="Удалить профессию"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setClientFormState((prev) => ({
+                                    ...prev,
+                                    professions: [
+                                      ...prev.professions,
+                                      createEmptyProfession(),
+                                    ],
+                                  }))
+                                }
+                                disabled={!canEditClientProfile}
+                                className="text-sm text-emerald-600"
+                              >
+                                + Добавить профессию
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      {clientFormState.kind === "individual" &&
+                        profileAdditionalOpen &&
+                        activeProfileGroup === "workplaces" && (
+                          <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Места работы и должности
+                            </label>
+                            <div className="space-y-2">
+                              {clientFormState.workplaces.map((item, index) => (
+                                <div
+                                  key={`workplace-${index}`}
+                                  className="rounded-lg border border-gray-200 p-3"
+                                >
+                                  <div className="grid items-start gap-2 md:grid-cols-12">
+                                    <input
+                                      value={item.organizationName}
+                                      onChange={(e) =>
+                                        updateWorkplace(
+                                          index,
+                                          "organizationName",
+                                          e.target.value,
+                                        )
+                                      }
+                                      placeholder="Организация"
+                                      disabled={!canEditClientProfile}
+                                      className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4"
+                                    />
+                                    <input
+                                      value={item.position}
+                                      onChange={(e) =>
+                                        updateWorkplace(
+                                          index,
+                                          "position",
+                                          e.target.value,
+                                        )
+                                      }
+                                      placeholder="Должность"
+                                      disabled={!canEditClientProfile}
+                                      className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3"
+                                    />
+                                    <div className="md:col-span-2">
+                                      <SystemDateInput
+                                        type="date"
+                                        value={item.startDate}
+                                        onChange={(e) =>
+                                          updateWorkplace(
+                                            index,
+                                            "startDate",
+                                            e.target.value,
+                                          )
+                                        }
+                                        disabled={!canEditClientProfile}
+                                        className={DATE_INPUT_CLASS}
+                                      />
+                                    </div>
+                                    <div className="md:col-span-2">
+                                      <SystemDateInput
+                                        type="date"
+                                        value={item.endDate}
+                                        onChange={(e) =>
+                                          updateWorkplace(
+                                            index,
+                                            "endDate",
+                                            e.target.value,
+                                          )
+                                        }
+                                        disabled={!canEditClientProfile}
+                                        className={DATE_INPUT_CLASS}
+                                      />
+                                    </div>
+                                    <div className="flex items-center justify-end md:col-span-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          void removeWorkplace(index);
+                                        }}
+                                        disabled={!canEditClientProfile}
+                                        className={PROFILE_DELETE_ICON_BUTTON_CLASS}
+                                        title="Удалить место работы"
+                                        aria-label="Удалить место работы"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setClientFormState((prev) => ({
+                                    ...prev,
+                                    workplaces: [
+                                      ...prev.workplaces,
+                                      createEmptyWorkplace(),
+                                    ],
+                                  }))
+                                }
+                                disabled={!canEditClientProfile}
+                                className="text-sm text-emerald-600"
+                              >
+                                + Добавить место работы
+                              </button>
+                              <button
+                                type="button"
+                                disabled={!canEditClientProfile}
+                                onClick={() => {
+                                  setLegalEntityPromptError(null);
+                                  setLegalEntityDraft({ shortName: "", inn: "" });
+                                  setLegalEntityPromptOpen(true);
+                                }}
+                                className="text-sm text-indigo-600"
+                              >
+                                + Добавить организацию
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      {clientFormState.kind === "individual" &&
+                        profileAdditionalOpen &&
+                        activeProfileGroup === "relatives" && (
+                          <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Близкие родственники
+                            </label>
+                            <div className="space-y-2">
+                              {clientFormState.relatives.map((item, index) => (
+                                <div
+                                  key={`relative-${index}`}
+                                  className="rounded-lg border border-gray-200 p-3"
+                                >
+                                  <div className="grid items-start gap-2 md:grid-cols-12">
+                                    <input
+                                      value={item.relation}
+                                      onChange={(e) =>
+                                        updateRelative(
+                                          index,
+                                          "relation",
+                                          e.target.value,
+                                        )
+                                      }
+                                      placeholder="Степень родства"
+                                      disabled={!canEditClientProfile}
+                                      className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-2"
+                                    />
+                                    <input
+                                      value={item.fullName}
+                                      onChange={(e) =>
+                                        updateRelative(
+                                          index,
+                                          "fullName",
+                                          e.target.value,
+                                        )
+                                      }
+                                      placeholder="ФИО"
+                                      disabled={!canEditClientProfile}
+                                      className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4"
+                                    />
+                                    <input
+                                      value={item.birthYear}
+                                      onChange={(e) =>
+                                        updateRelative(
+                                          index,
+                                          "birthYear",
+                                          e.target.value,
+                                        )
+                                      }
+                                      placeholder="Год рождения"
+                                      disabled={!canEditClientProfile}
+                                      className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-2"
+                                    />
+                                    <input
+                                      value={item.phone}
+                                      onChange={(e) =>
+                                        updateRelative(index, "phone", e.target.value)
+                                      }
+                                      placeholder="Номер телефона"
+                                      disabled={!canEditClientProfile}
+                                      inputMode="tel"
+                                      className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3"
+                                    />
+                                    <div className="flex items-center justify-end md:col-span-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          void removeRelative(index);
+                                        }}
+                                        disabled={!canEditClientProfile}
+                                        className={PROFILE_DELETE_ICON_BUTTON_CLASS}
+                                        title="Удалить родственника"
+                                        aria-label="Удалить родственника"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setClientFormState((prev) => ({
+                                    ...prev,
+                                    relatives: [
+                                      ...prev.relatives,
+                                      createEmptyRelative(),
+                                    ],
+                                  }))
+                                }
+                                disabled={!canEditClientProfile}
+                                className="text-sm text-emerald-600"
+                              >
+                                + Добавить родственника
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      {clientFormState.kind === "individual" &&
+                        profileAdditionalOpen &&
+                        activeProfileGroup === "poa" && (
+                          <div className="md:col-span-2">
+                            <div className="mb-2 flex items-center justify-between">
+                              <label className="block text-sm font-medium text-gray-700">
+                                Доверенности
+                              </label>
+                              <button
+                                type="button"
+                                disabled={!canEditClientProfile}
+                                onClick={openCreatePoaPrompt}
+                                className="text-sm text-emerald-600"
+                              >
+                                + Добавить доверенность
+                              </button>
+                            </div>
+                            <div className="rounded-lg border border-gray-200 p-3">
+                              {powersOfAttorney.length === 0 ? (
+                                <p className="text-sm text-gray-500">
+                                  Доверенности не найдены.
+                                </p>
+                              ) : (
+                                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                                  {powersOfAttorney.map((poa) => (
+                                    <div
+                                      key={poa.id}
+                                      data-poa-card="true"
+                                      className="rounded border border-gray-200 px-3 py-3 text-sm"
+                                    >
+                                      <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0 space-y-1">
+                                          <div className="font-medium text-slate-800">
+                                            №{poa.number}
+                                          </div>
+                                          <div className="text-slate-600">
+                                            {toRuDate(poa.issuedAt)}{" "}
+                                            {poa.validUntil
+                                              ? `— до ${toRuDate(poa.validUntil)}`
+                                              : ""}
+                                          </div>
+                                          {poa.issuer ? (
+                                            <div className="text-slate-500">
+                                              Кем выдана: {poa.issuer}
+                                            </div>
+                                          ) : null}
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                          <button
+                                            type="button"
+                                            onClick={() => openEditPoaPrompt(poa)}
+                                            disabled={!canEditClientProfile}
+                                            className={
+                                              PROFILE_SECONDARY_ICON_BUTTON_CLASS
+                                            }
+                                            title="Изменить доверенность"
+                                            aria-label="Изменить доверенность"
+                                          >
+                                            <Edit className="h-4 w-4" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              void deletePowerOfAttorney(poa)
+                                            }
+                                            disabled={!canEditClientProfile}
+                                            className={PROFILE_DELETE_ICON_BUTTON_CLASS}
+                                            title="Удалить доверенность"
+                                            aria-label="Удалить доверенность"
+                                          >
+                                            <Trash2 className="h-4 w-4" />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                    </div>
+                  ) : null}
+                </section>
+              )}
 
               <div className="md:col-span-2 grid gap-3 md:grid-cols-2">
                 <div>

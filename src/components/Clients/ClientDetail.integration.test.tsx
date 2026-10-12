@@ -1021,12 +1021,10 @@ describe('ClientDetail integration', () => {
     expect(await screen.findByRole('button', { name: 'Удалить телефон' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Удалить email' })).toBeTruthy();
 
-    await user.click(screen.getByRole('button', { name: 'Паспорта' }));
     expect(await screen.findByRole('button', { name: 'Удалить паспорт' })).toBeTruthy();
     expect(screen.queryByText('Действует с')).toBeNull();
     expect(screen.queryByText('Действует по')).toBeNull();
 
-    await user.click(screen.getByRole('button', { name: 'Адреса' }));
     expect((await screen.findAllByRole('button', { name: 'Удалить адрес' })).length).toBeGreaterThan(0);
 
     // PAY-32: прежние личные данные не удалены, а свёрнуты в «Дополнительную информацию».
@@ -1070,10 +1068,8 @@ describe('ClientDetail integration', () => {
     expect(await screen.findByDisplayValue('Отец')).toBeTruthy();
     expect(within(getRowContainerByValue('Отец')).getByRole('button', { name: 'Удалить родственника' })).toBeTruthy();
 
-    await user.click(screen.getByRole('button', { name: 'Свидетельства о рождении' }));
     expect(await screen.findByRole('button', { name: 'Удалить свидетельство о рождении' })).toBeTruthy();
 
-    await user.click(screen.getByRole('button', { name: 'Военные билеты' }));
     expect(await screen.findByRole('button', { name: 'Удалить военный билет' })).toBeTruthy();
   }, 15000);
 
@@ -1173,7 +1169,6 @@ describe('ClientDetail integration', () => {
 
     await screen.findByDisplayValue('Иванов');
     await user.click(screen.getByRole('button', { name: 'Редактировать' }));
-    await user.click(screen.getByRole('button', { name: 'Паспорта' }));
     await user.click(screen.getByRole('button', { name: 'Сохранить' }));
 
     await waitFor(() => {
@@ -1195,6 +1190,33 @@ describe('ClientDetail integration', () => {
         validTo: '',
       }),
     );
+  });
+
+  it('PAY-32: saving without opening the collapsed block keeps education, professions, workplaces and relatives', async () => {
+    const user = userEvent.setup();
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+
+    await screen.findByDisplayValue('Иванов');
+    await user.click(screen.getByRole('button', { name: 'Редактировать' }));
+    expect(screen.queryByDisplayValue('НГУ')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => {
+      expect(apiService.updateClient).toHaveBeenCalled();
+    });
+    const [, payload] = vi.mocked(apiService.updateClient).mock.calls.at(-1) ?? [];
+    const notes = (payload as { notes?: string | null }).notes ?? '';
+    const profile = JSON.parse(notes.slice(CLIENT_PROFILE_NOTES_PREFIX.length)) as {
+      education: Array<{ institution: string }>;
+      professions: Array<{ profession: string }>;
+      workplaces: Array<{ organizationName: string }>;
+      relatives: Array<{ relation: string }>;
+    };
+    expect(profile.education.map((item) => item.institution)).toEqual(['НГУ', 'МГУ']);
+    expect(profile.professions[0].profession).toBe('Юрист');
+    expect(profile.workplaces[0].organizationName).toBe('ООО Альфа');
+    expect(profile.relatives[0].relation).toBe('Отец');
   });
 
   it('filters client cases inside the cases tab', async () => {
