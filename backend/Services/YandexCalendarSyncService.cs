@@ -576,6 +576,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         var preservedTracking = CalendarSyncTaskPager.CaptureTrackedEntities(_db);
         await foreach (var tasks in CalendarSyncTaskPager.ReadPagesAsync(tasksQuery, cancellationToken))
         {
+            var logContext = new CalendarSyncLogContext(connection.Id, connection.User, tasks);
             var taskIds = tasks.Select(item => item.Id).ToArray();
             var duplicateSnapshot = new YandexBatchDuplicateSnapshot(taskIds.ToHashSet());
             var links = await _db.YandexCalendarTaskLinks
@@ -589,7 +590,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
                 {
                     if (ShouldHideCompletedTask(settings, task))
                     {
-                        await DeleteTaskLinkForCompletedTaskAsync(connection, task.Id, cancellationToken, links);
+                        await DeleteTaskLinkForCompletedTaskAsync(connection, task.Id, cancellationToken, links, logContext);
                     }
                     else
                     {
@@ -597,7 +598,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
                             connection,
                             task,
                             externalCommentsByTask.GetValueOrDefault(task.Id) ?? [],
-                            cancellationToken, links, duplicateSnapshot);
+                            cancellationToken, links, duplicateSnapshot, logContext);
                     }
 
                     processedTasks++;
@@ -606,7 +607,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
                 {
                     errors++;
                     connection.LastError = Trim(ex.Message, 2000);
-                    await AddLogAsync(connection.Id, null, task.Id, "crm-to-yandex", "upsert", "error", "Не удалось синхронизировать задачу с Яндекс.Календарём.", ex.Message, cancellationToken);
+                    await AddLogAsync(connection.Id, null, task.Id, "crm-to-yandex", "upsert", "error", "Не удалось синхронизировать задачу с Яндекс.Календарём.", ex.Message, cancellationToken, logContext);
                 }
             }
 
@@ -651,9 +652,11 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             return;
         }
 
+        var logContext = new CalendarSyncLogContext(connection.Id, connection.User, [task]);
+
         if (IsBeforeSyncFromDate(connection, task))
         {
-            await DeleteTaskLinkOutsideSyncWindowAsync(connection, task.Id, cancellationToken);
+            await DeleteTaskLinkOutsideSyncWindowAsync(connection, task.Id, cancellationToken, logContext);
             connection.LastIncrementalSyncAt = DateTime.UtcNow;
             connection.UpdatedAt = DateTime.UtcNow;
             await _db.SaveChangesAsync(cancellationToken);
@@ -663,7 +666,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         var visibility = await ResolveConnectionCalendarVisibilityAsync(connection.UserId, cancellationToken);
         if (!CanSyncTaskForConnection(connection, task, visibility))
         {
-            await DeleteTaskLinkForRevokedAccessAsync(connection, task.Id, cancellationToken);
+            await DeleteTaskLinkForRevokedAccessAsync(connection, task.Id, cancellationToken, logContext);
             connection.LastIncrementalSyncAt = DateTime.UtcNow;
             connection.UpdatedAt = DateTime.UtcNow;
             await _db.SaveChangesAsync(cancellationToken);
@@ -673,7 +676,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         var settings = await LoadCalendarSyncSettingsAsync(cancellationToken);
         if (ShouldHideCompletedTask(settings, task))
         {
-            await DeleteTaskLinkForCompletedTaskAsync(connection, task.Id, cancellationToken);
+            await DeleteTaskLinkForCompletedTaskAsync(connection, task.Id, cancellationToken, logContext: logContext);
         }
         else
         {
@@ -684,7 +687,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
                     connection,
                     task,
                     externalComments.GetValueOrDefault(task.Id) ?? [],
-                    cancellationToken);
+                    cancellationToken, logContext: logContext);
             }
             catch (Exception) when (!cancellationToken.IsCancellationRequested
                 && _db.ChangeTracker.Entries<YandexCalendarTaskLink>().Any(entry =>
@@ -969,10 +972,12 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         IReadOnlyCollection<TaskJournalComment> externalComments,
         CancellationToken cancellationToken,
         IReadOnlyDictionary<int, YandexCalendarTaskLink>? knownLinks = null,
-        YandexBatchDuplicateSnapshot? duplicateSnapshot = null)
+        YandexBatchDuplicateSnapshot? duplicateSnapshot = null,
+        CalendarSyncLogContext? logContext = null)
     {
         var accessToken = await ResolveAccessTokenAsync(connection, cancellationToken);
         var calendar = await EnsureCalendarForTaskAsync(connection, task, accessToken, cancellationToken);
+        logContext?.RememberCalendar(calendar.Id, calendar.Name, calendar.OwnerUserId, calendar.OwnerUser);
         var timeZone = await ResolveTaskTimeZoneAsync(connection, null, task, cancellationToken);
         var crmHash = BuildCrmHash(task, timeZone, externalComments);
         var link = knownLinks is null
@@ -987,7 +992,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             if (link.LastError?.StartsWith(DuplicateCleanupErrorPrefix, StringComparison.Ordinal) == true)
             {
                 await CompleteYandexDuplicateCleanupAsync(connection, calendar, task.Id, link.YandexEventId,
-                    accessToken, link, cancellationToken, duplicateSnapshot);
+                    accessToken, link, cancellationToken, duplicateSnapshot, logContext);
             }
             return;
         }
@@ -1025,7 +1030,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             "success",
             created ? "Задача создана в Яндекс.Календаре." : "Задача обновлена в Яндекс.Календаре.",
             BuildTaskSnapshotDetails(task, timeZone),
-            cancellationToken);
+            cancellationToken, logContext);
 
         link.CalendarSyncCalendarId = calendar.Id;
         link.YandexCalendarId = calendar.YandexCalendarId;
@@ -1047,7 +1052,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             eventId,
             accessToken,
             link,
-            cancellationToken, duplicateSnapshot);
+            cancellationToken, duplicateSnapshot, logContext);
     }
 
     private async Task EnsureAdminAssigneeCalendarsAsync(
@@ -1374,7 +1379,8 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         return errors;
     }
 
-    private async Task DeleteTaskLinkOutsideSyncWindowAsync(YandexCalendarConnection connection, int taskId, CancellationToken cancellationToken)
+    private async Task DeleteTaskLinkOutsideSyncWindowAsync(YandexCalendarConnection connection, int taskId, CancellationToken cancellationToken,
+        CalendarSyncLogContext? logContext = null)
     {
         if (!ResolveSyncFromDate(connection).HasValue)
         {
@@ -1408,11 +1414,12 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
                 ? "Событие удалено из Яндекс.Календаря, потому что задача раньше даты начала синхронизации."
                 : "Событие уже отсутствовало в Яндекс.Календаре при очистке задачи раньше даты начала синхронизации.",
             null,
-            cancellationToken);
+            cancellationToken, logContext);
     }
 
     private async Task DeleteTaskLinkForCompletedTaskAsync(YandexCalendarConnection connection, int taskId, CancellationToken cancellationToken,
-        IReadOnlyDictionary<int, YandexCalendarTaskLink>? knownLinks = null)
+        IReadOnlyDictionary<int, YandexCalendarTaskLink>? knownLinks = null,
+        CalendarSyncLogContext? logContext = null)
     {
         var link = knownLinks is null
             ? await _db.YandexCalendarTaskLinks.FirstOrDefaultAsync(item =>
@@ -1440,10 +1447,11 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
                 ? "Событие удалено из Яндекс Календаря, потому что в настройках включено скрытие выполненных и отменённых задач."
                 : "Событие уже отсутствовало в Яндекс Календаре при скрытии выполненной или отменённой задачи.",
             null,
-            cancellationToken);
+            cancellationToken, logContext);
     }
 
-    private async Task DeleteTaskLinkForRevokedAccessAsync(YandexCalendarConnection connection, int taskId, CancellationToken cancellationToken)
+    private async Task DeleteTaskLinkForRevokedAccessAsync(YandexCalendarConnection connection, int taskId, CancellationToken cancellationToken,
+        CalendarSyncLogContext? logContext = null)
     {
         var link = await _db.YandexCalendarTaskLinks
             .FirstOrDefaultAsync(item =>
@@ -1472,7 +1480,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
                 ? "Событие удалено из Яндекс Календаря, потому что доступ к календарю сотрудника отозван в правах роли."
                 : "Событие уже отсутствовало в Яндекс Календаре при отзыве доступа к календарю сотрудника.",
             null,
-            cancellationToken);
+            cancellationToken, logContext);
     }
 
     private IQueryable<YandexCalendarConnection> LoadConnectionQuery()
@@ -1864,20 +1872,21 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         string accessToken,
         YandexCalendarTaskLink link,
         CancellationToken cancellationToken,
-        YandexBatchDuplicateSnapshot? duplicateSnapshot = null)
+        YandexBatchDuplicateSnapshot? duplicateSnapshot = null,
+        CalendarSyncLogContext? logContext = null)
     {
         var retry = link.LastError?.StartsWith(DuplicateCleanupErrorPrefix, StringComparison.Ordinal) == true;
         try
         {
             await DeleteDuplicateYandexEventsForTaskAsync(connection, calendar, taskId, activeEventId,
-                accessToken, cancellationToken, duplicateSnapshot);
+                accessToken, cancellationToken, duplicateSnapshot, logContext);
             link.LastError = null;
             link.LastSyncedAt = DateTime.UtcNow;
             link.UpdatedAt = DateTime.UtcNow;
             if (retry)
             {
                 await AddLogAsync(connection.Id, calendar.Id, taskId, "crm-to-yandex", "duplicate-cleanup", "success",
-                    "Повторная очистка дублей события задачи завершена.", null, cancellationToken);
+                    "Повторная очистка дублей события задачи завершена.", null, cancellationToken, logContext);
             }
         }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
@@ -1887,7 +1896,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             connection.LastError = link.LastError;
             connection.UpdatedAt = DateTime.UtcNow;
             await AddLogAsync(connection.Id, calendar.Id, taskId, "crm-to-yandex", "duplicate-cleanup", "error",
-                "Очистка дублей события задачи не завершена; она будет повторена при следующей синхронизации.", ex.Message, cancellationToken);
+                "Очистка дублей события задачи не завершена; она будет повторена при следующей синхронизации.", ex.Message, cancellationToken, logContext);
             throw;
         }
     }
@@ -1899,7 +1908,8 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         string activeEventId,
         string accessToken,
         CancellationToken cancellationToken,
-        YandexBatchDuplicateSnapshot? duplicateSnapshot = null)
+        YandexBatchDuplicateSnapshot? duplicateSnapshot = null,
+        CalendarSyncLogContext? logContext = null)
     {
         IEnumerable<YandexEventItem> events;
         if (duplicateSnapshot is null)
@@ -1950,7 +1960,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
                         ? "Лишний дубль события Яндекс.Календаря для задачи CRM удалён."
                         : "Лишний дубль события Яндекс.Календаря для задачи CRM уже отсутствовал.",
                     duplicate.Summary,
-                    cancellationToken);
+                    cancellationToken, logContext);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -1964,7 +1974,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
                     "error",
                     "Не удалось удалить лишний дубль события Яндекс.Календаря для задачи CRM.",
                     ex.Message,
-                    cancellationToken);
+                    cancellationToken, logContext);
             }
         }
         if (firstFailure is not null)
@@ -2427,9 +2437,10 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         string status,
         string message,
         string? details,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        CalendarSyncLogContext? logContext = null)
     {
-        var detailsJson = await BuildLogDetailsJsonAsync(connectionId, calendarId, taskId, details, cancellationToken);
+        var detailsJson = await BuildLogDetailsJsonAsync(connectionId, calendarId, taskId, details, cancellationToken, logContext);
 
         _db.YandexCalendarSyncLogs.Add(new YandexCalendarSyncLog
         {
@@ -2452,7 +2463,8 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         int? calendarId,
         int? taskId,
         string? details,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        CalendarSyncLogContext? logContext = null)
     {
         var context = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (!string.IsNullOrWhiteSpace(details))
@@ -2460,35 +2472,48 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             context["detail"] = Trim(details, 4000);
         }
 
+        var knownContext = logContext?.ConnectionId == connectionId ? logContext : null;
         if (connectionId.HasValue)
         {
-            var connection = await _db.YandexCalendarConnections
-                .AsNoTracking()
-                .Where(item => item.Id == connectionId.Value)
-                .Select(item => new
-                {
-                    UserName = item.User == null ? string.Empty : item.User.FullName,
-                    UserEmail = item.User == null ? string.Empty : item.User.Email,
-                })
-                .FirstOrDefaultAsync(cancellationToken);
-
-            AddContextValue(context, "userName", connection?.UserName);
-            AddContextValue(context, "userEmail", connection?.UserEmail);
+            var userName = knownContext?.UserName;
+            var userEmail = knownContext?.UserEmail;
+            if (knownContext is null)
+            {
+                var connection = await _db.YandexCalendarConnections
+                    .AsNoTracking()
+                    .Where(item => item.Id == connectionId.Value)
+                    .Select(item => new
+                    {
+                        UserName = item.User == null ? string.Empty : item.User.FullName,
+                        UserEmail = item.User == null ? string.Empty : item.User.Email,
+                    })
+                    .FirstOrDefaultAsync(cancellationToken);
+                userName = connection?.UserName;
+                userEmail = connection?.UserEmail;
+            }
+            AddContextValue(context, "userName", userName);
+            AddContextValue(context, "userEmail", userEmail);
         }
 
         if (calendarId.HasValue)
         {
-            var calendar = await _db.YandexCalendarSyncCalendars
-                .AsNoTracking()
-                .Where(item => item.Id == calendarId.Value)
-                .Select(item => new
-                {
-                    item.Name,
-                    OwnerName = item.OwnerUser == null ? string.Empty : item.OwnerUser.FullName,
-                    OwnerEmail = item.OwnerUser == null ? string.Empty : item.OwnerUser.Email,
-                })
-                .FirstOrDefaultAsync(cancellationToken);
-
+            CalendarSyncLogContext.CalendarFields? calendar = null;
+            if (knownContext is null || !knownContext.Calendars.TryGetValue(calendarId.Value, out calendar))
+            {
+                var storedCalendar = await _db.YandexCalendarSyncCalendars
+                    .AsNoTracking()
+                    .Where(item => item.Id == calendarId.Value)
+                    .Select(item => new
+                    {
+                        item.Name,
+                        OwnerName = item.OwnerUser == null ? string.Empty : item.OwnerUser.FullName,
+                        OwnerEmail = item.OwnerUser == null ? string.Empty : item.OwnerUser.Email,
+                    })
+                    .FirstOrDefaultAsync(cancellationToken);
+                calendar = storedCalendar is null ? null : new CalendarSyncLogContext.CalendarFields(
+                    storedCalendar.Name, storedCalendar.OwnerName, storedCalendar.OwnerEmail);
+                knownContext?.Calendars.TryAdd(calendarId.Value, calendar);
+            }
             AddContextValue(context, "calendarName", calendar?.Name);
             AddContextValue(context, "calendarOwnerName", calendar?.OwnerName);
             AddContextValue(context, "calendarOwnerEmail", calendar?.OwnerEmail);
@@ -2496,17 +2521,22 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
 
         if (taskId.HasValue)
         {
-            var task = await _db.TaskJournalItems
-                .AsNoTracking()
-                .Where(item => item.Id == taskId.Value)
-                .Select(item => new
-                {
-                    item.Title,
-                    item.ObjectName,
-                    item.AssigneeName,
-                })
-                .FirstOrDefaultAsync(cancellationToken);
-
+            CalendarSyncLogContext.TaskFields? task = null;
+            if (knownContext is null || !knownContext.Tasks.TryGetValue(taskId.Value, out task))
+            {
+                var storedTask = await _db.TaskJournalItems
+                    .AsNoTracking()
+                    .Where(item => item.Id == taskId.Value)
+                    .Select(item => new
+                    {
+                        item.Title,
+                        item.ObjectName,
+                        item.AssigneeName,
+                    })
+                    .FirstOrDefaultAsync(cancellationToken);
+                task = storedTask is null ? null : new CalendarSyncLogContext.TaskFields(
+                    storedTask.Title, storedTask.ObjectName, storedTask.AssigneeName);
+            }
             AddContextValue(context, "taskTitle", task?.Title);
             AddContextValue(context, "taskObjectName", task?.ObjectName);
             AddContextValue(context, "taskAssigneeName", task?.AssigneeName);

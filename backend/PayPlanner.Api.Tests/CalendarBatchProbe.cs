@@ -11,11 +11,15 @@ internal sealed class CalendarBatchQueryProbe(string provider) : DbCommandInterc
 {
     public List<int> TaskPageLimits { get; } = [];
     public int LinkSelects { get; private set; }
+    public int LogMetadataSelects { get; private set; }
+    public int TotalSelects { get; private set; }
 
     public void Reset()
     {
         TaskPageLimits.Clear();
         LinkSelects = 0;
+        LogMetadataSelects = 0;
+        TotalSelects = 0;
     }
 
     public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
@@ -23,6 +27,16 @@ internal sealed class CalendarBatchQueryProbe(string provider) : DbCommandInterc
         CancellationToken cancellationToken = default)
     {
         var sql = command.CommandText;
+        if (sql.StartsWith("SELECT", StringComparison.Ordinal))
+        {
+            TotalSelects++;
+        }
+        if (sql.Contains(" AS \"UserName\"", StringComparison.Ordinal)
+            || sql.Contains(" AS \"OwnerName\"", StringComparison.Ordinal)
+            || sql.StartsWith("SELECT \"t\".\"Title\", \"t\".\"ObjectName\", \"t\".\"AssigneeName\"", StringComparison.Ordinal))
+        {
+            LogMetadataSelects++;
+        }
         if (sql.Contains("FROM \"TaskJournalItems\"", StringComparison.Ordinal))
         {
             var limit = Regex.Match(sql, @"LIMIT\s+([@$]\w+)");

@@ -1,0 +1,374 @@
+{
+  "verifiedAtUtc": "2026-10-12T20:44:23.387991+00:00",
+  "branch": "claude/practical-bardeen-pglcf3",
+  "baseRevision": "d2e9508752a1bbca1c3ea28bd6e242284e5c00a4",
+  "verificationPerformedBeforeCommit": true,
+  "deployed": false,
+  "yougilePublished": false,
+  "scope": "Bounded explicitly passed display snapshots for Google/Yandex export log metadata, including full/single task sync and cleanup retries",
+  "codeHashNormalization": "CRLF converted to LF; bytes otherwise unchanged",
+  "codeFiles": {
+    "backend/Services/CalendarSyncLogContext.cs": "1e3a94046826b0ace1d8a171c48b4e844a9573acfe98317d2be47ccc4142e809",
+    "backend/Services/GoogleCalendarSyncService.cs": "a5ef6f0ba4a7e6f2964e23c70d3253af0f73514f95ff9557af9e015337e2ec30",
+    "backend/Services/YandexCalendarSyncService.cs": "6f37e6a585cabbe2330461004a0df451579014510c48ecad4c4ec13187367cef",
+    "backend/PayPlanner.Api.Tests/CalendarBatchProbe.cs": "5dbded2e87c50274f2fc70c54ab050d5035fb78f9501a5a991bac38a47cc0a3e",
+    "backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs": "e8ea57a9329264b382f2c9ca060e37820e40f89613af3b7258780273b24332f5",
+    "backend/PayPlanner.Api.Tests/YandexCalendarSyncServiceTests.cs": "40f272b1d62f2ef5abdc5c02ddd743d870090fb8d45fc84f94bced0f5b33e615",
+    "backend/AppReleases/releases.json": "5eba98a31b3102a12bd59e86a1782842163e5e9694b2f5eaf76fda6af2efd4ef"
+  },
+  "workingTreeCodeFilesSha256": {
+    "backend/Services/CalendarSyncLogContext.cs": "1e3a94046826b0ace1d8a171c48b4e844a9573acfe98317d2be47ccc4142e809",
+    "backend/Services/GoogleCalendarSyncService.cs": "a5ef6f0ba4a7e6f2964e23c70d3253af0f73514f95ff9557af9e015337e2ec30",
+    "backend/Services/YandexCalendarSyncService.cs": "6f37e6a585cabbe2330461004a0df451579014510c48ecad4c4ec13187367cef",
+    "backend/PayPlanner.Api.Tests/CalendarBatchProbe.cs": "5dbded2e87c50274f2fc70c54ab050d5035fb78f9501a5a991bac38a47cc0a3e",
+    "backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs": "e8ea57a9329264b382f2c9ca060e37820e40f89613af3b7258780273b24332f5",
+    "backend/PayPlanner.Api.Tests/YandexCalendarSyncServiceTests.cs": "40f272b1d62f2ef5abdc5c02ddd743d870090fb8d45fc84f94bced0f5b33e615",
+    "backend/AppReleases/releases.json": "271211d87f1467d042ca25ded2c80a6a051550ce3c36807898c96437cbf5616f"
+  },
+  "baseline": {
+    "baseRevision": "d2e9508752a1bbca1c3ea28bd6e242284e5c00a4",
+    "sourceHashes": {
+      "backend/Services/GoogleCalendarSyncService.cs": "60ec59d0ea4692eac2792310e639d10817b3e362586c84b374467bd0b7633034",
+      "backend/Services/YandexCalendarSyncService.cs": "0f2d3f513c01a980e6a23ddc52c5dcc8fb1fb7c115a2718f2bd9c7add83d27b3",
+      "backend/PayPlanner.Api.Tests/CalendarBatchProbe.cs": "ff23a76aee9af4b334bd7314b12d5bca1b3e4725d5148941ad09e82ef54f0210",
+      "backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs": "ad6862333ffe50a0aed8ec10619913185cff4965b0a331df91b6ae0269fba8ff",
+      "backend/PayPlanner.Api.Tests/YandexCalendarSyncServiceTests.cs": "841bf1199312d7bf9f6edade2205af335a08d6e3970ec7c2cfcb2a6dee2ab3e2"
+    },
+    "artifactRoot": "D:\\PayPlannerReview-20261012\\calendar-log-baseline-artifacts",
+    "cases": [
+      {
+        "case": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.SyncNowAsync_Processes502TasksInBoundedPagesAndRetriesOnlyFailedEvent(scenario: \"failure\")",
+        "metadataSelects": 1505
+      },
+      {
+        "case": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.SyncNowAsync_Processes502TasksInBoundedPagesAndRetriesOnlyFailedEvent(scenario: \"normal\")",
+        "metadataSelects": 1506
+      },
+      {
+        "case": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.SyncNowAsync_Processes502TasksInBoundedPagesAndRetriesOnlyFailedEvent(scenario: \"failure\")",
+        "metadataSelects": 1505
+      },
+      {
+        "case": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.SyncNowAsync_Processes502TasksInBoundedPagesAndRetriesOnlyFailedEvent(scenario: \"cancel\")",
+        "metadataSelects": 1500
+      },
+      {
+        "case": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.SyncNowAsync_Colors502EventsInBoundedPagesWithoutRewritingOnRepeat(withDuplicates: False, failBatchRead: True)",
+        "metadataSelects": 4006
+      },
+      {
+        "case": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.SyncNowAsync_Processes502TasksInBoundedPagesAndRetriesOnlyFailedEvent(scenario: \"insert\")",
+        "metadataSelects": 1506
+      },
+      {
+        "case": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.SyncNowAsync_Processes502TasksInBoundedPagesAndRetriesOnlyFailedEvent(scenario: \"normal\")",
+        "metadataSelects": 1506
+      },
+      {
+        "case": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.SyncNowAsync_Colors502EventsInBoundedPagesWithoutRewritingOnRepeat(withDuplicates: False, failBatchRead: False)",
+        "metadataSelects": 1506
+      },
+      {
+        "case": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.SyncNowAsync_Processes502TasksInBoundedPagesAndRetriesOnlyFailedEvent(scenario: \"insert\")",
+        "metadataSelects": 1506
+      },
+      {
+        "case": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.SyncNowAsync_Processes502TasksInBoundedPagesAndRetriesOnlyFailedEvent(scenario: \"cancel\")",
+        "metadataSelects": 1500
+      },
+      {
+        "case": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.SyncNowAsync_Colors502EventsInBoundedPagesWithoutRewritingOnRepeat(withDuplicates: True, failBatchRead: False)",
+        "metadataSelects": 1512
+      },
+      {
+        "case": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.SyncNowAsync_Colors502EventsInBoundedPagesWithoutRewritingOnRepeat",
+        "metadataSelects": 1506
+      }
+    ],
+    "baselineFailed": 12,
+    "skipped": 0,
+    "trxSha256": "d8dd5d16cec7ee264d2900080530f32034ef40f5b18d072f74d4b1cc235ef80e",
+    "assemblySha256": {
+      "PayPlanner.Api.dll": "c15e4c89c42abdb93b7d3747ff3681c1641ba2b4b9bb348a800cce1411292fe9",
+      "PayPlanner.Api.Tests.dll": "fab89e4f5e275dfb58ad95121a4dd5348139d436b4cf7d61b32360d01ce834dd"
+    }
+  },
+  "initialFixtureFailure": {
+    "failed": 4,
+    "reason": "Fixture assigned an owner to personal calendar; service selected another calendar. Failure occurred before SQL budget assertion. This is not the performance baseline.",
+    "notCountedAsPerformanceBaseline": true
+  },
+  "focusedRegression": {
+    "passed": 16,
+    "failed": 0,
+    "total": 16,
+    "skipped": 0,
+    "trx": "calendar-log-context.trx",
+    "trxSha256": "85551161ccadeb325aa7628d9703564e6b46b988252f8aacb5274bf0c0f3b865"
+  },
+  "finalRelatedRegression": {
+    "passed": 157,
+    "failed": 0,
+    "total": 157,
+    "skipped": 0,
+    "trx": "calendar-log-context-regressions.trx",
+    "trxSha256": "fa16da499b40f9cfb94db6d05763a2456a3c182be0283b3f85d68860139e34d4"
+  },
+  "queryMetrics": [
+    {
+      "provider": "Google",
+      "scenario": "hide",
+      "case": "cancel",
+      "phase": "first",
+      "metadataSelects": 1,
+      "scenarioSelectsIncludingVerificationReads": 20
+    },
+    {
+      "provider": "Google",
+      "scenario": "hide",
+      "case": "cancel",
+      "phase": "retry",
+      "metadataSelects": 1,
+      "scenarioSelectsIncludingVerificationReads": 14
+    },
+    {
+      "provider": "Google",
+      "scenario": "hide",
+      "case": "failure",
+      "phase": "first",
+      "metadataSelects": 2,
+      "scenarioSelectsIncludingVerificationReads": 29
+    },
+    {
+      "provider": "Google",
+      "scenario": "hide",
+      "case": "failure",
+      "phase": "retry",
+      "metadataSelects": 1,
+      "scenarioSelectsIncludingVerificationReads": 14
+    },
+    {
+      "provider": "Google",
+      "scenario": "hide",
+      "case": "normal",
+      "phase": "first",
+      "metadataSelects": 2,
+      "scenarioSelectsIncludingVerificationReads": 29
+    },
+    {
+      "provider": "Google",
+      "scenario": "hide",
+      "case": "normal",
+      "phase": "retry",
+      "metadataSelects": 0,
+      "scenarioSelectsIncludingVerificationReads": 13
+    },
+    {
+      "provider": "Google",
+      "scenario": "hide",
+      "case": "insert",
+      "phase": "first",
+      "metadataSelects": 2,
+      "scenarioSelectsIncludingVerificationReads": 29
+    },
+    {
+      "provider": "Google",
+      "scenario": "hide",
+      "case": "insert",
+      "phase": "retry",
+      "metadataSelects": 1,
+      "scenarioSelectsIncludingVerificationReads": 14
+    },
+    {
+      "provider": "Google",
+      "scenario": "color",
+      "case": "normal",
+      "phase": "first",
+      "metadataSelects": 0,
+      "scenarioSelectsIncludingVerificationReads": 4548
+    },
+    {
+      "provider": "Google",
+      "scenario": "color",
+      "case": "normal",
+      "phase": "retry",
+      "metadataSelects": 0,
+      "scenarioSelectsIncludingVerificationReads": 4532
+    },
+    {
+      "provider": "Yandex",
+      "scenario": "color",
+      "case": "False-True",
+      "phase": "first",
+      "metadataSelects": 0,
+      "scenarioSelectsIncludingVerificationReads": 29
+    },
+    {
+      "provider": "Yandex",
+      "scenario": "color",
+      "case": "False-True",
+      "phase": "retry",
+      "metadataSelects": 0,
+      "scenarioSelectsIncludingVerificationReads": 15
+    },
+    {
+      "provider": "Yandex",
+      "scenario": "color",
+      "case": "False-False",
+      "phase": "first",
+      "metadataSelects": 0,
+      "scenarioSelectsIncludingVerificationReads": 29
+    },
+    {
+      "provider": "Yandex",
+      "scenario": "color",
+      "case": "False-False",
+      "phase": "retry",
+      "metadataSelects": 0,
+      "scenarioSelectsIncludingVerificationReads": 15
+    },
+    {
+      "provider": "Yandex",
+      "scenario": "color",
+      "case": "True-False",
+      "phase": "first",
+      "metadataSelects": 0,
+      "scenarioSelectsIncludingVerificationReads": 29
+    },
+    {
+      "provider": "Yandex",
+      "scenario": "color",
+      "case": "True-False",
+      "phase": "retry",
+      "metadataSelects": 0,
+      "scenarioSelectsIncludingVerificationReads": 15
+    },
+    {
+      "provider": "Yandex",
+      "scenario": "hide",
+      "case": "insert",
+      "phase": "first",
+      "metadataSelects": 2,
+      "scenarioSelectsIncludingVerificationReads": 27
+    },
+    {
+      "provider": "Yandex",
+      "scenario": "hide",
+      "case": "insert",
+      "phase": "retry",
+      "metadataSelects": 1,
+      "scenarioSelectsIncludingVerificationReads": 14
+    },
+    {
+      "provider": "Yandex",
+      "scenario": "hide",
+      "case": "cancel",
+      "phase": "first",
+      "metadataSelects": 1,
+      "scenarioSelectsIncludingVerificationReads": 17
+    },
+    {
+      "provider": "Yandex",
+      "scenario": "hide",
+      "case": "cancel",
+      "phase": "retry",
+      "metadataSelects": 1,
+      "scenarioSelectsIncludingVerificationReads": 14
+    },
+    {
+      "provider": "Yandex",
+      "scenario": "hide",
+      "case": "failure",
+      "phase": "first",
+      "metadataSelects": 2,
+      "scenarioSelectsIncludingVerificationReads": 27
+    },
+    {
+      "provider": "Yandex",
+      "scenario": "hide",
+      "case": "failure",
+      "phase": "retry",
+      "metadataSelects": 1,
+      "scenarioSelectsIncludingVerificationReads": 14
+    },
+    {
+      "provider": "Yandex",
+      "scenario": "hide",
+      "case": "normal",
+      "phase": "first",
+      "metadataSelects": 2,
+      "scenarioSelectsIncludingVerificationReads": 27
+    },
+    {
+      "provider": "Yandex",
+      "scenario": "hide",
+      "case": "normal",
+      "phase": "retry",
+      "metadataSelects": 0,
+      "scenarioSelectsIncludingVerificationReads": 13
+    }
+  ],
+  "metricsScope": "Metadata counters identify the three existing log display projections. Total counters include SQL SELECT statements and synthetic verification reads; INSERT/UPDATE RETURNING are excluded. Other service SELECTs remain.",
+  "checks": [
+    "All 502 export journal entries preserve user/calendar/task/object/assignee fields and detail text",
+    "Personal calendars do not acquire fictitious owner fields",
+    "Employee calendar owner labels preserved after clearing test tracking",
+    "One service handles different users without crossed labels",
+    "Later calls see changed user name/email, calendar and task labels; old stored journal entries remain unchanged",
+    "Two bounded pages, failed/cancelled/inserted events, unchanged repeat and duplicate cleanup recovery remain correct"
+  ],
+  "releaseBuild": {
+    "passed": true,
+    "warnings": 0,
+    "errors": 0,
+    "log": "calendar-log-context-final-build.log"
+  },
+  "format": {
+    "passed": true,
+    "serviceLog": "calendar-log-context-service-format-final.log",
+    "testLog": "calendar-log-context-test-format-final.log"
+  },
+  "encoding": {
+    "passed": true,
+    "checkedFiles": 3107,
+    "log": "calendar-log-context-encoding.log"
+  },
+  "assemblySha256": {
+    "api": "d436b7763aa605ebb8ed6c5a0f9a9c9065580fd0d7af7cb9d0c2c6e976f1b5eb",
+    "tests": "363f739839cab62813a417061f969b318cad3dd7c2f3ba460aed382872643292"
+  },
+  "frontendGate": {
+    "revision": "d2e9508752a1bbca1c3ea28bd6e242284e5c00a4",
+    "passed": 2596,
+    "reusedBecauseFrontendAndPublicApiUnchanged": true,
+    "proof": "calendar-cleanup-recovery-verification.json"
+  },
+  "safeLocalConfiguration": {
+    "Email__Enabled": false,
+    "BackgroundServices__Enabled": false,
+    "data": "Synthetic SQLite only; provider transports replaced by test handlers"
+  },
+  "fullCurrentBackendGate": "not_started",
+  "remaining": [
+    "Batch repeated timezone UserSettings reads using existing ResolveUserTimeZonesAsync",
+    "Bound the old-event cleanup before sync-from date; currently ToListAsync loads all matching links/tasks",
+    "Investigate remaining Google authorization/visibility/settings SELECTs without global permission or token caches",
+    "Full backend gate of final calendar revision",
+    "Identify actual owner-reported annulled task",
+    "Real environment acceptance and separately authorized publication/deployment"
+  ],
+  "calendarRoadmap": {
+    "completed": 0,
+    "total": 7,
+    "percent": 0
+  },
+  "overallRoadmap": {
+    "completed": 1,
+    "total": 31,
+    "percent": 3
+  },
+  "roadmapProgressAudit": {
+    "passed": true,
+    "log": "calendar-log-context-roadmap-progress.log"
+  }
+}

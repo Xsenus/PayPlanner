@@ -943,6 +943,7 @@ public class GoogleCalendarSyncServiceTests
         await EnableGoogleSettingsAsync(db);
         await CreateConnectionAsync(db, admin.Id, calendarMode: "adminByAssignee");
         await CreateTaskAsync(db, assignee.Id, "Проверить задачу", "Иван Петров");
+        db.ChangeTracker.Clear();
         var service = CreateService(db, new FakeHttpClientFactory(new RecordingGoogleHandler()));
 
         var result = await service.SyncNowAsync(admin.Id, CreateHttpRequest(admin.Id, "admin"), CancellationToken.None);
@@ -951,6 +952,14 @@ public class GoogleCalendarSyncServiceTests
         Assert.Contains(await db.GoogleCalendarSyncCalendars.ToListAsync(), item =>
             item.OwnerUserId == assignee.Id &&
             item.Name.Contains("Иван Петров", StringComparison.Ordinal));
+        var log = Assert.Single(await db.GoogleCalendarSyncLogs.AsNoTracking()
+            .Where(item => item.Operation == "create-event").ToListAsync());
+        using var details = JsonDocument.Parse(log.DetailsJson!);
+        Assert.Equal(admin.FullName, details.RootElement.GetProperty("userName").GetString());
+        Assert.Equal(admin.Email, details.RootElement.GetProperty("userEmail").GetString());
+        Assert.Equal(assignee.FullName, details.RootElement.GetProperty("calendarOwnerName").GetString());
+        Assert.Equal(assignee.Email, details.RootElement.GetProperty("calendarOwnerEmail").GetString());
+
     }
 
     [Fact]
@@ -1596,6 +1605,8 @@ public class GoogleCalendarSyncServiceTests
         }
         Assert.Equal(new[] { 500, 500 }, queryProbe.TaskPageLimits);
         Assert.InRange(queryProbe.LinkSelects, 2, 4);
+        Console.WriteLine($"CalendarLogQueries provider=Google; scenario=hide; case={scenario}; phase=first; metadata={queryProbe.LogMetadataSelects}; total={queryProbe.TotalSelects}");
+        Assert.InRange(queryProbe.LogMetadataSelects, 0, 8);
         Assert.Equal(cancelAfterFirstPage ? 501 : 502, handler.DeleteAttempts.Count);
         Assert.All(handler.DeleteAttempts.Values, count => Assert.Equal(1, count));
         Assert.Equal(cancelAfterFirstPage ? 500 : failOnce ? 501 : 502, await db.GoogleCalendarTaskLinks.AsNoTracking().CountAsync(item => item.SyncStatus == "deleted"));
@@ -1614,6 +1625,8 @@ public class GoogleCalendarSyncServiceTests
         Assert.Equal(insertDuringSync ? 503 : 502, await db.GoogleCalendarTaskLinks.AsNoTracking().CountAsync(item => item.SyncStatus == "deleted"));
         Assert.Equal(new[] { 500, 500 }, queryProbe.TaskPageLimits);
         Assert.InRange(queryProbe.LinkSelects, 2, 4);
+        Console.WriteLine($"CalendarLogQueries provider=Google; scenario=hide; case={scenario}; phase=retry; metadata={queryProbe.LogMetadataSelects}; total={queryProbe.TotalSelects}");
+        Assert.InRange(queryProbe.LogMetadataSelects, 0, 8);
         Assert.Equal(insertDuringSync ? 503 : 502, handler.DeleteAttempts.Count);
         Assert.All(handler.DeleteAttempts, item => Assert.Equal((failOnce || cancelAfterFirstPage) && item.Key.Contains("bulk-event-501", StringComparison.Ordinal) ? 2 : 1, item.Value));
     }
@@ -1680,6 +1693,27 @@ public class GoogleCalendarSyncServiceTests
         Assert.Equal(0, result.ErrorCount);
         Assert.Equal(new[] { 500, 500 }, queryProbe.TaskPageLimits);
         Assert.InRange(queryProbe.LinkSelects, 2, 4);
+        var exportLogs = await db.GoogleCalendarSyncLogs.AsNoTracking()
+            .Where(item => item.ConnectionId == connection.Id && item.Operation == "update-event").ToListAsync();
+        Assert.Equal(502, exportLogs.Count);
+        var logTasksById = tasks.ToDictionary(item => item.Id);
+        foreach (var exportLog in exportLogs)
+        {
+            using var details = JsonDocument.Parse(exportLog.DetailsJson!);
+            var value = details.RootElement;
+            var logTask = logTasksById[exportLog.TaskJournalItemId!.Value];
+            Assert.Equal(user.FullName, value.GetProperty("userName").GetString());
+            Assert.Equal(user.Email, value.GetProperty("userEmail").GetString());
+            Assert.Equal(calendar.Name, value.GetProperty("calendarName").GetString());
+            Assert.False(value.TryGetProperty("calendarOwnerName", out _));
+            Assert.False(value.TryGetProperty("calendarOwnerEmail", out _));
+            Assert.Equal(logTask.Title, value.GetProperty("taskTitle").GetString());
+            Assert.Equal(logTask.ObjectName, value.GetProperty("taskObjectName").GetString());
+            Assert.Equal(logTask.AssigneeName, value.GetProperty("taskAssigneeName").GetString());
+            Assert.False(string.IsNullOrWhiteSpace(value.GetProperty("detail").GetString()));
+        }
+        Console.WriteLine($"CalendarLogQueries provider=Google; scenario=color; case=normal; phase=first; metadata={queryProbe.LogMetadataSelects}; total={queryProbe.TotalSelects}");
+        Assert.InRange(queryProbe.LogMetadataSelects, 0, 8);
         Assert.Equal(502, handler.PutBodies.Count);
         Assert.All(handler.PutBodies.Values, bodies => Assert.Single(bodies));
         Assert.Equal(0, handler.DeleteCount);
@@ -1714,6 +1748,8 @@ public class GoogleCalendarSyncServiceTests
 
         Assert.Equal(502, retry.ProcessedTasks);
         Assert.Equal(0, retry.ErrorCount);
+        Console.WriteLine($"CalendarLogQueries provider=Google; scenario=color; case=normal; phase=retry; metadata={queryProbe.LogMetadataSelects}; total={queryProbe.TotalSelects}");
+        Assert.InRange(queryProbe.LogMetadataSelects, 0, 8);
         Assert.Equal(502, handler.PutBodies.Count);
         Assert.All(handler.PutBodies.Values, bodies => Assert.Single(bodies));
         Assert.Equal(0, handler.DeleteCount);
@@ -1895,6 +1931,66 @@ public class GoogleCalendarSyncServiceTests
         Assert.Equal(2, handler.EventWrites);
         Assert.Equal(4, handler.DuplicateReadAttempts);
         Assert.Equal(1, handler.DuplicateDeleteAttempts);
+    }
+
+    [Fact]
+    public async Task SyncTaskForConnectedUsersAsync_LogContextRefreshesAcrossUsersAndCalls()
+    {
+        await using var db = await CreateContextAsync();
+        var first = await CreateUserAsync(db, "log-first@example.local", "user");
+        var second = await CreateUserAsync(db, "log-second@example.local", "user");
+        first.FullName = "Synthetic first user";
+        second.FullName = "Synthetic second user";
+        await db.SaveChangesAsync();
+        await EnableGoogleSettingsAsync(db);
+        await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 10, completedTaskCalendarAction: "color");
+        var firstConnection = await CreateConnectionAsync(db, first.Id);
+        var secondConnection = await CreateConnectionAsync(db, second.Id);
+        var firstCalendar = await CreateCalendarAsync(db, firstConnection.Id, "log-first-calendar", "Synthetic first calendar");
+        var secondCalendar = await CreateCalendarAsync(db, secondConnection.Id, "log-second-calendar", "Synthetic second calendar");
+        var firstTask = await CreateTaskAsync(db, first.Id, "Synthetic first task", dueAt: DateTime.UtcNow.AddDays(7));
+        var secondTask = await CreateTaskAsync(db, second.Id, "Synthetic second task", dueAt: firstTask.DueAt);
+        var service = CreateService(db, new FakeHttpClientFactory(new RecordingGoogleHandler()));
+
+        await service.SyncTaskForConnectedUsersAsync(firstTask.Id, CancellationToken.None);
+        await service.SyncTaskForConnectedUsersAsync(secondTask.Id, CancellationToken.None);
+
+        var firstLog = await db.GoogleCalendarSyncLogs.AsNoTracking()
+            .SingleAsync(item => item.ConnectionId == firstConnection.Id && item.Operation == "create-event");
+        var secondLog = await db.GoogleCalendarSyncLogs.AsNoTracking()
+            .SingleAsync(item => item.ConnectionId == secondConnection.Id && item.Operation == "create-event");
+        using var firstDetails = JsonDocument.Parse(firstLog.DetailsJson!);
+        using var secondDetails = JsonDocument.Parse(secondLog.DetailsJson!);
+        Assert.Equal(first.FullName, firstDetails.RootElement.GetProperty("userName").GetString());
+        Assert.Equal(first.Email, firstDetails.RootElement.GetProperty("userEmail").GetString());
+        Assert.Equal(firstCalendar.Name, firstDetails.RootElement.GetProperty("calendarName").GetString());
+        Assert.Equal(firstTask.Title, firstDetails.RootElement.GetProperty("taskTitle").GetString());
+        Assert.Equal(second.FullName, secondDetails.RootElement.GetProperty("userName").GetString());
+        Assert.Equal(second.Email, secondDetails.RootElement.GetProperty("userEmail").GetString());
+        Assert.Equal(secondCalendar.Name, secondDetails.RootElement.GetProperty("calendarName").GetString());
+        Assert.Equal(secondTask.Title, secondDetails.RootElement.GetProperty("taskTitle").GetString());
+
+        first.FullName = "Synthetic renamed user";
+        first.Email = "log-renamed@example.local";
+        firstCalendar.Name = "Synthetic renamed calendar";
+        firstTask.Title = "Synthetic changed task";
+        firstTask.ObjectName = "Synthetic changed object";
+        firstTask.AssigneeName = "Synthetic changed assignee";
+        await db.SaveChangesAsync();
+
+        await service.SyncTaskForConnectedUsersAsync(firstTask.Id, CancellationToken.None);
+
+        var updateLog = await db.GoogleCalendarSyncLogs.AsNoTracking()
+            .SingleAsync(item => item.ConnectionId == firstConnection.Id && item.Operation == "update-event");
+        using var updated = JsonDocument.Parse(updateLog.DetailsJson!);
+        Assert.Equal(first.FullName, updated.RootElement.GetProperty("userName").GetString());
+        Assert.Equal(first.Email, updated.RootElement.GetProperty("userEmail").GetString());
+        Assert.Equal(firstCalendar.Name, updated.RootElement.GetProperty("calendarName").GetString());
+        Assert.Equal(firstTask.Title, updated.RootElement.GetProperty("taskTitle").GetString());
+        Assert.Equal(firstTask.ObjectName, updated.RootElement.GetProperty("taskObjectName").GetString());
+        Assert.Equal(firstTask.AssigneeName, updated.RootElement.GetProperty("taskAssigneeName").GetString());
+        Assert.Equal(firstLog.DetailsJson, (await db.GoogleCalendarSyncLogs.AsNoTracking()
+            .SingleAsync(item => item.Id == firstLog.Id)).DetailsJson);
     }
 
     private static PaymentContext CreateAdditionalContext(PaymentContext original, CalendarBatchQueryProbe? queryProbe = null)
