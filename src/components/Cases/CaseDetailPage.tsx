@@ -4373,6 +4373,7 @@ export function CaseDetailPage({
                 onCreateStageTask={createStageTaskForCase}
                 creatingTask={creatingTask}
                 canCreateTask={canCreateCaseTask}
+                onOpenTask={canViewTasks ? onOpenTask : undefined}
               />
             )
           ) : null}
@@ -6707,6 +6708,7 @@ function TaskList({
   onCreateStageTask,
   creatingTask,
   canCreateTask,
+  onOpenTask,
 }: {
   tasks: TaskJournalItem[];
   allTasks: TaskJournalItem[];
@@ -6718,6 +6720,7 @@ function TaskList({
   onCreateStageTask: (template: CaseStageTaskTemplate) => void;
   creatingTask: boolean;
   canCreateTask: boolean;
+  onOpenTask?: (taskId: number) => void;
 }) {
   const counts: Record<CaseTaskFilter, number> = {
     all: allTasks.length,
@@ -6731,7 +6734,7 @@ function TaskList({
       <div className="rounded-xl border border-slate-200 p-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Связанные задачи</h2>
+            <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Связанные задачи ({allTasks.length})</h2>
             <div className="mt-1 text-sm text-slate-500">Прогресс: {progress}%</div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -6802,7 +6805,17 @@ function TaskList({
           <tbody className="divide-y divide-slate-100">
             {tasks.map((task) => (
               <tr key={task.id}>
-                <td className="px-3 py-3 font-semibold text-slate-900">{task.title}</td>
+                <td className="px-3 py-3 font-semibold text-slate-900">
+                  {onOpenTask ? (
+                    <button
+                      type="button"
+                      onClick={() => onOpenTask(task.id)}
+                      aria-label={`Открыть задачу: ${task.title}`}
+                      className="text-left font-semibold text-blue-700 hover:underline">
+                      {task.title}
+                    </button>
+                  ) : task.title}
+                </td>
                 <td className="px-3 py-3 text-slate-700">{task.assigneeName || '—'}</td>
                 <td className="px-3 py-3 text-slate-700">{formatRuDateTime(task.dueAt) || '—'}</td>
                 <td className="px-3 py-3 text-slate-700">{TASK_STATUS_LABELS[task.status] ?? task.status}</td>
@@ -6812,6 +6825,7 @@ function TaskList({
           </tbody>
         </table>
       </div>
+      <div className="text-sm text-slate-500" aria-live="polite">Показано {tasks.length} из {allTasks.length}</div>
     </div>
   );
 }

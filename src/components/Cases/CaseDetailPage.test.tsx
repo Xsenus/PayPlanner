@@ -1322,6 +1322,21 @@ describe('CaseDetailPage', () => {
     expect(screen.getByText('3 записи')).toBeTruthy();
   });
 
+  it('PAY-24: opens a case task through the common task card and shows how many tasks are listed', async () => {
+    const onOpenTask = vi.fn();
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} onOpenTask={onOpenTask} />);
+    expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Задачи' }));
+    expect(await screen.findByText('Проверить движение по делу')).toBeTruthy();
+    expect(screen.getByText(/Показано \d+ из \d+/u)).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /Связанные задачи \(\d+\)/u })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Открыть задачу: Проверить движение по делу' }));
+    expect(onOpenTask).toHaveBeenCalledTimes(1);
+    expect(onOpenTask).toHaveBeenCalledWith(expect.any(Number));
+  });
+
   it('PAY-23: searches the loaded case documents and shows an honest empty state', async () => {
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
     expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
