@@ -93,6 +93,7 @@ import { CaseModal } from "./CaseModal";
 import { TwoTypeStats } from "../Statistics/TwoTypeStats";
 import { formatCurrencySmart } from "../../utils/formatters";
 import { formatDateTimeInTimeZone } from "../../utils/timeZoneDate";
+import { formatClientDate } from "./clientFormatters";
 import { ActModal } from "../Acts/ActModal";
 import { InvoiceModal } from "../Accounts/InvoiceModal";
 import { ContractModal } from "../Contracts/ContractModal";
@@ -977,6 +978,21 @@ const PROFILE_DELETE_ICON_BUTTON_CLASS =
   "inline-flex h-9 w-9 items-center justify-center rounded-lg text-rose-600 transition-colors hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60";
 const PROFILE_SECONDARY_ICON_BUTTON_CLASS =
   "inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-60";
+
+/** Возраст в полных годах по дате рождения YYYY-MM-DD; пусто, если дата не распознана. */
+function getAgeLabel(birthDate?: string | null): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(birthDate ?? "");
+  if (!match) return "";
+  const [, y, m, d] = match.map(Number);
+  const now = new Date();
+  let age = now.getFullYear() - y;
+  if (now.getMonth() + 1 < m || (now.getMonth() + 1 === m && now.getDate() < d)) age -= 1;
+  if (age < 0 || age > 150) return "";
+  const lastTwo = age % 100;
+  const last = age % 10;
+  const word = lastTwo >= 11 && lastTwo <= 14 ? "лет" : last === 1 ? "год" : last >= 2 && last <= 4 ? "года" : "лет";
+  return `${age} ${word}`;
+}
 
 /** Профильные группы, свёрнутые в блок «Дополнительная информация» (PAY-32). Данные групп не удаляются. */
 const PROFILE_ADDITIONAL_GROUPS: readonly string[] = ["education", "professions", "workplaces", "relatives", "poa"];
@@ -6131,6 +6147,29 @@ export function ClientDetail({
             )}
             <ClientStatusBadge status={clientData?.clientStatus} />
           </h1>
+          {(() => {
+            const isIndividual = clientFormState.kind === "individual";
+            const birth = isIndividual ? clientFormState.birthDate : "";
+            const age = getAgeLabel(birth);
+            const items = [
+              birth
+                ? `${formatClientDate(birth, profileTimeZoneId)}${age ? ` (${age})` : ""}`
+                : "",
+              clientData?.phone ?? "",
+              clientData?.email ?? "",
+              clientData?.address ?? "",
+            ].filter((item) => item.trim());
+            return items.length ? (
+              <div
+                className="basis-full text-sm text-gray-600 flex flex-wrap gap-x-4 gap-y-1"
+                aria-label="Краткие сведения о клиенте"
+              >
+                {items.map((item) => (
+                  <span key={item}>{item}</span>
+                ))}
+              </div>
+            ) : null;
+          })()}
           <div className="ml-auto flex flex-wrap items-center gap-2">
             {canViewClientFinancialSummary ? (
               <button
@@ -6173,8 +6212,10 @@ export function ClientDetail({
           </div>
         </div>
 
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap gap-2">
+        <div className="flex flex-col gap-6 lg:flex-row">
+          <aside className="order-first shrink-0 lg:order-last lg:w-60">
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-row flex-wrap gap-2 lg:flex-col lg:gap-1" role="navigation" aria-label="Разделы клиента">
             {visibleSections.map((section) => {
               const meta = SECTION_META[section];
               const isActive = activeSection === section;
@@ -6183,7 +6224,7 @@ export function ClientDetail({
                   key={section}
                   type="button"
                   onClick={() => setActiveSection(section)}
-                  className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${
+                  className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors lg:w-full lg:text-left ${
                     isActive
                       ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
                       : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
@@ -6276,8 +6317,28 @@ export function ClientDetail({
               </div>
             )}
           </div>
+                  <dl className="rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-600 space-y-2" aria-label="Служебные сведения">
+            <div>
+              <dt className="text-xs text-gray-500">№ клиента</dt>
+              <dd className="font-semibold text-gray-900">{clientData?.id ?? clientId}</dd>
+            </div>
+            {clientData?.createdAt ? (
+              <div>
+                <dt className="text-xs text-gray-500">Дата создания</dt>
+                <dd>{formatClientDate(clientData.createdAt, profileTimeZoneId)}</dd>
+              </div>
+            ) : null}
+            {clientData?.responsibleUserName ? (
+              <div>
+                <dt className="text-xs text-gray-500">Ответственный</dt>
+                <dd>{clientData.responsibleUserName}</dd>
+              </div>
+            ) : null}
+          </dl>
         </div>
 
+          </aside>
+          <div className="min-w-0 flex-1">
         {activeSection === "profile" ? (
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 mb-6 p-6">
             <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
@@ -10640,6 +10701,9 @@ export function ClientDetail({
             </div>
           </div>
         )}
+
+          </div>
+        </div>
 
         {expenseDetailsCase ? (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4 py-6">

@@ -628,6 +628,30 @@ describe('ClientDetail integration', () => {
     });
   });
 
+  it('PAY-32: shows short client facts in the header and service facts next to the section menu', async () => {
+    vi.mocked(apiService.getClient).mockResolvedValue({
+      ...createClient({ birthDate: '2000-01-02' }),
+      phone: '+7 893 467-48-83',
+      email: 'anna@example.test',
+      address: 'г. Новокузнецк',
+    });
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+
+    await screen.findByRole('heading', { name: 'Карточка клиента' });
+    const summary = await screen.findByLabelText('Краткие сведения о клиенте');
+    expect(within(summary).getByText('+7 893 467-48-83')).toBeTruthy();
+    expect(within(summary).getByText('anna@example.test')).toBeTruthy();
+    expect(within(summary).getByText('г. Новокузнецк')).toBeTruthy();
+    expect(within(summary).getByText(/02\.01\.2000 \(\d+ (год|года|лет)\)/)).toBeTruthy();
+
+    const menu = screen.getByRole('navigation', { name: 'Разделы клиента' });
+    expect(within(menu).getByRole('button', { name: /Карточка клиента/ })).toBeTruthy();
+    const service = screen.getByLabelText('Служебные сведения');
+    expect(within(service).getByText('№ клиента')).toBeTruthy();
+    expect(within(service).getByText('Дата создания')).toBeTruthy();
+  });
+
   it('does not enable hidden tab data hooks on the initial profile view', async () => {
     render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
 
