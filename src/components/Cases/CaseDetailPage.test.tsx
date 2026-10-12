@@ -1322,6 +1322,57 @@ describe('CaseDetailPage', () => {
     expect(screen.getByText('3 записи')).toBeTruthy();
   });
 
+  it('PAY-25: shows the event journal newest first, marks the source and leads to the court tab to add an event', async () => {
+    vi.mocked(apiService.getCaseCourtEvents).mockResolvedValue([
+      {
+        canRecordHearingOutcome: false,
+        id: 51,
+        clientCaseId: 15,
+        eventType: 'hearing',
+        eventTypeLabel: 'Заседание',
+        title: 'Старое заседание',
+        scheduledAt: '2026-06-01T09:00:00Z',
+        allDay: false,
+        courtInstance: 'first',
+        courtInstanceLabel: 'Первая инстанция',
+        movementStatus: 'scheduled',
+        movementStatusLabel: 'Назначено',
+        sourceType: 'manual',
+        createdAt: '2026-05-21T00:00:00Z',
+        isOverdue: false,
+      },
+      {
+        canRecordHearingOutcome: false,
+        id: 52,
+        clientCaseId: 15,
+        eventType: 'hearing',
+        eventTypeLabel: 'Заседание',
+        title: 'Новое заседание',
+        scheduledAt: '2026-07-01T09:00:00Z',
+        allDay: false,
+        courtInstance: 'first',
+        courtInstanceLabel: 'Первая инстанция',
+        movementStatus: 'scheduled',
+        movementStatusLabel: 'Назначено',
+        sourceType: 'sudrf',
+        createdAt: '2026-05-21T00:00:00Z',
+        isOverdue: false,
+      },
+    ]);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'События' }));
+    const journal = await screen.findByLabelText('Журнал событий дела');
+    const titles = within(journal).getAllByText(/заседание$/u).map((node) => node.textContent);
+    expect(titles).toEqual(['Новое заседание', 'Старое заседание']);
+    expect(within(journal).getByText('ГАС «Правосудие»')).toBeTruthy();
+    expect(within(journal).getByRole('heading', { name: 'Журнал событий (2)' })).toBeTruthy();
+
+    fireEvent.click(within(journal).getByRole('button', { name: /Добавить событие/ }));
+    expect(screen.queryByLabelText('Журнал событий дела')).toBeNull();
+  });
+
   it('PAY-24: opens a case task through the common task card and shows how many tasks are listed', async () => {
     const onOpenTask = vi.fn();
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} onOpenTask={onOpenTask} />);

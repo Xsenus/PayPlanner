@@ -102,7 +102,7 @@ interface CaseDetailPageProps {
   canSendMessenger?: boolean;
 }
 
-type CaseDetailTab = 'overview' | 'participants' | 'tasks' | 'court' | 'finance' | 'workOrder' | 'documents' | 'conversation' | 'history';
+type CaseDetailTab = 'overview' | 'participants' | 'tasks' | 'court' | 'events' | 'finance' | 'workOrder' | 'documents' | 'conversation' | 'history';
 type CaseTaskFilter = 'active' | 'all' | 'overdue' | 'done';
 type SummaryTone = 'slate' | 'emerald' | 'amber' | 'rose' | 'cyan';
 type ParticipantSourceType = 'client' | 'legalEntity' | 'externalContact';
@@ -281,6 +281,7 @@ const DETAIL_TABS: Array<{ key: CaseDetailTab; label: string }> = [
   { key: 'participants', label: 'Участники' },
   { key: 'tasks', label: 'Задачи' },
   { key: 'court', label: 'Суд' },
+  { key: 'events', label: 'События' },
   { key: 'finance', label: 'Финансы' },
   { key: 'workOrder', label: 'Заказ-наряд' },
   { key: 'documents', label: 'Документы' },
@@ -292,6 +293,7 @@ const QUICK_ACCESS_HINTS: Partial<Record<CaseDetailTab, string>> = {
   participants: 'Стороны и контакты',
   tasks: 'Текущие и просроченные',
   court: 'Судебные дела и заседания',
+  events: 'Журнал событий дела',
   finance: 'Счета и платежи',
   workOrder: 'Работы и согласование',
   documents: 'Все документы по делу',
@@ -2231,7 +2233,7 @@ export function CaseDetailPage({
   }, [caseId]);
 
   useEffect(() => {
-    if (activeTab !== 'court' && activeTab !== 'documents') return;
+    if (activeTab !== 'court' && activeTab !== 'documents' && activeTab !== 'events') return;
 
     let cancelled = false;
     setCourtEventsLoading(true);
@@ -4376,6 +4378,50 @@ export function CaseDetailPage({
                 onOpenTask={canViewTasks ? onOpenTask : undefined}
               />
             )
+          ) : null}
+
+          {activeTab === 'events' ? (
+            <section className="space-y-3 rounded-xl border border-slate-200 p-4" aria-label="Журнал событий дела">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Журнал событий ({courtEvents.length})</h2>
+                {canEdit ? (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('court')}
+                    className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                    <FilePlus2 className="h-4 w-4" /> Добавить событие
+                  </button>
+                ) : null}
+              </div>
+              {courtEventsLoading ? (
+                <LoadingBlock label="Загрузка событий дела..." />
+              ) : courtEventsError ? (
+                <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">{courtEventsError}</div>
+              ) : courtEvents.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">По делу пока нет событий.</div>
+              ) : (
+                <ol className="divide-y divide-slate-100">
+                  {[...courtEvents]
+                    .sort((left, right) => new Date(right.scheduledAt).getTime() - new Date(left.scheduledAt).getTime())
+                    .map((event) => (
+                      <li key={event.id} className="grid gap-1 py-3 sm:grid-cols-[170px_1fr]">
+                        <div className="text-sm font-semibold text-slate-900">{formatCourtEventSchedule(event) || '—'}</div>
+                        <div className="min-w-0">
+                          <div className="font-semibold text-slate-900">{event.title}</div>
+                          <div className="text-xs text-slate-500">
+                            {event.eventTypeLabel}
+                            {event.courtName ? ` · ${event.courtName}` : ''}
+                            {event.movementStatusLabel ? ` · ${event.movementStatusLabel}` : ''}
+                          </div>
+                          {event.description ? <div className="mt-1 text-sm text-slate-600">{event.description}</div> : null}
+                          {event.resultSummary ? <div className="mt-1 text-sm text-slate-600">Результат: {event.resultSummary}</div> : null}
+                          <CourtSourceProvenance item={event} />
+                        </div>
+                      </li>
+                    ))}
+                </ol>
+              )}
+            </section>
           ) : null}
 
           {activeTab === 'court' ? (
