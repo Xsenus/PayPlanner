@@ -646,7 +646,8 @@ describe('ClientDetail integration', () => {
     expect(within(summary).getByText(/02\.01\.2000 \(\d+ (год|года|лет)\)/)).toBeTruthy();
 
     const menu = screen.getByRole('navigation', { name: 'Разделы клиента' });
-    expect(within(menu).getByRole('button', { name: /Карточка клиента/ })).toBeTruthy();
+    expect(within(menu).getByRole('button', { name: 'Личные данные' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Основная информация' })).toBeTruthy();
     const service = screen.getByLabelText('Служебные сведения');
     expect(within(service).getByText('№ клиента')).toBeTruthy();
     expect(within(service).getByText('Дата создания')).toBeTruthy();
@@ -803,7 +804,7 @@ describe('ClientDetail integration', () => {
 
     render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
 
-    await screen.findByRole('button', { name: /Карточка клиента/ });
+    await screen.findByRole('button', { name: 'Личные данные' });
 
     expect(screen.queryByRole('button', { name: /Добавить сч/ })).toBeNull();
     expect(screen.queryByRole('button', { name: /Добавить акт/ })).toBeNull();

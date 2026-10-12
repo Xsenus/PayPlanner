@@ -6256,7 +6256,9 @@ export function ClientDetail({
                       : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
                   }`}
                 >
-                  {meta.label}
+                  {section === "profile" && clientFormState.kind === "individual"
+                    ? "Личные данные"
+                    : meta.label}
                 </button>
               );
             })}
@@ -6516,7 +6518,17 @@ export function ClientDetail({
 
               {clientFormState.kind === "individual" ? (
                 <>
-                  <div className="md:col-span-2 grid gap-3 md:grid-cols-4">
+                  <section
+                    className="md:col-span-2 rounded-xl border border-gray-200 bg-gray-50/50 p-4"
+                    aria-labelledby="client-profile-card-main-info"
+                  >
+                    <h3
+                      id="client-profile-card-main-info"
+                      className="mb-3 text-base font-semibold text-gray-900"
+                    >
+                      Основная информация
+                    </h3>
+                  <div className="grid gap-3 md:grid-cols-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         {"Фамилия" + requiredMark("LastName")}
@@ -6636,6 +6648,7 @@ export function ClientDetail({
                       </SystemSelect>
                     </div>
                   </div>
+                  </section>
                 </>
               ) : (
                 <div className="md:col-span-2">
