@@ -1,0 +1,47 @@
+{
+  "company": "PayPlanner",
+  "projectId": "daa8d6c1-cce6-4c0c-985a-6bdc5a4b5eb4",
+  "inventoryCardCount": 38,
+  "newCards": 0,
+  "threshold": "2026-10-12T22:13:00+07:00",
+  "items": [
+    {
+      "id": "c80f2e24-63cd-457e-aa60-7a0047e2746f",
+      "taskId": "PAY-37",
+      "title": "КАЛЕНДАРЬ - ВИДИМОСТЬ ЗАДАЧ",
+      "messages": [
+        {
+          "timestamp": 1791818030588,
+          "text": "написал в максе что задача со статусом анулировано не ушла из клаендаря"
+        },
+        {
+          "timestamp": 1791818039273,
+          "text": "система не понимает фильтр этого статуса"
+        }
+      ]
+    }
+  ],
+  "verifiedCard": {
+    "taskId": "PAY-37",
+    "column": "Доработка",
+    "complete": false,
+    "totalMessages": 16
+  },
+  "writes": false,
+  "productionReadOnlyObservation": {
+    "savedTaskStatuses": [
+      "cancelled",
+      "done",
+      "inProgress",
+      "new",
+      "onApproval",
+      "overdueApproval",
+      "waiting"
+    ],
+    "rawAnnulledStatusPresent": false,
+    "cancelledStatusPresent": true,
+    "completedTaskCalendarAction": "hide",
+    "serviceActive": true,
+    "scope": "Only aggregate status values and one non-secret setting read; no task rows, personal data or mutations. This does not identify the exact task or establish its displayed label."
+  }
+}

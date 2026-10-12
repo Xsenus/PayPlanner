@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "codeRevision": "cc744c0c98cefc1cb9a910f622f1d8ae220783ea",
+  "sourceHashes": {
+    "backend/Controllers/MoneyOperationsController.cs": "49579e302f2a8d20abae5d7490ea5b42b53aa2e75dd16fb1f901aa294e4febf6",
+    "backend/Services/MoneyOperationInvoiceAllocationService.cs": "3c078e3b333ac6991cf70b844b09e01342cb1c195e47e4a4276b87551130c055",
+    "backend/PayPlanner.Api.Tests/MoneyOperationsControllerTests.cs": "d24580841b1ac6bc8f03b46a8bcdb336b72560952d89e76d0f715155902cc1e2"
+  },
+  "related": {
+    "total": 150,
+    "passed": 150,
+    "failed": 0,
+    "notExecuted": 0
+  },
+  "resourceRecovery": {
+    "total": 28,
+    "passed": 28,
+    "failed": 0,
+    "notExecuted": 0
+  },
+  "checks": {
+    "fullBackendFormat": true,
+    "sourceEncodingFiles": 3088,
+    "previousReleaseEntriesPreserved": true,
+    "releaseBuild": true
+  },
+  "fullBackend": {
+    "status": "running",
+    "expectedCases": 7078,
+    "manifestSha256": "95ba710a5ae3f4969a6a99bb9719076e1c970d5160f3d8bc519f8b85ef1fef9b",
+    "interruptedInitialRun": "PostgreSQL shared-lock exhaustion and cleanup timeout; no successful full result claimed.",
+    "retry": "One independent loopback PostgreSQL 17 cluster per shard, max_locks_per_transaction=2048, two logical processors for each test process. Assertions, timeouts and all 7078 cases preserved.",
+    "configuration": "Release",
+    "runtimeProcessorCountReference": "https://learn.microsoft.com/et-ee/dotnet/core/compatibility/core-libraries/6.0/environment-processorcount-on-windows"
+  },
+  "availability": {
+    "branchOnly": true,
+    "deployed": false,
+    "yougilePublished": false
+  },
+  "remaining": "Unified company-scoped batch, bank sources, modal queue, durable allocations and concurrent confirmation are not implemented."
+}
