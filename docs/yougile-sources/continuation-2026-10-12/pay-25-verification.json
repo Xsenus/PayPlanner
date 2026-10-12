@@ -3,6 +3,9 @@
   "productionBuild": "passed",
   "scope": "PAY-25 frontend filters; no API/model changes",
   "deployed": false,
+  "implementationRevision": "d806d81ca5f0f9d0dce00552fb547af3c877cb0c",
+  "branchPushConfirmed": true,
+  "githubActionsForImplementationRevision": "not triggered; automatic deployment workflow only runs on main",
   "lint": "passed",
   "visualChecks": {
     "horizontalOverflow": false,
