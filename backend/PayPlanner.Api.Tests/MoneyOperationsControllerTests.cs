@@ -5470,6 +5470,277 @@ public class MoneyOperationsControllerTests
         Assert.Equal(1, await db.MoneyAccounts.CountAsync());
     }
 
+    [Theory]
+    [InlineData(PaymentType.Income, "10000", "20000")]
+    [InlineData(PaymentType.Expense, "-10000", "-20000")]
+    public async Task ImportBankStatement_DoesNotAllocateBatchAboveInvoiceRemainder(
+        PaymentType type, string firstAmount, string secondAmount)
+    {
+        await using var db = await CreateContextAsync();
+        var invoice = new Invoice { Number = "913", Date = new DateTime(2026, 10, 12) };
+        var payment = new Payment
+        {
+            Invoice = invoice,
+            Account = invoice.Number,
+            DocumentKind = DocumentKind.Invoice,
+            Type = type,
+            Status = PaymentStatus.Pending,
+            Amount = 25_000m,
+            Date = invoice.Date,
+            CounterpartyName = "Синтетический контрагент",
+        };
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+        var action = await controller.ImportBankStatement(CreateFormFile(
+            "Дата;Сумма;Контрагент;Назначение;Номер\n" +
+            $"12.10.2026;{firstAmount};Синтетический контрагент;Оплата по счету №913;A1\n" +
+            $"12.10.2026;{secondAmount};Синтетический контрагент;Оплата по счету №913;A2\n",
+            "batch-remainder.csv"), CancellationToken.None);
+        var result = Assert.IsType<BankStatementImportResultDto>(Assert.IsType<OkObjectResult>(action.Result).Value);
+        Assert.Equal(2, result.Created);
+        var operations = await db.MoneyOperations.OrderBy(item => item.Id).ToListAsync();
+        Assert.Equal(MoneyOperationMatchStatus.Matched, operations[0].MatchStatus);
+        Assert.Equal(MoneyOperationMatchStatus.ClarificationRequired, operations[1].MatchStatus);
+        Assert.Null(operations[1].LinkedInvoiceId);
+        Assert.Equal(10_000m, (await db.Payments.SingleAsync()).PaidAmount);
+        Assert.Empty(await db.ClientBalanceTransactions.ToListAsync());
+    }
+
+    [Fact]
+    public async Task ImportBankStatement_AllocatesSeveralPartialRowsWithinInvoiceRemainder()
+    {
+        await using var db = await CreateContextAsync();
+        var invoice = new Invoice { Number = "914", Date = new DateTime(2026, 10, 12) };
+        db.Payments.Add(new Payment
+        {
+            Invoice = invoice,
+            Account = invoice.Number,
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Processing,
+            Amount = 25_000m,
+            PaidAmount = 5_000m,
+            Date = invoice.Date,
+            CounterpartyName = "Синтетический контрагент",
+        });
+        await db.SaveChangesAsync();
+        var action = await CreateController(db).ImportBankStatement(CreateFormFile(
+            "Дата;Сумма;Контрагент;Назначение;Номер\n" +
+            "12.10.2026;8000;Синтетический контрагент;Оплата по счету №914;B1\n" +
+            "12.10.2026;12000;Синтетический контрагент;Оплата по счету №914;B2\n" +
+            "12.10.2026;100;Синтетический контрагент;Оплата по счету №914;B3\n",
+            "partial-rows.csv"), CancellationToken.None);
+        Assert.IsType<OkObjectResult>(action.Result);
+        var operations = await db.MoneyOperations.OrderBy(item => item.Id).ToListAsync();
+        Assert.All(operations.Take(2), item => Assert.Equal(MoneyOperationMatchStatus.Matched, item.MatchStatus));
+        Assert.Equal(MoneyOperationMatchStatus.ClarificationRequired, operations[2].MatchStatus);
+        Assert.Equal(25_000m, (await db.Payments.SingleAsync()).PaidAmount);
+    }
+
+    [Theory]
+    [InlineData(PaymentType.Income, "10000")]
+    [InlineData(PaymentType.Expense, "-10000")]
+    public async Task ImportBankStatement_AllocatesOneOperationAcrossInvoiceInstallments(PaymentType type, string amount)
+    {
+        await using var db = await CreateContextAsync();
+        var date = new DateTime(2026, 10, 12);
+        var invoice = new Invoice { Number = "915", Date = date };
+        var parent = new Payment
+        {
+            Invoice = invoice,
+            Account = invoice.Number,
+            DocumentKind = DocumentKind.Invoice,
+            Type = type,
+            Status = PaymentStatus.Pending,
+            Amount = 12_000m,
+            Date = date,
+        };
+        var first = new Payment
+        {
+            Invoice = invoice,
+            Account = invoice.Number,
+            DocumentKind = DocumentKind.Payment,
+            Type = type,
+            Status = PaymentStatus.Pending,
+            Amount = 6_000m,
+            Date = date,
+            SystemNotes = InvoiceManagedPaymentRules.InstallmentPaymentMarker,
+        };
+        var second = new Payment
+        {
+            Invoice = invoice,
+            Account = invoice.Number,
+            DocumentKind = DocumentKind.Payment,
+            Type = type,
+            Status = PaymentStatus.Pending,
+            Amount = 6_000m,
+            Date = date.AddMonths(1),
+            SystemNotes = InvoiceManagedPaymentRules.InstallmentPaymentMarker,
+        };
+        db.Payments.AddRange(parent, first, second);
+        await db.SaveChangesAsync();
+        var action = await CreateController(db).ImportBankStatement(CreateFormFile(
+            "Дата;Сумма;Контрагент;Назначение;Номер\n" +
+            $"12.10.2026;{amount};Синтетический контрагент;Оплата по счету №915;C1\n",
+            "installments.csv"), CancellationToken.None);
+        Assert.IsType<OkObjectResult>(action.Result);
+        db.ChangeTracker.Clear();
+        Assert.Equal(6_000m, (await db.Payments.SingleAsync(item => item.Id == first.Id)).PaidAmount);
+        Assert.Equal(4_000m, (await db.Payments.SingleAsync(item => item.Id == second.Id)).PaidAmount);
+        Assert.Equal(10_000m, (await db.Payments.SingleAsync(item => item.Id == parent.Id)).PaidAmount);
+        Assert.Empty(await db.ClientBalanceTransactions.ToListAsync());
+        Assert.Equal(MoneyOperationMatchStatus.Matched, (await db.MoneyOperations.SingleAsync()).MatchStatus);
+    }
+
+    [Fact]
+    public async Task ImportBankStatement_DoesNotAutomaticallyAllocateForeignCurrencyAccount()
+    {
+        await using var db = await CreateContextAsync();
+        var invoice = new Invoice { Number = "916", Date = new DateTime(2026, 10, 12) };
+        db.Payments.Add(new Payment
+        {
+            Invoice = invoice,
+            Account = invoice.Number,
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = 1_000m,
+            Date = invoice.Date,
+        });
+        db.MoneyAccounts.Add(new MoneyAccount
+        {
+            Name = "Валютный тестовый",
+            Source = MoneyOperationSource.Bank,
+            Currency = "USD",
+            IsActive = true,
+        });
+        await db.SaveChangesAsync();
+        var action = await CreateController(db).ImportBankStatement(CreateFormFile(
+            "Дата;Сумма;Контрагент;Назначение;Номер;Счет\n" +
+            "12.10.2026;1000;Синтетический контрагент;Оплата по счету №916;D1;Валютный тестовый\n",
+            "foreign-currency.csv"), CancellationToken.None);
+        Assert.IsType<OkObjectResult>(action.Result);
+        var operation = await db.MoneyOperations.SingleAsync();
+        Assert.Equal("USD", operation.Currency);
+        Assert.Equal(MoneyOperationMatchStatus.ClarificationRequired, operation.MatchStatus);
+        Assert.Null(operation.LinkedInvoiceId);
+        Assert.Equal(0m, (await db.Payments.SingleAsync()).PaidAmount);
+    }
+
+    [Fact]
+    public async Task LinkInvoice_RepeatedPartialAllocationDoesNotPayTwiceOrRebind()
+    {
+        await using var db = await CreateContextAsync();
+        var date = new DateTime(2026, 10, 12);
+        var invoice = new Invoice { Number = "917", Date = date };
+        var otherInvoice = new Invoice { Number = "918", Date = date };
+        db.Payments.AddRange(new Payment
+        {
+            Invoice = invoice,
+            Account = invoice.Number,
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = 25_000m,
+            Date = date,
+        }, new Payment
+        {
+            Invoice = otherInvoice,
+            Account = otherInvoice.Number,
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = 25_000m,
+            Date = date,
+        });
+        var operation = new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 1_000m,
+            Date = date,
+            MatchStatus = MoneyOperationMatchStatus.ClarificationRequired,
+        };
+        db.MoneyOperations.Add(operation);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+        Assert.IsType<OkObjectResult>(await controller.LinkInvoice(operation.Id,
+            new MoneyOperationsController.LinkMoneyOperationInvoiceRequest { InvoiceId = invoice.Id }, CancellationToken.None));
+        db.ChangeTracker.Clear();
+        Assert.IsType<OkObjectResult>(await controller.LinkInvoice(operation.Id,
+            new MoneyOperationsController.LinkMoneyOperationInvoiceRequest { InvoiceId = invoice.Id }, CancellationToken.None));
+        Assert.IsType<BadRequestObjectResult>(await controller.LinkInvoice(operation.Id,
+            new MoneyOperationsController.LinkMoneyOperationInvoiceRequest { InvoiceId = otherInvoice.Id }, CancellationToken.None));
+        Assert.Equal(1_000m, (await db.Payments.SingleAsync(item => item.InvoiceId == invoice.Id)).PaidAmount);
+        Assert.Equal(0m, (await db.Payments.SingleAsync(item => item.InvoiceId == otherInvoice.Id)).PaidAmount);
+        Assert.Equal(invoice.Id, (await db.MoneyOperations.SingleAsync()).LinkedInvoiceId);
+    }
+
+    [Fact]
+    public async Task LinkInvoice_InstallmentOverpaymentCreditsOnlyRemainderAfterAllInstallments()
+    {
+        await using var db = await CreateContextAsync();
+        var date = new DateTime(2026, 10, 12);
+        var invoice = new Invoice { Number = "919", Date = date };
+        var client = new Client { Name = "Синтетический клиент рассрочки", IsActive = true };
+        var parent = new Payment
+        {
+            Invoice = invoice,
+            Client = client,
+            Account = invoice.Number,
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = 12_000m,
+            Date = date,
+        };
+        var first = new Payment
+        {
+            Invoice = invoice,
+            Client = client,
+            Account = invoice.Number,
+            DocumentKind = DocumentKind.Payment,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = 6_000m,
+            Date = date,
+            SystemNotes = InvoiceManagedPaymentRules.InstallmentPaymentMarker,
+        };
+        var second = new Payment
+        {
+            Invoice = invoice,
+            Client = client,
+            Account = invoice.Number,
+            DocumentKind = DocumentKind.Payment,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = 6_000m,
+            Date = date.AddMonths(1),
+            SystemNotes = InvoiceManagedPaymentRules.InstallmentPaymentMarker,
+        };
+        var operation = new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 15_000m,
+            Date = date,
+            MatchStatus = MoneyOperationMatchStatus.ClarificationRequired,
+        };
+        db.Payments.AddRange(parent, first, second);
+        db.MoneyOperations.Add(operation);
+        await db.SaveChangesAsync();
+        Assert.IsType<OkObjectResult>(await CreateController(db).LinkInvoice(operation.Id,
+            new MoneyOperationsController.LinkMoneyOperationInvoiceRequest { InvoiceId = invoice.Id }, CancellationToken.None));
+        db.ChangeTracker.Clear();
+        Assert.Equal(6_000m, (await db.Payments.SingleAsync(item => item.Id == first.Id)).PaidAmount);
+        Assert.Equal(6_000m, (await db.Payments.SingleAsync(item => item.Id == second.Id)).PaidAmount);
+        Assert.Equal(12_000m, (await db.Payments.SingleAsync(item => item.Id == parent.Id)).PaidAmount);
+        Assert.Equal(3_000m, (await db.ClientBalanceTransactions.SingleAsync()).Amount);
+    }
+
     private static Task<PaymentContext> CreateContextAsync()
         => SqliteTestContextFactory.CreateAsync();
 

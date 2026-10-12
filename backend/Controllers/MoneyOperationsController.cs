@@ -1942,6 +1942,13 @@ public class MoneyOperationsController : ControllerBase
             return NotFound();
         }
 
+        if (IsAppliedToInvoice(operation))
+        {
+            return operation.LinkedInvoiceId == request.InvoiceId
+                ? Ok(operation)
+                : BadRequest("Связанную со счётом денежную операцию нельзя перенести на другой счёт без операции сторно.");
+        }
+
         var validation = await ValidateInvoiceLinkAsync(operation, request.InvoiceId, ct);
         if (validation.Error is not null)
         {
@@ -3601,6 +3608,7 @@ public class MoneyOperationsController : ControllerBase
                         NamesLookRelated(item.CounterpartyName, candidate.ClientName ?? candidate.CounterpartyName)))
                 .ToList();
 
+        var reservedByInvoice = new Dictionary<int, decimal>();
         foreach (var item in items)
         {
             ct.ThrowIfCancellationRequested();
@@ -3681,10 +3689,14 @@ public class MoneyOperationsController : ControllerBase
                 operation.Currency = moneyAccount.Currency;
             }
 
-            var autoMatch = TryResolveBankStatementInvoiceMatch(item, invoiceCandidates);
+            // Счета CRM ведутся в рублях. Валютная операция требует явного уточнения.
+            var autoMatch = string.Equals(operation.Currency, "RUB", StringComparison.OrdinalIgnoreCase)
+                ? TryResolveBankStatementInvoiceMatch(item, invoiceCandidates, reservedByInvoice)
+                : null;
             var importRowMessage = (string?)null;
             if (autoMatch is not null)
             {
+                reservedByInvoice[autoMatch.InvoiceId] = reservedByInvoice.GetValueOrDefault(autoMatch.InvoiceId) + operation.Amount;
                 operation.LinkedInvoiceId = autoMatch.InvoiceId;
                 operation.PaidInvoiceNumber = autoMatch.InvoiceNumber;
                 operation.PaidAccountName = autoMatch.InvoiceNumber;
@@ -3729,10 +3741,21 @@ public class MoneyOperationsController : ControllerBase
                 createdIndex++;
             }
 
-            foreach (var operation in pendingOperations.Where(item =>
-                         item.LinkedInvoiceId.HasValue && item.MatchStatus == MoneyOperationMatchStatus.Matched))
+            var matchedOperations = pendingOperations.Where(item =>
+                item.LinkedInvoiceId.HasValue && item.MatchStatus == MoneyOperationMatchStatus.Matched).ToList();
+            var paymentsByInvoice = new Dictionary<int, List<Payment>>();
+            foreach (var invoiceIds in matchedOperations.Select(item => item.LinkedInvoiceId!.Value).Distinct().Chunk(500))
             {
-                await ApplyMoneyOperationToInvoicePaymentAsync(operation, operation.LinkedInvoiceId!.Value, ct);
+                var payments = await _db.Payments
+                    .Where(item => item.InvoiceId.HasValue && invoiceIds.Contains(item.InvoiceId.Value) && item.Status != PaymentStatus.Cancelled)
+                    .ToListAsync(ct);
+                foreach (var group in payments.GroupBy(item => item.InvoiceId!.Value)) paymentsByInvoice[group.Key] = group.ToList();
+            }
+            foreach (var operation in matchedOperations)
+            {
+                var invoiceId = operation.LinkedInvoiceId!.Value;
+                await MoneyOperationInvoiceAllocationService.ApplyAsync(_db, operation, invoiceId, ct,
+                    paymentsByInvoice.GetValueOrDefault(invoiceId) ?? []);
             }
 
             await _db.SaveChangesAsync(ct);
@@ -4206,7 +4229,8 @@ public class MoneyOperationsController : ControllerBase
 
     private static BankStatementInvoiceCandidate? TryResolveBankStatementInvoiceMatch(
         BankStatementImportItem item,
-        IReadOnlyCollection<BankStatementInvoiceCandidate> candidates)
+        IReadOnlyCollection<BankStatementInvoiceCandidate> candidates,
+        IReadOnlyDictionary<int, decimal> reservedByInvoice)
     {
         if (item.Direction is not (MoneyOperationDirection.Income or MoneyOperationDirection.Expense))
         {
@@ -4222,8 +4246,8 @@ public class MoneyOperationsController : ControllerBase
             var matchingCandidates = candidates
                 .Where(candidate =>
                     candidate.PaymentType == targetPaymentType &&
-                    candidate.OutstandingAmount > 0m &&
-                    item.Amount <= candidate.OutstandingAmount + 0.009m &&
+                    (candidate.OutstandingAmount - reservedByInvoice.GetValueOrDefault(candidate.InvoiceId)) > 0m &&
+                    item.Amount <= (candidate.OutstandingAmount - reservedByInvoice.GetValueOrDefault(candidate.InvoiceId)) + 0.009m &&
                     candidate.MatchingNumberTokens.Any(tokens.Contains))
                 .GroupBy(candidate => candidate.InvoiceId)
                 .Select(group => group.First())
@@ -4235,7 +4259,7 @@ public class MoneyOperationsController : ControllerBase
             }
 
             var exactAmountCandidates = matchingCandidates
-                .Where(candidate => Math.Abs(candidate.OutstandingAmount - item.Amount) <= 0.009m)
+                .Where(candidate => Math.Abs((candidate.OutstandingAmount - reservedByInvoice.GetValueOrDefault(candidate.InvoiceId)) - item.Amount) <= 0.009m)
                 .ToList();
             if (exactAmountCandidates.Count == 1)
             {
@@ -4246,8 +4270,8 @@ public class MoneyOperationsController : ControllerBase
         var exactNamedCandidates = candidates
             .Where(candidate =>
                 candidate.PaymentType == targetPaymentType &&
-                candidate.OutstandingAmount > 0m &&
-                Math.Abs(candidate.OutstandingAmount - item.Amount) <= 0.009m &&
+                (candidate.OutstandingAmount - reservedByInvoice.GetValueOrDefault(candidate.InvoiceId)) > 0m &&
+                Math.Abs((candidate.OutstandingAmount - reservedByInvoice.GetValueOrDefault(candidate.InvoiceId)) - item.Amount) <= 0.009m &&
                 NamesLookRelated(item.CounterpartyName, candidate.ClientName ?? candidate.CounterpartyName))
             .GroupBy(candidate => candidate.InvoiceId)
             .Select(group => group.First())
@@ -4551,138 +4575,11 @@ public class MoneyOperationsController : ControllerBase
         return new(invoice, null);
     }
 
-    private async Task ApplyMoneyOperationToInvoicePaymentAsync(
+    private Task ApplyMoneyOperationToInvoicePaymentAsync(
         MoneyOperation operation,
         int invoiceId,
         CancellationToken ct = default)
-    {
-        if (operation.Direction is not (MoneyOperationDirection.Income or MoneyOperationDirection.Expense) || operation.Amount <= 0m)
-        {
-            return;
-        }
-
-        var targetPaymentType = operation.Direction == MoneyOperationDirection.Expense
-            ? PaymentType.Expense
-            : PaymentType.Income;
-        var invoicePayments = await _db.Payments
-            .Where(item =>
-                item.InvoiceId == invoiceId &&
-                item.Type == targetPaymentType &&
-                item.Status != PaymentStatus.Cancelled)
-            .ToListAsync(ct);
-        var representative = invoicePayments
-            .Where(item => item.DocumentKind == DocumentKind.Invoice)
-            .OrderByDescending(item => item.Amount)
-            .ThenBy(item => item.Id)
-            .FirstOrDefault();
-        if (representative is null)
-        {
-            return;
-        }
-
-        var sourcePayments = InvoicePaymentStateService.SelectStatusSourcePayments(
-            invoicePayments,
-            representative.Id,
-            representative.Amount);
-        var payment = sourcePayments
-            .Where(item => item.Status != PaymentStatus.Cancelled)
-            .Where(item => CalculateOutstandingAmount(item.Amount, item.PaidAmount, item.Status) > 0m)
-            .OrderBy(InvoicePaymentStateService.EffectivePlannedDate)
-            .ThenBy(item => item.Id)
-            .FirstOrDefault()
-            ?? (CalculateOutstandingAmount(representative.Amount, representative.PaidAmount, representative.Status) > 0m
-                ? representative
-                : null);
-        if (payment is null)
-        {
-            return;
-        }
-
-        var currentPaidAmount = Math.Max(payment.PaidAmount, 0m);
-        var outstandingAmount = CalculateOutstandingAmount(payment.Amount, currentPaidAmount, payment.Status);
-        if (outstandingAmount <= 0m)
-        {
-            return;
-        }
-
-        var appliedAmount = Math.Round(Math.Min(operation.Amount, outstandingAmount), 2, MidpointRounding.AwayFromZero);
-        if (appliedAmount <= 0m)
-        {
-            return;
-        }
-        var overpaymentAmount = Math.Round(operation.Amount - appliedAmount, 2, MidpointRounding.AwayFromZero);
-
-        payment.PaidAmount = Math.Round(currentPaidAmount + appliedAmount, 2, MidpointRounding.AwayFromZero);
-        payment.LastPaymentDate = operation.Date;
-        payment.PaymentDocumentDate ??= operation.RecognitionDate ?? operation.Date;
-        payment.PaymentOrderNumber ??= operation.PaymentOrderNumber;
-
-        if (payment.PaidAmount + 0.009m >= payment.Amount)
-        {
-            payment.PaidAmount = payment.Amount;
-            payment.Status = PaymentStatus.Completed;
-            payment.IsPaid = true;
-            payment.PaidDate ??= operation.Date;
-        }
-        else
-        {
-            payment.Status = PaymentStatus.Processing;
-            payment.IsPaid = false;
-            payment.PaidDate = null;
-        }
-
-        var sourceLabel = operation.Source switch
-        {
-            MoneyOperationSource.Cash => "касса",
-            MoneyOperationSource.Card => "карты",
-            MoneyOperationSource.EMoney => "e-money",
-            _ => "банк",
-        };
-        var movementLabel = targetPaymentType == PaymentType.Expense ? "списание" : "поступление";
-        var note = $"Системно: {DateTime.UtcNow:dd.MM.yyyy HH:mm:ss} — зачтено {movementLabel} из раздела \"Деньги\" ({sourceLabel}) на сумму {appliedAmount.ToString("N2", CultureInfo.GetCultureInfo("ru-RU"))}.";
-        payment.SystemNotes = string.IsNullOrWhiteSpace(payment.SystemNotes)
-            ? note
-            : $"{payment.SystemNotes.Trim()}\n{note}";
-
-        if (targetPaymentType == PaymentType.Income && overpaymentAmount > 0.009m && payment.ClientId.HasValue && operation.Id > 0)
-        {
-            var externalKey = $"money-operation-overpayment:{operation.Id}";
-            var existing = await _db.ClientBalanceTransactions
-                .FirstOrDefaultAsync(item => item.ExternalKey == externalKey, ct);
-            var description = $"Переплата по денежной операции #{operation.Id}";
-
-            if (existing is null)
-            {
-                _db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
-                {
-                    ClientId = payment.ClientId.Value,
-                    InvoiceId = payment.InvoiceId,
-                    PaymentId = payment.Id,
-                    Amount = overpaymentAmount,
-                    Type = ClientBalanceTransactionType.Overpayment,
-                    Direction = ClientBalanceDirection.Credit,
-                    Description = description,
-                    ExternalKey = externalKey,
-                    CreatedAt = DateTime.UtcNow,
-                });
-            }
-            else
-            {
-                existing.ClientId = payment.ClientId.Value;
-                existing.InvoiceId = payment.InvoiceId;
-                existing.PaymentId = payment.Id;
-                existing.Amount = overpaymentAmount;
-                existing.Type = ClientBalanceTransactionType.Overpayment;
-                existing.Direction = ClientBalanceDirection.Credit;
-                existing.Description = description;
-            }
-
-            var overpaymentNote = $"Системно: {DateTime.UtcNow:dd.MM.yyyy HH:mm:ss} — переплата {overpaymentAmount.ToString("N2", CultureInfo.GetCultureInfo("ru-RU"))} зачислена на баланс клиента.";
-            payment.SystemNotes = $"{payment.SystemNotes.Trim()}\n{overpaymentNote}";
-        }
-
-        await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, payment, DateTime.UtcNow, ct);
-    }
+        => MoneyOperationInvoiceAllocationService.ApplyAsync(_db, operation, invoiceId, ct);
 
     private static bool NamesLookRelated(string? left, string? right)
     {
