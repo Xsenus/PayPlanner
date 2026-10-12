@@ -569,33 +569,50 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         var settings = await LoadCalendarSyncSettingsAsync(cancellationToken);
         errors += await DeleteLinksOutsideSyncWindowAsync(connection, cancellationToken);
 
-        var tasks = await LoadTasksForConnectionAsync(connection, cancellationToken);
-        var externalCommentsByTask = await LoadExternalCalendarCommentsAsync(tasks.Select(item => item.Id), cancellationToken);
+        var tasksQuery = await BuildTasksForConnectionQueryAsync(connection, cancellationToken);
         var processedTasks = 0;
-        foreach (var task in tasks)
+        var preservedTracking = CalendarSyncTaskPager.CaptureTrackedEntities(_db);
+        await foreach (var tasks in CalendarSyncTaskPager.ReadPagesAsync(tasksQuery, cancellationToken))
         {
-            try
+            var taskIds = tasks.Select(item => item.Id).ToArray();
+            var links = await _db.YandexCalendarTaskLinks
+                .Where(item => item.ConnectionId == connection.Id && taskIds.Contains(item.TaskJournalItemId))
+                .ToDictionaryAsync(item => item.TaskJournalItemId, cancellationToken);
+            var externalCommentsByTask = await LoadExternalCalendarCommentsAsync(
+                tasks.Where(item => !ShouldHideCompletedTask(settings, item)).Select(item => item.Id), cancellationToken);
+            foreach (var task in tasks)
             {
-                if (ShouldHideCompletedTask(settings, task))
+                try
                 {
-                    await DeleteTaskLinkForCompletedTaskAsync(connection, task.Id, cancellationToken);
-                }
-                else
-                {
-                    await UpsertYandexEventForTaskAsync(
-                        connection,
-                        task,
-                        externalCommentsByTask.GetValueOrDefault(task.Id) ?? [],
-                        cancellationToken);
-                }
+                    if (ShouldHideCompletedTask(settings, task))
+                    {
+                        await DeleteTaskLinkForCompletedTaskAsync(connection, task.Id, cancellationToken, links);
+                    }
+                    else
+                    {
+                        await UpsertYandexEventForTaskAsync(
+                            connection,
+                            task,
+                            externalCommentsByTask.GetValueOrDefault(task.Id) ?? [],
+                            cancellationToken, links);
+                    }
 
-                processedTasks++;
+                    processedTasks++;
+                }
+                catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+                {
+                    errors++;
+                    connection.LastError = Trim(ex.Message, 2000);
+                    await AddLogAsync(connection.Id, null, task.Id, "crm-to-yandex", "upsert", "error", "Не удалось синхронизировать задачу с Яндекс.Календарём.", ex.Message, cancellationToken);
+                }
             }
-            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+
+            // Preserve successful batches before a later failure or cancellation.
+            await _db.SaveChangesAsync(cancellationToken);
+            foreach (var link in CalendarSyncTaskPager.DetachSavedBatch<YandexCalendarTaskLink, YandexCalendarSyncLog>(_db, preservedTracking))
             {
-                errors++;
-                connection.LastError = Trim(ex.Message, 2000);
-                await AddLogAsync(connection.Id, null, task.Id, "crm-to-yandex", "upsert", "error", "Не удалось синхронизировать задачу с Яндекс.Календарём.", ex.Message, cancellationToken);
+                link.Connection?.TaskLinks.Remove(link);
+                link.CalendarSyncCalendar?.TaskLinks.Remove(link);
             }
         }
 
@@ -929,14 +946,17 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         YandexCalendarConnection connection,
         TaskJournalItem task,
         IReadOnlyCollection<TaskJournalComment> externalComments,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<int, YandexCalendarTaskLink>? knownLinks = null)
     {
         var accessToken = await ResolveAccessTokenAsync(connection, cancellationToken);
         var calendar = await EnsureCalendarForTaskAsync(connection, task, accessToken, cancellationToken);
         var timeZone = await ResolveTaskTimeZoneAsync(connection, null, task, cancellationToken);
         var crmHash = BuildCrmHash(task, timeZone, externalComments);
-        var link = connection.TaskLinks
-            .FirstOrDefault(item => item.TaskJournalItemId == task.Id);
+        var link = knownLinks is null
+            ? await _db.YandexCalendarTaskLinks
+                .FirstOrDefaultAsync(item => item.ConnectionId == connection.Id && item.TaskJournalItemId == task.Id, cancellationToken)
+            : knownLinks.GetValueOrDefault(task.Id);
 
         if (link is not null
             && string.Equals(link.LastCrmHash, crmHash, StringComparison.Ordinal)
@@ -1191,7 +1211,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
                 group => (IReadOnlyCollection<TaskJournalComment>)group.ToArray());
     }
 
-    private async Task<IReadOnlyList<TaskJournalItem>> LoadTasksForConnectionAsync(YandexCalendarConnection connection, CancellationToken cancellationToken)
+    private async Task<IQueryable<TaskJournalItem>> BuildTasksForConnectionQueryAsync(YandexCalendarConnection connection, CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
         var from = ResolveSyncFromDate(connection) ?? now.AddDays(-30);
@@ -1203,7 +1223,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         var visibility = await ResolveConnectionCalendarVisibilityAsync(connection.UserId, cancellationToken);
         if (visibility is null)
         {
-            return [];
+            return query.Where(_ => false);
         }
 
         if (!visibility.SeesAll)
@@ -1221,10 +1241,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             }
         }
 
-        return await query
-            .OrderBy(item => item.DueAt)
-            .Take(500)
-            .ToListAsync(cancellationToken);
+        return query;
     }
 
     private async Task EnsureYandexCalendarTimeZoneAsync(
@@ -1366,15 +1383,15 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             cancellationToken);
     }
 
-    private async Task DeleteTaskLinkForCompletedTaskAsync(YandexCalendarConnection connection, int taskId, CancellationToken cancellationToken)
+    private async Task DeleteTaskLinkForCompletedTaskAsync(YandexCalendarConnection connection, int taskId, CancellationToken cancellationToken,
+        IReadOnlyDictionary<int, YandexCalendarTaskLink>? knownLinks = null)
     {
-        var link = await _db.YandexCalendarTaskLinks
-            .FirstOrDefaultAsync(item =>
-                item.ConnectionId == connection.Id &&
-                item.TaskJournalItemId == taskId &&
-                item.SyncStatus == "active",
-                cancellationToken);
-        if (link is null)
+        var link = knownLinks is null
+            ? await _db.YandexCalendarTaskLinks.FirstOrDefaultAsync(item =>
+                item.ConnectionId == connection.Id && item.TaskJournalItemId == taskId && item.SyncStatus == "active",
+                cancellationToken)
+            : knownLinks.GetValueOrDefault(taskId);
+        if (link is null || link.SyncStatus != "active")
         {
             return;
         }
@@ -1434,7 +1451,6 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         => _db.YandexCalendarConnections
             .Include(item => item.User)
             .ThenInclude(item => item.Role)
-            .Include(item => item.TaskLinks)
             .Include(item => item.Calendars)
             .ThenInclude(item => item.OwnerUser)
             .AsSplitQuery();

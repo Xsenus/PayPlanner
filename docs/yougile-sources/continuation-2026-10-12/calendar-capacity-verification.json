@@ -1,0 +1,91 @@
+{
+  "verifiedAtUtc": "2026-10-12T18:40:57.300262+00:00",
+  "branch": "claude/practical-bardeen-pglcf3",
+  "baseRevision": "431658c2fea8c1fe887803fac35524b21041b0f6",
+  "verificationPerformedBeforeCommit": true,
+  "deployed": false,
+  "yougilePublished": false,
+  "scope": "Bounded Google/Yandex full sync; hidden done/cancelled tasks; 502-event boundary, permissions, date window, error/retry, cancellation, insert snapshot and retained caller tracking",
+  "codeFiles": {
+    "backend/Services/CalendarSyncTaskPager.cs": "2b6cdc1567aeebd2973632a76237ee67f3ecb07ec1b27f36d6522091445629f1",
+    "backend/Services/GoogleCalendarSyncService.cs": "741028f52646cd5cc9a673a9c24b115650c6e62e4b06b45e4fde63f0caff73eb",
+    "backend/Services/YandexCalendarSyncService.cs": "51f4ea45caa1d1a50bc1fc50a13f0c4d636e1b7c72a6a1a535e8bf892cd231d5",
+    "backend/PayPlanner.Api.Tests/CalendarBatchProbe.cs": "24bd73b29824a558077c10e5f49f2cf50741e231845f5409f5465b33557c0aaa",
+    "backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs": "32bcb3866e85f7e5975499f67f4c5b26a0899ca11455278cdec7d6df55e718ac",
+    "backend/PayPlanner.Api.Tests/YandexCalendarSyncServiceTests.cs": "eeae4d759eac79b615296a56d05eb1b3592db6ecabb46648f29ec185785ab618",
+    "backend/AppReleases/releases.json": "3ce434b0b722b79428b21073f8f4f96837592400dff8fbc22bbbc618a1e13518"
+  },
+  "newBoundaryCases": {
+    "passed": 8,
+    "failed": 0,
+    "total": 8,
+    "skipped": 0,
+    "trx": "calendar-capacity-tracking.trx",
+    "trxSha256": "a682ee906d27100f5f719185f4590d4d232b831c9e69dce5f9b7b10ffc36f7e6"
+  },
+  "providerAndRegistryRegression": {
+    "passed": 107,
+    "failed": 0,
+    "total": 107,
+    "skipped": 0,
+    "trx": "calendar-capacity-providers.trx",
+    "trxSha256": "1ad220f36b54b7428966e3c75790a093eb1ead978d50e854d30127c22f35eee7"
+  },
+  "releaseAndDocsRegression": {
+    "passed": 25,
+    "failed": 0,
+    "total": 25,
+    "skipped": 0,
+    "trx": "calendar-capacity-release-docs.trx",
+    "trxSha256": "6b3c73bb01b9cb8931a5f19aeae8337535e2da77d17dad7c2f1b892261dfe04c"
+  },
+  "validationSequence": [
+    "8 boundary scenarios and 107 provider/registry scenarios passed",
+    "Whitespace-only formatting applied after these functional runs; no business behavior changed",
+    "Final Release build passed with zero warnings/errors",
+    "25 release/documentation scenarios passed on the final build"
+  ],
+  "finalBuiltAssemblySha256": "558c388a4f2fef82041bd86a5b27010cebef3799eb5c3aaa1c637a5f31d574c8",
+  "releaseBuild": {
+    "passed": true,
+    "warnings": 0,
+    "errors": 0,
+    "log": "calendar-capacity-build-final.log"
+  },
+  "format": {
+    "passed": true,
+    "log": "calendar-capacity-format-final.log"
+  },
+  "encoding": {
+    "state": "passed",
+    "checkedFiles": 3099,
+    "log": "calendar-capacity-encoding-final.log"
+  },
+  "frontendGate": {
+    "reusedFromRevision": "431658c2fea8c1fe887803fac35524b21041b0f6",
+    "passed": 2592,
+    "reason": "No frontend or public API contract changed in this batch"
+  },
+  "remaining": [
+    "Large color-mode coverage and provider query-volume review",
+    "Complete backend gate for final calendar code",
+    "Identify real production annulled case by task ID",
+    "Real production acceptance and separately authorized publication/deployment"
+  ],
+  "baselineBankGate": {
+    "session": 2664,
+    "revision": "cc744c0c98cefc1cb9a910f622f1d8ae220783ea",
+    "state": "running",
+    "countsAsCurrentCalendarGate": false
+  },
+  "calendarRoadmap": {
+    "completed": 0,
+    "total": 7,
+    "percent": 0
+  },
+  "overallRoadmap": {
+    "completed": 1,
+    "total": 31,
+    "percent": 3
+  }
+}

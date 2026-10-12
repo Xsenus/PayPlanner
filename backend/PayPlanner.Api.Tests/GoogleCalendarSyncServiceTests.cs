@@ -1488,13 +1488,146 @@ public class GoogleCalendarSyncServiceTests
             NullLogger<GoogleCalendarSyncService>.Instance);
     }
 
-    private static async Task<PaymentContext> CreateContextAsync()
+    [Theory]
+    [InlineData("normal")]
+    [InlineData("failure")]
+    [InlineData("cancel")]
+    [InlineData("insert")]
+    public async Task SyncNowAsync_Processes502TasksInBoundedPagesAndRetriesOnlyFailedEvent(string scenario)
+    {
+        var failOnce = scenario == "failure";
+        var cancelAfterFirstPage = scenario == "cancel";
+        var insertDuringSync = scenario == "insert";
+        using var cancellation = new CancellationTokenSource();
+        var queryProbe = new CalendarBatchQueryProbe("Google");
+        await using var db = await CreateContextAsync(queryProbe);
+        var user = await CreateUserAsync(db, "bulk-owner@example.local", "user");
+        var hidden = await CreateUserAsync(db, "bulk-hidden@example.local", "user");
+        await EnableGoogleSettingsAsync(db);
+        await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 10, completedTaskCalendarAction: "hide");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        var calendar = await CreateCalendarAsync(db, connection.Id, "bulk-calendar", "PayPlanner задачи");
+        var dueAt = DateTime.UtcNow.Date.AddDays(7).AddHours(9);
+        var tasks = Enumerable.Range(1, 502).Select(index => new TaskJournalItem
+        {
+            ObjectName = "Synthetic bulk",
+            Title = $"Bulk task {index}",
+            AssigneeUserId = user.Id,
+            AssigneeName = "User",
+            DueAt = dueAt,
+            PlannedDurationMinutes = 60,
+            Priority = "normal",
+            Status = index % 2 == 0 ? "done" : "cancelled",
+        }).ToArray();
+        db.TaskJournalItems.AddRange(tasks);
+        await db.SaveChangesAsync();
+        for (var index = 0; index < tasks.Length; index++)
+        {
+            var eventId = $"bulk-event-{index + 1}";
+            db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
+            {
+                ConnectionId = connection.Id,
+                CalendarSyncCalendarId = calendar.Id,
+                TaskJournalItemId = tasks[index].Id,
+                GoogleCalendarId = calendar.GoogleCalendarId,
+                GoogleEventId = eventId,
+                SyncStatus = "active",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+        }
+        await db.SaveChangesAsync();
+        await CreateTaskAsync(db, hidden.Id, "Not visible", dueAt: dueAt);
+        await CreateTaskAsync(db, user.Id, "Outside sync window", dueAt: DateTime.UtcNow.AddDays(366));
+        var firstPageIds = tasks.Take(500).Select(item => item.Id).ToArray();
+        var inner = new RecordingGoogleHandler();
+        var handler = new CalendarBatchDeleteProbe(inner, failOnce, async () =>
+        {
+            Assert.Equal(500, await db.GoogleCalendarTaskLinks.AsNoTracking()
+                .CountAsync(item => firstPageIds.Contains(item.TaskJournalItemId) && item.SyncStatus == "deleted"));
+            if (scenario != "normal")
+            {
+                Assert.Equal(2, db.ChangeTracker.Entries<GoogleCalendarTaskLink>().Count());
+                Assert.Empty(db.ChangeTracker.Entries<GoogleCalendarSyncLog>());
+                var trackedConnection = Assert.Single(db.ChangeTracker.Entries<GoogleCalendarConnection>()).Entity;
+                Assert.Equal(2, trackedConnection.TaskLinks.Count);
+                Assert.Equal(2, trackedConnection.Calendars.Sum(item => item.TaskLinks.Count));
+            }
+            if (insertDuringSync)
+            {
+                var lateTask = await CreateTaskAsync(db, user.Id, "Created during sync", dueAt: dueAt);
+                lateTask.Status = "cancelled";
+                db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
+                {
+                    ConnectionId = connection.Id,
+                    CalendarSyncCalendarId = calendar.Id,
+                    TaskJournalItemId = lateTask.Id,
+                    GoogleCalendarId = calendar.GoogleCalendarId,
+                    GoogleEventId = "bulk-event-503",
+                    SyncStatus = "active",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                });
+                await db.SaveChangesAsync();
+            }
+            if (cancelAfterFirstPage)
+            {
+                cancellation.Cancel();
+                cancellation.Token.ThrowIfCancellationRequested();
+            }
+        });
+        if (scenario != "normal")
+        {
+            db.ChangeTracker.Clear();
+        }
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+        queryProbe.Reset();
+
+        if (cancelAfterFirstPage)
+        {
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), cancellation.Token));
+        }
+        else
+        {
+            var result = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), cancellation.Token);
+            Assert.Equal(failOnce ? 501 : 502, result.ProcessedTasks);
+            Assert.Equal(failOnce ? 1 : 0, result.ErrorCount);
+        }
+        Assert.Equal(new[] { 500, 500 }, queryProbe.TaskPageLimits);
+        Assert.InRange(queryProbe.LinkSelects, 2, 4);
+        Assert.Equal(cancelAfterFirstPage ? 501 : 502, handler.DeleteAttempts.Count);
+        Assert.All(handler.DeleteAttempts.Values, count => Assert.Equal(1, count));
+        Assert.Equal(cancelAfterFirstPage ? 500 : failOnce ? 501 : 502, await db.GoogleCalendarTaskLinks.AsNoTracking().CountAsync(item => item.SyncStatus == "deleted"));
+        Assert.Equal(insertDuringSync ? 503 : 502, await db.GoogleCalendarTaskLinks.CountAsync());
+        Assert.DoesNotContain(inner.Requests, request => request.Method == HttpMethod.Put);
+        var taskIds = tasks.Select(item => item.Id).ToArray();
+        Assert.Equal(502, await db.TaskJournalItems.CountAsync(item => taskIds.Contains(item.Id) && (item.Status == "done" || item.Status == "cancelled")));
+        db.ChangeTracker.Clear();
+        queryProbe.Reset();
+        service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var retry = await service.SyncDueConnectionsAsync(10, CancellationToken.None);
+
+        Assert.Equal(insertDuringSync ? 503 : 502, retry.ProcessedTasks);
+        Assert.Equal(0, retry.ErrorCount);
+        Assert.Equal(insertDuringSync ? 503 : 502, await db.GoogleCalendarTaskLinks.AsNoTracking().CountAsync(item => item.SyncStatus == "deleted"));
+        Assert.Equal(new[] { 500, 500 }, queryProbe.TaskPageLimits);
+        Assert.InRange(queryProbe.LinkSelects, 2, 4);
+        Assert.Equal(insertDuringSync ? 503 : 502, handler.DeleteAttempts.Count);
+        Assert.All(handler.DeleteAttempts, item => Assert.Equal((failOnce || cancelAfterFirstPage) && item.Key.Contains("bulk-event-501", StringComparison.Ordinal) ? 2 : 1, item.Value));
+    }
+
+    private static async Task<PaymentContext> CreateContextAsync(CalendarBatchQueryProbe? queryProbe = null)
     {
         var connection = new SqliteConnection("DataSource=:memory:");
         await connection.OpenAsync();
-        var options = new DbContextOptionsBuilder<PaymentContext>()
-            .UseSqlite(connection)
-            .Options;
+        var optionsBuilder = new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection);
+        if (queryProbe is not null)
+        {
+            optionsBuilder.AddInterceptors(queryProbe);
+        }
+        var options = optionsBuilder.Options;
         var db = new PaymentContext(options, useObjectAuditModel: false);
         await db.Database.EnsureCreatedAsync();
         return db;
@@ -1502,9 +1635,13 @@ public class GoogleCalendarSyncServiceTests
 
     private static async Task<User> CreateUserAsync(PaymentContext db, string email, string roleName, string fullName = "User")
     {
-        var role = new Role { Name = roleName, Description = roleName };
-        db.Roles.Add(role);
-        await db.SaveChangesAsync();
+        var role = await db.Roles.SingleOrDefaultAsync(item => item.Name == roleName);
+        if (role is null)
+        {
+            role = new Role { Name = roleName, Description = roleName };
+            db.Roles.Add(role);
+            await db.SaveChangesAsync();
+        }
         var user = new User
         {
             Email = email,
