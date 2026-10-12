@@ -1,0 +1,195 @@
+{
+  "verifiedAtUtc": "2026-10-12T19:59:50.915834+00:00",
+  "branch": "claude/practical-bardeen-pglcf3",
+  "baseRevision": "794aa8e5f47d8b28d0284e126e981024df35e680",
+  "verificationPerformedBeforeCommit": true,
+  "deployed": false,
+  "yougilePublished": false,
+  "scope": "Persist and retry incomplete duplicate cleanup after full/single task synchronization in both providers; bounded failed Yandex reads; honest partial-failure notification in profile",
+  "codeHashNormalization": "CRLF converted to LF; bytes otherwise unchanged",
+  "codeFiles": {
+    "backend/Services/GoogleCalendarSyncService.cs": "3bbfc76af940b0cc21ab18c2f7bb06b009ca0e4899512dbe7d7e9b105b3384c9",
+    "backend/Services/YandexCalendarSyncService.cs": "d03dbd2f1086b8fe8ceab9e00a805d5c308c2a5dadff57c75e9c4688c17fea14",
+    "backend/PayPlanner.Api.Tests/CalendarBatchProbe.cs": "4eee31708d3e6ef1044e1506702a93fd0c2eafc5326d7be377eab42fc199506c",
+    "backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs": "a45b3005ea0ea9fd8b56c02060ec3f3eb1ca7b9e73650df67d3f022b754b3878",
+    "backend/PayPlanner.Api.Tests/YandexCalendarSyncServiceTests.cs": "5c1182c697a4c10f32e5e4ddbb90a37f03371c3591f414ad126822547526b983",
+    "src/components/Profile/GoogleCalendarPanel.tsx": "276f90f44fb92ab39a3d039550d0cd62df89ae2b1974a745f8e00ee6d377d070",
+    "src/components/Profile/YandexCalendarPanel.tsx": "49d060a1410068916f9ff8080169094c416197851ea53330a7224e1548aec6c3",
+    "src/components/Profile/CalendarPanels.test.tsx": "4663857cf2408bc78280baa59b12c5d64a426fb772f8c4c643d727ffd897f0af",
+    "backend/AppReleases/releases.json": "bc71bf3c9a67e3d4890ed378c6b9091547fe495afdad567aed483933413034e2"
+  },
+  "workingTreeCodeFilesSha256": {
+    "backend/Services/GoogleCalendarSyncService.cs": "60ec59d0ea4692eac2792310e639d10817b3e362586c84b374467bd0b7633034",
+    "backend/Services/YandexCalendarSyncService.cs": "0f2d3f513c01a980e6a23ddc52c5dcc8fb1fb7c115a2718f2bd9c7add83d27b3",
+    "backend/PayPlanner.Api.Tests/CalendarBatchProbe.cs": "99dd607aa1d3cd794839599367172c989b750ee6d295962eb3d0d1c402d9e8c0",
+    "backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs": "311251388fbb93e4364b278bd7882e1377eaef5c5e04efac904c7391b44514fb",
+    "backend/PayPlanner.Api.Tests/YandexCalendarSyncServiceTests.cs": "320ba557393913f6da87a34acc3750c85bdaf67e3ab1fd4d2578774be6abad24",
+    "src/components/Profile/GoogleCalendarPanel.tsx": "5fe17a8f9bd48d50e0428506c4333ae4797a49c55175367a572062ffa0c900d3",
+    "src/components/Profile/YandexCalendarPanel.tsx": "2fac99208303b827124202c4a6b9b2f7f0e70a2efba91f16b6ec4a196bb0e28a",
+    "src/components/Profile/CalendarPanels.test.tsx": "de6f108fbe4b70a4dc459780c55bcca273cc4b6f7bbcdbdf580f703359dad754",
+    "backend/AppReleases/releases.json": "ea43f242ebb5af028794fe0a43c96108c7e1d4b513fe9a94c4c4dff3e3f35244"
+  },
+  "baseline": {
+    "baseRevision": "794aa8e5f47d8b28d0284e126e981024df35e680",
+    "containsUncommittedRegressionTests": true,
+    "sourceHashes": {
+      "backend/Services/GoogleCalendarSyncService.cs": "741028f52646cd5cc9a673a9c24b115650c6e62e4b06b45e4fde63f0caff73eb",
+      "backend/Services/YandexCalendarSyncService.cs": "6a38693e2965463df9bb44443618c3adfb31a41636698869cd8b59e7f8fea1bd",
+      "backend/PayPlanner.Api.Tests/CalendarBatchProbe.cs": "9c88e7f13ac7bde090c01581185745d76a0601b48039a6627eb5e2d22ac224b6",
+      "backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs": "4c105b9f12a63bd5fb2ded9ece1b23370f0cfc3c31960e87f850cd8311ac93a7",
+      "backend/PayPlanner.Api.Tests/YandexCalendarSyncServiceTests.cs": "13d05a0c1abe922526083ab98e3d66f9e112a7dcfe036d7882add7c5f8d14914",
+      "src/components/Profile/GoogleCalendarPanel.tsx": "cae4e3d4c994e16327f2cb3292182c879ad46a013b8354faf83c63671875e059",
+      "src/components/Profile/YandexCalendarPanel.tsx": "05f0825018ae7f2fdbdd36a9a41544a56ac4b12307df59260fd6b53ae060f2eb",
+      "src/components/Profile/CalendarPanels.test.tsx": "de6f108fbe4b70a4dc459780c55bcca273cc4b6f7bbcdbdf580f703359dad754"
+    },
+    "backendFailed": 16,
+    "frontendFailed": 2,
+    "frontendPassed": 5,
+    "assemblyHashes": {
+      "PayPlanner.Api": "19179f1532d3a2d8fd45ae577f195b460449cc6fc479795839bfb11242dd72f8",
+      "PayPlanner.Api.Tests": "1500d216d06cc7823665e12c5b56f5e5691000bc37eb3a7397980c06f24fa1ec"
+    }
+  },
+  "baselineBackendCases": {
+    "passed": 0,
+    "failed": 16,
+    "total": 16,
+    "skipped": 0,
+    "trx": "calendar-cleanup-baseline.trx",
+    "trxSha256": "f251bcb2dbbefc01d0ec115b95515c0450e7182459cad5a5ae7b9f15236ab4bb"
+  },
+  "boundaryCasesBeforeFinalWhitespaceFormatting": {
+    "passed": 22,
+    "failed": 0,
+    "total": 22,
+    "skipped": 0,
+    "trx": "calendar-cleanup-boundaries.trx",
+    "trxSha256": "d45bc645e1f522b588e3c797f692207c0a75aef8711f5bc26fb59c0093ea8405"
+  },
+  "finalRelatedRegression": {
+    "passed": 154,
+    "failed": 0,
+    "total": 154,
+    "skipped": 0,
+    "trx": "calendar-cleanup-regressions.trx",
+    "trxSha256": "21517d7217b025397b860b6c7917f300cf868597539e1e4a6938a502447f4469"
+  },
+  "checks": [
+    "Read/delete failure x full/single sync x existing/new link, both providers",
+    "Retry and unchanged repeat in fresh SQLite contexts",
+    "No extra PUT/POST during cleanup retry; same saved event ID and hash",
+    "Single task failure persists pending link despite public warning handler",
+    "Completing one task does not clear another pending task/connection error",
+    "502-event Yandex run: one failed lookup per page/calendar, 500 errors and next page success",
+    "Retry clears 500 pending links without any additional event writes",
+    "Task pages remain limited to 500 and link selects bounded after fresh context",
+    "Provider permission, terminal-task visibility, cancellation and repeat regressions remain green"
+  ],
+  "releaseBuild": {
+    "passed": true,
+    "warnings": 0,
+    "errors": 0,
+    "log": "calendar-cleanup-final-build.log"
+  },
+  "format": {
+    "passed": true,
+    "serviceLog": "calendar-cleanup-service-format.log",
+    "testLog": "calendar-cleanup-test-format.log"
+  },
+  "assemblySha256": {
+    "api": "bc002a3c527233c7506087f14ce84f130d96b6e84adfdc77fe86b5fb3ac80a3e",
+    "tests": "b87ef58165de7e046be80ee1b73bbf529d948443cc88580c1eb632637601ace9"
+  },
+  "frontendTargeted": {
+    "passed": 7,
+    "failed": 0,
+    "baselinePassed": 5,
+    "baselineFailed": 2,
+    "log": "calendar-cleanup-frontend-fixed.log"
+  },
+  "frontendGate": {
+    "state": "passed",
+    "sessionExitCode": 0,
+    "files": 245,
+    "passed": 2596,
+    "failed": 0,
+    "previous2592GateReused": false,
+    "lint": {
+      "passed": true,
+      "log": "calendar-cleanup-lint.log"
+    },
+    "typeCheck": {
+      "passed": true,
+      "project": "tsconfig.app.json",
+      "log": "calendar-cleanup-types.log"
+    },
+    "encoding": {
+      "passed": true,
+      "checkedFiles": 3104,
+      "log": "calendar-cleanup-encoding.log"
+    },
+    "productionBuild": {
+      "passed": true,
+      "seconds": 25.86,
+      "log": "calendar-cleanup-frontend-build.log",
+      "existingWarnings": [
+        "Vite legacy chunk oxc minifier compatibility warning",
+        "vite:legacy-post-process timing notice"
+      ]
+    },
+    "logsSha256": {
+      "calendar-cleanup-frontend-full.log": "1d20fbd87f60e7a1cb41137852d0b25c9b25d1287d7d5338e3f9b28392d1dcb4",
+      "calendar-cleanup-lint.log": "fb96953ea7bd08e3c0c410c3fba0c7b5ea09ac4da8afa12ff30fe9d6da5429eb",
+      "calendar-cleanup-types.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "calendar-cleanup-encoding.log": "4d122e04866b8c2a9cb0647e3bf2ad374d1eaeaa4167a5e56227d1e38f8b59fe",
+      "calendar-cleanup-frontend-build.log": "be56b5e8a36cf0617c2391bd570aa72b425f4ad1ef51b681d7e1a9989a98bd81"
+    }
+  },
+  "fullCurrentBackendGate": "not_started",
+  "performanceReview": {
+    "state": "remaining_within_calendar_stage_4",
+    "finding": "Both BuildLogDetailsJsonAsync methods execute up to three SQL metadata reads per log entry; task/link page probes do not cover these reads",
+    "next": "Measure metadata read counts and reuse bounded already loaded log context; preserve fields and single-task fallback"
+  },
+  "providerPayloadLimitation": "Yandex still receives the selected full period per REPORT; page lookup retains only current visible task IDs. No provider server-side pagination claimed.",
+  "bankBaselineFullGate": {
+    "revision": "cc744c0c98cefc1cb9a910f622f1d8ae220783ea",
+    "sessionId": 2664,
+    "manifestSha256": "95ba710a5ae3f4969a6a99bb9719076e1c970d5160f3d8bc519f8b85ef1fef9b",
+    "state": "shard_1_running",
+    "shard0": {
+      "passed": 1770,
+      "failed": 0,
+      "total": 1770,
+      "skipped": 0,
+      "trx": "results.trx",
+      "trxSha256": "7460e97063f312289ced29f8b2188d2d5d61958051a37c4f1167cc980d090dcb"
+    },
+    "doesNotReplaceCurrentCalendarGate": true
+  },
+  "remaining": [
+    "Optimize repeated SQL metadata reads in logs",
+    "Full backend gate of final calendar revision",
+    "Identify actual owner-reported annulled task",
+    "Real environment acceptance and separately authorized publication/deployment"
+  ],
+  "calendarRoadmap": {
+    "completed": 0,
+    "total": 7,
+    "percent": 0
+  },
+  "overallRoadmap": {
+    "completed": 1,
+    "total": 31,
+    "percent": 3
+  },
+  "safeLocalConfiguration": {
+    "Email__Enabled": false,
+    "BackgroundServices__Enabled": false,
+    "calendarTestData": "Synthetic SQLite only; provider HTTP replaced by test handlers"
+  },
+  "roadmapProgressAudit": {
+    "passed": true,
+    "log": "calendar-cleanup-roadmap-progress.log"
+  }
+}

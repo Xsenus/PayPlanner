@@ -21,6 +21,8 @@ namespace PayPlanner.Api.Services;
 
 public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
 {
+    // Keep this stored phase prefix stable so previously failed links remain recoverable.
+    private const string DuplicateCleanupErrorPrefix = "Очистка дублей не завершена: ";
     private static readonly ConcurrentDictionary<int, SemaphoreSlim> ConnectionSyncLocks = new();
 
     private const string GoogleEnabledKey = "auth.google.enabled";
@@ -684,6 +686,15 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         {
             await SyncSingleTaskCoreAsync(userId, taskId, cancellationToken);
         }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested
+            && _db.ChangeTracker.Entries<GoogleCalendarTaskLink>().Any(entry =>
+                entry.State is EntityState.Added or EntityState.Modified
+                && entry.Entity.TaskJournalItemId == taskId && entry.Entity.Connection?.UserId == userId
+                && entry.Entity.LastError?.StartsWith(DuplicateCleanupErrorPrefix, StringComparison.Ordinal) == true))
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+            throw;
+        }
         finally
         {
             syncLock.Release();
@@ -742,6 +753,12 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
                 cancellationToken);
         }
 
+        if (connection.LastError?.StartsWith(DuplicateCleanupErrorPrefix, StringComparison.Ordinal) == true
+            && !await _db.GoogleCalendarTaskLinks.AnyAsync(item => item.ConnectionId == connection.Id
+                && item.TaskJournalItemId != taskId && item.LastError != null && item.LastError.StartsWith(DuplicateCleanupErrorPrefix), cancellationToken))
+        {
+            connection.LastError = null;
+        }
         connection.LastIncrementalSyncAt = DateTime.UtcNow;
         connection.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(cancellationToken);
@@ -1132,6 +1149,11 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             && string.Equals(link.LastCrmHash, crmHash, StringComparison.Ordinal)
             && string.Equals(link.SyncStatus, "active", StringComparison.Ordinal))
         {
+            if (link.LastError?.StartsWith(DuplicateCleanupErrorPrefix, StringComparison.Ordinal) == true)
+            {
+                await CompleteGoogleDuplicateCleanupAsync(connection, calendar, task.Id, link.GoogleEventId,
+                    accessToken, link, cancellationToken);
+            }
             return;
         }
 
@@ -1200,12 +1222,13 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         link.LastSyncedAt = DateTime.UtcNow;
         link.UpdatedAt = DateTime.UtcNow;
 
-        await DeleteDuplicateGoogleEventsForTaskAsync(
+        await CompleteGoogleDuplicateCleanupAsync(
             connection,
             calendar,
             task.Id,
             result.Id,
             accessToken,
+            link,
             cancellationToken);
     }
 
@@ -1869,6 +1892,41 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         return await SendGoogleDeleteAsync(request, cancellationToken);
     }
 
+    private async Task CompleteGoogleDuplicateCleanupAsync(
+        GoogleCalendarConnection connection,
+        GoogleCalendarSyncCalendar calendar,
+        int taskId,
+        string activeEventId,
+        string accessToken,
+        GoogleCalendarTaskLink link,
+        CancellationToken cancellationToken)
+    {
+        var retry = link.LastError?.StartsWith(DuplicateCleanupErrorPrefix, StringComparison.Ordinal) == true;
+        try
+        {
+            await DeleteDuplicateGoogleEventsForTaskAsync(connection, calendar, taskId, activeEventId,
+                accessToken, cancellationToken);
+            link.LastError = null;
+            link.LastSyncedAt = DateTime.UtcNow;
+            link.UpdatedAt = DateTime.UtcNow;
+            if (retry)
+            {
+                await AddLogAsync(connection.Id, calendar.Id, taskId, "crm-to-google", "duplicate-cleanup", "success",
+                    "Повторная очистка дублей события задачи завершена.", null, cancellationToken);
+            }
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            link.LastError = Trim(DuplicateCleanupErrorPrefix + ex.Message, 2000);
+            link.UpdatedAt = DateTime.UtcNow;
+            connection.LastError = link.LastError;
+            connection.UpdatedAt = DateTime.UtcNow;
+            await AddLogAsync(connection.Id, calendar.Id, taskId, "crm-to-google", "duplicate-cleanup", "error",
+                "Очистка дублей события задачи не завершена; она будет повторена при следующей синхронизации.", ex.Message, cancellationToken);
+            throw;
+        }
+    }
+
     private async Task DeleteDuplicateGoogleEventsForTaskAsync(
         GoogleCalendarConnection connection,
         GoogleCalendarSyncCalendar calendar,
@@ -1878,6 +1936,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         CancellationToken cancellationToken)
     {
         var duplicates = await ListGoogleEventsForTaskAsync(accessToken, calendar.GoogleCalendarId, taskId, cancellationToken);
+        Exception? firstFailure = null;
         foreach (var duplicate in duplicates.Where(item =>
             !string.Equals(item.Id, activeEventId, StringComparison.Ordinal) &&
             !string.Equals(item.Status, "cancelled", StringComparison.OrdinalIgnoreCase)))
@@ -1900,6 +1959,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                firstFailure ??= ex;
                 await AddLogAsync(
                     connection.Id,
                     calendar.Id,
@@ -1911,6 +1971,10 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
                     ex.Message,
                     cancellationToken);
             }
+        }
+        if (firstFailure is not null)
+        {
+            throw new InvalidOperationException("Не удалось удалить все дубли события задачи.", firstFailure);
         }
     }
 

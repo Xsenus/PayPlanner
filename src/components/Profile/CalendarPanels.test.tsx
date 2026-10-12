@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GoogleCalendarPanel } from './GoogleCalendarPanel';
@@ -7,6 +7,8 @@ import { YandexCalendarPanel } from './YandexCalendarPanel';
 const apiMock = vi.hoisted(() => ({
   getGoogleCalendarStatus: vi.fn(),
   getYandexCalendarStatus: vi.fn(),
+  syncGoogleCalendarNow: vi.fn(),
+  syncYandexCalendarNow: vi.fn(),
 }));
 const toastMock = vi.hoisted(() => ({
   error: vi.fn(),
@@ -29,6 +31,51 @@ vi.mock('../../hooks/useDialog', () => ({
 }));
 
 describe('calendar profile panels', () => {
+  it.each([
+    ['Google', 0],
+    ['Google', 1],
+    ['Yandex', 0],
+    ['Yandex', 1],
+  ] as const)('shows the correct outcome for %s sync with %s errors', async (provider, errorCount) => {
+    const status = {
+      isAvailable: true,
+      googleOAuthReady: true,
+      yandexOAuthReady: true,
+      callbackUrl: 'https://crm.example.local/api/calendar/auth/callback',
+      connection: {
+        id: 1,
+        googleEmail: 'user@example.local',
+        yandexEmail: 'user@example.local',
+        displayName: 'Synthetic user',
+        isEnabled: true,
+        syncEnabled: true,
+        calendarMode: 'personal',
+        conflictResolutionMode: 'latestWins',
+        manualFullSyncCooldownMinutes: 10,
+        manualFullSyncAvailableAt: null,
+        createdAt: '2026-10-01T09:00:00Z',
+        updatedAt: '2026-10-01T09:00:00Z',
+        calendars: [],
+      },
+      recentLogs: [],
+    };
+    const message = errorCount > 0 ? 'Синхронизация завершена с ошибками.' : 'Синхронизация выполнена.';
+    const getStatus = provider === 'Google' ? apiMock.getGoogleCalendarStatus : apiMock.getYandexCalendarStatus;
+    const syncNow = provider === 'Google' ? apiMock.syncGoogleCalendarNow : apiMock.syncYandexCalendarNow;
+    getStatus.mockResolvedValue(status);
+    syncNow.mockResolvedValue({ status, message, processedTasks: errorCount > 0 ? 0 : 1, importedEvents: 0, errorCount });
+    const Panel = provider === 'Google' ? GoogleCalendarPanel : YandexCalendarPanel;
+    render(<Panel />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Синхронизировать сейчас' }));
+
+    await waitFor(() => expect(syncNow).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(errorCount > 0 ? toastMock.error : toastMock.success).toHaveBeenCalledWith(message));
+    expect(errorCount > 0 ? toastMock.success : toastMock.error).not.toHaveBeenCalled();
+    expect((screen.getByRole('button', { name: 'Синхронизировать сейчас' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+
   beforeEach(() => {
     vi.clearAllMocks();
   });

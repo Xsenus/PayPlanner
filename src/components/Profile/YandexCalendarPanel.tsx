@@ -134,7 +134,11 @@ export function YandexCalendarPanel({ canUseEmployeeCalendarMode = false }: Prop
     try {
       const result = await apiService.syncYandexCalendarNow();
       setStatus(result.status);
-      toast.success(result.message);
+      if (result.errorCount > 0) {
+        toast.error(result.message);
+      } else {
+        toast.success(result.message);
+      }
     } catch (error) {
       toast.error(extractDisplayErrorMessage(error, 'Не удалось выполнить синхронизацию Яндекс.Календаря.'));
     } finally {

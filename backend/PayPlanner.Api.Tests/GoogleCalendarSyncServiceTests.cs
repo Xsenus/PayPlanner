@@ -1722,6 +1722,191 @@ public class GoogleCalendarSyncServiceTests
         Assert.InRange(queryProbe.LinkSelects, 2, 4);
     }
 
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(false, false, true)]
+    [InlineData(false, true, false)]
+    [InlineData(false, true, true)]
+    [InlineData(true, false, false)]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, false)]
+    [InlineData(true, true, true)]
+    public async Task Synchronization_RetriesIncompleteDuplicateCleanupWithoutRewritingEvent(bool failRead, bool fullSync, bool existingLink)
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "cleanup-owner@example.local", "user");
+        await EnableGoogleSettingsAsync(db);
+        await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 10, completedTaskCalendarAction: "color");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        var calendar = await CreateCalendarAsync(db, connection.Id, "cleanup-calendar", "Synthetic cleanup calendar");
+        var task = await CreateTaskAsync(db, user.Id, "Synthetic cleanup recovery", dueAt: DateTime.UtcNow.AddDays(7));
+        if (existingLink)
+        {
+            db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
+            {
+                ConnectionId = connection.Id,
+                CalendarSyncCalendarId = calendar.Id,
+                TaskJournalItemId = task.Id,
+                GoogleCalendarId = calendar.GoogleCalendarId,
+                GoogleEventId = "event-1",
+                SyncStatus = "active",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+        var duplicatePayload = JsonSerializer.Serialize(new
+        {
+            items = new[] { new { id = "cleanup-duplicate", status = "confirmed", summary = "Synthetic duplicate" } },
+        });
+        var handler = new CalendarCleanupFailureProbe(new RecordingGoogleHandler(), google: true, fullSync, failRead, duplicatePayload);
+        db.ChangeTracker.Clear();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+        handler.BeginRun();
+        if (fullSync)
+        {
+            var result = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+            Assert.Equal(1, result.ErrorCount);
+            Assert.Equal(0, result.ProcessedTasks);
+        }
+        else
+        {
+            await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+        }
+        Assert.Equal(1, handler.EventWrites);
+        var failedLink = await db.GoogleCalendarTaskLinks.AsNoTracking().SingleAsync(item => item.TaskJournalItemId == task.Id);
+        Assert.Equal("active", failedLink.SyncStatus);
+        Assert.False(string.IsNullOrWhiteSpace(failedLink.LastCrmHash));
+        Assert.False(string.IsNullOrWhiteSpace(failedLink.LastError));
+        Assert.True(await db.GoogleCalendarSyncLogs.AnyAsync(item => item.TaskJournalItemId == task.Id
+            && item.Operation == "duplicate-cleanup" && item.Status == "error"));
+        var firstHash = failedLink.LastCrmHash;
+        db.ChangeTracker.Clear();
+        await using var retryDb = CreateAdditionalContext(db);
+        service = CreateService(retryDb, new FakeHttpClientFactory(handler));
+        handler.BeginRun();
+
+        if (fullSync)
+        {
+            var retry = await service.SyncDueConnectionsAsync(10, CancellationToken.None);
+            Assert.Equal(0, retry.ErrorCount);
+            Assert.Equal(1, retry.ProcessedTasks);
+        }
+        else
+        {
+            await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+        }
+        Assert.Equal(1, handler.EventWrites);
+        Assert.True(handler.DuplicateDeleted);
+        Assert.Equal(failRead ? 1 : 2, handler.DuplicateDeleteAttempts);
+        Assert.Equal(2, handler.DuplicateReadAttempts);
+        var recoveredLink = await db.GoogleCalendarTaskLinks.AsNoTracking().SingleAsync(item => item.TaskJournalItemId == task.Id);
+        Assert.Null(recoveredLink.LastError);
+        Assert.Null((await db.GoogleCalendarConnections.AsNoTracking().SingleAsync(item => item.Id == connection.Id)).LastError);
+        Assert.True(await db.GoogleCalendarSyncLogs.AnyAsync(item => item.TaskJournalItemId == task.Id
+            && item.Operation == "duplicate-cleanup" && item.Status == "success"));
+        Assert.Equal(firstHash, recoveredLink.LastCrmHash);
+        Assert.Equal("new", (await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id)).Status);
+        Assert.Equal(1, await db.GoogleCalendarTaskLinks.CountAsync(item => item.TaskJournalItemId == task.Id));
+        db.ChangeTracker.Clear();
+        await using var repeatDb = CreateAdditionalContext(db);
+        service = CreateService(repeatDb, new FakeHttpClientFactory(handler));
+        handler.BeginRun();
+        if (fullSync)
+        {
+            var repeated = await service.SyncDueConnectionsAsync(10, CancellationToken.None);
+            Assert.Equal(0, repeated.ErrorCount);
+        }
+        else
+        {
+            await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+        }
+        Assert.Equal(1, handler.EventWrites);
+        Assert.Equal(failRead ? 1 : 2, handler.DuplicateDeleteAttempts);
+        Assert.Equal(2, handler.DuplicateReadAttempts);
+    }
+
+    [Fact]
+    public async Task Synchronization_SingleRetryPreservesOtherTaskCleanupError()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "cleanup-owner@example.local", "user");
+        await EnableGoogleSettingsAsync(db);
+        await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 10, completedTaskCalendarAction: "color");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        var calendar = await CreateCalendarAsync(db, connection.Id, "cleanup-calendar", "Synthetic cleanup calendar");
+        var task = await CreateTaskAsync(db, user.Id, "Synthetic cleanup recovery", dueAt: DateTime.UtcNow.AddDays(7));
+        var otherTask = await CreateTaskAsync(db, user.Id, "Synthetic other pending cleanup", dueAt: task.DueAt);
+        {
+            db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
+            {
+                ConnectionId = connection.Id,
+                CalendarSyncCalendarId = calendar.Id,
+                TaskJournalItemId = task.Id,
+                GoogleCalendarId = calendar.GoogleCalendarId,
+                GoogleEventId = "event-1",
+                SyncStatus = "active",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+        var duplicatePayload = JsonSerializer.Serialize(new
+        {
+            items = new[] { new { id = "cleanup-duplicate", status = "confirmed", summary = "Synthetic duplicate" } },
+        });
+        db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
+        {
+            ConnectionId = connection.Id,
+            CalendarSyncCalendarId = calendar.Id,
+            TaskJournalItemId = otherTask.Id,
+            GoogleCalendarId = calendar.GoogleCalendarId,
+            GoogleEventId = "other-event",
+            SyncStatus = "active",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var handler = new CalendarCleanupFailureProbe(new RecordingGoogleHandler(), google: true,
+            fullSync: false, failRead: true, duplicatePayload, failureCount: 2);
+        db.ChangeTracker.Clear();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+        await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+        await service.SyncTaskForConnectedUsersAsync(otherTask.Id, CancellationToken.None);
+        Assert.Equal(2, handler.EventWrites);
+        Assert.Equal(2, await db.GoogleCalendarTaskLinks.AsNoTracking().CountAsync(item => item.LastError != null));
+        db.ChangeTracker.Clear();
+        await using var retryDb = CreateAdditionalContext(db);
+        service = CreateService(retryDb, new FakeHttpClientFactory(handler));
+
+        await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+
+        Assert.Null((await db.GoogleCalendarTaskLinks.AsNoTracking().SingleAsync(item => item.TaskJournalItemId == task.Id)).LastError);
+        Assert.NotNull((await db.GoogleCalendarTaskLinks.AsNoTracking().SingleAsync(item => item.TaskJournalItemId == otherTask.Id)).LastError);
+        Assert.NotNull((await db.GoogleCalendarConnections.AsNoTracking().SingleAsync(item => item.Id == connection.Id)).LastError);
+        Assert.Equal(2, handler.EventWrites);
+        await using var finalDb = CreateAdditionalContext(db);
+        service = CreateService(finalDb, new FakeHttpClientFactory(handler));
+
+        await service.SyncTaskForConnectedUsersAsync(otherTask.Id, CancellationToken.None);
+
+        Assert.False(await db.GoogleCalendarTaskLinks.AnyAsync(item => item.LastError != null));
+        Assert.Null((await db.GoogleCalendarConnections.AsNoTracking().SingleAsync(item => item.Id == connection.Id)).LastError);
+        Assert.Equal(2, handler.EventWrites);
+        Assert.Equal(4, handler.DuplicateReadAttempts);
+        Assert.Equal(1, handler.DuplicateDeleteAttempts);
+    }
+
+    private static PaymentContext CreateAdditionalContext(PaymentContext original, CalendarBatchQueryProbe? queryProbe = null)
+    {
+        var options = new DbContextOptionsBuilder<PaymentContext>().UseSqlite(original.Database.GetDbConnection());
+        if (queryProbe is not null)
+        {
+            options.AddInterceptors(queryProbe);
+        }
+        return new PaymentContext(options.Options, useObjectAuditModel: false);
+    }
+
     private static async Task<PaymentContext> CreateContextAsync(CalendarBatchQueryProbe? queryProbe = null)
     {
         var connection = new SqliteConnection("DataSource=:memory:");

@@ -41,11 +41,12 @@ internal sealed class CalendarBatchQueryProbe(string provider) : DbCommandInterc
 }
 
 internal sealed class CalendarBatchColorProbe(HttpMessageHandler inner, Func<Task> verifyFirstPage,
-    string? yandexDuplicateReport = null) : DelegatingHandler(inner)
+    string? yandexDuplicateReport = null, bool failFirstYandexDuplicateRead = false) : DelegatingHandler(inner)
 {
     public Dictionary<string, List<string>> PutBodies { get; } = [];
     public List<string> CalendarReadQueries { get; } = [];
     public List<string> DeletedPaths { get; } = [];
+    private bool _readFailureInjected;
     public int DeleteCount { get; private set; }
     private bool _pageVerified;
 
@@ -56,6 +57,15 @@ internal sealed class CalendarBatchColorProbe(HttpMessageHandler inner, Func<Tas
             || request.Method.Method == "REPORT")
         {
             CalendarReadQueries.Add(request.RequestUri.Query);
+        }
+        if (request.Method.Method == "REPORT" && CalendarReadQueries.Count > 1
+            && failFirstYandexDuplicateRead && !_readFailureInjected)
+        {
+            _readFailureInjected = true;
+            return new HttpResponseMessage(HttpStatusCode.BadRequest)
+            {
+                Content = new StringContent("Synthetic permanent batch duplicate read failure"),
+            };
         }
         if (request.Method.Method == "REPORT" && yandexDuplicateReport is not null && CalendarReadQueries.Count > 1)
         {
@@ -127,4 +137,70 @@ internal sealed class CalendarBatchDeleteProbe(
         }
         return await base.SendAsync(request, cancellationToken);
     }
+}
+
+internal sealed class CalendarCleanupFailureProbe(HttpMessageHandler inner, bool google, bool fullSync,
+    bool failRead, string duplicatePayload, int failureCount = 1) : DelegatingHandler(inner)
+{
+    public int EventWrites { get; private set; }
+    public int DuplicateReadAttempts { get; private set; }
+    public int DuplicateDeleteAttempts { get; private set; }
+    public bool DuplicateDeleted { get; private set; }
+    private int _remainingFailures = failureCount;
+    private int _reportOrdinal;
+
+    public void BeginRun() => _reportOrdinal = 0;
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var path = request.RequestUri!.AbsolutePath;
+        if ((request.Method == HttpMethod.Put && (path.Contains("/events/", StringComparison.Ordinal)
+                || path.EndsWith(".ics", StringComparison.Ordinal)))
+            || (request.Method == HttpMethod.Post && path.EndsWith("/events", StringComparison.Ordinal)))
+        {
+            EventWrites++;
+        }
+        if (google && request.Method == HttpMethod.Put && path.Contains("/events/", StringComparison.Ordinal))
+        {
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(new { id = path.Split('/').Last(), etag = "synthetic-cleanup-etag" }),
+                    Encoding.UTF8, "application/json"),
+            };
+        }
+        var duplicateRead = google
+            ? request.Method == HttpMethod.Get && request.RequestUri.Query.Contains("privateExtendedProperty=", StringComparison.Ordinal)
+            : request.Method.Method == "REPORT" && (!fullSync || ++_reportOrdinal > 1);
+        if (duplicateRead)
+        {
+            DuplicateReadAttempts++;
+            if (failRead && _remainingFailures > 0)
+            {
+                _remainingFailures--;
+                return PermanentFailure();
+            }
+            return new HttpResponseMessage(google ? HttpStatusCode.OK : (HttpStatusCode)207)
+            {
+                Content = new StringContent(DuplicateDeleted ? (google ? "{\"items\":[]}" : string.Empty) : duplicatePayload,
+                    Encoding.UTF8, google ? "application/json" : "application/xml"),
+            };
+        }
+        if (request.Method == HttpMethod.Delete && (path.EndsWith("/cleanup-duplicate", StringComparison.Ordinal)
+            || path.EndsWith("/cleanup-duplicate.ics", StringComparison.Ordinal)))
+        {
+            DuplicateDeleteAttempts++;
+            if (!failRead && _remainingFailures > 0)
+            {
+                _remainingFailures--;
+                return PermanentFailure();
+            }
+            DuplicateDeleted = true;
+        }
+        return await base.SendAsync(request, cancellationToken);
+    }
+
+    private static HttpResponseMessage PermanentFailure() => new(HttpStatusCode.BadRequest)
+    {
+        Content = new StringContent("Synthetic permanent duplicate cleanup failure"),
+    };
 }

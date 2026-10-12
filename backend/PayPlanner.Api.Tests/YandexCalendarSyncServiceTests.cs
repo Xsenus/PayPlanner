@@ -1350,9 +1350,10 @@ END:VCALENDAR
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task SyncNowAsync_Colors502EventsInBoundedPagesWithoutRewritingOnRepeat(bool withDuplicates)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task SyncNowAsync_Colors502EventsInBoundedPagesWithoutRewritingOnRepeat(bool withDuplicates, bool failBatchRead)
     {
         var queryProbe = new CalendarBatchQueryProbe("Yandex");
         await using var db = await CreateContextAsync(queryProbe);
@@ -1419,15 +1420,15 @@ END:VCALENDAR
                 .CountAsync(item => firstPageIds.Contains(item.TaskJournalItemId)
                     && item.SyncStatus == "active" && item.LastCrmHash != null));
             Assert.Equal(2, db.ChangeTracker.Entries<YandexCalendarTaskLink>().Count());
-        }, yandexDuplicateReport: duplicateReport);
+        }, yandexDuplicateReport: duplicateReport, failFirstYandexDuplicateRead: failBatchRead);
         db.ChangeTracker.Clear();
         var service = CreateService(db, new FakeHttpClientFactory(handler));
         queryProbe.Reset();
 
         var result = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
 
-        Assert.Equal(502, result.ProcessedTasks);
-        Assert.Equal(0, result.ErrorCount);
+        Assert.Equal(failBatchRead ? 2 : 502, result.ProcessedTasks);
+        Assert.Equal(failBatchRead ? 500 : 0, result.ErrorCount);
         Assert.Equal(new[] { 500, 500 }, queryProbe.TaskPageLimits);
         Assert.InRange(queryProbe.LinkSelects, 2, 4);
         Assert.Equal(502, handler.PutBodies.Count);
@@ -1438,6 +1439,8 @@ END:VCALENDAR
         Assert.Contains(handler.PutBodies.Values, bodies => bodies[0].Contains("SUMMARY:[Отменено]", StringComparison.Ordinal));
         Assert.Contains(handler.PutBodies.Values, bodies => bodies[0].Contains("SUMMARY:[Готово]", StringComparison.Ordinal));
         Assert.Equal(3, handler.CalendarReadQueries.Count); // import + one duplicate snapshot per page
+        Assert.Equal(failBatchRead ? 500 : 0, await db.YandexCalendarTaskLinks.AsNoTracking()
+            .CountAsync(item => item.LastError != null));
         if (withDuplicates)
         {
             Assert.Contains(handler.DeletedPaths, path => path.EndsWith("duplicate-first.ics", StringComparison.Ordinal));
@@ -1451,7 +1454,8 @@ END:VCALENDAR
         db.ChangeTracker.Clear();
         queryProbe.Reset();
         handler.CalendarReadQueries.Clear();
-        service = CreateService(db, new FakeHttpClientFactory(handler));
+        await using var retryDb = CreateAdditionalContext(db, queryProbe);
+        service = CreateService(retryDb, new FakeHttpClientFactory(handler));
 
         var retry = await service.SyncDueConnectionsAsync(10, CancellationToken.None);
 
@@ -1460,9 +1464,212 @@ END:VCALENDAR
         Assert.Equal(502, handler.PutBodies.Count);
         Assert.All(handler.PutBodies.Values, bodies => Assert.Single(bodies));
         Assert.Equal(withDuplicates ? 2 : 0, handler.DeleteCount);
-        Assert.Single(handler.CalendarReadQueries);
+        Assert.Equal(failBatchRead ? 2 : 1, handler.CalendarReadQueries.Count);
+        Assert.False(await db.YandexCalendarTaskLinks.AnyAsync(item => item.LastError != null));
         Assert.Equal(new[] { 500, 500 }, queryProbe.TaskPageLimits);
         Assert.InRange(queryProbe.LinkSelects, 2, 4);
+    }
+
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(false, false, true)]
+    [InlineData(false, true, false)]
+    [InlineData(false, true, true)]
+    [InlineData(true, false, false)]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, false)]
+    [InlineData(true, true, true)]
+    public async Task Synchronization_RetriesIncompleteDuplicateCleanupWithoutRewritingEvent(bool failRead, bool fullSync, bool existingLink)
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "cleanup-owner@example.local", "user");
+        await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 10, completedTaskCalendarAction: "color");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        var calendar = await CreateCalendarAsync(db, connection.Id, "cleanup-calendar", "Synthetic cleanup calendar");
+        var task = await CreateTaskAsync(db, user.Id, "Synthetic cleanup recovery", dueAt: DateTime.UtcNow.AddDays(7));
+        if (existingLink)
+        {
+            db.YandexCalendarTaskLinks.Add(new YandexCalendarTaskLink
+            {
+                ConnectionId = connection.Id,
+                CalendarSyncCalendarId = calendar.Id,
+                TaskJournalItemId = task.Id,
+                YandexCalendarId = calendar.YandexCalendarId,
+                YandexEventId = "current-yandex-event",
+                YandexEventUrl = $"{calendar.CalendarUrl}current-yandex-event.ics",
+                SyncStatus = "active",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+        var duplicatePayload = BuildYandexReportResponse(calendar.CalendarUrl, "cleanup-duplicate", $"""
+BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:cleanup-duplicate
+DTSTART:{task.DueAt:yyyyMMdd'T'HHmmss'Z'}
+DTEND:{task.DueAt.AddHours(1):yyyyMMdd'T'HHmmss'Z'}
+SUMMARY:Synthetic duplicate
+X-PAYPLANNER-TASK-ID:{task.Id}
+END:VEVENT
+END:VCALENDAR
+""");
+        var handler = new CalendarCleanupFailureProbe(new RecordingYandexHandler(), google: false, fullSync, failRead, duplicatePayload);
+        db.ChangeTracker.Clear();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+        handler.BeginRun();
+        if (fullSync)
+        {
+            var result = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+            Assert.Equal(1, result.ErrorCount);
+            Assert.Equal(0, result.ProcessedTasks);
+        }
+        else
+        {
+            await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+        }
+        Assert.Equal(1, handler.EventWrites);
+        var failedLink = await db.YandexCalendarTaskLinks.AsNoTracking().SingleAsync(item => item.TaskJournalItemId == task.Id);
+        Assert.Equal("active", failedLink.SyncStatus);
+        Assert.False(string.IsNullOrWhiteSpace(failedLink.LastCrmHash));
+        Assert.False(string.IsNullOrWhiteSpace(failedLink.LastError));
+        Assert.True(await db.YandexCalendarSyncLogs.AnyAsync(item => item.TaskJournalItemId == task.Id
+            && item.Operation == "duplicate-cleanup" && item.Status == "error"));
+        var firstHash = failedLink.LastCrmHash;
+        db.ChangeTracker.Clear();
+        await using var retryDb = CreateAdditionalContext(db);
+        service = CreateService(retryDb, new FakeHttpClientFactory(handler));
+        handler.BeginRun();
+
+        if (fullSync)
+        {
+            var retry = await service.SyncDueConnectionsAsync(10, CancellationToken.None);
+            Assert.Equal(0, retry.ErrorCount);
+            Assert.Equal(1, retry.ProcessedTasks);
+        }
+        else
+        {
+            await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+        }
+        Assert.Equal(1, handler.EventWrites);
+        Assert.True(handler.DuplicateDeleted);
+        Assert.Equal(failRead ? 1 : 2, handler.DuplicateDeleteAttempts);
+        Assert.Equal(2, handler.DuplicateReadAttempts);
+        var recoveredLink = await db.YandexCalendarTaskLinks.AsNoTracking().SingleAsync(item => item.TaskJournalItemId == task.Id);
+        Assert.Null(recoveredLink.LastError);
+        Assert.Null((await db.YandexCalendarConnections.AsNoTracking().SingleAsync(item => item.Id == connection.Id)).LastError);
+        Assert.True(await db.YandexCalendarSyncLogs.AnyAsync(item => item.TaskJournalItemId == task.Id
+            && item.Operation == "duplicate-cleanup" && item.Status == "success"));
+        Assert.Equal(firstHash, recoveredLink.LastCrmHash);
+        Assert.Equal("new", (await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id)).Status);
+        Assert.Equal(1, await db.YandexCalendarTaskLinks.CountAsync(item => item.TaskJournalItemId == task.Id));
+        db.ChangeTracker.Clear();
+        await using var repeatDb = CreateAdditionalContext(db);
+        service = CreateService(repeatDb, new FakeHttpClientFactory(handler));
+        handler.BeginRun();
+        if (fullSync)
+        {
+            var repeated = await service.SyncDueConnectionsAsync(10, CancellationToken.None);
+            Assert.Equal(0, repeated.ErrorCount);
+        }
+        else
+        {
+            await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+        }
+        Assert.Equal(1, handler.EventWrites);
+        Assert.Equal(failRead ? 1 : 2, handler.DuplicateDeleteAttempts);
+        Assert.Equal(2, handler.DuplicateReadAttempts);
+    }
+
+    [Fact]
+    public async Task Synchronization_SingleRetryPreservesOtherTaskCleanupError()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "cleanup-owner@example.local", "user");
+        await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 10, completedTaskCalendarAction: "color");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        var calendar = await CreateCalendarAsync(db, connection.Id, "cleanup-calendar", "Synthetic cleanup calendar");
+        var task = await CreateTaskAsync(db, user.Id, "Synthetic cleanup recovery", dueAt: DateTime.UtcNow.AddDays(7));
+        var otherTask = await CreateTaskAsync(db, user.Id, "Synthetic other pending cleanup", dueAt: task.DueAt);
+        {
+            db.YandexCalendarTaskLinks.Add(new YandexCalendarTaskLink
+            {
+                ConnectionId = connection.Id,
+                CalendarSyncCalendarId = calendar.Id,
+                TaskJournalItemId = task.Id,
+                YandexCalendarId = calendar.YandexCalendarId,
+                YandexEventId = "current-yandex-event",
+                YandexEventUrl = $"{calendar.CalendarUrl}current-yandex-event.ics",
+                SyncStatus = "active",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+        var duplicatePayload = BuildYandexReportResponse(calendar.CalendarUrl, "cleanup-duplicate", $"""
+BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:cleanup-duplicate
+DTSTART:{task.DueAt:yyyyMMdd'T'HHmmss'Z'}
+DTEND:{task.DueAt.AddHours(1):yyyyMMdd'T'HHmmss'Z'}
+SUMMARY:Synthetic duplicate
+X-PAYPLANNER-TASK-ID:{task.Id}
+END:VEVENT
+END:VCALENDAR
+""");
+        db.YandexCalendarTaskLinks.Add(new YandexCalendarTaskLink
+        {
+            ConnectionId = connection.Id,
+            CalendarSyncCalendarId = calendar.Id,
+            TaskJournalItemId = otherTask.Id,
+            YandexCalendarId = calendar.YandexCalendarId,
+            YandexEventId = "other-event",
+            YandexEventUrl = $"{calendar.CalendarUrl}other-event.ics",
+            SyncStatus = "active",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var handler = new CalendarCleanupFailureProbe(new RecordingYandexHandler(), google: false,
+            fullSync: false, failRead: true, duplicatePayload, failureCount: 2);
+        db.ChangeTracker.Clear();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+        await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+        await service.SyncTaskForConnectedUsersAsync(otherTask.Id, CancellationToken.None);
+        Assert.Equal(2, handler.EventWrites);
+        Assert.Equal(2, await db.YandexCalendarTaskLinks.AsNoTracking().CountAsync(item => item.LastError != null));
+        db.ChangeTracker.Clear();
+        await using var retryDb = CreateAdditionalContext(db);
+        service = CreateService(retryDb, new FakeHttpClientFactory(handler));
+
+        await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+
+        Assert.Null((await db.YandexCalendarTaskLinks.AsNoTracking().SingleAsync(item => item.TaskJournalItemId == task.Id)).LastError);
+        Assert.NotNull((await db.YandexCalendarTaskLinks.AsNoTracking().SingleAsync(item => item.TaskJournalItemId == otherTask.Id)).LastError);
+        Assert.NotNull((await db.YandexCalendarConnections.AsNoTracking().SingleAsync(item => item.Id == connection.Id)).LastError);
+        Assert.Equal(2, handler.EventWrites);
+        await using var finalDb = CreateAdditionalContext(db);
+        service = CreateService(finalDb, new FakeHttpClientFactory(handler));
+
+        await service.SyncTaskForConnectedUsersAsync(otherTask.Id, CancellationToken.None);
+
+        Assert.False(await db.YandexCalendarTaskLinks.AnyAsync(item => item.LastError != null));
+        Assert.Null((await db.YandexCalendarConnections.AsNoTracking().SingleAsync(item => item.Id == connection.Id)).LastError);
+        Assert.Equal(2, handler.EventWrites);
+        Assert.Equal(4, handler.DuplicateReadAttempts);
+        Assert.Equal(1, handler.DuplicateDeleteAttempts);
+    }
+
+    private static PaymentContext CreateAdditionalContext(PaymentContext original, CalendarBatchQueryProbe? queryProbe = null)
+    {
+        var options = new DbContextOptionsBuilder<PaymentContext>().UseSqlite(original.Database.GetDbConnection());
+        if (queryProbe is not null)
+        {
+            options.AddInterceptors(queryProbe);
+        }
+        return new PaymentContext(options.Options, useObjectAuditModel: false);
     }
 
     private static async Task<PaymentContext> CreateContextAsync(CalendarBatchQueryProbe? queryProbe = null)

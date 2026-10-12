@@ -20,6 +20,8 @@ namespace PayPlanner.Api.Services;
 
 public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
 {
+    // Keep this stored phase prefix stable so previously failed links remain recoverable.
+    private const string DuplicateCleanupErrorPrefix = "Очистка дублей не завершена: ";
     private const string YandexEnabledKey = "auth.yandex.enabled";
     private const string YandexClientIdKey = "auth.yandex.clientId";
     private const string YandexClientSecretKey = "auth.yandex.clientSecret";
@@ -676,13 +678,31 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         else
         {
             var externalComments = await LoadExternalCalendarCommentsAsync([task.Id], cancellationToken);
-            await UpsertYandexEventForTaskAsync(
-                connection,
-                task,
-                externalComments.GetValueOrDefault(task.Id) ?? [],
-                cancellationToken);
+            try
+            {
+                await UpsertYandexEventForTaskAsync(
+                    connection,
+                    task,
+                    externalComments.GetValueOrDefault(task.Id) ?? [],
+                    cancellationToken);
+            }
+            catch (Exception) when (!cancellationToken.IsCancellationRequested
+                && _db.ChangeTracker.Entries<YandexCalendarTaskLink>().Any(entry =>
+                    entry.State is EntityState.Added or EntityState.Modified
+                    && entry.Entity.ConnectionId == connection.Id && entry.Entity.TaskJournalItemId == taskId
+                    && entry.Entity.LastError?.StartsWith(DuplicateCleanupErrorPrefix, StringComparison.Ordinal) == true))
+            {
+                await _db.SaveChangesAsync(cancellationToken);
+                throw;
+            }
         }
 
+        if (connection.LastError?.StartsWith(DuplicateCleanupErrorPrefix, StringComparison.Ordinal) == true
+            && !await _db.YandexCalendarTaskLinks.AnyAsync(item => item.ConnectionId == connection.Id
+                && item.TaskJournalItemId != taskId && item.LastError != null && item.LastError.StartsWith(DuplicateCleanupErrorPrefix), cancellationToken))
+        {
+            connection.LastError = null;
+        }
         connection.LastIncrementalSyncAt = DateTime.UtcNow;
         connection.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(cancellationToken);
@@ -964,6 +984,11 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             && string.Equals(link.LastCrmHash, crmHash, StringComparison.Ordinal)
             && string.Equals(link.SyncStatus, "active", StringComparison.Ordinal))
         {
+            if (link.LastError?.StartsWith(DuplicateCleanupErrorPrefix, StringComparison.Ordinal) == true)
+            {
+                await CompleteYandexDuplicateCleanupAsync(connection, calendar, task.Id, link.YandexEventId,
+                    accessToken, link, cancellationToken, duplicateSnapshot);
+            }
             return;
         }
 
@@ -1015,12 +1040,13 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         link.LastSyncedAt = DateTime.UtcNow;
         link.UpdatedAt = DateTime.UtcNow;
 
-        await DeleteDuplicateYandexEventsForTaskAsync(
+        await CompleteYandexDuplicateCleanupAsync(
             connection,
             calendar,
             task.Id,
             eventId,
             accessToken,
+            link,
             cancellationToken, duplicateSnapshot);
     }
 
@@ -1830,6 +1856,42 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         return await SendYandexDeleteAsync(request, cancellationToken);
     }
 
+    private async Task CompleteYandexDuplicateCleanupAsync(
+        YandexCalendarConnection connection,
+        YandexCalendarSyncCalendar calendar,
+        int taskId,
+        string activeEventId,
+        string accessToken,
+        YandexCalendarTaskLink link,
+        CancellationToken cancellationToken,
+        YandexBatchDuplicateSnapshot? duplicateSnapshot = null)
+    {
+        var retry = link.LastError?.StartsWith(DuplicateCleanupErrorPrefix, StringComparison.Ordinal) == true;
+        try
+        {
+            await DeleteDuplicateYandexEventsForTaskAsync(connection, calendar, taskId, activeEventId,
+                accessToken, cancellationToken, duplicateSnapshot);
+            link.LastError = null;
+            link.LastSyncedAt = DateTime.UtcNow;
+            link.UpdatedAt = DateTime.UtcNow;
+            if (retry)
+            {
+                await AddLogAsync(connection.Id, calendar.Id, taskId, "crm-to-yandex", "duplicate-cleanup", "success",
+                    "Повторная очистка дублей события задачи завершена.", null, cancellationToken);
+            }
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            link.LastError = Trim(DuplicateCleanupErrorPrefix + ex.Message, 2000);
+            link.UpdatedAt = DateTime.UtcNow;
+            connection.LastError = link.LastError;
+            connection.UpdatedAt = DateTime.UtcNow;
+            await AddLogAsync(connection.Id, calendar.Id, taskId, "crm-to-yandex", "duplicate-cleanup", "error",
+                "Очистка дублей события задачи не завершена; она будет повторена при следующей синхронизации.", ex.Message, cancellationToken);
+            throw;
+        }
+    }
+
     private async Task DeleteDuplicateYandexEventsForTaskAsync(
         YandexCalendarConnection connection,
         YandexCalendarSyncCalendar calendar,
@@ -1846,16 +1908,29 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         }
         else
         {
+            if (duplicateSnapshot.ReadFailures.TryGetValue(calendar.Id, out var readFailure))
+            {
+                throw new InvalidOperationException("События календаря недоступны для очистки в этой порции.", readFailure);
+            }
             if (!duplicateSnapshot.CalendarEvents.TryGetValue(calendar.Id, out var byTask))
             {
-                var calendarEvents = await ListYandexEventsAsync(accessToken, calendar, cancellationToken);
-                byTask = calendarEvents
-                    .Where(item => item.PayPlannerTaskId.HasValue && duplicateSnapshot.TaskIds.Contains(item.PayPlannerTaskId.Value))
-                    .ToLookup(item => item.PayPlannerTaskId!.Value);
-                duplicateSnapshot.CalendarEvents.Add(calendar.Id, byTask);
+                try
+                {
+                    var calendarEvents = await ListYandexEventsAsync(accessToken, calendar, cancellationToken);
+                    byTask = calendarEvents
+                        .Where(item => item.PayPlannerTaskId.HasValue && duplicateSnapshot.TaskIds.Contains(item.PayPlannerTaskId.Value))
+                        .ToLookup(item => item.PayPlannerTaskId!.Value);
+                    duplicateSnapshot.CalendarEvents.Add(calendar.Id, byTask);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    duplicateSnapshot.ReadFailures.Add(calendar.Id, ex);
+                    throw;
+                }
             }
             events = byTask[taskId];
         }
+        Exception? firstFailure = null;
         foreach (var duplicate in events.Where(item =>
             item.PayPlannerTaskId == taskId &&
             !item.Deleted &&
@@ -1879,6 +1954,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                firstFailure ??= ex;
                 await AddLogAsync(
                     connection.Id,
                     calendar.Id,
@@ -1890,6 +1966,10 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
                     ex.Message,
                     cancellationToken);
             }
+        }
+        if (firstFailure is not null)
+        {
+            throw new InvalidOperationException("Не удалось удалить все дубли события задачи.", firstFailure);
         }
     }
 
@@ -2957,6 +3037,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
     {
         public IReadOnlySet<int> TaskIds { get; } = taskIds;
         public Dictionary<int, ILookup<int, YandexEventItem>> CalendarEvents { get; } = [];
+        public Dictionary<int, Exception> ReadFailures { get; } = [];
     }
 
     private sealed record YandexSettings(bool Enabled, string? ClientId, string? ClientSecret, string? Scopes)
