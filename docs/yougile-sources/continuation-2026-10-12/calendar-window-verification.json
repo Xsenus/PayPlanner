@@ -1,0 +1,288 @@
+{
+  "recordedAtUtc": "2026-10-12T23:25:28.524792+00:00",
+  "baseRevision": "18dcb453ab72ff0683c072a4e6addb5df2a41f84",
+  "verificationPerformedBeforeCommit": true,
+  "codeHashNormalization": "CRLF converted to LF; bytes otherwise unchanged",
+  "codeFiles": {
+    "backend/Services/GoogleCalendarSyncService.cs": "90d5df931d27bd943b85d33111ea2690d4662c0f4b8b831bc20e75f33e4f3237",
+    "backend/Services/YandexCalendarSyncService.cs": "66db623c79a263fe0acf7942873969728fd870dbc5864577675b67622230d10c",
+    "backend/Services/CalendarSyncLogContext.cs": "cca8d216c6ee294da480654d20ed934a64291be8bf275d0bae6aa56db692471d",
+    "backend/Services/CalendarSyncTaskPager.cs": "a6cddfd0baa2e58540a40d0804b9384fa8b3b3a465a7d57947dd1c0f47cad2fc",
+    "backend/PayPlanner.Api.Tests/CalendarBatchProbe.cs": "96fac57f5b67225fb2a30611e4fd8e04e9a050f289552b5de7ffaaa8041d8d6b",
+    "backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs": "d1b964b5343b5ccbfa1fad66ff105529a4dafaa65c62bd33e970a9839bc06fa3",
+    "backend/PayPlanner.Api.Tests/YandexCalendarSyncServiceTests.cs": "f7fc6f31c7559c863c3125750dfdcbeaa415e4d52d56613d3cc704d7d6f7998e",
+    "backend/AppReleases/releases.json": "b9a369e003bc764fdce2de3b301330a78b927e028615cdc59a5cd28ad5a59849"
+  },
+  "scope": "500-row keyset pages for existing old-event cleanup and eligible owner preparation; explicit owned-entry detach in cleanup/export; same connection/status/date/role predicates",
+  "ownershipBaseline": {
+    "counts": {
+      "total": "8",
+      "executed": "8",
+      "passed": "6",
+      "failed": "2",
+      "error": "0",
+      "timeout": "0",
+      "aborted": "0",
+      "inconclusive": "0",
+      "passedButRunAborted": "0",
+      "notRunnable": "0",
+      "notExecuted": "0",
+      "disconnected": "0",
+      "warning": "0",
+      "completed": "0",
+      "inProgress": "0",
+      "pending": "0"
+    },
+    "results": [
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.SyncDueConnectionsAsync_Cleans502OldLinksInBoundedPagesAndPreservesUnrelatedState(scenario: \"failure\")",
+        "outcome": "Passed",
+        "message": null
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.SyncDueConnectionsAsync_Cleans502OldLinksInBoundedPagesAndPreservesUnrelatedState(scenario: \"cancel\")",
+        "outcome": "Passed",
+        "message": null
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.SyncDueConnectionsAsync_Cleans502OldLinksInBoundedPagesAndPreservesUnrelatedState(scenario: \"failure\")",
+        "outcome": "Passed",
+        "message": null
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.SyncDueConnectionsAsync_Cleans502OldLinksInBoundedPagesAndPreservesUnrelatedState(scenario: \"cancel\")",
+        "outcome": "Passed",
+        "message": null
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.SyncDueConnectionsAsync_Cleans502OldLinksInBoundedPagesAndPreservesUnrelatedState(scenario: \"insert\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: Unchanged\r\nActual:   Detached"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.SyncDueConnectionsAsync_Cleans502OldLinksInBoundedPagesAndPreservesUnrelatedState(scenario: \"normal\")",
+        "outcome": "Passed",
+        "message": null
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.SyncDueConnectionsAsync_Cleans502OldLinksInBoundedPagesAndPreservesUnrelatedState(scenario: \"normal\")",
+        "outcome": "Passed",
+        "message": null
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.SyncDueConnectionsAsync_Cleans502OldLinksInBoundedPagesAndPreservesUnrelatedState(scenario: \"insert\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: Unchanged\r\nActual:   Detached"
+      }
+    ],
+    "trxSha256": "3ee58a47cc489b1252aa85038b5c468233096cdcfbeb6980aa90143b86a35714",
+    "artifactRoot": "D:\\PayPlannerReview-20261012\\calendar-window-ownership-baseline-evidence",
+    "apiSha256": "82de5752f2ba13ac0a908d9808fa3de28c05bbc7ba19ae751b0b13dd8c04d375",
+    "testAssemblySha256": "83f6da8bc069f0adaa910ac5ace7ffeeb0b8dbe7b2a52fafe33588587dfd9ea5"
+  },
+  "intermediateBoundaries": {
+    "passed": 12,
+    "trxSha256": "f1a6e5a40a698f04f7bf67349e81854298a897956306ff62a5c7009c9972a672",
+    "notFinalOwnershipVerification": true
+  },
+  "baseline": {
+    "artifactRoot": "D:\\PayPlannerReview-20261012\\calendar-window-baseline-evidence",
+    "apiSha256": "66ef9e402c812910fb70263a10670038de817738aa095a765d4ed1e2f9b4c5dc",
+    "testAssemblySha256": "8acb7c4a27a302bdcad6d5bfed3139268a8b39b169c8ca3cdb0ebeef49482f2a",
+    "trxSha256": "92a5e40f48d44e66a22692fbf6dd10713bad69682f825ebf2fad8a14d889bff0",
+    "testSourceHashes": {
+      "backend/PayPlanner.Api.Tests/CalendarBatchProbe.cs": "96fac57f5b67225fb2a30611e4fd8e04e9a050f289552b5de7ffaaa8041d8d6b",
+      "backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs": "77e3bb31f3596efcd4d7ca2b05f31316d46bbc7bc6d52e3524300493cc1a2d2b",
+      "backend/PayPlanner.Api.Tests/YandexCalendarSyncServiceTests.cs": "449fe6f507bedc77eb8deb6850c75c0fc3dce721678a0ffcf3811cb6e8068f42"
+    },
+    "counts": {
+      "total": "12",
+      "executed": "12",
+      "passed": "0",
+      "failed": "12",
+      "error": "0",
+      "timeout": "0",
+      "aborted": "0",
+      "inconclusive": "0",
+      "passedButRunAborted": "0",
+      "notRunnable": "0",
+      "notExecuted": "0",
+      "disconnected": "0",
+      "warning": "0",
+      "completed": "0",
+      "inProgress": "0",
+      "pending": "0"
+    },
+    "results": [
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.SyncDueConnectionsAsync_Cleans502OldLinksInBoundedPagesAndPreservesUnrelatedState(scenario: \"insert\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 0\r\nActual:   1"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.SyncDueConnectionsAsync_Reads502CalendarOwnersInBoundedPagesAndDefersNewOwner(insertDuringRun: False)",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Collections differ\r\n                     ↓ (pos 0)\r\nExpected: int[]     [500, 500]\r\nActual:   List<int> [0]\r\n                     ↑ (pos 0)"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.SyncDueConnectionsAsync_Cleans502OldLinksInBoundedPagesAndPreservesUnrelatedState(scenario: \"normal\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 0\r\nActual:   1"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.SyncDueConnectionsAsync_Cleans502OldLinksInBoundedPagesAndPreservesUnrelatedState(scenario: \"failure\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Collections differ\r\n                     ↓ (pos 0)\r\nExpected: int[]     [500, 500]\r\nActual:   List<int> [0]\r\n                     ↑ (pos 0)"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.SyncDueConnectionsAsync_Cleans502OldLinksInBoundedPagesAndPreservesUnrelatedState(scenario: \"normal\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 0\r\nActual:   1"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.SyncDueConnectionsAsync_Reads502CalendarOwnersInBoundedPagesAndDefersNewOwner(insertDuringRun: True)",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Collections differ\r\n                     ↓ (pos 0)\r\nExpected: int[]     [500, 500]\r\nActual:   List<int> [0]\r\n                     ↑ (pos 0)"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.SyncDueConnectionsAsync_Reads502CalendarOwnersInBoundedPagesAndDefersNewOwner(insertDuringRun: False)",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Collections differ\r\n                     ↓ (pos 0)\r\nExpected: int[]     [500, 500]\r\nActual:   List<int> [0]\r\n                     ↑ (pos 0)"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.SyncDueConnectionsAsync_Reads502CalendarOwnersInBoundedPagesAndDefersNewOwner(insertDuringRun: True)",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Collections differ\r\n                     ↓ (pos 0)\r\nExpected: int[]     [500, 500]\r\nActual:   List<int> [0]\r\n                     ↑ (pos 0)"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.SyncDueConnectionsAsync_Cleans502OldLinksInBoundedPagesAndPreservesUnrelatedState(scenario: \"cancel\")",
+        "outcome": "Failed",
+        "message": "Assert.ThrowsAny() Failure: No exception was thrown\r\nExpected: typeof(System.OperationCanceledException)"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.SyncDueConnectionsAsync_Cleans502OldLinksInBoundedPagesAndPreservesUnrelatedState(scenario: \"failure\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Collections differ\r\n                     ↓ (pos 0)\r\nExpected: int[]     [500, 500]\r\nActual:   List<int> [0]\r\n                     ↑ (pos 0)"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.SyncDueConnectionsAsync_Cleans502OldLinksInBoundedPagesAndPreservesUnrelatedState(scenario: \"insert\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 0\r\nActual:   1"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.SyncDueConnectionsAsync_Cleans502OldLinksInBoundedPagesAndPreservesUnrelatedState(scenario: \"cancel\")",
+        "outcome": "Failed",
+        "message": "Assert.ThrowsAny() Failure: No exception was thrown\r\nExpected: typeof(System.OperationCanceledException)"
+      }
+    ],
+    "measurements": [
+      "CalendarWindowBoundary provider=Google; scenario=normal; saved=0; tasks=503; links=503; metadata=1500",
+      "CalendarWindowBoundary provider=Google; scenario=failure; saved=0; tasks=503; links=503; metadata=1500",
+      "CalendarWindowBoundary provider=Google; scenario=insert; saved=0; tasks=503; links=503; metadata=1500",
+      "CalendarWindowBoundary provider=Google; scenario=cancel; saved=0; tasks=503; links=503; metadata=1500",
+      "CalendarWindowBoundary provider=Yandex; scenario=cancel; saved=0; tasks=503; links=503; metadata=1500",
+      "CalendarWindowBoundary provider=Yandex; scenario=normal; saved=0; tasks=503; links=503; metadata=1500",
+      "CalendarWindowBoundary provider=Yandex; scenario=failure; saved=0; tasks=503; links=503; metadata=1500",
+      "CalendarWindowBoundary provider=Yandex; scenario=insert; saved=0; tasks=503; links=503; metadata=1500"
+    ]
+  },
+  "final": {
+    "focusedOwnershipCounts": {
+      "total": 16,
+      "executed": 16,
+      "passed": 16,
+      "failed": 0,
+      "error": 0,
+      "timeout": 0,
+      "aborted": 0,
+      "inconclusive": 0,
+      "passedButRunAborted": 0,
+      "notRunnable": 0,
+      "notExecuted": 0,
+      "disconnected": 0,
+      "warning": 0,
+      "completed": 0,
+      "inProgress": 0,
+      "pending": 0
+    },
+    "artifactRoot": "D:\\PayPlannerReview-20261012\\calendar-window-final-evidence",
+    "apiSha256": "30e9bcf202e6477e1af0ff59a48b28fda64c38a38058a862c53d4bc00fb9b11c",
+    "testAssemblySha256": "ef6149296e51d7d1624361a1b84f145343a588bd4028ebeac5813aafcac65d10",
+    "trxSha256": "29acccc53d8ad7779d20815bea444b77b2f9768f13696ecd50fdf8f149130eba",
+    "counts": {
+      "total": 214,
+      "executed": 214,
+      "passed": 214,
+      "failed": 0,
+      "error": 0,
+      "timeout": 0,
+      "aborted": 0,
+      "inconclusive": 0,
+      "passedButRunAborted": 0,
+      "notRunnable": 0,
+      "notExecuted": 0,
+      "disconnected": 0,
+      "warning": 0,
+      "completed": 0,
+      "inProgress": 0,
+      "pending": 0
+    },
+    "metrics": [
+      "CalendarOwners provider=Google; insert=False; phase=first; pages=500,500; settings=2",
+      "CalendarOwners provider=Google; insert=False; phase=repeat; pages=500,500; settings=2",
+      "CalendarOwners provider=Google; insert=True; phase=first; pages=500,500; settings=2",
+      "CalendarOwners provider=Google; insert=True; phase=repeat; pages=500,500; settings=2",
+      "CalendarOwners provider=Yandex; insert=False; phase=first; pages=500,500; settings=2",
+      "CalendarOwners provider=Yandex; insert=False; phase=repeat; pages=500,500; settings=2",
+      "CalendarOwners provider=Yandex; insert=True; phase=first; pages=500,500; settings=2",
+      "CalendarOwners provider=Yandex; insert=True; phase=repeat; pages=500,500; settings=2",
+      "CalendarWindow provider=Google; scenario=cancel; phase=first; pages=500,500; metadata=2",
+      "CalendarWindow provider=Google; scenario=cancel; phase=retry; pages=500; metadata=1",
+      "CalendarWindow provider=Google; scenario=failure; phase=first; pages=500,500; metadata=2",
+      "CalendarWindow provider=Google; scenario=failure; phase=retry; pages=500; metadata=1",
+      "CalendarWindow provider=Google; scenario=insert; phase=first; pages=500,500; metadata=2",
+      "CalendarWindow provider=Google; scenario=insert; phase=retry; pages=500; metadata=1",
+      "CalendarWindow provider=Google; scenario=normal; phase=first; pages=500,500; metadata=2",
+      "CalendarWindow provider=Google; scenario=normal; phase=retry; pages=; metadata=0",
+      "CalendarWindow provider=Yandex; scenario=cancel; phase=first; pages=500,500; metadata=2",
+      "CalendarWindow provider=Yandex; scenario=cancel; phase=retry; pages=500; metadata=1",
+      "CalendarWindow provider=Yandex; scenario=failure; phase=first; pages=500,500; metadata=2",
+      "CalendarWindow provider=Yandex; scenario=failure; phase=retry; pages=500; metadata=1",
+      "CalendarWindow provider=Yandex; scenario=insert; phase=first; pages=500,500; metadata=2",
+      "CalendarWindow provider=Yandex; scenario=insert; phase=retry; pages=500; metadata=1",
+      "CalendarWindow provider=Yandex; scenario=normal; phase=first; pages=500,500; metadata=2",
+      "CalendarWindow provider=Yandex; scenario=normal; phase=retry; pages=; metadata=0",
+      "CalendarWindowBoundary provider=Google; scenario=cancel; saved=500; tasks=1; links=3; metadata=2",
+      "CalendarWindowBoundary provider=Google; scenario=failure; saved=500; tasks=1; links=3; metadata=2",
+      "CalendarWindowBoundary provider=Google; scenario=insert; saved=500; tasks=1; links=3; metadata=2",
+      "CalendarWindowBoundary provider=Google; scenario=normal; saved=500; tasks=1; links=3; metadata=2",
+      "CalendarWindowBoundary provider=Yandex; scenario=cancel; saved=500; tasks=1; links=3; metadata=2",
+      "CalendarWindowBoundary provider=Yandex; scenario=failure; saved=500; tasks=1; links=3; metadata=2",
+      "CalendarWindowBoundary provider=Yandex; scenario=insert; saved=500; tasks=1; links=3; metadata=2",
+      "CalendarWindowBoundary provider=Yandex; scenario=normal; saved=500; tasks=1; links=3; metadata=2"
+    ],
+    "database": "Synthetic SQLite with local HTTP fakes; SQL row limits and SELECT counts, not a PostgreSQL latency benchmark",
+    "emailEnabled": false,
+    "backgroundServicesEnabled": false,
+    "releaseBuild": {
+      "errors": 0,
+      "warnings": 0,
+      "logSha256": "c567a920922ff296b16c43dbf1e2446d93761b7174e091a0e5675754076c59ad"
+    },
+    "ownershipFocusedTrxSha256": "b3062cdfbba23a6e782fb2f411211363e6635ae73f198ac66ffeda8fed973f1e"
+  },
+  "deployed": false,
+  "yougilePublished": false,
+  "finalFullBackendGatePassed": false,
+  "frontendGateReused": {
+    "revision": "d2e9508752a1bbca1c3ea28bd6e242284e5c00a4",
+    "passed": 2596,
+    "reason": "Frontend and public DTO contracts unchanged"
+  },
+  "remaining": [
+    "Connection calendars/owner graph and import tracking/CalDAV full response remain; bounded these two SQL lists does not bound total synchronization memory",
+    "Measure remaining Google visibility/settings reads without permission/token caching",
+    "Cancelled Google event replay after full-sync reset: journal idempotence needs a separate scenario",
+    "Actual owner-reported annulled task, final complete backend gate and live acceptance remain"
+  ]
+}

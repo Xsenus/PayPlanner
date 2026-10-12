@@ -2,9 +2,10 @@ using PayPlanner.Api.Models;
 
 namespace PayPlanner.Api.Services;
 
-// One export page (or one addressed task), passed explicitly and released after the operation.
-// Keep display snapshots only; do not retain entity graphs or cache across connections.
-internal sealed class CalendarSyncLogContext(int connectionId, User? user, IEnumerable<TaskJournalItem> tasks)
+// Display snapshots and optional owned-entry references for one synchronization page.
+// Ownership only spans this save/detach batch; never cache context across connections.
+internal sealed class CalendarSyncLogContext(int connectionId, User? user, IEnumerable<TaskJournalItem> tasks,
+    ICollection<object>? ownedEntities = null)
 {
     public int ConnectionId { get; } = connectionId;
     public string? UserName { get; } = user?.FullName;
@@ -12,6 +13,8 @@ internal sealed class CalendarSyncLogContext(int connectionId, User? user, IEnum
     public IReadOnlyDictionary<int, TaskFields> Tasks { get; } = tasks.ToDictionary(
         task => task.Id, task => new TaskFields(task.Title, task.ObjectName, task.AssigneeName));
     public Dictionary<int, CalendarFields?> Calendars { get; } = [];
+
+    public void RememberOwnedEntity(object entity) => ownedEntities?.Add(entity);
 
     public void RememberCalendar(int calendarId, string? name, int? ownerUserId, User? owner)
     {

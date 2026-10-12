@@ -15,6 +15,8 @@ internal sealed class CalendarBatchQueryProbe(string provider) : DbCommandInterc
     public int TotalSelects { get; private set; }
     public int TimeZoneSelects { get; private set; }
     public List<int[]> TimeZoneUserIds { get; } = [];
+    public List<int> CleanupPageLimits { get; } = [];
+    public List<int> OwnerPageLimits { get; } = [];
 
     public void Reset()
     {
@@ -24,6 +26,8 @@ internal sealed class CalendarBatchQueryProbe(string provider) : DbCommandInterc
         TotalSelects = 0;
         TimeZoneSelects = 0;
         TimeZoneUserIds.Clear();
+        CleanupPageLimits.Clear();
+        OwnerPageLimits.Clear();
     }
 
     public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
@@ -31,6 +35,21 @@ internal sealed class CalendarBatchQueryProbe(string provider) : DbCommandInterc
         CancellationToken cancellationToken = default)
     {
         var sql = command.CommandText;
+        var pageLimit = Regex.Match(sql, @"LIMIT\s+([@$]\w+)");
+        var limitValue = pageLimit.Success ? Convert.ToInt32(command.Parameters[pageLimit.Groups[1].Value].Value) : 0;
+        if (sql.StartsWith("SELECT", StringComparison.Ordinal) && !sql.Contains("COUNT(", StringComparison.Ordinal) && !sql.Contains("MAX(", StringComparison.Ordinal)
+            && sql.Contains($"FROM \"{provider}CalendarTaskLinks\"", StringComparison.Ordinal)
+            && sql.Contains("\"DueAt\"", StringComparison.Ordinal) && sql.Contains('<'))
+        {
+            CleanupPageLimits.Add(limitValue);
+        }
+        if (sql.StartsWith("SELECT", StringComparison.Ordinal) && !sql.Contains("COUNT(", StringComparison.Ordinal)
+            && sql.Contains("FROM \"Users\"", StringComparison.Ordinal) && sql.Contains("\"FullName\"", StringComparison.Ordinal)
+            && sql.Contains("\"IsActive\"", StringComparison.Ordinal) && sql.Contains("\"IsApproved\"", StringComparison.Ordinal)
+            && sql.Contains("\"IsEmployee\"", StringComparison.Ordinal))
+        {
+            OwnerPageLimits.Add(limitValue);
+        }
         if (sql.StartsWith("SELECT", StringComparison.Ordinal))
         {
             TotalSelects++;
@@ -197,6 +216,22 @@ internal sealed class CalendarBatchColorProbe(HttpMessageHandler inner, Func<Tas
                         Encoding.UTF8, "application/json"),
                 };
             }
+        }
+        return await base.SendAsync(request, cancellationToken);
+    }
+}
+
+internal sealed class CalendarOwnerPageProbe(HttpMessageHandler inner, Func<Task> afterOwner500) : DelegatingHandler(inner)
+{
+    private bool _observed;
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        if (!_observed && request.RequestUri!.AbsolutePath.Contains("owner-calendar-500", StringComparison.Ordinal)
+            && (request.Method == HttpMethod.Patch || request.Method.Method == "PROPPATCH"))
+        {
+            _observed = true;
+            await afterOwner500();
         }
         return await base.SendAsync(request, cancellationToken);
     }

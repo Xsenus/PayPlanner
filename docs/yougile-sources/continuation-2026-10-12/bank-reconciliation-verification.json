@@ -25,7 +25,7 @@
     "releaseBuild": true
   },
   "fullBackend": {
-    "status": "Two qualified shards, 3540/7078 cases; shard 2 confirmed live in original session 2664; no qualified full result",
+    "status": "Three qualified shards, 5309/7078 cases; final shard 3 running in original session 2664; full result pending",
     "expectedCases": 7078,
     "manifestSha256": "95ba710a5ae3f4969a6a99bb9719076e1c970d5160f3d8bc519f8b85ef1fef9b",
     "interruptedInitialRun": "PostgreSQL shared-lock exhaustion and cleanup timeout; no successful full result claimed.",
@@ -59,11 +59,17 @@
         "cases": 1770,
         "qualified": true,
         "trxSha256": "71dde639775ef8212f3c90d629213889f84ded8b9465bc6bf306c18d48067a87"
+      },
+      {
+        "shard": 2,
+        "cases": 1769,
+        "qualified": true,
+        "trxSha256": "3bba27996b486faf7e79714ce175b338141d087ef55d4ed152e0d8f819c16684"
       }
     ],
-    "qualifiedCasesSoFar": 3540,
-    "runningShard": 2,
-    "checkedAtUtc": "2026-10-12T21:20:22.094639+00:00"
+    "qualifiedCasesSoFar": 5309,
+    "runningShard": 3,
+    "checkedAtUtc": "2026-10-12T23:10:26.331438+00:00"
   },
   "availability": {
     "branchOnly": true,

@@ -11,12 +11,14 @@ internal static class CalendarSyncTaskPager
     public static HashSet<object> CaptureTrackedEntities(DbContext db) =>
         db.ChangeTracker.Entries().Select(entry => entry.Entity).ToHashSet(ReferenceEqualityComparer.Instance);
 
-    public static IReadOnlyList<TLink> DetachSavedBatch<TLink, TLog>(DbContext db, HashSet<object> preserved)
+    public static IReadOnlyList<TLink> DetachSavedBatch<TLink, TLog>(DbContext db, HashSet<object> preserved,
+        IEnumerable<object> ownedEntities)
         where TLink : class
         where TLog : class
     {
         var detachedLinks = new List<TLink>();
-        var entries = db.ChangeTracker.Entries()
+        var entries = ownedEntities.Distinct(ReferenceEqualityComparer.Instance)
+            .Select(entity => db.Entry(entity))
             .Where(entry => (entry.Entity is TLink or TLog)
                 && entry.State == EntityState.Unchanged && !preserved.Contains(entry.Entity))
             .ToArray();

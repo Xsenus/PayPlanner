@@ -623,7 +623,8 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         var preservedTracking = CalendarSyncTaskPager.CaptureTrackedEntities(_db);
         await foreach (var tasks in CalendarSyncTaskPager.ReadPagesAsync(tasksQuery, cancellationToken))
         {
-            var logContext = new CalendarSyncLogContext(connection.Id, connection.User, tasks);
+            var ownedEntities = new List<object>();
+            var logContext = new CalendarSyncLogContext(connection.Id, connection.User, tasks, ownedEntities);
             var exportTasks = tasks.Where(item => !ShouldHideCompletedTask(settings, item)).ToArray();
             IEnumerable<int> timeZoneUserIds = exportTasks.Length == 0 ? []
                 : string.Equals(connection.CalendarMode, "adminByAssignee", StringComparison.Ordinal)
@@ -635,6 +636,10 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             var links = await _db.GoogleCalendarTaskLinks
                 .Where(item => item.ConnectionId == connection.Id && taskIds.Contains(item.TaskJournalItemId))
                 .ToDictionaryAsync(item => item.TaskJournalItemId, cancellationToken);
+            foreach (var link in links.Values)
+            {
+                logContext.RememberOwnedEntity(link);
+            }
             var externalCommentsByTask = await LoadExternalCalendarCommentsAsync(
                 exportTasks.Select(item => item.Id), cancellationToken);
             foreach (var task in tasks)
@@ -667,7 +672,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
 
             // Preserve successful batches before a later failure or cancellation.
             await _db.SaveChangesAsync(cancellationToken);
-            foreach (var link in CalendarSyncTaskPager.DetachSavedBatch<GoogleCalendarTaskLink, GoogleCalendarSyncLog>(_db, preservedTracking))
+            foreach (var link in CalendarSyncTaskPager.DetachSavedBatch<GoogleCalendarTaskLink, GoogleCalendarSyncLog>(_db, preservedTracking, ownedEntities))
             {
                 link.Connection?.TaskLinks.Remove(link);
                 link.CalendarSyncCalendar?.TaskLinks.Remove(link);
@@ -1190,7 +1195,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             timeZones = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(_db, timeZoneUserIds, cancellationToken);
         }
         var accessToken = await ResolveAccessTokenAsync(connection, cancellationToken);
-        var calendar = await EnsureCalendarForTaskAsync(connection, task, accessToken, cancellationToken, timeZones);
+        var calendar = await EnsureCalendarForTaskAsync(connection, task, accessToken, cancellationToken, timeZones, logContext);
         logContext?.RememberCalendar(calendar.Id, calendar.Name, calendar.OwnerUserId, calendar.OwnerUser);
         var timeZone = await ResolveTaskTimeZoneAsync(connection, null, task, cancellationToken, timeZones);
         var crmHash = BuildCrmHash(task, timeZone, externalComments);
@@ -1240,6 +1245,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
                     CreatedAt = DateTime.UtcNow,
                 };
                 _db.GoogleCalendarTaskLinks.Add(link);
+                logContext?.RememberOwnedEntity(link);
             }
             else if (!string.IsNullOrWhiteSpace(previousGoogleCalendarId) &&
                      !string.IsNullOrWhiteSpace(previousGoogleEventId) &&
@@ -1326,13 +1332,22 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             ownersQuery = ownersQuery.Where(item => visibleUserIds.Contains(item.Id));
         }
 
-        var owners = await ownersQuery
-            .OrderBy(item => item.FullName)
-            .Select(item => new { item.Id, item.FullName })
-            .ToListAsync(cancellationToken);
-
-        foreach (var ownerPage in owners.Chunk(CalendarSyncTaskPager.PageSize))
+        // Freeze the upper ID so newly registered owners belong to the next run.
+        var upperOwnerId = await ownersQuery.MaxAsync(item => (int?)item.Id, cancellationToken) ?? 0;
+        var lastOwnerId = 0;
+        while (lastOwnerId < upperOwnerId)
         {
+            var ownerPage = await ownersQuery
+                .Where(item => item.Id > lastOwnerId && item.Id <= upperOwnerId)
+                .OrderBy(item => item.Id)
+                .Select(item => new { item.Id, item.FullName })
+                .Take(CalendarSyncTaskPager.PageSize)
+                .ToListAsync(cancellationToken);
+            if (ownerPage.Count == 0)
+            {
+                break;
+            }
+            lastOwnerId = ownerPage[^1].Id;
             var timeZones = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
                 _db, ownerPage.Select(owner => owner.Id), cancellationToken);
             foreach (var owner in ownerPage)
@@ -1367,13 +1382,14 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         TaskJournalItem task,
         string accessToken,
         CancellationToken cancellationToken,
-        IReadOnlyDictionary<int, TimeZoneInfo>? timeZones = null)
+        IReadOnlyDictionary<int, TimeZoneInfo>? timeZones = null,
+        CalendarSyncLogContext? logContext = null)
     {
         var visibility = await ResolveConnectionCalendarVisibilityAsync(connection.UserId, cancellationToken);
         var ownerUserId = IsAssigneeCalendarMode(connection, visibility) ? task.AssigneeUserId : null;
         var ownerName = ownerUserId.HasValue ? NormalizeOptional(task.AssigneeName) : null;
 
-        return await EnsureCalendarForOwnerAsync(connection, ownerUserId, ownerName, accessToken, cancellationToken, timeZones);
+        return await EnsureCalendarForOwnerAsync(connection, ownerUserId, ownerName, accessToken, cancellationToken, timeZones, logContext);
     }
 
     private async Task<GoogleCalendarSyncCalendar> EnsureCalendarForOwnerAsync(
@@ -1382,7 +1398,8 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         string? ownerName,
         string accessToken,
         CancellationToken cancellationToken,
-        IReadOnlyDictionary<int, TimeZoneInfo>? timeZones = null)
+        IReadOnlyDictionary<int, TimeZoneInfo>? timeZones = null,
+        CalendarSyncLogContext? logContext = null)
     {
         var name = ownerUserId.HasValue
             ? $"PayPlanner - {NormalizeOptional(ownerName) ?? $"сотрудник #{ownerUserId.Value}"}"
@@ -1427,7 +1444,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             }
             catch (Exception deleteEx) when (!cancellationToken.IsCancellationRequested)
             {
-                await AddLogAsync(connection.Id, null, null, "system", "delete-race-calendar", "error", $"Не удалось удалить календарь «{name}», созданный повторным параллельным запуском.", deleteEx.Message, cancellationToken);
+                await AddLogAsync(connection.Id, null, null, "system", "delete-race-calendar", "error", $"Не удалось удалить календарь «{name}», созданный повторным параллельным запуском.", deleteEx.Message, cancellationToken, logContext);
             }
 
             var existing = await _db.GoogleCalendarSyncCalendars
@@ -1442,7 +1459,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             throw;
         }
 
-        await AddLogAsync(connection.Id, calendar.Id, null, "system", "create-calendar", "success", $"В Google Calendar создан календарь «{name}».", null, cancellationToken);
+        await AddLogAsync(connection.Id, calendar.Id, null, "system", "create-calendar", "success", $"В Google Calendar создан календарь «{name}».", null, cancellationToken, logContext);
         return calendar;
     }
 
@@ -1580,45 +1597,110 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             return 0;
         }
 
-        var links = await _db.GoogleCalendarTaskLinks
-            .Include(item => item.TaskJournalItem)
+        var linksQuery = _db.GoogleCalendarTaskLinks
             .Where(item =>
                 item.ConnectionId == connection.Id &&
                 item.SyncStatus == "active" &&
-                item.TaskJournalItem.DueAt < syncFromDate.Value)
-            .ToListAsync(cancellationToken);
-        if (links.Count == 0)
+                item.TaskJournalItem.DueAt < syncFromDate.Value);
+        var upperLinkId = await linksQuery.MaxAsync(item => (int?)item.Id, cancellationToken) ?? 0;
+        if (upperLinkId == 0)
         {
             return 0;
         }
 
         var errors = 0;
+        var lastLinkId = 0;
         var accessToken = await ResolveAccessTokenAsync(connection, cancellationToken);
-        foreach (var link in links)
+        var preservedTracking = CalendarSyncTaskPager.CaptureTrackedEntities(_db);
+        while (lastLinkId < upperLinkId)
         {
-            try
+            // Track links only; task display fields stay as a bounded scalar projection.
+            var rows = await linksQuery
+                .Where(item => item.Id > lastLinkId && item.Id <= upperLinkId)
+                .OrderBy(item => item.Id)
+                .Take(CalendarSyncTaskPager.PageSize)
+                .Select(item => new
+                {
+                    Link = item,
+                    item.TaskJournalItem.Title,
+                    item.TaskJournalItem.ObjectName,
+                    item.TaskJournalItem.AssigneeName,
+                })
+                .ToListAsync(cancellationToken);
+            if (rows.Count == 0)
             {
-                var deleted = await DeleteGoogleEventAsync(accessToken, link.GoogleCalendarId, link.GoogleEventId, cancellationToken);
-                MarkGoogleLinkDeleted(link);
-                await AddLogAsync(
-                    connection.Id,
-                    link.CalendarSyncCalendarId,
-                    link.TaskJournalItemId,
-                    "crm-to-google",
-                    deleted ? "delete-event" : "delete-event-missing",
-                    "success",
-                    deleted
-                        ? "Событие удалено из Google Calendar, потому что задача раньше даты начала синхронизации."
-                        : "Событие уже отсутствовало в Google Calendar при очистке задач раньше даты начала синхронизации.",
-                    null,
-                    cancellationToken);
+                break;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            lastLinkId = rows[^1].Link.Id;
+            var ownedEntities = rows.Select(row => (object)row.Link).ToList();
+            var logContext = new CalendarSyncLogContext(connection.Id, connection.User,
+                rows.Select(row => new TaskJournalItem
+                {
+                    Id = row.Link.TaskJournalItemId,
+                    Title = row.Title,
+                    ObjectName = row.ObjectName,
+                    AssigneeName = row.AssigneeName,
+                }), ownedEntities);
+            var calendarIds = rows.Select(row => row.Link.CalendarSyncCalendarId).Distinct().ToArray();
+            if (calendarIds.Length > 0)
             {
-                errors++;
-                link.LastError = Trim(ex.Message, 2000);
-                link.UpdatedAt = DateTime.UtcNow;
-                await AddLogAsync(connection.Id, link.CalendarSyncCalendarId, link.TaskJournalItemId, "crm-to-google", "delete-event", "error", "Не удалось удалить событие Google Calendar для задачи раньше даты начала синхронизации.", ex.Message, cancellationToken);
+                var calendarFields = await _db.GoogleCalendarSyncCalendars.AsNoTracking()
+                    .Where(item => item.ConnectionId == connection.Id && calendarIds.Contains(item.Id))
+                    .Select(item => new
+                    {
+                        item.Id,
+                        item.Name,
+                        item.OwnerUserId,
+                        OwnerName = item.OwnerUser == null ? null : item.OwnerUser.FullName,
+                        OwnerEmail = item.OwnerUser == null ? null : item.OwnerUser.Email,
+                    })
+                    .ToListAsync(cancellationToken);
+                foreach (var calendar in calendarFields)
+                {
+                    var owner = calendar.OwnerUserId.HasValue ? new User
+                    {
+                        Id = calendar.OwnerUserId.Value,
+                        FullName = calendar.OwnerName ?? string.Empty,
+                        Email = calendar.OwnerEmail ?? string.Empty,
+                    } : null;
+                    logContext.RememberCalendar(calendar.Id, calendar.Name, calendar.OwnerUserId, owner);
+                }
+            }
+            foreach (var row in rows)
+            {
+                var link = row.Link;
+                try
+                {
+                    var deleted = await DeleteGoogleEventAsync(accessToken, link.GoogleCalendarId, link.GoogleEventId, cancellationToken);
+                    MarkGoogleLinkDeleted(link);
+                    await AddLogAsync(
+                        connection.Id,
+                        link.CalendarSyncCalendarId,
+                        link.TaskJournalItemId,
+                        "crm-to-google",
+                        deleted ? "delete-event" : "delete-event-missing",
+                        "success",
+                        deleted
+                            ? "Событие удалено из Google Calendar, потому что задача раньше даты начала синхронизации."
+                            : "Событие уже отсутствовало в Google Calendar при очистке задач раньше даты начала синхронизации.",
+                        null,
+                        cancellationToken, logContext);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    errors++;
+                    link.LastError = Trim(ex.Message, 2000);
+                    link.UpdatedAt = DateTime.UtcNow;
+                    await AddLogAsync(connection.Id, link.CalendarSyncCalendarId, link.TaskJournalItemId, "crm-to-google", "delete-event", "error", "Не удалось удалить событие Google Calendar для задачи раньше даты начала синхронизации.", ex.Message, cancellationToken, logContext);
+                }
+            }
+
+            // Keep completed deletions durable before the next page or cancellation.
+            await _db.SaveChangesAsync(cancellationToken);
+            foreach (var link in CalendarSyncTaskPager.DetachSavedBatch<GoogleCalendarTaskLink, GoogleCalendarSyncLog>(_db, preservedTracking, ownedEntities))
+            {
+                link.Connection?.TaskLinks.Remove(link);
+                link.CalendarSyncCalendar?.TaskLinks.Remove(link);
             }
         }
 
@@ -2416,7 +2498,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
     {
         var detailsJson = await BuildLogDetailsJsonAsync(connectionId, calendarId, taskId, details, cancellationToken, logContext);
 
-        _db.GoogleCalendarSyncLogs.Add(new GoogleCalendarSyncLog
+        var log = new GoogleCalendarSyncLog
         {
             ConnectionId = connectionId,
             CalendarSyncCalendarId = calendarId,
@@ -2427,7 +2509,12 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             Message = Trim(message, 1000),
             DetailsJson = detailsJson,
             CreatedAt = DateTime.UtcNow,
-        });
+        };
+        _db.GoogleCalendarSyncLogs.Add(log);
+        if (logContext is not null && logContext.ConnectionId == connectionId)
+        {
+            logContext.RememberOwnedEntity(log);
+        }
 
         await Task.CompletedTask.WaitAsync(cancellationToken);
     }

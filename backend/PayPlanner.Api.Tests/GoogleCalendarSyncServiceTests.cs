@@ -1549,6 +1549,7 @@ public class GoogleCalendarSyncServiceTests
         await CreateTaskAsync(db, hidden.Id, "Not visible", dueAt: dueAt);
         await CreateTaskAsync(db, user.Id, "Outside sync window", dueAt: DateTime.UtcNow.AddDays(366));
         var firstPageIds = tasks.Take(500).Select(item => item.Id).ToArray();
+        GoogleCalendarTaskLink? lateCallerLink = null;
         var inner = new RecordingGoogleHandler();
         var handler = new CalendarBatchDeleteProbe(inner, failOnce, async () =>
         {
@@ -1566,7 +1567,7 @@ public class GoogleCalendarSyncServiceTests
             {
                 var lateTask = await CreateTaskAsync(db, user.Id, "Created during sync", dueAt: dueAt);
                 lateTask.Status = "cancelled";
-                db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
+                lateCallerLink = new GoogleCalendarTaskLink
                 {
                     ConnectionId = connection.Id,
                     CalendarSyncCalendarId = calendar.Id,
@@ -1576,7 +1577,8 @@ public class GoogleCalendarSyncServiceTests
                     SyncStatus = "active",
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow,
-                });
+                };
+                db.GoogleCalendarTaskLinks.Add(lateCallerLink);
                 await db.SaveChangesAsync();
             }
             if (cancelAfterFirstPage)
@@ -1614,6 +1616,10 @@ public class GoogleCalendarSyncServiceTests
         Assert.DoesNotContain(inner.Requests, request => request.Method == HttpMethod.Put);
         var taskIds = tasks.Select(item => item.Id).ToArray();
         Assert.Equal(502, await db.TaskJournalItems.CountAsync(item => taskIds.Contains(item.Id) && (item.Status == "done" || item.Status == "cancelled")));
+        if (lateCallerLink is not null)
+        {
+            Assert.Equal(EntityState.Unchanged, db.Entry(lateCallerLink).State);
+        }
         db.ChangeTracker.Clear();
         queryProbe.Reset();
         service = CreateService(db, new FakeHttpClientFactory(handler));
@@ -2626,6 +2632,257 @@ public class GoogleCalendarSyncServiceTests
         });
         setting.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
+    }
+
+
+    [Theory]
+    [InlineData("normal")]
+    [InlineData("failure")]
+    [InlineData("cancel")]
+    [InlineData("insert")]
+    public async Task SyncDueConnectionsAsync_Cleans502OldLinksInBoundedPagesAndPreservesUnrelatedState(string scenario)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var probe = new CalendarBatchQueryProbe("Google");
+        await using var db = await CreateContextAsync(probe);
+        var user = await CreateUserAsync(db, "old-events-owner@example.local", "user");
+        var hidden = await CreateUserAsync(db, "old-events-other@example.local", "user");
+        await EnableGoogleSettingsAsync(db);
+        var cutoff = DateTime.UtcNow.Date;
+        var connection = await CreateConnectionAsync(db, user.Id, syncFromDate: cutoff);
+        var calendar = await CreateCalendarAsync(db, connection.Id, "bulk-old-calendar", "Synthetic old events");
+        var other = await CreateConnectionAsync(db, hidden.Id, syncFromDate: cutoff);
+        other.SyncEnabled = false;
+        var otherCalendar = await CreateCalendarAsync(db, other.Id, "other-calendar", "Synthetic other connection");
+        var tasks = Enumerable.Range(1, 502).Select(index => new TaskJournalItem
+        {
+            Title = $"Old task {index}",
+            ObjectName = "Synthetic cleanup",
+            AssigneeUserId = user.Id,
+            AssigneeName = user.FullName,
+            DueAt = cutoff.AddDays(-2),
+            PlannedDurationMinutes = 60,
+            Priority = "normal",
+            Status = index % 2 == 0 ? "new" : "cancelled",
+        }).ToArray();
+        db.TaskJournalItems.AddRange(tasks);
+        await db.SaveChangesAsync();
+        for (var index = 0; index < tasks.Length; index++)
+        {
+            db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
+            {
+                ConnectionId = connection.Id,
+                CalendarSyncCalendarId = calendar.Id,
+                TaskJournalItemId = tasks[index].Id,
+                GoogleCalendarId = calendar.GoogleCalendarId,
+                GoogleEventId = $"bulk-event-{index + 1}",
+
+                SyncStatus = "active",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+        }
+        var protectedTask = await CreateTaskAsync(db, hidden.Id, "Protected task at cutoff", dueAt: cutoff);
+        var protectedLink = new GoogleCalendarTaskLink
+        {
+            ConnectionId = connection.Id,
+            CalendarSyncCalendarId = calendar.Id,
+            TaskJournalItemId = protectedTask.Id,
+            GoogleCalendarId = calendar.GoogleCalendarId,
+            GoogleEventId = "protected-event",
+
+            SyncStatus = "active",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.GoogleCalendarTaskLinks.Add(protectedLink);
+        db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
+        {
+            ConnectionId = other.Id,
+            CalendarSyncCalendarId = otherCalendar.Id,
+            TaskJournalItemId = tasks[0].Id,
+            GoogleCalendarId = otherCalendar.GoogleCalendarId,
+            GoogleEventId = "other-event",
+
+            SyncStatus = "active",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var firstIds = tasks.Take(500).Select(task => task.Id).ToArray();
+        db.ChangeTracker.Clear();
+        var callerLink = await db.GoogleCalendarTaskLinks.SingleAsync(link => link.Id == protectedLink.Id);
+        var callerTask = await db.TaskJournalItems.SingleAsync(task => task.Id == protectedTask.Id);
+        GoogleCalendarTaskLink? lateCallerLink = null;
+        var inner = new RecordingGoogleHandler();
+        var handler = new CalendarBatchDeleteProbe(inner, scenario == "failure", async () =>
+        {
+            var savedFirstPage = await db.GoogleCalendarTaskLinks.AsNoTracking()
+                .CountAsync(link => link.ConnectionId == connection.Id && firstIds.Contains(link.TaskJournalItemId) && link.SyncStatus == "deleted");
+            Console.WriteLine($"CalendarWindowBoundary provider=Google; scenario={scenario}; saved={savedFirstPage}; tasks={db.ChangeTracker.Entries<TaskJournalItem>().Count()}; links={db.ChangeTracker.Entries<GoogleCalendarTaskLink>().Count()}; metadata={probe.LogMetadataSelects}");
+            Assert.Equal(500, savedFirstPage);
+            Assert.Equal(3, db.ChangeTracker.Entries<GoogleCalendarTaskLink>().Count());
+            Assert.Empty(db.ChangeTracker.Entries<GoogleCalendarSyncLog>());
+            Assert.Same(callerTask, Assert.Single(db.ChangeTracker.Entries<TaskJournalItem>()).Entity);
+            Assert.Equal(EntityState.Unchanged, db.Entry(callerLink).State);
+            if (scenario == "insert")
+            {
+                var late = await CreateTaskAsync(db, user.Id, "Added during cleanup", dueAt: cutoff.AddDays(-1));
+                lateCallerLink = new GoogleCalendarTaskLink
+                {
+                    ConnectionId = connection.Id,
+                    CalendarSyncCalendarId = calendar.Id,
+                    TaskJournalItemId = late.Id,
+                    GoogleCalendarId = calendar.GoogleCalendarId,
+                    GoogleEventId = "bulk-event-503",
+
+                    SyncStatus = "active",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                };
+                db.GoogleCalendarTaskLinks.Add(lateCallerLink);
+                await db.SaveChangesAsync();
+            }
+            if (scenario == "cancel")
+            {
+                cancellation.Cancel();
+                cancellation.Token.ThrowIfCancellationRequested();
+            }
+        });
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+        probe.Reset();
+        if (scenario == "cancel")
+        {
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.SyncDueConnectionsAsync(10, cancellation.Token));
+        }
+        else
+        {
+            var result = await service.SyncDueConnectionsAsync(10, CancellationToken.None);
+            Assert.Equal(0, result.ProcessedTasks);
+            Assert.Equal(scenario == "failure" ? 1 : 0, result.ErrorCount);
+        }
+        Assert.Equal(new[] { 500, 500 }, probe.CleanupPageLimits);
+        Assert.InRange(probe.LogMetadataSelects, 0, 4);
+        Assert.Equal(scenario == "cancel" ? 500 : scenario == "failure" ? 501 : 502,
+            await db.GoogleCalendarTaskLinks.CountAsync(link => link.ConnectionId == connection.Id && link.SyncStatus == "deleted"));
+        Assert.Equal(EntityState.Unchanged, db.Entry(callerLink).State);
+        Assert.Equal(EntityState.Unchanged, db.Entry(callerTask).State);
+        if (lateCallerLink is not null)
+        {
+            Assert.Equal(EntityState.Unchanged, db.Entry(lateCallerLink).State);
+        }
+        Assert.Equal(502, await db.TaskJournalItems.CountAsync(task => task.Title.StartsWith("Old task ")
+            && task.DueAt == cutoff.AddDays(-2) && (task.Status == "new" || task.Status == "cancelled")));
+        Assert.Equal(2, await db.GoogleCalendarTaskLinks.CountAsync(link => link.GoogleEventId == "protected-event"
+            || link.GoogleEventId == "other-event"));
+        Assert.Equal(2, await db.GoogleCalendarTaskLinks.CountAsync(link => (link.GoogleEventId == "protected-event"
+            || link.GoogleEventId == "other-event") && link.SyncStatus == "active"));
+        Assert.DoesNotContain(inner.Requests, request => request.Method == HttpMethod.Put);
+        Console.WriteLine($"CalendarWindow provider=Google; scenario={scenario}; phase=first; pages={string.Join(',', probe.CleanupPageLimits)}; metadata={probe.LogMetadataSelects}");
+        db.ChangeTracker.Clear();
+        probe.Reset();
+        var retry = await service.SyncDueConnectionsAsync(10, CancellationToken.None);
+        Assert.Equal(0, retry.ErrorCount);
+        Assert.Equal(scenario == "insert" ? 503 : 502,
+            await db.GoogleCalendarTaskLinks.CountAsync(link => link.ConnectionId == connection.Id && link.SyncStatus == "deleted"));
+        Assert.Equal(scenario == "normal" ? Array.Empty<int>() : new[] { 500 }, probe.CleanupPageLimits);
+        Assert.InRange(probe.LogMetadataSelects, 0, 4);
+        Assert.All(handler.DeleteAttempts, pair => Assert.Equal((scenario is "cancel" or "failure")
+            && pair.Key.Contains("bulk-event-501", StringComparison.Ordinal) ? 2 : 1, pair.Value));
+        Assert.DoesNotContain(handler.DeleteAttempts.Keys, path => path.Contains("protected-event") || path.Contains("other-event"));
+        Assert.Equal(scenario == "insert" ? 503 : 502, handler.DeleteAttempts.Count);
+        Console.WriteLine($"CalendarWindow provider=Google; scenario={scenario}; phase=retry; pages={string.Join(',', probe.CleanupPageLimits)}; metadata={probe.LogMetadataSelects}");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SyncDueConnectionsAsync_Reads502CalendarOwnersInBoundedPagesAndDefersNewOwner(bool insertDuringRun)
+    {
+        var probe = new CalendarBatchQueryProbe("Google");
+        await using var db = await CreateContextAsync(probe);
+        var admin = await CreateUserAsync(db, "owners-admin@example.local", "admin");
+        admin.IsEmployee = false;
+        var regular = await CreateUserAsync(db, "owners-role@example.local", "user");
+        regular.IsActive = false;
+        await EnableGoogleSettingsAsync(db);
+        var connection = await CreateConnectionAsync(db, admin.Id, calendarMode: "adminByAssignee");
+        var employees = Enumerable.Range(1, 502).Select(index => new User
+        {
+            Email = $"owner-{index}@example.local",
+            FullName = $"Owner {503 - index:D4}",
+            PasswordHash = "hash",
+            RoleId = index == 502 ? admin.RoleId : regular.RoleId,
+            IsEmployee = true,
+            IsActive = true,
+            IsApproved = true,
+        }).ToArray();
+        var rejected = new[]
+        {
+            new User { Email = "inactive-owner@example.local", FullName = "Inactive owner", PasswordHash = "hash", RoleId = regular.RoleId, IsActive = false, IsApproved = true, IsEmployee = true },
+            new User { Email = "unapproved-owner@example.local", FullName = "Unapproved owner", PasswordHash = "hash", RoleId = regular.RoleId, IsActive = true, IsApproved = false, IsEmployee = true },
+            new User { Email = "nonemployee-admin@example.local", FullName = "Other admin", PasswordHash = "hash", RoleId = admin.RoleId, IsActive = true, IsApproved = true, IsEmployee = false },
+        };
+        db.Users.AddRange(employees);
+        db.Users.AddRange(rejected);
+        await db.SaveChangesAsync();
+        for (var index = 0; index < employees.Length; index++)
+        {
+            db.GoogleCalendarSyncCalendars.Add(new GoogleCalendarSyncCalendar
+            {
+                ConnectionId = connection.Id,
+                OwnerUserId = employees[index].Id,
+                GoogleCalendarId = $"owner-calendar-{index + 1}",
+                Name = $"PayPlanner - {employees[index].FullName}",
+
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+        }
+        await db.SaveChangesAsync();
+        User? late = null;
+        var handler = new CalendarOwnerPageProbe(new RecordingGoogleHandler(), async () =>
+        {
+            if (insertDuringRun)
+            {
+                late = new User { Email = "late-owner@example.local", FullName = "Late owner", PasswordHash = "hash", RoleId = regular.RoleId, IsActive = true, IsApproved = true, IsEmployee = true };
+                db.Users.Add(late);
+                await db.SaveChangesAsync();
+            }
+        });
+        db.ChangeTracker.Clear();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+        probe.Reset();
+        var result = await service.SyncDueConnectionsAsync(10, CancellationToken.None);
+        Assert.Equal(0, result.ErrorCount);
+        Assert.Equal(0, result.ProcessedTasks);
+        Assert.Equal(new[] { 500, 500 }, probe.OwnerPageLimits);
+        Assert.Equal(2, probe.TimeZoneSelects);
+        var ownerIds = employees.Select(user => user.Id).ToArray();
+        Assert.Equal(502, await db.GoogleCalendarSyncCalendars.CountAsync(calendar => calendar.ConnectionId == connection.Id
+            && calendar.OwnerUserId.HasValue && ownerIds.Contains(calendar.OwnerUserId.Value)));
+        Assert.Equal(502, await db.GoogleCalendarSyncCalendars.CountAsync());
+        Assert.All(await db.GoogleCalendarSyncCalendars.AsNoTracking().ToListAsync(), calendar =>
+            Assert.Equal($"PayPlanner - {employees.Single(owner => owner.Id == calendar.OwnerUserId).FullName}", calendar.Name));
+        if (late is not null)
+        {
+            Assert.False(await db.GoogleCalendarSyncCalendars.AnyAsync(calendar => calendar.OwnerUserId == late.Id));
+        }
+        Console.WriteLine($"CalendarOwners provider=Google; insert={insertDuringRun}; phase=first; pages={string.Join(',', probe.OwnerPageLimits)}; settings={probe.TimeZoneSelects}");
+        db.ChangeTracker.Clear();
+        probe.Reset();
+        var repeat = await service.SyncDueConnectionsAsync(10, CancellationToken.None);
+        Assert.Equal(0, repeat.ErrorCount);
+        Assert.Equal(new[] { 500, 500 }, probe.OwnerPageLimits);
+        Assert.Equal(2, probe.TimeZoneSelects);
+        Assert.Equal(insertDuringRun ? 503 : 502, await db.GoogleCalendarSyncCalendars.CountAsync());
+        if (late is not null)
+        {
+            Assert.Equal("PayPlanner - Late owner", (await db.GoogleCalendarSyncCalendars.AsNoTracking().SingleAsync(calendar => calendar.OwnerUserId == late.Id)).Name);
+        }
+        var rejectedIds = rejected.Select(user => user.Id).Append(admin.Id).Append(regular.Id).ToArray();
+        Assert.False(await db.GoogleCalendarSyncCalendars.AnyAsync(calendar => calendar.OwnerUserId.HasValue && rejectedIds.Contains(calendar.OwnerUserId.Value)));
+        Console.WriteLine($"CalendarOwners provider=Google; insert={insertDuringRun}; phase=repeat; pages={string.Join(',', probe.OwnerPageLimits)}; settings={probe.TimeZoneSelects}");
     }
 
     private static async Task<GoogleCalendarConnection> CreateConnectionAsync(PaymentContext db, int userId, string calendarMode = "personal", DateTime? syncFromDate = null)
