@@ -1572,6 +1572,18 @@ export function CaseDetailPage({
   const [tasksLoading, setTasksLoading] = useState(false);
   const [participantsLoading, setParticipantsLoading] = useState(false);
   const [documentsLoading, setDocumentsLoading] = useState(false);
+  const [documentSearch, setDocumentSearch] = useState('');
+  const visibleDocuments = useMemo(() => {
+    const needle = documentSearch.trim().toLocaleLowerCase('ru');
+    if (!needle) return documents;
+    return documents.filter((document) => [
+      document.originalFileName,
+      document.documentType,
+      document.status,
+      document.templateLabel ?? '',
+      document.uploadedByName,
+    ].some((value) => value.toLocaleLowerCase('ru').includes(needle)));
+  }, [documentSearch, documents]);
   const [courtEventsLoading, setCourtEventsLoading] = useState(true);
   const [courtEventsError, setCourtEventsError] = useState<string | null>(null);
   const [courtInstancesLoading, setCourtInstancesLoading] = useState(true);
@@ -4691,11 +4703,31 @@ export function CaseDetailPage({
                   const items = await apiService.getCaseDocuments(caseItem.id, signal);
                   if (!signal.aborted) setDocuments(items);
                 }} /> : null}
+              <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 p-3">
+                <div className="relative min-w-[220px] flex-1">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="search"
+                    aria-label="Поиск по документам дела"
+                    value={documentSearch}
+                    onChange={(event) => setDocumentSearch(event.target.value)}
+                    placeholder="Поиск по документам дела..."
+                    className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                  />
+                </div>
+                <span className="text-sm text-slate-500" aria-live="polite">
+                  {documentSearch.trim() ? `Найдено ${visibleDocuments.length} из ${documents.length}` : `Документов: ${documents.length}`}
+                </span>
+              </div>
               {documentsLoading ? (
                 <LoadingBlock label="Загрузка документов дела..." />
+              ) : documentSearch.trim() && documents.length > 0 && visibleDocuments.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
+                  По запросу «{documentSearch.trim()}» документов не найдено.
+                </div>
               ) : (
                 <DocumentList
-                  documents={documents}
+                  documents={visibleDocuments}
                   clientId={caseItem.clientId ?? null}
                   downloadingDocumentId={downloadingDocumentId}
                   previewingDocumentId={previewingDocumentId}

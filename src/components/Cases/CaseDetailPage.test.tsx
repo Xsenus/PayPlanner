@@ -1322,6 +1322,27 @@ describe('CaseDetailPage', () => {
     expect(screen.getByText('3 записи')).toBeTruthy();
   });
 
+  it('PAY-23: searches the loaded case documents and shows an honest empty state', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    expect(await screen.findByText('Заявление.docx')).toBeTruthy();
+    expect(screen.getByText(/Документов: \d+/u)).toBeTruthy();
+
+    const search = screen.getByRole('searchbox', { name: 'Поиск по документам дела' });
+    fireEvent.change(search, { target: { value: 'ЗАЯВЛ' } });
+    expect(screen.getByText('Заявление.docx')).toBeTruthy();
+    expect(screen.getByText(/Найдено \d+ из \d+/u)).toBeTruthy();
+
+    fireEvent.change(search, { target: { value: 'несуществующий файл' } });
+    expect(screen.queryByText('Заявление.docx')).toBeNull();
+    expect(screen.getByText(/документов не найдено/u)).toBeTruthy();
+
+    fireEvent.change(search, { target: { value: '' } });
+    expect(screen.getByText('Заявление.docx')).toBeTruthy();
+  });
+
   it('PAY-21: quick access opens existing case sections and marks the current one', async () => {
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
     expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
