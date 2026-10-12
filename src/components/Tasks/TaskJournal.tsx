@@ -400,6 +400,7 @@ const TASK_JOURNAL_FILTERS_STORAGE_PREFIX = 'pp.task_journal.filters.v1';
 const TASK_JOURNAL_SAVED_VIEWS_STORAGE_PREFIX = 'pp.task_journal.views.v1';
 const TASK_CARD_LAYOUT_STORAGE_PREFIX = 'pp.task_journal.card_layout.v1';
 const TASK_AUTOMATION_PANEL_STORAGE_PREFIX = 'pp.task_journal.automation_panel.v1';
+const TASK_FILTERS_PANEL_STORAGE_PREFIX = 'pp.task_journal.filters_panel.v1';
 
 const QUICK_FILTER_OPTIONS: Array<{ value: QuickFilter; label: string; description: string; icon: typeof ClipboardList }> = [
   { value: 'all', label: 'Все', description: 'Все доступные вам задачи.', icon: ListFilter },
@@ -441,6 +442,30 @@ function getTaskJournalSavedViewsStorageKey(userId: number | null, mode: TaskJou
 
 function getTaskCardLayoutStorageKey(userId: number | null) {
   return `${TASK_CARD_LAYOUT_STORAGE_PREFIX}.${userId ? `user:${userId}` : 'guest'}`;
+}
+
+function getTaskFiltersPanelStorageKey(userId: number | null) {
+  return `${TASK_FILTERS_PANEL_STORAGE_PREFIX}.${userId ? `user:${userId}` : 'guest'}`;
+}
+
+function readTaskFiltersPanelCollapsed(userId: number | null) {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    return window.localStorage.getItem(getTaskFiltersPanelStorageKey(userId)) === 'collapsed';
+  } catch {
+    return false;
+  }
+}
+
+function writeTaskFiltersPanelCollapsed(userId: number | null, collapsed: boolean) {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.localStorage.setItem(getTaskFiltersPanelStorageKey(userId), collapsed ? 'collapsed' : 'expanded');
+  } catch {
+    // Панель всё равно сворачивается в текущем сеансе, если браузер запретил localStorage.
+  }
 }
 
 function getTaskAutomationPanelStorageKey(userId: number | null) {
@@ -2733,6 +2758,10 @@ export function TaskJournal({
   const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [templatesPanelOpen, setTemplatesPanelOpen] = useState(false);
+  const [filtersPanelCollapsed, setFiltersPanelCollapsed] = useState(() => readTaskFiltersPanelCollapsed(currentUserId));
+  useEffect(() => {
+    setFiltersPanelCollapsed(readTaskFiltersPanelCollapsed(currentUserId));
+  }, [currentUserId]);
   const routeTaskRequestRef = useRef(0);
   const pendingRouteTaskReadRef = useRef<{ taskId: number; userId: number | null; requestId: number } | null>(null);
   const taskListRequestRef = useRef<AbortController | null>(null);
@@ -6058,6 +6087,23 @@ export function TaskJournal({
           />
         </section>
 
+        <div className="mb-6 min-w-0 max-w-full rounded-xl border border-slate-200 bg-white p-3" data-testid="task-filters-and-views">
+          <button
+            type="button"
+            onClick={() => {
+              const next = !filtersPanelCollapsed;
+              setFiltersPanelCollapsed(next);
+              writeTaskFiltersPanelCollapsed(currentUserId, next);
+            }}
+            aria-expanded={!filtersPanelCollapsed}
+            aria-controls="task-filters-and-views-body"
+            data-testid="task-filters-toggle"
+            className="flex w-full items-center gap-2 text-left text-sm font-semibold text-slate-800"
+          >
+            {filtersPanelCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+            Фильтры и представления
+          </button>
+          <div id="task-filters-and-views-body" hidden={filtersPanelCollapsed} className="mt-3">
         <section className="mb-4 flex min-w-0 max-w-full flex-wrap items-center justify-between gap-3">
           {!untriagedOnly ? <div className="flex max-w-full flex-wrap overflow-x-auto rounded-xl bg-slate-100 p-1" data-testid="task-quick-filter-row">
             {QUICK_FILTER_OPTIONS.map(({ value, label, description, icon: Icon }) => (
@@ -6443,6 +6489,8 @@ export function TaskJournal({
             </div>
           </div>
         </section>
+          </div>
+        </div>
 
         {viewMode === 'list' ? (
           <TaskJournalColumnSettings

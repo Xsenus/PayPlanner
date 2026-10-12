@@ -711,6 +711,28 @@ describe('TaskJournal', () => {
     expect(screen.getByText('БАНКРОТСТВО')).toBeTruthy();
   });
 
+  it('PAY-19: collapses the filters and views panel without losing filter state and remembers the choice', async () => {
+    await renderJournal([], { waitForTitle: null });
+
+    const toggle = screen.getByTestId('task-filters-toggle');
+    const body = document.getElementById('task-filters-and-views-body') as HTMLElement;
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(body.hidden).toBe(false);
+    expect(within(body).getByTestId('task-saved-view-select')).toBeTruthy();
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(body.hidden).toBe(true);
+    expect(window.localStorage.getItem('pp.task_journal.filters_panel.v1.user:7')).toBe('collapsed');
+
+    cleanup();
+    await renderJournal([], { waitForTitle: null });
+    expect(screen.getByTestId('task-filters-toggle').getAttribute('aria-expanded')).toBe('false');
+
+    fireEvent.click(screen.getByTestId('task-filters-toggle'));
+    expect(window.localStorage.getItem('pp.task_journal.filters_panel.v1.user:7')).toBe('expanded');
+  });
+
   it('creates a quick internal task without choosing a client or case', async () => {
     await renderJournal([], { waitForTitle: null });
 
