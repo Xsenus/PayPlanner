@@ -969,7 +969,11 @@ function normalizeTaskDuration(value: number | null | undefined) {
 }
 
 function formatDuration(minutes: number | null | undefined) {
-  const normalized = normalizeTaskDuration(minutes);
+  return formatTotalDuration(normalizeTaskDuration(minutes));
+}
+
+function formatTotalDuration(minutes: number) {
+  const normalized = Math.max(0, minutes);
   const hours = Math.floor(normalized / 60);
   const rest = normalized % 60;
   if (hours > 0 && rest > 0) return `${hours} ч ${rest} мин`;
@@ -2082,7 +2086,7 @@ function getTaskCalendarCardTone(
   colorMode: TaskCalendarColorMode,
   completedTaskCalendarAction: 'color' | 'hide' = 'color',
 ) {
-  if (completedTaskCalendarAction === 'color' && task.status === 'done') {
+  if (completedTaskCalendarAction === 'color' && !isTaskJournalActive(task.status)) {
     return 'border-slate-300 bg-slate-200 text-slate-900 ring-1 ring-slate-300';
   }
 
@@ -2276,8 +2280,8 @@ function getTimelineTaskTone(
     (String(task.assigneeUserId ?? '') === assigneeFilter || hasAssigneeParticipant(task, assigneeFilter));
   const isOwnTask = isSelectedAssignee || isTaskExecutorForUser(task, currentUserId);
 
-  if (completedTaskCalendarAction === 'color' && task.status === 'done') {
-    return { label: 'Выполнено', className: 'border-slate-700 bg-slate-600 text-white', dotClassName: 'bg-slate-600' };
+  if (completedTaskCalendarAction === 'color' && !isTaskJournalActive(task.status)) {
+    return { label: task.status.trim().toLowerCase() === 'cancelled' ? 'Отменена' : 'Выполнено', className: 'border-slate-700 bg-slate-600 text-white', dotClassName: 'bg-slate-600' };
   }
 
   if (colorMode === 'priority') {
@@ -3228,7 +3232,7 @@ export function TaskJournal({
 
     return {
       search: debouncedSearch.trim() || undefined,
-      // В календаре и на временной шкале выполненные задачи остаются, пока в настройках выбрано «оставить с отметкой»:
+      // В календаре и на временной шкале закрытые задачи остаются, пока в настройках выбрано «оставить с отметкой»:
       // фильтр «Активные» по умолчанию иначе скрывал бы их независимо от этой настройки.
       status: keepsCompletedInCalendar && statusFilter === 'active' ? 'all' : statusFilter,
       type: typeFilter === 'all' ? undefined : typeFilter,
@@ -4265,7 +4269,7 @@ export function TaskJournal({
       .filter((task) => {
         const due = new Date(task.dueAt);
         const statusOk = keepsCompletedInCalendar && statusFilter === 'active'
-          ? matchesStatusFilter(task, 'active') || task.status === 'done'
+          ? true
           : matchesStatusFilter(task, statusFilter);
         const periodOk = !shouldApplyPeriodFilter
           ? true
@@ -4488,7 +4492,7 @@ export function TaskJournal({
         : filteredTasks.filter((task) => taskTouchesCalendarUsers(task, visibleTaskCalendarUserIds, currentUserId, currentUserName));
 
       return completedTaskCalendarAction === 'hide'
-        ? scopeLimitedTasks.filter((task) => task.status !== 'done')
+        ? scopeLimitedTasks.filter((task) => isTaskJournalActive(task.status))
         : scopeLimitedTasks;
     },
     [completedTaskCalendarAction, currentUserId, currentUserName, filteredTasks, visibleTaskCalendarUserIds],
@@ -5936,7 +5940,7 @@ export function TaskJournal({
                   title="Общая настройка показа выполненных задач для всех сотрудников"
                 >
                   <CalendarDays className="h-4 w-4 shrink-0" aria-hidden="true" />
-                  Выполненные задачи в календарях
+                  Выполненные и отменённые задачи в календарях
                 </a>
               ) : null}
               {canExportTasks ? (
@@ -9185,9 +9189,11 @@ function TaskTimelineCalendar({
       const names = getTaskAssigneeNames(task);
       names.forEach((name) => {
         const item = byAssignee.get(name) ?? { name, count: 0, duration: 0, done: 0 };
-        item.count += 1;
-        item.duration += normalizeTaskDuration(task.plannedDurationMinutes);
-        if (task.status === 'done') {
+        if (isTaskJournalActive(task.status)) {
+          item.count += 1;
+          item.duration += normalizeTaskDuration(task.plannedDurationMinutes);
+        }
+        if (task.status.trim().toLowerCase() === 'done') {
           item.done += 1;
         }
         byAssignee.set(name, item);
@@ -9195,6 +9201,7 @@ function TaskTimelineCalendar({
     });
 
     return Array.from(byAssignee.values())
+      .filter((item) => item.count > 0 || item.done > 0)
       .sort((a, b) => b.duration - a.duration || b.count - a.count || a.name.localeCompare(b.name, 'ru'))
       .slice(0, 8);
   }, [weekTasks]);
@@ -9322,7 +9329,7 @@ function TaskTimelineCalendar({
             <div className="mb-4 flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
               {weekWorkload.map((item) => (
                 <span key={item.name} className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">
-                  {item.name}: {item.count} · {formatDuration(item.duration)}
+                  {item.name}: активных {item.count} · {formatTotalDuration(item.duration)}
                   {item.done > 0 ? ` · готово ${item.done}` : ''}
                 </span>
               ))}
@@ -9347,7 +9354,7 @@ function TaskTimelineCalendar({
                     <div key={key} className="border-l border-slate-200 px-3 py-3 text-center">
                       <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{WEEKDAY_LABELS[visibleDays.indexOf(day)]}</div>
                       <div className="mt-1 text-2xl font-semibold text-slate-900">{day.getDate()}</div>
-                      <div className="mt-1 text-xs text-slate-500">{dayTasks.length} · {formatDuration(dayDuration)}</div>
+                      <div className="mt-1 text-xs text-slate-500">{dayTasks.length} · {formatTotalDuration(dayDuration)}</div>
                       {onCreateDate ? (
                         <button
                           type="button"
@@ -9458,12 +9465,15 @@ function TaskTimelineCalendar({
                               movingTaskId === task.id ? 'opacity-60' : ''
                             } ${highlightedTaskId === task.id ? 'ring-2 ring-blue-300' : ''}`}
                             style={{ top, height, left, width }}
-                            title={`${task.title}\n${formatTimeOnly(start)}-${formatTimeOnly(end)}\nИсполнитель: ${getTaskAssigneeNames(task).join(', ') || task.assigneeName}\nПоручил: ${getTaskAuthorName(task)}`}
+                            title={`${task.title}\n${formatTimeOnly(start)}-${formatTimeOnly(end)}${!isTaskJournalActive(task.status) ? `\nСтатус: ${tone.label}` : ''}\nИсполнитель: ${getTaskAssigneeNames(task).join(', ') || task.assigneeName}\nПоручил: ${getTaskAuthorName(task)}`}
                           >
                             <div className="flex h-full items-start justify-between gap-1">
                               <button type="button" onClick={() => onEdit(task)} className="min-w-0 flex-1 text-left">
                                 <span className="block truncate font-bold uppercase leading-4">{task.title}</span>
-                                <span className={`block truncate font-semibold opacity-90 ${isCompactTask ? 'mt-0' : 'mt-0.5'}`}>{formatTimeOnly(start)}-{formatTimeOnly(end)}</span>
+                                <span className={`block truncate font-semibold opacity-90 ${isCompactTask ? 'mt-0' : 'mt-0.5'}`}>
+                                  {formatTimeOnly(start)}-{formatTimeOnly(end)}
+                                  {!isTaskJournalActive(task.status) ? <> · <span>{tone.label}</span></> : null}
+                                </span>
                                 {!isCompactTask ? (
                                   <span className="mt-0.5 block truncate opacity-90">{getTaskAssigneeNames(task).join(', ')}</span>
                                 ) : null}
@@ -9636,7 +9646,8 @@ function TaskCalendar({
     return ids;
   }, [tasksByDate]);
   const selectedTotalDuration = useMemo(
-    () => selectedTasks.reduce((sum, task) => sum + normalizeTaskDuration(task.plannedDurationMinutes), 0),
+    () => selectedTasks.filter((task) => isTaskJournalActive(task.status))
+      .reduce((sum, task) => sum + normalizeTaskDuration(task.plannedDurationMinutes), 0),
     [selectedTasks],
   );
   const selectedWorkload = useMemo(() => {
@@ -9648,6 +9659,7 @@ function TaskCalendar({
       intervals: Array<{ start: number; end: number }>;
     }>();
     selectedTasks.forEach((task) => {
+      if (!isTaskJournalActive(task.status)) return;
       const participantNames = getTaskParticipants(task, 'assignee').map(getParticipantDisplayName).filter(Boolean);
       const names = unique(participantNames.length > 0 ? participantNames : [task.assigneeName || 'Без исполнителя']);
       const due = new Date(task.dueAt);
@@ -9964,7 +9976,7 @@ function TaskCalendar({
                     {selectedTasks.length > 0 ? `${selectedTasks.length} задач` : 'Задач нет'}
                   </p>
                   {selectedTasks.length > 0 ? (
-                    <p className="mt-0.5 text-xs text-slate-500">Плановая загрузка: {formatDuration(selectedTotalDuration)}</p>
+                    <p className="mt-0.5 text-xs text-slate-500">Плановая загрузка: {formatTotalDuration(selectedTotalDuration)}</p>
                   ) : null}
                 </div>
                 {onCreateDate ? (
@@ -9998,7 +10010,7 @@ function TaskCalendar({
                       }`}
                       title={item.hasConflict ? 'Есть риск перегруза или пересечение по времени' : undefined}
                     >
-                      {item.name}: {item.count} · {formatDuration(item.duration)}
+                      {item.name}: {item.count} · {formatTotalDuration(item.duration)}
                       {item.urgent > 0 ? ` · срочных ${item.urgent}` : ''}
                       {item.overlaps > 0 ? ` · пересечений ${item.overlaps}` : ''}
                     </span>
@@ -10189,7 +10201,7 @@ export function TaskDaySchedulePanel({
             {formatDateOnly(selectedDate)}, слот {formatTimeRange(selectedDate, plannedDuration)}
           </h3>
           <p className="mt-1 text-sm text-slate-500">
-            {scheduleOwnerLabel}: {activeVisibleScheduleTasks.length} активных задач · {formatDuration(visibleScheduleLoadMinutes)}
+            {scheduleOwnerLabel}: {activeVisibleScheduleTasks.length} активных задач · {formatTotalDuration(visibleScheduleLoadMinutes)}
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs font-semibold">
@@ -10197,7 +10209,7 @@ export function TaskDaySchedulePanel({
             Всего: {visibleScheduleTasks.length}
           </span>
           <span className="rounded-full bg-white px-3 py-1 text-slate-600 ring-1 ring-slate-200">
-            Активных: {activeVisibleScheduleTasks.length} · {formatDuration(visibleScheduleLoadMinutes)}
+            Активных: {activeVisibleScheduleTasks.length} · {formatTotalDuration(visibleScheduleLoadMinutes)}
           </span>
           <span className={`rounded-full px-3 py-1 ring-1 ${conflicts.length > 0 ? 'bg-rose-50 text-rose-700 ring-rose-200' : 'bg-emerald-50 text-emerald-700 ring-emerald-200'}`}>
             {conflicts.length > 0 ? `Пересечения: ${conflicts.length}` : 'Свободно'}

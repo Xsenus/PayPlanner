@@ -1,0 +1,124 @@
+{
+  "verifiedAtUtc": "2026-10-12T17:53:00Z",
+  "branch": "claude/practical-bardeen-pglcf3",
+  "baseRevision": "132fffd00ddc3c40ed42b6f233897a5e4f0bc63b",
+  "deployed": false,
+  "yougilePublished": false,
+  "scope": "Existing done/cancelled statuses only; actual annulled production case unidentified",
+  "codeFiles": {
+    "backend/Controllers/TasksController.cs": "9adbc048103ea6839cd600ebbf65c0f921d651ca927c84492a22397c4ae5e778",
+    "backend/Services/CalendarSyncProviderRegistry.cs": "55e41976facf35af1e8c5c023e534666816fe5fe7819b7823c83e44c82ad6c0e",
+    "backend/Services/GoogleCalendarSyncService.cs": "1614c2eedf91ca050be6328a36acb95396bad595fbd0fcd1d0cc6fc71b092c24",
+    "backend/Services/YandexCalendarSyncService.cs": "89d4678755146b68f7f099aadea6b5de68ff87ad7968b738397445ce0951eaa1",
+    "src/components/Tasks/TaskJournal.tsx": "1d0d2eecc76e79c3495b8437b2320a5d5952e5362947a0189054d015f207487e",
+    "src/components/Settings/CalendarSyncProviderSettings.tsx": "ea328bee05c2eaba6bfe4975ce528a334b8082922dc682caeae1cffdbe4bf210",
+    "src/utils/taskJournalStore.ts": "bf5ed42a9702eb6ceffacba80511095e1b367b05204bb0a2a11fec708c7271ab"
+  },
+  "releaseBuild": {
+    "passed": true,
+    "warnings": 0,
+    "errors": 0,
+    "log": "calendar-terminal-release-build-policy-final.log"
+  },
+  "backendRelated": {
+    "passed": 128,
+    "failed": 0,
+    "skipped": 0,
+    "trx": "calendar-terminal-related-final.trx",
+    "trxSha256": "15c1c5748662cab8dadf981248ff10e7656fda8aa55e9ac15ab503bf5a98b41d",
+    "assemblySha256": "296eb8fad8c9308048ca35ea626fd6b8baec306b241813bf033c61af4d596e51"
+  },
+  "frontendRegression": {
+    "passed": 6,
+    "failed": 0,
+    "filteredOut": 376,
+    "log": "calendar-terminal-frontend-regressions-workload.log"
+  },
+  "frontendFullBeforeFinalWorkloadChange": {
+    "passed": 2592,
+    "failed": 0,
+    "files": 245,
+    "acceptedAsFinalGate": false
+  },
+  "frontendFinalGate": {
+    "state": "passed",
+    "session": null,
+    "unit": {
+      "passed": 2592,
+      "failed": 0,
+      "files": 245,
+      "log": "calendar-terminal-frontend-full-final.log"
+    },
+    "lintPassed": true,
+    "typesPassed": true,
+    "encodingPassed": true,
+    "productionBuildPassed": true
+  },
+  "backendFullFinalGate": {
+    "state": "not_started",
+    "priorBankGateCodeRevision": "cc744c0c98cefc1cb9a910f622f1d8ae220783ea",
+    "priorBankGateSession": 2664,
+    "priorBankGateCountsAsCalendarFinalGate": false
+  },
+  "syntheticBrowser": {
+    "database": "owned synthetic SQLite only",
+    "liveFrontendOnly": true,
+    "backendCalendarCodeInBrowser": "previous compiled version; new backend verified in SQLite unit tests",
+    "emailEnabled": false,
+    "backgroundServicesEnabled": false,
+    "externalCalendarProvidersEnabled": false,
+    "tasks": [
+      {
+        "id": 8,
+        "status": "inProgress"
+      },
+      {
+        "id": 9,
+        "status": "cancelled"
+      }
+    ],
+    "hideCalendar": {
+      "activeVisible": true,
+      "cancelledVisible": false,
+      "plannedDurationMinutes": 60,
+      "falseOverlapWarning": false
+    },
+    "hideTimeline": {
+      "activeVisible": true,
+      "cancelledVisible": false
+    },
+    "colorTimeline": {
+      "cancelledVisible": true,
+      "cancelledLabel": "Отменена",
+      "activeMinutes": 60
+    },
+    "legacyTaskCard": {
+      "cancelledLabel": "Отменена"
+    },
+    "modernTaskCard": {
+      "cancelledLabel": "Отменена",
+      "adminModeSwitchUsed": true
+    },
+    "originalSettingsRestore": "confirmed: color, legacy, other settings and task status preserved",
+    "responsive": "Header/link observed at 390/1024; timeline observed at 1440. Synthetic reminder overlays excluded from final images."
+  },
+  "remaining": [
+    "complete full backend gate for final code",
+    "responsive/theme/keyboard acceptance where applicable",
+    "identify actual production annulled task",
+    "separately authorized deployment and owner acceptance",
+    "verify/fix full external-calendar visibility for more than existing 500-task connection limit"
+  ],
+  "backendFormat": {
+    "passed": true,
+    "exitCode": 0,
+    "log": "calendar-terminal-format.log"
+  },
+  "surfaceInventoryUpdated": true,
+  "encoding": {
+    "passed": true,
+    "textFiles": 3095,
+    "log": "calendar-terminal-encoding-docs.log"
+  },
+  "verificationPerformedBeforeCommit": true
+}

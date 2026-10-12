@@ -189,7 +189,7 @@ describe('CalendarSyncProviderSettings', () => {
   it('focuses the shared visibility setting only after its data loads and never saves on navigation', async () => {
     window.history.replaceState(null, '', '/?ppTab=settings#completed-task-calendar');
     render(<CalendarSyncProviderSettings />);
-    await screen.findByText('Выполненные задачи в календарях');
+    await screen.findByText('Выполненные и отменённые задачи в календарях');
     const section = document.getElementById('completed-task-calendar');
     await waitFor(() => expect(document.activeElement).toBe(section));
     expect(screen.getByText(/Общая настройка для всех сотрудников/)).toBeTruthy();
@@ -200,7 +200,7 @@ describe('CalendarSyncProviderSettings', () => {
 
   it('preserves normal focus when calendar settings are opened without an anchor', async () => {
     render(<CalendarSyncProviderSettings />);
-    await screen.findByText('Выполненные задачи в календарях');
+    await screen.findByText('Выполненные и отменённые задачи в календарях');
     expect(document.activeElement).not.toBe(document.getElementById('completed-task-calendar'));
   });
 

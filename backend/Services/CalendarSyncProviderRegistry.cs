@@ -13,6 +13,14 @@ public static class CalendarSyncProviderRegistry
     public const string DefaultCompletedTaskCalendarAction = "color";
     public const string DefaultCompletedTaskGoogleColorId = "8";
 
+    public static bool IsClosedTaskStatus(string? status)
+        => string.Equals(status?.Trim(), "done", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status?.Trim(), "cancelled", StringComparison.OrdinalIgnoreCase);
+
+    public static bool ShouldHideTask(CalendarSyncSettingsDto settings, string? status)
+        => string.Equals(settings.CompletedTaskCalendarAction, "hide", StringComparison.Ordinal)
+            && IsClosedTaskStatus(status);
+
     public static CalendarSyncSettingsDto BuildDefaultSettings(bool externalCalendarSyncEnabled = false)
         => new()
         {

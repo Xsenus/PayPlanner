@@ -4387,20 +4387,54 @@ describe('TaskJournal', () => {
   });
 
   it.each([
-    ['hide', false],
-    ['color', true],
-  ])('keeps completed tasks in the task list but shows them in the calendar only when the action is %s', async (action, completedVisible) => {
+    ['hide', 'done', false],
+    ['hide', 'cancelled', false],
+    ['color', 'done', true],
+    ['color', 'cancelled', true],
+  ] as const)('preserves %s/%s tasks in the list and applies visibility across calendar views', async (action, status, completedVisible) => {
     const settings = await apiMock.getCalendarSyncSettings();
     apiMock.getCalendarSyncSettings.mockResolvedValue({ ...settings, completedTaskCalendarAction: action });
 
     await renderJournal([
       createTask({ id: 101, title: 'Открытая календарная задача', status: 'inProgress', dueAt: todayAt(10) }),
-      createTask({ id: 102, title: 'Готовая календарная задача', status: 'done', dueAt: todayAt(12) }),
+      createTask({ id: 102, title: 'Закрытая календарная задача', status, dueAt: todayAt(10) }),
     ], { initialView: 'calendar', waitForTitle: null });
 
     await waitFor(() => expect(screen.getByTestId('task-calendar-task-101')).toBeTruthy());
     await waitFor(() => expect(apiMock.getCalendarSyncSettings).toHaveBeenCalled());
     await waitFor(() => expect(Boolean(screen.queryByTestId('task-calendar-task-102'))).toBe(completedVisible));
+    expect(screen.getByText('Плановая загрузка: 1 ч')).toBeTruthy();
+    expect(screen.queryByText(/пересечений 1/)).toBeNull();
+
+    fireEvent.click(screen.getByTestId('task-view-timeline'));
+    await waitFor(() => expect(screen.getByTestId('task-timeline-task-101')).toBeTruthy());
+    expect(Boolean(screen.queryByTestId('task-timeline-task-102'))).toBe(completedVisible);
+    expect(screen.getByText(/Администратор: активных 1 · 1 ч/)).toBeTruthy();
+    if (completedVisible && status === 'cancelled') {
+      expect(within(screen.getByTestId('task-timeline-task-102')).getByText('Отменена')).toBeTruthy();
+    }
+    fireEvent.click(screen.getByTestId('task-view-calendar'));
+    await waitFor(() => expect(screen.getByTestId('task-calendar-task-101')).toBeTruthy());
+    expect(Boolean(screen.queryByTestId('task-calendar-task-102'))).toBe(completedVisible);
+    fireEvent.click(screen.getByTestId('task-view-list'));
+    fireEvent.change(screen.getByLabelText('Статус'), { target: { value: 'all' } });
+    await waitFor(() => expect(screen.getByText('Закрытая календарная задача')).toBeTruthy());
+    expect(screen.getByText('Открытая календарная задача')).toBeTruthy();
+  });
+
+  it.each([
+    ['cancelled', 480, '0 мин'],
+    ['inProgress', 300, '10 ч'],
+  ] as const)('shows total calendar workload without per-task bounds for %s', async (status, duration, expected) => {
+    await renderJournal([
+      createTask({ id: 101, status, plannedDurationMinutes: duration, dueAt: todayAt(10) }),
+      createTask({ id: 102, title: 'Вторая задача', status, plannedDurationMinutes: duration, dueAt: todayAt(15) }),
+    ], { initialView: 'calendar', waitForTitle: null });
+    await waitFor(() => expect(screen.getByTestId('task-calendar-task-101')).toBeTruthy());
+    expect(screen.getByText(`Плановая загрузка: ${expected}`)).toBeTruthy();
+    if (status === 'cancelled') {
+      expect(screen.queryByText(/пересечений 1/)).toBeNull();
+    }
   });
 
   it('saves and applies the selected task calendar color mode', async () => {
@@ -7964,16 +7998,16 @@ describe('TaskJournal', () => {
 
   it('links an administrator from task calendar to the exact shared visibility setting', async () => {
     await renderJournal([], { initialView: 'calendar', waitForTitle: null });
-    const link = await screen.findByRole('link', { name: 'Выполненные задачи в календарях' });
+    const link = await screen.findByRole('link', { name: 'Выполненные и отменённые задачи в календарях' });
     expect(link.getAttribute('href')).toBe('/?ppTab=settings&settingsSection=integrations&integrationTab=calendars#completed-task-calendar');
     fireEvent.click(screen.getByTestId('task-view-list'));
-    expect(screen.queryByRole('link', { name: 'Выполненные задачи в календарях' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Выполненные и отменённые задачи в календарях' })).toBeNull();
   });
 
   it('does not expose the administrative visibility link to an employee', async () => {
     authState.isAdmin = false;
     await renderJournal([], { initialView: 'calendar', waitForTitle: null });
-    expect(screen.queryByRole('link', { name: 'Выполненные задачи в календарях' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Выполненные и отменённые задачи в календарях' })).toBeNull();
   });
 
   it('hides completed tasks from the task calendar when the calendar setting says to hide them', async () => {

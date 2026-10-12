@@ -414,15 +414,17 @@ public class GoogleCalendarSyncServiceTests
         Assert.Equal("Asia/Krasnoyarsk", document.RootElement.GetProperty("timeZone").GetString());
     }
 
-    [Fact]
-    public async Task SyncNowAsync_UsesGoogleColorForCompletedTasksWhenColorModeEnabled()
+    [Theory]
+    [InlineData("done")]
+    [InlineData("cancelled")]
+    public async Task SyncNowAsync_UsesGoogleColorForCompletedTasksWhenColorModeEnabled(string status)
     {
         await using var db = await CreateContextAsync();
         var user = await CreateUserAsync(db, "executor-completed-color-google@example.com", "user");
         await EnableGoogleSettingsAsync(db);
         await CreateConnectionAsync(db, user.Id);
         var task = await CreateTaskAsync(db, user.Id, "Готовая задача", dueAt: DateTime.UtcNow.Date.AddDays(7).AddHours(9));
-        task.Status = "done";
+        task.Status = status;
         await db.SaveChangesAsync();
         var handler = new RecordingGoogleHandler();
         var service = CreateService(db, new FakeHttpClientFactory(handler));
@@ -438,8 +440,10 @@ public class GoogleCalendarSyncServiceTests
         Assert.Equal("8", document.RootElement.GetProperty("colorId").GetString());
     }
 
-    [Fact]
-    public async Task SyncTaskForConnectedUsersAsync_DeletesCompletedTaskEventWhenHideModeEnabled()
+    [Theory]
+    [InlineData("done")]
+    [InlineData("cancelled")]
+    public async Task SyncTaskForConnectedUsersAsync_DeletesCompletedTaskEventWhenHideModeEnabled(string status)
     {
         await using var db = await CreateContextAsync();
         var user = await CreateUserAsync(db, "executor-completed-hide-google@example.com", "user");
@@ -448,7 +452,7 @@ public class GoogleCalendarSyncServiceTests
         var connection = await CreateConnectionAsync(db, user.Id);
         var calendar = await CreateCalendarAsync(db, connection.Id, "calendar-completed-hide", "PayPlanner задачи");
         var task = await CreateTaskAsync(db, user.Id, "Скрыть готовую задачу", dueAt: new DateTime(2026, 6, 5, 9, 0, 0));
-        task.Status = "done";
+        task.Status = status;
         db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
         {
             ConnectionId = connection.Id,
@@ -471,6 +475,113 @@ public class GoogleCalendarSyncServiceTests
             request.RequestUri!.AbsolutePath.Contains("/events/event-completed-hide", StringComparison.Ordinal));
         var link = await db.GoogleCalendarTaskLinks.SingleAsync(item => item.TaskJournalItemId == task.Id);
         Assert.Equal("deleted", link.SyncStatus);
+        await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+        Assert.Single(handler.Requests, request => request.Method == HttpMethod.Delete);
+        task.Status = "inProgress";
+        await db.SaveChangesAsync();
+        await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+        Assert.Equal("active", (await db.GoogleCalendarTaskLinks.SingleAsync(item => item.TaskJournalItemId == task.Id)).SyncStatus);
+        Assert.Single(handler.Requests, request => request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath.Contains("/events", StringComparison.Ordinal));
+        await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+        Assert.Single(handler.Requests, request => request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath.Contains("/events", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("done")]
+    [InlineData("cancelled")]
+    public async Task SyncTaskForConnectedUsersAsync_WhenClosedColorChanges_UpdatesEventOnce(string status)
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "closed-color-change@example.local", "user");
+        await EnableGoogleSettingsAsync(db);
+        await CreateConnectionAsync(db, user.Id);
+        var task = await CreateTaskAsync(db, user.Id, "Closed color task", dueAt: DateTime.UtcNow.Date.AddDays(7).AddHours(9));
+        task.Status = status;
+        await db.SaveChangesAsync();
+        var handler = new RecordingGoogleHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+        await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+        var setting = await db.SystemSettings.SingleAsync(item => item.Key == "calendarSync.settings");
+        var settings = JsonSerializer.Deserialize<CalendarSyncSettingsDto>(setting.Value)!;
+        settings.CompletedTaskGoogleColorId = "11";
+        setting.Value = JsonSerializer.Serialize(settings);
+        await db.SaveChangesAsync();
+
+        await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+        await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+
+        var update = Assert.Single(handler.Requests, request => request.Method == HttpMethod.Put && request.RequestUri!.AbsolutePath.Contains("/events/", StringComparison.Ordinal));
+        using var document = JsonDocument.Parse(await update.Content!.ReadAsStringAsync());
+        Assert.Equal("11", document.RootElement.GetProperty("colorId").GetString());
+        Assert.Single(await db.GoogleCalendarTaskLinks.ToListAsync());
+        Assert.Equal(status, (await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id)).Status);
+    }
+
+    [Theory]
+    [InlineData("done", "hide", false)]
+    [InlineData("cancelled", "hide", false)]
+    [InlineData("done", "color", true)]
+    [InlineData("cancelled", "color", true)]
+    public async Task SyncNowAsync_AppliesClosedTaskPolicyBeforeCreatingEvent(string status, string action, bool visible)
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "closed-initial@example.local", "user");
+        await EnableGoogleSettingsAsync(db);
+        await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 10, completedTaskCalendarAction: action);
+        await CreateConnectionAsync(db, user.Id);
+        var task = await CreateTaskAsync(db, user.Id, "Closed synthetic task", dueAt: DateTime.UtcNow.Date.AddDays(7).AddHours(9));
+        task.Status = status;
+        await db.SaveChangesAsync();
+        var handler = new RecordingGoogleHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var result = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+
+        Assert.Equal(1, result.ProcessedTasks);
+        Assert.Equal(0, result.ErrorCount);
+        Assert.Equal(visible, await db.GoogleCalendarTaskLinks.AnyAsync(item => item.TaskJournalItemId == task.Id));
+        Assert.Equal(visible, handler.Requests.Any(request => request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath.Contains("/events", StringComparison.Ordinal)));
+        Assert.Equal(status, (await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id)).Status);
+    }
+
+    [Theory]
+    [InlineData("done")]
+    [InlineData("cancelled")]
+    public async Task SyncNowAsync_WhenClosedTaskDeleteFails_PreservesLinkAndReportsError(string status)
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-completed-hide-google@example.com", "user");
+        await EnableGoogleSettingsAsync(db);
+        await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 10, completedTaskCalendarAction: "hide");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        var calendar = await CreateCalendarAsync(db, connection.Id, "calendar-completed-hide", "PayPlanner задачи");
+        var task = await CreateTaskAsync(db, user.Id, "Скрыть готовую задачу", dueAt: DateTime.UtcNow.Date.AddDays(7).AddHours(9));
+        task.Status = status;
+        db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
+        {
+            ConnectionId = connection.Id,
+            CalendarSyncCalendarId = calendar.Id,
+            TaskJournalItemId = task.Id,
+            GoogleCalendarId = calendar.GoogleCalendarId,
+            GoogleEventId = "event-completed-hide",
+            SyncStatus = "active",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var handler = new RecordingGoogleHandler(HttpStatusCode.ServiceUnavailable);
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var result = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+
+        Assert.True(result.ErrorCount > 0);
+        Assert.Equal(0, result.ProcessedTasks);
+        Assert.Equal("active", (await db.GoogleCalendarTaskLinks.SingleAsync(item => item.TaskJournalItemId == task.Id)).SyncStatus);
+        Assert.Equal(status, (await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id)).Status);
+        var logs = await db.GoogleCalendarSyncLogs.Where(item => item.TaskJournalItemId == task.Id).ToListAsync();
+        Assert.Contains(logs, item => item.Status == "error");
+        Assert.DoesNotContain(logs, item => item.Status == "success" && item.Operation.StartsWith("delete-event", StringComparison.Ordinal));
+        Assert.Contains(handler.Requests, request => request.Method == HttpMethod.Delete);
     }
 
     [Fact]

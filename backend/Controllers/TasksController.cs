@@ -1138,8 +1138,7 @@ public class TasksController : ControllerBase
         }
 
         var query = BuildVisibleTasksQuery(access)
-            .AsNoTracking()
-            .Where(task => task.Status != "cancelled");
+            .AsNoTracking();
 
         if (from.HasValue)
         {
@@ -1169,7 +1168,8 @@ public class TasksController : ControllerBase
         var calendarSyncSettings = await LoadCalendarSyncSettingsAsync(ct);
         if (string.Equals(calendarSyncSettings.CompletedTaskCalendarAction, "hide", StringComparison.Ordinal))
         {
-            query = query.Where(task => task.Status != "done");
+            query = query.Where(task => task.Status == null ||
+                (task.Status.Trim().ToLower() != "done" && task.Status.Trim().ToLower() != "cancelled"));
         }
 
         var tasks = await query
@@ -7490,9 +7490,11 @@ public class TasksController : ControllerBase
             builder.AppendLine($"DTSTAMP:{FormatIcsDate(now, calendarTimeZone)}");
             builder.AppendLine($"DTSTART:{FormatIcsDate(start, calendarTimeZone)}");
             builder.AppendLine($"DTEND:{FormatIcsDate(end, calendarTimeZone)}");
-            builder.AppendLine($"SUMMARY:{EscapeIcsText(task.Title)}");
+            var cancelled = string.Equals(task.Status?.Trim(), "cancelled", StringComparison.OrdinalIgnoreCase);
+            var title = cancelled ? $"[Отменена] {task.Title}" : task.Title;
+            builder.AppendLine($"SUMMARY:{EscapeIcsText(title)}");
             builder.AppendLine($"DESCRIPTION:{EscapeIcsText(description)}");
-            builder.AppendLine($"STATUS:{(task.Status == "done" ? "COMPLETED" : "CONFIRMED")}");
+            builder.AppendLine($"STATUS:{(string.Equals(task.Status?.Trim(), "done", StringComparison.OrdinalIgnoreCase) ? "COMPLETED" : "CONFIRMED")}");
             foreach (var minutes in reminders)
             {
                 AppendIcsAlarm(builder, task, IcsReminderOptions.ToTriggerDuration(minutes));

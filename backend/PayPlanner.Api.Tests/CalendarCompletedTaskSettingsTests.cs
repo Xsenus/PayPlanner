@@ -7,6 +7,21 @@ namespace PayPlanner.Api.Tests;
 public class CalendarCompletedTaskSettingsTests
 {
     [Theory]
+    [InlineData("hide", "done", true)]
+    [InlineData("hide", " cancelled ", true)]
+    [InlineData("hide", "CANCELLED", true)]
+    [InlineData("hide", "inProgress", false)]
+    [InlineData("hide", "unknown", false)]
+    [InlineData("hide", null, false)]
+    [InlineData("color", "done", false)]
+    [InlineData("color", "cancelled", false)]
+    public void CalendarPolicy_HidesOnlySupportedClosedTaskStatuses(string action, string? status, bool hidden)
+    {
+        Assert.Equal(hidden, CalendarSyncProviderRegistry.ShouldHideTask(
+            new CalendarSyncSettingsDto { CompletedTaskCalendarAction = action }, status));
+    }
+
+    [Theory]
     [InlineData("hide", "hide")]
     [InlineData("color", "color")]
     [InlineData(null, "color")]

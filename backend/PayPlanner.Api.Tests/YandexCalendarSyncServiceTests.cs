@@ -972,8 +972,10 @@ END:VCALENDAR
             item.Status == "success");
     }
 
-    [Fact]
-    public async Task SyncTaskForConnectedUsersAsync_DeletesCompletedTaskEventWhenHideModeEnabled()
+    [Theory]
+    [InlineData("done")]
+    [InlineData("cancelled")]
+    public async Task SyncTaskForConnectedUsersAsync_DeletesCompletedTaskEventWhenHideModeEnabled(string status)
     {
         await using var db = await CreateContextAsync();
         var user = await CreateUserAsync(db, "executor-yandex-completed-hide@example.com", "user");
@@ -985,7 +987,7 @@ END:VCALENDAR
             user.Id,
             "Скрыть готовую задачу",
             new DateTime(2026, 6, 5, 9, 0, 0));
-        task.Status = "done";
+        task.Status = status;
         db.YandexCalendarTaskLinks.Add(new YandexCalendarTaskLink
         {
             ConnectionId = connection.Id,
@@ -1009,6 +1011,85 @@ END:VCALENDAR
             request.RequestUri!.AbsoluteUri == "https://caldav.yandex.ru/calendars/user/payplanner/event-yandex-completed-hide.ics");
         var link = await db.YandexCalendarTaskLinks.SingleAsync(item => item.TaskJournalItemId == task.Id);
         Assert.Equal("deleted", link.SyncStatus);
+        await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+        Assert.Single(handler.Requests, request => request.Method == HttpMethod.Delete);
+        task.Status = "inProgress";
+        await db.SaveChangesAsync();
+        await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+        Assert.Equal("active", (await db.YandexCalendarTaskLinks.SingleAsync(item => item.TaskJournalItemId == task.Id)).SyncStatus);
+        Assert.Single(handler.Requests, request => request.Method == HttpMethod.Put);
+        await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+        Assert.Single(handler.Requests, request => request.Method == HttpMethod.Put);
+    }
+
+    [Theory]
+    [InlineData("done", "hide", false)]
+    [InlineData("cancelled", "hide", false)]
+    [InlineData("done", "color", true)]
+    [InlineData("cancelled", "color", true)]
+    public async Task SyncNowAsync_AppliesClosedTaskPolicyBeforeCreatingEvent(string status, string action, bool visible)
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "closed-initial@example.local", "user");
+        await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 10, completedTaskCalendarAction: action);
+        await CreateConnectionAsync(db, user.Id);
+        var task = await CreateTaskAsync(db, user.Id, "Closed synthetic task", DateTime.UtcNow.Date.AddDays(7).AddHours(9));
+        task.Status = status;
+        await db.SaveChangesAsync();
+        var handler = new RecordingYandexHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var result = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+
+        Assert.Equal(1, result.ProcessedTasks);
+        Assert.Equal(0, result.ErrorCount);
+        Assert.Equal(visible, await db.YandexCalendarTaskLinks.AnyAsync(item => item.TaskJournalItemId == task.Id));
+        Assert.Equal(visible, handler.Requests.Any(request => request.Method == HttpMethod.Put));
+        Assert.Equal(status, (await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id)).Status);
+    }
+
+    [Theory]
+    [InlineData("done")]
+    [InlineData("cancelled")]
+    public async Task SyncNowAsync_WhenClosedTaskDeleteFails_PreservesLinkAndReportsError(string status)
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-yandex-completed-hide@example.com", "user");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 10, completedTaskCalendarAction: "hide");
+        var calendar = await CreateCalendarAsync(db, connection.Id, "calendar-yandex-completed-hide", "PayPlanner задачи");
+        var task = await CreateTaskAsync(
+            db,
+            user.Id,
+            "Скрыть готовую задачу",
+            DateTime.UtcNow.Date.AddDays(7).AddHours(9));
+        task.Status = status;
+        db.YandexCalendarTaskLinks.Add(new YandexCalendarTaskLink
+        {
+            ConnectionId = connection.Id,
+            CalendarSyncCalendarId = calendar.Id,
+            TaskJournalItemId = task.Id,
+            YandexCalendarId = calendar.YandexCalendarId,
+            YandexEventId = "event-yandex-completed-hide",
+            YandexEventUrl = $"{calendar.CalendarUrl}event-yandex-completed-hide.ics",
+            SyncStatus = "active",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var handler = new RecordingYandexHandler(HttpStatusCode.ServiceUnavailable);
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var result = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+
+        Assert.True(result.ErrorCount > 0);
+        Assert.Equal(0, result.ProcessedTasks);
+        Assert.Equal("active", (await db.YandexCalendarTaskLinks.SingleAsync(item => item.TaskJournalItemId == task.Id)).SyncStatus);
+        Assert.Equal(status, (await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id)).Status);
+        var logs = await db.YandexCalendarSyncLogs.Where(item => item.TaskJournalItemId == task.Id).ToListAsync();
+        Assert.Contains(logs, item => item.Status == "error");
+        Assert.DoesNotContain(logs, item => item.Status == "success" && item.Operation.StartsWith("delete-event", StringComparison.Ordinal));
+        Assert.Contains(handler.Requests, request => request.Method == HttpMethod.Delete);
     }
 
     [Fact]

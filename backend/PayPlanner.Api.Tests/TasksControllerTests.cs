@@ -7817,6 +7817,38 @@ public class TasksControllerTests
         Assert.Equal(completedIsExported, content.Contains("SUMMARY:Выполненная задача ICS", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData("hide", "cancelled", false)]
+    [InlineData("hide", " CANCELLED ", false)]
+    [InlineData("color", "cancelled", true)]
+    [InlineData("color", " CANCELLED ", true)]
+    public async Task ExportCalendar_AppliesClosedTaskPolicyWithoutRemovingTasks(string action, string status, bool exported)
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "ics-cancelled@example.local", "Автор");
+        var client = await CreateClientAsync(db, "Синтетический клиент");
+        var active = await CreateTaskAsync(db, author.Id, client.Id);
+        active.Title = "Активная задача ICS";
+        var cancelled = await CreateTaskAsync(db, author.Id, client.Id);
+        cancelled.Title = "Отменённая задача ICS";
+        cancelled.Status = status;
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "calendarSync.settings",
+            Value = System.Text.Json.JsonSerializer.Serialize(new { completedTaskCalendarAction = action }),
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.ExportCalendar(null, null, null, null, null, null, CancellationToken.None);
+
+        var content = Encoding.UTF8.GetString(Assert.IsType<FileContentResult>(result).FileContents);
+        Assert.Contains("SUMMARY:Активная задача ICS", content);
+        Assert.Equal(exported, content.Contains("SUMMARY:[Отменена] Отменённая задача ICS", StringComparison.Ordinal));
+        Assert.Equal(status, (await db.TaskJournalItems.SingleAsync(item => item.Id == cancelled.Id)).Status);
+        Assert.Equal(2, await db.TaskJournalItems.CountAsync());
+    }
+
     [Fact]
     public async Task ExportCalendar_ReturnsIcsWithTaskDuration()
     {

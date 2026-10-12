@@ -1100,6 +1100,11 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         var calendar = await EnsureCalendarForTaskAsync(connection, task, accessToken, cancellationToken);
         var timeZone = await ResolveTaskTimeZoneAsync(connection, null, task, cancellationToken);
         var crmHash = BuildCrmHash(task, timeZone, externalComments);
+        var closedTaskColorId = ResolveCompletedTaskGoogleColorId(task, settings);
+        if (closedTaskColorId is not null)
+        {
+            crmHash = Sha256($"{crmHash}|closedTaskColor:{closedTaskColorId}");
+        }
         var link = await _db.GoogleCalendarTaskLinks
             .FirstOrDefaultAsync(item => item.ConnectionId == connection.Id && item.TaskJournalItemId == task.Id, cancellationToken);
 
@@ -1116,7 +1121,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         var createNewEvent = link is null ||
             string.IsNullOrWhiteSpace(link.GoogleEventId) ||
             link.GoogleCalendarId != calendar.GoogleCalendarId ||
-            link.SyncStatus == "detached";
+            link.SyncStatus is "detached" or "deleted";
 
         GoogleEventWriteResult result;
         if (createNewEvent)
@@ -1558,8 +1563,8 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             deleted ? "delete-event" : "delete-event-missing",
             "success",
             deleted
-                ? "Событие удалено из Google Calendar, потому что в настройках включено скрытие выполненных задач."
-                : "Событие уже отсутствовало в Google Calendar при скрытии выполненной задачи.",
+                ? "Событие удалено из Google Calendar, потому что в настройках включено скрытие выполненных и отменённых задач."
+                : "Событие уже отсутствовало в Google Calendar при скрытии выполненной или отменённой задачи.",
             null,
             cancellationToken);
     }
@@ -2166,8 +2171,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         };
 
     private static bool ShouldHideCompletedTask(CalendarSyncSettingsDto settings, TaskJournalItem task)
-        => string.Equals(settings.CompletedTaskCalendarAction, "hide", StringComparison.Ordinal) &&
-           string.Equals(task.Status, "done", StringComparison.OrdinalIgnoreCase);
+        => CalendarSyncProviderRegistry.ShouldHideTask(settings, task.Status);
 
     private static bool IsLinkedGoogleEvent(GoogleCalendarTaskLink link, string googleCalendarId, string googleEventId)
         => string.Equals(link.GoogleCalendarId, googleCalendarId, StringComparison.Ordinal) &&
@@ -2175,7 +2179,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
 
     private static string? ResolveCompletedTaskGoogleColorId(TaskJournalItem task, CalendarSyncSettingsDto settings)
         => string.Equals(settings.CompletedTaskCalendarAction, "color", StringComparison.Ordinal) &&
-           string.Equals(task.Status, "done", StringComparison.OrdinalIgnoreCase)
+           CalendarSyncProviderRegistry.IsClosedTaskStatus(task.Status)
             ? CalendarSyncProviderRegistry.NormalizeGoogleColorId(settings.CompletedTaskGoogleColorId)
             : null;
 

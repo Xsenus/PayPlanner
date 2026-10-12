@@ -361,14 +361,14 @@ export function CalendarSyncProviderSettings() {
             className="mt-4 scroll-mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/70 p-3 focus:outline-none focus:ring-2 focus:ring-sky-500"
           >
             <div className="flex flex-col gap-1">
-              <h6 id="completed-task-calendar-heading" className="text-sm font-semibold text-gray-900">Выполненные задачи в календарях</h6>
+              <h6 id="completed-task-calendar-heading" className="text-sm font-semibold text-gray-900">Выполненные и отменённые задачи в календарях</h6>
               <p className="text-xs leading-5 text-gray-600">
-                Общая настройка для всех сотрудников: оставлять готовые задачи во внутреннем календаре и внешних календарях с отдельной отметкой или убирать их после выполнения. Выбор применяется после нажатия «Сохранить» вверху этого блока настроек.
+                Общая настройка для всех сотрудников: оставлять выполненные и отменённые задачи во внутреннем календаре и внешних календарях с отдельной отметкой или скрывать их. Отмена счёта сама по себе не скрывает активную задачу. Выбор применяется после нажатия «Сохранить» вверху этого блока настроек.
               </p>
             </div>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               <label className="block min-w-0">
-                <span className="text-xs font-semibold text-gray-700">Действие после выполнения</span>
+                <span className="text-xs font-semibold text-gray-700">Действие для закрытых задач</span>
                 <SystemSelect
                   value={draft.completedTaskCalendarAction}
                   onChange={(event) => updateDraft({ completedTaskCalendarAction: event.target.value })}
@@ -380,7 +380,7 @@ export function CalendarSyncProviderSettings() {
                 </SystemSelect>
               </label>
               <label className="block min-w-0">
-                <span className="text-xs font-semibold text-gray-700">Цвет готовых задач в Google</span>
+                <span className="text-xs font-semibold text-gray-700">Цвет закрытых задач в Google</span>
                 <SystemSelect
                   value={draft.completedTaskGoogleColorId}
                   onChange={(event) => updateDraft({ completedTaskGoogleColorId: event.target.value })}

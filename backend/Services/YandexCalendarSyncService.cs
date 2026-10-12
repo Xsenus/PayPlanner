@@ -1392,8 +1392,8 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             deleted ? "delete-event" : "delete-event-missing",
             "success",
             deleted
-                ? "Событие удалено из Яндекс Календаря, потому что в настройках включено скрытие выполненных задач."
-                : "Событие уже отсутствовало в Яндекс Календаре при скрытии выполненной задачи.",
+                ? "Событие удалено из Яндекс Календаря, потому что в настройках включено скрытие выполненных и отменённых задач."
+                : "Событие уже отсутствовало в Яндекс Календаре при скрытии выполненной или отменённой задачи.",
             null,
             cancellationToken);
     }
@@ -2292,8 +2292,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         };
 
     private static bool ShouldHideCompletedTask(CalendarSyncSettingsDto settings, TaskJournalItem task)
-        => string.Equals(settings.CompletedTaskCalendarAction, "hide", StringComparison.Ordinal) &&
-           string.Equals(task.Status, "done", StringComparison.OrdinalIgnoreCase);
+        => CalendarSyncProviderRegistry.ShouldHideTask(settings, task.Status);
 
     private static bool IsLinkedYandexEvent(YandexCalendarTaskLink link, string yandexCalendarId, string yandexEventId)
         => string.Equals(link.YandexCalendarId, yandexCalendarId, StringComparison.Ordinal) &&

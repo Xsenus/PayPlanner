@@ -462,7 +462,8 @@ export function createTaskJournalItem(input: Omit<TaskJournalItem, 'id' | 'creat
 }
 
 export function isTaskJournalActive(status: TaskJournalStatus) {
-  return status !== 'done' && status !== 'cancelled';
+  const normalized = status?.trim().toLowerCase();
+  return normalized !== 'done' && normalized !== 'cancelled';
 }
 
 export function getTaskJournalNotifications(items = loadTaskJournalItems()): TaskJournalNotification[] {
