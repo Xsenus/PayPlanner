@@ -1,0 +1,308 @@
+{
+  "baselineRevision": "a019cc8d",
+  "syntheticDataOnly": true,
+  "animationsDisabledForFinalCaptures": true,
+  "images": [
+    {
+      "file": "PAY-19-dark-next-step-fixed.png",
+      "width": 520,
+      "height": 110,
+      "bytes": 8043,
+      "sha256": "c6a7bc2c390c6f4b628bdd9260be7008b3c160c313fea094f749ecdf9121d8a9"
+    },
+    {
+      "file": "PAY-19-journal-1024.png",
+      "width": 1024,
+      "height": 3197,
+      "bytes": 376748,
+      "sha256": "1c22a7f65d32af2090dd81de5d987a1de6410ce1c60dc0284382e3fe13c6423f"
+    },
+    {
+      "file": "PAY-19-journal-1440.png",
+      "width": 1440,
+      "height": 2435,
+      "bytes": 377087,
+      "sha256": "206a3d3a38fc3f67924d559324c087597f737d4e3837b4fbced964db7ea115c7"
+    },
+    {
+      "file": "PAY-19-journal-390.png",
+      "width": 390,
+      "height": 4323,
+      "bytes": 299967,
+      "sha256": "59fce90e941c9b2187419750ef9649d45b133634b2ccc1698b139155040d6da9"
+    },
+    {
+      "file": "PAY-19-journal-collapsed-1440.png",
+      "width": 1440,
+      "height": 2009,
+      "bytes": 324611,
+      "sha256": "1c7bffc79cba9ee2af5c241baa6a3c1f15171d9c0eef56246d33a73b54ef4243"
+    },
+    {
+      "file": "PAY-19-journal-dark-long-1440.png",
+      "width": 1440,
+      "height": 2435,
+      "bytes": 433296,
+      "sha256": "58910bbc8aaebc9d5f02b4c4fc19e57e1531a18910e13817fe56666d68449851"
+    },
+    {
+      "file": "PAY-19-journal-dark-long-390.png",
+      "width": 390,
+      "height": 4323,
+      "bytes": 332478,
+      "sha256": "a8c410b8be542f909b6173cde3c580357d992188d8d1828c7a0bfdb1a2620adf"
+    },
+    {
+      "file": "PAY-19-long-collapsed-1440.png",
+      "width": 1440,
+      "height": 1719,
+      "bytes": 220870,
+      "sha256": "4a8715a4e637d81e7a903c3347f297d14bb3c7d7d5001b27951d5caf3d54f12a"
+    },
+    {
+      "file": "PAY-19-long-collapsed-390.png",
+      "width": 390,
+      "height": 3413,
+      "bytes": 163666,
+      "sha256": "8a884de3cb3d4802c257e12fce7e7562b5eddf963dcb05ee9231ea18629d62e4"
+    },
+    {
+      "file": "PAY-21-case-1024.png",
+      "width": 1024,
+      "height": 3653,
+      "bytes": 262265,
+      "sha256": "79c7ffe0a9a200c54d2a883c1f43d90e0c224a1eb94e25ee3e8273a0a25182b9"
+    },
+    {
+      "file": "PAY-21-case-1440-before.png",
+      "width": 1440,
+      "height": 1854,
+      "bytes": 262288,
+      "sha256": "08b64f6f33e17aecfc1e73ae608baf76e1ceaaf3b503b8bdb85770dbece4cba5"
+    },
+    {
+      "file": "PAY-21-case-1440.png",
+      "width": 1440,
+      "height": 2288,
+      "bytes": 259888,
+      "sha256": "f1685c34292ddce7c9de251c100e393b92248e89f7d032572d9d920dcfbdd3c1"
+    },
+    {
+      "file": "PAY-21-case-390.png",
+      "width": 390,
+      "height": 4925,
+      "bytes": 213403,
+      "sha256": "142645751c391dc918ffe4c0cdd63f8642e5780f7b6f2b6801265abad3a131f5"
+    },
+    {
+      "file": "PAY-21-case-dark-long-1440.png",
+      "width": 1440,
+      "height": 2568,
+      "bytes": 323041,
+      "sha256": "1d4150d698acd241337abc4da00c38662df977da977fa3efed14b925387aa588"
+    },
+    {
+      "file": "PAY-21-case-dark-long-390.png",
+      "width": 390,
+      "height": 5389,
+      "bytes": 267249,
+      "sha256": "84ca4c64f6cfd1a69234cb6007156406475ac6c4fd526633b50f98b7a380f414"
+    },
+    {
+      "file": "PAY-21-keyboard-focus.png",
+      "width": 180,
+      "height": 546,
+      "bytes": 18232,
+      "sha256": "14814b2af819f8a5e420856a8f4dff88858e3ee49640e2e494ab6f0da12b0b0e"
+    },
+    {
+      "file": "PAY-23-documents-1024.png",
+      "width": 1024,
+      "height": 3237,
+      "bytes": 267329,
+      "sha256": "59d659f47b937cd9e99c7ac22a90479223cc0a0b7a1cccfa01cfe1425e244ace"
+    },
+    {
+      "file": "PAY-23-documents-1440.png",
+      "width": 1440,
+      "height": 1872,
+      "bytes": 265937,
+      "sha256": "73e17b31f1e755f5938f4682b386a82dd5573db21ec50811744498428600323e"
+    },
+    {
+      "file": "PAY-23-documents-390.png",
+      "width": 390,
+      "height": 4427,
+      "bytes": 220951,
+      "sha256": "684d97635b01d0857dcf7ab7ab23fe1673cde6aca88b2a55348ad1c1f3ee2051"
+    },
+    {
+      "file": "PAY-23-documents-dark-long-1440.png",
+      "width": 1440,
+      "height": 2376,
+      "bytes": 365760,
+      "sha256": "ca652b12f022b32fc91db56c102dbe08365ed2c7624e8f199a5ca91044acd0c1"
+    },
+    {
+      "file": "PAY-23-documents-dark-long-390.png",
+      "width": 390,
+      "height": 5473,
+      "bytes": 310914,
+      "sha256": "da6a6c78c4f1dc3a9020c71fe941d189dac4368e73ab90074fa414897152d65d"
+    },
+    {
+      "file": "PAY-24-tasks-1024.png",
+      "width": 1024,
+      "height": 2808,
+      "bytes": 246134,
+      "sha256": "a10576554fb1c08cf70fb0298481941657d43f085fad86a7e2feb37ccc60451c"
+    },
+    {
+      "file": "PAY-24-tasks-1440.png",
+      "width": 1440,
+      "height": 1443,
+      "bytes": 241549,
+      "sha256": "a93aadd87e5211097bc3aee24590c92cdfbb8ad52644e82aacbbf99d95f66f41"
+    },
+    {
+      "file": "PAY-24-tasks-390.png",
+      "width": 390,
+      "height": 3782,
+      "bytes": 199471,
+      "sha256": "fa7647f9949fa7c0b8a0392052523272ddb2d5e8e03069909a593345459e92d5"
+    },
+    {
+      "file": "PAY-24-tasks-dark-long-1440.png",
+      "width": 1440,
+      "height": 2136,
+      "bytes": 308016,
+      "sha256": "d9ce7bf94552ac3f2e76d96a0b98ea63c377c5ffe2cfabc29f31fb2e52bd62a7"
+    },
+    {
+      "file": "PAY-24-tasks-dark-long-390.png",
+      "width": 390,
+      "height": 4246,
+      "bytes": 253545,
+      "sha256": "677bf5e67708eb09fe0d0692c86d75755907a082116c5d75e976a2f55a9ff9e5"
+    },
+    {
+      "file": "PAY-25-events-1024.png",
+      "width": 1024,
+      "height": 2518,
+      "bytes": 221558,
+      "sha256": "03faaf9c1592320ab07a8273239a40aa5b5b17488651fd672d81a96ecea3c06a"
+    },
+    {
+      "file": "PAY-25-events-1440.png",
+      "width": 1440,
+      "height": 1408,
+      "bytes": 218100,
+      "sha256": "b00006e8c3bfe732f0dfc3f06154a2c351f45cd939a595fb150313687d7834a6"
+    },
+    {
+      "file": "PAY-25-events-390.png",
+      "width": 390,
+      "height": 3326,
+      "bytes": 173572,
+      "sha256": "5e1d46a935d402c89d38ea5de0a1eb69d9541ae10dc26f8172f97d76d9696f40"
+    },
+    {
+      "file": "PAY-25-events-dark-long-1440.png",
+      "width": 1440,
+      "height": 2136,
+      "bytes": 284460,
+      "sha256": "db1c705ce99168d5711f28a4be32f46d12cd7ecd870fbfb80e97592b2c8fbdd0"
+    },
+    {
+      "file": "PAY-25-events-dark-long-390.png",
+      "width": 390,
+      "height": 3790,
+      "bytes": 226923,
+      "sha256": "55705e5f2fd3a15071b2372617f24be33148b6f480bb33115759cc710f0b2d22"
+    },
+    {
+      "file": "PAY-32-client-1024-before.png",
+      "width": 1024,
+      "height": 3196,
+      "bytes": 208389,
+      "sha256": "a81b3a32dcdd4242d1c310e7804b60ca30d0c907dd94850c083b2756508c81c7"
+    },
+    {
+      "file": "PAY-32-client-1024.png",
+      "width": 1024,
+      "height": 3733,
+      "bytes": 264103,
+      "sha256": "0c5d4f486e22d657c5c7995b36363048270adc78c70ae736aaa9c968e734df3d"
+    },
+    {
+      "file": "PAY-32-client-1440-before.png",
+      "width": 1440,
+      "height": 2652,
+      "bytes": 234955,
+      "sha256": "9531c0bfe93432cab6cf2e866157d1b15ae2292ae5e0d19329ab57e50cbc6fd6"
+    },
+    {
+      "file": "PAY-32-client-1440.png",
+      "width": 1440,
+      "height": 3032,
+      "bytes": 267626,
+      "sha256": "0a03d3c82ff34baccf524b536e3c0ca46494eb19c35900002a93f0ba54333a57"
+    },
+    {
+      "file": "PAY-32-client-390-before.png",
+      "width": 390,
+      "height": 5492,
+      "bytes": 220371,
+      "sha256": "40a6c44ada2401f5f1bcbf6d14f4e040745687871879038f1cee8543f637549d"
+    },
+    {
+      "file": "PAY-32-client-390.png",
+      "width": 390,
+      "height": 6449,
+      "bytes": 229716,
+      "sha256": "e9e063fcaf76929d42ea2dc8a77e8758eb50dd5f172b8f11ab83adc59e997c3e"
+    },
+    {
+      "file": "PAY-32-client-dark-long-1440.png",
+      "width": 1440,
+      "height": 3070,
+      "bytes": 298155,
+      "sha256": "c9d56c43b40ebdaf5d73feb1cf5f5049692472788cd5c60ddcde559b9cfda54d"
+    },
+    {
+      "file": "PAY-32-client-dark-long-390.png",
+      "width": 390,
+      "height": 6449,
+      "bytes": 249072,
+      "sha256": "13503fe7966a4570902f096eb9cfbc9afd6daca4f1fd1fbefad87f41041eb399"
+    },
+    {
+      "file": "PAY-32-dark-notes-fixed.png",
+      "width": 858,
+      "height": 125,
+      "bytes": 10749,
+      "sha256": "f73e0ee8d052f157682d57ab471aba96fc84723adde879b9e601fdb17d4d8397"
+    },
+    {
+      "file": "PAY-32-keyboard-focus.png",
+      "width": 240,
+      "height": 333,
+      "bytes": 7934,
+      "sha256": "e2ae45c90ce300248c46774d1ba6c9e79119c04f49cde105cd3e14f8c169db35"
+    },
+    {
+      "file": "PAY-37-calendar-setting.png",
+      "width": 1440,
+      "height": 1200,
+      "bytes": 265479,
+      "sha256": "db5b6dc3db05b6838ed3fa632441fb7d3c3e51fd399454017426bbf31a34eb83"
+    },
+    {
+      "file": "restricted-executor-events.png",
+      "width": 1280,
+      "height": 720,
+      "bytes": 113071,
+      "sha256": "2f9b0b4d9a5f3e9488c7527a14858fb995f5226c8d8dfc39b5942823ec66d368"
+    }
+  ]
+}

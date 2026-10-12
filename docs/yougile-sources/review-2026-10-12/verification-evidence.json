@@ -1,0 +1,608 @@
+{
+  "baselineRevision": "a019cc8d",
+  "scope": "Claude branch, synthetic local runtime only; no production acceptance",
+  "profiles": {
+    "filled": {
+      "clientId": 3,
+      "savedFromUI": true,
+      "collapsedGroupRoundTrip": [
+        "education",
+        "professions",
+        "workplaces",
+        "relatives"
+      ],
+      "profilePassportRoundTrip": true,
+      "separatePassportEndpointPreserved": true,
+      "contactsEmpty": true
+    },
+    "empty": {
+      "clientId": 1,
+      "emptyAdditionalSavedFromUI": true,
+      "legacyNotesPreserved": true,
+      "clientAndContactFieldsPreserved": true,
+      "noAdditionalValuesInvented": true
+    },
+    "legal": {
+      "legalClientId": 4,
+      "linkedLegalEntityId": 1,
+      "saveStatus": 200,
+      "individualGroupsAbsent": true,
+      "legalNavigationPreserved": true
+    }
+  },
+  "taskCards": {
+    "legacy": {
+      "mode": "legacy",
+      "saveStatus": 200,
+      "visibleCard": 1
+    },
+    "modern": {
+      "mode": "modern",
+      "saveStatus": 200,
+      "visibleCard": 1
+    },
+    "legacyRoundTrip": {
+      "descriptionSaved": true,
+      "otherFieldsPreserved": true,
+      "mode": "legacy-saved"
+    },
+    "modernRoundTrip": {
+      "descriptionSaved": true,
+      "otherFieldsPreserved": true,
+      "mode": "modern-saved"
+    },
+    "originalWindowMode": "legacy",
+    "allOtherSettingsPreserved": true,
+    "observerSettingsUpdateStatus": 403,
+    "normalization": "Existing save rules round deadlines to minutes and use atDue when reminders are empty; confirmed in baseline source."
+  },
+  "roles": {
+    "admin": {
+      "role": "admin",
+      "financeVisible": true,
+      "tasksVisible": true,
+      "eventRows": 2,
+      "createEventLeadsToCourt": true
+    },
+    "executorRestricted": {
+      "role": "executor",
+      "tasksVisible": false,
+      "financeVisible": false,
+      "eventRows": 2,
+      "requests": [
+        "/api/v2/cases/3/court-events"
+      ]
+    },
+    "accountant": {
+      "financeVisible": true,
+      "tasksVisible": true,
+      "eventRows": 2,
+      "createEventVisible": false,
+      "currentSectionMarked": true
+    },
+    "secretary": {
+      "financeVisible": true,
+      "tasksVisible": true,
+      "eventRows": 2,
+      "createEventVisible": false,
+      "currentSectionMarked": true
+    },
+    "observer": {
+      "financeVisible": true,
+      "tasksVisible": true,
+      "eventRows": 2,
+      "createEventVisible": false,
+      "currentSectionMarked": true
+    },
+    "originalPermissionsRestored": {
+      "originalPermissionsRestoredAndCompared": true,
+      "results": [
+        {
+          "role": "admin",
+          "route": "/clients/3",
+          "status": 200
+        },
+        {
+          "role": "admin",
+          "route": "/v2/cases/3",
+          "status": 200
+        },
+        {
+          "role": "admin",
+          "route": "/v2/cases/3/court-events",
+          "status": 200
+        },
+        {
+          "role": "accountant",
+          "route": "/clients/3",
+          "status": 404
+        },
+        {
+          "role": "accountant",
+          "route": "/v2/cases/3",
+          "status": 404
+        },
+        {
+          "role": "accountant",
+          "route": "/v2/cases/3/court-events",
+          "status": 404
+        },
+        {
+          "role": "secretary",
+          "route": "/clients/3",
+          "status": 404
+        },
+        {
+          "role": "secretary",
+          "route": "/v2/cases/3",
+          "status": 404
+        },
+        {
+          "role": "secretary",
+          "route": "/v2/cases/3/court-events",
+          "status": 404
+        },
+        {
+          "role": "executor",
+          "route": "/clients/3",
+          "status": 200
+        },
+        {
+          "role": "executor",
+          "route": "/v2/cases/3",
+          "status": 200
+        },
+        {
+          "role": "executor",
+          "route": "/v2/cases/3/court-events",
+          "status": 200
+        },
+        {
+          "role": "observer",
+          "route": "/clients/3",
+          "status": 404
+        },
+        {
+          "role": "observer",
+          "route": "/v2/cases/3",
+          "status": 404
+        },
+        {
+          "role": "observer",
+          "route": "/v2/cases/3/court-events",
+          "status": 404
+        }
+      ]
+    }
+  },
+  "actions": {
+    "baseline": "ee6eef4a",
+    "current": "5a678303 — исправления Codex поверх a019cc8d",
+    "totalBefore": 667,
+    "totalAfter": 669,
+    "matched": 667,
+    "missing": [],
+    "guardChanges": [],
+    "schemaBefore": 179,
+    "schemaAfter": 179,
+    "schemaMissing": []
+  },
+  "visual": {
+    "screens": [
+      {
+        "screen": "PAY-32-client",
+        "viewport": 390,
+        "documentWidth": 390,
+        "bodyWidth": 390,
+        "overflow": false
+      },
+      {
+        "screen": "PAY-32-client",
+        "viewport": 1024,
+        "documentWidth": 1024,
+        "bodyWidth": 1024,
+        "overflow": false
+      },
+      {
+        "screen": "PAY-32-client",
+        "viewport": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "overflow": false
+      },
+      {
+        "screen": "PAY-21-case",
+        "viewport": 390,
+        "documentWidth": 390,
+        "bodyWidth": 390,
+        "overflow": false
+      },
+      {
+        "screen": "PAY-21-case",
+        "viewport": 1024,
+        "documentWidth": 1024,
+        "bodyWidth": 1024,
+        "overflow": false
+      },
+      {
+        "screen": "PAY-21-case",
+        "viewport": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "overflow": false
+      },
+      {
+        "screen": "PAY-23-documents",
+        "viewport": 390,
+        "documentWidth": 390,
+        "bodyWidth": 390,
+        "overflow": false
+      },
+      {
+        "screen": "PAY-23-documents",
+        "viewport": 1024,
+        "documentWidth": 1024,
+        "bodyWidth": 1024,
+        "overflow": false
+      },
+      {
+        "screen": "PAY-23-documents",
+        "viewport": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "overflow": false
+      },
+      {
+        "screen": "PAY-24-tasks",
+        "viewport": 390,
+        "documentWidth": 390,
+        "bodyWidth": 390,
+        "overflow": false
+      },
+      {
+        "screen": "PAY-24-tasks",
+        "viewport": 1024,
+        "documentWidth": 1024,
+        "bodyWidth": 1024,
+        "overflow": false
+      },
+      {
+        "screen": "PAY-24-tasks",
+        "viewport": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "overflow": false
+      },
+      {
+        "screen": "PAY-25-events",
+        "viewport": 390,
+        "documentWidth": 390,
+        "bodyWidth": 390,
+        "overflow": false
+      },
+      {
+        "screen": "PAY-25-events",
+        "viewport": 1024,
+        "documentWidth": 1024,
+        "bodyWidth": 1024,
+        "overflow": false
+      },
+      {
+        "screen": "PAY-25-events",
+        "viewport": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "overflow": false
+      },
+      {
+        "screen": "PAY-19-journal",
+        "viewport": 390,
+        "documentWidth": 390,
+        "bodyWidth": 390,
+        "overflow": false
+      },
+      {
+        "screen": "PAY-19-journal",
+        "viewport": 1024,
+        "documentWidth": 1024,
+        "bodyWidth": 1024,
+        "overflow": false
+      },
+      {
+        "screen": "PAY-19-journal",
+        "viewport": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "overflow": false
+      }
+    ],
+    "compactMenu": {
+      "height": 346,
+      "buttons": 9
+    },
+    "collapsedSummary": "Статус: Активные без закрытых\nПериод: День"
+  },
+  "darkLong": [
+    {
+      "screen": "PAY-32-client",
+      "theme": "graphite",
+      "viewport": 390,
+      "scrollWidth": 390
+    },
+    {
+      "screen": "PAY-32-client",
+      "theme": "graphite",
+      "viewport": 1440,
+      "scrollWidth": 1440
+    },
+    {
+      "screen": "PAY-21-case",
+      "theme": "graphite",
+      "viewport": 390,
+      "scrollWidth": 390
+    },
+    {
+      "screen": "PAY-21-case",
+      "theme": "graphite",
+      "viewport": 1440,
+      "scrollWidth": 1440
+    },
+    {
+      "screen": "PAY-23-documents",
+      "theme": "graphite",
+      "viewport": 390,
+      "scrollWidth": 390
+    },
+    {
+      "screen": "PAY-23-documents",
+      "theme": "graphite",
+      "viewport": 1440,
+      "scrollWidth": 1440
+    },
+    {
+      "screen": "PAY-24-tasks",
+      "theme": "graphite",
+      "viewport": 390,
+      "scrollWidth": 390
+    },
+    {
+      "screen": "PAY-24-tasks",
+      "theme": "graphite",
+      "viewport": 1440,
+      "scrollWidth": 1440
+    },
+    {
+      "screen": "PAY-25-events",
+      "theme": "graphite",
+      "viewport": 390,
+      "scrollWidth": 390
+    },
+    {
+      "screen": "PAY-25-events",
+      "theme": "graphite",
+      "viewport": 1440,
+      "scrollWidth": 1440
+    },
+    {
+      "screen": "PAY-19-journal",
+      "theme": "graphite",
+      "viewport": 390,
+      "scrollWidth": 390
+    },
+    {
+      "screen": "PAY-19-journal",
+      "theme": "graphite",
+      "viewport": 1440,
+      "scrollWidth": 1440
+    }
+  ],
+  "keyboard": {
+    "journal": {
+      "keyboardToggle": true,
+      "focusKept": true,
+      "ring": "rgb(255, 255, 255) 0px 0px 0px 0px, color(srgb 0.145098 0.388235 0.921569 / 0.24) 0px 0px 0px 2px, rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+      "activeSummary": "Поиск: СинтетическийпоискСинтетическийпоискСинтетическийпоискСинтетическийпоискСинтетическийпоискСинтетическийпоискСинтетическийпоискСинтетическийпоискСинтетическийпоискСинтетическийпоискСинтетическийпоискСинтетическийпоиск\nСтатус: Активные без закрытых\nПериод: День",
+      "controlledPanelId": ":r1:"
+    },
+    "case": {
+      "focused": true,
+      "ring": "rgb(255, 255, 255) 0px 0px 0px 0px, color(srgb 0.145098 0.388235 0.921569 / 0.24) 0px 0px 0px 2px, rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+      "keyboardSelect": true,
+      "ariaCurrent": "page"
+    },
+    "client": {
+      "focused": true,
+      "ariaCurrent": "page",
+      "additionalKeyboardToggle": true,
+      "additionalFocusKept": true,
+      "active": true,
+      "visible": true,
+      "outline": "rgb(59, 130, 246) solid 2px",
+      "outlineColor": "rgb(59, 130, 246)"
+    }
+  },
+  "clientFocusFixed": {
+    "active": true,
+    "visible": true,
+    "outline": "rgb(59, 130, 246) solid 2px",
+    "outlineColor": "rgb(59, 130, 246)"
+  },
+  "darkContrastFixed": {
+    "client": [
+      {
+        "name": "comment",
+        "value": "Синтетическое примечание для проверки тёмной темы",
+        "color": "rgb(230, 235, 241)",
+        "background": "rgb(40, 54, 66)"
+      },
+      {
+        "name": "legacyNotes",
+        "value": "Синтетическая историческая заметка для проверки тёмной темы",
+        "color": "rgb(230, 235, 241)",
+        "background": "rgb(40, 54, 66)"
+      }
+    ],
+    "journal": {
+      "color": "rgb(230, 235, 241)",
+      "background": "color(srgb 0.133333 0.168627 0.215686 / 0.88)",
+      "ratio": 11.927366961828758
+    }
+  },
+  "documentButtons": [
+    {
+      "viewport": 390,
+      "buttons": [
+        {
+          "label": "Сохранить документ synthetic-review.txt",
+          "width": 147,
+          "scrollWidth": 147
+        },
+        {
+          "label": "Предпросмотр документа synthetic-review.txt",
+          "width": 147,
+          "scrollWidth": 147
+        },
+        {
+          "label": "Скачать документ synthetic-review.txt",
+          "width": 147,
+          "scrollWidth": 147
+        },
+        {
+          "label": "Отправить документ synthetic-review.txt на Яндекс.Диск",
+          "width": 147,
+          "scrollWidth": 147
+        },
+        {
+          "label": "Отправить документ synthetic-review.txt в мессенджер",
+          "width": 147,
+          "scrollWidth": 147
+        },
+        {
+          "label": "Удалить документ synthetic-review.txt",
+          "width": 147,
+          "scrollWidth": 147
+        }
+      ]
+    },
+    {
+      "viewport": 1024,
+      "buttons": [
+        {
+          "label": "Сохранить документ synthetic-review.txt",
+          "width": 151,
+          "scrollWidth": 151
+        },
+        {
+          "label": "Предпросмотр документа synthetic-review.txt",
+          "width": 151,
+          "scrollWidth": 151
+        },
+        {
+          "label": "Скачать документ synthetic-review.txt",
+          "width": 151,
+          "scrollWidth": 151
+        },
+        {
+          "label": "Отправить документ synthetic-review.txt на Яндекс.Диск",
+          "width": 151,
+          "scrollWidth": 151
+        },
+        {
+          "label": "Отправить документ synthetic-review.txt в мессенджер",
+          "width": 151,
+          "scrollWidth": 151
+        },
+        {
+          "label": "Удалить документ synthetic-review.txt",
+          "width": 151,
+          "scrollWidth": 151
+        }
+      ]
+    },
+    {
+      "viewport": 1440,
+      "buttons": [
+        {
+          "label": "Сохранить документ synthetic-review.txt",
+          "width": 149,
+          "scrollWidth": 149
+        },
+        {
+          "label": "Предпросмотр документа synthetic-review.txt",
+          "width": 149,
+          "scrollWidth": 149
+        },
+        {
+          "label": "Скачать документ synthetic-review.txt",
+          "width": 149,
+          "scrollWidth": 149
+        },
+        {
+          "label": "Отправить документ synthetic-review.txt на Яндекс.Диск",
+          "width": 149,
+          "scrollWidth": 149
+        },
+        {
+          "label": "Отправить документ synthetic-review.txt в мессенджер",
+          "width": 149,
+          "scrollWidth": 149
+        },
+        {
+          "label": "Удалить документ synthetic-review.txt",
+          "width": 149,
+          "scrollWidth": 149
+        }
+      ]
+    }
+  ],
+  "backend": {
+    "passed": 420,
+    "failed": 0,
+    "skipped": 0,
+    "groups": [
+      {
+        "passed": 410,
+        "filter": "ClientsController|CasesV2ControllerTests|RolePermissionsAuditTests|FieldEncryptionServiceTests|RestoredRuntimeFieldEncryptionTests|CorsPolicyConfigurationTests|AppVersionControllerTests"
+      },
+      {
+        "passed": 10,
+        "filter": "ClientPassportEncryption"
+      }
+    ],
+    "seedBuild": {
+      "errors": 0,
+      "warnings": 0
+    },
+    "freshSeed": {
+      "clients": 3,
+      "legalEntities": 2,
+      "cases": 3,
+      "courtInstances": 12,
+      "tasks": 5,
+      "users": 5,
+      "invoices": 1,
+      "payments": 2
+    },
+    "uiSeedFieldEncryptionEnabled": false,
+    "encryptionVerifiedInDisposableBackendTests": true
+  },
+  "frontendFullGate": {
+    "files": 260,
+    "tests": 2884,
+    "passed": 2884,
+    "failed": 0,
+    "skipped": 0,
+    "durationSeconds": 648.64,
+    "lint": "passed",
+    "types": "passed",
+    "build": "passed",
+    "buildSeconds": 55.82,
+    "dependencyVulnerabilities": 0
+  },
+  "codeRevision": "5a6783030ec36c4f1fbda83178c83ea6ad1d4cc0",
+  "environmentAndActionMapsRevision": "3c448d9d7cbf70c61c3265feba338bb53725a11d",
+  "encodingAudit": {
+    "passed": true,
+    "textFiles": 3077
+  }
+}
