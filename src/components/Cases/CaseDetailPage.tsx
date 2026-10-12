@@ -81,7 +81,7 @@ import { formatCurrencySmart } from '../../utils/formatters';
 import { courtAmountToInput, hasInvalidCourtAmounts, parseCourtAmountInput } from '../../utils/courtAmounts';
 import { buildCaseTaskPayload, getCaseStageTaskTemplates, isPretrialCaseStage, type CaseStageTaskTemplate } from '../../utils/caseTaskPayload';
 import { buildCourtCaseProcessSummary, buildCourtInstanceStage, type CourtProcessSummaryTone } from '../../utils/courtCaseSummary';
-import { formatDateTimeInTimeZone, fromTimeZoneDateTimeInput, getEffectiveScheduleTime, toTimeZoneDateKey, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
+import { formatDateTimeInTimeZone, fromTimeZoneDateTimeInput, getEffectiveScheduleTime, parseInstant, toTimeZoneDateKey, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
 import { normalizeUserTimeZoneId, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
 import type { TaskJournalItem } from '../../utils/taskJournalStore';
 
@@ -1547,11 +1547,32 @@ export function CaseDetailPage({
   const [showArchivedParties, setShowArchivedParties] = useState(false);
   const [documents, setDocuments] = useState<ClientCaseDocument[]>([]);
   const [courtEvents, setCourtEvents] = useState<ClientCaseCourtEvent[]>([]);
+  const [eventSearch, setEventSearch] = useState('');
+  const [eventTypeFilter, setEventTypeFilter] = useState('');
+  const [eventDateFrom, setEventDateFrom] = useState('');
+  const [eventDateTo, setEventDateTo] = useState('');
+  const eventTypeOptions = useMemo(() => Array.from(new Map(courtEvents.map(event =>
+    [event.eventType, event.eventTypeLabel || event.eventType])).entries())
+    .sort((left, right) => left[1].localeCompare(right[1], 'ru')), [courtEvents]);
   const sortedCourtEvents = useMemo(() => [...courtEvents].sort((left, right) => {
     const leftTime = getEffectiveScheduleTime(left.scheduledAt, left.allDay, caseTimeZoneId) ?? -Infinity;
     const rightTime = getEffectiveScheduleTime(right.scheduledAt, right.allDay, caseTimeZoneId) ?? -Infinity;
     return leftTime === rightTime ? right.id - left.id : rightTime - leftTime;
   }), [courtEvents, caseTimeZoneId]);
+  const eventPeriodInvalid = Boolean(eventDateFrom && eventDateTo && eventDateFrom > eventDateTo);
+  const eventFiltersActive = Boolean(eventSearch.trim() || eventTypeFilter || eventDateFrom || eventDateTo);
+  const visibleCourtEvents = useMemo(() => {
+    const query = eventSearch.trim().toLocaleLowerCase('ru');
+    return sortedCourtEvents.filter(event => {
+      if (eventPeriodInvalid || (eventTypeFilter && event.eventType !== eventTypeFilter)) return false;
+      if (query && ![event.title, event.description, event.courtName, event.resultSummary]
+        .some(value => value?.toLocaleLowerCase('ru').includes(query))) return false;
+      if (!eventDateFrom && !eventDateTo) return true;
+      if (!Number.isFinite(parseInstant(event.scheduledAt).getTime())) return false;
+      const dateKey = event.allDay ? event.scheduledAt.slice(0, 10) : toTimeZoneDateKey(event.scheduledAt, caseTimeZoneId);
+      return Boolean(dateKey) && (!eventDateFrom || dateKey >= eventDateFrom) && (!eventDateTo || dateKey <= eventDateTo);
+    });
+  }, [sortedCourtEvents, eventSearch, eventTypeFilter, eventDateFrom, eventDateTo, eventPeriodInvalid, caseTimeZoneId]);
   const [courtInstances, setCourtInstances] = useState<ClientCaseCourtInstance[]>([]);
   const [courtDirectory, setCourtDirectory] = useState<ClientCaseCourt[]>([]);
   const [courtParties, setCourtParties] = useState<ClientCaseCourtParty[]>([]);
@@ -1760,6 +1781,10 @@ export function CaseDetailPage({
     setEditPageOpen(false);
     setCaseEditDraft(null);
     setCourtEvents([]);
+    setEventSearch('');
+    setEventTypeFilter('');
+    setEventDateFrom('');
+    setEventDateTo('');
     setCourtEventsLoading(true);
     setCourtEventsError(null);
     setCourtDirectory([]);
@@ -4386,15 +4411,39 @@ export function CaseDetailPage({
                   </button>
                 ) : null}
               </div>
+              <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
+                <label className="min-w-0 text-xs font-medium text-slate-600">Поиск событий
+                  <input type="search" value={eventSearch} onChange={event => setEventSearch(event.target.value)}
+                    placeholder="Название, описание, суд, результат" className="mt-1 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                </label>
+                <label className="min-w-0 text-xs font-medium text-slate-600">Тип события
+                  <SystemSelect value={eventTypeFilter} onChange={event => setEventTypeFilter(event.target.value)} className="mt-1 w-full">
+                    <option value="">Все типы</option>
+                    {eventTypeOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  </SystemSelect>
+                </label>
+                <label className="min-w-0 text-xs font-medium text-slate-600">События с даты
+                  <SystemDateInput type="date" value={eventDateFrom} onChange={event => setEventDateFrom(event.target.value)} className="mt-1 w-full" />
+                </label>
+                <label className="min-w-0 text-xs font-medium text-slate-600">События по дату
+                  <SystemDateInput type="date" value={eventDateTo} onChange={event => setEventDateTo(event.target.value)} className="mt-1 w-full" />
+                </label>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+                <span role="status">Показано {visibleCourtEvents.length} из {courtEvents.length} · судебные события</span>
+                {eventFiltersActive ? <button type="button" className="rounded-lg px-2 py-1 font-semibold text-slate-700 hover:bg-slate-50"
+                  onClick={() => { setEventSearch(''); setEventTypeFilter(''); setEventDateFrom(''); setEventDateTo(''); }}>Сбросить фильтры событий</button> : null}
+              </div>
+              {eventPeriodInvalid ? <div role="alert" className="text-sm text-amber-800">Начало периода должно быть не позже окончания.</div> : null}
               {courtEventsLoading ? (
                 <LoadingBlock label="Загрузка событий дела..." />
               ) : courtEventsError ? (
                 <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">{courtEventsError}</div>
-              ) : courtEvents.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">По делу пока нет событий.</div>
+              ) : visibleCourtEvents.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">{courtEvents.length ? 'Нет судебных событий, соответствующих фильтрам.' : 'По делу пока нет событий.'}</div>
               ) : (
                 <ol className="divide-y divide-slate-100">
-                  {sortedCourtEvents
+                  {visibleCourtEvents
                     .map((event) => (
                       <li key={event.id} className="grid gap-1 py-3 sm:grid-cols-[170px_1fr]">
                         <div className="text-sm font-semibold text-slate-900">{formatCourtEventSchedule(event) || '—'}</div>

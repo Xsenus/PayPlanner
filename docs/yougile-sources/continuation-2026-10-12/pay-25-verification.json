@@ -1,0 +1,71 @@
+{
+  "caseTests": 132,
+  "productionBuild": "passed",
+  "scope": "PAY-25 frontend filters; no API/model changes",
+  "deployed": false,
+  "lint": "passed",
+  "visualChecks": {
+    "horizontalOverflow": false,
+    "graphiteResetHoverReadable": true,
+    "search": true,
+    "reset": true,
+    "keyboard": true,
+    "emptyResult": true
+  },
+  "screenshots": [
+    {
+      "sha256": "3fea636da477032db3d1ab78382d3b2c943b46c40b8ec894489ee822d8020b50",
+      "viewport": 390,
+      "file": "pay-25-filters-390.png",
+      "theme": "light"
+    },
+    {
+      "sha256": "425a2c62e178c371ec2e7dfe7a9b4dfa4967fa3ead63c52d00cf2b1d79ab1475",
+      "viewport": 1024,
+      "file": "pay-25-filters-1024.png",
+      "theme": "light"
+    },
+    {
+      "sha256": "61144191a01f5e7c2946e869383409b01c5e17c82e9bda623c68be67e6bbc467",
+      "viewport": 1440,
+      "file": "pay-25-filters-1440.png",
+      "theme": "light"
+    },
+    {
+      "sha256": "fe91f45d9ebad2be3da6d61cb7fa4e03a2836046e171c9f9f751020854741bda",
+      "viewport": 390,
+      "file": "pay-25-filters-dark-390.png",
+      "theme": "graphite"
+    },
+    {
+      "sha256": "4ab9fb30fbdc8946a9f48eb9e24461fb64c83c36136fe9759db05d2f1d25399e",
+      "viewport": 1024,
+      "file": "pay-25-filters-dark-1024.png",
+      "theme": "graphite"
+    },
+    {
+      "sha256": "e3ea99b917ea87f49a7161c93785329301fc29ffd636aa84551ef3b30821537a",
+      "viewport": 1440,
+      "file": "pay-25-filters-dark-1440.png",
+      "theme": "graphite"
+    }
+  ],
+  "typeCheckRoot": "passed",
+  "localRuntime": {
+    "emailEnabled": false,
+    "backgroundServicesEnabled": false,
+    "prodDataUsed": false,
+    "data": "owned synthetic SQLite"
+  },
+  "targetedPay25Tests": 8,
+  "typeCheckApp": "passed",
+  "branch": "claude/practical-bardeen-pglcf3",
+  "unit": {
+    "passed": 2570,
+    "success": true,
+    "files": 244,
+    "command": "npx vitest run --exclude '**/*.integration.test.*' --maxWorkers=3 --reporter=json",
+    "failed": 0,
+    "pending": 0
+  }
+}

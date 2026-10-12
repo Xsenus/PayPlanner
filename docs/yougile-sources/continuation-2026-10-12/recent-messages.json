@@ -1,0 +1,712 @@
+{
+  "observedAtUtc": "2026-10-12 14:17:24 UTC",
+  "company": "PayPlanner",
+  "companyId": "a9848b434609",
+  "projectId": "daa8d6c1-cce6-4c0c-985a-6bdc5a4b5eb4",
+  "cutoff": "2026-10-12T09:00:00+07:00",
+  "nextCursor": null,
+  "totalItems": 38,
+  "items": [
+    {
+      "id": "99465014-bfd6-46b1-9130-cc4b5ab6f80c",
+      "taskId": "PAY-32",
+      "title": "РЕДИЗАН КАРТОЧКИ КЛИЕНТА ФИЗ. ЛИЦА",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "15eb93b8-7fde-4a2f-9c08-439dee8b8d32",
+      "taskId": "PAY-29",
+      "title": "РЕДИЗАЙН МЕССЕНДЖЕРА В СРМ",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "56e92dc9-3186-4cb1-ae7f-d05901712565",
+      "taskId": "PAY-28",
+      "title": "СДЕЛАТЬ РЕДЕЗАН - РАЗДЕЛА  ФИНАНСЫ  В КАРТОЧКЕ ДЕЛА",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "403a558a-e1b8-4329-b6d4-ae0e36ed7a8c",
+      "taskId": "PAY-27",
+      "title": "СДЕЛАТЬ РЕДЕЗАН - РАЗДЕЛА  ПОЧТА РФ  В КАРТОЧКЕ ДЕЛА",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "f9294faf-6260-45b6-b7fd-efee790c59aa",
+      "taskId": "PAY-26",
+      "title": "СДЕЛАТЬ РЕДЕЗАН - РАЗДЕЛА  ФССП В КАРТОЧКЕ ДЕЛА",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "6c6ec9ef-c343-4c3b-af62-3f4228f8ad5a",
+      "taskId": "PAY-25",
+      "title": "СДЕЛАТЬ РЕДЕЗАН - РАЗДЕЛА  СОБЫТИЯ В КАРТОЧКЕ ДЕЛА",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "0d9fb0ef-2ad0-4799-b049-29d72b761851",
+      "taskId": "PAY-24",
+      "title": "СДЕЛАТЬ РЕДЕЗАН - РАЗДЕЛА  ЗАДАЧИ В КАРТОЧКЕ ДЕЛА",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "7d72c480-1fcc-481b-bab7-dd7f1d52f37b",
+      "taskId": "PAY-23",
+      "title": "СДЕЛАТЬ РЕДЕЗАН - РАЗДЕЛА  ДОКУМЕНТЫ В КАРТОЧКЕ ДЕЛА",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "9a50de8b-d880-4cdc-92f3-e4f536b471fa",
+      "taskId": "PAY-22",
+      "title": "СДЕЛАТЬ РЕДЕЗАН - РАЗДЕЛА СУД В КАРДОЧКЕ ДЕЛА",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "65d94840-3e9b-48fc-bb1d-00510fad1d2b",
+      "taskId": "PAY-19",
+      "title": "СДЕЛАТЬ РЕДИЗАЙН ЖУРАНАЛА ЗАДАЧ",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "c3448093-93ac-4385-b175-11d24c033438",
+      "taskId": "PAY-9",
+      "title": "РЕАЛИЗОВАТЬ СИНХРОНИЗАЦИЮ СПРАВОЧНИКА КОНТАКТОВ СРМ  И СПРАВОЧНИКА ТЕЛЕФОНА",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "b714cbd0-6f92-4345-9dea-dfe0785a2ee1",
+      "taskId": "PAY-8",
+      "title": "РЕАЛИЗОВАТЬ ТРИГЕР ТЕЛЕФОНИИ В СРМ  НА БАЗЕ pbx",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "cf0f1b97-e3fa-4ac0-b47c-7ded0e0c2942",
+      "taskId": "PAY-30",
+      "title": "БЛОК БИЗНЕС ПРОЦЕССЫ\nПИШЕТСЯ",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "2ff4816e-8bec-415d-8420-f394df4fec8d",
+      "taskId": "PAY-18",
+      "title": "ПЕРЕРАБОТКА  РАЗДЕЛА НАСТРОЙКА ПРАВ СОТРУДНИКОВ В НОРМАЛЬНЫЙ ВИД - ПИШЕТСЯ",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "975c7db0-a7bc-4711-9db7-2b0850a5c6dd",
+      "taskId": "PAY-2",
+      "title": "РАЗДЕЛ ЗАРПЛАТА -ЗАДАНИЕ ПИШЕТСЯ",
+      "columnId": "8b67ab8b-15cb-4d8e-ba99-70a51801dbb4",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "ec9decc2-06b0-4247-96f2-51e916ee7e6c",
+      "taskId": "PAY-21",
+      "title": "СДЕЛАТЬ РЕДИЗАЙН КАРТОЧКИ ДЕЛА",
+      "columnId": "6cf1730a-d731-4978-81cc-e9e55ad2d36c",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "5358047f-22c4-4d02-a633-8ddbdec263b9",
+      "taskId": "PAY-7",
+      "title": "КОНТРОЛЬ И ОБЪЕДЕНЕНИЕ ДУБЛЕЙ КОНТАКТОВ",
+      "columnId": "7242f4f8-301f-438e-9078-d102ad91fa58",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "fd9524b4-9723-45b4-b762-f37561e119a2",
+      "taskId": "PAY-36",
+      "title": "ИНТЕГРАЦИИ С БАНКОМ",
+      "columnId": "38768f75-7e1d-4368-be67-d552474c14ee",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "11864365-b470-43f0-893a-a33d076be15e",
+      "taskId": "PAY-35",
+      "title": "КНИГА УЧЕТА И ПРОДАЖ",
+      "columnId": "38768f75-7e1d-4368-be67-d552474c14ee",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": [
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1791793892606,
+          "text": "учитывайте в формет 1С  и требованиям поравитеьства\nвыгрузка  для налоговой в основном  в том числе 1с  иногда просят\nпоэтому к документам ОСОБОЕ ВНИМАНИЕ"
+        }
+      ]
+    },
+    {
+      "id": "c9b411c2-500a-4536-99e9-21b12a736f0f",
+      "taskId": "PAY-34",
+      "title": "СРОЧНО  БУХ. ПЕРВИЧНЫЕ . ДОКУМЕНТЫ -КУБ",
+      "columnId": "38768f75-7e1d-4368-be67-d552474c14ee",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": [
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1791794153228,
+          "text": "в максе написал все  и требования к счетам  и иным документам\nочень прошу прям критично вниматеьно отнестись к функционал и форме документов"
+        },
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1791794173584,
+          "text": "Зайдите в куб, там две минуты  посмотреть"
+        },
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1791794234638,
+          "text": "если упрощенка  или нет ндс в настройках компании то колонки вообе нет\nно если нужен ндс к примеру точечно , то ндс  включаеться прям в счете  ик олонка появляется\nскидка - тоже попробуйте включите в ключбом счете как это работает"
+        },
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1791794267692,
+          "text": "ранее мы сипользовали скидку постоянно для лкиетов что бы показать  клиенту как мы его ценим и делаем скидку а не меняем стоимость"
+        },
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1791794283212,
+          "text": "поэтому  можно позаимствовать часть функционала с того сервиса"
+        }
+      ]
+    },
+    {
+      "id": "ae426978-a839-4230-a5f0-474d0e9dd4e9",
+      "taskId": "PAY-33",
+      "title": "СРОЧНО .  ПРОФИЛЬ КОМПАНИИ - КУБ24",
+      "columnId": "38768f75-7e1d-4368-be67-d552474c14ee",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "5bab0eae-ec0a-4056-9dea-548d64a3df77",
+      "taskId": "PAY-31",
+      "title": "СОЗДАТЬ РАЗДЕЛ СРМ \nТЗ ВНУТРИ",
+      "columnId": "38768f75-7e1d-4368-be67-d552474c14ee",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": [
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1791794390214,
+          "text": "дизайн сразу надо делать  тоже , что бы  потом не возвращеаться или макет дизайна хотя бы\nв том  виде что сейчас - конечно работать не возможно будет"
+        }
+      ]
+    },
+    {
+      "id": "cb0bf4b0-a1e5-46f8-b31c-48bd20472425",
+      "taskId": "PAY-38",
+      "title": "НУЖНА КОНСУЛЬТАЦИЯ - АЛИСА",
+      "columnId": "38768f75-7e1d-4368-be67-d552474c14ee",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": [
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1791794490460,
+          "text": "Тогда нужно определится с сервисом который вы порекомендуете\nпро то у нас все на яндексе\nс отсальными мы не работали"
+        }
+      ]
+    },
+    {
+      "id": "510afd33-fee8-4ec2-89a2-09c736004350",
+      "taskId": "PAY-20",
+      "title": "СДЕЛАТЬ РЕДИЗАЙН КАРТОКИ ЗАДАЧИ",
+      "columnId": "38768f75-7e1d-4368-be67-d552474c14ee",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "f5832f5b-6106-411d-84ef-ff1700530a70",
+      "taskId": "PAY-16",
+      "title": "КОРРЕКТИРОВАКА КАРТОЧКИ  ЗАДАЧИ -логика по  привязанным счетам",
+      "columnId": "38768f75-7e1d-4368-be67-d552474c14ee",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "694a87e3-c960-4ed4-bf8e-43a0f6866fb2",
+      "taskId": "PAY-14",
+      "title": "ПОДКЛЮЧИТЬ БОТА В МАКС \nДЛЯ ПОЛУЧЕНИЯ ВСЕХ УВЕДОМЛЕНИЙ",
+      "columnId": "38768f75-7e1d-4368-be67-d552474c14ee",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": [
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1791793310073,
+          "text": "ДАВАЙТЕ НА МНЕ ТЕСТИРОВАТЬ , Я ГОТОВ .\nНАПИШИТЕ ДАТУ И ВРЕМЯ - НАЧНЕМ ПО ШАГАМ ВСЕ ДЕЛАТЬ"
+        },
+        {
+          "authorId": "5ae924d5-dc20-4a42-a971-7fc05f26a3bb",
+          "timestamp": 1791793680470,
+          "text": "токен еще не подвязал, сегодня как обновления до устанавливается запущу"
+        },
+        {
+          "authorId": "5ae924d5-dc20-4a42-a971-7fc05f26a3bb",
+          "timestamp": 1791793697118,
+          "text": "пока еще процесс борки всего идет"
+        }
+      ]
+    },
+    {
+      "id": "cb50ccfa-6b11-40d5-ae41-2a5e5b07324c",
+      "taskId": "PAY-4",
+      "title": "доработка расписания в задачах",
+      "columnId": "38768f75-7e1d-4368-be67-d552474c14ee",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "d40a2a79-5f1f-40be-83b0-ca5b88ddc927",
+      "taskId": "PAY-3",
+      "title": "РАЗРАБОТКА РАЗДЕЛА СУД",
+      "columnId": "38768f75-7e1d-4368-be67-d552474c14ee",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "ea6cd6db-5814-4aa8-b244-9283086a2056",
+      "taskId": "PAY-1",
+      "title": "РЕАЛИЗОВАТЬ  ЧАТЫ КАК В yougile",
+      "columnId": "38768f75-7e1d-4368-be67-d552474c14ee",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "c3bf8980-9183-4fcc-8a56-3d3368582e7b",
+      "taskId": "PAY-5",
+      "title": "ПРОВЕРКА УВЕДОМЛЕНИЙ ПО ЗАДАЧАМ",
+      "columnId": "38768f75-7e1d-4368-be67-d552474c14ee",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "ea9352d2-66ba-4f8a-b7b4-98385b58ecac",
+      "taskId": "PAY-13",
+      "title": "СДЕЛАТЬ НАСТРАЕВЫМАЕЙ ТРИГЕР ДНИ РОЖДЕНИЯ КЛИЕНТОВ И СОТРУДНИКОВ",
+      "columnId": "38768f75-7e1d-4368-be67-d552474c14ee",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "ea106e5b-267d-4477-90cf-2b5755cd04b0",
+      "taskId": "PAY-12",
+      "title": "В ЧАТАХ НЕ ВИДНО К КОМУ ОБРАЩАЕШЬСЯ",
+      "columnId": "38768f75-7e1d-4368-be67-d552474c14ee",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "096030ea-ca1b-45c0-a0d4-811e0773753a",
+      "taskId": "PAY-10",
+      "title": "ЛОГИКА БЫСТРЫХ ЗАДАЧ",
+      "columnId": "9e22950b-be55-4eba-ab35-2b0c60264c91",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": true,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "255b5186-0b00-4c85-9507-0292e361b3b3",
+      "taskId": "PAY-15",
+      "title": "ЖЕРНАЛ ЗАДАЧ - КОРРЕКТИРОВКА",
+      "columnId": "9e22950b-be55-4eba-ab35-2b0c60264c91",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": true,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "c5bc6377-efec-4741-ad30-5548d8adb153",
+      "taskId": "PAY-11",
+      "title": "НЕТ КНОПКИ ЗАПРОСИТЬ ПЕРЕНОС - ПРОВЕРИТЬ  В ЗАДАЧАХ",
+      "columnId": "9e22950b-be55-4eba-ab35-2b0c60264c91",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": true,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "b718dc5f-d69e-4509-81b4-90405e313d1b",
+      "taskId": "PAY-17",
+      "title": "ПЕРЕРАБОТКА  В НОРМАЛЬНЫЙ ВИД КАРТОЧКИ  ДЕЛА ТЗ ПИЩЕТСЯ",
+      "columnId": "9e22950b-be55-4eba-ab35-2b0c60264c91",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "701f83cf-391e-4246-a644-7029891a3eab",
+      "taskId": "PAY-6",
+      "title": "ЖУРНАЛ ЗАДАЧ - ТАБЛИЦА НАСТРОЙКА КОЛОНОК",
+      "columnId": "9e22950b-be55-4eba-ab35-2b0c60264c91",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": true,
+      "archived": false,
+      "messages": []
+    },
+    {
+      "id": "c80f2e24-63cd-457e-aa60-7a0047e2746f",
+      "taskId": "PAY-37",
+      "title": "КАЛЕНДАРЬ - ВИДИМОСТЬ ЗАДАЧ",
+      "columnId": "9e22950b-be55-4eba-ab35-2b0c60264c91",
+      "boardId": "2645d56b-1b04-433e-b38e-0063ad2fcca6",
+      "complete": false,
+      "archived": false,
+      "messages": [
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1791793813087,
+          "text": "НУ МОГУ НАЙТИ НАСТРОЙКУ"
+        },
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1791793816334,
+          "text": "ВСЕ ПЕРЕРЫЛ"
+        },
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1791793821804,
+          "text": "ПОМОГИТЕ ПОЖАЛУЙСТА"
+        },
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1791794112212,
+          "text": "пришлите скриншот"
+        },
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1791794603509,
+          "text": "Нужно отдельно различить отмену самой задачи и аннулирование её связи со счётом, чтобы действующая задача не исчезала из расписания ошибочно.\nвопрос - как это влияет на календарь\nесть просто статус задачи - и он уходит из календаря"
+        },
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1791794632652,
+          "text": "для календаря не принципиально , отменен или удален или аннулирован"
+        },
+        {
+          "authorId": "5ae924d5-dc20-4a42-a971-7fc05f26a3bb",
+          "timestamp": 1791794674964,
+          "text": "Андрей, настройка находится в общих настройках CRM. Порядок такой:\n\n1. В левом меню раскройте «Управление» и откройте «Настройки».\n2. В списке разделов настроек найдите блок «Интеграции и доступ» и нажмите «Ключи интеграций».\n3. Справа откройте вкладку «Календари».\n4. В блоке «Модель синхронизации и конфликты» прокрутите ниже до «Выполненные задачи в календарях».\n5. В поле «Действие после выполнения» выберите «Скрывать из календарей», чтобы выполненные задачи исчезали, или «Выделять цветом», чтобы они оставались с отметкой.\n6. Нажмите «Сохранить» в верхней части блока «Модель синхронизации и конфликты». Затем вернитесь в календарь и обновите страницу.\n\nИзменять эту общую настройку может администратор. Если пункта «Ключи интеграций» нет, потребуется вход под администратором.\n\nПо вопросу о статусе: для календаря важен статус самой задачи. Отмена задачи и аннулирование её связи со счётом — разные действия; аннулирование связи со счётом не должно само по себе убирать действующую задачу из календаря. Сейчас настройка применяется к выполненным задачам; аналогичное управление отменёнными ещё требует доработки.\n\nПрилагаю скриншот из тестовой копии CRM с расположением настройки. \nhttps://yougile.com/user-data/c5b6cc1e-1563-4fcb-b25c-6b15333bf037/PAY-37-calendar-setting.png"
+        },
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1791811632496,
+          "text": "ВСЕ ПОЛУЧИЛОСЬ"
+        },
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1791811639197,
+          "text": "ЗАДАЧИ ПРОПАЛИ"
+        },
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1791811657243,
+          "text": "По настройкам очень все замудрено получилось"
+        },
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1791811710143,
+          "text": "закройте тогда задачу"
+        }
+      ]
+    }
+  ],
+  "uiCards": [
+    {
+      "taskId": "PAY-19",
+      "title": "СДЕЛАТЬ РЕДИЗАЙН ЖУРАНАЛА ЗАДАЧ",
+      "columnTitle": "Задания",
+      "complete": false,
+      "description": "",
+      "messagesCount": 5,
+      "messages": [
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1790614877769,
+          "text": "",
+          "attachments": [
+            {
+              "name": "textplus_ru_1790611857232.png",
+              "downloadUrl": "https://yougile.com/user-data/5397941d-4ee2-49c3-b973-3d39abd434e0/textplus_ru_1790611857232.png?previews[]=-256-preview@314x314",
+              "resourceUri": "yougile://attachment/task/65d94840-3e9b-48fc-bb1d-00510fad1d2b/1790614877769/0"
+            },
+            {
+              "name": "textplus_ru_1790611751924 (1).png",
+              "downloadUrl": "https://yougile.com/user-data/c5154fb3-a1ed-4551-8067-0cb8b46d432f/textplus_ru_1790611751924%20(1).png?previews[]=-256-preview@314x314",
+              "resourceUri": "yougile://attachment/task/65d94840-3e9b-48fc-bb1d-00510fad1d2b/1790614877769/1"
+            },
+            {
+              "name": "textplus_ru_1790611751924.png",
+              "downloadUrl": "https://yougile.com/user-data/819aa1a1-3e22-4a6b-a573-c31d3002a40e/textplus_ru_1790611751924.png?previews[]=-256-preview@314x314",
+              "resourceUri": "yougile://attachment/task/65d94840-3e9b-48fc-bb1d-00510fad1d2b/1790614877769/2"
+            },
+            {
+              "name": "textplus_ru_1790611069526.png",
+              "downloadUrl": "https://yougile.com/user-data/4b2277a3-7d3f-45a3-8eef-98d4771ef7eb/textplus_ru_1790611069526.png?previews[]=-256-preview@256x256",
+              "resourceUri": "yougile://attachment/task/65d94840-3e9b-48fc-bb1d-00510fad1d2b/1790614877769/3"
+            },
+            {
+              "name": "textplus_ru_1790610579239.png",
+              "downloadUrl": "https://yougile.com/user-data/0f3157a7-93e6-49ef-9db8-81a869301bdf/textplus_ru_1790610579239.png?previews[]=-256-preview@314x314",
+              "resourceUri": "yougile://attachment/task/65d94840-3e9b-48fc-bb1d-00510fad1d2b/1790614877769/4"
+            }
+          ]
+        },
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1790614939807,
+          "text": "С журналом долно быть легко работать\nНа данный момент главная страница журнала  очень перегружена"
+        },
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1790615162778,
+          "text": "",
+          "attachments": [
+            {
+              "name": "textplus_ru_1790615155093.png",
+              "downloadUrl": "https://yougile.com/user-data/9f8de626-c037-421a-9030-504f3ed739ff/textplus_ru_1790615155093.png?previews[]=-256-preview@314x314",
+              "resourceUri": "yougile://attachment/task/65d94840-3e9b-48fc-bb1d-00510fad1d2b/1790615162778/0"
+            }
+          ]
+        },
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1790615171100,
+          "text": "карточка задачи"
+        },
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1791174538243,
+          "text": "лево меню не смотрим, остальное в соответствии с образцом ,  если какого то функционала нет , который был в старой карточке , переносим либо совместно решаем куда перенести , что бы не нарушить дизайн"
+        }
+      ],
+      "nextCursor": null
+    },
+    {
+      "taskId": "PAY-21",
+      "title": "СДЕЛАТЬ РЕДИЗАЙН КАРТОЧКИ ДЕЛА",
+      "columnTitle": "В работе",
+      "complete": false,
+      "description": "",
+      "messagesCount": 4,
+      "messages": [
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1790616794207,
+          "text": "",
+          "attachments": [
+            {
+              "name": "textplus_ru_1790616429824.png",
+              "downloadUrl": "https://yougile.com/user-data/5f0c6aa2-f275-4d4f-8303-443dd0d7886a/textplus_ru_1790616429824.png?previews[]=-256-preview@363x272",
+              "resourceUri": "yougile://attachment/task/ec9decc2-06b0-4247-96f2-51e916ee7e6c/1790616794207/0"
+            }
+          ]
+        },
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1790616817183,
+          "text": "ДОБАВИТЬ В ПРАВОЕ МЕНЮ ЕФРСБ\nПОЧТА РФ\nФИНАНСЫ"
+        },
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1790751809349,
+          "text": "НЕ ОТСТУПАТЬ  ОТ ДИЗАЙНА - ЭТОТ НАИБОЛЕЕ ЛАКОНИЧНЫЙ И НА МОНИТОРЕ НОРМАЛЬМАЛЬНО ОТОБРАЖАЕТСЯ"
+        },
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1791174677595,
+          "text": "лево меню не смотрим, остальное в соответствии с образцом ,  если какого то функционала нет , который был в старой карточке , переносим либо совместно решаем куда перенести , что бы не нарушить дизайн"
+        }
+      ],
+      "nextCursor": null
+    },
+    {
+      "taskId": "PAY-23",
+      "title": "СДЕЛАТЬ РЕДЕЗАН - РАЗДЕЛА  ДОКУМЕНТЫ В КАРТОЧКЕ ДЕЛА",
+      "columnTitle": "Задания",
+      "complete": false,
+      "description": "",
+      "messagesCount": 2,
+      "messages": [
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1790624740258,
+          "text": "",
+          "attachments": [
+            {
+              "name": "textplus_ru_1790624645414.png",
+              "downloadUrl": "https://yougile.com/user-data/f33e337a-62ab-4104-8e07-bca4211e5322/textplus_ru_1790624645414.png?previews[]=-256-preview@314x314",
+              "resourceUri": "yougile://attachment/task/7d72c480-1fcc-481b-bab7-dd7f1d52f37b/1790624740258/0"
+            }
+          ]
+        },
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1791174489668,
+          "text": "лево меню не смотрим, остальное в соответствии с образцом ,  если какого то функционала нет , который был в старой карточке , переносим либо совместно решаем куда перенести , что бы не нарушить дизайн"
+        }
+      ],
+      "nextCursor": null
+    },
+    {
+      "taskId": "PAY-24",
+      "title": "СДЕЛАТЬ РЕДЕЗАН - РАЗДЕЛА  ЗАДАЧИ В КАРТОЧКЕ ДЕЛА",
+      "columnTitle": "Задания",
+      "complete": false,
+      "description": "",
+      "messagesCount": 2,
+      "messages": [
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1790625083578,
+          "text": "",
+          "attachments": [
+            {
+              "name": "textplus_ru_1790624916252 (2).png",
+              "downloadUrl": "https://yougile.com/user-data/b62271d3-30bf-4d9f-9a37-b9309c54552a/textplus_ru_1790624916252%20(2).png?previews[]=-256-preview@314x314",
+              "resourceUri": "yougile://attachment/task/0d9fb0ef-2ad0-4799-b049-29d72b761851/1790625083578/0"
+            }
+          ]
+        },
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1791174486617,
+          "text": "лево меню не смотрим, остальное в соответствии с образцом ,  если какого то функционала нет , который был в старой карточке , переносим либо совместно решаем куда перенести , что бы не нарушить дизайн"
+        }
+      ],
+      "nextCursor": null
+    },
+    {
+      "taskId": "PAY-32",
+      "title": "РЕДИЗАН КАРТОЧКИ КЛИЕНТА ФИЗ. ЛИЦА",
+      "columnTitle": "Задания",
+      "complete": false,
+      "description": "",
+      "messagesCount": 4,
+      "messages": [
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1791149041414,
+          "text": "",
+          "attachments": [
+            {
+              "name": "textplus_ru_1791148662304.png",
+              "downloadUrl": "https://yougile.com/user-data/f503046d-2820-498e-8d6b-b16330a54e01/textplus_ru_1791148662304.png?previews[]=-256-preview@314x314",
+              "resourceUri": "yougile://attachment/task/99465014-bfd6-46b1-9130-cc4b5ab6f80c/1791149041414/0"
+            }
+          ]
+        },
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1791149075203,
+          "text": "НА ЛЕВОЕ МЕНЮ НЕ СМОТРИМ"
+        },
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1791149129161,
+          "text": "ПО ОСТАЛЬНОМУ ПРИДЕРЖИВАЕМСЯ КАК ЕСТЬ\nОСТАЛЬНЫЕ РАЗДЕЛЫ БУДУ ПРИСЫЛАТЬ ПО МЕРЕ ГОТОВНОСТИ КАРТОЧКИ ОСНОВНОЙ"
+        },
+        {
+          "authorId": "abca0051-eb73-48a3-8c96-d2f4275477cf",
+          "timestamp": 1791149790463,
+          "text": "РАЗДЕЛЫ ИЗ ЛИЧНЫХ ДАННЫХ СТАРОЙ КАРТОЧКИ КОТОРЫЕ НЕ УМЕСТИЛИСЬ , ПЕРЕНОСИ В СВЕРНУТОМ ВИДЕ В РАЗДЕЛ ДОПОЛНИТЕЛЬНАЯ ИНФО"
+        }
+      ],
+      "nextCursor": null
+    }
+  ],
+  "limitations": "Only the accessible PayPlanner project was queried. Recent messages cover the stated cutoff; older complete histories remain in the 2026-10-10 source package."
+}

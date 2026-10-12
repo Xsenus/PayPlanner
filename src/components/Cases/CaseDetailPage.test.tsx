@@ -2,9 +2,16 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { apiService } from '../../services/api';
-import type { ClientCase, ClientCaseDocument, ClientCaseWorkOrder } from '../../types';
+import type { ClientCase, ClientCaseCourtEvent, ClientCaseDocument, ClientCaseWorkOrder } from '../../types';
 import type { TaskJournalItem } from '../../utils/taskJournalStore';
 import { CaseDetailPage, CourtSourceProvenance } from './CaseDetailPage';
+
+function createJournalEvent(overrides: Partial<ClientCaseCourtEvent> = {}): ClientCaseCourtEvent {
+  return { id: 80, clientCaseId: 15, eventType: 'hearing', eventTypeLabel: 'Заседание', title: 'Заседание',
+    scheduledAt: '2026-10-12T09:30:00Z', allDay: false, courtInstance: 'first', courtInstanceLabel: 'Первая инстанция',
+    movementStatus: 'scheduled', movementStatusLabel: 'Назначено', sourceType: 'manual',
+    createdAt: '2026-10-01T00:00:00Z', isOverdue: false, canRecordHearingOutcome: false, ...overrides };
+}
 
 const dialogMock = vi.hoisted(() => ({
   confirm: vi.fn(),
@@ -1437,6 +1444,95 @@ describe('CaseDetailPage', () => {
 
     fireEvent.click(within(journal).getByRole('button', { name: /Добавить событие/ }));
     expect(screen.queryByLabelText('Журнал событий дела')).toBeNull();
+  });
+
+  it('PAY-25 filters: combines search and type, resets the list and never refetches or grants creation', async () => {
+    vi.mocked(apiService.getCaseCourtEvents).mockResolvedValue([
+      createJournalEvent({ title: 'Проверка заявления', description: 'Подготовка материалов', courtName: 'Арбитражный суд', resultSummary: 'Принято к рассмотрению' }),
+      createJournalEvent({ id: 81, title: 'Получено определение', eventType: 'ruling', eventTypeLabel: 'Определение', description: 'Подготовка ответа' }),
+    ]);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit={false} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'События' }));
+    const journal = await screen.findByLabelText('Журнал событий дела');
+    await within(journal).findByText('Получено определение');
+    const reads = vi.mocked(apiService.getCaseCourtEvents).mock.calls.length;
+    const search = within(journal).getByRole('searchbox', { name: 'Поиск событий' });
+    for (const query of [' ПРОВЕРКА ', 'арбитражный', 'ПРИНЯТО']) {
+      fireEvent.change(search, { target: { value: query } });
+      expect(within(journal).getByText('Проверка заявления')).toBeTruthy();
+      expect(within(journal).queryByText('Получено определение')).toBeNull();
+    }
+    fireEvent.change(search, { target: { value: 'подготовка' } });
+    fireEvent.change(within(journal).getByLabelText('Тип события', { selector: 'select' }), { target: { value: 'ruling' } });
+    expect(within(journal).getByText('Получено определение')).toBeTruthy();
+    expect(within(journal).queryByText('Проверка заявления')).toBeNull();
+    expect(within(journal).getByRole('status').textContent).toContain('Показано 1 из 2');
+    fireEvent.change(search, { target: { value: 'нет совпадений' } });
+    expect(within(journal).getByText('Нет судебных событий, соответствующих фильтрам.')).toBeTruthy();
+    fireEvent.click(within(journal).getByRole('button', { name: 'Сбросить фильтры событий' }));
+    expect(within(journal).getByText('Проверка заявления')).toBeTruthy();
+    expect(within(journal).getByText('Получено определение')).toBeTruthy();
+    expect(apiService.getCaseCourtEvents).toHaveBeenCalledTimes(reads);
+    expect(within(journal).queryByRole('button', { name: /Добавить событие/u })).toBeNull();
+  });
+
+  it('PAY-25 filters: uses inclusive profile dates and keeps all-day dates without shifting UTC or invalid data', async () => {
+    vi.mocked(apiService.getUserSetting).mockImplementation(key => key === 'profile.timeZoneId'
+      ? Promise.resolve({ key, value: 'Europe/Samara' }) : Promise.resolve(null));
+    vi.mocked(apiService.getCaseCourtEvents).mockResolvedValue([
+      createJournalEvent({ title: 'Событие после полуночи', scheduledAt: '2026-10-12T23:30:00' }),
+      createJournalEvent({ id: 81, title: 'Календарный день 12', scheduledAt: '2026-10-12T00:00:00Z', allDay: true }),
+      createJournalEvent({ id: 82, title: 'Конец выбранного дня', scheduledAt: '2026-10-13T19:59:59Z' }),
+      createJournalEvent({ id: 83, title: 'Следующий день', scheduledAt: '2026-10-13T20:00:00Z' }),
+      createJournalEvent({ id: 84, title: 'Неизвестная дата', scheduledAt: 'invalid-date', allDay: true }),
+    ]);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'События' }));
+    const journal = await screen.findByLabelText('Журнал событий дела');
+    await within(journal).findByText('13.10.2026, 03:30');
+    fireEvent.change(within(journal).getByLabelText('События с даты', { selector: 'input' }), { target: { value: '2026-10-13' } });
+    fireEvent.change(within(journal).getByLabelText('События по дату', { selector: 'input' }), { target: { value: '2026-10-13' } });
+    expect(within(journal).getByText('Событие после полуночи')).toBeTruthy();
+    expect(within(journal).getByText('Конец выбранного дня')).toBeTruthy();
+    for (const title of ['Календарный день 12', 'Следующий день', 'Неизвестная дата']) expect(within(journal).queryByText(title)).toBeNull();
+    fireEvent.change(within(journal).getByLabelText('События с даты', { selector: 'input' }), { target: { value: '2026-10-12' } });
+    fireEvent.change(within(journal).getByLabelText('События по дату', { selector: 'input' }), { target: { value: '2026-10-12' } });
+    expect(within(journal).getByText('Календарный день 12')).toBeTruthy();
+    expect(within(journal).queryByText('Событие после полуночи')).toBeNull();
+  });
+
+  it('PAY-25 filters: explains a reversed period and recovers when its dates are corrected', async () => {
+    vi.mocked(apiService.getCaseCourtEvents).mockResolvedValue([createJournalEvent({ allDay: true })]);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'События' }));
+    const journal = await screen.findByLabelText('Журнал событий дела');
+    await within(journal).findByText('12.10.2026 · весь день');
+    fireEvent.change(within(journal).getByLabelText('События с даты', { selector: 'input' }), { target: { value: '2026-10-13' } });
+    fireEvent.change(within(journal).getByLabelText('События по дату', { selector: 'input' }), { target: { value: '2026-10-12' } });
+    expect(within(journal).getByRole('alert').textContent).toContain('Начало периода должно быть не позже окончания.');
+    expect(within(journal).getByRole('status').textContent).toContain('Показано 0 из 1');
+    fireEvent.change(within(journal).getByLabelText('События с даты', { selector: 'input' }), { target: { value: '2026-10-12' } });
+    expect(within(journal).queryByRole('alert')).toBeNull();
+    expect(within(journal).getByRole('status').textContent).toContain('Показано 1 из 1');
+  });
+
+  it('PAY-25 filters: resets restrictions when changing to another case', async () => {
+    vi.mocked(apiService.getCaseCourtEvents).mockImplementation(async id => [createJournalEvent({ clientCaseId: id, title: `Событие дела ${id}` })]);
+    vi.mocked(apiService.getCaseV2).mockImplementation(async id => createCase({ id, title: `Дело ${id}` }));
+    const view = render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'События' }));
+    let journal = await screen.findByLabelText('Журнал событий дела');
+    await within(journal).findByText('Событие дела 15');
+    fireEvent.change(within(journal).getByRole('searchbox', { name: 'Поиск событий' }), { target: { value: 'дела 15' } });
+    fireEvent.change(within(journal).getByLabelText('События с даты', { selector: 'input' }), { target: { value: '2027-01-01' } });
+    view.rerender(<CaseDetailPage caseId={16} onBack={vi.fn()} />);
+    await screen.findByText('Дело 16');
+    fireEvent.click(screen.getByRole('button', { name: 'События' }));
+    journal = await screen.findByLabelText('Журнал событий дела');
+    await within(journal).findByText('Событие дела 16');
+    expect((within(journal).getByRole('searchbox', { name: 'Поиск событий' }) as HTMLInputElement).value).toBe('');
+    expect((within(journal).getByLabelText('События с даты', { selector: 'input' }) as HTMLInputElement).value).toBe('');
+    expect(within(journal).queryByRole('button', { name: 'Сбросить фильтры событий' })).toBeNull();
   });
 
   it('PAY-24: opens a case task through the common task card and shows how many tasks are listed', async () => {
