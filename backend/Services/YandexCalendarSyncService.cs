@@ -1171,7 +1171,8 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         IReadOnlyDictionary<int, TimeZoneInfo>? timeZones = null,
         CalendarSyncLogContext? logContext = null)
     {
-        var visibility = await ResolveConnectionCalendarVisibilityAsync(connection.UserId, cancellationToken);
+        var visibility = string.Equals(connection.CalendarMode, "adminByAssignee", StringComparison.Ordinal)
+            ? await ResolveConnectionCalendarVisibilityAsync(connection.UserId, cancellationToken) : null;
         var ownerUserId = IsAssigneeCalendarMode(connection, visibility) ? task.AssigneeUserId : null;
         var ownerName = ownerUserId.HasValue ? NormalizeOptional(task.AssigneeName) : null;
 
@@ -1364,7 +1365,8 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         var ownerUserId = calendar?.OwnerUserId;
         if (!ownerUserId.HasValue)
         {
-            var visibility = await ResolveConnectionCalendarVisibilityAsync(connection.UserId, cancellationToken);
+            var visibility = string.Equals(connection.CalendarMode, "adminByAssignee", StringComparison.Ordinal)
+                ? await ResolveConnectionCalendarVisibilityAsync(connection.UserId, cancellationToken) : null;
             ownerUserId = IsAssigneeCalendarMode(connection, visibility)
                 ? task.AssigneeUserId
                 : connection.UserId;

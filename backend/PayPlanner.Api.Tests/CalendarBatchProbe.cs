@@ -13,6 +13,7 @@ internal sealed class CalendarBatchQueryProbe(string provider) : DbCommandInterc
     public int LinkSelects { get; private set; }
     public int LogMetadataSelects { get; private set; }
     public int TotalSelects { get; private set; }
+    public Dictionary<string, int> TableSelects { get; } = [];
     public int TimeZoneSelects { get; private set; }
     public List<int[]> TimeZoneUserIds { get; } = [];
     public List<int> CleanupPageLimits { get; } = [];
@@ -24,6 +25,7 @@ internal sealed class CalendarBatchQueryProbe(string provider) : DbCommandInterc
         LinkSelects = 0;
         LogMetadataSelects = 0;
         TotalSelects = 0;
+        TableSelects.Clear();
         TimeZoneSelects = 0;
         TimeZoneUserIds.Clear();
         CleanupPageLimits.Clear();
@@ -53,6 +55,12 @@ internal sealed class CalendarBatchQueryProbe(string provider) : DbCommandInterc
         if (sql.StartsWith("SELECT", StringComparison.Ordinal))
         {
             TotalSelects++;
+            var table = Regex.Match(sql, @"FROM ""([^""]+)""");
+            if (table.Success)
+            {
+                var name = table.Groups[1].Value;
+                TableSelects[name] = TableSelects.GetValueOrDefault(name) + 1;
+            }
         }
         if (sql.StartsWith("SELECT", StringComparison.Ordinal)
             && sql.Contains("FROM \"UserSettings\"", StringComparison.Ordinal))

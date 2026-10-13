@@ -1,0 +1,239 @@
+{
+  "recordedAtUtc": "2026-10-13T00:02:01.635436+00:00",
+  "baseRevision": "260c40338156b757bc396ea18d250783ea51895a",
+  "verificationPerformedBeforeCommit": true,
+  "scope": "Google event-deletion replay idempotence; page-scoped personal Google calendar lookup; avoid routing-only visibility reads for personal Google/Yandex calendars, with task authorization unchanged",
+  "codeHashNormalization": "CRLF converted to LF; bytes otherwise unchanged",
+  "codeFiles": {
+    "backend/Services/GoogleCalendarSyncService.cs": "d23f8b676ba3a591ebbde878dbb405f322295cc657d1556c8090cabcd0a0d2e8",
+    "backend/Services/YandexCalendarSyncService.cs": "265fd77311ee88da25ea99ee84a7f0b858238232df20326a52a3d486ea5f529c",
+    "backend/PayPlanner.Api.Tests/CalendarBatchProbe.cs": "1bfb7489b77b13493fdc2b4e1635540eb5ecd51fd4cecbf546f72a94e58d5192",
+    "backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs": "c28541db574acda6a77a24fabd8432bdca9527366c8b2a6c52549320e75196e1",
+    "backend/AppReleases/releases.json": "044ee57303220fff2e537b415d11e715d572da9c850404256970bef2f10fc179"
+  },
+  "baseline": {
+    "counts": {
+      "total": 11,
+      "executed": 11,
+      "passed": 0,
+      "failed": 11,
+      "error": 0,
+      "timeout": 0,
+      "aborted": 0,
+      "inconclusive": 0,
+      "passedButRunAborted": 0,
+      "notRunnable": 0,
+      "notExecuted": 0,
+      "disconnected": 0,
+      "warning": 0,
+      "completed": 0,
+      "inProgress": 0,
+      "pending": 0
+    },
+    "results": [
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Synchronization_RecordsGoogleEventDeletionOnlyForNewDetachTransition(scenario: \"manualFull\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 1\r\nActual:   2"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Synchronization_RecordsGoogleEventDeletionOnlyForNewDetachTransition(scenario: \"cancelSecond\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 1\r\nActual:   2"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Synchronization_RecordsGoogleEventDeletionOnlyForNewDetachTransition(scenario: \"caseInsensitive\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 1\r\nActual:   2"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Synchronization_RecordsGoogleEventDeletionOnlyForNewDetachTransition(scenario: \"reactivated\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 2\r\nActual:   3"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Synchronization_RecordsGoogleEventDeletionOnlyForNewDetachTransition(scenario: \"resetAfterDetach\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 1\r\nActual:   2"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Synchronization_RecordsGoogleEventDeletionOnlyForNewDetachTransition(scenario: \"resetBeforeFirst\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 1\r\nActual:   2"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Synchronization_RecordsGoogleEventDeletionOnlyForNewDetachTransition(scenario: \"secondFailure\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 1\r\nActual:   2"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Synchronization_RecordsGoogleEventDeletionOnlyForNewDetachTransition(scenario: \"normal\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 1\r\nActual:   2"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Synchronization_RecordsGoogleEventDeletionOnlyForNewDetachTransition(scenario: \"missingFinal\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 1\r\nActual:   2"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.SyncNowAsync_Colors502EventsInBoundedPagesWithoutRewritingOnRepeat",
+        "outcome": "Failed",
+        "message": "Assert.InRange() Failure: Value not in range\r\nRange:  (0 - 12)\r\nActual: 1006"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Synchronization_RecordsGoogleEventDeletionOnlyForNewDetachTransition(scenario: \"withoutTaskId\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 1\r\nActual:   2"
+      }
+    ],
+    "metrics": [
+      "GoogleDeletionReplay scenario=missingFinal; round=1; logs=1; imported=0; state=detached",
+      "GoogleDeletionReplay scenario=missingFinal; round=2; logs=2; imported=1; state=detached",
+      "GoogleDeletionReplay scenario=cancelSecond; round=1; logs=0; imported=0; state=active",
+      "GoogleDeletionReplay scenario=cancelSecond; round=2; logs=1; imported=1; state=detached",
+      "GoogleDeletionReplay scenario=cancelSecond; round=3; logs=2; imported=1; state=detached",
+      "GoogleDeletionReplay scenario=caseInsensitive; round=1; logs=1; imported=1; state=detached",
+      "GoogleDeletionReplay scenario=caseInsensitive; round=2; logs=2; imported=1; state=detached",
+      "GoogleDeletionReplay scenario=resetBeforeFirst; round=1; logs=1; imported=1; state=detached",
+      "GoogleDeletionReplay scenario=resetBeforeFirst; round=2; logs=2; imported=1; state=detached",
+      "GoogleDeletionReplay scenario=resetAfterDetach; round=1; logs=2; imported=2; state=detached",
+      "GoogleDeletionReplay scenario=manualFull; round=1; logs=1; imported=1; state=detached",
+      "GoogleDeletionReplay scenario=manualFull; round=2; logs=2; imported=1; state=detached",
+      "GoogleDeletionReplay scenario=normal; round=1; logs=1; imported=1; state=detached",
+      "GoogleDeletionReplay scenario=normal; round=2; logs=2; imported=1; state=detached",
+      "GoogleDeletionReplay scenario=withoutTaskId; round=1; logs=1; imported=1; state=detached",
+      "GoogleDeletionReplay scenario=withoutTaskId; round=2; logs=2; imported=1; state=detached",
+      "GoogleDeletionReplay scenario=secondFailure; round=1; logs=1; imported=0; state=detached",
+      "GoogleDeletionReplay scenario=secondFailure; round=2; logs=2; imported=1; state=detached",
+      "GoogleDeletionReplay scenario=reactivated; round=1; logs=1; imported=1; state=detached",
+      "GoogleDeletionReplay scenario=reactivated; round=2; logs=2; imported=1; state=detached",
+      "GoogleDeletionReplay scenario=reactivated; round=3; logs=3; imported=1; state=detached",
+      "GooglePersonalQueries phase=first; tables={\"Users\":1006,\"SystemSettings\":11,\"GoogleCalendarConnections\":5,\"RolePermissions\":2010,\"TaskJournalItems\":3,\"UserSettings\":2,\"GoogleCalendarTaskLinks\":3,\"TaskJournalComments\":2,\"GoogleCalendarSyncCalendars\":502,\"GoogleCalendarSyncLogs\":2}"
+    ],
+    "trxSha256": "2ad7fe057ea5e92d0cb463980f995ada42fe4db4643158738f7025fa1b19c10a",
+    "apiSha256": "30e9bcf202e6477e1af0ff59a48b28fda64c38a38058a862c53d4bc00fb9b11c",
+    "testAssemblySha256": "360511c75ab7919c7be69f05b6d04af53aa0f353a7214d5b18cfc29f8c540a8e",
+    "artifactRoot": "D:\\PayPlannerReview-20261012\\calendar-deletion-baseline-evidence",
+    "sourceHashes": {
+      "backend/PayPlanner.Api.Tests/CalendarBatchProbe.cs": "0136473dbee2125fe76db841b22e06c6d4f61d721cd36739b248431078459ffa",
+      "backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs": "8159579b795d2eb2d30c3c04bf2dd583e59ed4bdad87a9416cc0c6edb13abc28"
+    }
+  },
+  "final": {
+    "artifactRoot": "D:\\PayPlannerReview-20261012\\calendar-deletion-final-evidence",
+    "apiSha256": "96d55591f863791282f8299766103fde616f50e8781a2451a267ad57670ac3ab",
+    "testAssemblySha256": "36606c9839d0355c004f20fe32cd164f5f6004f3f01cfe02f58a8bac71975782",
+    "focusedCounts": {
+      "total": 11,
+      "executed": 11,
+      "passed": 11,
+      "failed": 0,
+      "error": 0,
+      "timeout": 0,
+      "aborted": 0,
+      "inconclusive": 0,
+      "passedButRunAborted": 0,
+      "notRunnable": 0,
+      "notExecuted": 0,
+      "disconnected": 0,
+      "warning": 0,
+      "completed": 0,
+      "inProgress": 0,
+      "pending": 0
+    },
+    "focusedTrxSha256": "b6670be73e6938d68361bb02350b9e2d0910aa7b14ea828d33aa4b198200ace2",
+    "relatedCounts": {
+      "total": 251,
+      "executed": 251,
+      "passed": 251,
+      "failed": 0,
+      "error": 0,
+      "timeout": 0,
+      "aborted": 0,
+      "inconclusive": 0,
+      "passedButRunAborted": 0,
+      "notRunnable": 0,
+      "notExecuted": 0,
+      "disconnected": 0,
+      "warning": 0,
+      "completed": 0,
+      "inProgress": 0,
+      "pending": 0
+    },
+    "relatedTrxSha256": "f5ca54ff380872e14054e94508ca7f0cc2d829ea5992fca0cdc5636d5e41d5c7",
+    "metrics": [
+      "GoogleDeletionReplay scenario=cancelSecond; round=1; logs=0; imported=0; state=active",
+      "GoogleDeletionReplay scenario=cancelSecond; round=2; logs=1; imported=1; state=detached",
+      "GoogleDeletionReplay scenario=cancelSecond; round=3; logs=1; imported=0; state=detached",
+      "GoogleDeletionReplay scenario=caseInsensitive; round=1; logs=1; imported=1; state=detached",
+      "GoogleDeletionReplay scenario=caseInsensitive; round=2; logs=1; imported=0; state=detached",
+      "GoogleDeletionReplay scenario=caseInsensitive; round=3; logs=1; imported=0; state=detached",
+      "GoogleDeletionReplay scenario=manualFull; round=1; logs=1; imported=1; state=detached",
+      "GoogleDeletionReplay scenario=manualFull; round=2; logs=1; imported=0; state=detached",
+      "GoogleDeletionReplay scenario=manualFull; round=3; logs=1; imported=0; state=detached",
+      "GoogleDeletionReplay scenario=missingFinal; round=1; logs=1; imported=0; state=detached",
+      "GoogleDeletionReplay scenario=missingFinal; round=2; logs=1; imported=0; state=detached",
+      "GoogleDeletionReplay scenario=missingFinal; round=3; logs=1; imported=0; state=detached",
+      "GoogleDeletionReplay scenario=normal; round=1; logs=1; imported=1; state=detached",
+      "GoogleDeletionReplay scenario=normal; round=2; logs=1; imported=0; state=detached",
+      "GoogleDeletionReplay scenario=normal; round=3; logs=1; imported=0; state=detached",
+      "GoogleDeletionReplay scenario=reactivated; round=1; logs=1; imported=1; state=detached",
+      "GoogleDeletionReplay scenario=reactivated; round=2; logs=2; imported=1; state=detached",
+      "GoogleDeletionReplay scenario=reactivated; round=3; logs=2; imported=0; state=detached",
+      "GoogleDeletionReplay scenario=resetAfterDetach; round=1; logs=1; imported=1; state=detached",
+      "GoogleDeletionReplay scenario=resetAfterDetach; round=2; logs=1; imported=0; state=detached",
+      "GoogleDeletionReplay scenario=resetAfterDetach; round=3; logs=1; imported=0; state=detached",
+      "GoogleDeletionReplay scenario=resetBeforeFirst; round=1; logs=1; imported=1; state=detached",
+      "GoogleDeletionReplay scenario=resetBeforeFirst; round=2; logs=1; imported=0; state=detached",
+      "GoogleDeletionReplay scenario=resetBeforeFirst; round=3; logs=1; imported=0; state=detached",
+      "GoogleDeletionReplay scenario=secondFailure; round=1; logs=1; imported=0; state=detached",
+      "GoogleDeletionReplay scenario=secondFailure; round=2; logs=1; imported=0; state=detached",
+      "GoogleDeletionReplay scenario=secondFailure; round=3; logs=1; imported=0; state=detached",
+      "GoogleDeletionReplay scenario=withoutTaskId; round=1; logs=1; imported=1; state=detached",
+      "GoogleDeletionReplay scenario=withoutTaskId; round=2; logs=1; imported=0; state=detached",
+      "GoogleDeletionReplay scenario=withoutTaskId; round=3; logs=1; imported=0; state=detached",
+      "GooglePersonalQueries phase=first; tables={\"Users\":2,\"SystemSettings\":11,\"GoogleCalendarConnections\":5,\"RolePermissions\":2,\"TaskJournalItems\":3,\"UserSettings\":2,\"GoogleCalendarSyncCalendars\":2,\"GoogleCalendarTaskLinks\":3,\"TaskJournalComments\":2,\"GoogleCalendarSyncLogs\":2}",
+      "GooglePersonalQueries phase=retry; tables={\"GoogleCalendarConnections\":3,\"SystemSettings\":1,\"Users\":1,\"RolePermissions\":2,\"TaskJournalItems\":3,\"UserSettings\":2,\"GoogleCalendarSyncCalendars\":2,\"GoogleCalendarTaskLinks\":2,\"TaskJournalComments\":2}"
+    ],
+    "releaseBuild": {
+      "errors": 0,
+      "warnings": 0,
+      "logSha256": "9015bae9dba7d828806b43cb94b5655b65da7ed173842b554e5237911b79cbe3"
+    },
+    "databases": "Synthetic SQLite with HTTP fakes; DataVisibilityService PostgreSQL case uses an explicitly configured local owned cluster and a fresh disposable database; not production data or a provider latency benchmark",
+    "postgresCase": {
+      "executionId": "6b93b585-c6c2-4c76-91d1-8c02a4855405",
+      "testId": "2e12afaf-ae69-1153-83d9-4e04da21b0bd",
+      "testName": "PayPlanner.Api.Tests.DataVisibilityServiceTests.ResolveSectionAccessAsync_TranslatesOnFreshPostgreSqlDatabase",
+      "computerName": "XSENUS",
+      "duration": "00:01:12.2471568",
+      "startTime": "2026-10-13T07:01:21.9458669+07:00",
+      "endTime": "2026-10-13T07:01:21.9458671+07:00",
+      "testType": "13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b",
+      "outcome": "Passed",
+      "testListId": "8c84fa94-04c1-424b-9868-57a2d4851a1d",
+      "relativeResultsDirectory": "6b93b585-c6c2-4c76-91d1-8c02a4855405"
+    },
+    "postgresConfigured": true,
+    "emailEnabled": false,
+    "backgroundServicesEnabled": false
+  },
+  "references": [
+    "https://developers.google.com/workspace/calendar/api/v3/reference/events"
+  ],
+  "deployed": false,
+  "yougilePublished": false,
+  "finalFullBackendGatePassed": false,
+  "frontendGateReused": {
+    "revision": "d2e9508752a1bbca1c3ea28bd6e242284e5c00a4",
+    "passed": 2596,
+    "reason": "No frontend or public DTO change"
+  },
+  "remaining": [
+    "Yandex visibility cache lifetime across operations and access revocation remains a mandatory security prerequisite",
+    "Google assignee-mode repeated visibility/calendar reads and per-task provider duplicate scans remain to assess",
+    "Already-loaded calendars/owner graph, import tracking and full CalDAV response are not wholly bounded by this change",
+    "Final complete backend gate for the final code, live acceptance and the actual owner-reported annulled task remain"
+  ]
+}

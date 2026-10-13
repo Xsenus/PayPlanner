@@ -1720,6 +1720,10 @@ public class GoogleCalendarSyncServiceTests
             Assert.False(string.IsNullOrWhiteSpace(value.GetProperty("detail").GetString()));
         }
         Console.WriteLine($"CalendarLogQueries provider=Google; scenario=color; case=normal; phase=first; metadata={queryProbe.LogMetadataSelects}; total={queryProbe.TotalSelects}");
+        Console.WriteLine($"GooglePersonalQueries phase=first; tables={JsonSerializer.Serialize(queryProbe.TableSelects)}");
+        Assert.InRange(queryProbe.TableSelects.GetValueOrDefault("Users"), 0, 12);
+        Assert.InRange(queryProbe.TableSelects.GetValueOrDefault("RolePermissions"), 0, 12);
+        Assert.InRange(queryProbe.TableSelects.GetValueOrDefault("GoogleCalendarSyncCalendars"), 0, 4);
         Assert.InRange(queryProbe.LogMetadataSelects, 0, 8);
         Console.WriteLine($"CalendarTimezoneQueries provider=Google; phase=first; settings={queryProbe.TimeZoneSelects}");
         Assert.InRange(queryProbe.TimeZoneSelects, 1, 2);
@@ -1758,6 +1762,10 @@ public class GoogleCalendarSyncServiceTests
         Assert.Equal(502, retry.ProcessedTasks);
         Assert.Equal(0, retry.ErrorCount);
         Console.WriteLine($"CalendarLogQueries provider=Google; scenario=color; case=normal; phase=retry; metadata={queryProbe.LogMetadataSelects}; total={queryProbe.TotalSelects}");
+        Console.WriteLine($"GooglePersonalQueries phase=retry; tables={JsonSerializer.Serialize(queryProbe.TableSelects)}");
+        Assert.InRange(queryProbe.TableSelects.GetValueOrDefault("Users"), 0, 12);
+        Assert.InRange(queryProbe.TableSelects.GetValueOrDefault("RolePermissions"), 0, 12);
+        Assert.InRange(queryProbe.TableSelects.GetValueOrDefault("GoogleCalendarSyncCalendars"), 0, 4);
         Assert.InRange(queryProbe.LogMetadataSelects, 0, 8);
         Console.WriteLine($"CalendarTimezoneQueries provider=Google; phase=retry; settings={queryProbe.TimeZoneSelects}");
         Assert.InRange(queryProbe.TimeZoneSelects, 1, 2);
@@ -2569,6 +2577,196 @@ public class GoogleCalendarSyncServiceTests
         Assert.Equal(2, await db.GoogleCalendarSyncLogs.CountAsync(item => item.Direction == "google-to-crm" && item.Operation == "update-task"));
         Assert.Equal(initialWrites, handler.EventWrites);
         Assert.Equal(2, handler.EventListReads);
+    }
+
+    [Theory]
+    [InlineData("normal")]
+    [InlineData("withoutTaskId")]
+    [InlineData("caseInsensitive")]
+    [InlineData("resetBeforeFirst")]
+    [InlineData("resetAfterDetach")]
+    [InlineData("secondFailure")]
+    [InlineData("cancelSecond")]
+    [InlineData("missingFinal")]
+    [InlineData("reactivated")]
+    [InlineData("manualFull")]
+    public async Task Synchronization_RecordsGoogleEventDeletionOnlyForNewDetachTransition(string scenario)
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "deletion-owner@example.local", "user");
+        var foreignUser = await CreateUserAsync(db, "foreign-deletion@example.local", "user");
+        await EnableGoogleSettingsAsync(db);
+        await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 10, completedTaskCalendarAction: "hide");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        var calendar = await CreateCalendarAsync(db, connection.Id, "timezone-import", "Synthetic deletion calendar");
+        calendar.SyncToken = "synthetic-old-sync";
+        var foreignConnection = await CreateConnectionAsync(db, foreignUser.Id);
+        foreignConnection.SyncEnabled = false;
+        var foreignCalendar = await CreateCalendarAsync(db, foreignConnection.Id, "foreign-calendar", "Foreign calendar");
+        var dueAt = DateTime.UtcNow.Date.AddDays(14).AddHours(10);
+        var task = await CreateTaskAsync(db, user.Id, "CRM task stays unchanged", dueAt: dueAt);
+        task.Description = "Synthetic retained description";
+        task.Status = scenario == "caseInsensitive" ? "cancelled" : "done";
+        var expectedTask = (task.Title, task.Description, task.Status, task.DueAt, task.AssigneeUserId);
+        var foreignTask = await CreateTaskAsync(db, foreignUser.Id, "Foreign task stays unchanged", dueAt: dueAt);
+        var link = new GoogleCalendarTaskLink
+        {
+            ConnectionId = connection.Id,
+            CalendarSyncCalendarId = calendar.Id,
+            TaskJournalItemId = task.Id,
+            GoogleCalendarId = calendar.GoogleCalendarId,
+            GoogleEventId = "deleted-event",
+            SyncStatus = "active",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var foreignLink = new GoogleCalendarTaskLink
+        {
+            ConnectionId = foreignConnection.Id,
+            CalendarSyncCalendarId = foreignCalendar.Id,
+            TaskJournalItemId = foreignTask.Id,
+            GoogleCalendarId = foreignCalendar.GoogleCalendarId,
+            GoogleEventId = "foreign-event",
+            SyncStatus = "active",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.GoogleCalendarTaskLinks.AddRange(link, foreignLink);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var inner = new RecordingGoogleHandler();
+        var handler = new CalendarTimezoneImportProbe(inner, google: true);
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+        DateTime? previousDetachAt = null;
+        DateTime? previousUpdatedAt = null;
+        var expectedLogs = 0;
+        for (var round = 1; round <= 3; round++)
+        {
+            if (round == 2 && scenario == "reactivated")
+            {
+                // A genuinely active link may be deleted again, even for the same event ID.
+                await db.GoogleCalendarTaskLinks.Where(item => item.Id == link.Id)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.SyncStatus, "active"));
+            }
+            if (round == 2 && scenario == "manualFull")
+            {
+                // Model the configured cooldown having elapsed, retaining the public manual path.
+                await db.GoogleCalendarConnections.Where(item => item.Id == connection.Id)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.LastFullSyncAt, DateTime.UtcNow.AddMinutes(-11)));
+            }
+            using var cancellation = new CancellationTokenSource();
+            var resetUsed = false;
+            handler.GooglePageResponse = (request, ordinal, token) =>
+            {
+                var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(request.RequestUri!.Query);
+                var next = query.ContainsKey("pageToken");
+                if (round == 1 && !resetUsed && ((scenario == "resetBeforeFirst" && !next)
+                    || (scenario == "resetAfterDetach" && next)))
+                {
+                    resetUsed = true;
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Gone));
+                }
+                if (round == 1 && next && scenario == "cancelSecond")
+                {
+                    cancellation.Cancel();
+                    token.ThrowIfCancellationRequested();
+                }
+                if (round == 1 && next && scenario == "secondFailure")
+                {
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadRequest)
+                    {
+                        Content = new StringContent("Synthetic deletion second-page error"),
+                    });
+                }
+                var deleted = new Dictionary<string, object>
+                {
+                    ["id"] = "deleted-event",
+                    ["status"] = scenario == "caseInsensitive" ? "CANCELLED" : "cancelled",
+                };
+                if (scenario != "withoutTaskId")
+                {
+                    deleted["extendedProperties"] = new
+                    {
+                        @private = new Dictionary<string, string> { ["payPlannerTaskId"] = task.Id.ToString() },
+                    };
+                }
+                object[] events = next ? [] :
+                [
+                    deleted,
+                    new { id = "stale-event", status = "cancelled", extendedProperties = new
+                    {
+                        @private = new Dictionary<string, string> { ["payPlannerTaskId"] = task.Id.ToString() },
+                    } },
+                    new { id = "foreign-event", status = "cancelled", extendedProperties = new
+                    {
+                        @private = new Dictionary<string, string> { ["payPlannerTaskId"] = foreignTask.Id.ToString() },
+                    } },
+                    new { id = "unlinked-event", status = "cancelled" },
+                ];
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(JsonSerializer.Serialize(new
+                    {
+                        items = events,
+                        nextPageToken = !next ? "deletion-next" : null,
+                        nextSyncToken = next && !(round == 1 && scenario == "missingFinal") ? "synthetic-final-sync" : null,
+                    }), Encoding.UTF8, "application/json"),
+                });
+            };
+            handler.ResetReads();
+            var imported = 0;
+            if (round == 1 && scenario == "cancelSecond")
+            {
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.SyncDueConnectionsAsync(1, cancellation.Token));
+            }
+            else if (round == 2 && scenario == "manualFull")
+            {
+                var result = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+                Assert.Equal(0, result.ErrorCount);
+                imported = result.ImportedEvents;
+                Assert.All(handler.EventListQueries.Select(Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery), query =>
+                {
+                    Assert.False(query.ContainsKey("syncToken"));
+                    Assert.True(query.ContainsKey("timeMin"));
+                });
+            }
+            else
+            {
+                var result = await service.SyncDueConnectionsAsync(1, CancellationToken.None);
+                Assert.Equal(round == 1 && scenario is "secondFailure" or "missingFinal" ? 1 : 0, result.ErrorCount);
+                imported = result.ImportedEvents;
+            }
+            var newDetach = (round == 1 && scenario != "cancelSecond")
+                || (round == 2 && scenario is "cancelSecond" or "reactivated");
+            if (newDetach) expectedLogs++;
+            var logs = await db.GoogleCalendarSyncLogs.AsNoTracking()
+                .Where(item => item.ConnectionId == connection.Id && item.Operation == "detach").ToListAsync();
+            var stored = await db.GoogleCalendarTaskLinks.AsNoTracking().SingleAsync(item => item.Id == link.Id);
+            Console.WriteLine($"GoogleDeletionReplay scenario={scenario}; round={round}; logs={logs.Count}; imported={imported}; state={stored.SyncStatus}");
+            Assert.Equal(expectedLogs, logs.Count);
+            Assert.All(logs, log => Assert.Equal(task.Id, log.TaskJournalItemId));
+            Assert.Equal(round == 1 && scenario == "cancelSecond" ? "active" : "detached", stored.SyncStatus);
+            if (round > 1 && !newDetach)
+            {
+                Assert.Equal(previousDetachAt, stored.LastSyncedAt);
+                Assert.Equal(previousUpdatedAt, stored.UpdatedAt);
+            }
+            if (!(round == 1 && scenario is "secondFailure" or "missingFinal" or "cancelSecond"))
+            {
+                Assert.Equal(newDetach ? 1 : 0, imported);
+            }
+            var storedTask = await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id);
+            Assert.Equal(expectedTask, (storedTask.Title, storedTask.Description, storedTask.Status, storedTask.DueAt, storedTask.AssigneeUserId));
+            var storedForeign = await db.GoogleCalendarTaskLinks.AsNoTracking().SingleAsync(item => item.Id == foreignLink.Id);
+            Assert.Equal("active", storedForeign.SyncStatus);
+            Assert.Null(storedForeign.LastSyncedAt);
+            Assert.Equal("new", await db.TaskJournalItems.AsNoTracking().Where(item => item.Id == foreignTask.Id).Select(item => item.Status).SingleAsync());
+            Assert.DoesNotContain(inner.Requests, request => request.RequestUri!.AbsolutePath.Contains("/events", StringComparison.Ordinal)
+                && request.Method != HttpMethod.Get);
+            previousDetachAt = stored.LastSyncedAt;
+            previousUpdatedAt = stored.UpdatedAt;
+            db.ChangeTracker.Clear();
+        }
     }
 
     private static async Task SetUserTimeZoneAsync(PaymentContext db, int userId, string timeZoneId)
