@@ -47,7 +47,9 @@ internal static class Program
         var assembly = Path.GetFullPath(options["assembly"]);
         var root = Path.GetDirectoryName(manifest)!;
         var relative = Path.GetRelativePath(root, assembly).Replace('\\', '/');
+        var runnerConfig = Path.Combine(Path.GetDirectoryName(assembly)!, "xunit.runner.json");
         var pins = new[] { assembly, Path.ChangeExtension(assembly, ".deps.json"), Path.ChangeExtension(assembly, ".runtimeconfig.json"), Path.Combine(Path.GetDirectoryName(assembly)!, "PayPlanner.Api.dll") }
+            .Concat(File.Exists(runnerConfig) ? [runnerConfig] : [])
             .Select(path => new ArtifactPin(Path.GetRelativePath(root, path).Replace('\\', '/'), ShardPlan.HashFile(path))).ToArray();
         var theories = AssemblyCatalog.ReadTheoryMethods(assembly);
         var sdk = await LocateSdkAsync();
