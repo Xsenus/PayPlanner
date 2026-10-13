@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readdir, readFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { createServer as createControlServer } from 'node:http';
 import { createServer } from 'vite';
@@ -142,6 +142,23 @@ try {
       }
     };
     const outside = []; const errors = []; const fileKeys = []; const reads = [];
+    const readTrace = [];
+    const tracedReads = new WeakMap();
+    let tracePhase = 'login';
+    let traceSequence = 0;
+    const traceStarted = Date.now();
+    const traceRead = (event, request) => {
+      const url = new URL(request.url());
+      if (url.origin !== settings.api || request.method() !== 'GET'
+        || url.pathname !== '/api/v2/cases/' + settings.caseId + '/documents/uploads/pending') return;
+      if (event === 'start') tracedReads.set(request, ++traceSequence);
+      if (readTrace.length < 64) readTrace.push({ event, read: tracedReads.get(request), phase: tracePhase,
+        elapsedMs: Date.now() - traceStarted,
+        aborted: event === 'failed' && request.failure()?.errorText === 'net::ERR_ABORTED' });
+    };
+    page.on('request', request => traceRead('start', request));
+    page.on('requestfinished', request => traceRead('finished', request));
+    page.on('requestfailed', request => traceRead('failed', request));
     let retirePosts = 0; let filePosts = 0; let caseSaves = 0; let documentReads = 0; let publisherPosts = 0;
     const editing = settings.flow !== 'documents' && settings.flow !== 'version';
     const versionAttempt = settings.flow.includes('version');
@@ -266,6 +283,7 @@ try {
     await page.getByRole('button', { name: 'Войти', exact: true }).click();
     await waitAtPhase(page.locator('input[type="email"]'), 'login-finished', { state: 'hidden' });
     await waitAtPhase(page.getByRole('button', { name: 'Редактировать дело', exact: true }), 'case-ready');
+    tracePhase = 'fixture-identity';
     // Register a fixture identity through the real helper, then bind it to the owned durable server attempt.
     await page.evaluate(async settings => {
       const { beginCaseDocumentUpload } = await import('/src/services/caseDocumentUploadAttempts.ts');
@@ -280,6 +298,7 @@ try {
       sessionStorage.setItem('pp.case-document-upload-attempts.v1', JSON.stringify(rows));
     }, settings);
     if (modal) {
+      tracePhase = 'client-navigation';
       // Finish already-issued reads and the owned activity write before navigation.
       await caseReads.drain('client-navigation');
       // Playwright clears its socket registry on main-document navigation without
@@ -294,14 +313,17 @@ try {
       await waitAtPhase(card.getByText('Загружаем файлы...', { exact: true }), 'modal-files-loaded', { state: 'hidden' });
       await card.getByRole('textbox', { name: 'Стратегия и план действий', exact: true }).fill('Unsaved browser strategy');
     } else if (editing) {
+      tracePhase = 'editor-open';
       await page.getByRole('button', { name: 'Редактировать дело', exact: true }).click();
       await page.getByRole('textbox', { name: 'Стратегия и план действий', exact: true }).fill('Unsaved browser strategy');
     } else {
       await caseReads.drain('document-tab');
+      tracePhase = 'document-tab';
       await page.getByRole('button', { name: 'Документы', exact: true }).click();
     }
     const panel = page.getByRole('region', { name: 'Состояние ваших загрузок', exact: true });
     await waitAtPhase(panel.getByText(settings.pending.fileName, { exact: true }), 'owned-attempt-visible');
+    tracePhase = 'retirement-dialog';
     await panel.getByRole('button', { name: 'Подготовить новую загрузку', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Подготовить новую загрузку', exact: true });
     await dialog.getByRole('button', { name: 'Отмена', exact: true }).click();
@@ -310,6 +332,7 @@ try {
     const readsBeforeConfirmation = documentReads;
     const proofReadsBeforeConfirmation = reads.filter(keys => keys.includes(settings.key)).length;
     await panel.getByRole('button', { name: 'Подготовить новую загрузку', exact: true }).click();
+    tracePhase = 'retirement-confirmation';
     await dialog.getByRole('button', { name: 'Подтвердить', exact: true }).click();
     if (restarted) {
       await restartFinished;
@@ -341,7 +364,7 @@ try {
       check(retirePosts === 1 && filePosts === 0 && caseSaves === 0, 'Denied retirement wrote unrelated data');
       check(outside.length === 0 && errors.length === 0, 'Unexpected browser activity: ' + JSON.stringify({ outside, errors }));
       await caseReads.drain('browser-close');
-      return 'CASE_RETIREMENT_BROWSER_OK ' + JSON.stringify({ flow: settings.flow, retirePosts, filePosts, rightsApplied });
+      return 'CASE_RETIREMENT_BROWSER_OK ' + JSON.stringify({ flow: settings.flow, retirePosts, filePosts, rightsApplied, readTrace });
     }
     await waitAtPhase(panel.getByText(publishedWinner
       ? 'Прежняя попытка уже добавила документ. Он сохранён. Новый файл выберите и отправьте отдельно.'
@@ -361,6 +384,7 @@ try {
     // Upload completion changes the status-panel revision. Do not let the
     // fixture's next write cancel an earlier discovery response under load.
     await caseReads.drain('document-upload');
+    tracePhase = 'document-upload';
     if (versionAttempt) {
       const inputName = modal ? 'Загрузить новую версию base-browser-version.bin' : 'Загрузить новую версию документа base-browser-version.bin';
       await openDocumentActions('base-browser-version.bin');
@@ -401,6 +425,7 @@ try {
     await waitAtPhase(versionInput, 'document-version-input', { state: 'attached' });
     check(filePosts === 1 && fileKeys[0] !== settings.key, 'Separate upload did not use a new identity');
     await caseReads.drain('document-upload');
+    tracePhase = 'version-upload';
     const [versionResponse] = await Promise.all([
       page.waitForResponse(response => /\/api\/case-documents\/\d+\/versions$/.test(new URL(response.url()).pathname) && response.request().method() === 'POST'),
       versionInput.setInputFiles({ name: 'separate-browser-version.txt', mimeType: 'text/plain', buffer: Buffer.from('Separate browser version') }),
@@ -421,11 +446,26 @@ try {
     // A visible upload result may precede its refreshed status read. Complete
     // actual response bodies before this fixture closes the browser connection.
     await caseReads.drain('browser-close');
+    tracePhase = 'browser-close';
     check(outside.length === 0, 'Browser attempted an external request');
     check(errors.length === 0, 'Browser page errors: ' + JSON.stringify(errors));
-    return 'CASE_RETIREMENT_BROWSER_OK ' + JSON.stringify({ flow: settings.flow, retirePosts, filePosts, publisherPosts, lostAck: settings.lostAck, restartApplied, manualRecovery, proofRefusals, realtimeInterruptions, reconnectProved, exactProofRead: reads.some(keys => keys.includes(settings.key)) });
+    return 'CASE_RETIREMENT_BROWSER_OK ' + JSON.stringify({ flow: settings.flow, retirePosts, filePosts, publisherPosts, lostAck: settings.lostAck, restartApplied, manualRecovery, proofRefusals, realtimeInterruptions, reconnectProved, exactProofRead: reads.some(keys => keys.includes(settings.key)), readTrace });
   }`);
   assert.ok(result.includes('CASE_RETIREMENT_BROWSER_OK'), result);
+  // The test launcher deliberately clears non-allowlisted environment values.
+  // Retain only bounded synthetic request metadata beside its owned temp roots.
+  const traceDir = join(dirname(root), 'payplanner-case-retirement-read-traces');
+  if (traceDir) {
+    assert.ok(isAbsolute(traceDir), 'The owned diagnostic directory must be absolute.');
+    const receiptLine = result.split(/\r?\n/).find(line => line.startsWith('"CASE_RETIREMENT_BROWSER_OK ')
+      || line.startsWith('CASE_RETIREMENT_BROWSER_OK '));
+    assert.ok(receiptLine, 'The CLI must retain its structured diagnostic receipt.');
+    const receipt = receiptLine.startsWith('"') ? JSON.parse(receiptLine) : receiptLine;
+    const diagnostic = JSON.parse(receipt.slice('CASE_RETIREMENT_BROWSER_OK '.length));
+    await mkdir(traceDir, { recursive: true });
+    await writeFile(join(traceDir, basename(root) + '.json'), JSON.stringify({ flow, lostAck: diagnostic.lostAck,
+      readTrace: diagnostic.readTrace }, null, 2));
+  }
   console.log(result.slice(result.indexOf('CASE_RETIREMENT_BROWSER_OK'), result.indexOf('CASE_RETIREMENT_BROWSER_OK') + 220));
 } catch (error) {
   if (opened) {

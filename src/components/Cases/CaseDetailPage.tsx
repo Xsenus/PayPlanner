@@ -1624,6 +1624,7 @@ export function CaseDetailPage({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const [documentReloadToken, setDocumentReloadToken] = useState(0);
   const [creatingTask, setCreatingTask] = useState(false);
   const [savingHeader, setSavingHeader] = useState(false);
   const [reviewingPosition, setReviewingPosition] = useState(false);
@@ -2166,7 +2167,7 @@ export function CaseDetailPage({
     return () => {
       cancelled = true;
     };
-  }, [activeTab, caseId, externalApprovalAvailable, reloadToken]);
+  }, [activeTab, caseId, documentReloadToken, externalApprovalAvailable, reloadToken]);
 
   useEffect(() => {
     if (!editPageOpen || activeTab === 'documents' || activeTab === 'court'
@@ -2176,7 +2177,7 @@ export function CaseDetailPage({
       .then((items) => { if (!cancelled) setDocuments(items); })
       .catch(() => { if (!cancelled) setDocuments([]); });
     return () => { cancelled = true; };
-  }, [activeTab, caseId, editPageOpen, externalApprovalAvailable]);
+  }, [activeTab, caseId, documentReloadToken, editPageOpen, externalApprovalAvailable]);
 
   useEffect(() => {
     if (activeTab !== 'court' && activeTab !== 'documents') return;
@@ -2764,7 +2765,7 @@ export function CaseDetailPage({
         setDocumentSourceId('');
       }
       setActiveTab('documents');
-      setReloadToken((value) => value + 1);
+      setDocumentReloadToken((value) => value + 1);
     } catch (err) {
       setError(extractDisplayErrorMessage(err, 'Не удалось загрузить документ по делу.'));
     } finally {
@@ -2880,7 +2881,7 @@ export function CaseDetailPage({
         status: caseDocument.status,
       });
       setNotice(`Новая версия документа «${caseDocument.originalFileName}» загружена.`);
-      setReloadToken((value) => value + 1);
+      setDocumentReloadToken((value) => value + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось загрузить новую версию документа по делу.');
     } finally {

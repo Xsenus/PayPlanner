@@ -3596,6 +3596,39 @@ describe('CaseDetailPage', () => {
     expect(await screen.findByText('Документ «claim.pdf» загружен.')).toBeTruthy();
   });
 
+  it.each(['document', 'version'] as const)('refreshes only documents without restarting pending reads after %s upload', async kind => {
+    const signals: AbortSignal[] = [];
+    let finishRead!: (value: Awaited<ReturnType<typeof apiService.getPendingCaseDocumentUploads>>) => void;
+    vi.mocked(apiService.getPendingCaseDocumentUploads).mockImplementation((_id, _after, signal) => {
+      signals.push(signal!);
+      return signals.length === 1 ? Promise.resolve({ items: [], nextCursor: null })
+        : new Promise(resolve => { finishRead = resolve; });
+    });
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    await waitFor(() => expect(apiService.getPendingCaseDocumentUploads).toHaveBeenCalledTimes(1));
+    const financeReads = vi.mocked(apiService.getCaseFinance).mock.calls.length;
+    const courtReads = vi.mocked(apiService.getCaseCourtDirectory).mock.calls.length;
+    const file = new File(['owned upload'], 'owned-upload.pdf', { type: 'application/pdf' });
+    if (kind === 'version') {
+      await openDocumentDetails();
+      fireEvent.change(screen.getByLabelText('Загрузить новую версию документа Заявление.docx'), { target: { files: [file] } });
+    } else {
+      fireEvent.change(screen.getByLabelText('Файл документа'), { target: { files: [file] } });
+      fireEvent.click(screen.getByRole('button', { name: /^Загрузить$/u }));
+    }
+    await waitFor(() => expect(apiService.getCaseDocuments).toHaveBeenCalledTimes(2));
+    await screen.findByText(kind === 'version' ? 'Новая версия документа «Заявление.docx» загружена.' : 'Документ «owned-upload.pdf» загружен.');
+    expect(apiService.getCaseV2).toHaveBeenCalledTimes(1);
+    expect(apiService.getCaseFinance).toHaveBeenCalledTimes(financeReads);
+    expect(apiService.getCaseCourtDirectory).toHaveBeenCalledTimes(courtReads);
+    expect(apiService.getPendingCaseDocumentUploads).toHaveBeenCalledTimes(2);
+    expect(signals[1].aborted).toBe(false);
+    await act(async () => { finishRead({ items: [], nextCursor: null }); });
+    expect(screen.queryByText('Загрузка карточки дела...')).toBeNull();
+  });
+
   it('uploads a new case document version from the documents tab', async () => {
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
 

@@ -1,0 +1,49 @@
+{
+  "SchemaVersion": 1,
+  "BaseRevision": "f47e6069f32be9fd523f30073ade090f4a3b20b7",
+  "Cause": "Successful file/version upload reloaded the entire case and unmounted the upload-status panel",
+  "Before": [
+    {
+      "LostAck": true,
+      "Started": 6,
+      "Finished": 5,
+      "Aborted": 1
+    },
+    {
+      "LostAck": false,
+      "Started": 6,
+      "Finished": 5,
+      "Aborted": 1
+    }
+  ],
+  "After": [
+    {
+      "LostAck": true,
+      "Started": 5,
+      "Finished": 5,
+      "Aborted": 0
+    },
+    {
+      "LostAck": false,
+      "Started": 5,
+      "Finished": 5,
+      "Aborted": 0
+    }
+  ],
+  "BaselineComponentFailures": 2,
+  "TargetedComponentPassed": 3,
+  "ExpandedComponentPassed": 194,
+  "NativePassed": 2,
+  "NativeFailed": 0,
+  "OriginalTimeoutsAndAssertionsPreserved": true,
+  "BackendCodeChanged": false,
+  "FullBackendQualified": false,
+  "NewFullFrontendQualified": false,
+  "ReleaseVersion": "1.14.88",
+  "Pushed": false,
+  "Deployed": false,
+  "YouGileChanged": false,
+  "Pay24Progress": "4/6 (67%)",
+  "UploadProgress": "7/9 (78%)",
+  "RecordedUtc": "2026-10-13T22:02:28.3613617Z"
+}
