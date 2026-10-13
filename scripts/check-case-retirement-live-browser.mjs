@@ -165,8 +165,8 @@ try {
       if (await button.getAttribute('aria-expanded') !== 'true') await button.click();
       check(await button.getAttribute('aria-expanded') === 'true', 'Document actions must be expanded before accessing its version input');
     };
-    const caseReads = modal || restarted ? (${createCaseReadLifecycle})(page,
-      request => (${isCaseBoundaryRead})(request, settings.api, settings.caseId), 20000) : null;
+    const caseReads = (${createCaseReadLifecycle})(page,
+      request => (${isCaseBoundaryRead})(request, settings.api, settings.caseId), 20000);
     page.setDefaultTimeout(20000);
     page.on('pageerror', error => errors.push(error.message));
     const createRestartObserver = (${createCaseRestartObserver});
@@ -296,7 +296,10 @@ try {
     } else if (editing) {
       await page.getByRole('button', { name: 'Редактировать дело', exact: true }).click();
       await page.getByRole('textbox', { name: 'Стратегия и план действий', exact: true }).fill('Unsaved browser strategy');
-    } else await page.getByRole('button', { name: 'Документы', exact: true }).click();
+    } else {
+      await caseReads.drain('document-tab');
+      await page.getByRole('button', { name: 'Документы', exact: true }).click();
+    }
     const panel = page.getByRole('region', { name: 'Состояние ваших загрузок', exact: true });
     await waitAtPhase(panel.getByText(settings.pending.fileName, { exact: true }), 'owned-attempt-visible');
     await panel.getByRole('button', { name: 'Подготовить новую загрузку', exact: true }).click();
@@ -337,6 +340,7 @@ try {
       check(await page.getByRole('textbox', { name: 'Стратегия и план действий', exact: true }).inputValue() === 'Unsaved browser strategy', 'Denied retirement lost unsaved fields');
       check(retirePosts === 1 && filePosts === 0 && caseSaves === 0, 'Denied retirement wrote unrelated data');
       check(outside.length === 0 && errors.length === 0, 'Unexpected browser activity: ' + JSON.stringify({ outside, errors }));
+      await caseReads.drain('browser-close');
       return 'CASE_RETIREMENT_BROWSER_OK ' + JSON.stringify({ flow: settings.flow, retirePosts, filePosts, rightsApplied });
     }
     await waitAtPhase(panel.getByText(publishedWinner
@@ -410,6 +414,9 @@ try {
     });
     const reconnectProved = restarted && restartObserver.hasProof();
     if (restarted) check(reconnectProved, 'The restarted server did not acknowledge a new notification connection');
+    // A visible upload result may precede its refreshed status read. Complete
+    // actual response bodies before this fixture closes the browser connection.
+    await caseReads.drain('browser-close');
     check(outside.length === 0, 'Browser attempted an external request');
     check(errors.length === 0, 'Browser page errors: ' + JSON.stringify(errors));
     return 'CASE_RETIREMENT_BROWSER_OK ' + JSON.stringify({ flow: settings.flow, retirePosts, filePosts, publisherPosts, lostAck: settings.lostAck, restartApplied, manualRecovery, proofRefusals, realtimeInterruptions, reconnectProved, exactProofRead: reads.some(keys => keys.includes(settings.key)) });

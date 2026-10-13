@@ -40,6 +40,32 @@ function fixture() {
 }
 
 describe('owned case read boundary', () => {
+  it.each(['document-tab', 'browser-close'])('finishes a pending upload response before %s', async phase => {
+    const { page, lifecycle, request } = fixture();
+    const pending = request('/api/v2/cases/7/documents/uploads/pending');
+    page.emit('request', pending.value);
+    let complete = false;
+    const drain = lifecycle.drain(phase).then(() => { complete = true; });
+    pending.headers();
+    await Promise.resolve();
+    assert.equal(complete, false);
+    pending.finish();
+    await drain;
+    assert.equal(complete, true);
+    lifecycle.dispose();
+  });
+
+  it.each(['document-tab', 'browser-close'])('retains an upload response failure before %s', async phase => {
+    const { page, lifecycle, request } = fixture();
+    const pending = request('/api/v2/cases/7/documents/uploads/pending');
+    page.emit('request', pending.value);
+    const drain = lifecycle.drain(phase);
+    pending.headers();
+    pending.failBody();
+    await assert.rejects(drain, /response body failed/);
+    lifecycle.dispose();
+  });
+
   it('waits for an existing API read and its body before permitting restart', async () => {
     const { page, lifecycle, request } = fixture();
     const settings = request();
