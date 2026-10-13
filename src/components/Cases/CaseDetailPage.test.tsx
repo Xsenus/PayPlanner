@@ -21,6 +21,23 @@ function createCaseDocument(overrides: Partial<ClientCaseDocument> = {}): Client
     uploadedAt: '2026-05-02T10:00:00Z', isLatestVersion: true, ...overrides };
 }
 
+function mockCaseTaskServer(items: TaskJournalItem[]) {
+  const active = items.filter((item) => item.status !== 'done' && item.status !== 'cancelled');
+  const overdue = active.filter((item) => Date.parse(item.dueAt) < Date.now());
+  const completed = items.filter((item) => item.status === 'done' || item.status === 'cancelled');
+  vi.mocked(apiService.getTaskJournalSummary).mockResolvedValue({
+    total: items.length, completed: completed.length, active: active.length, overdue: overdue.length,
+    today: 0, highPriority: 0, unbilled: 0,
+  });
+  vi.mocked(apiService.getTaskJournalItems).mockImplementation(async (query) => {
+    const selected = query?.status === 'active' ? active : query?.status === 'overdue' ? overdue
+      : query?.status === 'completed' ? completed : items;
+    const page = query?.page ?? 1;
+    const pageSize = query?.pageSize ?? 50;
+    return { items: selected.slice((page - 1) * pageSize, page * pageSize), total: selected.length, page, pageSize };
+  });
+}
+
 async function openDocumentDetails(fileName = 'Заявление.docx') {
   const name = `Сведения и действия документа ${fileName}`;
   const toggle = await screen.findByRole('button', { name });
@@ -57,6 +74,7 @@ vi.mock('../../services/api', () => ({
     createCaseAppealTask: vi.fn(),
     getActResponsibles: vi.fn(),
     getTaskJournalItems: vi.fn(),
+    getTaskJournalSummary: vi.fn(),
     getCaseRelatedParties: vi.fn(),
     getClients: vi.fn(),
     getLegalEntitiesPaged: vi.fn(),
@@ -488,7 +506,8 @@ describe('CaseDetailPage', () => {
       { id: 8, fullName: 'Диденко Анна Владимировна' },
     ]);
     vi.mocked(apiService.getTaskJournalItems).mockReset();
-    vi.mocked(apiService.getTaskJournalItems).mockResolvedValue({ items: [createTask()], total: 1, page: 1, pageSize: 50 });
+    vi.mocked(apiService.getTaskJournalSummary).mockReset();
+    mockCaseTaskServer([createTask()]);
     vi.mocked(apiService.getCaseRelatedParties).mockReset();
     vi.mocked(apiService.getCaseRelatedParties).mockResolvedValue([
       {
@@ -2970,31 +2989,189 @@ describe('CaseDetailPage', () => {
     });
   });
 
+  it.each([
+    ['task', 'Задача'], ['budget', 'Бюджет'], ['contact', 'Связаться'], ['document', 'Документ'],
+    ['reminder', 'Не забыть'], ['control', 'Контроль'], ['courtHearing', 'Суд. заседание'], ['meeting', 'Встреча'],
+    ['legacyUnknown', 'Задача'],
+  ])('PAY-24 rows: presents type %s with the journal label %s', async (type, label) => {
+    mockCaseTaskServer([createTask({ type: type as TaskJournalItem['type'] })]);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Задачи' }));
+    expect(await screen.findByRole('img', { name: `Тип задачи: ${label}` })).toBeTruthy();
+    expect(apiService.getTaskJournalItems).toHaveBeenCalledTimes(1);
+    expect(apiService.getActResponsibles).toHaveBeenCalledTimes(1);
+  });
+
+  it('PAY-24 rows: shows full long names with initials and a safe empty assignee', async () => {
+    const name = 'Синтетический ОченьДлинныйИсполнитель'.repeat(3);
+    mockCaseTaskServer([createTask({ id: 11, title: 'С именем', assigneeName: name }), createTask({ id: 12, title: 'Без имени', assigneeName: '  ' })]);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Задачи' }));
+    expect(await screen.findByText(name)).toBeTruthy();
+    const table = screen.getByRole('table', { name: 'Задачи дела' });
+    expect(within(table).getByText('СО').getAttribute('aria-hidden')).toBe('true');
+    const emptyRow = within(table).getByText('Без имени').closest('tr')!;
+    expect(emptyRow.querySelector('td:nth-child(2)')?.textContent).toBe('—');
+    expect(apiService.getTaskJournalItems).toHaveBeenCalledTimes(1);
+  });
+
+  it('PAY-24 pages: reaches task 61 with whole-case counters and the same open callback', async () => {
+    const onOpenTask = vi.fn();
+    mockCaseTaskServer(Array.from({ length: 61 }, (_, index) => createTask({
+      id: index + 1, title: `Строка задачи ${index + 1}`, status: 'new', dueAt: '2100-01-01T10:00:00Z',
+    })));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} onOpenTask={onOpenTask} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Задачи' }));
+    expect(await screen.findByText('Связанные задачи (61)')).toBeTruthy();
+    await screen.findByText('Строка задачи 50');
+    expect(screen.getByRole('table', { name: 'Задачи дела' }).querySelectorAll('tbody tr')).toHaveLength(50);
+    expect(screen.queryByText('Строка задачи 61')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Следующая страница задач' }));
+    const open = await screen.findByRole('button', { name: 'Открыть задачу: Строка задачи 61' });
+    expect(screen.getByText('Показано 11 из 61')).toBeTruthy();
+    expect(screen.getByRole('table', { name: 'Задачи дела' }).querySelectorAll('tbody tr')).toHaveLength(11);
+    fireEvent.click(open);
+    expect(onOpenTask).toHaveBeenCalledExactlyOnceWith(61);
+    expect(apiService.getTaskJournalItems).toHaveBeenCalledTimes(2);
+    expect(apiService.getTaskJournalItems).toHaveBeenLastCalledWith(expect.objectContaining({ clientCaseId: 15, status: 'active', page: 2, pageSize: 50 }), { signal: expect.any(AbortSignal) });
+    expect(apiService.getTaskJournalSummary).toHaveBeenCalledTimes(1);
+  });
+
+  it('PAY-24 pages: finds overdue and cancelled tasks beyond the first unfiltered page', async () => {
+    mockCaseTaskServer([
+      ...Array.from({ length: 50 }, (_, index) => createTask({ id: index + 1, title: `Будущая ${index + 1}`, status: 'new', dueAt: '2100-01-01T10:00:00Z' })),
+      createTask({ id: 51, title: 'Просроченная за пределом страницы', status: 'inProgress', dueAt: '2020-01-01T10:00:00Z' }),
+      createTask({ id: 52, title: 'Выполненная за пределом страницы', status: 'done' }),
+      createTask({ id: 53, title: 'Отменённая за пределом страницы', status: 'cancelled' }),
+    ]);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Задачи' }));
+    await screen.findByText('Будущая 50');
+    expect(screen.queryByText('Просроченная за пределом страницы')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Просроченные · 1' }));
+    await screen.findByText('Просроченная за пределом страницы');
+    expect(screen.getByText('Показано 1 из 1')).toBeTruthy();
+    expect(apiService.getTaskJournalItems).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'overdue', page: 1 }), expect.anything());
+    fireEvent.click(screen.getByRole('button', { name: 'Закрытые · 2' }));
+    await screen.findByText('Отменённая за пределом страницы');
+    expect(screen.getByText('Выполненная за пределом страницы')).toBeTruthy();
+    expect(screen.getByText('Показано 2 из 2')).toBeTruthy();
+    expect(apiService.getTaskJournalItems).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'completed', page: 1 }), expect.anything());
+    expect(screen.getByRole('button', { name: 'Все · 53' })).toBeTruthy();
+  });
+
+  it('PAY-24 pages: reports a failed page without a false empty result and retries', async () => {
+    vi.mocked(apiService.getTaskJournalItems).mockRejectedValueOnce(new Error('Unavailable'));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Задачи' }));
+    await screen.findByText('Не удалось загрузить задачи дела.');
+    expect(screen.queryByText('По выбранному фильтру задач нет.')).toBeNull();
+    expect(screen.queryByText(/Показано 0 из/u)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку задач' }));
+    await screen.findByText('Проверить движение по делу');
+    expect(screen.queryByText('Не удалось загрузить задачи дела.')).toBeNull();
+  });
+
+  it('PAY-24 pages: keeps loaded rows when counters fail and does not invent zero counters', async () => {
+    vi.mocked(apiService.getTaskJournalSummary).mockRejectedValueOnce(new Error('Summary unavailable'));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Задачи' }));
+    await screen.findByText('Проверить движение по делу');
+    await screen.findByText('Не удалось получить счётчики задач.');
+    expect(screen.getByRole('button', { name: 'Все · —' })).toBeTruthy();
+    expect(screen.queryByText('Связанные задачи (0)')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку счётчиков' }));
+    await screen.findByText('Связанные задачи (1)');
+  });
+
+  it('PAY-24 pages: retains filters during loading and discards a late response after changing filter', async () => {
+    let finish!: (value: Awaited<ReturnType<typeof apiService.getTaskJournalItems>>) => void;
+    const old = new Promise<Awaited<ReturnType<typeof apiService.getTaskJournalItems>>>((resolve) => { finish = resolve; });
+    vi.mocked(apiService.getTaskJournalItems).mockImplementation(async (query) => query?.status === 'active'
+      ? old : { items: [createTask({ id: 302, title: 'Новый результат фильтра', dueAt: '2020-01-01T10:00:00Z' })], total: 1, page: 1, pageSize: 50 });
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Задачи' }));
+    await waitFor(() => expect(apiService.getTaskJournalItems).toHaveBeenCalledTimes(1));
+    const signal = vi.mocked(apiService.getTaskJournalItems).mock.calls[0][1]!.signal!;
+    expect(screen.getByRole('button', { name: /Просроченные ·/u })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Просроченные ·/u }));
+    await screen.findByText('Новый результат фильтра');
+    expect(signal.aborted).toBe(true);
+    await act(async () => finish({ items: [createTask({ id: 301, title: 'Устаревшая строка' })], total: 1, page: 1, pageSize: 50 }));
+    expect(screen.queryByText('Устаревшая строка')).toBeNull();
+    expect(screen.getByRole('button', { name: /Просроченные ·/u }).getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('PAY-24 pages: aborts the old case read before exposing rows from the new case', async () => {
+    let finish!: (value: Awaited<ReturnType<typeof apiService.getTaskJournalItems>>) => void;
+    const old = new Promise<Awaited<ReturnType<typeof apiService.getTaskJournalItems>>>((resolve) => { finish = resolve; });
+    vi.mocked(apiService.getCaseV2).mockImplementation(async (id) => createCase({ id, title: id === 15 ? 'Первое дело' : 'Второе дело' }));
+    vi.mocked(apiService.getTaskJournalItems).mockImplementation(async (query) => query?.clientCaseId === 15
+      ? old : { items: [createTask({ id: 602, title: 'Строка второго дела', clientCaseId: 16 })], total: 1, page: 1, pageSize: 50 });
+    const view = render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('Первое дело');
+    fireEvent.click(screen.getByRole('button', { name: 'Задачи' }));
+    await waitFor(() => expect(apiService.getTaskJournalItems).toHaveBeenCalledTimes(1));
+    const signal = vi.mocked(apiService.getTaskJournalItems).mock.calls[0][1]!.signal!;
+    view.rerender(<CaseDetailPage caseId={16} onBack={vi.fn()} />);
+    await screen.findByText('Второе дело');
+    fireEvent.click(screen.getByRole('button', { name: 'Задачи' }));
+    await screen.findByText('Строка второго дела');
+    expect(signal.aborted).toBe(true);
+    await act(async () => finish({ items: [createTask({ id: 601, title: 'Строка прежнего дела' })], total: 1, page: 1, pageSize: 50 }));
+    expect(screen.queryByText('Строка прежнего дела')).toBeNull();
+    expect(apiService.getTaskJournalItems).toHaveBeenLastCalledWith(expect.objectContaining({ clientCaseId: 16 }), expect.anything());
+  });
+
+  it('PAY-24 pages: preserves a selected document source and upload draft across task pages', async () => {
+    mockCaseTaskServer(Array.from({ length: 61 }, (_, index) => createTask({ id: index + 1, title: `Источник ${index + 1}`, status: 'new', dueAt: '2100-01-01T10:00:00Z' })));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    const file = new File(['synthetic'], 'source.pdf', { type: 'application/pdf' });
+    fireEvent.change(await screen.findByLabelText('Файл документа'), { target: { files: [file] } });
+    fireEvent.change(screen.getByLabelText('Тип документа'), { target: { value: 'Несохранённый тип' } });
+    fireEvent.change(screen.getByLabelText('Источник документа'), { target: { value: 'task' } });
+    await screen.findByRole('option', { name: 'Источник 11', hidden: true });
+    fireEvent.change(screen.getByLabelText('Объект документа'), { target: { value: '11' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Задачи' }));
+    await screen.findByText('Источник 50');
+    fireEvent.click(screen.getByRole('button', { name: 'Следующая страница задач' }));
+    await screen.findByText('Источник 61');
+    fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    expect((await screen.findByLabelText('Объект документа') as HTMLSelectElement).value).toBe('11');
+    expect((screen.getByLabelText('Тип документа') as HTMLInputElement).value).toBe('Несохранённый тип');
+    fireEvent.click(screen.getByRole('button', { name: /^Загрузить$/u }));
+    await waitFor(() => expect(apiService.uploadCaseDocument).toHaveBeenCalledWith(15, file, expect.objectContaining({ documentType: 'Несохранённый тип', documentKey: expect.stringContaining('task-11-') })));
+  });
+
   it('filters case tasks and creates a task from the tasks tab', async () => {
-    vi.mocked(apiService.getTaskJournalItems).mockResolvedValue({
-      items: [
+    mockCaseTaskServer([
         createTask({ id: 101, title: 'Будущая задача', status: 'inProgress', dueAt: '2100-01-01T10:00:00Z' }),
         createTask({ id: 102, title: 'Просроченная задача', status: 'inProgress', dueAt: '2020-01-01T10:00:00Z' }),
         createTask({ id: 103, title: 'Закрытая задача', status: 'done', dueAt: '2026-05-01T10:00:00Z' }),
-      ],
-      total: 3,
-      page: 1,
-      pageSize: 50,
-    });
+    ]);
 
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
 
     await screen.findByText('ЗЕМЦОВ - банкротство');
     fireEvent.click(screen.getByRole('button', { name: 'Задачи' }));
     expect(await screen.findByText('Будущая задача')).toBeTruthy();
-    expect(screen.getByText('Просроченная задача')).toBeTruthy();
+    expect(await screen.findByText('Просроченная задача')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: /Просроченные/u }));
     expect(screen.queryByText('Будущая задача')).toBeNull();
-    expect(screen.getByText('Просроченная задача')).toBeTruthy();
+    expect(await screen.findByText('Просроченная задача')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: /Закрытые/u }));
-    expect(screen.getByText('Закрытая задача')).toBeTruthy();
+    expect(await screen.findByText('Закрытая задача')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: /^Создать$/u }));
     await waitFor(() => {
@@ -3007,15 +3184,10 @@ describe('CaseDetailPage', () => {
   });
 
   it('restores the last opened tab and task filter for the case card', async () => {
-    vi.mocked(apiService.getTaskJournalItems).mockResolvedValue({
-      items: [
+    mockCaseTaskServer([
         createTask({ id: 101, title: 'Будущая задача', status: 'inProgress', dueAt: '2100-01-01T10:00:00Z' }),
         createTask({ id: 102, title: 'Просроченная задача', status: 'inProgress', dueAt: '2020-01-01T10:00:00Z' }),
-      ],
-      total: 2,
-      page: 1,
-      pageSize: 50,
-    });
+    ]);
 
     const firstRender = render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
     await screen.findByText('ЗЕМЦОВ - банкротство');
@@ -3023,7 +3195,7 @@ describe('CaseDetailPage', () => {
     expect(await screen.findByText('Будущая задача')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /Просроченные/u }));
     expect(screen.queryByText('Будущая задача')).toBeNull();
-    expect(screen.getByText('Просроченная задача')).toBeTruthy();
+    expect(await screen.findByText('Просроченная задача')).toBeTruthy();
     firstRender.unmount();
 
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);

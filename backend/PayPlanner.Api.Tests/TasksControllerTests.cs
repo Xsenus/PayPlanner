@@ -1456,6 +1456,187 @@ public class TasksControllerTests
         Assert.True(settings.RequireCompletionResult);
     }
 
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(121, false)]
+    [InlineData(121, true)]
+    public async Task GetTasks_CaseCompletedGroupIsPagedBeforeProjection(int count, bool usePostgreSql)
+    {
+        if (usePostgreSql && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES")))
+        {
+            Assert.False(string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase),
+                "PAYPLANNER_TEST_POSTGRES must be configured in CI.");
+            return;
+        }
+        var template = new PostgreSqlMigratedTemplate();
+        PostgreSqlMigratedTemplate.DatabaseLease? database = null;
+        PaymentContext? db = null;
+        var failures = new List<Exception>();
+        try
+        {
+            database = usePostgreSql ? await template.CreateDatabaseAsync("pp_case_task_page_") : null;
+            var interceptor = new RecordingCommandInterceptor();
+            db = database is null
+                ? await CreateContextAsync(interceptor)
+                : new PostgreSqlPaymentContext(new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
+                    .UseNpgsql(database.ConnectionString, options => options.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery))
+                    .AddInterceptors(interceptor).Options);
+            var admin = await CreateAdminUserAsync(db, "case-pages@example.local", "Администратор страниц");
+            var client = await CreateClientAsync(db, "Синтетический клиент страниц");
+            var clientCase = await CreateCaseAsync(db, client.Id, "Дело с несколькими страницами");
+            var otherCase = await CreateCaseAsync(db, client.Id, "Другое дело");
+            var dueAt = DateTime.UtcNow.AddDays(-2);
+            var tasks = Enumerable.Range(1, count).Select(index => new TaskJournalItem
+            {
+                ClientId = client.Id,
+                ClientCaseId = clientCase.Id,
+                ObjectName = client.Name,
+                Title = $"Задача страницы {index}",
+                AuthorUserId = admin.Id,
+                AuthorName = admin.FullName,
+                AssigneeUserId = admin.Id,
+                AssigneeName = admin.FullName,
+                DueAt = dueAt,
+                Status = index % 3 == 0 ? (index % 2 == 0 ? "CANCELLED" : "cancelled")
+                    : index % 3 == 1 ? (index % 2 == 0 ? "Done" : "done") : "new",
+                Type = "task",
+                Priority = "normal",
+            }).ToList();
+            db.TaskJournalItems.AddRange(tasks);
+            await db.SaveChangesAsync();
+            await CreateTaskAsync(db, admin.Id, client.Id, admin.Id, otherCase.Id, status: "done");
+            db.ChangeTracker.Clear();
+            var controller = CreateController(db, new RecordingNotificationService(), admin);
+            var expectedIds = tasks.Where(task => string.Equals(task.Status, "done", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(task.Status, "cancelled", StringComparison.OrdinalIgnoreCase))
+                .Select(task => task.Id).Order().ToArray();
+
+            interceptor.Commands.Clear();
+            for (var pageNumber = 1; pageNumber <= 2; pageNumber++)
+            {
+                var result = await controller.GetTasks(
+                    search: null, status: "completed", type: null, assigneeUserId: null,
+                    from: null, to: null, clientCaseId: clientCase.Id,
+                    page: pageNumber, pageSize: 50, sortBy: "dueAt", sortDir: "asc",
+                    ct: CancellationToken.None);
+                var page = Assert.IsType<PagedResponse<TaskJournalItemDto>>(
+                    Assert.IsType<OkObjectResult>(result.Result).Value);
+                Assert.Equal(expectedIds.Length, page.Total);
+                Assert.Equal(expectedIds.Skip((pageNumber - 1) * 50).Take(50), page.Items.Select(task => task.Id));
+                Assert.All(page.Items, task => Assert.Contains(task.Status.ToLowerInvariant(), new[] { "done", "cancelled" }));
+            }
+
+            Assert.InRange(interceptor.Commands.Count(command =>
+                command.Contains("FROM \"TaskJournalItems\"", StringComparison.Ordinal)), 2, 6);
+
+            interceptor.Commands.Clear();
+            var summaryResult = await controller.GetTaskListSummary(
+                search: null, status: "all", type: null, assigneeUserId: null,
+                from: null, to: null, clientCaseId: clientCase.Id, ct: CancellationToken.None);
+            var summary = Assert.IsType<TaskJournalListSummaryDto>(
+                Assert.IsType<OkObjectResult>(summaryResult.Result).Value);
+            Assert.Equal(count, summary.Total);
+            Assert.Equal(expectedIds.Length, summary.Completed);
+            Assert.Equal(count - expectedIds.Length, summary.Active);
+            Assert.Equal(2, interceptor.Commands.Count(command =>
+                command.Contains("FROM \"TaskJournalItems\"", StringComparison.Ordinal)));
+            Assert.Equal(summary.Active, summary.Overdue);
+            foreach (var (filter, expectedCount) in new[] { ("all", summary.Total), ("active", summary.Active), ("overdue", summary.Overdue) })
+            {
+                interceptor.Commands.Clear();
+                var filteredResult = await controller.GetTasks(
+                    search: null, status: filter, type: null, assigneeUserId: null,
+                    from: null, to: null, clientCaseId: clientCase.Id,
+                    page: 1, pageSize: 50, sortBy: "dueAt", sortDir: "asc", ct: CancellationToken.None);
+                var filteredPage = Assert.IsType<PagedResponse<TaskJournalItemDto>>(
+                    Assert.IsType<OkObjectResult>(filteredResult.Result).Value);
+                Assert.Equal(expectedCount, filteredPage.Total);
+                Assert.Equal(Math.Min(50, expectedCount), filteredPage.Items.Count);
+                if (filter != "all") Assert.All(filteredPage.Items, task =>
+                    Assert.DoesNotContain(task.Status.ToLowerInvariant(), new[] { "done", "cancelled" }));
+                Assert.InRange(interceptor.Commands.Count(command =>
+                    command.Contains("FROM \"TaskJournalItems\"", StringComparison.Ordinal)), 1, 3);
+            }
+
+        }
+        catch (Exception error)
+        {
+            failures.Add(error);
+        }
+        finally
+        {
+            foreach (var resource in new IAsyncDisposable?[] { db, database, template })
+            {
+                if (resource is null) continue;
+                try { await resource.DisposeAsync(); }
+                catch (Exception error) { failures.Add(error); }
+            }
+        }
+        if (failures.Count == 1) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failures[0]).Throw();
+        if (failures.Count > 1) throw new AggregateException("Case paging checks and owned cleanup failed.", failures);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GetTaskListSummary_CaseCountersExcludeOtherCasesAndInvisibleTasks(bool empty)
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var current = await CreateTaskUserAsync(db, "case-summary@example.local", "Сотрудник", canEdit: false);
+        var other = await CreateTaskUserAsync(db, "case-summary-other@example.local", "Другой сотрудник", canEdit: false);
+        var client = await CreateClientAsync(db, "Синтетический клиент сводки");
+        var clientCase = await CreateCaseAsync(db, client.Id, "Дело сводки");
+        var otherCase = await CreateCaseAsync(db, client.Id, "Иное дело сводки");
+        if (!empty)
+        {
+            await CreateTaskAsync(db, current.Id, client.Id, current.Id, clientCase.Id, status: "done");
+            await CreateTaskAsync(db, current.Id, client.Id, current.Id, clientCase.Id, status: "cancelled");
+            await CreateTaskAsync(db, current.Id, client.Id, current.Id, clientCase.Id, dueAt: DateTime.UtcNow.AddDays(-1));
+        }
+        await CreateTaskAsync(db, current.Id, client.Id, current.Id, otherCase.Id, status: "done");
+        await CreateTaskAsync(db, other.Id, client.Id, other.Id, clientCase.Id, status: "done");
+        db.ChangeTracker.Clear();
+        var controller = CreateController(db, new RecordingNotificationService(), current);
+        interceptor.Commands.Clear();
+
+        var result = await controller.GetTaskListSummary(
+            search: null, status: "all", type: null, assigneeUserId: null,
+            from: null, to: null, clientCaseId: clientCase.Id, ct: CancellationToken.None);
+        var summary = Assert.IsType<TaskJournalListSummaryDto>(
+            Assert.IsType<OkObjectResult>(result.Result).Value);
+        var json = JsonSerializer.SerializeToElement(summary, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.Equal(empty ? 0 : 3, json.GetProperty("total").GetInt32());
+        Assert.Equal(empty ? 0 : 2, json.GetProperty("completed").GetInt32());
+        Assert.Equal(empty ? 0 : 1, summary.Active);
+        Assert.Equal(empty ? 0 : 1, summary.Overdue);
+        Assert.Equal(2, interceptor.Commands.Count(command =>
+            command.Contains("FROM \"TaskJournalItems\"", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task GetTasks_CasePagesAndCountersRejectDeniedViewBeforeReadingTasks()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var current = await CreateTaskUserAsync(db, "case-denied@example.local", "Недоступный просмотр", canEdit: false);
+        current.Role!.Permissions.Single(permission => permission.Section == RolePermissionCatalog.Tasks).CanView = false;
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), current);
+        interceptor.Commands.Clear();
+
+        var list = await controller.GetTasks(
+            search: null, status: "completed", type: null, assigneeUserId: null,
+            from: null, to: null, clientCaseId: 1, ct: CancellationToken.None);
+        var summary = await controller.GetTaskListSummary(
+            search: null, status: "all", type: null, assigneeUserId: null,
+            from: null, to: null, clientCaseId: 1, ct: CancellationToken.None);
+        Assert.IsType<UnauthorizedResult>(list.Result);
+        Assert.IsType<UnauthorizedResult>(summary.Result);
+        Assert.DoesNotContain(interceptor.Commands, command =>
+            command.Contains("FROM \"TaskJournalItems\"", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task GetTasks_SortsByAssigneeOnServer()
     {

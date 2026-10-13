@@ -2173,6 +2173,8 @@ export interface TaskJournalListParams {
 
 /** Компактные счётчики журнала, рассчитанные сервером без выгрузки карточек. */
 export interface TaskJournalListSummary {
+  total?: number;
+  completed?: number;
   active: number;
   overdue: number;
   today: number;

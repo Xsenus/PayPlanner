@@ -375,6 +375,8 @@ public class TaskJournalOverdueSummaryDto
 /// </summary>
 public class TaskJournalListSummaryDto
 {
+    public int Total { get; set; }
+    public int Completed { get; set; }
     public int Active { get; set; }
     public int Overdue { get; set; }
     public int Today { get; set; }

@@ -1,6 +1,9 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
+import { TablePagination } from '../ui/TablePagination';
+import { useCaseTaskPage, CASE_TASK_PAGE_SIZES, type CaseTaskFilter } from '../../hooks/useCaseTaskPage';
+import { TASK_TYPE_OPTIONS } from '../Tasks/taskTypeOptions';
 import { ClientPortalAccessPanel } from './ClientPortalAccessPanel';
 import { CaseAppealDecisionAction } from './CaseAppealDecisionAction';
 import { CasePreHearingActions } from './CasePreHearingActions';
@@ -105,7 +108,6 @@ interface CaseDetailPageProps {
 }
 
 type CaseDetailTab = 'overview' | 'participants' | 'tasks' | 'court' | 'events' | 'finance' | 'workOrder' | 'documents' | 'conversation' | 'history';
-type CaseTaskFilter = 'active' | 'all' | 'overdue' | 'done';
 type SummaryTone = 'slate' | 'emerald' | 'amber' | 'rose' | 'cyan';
 type ParticipantSourceType = 'client' | 'legalEntity' | 'externalContact';
 type DocumentSourceType = 'case' | 'task' | 'courtEvent' | 'workOrder' | 'invoice' | 'stage';
@@ -1198,15 +1200,6 @@ function splitHistory(value?: string | null) {
     .filter(Boolean);
 }
 
-function isActiveTask(task: TaskJournalItem) {
-  return task.status !== 'done' && task.status !== 'cancelled';
-}
-
-function isOverdueTask(task: TaskJournalItem) {
-  const dueAt = Date.parse(task.dueAt);
-  return isActiveTask(task) && Number.isFinite(dueAt) && dueAt < Date.now();
-}
-
 function toDateInput(value: string | null | undefined) {
   return value ? String(value).slice(0, 10) : '';
 }
@@ -1544,7 +1537,7 @@ export function CaseDetailPage({
   const markedViewedCaseIdRef = useRef<number | null>(null);
   const [caseTimeZoneId, setCaseTimeZoneId] = useState(() => normalizeUserTimeZoneId());
   const [responsibles, setResponsibles] = useState<ActResponsible[]>([]);
-  const [tasks, setTasks] = useState<TaskJournalItem[]>([]);
+  const [documentSourceTasks, setDocumentSourceTasks] = useState<TaskJournalItem[]>([]);
   const [relatedParties, setRelatedParties] = useState<ClientCaseRelatedParty[]>([]);
   const [showArchivedParties, setShowArchivedParties] = useState(false);
   const [documents, setDocuments] = useState<ClientCaseDocument[]>([]);
@@ -1599,7 +1592,6 @@ export function CaseDetailPage({
   );
   const [courtOverview, setCourtOverview] = useState(initialViewState.courtOverview === true);
   const [loading, setLoading] = useState(true);
-  const [tasksLoading, setTasksLoading] = useState(false);
   const [participantsLoading, setParticipantsLoading] = useState(false);
   const [documentsLoading, setDocumentsLoading] = useState(false);
   const [courtEventsLoading, setCourtEventsLoading] = useState(true);
@@ -1686,6 +1678,12 @@ export function CaseDetailPage({
   const [inactivityRemindersDraft, setInactivityRemindersDraft] = useState(true);
   const [inactivityRemindersDisabledReasonDraft, setInactivityRemindersDisabledReasonDraft] = useState('');
   const [taskFilter, setTaskFilter] = useState<CaseTaskFilter>(initialViewState.taskFilter ?? 'active');
+  const taskPage = useCaseTaskPage({
+    caseId,
+    enabled: canViewTasks && activeTab === 'tasks' && !editPageOpen && caseItem?.id === caseId && !error,
+    filter: taskFilter,
+    revision: reloadToken,
+  });
   const [participantSourceType, setParticipantSourceType] = useState<ParticipantSourceType>(initialViewState.participantSourceType ?? 'client');
   const [participantSourceId, setParticipantSourceId] = useState('');
   const [participantSearch, setParticipantSearch] = useState('');
@@ -1750,12 +1748,12 @@ export function CaseDetailPage({
   const documentSourceOptions = useMemo(
     () => buildDocumentSourceOptions(
       documentSourceType,
-      canViewTasks ? tasks : [],
+      canViewTasks ? documentSourceTasks : [],
       courtEvents,
       workOrder,
       canViewFinance ? financeDetail : null,
     ),
-    [canViewFinance, canViewTasks, courtEvents, documentSourceType, financeDetail, tasks, workOrder],
+    [canViewFinance, canViewTasks, courtEvents, documentSourceType, financeDetail, documentSourceTasks, workOrder],
   );
   const documentTypeListId = useMemo(() => `case-document-types-${caseId}`, [caseId]);
 
@@ -1842,8 +1840,7 @@ export function CaseDetailPage({
     }
 
     if (!canViewTasks && activeTab === 'tasks') {
-      setTasks([]);
-      setTasksLoading(false);
+      setDocumentSourceTasks([]);
     }
   }, [activeTab, canViewFinance, canViewTasks]);
 
@@ -2047,29 +2044,22 @@ export function CaseDetailPage({
 
   useEffect(() => {
     if (!canViewTasks) {
-      setTasks([]);
-      setTasksLoading(false);
+      setDocumentSourceTasks([]);
       return;
     }
 
-    if (activeTab !== 'tasks' && activeTab !== 'documents') return;
+    if (activeTab !== 'documents') return;
 
-    let cancelled = false;
-    setTasksLoading(true);
-    apiService.getTaskJournalItems({ clientCaseId: caseId, page: 1, pageSize: 50 })
+    const controller = new AbortController();
+    apiService.getTaskJournalItems({ clientCaseId: caseId, page: 1, pageSize: 50 }, { signal: controller.signal })
       .then((result) => {
-        if (!cancelled) setTasks(result.items ?? []);
+        if (!controller.signal.aborted) setDocumentSourceTasks(result.items ?? []);
       })
       .catch(() => {
-        if (!cancelled) setTasks([]);
-      })
-      .finally(() => {
-        if (!cancelled) setTasksLoading(false);
+        if (!controller.signal.aborted) setDocumentSourceTasks([]);
       });
 
-    return () => {
-      cancelled = true;
-    };
+    return () => controller.abort();
   }, [activeTab, canViewTasks, caseId, reloadToken]);
 
   useEffect(() => {
@@ -2494,12 +2484,6 @@ export function CaseDetailPage({
     setInactivityRemindersDisabledReasonDraft(caseItem.inactivityRemindersDisabledReason ?? '');
   }, [caseItem]);
 
-  const filteredTasks = useMemo(() => {
-    if (taskFilter === 'all') return tasks;
-    if (taskFilter === 'done') return tasks.filter((task) => task.status === 'done' || task.status === 'cancelled');
-    if (taskFilter === 'overdue') return tasks.filter(isOverdueTask);
-    return tasks.filter(isActiveTask);
-  }, [taskFilter, tasks]);
   const stageTaskTemplates = useMemo(
     () => caseItem ? getCaseStageTaskTemplates(caseItem) : [],
     [caseItem],
@@ -4381,23 +4365,18 @@ export function CaseDetailPage({
           ) : null}
 
           {activeTab === 'tasks' ? (
-            tasksLoading ? (
-              <LoadingBlock label="Загрузка задач по делу..." />
-            ) : (
-              <TaskList
-                tasks={filteredTasks}
-                allTasks={tasks}
-                progress={progress}
-                filter={taskFilter}
-                onFilterChange={setTaskFilter}
-                onCreateTask={createTaskForCase}
-                stageTaskTemplates={stageTaskTemplates}
-                onCreateStageTask={createStageTaskForCase}
-                creatingTask={creatingTask}
-                canCreateTask={canCreateCaseTask}
-                onOpenTask={canViewTasks ? onOpenTask : undefined}
-              />
-            )
+            <TaskList
+              pageData={taskPage}
+              progress={progress}
+              filter={taskFilter}
+              onFilterChange={setTaskFilter}
+              onCreateTask={createTaskForCase}
+              stageTaskTemplates={stageTaskTemplates}
+              onCreateStageTask={createStageTaskForCase}
+              creatingTask={creatingTask}
+              canCreateTask={canCreateCaseTask}
+              onOpenTask={canViewTasks ? onOpenTask : undefined}
+            />
           ) : null}
 
           {activeTab === 'events' ? (
@@ -6768,8 +6747,7 @@ function RelatedParties({
 }
 
 function TaskList({
-  tasks,
-  allTasks,
+  pageData,
   progress,
   filter,
   onFilterChange,
@@ -6780,8 +6758,7 @@ function TaskList({
   canCreateTask,
   onOpenTask,
 }: {
-  tasks: TaskJournalItem[];
-  allTasks: TaskJournalItem[];
+  pageData: ReturnType<typeof useCaseTaskPage>;
   progress: number;
   filter: CaseTaskFilter;
   onFilterChange: (filter: CaseTaskFilter) => void;
@@ -6792,19 +6769,16 @@ function TaskList({
   canCreateTask: boolean;
   onOpenTask?: (taskId: number) => void;
 }) {
-  const counts: Record<CaseTaskFilter, number> = {
-    all: allTasks.length,
-    active: allTasks.filter(isActiveTask).length,
-    overdue: allTasks.filter(isOverdueTask).length,
-    done: allTasks.filter((task) => task.status === 'done' || task.status === 'cancelled').length,
-  };
+  const { items: tasks, counts } = pageData;
+  const paginationTotal = pageData.loading || pageData.error ? counts?.[filter] ?? 0 : pageData.total;
+  const totalPages = Math.max(1, Math.ceil(paginationTotal / pageData.pageSize));
 
   return (
-    <div className="space-y-4">
-      <div className="rounded-xl border border-slate-200 p-4">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+    <div className="space-y-3">
+      <div className="rounded-xl border border-slate-200 p-3">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Связанные задачи ({allTasks.length})</h2>
+            <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Связанные задачи ({counts?.all ?? '—'})</h2>
             <div className="mt-1 text-sm text-slate-500">Прогресс: {progress}%</div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -6813,8 +6787,9 @@ function TaskList({
                 key={option.value}
                 type="button"
                 onClick={() => onFilterChange(option.value)}
+                aria-pressed={filter === option.value}
                 className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${filter === option.value ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>
-                {option.label} · {counts[option.value]}
+                {option.label} · {counts?.[option.value] ?? '—'}
               </button>
             ))}
             {canCreateTask ? (
@@ -6830,7 +6805,7 @@ function TaskList({
         </div>
       </div>
       {canCreateTask && stageTaskTemplates.length > 0 ? (
-        <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-4">
+        <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-3">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-blue-700">Подсказки по этапу</h3>
@@ -6860,42 +6835,89 @@ function TaskList({
           </div>
         </div>
       ) : null}
-      {tasks.length === 0 ? <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">По выбранному фильтру задач нет.</div> : null}
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[760px] text-left text-sm">
+      {pageData.summaryError ? (
+        <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          Не удалось получить счётчики задач.
+          <button type="button" onClick={pageData.refresh} className="rounded underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">Повторить загрузку счётчиков</button>
+        </div>
+      ) : null}
+      {pageData.error ? (
+        <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+          Не удалось загрузить задачи дела.
+          <button type="button" onClick={pageData.refresh} className="rounded underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">Повторить загрузку задач</button>
+        </div>
+      ) : pageData.loading ? (
+        <LoadingBlock label="Загрузка задач по делу..." />
+      ) : tasks.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-slate-200 p-3 text-sm text-slate-500">По выбранному фильтру задач нет.</div>
+      ) : null}
+      <div className="max-w-full overflow-x-auto" aria-busy={pageData.loading}>
+        <table aria-label="Задачи дела" className="w-full min-w-[640px] table-fixed text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase tracking-[0.12em] text-slate-500">
             <tr>
-              <th className="px-3 py-2">Задача</th>
-              <th className="px-3 py-2">Исполнитель</th>
-              <th className="px-3 py-2">Срок</th>
-              <th className="px-3 py-2">Статус</th>
-              <th className="px-3 py-2">Результат</th>
+              <th scope="col" className="w-[32%] px-3 py-2">Задача</th>
+              <th scope="col" className="w-[23%] px-3 py-2">Исполнитель</th>
+              <th scope="col" className="w-[17%] px-3 py-2">Срок</th>
+              <th scope="col" className="w-[14%] px-3 py-2">Статус</th>
+              <th scope="col" className="w-[14%] px-2 py-2 text-[11px] tracking-normal">Результат</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {tasks.map((task) => (
-              <tr key={task.id}>
-                <td className="px-3 py-3 font-semibold text-slate-900">
-                  {onOpenTask ? (
-                    <button
-                      type="button"
-                      onClick={() => onOpenTask(task.id)}
-                      aria-label={`Открыть задачу: ${task.title}`}
-                      className="text-left font-semibold text-blue-700 hover:underline">
-                      {task.title}
-                    </button>
-                  ) : task.title}
-                </td>
-                <td className="px-3 py-3 text-slate-700">{task.assigneeName || '—'}</td>
-                <td className="px-3 py-3 text-slate-700">{formatRuDateTime(task.dueAt) || '—'}</td>
-                <td className="px-3 py-3 text-slate-700">{TASK_STATUS_LABELS[task.status] ?? task.status}</td>
-                <td className="px-3 py-3 text-slate-700">{task.result || '—'}</td>
-              </tr>
-            ))}
+            {tasks.map((task) => {
+              const typeOption = TASK_TYPE_OPTIONS.find((option) => option.value === task.type) ?? TASK_TYPE_OPTIONS[0];
+              const TypeIcon = typeOption.icon;
+              const assigneeName = task.assigneeName?.trim() || '—';
+              const initials = assigneeName === '—' ? '' : Array.from(assigneeName.split(/\s+/).slice(0, 2)
+                .map((part) => Array.from(part)[0]).join('').toLocaleUpperCase('ru')).slice(0, 2).join('');
+              return (
+                <tr key={task.id}>
+                  <td className="px-3 py-3 font-semibold text-slate-900">
+                    <div className="flex min-w-0 items-start gap-2">
+                      <span role="img" aria-label={`Тип задачи: ${typeOption.label}`} title={typeOption.label} className="mt-0.5 shrink-0 text-blue-700">
+                        <TypeIcon className="h-4 w-4" aria-hidden="true" />
+                      </span>
+                      {onOpenTask ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenTask(task.id)}
+                          aria-label={`Открыть задачу: ${task.title}`}
+                          className="min-w-0 rounded text-left font-semibold text-blue-700 [overflow-wrap:anywhere] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                          {task.title}
+                        </button>
+                      ) : <span className="min-w-0 [overflow-wrap:anywhere]">{task.title}</span>}
+                    </div>
+                  </td>
+                  <td className="px-3 py-3 text-slate-700">
+                    <div className="flex min-w-0 items-start gap-2">
+                      {initials ? <span aria-hidden="true" className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-100 text-[10px] font-semibold text-blue-700">{initials}</span> : null}
+                      <span className="min-w-0 [overflow-wrap:anywhere]">{assigneeName}</span>
+                    </div>
+                  </td>
+                  <td className="px-3 py-3 text-slate-700">{formatRuDateTime(task.dueAt) || '—'}</td>
+                  <td className="px-3 py-3 text-xs text-slate-700 [overflow-wrap:anywhere]">{TASK_STATUS_LABELS[task.status] ?? task.status}</td>
+                  <td className="px-3 py-3 text-xs text-slate-700 [overflow-wrap:anywhere]">{task.result || '—'}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
-      <div className="text-sm text-slate-500" aria-live="polite">Показано {tasks.length} из {allTasks.length}</div>
+      {!pageData.loading && !pageData.error ? (
+        <div className="text-sm text-slate-500" aria-live="polite">Показано {tasks.length} из {pageData.total}</div>
+      ) : null}
+      <TablePagination
+        page={pageData.page}
+        totalPages={totalPages}
+        totalItems={paginationTotal}
+        pageSize={pageData.pageSize}
+        pageSizeOptions={CASE_TASK_PAGE_SIZES}
+        onPageChange={pageData.setPage}
+        onPageSizeChange={pageData.setPageSize}
+        recordsLabel="Найдено задач"
+        previousLabel="Предыдущая страница задач"
+        nextLabel="Следующая страница задач"
+        className="!gap-3 !p-3"
+      />
     </div>
   );
 }

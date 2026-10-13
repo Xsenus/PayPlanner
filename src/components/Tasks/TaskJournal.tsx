@@ -1,6 +1,7 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { CALENDAR_TASK_VISIBILITY_SETTINGS_HREF } from '../../utils/calendarSettingsNavigation';
 import { TaskUploadStatusPanel } from './TaskUploadStatusPanel';
+import { TASK_TYPE_OPTIONS as TYPE_OPTIONS } from './taskTypeOptions';
 import { submitTaskFileUpload, TaskFileUploadWaitingError } from '../../services/taskFileUpload';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
@@ -38,7 +39,6 @@ import {
   Paperclip,
   Palette,
   Pencil,
-  Phone,
   Play,
   Plus,
   RefreshCw,
@@ -343,17 +343,6 @@ const STATUS_OPTIONS: Array<{ value: TaskJournalStatus; label: string }> = [
   { value: 'overdueApproval', label: 'Просрочено на согласовании' },
   { value: 'done', label: 'Готово' },
   { value: 'cancelled', label: 'Отменена' },
-];
-
-const TYPE_OPTIONS: Array<{ value: TaskJournalType; label: string; icon: typeof ClipboardList }> = [
-  { value: 'task', label: 'Задача', icon: ClipboardList },
-  { value: 'budget', label: 'Бюджет', icon: WalletCards },
-  { value: 'contact', label: 'Связаться', icon: Phone },
-  { value: 'document', label: 'Документ', icon: FileText },
-  { value: 'reminder', label: 'Не забыть', icon: Bell },
-  { value: 'control', label: 'Контроль', icon: AlarmClock },
-  { value: 'courtHearing', label: 'Суд. заседание', icon: Scale },
-  { value: 'meeting', label: 'Встреча', icon: UsersRound },
 ];
 
 const PRIORITY_OPTIONS: Array<{ value: TaskJournalPriority; label: string }> = [

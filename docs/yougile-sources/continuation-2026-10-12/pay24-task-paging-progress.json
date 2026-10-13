@@ -1,0 +1,700 @@
+{
+  "recordedAtUtc": "2026-10-13T07:59:44.144048+00:00",
+  "card": "PAY-24",
+  "cardId": "0d9fb0ef-2ad0-4799-b049-29d72b761851",
+  "baseRevision": "7da8c5034d5b299e626829df62596fee29ff2221",
+  "status": "screen_pages_counters_icons_verified_2631_unit_318_integration_24_related_api_passed_normal_backend_gate_open",
+  "sourcePins": {
+    "backend/Controllers/TasksController.cs": "9dbb54b6a67624f8e28c085c998cdfc471f2884bb932ea5e5a71e1d4fe25bd61",
+    "backend/Models/Responses/TaskJournalDtos.cs": "b860a3fff1c6e5ee71fec8ff3b06923fdb6dc083d2b27d9f235774c891dfc7a6",
+    "backend/PayPlanner.Api.Tests/TasksControllerTests.cs": "8d748ddf7c5b015fc6c26ac7c677a8505dacd37d153f10ff3637e7453fe9f0ba",
+    "src/services/api.ts": "740928a8ff6378abb7607de4d577cf22abd42e0b6f9f1eeb2a7e1ec719d5982a",
+    "src/hooks/useCaseTaskPage.ts": "969d3990ab616e19f662177daee0555581f41b94b5e23d0212bdaded6a11dc8e",
+    "src/hooks/useCaseTaskPage.test.tsx": "66827427d83520333188a44f3e9537f86df359be3cd28817be16de155282a2df",
+    "src/components/Cases/CaseDetailPage.tsx": "c649d7be1b8ed25f81bbd306459742cbe909c37e8e9efabeb38911ae2e12464f",
+    "src/components/Cases/CaseDetailPage.test.tsx": "7e2efc7e572c75924c5cf19e9afc8e2f1c7de53a6b7f4eca506ada6ce5c043ba",
+    "src/components/Tasks/TaskJournal.tsx": "1e7697ca74a8eb556276963b12da8e28b0e67871f6b2e4d99b9f279cf82f6dd3",
+    "src/components/Tasks/taskTypeOptions.ts": "2b98382e586dfdefdeb56eca0a59ee1232a3380d7a50660dc3af329fd09c846f",
+    "backend/AppReleases/releases.json": "6f5ef1d2aab5a85b44a35e3f4d033b0a0e097afdf7fe540e631ecd20f04cc89e",
+    "vite.restored-browser.integration.test.ts": "56f3aa01814e66e68b29c3bdca0cb4ba35034304b471eaedf2a32c83fb1270df"
+  },
+  "implementedCandidate": [
+    "Existing task filter gains completed = done plus cancelled; existing summary aggregate gains total/completed without extra queries.",
+    "Independent task-page hook uses server filters/pages and case counters, cancellation and stale-response guards, resets/corrects pages, retries errors and rejects missing counters.",
+    "Case screen uses independent server pages and whole-case counters only after authorized case load; document-source choices retain separate state.",
+    "Shared eight task types used by journal and case rows; assignee initials and full names; fixed compact widths preserve result and due time."
+  ],
+  "frontendHook": {
+    "qualified": true,
+    "passed": 9,
+    "failed": 0,
+    "fullFrontendGate": true,
+    "integratedIntoScreen": true,
+    "terminalSession": 62866,
+    "terminalExitCode": 0,
+    "log": {
+      "path": "D:/PayPlannerReview-20261012/pay24-hook-targeted.log",
+      "sha256": "2d2569860223dce89e3aa048ab5cc1a8cf3356a599ab3073dd1753e02d8aa1da",
+      "bytes": 373
+    },
+    "json": {
+      "path": "D:/PayPlannerReview-20261012/pay24-hook-targeted.json",
+      "sha256": "9756442d5c8b7410fd2766405d583ee18ffcacb362a8682e9db4fed43ced28a3",
+      "bytes": 3589
+    },
+    "lintPassed": true,
+    "typesPassed": true,
+    "staticTerminalSession": 16677,
+    "staticTerminalExitCode": 0,
+    "lintLog": {
+      "path": "D:/PayPlannerReview-20261012/pay24-lint-targeted.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "typesLog": {
+      "path": "D:/PayPlannerReview-20261012/pay24-types-targeted.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    }
+  },
+  "backendVerification": {
+    "qualified": true,
+    "testsExecuted": true,
+    "postgresSqlReadyButNewTestsNotExecuted": false,
+    "failures": [
+      {
+        "session": 62382,
+        "exitCode": 1,
+        "cause": "Owned compiler stopped before renewed C exhaustion; MSB6006 csc -1 in Migrations dependency.",
+        "log": {
+          "path": "D:/PayPlannerReview-20261012/pay24-api-baseline.log",
+          "sha256": "e9a27cdd01c618689cb766d09f0433a6f7958789b4ffefb52e4b8d48cc1c8f19",
+          "bytes": 739
+        }
+      },
+      {
+        "session": 27996,
+        "exitCode": 1,
+        "cause": "2GiB GC heap limit insufficient; migration compiler out of memory; no API test run.",
+        "log": {
+          "path": "D:/PayPlannerReview-20261012/pay24-api-targeted.log",
+          "sha256": "a212b6695958b46f22ac0eaa2ea5a4536f7ba2f98d822263891a2bca0507bc8e",
+          "bytes": 696
+        }
+      },
+      {
+        "session": 84290,
+        "exitCode": 1,
+        "cause": "5GiB GC heap limit insufficient; migration compiler OutOfMemoryException; no API test run.",
+        "durationSeconds": 276.89,
+        "log": {
+          "path": "D:/PayPlannerReview-20261012/pay24-migrations-memory5g.log",
+          "sha256": "1fb45237c6fd2e3cd46fc0e25d2c2b535f8e3030ec709fd8e19703952e96fd27",
+          "bytes": 124404
+        }
+      }
+    ],
+    "largerBuildNotStarted": {
+      "guardSession": 39385,
+      "exitCode": 1,
+      "commitHeadroomGB": 5.82,
+      "physicalFreeMB": 5829,
+      "cFreeGB": 3.7,
+      "requestedHeapGiB": 7,
+      "requiredCommitHeadroomGiB": 10
+    },
+    "newMigrationDefinitionsChanged": false,
+    "fullBackendGatePassed": false,
+    "cachedDependencyAttempt": {
+      "session": 86407,
+      "exitCode": 1,
+      "total": 24,
+      "passed": 22,
+      "failed": 2,
+      "skipped": 0,
+      "mode": "Targeted test-project build with BuildProjectReferences=false; current API and previously qualified unchanged migrations binary. Normal full dependency build remains an unmet release gate.",
+      "migrationBinarySha256": "5e5101a6d344f99342874e4c81c2429d66876aaa7a928f9c250dce7f1d56b3bc",
+      "failureKinds": [
+        "Denied-view expectation was Forbid, existing ResolveDataVisibility returns no access and controller returns Unauthorized; no-task-read assertion retained.",
+        "PostgreSQL cleanup failure masked the primary result. Diagnostic cleanup now retains every body/disposal exception without suppressing failures."
+      ]
+    },
+    "fixtureRepairSession": 79953,
+    "fixtureRepairStatus": "passed",
+    "qualificationScope": "Targeted server query/summary behavior only. New runtime scenarios use current API and previously qualified unchanged migrations binary; normal full dependency and release gates remain unqualified.",
+    "fixtureRepairExitCode": 0,
+    "fixtureRepair": {
+      "total": 6,
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "session": 79953,
+      "trx": {
+        "path": "D:/PayPlannerReview-20261012/pay24-api-fixture-repair-results/pay24-api-fixture-repair.trx",
+        "sha256": "56f811a360b38ddb9689e601aeb209d96f19cce0ea16d4d83549e6fc250ac00b",
+        "bytes": 10706
+      },
+      "log": {
+        "path": "D:/PayPlannerReview-20261012/pay24-api-fixture-repair.log",
+        "sha256": "04c5c4110a36a23334ded4f0e8e138704ec6c80c7325898ab5f304a8a2fac8f3",
+        "bytes": 1089
+      },
+      "postgreSqlActuallyExecuted": true,
+      "cleanupPassed": true
+    },
+    "relatedCoverage": {
+      "distinctScenarios": 24,
+      "initialRun": {
+        "passed": 22,
+        "failed": 2
+      },
+      "newScenarioRepeatPassed": 6,
+      "singleFinal24ScenarioRunClaimed": true,
+      "note": "Historical 22+6 runs retained above. Latest final source also has a separate successful 24/24 run, including expanded mixed-case group filters."
+    },
+    "initialPostgreSqlFailureCause": "Initial owned-lease cleanup failed and masked the body result. The cause was not conclusively established. Diagnostics now retain all body/cleanup failures; the repeat passed.",
+    "statusCaseParity": {
+      "qualified": true,
+      "baseline": {
+        "total": 3,
+        "passed": 1,
+        "failed": 2,
+        "exitCode": 1,
+        "session": 80419,
+        "log": {
+          "path": "D:/PayPlannerReview-20261012/pay24-status-case-baseline.log",
+          "sha256": "c533fe30f206a69852c383af9f6b5b01a45cb9df527a2bad6ac84146ebcf840f",
+          "bytes": 6189
+        },
+        "trx": {
+          "path": "D:/PayPlannerReview-20261012/pay24-status-case-baseline-results/pay24-status-case-baseline.trx",
+          "sha256": "4af9ce206df8ef850f1e22f40814383f5af29711e7b0177a3b31ca5e8f046048",
+          "bytes": 17282
+        },
+        "cause": "Both SQLite/PostgreSQL exposed summary active 40 vs filtered total 80 for Done/CANCELLED. PG additionally timed out dropping owned clone; original exceptions all retained."
+      },
+      "fix": "Active/overdue reads now compare terminal statuses case-insensitively exactly as existing summary; no write rules, schema or bulk data edits. Existing mixed-case fixture asserts group counts and SQL budgets on SQLite/PostgreSQL.",
+      "apiBuild": {
+        "session": 86355,
+        "exitCode": 0,
+        "errors": 0,
+        "warnings": 0,
+        "durationSeconds": 80.46,
+        "log": {
+          "path": "D:/PayPlannerReview-20261012/pay24-status-case-api-build.log",
+          "sha256": "689ad3adeca4bf41dd13771c912a8e65ca5f8fd7a245699bc99f838116752849",
+          "bytes": 474
+        },
+        "scope": "API compiled with PayPlannerSkipMigrationsBuild=true for targeted loop; existing qualified migrations reused; NOT normal full build."
+      },
+      "finalRun": {
+        "session": 86355,
+        "exitCode": 0,
+        "total": 24,
+        "passed": 24,
+        "failed": 0,
+        "skipped": 0,
+        "durationSeconds": 153,
+        "log": {
+          "path": "D:/PayPlannerReview-20261012/pay24-status-case-final.log",
+          "sha256": "be1d42d5bc124bdd8f2799f7ba36e43e14aa0e578b71110fe69f075997308b36",
+          "bytes": 1087
+        },
+        "trx": {
+          "path": "D:/PayPlannerReview-20261012/pay24-status-case-final-results/pay24-status-case-final.trx",
+          "sha256": "ff6cf32c0cfd078288e5201c5dd0224feb4479d3621783286955e1bdf8c020cf",
+          "bytes": 36323
+        },
+        "configuredPostgreSqlExecuted": true,
+        "testOnlyCommandTimeoutSeconds": 120,
+        "note": "Only local test connection timeout increased for slow native Windows owned DB disposal; assertions, query budget, full cleanup and all tests retained."
+      },
+      "ownedBaselineCleanup": {
+        "databases": [
+          "pp_case_task_page_ca9452396b1045468f95cb8ca1fc13bf",
+          "pp_schema_template_bed6d0f39b594b0e89fe5a4307291e76"
+        ],
+        "ownershipFromBaselineTrx": true,
+        "noSessionsChecked": true,
+        "exitCode": 0,
+        "remaining": 0,
+        "log": {
+          "path": "D:/PayPlannerReview-20261012/pay24-status-case-cleanup.log",
+          "sha256": "e0f956c459eb991f3d2099fb0967a1c72ffa25a51b94556398f9620708bfe0c5",
+          "bytes": 127
+        }
+      },
+      "finalOwnedCleanupPassed": true,
+      "finalDatabaseInventoryEmpty": true
+    },
+    "laterMemoryObservation": {
+      "availableMBytes": 3644,
+      "committedBytes": 36956418048,
+      "commitLimitBytes": 42984017920,
+      "commitHeadroomGiB": 5.61,
+      "cFreeGiB": 2.05,
+      "dFreeGiB": 170.23,
+      "normalLargeCompileRestarted": false,
+      "reason": "Insufficient safe headroom for generated migration project (>6 GiB compile requirement documented by repository workflow). No global OS/pagefile changes made."
+    },
+    "currentTargetedBinaries": {
+      "PayPlanner.Api": {
+        "path": "D:/PayPlannerReview-20261012/calendar-timezone-baseline-artifacts/bin/PayPlanner.Api/release/PayPlanner.Api.dll",
+        "sha256": "c926bb3206528b02b8b70cb392b7dd49561f84ea4d8eb80ba8fd87cb9df6d895",
+        "bytes": 17088000
+      },
+      "PayPlanner.Api.Tests": {
+        "path": "D:/PayPlannerReview-20261012/calendar-timezone-baseline-artifacts/bin/PayPlanner.Api.Tests/release/PayPlanner.Api.Tests.dll",
+        "sha256": "a08b91bc782a12d445c86c4b992b52a72fda0c377a70466ae0eb0c9fe665668e",
+        "bytes": 15242752
+      },
+      "PayPlanner.Api.Migrations": {
+        "path": "D:/PayPlannerReview-20261012/calendar-timezone-baseline-artifacts/bin/PayPlanner.Api.Migrations/release/PayPlanner.Api.Migrations.dll",
+        "sha256": "5e5101a6d344f99342874e4c81c2429d66876aaa7a928f9c250dce7f1d56b3bc",
+        "bytes": 40424960
+      }
+    }
+  },
+  "roadmapAudit": {
+    "method": "Direct count of status markers in the new PAY-24 roadmap; existing npm roadmap checker only covers tz-gap/tz-crm names.",
+    "total": 6,
+    "completed": 2,
+    "inProgress": 3,
+    "notStarted": 0,
+    "blocked": 0,
+    "decision": 0,
+    "acceptance": 1,
+    "percent": 33
+  },
+  "limitations": [
+    "Normal fresh generated-migration compilation and full backend gate remain open. Targeted cached-dependency runtime checks do not qualify them.",
+    "Final frontend area gate passed: 2631 unit/318 integration, explicit app/node types, lint, production build and encoding. Initial native-browser download failures retained; cause not conclusively established. This does not qualify the full normal backend or all-release CI equivalent.",
+    "Full mutation cycles through both route cards, menu/mass selection design and real environment/full card acceptance remain open.",
+    "Document-source selector intentionally remains its old independent first-50 list; whole-source availability is a PAY-23 follow-up, not the paginated task table.",
+    "YouGile new-task refresh deferred by the user; last confirmed complete read 2026-10-13 01:58 UTC.",
+    "The committed PAY-23 2605-test C0 result is historical and does not qualify new C1 work."
+  ],
+  "pushed": false,
+  "deployed": false,
+  "yougileChanged": false,
+  "goalComplete": false,
+  "encodingAudit": {
+    "passed": true,
+    "textFilesChecked": 3132,
+    "command": "npm run audit:encoding",
+    "terminalExitCode": 0,
+    "log": {
+      "path": "D:/PayPlannerReview-20261012/pay24-final-checkpoint-encoding.log",
+      "sha256": "1bcdce780679fd07d98b223e4438b46fc7ba0115a9e8708d09befd4819fb1ffb",
+      "bytes": 142
+    }
+  },
+  "frontendScreen": {
+    "qualifiedBehavior": true,
+    "finalFullFrontendUnitGatePassed": true,
+    "component": {
+      "result": {
+        "numTotalTests": 158,
+        "numPassedTests": 158,
+        "numFailedTests": 0,
+        "numPendingTests": 0,
+        "numTotalTestSuites": 3,
+        "numPassedTestSuites": 3,
+        "success": true
+      },
+      "log": {
+        "path": "D:/PayPlannerReview-20261012/pay24-component-full.log",
+        "sha256": "560dad114471f61a6b4aaf8ed9c955ce174b58f2a92648883f371ecafc445e1c",
+        "bytes": 6534
+      },
+      "json": {
+        "path": "D:/PayPlannerReview-20261012/pay24-component-full.json",
+        "sha256": "22bda906e2e9fd2cc3ad8c9e0ef2023dbf81a3632786ffa55d71a1febd9b617b",
+        "bytes": 49305
+      },
+      "scope": "158 component tests passed; afterwards only task table CSS/column sizing changed, verified by final static/build/browser checks; final unit gate now running.",
+      "finalUnitGateAlsoCoversFinalLayout": true
+    },
+    "journalRelated": {
+      "result": {
+        "numTotalTests": 382,
+        "numPassedTests": 178,
+        "numFailedTests": 0,
+        "numPendingTests": 204,
+        "numTotalTestSuites": 5,
+        "numPassedTestSuites": 5,
+        "success": true
+      },
+      "log": {
+        "path": "D:/PayPlannerReview-20261012/pay24-journal-targeted.log",
+        "sha256": "358c7b3c40fe7c757d31e40617dc2a8887c9ad665878914efbe2628fc3c31d2c",
+        "bytes": 12309
+      },
+      "json": {
+        "path": "D:/PayPlannerReview-20261012/pay24-journal-targeted.json",
+        "sha256": "e7943233a59a4d97cff79e5c5867712a91725b5c121fa8bdec948f87033ceb42",
+        "bytes": 111861
+      },
+      "scope": "178 passed, 204 not selected; both forms, admin setting and shared saving/permissions covered; not a full journal suite claim.",
+      "finalUnitGateAlsoCoversAll382JournalTests": true
+    },
+    "initialFixtureFailure": {
+      "log": {
+        "path": "D:/PayPlannerReview-20261012/pay24-component-targeted.log",
+        "sha256": "8ca21dd4145e4e70509c5df197e5d0183ed688925bd988dd8075164871771593",
+        "bytes": 24105
+      },
+      "note": "12 passed, 1 failed, 144 not selected: hidden native SystemSelect option needed hidden:true. No hook tests executed by that selection."
+    },
+    "fixtureRepair": {
+      "result": {
+        "numTotalTests": 148,
+        "numPassedTests": 1,
+        "numFailedTests": 0,
+        "numPendingTests": 147,
+        "numTotalTestSuites": 3,
+        "numPassedTestSuites": 3,
+        "success": true
+      },
+      "log": {
+        "path": "D:/PayPlannerReview-20261012/pay24-document-source-repeat.log",
+        "sha256": "c339ee482a120354a7581f6819140a4e45fbcb6ef9782cc38bebc9f3606534b7",
+        "bytes": 526
+      }
+    },
+    "initialSharedMapLintFailure": {
+      "log": {
+        "path": "D:/PayPlannerReview-20261012/pay24-ui-lint.log",
+        "sha256": "caffe888741c7df13118d8249e92d203b0e63377783f2edf850978ac84e78685",
+        "bytes": 204
+      },
+      "note": "Unused Phone import after extracting type options; import removed; final full lint passed."
+    },
+    "finalStatic": {
+      "exitCode": 0,
+      "session": 56754,
+      "lint": {
+        "path": "D:/PayPlannerReview-20261012/pay24-final-lint.log",
+        "sha256": "fb96953ea7bd08e3c0c410c3fba0c7b5ea09ac4da8afa12ff30fe9d6da5429eb",
+        "bytes": 41
+      },
+      "types": {
+        "path": "D:/PayPlannerReview-20261012/pay24-final-types.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "build": {
+        "path": "D:/PayPlannerReview-20261012/pay24-final-build.log",
+        "sha256": "faded438b891f658d1b6ef4ad6adf740517ae0395bc3cfb9f881cbf606036cef",
+        "bytes": 14756
+      },
+      "buildDurationSeconds": 14.78,
+      "outputDirectory": "D:/PayPlannerReview-20261012/pay24-production-build",
+      "rootTscCommandDidNotCheckReferencedProjects": true,
+      "rootTscLog": {
+        "path": "D:/PayPlannerReview-20261012/pay24-final-types.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "typesApp": {
+        "path": "D:/PayPlannerReview-20261012/pay24-final-types-app.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "typesNode": {
+        "path": "D:/PayPlannerReview-20261012/pay24-final-types-node.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "explicitProjectTypesPassed": true,
+      "explicitTypeCommands": [
+        "node node_modules/typescript/bin/tsc -p tsconfig.app.json --noEmit",
+        "node node_modules/typescript/bin/tsc -p tsconfig.node.json --noEmit"
+      ],
+      "browserDiagnosticLint": {
+        "path": "D:/PayPlannerReview-20261012/pay24-browser-diagnostic-lint.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    "fullUnitGate": {
+      "status": "passed",
+      "session": 7593,
+      "sourcePin": {
+        "path": "D:/PayPlannerReview-20261012/pay24-final-frontend-source-pin.json",
+        "sha256": "c2aad1674b3dd446d5156e82fa6145ccf72eb7e20b6b87b1cb61eb8979d35045",
+        "bytes": 1200
+      },
+      "logPath": "D:/PayPlannerReview-20261012/pay24-final-frontend-unit.log",
+      "jsonPath": "D:/PayPlannerReview-20261012/pay24-final-frontend-unit.json",
+      "command": "node node_modules/vitest/vitest.mjs run --exclude **/*.integration.test.* --maxWorkers=1 --no-file-parallelism --reporter=default --reporter=json --outputFile.json=...",
+      "sequentialForMemory": true,
+      "exitCode": 0,
+      "total": 2631,
+      "passed": 2631,
+      "failed": 0,
+      "skipped": 0,
+      "files": 246,
+      "durationSeconds": 936.85,
+      "sourceHashesUnchanged": true,
+      "log": {
+        "path": "D:/PayPlannerReview-20261012/pay24-final-frontend-unit.log",
+        "sha256": "40117b5646618fd9dee2d2d2ed1bfd481cbb5d7a1cf25edc8a08664575b79978",
+        "bytes": 78019
+      },
+      "json": {
+        "path": "D:/PayPlannerReview-20261012/pay24-final-frontend-unit.json",
+        "sha256": "c68def37bd42978267649ac9a140b5fe14b0c752c766ea9b83895e2a4642e2a1",
+        "bytes": 859651
+      }
+    },
+    "integrationGate": {
+      "status": "passed_final_full_repeat_previous_failures_retained",
+      "session": 78771,
+      "exitCode": 1,
+      "total": 318,
+      "passed": 317,
+      "failed": 1,
+      "filesPassed": 15,
+      "filesFailed": 1,
+      "durationSeconds": 176.59,
+      "log": {
+        "path": "D:/PayPlannerReview-20261012/pay24-final-frontend-integration.log",
+        "sha256": "5eb6d01afc5b098df34a3a4e79fa84da3fcdd9780bdd4378025b710d7adb49ae",
+        "bytes": 2453
+      },
+      "failedTest": "vite.restored-browser.integration.test.ts: native loopback isolation fixture did not receive download within 10s; repeat in progress",
+      "fullMandatoryGatePassed": true,
+      "unchangedRepeat": {
+        "session": 6546,
+        "exitCode": 1,
+        "failed": 1,
+        "log": {
+          "path": "D:/PayPlannerReview-20261012/pay24-restored-browser-repeat.log",
+          "sha256": "bd7d1b86407c6e3d6eaa406a3b840c5fed9eb1e8a7fdf3581e6edbae733a80e9",
+          "bytes": 1787
+        }
+      },
+      "diagnosticRepeat": {
+        "session": 61750,
+        "exitCode": 0,
+        "passed": 1,
+        "log": {
+          "path": "D:/PayPlannerReview-20261012/pay24-restored-browser-diagnostic.log",
+          "sha256": "9bda7ad35240713e73cfc1ab6d4e71855086a534fc2b47d46820bd099f46bb7d",
+          "bytes": 362
+        },
+        "note": "Failure-only diagnostics added, all success-path assertions and existing timeout preserved. Repeat passed; initial intermittent download cause not conclusively established."
+      },
+      "fullRepeat": {
+        "session": 82178,
+        "status": "passed",
+        "logPath": "D:/PayPlannerReview-20261012/pay24-final-frontend-integration-repeat.log",
+        "exitCode": 0,
+        "passed": 318,
+        "total": 318,
+        "failed": 0,
+        "skipped": 0,
+        "files": 16,
+        "durationSeconds": 160.31,
+        "log": {
+          "path": "D:/PayPlannerReview-20261012/pay24-final-frontend-integration-repeat.log",
+          "sha256": "df64fd6a17c06f172e5722beaa25c36fcdd5832982200b8d214ac36e0a56e805",
+          "bytes": 330
+        }
+      },
+      "flakinessCaveat": "Initial download cause not conclusively established; diagnostics preserve failures without relaxing assertions or timeouts. Targeted and final full repeat passed."
+    }
+  },
+  "browserScreen": {
+    "qualified": true,
+    "visual": {
+      "fixture": "Browser-only task metadata based on an existing synthetic case task; no task/file mutations",
+      "geometries": [
+        {
+          "viewport": 390,
+          "documentWidth": 390,
+          "tableWidth": 640,
+          "scrollerWidth": 332,
+          "theme": "standard"
+        },
+        {
+          "viewport": 1024,
+          "documentWidth": 1024,
+          "tableWidth": 662,
+          "scrollerWidth": 662,
+          "theme": "standard"
+        },
+        {
+          "viewport": 1440,
+          "documentWidth": 1440,
+          "tableWidth": 654,
+          "scrollerWidth": 654,
+          "theme": "standard"
+        },
+        {
+          "viewport": 390,
+          "documentWidth": 390,
+          "tableWidth": 640,
+          "scrollerWidth": 332,
+          "theme": "graphite"
+        },
+        {
+          "viewport": 1024,
+          "documentWidth": 1024,
+          "tableWidth": 662,
+          "scrollerWidth": 662,
+          "theme": "graphite"
+        },
+        {
+          "viewport": 1440,
+          "documentWidth": 1440,
+          "tableWidth": 654,
+          "scrollerWidth": 654,
+          "theme": "graphite"
+        }
+      ],
+      "keyboardNextPage": true,
+      "closedAndCancelled": true,
+      "reads": [
+        {
+          "status": "active",
+          "page": 1,
+          "pageSize": 50
+        },
+        {
+          "status": "active",
+          "page": 2,
+          "pageSize": 50
+        },
+        {
+          "status": "completed",
+          "page": 1,
+          "pageSize": 50
+        }
+      ]
+    },
+    "visualLog": {
+      "path": "D:/PayPlannerReview-20261012/pay24-visual-review-final.log",
+      "sha256": "5d0863880a6e129fc514a20c5fc9f50a94e7ac3b6beaabcddc1298aba7616c60",
+      "bytes": 5894
+    },
+    "returnThroughBothForms": {
+      "scope": "Real synthetic task ID opened in both existing forms; browser-only settings/metadata overlay, no database writes; return rereads case data and starts page 1",
+      "returns": [
+        {
+          "mode": "legacy",
+          "taskId": 7,
+          "title": "Подготовиться к заседанию",
+          "returnedCaseId": 3,
+          "filterRetained": "true",
+          "rows": 50,
+          "total": true
+        },
+        {
+          "mode": "modern",
+          "taskId": 7,
+          "returnedCaseId": 3,
+          "filterRetained": "true",
+          "rows": 50,
+          "total": true
+        }
+      ]
+    },
+    "returnLog": {
+      "path": "D:/PayPlannerReview-20261012/pay24-return-review-final.log",
+      "sha256": "e8a7c761d8ecce4bccf59b0c2826bd2cf1a6b5f7abc954e6ec0771737bd29283",
+      "bytes": 3637
+    },
+    "initialLocatorFailures": [
+      {
+        "path": "D:/PayPlannerReview-20261012/pay24-return-inspect.log",
+        "sha256": "40c98418cabcae451c079cbe4c24ecfa6cda242286c24517151eb44d6727ba36",
+        "bytes": 150
+      },
+      {
+        "path": "D:/PayPlannerReview-20261012/pay24-return-review.log",
+        "sha256": "2e76999f9d06112f80586473933a12559e04de2addf2a61d4012cca36860ee84",
+        "bytes": 206
+      },
+      {
+        "path": "D:/PayPlannerReview-20261012/pay24-return-review-repaired.log",
+        "sha256": "31764755716fdd94bd9e4e19979e0d9637f72290a4a5a033dac7ae9309a0bed0",
+        "bytes": 206
+      }
+    ],
+    "locatorFailureExplanation": "Initial diagnostic locators assumed dialog/Close; existing route card uses test ID and Journal/Back-to-journal. Corrected locators passed. No application change for those diagnostic failures.",
+    "screenshots": [
+      {
+        "path": "D:/PayPlannerReview-20261012/pay24-tasks-standard-390.png",
+        "sha256": "fd0715508cdf10c5d76a1c12c2bff4f0fa3ad0473eaa355f441dcb37357ca124",
+        "bytes": 65355
+      },
+      {
+        "path": "D:/PayPlannerReview-20261012/pay24-tasks-standard-1024.png",
+        "sha256": "91b227ef88d462883690b93d04b182e85853a20b14eedd93d37f7edaa933d7b3",
+        "bytes": 132250
+      },
+      {
+        "path": "D:/PayPlannerReview-20261012/pay24-tasks-standard-1440.png",
+        "sha256": "e6b7b67af76bc2f947857408e2a742345822c4ca651582b0ff648ea898c0c17a",
+        "bytes": 173690
+      },
+      {
+        "path": "D:/PayPlannerReview-20261012/pay24-tasks-graphite-390.png",
+        "sha256": "bd64e2ddcaec73e2a7839d234a55d1202e21baca6f545326bea973acb9b67147",
+        "bytes": 66300
+      },
+      {
+        "path": "D:/PayPlannerReview-20261012/pay24-tasks-graphite-1024.png",
+        "sha256": "e2c50d4f402a0ad26fafc2383a111c031ab9055bc708d3bafef075a7de454cc8",
+        "bytes": 135510
+      },
+      {
+        "path": "D:/PayPlannerReview-20261012/pay24-tasks-graphite-1440.png",
+        "sha256": "0e7aa5791a9d04b3f84b68db5b265c0f3f48b7324227ac982c4ed156fad6bc8e",
+        "bytes": 177324
+      }
+    ],
+    "limits": "Browser overlay generated 61 metadata rows from one actual existing synthetic task, changed only browser responses for card mode; no task/file mutations, no 61-row database or production acceptance claimed. Return restarts page 1 with filter retained; mutation cycles remain open.",
+    "localIsolation": {
+      "emailEnabled": false,
+      "backgroundServicesEnabled": false,
+      "dbEmailEnabled": false,
+      "productionSmtpSettingsCount": 0,
+      "restoredIsolationHeaderVerified": true,
+      "guardedHealthHttpStatus": 200,
+      "unguardedHealthHttpStatus": 409,
+      "syntheticDataOnly": true,
+      "previewStopped": true
+    }
+  },
+  "releaseNote": {
+    "version": "1.14.84",
+    "combinedPerUserPreference": true,
+    "previousEntriesUnchanged": true,
+    "publishedToProduction": false
+  },
+  "allReleaseCiEquivalentPassed": false,
+  "performanceReview": {
+    "tableRequestPattern": "One bounded page plus one summary on entry; page/filter changes do not re-read summary, no all-task download or per-row requests.",
+    "serverQueryBudget": "Existing bounded page count/projection and two task summary queries preserved, tested on 121 rows in SQLite/PostgreSQL.",
+    "rowRendering": "At most selected page size 100; constant eight-type lookup and max-two initials, no photo/dictionary requests.",
+    "otherState": "Independent document-source selector preserves file/type/task ID across pages; its pre-existing first-50 availability remains a PAY-23 limitation."
+  },
+  "canonicalLfSourcePins": {
+    "backend/Controllers/TasksController.cs": "9dbb54b6a67624f8e28c085c998cdfc471f2884bb932ea5e5a71e1d4fe25bd61",
+    "backend/Models/Responses/TaskJournalDtos.cs": "b860a3fff1c6e5ee71fec8ff3b06923fdb6dc083d2b27d9f235774c891dfc7a6",
+    "backend/PayPlanner.Api.Tests/TasksControllerTests.cs": "8d748ddf7c5b015fc6c26ac7c677a8505dacd37d153f10ff3637e7453fe9f0ba",
+    "src/services/api.ts": "740928a8ff6378abb7607de4d577cf22abd42e0b6f9f1eeb2a7e1ec719d5982a",
+    "src/hooks/useCaseTaskPage.ts": "969d3990ab616e19f662177daee0555581f41b94b5e23d0212bdaded6a11dc8e",
+    "src/hooks/useCaseTaskPage.test.tsx": "66827427d83520333188a44f3e9537f86df359be3cd28817be16de155282a2df",
+    "src/components/Cases/CaseDetailPage.tsx": "c649d7be1b8ed25f81bbd306459742cbe909c37e8e9efabeb38911ae2e12464f",
+    "src/components/Cases/CaseDetailPage.test.tsx": "7e2efc7e572c75924c5cf19e9afc8e2f1c7de53a6b7f4eca506ada6ce5c043ba",
+    "src/components/Tasks/TaskJournal.tsx": "7d20224a549532fa1d8938de0fe1ef363a50382fb1c3c013d212d7f87ed94fd9",
+    "src/components/Tasks/taskTypeOptions.ts": "2b98382e586dfdefdeb56eca0a59ee1232a3380d7a50660dc3af329fd09c846f",
+    "backend/AppReleases/releases.json": "6f5ef1d2aab5a85b44a35e3f4d033b0a0e097afdf7fe540e631ecd20f04cc89e",
+    "vite.restored-browser.integration.test.ts": "56f3aa01814e66e68b29c3bdca0cb4ba35034304b471eaedf2a32c83fb1270df"
+  },
+  "sourcePinConvention": "sourcePins retain exact tested working-tree bytes. canonicalLfSourcePins reflect Git text=auto eol=lf, with only line endings normalized."
+}

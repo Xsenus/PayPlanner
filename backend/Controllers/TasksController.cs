@@ -806,6 +806,10 @@ public class TasksController : ControllerBase
             .GroupBy(_ => 1)
             .Select(group => new
             {
+                Total = group.Count(),
+                Completed = group.Count(task =>
+                    task.Status != null &&
+                    (task.Status.ToLower() == "done" || task.Status.ToLower() == "cancelled")),
                 Active = group.Count(task =>
                     (task.Status == null || task.Status.ToLower() != "done") &&
                     (task.Status == null || task.Status.ToLower() != "cancelled")),
@@ -854,6 +858,8 @@ public class TasksController : ControllerBase
 
         return Ok(new TaskJournalListSummaryDto
         {
+            Total = aggregate?.Total ?? 0,
+            Completed = aggregate?.Completed ?? 0,
             Active = aggregate?.Active ?? 0,
             Overdue = aggregate?.Overdue ?? 0,
             Today = aggregate?.Today ?? 0,
@@ -5200,15 +5206,21 @@ public class TasksController : ControllerBase
         {
             if (string.Equals(status, "active", StringComparison.OrdinalIgnoreCase))
             {
-                query = query.Where(task => task.Status != "done" && task.Status != "cancelled");
+                query = query.Where(task => (task.Status == null || task.Status.ToLower() != "done") &&
+                    (task.Status == null || task.Status.ToLower() != "cancelled"));
             }
             else if (string.Equals(status, "overdue", StringComparison.OrdinalIgnoreCase))
             {
                 var now = DateTime.UtcNow;
                 query = query.Where(task =>
-                    task.Status != "done" &&
-                    task.Status != "cancelled" &&
+                    (task.Status == null || task.Status.ToLower() != "done") &&
+                    (task.Status == null || task.Status.ToLower() != "cancelled") &&
                     task.DueAt < now);
+            }
+            else if (string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase))
+            {
+                query = query.Where(task => task.Status != null &&
+                    (task.Status.ToLower() == "done" || task.Status.ToLower() == "cancelled"));
             }
             else
             {

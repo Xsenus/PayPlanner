@@ -152,7 +152,16 @@ it('qualifies native browser CSP, probe transport and clean-profile barriers aga
     }))).toBe(true);
     const downloading = page.waitForEvent('download');
     await page.evaluate(() => window.__restoredProbe.download());
-    const downloaded = await downloading;
+    let downloaded;
+    try {
+      downloaded = await downloading;
+    } catch (cause) {
+      const diagnostics = { requests, outside, errors, consoleErrors,
+        browserVersion: browser.version(),
+        blocked: await page.evaluate(() => window.__restoredCspBlocked),
+      };
+      throw new Error(`Native fixture download failed: ${JSON.stringify(diagnostics)}`, { cause });
+    }
     expect(downloaded.suggestedFilename()).toBe('fixture.txt');
     expect(await downloaded.failure()).toBeNull();
     const stream = await downloaded.createReadStream();
