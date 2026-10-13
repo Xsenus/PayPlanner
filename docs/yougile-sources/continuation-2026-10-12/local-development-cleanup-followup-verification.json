@@ -1,0 +1,59 @@
+{
+  "verifiedAtUtc": "2026-10-13T04:02:03.9403346Z",
+  "scope": "User-authorized archival of two confirmed stopped synthetic PayPlanner PostgreSQL clusters from C to D",
+  "movedClusters": [
+    {
+      "name": "claude-test-postgres",
+      "historicalSourcePath": "C:\\Users\\ilel\\source\\repos\\PayPlanner\\.codex-build\\claude-test-postgres",
+      "archivePath": "D:\\PayPlannerReview-20261012\\retired-c-clusters-20261013\\claude-test-postgres",
+      "bytes": 283050918,
+      "fileCount": 9906,
+      "directoryCount": 41,
+      "pgCtlStatusExitCodeBeforeMove": 3,
+      "matchingPostgresProcessesBeforeMove": 0,
+      "absolutePathsValidatedBeforeMove": true,
+      "destinationAbsentBeforeMove": true,
+      "sourceAbsentAfterMove": true,
+      "filesAndDirectoriesPreserved": true,
+      "inventorySha256": "f9baee3fe98f1836b6f175427f21b2c71d9d7948793e627d7d743f7ef2dd78b1"
+    },
+    {
+      "name": "bank-ssd-postgres",
+      "historicalSourcePath": "C:\\Users\\ilel\\source\\repos\\PayPlanner\\.codex-build\\bank-ssd-postgres",
+      "archivePath": "D:\\PayPlannerReview-20261012\\retired-c-clusters-20261013\\bank-ssd-postgres",
+      "bytes": 75148855,
+      "fileCount": 976,
+      "directoryCount": 26,
+      "pgCtlStatusExitCodeBeforeMove": 3,
+      "matchingPostgresProcessesBeforeMove": 0,
+      "absolutePathsValidatedBeforeMove": true,
+      "destinationAbsentBeforeMove": true,
+      "sourceAbsentAfterMove": true,
+      "filesAndDirectoriesPreserved": true,
+      "inventorySha256": "4d6a62ba07f8ee9d7126f1ca60238538310d93d29a899e309d750f59a16cdd92"
+    }
+  ],
+  "movedBytes": 358199773,
+  "privateManifestPath": "D:\\PayPlannerReview-20261012\\retired-c-clusters-20261013\\relocation-manifest.local.json",
+  "privateManifestSha256": "1a18a7b7e89ce4e1f4d6ee4719067b68f45d8222d9472a40cb8f6e31d7591d53",
+  "fileContentsVerifiedBySha256": true,
+  "noFilesDeleted": true,
+  "noDestinationsOverwritten": true,
+  "currentSyntheticRuntime": {
+    "postgresPort": 55445,
+    "processesUnchanged": true,
+    "configurationUnchanged": true,
+    "frontendAddress": "http://127.0.0.1:5301",
+    "sqlitePath": "C:/Users/ilel/source/repos/PayPlanner/.codex-build/claude-synthetic/synthetic.db",
+    "apiAddress": "http://127.0.0.1:5300",
+    "postgresDataPath": "D:/PayPlannerReview-20261012/bank-ssd-icu-postgres"
+  },
+  "productionUnchanged": true,
+  "sourceAndNodeModulesUnchanged": true,
+  "noTestsOrBuildsRun": true,
+  "historicalPathsNote": "The two former C paths are now archives at the recorded D destinations. Historical reports keep their original paths as evidence; the archived clusters have not been started and are not the current API/SQLite/PostgreSQL environment.",
+  "limitations": [
+    "Directory bytes preserved and relocated do not guarantee an equal lasting change in C free space because Windows paging varies.",
+    "This storage-only action does not qualify any incomplete test or deployment gate."
+  ]
+}

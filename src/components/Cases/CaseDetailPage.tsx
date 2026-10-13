@@ -10,9 +10,10 @@ import { CourtRecoveryPanel } from './CourtRecoveryPanel';
 import { ExecutiveWritDocumentUpload } from './ExecutiveWritDocumentUpload';
 import { CaseDocumentUploadStatusPanel } from './CaseDocumentUploadStatusPanel';
 import { MessengerDocumentDeliveryModal } from './MessengerDocumentDeliveryModal';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import {
   Archive,
+  ArrowDown,
   ArrowLeft,
   Briefcase,
   Check,
@@ -29,6 +30,7 @@ import {
   LockKeyhole,
   Mail,
   MessageSquare,
+  MoreHorizontal,
   Paperclip,
   Pencil,
   Phone,
@@ -8478,6 +8480,7 @@ function DocumentList({
   const [typeFilter, setTypeFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [latestOnly, setLatestOnly] = useState(false);
+  const [dateSortDirection, setDateSortDirection] = useState<'asc' | 'desc'>('desc');
   const [deliveryDocument, setDeliveryDocument] = useState<ClientCaseDocument | null>(null);
   const versionSummaries = useMemo(() => buildDocumentVersionSummaries(documents), [documents]);
 
@@ -8507,6 +8510,16 @@ function DocumentList({
       ].some((value) => normalizeDocumentFilter(value).includes(query));
     });
   }, [documents, latestOnly, searchTerm, statusFilter, typeFilter]);
+
+  const sortedDocuments = useMemo(() => visibleDocuments
+    .map((document) => ({ document, timestamp: getDocumentUploadTimestamp(document.uploadedAt) }))
+    .sort((left, right) => {
+      if (left.timestamp === null && right.timestamp === null) return left.document.id - right.document.id;
+      if (left.timestamp === null) return 1;
+      if (right.timestamp === null) return -1;
+      const dateDifference = left.timestamp - right.timestamp;
+      return (dateSortDirection === 'desc' ? -dateDifference : dateDifference) || left.document.id - right.document.id;
+    }), [dateSortDirection, visibleDocuments]);
 
   if (documents.length === 0) {
     return <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">Документы по делу пока не загружены.</div>;
@@ -8573,31 +8586,57 @@ function DocumentList({
           По текущим фильтрам документов нет.
         </div>
       ) : (
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,280px),1fr))] gap-3">
-          {visibleDocuments.map((document) => (
-            <DocumentCard
-              key={document.id}
-              document={document}
-              versionSummary={versionSummaries.get(document.documentKey)}
-              downloading={downloadingDocumentId === document.id}
-              previewing={previewingDocumentId === document.id}
-              sendingToYandex={sendingYandexDocumentId === document.id}
-              uploadingVersion={uploadingDocumentVersionId === document.id}
-              updating={updatingDocumentId === document.id}
-              deleting={deletingDocumentId === document.id}
-              documentTypeOptions={documentTypeOptions}
-              documentStatusOptions={documentStatusOptions}
-              canEdit={canEdit}
-              canDelete={canDelete}
-              onPreview={onPreview}
-              onDownload={onDownload}
-              onSendToYandexDisk={onSendToYandexDisk}
-              onSendMessenger={clientId && canSendMessenger ? setDeliveryDocument : undefined}
-              onUploadVersion={onUploadVersion}
-              onUpdate={onUpdate}
-              onDelete={onDelete}
-            />
-          ))}
+        <div className="max-w-full overflow-x-auto rounded-xl border border-slate-200">
+          <table aria-label="Документы дела" className="w-full min-w-[640px] table-fixed text-left text-sm">
+            <thead className="bg-slate-50 text-xs font-semibold text-slate-500">
+              <tr>
+                <th scope="col" className="px-3 py-2">Название документа</th>
+                <th scope="col" aria-sort={dateSortDirection === 'desc' ? 'descending' : 'ascending'} className="w-[16%] px-3 py-2">
+                  <button
+                    type="button"
+                    aria-label="Сортировать документы по дате"
+                    title={dateSortDirection === 'desc' ? 'Сначала новые документы' : 'Сначала старые документы'}
+                    onClick={() => setDateSortDirection((current) => current === 'desc' ? 'asc' : 'desc')}
+                    className="inline-flex items-center gap-1 rounded text-left hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                  >
+                    Дата
+                    <ArrowDown className={`h-3.5 w-3.5 ${dateSortDirection === 'asc' ? 'rotate-180' : ''}`} aria-hidden="true" />
+                  </button>
+                </th>
+                <th scope="col" className="w-[17%] px-3 py-2">Тип документа</th>
+                <th scope="col" className="w-[15%] px-3 py-2">Автор</th>
+                <th scope="col" className="w-[10%] px-3 py-2">Размер</th>
+                <th scope="col" className="relative w-12 px-2 py-2"><span className="sr-only">Действия</span></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200">
+              {sortedDocuments.map(({ document, timestamp }) => (
+                <DocumentTableRow
+                  key={document.id}
+                  document={document}
+                  uploadedAtTimestamp={timestamp}
+                  versionSummary={versionSummaries.get(document.documentKey)}
+                  downloading={downloadingDocumentId === document.id}
+                  previewing={previewingDocumentId === document.id}
+                  sendingToYandex={sendingYandexDocumentId === document.id}
+                  uploadingVersion={uploadingDocumentVersionId === document.id}
+                  updating={updatingDocumentId === document.id}
+                  deleting={deletingDocumentId === document.id}
+                  documentTypeOptions={documentTypeOptions}
+                  documentStatusOptions={documentStatusOptions}
+                  canEdit={canEdit}
+                  canDelete={canDelete}
+                  onPreview={onPreview}
+                  onDownload={onDownload}
+                  onSendToYandexDisk={onSendToYandexDisk}
+                  onSendMessenger={clientId && canSendMessenger ? setDeliveryDocument : undefined}
+                  onUploadVersion={onUploadVersion}
+                  onUpdate={onUpdate}
+                  onDelete={onDelete}
+                />
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
       {deliveryDocument && clientId ? (
@@ -8642,6 +8681,104 @@ function buildDocumentVersionSummaries(documents: ClientCaseDocument[]) {
   });
 
   return result;
+}
+
+function getDocumentUploadTimestamp(value?: string | null): number | null {
+  const normalized = value?.trim();
+  if (!normalized) return null;
+  const timestamp = parseInstant(normalized).getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+type DocumentTableRowProps = Parameters<typeof DocumentCard>[0] & {
+  uploadedAtTimestamp: number | null;
+};
+
+function DocumentTableRow({ uploadedAtTimestamp, ...cardProps }: DocumentTableRowProps) {
+  const { document, previewing, deleting, onPreview } = cardProps;
+  const [expanded, setExpanded] = useState(false);
+  const [hasOpened, setHasOpened] = useState(false);
+  const actionsButtonRef = useRef<HTMLButtonElement | null>(null);
+  const displayName = document.originalFileName?.trim() || `Документ №${document.id}`;
+  const detailsId = `case-document-details-${document.clientCaseId}-${document.id}`;
+  const actionsLabel = `Сведения и действия документа ${displayName}`;
+  const closeDetailsOnEscape = (event: KeyboardEvent<HTMLElement>) => {
+    if (!expanded || event.key !== 'Escape' || event.defaultPrevented) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setExpanded(false);
+    actionsButtonRef.current?.focus();
+  };
+
+  return (
+    <Fragment>
+      <tr aria-label={`Документ ${displayName}`} className="align-top hover:bg-slate-50/60">
+        <td className="px-3 py-3">
+          <div className="flex min-w-0 items-start gap-2">
+            <FileText className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" aria-hidden="true" />
+            <div className="min-w-0">
+              <button
+                type="button"
+                onClick={() => onPreview(document)}
+                disabled={previewing || deleting}
+                aria-label={`Открыть предпросмотр документа ${displayName}`}
+                className="rounded text-left font-semibold text-blue-700 [overflow-wrap:anywhere] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-50"
+              >
+                {displayName}
+              </button>
+              <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-xs text-slate-500">
+                <span>v{document.version}</span>
+                <span className={document.isLatestVersion ? 'text-emerald-700' : 'text-amber-700'}>
+                  {document.isLatestVersion ? 'Актуальная' : 'Не актуальная версия'}
+                </span>
+                <span>{formatCaseDocumentStatus(document.status)}</span>
+              </div>
+            </div>
+          </div>
+        </td>
+        <td className="px-3 py-3 text-xs text-slate-500">
+          {uploadedAtTimestamp === null ? '—' : formatRuDateTime(document.uploadedAt) || '—'}
+        </td>
+        <td className="px-3 py-3 text-xs text-slate-700 [overflow-wrap:anywhere]">
+          {document.documentType?.trim() || '—'}
+        </td>
+        <td className="px-3 py-3 text-xs text-slate-500 [overflow-wrap:anywhere]">
+          {document.uploadedByName?.trim() || '—'}
+        </td>
+        <td className="px-3 py-3 text-xs text-slate-500">{formatFileSize(document.sizeBytes)}</td>
+        <td className="px-2 py-2">
+          <button
+            ref={actionsButtonRef}
+            type="button"
+            aria-label={actionsLabel}
+            aria-expanded={expanded}
+            aria-controls={detailsId}
+            title="Сведения и действия"
+            onKeyDown={closeDetailsOnEscape}
+            onClick={() => {
+              setHasOpened(true);
+              setExpanded((current) => !current);
+            }}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          >
+            <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </td>
+      </tr>
+      <tr hidden={!expanded} className={expanded ? 'bg-slate-50/60' : 'hidden'}>
+        <td colSpan={6} className="p-3">
+          <div
+            id={detailsId}
+            role="region"
+            aria-label={actionsLabel}
+            onKeyDown={closeDetailsOnEscape}
+          >
+            {hasOpened ? <DocumentCard {...cardProps} /> : null}
+          </div>
+        </td>
+      </tr>
+    </Fragment>
+  );
 }
 
 function DocumentCard({

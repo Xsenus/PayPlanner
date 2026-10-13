@@ -1,0 +1,66 @@
+{
+  "recordedAtUtc": "2026-10-13T04:19:30Z",
+  "projectId": "daa8d6c1-cce6-4c0c-985a-6bdc5a4b5eb4",
+  "status": "refresh_unavailable",
+  "userDeferredRefresh": true,
+  "userDecision": "Сверить позже",
+  "scope": "Read-only refresh of the exact PayPlanner project; no other company or project was queried.",
+  "attemptEvidenceSource": "Three MCP tool results reported by the parent agent; summaries below do not replace raw responses.",
+  "attempts": [
+    {
+      "tool": "mcp__yougile.query_tasks",
+      "scope": {
+        "projectId": "daa8d6c1-cce6-4c0c-985a-6bdc5a4b5eb4"
+      },
+      "result": {
+        "cards": []
+      },
+      "interpretation": "The exact project query returned no accessible cards; this does not establish deletion or an empty PayPlanner project."
+    },
+    {
+      "tool": "mcp__yougile.get_project_tree",
+      "scope": {
+        "id": "daa8d6c1-cce6-4c0c-985a-6bdc5a4b5eb4"
+      },
+      "result": {
+        "isError": true,
+        "message": "Не удалось найти проект"
+      }
+    },
+    {
+      "tool": "mcp__yougile.get_task_data",
+      "scope": {
+        "id": "7d72c480-1fcc-481b-bab7-dd7f1d52f37b",
+        "taskId": "PAY-23"
+      },
+      "result": {
+        "isError": true,
+        "message": "Не удалось найти задачу"
+      }
+    }
+  ],
+  "lastConfirmedFullPoll": {
+    "path": "docs/yougile-sources/continuation-2026-10-12/latest-poll-2026-10-13-assignee.json",
+    "sha256": "d4020ec37bfed01d06a7fbb7df34a66b8121f9e787136461c3c38a7258c31cdb",
+    "recordedAtUtc": "2026-10-13T01:58:10.834541+00:00",
+    "cardCount": 38,
+    "nextCursor": null,
+    "descriptionsReread": true
+  },
+  "comparison": {
+    "status": "not_performed",
+    "cardCount": null,
+    "changedTaskIds": null,
+    "addedCardIds": null,
+    "removedCardIds": null,
+    "newMessageCount": null,
+    "descriptionsReread": false
+  },
+  "yougileChangesMade": false,
+  "limitations": [
+    "The requested PayPlanner context is unavailable to the active connector. The cause was not established.",
+    "New tasks, changed metadata or descriptions, and messages since 2026-10-13T01:58:10.834541+00:00 remain unverified.",
+    "The user deferred the refresh. No further attempts are required now; development continues independently.",
+    "No card reply, description edit, status update, or column move was made."
+  ]
+}

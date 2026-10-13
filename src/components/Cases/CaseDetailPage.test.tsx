@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import userEvent from '@testing-library/user-event';
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import { apiService } from '../../services/api';
 import type { ClientCase, ClientCaseCourtEvent, ClientCaseDocument, ClientCaseWorkOrder } from '../../types';
@@ -11,6 +12,29 @@ function createJournalEvent(overrides: Partial<ClientCaseCourtEvent> = {}): Clie
     scheduledAt: '2026-10-12T09:30:00Z', allDay: false, courtInstance: 'first', courtInstanceLabel: 'Первая инстанция',
     movementStatus: 'scheduled', movementStatusLabel: 'Назначено', sourceType: 'manual',
     createdAt: '2026-10-01T00:00:00Z', isOverdue: false, canRecordHearingOutcome: false, ...overrides };
+}
+
+function createCaseDocument(overrides: Partial<ClientCaseDocument> = {}): ClientCaseDocument {
+  return { id: 7, clientCaseId: 15, documentKey: 'claim', version: 1,
+    documentType: 'Заявление', status: 'Готово', originalFileName: 'Заявление.docx',
+    contentType: 'application/pdf', sizeBytes: 1024, uploadedByName: 'Синтетический автор',
+    uploadedAt: '2026-05-02T10:00:00Z', isLatestVersion: true, ...overrides };
+}
+
+async function openDocumentDetails(fileName = 'Заявление.docx') {
+  const name = `Сведения и действия документа ${fileName}`;
+  const toggle = await screen.findByRole('button', { name });
+  if (toggle.getAttribute('aria-expanded') !== 'true') fireEvent.click(toggle);
+  return screen.getByRole('region', { name });
+}
+
+function setupDocumentUser() {
+  const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  onTestFinished(() => {
+    if (clipboard) Object.defineProperty(navigator, 'clipboard', clipboard);
+    else Reflect.deleteProperty(navigator, 'clipboard');
+  });
+  return userEvent.setup();
 }
 
 const dialogMock = vi.hoisted(() => ({
@@ -54,6 +78,7 @@ vi.mock('../../services/api', () => ({
     uploadCaseDocumentVersion: vi.fn(),
     downloadCaseDocument: vi.fn(),
     uploadCaseDocumentToYandexDisk: vi.fn(),
+    getMessengerDocumentDeliveryConfiguration: vi.fn(),
     updateCaseDocument: vi.fn(),
     deleteCaseDocument: vi.fn(),
     addCaseHistoryEntry: vi.fn(),
@@ -412,6 +437,7 @@ describe('CaseDetailPage', () => {
     expect(apiService.uploadCaseDocumentVersion).not.toHaveBeenCalled();
   });
   beforeEach(() => {
+    vi.mocked(apiService.getMessengerDocumentDeliveryConfiguration).mockReset();
     vi.mocked(apiService.retireCaseDocumentUpload).mockReset();
     vi.mocked(apiService.getPendingCaseDocumentUploads).mockReset();
     vi.mocked(apiService.getPendingCaseDocumentUploads).mockResolvedValue({ items: [], nextCursor: null });
@@ -1567,6 +1593,217 @@ describe('CaseDetailPage', () => {
     expect(screen.getByText('Заявление.docx')).toBeTruthy();
   });
 
+  it('PAY-23 table: sorts instants with stable ID ties and invalid dates last without changing data or fetching files', async () => {
+    const documents = [
+      createCaseDocument({ id: 90, documentKey: 'invalid', originalFileName: 'Некорректная.pdf', uploadedAt: 'not-a-date' }),
+      createCaseDocument({ id: 20, documentKey: 'utc', originalFileName: 'UTC.pdf', uploadedAt: '2026-05-05T10:00:00Z' }),
+      createCaseDocument({ id: 50, documentKey: 'newest', originalFileName: 'Новый.pdf', uploadedAt: '2026-05-06T10:00:00Z' }),
+      createCaseDocument({ id: 40, documentKey: 'null', originalFileName: 'Без даты.pdf', uploadedAt: null as unknown as string }),
+      createCaseDocument({ id: 10, documentKey: 'naive', originalFileName: 'Без суффикса.pdf', uploadedAt: '2026-05-05T10:00:00' }),
+      createCaseDocument({ id: 60, documentKey: 'empty', originalFileName: 'Пустая дата.pdf', uploadedAt: '' }),
+      createCaseDocument({ id: 30, documentKey: 'offset', originalFileName: 'Со смещением.pdf', uploadedAt: '2026-05-05T14:00:00+04:00' }),
+    ];
+    const originalIds = documents.map(item => item.id);
+    documents.forEach(Object.freeze);
+    Object.freeze(documents);
+    vi.mocked(apiService.getCaseDocuments).mockResolvedValue(documents);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    const table = await screen.findByRole('table', { name: 'Документы дела' });
+    const rows = () => within(table).getAllByRole('row', { name: /^Документ /u })
+      .map(row => row.getAttribute('aria-label')?.replace(/^Документ /u, ''));
+    const missing = ['Без даты.pdf', 'Пустая дата.pdf', 'Некорректная.pdf'];
+    const sameInstant = ['Без суффикса.pdf', 'UTC.pdf', 'Со смещением.pdf'];
+    expect(rows()).toEqual(['Новый.pdf', ...sameInstant, ...missing]);
+    const sort = within(table).getByRole('button', { name: 'Сортировать документы по дате' });
+    expect(sort.closest('th')?.getAttribute('aria-sort')).toBe('descending');
+    const reads = vi.mocked(apiService.getCaseDocuments).mock.calls.length;
+    fireEvent.click(sort);
+    expect(rows()).toEqual([...sameInstant, 'Новый.pdf', ...missing]);
+    expect(sort.closest('th')?.getAttribute('aria-sort')).toBe('ascending');
+    fireEvent.click(sort);
+    expect(rows()).toEqual(['Новый.pdf', ...sameInstant, ...missing]);
+    for (const name of missing) {
+      expect(within(within(table).getByRole('row', { name: `Документ ${name}` })).getAllByRole('cell')[1].textContent).toBe('—');
+    }
+    expect(documents.map(item => item.id)).toEqual(originalIds);
+    expect(apiService.getCaseDocuments).toHaveBeenCalledTimes(reads);
+    expect(apiService.downloadCaseDocument).not.toHaveBeenCalled();
+    expect(apiService.uploadCaseDocumentToYandexDisk).not.toHaveBeenCalled();
+  });
+
+  it('PAY-23 table: combines filters while retaining the complete version history and court source details', async () => {
+    vi.mocked(apiService.getCaseDocuments).mockResolvedValue([
+      createCaseDocument({ id: 11, documentKey: 'history', version: 1, originalFileName: 'История v1.pdf', status: 'Черновик', isLatestVersion: false }),
+      createCaseDocument({ id: 13, documentKey: 'history', version: 3, originalFileName: 'История v3.pdf', documentType: 'Иск', status: 'Подписан',
+        uploadedByName: 'Автор для поиска', templateLabel: 'Полный шаблон', sourceType: 'sudrf',
+        sourceUrl: 'https://example.sudrf.ru/document/13', sourceConfidence: 'official', sourceCheckedAt: '2026-05-03T10:00:00Z' }),
+      createCaseDocument({ id: 22, documentKey: 'unrelated', originalFileName: 'Другой.pdf', documentType: 'Иск', status: 'Подписан' }),
+    ]);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    await screen.findByRole('table', { name: 'Документы дела' });
+    const reads = vi.mocked(apiService.getCaseDocuments).mock.calls.length;
+    fireEvent.change(screen.getByLabelText('Поиск документов дела'), { target: { value: '  АВТОР ДЛЯ  ' } });
+    fireEvent.change(screen.getByLabelText('Фильтр документов по типу'), { target: { value: 'Иск' } });
+    fireEvent.change(screen.getByLabelText('Фильтр документов по статусу'), { target: { value: 'Подписан' } });
+    fireEvent.click(screen.getByLabelText('Только актуальные версии'));
+    expect(screen.getAllByRole('row', { name: /^Документ /u })).toHaveLength(1);
+    expect(screen.getByText('Показано 1 из 3')).toBeTruthy();
+    const details = await openDocumentDetails('История v3.pdf');
+    expect(within(details).getByText('История версий: v1, v3 · последняя v3')).toBeTruthy();
+    expect(within(details).getByText('Шаблон: Полный шаблон')).toBeTruthy();
+    expect(within(details).getByText('ГАС «Правосудие»')).toBeTruthy();
+    expect(within(details).getByRole('link', { name: 'Открыть источник' }).getAttribute('href')).toBe('https://example.sudrf.ru/document/13');
+    fireEvent.click(screen.getByRole('button', { name: 'Сортировать документы по дате' }));
+    expect(within(details).getByText('История версий: v1, v3 · последняя v3')).toBeTruthy();
+    expect(apiService.getCaseDocuments).toHaveBeenCalledTimes(reads);
+    expect(apiService.downloadCaseDocument).not.toHaveBeenCalled();
+  });
+
+  it('PAY-23 table: preserves metadata drafts across collapse and sorting and restores keyboard focus on Escape', async () => {
+    const user = setupDocumentUser();
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    const toggle = await screen.findByRole('button', { name: 'Сведения и действия документа Заявление.docx' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByRole('region', { name: 'Сведения и действия документа Заявление.docx' })).toBeNull();
+    toggle.focus();
+    await user.keyboard('{Enter}');
+    const details = screen.getByRole('region', { name: 'Сведения и действия документа Заявление.docx' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(document.getElementById(toggle.getAttribute('aria-controls')!)).toBe(details);
+    await user.keyboard('{Escape}');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(toggle);
+    const closedEscape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    expect(toggle.dispatchEvent(closedEscape)).toBe(true);
+    expect(closedEscape.defaultPrevented).toBe(false);
+    await user.keyboard('{Enter}');
+    const type = within(details).getByLabelText('Тип документа Заявление.docx');
+    fireEvent.change(type, { target: { value: 'Несохранённый тип' } });
+    fireEvent.change(within(details).getByLabelText('Статус документа Заявление.docx'), { target: { value: 'Подписан' } });
+    type.focus();
+    await user.keyboard('{Escape}');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(toggle);
+    expect(screen.queryByRole('region', { name: 'Сведения и действия документа Заявление.docx' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Сортировать документы по дате' }));
+    toggle.focus();
+    await user.keyboard(' ');
+    const reopened = screen.getByRole('region', { name: 'Сведения и действия документа Заявление.docx' });
+    expect((within(reopened).getByLabelText('Тип документа Заявление.docx') as HTMLInputElement).value).toBe('Несохранённый тип');
+    expect((within(reopened).getByLabelText('Статус документа Заявление.docx') as HTMLSelectElement).value).toBe('Подписан');
+    fireEvent.click(within(reopened).getByRole('button', { name: 'Сохранить документ Заявление.docx' }));
+    await waitFor(() => expect(apiService.updateCaseDocument).toHaveBeenCalledExactlyOnceWith(15, 7, { documentType: 'Несохранённый тип', status: 'Подписан' }));
+  });
+
+  it.each([
+    { clientId: 12, canSendMessenger: false, visible: false },
+    { clientId: null, canSendMessenger: true, visible: false },
+    { clientId: 12, canSendMessenger: true, visible: true },
+  ])('PAY-23 table: preserves messenger access for client=$clientId permission=$canSendMessenger', async ({ clientId, canSendMessenger, visible }) => {
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({ clientId }));
+    vi.mocked(apiService.getMessengerDocumentDeliveryConfiguration).mockResolvedValue({ enabled: false, linkLifetimeHours: 24, providers: [] });
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canSendMessenger={canSendMessenger} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    const details = await openDocumentDetails();
+    const action = within(details).queryByRole('button', { name: 'Отправить документ Заявление.docx в мессенджер' });
+    expect(Boolean(action)).toBe(visible);
+    if (action) {
+      fireEvent.click(action);
+      const modal = await screen.findByRole('region', { name: 'Отправка документа в мессенджер' });
+      expect(within(modal).getByText('Заявление.docx')).toBeTruthy();
+      expect(within(modal).getByText(/Заявление · версия 1/u)).toBeTruthy();
+      expect(await within(modal).findByText(/доставка документов выключена/i)).toBeTruthy();
+      fireEvent.click(within(modal).getByRole('button', { name: 'Закрыть мастер отправки' }));
+    }
+  });
+
+  it('PAY-23 table: routes same-name document actions to the selected ID and version', async () => {
+    const documents = [
+      createCaseDocument({ id: 71, documentKey: 'first', originalFileName: 'Одинаковое.pdf', version: 1, uploadedByName: 'Первый автор' }),
+      createCaseDocument({ id: 72, documentKey: 'second', originalFileName: 'Одинаковое.pdf', version: 4, uploadedByName: 'Второй автор' }),
+    ];
+    vi.mocked(apiService.getCaseDocuments).mockResolvedValue(documents);
+    const createUrl = vi.fn(() => 'blob:selected-document');
+    const revokeUrl = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createUrl });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeUrl });
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    try {
+      render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+      const rows = await screen.findAllByRole('row', { name: 'Документ Одинаковое.pdf' });
+      const selected = rows.find(row => within(row).queryByText('Второй автор'))!;
+      fireEvent.click(within(selected).getByRole('button', { name: 'Сведения и действия документа Одинаковое.pdf' }));
+      const details = screen.getByRole('region', { name: 'Сведения и действия документа Одинаковое.pdf' });
+      expect(within(details).getByText('Версия 4')).toBeTruthy();
+      fireEvent.click(within(details).getByRole('button', { name: 'Скачать документ Одинаковое.pdf' }));
+      await waitFor(() => expect(apiService.downloadCaseDocument).toHaveBeenCalledExactlyOnceWith(15, 72));
+      expect(revokeUrl).toHaveBeenCalledWith('blob:selected-document');
+      const file = new File(['synthetic replacement'], 'replacement.pdf', { type: 'application/pdf' });
+      fireEvent.change(within(details).getByLabelText('Загрузить новую версию документа Одинаковое.pdf'), { target: { files: [file] } });
+      await waitFor(() => expect(apiService.uploadCaseDocumentVersion).toHaveBeenCalledExactlyOnceWith(72, file, {
+        clientCaseId: 15, documentKey: 'second', documentType: 'Заявление', status: 'Готово',
+      }));
+    } finally {
+      clickSpy.mockRestore();
+    }
+  });
+
+  it('PAY-23 table: blocks only the deleting document actions and recovers the same draft after failure', async () => {
+    vi.mocked(apiService.getCaseDocuments).mockResolvedValue([
+      createCaseDocument(), createCaseDocument({ id: 8, documentKey: 'other', originalFileName: 'Другой.pdf' }),
+    ]);
+    let rejectDelete!: (reason: Error) => void;
+    vi.mocked(apiService.deleteCaseDocument).mockReturnValueOnce(new Promise((_resolve, reject) => { rejectDelete = reject; }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canSendMessenger />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    const details = await openDocumentDetails();
+    fireEvent.change(within(details).getByLabelText('Тип документа Заявление.docx'), { target: { value: 'Черновик до удаления' } });
+    fireEvent.click(within(details).getByRole('button', { name: 'Удалить документ Заявление.docx' }));
+    await waitFor(() => expect(apiService.deleteCaseDocument).toHaveBeenCalledExactlyOnceWith(15, 7));
+    for (const action of ['Предпросмотр документа Заявление.docx', 'Скачать документ Заявление.docx',
+      'Отправить документ Заявление.docx на Яндекс.Диск', 'Отправить документ Заявление.docx в мессенджер',
+      'Сохранить документ Заявление.docx', 'Удалить документ Заявление.docx']) {
+      const button = within(details).getByRole('button', { name: action }) as HTMLButtonElement;
+      expect(button.disabled).toBe(true);
+      fireEvent.click(button);
+    }
+    expect((within(details).getByLabelText('Загрузить новую версию документа Заявление.docx') as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Открыть предпросмотр документа Заявление.docx' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Открыть предпросмотр документа Другой.pdf' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(apiService.downloadCaseDocument).not.toHaveBeenCalled();
+    expect(apiService.updateCaseDocument).not.toHaveBeenCalled();
+    expect(apiService.uploadCaseDocumentToYandexDisk).not.toHaveBeenCalled();
+    expect(apiService.deleteCaseDocument).toHaveBeenCalledTimes(1);
+    await act(async () => { rejectDelete(new Error('Синтетический отказ удаления')); });
+    expect(await screen.findByText('Синтетический отказ удаления')).toBeTruthy();
+    expect((within(details).getByRole('button', { name: 'Удалить документ Заявление.docx' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((within(details).getByLabelText('Тип документа Заявление.docx') as HTMLInputElement).value).toBe('Черновик до удаления');
+  });
+
+  it('PAY-23 table: permits selecting the same version file again after an upload failure', async () => {
+    const user = setupDocumentUser();
+    vi.mocked(apiService.uploadCaseDocumentVersion).mockRejectedValueOnce(new Error('Синтетический отказ загрузки версии'));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    const details = await openDocumentDetails();
+    const input = within(details).getByLabelText('Загрузить новую версию документа Заявление.docx') as HTMLInputElement;
+    const file = new File(['synthetic retry content'], 'same-version.pdf', { type: 'application/pdf' });
+    await user.upload(input, file);
+    expect(await screen.findByText('Синтетический отказ загрузки версии')).toBeTruthy();
+    expect(input.value).toBe('');
+    expect(input.disabled).toBe(false);
+    await user.upload(input, file);
+    await waitFor(() => expect(apiService.uploadCaseDocumentVersion).toHaveBeenCalledTimes(2));
+    for (const call of vi.mocked(apiService.uploadCaseDocumentVersion).mock.calls) {
+      expect(call).toEqual([7, file, { clientCaseId: 15, documentKey: 'claim', documentType: 'Заявление', status: 'Готово' }]);
+    }
+    expect(await screen.findByText('Новая версия документа «Заявление.docx» загружена.')).toBeTruthy();
+  });
+
   it('PAY-23 review: renders the upload panel and document list with distinct React keys', async () => {
     const consoleError = vi.spyOn(console, 'error');
     try {
@@ -1594,6 +1831,7 @@ describe('CaseDetailPage', () => {
     fireEvent.change(screen.getByRole('searchbox', { name: 'Поиск документов дела' }), { target: { value: 'ШАБЛОН ДЛЯ' } });
     expect(screen.queryByText('Синтетический документ v1.pdf')).toBeNull();
     expect(screen.getByText('Синтетический документ v2.pdf')).toBeTruthy();
+    await openDocumentDetails('Синтетический документ v2.pdf');
     expect(screen.getByText('История версий: v1, v2 · последняя v2')).toBeTruthy();
     expect(screen.getByText('Показано 1 из 2')).toBeTruthy();
     expect(apiService.getCaseDocuments).toHaveBeenCalledTimes(calls);
@@ -1715,6 +1953,7 @@ describe('CaseDetailPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
     expect(await screen.findByText('Архивное определение.pdf')).toBeTruthy();
+    await openDocumentDetails('Архивное определение.pdf');
     expect(screen.getByText(/Судебный акт · v1 · В архиве/u)).toBeTruthy();
   });
 
@@ -3049,22 +3288,24 @@ describe('CaseDetailPage', () => {
     await screen.findByText('ЗЕМЦОВ - банкротство');
     fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
     expect(await screen.findByText('Иск v1.docx')).toBeTruthy();
-    expect(screen.getByText('Иск v2.pdf')).toBeTruthy();
+    expect(screen.getByRole('row', { name: 'Документ Иск v2.pdf' })).toBeTruthy();
     expect(screen.getByText('Фото.jpg')).toBeTruthy();
+    const oldDetails = await openDocumentDetails('Иск v1.docx');
+    await openDocumentDetails('Иск v2.pdf');
     expect(screen.getAllByText('История версий: v1, v2 · последняя v2')).toHaveLength(2);
-    expect(screen.getByText('Не актуальная версия')).toBeTruthy();
+    expect(within(oldDetails).getByText('Не актуальная версия')).toBeTruthy();
 
     fireEvent.click(screen.getByLabelText('Только актуальные версии'));
     expect(screen.queryByText('Иск v1.docx')).toBeNull();
-    expect(screen.getByText('Иск v2.pdf')).toBeTruthy();
+    expect(screen.getByRole('row', { name: 'Документ Иск v2.pdf' })).toBeTruthy();
     expect(screen.getByText('Фото.jpg')).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText('Фильтр документов по типу'), { target: { value: 'Заявление' } });
-    expect(screen.getByText('Иск v2.pdf')).toBeTruthy();
+    expect(screen.getByRole('row', { name: 'Документ Иск v2.pdf' })).toBeTruthy();
     expect(screen.queryByText('Фото.jpg')).toBeNull();
 
     fireEvent.change(screen.getByLabelText('Фильтр документов по статусу'), { target: { value: 'Подписан' } });
-    expect(screen.getByText('Иск v2.pdf')).toBeTruthy();
+    expect(screen.getByRole('row', { name: 'Документ Иск v2.pdf' })).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText('Поиск документов дела'), { target: { value: 'фото' } });
     expect(screen.queryByText('Иск v2.pdf')).toBeNull();
@@ -3102,6 +3343,7 @@ describe('CaseDetailPage', () => {
 
     await screen.findByText('ЗЕМЦОВ - банкротство');
     fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
 
     const file = new File(['claim-v2'], 'claim-v2.pdf', { type: 'application/pdf' });
     fireEvent.change(await screen.findByLabelText('Загрузить новую версию документа Заявление.docx'), { target: { files: [file] } });
@@ -3129,6 +3371,7 @@ describe('CaseDetailPage', () => {
 
     await screen.findByText('ЗЕМЦОВ - банкротство');
     fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
     fireEvent.click(await screen.findByRole('button', { name: 'Скачать документ Заявление.docx' }));
 
     await waitFor(() => {
@@ -3150,6 +3393,7 @@ describe('CaseDetailPage', () => {
 
     await screen.findByText('ЗЕМЦОВ - банкротство');
     fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
     fireEvent.click(await screen.findByRole('button', { name: 'Предпросмотр документа Заявление.docx' }));
 
     expect(await screen.findByText('Предпросмотр документа')).toBeTruthy();
@@ -3178,6 +3422,7 @@ describe('CaseDetailPage', () => {
 
     await screen.findByText('ЗЕМЦОВ - банкротство');
     fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
     fireEvent.click(await screen.findByRole('button', { name: 'Предпросмотр документа Заявление.docx' }));
 
     const frame = await screen.findByTitle('Предпросмотр Заказ-наряд.html');
@@ -3206,6 +3451,7 @@ describe('CaseDetailPage', () => {
 
     await screen.findByText('ЗЕМЦОВ - банкротство');
     fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
     fireEvent.click(await screen.findByRole('button', { name: 'Предпросмотр документа Заявление.docx' }));
 
     expect(await screen.findByText(/Текстовая версия документа/)).toBeTruthy();
@@ -3227,6 +3473,7 @@ describe('CaseDetailPage', () => {
 
     await screen.findByText('ЗЕМЦОВ - банкротство');
     fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
     fireEvent.click(await screen.findByRole('button', { name: 'Отправить документ Заявление.docx на Яндекс.Диск' }));
 
     expect(await screen.findByText('Включите правила синхронизации CRM в разделе Я.Диск.')).toBeTruthy();
@@ -3238,6 +3485,7 @@ describe('CaseDetailPage', () => {
 
     await screen.findByText('ЗЕМЦОВ - банкротство');
     fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
 
     expect(await screen.findByText(/Документы доступны только для просмотра/u)).toBeTruthy();
     expect(screen.queryByRole('button', { name: /^Сформировать$/u })).toBeNull();
@@ -3254,6 +3502,7 @@ describe('CaseDetailPage', () => {
 
     await screen.findByText('ЗЕМЦОВ - банкротство');
     fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
 
     expect(await screen.findByRole('button', { name: 'Сохранить документ Заявление.docx' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Удалить документ Заявление.docx' })).toBeNull();
@@ -3264,6 +3513,7 @@ describe('CaseDetailPage', () => {
 
     await screen.findByText('ЗЕМЦОВ - банкротство');
     fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    await openDocumentDetails();
     fireEvent.change(await screen.findByLabelText('Статус документа Заявление.docx'), { target: { value: 'Подписан' } });
     fireEvent.click(screen.getByRole('button', { name: 'Сохранить документ Заявление.docx' }));
 
