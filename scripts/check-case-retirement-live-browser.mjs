@@ -159,6 +159,12 @@ try {
     let notifyReconnect;
     let rightsApplied = false;
     const modal = settings.flow.includes('modal');
+    const openDocumentActions = async fileName => {
+      if (modal || editing) return;
+      const button = page.getByRole('button', { name: 'Сведения и действия документа ' + fileName, exact: true });
+      if (await button.getAttribute('aria-expanded') !== 'true') await button.click();
+      check(await button.getAttribute('aria-expanded') === 'true', 'Document actions must be expanded before accessing its version input');
+    };
     const caseReads = modal || restarted ? (${createCaseReadLifecycle})(page,
       request => (${isCaseBoundaryRead})(request, settings.api, settings.caseId), 20000) : null;
     page.setDefaultTimeout(20000);
@@ -350,6 +356,7 @@ try {
     if (restarted) check(restartApplied, 'The server was never restarted after the committed retirement');
     if (versionAttempt) {
       const inputName = modal ? 'Загрузить новую версию base-browser-version.bin' : 'Загрузить новую версию документа base-browser-version.bin';
+      await openDocumentActions('base-browser-version.bin');
       const [versionResponse] = await Promise.all([
         page.waitForResponse(response => response.request().method() === 'POST' && (modal
           ? new URL(response.url()).pathname === '/api/v2/cases/' + settings.caseId + '/documents'
@@ -360,6 +367,7 @@ try {
       check(versionResponse.status() === 201, 'Separate version failed: ' + await versionResponse.text());
       const saved = await versionResponse.json();
       check(saved.version === 2 && saved.documentKey === settings.documentKey && saved.id !== settings.sourceDocumentId, 'Separate version did not preserve its source');
+      await openDocumentActions(settings.pending.fileName);
       await waitAtPhase(page.getByLabel(modal ? 'Загрузить новую версию ' + settings.pending.fileName
         : 'Загрузить новую версию документа ' + settings.pending.fileName, { exact: true }), 'published-version-input', { state: 'attached' });
       check(filePosts === 1 && fileKeys[0] !== settings.key, 'Separate version reused the retired identity');
@@ -381,6 +389,7 @@ try {
       page.getByRole('button', { name: 'Загрузить', exact: true }).click(),
     ]);
     check(uploaded.status() === 201, 'Actual document upload failed: ' + uploaded.status() + ' ' + await uploaded.text());
+    await openDocumentActions('separate-browser-document.txt');
     const versionInput = page.getByLabel('Загрузить новую версию документа separate-browser-document.txt', { exact: true });
     await waitAtPhase(versionInput, 'document-version-input', { state: 'attached' });
     check(filePosts === 1 && fileKeys[0] !== settings.key, 'Separate upload did not use a new identity');
@@ -389,6 +398,7 @@ try {
       versionInput.setInputFiles({ name: 'separate-browser-version.txt', mimeType: 'text/plain', buffer: Buffer.from('Separate browser version') }),
     ]);
     check(versionResponse.status() === 201, 'Actual version upload failed: ' + versionResponse.status() + ' ' + await versionResponse.text());
+    await openDocumentActions('separate-browser-version.txt');
     await waitAtPhase(page.getByLabel('Загрузить новую версию документа separate-browser-version.txt', { exact: true }), 'new-version-visible', { state: 'attached' });
     check(filePosts === 2 && new Set(fileKeys).size === 2 && !fileKeys.includes(settings.key), 'Version identity was reused');
     }
