@@ -1444,6 +1444,8 @@ function AppContent() {
             canViewFinance={permissions.payments.canView}
             canViewTasks={permissions.tasks.canView}
             canCreateTasks={permissions.tasks.canView && permissions.tasks.canCreate}
+            canEditTasks={permissions.tasks.canEdit}
+            canExportTasks={permissions.tasks.canExport}
             canSendMessenger={isAdminRole}
             onBack={() => {
               setSelectedCaseId(null);

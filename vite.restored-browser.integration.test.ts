@@ -94,16 +94,20 @@ it('qualifies native browser CSP, probe transport and clean-profile barriers aga
             download: async () => {
               const response = await apiFetch(${JSON.stringify(`${apiUrl}/file`)});
               const url = URL.createObjectURL(await response.blob());
-              const link = document.createElement('a'); link.href = url; link.download = 'fixture.txt'; link.click();
+              const link = document.createElement('a'); link.href = url; link.download = 'fixture.txt';
+              document.body.appendChild(link);
+              link.click();
+              link.remove();
               setTimeout(() => URL.revokeObjectURL(url), 1000);
             }
           };
+          document.getElementById('fixture-download').addEventListener('click', () => void window.__restoredProbe.download());
         `);
       } else if (request.url === '/__probe-worker.js') {
         response.setHeader('Content-Type', 'application/javascript');
         response.end("self.addEventListener('install', () => self.skipWaiting()); self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));");
       } else if (request.url === '/__probe.html') {
-        void vite.transformIndexHtml('/__probe.html', '<!doctype html><head></head><body><script type="module" src="/__probe.js"></script></body>')
+        void vite.transformIndexHtml('/__probe.html', '<!doctype html><head></head><body><button id="fixture-download" type="button">Скачать файл</button><script type="module" src="/__probe.js"></script></body>')
           .then(html => {
             response.setHeader('Content-Type', 'text/html; charset=utf-8');
             response.setHeader('Content-Security-Policy', String(vite.config.server.headers?.['Content-Security-Policy']));
@@ -151,7 +155,7 @@ it('qualifies native browser CSP, probe transport and clean-profile barriers aga
       image.src = window.__restoredProbe.photo('/user-photos/fixture.png')!;
     }))).toBe(true);
     const downloading = page.waitForEvent('download');
-    await page.evaluate(() => window.__restoredProbe.download());
+    await page.getByRole('button', { name: 'Скачать файл', exact: true }).click();
     let downloaded;
     try {
       downloaded = await downloading;

@@ -75,6 +75,8 @@ vi.mock('../../services/api', () => ({
     getActResponsibles: vi.fn(),
     getTaskJournalItems: vi.fn(),
     getTaskJournalSummary: vi.fn(),
+    bulkUpdateTaskJournalItems: vi.fn(),
+    getTaskJournalAssignees: vi.fn(),
     getCaseRelatedParties: vi.fn(),
     getClients: vi.fn(),
     getLegalEntitiesPaged: vi.fn(),
@@ -3015,6 +3017,24 @@ describe('CaseDetailPage', () => {
     const emptyRow = within(table).getByText('Без имени').closest('tr')!;
     expect(emptyRow.querySelector('td:nth-child(2)')?.textContent).toBe('—');
     expect(apiService.getTaskJournalItems).toHaveBeenCalledTimes(1);
+  });
+
+  it('PAY-24 bulk: reports partial changes after reloading the case and preserves its filter', async () => {
+    mockCaseTaskServer([createTask({ id: 11, title: 'Массовая первая' }), createTask({ id: 12, title: 'Массовая вторая' })]);
+    vi.mocked(apiService.bulkUpdateTaskJournalItems).mockResolvedValue({ requested: 2, updated: 1, skipped: 1 });
+    dialogMock.confirm.mockResolvedValue(true);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEditTasks canExportTasks />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Задачи' }));
+    await screen.findByText('Массовая первая');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Выбрать все задачи на этой странице' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Применить к выбранным' }));
+    await waitFor(() => expect(apiService.getCaseV2).toHaveBeenCalledTimes(2));
+    await screen.findByText('Массовая первая');
+    expect(screen.getByText(/Изменено: 1. Пропущено: 1/)).toBeTruthy();
+    expect(apiService.bulkUpdateTaskJournalItems).toHaveBeenCalledWith({ ids: [11, 12], status: 'inProgress' });
+    expect(screen.getByRole('button', { name: 'Активные · 2' }).getAttribute('aria-pressed')).toBe('true');
+    expect((screen.getByRole('checkbox', { name: 'Выбрать все задачи на этой странице' }) as HTMLInputElement).checked).toBe(false);
   });
 
   it('PAY-24 pages: reaches task 61 with whole-case counters and the same open callback', async () => {

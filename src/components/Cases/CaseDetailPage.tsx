@@ -3,6 +3,7 @@ import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { TablePagination } from '../ui/TablePagination';
 import { useCaseTaskPage, CASE_TASK_PAGE_SIZES, type CaseTaskFilter } from '../../hooks/useCaseTaskPage';
+import { CaseTaskActions } from './CaseTaskActions';
 import { TASK_TYPE_OPTIONS } from '../Tasks/taskTypeOptions';
 import { ClientPortalAccessPanel } from './ClientPortalAccessPanel';
 import { CaseAppealDecisionAction } from './CaseAppealDecisionAction';
@@ -104,6 +105,8 @@ interface CaseDetailPageProps {
   canViewFinance?: boolean;
   canViewTasks?: boolean;
   canCreateTasks?: boolean;
+  canEditTasks?: boolean;
+  canExportTasks?: boolean;
   canSendMessenger?: boolean;
 }
 
@@ -1528,6 +1531,8 @@ export function CaseDetailPage({
   canViewFinance = true,
   canViewTasks = true,
   canCreateTasks = true,
+  canEditTasks = false,
+  canExportTasks = false,
   canSendMessenger = false,
 }: CaseDetailPageProps) {
   const { confirm, prompt } = useDialog();
@@ -4366,6 +4371,10 @@ export function CaseDetailPage({
 
           {activeTab === 'tasks' ? (
             <TaskList
+              caseId={caseId}
+              canEditTasks={canViewTasks && canEditTasks}
+              canExportTasks={canViewTasks && canExportTasks}
+              onTasksChanged={(message) => { setNotice(message); setReloadToken((value) => value + 1); }}
               pageData={taskPage}
               progress={progress}
               filter={taskFilter}
@@ -6747,6 +6756,10 @@ function RelatedParties({
 }
 
 function TaskList({
+  caseId,
+  canEditTasks,
+  canExportTasks,
+  onTasksChanged,
   pageData,
   progress,
   filter,
@@ -6758,6 +6771,10 @@ function TaskList({
   canCreateTask,
   onOpenTask,
 }: {
+  caseId: number;
+  canEditTasks: boolean;
+  canExportTasks: boolean;
+  onTasksChanged: (message: string) => void;
   pageData: ReturnType<typeof useCaseTaskPage>;
   progress: number;
   filter: CaseTaskFilter;
@@ -6851,10 +6868,17 @@ function TaskList({
       ) : tasks.length === 0 ? (
         <div className="rounded-lg border border-dashed border-slate-200 p-3 text-sm text-slate-500">По выбранному фильтру задач нет.</div>
       ) : null}
-      <div className="max-w-full overflow-x-auto" aria-busy={pageData.loading}>
+      <CaseTaskActions key={`${caseId}:${filter}:${pageData.page}:${pageData.pageSize}`}
+        tasks={tasks} caseId={caseId} loading={pageData.loading || Boolean(pageData.error)}
+        canEdit={canEditTasks} canExport={canExportTasks} statusLabels={TASK_STATUS_LABELS} onChanged={onTasksChanged}>
+        {(selection) => <div className="max-w-full overflow-x-auto" aria-busy={pageData.loading}>
         <table aria-label="Задачи дела" className="w-full min-w-[640px] table-fixed text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase tracking-[0.12em] text-slate-500">
             <tr>
+              {selection.enabled ? <th scope="col" className="w-9 px-2 py-2"><SystemCheckbox
+                aria-label="Выбрать все задачи на этой странице" checked={selection.allSelected}
+                indeterminate={selection.selected.size > 0 && !selection.allSelected} disabled={selection.busy}
+                onChange={selection.toggleAll} /></th> : null}
               <th scope="col" className="w-[32%] px-3 py-2">Задача</th>
               <th scope="col" className="w-[23%] px-3 py-2">Исполнитель</th>
               <th scope="col" className="w-[17%] px-3 py-2">Срок</th>
@@ -6871,6 +6895,9 @@ function TaskList({
                 .map((part) => Array.from(part)[0]).join('').toLocaleUpperCase('ru')).slice(0, 2).join('');
               return (
                 <tr key={task.id}>
+                  {selection.enabled ? <td className="px-2 py-3"><SystemCheckbox
+                    aria-label={`Выбрать задачу: ${task.title}`} checked={selection.selected.has(task.id)}
+                    disabled={selection.busy} onChange={() => selection.toggle(task.id)} /></td> : null}
                   <td className="px-3 py-3 font-semibold text-slate-900">
                     <div className="flex min-w-0 items-start gap-2">
                       <span role="img" aria-label={`Тип задачи: ${typeOption.label}`} title={typeOption.label} className="mt-0.5 shrink-0 text-blue-700">
@@ -6901,7 +6928,8 @@ function TaskList({
             })}
           </tbody>
         </table>
-      </div>
+        </div>}
+      </CaseTaskActions>
       {!pageData.loading && !pageData.error ? (
         <div className="text-sm text-slate-500" aria-live="polite">Показано {tasks.length} из {pageData.total}</div>
       ) : null}
