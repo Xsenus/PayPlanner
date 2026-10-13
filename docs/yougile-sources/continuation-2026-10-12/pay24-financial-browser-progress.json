@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "recordedUtc": "2026-10-13T17:46:06.644021+00:00",
+  "baseRevision": "26a22c42c1919aeac7a65514a447921a869f36c9",
+  "sourceHashes": {
+    "scripts/check-case-financial-live-browser.mjs": {
+      "sha256": "35f1e78c89e827d87c1ba8f616822dde15e263cebaf518f362e3ce2a8b464bc8",
+      "canonicalLfSha256": "35f1e78c89e827d87c1ba8f616822dde15e263cebaf518f362e3ce2a8b464bc8"
+    },
+    "backend/PayPlanner.Api.Tests/SyntheticWritableBackendProcess.cs": {
+      "sha256": "516e4dcec02c58f49dd64c939966ac860bdbd9b014b5ad24dd39b8f27405379d",
+      "canonicalLfSha256": "516e4dcec02c58f49dd64c939966ac860bdbd9b014b5ad24dd39b8f27405379d"
+    }
+  },
+  "scope": "Existing financial native-browser verification adapted to the case document table; immutable frontend watcher disabled through config hook",
+  "native": {
+    "passed": 18,
+    "failed": 0,
+    "skipped": 0,
+    "expectedCasesMatched": true,
+    "uniqueCases": 18,
+    "durationMinutes": 16.4937,
+    "exitCode": 0,
+    "counters": {
+      "total": 18,
+      "executed": 18,
+      "passed": 18,
+      "failed": 0,
+      "error": 0,
+      "timeout": 0,
+      "aborted": 0,
+      "inconclusive": 0,
+      "passedButRunAborted": 0,
+      "notRunnable": 0,
+      "notExecuted": 0,
+      "disconnected": 0,
+      "warning": 0,
+      "completed": 0,
+      "inProgress": 0,
+      "pending": 0
+    }
+  },
+  "relatedPriorSsdChecks": {
+    "taskCreationBothCardsPassed": 2,
+    "chatPublicationBothEnginesPassed": 2,
+    "separateRuns": true
+  },
+  "watcherDiagnosisBefore": {
+    "FSEventWrap": 5711,
+    "FSReqCallback": 147,
+    "Timeout": 451
+  },
+  "safety": {
+    "originalDeadlinesUnchanged": true,
+    "originalBusinessAssertionsRetained": true,
+    "forcedProcessExitAdded": false,
+    "resolvedWatchNullRequired": true,
+    "syntheticLoopbackApiOnly": true,
+    "emailEnabled": false,
+    "backgroundServicesEnabled": false
+  },
+  "staticChecks": {
+    "normalTestBuildWarnings": 0,
+    "normalTestBuildErrors": 0,
+    "fullBackendFormatPassed": true,
+    "encodingPassed": true,
+    "scriptSyntaxPassed": true,
+    "surfaceInventoryPassed": true,
+    "frontendSourcePinsUnchanged": 11
+  },
+  "release": {
+    "fullBackendSuitePassed": false,
+    "freshFullManifestRequired": true,
+    "restoredBrowserGatePassed": false,
+    "pushed": false,
+    "deployed": false,
+    "yougileChanged": false,
+    "pay24Progress": "4/6 (67%)",
+    "packageProgress": "1/31 (3%)"
+  }
+}

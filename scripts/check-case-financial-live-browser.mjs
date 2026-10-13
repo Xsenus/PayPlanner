@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { createServer as createControlServer } from 'node:http';
 import { createServer } from 'vite';
@@ -59,6 +59,7 @@ let vite;
 let opened = false;
 let control;
 let controlUrl;
+const phase = name => console.log('PP_FINANCIAL_BROWSER_PHASE ' + name);
 try {
   if (process.env.CASE_RETIREMENT_BOUNDARY === 'true') {
     let applied = false;
@@ -90,18 +91,35 @@ try {
     });
     controlUrl = `http://127.0.0.1:${control.address().port}/apply`;
   }
-  vite = await createServer({ envDir: root, cacheDir: join(root, 'vite-financial-cache'), server: { host: '127.0.0.1', port, strictPort: true }, logLevel: 'error' });
+  phase('vite-create');
+  // This scenario uses a fixed source tree; avoid watching temporary databases and build files.
+  vite = await createServer({ envDir: root, cacheDir: join(root, 'vite-financial-cache'), plugins: [{
+    name: 'financial-browser-fixed-source',
+    config(config) {
+      config.server ??= {};
+      config.server.watch = null;
+    },
+  }], server: { host: '127.0.0.1', port, strictPort: true }, logLevel: 'error' });
+  phase('vite-listen');
+  assert.equal(vite.config.server.watch, null, 'The immutable financial browser fixture must disable file watching.');
+  await writeFile(join(root, 'financial-watcher-config.json'), JSON.stringify({ disabled: vite.config.server.watch === null }));
   await vite.listen();
   // Prepare the real entry within the existing scenario budget before browser navigation.
+  phase('entry-transform');
   const entry = await vite.transformRequest('/src/main.tsx');
   assert.ok(entry?.code, 'The synthetic financial UI entry module must compile successfully.');
+  phase('requests-idle');
   await vite.waitForRequestsIdle();
+  phase('cli-open');
   await cli('open', 'about:blank', '--browser', browser); opened = true;
+  phase('cli-goto');
   await cli('goto', ui + '/cases/' + caseId);
+  phase('cli-snapshot');
   await cli('snapshot');
   const settings = JSON.stringify({ api: api.origin, ui, caseId, clientId, flow, controlUrl,
     downloadPath: join(root, 'financial-browser-download.html'),
     email: process.env.CASE_RETIREMENT_EMAIL, password: process.env.CASE_RETIREMENT_PASSWORD });
+  phase('scenario');
   const result = await cli('run-code', String.raw`async (page) => {
     const settings = ${settings};
     const check = (value, message) => { if (!value) throw new Error(message); };
@@ -206,6 +224,11 @@ try {
       await page.getByRole('button', { name: 'Документы', exact: true }).click();
     }
     const downloadButton = card.getByRole('button', { name: new RegExp((modal ? '^Скачать case-' : '^Скачать документ case-') + settings.caseId + '-' + kind + '-[0-9]+\\.html$') });
+    if (!modal) {
+      const actionsButton = card.getByRole('button', { name: new RegExp('^Сведения и действия документа case-' + settings.caseId + '-' + kind + '-[0-9]+[.]html$') });
+      await actionsButton.click();
+      check(await actionsButton.getAttribute('aria-expanded') === 'true', 'The generated document actions must be expanded before downloading');
+    }
     await downloadButton.waitFor();
     const downloadEvent = page.waitForEvent('download'); await downloadButton.click();
     const download = await downloadEvent; check(await download.failure() === null, 'Financial document download failed');
@@ -221,12 +244,23 @@ try {
   if (opened) { console.error(await cli('snapshot')); console.error(await cli('console', 'error')); }
   throw new Error(error.stdout || error.message);
 } finally {
+  phase('browser-close');
   try { if (opened) await cli('close'); }
   finally {
+    phase('vite-close');
     try { if (vite) await vite.close(); }
     finally {
+      phase('control-close');
       try { if (control) await new Promise((resolve, reject) => control.close(error => error ? reject(error) : resolve())); }
-      finally { if (control) process.stdin.destroy(); }
+      finally {
+        phase('stdin-close');
+        if (control) process.stdin.destroy();
+      }
     }
   }
 }
+phase('done');
+await new Promise(setImmediate);
+const remainingResources = Object.create(null);
+for (const resource of process.getActiveResourcesInfo()) remainingResources[resource] = (remainingResources[resource] ?? 0) + 1;
+await writeFile(join(root, 'financial-shutdown-resources.json'), JSON.stringify(remainingResources));

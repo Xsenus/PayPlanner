@@ -567,6 +567,7 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
         _browserPortReservation.Stop();
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Browser fixture could not start.");
         var stderr = process.StandardError.ReadToEndAsync();
+        var financialPhase = "starting";
         try
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
@@ -583,6 +584,13 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
                 while (await process.StandardOutput.ReadLineAsync(ct) is { } line)
                 {
                     output.AppendLine(line);
+                    if (financialDocuments && Regex.IsMatch(line,
+                        @"\APP_FINANCIAL_BROWSER_PHASE (?:vite-create|vite-listen|entry-transform|requests-idle|cli-open|cli-goto|cli-snapshot|scenario|browser-close|vite-close|control-close|stdin-close|done)\z",
+                        RegexOptions.CultureInvariant))
+                    {
+                        financialPhase = line;
+                        Console.WriteLine(line);
+                    }
                     if (chatAttachments && Regex.IsMatch(line,
                         @"\APP_CHAT_BROWSER_(?:PHASE (?:ui-build|preview-listen|pending-scenario|apply-boundary|published-scenario|browser-close)|READS phase=(?:before-lost-reload|before-draft-reload|pending|published|before-close) started=\d{1,6} finished=\d{1,6} failed=\d{1,6} locallyAborted=\d{1,6} pending=\d{1,6}|POST phase=(?:start|end|fail) elapsedMs=\d{1,9} apiReadsStarted=\d{1,6} apiReadsFinished=\d{1,6} apiReadsFailed=\d{1,6} apiReadsPending=\d{1,6})\z",
                         RegexOptions.CultureInvariant)) Console.WriteLine(line);
@@ -605,6 +613,10 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
                 }
                 return output.ToString();
             }
+        }
+        catch (OperationCanceledException) when (financialDocuments)
+        {
+            throw new TimeoutException("Synthetic financial browser timed out at: " + financialPhase);
         }
         finally
         {
