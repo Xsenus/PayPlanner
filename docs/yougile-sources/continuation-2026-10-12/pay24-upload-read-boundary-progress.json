@@ -1,0 +1,19 @@
+{
+  "SchemaVersion": 1,
+  "Revision": "2395314cd817a9d83c35d5e79d8d6a6a7872629e",
+  "FullGateQualified": false,
+  "StoppedAfterConfirmedFailure": true,
+  "PartialPassedLogLines": 343,
+  "FailedCases": 1,
+  "OtherShardsNotRun": true,
+  "Failure": "Request-aborted TaskCanceledException in GetPendingDocumentUploads, documents/lostAcknowledgement=true",
+  "Followup": "Drain actual read responses before each independent document/version write",
+  "ObserverUnitTestsPassed": 28,
+  "NativeFollowup": "running",
+  "OriginalBudgetsAndServerErrorAssertionsPreserved": true,
+  "LegalFlagsCiResult": "passed with fetch-failed warning; actual live flags unverified",
+  "Pushed": false,
+  "Deployed": false,
+  "Roadmap": "4/6 (67%)",
+  "RecordedUtc": "2026-10-13T21:38:41.5682959Z"
+}

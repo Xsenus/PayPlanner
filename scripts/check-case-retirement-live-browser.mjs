@@ -358,6 +358,9 @@ try {
     check(registry === null, 'Confirmed retirement retained its browser identity');
     if (settings.lostAck) check(reads.some(keys => keys.includes(settings.key)), 'Lost acknowledgement did not read the exact key');
     if (restarted) check(restartApplied, 'The server was never restarted after the committed retirement');
+    // Upload completion changes the status-panel revision. Do not let the
+    // fixture's next write cancel an earlier discovery response under load.
+    await caseReads.drain('document-upload');
     if (versionAttempt) {
       const inputName = modal ? 'Загрузить новую версию base-browser-version.bin' : 'Загрузить новую версию документа base-browser-version.bin';
       await openDocumentActions('base-browser-version.bin');
@@ -397,6 +400,7 @@ try {
     const versionInput = page.getByLabel('Загрузить новую версию документа separate-browser-document.txt', { exact: true });
     await waitAtPhase(versionInput, 'document-version-input', { state: 'attached' });
     check(filePosts === 1 && fileKeys[0] !== settings.key, 'Separate upload did not use a new identity');
+    await caseReads.drain('document-upload');
     const [versionResponse] = await Promise.all([
       page.waitForResponse(response => /\/api\/case-documents\/\d+\/versions$/.test(new URL(response.url()).pathname) && response.request().method() === 'POST'),
       versionInput.setInputFiles({ name: 'separate-browser-version.txt', mimeType: 'text/plain', buffer: Buffer.from('Separate browser version') }),

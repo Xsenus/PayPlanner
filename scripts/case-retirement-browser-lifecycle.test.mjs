@@ -40,7 +40,7 @@ function fixture() {
 }
 
 describe('owned case read boundary', () => {
-  it.each(['document-tab', 'browser-close'])('finishes a pending upload response before %s', async phase => {
+  it.each(['document-tab', 'document-upload', 'browser-close'])('finishes a pending upload response before %s', async phase => {
     const { page, lifecycle, request } = fixture();
     const pending = request('/api/v2/cases/7/documents/uploads/pending');
     page.emit('request', pending.value);
@@ -55,7 +55,7 @@ describe('owned case read boundary', () => {
     lifecycle.dispose();
   });
 
-  it.each(['document-tab', 'browser-close'])('retains an upload response failure before %s', async phase => {
+  it.each(['document-tab', 'document-upload', 'browser-close'])('retains an upload response failure before %s', async phase => {
     const { page, lifecycle, request } = fixture();
     const pending = request('/api/v2/cases/7/documents/uploads/pending');
     page.emit('request', pending.value);
