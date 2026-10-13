@@ -618,7 +618,8 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         var settings = await LoadCalendarSyncSettingsAsync(cancellationToken);
         errors += await DeleteLinksOutsideSyncWindowAsync(connection, cancellationToken);
 
-        var tasksQuery = await BuildTasksForConnectionQueryAsync(connection, cancellationToken);
+        var visibility = await ResolveConnectionCalendarVisibilityAsync(connection.UserId, cancellationToken);
+        var tasksQuery = BuildTasksForConnectionQuery(connection, visibility);
         var processedTasks = 0;
         var preservedTracking = CalendarSyncTaskPager.CaptureTrackedEntities(_db);
         await foreach (var tasks in CalendarSyncTaskPager.ReadPagesAsync(tasksQuery, cancellationToken))
@@ -632,20 +633,9 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
                     : [connection.UserId];
             var timeZones = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
                 _db, timeZoneUserIds, cancellationToken);
-            Dictionary<int, GoogleCalendarSyncCalendar>? knownPersonalCalendars = null;
-            if (exportTasks.Length > 0 && !string.Equals(connection.CalendarMode, "adminByAssignee", StringComparison.Ordinal))
-            {
-                // One fresh calendar lookup per page; never share it across operations.
-                knownPersonalCalendars = [];
-                var personalCalendar = await _db.GoogleCalendarSyncCalendars
-                    .Where(item => item.ConnectionId == connection.Id && item.OwnerUserId == null)
-                    .OrderBy(item => item.Id)
-                    .FirstOrDefaultAsync(cancellationToken);
-                if (personalCalendar is not null)
-                {
-                    knownPersonalCalendars.Add(0, personalCalendar);
-                }
-            }
+            var calendarOwnerIds = exportTasks.Select(item =>
+                IsAssigneeCalendarMode(connection, visibility) ? item.AssigneeUserId : null);
+            var knownCalendars = await LoadCalendarsForOwnersAsync(connection.Id, calendarOwnerIds, cancellationToken);
             var taskIds = tasks.Select(item => item.Id).ToArray();
             var links = await _db.GoogleCalendarTaskLinks
                 .Where(item => item.ConnectionId == connection.Id && taskIds.Contains(item.TaskJournalItemId))
@@ -671,7 +661,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
                             task,
                             settings,
                             externalCommentsByTask.GetValueOrDefault(task.Id) ?? [],
-                            cancellationToken, links, logContext, timeZones, knownPersonalCalendars);
+                            cancellationToken, visibility, links, logContext, timeZones, knownCalendars);
                     }
 
                     processedTasks++;
@@ -782,7 +772,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
                 task,
                 settings,
                 externalComments.GetValueOrDefault(task.Id) ?? [],
-                cancellationToken, logContext: logContext);
+                cancellationToken, visibility, logContext: logContext);
         }
 
         if (connection.LastError?.StartsWith(DuplicateCleanupErrorPrefix, StringComparison.Ordinal) == true
@@ -1137,7 +1127,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         var task = link.TaskJournalItem;
         var changed = false;
         var changes = new List<string>();
-        var timeZone = await ResolveTaskTimeZoneAsync(connection, calendar, task, cancellationToken, importTimeZones: importTimeZones);
+        var timeZone = await ResolveTaskTimeZoneAsync(connection, calendar, task, cancellationToken, visibility, importTimeZones: importTimeZones);
         var importedStartAt = googleEvent.StartAt.HasValue ? CalendarTimeZoneHelper.NormalizeUtcInstant(googleEvent.StartAt.Value) : (DateTime?)null;
         var importedEndAt = googleEvent.EndAt.HasValue ? CalendarTimeZoneHelper.NormalizeUtcInstant(googleEvent.EndAt.Value) : (DateTime?)null;
         if (importedStartAt.HasValue && task.DueAt != importedStartAt.Value)
@@ -1213,10 +1203,11 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         CalendarSyncSettingsDto settings,
         IReadOnlyCollection<TaskJournalComment> externalComments,
         CancellationToken cancellationToken,
+        DataVisibilityAccess? visibility,
         IReadOnlyDictionary<int, GoogleCalendarTaskLink>? knownLinks = null,
         CalendarSyncLogContext? logContext = null,
         IReadOnlyDictionary<int, TimeZoneInfo>? timeZones = null,
-        Dictionary<int, GoogleCalendarSyncCalendar>? knownPersonalCalendars = null)
+        Dictionary<int, GoogleCalendarSyncCalendar>? knownCalendars = null)
     {
         if (timeZones is null)
         {
@@ -1225,9 +1216,9 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             timeZones = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(_db, timeZoneUserIds, cancellationToken);
         }
         var accessToken = await ResolveAccessTokenAsync(connection, cancellationToken);
-        var calendar = await EnsureCalendarForTaskAsync(connection, task, accessToken, cancellationToken, timeZones, logContext, knownPersonalCalendars);
+        var calendar = await EnsureCalendarForTaskAsync(connection, task, accessToken, cancellationToken, visibility, timeZones, logContext, knownCalendars);
         logContext?.RememberCalendar(calendar.Id, calendar.Name, calendar.OwnerUserId, calendar.OwnerUser);
-        var timeZone = await ResolveTaskTimeZoneAsync(connection, null, task, cancellationToken, timeZones);
+        var timeZone = await ResolveTaskTimeZoneAsync(connection, calendar, task, cancellationToken, visibility, timeZones);
         var crmHash = BuildCrmHash(task, timeZone, externalComments);
         var closedTaskColorId = ResolveCompletedTaskGoogleColorId(task, settings);
         if (closedTaskColorId is not null)
@@ -1380,9 +1371,11 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             lastOwnerId = ownerPage[^1].Id;
             var timeZones = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
                 _db, ownerPage.Select(owner => owner.Id), cancellationToken);
+            var knownCalendars = await LoadCalendarsForOwnersAsync(
+                connection.Id, ownerPage.Select(owner => (int?)owner.Id), cancellationToken);
             foreach (var owner in ownerPage)
             {
-                await EnsureCalendarForOwnerAsync(connection, owner.Id, owner.FullName, accessToken, cancellationToken, timeZones);
+                await EnsureCalendarForOwnerAsync(connection, owner.Id, owner.FullName, accessToken, cancellationToken, timeZones, knownCalendars: knownCalendars);
             }
         }
 
@@ -1407,21 +1400,49 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         }
     }
 
+    private async Task<Dictionary<int, GoogleCalendarSyncCalendar>> LoadCalendarsForOwnersAsync(
+        int connectionId,
+        IEnumerable<int?> ownerUserIds,
+        CancellationToken cancellationToken)
+    {
+        var requested = ownerUserIds.Distinct().ToArray();
+        if (requested.Length == 0)
+        {
+            return [];
+        }
+
+        var ownerIds = requested.Where(id => id.HasValue).Select(id => id!.Value).ToArray();
+        var includePersonal = requested.Contains(null);
+        // This lookup belongs only to the current owner/task page, never another run.
+        var calendars = await _db.GoogleCalendarSyncCalendars
+            .Include(item => item.OwnerUser)
+            .Where(item => item.ConnectionId == connectionId
+                && ((item.OwnerUserId.HasValue && ownerIds.Contains(item.OwnerUserId.Value))
+                    || (includePersonal && item.OwnerUserId == null)))
+            .OrderBy(item => item.Id)
+            .ToListAsync(cancellationToken);
+        var knownCalendars = new Dictionary<int, GoogleCalendarSyncCalendar>();
+        foreach (var calendar in calendars)
+        {
+            knownCalendars.TryAdd(calendar.OwnerUserId ?? 0, calendar);
+        }
+        return knownCalendars;
+    }
+
     private async Task<GoogleCalendarSyncCalendar> EnsureCalendarForTaskAsync(
         GoogleCalendarConnection connection,
         TaskJournalItem task,
         string accessToken,
         CancellationToken cancellationToken,
+        DataVisibilityAccess? visibility,
         IReadOnlyDictionary<int, TimeZoneInfo>? timeZones = null,
         CalendarSyncLogContext? logContext = null,
-        Dictionary<int, GoogleCalendarSyncCalendar>? knownPersonalCalendars = null)
+        Dictionary<int, GoogleCalendarSyncCalendar>? knownCalendars = null)
     {
-        var visibility = string.Equals(connection.CalendarMode, "adminByAssignee", StringComparison.Ordinal)
-            ? await ResolveConnectionCalendarVisibilityAsync(connection.UserId, cancellationToken) : null;
         var ownerUserId = IsAssigneeCalendarMode(connection, visibility) ? task.AssigneeUserId : null;
         var ownerName = ownerUserId.HasValue ? NormalizeOptional(task.AssigneeName) : null;
 
-        return await EnsureCalendarForOwnerAsync(connection, ownerUserId, ownerName, accessToken, cancellationToken, timeZones, logContext, knownPersonalCalendars);
+        return await EnsureCalendarForOwnerAsync(connection, ownerUserId, ownerName, accessToken, cancellationToken, timeZones, logContext, knownCalendars);
     }
 
     private async Task<GoogleCalendarSyncCalendar> EnsureCalendarForOwnerAsync(
@@ -1432,16 +1453,17 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         CancellationToken cancellationToken,
         IReadOnlyDictionary<int, TimeZoneInfo>? timeZones = null,
         CalendarSyncLogContext? logContext = null,
-        Dictionary<int, GoogleCalendarSyncCalendar>? knownPersonalCalendars = null)
+        Dictionary<int, GoogleCalendarSyncCalendar>? knownCalendars = null)
     {
         var name = ownerUserId.HasValue
             ? $"PayPlanner - {NormalizeOptional(ownerName) ?? $"сотрудник #{ownerUserId.Value}"}"
             : "PayPlanner задачи";
 
         GoogleCalendarSyncCalendar? calendar = null;
-        if (!ownerUserId.HasValue && knownPersonalCalendars is not null
-            && knownPersonalCalendars.TryGetValue(0, out var knownCalendar)
-            && knownCalendar.ConnectionId == connection.Id && knownCalendar.OwnerUserId is null)
+        var ownerKey = ownerUserId ?? 0;
+        if (knownCalendars is not null
+            && knownCalendars.TryGetValue(ownerKey, out var knownCalendar)
+            && knownCalendar.ConnectionId == connection.Id && knownCalendar.OwnerUserId == ownerUserId)
         {
             calendar = knownCalendar;
         }
@@ -1452,7 +1474,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         var timeZone = await ResolveUserTimeZoneAsync(ownerUserId ?? connection.UserId, cancellationToken, timeZones);
         if (calendar is not null)
         {
-            if (!ownerUserId.HasValue) knownPersonalCalendars?.TryAdd(0, calendar);
+            knownCalendars?.TryAdd(ownerKey, calendar);
             await EnsureGoogleCalendarTimeZoneAsync(accessToken, calendar, timeZone, cancellationToken);
             return calendar;
         }
@@ -1494,7 +1516,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
                 .FirstOrDefaultAsync(cancellationToken);
             if (existing is not null)
             {
-                if (!ownerUserId.HasValue) knownPersonalCalendars?.TryAdd(0, existing);
+                knownCalendars?.TryAdd(ownerKey, existing);
                 return existing;
             }
 
@@ -1502,7 +1524,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         }
 
         await AddLogAsync(connection.Id, calendar.Id, null, "system", "create-calendar", "success", $"В Google Calendar создан календарь «{name}».", null, cancellationToken, logContext);
-        if (!ownerUserId.HasValue) knownPersonalCalendars?.TryAdd(0, calendar);
+        knownCalendars?.TryAdd(ownerKey, calendar);
         return calendar;
     }
 
@@ -1544,7 +1566,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
                 group => (IReadOnlyCollection<TaskJournalComment>)group.ToArray());
     }
 
-    private async Task<IQueryable<TaskJournalItem>> BuildTasksForConnectionQueryAsync(GoogleCalendarConnection connection, CancellationToken cancellationToken)
+    private IQueryable<TaskJournalItem> BuildTasksForConnectionQuery(GoogleCalendarConnection connection, DataVisibilityAccess? visibility)
     {
         var now = DateTime.UtcNow;
         var from = ResolveSyncFromDate(connection) ?? now.AddDays(-30);
@@ -1553,7 +1575,6 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             .Include(item => item.Participants)
             .Where(item => item.DueAt >= from && item.DueAt <= to);
 
-        var visibility = await ResolveConnectionCalendarVisibilityAsync(connection.UserId, cancellationToken);
         if (visibility is null)
         {
             return query.Where(_ => false);
@@ -1610,14 +1631,13 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         GoogleCalendarSyncCalendar? calendar,
         TaskJournalItem task,
         CancellationToken cancellationToken,
+        DataVisibilityAccess? visibility,
         IReadOnlyDictionary<int, TimeZoneInfo>? timeZones = null,
         Dictionary<int, TimeZoneInfo>? importTimeZones = null)
     {
         var ownerUserId = calendar?.OwnerUserId;
         if (!ownerUserId.HasValue)
         {
-            var visibility = string.Equals(connection.CalendarMode, "adminByAssignee", StringComparison.Ordinal)
-                ? await ResolveConnectionCalendarVisibilityAsync(connection.UserId, cancellationToken) : null;
             ownerUserId = IsAssigneeCalendarMode(connection, visibility)
                 ? task.AssigneeUserId
                 : connection.UserId;

@@ -1,0 +1,78 @@
+{
+  "verifiedAtUtc": "2026-10-13T03:20:30.393210+00:00",
+  "scope": "User-authorized PayPlanner generated build and expired synthetic fixture cleanup",
+  "generatedBuildsMovedToD": [
+    {
+      "repositoryRelativePath": "backend/bin",
+      "bytes": 163946150
+    },
+    {
+      "repositoryRelativePath": "backend/obj",
+      "bytes": 27894271
+    },
+    {
+      "repositoryRelativePath": "backend/PayPlanner.Api.Migrations/bin",
+      "bytes": 68152288
+    },
+    {
+      "repositoryRelativePath": "backend/PayPlanner.Api.Migrations/obj",
+      "bytes": 49462793
+    },
+    {
+      "repositoryRelativePath": "backend/PayPlanner.Api.Tests/bin",
+      "bytes": 168648321
+    },
+    {
+      "repositoryRelativePath": "backend/PayPlanner.Api.Tests/obj",
+      "bytes": 24642499
+    },
+    {
+      "repositoryRelativePath": "scripts/claude-preparation/Seed/bin",
+      "bytes": 146838373
+    },
+    {
+      "repositoryRelativePath": "scripts/claude-preparation/Seed/obj",
+      "bytes": 529426
+    },
+    {
+      "repositoryRelativePath": "tests/PayPlanner.StorageStageWriterProbe/bin",
+      "bytes": 100362803
+    },
+    {
+      "repositoryRelativePath": "tests/PayPlanner.StorageStageWriterProbe/obj",
+      "bytes": 622241
+    }
+  ],
+  "movedGeneratedBytes": 751099165,
+  "generatedBuildArchive": "D:\\PayPlannerReview-20261012\\retired-c-builds-20261013",
+  "expiredSyntheticFixturesDeleted": 111,
+  "deletedFixtureBytes": 92668587,
+  "deletedPathsConfirmedAbsent": true,
+  "cleanupManifestSha256": "4b869246549d70b736c0c8015ee02b35e2e7048a9a4665cb5c6195819e9df052",
+  "cleanupChecks": [
+    "resolved absolute path inside explicitly named Temp root",
+    "exact known generator prefix plus GUID",
+    "source generator identified in repository",
+    "all tree timestamps before host reboot",
+    "no reparse point, PostgreSQL or browser-profile marker",
+    "no current process command-line reference"
+  ],
+  "ownedSyntheticPostgres": {
+    "movedTo": "D:/PayPlannerReview-20261012/bank-ssd-icu-postgres",
+    "port": 55445,
+    "bind": "127.0.0.1",
+    "version": "17.2",
+    "localeProvider": "icu",
+    "icuLocale": "ru-RU",
+    "ready": true,
+    "inRecovery": false,
+    "oldClusterVerifiedStoppedBeforeMove": true
+  },
+  "newBuildAndTestTempOnD": true,
+  "activeSourceAndEvidencePreserved": true,
+  "nodeModulesUnchanged": true,
+  "productionUnchanged": true,
+  "systemPagefileAndUnrelatedProcessesUnchanged": true,
+  "limitation": "Directory sizes do not prove peak disk use. Free space also varies with Windows paging. This cleanup does not qualify the interrupted bank gate.",
+  "discoveredBuildIssue": "After removal of old default output, API build copied migrations from a hardcoded old path instead of the actual artifacts output; MSB3030 preserved, path fix and verification tracked separately."
+}

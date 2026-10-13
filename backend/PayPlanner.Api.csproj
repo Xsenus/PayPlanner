@@ -83,12 +83,21 @@
   -->
   <PropertyGroup>
     <MigrationsProjectPath>$(MSBuildProjectDirectory)\PayPlanner.Api.Migrations\PayPlanner.Api.Migrations.csproj</MigrationsProjectPath>
-    <MigrationsOutputDll>$(MSBuildProjectDirectory)\PayPlanner.Api.Migrations\bin\$(Configuration)\$(TargetFramework)\PayPlanner.Api.Migrations.dll</MigrationsOutputDll>
   </PropertyGroup>
 
-  <ItemGroup>
-    <None Include="$(MigrationsOutputDll)" Link="PayPlanner.Api.Migrations.dll" CopyToOutputDirectory="Never" CopyToPublishDirectory="PreserveNewest" />
-  </ItemGroup>
+  <!-- Путь учитывает раскладку дочернего проекта; элемент публикации нужен до AssignTargetPaths, включая публикацию без сборки. -->
+  <Target Name="ResolveMigrationsAssemblyPath" BeforeTargets="AssignTargetPaths;BuildMigrationsAssembly;GetCopyToPublishDirectoryItems">
+    <MSBuild Projects="$(MigrationsProjectPath)" Targets="GetTargetPath" Properties="Configuration=$(Configuration);BuildProjectReferences=false">
+      <Output TaskParameter="TargetOutputs" ItemName="_MigrationsAssemblyTargetPath" />
+    </MSBuild>
+    <Error Condition="'@(_MigrationsAssemblyTargetPath)' == ''" Text="Не удалось определить выходную сборку проекта миграций." />
+    <PropertyGroup>
+      <MigrationsOutputDll>@(_MigrationsAssemblyTargetPath->'%(FullPath)')</MigrationsOutputDll>
+    </PropertyGroup>
+    <ItemGroup>
+      <None Include="$(MigrationsOutputDll)" Link="PayPlanner.Api.Migrations.dll" CopyToOutputDirectory="Never" CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
 
   <Target Name="BuildMigrationsAssembly" AfterTargets="CopyFilesToOutputDirectory" Condition="'$(PayPlannerSkipMigrationsBuild)' != 'true'">
     <MSBuild Projects="$(MigrationsProjectPath)" Targets="Restore" Properties="Configuration=$(Configuration);MSBuildRestoreSessionId=$([System.Guid]::NewGuid())" />

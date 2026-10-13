@@ -1,0 +1,502 @@
+{
+  "checkedAtUtc": "2026-10-13T03:28:48.464724+00:00",
+  "baseRevision": "ecc5ab0a55b2862e20d0720d51c89bf51edfed81",
+  "verificationStatus": "3 focused and 306 related cases passed; final full backend gate, infrastructure release checks and live acceptance remain.",
+  "codeFiles": {
+    "backend/Services/GoogleCalendarSyncService.cs": "33f9db91c9f24a1a4b3d5aae5789135120b538aea3ee1446c10f0d1c8b8ff55e",
+    "backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs": "afeacadddc892a25aa4ee04f910849626369f8c6b6f422f8f909ec985d68f295",
+    "backend/PayPlanner.Api.csproj": "d1d1f65c03626129bd9a1102025343edba003679b50c6538efff24f89048726f",
+    "backend/AppReleases/releases.json": "251b633e123db20d4bb6ee12f8a10c314b3a1a1e83665d47e32b59fa514942bd"
+  },
+  "sourceHashMode": "SHA256 of raw file bytes pinned immediately before the repaired normal build",
+  "sourcePinSha256": "8c7b7a98125bb9f04c2722067bb3bf83e17f85f3a94498f03f19048199deb021",
+  "apiSha256": "9b6cdf8c30c49415277d65ba314823d15e6c048df9b7e612ecaf854ee46541d8",
+  "testAssemblySha256": "5d651501bb6418b71ae9fe750f2285aa97d6596707781af34ebea259dd82a56f",
+  "migrationAssemblySha256": "5e5101a6d344f99342874e4c81c2429d66876aaa7a928f9c250dce7f1d56b3bc",
+  "binaryFiles": {
+    "bin/PayPlanner.Api/release/PayPlanner.Api.dll": "9b6cdf8c30c49415277d65ba314823d15e6c048df9b7e612ecaf854ee46541d8",
+    "bin/PayPlanner.Api.Tests/release/PayPlanner.Api.Tests.dll": "5d651501bb6418b71ae9fe750f2285aa97d6596707781af34ebea259dd82a56f",
+    "bin/PayPlanner.Api.Tests/release/PayPlanner.Api.dll": "9b6cdf8c30c49415277d65ba314823d15e6c048df9b7e612ecaf854ee46541d8",
+    "bin/PayPlanner.Api.Migrations/release/PayPlanner.Api.Migrations.dll": "5e5101a6d344f99342874e4c81c2429d66876aaa7a928f9c250dce7f1d56b3bc",
+    "bin/PayPlanner.Api/release/PayPlanner.Api.Migrations.dll": "5e5101a6d344f99342874e4c81c2429d66876aaa7a928f9c250dce7f1d56b3bc",
+    "bin/PayPlanner.Api.Tests/release/PayPlanner.Api.Migrations.dll": "5e5101a6d344f99342874e4c81c2429d66876aaa7a928f9c250dce7f1d56b3bc"
+  },
+  "artifactRoot": "D:\\PayPlannerReview-20261012\\calendar-assignee-final-evidence",
+  "normalBuild": {
+    "exitCode": 0,
+    "warnings": 0,
+    "errors": 0,
+    "logSha256": "87cc0d4950c298b12c0841593c5d7d4562c8adb7414d9b70b8a9cff6f9782141",
+    "artifactsPath": "D:\\PayPlannerReview-20261012\\calendar-timezone-baseline-artifacts"
+  },
+  "earlierBuildFailures": [
+    {
+      "code": "MSB3030",
+      "logSha256": "5fe46bc5d896b272180af935f2dfac59671e05193b0970863ec68c9cdc881c47",
+      "warnings": 0,
+      "errors": 1,
+      "reason": "After old default C build outputs were moved, the migrations assembly was built under D artifacts but the API copy target still read the hardcoded C/bin path.",
+      "partialOutputsAreNotASuccessfulBuild": true
+    },
+    {
+      "code": "MSB4025",
+      "logSha256": "a6bd55ac469863e8d80f16917844518e5be743033c99a1cb84ef195b129ef619",
+      "warnings": 0,
+      "errors": 1,
+      "reason": "A repair comment contained the XML-forbidden double hyphen. The following repaired normal build is recorded separately."
+    }
+  ],
+  "baseline": {
+    "proofSha256": "424881a1b28f48b549ca087f697e4e551d004a6528cc5134b3ac44ffde5bb140",
+    "sourceRevision": "ecc5ab0a55b2862e20d0720d51c89bf51edfed81",
+    "artifactRoot": "D:\\PayPlannerReview-20261012\\calendar-assignee-baseline-evidence",
+    "apiSha256": "2895033b75bf8775367696bee29c14fabf0ad3d619c6b6f66a064471297b134b",
+    "testAssemblySha256": "3483c7fb5811d41c9609dd0c748fc71089f65f120595440cdc50d90827d25703",
+    "trxSha256": "9c61f81a977a91755dc7157b7ef1278ae3e98742c58c2a1c8445ea6f19ed474e",
+    "counts": {
+      "total": 3,
+      "executed": 3,
+      "passed": 0,
+      "failed": 3,
+      "error": 0,
+      "timeout": 0,
+      "aborted": 0,
+      "inconclusive": 0,
+      "passedButRunAborted": 0,
+      "notRunnable": 0,
+      "notExecuted": 0,
+      "disconnected": 0,
+      "warning": 0,
+      "completed": 0,
+      "inProgress": 0,
+      "pending": 0
+    },
+    "failures": [
+      {
+        "scenario": "cancel",
+        "failure": "Assert.InRange() Failure: Value not in range\r\nRange:  (0 - 15)\r\nActual: 1008",
+        "sourceLine": 2499
+      },
+      {
+        "scenario": "failure",
+        "failure": "Assert.InRange() Failure: Value not in range\r\nRange:  (0 - 15)\r\nActual: 1010",
+        "sourceLine": 2499
+      },
+      {
+        "scenario": "normal",
+        "failure": "Assert.InRange() Failure: Value not in range\r\nRange:  (0 - 15)\r\nActual: 1010",
+        "sourceLine": 2499
+      }
+    ],
+    "functionalAssertionsCompletedBeforeQueryBoundFailure": true
+  },
+  "focusedTests": {
+    "exitCode": 0,
+    "counts": {
+      "total": 3,
+      "executed": 3,
+      "passed": 3,
+      "failed": 0,
+      "error": 0,
+      "timeout": 0,
+      "aborted": 0,
+      "inconclusive": 0,
+      "passedButRunAborted": 0,
+      "notRunnable": 0,
+      "notExecuted": 0,
+      "disconnected": 0,
+      "warning": 0,
+      "completed": 0,
+      "inProgress": 0,
+      "pending": 0
+    },
+    "trxSha256": "138080e112f5f8ea178b28ce3f42e1a227b3a0bd61d11646093cd0a0542bbdea",
+    "scenarios": [
+      "cancel",
+      "failure",
+      "normal"
+    ]
+  },
+  "relatedTests": {
+    "exitCode": 0,
+    "counts": {
+      "total": 306,
+      "executed": 306,
+      "passed": 306,
+      "failed": 0,
+      "error": 0,
+      "timeout": 0,
+      "aborted": 0,
+      "inconclusive": 0,
+      "passedButRunAborted": 0,
+      "notRunnable": 0,
+      "notExecuted": 0,
+      "disconnected": 0,
+      "warning": 0,
+      "completed": 0,
+      "inProgress": 0,
+      "pending": 0
+    },
+    "classCounts": {
+      "PayPlanner.Api.Tests.AppVersionControllerTests": 21,
+      "PayPlanner.Api.Tests.CalendarTimeZoneHelperTests": 13,
+      "PayPlanner.Api.Tests.DataVisibilityQueryExtensionsTests": 5,
+      "PayPlanner.Api.Tests.DataVisibilityServiceTests": 22,
+      "PayPlanner.Api.Tests.DocumentationProcessTests": 4,
+      "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests": 129,
+      "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests": 112
+    },
+    "trxSha256": "403eae5d21f63e2b7f92a5e65c00acebd6ca3ea58096251f66635034bd345fe8"
+  },
+  "queryMeasurements": {
+    "scope": "502 tasks, two visible calendar owners, two task pages, same-service retry and unchanged repeat",
+    "baseline": [
+      {
+        "scenario": "normal",
+        "phase": "first",
+        "tables": {
+          "Users": 1010,
+          "SystemSettings": 11,
+          "GoogleCalendarConnections": 5,
+          "RolePermissions": 1007,
+          "RoleCalendarVisibleUsers": 1007,
+          "UserSettings": 3,
+          "GoogleCalendarSyncCalendars": 504,
+          "TaskJournalItems": 3,
+          "GoogleCalendarTaskLinks": 3,
+          "TaskJournalComments": 2,
+          "GoogleCalendarSyncLogs": 1
+        },
+        "countedTableSelects": 3556
+      },
+      {
+        "scenario": "normal",
+        "phase": "retry",
+        "tables": {
+          "GoogleCalendarConnections": 3,
+          "Users": 1009,
+          "RolePermissions": 1007,
+          "RoleCalendarVisibleUsers": 1007,
+          "UserSettings": 3,
+          "GoogleCalendarSyncCalendars": 504,
+          "SystemSettings": 1,
+          "TaskJournalItems": 3,
+          "GoogleCalendarTaskLinks": 2,
+          "TaskJournalComments": 2
+        },
+        "countedTableSelects": 3541
+      },
+      {
+        "scenario": "normal",
+        "phase": "unchanged",
+        "tables": {
+          "GoogleCalendarConnections": 3,
+          "Users": 1009,
+          "RolePermissions": 1007,
+          "RoleCalendarVisibleUsers": 1007,
+          "UserSettings": 3,
+          "GoogleCalendarSyncCalendars": 504,
+          "SystemSettings": 1,
+          "TaskJournalItems": 3,
+          "GoogleCalendarTaskLinks": 2,
+          "TaskJournalComments": 2
+        },
+        "countedTableSelects": 3541
+      },
+      {
+        "scenario": "failure",
+        "phase": "first",
+        "tables": {
+          "Users": 1010,
+          "SystemSettings": 11,
+          "GoogleCalendarConnections": 5,
+          "RolePermissions": 1007,
+          "RoleCalendarVisibleUsers": 1007,
+          "UserSettings": 3,
+          "GoogleCalendarSyncCalendars": 504,
+          "TaskJournalItems": 3,
+          "GoogleCalendarTaskLinks": 3,
+          "TaskJournalComments": 2,
+          "GoogleCalendarSyncLogs": 1
+        },
+        "countedTableSelects": 3556
+      },
+      {
+        "scenario": "failure",
+        "phase": "retry",
+        "tables": {
+          "GoogleCalendarConnections": 3,
+          "Users": 1009,
+          "RolePermissions": 1007,
+          "RoleCalendarVisibleUsers": 1007,
+          "UserSettings": 3,
+          "GoogleCalendarSyncCalendars": 504,
+          "SystemSettings": 1,
+          "TaskJournalItems": 3,
+          "GoogleCalendarTaskLinks": 2,
+          "TaskJournalComments": 2
+        },
+        "countedTableSelects": 3541
+      },
+      {
+        "scenario": "failure",
+        "phase": "unchanged",
+        "tables": {
+          "GoogleCalendarConnections": 3,
+          "Users": 1009,
+          "RolePermissions": 1007,
+          "RoleCalendarVisibleUsers": 1007,
+          "UserSettings": 3,
+          "GoogleCalendarSyncCalendars": 504,
+          "SystemSettings": 1,
+          "TaskJournalItems": 3,
+          "GoogleCalendarTaskLinks": 2,
+          "TaskJournalComments": 2
+        },
+        "countedTableSelects": 3541
+      },
+      {
+        "scenario": "cancel",
+        "phase": "first",
+        "tables": {
+          "Users": 1008,
+          "SystemSettings": 6,
+          "GoogleCalendarConnections": 3,
+          "RolePermissions": 1005,
+          "RoleCalendarVisibleUsers": 1005,
+          "UserSettings": 3,
+          "GoogleCalendarSyncCalendars": 503,
+          "TaskJournalItems": 3,
+          "GoogleCalendarTaskLinks": 3,
+          "TaskJournalComments": 2
+        },
+        "countedTableSelects": 3541
+      },
+      {
+        "scenario": "cancel",
+        "phase": "retry",
+        "tables": {
+          "GoogleCalendarConnections": 3,
+          "Users": 1009,
+          "RolePermissions": 1007,
+          "RoleCalendarVisibleUsers": 1007,
+          "UserSettings": 3,
+          "GoogleCalendarSyncCalendars": 504,
+          "SystemSettings": 1,
+          "TaskJournalItems": 3,
+          "GoogleCalendarTaskLinks": 2,
+          "TaskJournalComments": 2
+        },
+        "countedTableSelects": 3541
+      },
+      {
+        "scenario": "cancel",
+        "phase": "unchanged",
+        "tables": {
+          "GoogleCalendarConnections": 3,
+          "Users": 1009,
+          "RolePermissions": 1007,
+          "RoleCalendarVisibleUsers": 1007,
+          "UserSettings": 3,
+          "GoogleCalendarSyncCalendars": 504,
+          "SystemSettings": 1,
+          "TaskJournalItems": 3,
+          "GoogleCalendarTaskLinks": 2,
+          "TaskJournalComments": 2
+        },
+        "countedTableSelects": 3541
+      }
+    ],
+    "corrected": [
+      {
+        "scenario": "normal",
+        "phase": "first",
+        "tables": {
+          "Users": 6,
+          "SystemSettings": 11,
+          "GoogleCalendarConnections": 5,
+          "RolePermissions": 3,
+          "RoleCalendarVisibleUsers": 3,
+          "UserSettings": 3,
+          "GoogleCalendarSyncCalendars": 3,
+          "TaskJournalItems": 3,
+          "GoogleCalendarTaskLinks": 3,
+          "TaskJournalComments": 2,
+          "GoogleCalendarSyncLogs": 1
+        },
+        "countedTableSelects": 43
+      },
+      {
+        "scenario": "normal",
+        "phase": "retry",
+        "tables": {
+          "GoogleCalendarConnections": 3,
+          "Users": 5,
+          "RolePermissions": 3,
+          "RoleCalendarVisibleUsers": 3,
+          "UserSettings": 3,
+          "GoogleCalendarSyncCalendars": 3,
+          "SystemSettings": 1,
+          "TaskJournalItems": 3,
+          "GoogleCalendarTaskLinks": 2,
+          "TaskJournalComments": 2
+        },
+        "countedTableSelects": 28
+      },
+      {
+        "scenario": "normal",
+        "phase": "unchanged",
+        "tables": {
+          "GoogleCalendarConnections": 3,
+          "Users": 5,
+          "RolePermissions": 3,
+          "RoleCalendarVisibleUsers": 3,
+          "UserSettings": 3,
+          "GoogleCalendarSyncCalendars": 3,
+          "SystemSettings": 1,
+          "TaskJournalItems": 3,
+          "GoogleCalendarTaskLinks": 2,
+          "TaskJournalComments": 2
+        },
+        "countedTableSelects": 28
+      },
+      {
+        "scenario": "failure",
+        "phase": "first",
+        "tables": {
+          "Users": 6,
+          "SystemSettings": 11,
+          "GoogleCalendarConnections": 5,
+          "RolePermissions": 3,
+          "RoleCalendarVisibleUsers": 3,
+          "UserSettings": 3,
+          "GoogleCalendarSyncCalendars": 3,
+          "TaskJournalItems": 3,
+          "GoogleCalendarTaskLinks": 3,
+          "TaskJournalComments": 2,
+          "GoogleCalendarSyncLogs": 1
+        },
+        "countedTableSelects": 43
+      },
+      {
+        "scenario": "failure",
+        "phase": "retry",
+        "tables": {
+          "GoogleCalendarConnections": 3,
+          "Users": 5,
+          "RolePermissions": 3,
+          "RoleCalendarVisibleUsers": 3,
+          "UserSettings": 3,
+          "GoogleCalendarSyncCalendars": 3,
+          "SystemSettings": 1,
+          "TaskJournalItems": 3,
+          "GoogleCalendarTaskLinks": 2,
+          "TaskJournalComments": 2
+        },
+        "countedTableSelects": 28
+      },
+      {
+        "scenario": "failure",
+        "phase": "unchanged",
+        "tables": {
+          "GoogleCalendarConnections": 3,
+          "Users": 5,
+          "RolePermissions": 3,
+          "RoleCalendarVisibleUsers": 3,
+          "UserSettings": 3,
+          "GoogleCalendarSyncCalendars": 3,
+          "SystemSettings": 1,
+          "TaskJournalItems": 3,
+          "GoogleCalendarTaskLinks": 2,
+          "TaskJournalComments": 2
+        },
+        "countedTableSelects": 28
+      },
+      {
+        "scenario": "cancel",
+        "phase": "first",
+        "tables": {
+          "Users": 6,
+          "SystemSettings": 6,
+          "GoogleCalendarConnections": 3,
+          "RolePermissions": 3,
+          "RoleCalendarVisibleUsers": 3,
+          "UserSettings": 3,
+          "GoogleCalendarSyncCalendars": 3,
+          "TaskJournalItems": 3,
+          "GoogleCalendarTaskLinks": 3,
+          "TaskJournalComments": 2
+        },
+        "countedTableSelects": 35
+      },
+      {
+        "scenario": "cancel",
+        "phase": "retry",
+        "tables": {
+          "GoogleCalendarConnections": 3,
+          "Users": 5,
+          "RolePermissions": 3,
+          "RoleCalendarVisibleUsers": 3,
+          "UserSettings": 3,
+          "GoogleCalendarSyncCalendars": 3,
+          "SystemSettings": 1,
+          "TaskJournalItems": 3,
+          "GoogleCalendarTaskLinks": 2,
+          "TaskJournalComments": 2
+        },
+        "countedTableSelects": 28
+      },
+      {
+        "scenario": "cancel",
+        "phase": "unchanged",
+        "tables": {
+          "GoogleCalendarConnections": 3,
+          "Users": 5,
+          "RolePermissions": 3,
+          "RoleCalendarVisibleUsers": 3,
+          "UserSettings": 3,
+          "GoogleCalendarSyncCalendars": 3,
+          "SystemSettings": 1,
+          "TaskJournalItems": 3,
+          "GoogleCalendarTaskLinks": 2,
+          "TaskJournalComments": 2
+        },
+        "countedTableSelects": 28
+      }
+    ]
+  },
+  "postgresTest": {
+    "name": "PayPlanner.Api.Tests.DataVisibilityServiceTests.ResolveSectionAccessAsync_TranslatesOnFreshPostgreSqlDatabase",
+    "outcome": "Passed",
+    "duration": "00:00:42.3733760",
+    "declaredEnvironment": "Fresh disposable database on the owned local PostgreSQL cluster, data on D; no production data."
+  },
+  "environment": {
+    "emailEnabled": false,
+    "backgroundServicesEnabled": false,
+    "calendarData": "synthetic SQLite",
+    "calendarProviders": "fake HTTP handlers",
+    "temporaryFilesOnD": true
+  },
+  "releaseVersion": "1.14.82",
+  "scope": "Google per-assignee export SQL batching and artifacts-path migrations copy target; no new visibility policy.",
+  "limitations": [
+    "These tests do not constitute the full backend release gate.",
+    "The measured bounds cover two visible owners and task pages; they do not prove the entire connection/calendar graph or import response is memory-bounded.",
+    "Visibility is fresh at the existing operation stages; immediate mid-operation revocation is not claimed.",
+    "The actual production annulled-task example and live acceptance remain unresolved."
+  ],
+  "frontendChanged": false,
+  "fullBackendGatePassed": false,
+  "publicationChecksPending": false,
+  "committed": false,
+  "pushed": false,
+  "deployed": false,
+  "yougileChanged": false,
+  "publicationChecks": {
+    "completed": true,
+    "proof": "migrations-output-path-verification.json",
+    "localPublicationOnly": true,
+    "deployed": false
+  }
+}

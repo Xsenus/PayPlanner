@@ -25,7 +25,7 @@
     "releaseBuild": true
   },
   "fullBackend": {
-    "status": "Three qualified shards5309/7078; shard3 finished1768pass1fail; full backend gate not passed",
+    "status": "Original shards0/1/2 qualified5309/7078; original shard3 failed1; repeated shard3 interrupted after disk-full errors without final TRX; full backend gate not passed",
     "expectedCases": 7078,
     "manifestSha256": "95ba710a5ae3f4969a6a99bb9719076e1c970d5160f3d8bc519f8b85ef1fef9b",
     "interruptedInitialRun": "PostgreSQL shared-lock exhaustion and cleanup timeout; no successful full result claimed.",
@@ -69,7 +69,7 @@
     ],
     "qualifiedCasesSoFar": 5309,
     "runningShard": null,
-    "checkedAtUtc": "2026-10-13T01:01:32.682251+00:00",
+    "checkedAtUtc": "2026-10-13T02:49:56.588153+00:00",
     "failedShard": {
       "shard": 3,
       "qualified": false,
@@ -127,15 +127,54 @@
     },
     "recheck": {
       "shard": 3,
-      "state": "Running on the same pinned assembly; original failed results retained",
-      "resultRoot": "D:/PayPlannerReview-20261012/bank-allocation-release-icu-recheck-full",
+      "state": "Interrupted without native exit metadata, final TRX or qualification; runner and testhost absent after PostgreSQL disk-full errors",
       "qualified": false,
-      "previousSuccessfulShardsReused": [
+      "resultRoot": "D:\\PayPlannerReview-20261012\\bank-allocation-release-icu-recheck-full",
+      "logSha256": "6f83ab7de678425501fae64d6f3e911f84fb06bacfc40380f2a3662fc2635832",
+      "logBytes": 951376,
+      "missingTerminalFiles": [
+        "shard-3/run.json",
+        "shard-3/results.trx",
+        "shard-3/qualification.json",
+        "aggregate-qualification.json"
+      ],
+      "processExitCode": null,
+      "observedPassedLogLines": 1024,
+      "observedXunitFailedLogLines": 167,
+      "observationCountsAreNotQualifiedResults": true,
+      "firstDiskError": "[xUnit.net 00:29:03.93]       ---- Npgsql.PostgresException : 53100: не удалось увеличить файл \"base/1914646/1916149\": No space left on device",
+      "firstFailedTest": "PayPlanner.Api.Tests.OutboxLeaseConcurrencyTests.ParallelWorkersSendEachMaxAndDocumentOutboxItemOnlyOnce",
+      "diskErrorCode": "53100",
+      "diskFreeBytesObservedAtFailure": 108326912,
+      "diskFreeObservationNote": "C: during active failures; observed free space recovered later without this agent deleting files",
+      "earlierQualifiedShardsPreserved": [
         0,
         1,
         2
       ],
-      "testTimeoutsUnchanged": true
+      "earlierQualifiedShardsCopiedIntoRecheckRoot": false,
+      "testTimeoutsUnchanged": true,
+      "newTestRunStarted": false,
+      "checkedAtUtc": "2026-10-13T02:49:56.588153+00:00",
+      "hostRebootConfirmed": true,
+      "hostBootTime": "2026-10-13T09:35:20.500000+07:00"
+    },
+    "diskInvestigation": {
+      "checkedAtUtc": "2026-10-13T02:53:24.231385+00:00",
+      "hostBootTime": "2026-10-13T09:35:20.500000+07:00",
+      "interruptedRunStartedBeforeHostBoot": true,
+      "postgresDiskLogSha256": "f9987c216efc97b56e30a362f64d8477c2278416e94fdf7be7c7a354def96df9",
+      "postgresDiskErrorLines": 43,
+      "postgresFirstDiskErrorAt": "2026-10-13T09:06:15.330+07:00",
+      "postgresLastDiskErrorAt": "2026-10-13T09:09:00.152+07:00",
+      "currentOwnedScratchBytes": 478451990,
+      "currentTaskNamedTempBytes": 657692032,
+      "currentTaskNamedTempDirectories": 324,
+      "currentSyntheticIcuPostgresBytes": 102034595,
+      "currentStandardBuildBytes": 385131241,
+      "currentMeasurementsDoNotProvePeakUse": true,
+      "finding": "Current owned database, scratch, temp and standard build output sizes do not account for the multi-gigabyte free-space swing. Host reboot explains lost process handles. The primary cause of system disk consumption is not established by these task-owned measurements.",
+      "recoveryPlan": "Before another run, use process-local TEMP and TMP beneath an explicitly owned D: review scratch root, pinned existing DLLs and installed CLI, sequential execution and monitored RAM/commit/free-space headroom; retain the existing isolated PostgreSQL locale/durability. No retry, deletion, relocation or OS setting change performed in this investigation."
     }
   },
   "availability": {

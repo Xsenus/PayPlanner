@@ -2343,6 +2343,204 @@ public class GoogleCalendarSyncServiceTests
 
 
     [Theory]
+    [InlineData("normal")]
+    [InlineData("failure")]
+    [InlineData("cancel")]
+    public async Task SyncNowAsync_BoundsAssigneeRoutingQueriesAcross502TasksAndPreservesRetry(string scenario)
+    {
+        var probe = new CalendarBatchQueryProbe("Google");
+        await using var db = await CreateContextAsync(probe);
+        var actor = await CreateUserAsync(db, "assignee-batch-actor@example.local", "assignee-batch-manager", "Batch Manager");
+        var selected = await CreateUserAsync(db, "assignee-batch-selected@example.local", "user", "Batch Selected");
+        var hidden = await CreateUserAsync(db, "assignee-batch-hidden@example.local", "user", "Batch Hidden");
+        var owners = new[] { actor, selected };
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = actor.RoleId,
+            Section = RolePermissionCatalog.Calendar,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Specific,
+        });
+        db.RoleCalendarVisibleUsers.Add(new RoleCalendarVisibleUser { RoleId = actor.RoleId, UserId = selected.Id });
+        await db.SaveChangesAsync();
+        await EnableGoogleSettingsAsync(db);
+        await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 10, completedTaskCalendarAction: "color");
+        await SetUserTimeZoneAsync(db, actor.Id, "Europe/Samara");
+        await SetUserTimeZoneAsync(db, selected.Id, "America/New_York");
+        var connection = await CreateConnectionAsync(db, actor.Id, calendarMode: "adminByAssignee");
+        var calendars = new Dictionary<int, GoogleCalendarSyncCalendar>();
+        foreach (var owner in owners)
+        {
+            calendars.Add(owner.Id, await CreateCalendarAsync(db, connection.Id, $"assignee-calendar-{owner.Id}", $"PayPlanner - {owner.FullName}", owner.Id));
+        }
+        var dueAt = DateTime.UtcNow.Date.AddDays(7).AddHours(23).AddMinutes(30);
+        var tasks = Enumerable.Range(0, 502).Select(index => new TaskJournalItem
+        {
+            ObjectName = "Synthetic assignee batch",
+            Title = $"Assignee batch task {index + 1}",
+            AssigneeUserId = owners[index % 2].Id,
+            AssigneeName = owners[index % 2].FullName,
+            DueAt = dueAt,
+            PlannedDurationMinutes = 60,
+            Priority = "normal",
+            Status = index % 2 == 0 ? "done" : "cancelled",
+        }).ToArray();
+        db.TaskJournalItems.AddRange(tasks);
+        await db.SaveChangesAsync();
+        for (var index = 0; index < tasks.Length; index++)
+        {
+            var calendar = calendars[tasks[index].AssigneeUserId!.Value];
+            db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
+            {
+                ConnectionId = connection.Id,
+                CalendarSyncCalendarId = calendar.Id,
+                TaskJournalItemId = tasks[index].Id,
+                GoogleCalendarId = calendar.GoogleCalendarId,
+                GoogleEventId = $"bulk-event-{index + 1}",
+                SyncStatus = "active",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+        }
+        await db.SaveChangesAsync();
+        var hiddenTask = await CreateTaskAsync(db, hidden.Id, "Hidden assignee with visible participant", hidden.FullName, dueAt);
+        hiddenTask.Participants.Add(new TaskJournalParticipant { UserId = selected.Id, Role = "observer", DisplayName = selected.FullName });
+        var outsideTask = await CreateTaskAsync(db, selected.Id, "Outside window", selected.FullName, DateTime.UtcNow.AddDays(366));
+        await db.SaveChangesAsync();
+        var firstPageIds = tasks.Take(500).Select(task => task.Id).ToArray();
+        using var cancellation = new CancellationTokenSource();
+        var handler = new AssigneeBatchGoogleHandler(new RecordingGoogleHandler(), scenario, async () =>
+        {
+            Assert.Equal(500, await db.GoogleCalendarTaskLinks.AsNoTracking().CountAsync(link =>
+                firstPageIds.Contains(link.TaskJournalItemId) && link.LastCrmHash != null && link.LastError == null));
+            Assert.Equal(2, db.ChangeTracker.Entries<GoogleCalendarTaskLink>().Count());
+            if (scenario == "cancel")
+            {
+                cancellation.Cancel();
+                cancellation.Token.ThrowIfCancellationRequested();
+            }
+        });
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+        var measurements = new List<(string Phase, Dictionary<string, int> Tables)>();
+        db.ChangeTracker.Clear();
+        probe.Reset();
+        if (scenario == "cancel")
+        {
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.SyncNowAsync(
+                actor.Id, CreateHttpRequest(actor.Id, "assignee-batch-manager"), cancellation.Token));
+        }
+        else
+        {
+            var result = await service.SyncNowAsync(actor.Id, CreateHttpRequest(actor.Id, "assignee-batch-manager"), cancellation.Token);
+            Assert.Equal(scenario == "failure" ? 501 : 502, result.ProcessedTasks);
+            Assert.Equal(scenario == "failure" ? 1 : 0, result.ErrorCount);
+        }
+        measurements.Add(("first", new Dictionary<string, int>(probe.TableSelects)));
+        Assert.Equal(new[] { 500, 500 }, probe.TaskPageLimits);
+        Assert.Equal(scenario == "cancel" ? 500 : scenario == "failure" ? 501 : 502, handler.SuccessfulBodies.Count);
+        Assert.Equal(scenario == "cancel" ? 500 : scenario == "failure" ? 501 : 502,
+            await db.GoogleCalendarTaskLinks.AsNoTracking().CountAsync(link => link.LastCrmHash != null));
+
+        foreach (var phase in new[] { "retry", "unchanged" })
+        {
+            await db.GoogleCalendarConnections.ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.LastFullSyncAt, (DateTime?)null)
+                .SetProperty(item => item.LastIncrementalSyncAt, (DateTime?)null));
+            db.ChangeTracker.Clear();
+            probe.Reset();
+            var retry = await service.SyncDueConnectionsAsync(10, CancellationToken.None);
+            measurements.Add((phase, new Dictionary<string, int>(probe.TableSelects)));
+            Assert.Equal(502, retry.ProcessedTasks);
+            Assert.Equal(0, retry.ErrorCount);
+            Assert.Equal(new[] { 500, 500 }, probe.TaskPageLimits);
+            Assert.Equal(502, handler.SuccessfulBodies.Count);
+            Assert.All(handler.SuccessfulBodies.Values, bodies => Assert.Single(bodies));
+        }
+
+        Assert.Equal(0, handler.Deletes);
+        Assert.Equal(502, handler.Attempts.Count);
+        Assert.All(handler.Attempts, attempt => Assert.Equal(
+            scenario != "normal" && attempt.Key.EndsWith("/bulk-event-501", StringComparison.Ordinal) ? 2 : 1, attempt.Value));
+        Assert.Equal(502, await db.GoogleCalendarTaskLinks.CountAsync(link => link.SyncStatus == "active" && link.LastError == null && link.LastCrmHash != null));
+        Assert.False(await db.GoogleCalendarTaskLinks.AnyAsync(link => link.TaskJournalItemId == hiddenTask.Id || link.TaskJournalItemId == outsideTask.Id));
+        Assert.False(await db.GoogleCalendarSyncCalendars.AnyAsync(calendar => calendar.OwnerUserId == hidden.Id));
+        var logs = await db.GoogleCalendarSyncLogs.AsNoTracking()
+            .Where(log => log.ConnectionId == connection.Id && log.Operation == "update-event" && log.Status == "success").ToListAsync();
+        Assert.Equal(502, logs.Count);
+        var logsByTask = logs.ToDictionary(log => log.TaskJournalItemId!.Value);
+        for (var index = 0; index < tasks.Length; index++)
+        {
+            var task = tasks[index];
+            var owner = owners[index % 2];
+            var calendar = calendars[owner.Id];
+            var path = $"/calendar/v3/calendars/{calendar.GoogleCalendarId}/events/bulk-event-{index + 1}";
+            using var payload = JsonDocument.Parse(Assert.Single(handler.SuccessfulBodies[path]));
+            var zone = CalendarTimeZoneHelper.ResolveTimeZone(owner.Id == actor.Id ? "Europe/Samara" : "America/New_York");
+            Assert.Equal("8", payload.RootElement.GetProperty("colorId").GetString());
+            Assert.Equal(CalendarTimeZoneHelper.ResolveIanaTimeZoneId(zone), payload.RootElement.GetProperty("start").GetProperty("timeZone").GetString());
+            Assert.Equal(CalendarTimeZoneHelper.FormatOffsetDateTime(task.DueAt, zone), payload.RootElement.GetProperty("start").GetProperty("dateTime").GetString());
+            Assert.Equal(CalendarTimeZoneHelper.FormatOffsetDateTime(task.DueAt.AddHours(1), zone), payload.RootElement.GetProperty("end").GetProperty("dateTime").GetString());
+            using var details = JsonDocument.Parse(logsByTask[task.Id].DetailsJson!);
+            Assert.Equal(actor.FullName, details.RootElement.GetProperty("userName").GetString());
+            Assert.Equal(actor.Email, details.RootElement.GetProperty("userEmail").GetString());
+            Assert.Equal(owner.FullName, details.RootElement.GetProperty("calendarOwnerName").GetString());
+            Assert.Equal(owner.Email, details.RootElement.GetProperty("calendarOwnerEmail").GetString());
+            Assert.Equal(calendar.Name, details.RootElement.GetProperty("calendarName").GetString());
+            Assert.Equal(task.Title, details.RootElement.GetProperty("taskTitle").GetString());
+        }
+
+        // Keep bounds after all correctness assertions so a baseline failure proves the N+1.
+        foreach (var measurement in measurements)
+        {
+            Console.WriteLine($"GoogleAssigneeQueries scenario={scenario}; phase={measurement.Phase}; tables={JsonSerializer.Serialize(measurement.Tables)}");
+        }
+        foreach (var measurement in measurements)
+        {
+            Assert.InRange(measurement.Tables.GetValueOrDefault("Users"), 0, 15);
+            Assert.InRange(measurement.Tables.GetValueOrDefault("RolePermissions"), 0, 15);
+            Assert.InRange(measurement.Tables.GetValueOrDefault("GoogleCalendarSyncCalendars"), 0, 6);
+        }
+    }
+
+    private sealed class AssigneeBatchGoogleHandler(HttpMessageHandler inner, string scenario, Func<Task> onSecondPage) : DelegatingHandler(inner)
+    {
+        public Dictionary<string, List<string>> SuccessfulBodies { get; } = [];
+        public Dictionary<string, int> Attempts { get; } = [];
+        public int Deletes { get; private set; }
+        private bool _observedSecondPage;
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.Method == HttpMethod.Delete) Deletes++;
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Put && path.Contains("/events/bulk-event-", StringComparison.Ordinal))
+            {
+                Attempts[path] = Attempts.GetValueOrDefault(path) + 1;
+                if (!_observedSecondPage && path.EndsWith("/bulk-event-501", StringComparison.Ordinal))
+                {
+                    _observedSecondPage = true;
+                    await onSecondPage();
+                    if (scenario == "failure")
+                    {
+                        return new HttpResponseMessage(HttpStatusCode.BadRequest) { Content = new StringContent("Synthetic permanent write failure") };
+                    }
+                }
+                if (!SuccessfulBodies.TryGetValue(path, out var bodies))
+                {
+                    bodies = [];
+                    SuccessfulBodies.Add(path, bodies);
+                }
+                bodies.Add(await request.Content!.ReadAsStringAsync(cancellationToken));
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(JsonSerializer.Serialize(new { id = path.Split('/').Last(), etag = "synthetic-assignee-etag" }), Encoding.UTF8, "application/json"),
+                };
+            }
+            return await base.SendAsync(request, cancellationToken);
+        }
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task SyncNowAsync_BatchesTimeZonesFor502TasksAndPreservesCalendarOwner(bool assigneeMode)

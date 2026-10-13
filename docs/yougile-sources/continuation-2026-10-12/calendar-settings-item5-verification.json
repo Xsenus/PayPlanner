@@ -1,0 +1,210 @@
+{
+  "verifiedAtUtc": "2026-10-13T02:51:56.042076+00:00",
+  "scope": "PAY-37 terminal-task visibility roadmap item 5: setting wording, administrator navigation, one release note and local reply draft",
+  "codeRevision": "ecc5ab0a55b2862e20d0720d51c89bf51edfed81",
+  "verificationMethod": "Read-only source, result and hash audit; no new application test or browser run",
+  "item5LocalCompletionVerified": true,
+  "roadmapStatusChangedByThisArtifact": false,
+  "sourceHashNormalization": "UTF-8 text with LF newlines",
+  "sourceFiles": {
+    "src/App.tsx": "ccb51b06442973809d6423070450b780d2237bc47c0f20744310386dcdf804e3",
+    "src/components/Settings/AppSettings.tsx": "39fb731b39701e07bda1ff2d445ff9d61c60ab2f7810ad06b9c5f40f09173a79",
+    "src/components/Settings/AppSettings.test.tsx": "3a020d5b5a99c7f7d6ab2202f852bd4e7b9df2548f3bb28a28b4136802aa97cf",
+    "src/components/Settings/CalendarSyncProviderSettings.tsx": "72507a667cf7f1e71591827eec0bc671194bdb6792d2cd6438f8c46bc1080ace",
+    "src/components/Settings/CalendarSyncProviderSettings.test.tsx": "6a129ade241bd995b023a058c78596c780ba226063035f3c176ae9a3b6cfe7cc",
+    "src/components/Tasks/TaskJournal.tsx": "1f05c2b806122975b93131a71f1918d15216ab3623b29ab656b7da5878e49155",
+    "src/components/Tasks/TaskJournal.test.tsx": "ab20186ab6f9f887dd609e67fa53fd1452e8b4359b71610a989592f687e3cca4",
+    "src/utils/calendarSettingsNavigation.ts": "ddcd443b65dfa2943012c251a9a0131e7f5ece5dce99766eb3cca919f627d1f2"
+  },
+  "criteria": {
+    "settingWording": {
+      "file": "src/components/Settings/CalendarSyncProviderSettings.tsx",
+      "line": 364,
+      "covers": [
+        "done",
+        "cancelled"
+      ],
+      "explainsGlobalScopeAndSave": true,
+      "invoiceCancellationDoesNotHideActiveTask": true,
+      "currentRawFileSha256": "ea328bee05c2eaba6bfe4975ce528a334b8082922dc682caeae1cffdbe4bf210",
+      "rawFileMatchesClosedTaskBrowserProof": true
+    },
+    "administratorNavigation": {
+      "file": "src/components/Tasks/TaskJournal.tsx",
+      "line": 5936,
+      "adminOnly": true,
+      "views": [
+        "calendar",
+        "timeline"
+      ],
+      "existingNavigationReused": true,
+      "currentTargetedTests": "src/components/Tasks/TaskJournal.test.tsx:7999"
+    },
+    "releaseNote": {
+      "file": "backend/AppReleases/releases.json",
+      "releaseId": "2026-10-13-calendar-closed-task-visibility",
+      "version": "1.14.73",
+      "canonicalEntrySha256": "7e7676e2fc394267100f25d1287c4144dd235043e41a1274a3c2eb8068e92015",
+      "canonicalization": "UTF-8 JSON, sorted keys, compact separators, non-ASCII characters preserved",
+      "entryUnchangedSinceFrontendGateRevision": true
+    },
+    "localReplyDraft": {
+      "file": "docs/yougile-drafts-continuation-2026-10-12.md",
+      "section": "PAY-37 — видимость закрытых задач",
+      "quoteSha256": "b144f70f0a96e43c765a5563604016a9f007779e2e5ffabaa25d0e3d42d83290",
+      "honestlyStatesNotDeployed": true,
+      "unknownAnnulledCaseExplicit": true,
+      "readyForPublication": false
+    }
+  },
+  "frontendGate": {
+    "revision": "d2e9508752a1bbca1c3ea28bd6e242284e5c00a4",
+    "allInspectedInputsUnchanged": true,
+    "inspectedGitPaths": [
+      "src",
+      "package.json",
+      "package-lock.json",
+      "tsconfig*",
+      "vite.config.*",
+      "vitest.config.*",
+      "eslint.config.*"
+    ],
+    "changedFiles": [],
+    "testFilesPassed": 245,
+    "testsPassed": 2596,
+    "testsFailed": 0,
+    "lintPassed": true,
+    "typeCheckPassed": true,
+    "encodingPassed": true,
+    "productionBuildPassed": true,
+    "logs": {
+      "calendar-cleanup-frontend-full.log": {
+        "sha256": "1d20fbd87f60e7a1cb41137852d0b25c9b25d1287d7d5338e3f9b28392d1dcb4",
+        "matchedRecordedHash": true
+      },
+      "calendar-cleanup-lint.log": {
+        "sha256": "fb96953ea7bd08e3c0c410c3fba0c7b5ea09ac4da8afa12ff30fe9d6da5429eb",
+        "matchedRecordedHash": true
+      },
+      "calendar-cleanup-types.log": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "matchedRecordedHash": true
+      },
+      "calendar-cleanup-encoding.log": {
+        "sha256": "4d122e04866b8c2a9cb0647e3bf2ad374d1eaeaa4167a5e56227d1e38f8b59fe",
+        "matchedRecordedHash": true
+      },
+      "calendar-cleanup-frontend-build.log": {
+        "sha256": "be56b5e8a36cf0617c2391bd570aa72b425f4ad1ef51b681d7e1a9989a98bd81",
+        "matchedRecordedHash": true
+      }
+    }
+  },
+  "reusedEvidence": {
+    "calendar-navigation-verification.json": {
+      "sha256": "4694ef90d5618ecac9fa160086475a3159a17f3bd7466e95d0dacd52bfdc2349"
+    },
+    "calendar-closed-task-verification.json": {
+      "sha256": "f6a9701983915d1d686fd1d6453654b55e9737ea2fd4e3b25dd70df65e33874f"
+    },
+    "calendar-cleanup-recovery-verification.json": {
+      "sha256": "595957cc7b3d2e4ec86c794bb7a522b4bb369b02636effe8fab6576d78d268dc"
+    }
+  },
+  "historicalNavigationChecks": {
+    "settingsTests": 22,
+    "journalLinkTests": 2,
+    "finalRefinementTests": 11,
+    "visual": {
+      "viewports": [
+        390,
+        1024,
+        1440
+      ],
+      "themes": [
+        "light",
+        "graphite"
+      ],
+      "overflow": false,
+      "keyboardEnter": true,
+      "focusedAfterLoad": true,
+      "directReload": true,
+      "browserBack": true,
+      "originalThemeRestored": true,
+      "menuReturn": true,
+      "reloadAfterMenuReturn": true
+    },
+    "permissions": {
+      "executor": {
+        "read": 200,
+        "write": 403
+      },
+      "observer": {
+        "read": 200,
+        "write": 403
+      },
+      "settingsUnchangedAfterDeniedWrites": true
+    },
+    "screenshotsVerified": 12,
+    "screenshots": [
+      {
+        "file": "calendar-nav-calendar-1024.png",
+        "sha256": "eba169a25a94c0fb5eeda076923c41085d47681fe477f767fc25915b5bd642c1"
+      },
+      {
+        "file": "calendar-nav-calendar-1440.png",
+        "sha256": "0137b8076da96f87a07a14b7c069cf8ba11f22a93bdedfda36b2fbcb7b8e7a96"
+      },
+      {
+        "file": "calendar-nav-calendar-390.png",
+        "sha256": "c2857bb894523e2de1591220d43cee9ab1cde42cd200e26a6db46bc2a8f2b9ff"
+      },
+      {
+        "file": "calendar-nav-calendar-dark-1024.png",
+        "sha256": "81a57e01b5993e846e55affcf4efd805a31742889ec9652b1d5b323f0e2eb868"
+      },
+      {
+        "file": "calendar-nav-calendar-dark-1440.png",
+        "sha256": "8aea92e5b87dc55ef594461df6e188cfb4af3f94e2db8b8a9613ae7f24f34591"
+      },
+      {
+        "file": "calendar-nav-calendar-dark-390.png",
+        "sha256": "2044047432b8a77cc0cca28ef2fbcc2b8da2c3b16b917178702e49dcef58601a"
+      },
+      {
+        "file": "calendar-nav-settings-1024.png",
+        "sha256": "b4bbbe13452ae47aad2d4933f26f378de8d42a0ba7d8712c34db49e6f2cc32c9"
+      },
+      {
+        "file": "calendar-nav-settings-1440.png",
+        "sha256": "18409fc2b181c14ebc760982d0d9135ea13ed7f733c22aa085cb20d6d849fc19"
+      },
+      {
+        "file": "calendar-nav-settings-390.png",
+        "sha256": "d81dc8ab497aeeb62d21c01a1571a777398c35193c62fb9b502712a54b3f025a"
+      },
+      {
+        "file": "calendar-nav-settings-dark-1024.png",
+        "sha256": "9da09e92278cf8417a24dc0c335eb28ce37702cb0021c5205aa593bf08eafe16"
+      },
+      {
+        "file": "calendar-nav-settings-dark-1440.png",
+        "sha256": "f93d161f08b4819cac90708555a6a1e04e2c483367dc07b25a54094b54e13cde"
+      },
+      {
+        "file": "calendar-nav-settings-dark-390.png",
+        "sha256": "83491ea875abfa6e5b4f9e5ea75bf6fb6ec04095c544a5b13059e1c990e4d58c"
+      }
+    ],
+    "currentSettingSourceMatchesLaterClosedTaskProof": true,
+    "oldNavigationProofIsNotClaimedAsCurrentFullSourceHashMatch": true
+  },
+  "limits": [
+    "Only roadmap item 5 is verified complete locally; this artifact does not close other calendar items or PAY-37.",
+    "The final full backend gate for the complete calendar release remains open.",
+    "No production deployment, live external-provider acceptance, owner confirmation, YouGile publication or card move was performed.",
+    "The concrete reported annulled task and its displayed status origin remain unidentified.",
+    "Historical screenshots and runtime permission results were hash-audited or read from existing evidence; no new browser or server checks were run.",
+    "No new database mechanism is introduced by this documentation artifact; prior navigation tests used an owned synthetic database with email and background services disabled."
+  ]
+}
