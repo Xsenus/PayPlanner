@@ -13,7 +13,8 @@ using PayPlanner.Api.Services.Documents;
 namespace PayPlanner.Api.Services.Storage;
 
 public sealed record ManagedCaseDocumentUploadRequest(int CaseId, int ActorId, string ActorName, Guid UploadKey,
-    IFormFile File, string FileName, string DocumentType, string Status, string? DocumentKey);
+    IFormFile File, string FileName, string DocumentType, string Status, string? DocumentKey,
+    bool AllowInitialSourceDocument = false);
 public sealed record ManagedCaseDocumentUploadResult(string Status, int? DocumentId = null, bool IsReplay = false);
 // Supplied by a server writer, never bound from the public multipart upload API.
 public sealed record ManagedCaseDocumentGeneration(string Kind, string RequestSha256, string FrozenDomainJson);
@@ -438,7 +439,8 @@ public sealed class ManagedCaseDocumentUploadService(PaymentContext db, IStorage
                 {
                     var documentKey = request.DocumentKey ?? Guid.NewGuid().ToString("N");
                     var latest = await LatestVersionAsync(request.CaseId, documentKey, ct);
-                    if (request.DocumentKey is not null && latest == 0 && generation is null) return new("invalid");
+                    if (request.DocumentKey is not null && latest == 0 && generation is null
+                        && !request.AllowInitialSourceDocument) return new("invalid");
                     if (latest == int.MaxValue) return new("conflict");
                     var now = DateTime.UtcNow;
                     // PostgreSQL timestamps persist microseconds. Keep the durable

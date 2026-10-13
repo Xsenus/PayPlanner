@@ -5528,6 +5528,31 @@ public partial class CasesV2Controller : ControllerBase
             return BadRequest(new { message = "Некорректный ключ документа." });
         }
 
+        // A source key from the case form can identify the first document,
+        // whereas the version endpoints must always target an existing one.
+        // Keep arbitrary/manual keys on the existing-version path.
+        var allowInitialSourceDocument = false;
+        if (!requireExistingDocument && normalizedDocumentKey is not null
+            && ResolveDocumentSourceTaskId(normalizedDocumentKey) is > 0 and var sourceTaskId
+            && !await _db.ClientCaseDocuments.AsNoTracking().AnyAsync(document =>
+                document.ClientCaseId == clientCase.Id && document.DocumentKey == normalizedDocumentKey, ct))
+        {
+            var sourcePrefix = $"task-{sourceTaskId}-";
+            if (!normalizedDocumentKey.StartsWith(sourcePrefix, StringComparison.Ordinal)
+                || normalizedDocumentKey.Length <= sourcePrefix.Length)
+            {
+                return BadRequest(new { message = "Некорректная связь документа с задачей." });
+            }
+            var taskAccess = await _db.ResolveSectionAccessAsync(User, RolePermissionCatalog.Tasks, ct);
+            if (taskAccess is null || taskAccess.Permission?.CanView != true || !await _db.TaskJournalItems
+                .ApplyTaskVisibility(taskAccess.Visibility, _db)
+                .AnyAsync(task => task.Id == sourceTaskId && task.ClientCaseId == clientCase.Id, ct))
+            {
+                return BadRequest(new { message = "Выберите доступную задачу этого дела для источника документа." });
+            }
+            allowInitialSourceDocument = true;
+        }
+
         if (_managedCaseUploads?.Enabled == true)
         {
             if (requireExistingDocument && normalizedDocumentKey is null)
@@ -5539,10 +5564,10 @@ public partial class CasesV2Controller : ControllerBase
             if (actorId is null) return Unauthorized();
             var managed = await _managedCaseUploads.UploadAsync(new(clientCase.Id, actorId.Value, User.GetDisplayName(), uploadKey,
                 uploadFile, SanitizeFileName(uploadFile.FileName), NormalizeRequired(documentType, "Документ"),
-                NormalizeRequired(status, "Подготовлен"), normalizedDocumentKey), async (document, token) =>
+                NormalizeRequired(status, "Подготовлен"), normalizedDocumentKey, allowInitialSourceDocument), async (document, token) =>
             {
                 await new CaseDocumentPublicationRecords(_db, CreateCaseDocumentNotifications())
-                    .PersistUploadAsync(clientCase, document, normalizedDocumentKey is null,
+                    .PersistUploadAsync(clientCase, document, document.Version == 1,
                         actorId.Value, User.GetDisplayName(), ResolveCaseStatusClock().NowLocal, token);
             }, (path, publish, token) => SaveCaseDocumentAtomicallyAsync(path, () => Task.CompletedTask, publish, token,
                 preserveFileOnFailure: true), ct);
@@ -5593,10 +5618,12 @@ public partial class CasesV2Controller : ControllerBase
                 .Where(item => item.ClientCaseId == clientCase.Id && item.DocumentKey == normalizedDocumentKey)
                 .MaxAsync(item => (int?)item.Version, ct) ?? 0;
 
-        if (!isNewDocument && latestVersion == 0)
+        if (!isNewDocument && latestVersion == 0 && !allowInitialSourceDocument)
         {
             return BadRequest(new { message = "Документ для новой версии не найден." });
         }
+
+        isNewDocument = isNewDocument || latestVersion == 0;
 
         var version = latestVersion + 1;
         var safeFileName = SanitizeFileName(uploadFile.FileName);

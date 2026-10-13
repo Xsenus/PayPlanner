@@ -33,6 +33,92 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(false, true)]
     [InlineData(true, false)]
     [InlineData(true, true)]
+    public async Task InitialTaskSourceUploadKeepsSourceAcrossVersionsAndReplay(bool postgres, bool managed)
+    {
+        await using var f = await Fixture.CreateAsync(postgres);
+        if (!managed) f.Options.ProductWriteEnabledClasses.Clear();
+        f.User.Role!.Permissions.Add(new RolePermission
+        {
+            Section = RolePermissionCatalog.Tasks,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Own
+        });
+        var task = new TaskJournalItem
+        {
+            ClientCaseId = f.Case.Id,
+            Title = "Источник документа",
+            AuthorUserId = f.User.Id,
+            AssigneeUserId = f.User.Id,
+            DueAt = DateTime.UtcNow.AddDays(1)
+        };
+        f.Db.TaskJournalItems.Add(task);
+        await f.Db.SaveChangesAsync();
+        var sourceKey = $"task-{task.Id}-evidence";
+        var attempt = Guid.NewGuid();
+        var first = f.Created(await f.Upload(attempt, documentKey: sourceKey));
+        Assert.Equal(sourceKey, first.DocumentKey);
+        Assert.Equal(task.Id, first.SourceTaskId);
+        Assert.Equal(1, first.Version);
+        if (managed)
+            Assert.Equal(first.Id, f.Created(await f.Upload(attempt, documentKey: sourceKey)).Id);
+        Assert.Single(await f.Db.ClientCaseDocuments.AsNoTracking().ToArrayAsync());
+        Assert.Equal("Created", (await f.Db.ObjectAuditEvents.SingleAsync(a => a.ObjectType == "client-case-document")).Action);
+        var second = f.Created(await f.Upload(Guid.NewGuid(), body: "revised document", versionOf: first.Id));
+        Assert.Equal(sourceKey, second.DocumentKey);
+        Assert.Equal(task.Id, second.SourceTaskId);
+        Assert.Equal(2, second.Version);
+        Assert.Equal(2, await f.Db.ClientCaseDocuments.CountAsync());
+        Assert.IsType<NotFoundResult>((await f.Upload(Guid.NewGuid(), versionOf: int.MaxValue)).Result);
+        Assert.Equal(2, await f.Db.ClientCaseDocuments.CountAsync());
+    }
+
+    public static IEnumerable<object[]> UnavailableInitialTaskSources()
+    {
+        foreach (var postgres in new[] { false, true })
+            foreach (var managed in new[] { false, true })
+                foreach (var reason in new[] { "permission", "visibility", "other-case", "missing", "empty-suffix" })
+                    yield return [postgres, managed, reason];
+    }
+
+    [Theory]
+    [MemberData(nameof(UnavailableInitialTaskSources))]
+    public async Task InitialTaskSourceUploadRejectsUnavailableSourceBeforeStorage(bool postgres, bool managed, string reason)
+    {
+        await using var f = await Fixture.CreateAsync(postgres);
+        if (!managed) f.Options.ProductWriteEnabledClasses.Clear();
+        if (reason != "permission")
+            f.User.Role!.Permissions.Add(new RolePermission
+            {
+                Section = RolePermissionCatalog.Tasks,
+                CanView = true,
+                ViewScope = DataVisibilityScope.Own
+            });
+        var task = new TaskJournalItem
+        {
+            ClientCaseId = reason == "other-case" ? null : f.Case.Id,
+            Title = "Синтетический источник",
+            DueAt = DateTime.UtcNow.AddDays(1),
+            AuthorUserId = reason == "visibility" ? null : f.User.Id,
+            AssigneeUserId = reason == "visibility" ? null : f.User.Id
+        };
+        f.Db.TaskJournalItems.Add(task);
+        await f.Db.SaveChangesAsync();
+        var sourceId = reason == "missing" ? int.MaxValue : task.Id;
+        var sourceKey = $"task-{sourceId}-" + (reason == "empty-suffix" ? "" : "evidence");
+        Assert.IsType<BadRequestObjectResult>((await f.Upload(Guid.NewGuid(), documentKey: sourceKey)).Result);
+        Assert.Equal(0, f.Local.PutCount);
+        Assert.Equal(0, f.Mirror.PutCount);
+        Assert.Empty(await f.Db.StorageObjects.AsNoTracking().ToArrayAsync());
+        Assert.Empty(await f.Db.ClientCaseDocuments.AsNoTracking().ToArrayAsync());
+        Assert.Empty(await f.Db.StorageCapacityReservations.AsNoTracking().ToArrayAsync());
+        Assert.Empty(Directory.EnumerateFiles(f.Root, "*.txt", SearchOption.AllDirectories));
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
     public async Task ManagedWorkOrderHttpFeedsAutomaticQueueWithFrozenSource(bool postgres, bool automaticAtWrite)
     {
         await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);

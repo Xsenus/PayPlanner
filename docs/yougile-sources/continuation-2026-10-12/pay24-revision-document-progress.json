@@ -1,0 +1,282 @@
+{
+  "baseRevision": "c4cc6ad97901e847736cc70d05c5131c2c4fb709",
+  "status": "in-progress",
+  "nativeApprovalResults": {
+    "legacy-submit": {
+      "mode": "legacy",
+      "taskId": 13,
+      "status": "onApproval",
+      "result": "PAY24-C3 результат старого окна, первая отправка",
+      "caseUrl": "http://127.0.0.1:5301/cases/3",
+      "restrictedEdit": true
+    },
+    "legacy-final": {
+      "mode": "legacy",
+      "taskId": 13,
+      "status": "done",
+      "result": "PAY24-C3 результат старого окна, первая отправка",
+      "dueAt": "2026-10-29T03:30:00.0000000Z",
+      "participants": [
+        {
+          "id": 16,
+          "userId": 4,
+          "role": "assignee",
+          "displayName": "Синтетический executor",
+          "email": "executor@claude.local",
+          "sortOrder": 0,
+          "approvalStatus": "pending",
+          "resolution": ""
+        },
+        {
+          "id": 17,
+          "userId": 1,
+          "role": "approver",
+          "displayName": "Синтетический администратор",
+          "email": "admin@claude.local",
+          "sortOrder": 1,
+          "approvalStatus": "approved",
+          "resolution": "PAY24-C3 результат старого окна, первая отправка",
+          "respondedAt": "2026-10-13T13:17:42.4587614Z"
+        }
+      ],
+      "cardRetainedUntilDecision": true,
+      "active": 9,
+      "completed": 2,
+      "url": "http://127.0.0.1:5301/cases/3"
+    },
+    "modern-submit": {
+      "mode": "modern",
+      "taskId": 14,
+      "status": "onApproval",
+      "result": "PAY24-C3 результат нового окна, первая отправка",
+      "caseUrl": "http://127.0.0.1:5301/cases/3",
+      "restrictedEdit": true
+    },
+    "modern-resubmit": {
+      "mode": "modern",
+      "taskId": 14,
+      "status": "onApproval",
+      "result": "PAY24-C3 результат нового окна, первая отправка",
+      "resultPreserved": true,
+      "participants": [
+        {
+          "id": 18,
+          "userId": 4,
+          "role": "assignee",
+          "displayName": "Синтетический executor",
+          "email": "executor@claude.local",
+          "sortOrder": 0,
+          "approvalStatus": "pending",
+          "resolution": ""
+        },
+        {
+          "id": 19,
+          "userId": 1,
+          "role": "approver",
+          "displayName": "Синтетический администратор",
+          "email": "admin@claude.local",
+          "sortOrder": 1,
+          "approvalStatus": "pending",
+          "resolution": ""
+        }
+      ],
+      "url": "http://127.0.0.1:5301/cases/3"
+    },
+    "modern-final": {
+      "mode": "modern",
+      "taskId": 14,
+      "status": "done",
+      "result": "PAY24-C3 результат нового окна, первая отправка",
+      "dueAt": "2026-10-30T03:30:00.0000000Z",
+      "participants": [
+        {
+          "id": 18,
+          "userId": 4,
+          "role": "assignee",
+          "displayName": "Синтетический executor",
+          "email": "executor@claude.local",
+          "sortOrder": 0,
+          "approvalStatus": "pending",
+          "resolution": ""
+        },
+        {
+          "id": 19,
+          "userId": 1,
+          "role": "approver",
+          "displayName": "Синтетический администратор",
+          "email": "admin@claude.local",
+          "sortOrder": 1,
+          "approvalStatus": "approved",
+          "resolution": "PAY24-C3 результат нового окна, первая отправка",
+          "respondedAt": "2026-10-13T13:21:03.1647490Z"
+        }
+      ],
+      "cardRetainedUntilDecision": true,
+      "active": 8,
+      "completed": 3,
+      "url": "http://127.0.0.1:5301/cases/3"
+    }
+  },
+  "nativeApprovalQualification": "Actions used real synthetic API/DB and both admin-selected forms. Legacy revision recorder expected revisionRequested instead of actual revision; modern revision recorder expected wrong row label. Separate snapshots confirm revision rows; subsequent real resubmission and final approval succeeded. Existing nonempty result resubmits directly, without a result prompt. These are several recorded steps, not one uninterrupted passing scenario.",
+  "documentBoundary": {
+    "draftAcrossFilterAndPage": true,
+    "selectedTaskId": 13,
+    "fileRetainedInState": true,
+    "uploadHttp": 400,
+    "error": "Документ для новой версии не найден.",
+    "fixStatus": "Verified in 24 related tests and real native upload/download with both common forms and restricted role",
+    "scope": "First task-linked document only; arbitrary keys and missing version targets remain rejected"
+  },
+  "targetedNewCases": 24,
+  "localSafety": {
+    "originalSettingsRestoredExactly": true,
+    "emailDbEnabled": false,
+    "smtpNonempty": 0,
+    "originalTasks1To9": 9,
+    "ownedTaskIds": [
+      13,
+      14
+    ],
+    "ownedDocumentId": 4,
+    "readOnlyUploadHttp": 403,
+    "forbiddenDocumentRows": 0,
+    "nativeDownloadSha256": "06995a74cf0810b809c40c2f050ca379b0d59f5d16e343da4abe4431a6dac195",
+    "sourceFileSha256": "06995a74cf0810b809c40c2f050ca379b0d59f5d16e343da4abe4431a6dac195",
+    "previewStopped": true
+  },
+  "normalBackend": {
+    "local": {
+      "Started": "2026-10-13T13:31:59.7468976Z",
+      "Finished": "2026-10-13T13:37:21.8598374Z",
+      "PID": 16884,
+      "ExitCode": -1,
+      "GuardReason": "Resource guard: C below 600 MiB or virtual commit below 500 MiB",
+      "HeapGiB": 6.5,
+      "NormalMigrationsBuild": true,
+      "AnalyzersEnabled": true,
+      "ArtifactsPath": "D:/PayPlannerReview-20261012/pay24-normal-final-artifacts"
+    },
+    "remote": "All isolated attempts terminal; logs preserved, temporary 8 GiB review swap removed. Production main PID713064 unchanged and health HTTP200. Successful fresh normal build completed locally.",
+    "sourcePin": {
+      "baseRevision": "c4cc6ad97901e847736cc70d05c5131c2c4fb709",
+      "archiveSha256": "85ef4551059c5cf57307414ee45b43ccd4540e428966ba6423b74226df392e4a",
+      "overlays": {
+        "backend/Controllers/V2/CasesV2Controller.cs": "080b10970484eb4461a34679e1f2bbee56155e2dd5247d46c68a5fd9892617b4",
+        "backend/Services/Storage/ManagedCaseDocumentUploadService.cs": "1654eb725c4ec53a16abd539407ed20d13b837e54d71afbc2fbcfba24145c566",
+        "backend/PayPlanner.Api.Tests/ManagedCaseDocumentUploadServiceTests.cs": "8c0c3b5660ad8b2d9c6e61c7028f31cdc3deb60e47075ef2cd88ce83163d8503",
+        "backend/AppReleases/releases.json": "6a00ee831e2ac4e38aba84ff5de8bb67009e23ee0a2ce75af4cc98dddd51c1e0",
+        "docs/pay-24-case-task-list-roadmap-2026-10-13.md": "6eb2bf7fe9971f5db13559b9d1cd0a1fcb938c57430c529823fd891a1d9fee05"
+      }
+    },
+    "localRecovery": {
+      "Started": "2026-10-13T14:52:32.8303093Z",
+      "Finished": "2026-10-13T15:01:40.2933009Z",
+      "PID": 26924,
+      "ExitCode": 0,
+      "GuardReason": null,
+      "HeapGiB": 9,
+      "NormalMigrationsBuild": true,
+      "AnalyzersEnabled": true,
+      "ArtifactsPath": "D:/PayPlannerReview-20261012/pay24-normal-final-artifacts",
+      "InitialFreeCGiB": 11.88
+    },
+    "freshNormalBuildPassed": true,
+    "fullTestsPassed": false,
+    "format": "Full solution verification passed; normal incremental build after only whitespace in new tests passed, zero warnings/errors",
+    "currentSourceHashes": {
+      "backend/Controllers/V2/CasesV2Controller.cs": "080b10970484eb4461a34679e1f2bbee56155e2dd5247d46c68a5fd9892617b4",
+      "backend/Services/Storage/ManagedCaseDocumentUploadService.cs": "1654eb725c4ec53a16abd539407ed20d13b837e54d71afbc2fbcfba24145c566",
+      "backend/PayPlanner.Api.Tests/ManagedCaseDocumentUploadServiceTests.cs": "a4fe3ca8e99e2997a08516ecfd7a523b9e86a5fd52fdc513a718d1bbb95b3d44",
+      "backend/AppReleases/releases.json": "6a00ee831e2ac4e38aba84ff5de8bb67009e23ee0a2ce75af4cc98dddd51c1e0"
+    }
+  },
+  "yougileChanged": false,
+  "pushed": false,
+  "deployed": false,
+  "roadmap": {
+    "complete": 4,
+    "total": 6,
+    "percent": 67
+  },
+  "targetedQualification": {
+    "firstRun": {
+      "passed": 42,
+      "total": 44,
+      "failed": 2,
+      "reason": "Empty suffix reached storage admission ledger before invalid target rejection"
+    },
+    "affectedRepeat": {
+      "passed": 24,
+      "total": 24,
+      "skipped": 0
+    },
+    "differentCases": 44,
+    "combinedResultsAreSeparateRuns": true,
+    "normalFreshMigrationsGate": false,
+    "cachedMigrationSha256": "5e5101a6d344f99342874e4c81c2429d66876aaa7a928f9c250dce7f1d56b3bc",
+    "finalApiSha256": "44e6e6a2579b45bef2e347fe256bb2c6b6a8aff5235fd5283c2f8a8fecfa174c"
+  },
+  "ownedTempCleanup": {
+    "movedDirectories": 4,
+    "preservedMiB": 289.6,
+    "destination": "D:/PayPlannerReview-20261012/expired-payplanner-temp-20261013"
+  },
+  "finalTestDatabase": {
+    "engine": "PostgreSQL17.2",
+    "data": "fresh synthetic only",
+    "localeProvider": "icu",
+    "locale": "und",
+    "port": 55438,
+    "russianUnicodeCaseFoldVerified": true
+  },
+  "nativeDocumentResults": {
+    "upload": {
+      "documentId": 4,
+      "sourceTaskId": 13,
+      "documentKey": "task-13-pay24-owned-source",
+      "version": 1,
+      "documentType": "PAY24 синтетическая связь",
+      "status": "Подготовлен",
+      "fileName": "pay24-owned-source.txt",
+      "caseId": 3,
+      "pageTwoVisited": true,
+      "fieldsAndFilePreserved": true,
+      "firstLinkedUploadHttp": 201,
+      "realApiWithoutResponseStubs": true
+    },
+    "legacy-link": {
+      "mode": "legacy",
+      "openedTaskId": 13,
+      "documentId": 4,
+      "sourceTaskId": 13,
+      "documentKey": "task-13-pay24-owned-source",
+      "savedFieldsRetained": true,
+      "nativeDownloadName": "pay24-owned-source.txt",
+      "url": "http://127.0.0.1:5301/cases/3",
+      "realApiWithoutStubs": true
+    },
+    "modern-link": {
+      "mode": "modern",
+      "actualAdminSetting": true,
+      "openedTaskId": 13,
+      "documentId": 4,
+      "sourceTaskId": 13,
+      "documentKey": "task-13-pay24-owned-source",
+      "documentType": "PAY24 синтетическая связь",
+      "version": 1,
+      "url": "http://127.0.0.1:5301/cases/3",
+      "realApiWithoutStubs": true
+    },
+    "executor-read": {
+      "actorUserId": 4,
+      "caseId": 3,
+      "documentId": 4,
+      "documentVisible": true,
+      "uploadAbsent": true,
+      "deleteAbsent": true,
+      "versionUploadAbsent": true,
+      "url": "http://127.0.0.1:5301/cases/3"
+    }
+  },
+  "fullBackendTestsPassed": false
+}
