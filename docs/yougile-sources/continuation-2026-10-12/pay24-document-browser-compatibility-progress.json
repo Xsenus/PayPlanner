@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "recordedUtc": "2026-10-13T18:11:15.209318+00:00",
+  "baseRevision": "d92479ef4449edb0fd1936560d441c9e6d9ffd69",
+  "sourceHashes": {
+    "scripts/check-case-court-live-browser.mjs": {
+      "sha256": "688033aed04e5e8af32473a4d1c8aeff2b5b9e84dd57e9bf7eb3f2586aa2d06d",
+      "canonicalLfSha256": "688033aed04e5e8af32473a4d1c8aeff2b5b9e84dd57e9bf7eb3f2586aa2d06d"
+    },
+    "scripts/check-restored-live-browser.mjs": {
+      "sha256": "a5427d375a00724fe2b6de8333874eef072725d66a08308805cc81e8b6d565e5",
+      "canonicalLfSha256": "a5427d375a00724fe2b6de8333874eef072725d66a08308805cc81e8b6d565e5"
+    }
+  },
+  "courtNative": {
+    "passed": 2,
+    "failed": 0,
+    "skipped": 0,
+    "exactCaseSetMatched": true,
+    "exitCode": 0,
+    "durationMinutes": 1.6357,
+    "counters": {
+      "total": 2,
+      "executed": 2,
+      "passed": 2,
+      "failed": 0,
+      "error": 0,
+      "timeout": 0,
+      "aborted": 0,
+      "inconclusive": 0,
+      "passedButRunAborted": 0,
+      "notRunnable": 0,
+      "notExecuted": 0,
+      "disconnected": 0,
+      "warning": 0,
+      "completed": 0,
+      "inProgress": 0,
+      "pending": 0
+    }
+  },
+  "changes": {
+    "courtAndRestoredOpenActualDocumentActionsBeforeDownload": true,
+    "courtResolvedWatchNullRequired": true,
+    "originalAssertionsAndDeadlinesRetained": true,
+    "productionCodeChanged": false
+  },
+  "priorFinancialNativePassed": 18,
+  "normalFreshBackendBuild": {
+    "revision": "d92479ef4449edb0fd1936560d441c9e6d9ffd69",
+    "warnings": 0,
+    "errors": 0,
+    "minutes": 6.1893,
+    "normalMigrationsFromSource": true,
+    "analyzersEnabled": true,
+    "discoveredCases": 7284
+  },
+  "release": {
+    "fullBackendSuitePassed": false,
+    "fiveRestoredBrowserCasesPassed": false,
+    "pushed": false,
+    "deployed": false,
+    "yougileChanged": false,
+    "pay24Progress": "4/6 (67%)",
+    "packageProgress": "1/31 (3%)"
+  }
+}

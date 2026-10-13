@@ -88,7 +88,14 @@ try {
     });
     controlUrl = `http://127.0.0.1:${control.address().port}/apply`;
   }
-  vite = await createServer({ envDir: root, cacheDir: join(root, 'vite-court-cache'), server: { host: '127.0.0.1', port, strictPort: true }, logLevel: 'error' });
+  vite = await createServer({ envDir: root, cacheDir: join(root, 'vite-court-cache'), plugins: [{
+    name: 'court-browser-fixed-source',
+    config(config) {
+      config.server ??= {};
+      config.server.watch = null;
+    },
+  }], server: { host: '127.0.0.1', port, strictPort: true }, logLevel: 'error' });
+  assert.equal(vite.config.server.watch, null, 'The immutable court browser fixture must disable file watching.');
   await vite.listen();
   // Prepare the real entry within the existing scenario budget before browser navigation.
   const entry = await vite.transformRequest('/src/main.tsx');
@@ -157,6 +164,9 @@ try {
     const document = documents[0];
     await page.getByRole('button', { name: 'Документы', exact: true }).click();
     await page.getByText(document.originalFileName, { exact: true }).first().waitFor();
+    const actionsButton = page.getByRole('button', { name: 'Сведения и действия документа ' + document.originalFileName, exact: true });
+    await actionsButton.click();
+    check(await actionsButton.getAttribute('aria-expanded') === 'true', 'The court document actions must be expanded before downloading');
     const downloadEvent = page.waitForEvent('download');
     await page.getByRole('button', { name: 'Скачать документ ' + document.originalFileName, exact: true }).click();
     const download = await downloadEvent; check(await download.failure() === null, 'Court summary download failed');

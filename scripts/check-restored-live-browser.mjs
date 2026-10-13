@@ -168,6 +168,9 @@ try {
   assert.ok(documentName);
   const downloadButton = page.getByRole('button', { name: `Скачать документ ${documentName}`, exact: true });
   recordBrowserPhase('document-button');
+  const actionsButton = page.getByRole('button', { name: `Сведения и действия документа ${documentName}`, exact: true });
+  await actionsButton.click();
+  assert.equal(await actionsButton.getAttribute('aria-expanded'), 'true', 'The restored document actions must be expanded before downloading.');
   await downloadButton.waitFor();
   recordBrowserPhase('document-download');
   const [download] = await Promise.all([page.waitForEvent('download'), downloadButton.click()]);
