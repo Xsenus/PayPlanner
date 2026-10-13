@@ -43,6 +43,7 @@ export function TablePagination({
         <label className="flex items-center gap-2">
           <span>{pageSizeLabel}</span>
           <SystemSelect
+            aria-label={pageSizeLabel}
             value={pageSize}
             onChange={(event) => onPageSizeChange(Number(event.target.value) || pageSize)}
             className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700"

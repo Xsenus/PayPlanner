@@ -1,5 +1,5 @@
 import { createPortal } from 'react-dom';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 
 export type TableContextMenuAction = {
   key: string;
@@ -21,6 +21,11 @@ interface TableContextMenuProps {
   title?: string;
   actions: TableContextMenuAction[];
   onClose: () => void;
+  keyboardNavigation?: boolean;
+  initialFocus?: 'first' | 'last';
+  returnFocusRef?: RefObject<HTMLElement>;
+  menuId?: string;
+  ariaLabel?: string;
 }
 
 export function TableContextMenu({
@@ -29,8 +34,14 @@ export function TableContextMenu({
   title,
   actions,
   onClose,
+  keyboardNavigation = false,
+  initialFocus = 'first',
+  returnFocusRef,
+  menuId,
+  ariaLabel,
 }: TableContextMenuProps) {
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const restoreFocusOnClose = useRef(true);
   const [resolvedPosition, setResolvedPosition] = useState<TableContextMenuPosition | null>(position);
 
   const visibleActions = useMemo(() => actions.filter((action) => action.label.trim().length > 0), [actions]);
@@ -58,6 +69,20 @@ export function TableContextMenu({
       setResolvedPosition(next);
     }
   }, [open, position, resolvedPosition?.x, resolvedPosition?.y, title, visibleActions]);
+
+  useLayoutEffect(() => {
+    if (!open || !keyboardNavigation || !resolvedPosition || !menuRef.current
+      || menuRef.current.contains(document.activeElement)) return;
+    const buttons = menuRef.current.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]:not(:disabled)');
+    buttons[initialFocus === 'last' ? buttons.length - 1 : 0]?.focus({ preventScroll: true });
+  }, [open, keyboardNavigation, initialFocus, resolvedPosition]);
+
+  useEffect(() => {
+    if (!open || !keyboardNavigation) return;
+    restoreFocusOnClose.current = true;
+    const trigger = returnFocusRef?.current;
+    return () => { if (restoreFocusOnClose.current && trigger?.isConnected) trigger.focus({ preventScroll: true }); };
+  }, [open, keyboardNavigation, returnFocusRef]);
 
   useEffect(() => {
     if (!open) return;
@@ -88,10 +113,48 @@ export function TableContextMenu({
     >
       <div
         ref={menuRef}
+        id={menuId}
         role="menu"
+        aria-label={ariaLabel}
         className="absolute min-w-[220px] rounded-xl border border-slate-200 bg-white py-2 shadow-2xl"
         style={{ top: resolvedPosition.y, left: resolvedPosition.x }}
         onClick={(event) => event.stopPropagation()}
+        onKeyDown={(event) => {
+          if (!keyboardNavigation) return;
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            onClose();
+          } else if (event.key === 'Tab') {
+            event.preventDefault();
+            const trigger = returnFocusRef?.current;
+            const styleCache = new Map<HTMLElement, CSSStyleDeclaration>();
+            const controls = Array.from(document.querySelectorAll<HTMLElement>('button, a[href], input, select, textarea, [tabindex]'))
+              .filter((element) => {
+                if (element.tabIndex < 0 || element.matches(':disabled') || menuRef.current?.contains(element)
+                  || element.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
+                for (let parent: HTMLElement | null = element; parent; parent = parent.parentElement) {
+                  let style = styleCache.get(parent);
+                  if (!style) { style = window.getComputedStyle(parent); styleCache.set(parent, style); }
+                  if (style.display === 'none' || style.visibility === 'hidden') return false;
+                }
+                return true;
+              });
+            const index = trigger ? controls.indexOf(trigger) : -1;
+            const target = index >= 0 ? controls[index + (event.shiftKey ? -1 : 1)] ?? trigger : trigger;
+            restoreFocusOnClose.current = false;
+            target?.focus({ preventScroll: true });
+            onClose();
+          } else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+            event.preventDefault();
+            const buttons = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]:not(:disabled)') ?? []);
+            if (buttons.length === 0) return;
+            const active = buttons.indexOf(document.activeElement as HTMLButtonElement);
+            const index = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1
+              : (active + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
+            buttons[index]?.focus({ preventScroll: true });
+          }
+        }}
       >
         {title ? (
           <>

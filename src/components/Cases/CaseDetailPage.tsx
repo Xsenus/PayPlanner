@@ -4,6 +4,8 @@ import { SystemSelect } from '../ui/SystemSelect';
 import { TablePagination } from '../ui/TablePagination';
 import { useCaseTaskPage, CASE_TASK_PAGE_SIZES, type CaseTaskFilter } from '../../hooks/useCaseTaskPage';
 import { CaseTaskActions } from './CaseTaskActions';
+import { CaseTaskRowMenu } from './CaseTaskRowMenu';
+import { taskStatusClass } from '../../utils/taskStatusClass';
 import { TASK_TYPE_OPTIONS } from '../Tasks/taskTypeOptions';
 import { ClientPortalAccessPanel } from './ClientPortalAccessPanel';
 import { CaseAppealDecisionAction } from './CaseAppealDecisionAction';
@@ -14,7 +16,7 @@ import { CourtRecoveryPanel } from './CourtRecoveryPanel';
 import { ExecutiveWritDocumentUpload } from './ExecutiveWritDocumentUpload';
 import { CaseDocumentUploadStatusPanel } from './CaseDocumentUploadStatusPanel';
 import { MessengerDocumentDeliveryModal } from './MessengerDocumentDeliveryModal';
-import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import {
   Archive,
   ArrowDown,
@@ -31,6 +33,8 @@ import {
   FileText,
   Gavel,
   Loader2,
+  ListFilter,
+  ClipboardCheck,
   LockKeyhole,
   Mail,
   MessageSquare,
@@ -426,6 +430,7 @@ interface CaseDetailViewState {
   activeTab?: CaseDetailTab;
   courtOverview?: boolean;
   taskFilter?: CaseTaskFilter;
+  taskFiltersExpanded?: boolean;
   participantSourceType?: ParticipantSourceType;
   participantRole?: string;
   documentTemplateKey?: string;
@@ -488,6 +493,7 @@ function readCaseDetailViewState(caseId: number): CaseDetailViewState {
       activeTab: isCaseDetailTab(parsed.activeTab) ? parsed.activeTab : undefined,
       courtOverview: parsed.courtOverview === true,
       taskFilter: isCaseTaskFilter(parsed.taskFilter) ? parsed.taskFilter : undefined,
+      taskFiltersExpanded: typeof parsed.taskFiltersExpanded === 'boolean' ? parsed.taskFiltersExpanded : undefined,
       participantSourceType: isParticipantSourceType(parsed.participantSourceType) ? parsed.participantSourceType : undefined,
       participantRole: typeof parsed.participantRole === 'string' ? parsed.participantRole : undefined,
       documentTemplateKey: typeof parsed.documentTemplateKey === 'string' ? parsed.documentTemplateKey : undefined,
@@ -1683,6 +1689,7 @@ export function CaseDetailPage({
   const [inactivityRemindersDraft, setInactivityRemindersDraft] = useState(true);
   const [inactivityRemindersDisabledReasonDraft, setInactivityRemindersDisabledReasonDraft] = useState('');
   const [taskFilter, setTaskFilter] = useState<CaseTaskFilter>(initialViewState.taskFilter ?? 'active');
+  const [taskFiltersExpanded, setTaskFiltersExpanded] = useState(initialViewState.taskFiltersExpanded !== false);
   const taskPage = useCaseTaskPage({
     caseId,
     enabled: canViewTasks && activeTab === 'tasks' && !editPageOpen && caseItem?.id === caseId && !error,
@@ -1771,6 +1778,7 @@ export function CaseDetailPage({
         : 'overview',
     );
     setTaskFilter(savedState.taskFilter ?? 'active');
+    setTaskFiltersExpanded(savedState.taskFiltersExpanded !== false);
     setParticipantSourceType(savedState.participantSourceType ?? 'client');
     setParticipantRole(savedState.participantRole ?? '');
     setDocumentTypeDraft(savedState.documentTypeDraft ?? '');
@@ -1866,6 +1874,7 @@ export function CaseDetailPage({
       activeTab,
       courtOverview,
       taskFilter,
+      taskFiltersExpanded,
       participantSourceType,
       participantRole,
       documentTemplateKey,
@@ -1881,6 +1890,7 @@ export function CaseDetailPage({
     participantRole,
     participantSourceType,
     taskFilter,
+    taskFiltersExpanded,
     courtOverview,
   ]);
 
@@ -4379,6 +4389,8 @@ export function CaseDetailPage({
               progress={progress}
               filter={taskFilter}
               onFilterChange={setTaskFilter}
+              filtersExpanded={taskFiltersExpanded}
+              onFiltersExpandedChange={setTaskFiltersExpanded}
               onCreateTask={createTaskForCase}
               stageTaskTemplates={stageTaskTemplates}
               onCreateStageTask={createStageTaskForCase}
@@ -6764,6 +6776,8 @@ function TaskList({
   progress,
   filter,
   onFilterChange,
+  filtersExpanded,
+  onFiltersExpandedChange,
   onCreateTask,
   stageTaskTemplates,
   onCreateStageTask,
@@ -6779,6 +6793,8 @@ function TaskList({
   progress: number;
   filter: CaseTaskFilter;
   onFilterChange: (filter: CaseTaskFilter) => void;
+  filtersExpanded: boolean;
+  onFiltersExpandedChange: (expanded: boolean) => void;
   onCreateTask: () => void;
   stageTaskTemplates: CaseStageTaskTemplate[];
   onCreateStageTask: (template: CaseStageTaskTemplate) => void;
@@ -6787,18 +6803,27 @@ function TaskList({
   onOpenTask?: (taskId: number) => void;
 }) {
   const { items: tasks, counts } = pageData;
+  const filterGroupId = useId();
   const paginationTotal = pageData.loading || pageData.error ? counts?.[filter] ?? 0 : pageData.total;
   const totalPages = Math.max(1, Math.ceil(paginationTotal / pageData.pageSize));
+  const hasRowActions = Boolean(onOpenTask) || canEditTasks || canExportTasks;
 
   return (
     <div className="space-y-3">
       <div className="rounded-xl border border-slate-200 p-3">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Связанные задачи ({counts?.all ?? '—'})</h2>
+            <h2 className="inline-flex items-center gap-2 text-sm font-semibold text-blue-900"><ClipboardCheck className="h-5 w-5" aria-hidden="true" />Задачи по делу ({counts?.all ?? '—'})</h2>
             <div className="mt-1 text-sm text-slate-500">Прогресс: {progress}%</div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <button type="button" aria-label="Фильтры задач" title="Фильтры задач"
+              aria-expanded={filtersExpanded} aria-controls={filtersExpanded ? filterGroupId : undefined}
+              onClick={() => onFiltersExpandedChange(!filtersExpanded)}
+              className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${filtersExpanded ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600'}`}>
+              <ListFilter className="h-4 w-4" aria-hidden="true" />
+            </button>
+            {filtersExpanded ? <div id={filterGroupId} className="flex flex-wrap items-center gap-2" role="group" aria-label="Фильтры списка задач">
             {CASE_TASK_FILTERS.map((option) => (
               <button
                 key={option.value}
@@ -6809,6 +6834,9 @@ function TaskList({
                 {option.label} · {counts?.[option.value] ?? '—'}
               </button>
             ))}
+            </div> : <span role="status" className="rounded-lg bg-slate-100 px-2 py-1 text-xs text-slate-600" aria-label={`Текущий фильтр задач: ${CASE_TASK_FILTERS.find((option) => option.value === filter)?.label}`}>
+              {CASE_TASK_FILTERS.find((option) => option.value === filter)?.label} · {counts?.[filter] ?? '—'}
+            </span>}
             {canCreateTask ? (
               <button
                 type="button"
@@ -6879,11 +6907,12 @@ function TaskList({
                 aria-label="Выбрать все задачи на этой странице" checked={selection.allSelected}
                 indeterminate={selection.selected.size > 0 && !selection.allSelected} disabled={selection.busy}
                 onChange={selection.toggleAll} /></th> : null}
-              <th scope="col" className="w-[32%] px-3 py-2">Задача</th>
-              <th scope="col" className="w-[23%] px-3 py-2">Исполнитель</th>
+              <th scope="col" className="w-[29%] px-3 py-2">Задача</th>
+              <th scope="col" className="w-[22%] px-3 py-2">Исполнитель</th>
               <th scope="col" className="w-[17%] px-3 py-2">Срок</th>
-              <th scope="col" className="w-[14%] px-3 py-2">Статус</th>
+              <th scope="col" className="w-[18%] px-2 py-2">Статус</th>
               <th scope="col" className="w-[14%] px-2 py-2 text-[11px] tracking-normal">Результат</th>
+              {hasRowActions ? <th scope="col" className="relative w-9 px-1 py-2"><span className="sr-only">Действия</span></th> : null}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -6914,15 +6943,19 @@ function TaskList({
                       ) : <span className="min-w-0 [overflow-wrap:anywhere]">{task.title}</span>}
                     </div>
                   </td>
-                  <td className="px-3 py-3 text-slate-700">
-                    <div className="flex min-w-0 items-start gap-2">
-                      {initials ? <span aria-hidden="true" className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-100 text-[10px] font-semibold text-blue-700">{initials}</span> : null}
+                  <td className="px-2 py-2.5 text-xs leading-5 text-slate-700">
+                    <div className="flex min-w-0 items-start gap-1.5">
+                      {initials ? <span aria-hidden="true" className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-100 text-[10px] font-semibold text-blue-700">{initials}</span> : null}
                       <span className="min-w-0 [overflow-wrap:anywhere]">{assigneeName}</span>
                     </div>
                   </td>
                   <td className="px-3 py-3 text-slate-700">{formatRuDateTime(task.dueAt) || '—'}</td>
-                  <td className="px-3 py-3 text-xs text-slate-700 [overflow-wrap:anywhere]">{TASK_STATUS_LABELS[task.status] ?? task.status}</td>
+                  <td className="px-2 py-2.5 text-xs [overflow-wrap:anywhere]"><span className={`inline-flex max-w-full rounded-md px-1.5 py-0.5 text-[11px] font-medium ${taskStatusClass(task.status)}`}>{TASK_STATUS_LABELS[task.status] ?? task.status}</span></td>
                   <td className="px-3 py-3 text-xs text-slate-700 [overflow-wrap:anywhere]">{task.result || '—'}</td>
+                  {hasRowActions ? <td className="px-1 py-3"><CaseTaskRowMenu task={task} caseId={caseId}
+                    disabled={selection.busy} canSelect={selection.enabled} selected={selection.selected.has(task.id)}
+                    onToggle={() => selection.toggle(task.id)} canExport={canExportTasks}
+                    statusLabels={TASK_STATUS_LABELS} onOpenTask={onOpenTask} /></td> : null}
                 </tr>
               );
             })}

@@ -1590,7 +1590,7 @@ describe('CaseDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Задачи' }));
     expect(await screen.findByText('Проверить движение по делу')).toBeTruthy();
     expect(screen.getByText(/Показано \d+ из \d+/u)).toBeTruthy();
-    expect(screen.getByRole('heading', { name: /Связанные задачи \(\d+\)/u })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /Задачи по делу \(\d+\)/u })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Открыть задачу: Проверить движение по делу' }));
     expect(onOpenTask).toHaveBeenCalledTimes(1);
@@ -3019,6 +3019,72 @@ describe('CaseDetailPage', () => {
     expect(apiService.getTaskJournalItems).toHaveBeenCalledTimes(1);
   });
 
+  it('PAY-24 filters: collapses the controls without changing the active filter or fetching again', async () => {
+    mockCaseTaskServer([createTask({ id: 51, title: 'Задача фильтров', dueAt: '2100-01-01T10:00:00Z' })]);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство'); fireEvent.click(screen.getByRole('button', { name: 'Задачи' }));
+    await screen.findByRole('button', { name: 'Активные · 1' });
+    const requests = vi.mocked(apiService.getTaskJournalItems).mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: 'Фильтры задач' }));
+    expect(screen.queryByRole('button', { name: 'Активные · 1' })).toBeNull();
+    expect(screen.getByRole('status', { name: 'Текущий фильтр задач: Активные' })).toBeTruthy();
+    expect(apiService.getTaskJournalItems).toHaveBeenCalledTimes(requests);
+    fireEvent.click(screen.getByRole('button', { name: 'Фильтры задач' }));
+    expect(screen.getByRole('button', { name: 'Активные · 1' }).getAttribute('aria-pressed')).toBe('true');
+    expect(apiService.getTaskJournalItems).toHaveBeenCalledTimes(requests);
+  });
+  it('PAY-24 filters: restores collapsed controls on return to the same case', async () => {
+    mockCaseTaskServer([createTask({ id: 51, title: 'Задача сохранённых фильтров' })]);
+    const view = render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство'); fireEvent.click(screen.getByRole('button', { name: 'Задачи' }));
+    await screen.findByRole('button', { name: 'Активные · 1' });
+    fireEvent.click(screen.getByRole('button', { name: 'Фильтры задач' }));
+    await waitFor(() => expect(JSON.parse(sessionStorage.getItem('pp.case-detail.15.view.v1')!).taskFiltersExpanded).toBe(false));
+    view.unmount(); render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('Задача сохранённых фильтров');
+    expect(screen.getByRole('button', { name: 'Фильтры задач' }).getAttribute('aria-expanded')).toBe('false');
+    expect(screen.getByRole('status', { name: 'Текущий фильтр задач: Активные' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Активные · 1' })).toBeNull();
+  });
+
+  it('PAY-24 filters: ignores a string masquerading as a saved boolean', async () => {
+    sessionStorage.setItem('pp.case-detail.15.view.v1', JSON.stringify({ activeTab: 'tasks', taskFiltersExpanded: 'false' }));
+    mockCaseTaskServer([createTask({ id: 51, title: 'Задача неправильного состояния' })]);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByRole('button', { name: 'Активные · 1' });
+    expect(screen.getByRole('button', { name: 'Фильтры задач' }).getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByRole('group', { name: 'Фильтры списка задач' })).toBeTruthy();
+  });
+
+  it('PAY-24 menu: opens the same common card without exposing writes to a read-only role', async () => {
+    const onOpenTask = vi.fn(); mockCaseTaskServer([createTask({ id: 51, title: 'Задача меню чтения' })]);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} onOpenTask={onOpenTask} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство'); fireEvent.click(screen.getByRole('button', { name: 'Задачи' }));
+    const trigger = await screen.findByRole('button', { name: 'Действия задачи: Задача меню чтения' });
+    fireEvent.click(trigger); expect(screen.getAllByRole('menuitem')).toHaveLength(1);
+    expect(screen.queryByRole('checkbox', { name: 'Выбрать задачу: Задача меню чтения' })).toBeNull();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Открыть карточку' }));
+    expect(onOpenTask).toHaveBeenCalledExactlyOnceWith(51);
+    expect(apiService.getTaskJournalItems).toHaveBeenCalledTimes(1);
+    expect(apiService.bulkUpdateTaskJournalItems).not.toHaveBeenCalled();
+  });
+
+  it('PAY-24 menu: selects the existing row and closes when the filter changes', async () => {
+    mockCaseTaskServer([createTask({ id: 51, title: 'Задача меню выбора' })]);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEditTasks onOpenTask={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство'); fireEvent.click(screen.getByRole('button', { name: 'Задачи' }));
+    const trigger = await screen.findByRole('button', { name: 'Действия задачи: Задача меню выбора' });
+    fireEvent.click(trigger); fireEvent.click(screen.getByRole('menuitem', { name: 'Выбрать задачу' }));
+    expect((screen.getByRole('checkbox', { name: 'Выбрать задачу: Задача меню выбора' }) as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByText('Выбрано на этой странице: 1')).toBeTruthy();
+    fireEvent.click(trigger); expect(screen.getByRole('menuitem', { name: 'Снять выбор задачи' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Все · 1' }));
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+    await screen.findByText('Задача меню выбора');
+    expect(screen.queryByText('Выбрано на этой странице: 1')).toBeNull();
+    expect(apiService.bulkUpdateTaskJournalItems).not.toHaveBeenCalled();
+  });
+
   it('PAY-24 bulk: reports partial changes after reloading the case and preserves its filter', async () => {
     mockCaseTaskServer([createTask({ id: 11, title: 'Массовая первая' }), createTask({ id: 12, title: 'Массовая вторая' })]);
     vi.mocked(apiService.bulkUpdateTaskJournalItems).mockResolvedValue({ requested: 2, updated: 1, skipped: 1 });
@@ -3045,7 +3111,7 @@ describe('CaseDetailPage', () => {
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} onOpenTask={onOpenTask} />);
     await screen.findByText('ЗЕМЦОВ - банкротство');
     fireEvent.click(screen.getByRole('button', { name: 'Задачи' }));
-    expect(await screen.findByText('Связанные задачи (61)')).toBeTruthy();
+    expect(await screen.findByText('Задачи по делу (61)')).toBeTruthy();
     await screen.findByText('Строка задачи 50');
     expect(screen.getByRole('table', { name: 'Задачи дела' }).querySelectorAll('tbody tr')).toHaveLength(50);
     expect(screen.queryByText('Строка задачи 61')).toBeNull();
@@ -3105,9 +3171,9 @@ describe('CaseDetailPage', () => {
     await screen.findByText('Проверить движение по делу');
     await screen.findByText('Не удалось получить счётчики задач.');
     expect(screen.getByRole('button', { name: 'Все · —' })).toBeTruthy();
-    expect(screen.queryByText('Связанные задачи (0)')).toBeNull();
+    expect(screen.queryByText('Задачи по делу (0)')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку счётчиков' }));
-    await screen.findByText('Связанные задачи (1)');
+    await screen.findByText('Задачи по делу (1)');
   });
 
   it('PAY-24 pages: retains filters during loading and discards a late response after changing filter', async () => {

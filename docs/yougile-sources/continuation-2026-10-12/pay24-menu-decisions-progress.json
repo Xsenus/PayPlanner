@@ -1,0 +1,583 @@
+{
+  "scope": "PAY24 row menu, filter controls, shared status presentation, and routed decision dialogs for both task windows",
+  "baseRevision": "832b91d81a68438fc3d22edbd8356a9f46814ccc",
+  "sourcePins": {
+    "src/components/Cases/CaseDetailPage.test.tsx": {
+      "sha256": "e69cdd0598eeb7399e66dd492f5144afd013fd730f35d9e3a7c9fcad77ff4765",
+      "canonicalLfSha256": "3c6fe263b0456882cc622f578cb32b67dc95bf9eae68c0c4b637d7cbf502410d"
+    },
+    "src/components/Cases/CaseDetailPage.tsx": {
+      "sha256": "59c00ed0111cf582f636b269691a14bdb4e38a315c302686b6684ba2ea4af18f",
+      "canonicalLfSha256": "8e99f4b8d150dbf67928ebacd41e35fbd3da5deac9084e1b69121d1b78246c03"
+    },
+    "src/components/Cases/CaseTaskRowMenu.test.tsx": {
+      "sha256": "e6b2cf9ffae74c3cc80f540ea4403f0e16f9c42d54732496ef2d718144f79bb6",
+      "canonicalLfSha256": "e6b2cf9ffae74c3cc80f540ea4403f0e16f9c42d54732496ef2d718144f79bb6"
+    },
+    "src/components/Cases/CaseTaskRowMenu.tsx": {
+      "sha256": "f714d58b845b7461fae9e6a5215e30673cdd9c31bd5c38e9d0c1a9bff590e669",
+      "canonicalLfSha256": "f714d58b845b7461fae9e6a5215e30673cdd9c31bd5c38e9d0c1a9bff590e669"
+    },
+    "src/components/Tasks/TaskJournal.test.tsx": {
+      "sha256": "1d9499784db8da0af8d43ba0bb4b73821a62194b4133c348abd8f85d0c94534a",
+      "canonicalLfSha256": "bf53bff5a99ec16a0bffdbb535ae61c83121fbf9a2a3ac7d25ed4c0764c71ba2"
+    },
+    "src/components/Tasks/TaskJournal.tsx": {
+      "sha256": "43ba815939cae05fec14703744a06720bd10201581da6efd209b1d3afd7efb09",
+      "canonicalLfSha256": "7c0525a6dd474977a6a6eeaf04722ed177fdc7a8f3ead9da5959a66c12c5cb60"
+    },
+    "src/components/ui/TableContextMenu.test.tsx": {
+      "sha256": "fa07f9c74ddf19ee6ee66de2096141dd9effe14074f4e288d76dc46f7cd34900",
+      "canonicalLfSha256": "fa07f9c74ddf19ee6ee66de2096141dd9effe14074f4e288d76dc46f7cd34900"
+    },
+    "src/components/ui/TableContextMenu.tsx": {
+      "sha256": "f6daab5c33d77bdfde5dc1d0577056ee735656876d8f9415dfc7764396f7a14d",
+      "canonicalLfSha256": "49727e0643331eb450341e5aa110c55edba4bf9cf3b3ffb98fb1c77ab488c18b"
+    },
+    "src/components/ui/TablePagination.test.tsx": {
+      "sha256": "84cbedcad642958a8e998f531bf55374530bb818683a6f4d1dd076c94a572fb9",
+      "canonicalLfSha256": "84cbedcad642958a8e998f531bf55374530bb818683a6f4d1dd076c94a572fb9"
+    },
+    "src/components/ui/TablePagination.tsx": {
+      "sha256": "bcccecf3cc0df052250c90d067225197443bfa1da0e015b5064ba6b5d1d46777",
+      "canonicalLfSha256": "a6ac13d6f7169b04b912ae1e5c8f759453ec8f1ba329516a64445d82cdd36138"
+    },
+    "src/utils/taskStatusClass.ts": {
+      "sha256": "fb78a5973b633ce2dd748b42dc113dca07c14be27cff17c2b4eee3beee09074e",
+      "canonicalLfSha256": "fb78a5973b633ce2dd748b42dc113dca07c14be27cff17c2b4eee3beee09074e"
+    }
+  },
+  "frontendUnit": {
+    "passed": 2699,
+    "failed": 0,
+    "skipped": 0,
+    "files": 251,
+    "durationSeconds": 399.13,
+    "terminalExitCode": 0,
+    "report": {
+      "path": "D:/PayPlannerReview-20261012/pay24-menu-full-unit.json",
+      "sha256": "3b99e2e9d44fb789218f2c3aa48078a6beb1ed961790b235a2ad1ecdf5e5567b",
+      "bytes": 882107
+    }
+  },
+  "frontendStatic": {
+    "lint": true,
+    "explicitAppTypes": true,
+    "explicitNodeTypes": true,
+    "productionBuild": true,
+    "productionBuildDurationSeconds": 24.24,
+    "encodingTextFiles": 3142,
+    "encodingTextFilesAtCheckpoint": 3143
+  },
+  "frontendIntegration": {
+    "status": "passed",
+    "passed": 318,
+    "failed": 0,
+    "skipped": 0,
+    "files": 16,
+    "terminalExitCode": 0,
+    "durationSeconds": 162.01,
+    "log": "D:/PayPlannerReview-20261012/pay24-menu-full-integration.log"
+  },
+  "targeted": {
+    "newMenuAndPaginationControls": 22,
+    "routedDecisionCases": 16,
+    "filterCases": 3,
+    "combinedLatestFocused": 19,
+    "combinedLatestSkipped": 543,
+    "caseBeforeLatestFilterAndDialogChanges": 161,
+    "journalBeforeDecisionChanges": 382,
+    "note": "Earlier targeted runs are historical; final full unit covers all current 398 journal tests, 164 case tests, new controls and all existing frontend cases."
+  },
+  "browser": {
+    "pay24-menu-keyboard-repeat.log": {
+      "scope": "Actual synthetic two-row case, real native keyboard",
+      "arrowFocus": true,
+      "homeEnd": true,
+      "escapeRestoresFocus": true,
+      "tabCloses": true,
+      "tabTarget": {
+        "tag": "INPUT",
+        "label": "Выбрать задачу: Подготовиться к заседанию"
+      },
+      "selectionChecked": true
+    },
+    "pay24-menu-real-last-page-repeat.log": {
+      "scope": "Real DB/API, no response overlays",
+      "mode": "legacy",
+      "openedByRowMenu": true,
+      "taskId": 21,
+      "status": "done",
+      "beforeActive": 11,
+      "beforePage": 2,
+      "beforeRows": 1,
+      "afterActive": 10,
+      "afterPage": 1,
+      "afterRows": 10,
+      "filterRetained": true,
+      "caseTotal": 11,
+      "caseCompleted": 1,
+      "returnMount": "Case view mounts again at first page; hook unit separately covers mounted last-page correction",
+      "url": "http://127.0.0.1:5301/cases/3"
+    },
+    "pay24-executor-legacy-deadline-verify.log": {
+      "taskId": 13,
+      "mode": "legacy",
+      "actor": 4,
+      "deadlineStillOriginal": "2026-10-25T15:00",
+      "requestText": "Запросы переноса срока\n\nЗдесь видно, кто запросил перенос, какой срок предложен и кто должен принять решение.\n\n1 шт.\nОжидает решения\n13.10.2026, 17:00\nЗАПРОСИЛ\nСинтетический executor\nДЕЙСТВИЕ\nОжидает решения: Синтетический администратор\nТЕКУЩИЙ СРОК\n25.10.2026, 15:00\nЗАПРОШЕННЫЙ СРОК\n29.10.2026, 10:30\nПричина: Синтетическая причина переноса срока",
+      "filterRetained": true,
+      "note": "Prior recorder POST assertion passed but exact-text reason locator included no UI prefix and timed out; no repeated POST."
+    },
+    "pay24-admin-legacy-deadline-fixed.log": {
+      "mode": "legacy",
+      "taskId": 13,
+      "cardRetainedUntilDecision": true,
+      "serverDue": "2026-10-29T03:30:00.0000000Z",
+      "caseRowDue": "29.10.2026, 10:30",
+      "filterRetained": true,
+      "url": "http://127.0.0.1:5301/cases/3",
+      "apiResponseStatus": 200
+    },
+    "pay24-executor-modern-deadline-request.log": {
+      "mode": "modern",
+      "taskId": 14,
+      "actorUserId": 4,
+      "readOnly": true,
+      "openedByMenu": true,
+      "exportAbsent": true,
+      "emptyReasonBlocked": true,
+      "requestStatus": 201,
+      "requestedLocal": "30.10.2026 10:30",
+      "dueNotChangedBeforeApproval": "2026-10-25T16:00",
+      "requestText": "Запросы переноса срока\n\nЗдесь видно, кто запросил перенос, какой срок предложен и кто должен принять решение.\n\n1 шт.\nОжидает решения\n13.10.2026, 17:22\nЗАПРОСИЛ\nСинтетический executor\nДЕЙСТВИЕ\nОжидает решения: Синтетический администратор\nТЕКУЩИЙ СРОК\n25.10.2026, 16:00\nЗАПРОШЕННЫЙ СРОК\n30.10.2026, 10:30\nПричина: Синтетическая причина переноса срока"
+    },
+    "pay24-admin-modern-deadline-fixed.log": {
+      "mode": "modern",
+      "taskId": 14,
+      "realAdminWindowSetting": true,
+      "cardRetainedUntilDecision": true,
+      "serverDue": "2026-10-30T03:30:00.0000000Z",
+      "caseRowDue": "30.10.2026, 10:30",
+      "filterRetained": true,
+      "url": "http://127.0.0.1:5301/cases/3",
+      "apiResponseStatus": 200
+    },
+    "pay24-row-native-download.log": {
+      "taskId": 14,
+      "suggestedFilename": "case-3-task-14.csv",
+      "nativeDownload": true,
+      "scope": "Actual synthetic task, no response overlays",
+      "menuClosed": true
+    },
+    "pay24-menu-filter-native-final.log": {
+      "realSyntheticData": true,
+      "collapseDoesNotChangeRows": true,
+      "rows": 10,
+      "restoredAfterReload": true,
+      "selectedFilter": "active",
+      "caption": "Задачи по делу (11)"
+    },
+    "pay24-menu-visual-sequential-final.log": {
+      "scope": "Read-only browser metadata overlay, not DB rows or mutations",
+      "statuses": 10,
+      "types": 9,
+      "rows": 10,
+      "screenshots": 6,
+      "geometry": [
+        {
+          "theme": "standard",
+          "width": 390,
+          "documentWidth": 390,
+          "tableWidth": 640,
+          "scrollerWidth": 332,
+          "menu": {
+            "x": 141,
+            "y": 617.5,
+            "width": 220,
+            "height": 167,
+            "top": 617.5,
+            "right": 361,
+            "bottom": 784.5,
+            "left": 141
+          }
+        },
+        {
+          "theme": "standard",
+          "width": 1024,
+          "documentWidth": 1024,
+          "tableWidth": 662,
+          "scrollerWidth": 662,
+          "menu": {
+            "x": 759,
+            "y": 712,
+            "width": 220,
+            "height": 167,
+            "top": 712,
+            "right": 979,
+            "bottom": 879,
+            "left": 759
+          }
+        },
+        {
+          "theme": "standard",
+          "width": 1440,
+          "documentWidth": 1440,
+          "tableWidth": 654,
+          "scrollerWidth": 654,
+          "menu": {
+            "x": 983,
+            "y": 721,
+            "width": 220,
+            "height": 167,
+            "top": 721,
+            "right": 1203,
+            "bottom": 888,
+            "left": 983
+          }
+        },
+        {
+          "theme": "graphite",
+          "width": 390,
+          "documentWidth": 390,
+          "tableWidth": 640,
+          "scrollerWidth": 332,
+          "menu": {
+            "x": 141,
+            "y": 617.5,
+            "width": 220,
+            "height": 167,
+            "top": 617.5,
+            "right": 361,
+            "bottom": 784.5,
+            "left": 141
+          }
+        },
+        {
+          "theme": "graphite",
+          "width": 1024,
+          "documentWidth": 1024,
+          "tableWidth": 662,
+          "scrollerWidth": 662,
+          "menu": {
+            "x": 759,
+            "y": 712,
+            "width": 220,
+            "height": 167,
+            "top": 712,
+            "right": 979,
+            "bottom": 879,
+            "left": 759
+          }
+        },
+        {
+          "theme": "graphite",
+          "width": 1440,
+          "documentWidth": 1440,
+          "tableWidth": 654,
+          "scrollerWidth": 654,
+          "menu": {
+            "x": 983,
+            "y": 721,
+            "width": 220,
+            "height": 167,
+            "top": 721,
+            "right": 1203,
+            "bottom": 888,
+            "left": 983
+          }
+        }
+      ],
+      "escapeFocusRetained": true
+    }
+  },
+  "browserScopeNotes": {
+    "homeKey": "covered by component tests; native script field homeEnd=true actually verified End, arrows, Escape and Tab",
+    "visual": "metadata overlay only; no mutation or real DB completeness claim for fake visual rows",
+    "mutations": "real synthetic DB/API, no response overlays for owned IDs 13/14/21",
+    "oneBrowserActorSwitch": "cleared only synthetic-origin local/session caches while preserving marker and current token without disclosure, to prevent stale actor metadata and reduce memory",
+    "lastPageReturn": "return mounts case view at first page; mounted hook correction verified separately in existing hook tests"
+  },
+  "localSafety": {
+    "originalSettingsRestoredExactly": true,
+    "originalVisibleTaskIdsPreserved": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "ownedFixtureIdsKeptForRemainingStage3": [
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21
+    ],
+    "emailDisabledInDatabase": true,
+    "nonemptySmtpSettings": 0,
+    "snapshotPath": "D:/PayPlannerReview-20261012/pay24-menu-owned-fixtures-after-checks.local.db",
+    "snapshotSha256": "838f0a0edab408adfc41dad3d307a351c90958825dd83a00cef67594e4032607",
+    "csvBytesSha256": "d027df5b9552a6b0f27933d6862d8a5568c2794b4163004e7005864aac0125ed",
+    "csvBom": true,
+    "csvRows": 1,
+    "csvTaskId": 14,
+    "csvColumns": 6,
+    "csvUtcDueVerified": true,
+    "productionTouched": false
+  },
+  "ownedPreviewsStopped": true,
+  "ownedBrowserSessionsClosed": true,
+  "apiAndSchemaChanged": false,
+  "apiBinaryUnchangedFromPreviousProof": true,
+  "normalFullBackendGatePassed": false,
+  "allReleaseGatesPassed": false,
+  "performance": {
+    "rowMenuExtraRequests": 0,
+    "singleRowCsvExtraRequests": 0,
+    "selectionMaximum": 100,
+    "filtersVisibilityExtraRequests": 0,
+    "oneScrollListenerForOpenMenu": true,
+    "unchangedAnchorCoordinatesDoNotRerender": true,
+    "tabAncestorStyleReadsCachedPerEvent": true,
+    "statusPresentationSharedWithoutChangingJournalColors": true
+  },
+  "logs": {
+    "pay24-menu-keyboard-repeat.log": {
+      "path": "D:/PayPlannerReview-20261012/pay24-menu-keyboard-repeat.log",
+      "sha256": "36ac50871e48c899fcd1ab73ac109a4702cac37172b17846e38a2574cf89bd62",
+      "bytes": 2400
+    },
+    "pay24-menu-real-last-page-repeat.log": {
+      "path": "D:/PayPlannerReview-20261012/pay24-menu-real-last-page-repeat.log",
+      "sha256": "15bd416eea23f515624df8f4f39e516e51a95f40e699c658285e023edc92443b",
+      "bytes": 3202
+    },
+    "pay24-executor-legacy-deadline-verify.log": {
+      "path": "D:/PayPlannerReview-20261012/pay24-executor-legacy-deadline-verify.log",
+      "sha256": "f8bfc78a57e5b9641c6ce5e6b6f9366f7561b5f74ad40aede0a631d5cfac563c",
+      "bytes": 2087
+    },
+    "pay24-admin-legacy-deadline-fixed.log": {
+      "path": "D:/PayPlannerReview-20261012/pay24-admin-legacy-deadline-fixed.log",
+      "sha256": "d212fdcb2087babbfe7ec7beb4ae784f7889c1e867fe19b3fc01d4096073d435",
+      "bytes": 2200
+    },
+    "pay24-executor-modern-deadline-request.log": {
+      "path": "D:/PayPlannerReview-20261012/pay24-executor-modern-deadline-request.log",
+      "sha256": "3cc732d6370d545a88acd2fdae1a728397c25993c9310b3ab750ba6e7d436369",
+      "bytes": 3730
+    },
+    "pay24-admin-modern-deadline-fixed.log": {
+      "path": "D:/PayPlannerReview-20261012/pay24-admin-modern-deadline-fixed.log",
+      "sha256": "7ae07d5dd025b888d35181be4290bde260a43a58fd266db82a0778c11a980548",
+      "bytes": 2569
+    },
+    "pay24-row-native-download.log": {
+      "path": "D:/PayPlannerReview-20261012/pay24-row-native-download.log",
+      "sha256": "0742ad2128033a1e85f8f7a239eef1b77f4229fe54332f87a3a2b622703871e1",
+      "bytes": 1284
+    },
+    "pay24-menu-filter-native-final.log": {
+      "path": "D:/PayPlannerReview-20261012/pay24-menu-filter-native-final.log",
+      "sha256": "93a3b2dbb4140c1b18493bc5515e310d1012f22ed8c1328a4e7e5f9ab47a5ea9",
+      "bytes": 2029
+    },
+    "pay24-menu-visual-sequential-final.log": {
+      "path": "D:/PayPlannerReview-20261012/pay24-menu-visual-sequential-final.log",
+      "sha256": "b132d3baf13c72e8534d6a8a0893ff899a814a12433b151d359ed06503ebf792",
+      "bytes": 5615
+    },
+    "pay24-menu-controls-final.log": {
+      "path": "D:/PayPlannerReview-20261012/pay24-menu-controls-final.log",
+      "sha256": "1bbddb6da5018bf52dc1172a828ee63425b4ae7a5b4723ead13836d728764cc3",
+      "bytes": 238
+    },
+    "pay24-decisions-filters-final-targeted.log": {
+      "path": "D:/PayPlannerReview-20261012/pay24-decisions-filters-final-targeted.log",
+      "sha256": "73a7e076cc12e73acbb17610e4cd459f10f61b15a4f8ee8e01cbe5aa2c45dc49",
+      "bytes": 253
+    },
+    "pay24-menu-full-unit.log": {
+      "path": "D:/PayPlannerReview-20261012/pay24-menu-full-unit.log",
+      "sha256": "780e26caeaf569b993c55e09f5b5b3f7160236fc1c3c4f4116774abbbd5dd83e",
+      "bytes": 96767
+    },
+    "pay24-menu-full-lint.log": {
+      "path": "D:/PayPlannerReview-20261012/pay24-menu-full-lint.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "pay24-menu-full-types-app.log": {
+      "path": "D:/PayPlannerReview-20261012/pay24-menu-full-types-app.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "pay24-menu-full-types-node.log": {
+      "path": "D:/PayPlannerReview-20261012/pay24-menu-full-types-node.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "pay24-menu-full-encoding.log": {
+      "path": "D:/PayPlannerReview-20261012/pay24-menu-full-encoding.log",
+      "sha256": "54a590aabc049ac5c28a3eef0e6b31dfa2195d8cb8aad02b47eae6e0979de749",
+      "bytes": 61
+    },
+    "pay24-menu-full-build.log": {
+      "path": "D:/PayPlannerReview-20261012/pay24-menu-full-build.log",
+      "sha256": "d8bf12c507c09671415c8b4df9de8096cc7a9e4e1fb4d9ab6a390aa5d379fcb4",
+      "bytes": 15356
+    },
+    "pay24-menu-full-integration.log": {
+      "path": "D:/PayPlannerReview-20261012/pay24-menu-full-integration.log",
+      "sha256": "963d535623042713be846d367c846cb6d5e33f3ec7400d38298fd53f1cbfe683",
+      "bytes": 247
+    },
+    "pay24-menu-checkpoint-encoding.log": {
+      "path": "D:/PayPlannerReview-20261012/pay24-menu-checkpoint-encoding.log",
+      "sha256": "12ddcc13f738cf0e2046f3f8c8f7180e87cc14ec61e4dff26919d8312d2f4afa",
+      "bytes": 61
+    }
+  },
+  "screenshots": {
+    "standard-390": {
+      "path": "D:/PayPlannerReview-20261012/pay24-menu-standard-390.png",
+      "sha256": "dbbf0325f28e54a77e780907c0ce3d4ae171fb93158725d944faffb8b75bc602",
+      "bytes": 54318
+    },
+    "standard-1024": {
+      "path": "D:/PayPlannerReview-20261012/pay24-menu-standard-1024.png",
+      "sha256": "8a5d8011fc18e71522dea445bf62280d23c600200b7d66c1bc8e045dadadb171",
+      "bytes": 142039
+    },
+    "standard-1440": {
+      "path": "D:/PayPlannerReview-20261012/pay24-menu-standard-1440.png",
+      "sha256": "1a39be671c03fc74d199c58bc1ab5eae8f2722c4c96a379ca817d03b111a3224",
+      "bytes": 159775
+    },
+    "graphite-390": {
+      "path": "D:/PayPlannerReview-20261012/pay24-menu-graphite-390.png",
+      "sha256": "3af34c49c5b5b3aaeef1fd41953f78bd0f5c403c39b27d9e2b54a9590d19a9f9",
+      "bytes": 54193
+    },
+    "graphite-1024": {
+      "path": "D:/PayPlannerReview-20261012/pay24-menu-graphite-1024.png",
+      "sha256": "8c43f0a4381cf52c684a12639fd16dc43a447616d04b8352640629f725cb4c34",
+      "bytes": 147209
+    },
+    "graphite-1440": {
+      "path": "D:/PayPlannerReview-20261012/pay24-menu-graphite-1440.png",
+      "sha256": "f321795ddcd62ca3f4114e68820729ad229256b2db6365bfe9ecbb15ab58c40f",
+      "bytes": 164473
+    }
+  },
+  "nativeCsv": {
+    "path": "D:/PayPlannerReview-20261012/pay24-row-native.csv",
+    "sha256": "d027df5b9552a6b0f27933d6862d8a5568c2794b4163004e7005864aac0125ed",
+    "bytes": 210
+  },
+  "releaseId": "2026-10-13-case-task-row-menu",
+  "releaseVersion": "1.14.86",
+  "limitations": [
+    "Stage3 actual revision/resubmit cycles and document binding preservation still open",
+    "Full normal backend dependency build remains unmet due host resources; no compiler retry in this UI wave",
+    "Whole card production acceptance remains open",
+    "Fresh YouGile read deferred by user; last confirmed full read 2026-10-13 01:58 UTC",
+    "No push, deploy, merge or YouGile changes"
+  ],
+  "failedEvidence": [
+    {
+      "log": "pay24-menu-focused.log",
+      "reason": "Tab closed menu but lost focus to body; explicit next/previous visible control handling added and verified."
+    },
+    {
+      "log": "pay24-menu-keyboard.log",
+      "reason": "Native scroll while opening closed menu; anchor now followed while visible, no synthetic delay or weaker assertion added."
+    },
+    {
+      "log": "pay24-menu-visual.log",
+      "reason": "sr-only action header escaped table clipping: x636, document637px at390 viewport. Relative th bounds fixed and sequential visual repeat passed."
+    },
+    {
+      "log": "pay24-menu-real-last-page.log",
+      "reason": "Recorder expected accessible page-size name that did not exist. Existing pageSizeLabel applied to visible SystemSelect, default/custom labels tested."
+    },
+    {
+      "log": "pay24-executor-legacy-deadline-request-repeat.log",
+      "reason": "POST201 succeeded, exact-text selector missed UI reason prefix. Verified existing pending request and unchanged due without sending duplicate POST."
+    },
+    {
+      "log": "pay24-admin-legacy-deadline-approve.log",
+      "reason": "Actual bug: premature close/unmount returned to case and omitted routed decision dialog. Both window callbacks/returns fixed; actual legacy/modern approval passed."
+    },
+    {
+      "log": "pay24-routed-decisions-focused-repeat.log",
+      "reason": "New test preparation had wrong input-text query, other-task mock ID, result resolution and ambiguous approval-button locator. Corrected data and exact result assertion; 16 final decision cases and full unit passed."
+    },
+    {
+      "log": "pay24-routed-decisions-focused.log",
+      "reason": "Failed editing assertion left no new tests; all382skipped is not a passed gate. No such claim made."
+    },
+    {
+      "log": "pay24-menu-filter-native-repeat.log",
+      "reason": "Native script assumed active while prior visual selected all; then two live CLI chains overlapped on one tab. Excluded these observations; terminal handles checked and reset/unroute followed by sequential native+visual repeats."
+    },
+    {
+      "log": "pay24-menu-stage3-api initial verification",
+      "reason": "Relative SQLite path was interpreted under backend cwd. Explicit mail/background false was set; absolute DB path immediately rechecked and email false/SMTP empty verified. Later launches use guards."
+    },
+    {
+      "log": "pay24-menu-stage3-vite.local.log",
+      "reason": "Preview-root env variables omitted from private launcher, startup failed before use. Correct root/setup/cache environment applied; ready process used."
+    },
+    {
+      "log": "pay24-menu-api stale auth probe",
+      "reason": "Prior token expired, returned401. Fresh synthetic login saved privately; no secrets printed."
+    }
+  ],
+  "roadmaps": {
+    "pay24": "3/6 (50%)",
+    "overall": "1/31 (3%)"
+  },
+  "pushed": false,
+  "deployed": false,
+  "yougileChanged": false,
+  "goalComplete": false,
+  "frontendAreaGatePassed": true,
+  "stage4CompletedAndVerified": true,
+  "stage4Audit": {
+    "checkboxesAndBulkActions": "current page selection, prior832b proof and current unit",
+    "rowMenu": "open original ID, selection, CSV; no decorative action",
+    "filters": "existing four server filters retained, collapsible panel state and strict saved boolean verified",
+    "typesAndNames": "eight existing types plus fallback, full names and Unicode initials",
+    "statusAndResult": "all nine statuses plus fallback; shared unchanged journal palette, result retained",
+    "oldFunctions": "create/stage suggestions/progress/results/common card files-comments-subtasks-links preserved by map and full regression suite",
+    "keyboardAndViewport": "menu keys/Tab/return focus; sequential390/1024/1440 two-theme snapshots, no document/desktop overflow",
+    "bothWindowsAndLocalDb": "actual legacy/modern menu entry and deadline decision; admin setting and restricted actor; original SQL email-disabled/synthetic settings snapshot",
+    "externalCaseShell": "separate PAY21/22 scope; whole PAY24 acceptance not claimed"
+  },
+  "apiTestBinaryPins": {
+    "PayPlanner.Api": {
+      "path": "D:/PayPlannerReview-20261012/calendar-timezone-baseline-artifacts/bin/PayPlanner.Api/release/PayPlanner.Api.dll",
+      "sha256": "c926bb3206528b02b8b70cb392b7dd49561f84ea4d8eb80ba8fd87cb9df6d895"
+    },
+    "PayPlanner.Api.Tests": {
+      "path": "D:/PayPlannerReview-20261012/calendar-timezone-baseline-artifacts/bin/PayPlanner.Api.Tests/release/PayPlanner.Api.Tests.dll",
+      "sha256": "a08b91bc782a12d445c86c4b992b52a72fda0c377a70466ae0eb0c9fe665668e"
+    },
+    "PayPlanner.Api.Migrations": {
+      "path": "D:/PayPlannerReview-20261012/calendar-timezone-baseline-artifacts/bin/PayPlanner.Api.Migrations/release/PayPlanner.Api.Migrations.dll",
+      "sha256": "5e5101a6d344f99342874e4c81c2429d66876aaa7a928f9c250dce7f1d56b3bc"
+    }
+  },
+  "releaseHistoryPreserved": true,
+  "sourceFreezeVerifiedBeforeCommit": true
+}

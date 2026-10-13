@@ -366,6 +366,8 @@ async function renderJournal(
     mode?: 'journal' | 'approvals' | 'untriaged';
     assignees?: TaskJournalAssignee[];
     withRoute?: boolean;
+    unmountOnTaskClose?: boolean;
+    nextRouteTaskId?: number;
     waitForTitle?: string | null;
     periodMode?: 'day' | 'week' | 'month' | 'all';
     embedded?: boolean;
@@ -457,14 +459,17 @@ async function renderJournal(
 
   function RoutedJournal() {
     const [routeTaskId, setRouteTaskId] = useState<number | null>(null);
-    return (
+    const [returned, setReturned] = useState(false);
+    if (returned) return <div data-testid="returned-to-case">Возврат в дело</div>;
+    return (<>
+      {options.nextRouteTaskId ? <button onClick={() => setRouteTaskId(options.nextRouteTaskId!)}>Перейти в другую задачу</button> : null}
       <TaskJournal
         initialView={options.initialView}
         mode={options.mode}
         embedded={options.embedded}
         contextFilter={options.contextFilter}
         routeTaskId={routeTaskId}
-        onRouteTaskChange={setRouteTaskId}
+        onRouteTaskChange={(id) => { setRouteTaskId(id); if (id === null && routeTaskId !== null && options.unmountOnTaskClose) setReturned(true); }}
         onOpenClient={options.onOpenClient}
         onOpenCase={options.onOpenCase}
         onOpenLegalEntity={options.onOpenLegalEntity}
@@ -472,7 +477,7 @@ async function renderJournal(
         underControlOnly={options.underControlOnly}
         overdueFilterSignal={options.overdueFilterSignal}
       />
-    );
+    </>);
   }
 
   const result = render(options.withRoute ? (
@@ -3068,6 +3073,126 @@ describe('TaskJournal', () => {
     expect(screen.getByTestId('task-deadline-change-request-badge-204')).toBeTruthy();
     expect(screen.getAllByText('Запрос переноса срока').length).toBeGreaterThan(0);
     expect(screen.queryByText(regularTask.title)).toBeNull();
+  });
+
+  describe.each(['legacy', 'modern'] as const)('routed decisions: %s', (mode) => {
+    const deadlineRequest = () => ({ id: 902, taskJournalItemId: 101, requestedByUserId: 8,
+      requestedByName: 'Исполнитель', reviewerUserId: 7, reviewerName: 'Постановщик',
+      currentDueAt: todayAt(18), requestedDueAt: todayAt(20), reason: 'Синтетическая причина',
+      status: 'pending', decisionDueAt: null, decisionComment: null, decidedByUserId: null,
+      decidedByName: null, decidedAt: null, createdCommentId: 501, decisionCommentId: null,
+      createdAt: todayAt(12), updatedAt: todayAt(12) });
+    async function openDeadline(options: { nextRouteTaskId?: number } = {}) {
+      apiMock.getTaskJournalDeadlineChangeRequests.mockResolvedValue([deadlineRequest()]);
+      await renderJournal([createTask({ authorUserId: 7, assigneeUserId: 8 }), createTask({ id: 102, title: 'Другая задача' })],
+        { withRoute: true, unmountOnTaskClose: true, nextRouteTaskId: options.nextRouteTaskId, settings: { taskCardWindowMode: mode } });
+      fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+      const card = await screen.findByTestId(`task-${mode}-card-window`);
+      fireEvent.click(await within(card).findByRole('button', { name: 'Рассмотреть запрос: согласовать или отказать' }));
+      const prompt = await screen.findByTestId('deadline-change-decision-prompt');
+      expect(screen.getByTestId(`task-${mode}-card-window`)).toBeTruthy();
+      expect(screen.queryByTestId('returned-to-case')).toBeNull();
+      return prompt;
+    }
+    it.each(['approve', 'reject'] as const)('keeps the card until a successful deadline %s and then returns to the case', async (decision) => {
+      const prompt = await openDeadline();
+      fireEvent.change(within(prompt).getByLabelText('Комментарий к решению'), { target: { value: 'Синтетическое решение' } });
+      fireEvent.click(within(prompt).getByRole('button', { name: decision === 'approve' ? 'Согласовать перенос' : 'Отказать' }));
+      await screen.findByTestId('returned-to-case');
+      expect(decision === 'approve' ? apiMock.approveTaskJournalDeadlineChangeRequest : apiMock.rejectTaskJournalDeadlineChangeRequest)
+        .toHaveBeenCalledWith(101, 902, expect.objectContaining({ comment: 'Синтетическое решение' }));
+    });
+    it('keeps the card on error and after snoozing the decision', async () => {
+      apiMock.approveTaskJournalDeadlineChangeRequest.mockRejectedValueOnce(new Error('Синтетический отказ сети'));
+      const prompt = await openDeadline();
+      fireEvent.click(within(prompt).getByRole('button', { name: 'Согласовать перенос' }));
+      await within(prompt).findByText('Синтетический отказ сети');
+      expect(screen.queryByTestId('returned-to-case')).toBeNull();
+      fireEvent.click(within(prompt).getByText('Отложить')); fireEvent.click(within(prompt).getByRole('button', { name: '10 мин' }));
+      await waitFor(() => expect(screen.queryByTestId('deadline-change-decision-prompt')).toBeNull());
+      expect(screen.getByTestId(`task-${mode}-card-window`)).toBeTruthy();
+    });
+    it('does not close another routed task from a delayed deadline response', async () => {
+      let finish!: (task: TaskJournalItem) => void;
+      apiMock.approveTaskJournalDeadlineChangeRequest.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+      apiMock.getTaskJournalItem.mockImplementation(async (id: number) => id === 102
+        ? createTask({ id: 102, title: 'Другая задача' }) : createTask({ authorUserId: 7, assigneeUserId: 8 }));
+      const prompt = await openDeadline({ nextRouteTaskId: 102 });
+      fireEvent.click(within(prompt).getByRole('button', { name: 'Согласовать перенос' }));
+      await waitFor(() => expect(apiMock.approveTaskJournalDeadlineChangeRequest).toHaveBeenCalledOnce());
+      fireEvent.click(screen.getByRole('button', { name: 'Перейти в другую задачу' }));
+      await waitFor(() => expect((within(screen.getByTestId(`task-${mode}-card-window`)).getByTestId('task-title-input') as HTMLInputElement).value).toBe('Другая задача'));
+      await act(async () => finish(createTask({ dueAt: todayAt(20) })));
+      expect(screen.queryByTestId('returned-to-case')).toBeNull();
+      expect(screen.getByTestId(`task-${mode}-card-window`)).toBeTruthy();
+      expect(screen.queryByTestId('deadline-change-decision-prompt')).toBeNull();
+      expect((screen.getByTestId('task-title-input') as HTMLInputElement).value).toBe('Другая задача');
+    });
+    it('ignores a late approval response after navigation to another routed task', async () => {
+      let finish!: (task: TaskJournalItem) => void;
+      const pendingTask = createTask({ status: 'onApproval', result: 'Работа выполнена', authorUserId: 8, assigneeUserId: 8,
+        participants: [{ id: 77, userId: 7, role: 'approver', displayName: 'Согласующий', sortOrder: 0, approvalStatus: 'pending' }] });
+      const otherTask = createTask({ id: 102, title: 'Другая задача' });
+      apiMock.updateTaskJournalApproval.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+      apiMock.getTaskJournalItem.mockImplementation(async (id: number) => id === 102 ? otherTask : pendingTask);
+      await renderJournal([pendingTask, otherTask], { withRoute: true, unmountOnTaskClose: true, nextRouteTaskId: 102,
+        settings: { taskCardWindowMode: mode } });
+      fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+      const card = await screen.findByTestId(`task-${mode}-card-window`);
+      fireEvent.click(within(card).getByTestId('task-open-approval-decision'));
+      const prompt = await screen.findByTestId('task-approval-decision-prompt');
+      fireEvent.click(within(prompt).getByRole('button', { name: 'Согласовать и завершить' }));
+      await waitFor(() => expect(apiMock.updateTaskJournalApproval).toHaveBeenCalledOnce());
+      fireEvent.click(screen.getByRole('button', { name: 'Перейти в другую задачу' }));
+      await waitFor(() => expect((screen.getByTestId('task-title-input') as HTMLInputElement).value).toBe('Другая задача'));
+      await act(async () => finish({ ...pendingTask, status: 'done' }));
+      expect(screen.queryByTestId('returned-to-case')).toBeNull();
+      expect((screen.getByTestId('task-title-input') as HTMLInputElement).value).toBe('Другая задача');
+      expect(screen.queryByTestId('task-approval-decision-prompt')).toBeNull();
+    });
+    it('clears the routed decision after returning to the journal in the same component', async () => {
+      const task = createTask({ status: 'onApproval', result: 'Работа выполнена', authorUserId: 8, assigneeUserId: 8,
+        participants: [{ id: 77, userId: 7, role: 'approver', displayName: 'Согласующий', sortOrder: 0, approvalStatus: 'pending' }] });
+      await renderJournal([task], { withRoute: true, settings: { taskCardWindowMode: mode } });
+      fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+      const card = await screen.findByTestId(`task-${mode}-card-window`);
+      fireEvent.click(within(card).getByTestId('task-open-approval-decision'));
+      const prompt = await screen.findByTestId('task-approval-decision-prompt');
+      fireEvent.click(within(prompt).getByRole('button', { name: 'Согласовать и завершить' }));
+      await screen.findByTestId('task-view-controls');
+      await waitFor(() => expect(screen.queryByTestId('task-approval-decision-prompt')).toBeNull());
+      expect(screen.queryByTestId(`task-${mode}-card-window`)).toBeNull();
+    });
+    it('preserves the modal deadline decision in the approvals journal with a route callback', async () => {
+      const request = deadlineRequest(); const task = createTask({ authorUserId: 7, assigneeUserId: 8, activeDeadlineChangeRequests: [request] });
+      apiMock.getTaskJournalDeadlineChangeRequests.mockResolvedValue([request]);
+      await renderJournal([task], { withRoute: true, mode: 'approvals', settings: { taskCardWindowMode: mode } });
+      const automatic = await screen.findByTestId('deadline-change-decision-prompt');
+      fireEvent.click(within(automatic).getByText('Отложить')); fireEvent.click(within(automatic).getByRole('button', { name: '10 мин' }));
+      await waitFor(() => expect(screen.queryByTestId('deadline-change-decision-prompt')).toBeNull());
+      fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+      const card = await screen.findByTestId(`task-${mode}-card-window`);
+      fireEvent.click(await within(card).findByRole('button', { name: 'Рассмотреть запрос: согласовать или отказать' }));
+      const prompt = await screen.findByTestId('deadline-change-decision-prompt');
+      expect(screen.queryByTestId(`task-${mode}-card-window`)).toBeNull();
+      fireEvent.click(within(prompt).getByRole('button', { name: 'Согласовать перенос' }));
+      await waitFor(() => expect(screen.queryByTestId('deadline-change-decision-prompt')).toBeNull());
+      expect(apiMock.approveTaskJournalDeadlineChangeRequest).toHaveBeenCalledWith(101, 902, expect.any(Object));
+    });
+    it('keeps the routed approval decision available until the approver finishes', async () => {
+      await renderJournal([createTask({ status: 'onApproval', result: 'Работа выполнена', authorUserId: 8, assigneeUserId: 8,
+        participants: [{ id: 77, userId: 7, role: 'approver', displayName: 'Согласующий', sortOrder: 0, approvalStatus: 'pending' }] })],
+      { withRoute: true, unmountOnTaskClose: true, settings: { taskCardWindowMode: mode } });
+      fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+      const card = await screen.findByTestId(`task-${mode}-card-window`);
+      fireEvent.click(within(card).getByTestId('task-open-approval-decision'));
+      const prompt = await screen.findByTestId('task-approval-decision-prompt');
+      expect(screen.queryByTestId('returned-to-case')).toBeNull();
+      expect(screen.getByTestId(`task-${mode}-card-window`)).toBeTruthy();
+      fireEvent.click(within(prompt).getByRole('button', { name: 'Согласовать и завершить' }));
+      await screen.findByTestId('returned-to-case');
+      expect(apiMock.updateTaskJournalApproval).toHaveBeenCalledWith(101, 'approved', 'Работа выполнена', 77, 'complete');
+    });
   });
 
   it('shows a forced decision prompt for deadline change requests in approvals mode', async () => {

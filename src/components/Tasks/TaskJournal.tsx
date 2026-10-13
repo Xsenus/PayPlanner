@@ -1,3 +1,4 @@
+import { taskStatusClass as statusClass } from '../../utils/taskStatusClass';
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { CALENDAR_TASK_VISIBILITY_SETTINGS_HREF } from '../../utils/calendarSettingsNavigation';
 import { TaskUploadStatusPanel } from './TaskUploadStatusPanel';
@@ -2012,29 +2013,6 @@ function TaskPriorityBadge({
   );
 }
 
-function statusClass(status: TaskJournalStatus) {
-  switch (status) {
-    case 'done':
-      return 'bg-emerald-50 text-emerald-700';
-    case 'cancelled':
-      return 'bg-slate-100 text-slate-500';
-    case 'waiting':
-      return 'bg-amber-50 text-amber-700';
-    case 'onApproval':
-      return 'bg-violet-50 text-violet-700';
-    case 'approved':
-      return 'bg-emerald-50 text-emerald-700';
-    case 'revision':
-      return 'bg-orange-50 text-orange-700';
-    case 'overdueApproval':
-      return 'bg-rose-50 text-rose-700';
-    case 'inProgress':
-      return 'bg-blue-50 text-blue-700';
-    default:
-      return 'bg-slate-50 text-slate-700';
-  }
-}
-
 function taskCalendarPriorityTone(priority: TaskJournalPriority) {
   switch (priority) {
     case 'urgent':
@@ -2734,6 +2712,27 @@ export function TaskJournal({
   const [approvalDecisionRevisionDueAt, setApprovalDecisionRevisionDueAt] = useState('');
   const [approvalDecisionError, setApprovalDecisionError] = useState<string | null>(null);
   const [approvalDecisionSaving, setApprovalDecisionSaving] = useState<'approve' | 'approveComplete' | 'approveReturn' | 'revision' | null>(null);
+  const decisionOwnerRef = useRef({ mounted: false, taskId: routeTaskId ?? null, userId: currentUserId });
+  const previousDecisionRouteRef = useRef(isRouteTaskPage);
+  useLayoutEffect(() => {
+    decisionOwnerRef.current = { mounted: true, taskId: routeTaskId ?? null, userId: currentUserId };
+    return () => { decisionOwnerRef.current.mounted = false; };
+  }, [routeTaskId, currentUserId]);
+  useEffect(() => {
+    const previous = previousDecisionRouteRef.current;
+    previousDecisionRouteRef.current = isRouteTaskPage;
+    if (!isRouteTaskPage) {
+      if (previous) {
+        setDeadlineChangeDecisionPrompt(null);
+        setApprovalDecisionPrompt(null);
+        setDeadlineChangeDecisionSaving(null);
+        setApprovalDecisionSaving(null);
+      }
+      return;
+    }
+    setDeadlineChangeDecisionPrompt((current) => current && current.task.id !== routeTaskId ? null : current);
+    setApprovalDecisionPrompt((current) => current && current.task.id !== routeTaskId ? null : current);
+  }, [isRouteTaskPage, routeTaskId]);
   const [forcedDecisionSnoozeRevision, setForcedDecisionSnoozeRevision] = useState(0);
   const forcedDecisionSnoozes = useMemo(() => ({
     revision: forcedDecisionSnoozeRevision,
@@ -5223,6 +5222,11 @@ export function TaskJournal({
     }
   };
 
+  const decisionIsCurrent = () => {
+    const owner = decisionOwnerRef.current;
+    return owner.mounted && owner.userId === currentUserId && owner.taskId === (routeTaskId ?? null);
+  };
+
   const resetDeadlineChangeDecisionPrompt = () => {
     setDeadlineChangeDecisionPrompt(null);
     setDeadlineChangeDecisionDueAt('');
@@ -5273,13 +5277,16 @@ export function TaskJournal({
         approvedDueAt,
         comment: comment || null,
       });
+      if (!decisionIsCurrent()) { emitTaskChange(); return; }
       toast.success('Перенос срока согласован.', 'Согласования');
       processedDeadlineChangeRequestIdsRef.current.add(request.id);
       setForcedDecisionSnoozeRevision((value) => value + 1);
       resetDeadlineChangeDecisionPrompt();
+      if (isRouteTaskPage) closeTaskModal();
       await refreshTasks();
       emitTaskChange();
     } catch (error) {
+      if (!decisionIsCurrent()) return;
       if (isHttpErrorStatus(error, 404)) {
         await dismissUnavailableDeadlineChangePrompt(task.id, request.id);
         return;
@@ -5303,13 +5310,16 @@ export function TaskJournal({
     setDeadlineChangeDecisionError(null);
     try {
       await apiService.rejectTaskJournalDeadlineChangeRequest(task.id, request.id, { comment });
+      if (!decisionIsCurrent()) { emitTaskChange(); return; }
       toast.success('Перенос срока отклонен.', 'Согласования');
       processedDeadlineChangeRequestIdsRef.current.add(request.id);
       setForcedDecisionSnoozeRevision((value) => value + 1);
       resetDeadlineChangeDecisionPrompt();
+      if (isRouteTaskPage) closeTaskModal();
       await refreshTasks();
       emitTaskChange();
     } catch (error) {
+      if (!decisionIsCurrent()) return;
       if (isHttpErrorStatus(error, 404)) {
         await dismissUnavailableDeadlineChangePrompt(task.id, request.id);
         return;
@@ -5468,6 +5478,7 @@ export function TaskJournal({
       } else {
         await apiService.updateTaskJournalApproval(taskId, decision, resolution, participantId, finalAction);
       }
+      if (!decisionIsCurrent()) { emitTaskChange(); return true; }
       const successMessage = finalAction === 'complete'
         ? 'Задача согласована и завершена.'
         : decision === 'approved'
@@ -5479,6 +5490,7 @@ export function TaskJournal({
       emitTaskChange();
       return true;
     } catch (error) {
+      if (!decisionIsCurrent()) return false;
       toast.error(extractDisplayErrorMessage(error, 'Не удалось сохранить решение по согласованию.'), 'Журнал задач');
       return false;
     }
@@ -5513,6 +5525,7 @@ export function TaskJournal({
     setApprovalDecisionError(null);
     const { task, participant } = approvalDecisionPrompt;
     const saved = await handleApprovalDecision(task.id, 'approved', task.result.trim(), participant.id, finalAction);
+    if (!decisionIsCurrent()) return;
     if (saved) {
       resetApprovalDecisionPrompt();
     } else {
@@ -5536,6 +5549,7 @@ export function TaskJournal({
     setApprovalDecisionSaving('revision');
     setApprovalDecisionError(null);
     const saved = await handleApprovalDecision(task.id, 'revisionRequested', text, participant.id, undefined, revisionDueAt);
+    if (!decisionIsCurrent()) return;
     if (saved) {
       resetApprovalDecisionPrompt();
     } else {
@@ -5823,6 +5837,61 @@ export function TaskJournal({
     }
   };
 
+  const taskDecisionDialogs = (
+    <>
+      {deadlineChangeDecisionPrompt ? (
+        <TaskDeadlineChangeDecisionPrompt
+          state={deadlineChangeDecisionPrompt}
+          approvedDueAt={deadlineChangeDecisionDueAt}
+          comment={deadlineChangeDecisionComment}
+          error={deadlineChangeDecisionError}
+          saving={deadlineChangeDecisionSaving}
+          onApprovedDueAtChange={(value) => {
+            setDeadlineChangeDecisionDueAt(value);
+            if (deadlineChangeDecisionError) {
+              setDeadlineChangeDecisionError(null);
+            }
+          }}
+          onCommentChange={(value) => {
+            setDeadlineChangeDecisionComment(value);
+            if (deadlineChangeDecisionError) {
+              setDeadlineChangeDecisionError(null);
+            }
+          }}
+          onApprove={() => void approveDeadlineChangeDecision()}
+          onReject={() => void rejectDeadlineChangeDecision()}
+          onSnooze={snoozeDeadlineChangeDecisionPrompt}
+        />
+      ) : null}
+      {approvalDecisionPrompt ? (
+        <TaskApprovalDecisionPrompt
+          state={approvalDecisionPrompt}
+          revisionText={approvalDecisionRevisionText}
+          revisionDueAt={approvalDecisionRevisionDueAt}
+          error={approvalDecisionError}
+          saving={approvalDecisionSaving}
+          onRevisionTextChange={(value) => {
+            setApprovalDecisionRevisionText(value);
+            if (approvalDecisionError) {
+              setApprovalDecisionError(null);
+            }
+          }}
+          onRevisionDueAtChange={(value) => {
+            setApprovalDecisionRevisionDueAt(value);
+            if (approvalDecisionError) {
+              setApprovalDecisionError(null);
+            }
+          }}
+          onApprove={() => void approvePromptDecision()}
+          onApproveComplete={() => void approvePromptDecision('complete')}
+          onApproveReturnToAssignee={() => void approvePromptDecision('returnToAssignee')}
+          onReturnToRevision={() => void returnPromptDecisionToRevision()}
+          onSnooze={snoozeApprovalDecisionPrompt}
+        />
+      ) : null}
+    </>
+  );
+
   const contextTitle = contextFilter?.title?.trim();
   const pageTitle = isApprovalsMode ? 'Согласования' : untriagedOnly ? 'Неразобранные' : underControlOnly ? 'На контроле' : contextTitle ? `Задачи: ${contextTitle}` : 'Журнал задач';
   const pageDescription = isApprovalsMode
@@ -5882,11 +5951,9 @@ export function TaskJournal({
             onResultSave={handleResultSave}
             onApprovalDecision={handleApprovalDecision}
             onReviewDeadlineChange={(task, request) => {
-              closeTaskModal();
               openDeadlineChangeDecisionPrompt(task, request);
             }}
             onReviewApproval={(task, participant) => {
-              closeTaskModal();
               openApprovalDecisionPrompt(task, participant);
             }}
             onDelete={handleDelete}
@@ -5900,6 +5967,7 @@ export function TaskJournal({
             </div>
           </div>
         )}
+        {taskDecisionDialogs}
         </div>
       </TaskStickerStylesProvider>
     );
@@ -6917,56 +6985,7 @@ export function TaskJournal({
           onClose={closeQuickApprovalPrompt}
         />
       ) : null}
-      {deadlineChangeDecisionPrompt ? (
-        <TaskDeadlineChangeDecisionPrompt
-          state={deadlineChangeDecisionPrompt}
-          approvedDueAt={deadlineChangeDecisionDueAt}
-          comment={deadlineChangeDecisionComment}
-          error={deadlineChangeDecisionError}
-          saving={deadlineChangeDecisionSaving}
-          onApprovedDueAtChange={(value) => {
-            setDeadlineChangeDecisionDueAt(value);
-            if (deadlineChangeDecisionError) {
-              setDeadlineChangeDecisionError(null);
-            }
-          }}
-          onCommentChange={(value) => {
-            setDeadlineChangeDecisionComment(value);
-            if (deadlineChangeDecisionError) {
-              setDeadlineChangeDecisionError(null);
-            }
-          }}
-          onApprove={() => void approveDeadlineChangeDecision()}
-          onReject={() => void rejectDeadlineChangeDecision()}
-          onSnooze={snoozeDeadlineChangeDecisionPrompt}
-        />
-      ) : null}
-      {approvalDecisionPrompt ? (
-        <TaskApprovalDecisionPrompt
-          state={approvalDecisionPrompt}
-          revisionText={approvalDecisionRevisionText}
-          revisionDueAt={approvalDecisionRevisionDueAt}
-          error={approvalDecisionError}
-          saving={approvalDecisionSaving}
-          onRevisionTextChange={(value) => {
-            setApprovalDecisionRevisionText(value);
-            if (approvalDecisionError) {
-              setApprovalDecisionError(null);
-            }
-          }}
-          onRevisionDueAtChange={(value) => {
-            setApprovalDecisionRevisionDueAt(value);
-            if (approvalDecisionError) {
-              setApprovalDecisionError(null);
-            }
-          }}
-          onApprove={() => void approvePromptDecision()}
-          onApproveComplete={() => void approvePromptDecision('complete')}
-          onApproveReturnToAssignee={() => void approvePromptDecision('returnToAssignee')}
-          onReturnToRevision={() => void returnPromptDecisionToRevision()}
-          onSnooze={snoozeApprovalDecisionPrompt}
-        />
-      ) : null}
+      {taskDecisionDialogs}
       </div>
     </TaskStickerStylesProvider>
   );
@@ -13578,6 +13597,7 @@ function TaskModal({
                   <button
                     type="button"
                     onClick={() => state?.task && currentApprovalParticipant && onReviewApproval(state.task, currentApprovalParticipant)}
+                    data-testid="task-open-approval-decision"
                     className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm font-semibold text-violet-700 transition hover:bg-violet-50"
                   >
                     <Scale className="h-4 w-4" />
@@ -14294,6 +14314,7 @@ function TaskModal({
                               <button
                                 type="button"
                                 onClick={() => state?.task && onReviewApproval(state.task, participant)}
+                                data-testid="task-open-approval-decision"
                                 className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:bg-violet-100"
                               >
                                 Открыть окно решения
