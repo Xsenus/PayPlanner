@@ -1,0 +1,340 @@
+{
+  "baseRevision": "dca4901775111e1e4f2c32c60307c32e8680ad08",
+  "verificationStatus": "40 focused and 291 related tests passed locally; full final backend gate and live acceptance remain",
+  "codeFiles": {
+    "backend/Services/GoogleCalendarSyncService.cs": "b5167cf7ff5cfa71d36993b3abaf82438eadc6335785dfcaeddbb176240a9315",
+    "backend/Services/YandexCalendarSyncService.cs": "cde3efa8492d86fcc91916cd5ea2885c44d8faf86d4c764dc3e41318caa41af3",
+    "backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs": "a9e5321c61959945a758ddbb9a4c77a03f27993d950b5cfc46830410d0ee1d5f",
+    "backend/PayPlanner.Api.Tests/YandexCalendarSyncServiceTests.cs": "9f339522bb50d627c7632e23ef8a3817a732648e7014ef7d67ce6ad557be173a",
+    "backend/AppReleases/releases.json": "037f6ba37541aa4c5f0a5ef484756de53d87491927c6ad4b3d8cd8745f348955"
+  },
+  "apiSha256": "2895033b75bf8775367696bee29c14fabf0ad3d619c6b6f66a064471297b134b",
+  "testAssemblySha256": "2c7ea568915609a70f3cd330ad1046eaf2ebce674e80c99f25cb5c5e186d77a1",
+  "artifactRoot": "D:\\PayPlannerReview-20261012\\calendar-permission-restore-final-evidence",
+  "buildPassed": true,
+  "buildWarnings": 0,
+  "buildErrors": 0,
+  "buildLogSha256": "52bfab506abb085ae37949052256278164af11ba868e532a68d7473d299bf523",
+  "focusedTests": {
+    "counts": {
+      "total": 40,
+      "executed": 40,
+      "passed": 40,
+      "failed": 0,
+      "error": 0,
+      "timeout": 0,
+      "aborted": 0,
+      "inconclusive": 0,
+      "passedButRunAborted": 0,
+      "notRunnable": 0,
+      "notExecuted": 0,
+      "disconnected": 0,
+      "warning": 0,
+      "completed": 0,
+      "inProgress": 0,
+      "pending": 0
+    },
+    "trxSha256": "6022e347a3a9e4c85eda6cdcc215175a5af567f0a90e50d5e5f2fbb6c0f10d9f"
+  },
+  "relatedTests": {
+    "counts": {
+      "total": 291,
+      "executed": 291,
+      "passed": 291,
+      "failed": 0,
+      "error": 0,
+      "timeout": 0,
+      "aborted": 0,
+      "inconclusive": 0,
+      "passedButRunAborted": 0,
+      "notRunnable": 0,
+      "notExecuted": 0,
+      "disconnected": 0,
+      "warning": 0,
+      "completed": 0,
+      "inProgress": 0,
+      "pending": 0
+    },
+    "trxSha256": "4efcf72c9d8950a49ff1eb36b8b22d9fbd71078c943279b293b92d9c87fe785a",
+    "postgresCase": {
+      "executionId": "a5fc7d1f-82f2-42f0-b808-081fe3f596a8",
+      "testId": "2e12afaf-ae69-1153-83d9-4e04da21b0bd",
+      "testName": "PayPlanner.Api.Tests.DataVisibilityServiceTests.ResolveSectionAccessAsync_TranslatesOnFreshPostgreSqlDatabase",
+      "computerName": "XSENUS",
+      "duration": "00:00:48.1656435",
+      "startTime": "2026-10-13T08:33:44.6995560+07:00",
+      "endTime": "2026-10-13T08:33:44.6995564+07:00",
+      "testType": "13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b",
+      "outcome": "Passed",
+      "testListId": "8c84fa94-04c1-424b-9868-57a2d4851a1d",
+      "relativeResultsDirectory": "a5fc7d1f-82f2-42f0-b808-081fe3f596a8"
+    }
+  },
+  "recoveryMetrics": [
+    "CalendarPermissionRecovery fresh=False; revokedErrors=0; restoredErrors=0; created=1; successfulWrites=2; missingReads=0",
+    "CalendarPermissionRecovery fresh=True; revokedErrors=0; restoredErrors=0; created=1; successfulWrites=2; missingReads=0"
+  ],
+  "permissionBaseline": {
+    "counts": {
+      "total": 30,
+      "executed": 30,
+      "passed": 0,
+      "failed": 30,
+      "error": 0,
+      "timeout": 0,
+      "aborted": 0,
+      "inconclusive": 0,
+      "passedButRunAborted": 0,
+      "notRunnable": 0,
+      "notExecuted": 0,
+      "disconnected": 0,
+      "warning": 0,
+      "completed": 0,
+      "inProgress": 0,
+      "pending": 0
+    },
+    "results": [
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: True, change: \"deny\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Strings differ\r\n           ↓ (pos 0)\r\nExpected: \"Protected after access revoked\"\r\nActual:   \"External allowed\"\r\n           ↑ (pos 0)",
+        "stack": "   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1429\r\n   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1434\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: True, change: \"role\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Strings differ\r\n           ↓ (pos 0)\r\nExpected: \"Protected after access revoked\"\r\nActual:   \"External allowed\"\r\n           ↑ (pos 0)",
+        "stack": "   at PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\GoogleCalendarSyncServiceTests.cs:line 1607\r\n   at PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\GoogleCalendarSyncServiceTests.cs:line 1612\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(singleTask: True, change: \"grant\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 1\r\nActual:   0",
+        "stack": "   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(Boolean singleTask, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1310\r\n   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(Boolean singleTask, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1314\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: False, change: \"moved\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Strings differ\r\n           ↓ (pos 0)\r\nExpected: \"Protected after access revoked\"\r\nActual:   \"External allowed\"\r\n           ↑ (pos 0)",
+        "stack": "   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1429\r\n   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1434\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(singleTask: True, change: \"deny\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 0\r\nActual:   1",
+        "stack": "   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(Boolean singleTask, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1310\r\n   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(Boolean singleTask, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1314\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: False, change: \"deny\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Strings differ\r\n           ↓ (pos 0)\r\nExpected: \"Protected after access revoked\"\r\nActual:   \"External allowed\"\r\n           ↑ (pos 0)",
+        "stack": "   at PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\GoogleCalendarSyncServiceTests.cs:line 1607\r\n   at PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\GoogleCalendarSyncServiceTests.cs:line 1612\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: True, change: \"moved\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Strings differ\r\n           ↓ (pos 0)\r\nExpected: \"Protected after access revoked\"\r\nActual:   \"External allowed\"\r\n           ↑ (pos 0)",
+        "stack": "   at PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\GoogleCalendarSyncServiceTests.cs:line 1607\r\n   at PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\GoogleCalendarSyncServiceTests.cs:line 1612\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: True, change: \"specific\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Strings differ\r\n           ↓ (pos 0)\r\nExpected: \"Protected after access revoked\"\r\nActual:   \"External allowed\"\r\n           ↑ (pos 0)",
+        "stack": "   at PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\GoogleCalendarSyncServiceTests.cs:line 1607\r\n   at PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\GoogleCalendarSyncServiceTests.cs:line 1612\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(singleTask: False, change: \"grant\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 1\r\nActual:   0",
+        "stack": "   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(Boolean singleTask, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1310\r\n   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(Boolean singleTask, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1314\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: False, change: \"role\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Strings differ\r\n           ↓ (pos 0)\r\nExpected: \"Protected after access revoked\"\r\nActual:   \"External allowed\"\r\n           ↑ (pos 0)",
+        "stack": "   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1429\r\n   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1434\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: False, change: \"specific\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Strings differ\r\n           ↓ (pos 0)\r\nExpected: \"Protected after access revoked\"\r\nActual:   \"External allowed\"\r\n           ↑ (pos 0)",
+        "stack": "   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1429\r\n   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1434\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: True, change: \"moved\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Strings differ\r\n           ↓ (pos 0)\r\nExpected: \"Protected after access revoked\"\r\nActual:   \"External allowed\"\r\n           ↑ (pos 0)",
+        "stack": "   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1429\r\n   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1434\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(singleTask: True, change: \"inactive\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 0\r\nActual:   1",
+        "stack": "   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(Boolean singleTask, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1310\r\n   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(Boolean singleTask, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1314\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: True, change: \"role\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Strings differ\r\n           ↓ (pos 0)\r\nExpected: \"Protected after access revoked\"\r\nActual:   \"External allowed\"\r\n           ↑ (pos 0)",
+        "stack": "   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1429\r\n   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1434\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: False, change: \"moved\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Strings differ\r\n           ↓ (pos 0)\r\nExpected: \"Protected after access revoked\"\r\nActual:   \"External allowed\"\r\n           ↑ (pos 0)",
+        "stack": "   at PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\GoogleCalendarSyncServiceTests.cs:line 1607\r\n   at PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\GoogleCalendarSyncServiceTests.cs:line 1612\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: False, change: \"role\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Strings differ\r\n           ↓ (pos 0)\r\nExpected: \"Protected after access revoked\"\r\nActual:   \"External allowed\"\r\n           ↑ (pos 0)",
+        "stack": "   at PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\GoogleCalendarSyncServiceTests.cs:line 1607\r\n   at PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\GoogleCalendarSyncServiceTests.cs:line 1612\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: False, change: \"inactive\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Strings differ\r\n           ↓ (pos 0)\r\nExpected: \"Protected after access revoked\"\r\nActual:   \"External allowed\"\r\n           ↑ (pos 0)",
+        "stack": "   at PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\GoogleCalendarSyncServiceTests.cs:line 1607\r\n   at PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\GoogleCalendarSyncServiceTests.cs:line 1612\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: True, change: \"inactive\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Strings differ\r\n           ↓ (pos 0)\r\nExpected: \"Protected after access revoked\"\r\nActual:   \"External allowed\"\r\n           ↑ (pos 0)",
+        "stack": "   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1429\r\n   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1434\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: True, change: \"inactive\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Strings differ\r\n           ↓ (pos 0)\r\nExpected: \"Protected after access revoked\"\r\nActual:   \"External allowed\"\r\n           ↑ (pos 0)",
+        "stack": "   at PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\GoogleCalendarSyncServiceTests.cs:line 1607\r\n   at PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\GoogleCalendarSyncServiceTests.cs:line 1612\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: False, change: \"inactive\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Strings differ\r\n           ↓ (pos 0)\r\nExpected: \"Protected after access revoked\"\r\nActual:   \"External allowed\"\r\n           ↑ (pos 0)",
+        "stack": "   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1429\r\n   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1434\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: True, change: \"deny\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Strings differ\r\n           ↓ (pos 0)\r\nExpected: \"Protected after access revoked\"\r\nActual:   \"External allowed\"\r\n           ↑ (pos 0)",
+        "stack": "   at PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\GoogleCalendarSyncServiceTests.cs:line 1607\r\n   at PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\GoogleCalendarSyncServiceTests.cs:line 1612\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(singleTask: True, change: \"role\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 0\r\nActual:   1",
+        "stack": "   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(Boolean singleTask, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1310\r\n   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(Boolean singleTask, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1314\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(singleTask: False, change: \"deny\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 0\r\nActual:   1",
+        "stack": "   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(Boolean singleTask, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1310\r\n   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(Boolean singleTask, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1314\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(singleTask: False, change: \"role\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 0\r\nActual:   1",
+        "stack": "   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(Boolean singleTask, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1310\r\n   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(Boolean singleTask, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1314\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(singleTask: False, change: \"specific\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 0\r\nActual:   1",
+        "stack": "   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(Boolean singleTask, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1310\r\n   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(Boolean singleTask, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1314\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(singleTask: True, change: \"specific\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 0\r\nActual:   1",
+        "stack": "   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(Boolean singleTask, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1310\r\n   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(Boolean singleTask, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1314\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(singleTask: False, change: \"inactive\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Values differ\r\nExpected: 0\r\nActual:   1",
+        "stack": "   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(Boolean singleTask, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1310\r\n   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Synchronization_RefreshesCalendarPermissionOnSameService(Boolean singleTask, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1314\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: False, change: \"specific\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Strings differ\r\n           ↓ (pos 0)\r\nExpected: \"Protected after access revoked\"\r\nActual:   \"External allowed\"\r\n           ↑ (pos 0)",
+        "stack": "   at PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\GoogleCalendarSyncServiceTests.cs:line 1607\r\n   at PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\GoogleCalendarSyncServiceTests.cs:line 1612\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: True, change: \"specific\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Strings differ\r\n           ↓ (pos 0)\r\nExpected: \"Protected after access revoked\"\r\nActual:   \"External allowed\"\r\n           ↑ (pos 0)",
+        "stack": "   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1429\r\n   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1434\r\n--- End of stack trace from previous location ---"
+      },
+      {
+        "name": "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: False, change: \"deny\")",
+        "outcome": "Failed",
+        "message": "Assert.Equal() Failure: Strings differ\r\n           ↓ (pos 0)\r\nExpected: \"Protected after access revoked\"\r\nActual:   \"External allowed\"\r\n           ↑ (pos 0)",
+        "stack": "   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1429\r\n   at PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(Boolean newService, String change) in C:\\Users\\ilel\\source\\repos\\PayPlanner\\backend\\PayPlanner.Api.Tests\\YandexCalendarSyncServiceTests.cs:line 1434\r\n--- End of stack trace from previous location ---"
+      }
+    ],
+    "trxPath": "D:\\PayPlannerReview-20261012\\calendar-permission-baseline-qualified-results\\calendar-permission-baseline-qualified.trx",
+    "trxSha256": "175a23efdd590c3d1c8173f54e96aa2a8995cc75152744aa07551037200f8fa2",
+    "apiSha256": "96d55591f863791282f8299766103fde616f50e8781a2451a267ad57670ac3ab",
+    "testAssemblySha256": "27aed560e69c99d41a47638d5e6c71c9d19b7f041985bb05df731893878808ea",
+    "artifactRoot": "D:\\PayPlannerReview-20261012\\calendar-permission-baseline-evidence",
+    "sourceHashes": {
+      "backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs": "322423cec171137d04409665fd72b03adbdaa3d7783fc11aeeb5b2813490d134",
+      "backend/PayPlanner.Api.Tests/YandexCalendarSyncServiceTests.cs": "8d5bdff1ca190a7565b80d660c30a3345150190942b9b5f8e7b22bc7fbaedfdc"
+    }
+  },
+  "restoreBaseline": {
+    "counts": {
+      "total": 2,
+      "executed": 2,
+      "passed": 0,
+      "failed": 2,
+      "error": 0,
+      "timeout": 0,
+      "aborted": 0,
+      "inconclusive": 0,
+      "passedButRunAborted": 0,
+      "notRunnable": 0,
+      "notExecuted": 0,
+      "disconnected": 0,
+      "warning": 0,
+      "completed": 0,
+      "inProgress": 0,
+      "pending": 0
+    },
+    "trxSha256": "9904e4c15675d4f9f24cc89b19de5fb942da259eb7874d6a97a4f88d44283038",
+    "apiSha256": "c52a927ef70961ded262026717357777732acff2d6091b4489d966f782ed56ac",
+    "testAssemblySha256": "6d4b7d7615985807293fb4f50110816b2d0584c649a2ce4a4f8e7401352e6a23",
+    "artifactRoot": "D:\\PayPlannerReview-20261012\\calendar-permission-restore-baseline-evidence",
+    "metrics": [
+      "CalendarPermissionRecovery fresh=False; revokedErrors=1; restoredErrors=0; created=1; successfulWrites=2; missingReads=1",
+      "CalendarPermissionRecovery fresh=True; revokedErrors=1; restoredErrors=0; created=1; successfulWrites=2; missingReads=1"
+    ],
+    "sourceHashes": {
+      "backend/Services/GoogleCalendarSyncService.cs": "88d281bdedbd163934d740dc9d96161b384d201818add7882ef3133bf9477399",
+      "backend/Services/YandexCalendarSyncService.cs": "55b57fc577a09133302b4507df95c9ac4f985db0bf636e66375c7c0d70be8640",
+      "backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs": "a9e5321c61959945a758ddbb9a4c77a03f27993d950b5cfc46830410d0ee1d5f",
+      "backend/PayPlanner.Api.Tests/YandexCalendarSyncServiceTests.cs": "d24f581ace3b43cb67493456051d0642b2741ab495b383820f94ee04c5641682",
+      "backend/AppReleases/releases.json": "21f30a7d06ddd1710ca6be153f4ca50811392c1252c2a5f00bcae65c26b8e51c"
+    },
+    "finding": "Import reads EF-deleted calendar after revoke. Restore succeeds in both same/fresh service cases; stale calendar-home defect is not established."
+  },
+  "checkpointProofSha256": "43151d5a4164fa18ab9a2b04b77bc1dde435cf739806c8e75ca9195ee0bd3d24",
+  "localEmailEnabled": false,
+  "localBackgroundServicesEnabled": false,
+  "syntheticDataOnly": true,
+  "fakeProviderHttp": true,
+  "ownedFreshPostgres": true,
+  "fullBackendGateCompleted": false,
+  "deployed": false,
+  "yougileChanged": false,
+  "scope": "Fresh rights per connection operation and import task visibility; skip intentionally EF-deleted calendars before SaveChanges. Restoration succeeds with the same and a fresh Yandex service. No stale calendar-home defect established.",
+  "remaining": [
+    "Inaccessible deleted/stale event boundaries and unchanged link metadata",
+    "Final full backend gate for the final calendar code",
+    "Remaining Google assignee SQL/provider queries and full graph/import memory work",
+    "Live provider acceptance and actual annulled task example"
+  ]
+}

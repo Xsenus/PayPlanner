@@ -1,0 +1,114 @@
+{
+  "baseRevision": "dca4901775111e1e4f2c32c60307c32e8680ad08",
+  "verificationStatus": "52 focused cases passed on the same API as the 291-case checkpoint; final full backend gate and live acceptance remain",
+  "codeFiles": {
+    "backend/Services/GoogleCalendarSyncService.cs": "b5167cf7ff5cfa71d36993b3abaf82438eadc6335785dfcaeddbb176240a9315",
+    "backend/Services/YandexCalendarSyncService.cs": "cde3efa8492d86fcc91916cd5ea2885c44d8faf86d4c764dc3e41318caa41af3",
+    "backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs": "782c0b70f171e8b2adc8251a81f1ab0407300a5204e545e6020835739c70a75d",
+    "backend/PayPlanner.Api.Tests/YandexCalendarSyncServiceTests.cs": "ff7177bd5c279b69269018f836f536449b91e4f883ffbf97a324f6082f225328",
+    "backend/AppReleases/releases.json": "037f6ba37541aa4c5f0a5ef484756de53d87491927c6ad4b3d8cd8745f348955"
+  },
+  "apiSha256": "2895033b75bf8775367696bee29c14fabf0ad3d619c6b6f66a064471297b134b",
+  "testAssemblySha256": "415df854995e7643598fc0a7edcbce966c7e0e15f655601012d6395b05373274",
+  "artifactRoot": "D:\\PayPlannerReview-20261012\\calendar-permission-boundary-final-evidence",
+  "normalApiBuildReused": true,
+  "testOnlyBuildPassed": true,
+  "buildWarnings": 0,
+  "buildErrors": 0,
+  "focusedTests": {
+    "counts": {
+      "total": 52,
+      "executed": 52,
+      "passed": 52,
+      "failed": 0,
+      "error": 0,
+      "timeout": 0,
+      "aborted": 0,
+      "inconclusive": 0,
+      "passedButRunAborted": 0,
+      "notRunnable": 0,
+      "notExecuted": 0,
+      "disconnected": 0,
+      "warning": 0,
+      "completed": 0,
+      "inProgress": 0,
+      "pending": 0
+    },
+    "trxSha256": "7880d101d455b31ab9d8324a8b612c0d86311af99bca0e114f6cb0925628fe01"
+  },
+  "additionalDeletedStaleCases": [
+    "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: False, change: \"deleted\")",
+    "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: False, change: \"deletedMissingId\")",
+    "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: False, change: \"stale\")",
+    "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: True, change: \"deleted\")",
+    "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: True, change: \"deletedMissingId\")",
+    "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: True, change: \"stale\")",
+    "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: False, change: \"deleted\")",
+    "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: False, change: \"deletedMissingId\")",
+    "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: False, change: \"stale\")",
+    "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: True, change: \"deleted\")",
+    "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: True, change: \"deletedMissingId\")",
+    "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: True, change: \"stale\")"
+  ],
+  "relatedCheckpointReused": {
+    "proofSha256": "d3c84d4eb86e02e767d36ae8a2ec061ffbfbe5ee7cbff5876172bfe91e04981e",
+    "passed": 291,
+    "trxSha256": "4efcf72c9d8950a49ff1eb36b8b22d9fbd71078c943279b293b92d9c87fe785a",
+    "sameApiSha256": "2895033b75bf8775367696bee29c14fabf0ad3d619c6b6f66a064471297b134b",
+    "reason": "Only test fixtures and assertions changed after the checkpoint; API, release data and configuration are unchanged"
+  },
+  "relatedUniqueCasesCovered": 303,
+  "singleRunOf303Claimed": false,
+  "importCasesPreservingCompleteLinkMetadata": 36,
+  "specificCleanupCasesVerifyRemovedCalendarAndLink": 4,
+  "staleUnauthorizedEventNotDeleted": true,
+  "fixturePreflight": {
+    "counts": {
+      "total": 52,
+      "executed": 52,
+      "passed": 48,
+      "failed": 4,
+      "error": 0,
+      "timeout": 0,
+      "aborted": 0,
+      "inconclusive": 0,
+      "passedButRunAborted": 0,
+      "notRunnable": 0,
+      "notExecuted": 0,
+      "disconnected": 0,
+      "warning": 0,
+      "completed": 0,
+      "inProgress": 0,
+      "pending": 0
+    },
+    "failed": [
+      "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: False, change: \"specific\")",
+      "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: False, change: \"specific\")",
+      "PayPlanner.Api.Tests.GoogleCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: True, change: \"specific\")",
+      "PayPlanner.Api.Tests.YandexCalendarSyncServiceTests.Import_DoesNotChangeTaskAfterCalendarAccessRevoked(newService: True, change: \"specific\")"
+    ],
+    "trxSha256": "f86dabf5d0a399a452f41e2c1731c4917605f8ee9d687900e3bd15ab1d06ae9d",
+    "sourceHashes": {
+      "backend/Services/GoogleCalendarSyncService.cs": "b5167cf7ff5cfa71d36993b3abaf82438eadc6335785dfcaeddbb176240a9315",
+      "backend/Services/YandexCalendarSyncService.cs": "cde3efa8492d86fcc91916cd5ea2885c44d8faf86d4c764dc3e41318caa41af3",
+      "backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs": "418247c18941de5e95ee66be04a60c5a553483265798ba0bad58f1cb75559992",
+      "backend/PayPlanner.Api.Tests/YandexCalendarSyncServiceTests.cs": "f5f39319e992921cf8ea3cc621d36fe41a95b5a97343a5d19624c33c887e0075",
+      "backend/AppReleases/releases.json": "037f6ba37541aa4c5f0a5ef484756de53d87491927c6ad4b3d8cd8745f348955"
+    },
+    "testAssemblySha256": "31d3cfade1331630ceda825236e8925e23f92a5b061ecc7a913ce91f746b6e65",
+    "qualifiedDefectBaseline": false,
+    "reason": "Test incorrectly expected a link after intentional specific-assignee calendar cleanup; both providers remove that calendar and link by established policy. Original TRX retained; application code unchanged."
+  },
+  "localEmailEnabled": false,
+  "localBackgroundServicesEnabled": false,
+  "syntheticDataOnly": true,
+  "fakeProviderHttp": true,
+  "deployed": false,
+  "yougileChanged": false,
+  "fullBackendGateCompleted": false,
+  "remaining": [
+    "Final full backend gate for final code",
+    "Remaining Google assignee queries and full graph/import memory work",
+    "Live external provider acceptance and actual annulled task example"
+  ]
+}

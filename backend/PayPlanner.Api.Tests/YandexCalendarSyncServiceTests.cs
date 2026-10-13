@@ -1208,6 +1208,318 @@ END:VCALENDAR
             .SingleAsync());
     }
 
+
+    [Theory]
+    [InlineData(false, "deny")]
+    [InlineData(true, "deny")]
+    [InlineData(false, "inactive")]
+    [InlineData(true, "inactive")]
+    [InlineData(false, "role")]
+    [InlineData(true, "role")]
+    [InlineData(false, "specific")]
+    [InlineData(true, "specific")]
+    [InlineData(false, "grant")]
+    [InlineData(true, "grant")]
+    public async Task Synchronization_RefreshesCalendarPermissionOnSameService(bool singleTask, string change)
+    {
+        await using var db = await CreateContextAsync();
+        var actor = await CreateUserAsync(db, "permission-actor@example.local", "permission-actor");
+        var selected = await CreateUserAsync(db, "permission-selected@example.local", "permission-selected");
+        var other = await CreateUserAsync(db, "permission-other@example.local", "permission-other");
+        actor.FullName = "Permission actor";
+        selected.FullName = "Permission selected";
+        other.FullName = "Permission other";
+        var specific = change == "specific";
+        var permission = new RolePermission
+        {
+            RoleId = actor.RoleId,
+            Section = RolePermissionCatalog.Calendar,
+            CanView = change != "grant",
+            ViewScope = specific ? DataVisibilityScope.Specific : DataVisibilityScope.Own,
+        };
+        db.RolePermissions.Add(permission);
+        if (specific)
+        {
+            db.RoleCalendarVisibleUsers.AddRange(
+                new RoleCalendarVisibleUser { RoleId = actor.RoleId, UserId = selected.Id },
+                new RoleCalendarVisibleUser { RoleId = actor.RoleId, UserId = other.Id });
+        }
+        await db.SaveChangesAsync();
+        var connection = await CreateConnectionAsync(db, actor.Id, calendarMode: specific ? "adminByAssignee" : "personal");
+        var task = await CreateTaskAsync(db, specific ? selected.Id : actor.Id, "Permission before change");
+        if (specific)
+        {
+            task.Participants.Add(new TaskJournalParticipant { UserId = actor.Id, Role = "observer", DisplayName = "Actor" });
+            await db.SaveChangesAsync();
+        }
+        var handler = new RecordingYandexHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+        db.ChangeTracker.Clear();
+
+        async Task RunAsync()
+        {
+            if (singleTask)
+            {
+                await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+            }
+            else
+            {
+                var result = await service.SyncDueConnectionsAsync(1, CancellationToken.None);
+                Assert.Equal(1, result.ProcessedConnections);
+                Assert.Equal(0, result.ErrorCount);
+            }
+        }
+
+        await RunAsync();
+        var initialWrites = handler.Requests.Count(request => request.Method == HttpMethod.Put);
+        Assert.Equal(change == "grant" ? 0 : 1, initialWrites);
+        switch (change)
+        {
+            case "deny":
+                await db.RolePermissions.Where(item => item.Id == permission.Id)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.CanView, false));
+                break;
+            case "grant":
+                await db.RolePermissions.Where(item => item.Id == permission.Id)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.CanView, true));
+                break;
+            case "inactive":
+                await db.Users.Where(item => item.Id == actor.Id)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.IsActive, false));
+                break;
+            case "role":
+                var deniedRole = new Role { Name = "permission-denied", Description = "Denied" };
+                db.Roles.Add(deniedRole);
+                await db.SaveChangesAsync();
+                db.RolePermissions.Add(new RolePermission { RoleId = deniedRole.Id, Section = RolePermissionCatalog.Calendar, CanView = false });
+                await db.SaveChangesAsync();
+                await db.Users.Where(item => item.Id == actor.Id)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.RoleId, deniedRole.Id));
+                break;
+            case "specific":
+                await db.RoleCalendarVisibleUsers.Where(item => item.RoleId == actor.RoleId && item.UserId == selected.Id)
+                    .ExecuteDeleteAsync();
+                break;
+        }
+        await db.TaskJournalItems.Where(item => item.Id == task.Id)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.Title, "Protected after permission change"));
+        db.ChangeTracker.Clear();
+        await RunAsync();
+        var newWrites = handler.Requests.Count(request => request.Method == HttpMethod.Put) - initialWrites;
+        Console.WriteLine($"CalendarPermissionRefresh provider=Yandex; single={singleTask}; change={change}; writes={newWrites}");
+        Assert.Equal(change == "grant" ? 1 : 0, newWrites);
+        Assert.Equal("Protected after permission change", await db.TaskJournalItems.AsNoTracking()
+            .Where(item => item.Id == task.Id).Select(item => item.Title).SingleAsync());
+        await RunAsync();
+        Assert.Equal(initialWrites + (change == "grant" ? 1 : 0), handler.Requests.Count(request => request.Method == HttpMethod.Put));
+    }
+
+
+    [Theory]
+    [InlineData(false, "deny")]
+    [InlineData(true, "deny")]
+    [InlineData(false, "inactive")]
+    [InlineData(true, "inactive")]
+    [InlineData(false, "role")]
+    [InlineData(true, "role")]
+    [InlineData(false, "specific")]
+    [InlineData(true, "specific")]
+    [InlineData(false, "moved")]
+    [InlineData(true, "moved")]
+    [InlineData(false, "participant")]
+    [InlineData(true, "participant")]
+    [InlineData(false, "missingId")]
+    [InlineData(true, "missingId")]
+    [InlineData(false, "deleted")]
+    [InlineData(true, "deleted")]
+    [InlineData(false, "stale")]
+    [InlineData(true, "stale")]
+    [InlineData(false, "deletedMissingId")]
+    [InlineData(true, "deletedMissingId")]
+    public async Task Import_DoesNotChangeTaskAfterCalendarAccessRevoked(bool newService, string change)
+    {
+        await using var db = await CreateContextAsync();
+        var actor = await CreateUserAsync(db, "import-permission-actor@example.local", "import-permission-actor");
+        var selected = await CreateUserAsync(db, "import-permission-selected@example.local", "import-permission-selected");
+        var other = await CreateUserAsync(db, "import-permission-other@example.local", "import-permission-other");
+        actor.FullName = "Import actor";
+        selected.FullName = "Import selected";
+        other.FullName = "Import other";
+        var missingTaskId = change is "missingId" or "deletedMissingId";
+        var specific = change == "specific";
+        var permission = new RolePermission
+        {
+            RoleId = actor.RoleId,
+            Section = RolePermissionCatalog.Calendar,
+            CanView = true,
+            ViewScope = specific ? DataVisibilityScope.Specific : DataVisibilityScope.Own,
+        };
+        db.RolePermissions.Add(permission);
+        if (specific)
+        {
+            db.RoleCalendarVisibleUsers.AddRange(
+                new RoleCalendarVisibleUser { RoleId = actor.RoleId, UserId = selected.Id },
+                new RoleCalendarVisibleUser { RoleId = actor.RoleId, UserId = other.Id });
+        }
+        await db.SaveChangesAsync();
+        var connection = await CreateConnectionAsync(db, actor.Id, calendarMode: specific ? "adminByAssignee" : "personal");
+        var calendar = await CreateCalendarAsync(db, connection.Id, "permission-calendar", "Permission calendar",
+            ownerUserId: specific ? selected.Id : null);
+        var dueAt = DateTime.UtcNow.Date.AddDays(7).AddHours(12);
+        var task = await CreateTaskAsync(db, specific || change == "participant" ? selected.Id : actor.Id, "External allowed", dueAt: dueAt);
+        if (change == "participant")
+        {
+            task.Participants.Add(new TaskJournalParticipant { UserId = actor.Id, Role = "observer", DisplayName = actor.FullName });
+            task.Participants.Add(new TaskJournalParticipant { UserId = selected.Id, Role = "observer", DisplayName = selected.FullName });
+        }
+        var unrelated = await CreateTaskAsync(db, other.Id, "Unrelated protected task", dueAt: dueAt);
+        var eventId = "event-1";
+        db.YandexCalendarTaskLinks.Add(new YandexCalendarTaskLink
+        {
+            ConnectionId = connection.Id,
+            CalendarSyncCalendarId = calendar.Id,
+            TaskJournalItemId = task.Id,
+            YandexCalendarId = calendar.YandexCalendarId,
+            YandexEventId = eventId,
+            YandexEventUrl = $"{calendar.CalendarUrl}{eventId}.ics",
+            SyncStatus = "active",
+            LastYandexHash = "before-first-import",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        string BuildPermissionReport(bool revoked)
+        {
+            var externalId = revoked && change == "stale" ? "stale-event" : eventId;
+            return BuildYandexReportResponse(calendar.CalendarUrl, externalId, $"""
+BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:{externalId}
+{(revoked && change is "deleted" or "deletedMissingId" ? "STATUS:CANCELLED" : string.Empty)}
+DTSTART:{dueAt.AddHours(1):yyyyMMdd'T'HHmmss'Z'}
+DTEND:{dueAt.AddHours(2):yyyyMMdd'T'HHmmss'Z'}
+SUMMARY:External allowed
+{(missingTaskId ? string.Empty : $"X-PAYPLANNER-TASK-ID:{task.Id}")}
+X-PAYPLANNER-HASH:external-permission-change
+END:VEVENT
+END:VCALENDAR
+""");
+        }
+        var handler = new RecordingYandexHandler(reportResponse: BuildPermissionReport(false), reportCalendarPath: new Uri(calendar.CalendarUrl).AbsolutePath);
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+        db.ChangeTracker.Clear();
+        var first = await service.SyncDueConnectionsAsync(1, CancellationToken.None);
+        Assert.Equal(0, first.ErrorCount);
+        Assert.Equal(1, first.ImportedEvents);
+        Assert.Equal(dueAt.AddHours(1), await db.TaskJournalItems.AsNoTracking()
+            .Where(item => item.Id == task.Id).Select(item => item.DueAt).SingleAsync());
+
+        switch (change)
+        {
+            case "deny":
+                await db.RolePermissions.Where(item => item.Id == permission.Id)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.CanView, false));
+                break;
+            case "inactive":
+                await db.Users.Where(item => item.Id == actor.Id)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.IsActive, false));
+                break;
+            case "role":
+                var deniedRole = new Role { Name = "import-permission-denied", Description = "Denied" };
+                db.Roles.Add(deniedRole);
+                await db.SaveChangesAsync();
+                db.RolePermissions.Add(new RolePermission { RoleId = deniedRole.Id, Section = RolePermissionCatalog.Calendar, CanView = false });
+                await db.SaveChangesAsync();
+                await db.Users.Where(item => item.Id == actor.Id)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.RoleId, deniedRole.Id));
+                break;
+            case "specific":
+                await db.RoleCalendarVisibleUsers.Where(item => item.RoleId == actor.RoleId && item.UserId == selected.Id)
+                    .ExecuteDeleteAsync();
+                break;
+            case "moved":
+            case "missingId":
+            case "deleted":
+            case "stale":
+            case "deletedMissingId":
+                await db.TaskJournalItems.Where(item => item.Id == task.Id)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.AssigneeUserId, other.Id));
+                await db.TaskJournalParticipants.Where(item => item.TaskJournalItemId == task.Id).ExecuteDeleteAsync();
+                break;
+            case "participant":
+                await db.TaskJournalParticipants.Where(item => item.TaskJournalItemId == task.Id && item.UserId == actor.Id).ExecuteDeleteAsync();
+                break;
+        }
+        await db.TaskJournalItems.Where(item => item.Id == task.Id).ExecuteUpdateAsync(setters => setters
+            .SetProperty(item => item.Title, "Protected after access revoked")
+            .SetProperty(item => item.DueAt, dueAt));
+        await db.YandexCalendarTaskLinks.Where(item => item.ConnectionId == connection.Id)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.LastYandexHash, "before-revoked-import"));
+        handler.ReportResponse = BuildPermissionReport(true);
+        var protectedLink = await db.YandexCalendarTaskLinks.AsNoTracking()
+            .Where(item => item.TaskJournalItemId == task.Id).Select(item => new
+            {
+                item.Id,
+                item.ConnectionId,
+                item.CalendarSyncCalendarId,
+                item.TaskJournalItemId,
+                item.YandexCalendarId,
+                item.YandexEventId,
+                item.YandexEventUrl,
+                item.YandexEtag,
+                item.LastYandexHash,
+                item.LastCrmHash,
+                item.LastSyncedAt,
+                item.LastDirection,
+                item.SyncStatus,
+                item.LastError,
+                item.CreatedAt,
+                item.UpdatedAt
+            }).SingleAsync();
+        var requestsBeforeRevokedImport = handler.Requests.Count;
+        db.ChangeTracker.Clear();
+        if (newService) service = CreateService(db, new FakeHttpClientFactory(handler));
+        var second = await service.SyncDueConnectionsAsync(1, CancellationToken.None);
+        var stored = await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id);
+        Console.WriteLine($"CalendarPermissionImport provider=Yandex; fresh={newService}; change={change}; imported={second.ImportedEvents}; title={stored.Title}");
+        Assert.Equal("Protected after access revoked", stored.Title);
+        Assert.Equal(dueAt, stored.DueAt);
+        Assert.Equal("new", stored.Status);
+        Assert.Equal(0, second.ImportedEvents);
+        Assert.Equal(0, second.ErrorCount);
+        var linkAfterImport = await db.YandexCalendarTaskLinks.AsNoTracking()
+            .Where(item => item.TaskJournalItemId == task.Id).Select(item => new
+            {
+                item.Id,
+                item.ConnectionId,
+                item.CalendarSyncCalendarId,
+                item.TaskJournalItemId,
+                item.YandexCalendarId,
+                item.YandexEventId,
+                item.YandexEventUrl,
+                item.YandexEtag,
+                item.LastYandexHash,
+                item.LastCrmHash,
+                item.LastSyncedAt,
+                item.LastDirection,
+                item.SyncStatus,
+                item.LastError,
+                item.CreatedAt,
+                item.UpdatedAt
+            }).SingleOrDefaultAsync();
+        if (specific)
+        {
+            Assert.Null(linkAfterImport);
+            Assert.False(await db.YandexCalendarSyncCalendars.AnyAsync(item => item.Id == calendar.Id));
+        }
+        else Assert.Equal(protectedLink, linkAfterImport);
+        Assert.DoesNotContain(handler.Requests.Skip(requestsBeforeRevokedImport), request =>
+            request.Method == HttpMethod.Delete && request.RequestUri!.AbsolutePath.Contains("stale-event", StringComparison.Ordinal));
+        Assert.Equal("Unrelated protected task", await db.TaskJournalItems.AsNoTracking()
+            .Where(item => item.Id == unrelated.Id).Select(item => item.Title).SingleAsync());
+    }
+
     private static YandexCalendarSyncService CreateService(PaymentContext db, IHttpClientFactory httpClientFactory)
     {
         return new YandexCalendarSyncService(
@@ -1216,6 +1528,141 @@ END:VCALENDAR
             httpClientFactory,
             TestDataProtectionProvider,
             NullLogger<YandexCalendarSyncService>.Instance);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Synchronization_RestoresRemovedAssigneeCalendarWithFreshProviderState(bool newService)
+    {
+        await using var db = await CreateContextAsync();
+        var actor = await CreateUserAsync(db, "calendar-recovery-actor@example.local", "calendar-recovery-actor");
+        var selected = await CreateUserAsync(db, "calendar-recovery-selected@example.local", "calendar-recovery-selected");
+        var other = await CreateUserAsync(db, "calendar-recovery-other@example.local", "calendar-recovery-other");
+        var hidden = await CreateUserAsync(db, "calendar-recovery-hidden@example.local", "calendar-recovery-hidden");
+        actor.FullName = "Recovery actor";
+        selected.FullName = "Recovery selected";
+        other.FullName = "Recovery other";
+        hidden.FullName = "Recovery hidden";
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = actor.RoleId,
+            Section = RolePermissionCatalog.Calendar,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Specific,
+        });
+        db.RoleCalendarVisibleUsers.AddRange(
+            new RoleCalendarVisibleUser { RoleId = actor.RoleId, UserId = selected.Id },
+            new RoleCalendarVisibleUser { RoleId = actor.RoleId, UserId = other.Id });
+        await db.SaveChangesAsync();
+        var connection = await CreateConnectionAsync(db, actor.Id, calendarMode: "adminByAssignee");
+        var task = await CreateTaskAsync(db, selected.Id, "Recover allowed calendar");
+        var hiddenTask = await CreateTaskAsync(db, hidden.Id, "Preserve hidden calendar");
+        using var handler = new CalendarRecoveryYandexHandler(
+            ("recovery-actor", $"PayPlanner - {actor.FullName}"),
+            ("recovery-selected", $"PayPlanner - {selected.FullName}"),
+            ("recovery-other", $"PayPlanner - {other.FullName}"),
+            ("recovery-hidden", $"PayPlanner - {hidden.FullName}"));
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+        db.ChangeTracker.Clear();
+        var initial = await service.SyncDueConnectionsAsync(1, CancellationToken.None);
+        Assert.Equal(0, initial.ErrorCount);
+        Assert.Equal(1, initial.ProcessedTasks);
+        Assert.Single(handler.SuccessfulWrites);
+        var oldCalendar = await db.YandexCalendarSyncCalendars.AsNoTracking()
+            .SingleAsync(item => item.ConnectionId == connection.Id && item.OwnerUserId == selected.Id);
+        var oldPath = new Uri(oldCalendar.CalendarUrl).AbsolutePath;
+
+        await db.RoleCalendarVisibleUsers.Where(item => item.RoleId == actor.RoleId && item.UserId == selected.Id).ExecuteDeleteAsync();
+        db.ChangeTracker.Clear();
+        var revoked = await service.SyncDueConnectionsAsync(1, CancellationToken.None);
+        Assert.False(handler.ActiveCalendars.ContainsKey(oldPath));
+        Assert.False(await db.YandexCalendarSyncCalendars.AnyAsync(item => item.ConnectionId == connection.Id && item.OwnerUserId == selected.Id));
+        Assert.False(await db.YandexCalendarTaskLinks.AnyAsync(item => item.TaskJournalItemId == task.Id));
+        Assert.Single(handler.SuccessfulWrites);
+
+        db.RoleCalendarVisibleUsers.Add(new RoleCalendarVisibleUser { RoleId = actor.RoleId, UserId = selected.Id });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        if (newService) service = CreateService(db, new FakeHttpClientFactory(handler));
+        var restored = await service.SyncDueConnectionsAsync(1, CancellationToken.None);
+        Console.WriteLine($"CalendarPermissionRecovery fresh={newService}; revokedErrors={revoked.ErrorCount}; restoredErrors={restored.ErrorCount}; created={handler.CreatedCalendars}; successfulWrites={handler.SuccessfulWrites.Count}; missingReads={handler.MissingReads}");
+        Assert.Equal(0, revoked.ErrorCount);
+        Assert.Equal(0, restored.ErrorCount);
+        Assert.Equal(1, restored.ProcessedTasks);
+        Assert.Equal(2, handler.SuccessfulWrites.Count);
+        Assert.Equal(1, handler.CreatedCalendars);
+        var newCalendar = await db.YandexCalendarSyncCalendars.AsNoTracking()
+            .SingleAsync(item => item.ConnectionId == connection.Id && item.OwnerUserId == selected.Id);
+        Assert.NotEqual(oldPath, new Uri(newCalendar.CalendarUrl).AbsolutePath);
+        Assert.True(handler.ActiveCalendars.ContainsKey(new Uri(newCalendar.CalendarUrl).AbsolutePath));
+        var link = await db.YandexCalendarTaskLinks.AsNoTracking().SingleAsync(item => item.TaskJournalItemId == task.Id);
+        Assert.Equal("active", link.SyncStatus);
+        Assert.Null(link.LastError);
+        Assert.Equal("Recover allowed calendar", await db.TaskJournalItems.AsNoTracking().Where(item => item.Id == task.Id).Select(item => item.Title).SingleAsync());
+        Assert.True(handler.ActiveCalendars.ContainsKey(CalendarRecoveryYandexHandler.PathFor("recovery-hidden")));
+        Assert.False(await db.YandexCalendarTaskLinks.AnyAsync(item => item.TaskJournalItemId == hiddenTask.Id));
+        Assert.Equal("Preserve hidden calendar", await db.TaskJournalItems.AsNoTracking().Where(item => item.Id == hiddenTask.Id).Select(item => item.Title).SingleAsync());
+    }
+
+    private sealed class CalendarRecoveryYandexHandler : HttpMessageHandler
+    {
+        public Dictionary<string, string> ActiveCalendars { get; } = new(StringComparer.Ordinal);
+        public List<string> SuccessfulWrites { get; } = [];
+        public int CreatedCalendars { get; private set; }
+        public int MissingReads { get; private set; }
+        public static string PathFor(string id) => $"/calendars/yandex%40example.com/{id}/";
+
+        public CalendarRecoveryYandexHandler(params (string Id, string Name)[] calendars)
+        {
+            foreach (var item in calendars) ActiveCalendars.Add(PathFor(item.Id), item.Name);
+        }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var path = request.RequestUri!.AbsolutePath;
+            var method = request.Method.Method;
+            if (method == "PROPFIND")
+            {
+                return Reply((HttpStatusCode)207, BuildYandexCalendarHomeResponseForCalendars(
+                    ActiveCalendars.Select(item => (item.Key, item.Value)).ToArray()));
+            }
+            if (method == "MKCALENDAR")
+            {
+                var document = XDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
+                XNamespace dav = "DAV:";
+                var name = document.Descendants(dav + "displayname").Single().Value;
+                if (!ActiveCalendars.TryAdd(path, name)) return Reply(HttpStatusCode.Conflict);
+                CreatedCalendars++;
+                return Reply(HttpStatusCode.Created);
+            }
+            if (method == "DELETE")
+            {
+                return Reply(ActiveCalendars.Remove(path) ? HttpStatusCode.NoContent : HttpStatusCode.NotFound);
+            }
+            if (method == "REPORT")
+            {
+                if (ActiveCalendars.ContainsKey(path)) return Reply((HttpStatusCode)207);
+                MissingReads++;
+                return Reply(HttpStatusCode.NotFound);
+            }
+            if (method == "PROPPATCH")
+            {
+                return Reply(ActiveCalendars.ContainsKey(path) ? (HttpStatusCode)207 : HttpStatusCode.NotFound);
+            }
+            if (request.Method == HttpMethod.Put)
+            {
+                var calendarPath = path[..(path.LastIndexOf('/') + 1)];
+                if (!ActiveCalendars.ContainsKey(calendarPath)) return Reply(HttpStatusCode.NotFound);
+                SuccessfulWrites.Add(path);
+                return Reply(HttpStatusCode.Created);
+            }
+            return Reply(HttpStatusCode.NotFound);
+        }
+
+        private static HttpResponseMessage Reply(HttpStatusCode status, string payload = "")
+            => new(status) { Content = new StringContent(payload, Encoding.UTF8, "application/xml") };
     }
 
     [Theory]
@@ -2686,17 +3133,20 @@ END:VCALENDAR
     private sealed class RecordingYandexHandler : HttpMessageHandler
     {
         private readonly HttpStatusCode _deleteStatusCode;
-        private readonly string? _reportResponse;
+        public string? ReportResponse { get; set; }
+        private readonly string? _reportCalendarPath;
         private readonly string? _calendarHomeResponse;
         private readonly List<(string Href, string DisplayName)> _createdCalendars = [];
 
         public RecordingYandexHandler(
             HttpStatusCode deleteStatusCode = HttpStatusCode.NoContent,
             string? reportResponse = null,
-            string? calendarHomeResponse = null)
+            string? calendarHomeResponse = null,
+            string? reportCalendarPath = null)
         {
             _deleteStatusCode = deleteStatusCode;
-            _reportResponse = reportResponse;
+            ReportResponse = reportResponse;
+            _reportCalendarPath = reportCalendarPath;
             _calendarHomeResponse = calendarHomeResponse;
         }
 
@@ -2737,7 +3187,8 @@ END:VCALENDAR
             {
                 return Task.FromResult(new HttpResponseMessage((HttpStatusCode)207)
                 {
-                    Content = new StringContent(_reportResponse ?? string.Empty, Encoding.UTF8, "application/xml"),
+                    Content = new StringContent(_reportCalendarPath is null || request.RequestUri?.AbsolutePath == _reportCalendarPath
+                        ? ReportResponse ?? string.Empty : string.Empty, Encoding.UTF8, "application/xml"),
                 });
             }
 

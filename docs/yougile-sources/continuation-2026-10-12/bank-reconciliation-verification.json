@@ -25,7 +25,7 @@
     "releaseBuild": true
   },
   "fullBackend": {
-    "status": "Three qualified shards, 5309/7078 cases; final shard 3 running in original session 2664; full result pending",
+    "status": "Three qualified shards5309/7078; shard3 finished1768pass1fail; full backend gate not passed",
     "expectedCases": 7078,
     "manifestSha256": "95ba710a5ae3f4969a6a99bb9719076e1c970d5160f3d8bc519f8b85ef1fef9b",
     "interruptedInitialRun": "PostgreSQL shared-lock exhaustion and cleanup timeout; no successful full result claimed.",
@@ -68,8 +68,75 @@
       }
     ],
     "qualifiedCasesSoFar": 5309,
-    "runningShard": 3,
-    "checkedAtUtc": "2026-10-12T23:10:26.331438+00:00"
+    "runningShard": null,
+    "checkedAtUtc": "2026-10-13T01:01:32.682251+00:00",
+    "failedShard": {
+      "shard": 3,
+      "qualified": false,
+      "counts": {
+        "total": 1769,
+        "executed": 1769,
+        "passed": 1768,
+        "failed": 1,
+        "error": 0,
+        "timeout": 0,
+        "aborted": 0,
+        "inconclusive": 0,
+        "passedButRunAborted": 0,
+        "notRunnable": 0,
+        "notExecuted": 0,
+        "disconnected": 0,
+        "warning": 0,
+        "completed": 0,
+        "inProgress": 0,
+        "pending": 0
+      },
+      "trxSha256": "995243b081c0c2b3fdce628539fc8aaefe9a8ce678b589eff576b458ca629406",
+      "failedTest": "PayPlanner.Api.Tests.ManagedCaseDocumentWireTests.RealBrowserCourtYandexCopiesKeepControlsAndShowPendingThenReadySummary(flow: \"court-overview\")",
+      "reason": "Browser court-overview waitForResponse timed out after20000ms; full shard unqualified; exact failure retained in original TRX",
+      "runningSession": null
+    },
+    "observedTotalPassed": 7077,
+    "observedTotalFailed": 1,
+    "fullGatePassed": false,
+    "failedCaseRecheck": {
+      "counts": {
+        "total": 1,
+        "executed": 1,
+        "passed": 1,
+        "failed": 0,
+        "error": 0,
+        "timeout": 0,
+        "aborted": 0,
+        "inconclusive": 0,
+        "passedButRunAborted": 0,
+        "notRunnable": 0,
+        "notExecuted": 0,
+        "disconnected": 0,
+        "warning": 0,
+        "completed": 0,
+        "inProgress": 0,
+        "pending": 0
+      },
+      "trxSha256": "11d2e60f7fdbc1b2d294ab3f8d8b504a91401d188346a6fe8afe76a3ef8d1d55",
+      "assemblySha256": "ce132e308ec507d2c187c079048bccd1c11a5a4e89773c3171148b801802f8d0",
+      "revision": "cc744c0c98cefc1cb9a910f622f1d8ae220783ea",
+      "test": "PayPlanner.Api.Tests.ManagedCaseDocumentWireTests.RealBrowserCourtYandexCopiesKeepControlsAndShowPendingThenReadySummary(flow: \"court-overview\")",
+      "sourceChanged": false,
+      "qualification": "Single failed case passed on original assembly; original full shard remains unqualified; root cause of20s response timeout not established."
+    },
+    "recheck": {
+      "shard": 3,
+      "state": "Running on the same pinned assembly; original failed results retained",
+      "resultRoot": "D:/PayPlannerReview-20261012/bank-allocation-release-icu-recheck-full",
+      "qualified": false,
+      "previousSuccessfulShardsReused": [
+        0,
+        1,
+        2
+      ],
+      "testTimeoutsUnchanged": true
+    }
   },
   "availability": {
     "branchOnly": true,

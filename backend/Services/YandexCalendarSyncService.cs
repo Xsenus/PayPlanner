@@ -47,7 +47,6 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
     private readonly HashSet<string> _calendarTimeZoneEnsured = [];
     private readonly HashSet<string> _calendarUrlsRefreshed = [];
     private readonly Dictionary<string, IReadOnlyList<YandexCalendarCreateResult>> _calendarHomeSnapshots = new(StringComparer.Ordinal);
-    private readonly Dictionary<int, DataVisibilityAccess?> _calendarVisibilityByUser = [];
 
     public YandexCalendarSyncService(
         PaymentContext db,
@@ -545,9 +544,11 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
 
         var errors = 0;
         var importedEvents = 0;
+        // A fresh decision belongs only to this connection operation, not the service lifetime.
+        var visibility = await ResolveConnectionCalendarVisibilityAsync(connection.UserId, cancellationToken);
         try
         {
-            await EnsureAdminAssigneeCalendarsAsync(connection, cancellationToken);
+            await EnsureAdminAssigneeCalendarsAsync(connection, visibility, cancellationToken);
         }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
@@ -558,7 +559,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
 
         try
         {
-            importedEvents += await ImportYandexChangesAsync(connection, forceFull, cancellationToken);
+            importedEvents += await ImportYandexChangesAsync(connection, forceFull, visibility, cancellationToken);
         }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
@@ -573,7 +574,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         var settings = await LoadCalendarSyncSettingsAsync(cancellationToken);
         errors += await DeleteLinksOutsideSyncWindowAsync(connection, cancellationToken);
 
-        var tasksQuery = await BuildTasksForConnectionQueryAsync(connection, cancellationToken);
+        var tasksQuery = BuildTasksForConnectionQuery(connection, visibility);
         var processedTasks = 0;
         var preservedTracking = CalendarSyncTaskPager.CaptureTrackedEntities(_db);
         await foreach (var tasks in CalendarSyncTaskPager.ReadPagesAsync(tasksQuery, cancellationToken))
@@ -612,7 +613,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
                             connection,
                             task,
                             externalCommentsByTask.GetValueOrDefault(task.Id) ?? [],
-                            cancellationToken, links, duplicateSnapshot, logContext, timeZones);
+                            cancellationToken, links, duplicateSnapshot, logContext, timeZones, visibility);
                     }
 
                     processedTasks++;
@@ -701,7 +702,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
                     connection,
                     task,
                     externalComments.GetValueOrDefault(task.Id) ?? [],
-                    cancellationToken, logContext: logContext);
+                    cancellationToken, logContext: logContext, knownVisibility: visibility);
             }
             catch (Exception) when (!cancellationToken.IsCancellationRequested
                 && _db.ChangeTracker.Entries<YandexCalendarTaskLink>().Any(entry =>
@@ -788,12 +789,15 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         }
     }
 
-    private async Task<int> ImportYandexChangesAsync(YandexCalendarConnection connection, bool forceFull, CancellationToken cancellationToken)
+    private async Task<int> ImportYandexChangesAsync(YandexCalendarConnection connection, bool forceFull, DataVisibilityAccess? visibility, CancellationToken cancellationToken)
     {
+        if (visibility is null) return 0;
         var imported = 0;
         var accessToken = await ResolveAccessTokenAsync(connection, cancellationToken);
         foreach (var calendar in connection.Calendars.ToList())
         {
+            // Access cleanup can delete a tracked calendar before the import phase.
+            if (_db.Entry(calendar).State == EntityState.Deleted) continue;
             var events = await ListYandexEventsAsync(accessToken, calendar, cancellationToken);
             foreach (var eventPage in events.Chunk(CalendarSyncTaskPager.PageSize))
             {
@@ -802,7 +806,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
                 var importTimeZones = new Dictionary<int, TimeZoneInfo>();
                 foreach (var yandexEvent in eventPage)
                 {
-                    if (await ApplyYandexEventAsync(connection, calendar, yandexEvent, accessToken, cancellationToken, importTimeZones))
+                    if (await ApplyYandexEventAsync(connection, calendar, yandexEvent, accessToken, cancellationToken, importTimeZones, visibility))
                     {
                         imported++;
                     }
@@ -824,7 +828,8 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         YandexEventItem yandexEvent,
         string accessToken,
         CancellationToken cancellationToken,
-        Dictionary<int, TimeZoneInfo> importTimeZones)
+        Dictionary<int, TimeZoneInfo> importTimeZones,
+        DataVisibilityAccess visibility)
     {
         var taskId = yandexEvent.PayPlannerTaskId;
         YandexCalendarTaskLink? link = null;
@@ -832,8 +837,13 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         {
             link = await _db.YandexCalendarTaskLinks
                 .Include(item => item.TaskJournalItem)
+                .ThenInclude(item => item!.Participants)
                 .FirstOrDefaultAsync(item => item.ConnectionId == connection.Id && item.TaskJournalItemId == taskId.Value, cancellationToken);
 
+            if (link?.TaskJournalItem is not null && !CanSyncTaskForConnection(connection, link.TaskJournalItem, visibility))
+            {
+                return false;
+            }
             if (link is not null && !IsLinkedYandexEvent(link, calendar.YandexCalendarId, yandexEvent.Id))
             {
                 if (yandexEvent.Deleted)
@@ -877,13 +887,14 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
 
         link ??= await _db.YandexCalendarTaskLinks
             .Include(item => item.TaskJournalItem)
+            .ThenInclude(item => item!.Participants)
             .FirstOrDefaultAsync(item =>
                 item.YandexCalendarId == calendar.YandexCalendarId &&
                 item.YandexEventId == yandexEvent.Id &&
                 item.ConnectionId == connection.Id,
                 cancellationToken);
 
-        if (link?.TaskJournalItem is null)
+        if (link?.TaskJournalItem is null || !CanSyncTaskForConnection(connection, link.TaskJournalItem, visibility))
         {
             return false;
         }
@@ -917,7 +928,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         var task = link.TaskJournalItem;
         var changed = false;
         var changes = new List<string>();
-        var timeZone = await ResolveTaskTimeZoneAsync(connection, calendar, task, cancellationToken, importTimeZones: importTimeZones);
+        var timeZone = await ResolveTaskTimeZoneAsync(connection, calendar, task, cancellationToken, importTimeZones: importTimeZones, knownVisibility: visibility);
         var importedStartAt = yandexEvent.StartAt.HasValue ? CalendarTimeZoneHelper.NormalizeUtcInstant(yandexEvent.StartAt.Value) : (DateTime?)null;
         var importedEndAt = yandexEvent.EndAt.HasValue ? CalendarTimeZoneHelper.NormalizeUtcInstant(yandexEvent.EndAt.Value) : (DateTime?)null;
         if (importedStartAt.HasValue && task.DueAt != importedStartAt.Value)
@@ -995,7 +1006,8 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         IReadOnlyDictionary<int, YandexCalendarTaskLink>? knownLinks = null,
         YandexBatchDuplicateSnapshot? duplicateSnapshot = null,
         CalendarSyncLogContext? logContext = null,
-        IReadOnlyDictionary<int, TimeZoneInfo>? timeZones = null)
+        IReadOnlyDictionary<int, TimeZoneInfo>? timeZones = null,
+        DataVisibilityAccess? knownVisibility = null)
     {
         if (timeZones is null)
         {
@@ -1004,9 +1016,9 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             timeZones = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(_db, timeZoneUserIds, cancellationToken);
         }
         var accessToken = await ResolveAccessTokenAsync(connection, cancellationToken);
-        var calendar = await EnsureCalendarForTaskAsync(connection, task, accessToken, cancellationToken, timeZones, logContext);
+        var calendar = await EnsureCalendarForTaskAsync(connection, task, accessToken, cancellationToken, timeZones, logContext, knownVisibility);
         logContext?.RememberCalendar(calendar.Id, calendar.Name, calendar.OwnerUserId, calendar.OwnerUser);
-        var timeZone = await ResolveTaskTimeZoneAsync(connection, null, task, cancellationToken, timeZones);
+        var timeZone = await ResolveTaskTimeZoneAsync(connection, null, task, cancellationToken, timeZones, knownVisibility: knownVisibility);
         var crmHash = BuildCrmHash(task, timeZone, externalComments);
         var link = knownLinks is null
             ? await _db.YandexCalendarTaskLinks
@@ -1086,6 +1098,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
 
     private async Task EnsureAdminAssigneeCalendarsAsync(
         YandexCalendarConnection connection,
+        DataVisibilityAccess? visibility,
         CancellationToken cancellationToken)
     {
         if (!string.Equals(connection.CalendarMode, "adminByAssignee", StringComparison.Ordinal))
@@ -1093,7 +1106,6 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             return;
         }
 
-        var visibility = await ResolveConnectionCalendarVisibilityAsync(connection.UserId, cancellationToken);
         if (visibility is null)
         {
             return;
@@ -1169,10 +1181,11 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         string accessToken,
         CancellationToken cancellationToken,
         IReadOnlyDictionary<int, TimeZoneInfo>? timeZones = null,
-        CalendarSyncLogContext? logContext = null)
+        CalendarSyncLogContext? logContext = null,
+        DataVisibilityAccess? knownVisibility = null)
     {
-        var visibility = string.Equals(connection.CalendarMode, "adminByAssignee", StringComparison.Ordinal)
-            ? await ResolveConnectionCalendarVisibilityAsync(connection.UserId, cancellationToken) : null;
+        var visibility = knownVisibility ?? (string.Equals(connection.CalendarMode, "adminByAssignee", StringComparison.Ordinal)
+            ? await ResolveConnectionCalendarVisibilityAsync(connection.UserId, cancellationToken) : null);
         var ownerUserId = IsAssigneeCalendarMode(connection, visibility) ? task.AssigneeUserId : null;
         var ownerName = ownerUserId.HasValue ? NormalizeOptional(task.AssigneeName) : null;
 
@@ -1292,7 +1305,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
                 group => (IReadOnlyCollection<TaskJournalComment>)group.ToArray());
     }
 
-    private async Task<IQueryable<TaskJournalItem>> BuildTasksForConnectionQueryAsync(YandexCalendarConnection connection, CancellationToken cancellationToken)
+    private IQueryable<TaskJournalItem> BuildTasksForConnectionQuery(YandexCalendarConnection connection, DataVisibilityAccess? visibility)
     {
         var now = DateTime.UtcNow;
         var from = ResolveSyncFromDate(connection) ?? now.AddDays(-30);
@@ -1301,7 +1314,6 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             .Include(item => item.Participants)
             .Where(item => item.DueAt >= from && item.DueAt <= to);
 
-        var visibility = await ResolveConnectionCalendarVisibilityAsync(connection.UserId, cancellationToken);
         if (visibility is null)
         {
             return query.Where(_ => false);
@@ -1360,13 +1372,14 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         TaskJournalItem task,
         CancellationToken cancellationToken,
         IReadOnlyDictionary<int, TimeZoneInfo>? timeZones = null,
-        Dictionary<int, TimeZoneInfo>? importTimeZones = null)
+        Dictionary<int, TimeZoneInfo>? importTimeZones = null,
+        DataVisibilityAccess? knownVisibility = null)
     {
         var ownerUserId = calendar?.OwnerUserId;
         if (!ownerUserId.HasValue)
         {
-            var visibility = string.Equals(connection.CalendarMode, "adminByAssignee", StringComparison.Ordinal)
-                ? await ResolveConnectionCalendarVisibilityAsync(connection.UserId, cancellationToken) : null;
+            var visibility = knownVisibility ?? (string.Equals(connection.CalendarMode, "adminByAssignee", StringComparison.Ordinal)
+                ? await ResolveConnectionCalendarVisibilityAsync(connection.UserId, cancellationToken) : null);
             ownerUserId = IsAssigneeCalendarMode(connection, visibility)
                 ? task.AssigneeUserId
                 : connection.UserId;
@@ -2691,19 +2704,12 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         int userId,
         CancellationToken cancellationToken)
     {
-        if (_calendarVisibilityByUser.TryGetValue(userId, out var cached))
-        {
-            return cached;
-        }
-
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
         [
             new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture)),
         ], "calendar-sync"));
 
-        var visibility = await _db.ResolveDataVisibilityAsync(principal, RolePermissionCatalog.Calendar, cancellationToken);
-        _calendarVisibilityByUser[userId] = visibility;
-        return visibility;
+        return await _db.ResolveDataVisibilityAsync(principal, RolePermissionCatalog.Calendar, cancellationToken);
     }
 
     private async Task<TimeZoneInfo> ResolveUserTimeZoneAsync(int userId, CancellationToken cancellationToken,

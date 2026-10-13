@@ -1487,6 +1487,211 @@ public class GoogleCalendarSyncServiceTests
             .SingleAsync());
     }
 
+
+    [Theory]
+    [InlineData(false, "deny")]
+    [InlineData(true, "deny")]
+    [InlineData(false, "inactive")]
+    [InlineData(true, "inactive")]
+    [InlineData(false, "role")]
+    [InlineData(true, "role")]
+    [InlineData(false, "specific")]
+    [InlineData(true, "specific")]
+    [InlineData(false, "moved")]
+    [InlineData(true, "moved")]
+    [InlineData(false, "participant")]
+    [InlineData(true, "participant")]
+    [InlineData(false, "missingId")]
+    [InlineData(true, "missingId")]
+    [InlineData(false, "deleted")]
+    [InlineData(true, "deleted")]
+    [InlineData(false, "stale")]
+    [InlineData(true, "stale")]
+    [InlineData(false, "deletedMissingId")]
+    [InlineData(true, "deletedMissingId")]
+    public async Task Import_DoesNotChangeTaskAfterCalendarAccessRevoked(bool newService, string change)
+    {
+        await using var db = await CreateContextAsync();
+        await EnableGoogleSettingsAsync(db);
+        var actor = await CreateUserAsync(db, "import-permission-actor@example.local", "import-permission-actor");
+        var selected = await CreateUserAsync(db, "import-permission-selected@example.local", "import-permission-selected");
+        var other = await CreateUserAsync(db, "import-permission-other@example.local", "import-permission-other");
+        actor.FullName = "Import actor";
+        selected.FullName = "Import selected";
+        other.FullName = "Import other";
+        var missingTaskId = change is "missingId" or "deletedMissingId";
+        var specific = change == "specific";
+        var permission = new RolePermission
+        {
+            RoleId = actor.RoleId,
+            Section = RolePermissionCatalog.Calendar,
+            CanView = true,
+            ViewScope = specific ? DataVisibilityScope.Specific : DataVisibilityScope.Own,
+        };
+        db.RolePermissions.Add(permission);
+        if (specific)
+        {
+            db.RoleCalendarVisibleUsers.AddRange(
+                new RoleCalendarVisibleUser { RoleId = actor.RoleId, UserId = selected.Id },
+                new RoleCalendarVisibleUser { RoleId = actor.RoleId, UserId = other.Id });
+        }
+        await db.SaveChangesAsync();
+        var connection = await CreateConnectionAsync(db, actor.Id, calendarMode: specific ? "adminByAssignee" : "personal");
+        var calendar = await CreateCalendarAsync(db, connection.Id, "permission-calendar", "Permission calendar",
+            ownerUserId: specific ? selected.Id : null);
+        var dueAt = DateTime.UtcNow.Date.AddDays(7).AddHours(12);
+        var task = await CreateTaskAsync(db, specific || change == "participant" ? selected.Id : actor.Id, "External allowed", dueAt: dueAt);
+        if (change == "participant")
+        {
+            task.Participants.Add(new TaskJournalParticipant { UserId = actor.Id, Role = "observer", DisplayName = actor.FullName });
+            task.Participants.Add(new TaskJournalParticipant { UserId = selected.Id, Role = "observer", DisplayName = selected.FullName });
+        }
+        var unrelated = await CreateTaskAsync(db, other.Id, "Unrelated protected task", dueAt: dueAt);
+        var eventId = "event-1";
+        db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
+        {
+            ConnectionId = connection.Id,
+            CalendarSyncCalendarId = calendar.Id,
+            TaskJournalItemId = task.Id,
+            GoogleCalendarId = calendar.GoogleCalendarId,
+            GoogleEventId = eventId,
+
+            SyncStatus = "active",
+            LastGoogleHash = "before-first-import",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var permissionProperties = new Dictionary<string, string>
+        {
+            ["payPlannerHash"] = "external-permission-change",
+        };
+        if (!missingTaskId) permissionProperties["payPlannerTaskId"] = task.Id.ToString();
+        object BuildPermissionEvent(bool revoked) => new
+        {
+            id = revoked && change == "stale" ? "stale-event" : eventId,
+            status = revoked && change is "deleted" or "deletedMissingId" ? "cancelled" : "confirmed",
+            summary = "External allowed",
+            etag = "permission-etag",
+            start = new { dateTime = DateTime.SpecifyKind(dueAt.AddHours(1), DateTimeKind.Utc).ToString("O") },
+            end = new { dateTime = DateTime.SpecifyKind(dueAt.AddHours(2), DateTimeKind.Utc).ToString("O") },
+            extendedProperties = new
+            {
+                @private = permissionProperties,
+            },
+        };
+        var handler = new RecordingGoogleHandler(eventItems: [BuildPermissionEvent(false)], eventCalendarId: calendar.GoogleCalendarId);
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+        db.ChangeTracker.Clear();
+        var first = await service.SyncDueConnectionsAsync(1, CancellationToken.None);
+        Assert.Equal(0, first.ErrorCount);
+        Assert.Equal(1, first.ImportedEvents);
+        Assert.Equal(dueAt.AddHours(1), await db.TaskJournalItems.AsNoTracking()
+            .Where(item => item.Id == task.Id).Select(item => item.DueAt).SingleAsync());
+
+        switch (change)
+        {
+            case "deny":
+                await db.RolePermissions.Where(item => item.Id == permission.Id)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.CanView, false));
+                break;
+            case "inactive":
+                await db.Users.Where(item => item.Id == actor.Id)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.IsActive, false));
+                break;
+            case "role":
+                var deniedRole = new Role { Name = "import-permission-denied", Description = "Denied" };
+                db.Roles.Add(deniedRole);
+                await db.SaveChangesAsync();
+                db.RolePermissions.Add(new RolePermission { RoleId = deniedRole.Id, Section = RolePermissionCatalog.Calendar, CanView = false });
+                await db.SaveChangesAsync();
+                await db.Users.Where(item => item.Id == actor.Id)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.RoleId, deniedRole.Id));
+                break;
+            case "specific":
+                await db.RoleCalendarVisibleUsers.Where(item => item.RoleId == actor.RoleId && item.UserId == selected.Id)
+                    .ExecuteDeleteAsync();
+                break;
+            case "moved":
+            case "missingId":
+            case "deleted":
+            case "stale":
+            case "deletedMissingId":
+                await db.TaskJournalItems.Where(item => item.Id == task.Id)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.AssigneeUserId, other.Id));
+                await db.TaskJournalParticipants.Where(item => item.TaskJournalItemId == task.Id).ExecuteDeleteAsync();
+                break;
+            case "participant":
+                await db.TaskJournalParticipants.Where(item => item.TaskJournalItemId == task.Id && item.UserId == actor.Id).ExecuteDeleteAsync();
+                break;
+        }
+        await db.TaskJournalItems.Where(item => item.Id == task.Id).ExecuteUpdateAsync(setters => setters
+            .SetProperty(item => item.Title, "Protected after access revoked")
+            .SetProperty(item => item.DueAt, dueAt));
+        await db.GoogleCalendarTaskLinks.Where(item => item.ConnectionId == connection.Id)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.LastGoogleHash, "before-revoked-import"));
+        handler.EventItems = [BuildPermissionEvent(true)];
+        var protectedLink = await db.GoogleCalendarTaskLinks.AsNoTracking()
+            .Where(item => item.TaskJournalItemId == task.Id).Select(item => new
+            {
+                item.Id,
+                item.ConnectionId,
+                item.CalendarSyncCalendarId,
+                item.TaskJournalItemId,
+                item.GoogleCalendarId,
+                item.GoogleEventId,
+                item.GoogleEtag,
+                item.LastGoogleHash,
+                item.LastCrmHash,
+                item.LastSyncedAt,
+                item.LastDirection,
+                item.SyncStatus,
+                item.LastError,
+                item.CreatedAt,
+                item.UpdatedAt
+            }).SingleAsync();
+        var requestsBeforeRevokedImport = handler.Requests.Count;
+        db.ChangeTracker.Clear();
+        if (newService) service = CreateService(db, new FakeHttpClientFactory(handler));
+        var second = await service.SyncDueConnectionsAsync(1, CancellationToken.None);
+        var stored = await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id);
+        Console.WriteLine($"CalendarPermissionImport provider=Google; fresh={newService}; change={change}; imported={second.ImportedEvents}; title={stored.Title}");
+        Assert.Equal("Protected after access revoked", stored.Title);
+        Assert.Equal(dueAt, stored.DueAt);
+        Assert.Equal("new", stored.Status);
+        Assert.Equal(0, second.ImportedEvents);
+        Assert.Equal(0, second.ErrorCount);
+        var linkAfterImport = await db.GoogleCalendarTaskLinks.AsNoTracking()
+            .Where(item => item.TaskJournalItemId == task.Id).Select(item => new
+            {
+                item.Id,
+                item.ConnectionId,
+                item.CalendarSyncCalendarId,
+                item.TaskJournalItemId,
+                item.GoogleCalendarId,
+                item.GoogleEventId,
+                item.GoogleEtag,
+                item.LastGoogleHash,
+                item.LastCrmHash,
+                item.LastSyncedAt,
+                item.LastDirection,
+                item.SyncStatus,
+                item.LastError,
+                item.CreatedAt,
+                item.UpdatedAt
+            }).SingleOrDefaultAsync();
+        if (specific)
+        {
+            Assert.Null(linkAfterImport);
+            Assert.False(await db.GoogleCalendarSyncCalendars.AnyAsync(item => item.Id == calendar.Id));
+        }
+        else Assert.Equal(protectedLink, linkAfterImport);
+        Assert.DoesNotContain(handler.Requests.Skip(requestsBeforeRevokedImport), request =>
+            request.Method == HttpMethod.Delete && request.RequestUri!.AbsolutePath.Contains("stale-event", StringComparison.Ordinal));
+        Assert.Equal("Unrelated protected task", await db.TaskJournalItems.AsNoTracking()
+            .Where(item => item.Id == unrelated.Id).Select(item => item.Title).SingleAsync());
+    }
+
     private static GoogleCalendarSyncService CreateService(PaymentContext db, IHttpClientFactory httpClientFactory)
     {
         return new GoogleCalendarSyncService(
@@ -3173,7 +3378,8 @@ public class GoogleCalendarSyncServiceTests
     private sealed class RecordingGoogleHandler : HttpMessageHandler
     {
         private readonly HttpStatusCode _deleteStatusCode;
-        private readonly object[] _eventItems;
+        public object[] EventItems { get; set; }
+        private readonly string? _eventCalendarId;
         private int _eventListRateLimitCount;
         private int _eventListTransientFailureCount;
 
@@ -3181,10 +3387,12 @@ public class GoogleCalendarSyncServiceTests
             HttpStatusCode deleteStatusCode = HttpStatusCode.NoContent,
             object[]? eventItems = null,
             int eventListRateLimitCount = 0,
-            int eventListTransientFailureCount = 0)
+            int eventListTransientFailureCount = 0,
+            string? eventCalendarId = null)
         {
             _deleteStatusCode = deleteStatusCode;
-            _eventItems = eventItems ?? [];
+            EventItems = eventItems ?? [];
+            _eventCalendarId = eventCalendarId;
             _eventListRateLimitCount = eventListRateLimitCount;
             _eventListTransientFailureCount = eventListTransientFailureCount;
         }
@@ -3239,7 +3447,9 @@ public class GoogleCalendarSyncServiceTests
                     });
                 }
 
-                return Task.FromResult(Json(new { items = _eventItems, nextSyncToken = "sync-token" }));
+                var items = _eventCalendarId is null || path.Contains($"/calendars/{Uri.EscapeDataString(_eventCalendarId)}/events", StringComparison.Ordinal)
+                    ? EventItems : [];
+                return Task.FromResult(Json(new { items, nextSyncToken = "sync-token" }));
             }
 
             if (path.Contains("/events", StringComparison.Ordinal) && request.Method == HttpMethod.Post)

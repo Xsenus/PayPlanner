@@ -959,10 +959,14 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
 
     private async Task<int> ImportGoogleChangesAsync(GoogleCalendarConnection connection, bool forceFull, CancellationToken cancellationToken)
     {
+        var visibility = await ResolveConnectionCalendarVisibilityAsync(connection.UserId, cancellationToken);
+        if (visibility is null) return 0;
         var imported = 0;
         var accessToken = await ResolveAccessTokenAsync(connection, cancellationToken);
         foreach (var calendar in connection.Calendars.ToList())
         {
+            // Access cleanup can delete a tracked calendar before the import phase.
+            if (_db.Entry(calendar).State == EntityState.Deleted) continue;
             var windowAnchor = DateTime.UtcNow;
             var fullSync = forceFull;
             var resetPerformed = false;
@@ -992,7 +996,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
                     var importTimeZones = new Dictionary<int, TimeZoneInfo>();
                     foreach (var googleEvent in eventPage)
                     {
-                        if (await ApplyGoogleEventAsync(connection, calendar, googleEvent, accessToken, cancellationToken, importTimeZones))
+                        if (await ApplyGoogleEventAsync(connection, calendar, googleEvent, accessToken, cancellationToken, importTimeZones, visibility))
                         {
                             imported++;
                         }
@@ -1029,7 +1033,8 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         GoogleEventItem googleEvent,
         string accessToken,
         CancellationToken cancellationToken,
-        Dictionary<int, TimeZoneInfo> importTimeZones)
+        Dictionary<int, TimeZoneInfo> importTimeZones,
+        DataVisibilityAccess visibility)
     {
         var taskId = googleEvent.PayPlannerTaskId;
         GoogleCalendarTaskLink? link = null;
@@ -1037,8 +1042,13 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         {
             link = await _db.GoogleCalendarTaskLinks
                 .Include(item => item.TaskJournalItem)
+                .ThenInclude(item => item!.Participants)
                 .FirstOrDefaultAsync(item => item.ConnectionId == connection.Id && item.TaskJournalItemId == taskId.Value, cancellationToken);
 
+            if (link?.TaskJournalItem is not null && !CanSyncTaskForConnection(connection, link.TaskJournalItem, visibility))
+            {
+                return false;
+            }
             if (link is not null && !IsLinkedGoogleEvent(link, calendar.GoogleCalendarId, googleEvent.Id))
             {
                 if (string.Equals(googleEvent.Status, "cancelled", StringComparison.OrdinalIgnoreCase))
@@ -1082,13 +1092,14 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
 
         link ??= await _db.GoogleCalendarTaskLinks
             .Include(item => item.TaskJournalItem)
+            .ThenInclude(item => item!.Participants)
             .FirstOrDefaultAsync(item =>
                 item.GoogleCalendarId == calendar.GoogleCalendarId &&
                 item.GoogleEventId == googleEvent.Id &&
                 item.ConnectionId == connection.Id,
                 cancellationToken);
 
-        if (link?.TaskJournalItem is null)
+        if (link?.TaskJournalItem is null || !CanSyncTaskForConnection(connection, link.TaskJournalItem, visibility))
         {
             return false;
         }
