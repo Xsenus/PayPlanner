@@ -50,7 +50,7 @@
 | [Заявки и автоматизация](payplanner-requests-roadmap-2026-10-14.md) | 0/12 (0.0%) | 4 / 1 / 0 |
 | [Контакты и телефония](payplanner-contacts-telephony-roadmap-2026-10-14.md) | 0/9 (0.0%) | 2 / 1 / 0 |
 | [Задачи и согласование](payplanner-task-workflow-roadmap-2026-10-14.md) | 0/8 (0.0%) | 0 / 1 / 0 |
-| [Мессенджер, уведомления и MAX](payplanner-messenger-roadmap-2026-10-14.md) | 0/10 (0.0%) | 2 / 1 / 0 |
+| [Мессенджер, уведомления и MAX](payplanner-messenger-roadmap-2026-10-14.md) | 0/10 (0.0%) | 2 / 0 / 0 |
 | [Календари и рабочий интерфейс](payplanner-calendar-roadmap-2026-10-14.md) | 0/10 (0.0%) | 0 / 2 / 0 |
 | [Суды, ФССП и события дела](payplanner-court-roadmap-2026-10-14.md) | 0/9 (0.0%) | 1 / 1 / 1 |
 | [Автоконтроль и реестр дел](payplanner-case-control-roadmap-2026-10-14.md) | 0/6 (0.0%) | 2 / 1 / 0 |
