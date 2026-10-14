@@ -1177,6 +1177,20 @@ export interface SmsNotificationDiagnosticsDto {
   deliveredRatePercent?: number | null;
 }
 
+export interface MaxEmployeeLinkStatus {
+  linkId: string | null;
+  status: 'unlinked' | 'pending' | 'expired' | 'verified' | 'opted-out' | 'blocked';
+  channelReady: boolean;
+  expiresAt: string | null;
+  verifiedAt: string | null;
+}
+
+export interface MaxEmployeeLink {
+  linkId: string;
+  deepLinkUrl: string | null;
+  expiresAt: string;
+}
+
 export interface MaxNotificationDiagnosticsDto {
   enabled: boolean;
   ready: boolean;
@@ -3881,6 +3895,18 @@ export class ApiService {
 
   async getMaxOutboxMessages(take = 20) {
     return this.request<MaxOutboxMessageDto[]>(`/max/messages?take=${Math.max(1, Math.min(100, take))}`);
+  }
+
+  async getEmployeeMaxLinkStatus() {
+    return this.request<MaxEmployeeLinkStatus>('/max/link', { cache: 'no-store' });
+  }
+
+  async createEmployeeMaxLink() {
+    return this.request<MaxEmployeeLink>('/max/link', { method: 'POST', cache: 'no-store' });
+  }
+
+  async deleteEmployeeMaxLink() {
+    return this.request<void>('/max/link', { method: 'DELETE', cache: 'no-store' });
   }
 
   async retryMaxOutboxMessage(publicId: string) {

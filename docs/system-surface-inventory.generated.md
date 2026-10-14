@@ -7,9 +7,9 @@
 
 - Разделов frontend: 55.
 - Backend-контроллеров: 89.
-- HTTP endpoints: 929; с прямой тестовой связью: 629.
-- HTTP endpoints с точной ссылкой из документации: 229; критичных без такой ссылки: 536.
-- Критичных endpoints без прямой тестовой связи: 248.
+- HTTP endpoints: 930; с прямой тестовой связью: 632.
+- HTTP endpoints с точной ссылкой из документации: 232; критичных без такой ссылки: 534.
+- Критичных endpoints без прямой тестовой связи: 246.
 - Реальных HTML-форм: 19; с найденной тестовой связью: 17.
 - Фоновых сервисов: 33; с найденной тестовой связью: 28.
 - Исходящих HTTP-интеграций: 12; с найденной тестовой связью: 12.
@@ -19,7 +19,7 @@
 | Раздел | Правило доступа | Тестовая связь | Документация |
 | --- | --- | --- | --- |
 | workspace | () => true | да | docs/full-project-audit-2026-06-10.md, README.md |
-| notifications | () => true | да | docs/batch-operations-audit-coverage-2026-06-10.md, docs/claude-yougile-finance-development-spec-2026-10-10.md, docs/claude-yougile-ui-development-spec-2026-10-10.md, docs/deploy-runbook.md, docs/development-pause-plan-2026-09-30.md, docs/full-project-audit-2026-06-10.md, docs/payplanner-requests-roadmap-2026-10-14.md, docs/task-critical-events-matrix-2026-07-09.md, docs/task-critical-notifications-audit-2026-07-09.md |
+| notifications | () => true | да | docs/batch-operations-audit-coverage-2026-06-10.md, docs/claude-yougile-finance-development-spec-2026-10-10.md, docs/claude-yougile-ui-development-spec-2026-10-10.md, docs/deploy-runbook.md, docs/development-pause-plan-2026-09-30.md, docs/full-project-audit-2026-06-10.md, docs/max-today-reply-drafts-2026-10-14.md, docs/payplanner-requests-roadmap-2026-10-14.md, docs/task-critical-events-matrix-2026-07-09.md, docs/task-critical-notifications-audit-2026-07-09.md |
 | messenger | () => true | да | docs/claude-yougile-development-handoff-2026-10-10.md, docs/claude-yougile-operations-development-spec-2026-10-10.md, docs/development-release-preparation-2026-10-06.md, docs/payplanner-roadmap-coverage-2026-10-14.md, docs/public-access-link-security.md, docs/storage-backup-snapshot-boundary-audit-2026-09-28.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/unpushed-changes-map-2026-10-03.md |
 | profile | () => true | да | docs/development-pause-plan-2026-09-30.md, docs/development-release-preparation-2026-10-06.md, docs/full-project-audit-2026-06-10.md, docs/payplanner-esign-roadmap-2026-10-14.md, docs/payplanner-roadmap-coverage-2026-10-14.md, docs/release-verification-history-2026-10-06.md, docs/storage-resilience-runbook.md, docs/storage-s3-backup-audit-2026-09-22.md |
 | calendar | (permissions) => permissions.calendar.canView | да | docs/action-map-pay-20-task-cards-2026-10-12.md, docs/claude-yougile-development-handoff-2026-10-10.md, docs/date-time-inventory.md, docs/final-acceptance-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/legal-feature-flag-ci-gate-2026-06-10.md, docs/owner-decisions-2026-10-12.md, docs/payplanner-court-roadmap-2026-10-14.md, docs/payplanner-roadmap-coverage-2026-10-14.md, docs/yougile-drafts-continuation-2026-10-12.md, docs/yougile-payplanner-drafts-2026-10-12.md, docs/yougile-work-categories-2026-10-12.md |
@@ -197,7 +197,7 @@
 | LegacyStorageMigrationController | backend/Controllers/LegacyStorageMigrationController.cs | 1 | [Authorize(Policy = "Admin")] | нет |
 | LegalEntitiesController | backend/Controllers/LegalEntitiesController.cs | 18 | [Authorize] | да |
 | LegalEntityBalancesController | backend/Controllers/LegalEntityBalancesController.cs | 3 | не задано | да |
-| MaxMessengerController | backend/Controllers/MaxMessengerController.cs | 7 | [Authorize] | нет |
+| MaxMessengerController | backend/Controllers/MaxMessengerController.cs | 8 | [Authorize] | да |
 | MaxWebhookController | backend/Controllers/MaxMessengerController.cs | 1 | публичный ([AllowAnonymous]) | да |
 | MessengerDocumentDeliveriesController | backend/Controllers/MessengerDocumentDeliveriesController.cs | 7 | [Authorize(Policy = "Admin")] | да |
 | PublicMessengerDocumentDeliveriesController | backend/Controllers/MessengerDocumentDeliveriesController.cs | 3 | публичный ([AllowAnonymous]) | да |
@@ -448,11 +448,9 @@
 | POST | api/internal-chat/messages/{messageId:int}/reactions | InternalChatController.ToggleReaction | изменение данных | backend/Controllers/InternalChatController.cs:824 |
 | PUT | api/internal-chat/threads/{threadId:int}/members | InternalChatController.UpdateChannelMembers | изменение данных | backend/Controllers/InternalChatController.cs:196 |
 | PUT | api/internal-chat/threads/{threadId:int}/notification-mode | InternalChatController.SetNotificationMode | изменение данных | backend/Controllers/InternalChatController.cs:888 |
-| POST | api/max/correspondence/{publicId:guid}/route | MaxMessengerController.RouteCorrespondence | изменение данных | backend/Controllers/MaxMessengerController.cs:101 |
-| POST | api/max/link | MaxMessengerController.CreateLink | изменение данных | backend/Controllers/MaxMessengerController.cs:22 |
-| DELETE | api/max/link | MaxMessengerController.OptOut | изменение данных | backend/Controllers/MaxMessengerController.cs:29 |
-| POST | api/max/messages | MaxMessengerController.QueueMessage | изменение данных | backend/Controllers/MaxMessengerController.cs:36 |
-| POST | api/max/messages/{publicId:guid}/retry | MaxMessengerController.RetryMessage | изменение данных | backend/Controllers/MaxMessengerController.cs:77 |
+| POST | api/max/correspondence/{publicId:guid}/route | MaxMessengerController.RouteCorrespondence | изменение данных | backend/Controllers/MaxMessengerController.cs:114 |
+| POST | api/max/messages | MaxMessengerController.QueueMessage | изменение данных | backend/Controllers/MaxMessengerController.cs:49 |
+| POST | api/max/messages/{publicId:guid}/retry | MaxMessengerController.RetryMessage | изменение данных | backend/Controllers/MaxMessengerController.cs:90 |
 | GET | api/messenger-document-deliveries | MessengerDocumentDeliveriesController.GetHistory | чувствительные данные или операция | backend/Controllers/MessengerDocumentDeliveriesController.cs:226 |
 | GET | api/messenger-document-deliveries/configuration | MessengerDocumentDeliveriesController.GetConfiguration | чувствительные данные или операция | backend/Controllers/MessengerDocumentDeliveriesController.cs:33 |
 | GET | api/messenger-document-deliveries/recipients | MessengerDocumentDeliveriesController.GetRecipients | чувствительные данные или операция | backend/Controllers/MessengerDocumentDeliveriesController.cs:55 |
@@ -673,7 +671,7 @@
 | GET | api/contacts/phonebook/yealink/{token} | ContactsController | GetYealinkRemotePhonebook | backend/Controllers/ContactsController.cs:742 | публичный ([AllowAnonymous]) | да | docs/contacts-directory-implementation-log.md |
 | POST | api/contacts/imports/yealink | ContactsController | ImportYealinkXml | backend/Controllers/ContactsController.cs:786 | [Authorize] | нет | docs/contacts-directory-implementation-log.md |
 | POST | merge/preview | ContactsController | PreviewMerge | backend/Controllers/ContactsController.Merge.cs:39 | не задано | да | нет |
-| POST | merge | ContactsController | MergeContacts | backend/Controllers/ContactsController.Merge.cs:52 | не задано | да | docs/claude-merge-review-2026-10-11.md, docs/claude-yougile-operations-development-spec-2026-10-10.md, docs/date-time-inventory.md, docs/frontend-hook-test-coverage-2026-06-10.md, docs/payplanner-card-coverage-2026-10-14.md, docs/payplanner-contacts-telephony-roadmap-2026-10-14.md, docs/yougile-payplanner-drafts-2026-10-12.md, docs/yougile-work-categories-2026-10-12.md |
+| POST | merge | ContactsController | MergeContacts | backend/Controllers/ContactsController.Merge.cs:52 | не задано | да | docs/claude-merge-review-2026-10-11.md, docs/claude-yougile-operations-development-spec-2026-10-10.md, docs/date-time-inventory.md, docs/frontend-hook-test-coverage-2026-06-10.md, docs/max-latest-reply-drafts-2026-10-15.md, docs/max-today-reply-drafts-2026-10-14.md, docs/payplanner-card-coverage-2026-10-14.md, docs/payplanner-contacts-telephony-roadmap-2026-10-14.md, docs/yougile-payplanner-drafts-2026-10-12.md, docs/yougile-work-categories-2026-10-12.md |
 | GET | api/[controller] | ContractsController | Get | backend/Controllers/ContractsController.cs:313 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
 | GET | api/[controller]/{id:int} | ContractsController | GetById | backend/Controllers/ContractsController.cs:346 | [Authorize] | да | нет |
 | GET | api/[controller]/{id:int}/document | ContractsController | GetDocument | backend/Controllers/ContractsController.cs:367 | [Authorize] | да | нет |
@@ -925,14 +923,15 @@
 | GET |  | LegalEntityBalancesController | GetSummary | backend/Controllers/LegalEntityBalancesController.cs:57 | не задано | да | нет |
 | GET | transactions | LegalEntityBalancesController | GetTransactions | backend/Controllers/LegalEntityBalancesController.cs:78 | не задано | да | docs/bank-integrations-api-verification-2026-10-09.md, docs/delete-behavior-contract-2026-06-10.md |
 | POST | apply | LegalEntityBalancesController | ApplyCredit | backend/Controllers/LegalEntityBalancesController.cs:116 | не задано | да | docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/payplanner-storage-roadmap-2026-10-14.md, docs/release-verification-history-2026-10-06.md, docs/storage-resilience-runbook.md, docs/unpushed-changes-map-2026-10-03.md |
-| POST | api/max/link | MaxMessengerController | CreateLink | backend/Controllers/MaxMessengerController.cs:22 | [Authorize] | нет | нет |
-| DELETE | api/max/link | MaxMessengerController | OptOut | backend/Controllers/MaxMessengerController.cs:29 | [Authorize] | нет | нет |
-| POST | api/max/messages | MaxMessengerController | QueueMessage | backend/Controllers/MaxMessengerController.cs:36 | [Authorize]; [Authorize(Roles = "admin")] | нет | нет |
-| GET | api/max/messages | MaxMessengerController | GetMessages | backend/Controllers/MaxMessengerController.cs:51 | [Authorize]; [Authorize(Roles = "admin")] | нет | нет |
-| POST | api/max/messages/{publicId:guid}/retry | MaxMessengerController | RetryMessage | backend/Controllers/MaxMessengerController.cs:77 | [Authorize]; [Authorize(Roles = "admin")] | нет | нет |
-| GET | api/max/correspondence | MaxMessengerController | GetCorrespondence | backend/Controllers/MaxMessengerController.cs:93 | [Authorize]; [Authorize(Roles = "admin")] | нет | нет |
-| POST | api/max/correspondence/{publicId:guid}/route | MaxMessengerController | RouteCorrespondence | backend/Controllers/MaxMessengerController.cs:101 | [Authorize]; [Authorize(Roles = "admin")] | нет | нет |
-| POST | api/integrations/max/webhook | MaxWebhookController | Receive | backend/Controllers/MaxMessengerController.cs:143 | публичный ([AllowAnonymous]) | да | docs/payplanner-messenger-roadmap-2026-10-14.md |
+| GET | api/max/link | MaxMessengerController | GetLink | backend/Controllers/MaxMessengerController.cs:22 | [Authorize] | да | docs/development-2026-10-15-max-profile.md, docs/payplanner-messenger-roadmap-2026-10-14.md |
+| POST | api/max/link | MaxMessengerController | CreateLink | backend/Controllers/MaxMessengerController.cs:31 | [Authorize] | да | docs/development-2026-10-15-max-profile.md, docs/payplanner-messenger-roadmap-2026-10-14.md |
+| DELETE | api/max/link | MaxMessengerController | OptOut | backend/Controllers/MaxMessengerController.cs:40 | [Authorize] | да | docs/development-2026-10-15-max-profile.md, docs/payplanner-messenger-roadmap-2026-10-14.md |
+| POST | api/max/messages | MaxMessengerController | QueueMessage | backend/Controllers/MaxMessengerController.cs:49 | [Authorize]; [Authorize(Roles = "admin")] | нет | нет |
+| GET | api/max/messages | MaxMessengerController | GetMessages | backend/Controllers/MaxMessengerController.cs:64 | [Authorize]; [Authorize(Roles = "admin")] | нет | нет |
+| POST | api/max/messages/{publicId:guid}/retry | MaxMessengerController | RetryMessage | backend/Controllers/MaxMessengerController.cs:90 | [Authorize]; [Authorize(Roles = "admin")] | нет | нет |
+| GET | api/max/correspondence | MaxMessengerController | GetCorrespondence | backend/Controllers/MaxMessengerController.cs:106 | [Authorize]; [Authorize(Roles = "admin")] | нет | нет |
+| POST | api/max/correspondence/{publicId:guid}/route | MaxMessengerController | RouteCorrespondence | backend/Controllers/MaxMessengerController.cs:114 | [Authorize]; [Authorize(Roles = "admin")] | нет | нет |
+| POST | api/integrations/max/webhook | MaxWebhookController | Receive | backend/Controllers/MaxMessengerController.cs:156 | публичный ([AllowAnonymous]) | да | docs/payplanner-messenger-roadmap-2026-10-14.md |
 | GET | api/messenger-document-deliveries/configuration | MessengerDocumentDeliveriesController | GetConfiguration | backend/Controllers/MessengerDocumentDeliveriesController.cs:33 | [Authorize(Policy = "Admin")] | нет | нет |
 | GET | api/messenger-document-deliveries/recipients | MessengerDocumentDeliveriesController | GetRecipients | backend/Controllers/MessengerDocumentDeliveriesController.cs:55 | [Authorize(Policy = "Admin")] | нет | нет |
 | POST | api/messenger-document-deliveries/recipients | MessengerDocumentDeliveriesController | CreateRecipient | backend/Controllers/MessengerDocumentDeliveriesController.cs:80 | [Authorize(Policy = "Admin")] | нет | нет |

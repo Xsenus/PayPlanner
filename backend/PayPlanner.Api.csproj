@@ -9,6 +9,8 @@
     <Copyright>ilel@list.ru</Copyright>
     <AssemblyVersion>1.0.0.6</AssemblyVersion>
     <FileVersion>1.0.0.6</FileVersion>
+    <!-- SHA выпуска хранится в REVISION; он не должен менять контракт ссылочной сборки и пересобирать исторические миграции. -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <UserSecretsId>payplanner-api-local-dev</UserSecretsId>
   </PropertyGroup>
 

@@ -33,6 +33,7 @@ import { YandexCalendarPanel } from './YandexCalendarPanel';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 import { TaskNotificationDefaultsPanel } from '../Tasks/TaskNotificationDefaultsPanel';
 import { WebPushDevicePanel } from '../Notifications/WebPushDevicePanel';
+import { MaxMessengerPanel } from './MaxMessengerPanel';
 
 type ProviderId = 'google' | 'vk' | 'yandex' | 'telegram';
 
@@ -1099,6 +1100,8 @@ export function ProfilePage() {
                 </button>
               </div>
             </div>
+
+            {profile ? <MaxMessengerPanel key={profile.id} /> : null}
 
             <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <WebPushDevicePanel

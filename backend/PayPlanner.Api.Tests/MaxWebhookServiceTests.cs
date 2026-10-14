@@ -14,6 +14,92 @@ namespace PayPlanner.Api.Tests;
 public sealed class MaxWebhookServiceTests
 {
     [Fact]
+    public async Task EmployeeStatusReturnsOnlyOwnLinkWithoutRecipientOrSecret()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var empty = await fixture.Service.GetEmployeeLinkStatusAsync(fixture.UserId, CancellationToken.None);
+        Assert.Equal("unlinked", empty.Status);
+        Assert.True(empty.ChannelReady);
+        Assert.Null(empty.LinkId);
+
+        var own = await fixture.Service.CreateEmployeeLinkAsync(fixture.UserId, CancellationToken.None);
+        var other = new User { Email = "other@example.test", FullName = "Другой", PasswordHash = "hash", RoleId = (await fixture.Db.Users.FindAsync(fixture.UserId))!.RoleId, IsActive = true };
+        fixture.Db.Users.Add(other);
+        await fixture.Db.SaveChangesAsync();
+        fixture.Db.MaxRecipientLinks.Add(new MaxRecipientLink { UserId = other.Id, Status = MaxRecipientLinkStatuses.Verified, MaxUserId = 123456, LinkTokenHash = "other-secret", UpdatedAt = fixture.Now.AddMinutes(1) });
+        await fixture.Db.SaveChangesAsync();
+        fixture.Db.ChangeTracker.Clear();
+
+        var status = await fixture.Service.GetEmployeeLinkStatusAsync(fixture.UserId, CancellationToken.None);
+        Assert.Equal("pending", status.Status);
+        Assert.Equal(own.LinkId, status.LinkId);
+        Assert.Equal(own.ExpiresAt, status.ExpiresAt);
+        Assert.Equal(DateTimeKind.Utc, status.ExpiresAt!.Value.Kind);
+        var serialized = JsonSerializer.Serialize(status);
+        Assert.DoesNotContain(own.Payload, serialized);
+        Assert.DoesNotContain("other-secret", serialized);
+        Assert.DoesNotContain("MaxUserId", serialized);
+        Assert.DoesNotContain("123456", serialized);
+    }
+
+    [Fact]
+    public async Task EmployeeStatusPrefersVerifiedLinkWhileReplacementIsPending()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var first = await fixture.Service.CreateEmployeeLinkAsync(fixture.UserId, CancellationToken.None);
+        await fixture.Service.ProcessAsync(fixture.Update("bot_started", first.Payload), "webhook-secret", CancellationToken.None);
+        await fixture.Service.CreateEmployeeLinkAsync(fixture.UserId, CancellationToken.None);
+        fixture.Db.ChangeTracker.Clear();
+        var status = await fixture.Service.GetEmployeeLinkStatusAsync(fixture.UserId, CancellationToken.None);
+        Assert.Equal("verified", status.Status);
+        Assert.Equal(first.LinkId, status.LinkId);
+        Assert.Null(status.ExpiresAt);
+        Assert.Equal(DateTimeKind.Utc, status.VerifiedAt!.Value.Kind);
+    }
+
+    [Fact]
+    public async Task EmployeeStatusReportsExpiredLinkWithoutChangingStorage()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var created = await fixture.Service.CreateEmployeeLinkAsync(fixture.UserId, CancellationToken.None);
+        var stored = await fixture.Db.MaxRecipientLinks.SingleAsync();
+        stored.LinkTokenExpiresAt = fixture.Now;
+        await fixture.Db.SaveChangesAsync();
+        var status = await fixture.Service.GetEmployeeLinkStatusAsync(fixture.UserId, CancellationToken.None);
+        Assert.Equal("expired", status.Status);
+        Assert.Equal(created.LinkId, status.LinkId);
+        Assert.Equal(MaxRecipientLinkStatuses.Pending, stored.Status);
+        Assert.Single(await fixture.Db.ObjectAuditEvents.ToListAsync());
+    }
+
+    [Fact]
+    public async Task EmployeeStatusReportsDisabledChannelAndRejectsInactiveOrUnknownUser()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: false);
+        var status = await fixture.Service.GetEmployeeLinkStatusAsync(fixture.UserId, CancellationToken.None);
+        Assert.False(status.ChannelReady);
+        Assert.Equal("unlinked", status.Status);
+        await Assert.ThrowsAsync<MaxLinkUnavailableException>(() => fixture.Service.GetEmployeeLinkStatusAsync(-1, CancellationToken.None));
+        await Assert.ThrowsAsync<MaxLinkUnavailableException>(() => fixture.Service.GetEmployeeLinkStatusAsync(int.MaxValue, CancellationToken.None));
+        (await fixture.Db.Users.FindAsync(fixture.UserId))!.IsActive = false;
+        await fixture.Db.SaveChangesAsync();
+        await Assert.ThrowsAsync<MaxLinkUnavailableException>(() => fixture.Service.GetEmployeeLinkStatusAsync(fixture.UserId, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task EmployeeStatusReportsOptOutAndReplacementWithDeterministicOrder()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        await fixture.Service.CreateEmployeeLinkAsync(fixture.UserId, CancellationToken.None);
+        var replacement = await fixture.Service.CreateEmployeeLinkAsync(fixture.UserId, CancellationToken.None);
+        Assert.Equal(replacement.LinkId, (await fixture.Service.GetEmployeeLinkStatusAsync(fixture.UserId, CancellationToken.None)).LinkId);
+        await fixture.Service.OptOutEmployeeAsync(fixture.UserId, CancellationToken.None);
+        var status = await fixture.Service.GetEmployeeLinkStatusAsync(fixture.UserId, CancellationToken.None);
+        Assert.Equal("opted-out", status.Status);
+        Assert.Null(status.ExpiresAt);
+    }
+
+    [Fact]
     public async Task BotStartedVerifiesOneTimeLinkAndReplayIsIdempotent()
     {
         await using var fixture = await Fixture.CreateAsync();

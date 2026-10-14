@@ -83,6 +83,9 @@ jobs:
       - name: Test FE guard and unit
         run: npm run test:ci
 
+      - name: Install Chromium for frontend integration
+        run: npx playwright install --with-deps chromium
+
       - name: Test FE integration
         run: npm run test:integration
 
@@ -200,6 +203,14 @@ jobs:
 
       - name: Restore backend
         run: dotnet restore "${{ env.BE_SLN }}" --force -p:PayPlannerReleaseAudit=true
+
+      - name: Setup Node for reference cache audit
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+
+      - name: Verify reference assembly cache contracts
+        run: npm run audit:reference-cache
 
       - name: Build backend with analyzers
         run: dotnet build backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-restore -c Release

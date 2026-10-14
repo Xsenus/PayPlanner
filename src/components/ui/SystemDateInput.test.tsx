@@ -17,6 +17,28 @@ function ControlledDate({ initial = '' }: { initial?: string }) {
 }
 
 describe('SystemDateInput', () => {
+  it.each([
+    { type: 'date' as const, value: '2026-07-21', restriction: 'disabled' as const },
+    { type: 'date' as const, value: '2026-07-21', restriction: 'readOnly' as const },
+    { type: 'time' as const, value: '10:30', restriction: 'disabled' as const },
+    { type: 'time' as const, value: '10:30', restriction: 'readOnly' as const },
+    { type: 'datetime-local' as const, value: '2026-07-21T10:30', restriction: 'disabled' as const },
+    { type: 'datetime-local' as const, value: '2026-07-21T10:30', restriction: 'readOnly' as const },
+  ])('closes the $type picker when $restriction is applied and preserves the value', async ({ type, value, restriction }) => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const view = render(<SystemDateInput aria-label="Срок" type={type} value={value} onChange={onChange} />);
+    await user.click(screen.getByRole('button', { name: 'Выбрать: Срок' }));
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    view.rerender(<SystemDateInput aria-label="Срок" type={type} value={value} onChange={onChange} {...{ [restriction]: true }} />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Выбрать: Срок' }).querySelector('.lucide-x')).toBeNull();
+    expect((screen.getByLabelText('Срок') as HTMLInputElement).value).toBe(value);
+    expect(onChange).not.toHaveBeenCalled();
+    view.rerender(<SystemDateInput aria-label="Срок" type={type} value={value} onChange={onChange} />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
   it('keeps a native date input for forms and existing integrations', () => {
     const onChange = vi.fn();
     const { container } = render(<SystemDateInput type="date" name="dueDate" value="2026-07-21" onChange={onChange} />);

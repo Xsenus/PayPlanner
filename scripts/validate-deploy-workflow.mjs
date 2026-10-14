@@ -199,6 +199,9 @@ export function validateDeployWorkflow(source) {
     'tar -czf frontend.tar.gz -C "${{ env.OUT_DIR }}" fe',
   ];
   const fe = frontendCommands.map(value => command('frontend', value));
+  const feBrowser = command('frontend', 'npx playwright install --with-deps chromium');
+  requireValue(feBrowser.index > fe[0].index && feBrowser.index < fe[12].index,
+    'Compatible Chromium must be installed after dependencies and before frontend integration');
   requireValue(fe.every(({ index }) => index < feUpload.index), 'Frontend gates/build must precede frontend upload');
   requireValue(fe.slice(1, 14).every(({ index }) => index > fe[0].index && index < fe[14].index), 'Frontend install/checks/build order');
   requireValue(fe[0].index < fe[1].index && fe[13].index < fe[14].index && fe[14].index < fe[15].index, 'Frontend install/legal/build/package order');

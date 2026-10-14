@@ -14,6 +14,7 @@ declare global {
       download: () => Promise<void>;
       photo: (url: string) => string | undefined;
     };
+    __restoredDownloadState?: { activeBefore: boolean; activeAfter: boolean; elapsed: number; clicked: boolean; origin: string };
   }
 }
 
@@ -21,7 +22,8 @@ const ID = 'cefe9b7e3bb64c51b3c80a9e96bb57ea';
 afterEach(() => vi.unstubAllEnvs());
 
 async function launchBrowser(): Promise<Browser> {
-  for (const channel of ['msedge', 'chrome', undefined]) {
+  // Версия Chromium должна соответствовать Playwright; установленные системные браузеры остаются запасным вариантом.
+  for (const channel of [undefined, 'msedge', 'chrome']) {
     try { return await chromium.launch({ headless: true, channel }); } catch { /* Try installed alternatives, never download a browser. */ }
   }
   throw new Error('Для браузерного теста нужен установленный Chromium/Edge/Chrome.');
@@ -92,11 +94,15 @@ it('qualifies native browser CSP, probe transport and clean-profile barriers aga
             request: () => apiFetch(${JSON.stringify(`${apiUrl}/probe`)}, { method: 'POST', body: 'fixture' }),
             photo: restoredPhotoUrl,
             download: async () => {
+              const started = performance.now();
+              const activeBefore = navigator.userActivation.isActive;
               const response = await apiFetch(${JSON.stringify(`${apiUrl}/file`)});
               const url = URL.createObjectURL(await response.blob());
               const link = document.createElement('a'); link.href = url; link.download = 'fixture.txt';
               document.body.appendChild(link);
+              window.__restoredDownloadState = { activeBefore, activeAfter: navigator.userActivation.isActive, elapsed: performance.now() - started, clicked: false, origin: location.origin };
               link.click();
+              window.__restoredDownloadState.clicked = true;
               link.remove();
               setTimeout(() => URL.revokeObjectURL(url), 1000);
             }
@@ -163,6 +169,7 @@ it('qualifies native browser CSP, probe transport and clean-profile barriers aga
       const diagnostics = { requests, outside, errors, consoleErrors,
         browserVersion: browser.version(),
         blocked: await page.evaluate(() => window.__restoredCspBlocked),
+        downloadState: await page.evaluate(() => window.__restoredDownloadState),
       };
       throw new Error(`Native fixture download failed: ${JSON.stringify(diagnostics)}`, { cause });
     }

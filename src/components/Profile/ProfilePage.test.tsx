@@ -72,6 +72,10 @@ vi.mock('./ProfilePhotoCropModal', () => ({
   ProfilePhotoCropModal: () => null,
 }));
 
+vi.mock('./MaxMessengerPanel', () => ({
+  MaxMessengerPanel: () => <div>Уведомления в MAX mock</div>,
+}));
+
 vi.mock('../Tasks/TaskNotificationDefaultsPanel', () => ({
   TaskNotificationDefaultsPanel: () => <div>Настройки напоминаний mock</div>,
 }));

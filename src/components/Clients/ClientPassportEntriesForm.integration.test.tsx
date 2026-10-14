@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -19,6 +20,33 @@ const baseEntry: ClientPassportEntryFormValue = {
 };
 
 describe('ClientPassportEntriesForm integration', () => {
+  it('selects a historical issue date through the shared month and year picker', async () => {
+    const user = userEvent.setup();
+    const onUpdateEntry = vi.fn();
+    render(<ClientPassportEntriesForm entries={[baseEntry]} canEdit onUpdateEntry={onUpdateEntry} onRemoveEntry={vi.fn()} onAddEntry={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: /Выбрать.*Дата выдачи/ }));
+    await user.click(screen.getByRole('button', { name: 'Выбрать месяц и год' }));
+    const year = screen.getByRole('spinbutton', { name: 'Год' });
+    await user.clear(year);
+    await user.type(year, '1985');
+    await user.click(screen.getByRole('button', { name: 'Март' }));
+    await user.click(screen.getByRole('button', { name: '15.03.1985' }));
+    await user.click(screen.getByRole('button', { name: 'Применить' }));
+    expect(onUpdateEntry).toHaveBeenCalledExactlyOnceWith(0, 'issueDate', '1985-03-15');
+  });
+
+  it('does not allow changing an issue date when the passport form is read-only', async () => {
+    const user = userEvent.setup();
+    const onUpdateEntry = vi.fn();
+    render(<ClientPassportEntriesForm entries={[baseEntry]} canEdit={false} onUpdateEntry={onUpdateEntry} onRemoveEntry={vi.fn()} onAddEntry={vi.fn()} />);
+    const button = screen.getByRole('button', { name: /Выбрать.*Дата выдачи/ });
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    expect(button.querySelector('.lucide-x')).toBeNull();
+    await user.click(button);
+    expect(screen.queryByRole('dialog', { name: 'Выбор даты' })).toBeNull();
+    expect(onUpdateEntry).not.toHaveBeenCalled();
+  });
+
   it('renders passport removal as an icon-only action with an accessible label', () => {
     render(
       <ClientPassportEntriesForm

@@ -116,6 +116,7 @@ public sealed class ClientPortalControllerSecurityTests
 
     private sealed class MaxWebhookServiceStub : IMaxWebhookService
     {
+        public Task<MaxEmployeeLinkStatus> GetEmployeeLinkStatusAsync(int userId, CancellationToken ct) => throw new NotSupportedException();
         public Task<MaxLinkTokenResult> CreateEmployeeLinkAsync(int userId, CancellationToken ct) => throw new NotSupportedException();
         public Task<MaxLinkTokenResult> CreatePortalLinkAsync(int portalAccountId, CancellationToken ct) => throw new NotSupportedException();
         public Task<bool> OptOutEmployeeAsync(int userId, CancellationToken ct) => throw new NotSupportedException();

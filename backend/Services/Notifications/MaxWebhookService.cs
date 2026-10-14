@@ -8,10 +8,13 @@ using PayPlanner.Api.Models;
 namespace PayPlanner.Api.Services.Notifications;
 
 public sealed record MaxLinkTokenResult(Guid LinkId, string Payload, string? DeepLinkUrl, DateTime ExpiresAt);
+public sealed record MaxEmployeeLinkStatus(string Status, bool ChannelReady, DateTime? ExpiresAt, DateTime? VerifiedAt, Guid? LinkId);
 public sealed record MaxWebhookResult(bool Accepted, bool Duplicate, string Status, string? ErrorCode = null);
+public sealed class MaxLinkUnavailableException(string message) : InvalidOperationException(message);
 
 public interface IMaxWebhookService
 {
+    Task<MaxEmployeeLinkStatus> GetEmployeeLinkStatusAsync(int userId, CancellationToken ct);
     Task<MaxLinkTokenResult> CreateEmployeeLinkAsync(int userId, CancellationToken ct);
     Task<MaxLinkTokenResult> CreatePortalLinkAsync(int portalAccountId, CancellationToken ct);
     Task<bool> OptOutEmployeeAsync(int userId, CancellationToken ct);
@@ -31,6 +34,30 @@ public sealed class MaxWebhookService(
         "bot_started", "bot_stopped", "dialog_removed", "message_created", "message_callback"
     ];
 
+    public async Task<MaxEmployeeLinkStatus> GetEmployeeLinkStatusAsync(int userId, CancellationToken ct)
+    {
+        if (userId <= 0 || !await db.Users.AsNoTracking().AnyAsync(item => item.Id == userId && item.IsActive, ct))
+            throw new MaxLinkUnavailableException("Активный сотрудник не найден.");
+
+        var settings = await settingsService.GetRuntimeSettingsAsync(ct);
+        var botName = configuration["MaxMessenger:BotUsername"]?.Trim().TrimStart('@');
+        var channelReady = settings.Ready && !string.IsNullOrWhiteSpace(botName);
+        var link = await db.MaxRecipientLinks.AsNoTracking()
+            .Where(item => item.UserId == userId && item.ClientPortalAccountId == null)
+            .OrderByDescending(item => item.Status == MaxRecipientLinkStatuses.Verified)
+            .ThenByDescending(item => item.UpdatedAt)
+            .ThenByDescending(item => item.Id)
+            .Select(item => new { item.PublicId, item.Status, item.LinkTokenExpiresAt, item.VerifiedAt })
+            .FirstOrDefaultAsync(ct);
+        if (link is null) return new MaxEmployeeLinkStatus("unlinked", channelReady, null, null, null);
+
+        var status = link.Status == MaxRecipientLinkStatuses.Pending
+            && link.LinkTokenExpiresAt <= timeProvider.GetUtcNow().UtcDateTime ? "expired" : link.Status;
+        return new MaxEmployeeLinkStatus(status, channelReady,
+            link.Status == MaxRecipientLinkStatuses.Pending ? DateTime.SpecifyKind(link.LinkTokenExpiresAt, DateTimeKind.Utc) : null,
+            link.VerifiedAt is { } verifiedAt ? DateTime.SpecifyKind(verifiedAt, DateTimeKind.Utc) : null, link.PublicId);
+    }
+
     public async Task<MaxLinkTokenResult> CreateEmployeeLinkAsync(int userId, CancellationToken ct)
     {
         var actorName = userId <= 0 ? null : await db.Users.AsNoTracking()
@@ -38,7 +65,7 @@ public sealed class MaxWebhookService(
             .Select(item => item.FullName)
             .FirstOrDefaultAsync(ct);
         if (string.IsNullOrWhiteSpace(actorName))
-            throw new InvalidOperationException("Активный сотрудник не найден.");
+            throw new MaxLinkUnavailableException("Активный сотрудник не найден.");
         return await CreateLinkAsync(userId, null, userId, actorName, ct);
     }
 
@@ -61,9 +88,9 @@ public sealed class MaxWebhookService(
         CancellationToken ct)
     {
         var settings = await settingsService.GetRuntimeSettingsAsync(ct);
-        if (!settings.Ready) throw new InvalidOperationException("Канал MAX выключен или настроен не полностью.");
+        if (!settings.Ready) throw new MaxLinkUnavailableException("Канал MAX выключен или настроен не полностью.");
         var botName = configuration["MaxMessenger:BotUsername"]?.Trim().TrimStart('@');
-        if (string.IsNullOrWhiteSpace(botName)) throw new InvalidOperationException("Имя бота MAX не настроено.");
+        if (string.IsNullOrWhiteSpace(botName)) throw new MaxLinkUnavailableException("Имя бота MAX не настроено.");
 
         var now = timeProvider.GetUtcNow().UtcDateTime;
         var oldPending = await db.MaxRecipientLinks

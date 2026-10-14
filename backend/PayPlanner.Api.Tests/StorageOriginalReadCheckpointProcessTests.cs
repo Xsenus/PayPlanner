@@ -81,14 +81,7 @@ public sealed partial class StorageStageCapacityServiceTests
             }
             await StopOwnedAsync();
             var marker = Path.Combine(f.Root, "objects", ".stage-writer-fences-v1", ticket.ObjectId.ToString("N") + ".lock");
-            var quiescentDeadline = DateTime.UtcNow.AddSeconds(5);
-            while (true)
-            {
-                try { await using var exclusive = new FileStream(marker, FileMode.Open, FileAccess.ReadWrite, FileShare.None); break; }
-                catch (IOException) when (DateTime.UtcNow < quiescentDeadline) { await Task.Delay(20); }
-            }
-            await using (var file = new FileStream(ticket.AbsolutePath, FileMode.Open, FileAccess.Read, FileShare.Read))
-                Assert.Equal(proof.FileIdentity, StorageStageFileIdentity.Observe(file.SafeFileHandle));
+            await WaitForStoppedStageHandlesAsync(marker, ticket.AbsolutePath, proof.FileIdentity);
             var complete = phase == "original-complete";
             var preview = await recovery.ReconcilePendingAsync(false, 10, TimeSpan.FromMinutes(10), default);
             Assert.Equal(complete ? "eligible" : "incompleteFile", Assert.Single(preview.Items).Status);
@@ -123,6 +116,23 @@ public sealed partial class StorageStageCapacityServiceTests
             Assert.Equal(processIdentity, OwnedProcessIdentity.Capture(observed));
             writer.Kill();
             await writer.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        }
+    }
+    private static async Task WaitForStoppedStageHandlesAsync(string marker, string stage, string expectedIdentity)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (true)
+        {
+            try
+            {
+                // Native teardown may release the marker before the stage handle.
+                // Keep the original deadline and verify both, including identity.
+                await using var exclusive = new FileStream(marker, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+                await using var file = new FileStream(stage, FileMode.Open, FileAccess.Read, FileShare.Read);
+                Assert.Equal(expectedIdentity, StorageStageFileIdentity.Observe(file.SafeFileHandle));
+                return;
+            }
+            catch (IOException) when (DateTime.UtcNow < deadline) { await Task.Delay(20); }
         }
     }
 }

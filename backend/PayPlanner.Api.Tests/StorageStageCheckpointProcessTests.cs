@@ -80,14 +80,7 @@ public sealed partial class StorageStageCapacityServiceTests
             }
             await StopOwnedAsync();
             var marker = Path.Combine(f.Root, "objects", ".stage-writer-fences-v1", ticket.ObjectId.ToString("N") + ".lock");
-            var quiescentDeadline = DateTime.UtcNow.AddSeconds(5);
-            while (true)
-            {
-                try { await using var exclusive = new FileStream(marker, FileMode.Open, FileAccess.ReadWrite, FileShare.None); break; }
-                catch (IOException) when (DateTime.UtcNow < quiescentDeadline) { await Task.Delay(20); }
-            }
-            await using (var file = new FileStream(ticket.AbsolutePath, FileMode.Open, FileAccess.Read, FileShare.Read))
-                Assert.Equal(proof.FileIdentity, StorageStageFileIdentity.Observe(file.SafeFileHandle));
+            await WaitForStoppedStageHandlesAsync(marker, ticket.AbsolutePath, proof.FileIdentity);
             var complete = phase == "checkpoint-complete";
             var preview = await recovery.ReconcilePendingAsync(false, 10, TimeSpan.FromMinutes(10), default);
             Assert.Equal(complete ? "eligible" : "incompleteFile", Assert.Single(preview.Items).Status);

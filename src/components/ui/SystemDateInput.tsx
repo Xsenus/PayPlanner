@@ -153,6 +153,10 @@ export const SystemDateInput = forwardRef<HTMLInputElement, SystemDateInputProps
   const [position, setPosition] = useState<MenuPosition | null>(null);
   const [inferredLabel, setInferredLabel] = useState('');
 
+  useEffect(() => {
+    if ((disabled || readOnly) && open) setOpen(false);
+  }, [disabled, readOnly, open]);
+
   const setNativeRef = useCallback((node: HTMLInputElement | null) => {
     nativeRef.current = node;
     if (typeof forwardedRef === 'function') forwardedRef(node);
@@ -174,6 +178,7 @@ export const SystemDateInput = forwardRef<HTMLInputElement, SystemDateInputProps
   }, [currentValue, disabled, readOnly, today, type]);
 
   const emitChange = useCallback((nextValue: string) => {
+    if (disabled || readOnly) return;
     if (!controlled) setUncontrolledValue(nextValue);
     const nativeInput = nativeRef.current;
     if (!nativeInput) return;
@@ -181,7 +186,7 @@ export const SystemDateInput = forwardRef<HTMLInputElement, SystemDateInputProps
     const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
     valueSetter?.call(nativeInput, nextValue);
     nativeInput.dispatchEvent(new Event('input', { bubbles: true }));
-  }, [controlled]);
+  }, [controlled, disabled, readOnly]);
 
   const apply = useCallback(() => {
     const nextValue = type === 'time'
@@ -310,7 +315,7 @@ export const SystemDateInput = forwardRef<HTMLInputElement, SystemDateInputProps
   };
 
   const nativeLabel = ariaLabel || inferredLabel || inputProps.title || name || 'Дата';
-  const panel = open ? (
+  const panel = open && !disabled && !readOnly ? (
     <div
       ref={panelRef}
       role="dialog"
@@ -498,7 +503,7 @@ export const SystemDateInput = forwardRef<HTMLInputElement, SystemDateInputProps
           {formatDisplayValue(currentValue, type, type === 'time' ? 'Выберите время' : emptyLabel)}
         </span>
         <span className="flex shrink-0 items-center gap-1 text-slate-400">
-          {showInlineClear && currentValue && !required && !readOnly ? (
+          {showInlineClear && currentValue && !required && !readOnly && !disabled ? (
             <span
               aria-hidden="true"
               onClick={(event) => { event.stopPropagation(); clear(); }}

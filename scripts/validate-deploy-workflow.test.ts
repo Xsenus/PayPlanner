@@ -41,6 +41,7 @@ describe('parallel deploy workflow release contract', () => {
     ['conditional legal gate', '        run: npm run test:legal-flags:strict', '        if: false\n        run: npm run test:legal-flags:strict'],
     ['commented legal gate', '        run: npm run test:legal-flags:strict', '        run: echo npm run test:legal-flags:strict'],
     ['removed validator', '        run: node scripts/validate-deploy-workflow.mjs', '        run: echo validator'],
+    ['missing frontend browser', '        run: npx playwright install --with-deps chromium\n', '        run: echo browser\n'],
     ['failure swallowed', '        run: npm run lint', '        run: |\n          npm run lint\n          true || true'],
     ['conditional shell wrapper', '        run: npm run lint', '        run: |\n          if false; then\n            npm run lint\n          fi'],
     ['shard cases filtered', '--shard ${{ matrix.shard }} --results', '--filter Tiny --shard ${{ matrix.shard }} --results'],
@@ -147,6 +148,16 @@ describe('parallel deploy workflow release contract', () => {
     ['download arbitrary cross-run ID', '          artifact-ids: ${{ needs.backend-build.outputs.runtime-artifact-id }}\n', '          artifact-ids: ${{ needs.backend-build.outputs.runtime-artifact-id }}\n          github-token: ${{ github.token }}\n'],
   ])('rejects unsafe rerun binding: %s', (_name, before, after) => {
     expect(() => validateDeployWorkflow(replaceOnce(before, after))).toThrow();
+  });
+
+  it('rejects installing Chromium after frontend integration', () => {
+    const browserStep = '      - name: Install Chromium for frontend integration\n        run: npx playwright install --with-deps chromium\n\n';
+    expect(workflow).toContain(browserStep);
+    const moved = workflow.replace(browserStep, '').replace(
+      '      - name: Test legal feature flags readiness\n',
+      browserStep + '      - name: Test legal feature flags readiness\n',
+    );
+    expect(() => validateDeployWorkflow(moved)).toThrow(/Chromium/);
   });
 
   it('requires completed shard diagnostics before publishing a qualified alias', () => {

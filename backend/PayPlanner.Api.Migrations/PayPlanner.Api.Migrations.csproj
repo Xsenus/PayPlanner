@@ -16,6 +16,8 @@
     <IsPackable>false</IsPackable>
     <AssemblyVersion>1.0.0.6</AssemblyVersion>
     <FileVersion>1.0.0.6</FileVersion>
+    <!-- Коммит документации не меняет код миграций; ревизия поставки проверяется отдельным файлом REVISION. -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>

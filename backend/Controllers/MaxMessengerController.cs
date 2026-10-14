@@ -19,18 +19,31 @@ public sealed class MaxMessengerController(
     IMaxCorrespondenceService correspondence,
     PaymentContext db) : ControllerBase
 {
+    [HttpGet("link")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<ActionResult<MaxEmployeeLinkStatus>> GetLink(CancellationToken ct)
+    {
+        if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId) || userId <= 0) return Unauthorized();
+        try { return Ok(await service.GetEmployeeLinkStatusAsync(userId, ct)); }
+        catch (MaxLinkUnavailableException error) { return BadRequest(error.Message); }
+    }
+
     [HttpPost("link")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     public async Task<ActionResult<MaxLinkTokenResult>> CreateLink(CancellationToken ct)
     {
-        if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)) return Unauthorized();
-        return Ok(await service.CreateEmployeeLinkAsync(userId, ct));
+        if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId) || userId <= 0) return Unauthorized();
+        try { return Ok(await service.CreateEmployeeLinkAsync(userId, ct)); }
+        catch (MaxLinkUnavailableException error) { return BadRequest(error.Message); }
     }
 
     [HttpDelete("link")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     public async Task<IActionResult> OptOut(CancellationToken ct)
     {
-        if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)) return Unauthorized();
-        return await service.OptOutEmployeeAsync(userId, ct) ? NoContent() : NotFound();
+        if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId) || userId <= 0) return Unauthorized();
+        await service.OptOutEmployeeAsync(userId, ct);
+        return NoContent();
     }
 
     [HttpPost("messages")]
