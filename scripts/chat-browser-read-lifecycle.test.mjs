@@ -4,7 +4,53 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { runInNewContext } from 'node:vm';
 import { afterEach, test, vi } from 'vitest';
-import { createChatPostRecorder, createChatReadLifecycle, redactChatBrowserDiagnostic } from './chat-browser-read-lifecycle.mjs';
+import { createChatPostRecorder, createChatReadLifecycle, drainChatNavigationReads, redactChatBrowserDiagnostic } from './chat-browser-read-lifecycle.mjs';
+
+test('navigation waits for an unfinished notification response even when chat reads are idle', async () => {
+  const page = new EventEmitter();
+  const chat = createChatReadLifecycle(page, request => request.chat, 20000);
+  const api = createChatReadLifecycle(page, request => request.api, 20000);
+  const notification = { api: true, chat: false };
+  page.emit('request', notification);
+  let done = false;
+  const navigation = drainChatNavigationReads(chat, api).then(() => { done = true; });
+  page.emit('response', notification);
+  await Promise.resolve();
+  assert.equal(done, false);
+  page.emit('requestfinished', notification);
+  await navigation;
+  assert.equal(done, true);
+  chat.dispose(); api.dispose();
+});
+
+test('navigation rejects an unexpected failed API read outside the chat', async () => {
+  const page = new EventEmitter();
+  const chat = createChatReadLifecycle(page, request => request.chat, 20000);
+  const api = createChatReadLifecycle(page, request => request.api, 20000);
+  const notification = { api: true, chat: false };
+  page.emit('request', notification);
+  const navigation = drainChatNavigationReads(chat, api);
+  page.emit('requestfailed', notification);
+  await assert.rejects(navigation, /owned API read failed/);
+  assert.equal(api.snapshot().failed, 1);
+  chat.dispose(); api.dispose();
+});
+
+test('the exact injected chat status abort remains explicit in both navigation observers', async () => {
+  const page = new EventEmitter();
+  const chat = createChatReadLifecycle(page, request => request.chat, 20000);
+  const api = createChatReadLifecycle(page, request => request.api, 20000);
+  const status = { api: true, chat: true };
+  page.emit('request', status);
+  chat.expectLocalAbort(status); api.expectLocalAbort(status);
+  const navigation = drainChatNavigationReads(chat, api);
+  page.emit('requestfailed', status);
+  await navigation;
+  assert.equal(chat.snapshot().locallyAborted, 1);
+  assert.equal(api.snapshot().locallyAborted, 1);
+  assert.equal(api.snapshot().failed, 0);
+  chat.dispose(); api.dispose();
+});
 
 afterEach(() => vi.useRealTimers());
 

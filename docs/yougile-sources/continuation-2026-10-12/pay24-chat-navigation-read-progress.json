@@ -1,0 +1,52 @@
+{
+  "Date": "2026-10-14",
+  "SourceParentRevision": "b0a92d3e82dd1851d124d7d5c7bf299b0e7332fe",
+  "CompiledRuntimeRevision": "a448f14bd7583387acb945e493ad640d3e5ad5a5",
+  "ManifestSha256": "A2AA6ACB85CB12683873C252719B4A091F480369AFEA95141660CF08AA3D3CB4",
+  "ApplicationCodeChanged": false,
+  "ApiContractChanged": false,
+  "DatabaseSchemaChanged": false,
+  "OriginalObserverTimeoutMs": 20000,
+  "OriginalBrowserBudgetPreserved": true,
+  "ServerErrorAssertionsPreserved": true,
+  "UnexpectedApiReadFailuresRejected": true,
+  "InjectedLossMarkedOnlyAtExactRouteAbort": true,
+  "ObserverUnitPassed": 13,
+  "NewObserverRegressions": 3,
+  "NativePassed": 2,
+  "NativeSkipped": 0,
+  "NativeCases": [
+    {
+      "Id": "2343c6ba-2a59-5ea9-0bff-045bce45f3b1",
+      "FullyQualifiedName": "PayPlanner.Api.Tests.InternalChatManagedWireTests.RealBrowserChatYandexCopiesKeepChangedDraftAcrossReloadAndExplicitResume",
+      "DisplayName": "PayPlanner.Api.Tests.InternalChatManagedWireTests.RealBrowserChatYandexCopiesKeepChangedDraftAcrossReloadAndExplicitResume(lostAcknowledgement: True)",
+      "Shard": 2
+    },
+    {
+      "Id": "3568f5da-c40e-af3c-f9ff-e625de2d17d3",
+      "FullyQualifiedName": "PayPlanner.Api.Tests.InternalChatManagedWireTests.RealBrowserChatYandexCopiesKeepChangedDraftAcrossReloadAndExplicitResume",
+      "DisplayName": "PayPlanner.Api.Tests.InternalChatManagedWireTests.RealBrowserChatYandexCopiesKeepChangedDraftAcrossReloadAndExplicitResume(lostAcknowledgement: False)",
+      "Shard": 2
+    }
+  ],
+  "NativeIdentityMatchedReleasePlan": true,
+  "FrontendUnitPassed": 2710,
+  "FrontendUnitFiles": 251,
+  "FrontendUnitDurationSeconds": 342.34,
+  "LintPassed": true,
+  "EncodingPassed": true,
+  "RetainedBackendShards": [
+    0,
+    1
+  ],
+  "RetainedBackendCases": 3642,
+  "PreviousThirdShardPassed": 1503,
+  "PreviousThirdShardFailed": 1,
+  "PreviousThirdShardQualified": false,
+  "FailureAction": "NotificationInboxController.GetNotifications",
+  "FailureKind": "Request-aborted TaskCanceledException during deliberate chat browser reload",
+  "FullBackendQualified": false,
+  "Pushed": false,
+  "Deployed": false,
+  "YouGileChanged": false
+}

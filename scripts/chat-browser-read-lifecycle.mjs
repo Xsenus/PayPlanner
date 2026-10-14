@@ -52,6 +52,15 @@ export function createChatReadLifecycle(page, isOwnedRead, timeoutMs) {
   };
 }
 
+// Hard reload and browser close end every API read, including the notification
+// inbox. Wait for their response bodies as well as the chat's own status reads.
+// This helper is serialized into the same minimal Playwright CLI session.
+export async function drainChatNavigationReads(chatReads, apiReads) {
+  await Promise.all([chatReads.drain(), apiReads.drain()]);
+  if (chatReads.snapshot().failed !== 0) throw new Error('An owned chat read failed before navigation.');
+  if (apiReads.snapshot().failed !== 0) throw new Error('An owned API read failed before navigation.');
+}
+
 // Serialized into Playwright CLI's minimal VM, which has Date but no performance.
 export function createChatPostRecorder(reads, timings) {
   let startedAt;

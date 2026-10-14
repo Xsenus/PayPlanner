@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 import { mkdir, readdir, readFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { build, preview } from 'vite';
-import { createChatPostRecorder, createChatReadLifecycle, redactChatBrowserDiagnostic } from './chat-browser-read-lifecycle.mjs';
+import { createChatPostRecorder, createChatReadLifecycle, drainChatNavigationReads, redactChatBrowserDiagnostic } from './chat-browser-read-lifecycle.mjs';
 
 const api = new URL(process.env.CASE_RETIREMENT_API);
 assert.equal(api.hostname, '127.0.0.1');
@@ -111,6 +111,7 @@ try {
     const apiReads = (${createChatReadLifecycle.toString()})(page, request =>
       request.method() === 'GET' && new URL(request.url()).origin === settings.api, 20000);
     page.__ownedChatApiReads = apiReads;
+    const drainNavigationReads = () => (${drainChatNavigationReads.toString()})(reads, apiReads);
     page.__ownedChatPostTimings = [];
     const recordFirstPost = (${createChatPostRecorder.toString()})(apiReads, page.__ownedChatPostTimings);
     const readPhases = [];
@@ -132,6 +133,7 @@ try {
       if (![settings.api, settings.ui].includes(url.origin)) { outside.push(url.origin); return route.abort(); }
       if (!allowStatus && url.pathname === prefix + '/sends/' + key && route.request().method() === 'GET') {
         reads.expectLocalAbort(route.request());
+        apiReads.expectLocalAbort(route.request());
         return route.abort('failed');
       }
       if (url.pathname === prefix + '/messages' && route.request().method() === 'POST') {
@@ -180,7 +182,7 @@ try {
         return storageKey ? JSON.parse(sessionStorage.getItem(storageKey)) : null;
       }, { threadId: settings.threadId, key });
       check(unconfirmed?.id === key && unconfirmed.managed !== true, 'Lost response unexpectedly confirmed the attempt');
-      await reads.drain(); recordReads('before-lost-reload');
+      await drainNavigationReads(); recordReads('before-lost-reload');
       allowStatus = true;
       await page.reload({ waitUntil: 'domcontentloaded' });
       await page.getByRole('status').waitFor();
@@ -204,7 +206,7 @@ try {
     check(await page.getByText('first.txt', { exact: true }).count() === 1 && await page.getByText('second.txt', { exact: true }).count() === 1, 'Pending response erased selected files');
     await page.screenshot({ path: settings.screenshots + '/chat-managed-' + settings.suffix + '-pending-desktop.png' });
     await editor.fill('Новый черновик после прежней отправки');
-    await reads.drain(); recordReads('before-draft-reload');
+    await drainNavigationReads(); recordReads('before-draft-reload');
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.getByRole('status').waitFor();
     check(await page.getByPlaceholder('Напишите сообщение…').inputValue() === 'Новый черновик после прежней отправки', 'Reload erased the changed draft');
@@ -272,7 +274,7 @@ try {
           if (!page.__ownedChatReads) return 'CHAT_READ_OBSERVER_NOT_STARTED';
           const postTimings = (page.__ownedChatPostTimings ?? []).join('\n');
           try {
-            await page.__ownedChatReads.drain();
+            await (${drainChatNavigationReads.toString()})(page.__ownedChatReads, page.__ownedChatApiReads);
             if (page.__ownedChatReads.snapshot().failed !== 0) throw new Error('An owned chat read failed before browser close.');
             return 'PP_CHAT_BROWSER_READS phase=before-close ' + page.__ownedChatReads.describe()
               + '\n' + postTimings;
