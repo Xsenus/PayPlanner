@@ -1,4 +1,4 @@
-## Актуальная инвентаризация — 11 октября 2026
+## Актуальная инвентаризация — 14 октября 2026
 
 Всего **111** мест ExecuteUpdateAsync/ExecuteDeleteAsync по неизменному предикату BatchOperationAuditCoverageTests. Предыдущие описания ниже сохранены как история решений по аудиту; после форматирования их номера строк могут отличаться. Текущие номера приведены в полном перечне здесь. Перечень обновлён по фактическим исходникам после адресных исправлений и форматирования; подготовленные overlays не используются.
 
@@ -30,14 +30,14 @@
 | backend/Controllers/MessengerDocumentDeliveriesController.cs:496 | ExecuteUpdateAsync |
 | backend/Controllers/MessengerDocumentDeliveriesController.cs:513 | ExecuteUpdateAsync |
 | backend/Controllers/StorageAdminController.cs:145 | ExecuteUpdateAsync |
-| backend/Controllers/TasksController.cs:3220 | ExecuteUpdateAsync |
-| backend/Controllers/TasksController.cs:4532 | ExecuteUpdateAsync |
-| backend/Controllers/TasksController.cs:4778 | ExecuteUpdateAsync |
+| backend/Controllers/TasksController.cs:3226 | ExecuteUpdateAsync |
+| backend/Controllers/TasksController.cs:4538 | ExecuteUpdateAsync |
+| backend/Controllers/TasksController.cs:4784 | ExecuteUpdateAsync |
 | backend/Controllers/UserActivityController.cs:418 | ExecuteUpdateAsync |
 | backend/Controllers/UserActivityController.cs:540 | ExecuteDeleteAsync |
-| backend/Controllers/V2/CasesV2Controller.cs:10844 | ExecuteUpdateAsync |
-| backend/Controllers/V2/CasesV2Controller.cs:5710 | ExecuteUpdateAsync |
-| backend/Controllers/V2/CasesV2Controller.cs:6047 | ExecuteUpdateAsync |
+| backend/Controllers/V2/CasesV2Controller.cs:10871 | ExecuteUpdateAsync |
+| backend/Controllers/V2/CasesV2Controller.cs:5737 | ExecuteUpdateAsync |
+| backend/Controllers/V2/CasesV2Controller.cs:6074 | ExecuteUpdateAsync |
 | backend/Services/AuthService.cs:261 | ExecuteUpdateAsync |
 | backend/Services/AuthService.cs:743 | ExecuteUpdateAsync |
 | backend/Services/Banking/BankSyncService.cs:408 | ExecuteUpdateAsync |
@@ -50,7 +50,7 @@
 | backend/Services/ElectronicSignatureService.cs:681 | ExecuteUpdateAsync |
 | backend/Services/ExternalAuthService.cs:937 | ExecuteUpdateAsync |
 | backend/Services/ExternalAuthService.cs:960 | ExecuteUpdateAsync |
-| backend/Services/GoogleCalendarSyncService.cs:190 | ExecuteUpdateAsync |
+| backend/Services/GoogleCalendarSyncService.cs:192 | ExecuteUpdateAsync |
 | backend/Services/MessengerDocumentDeliveryService.cs:673 | ExecuteUpdateAsync |
 | backend/Services/MessengerDocumentDeliveryService.cs:699 | ExecuteUpdateAsync |
 | backend/Services/MessengerDocumentDeliveryService.cs:771 | ExecuteUpdateAsync |
@@ -95,9 +95,9 @@
 | backend/Services/Storage/InternalChatSendPublication.cs:60 | ExecuteUpdateAsync |
 | backend/Services/Storage/InternalChatSendRecoveryBatch.cs:70 | ExecuteUpdateAsync |
 | backend/Services/Storage/LegacyStorageReplicaMigrationService.cs:119 | ExecuteUpdateAsync |
-| backend/Services/Storage/ManagedCaseDocumentUploadService.cs:540 | ExecuteUpdateAsync |
-| backend/Services/Storage/ManagedCaseDocumentUploadService.cs:583 | ExecuteUpdateAsync |
-| backend/Services/Storage/ManagedCaseDocumentUploadService.cs:590 | ExecuteUpdateAsync |
+| backend/Services/Storage/ManagedCaseDocumentUploadService.cs:542 | ExecuteUpdateAsync |
+| backend/Services/Storage/ManagedCaseDocumentUploadService.cs:585 | ExecuteUpdateAsync |
+| backend/Services/Storage/ManagedCaseDocumentUploadService.cs:592 | ExecuteUpdateAsync |
 | backend/Services/Storage/ManagedProfilePhotoUploadService.cs:125 | ExecuteUpdateAsync |
 | backend/Services/Storage/ManagedTaskFileUploadService.cs:279 | ExecuteUpdateAsync |
 | backend/Services/Storage/ManagedTaskFileUploadService.cs:377 | ExecuteUpdateAsync |
