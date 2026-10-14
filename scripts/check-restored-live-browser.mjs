@@ -20,7 +20,7 @@ assert.ok(Number.isInteger(port) && port > 0 && port < 65536, 'A preconfigured l
 const configuredBrowser = process.env.PAYPLANNER_TEST_BROWSER;
 assert.ok(!configuredBrowser || ['msedge', 'chrome'].includes(configuredBrowser), 'Use the configured installed Edge or Chrome channel.');
 const browserChannels = configuredBrowser ? [configuredBrowser]
-  : process.platform === 'win32' ? ['msedge', 'chrome', undefined] : ['chrome', undefined, 'msedge'];
+  : [undefined, 'msedge', 'chrome'];
 let browser;
 let vite;
 let page;

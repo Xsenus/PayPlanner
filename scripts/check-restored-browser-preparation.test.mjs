@@ -88,3 +88,18 @@ test('rejects an invalid browser configuration before compiling or creating outp
   expect(mocks.launch).not.toHaveBeenCalled();
   expect(mocks.mkdir).not.toHaveBeenCalled();
 });
+
+test.each([false, true])('uses the matching browser by default and retains ownership of its fallback (missing bundled: %s)', async missingBundled => {
+  vi.stubEnv('PAYPLANNER_TEST_BROWSER', undefined);
+  const browser = { close: vi.fn().mockResolvedValue(undefined) };
+  const failure = new Error('owned preview failure');
+  mocks.build.mockResolvedValue(entry);
+  if (missingBundled) mocks.launch.mockRejectedValueOnce(new Error('bundled browser missing'));
+  mocks.launch.mockResolvedValue(browser);
+  mocks.preview.mockRejectedValue(failure);
+  expect(await run().catch(error => error)).toBe(failure);
+  expect(mocks.launch).toHaveBeenNthCalledWith(1, { headless: true, channel: undefined });
+  expect(mocks.launch).toHaveBeenCalledTimes(missingBundled ? 2 : 1);
+  if (missingBundled) expect(mocks.launch).toHaveBeenNthCalledWith(2, { headless: true, channel: 'msedge' });
+  expect(browser.close).toHaveBeenCalledTimes(1);
+});
