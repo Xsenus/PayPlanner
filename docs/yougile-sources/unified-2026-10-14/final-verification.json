@@ -1,0 +1,28 @@
+{
+  "blocks": 21,
+  "packages": 166,
+  "done": 8,
+  "cards": 38,
+  "originalRoadmaps": 45,
+  "originalMarkers": 974,
+  "groupImagesRead": 173,
+  "namedGroupPngRead": 3,
+  "groupVideoRead": true,
+  "originalTextPreservedExceptLinks": true,
+  "legacyBrokenArchiveLinks": [],
+  "errors": [],
+  "date": "2026-10-14",
+  "scope": "Документация и консолидация планов; код приложения не изменён",
+  "preparationProgress": "12/12 (100%)",
+  "implementationPackageProgress": "8/166 (4.8%)",
+  "checks": {
+    "sourceEncoding": "passed, 3200 working-tree text files",
+    "systemSurfaceInventory": "passed",
+    "stagedDiffWhitespace": "passed",
+    "markdownLinksAndSourceAnchors": "passed",
+    "archiveTextPreservation": "passed, relative Markdown links only",
+    "photoChecksums": "passed, 173 sources"
+  },
+  "yougileRefresh": "Полная сохранённая выборка 38 карточек; на окончательном запросе в сессии выбрана другая компания, данные PayPlanner после сохранённого среза не подтверждены.",
+  "maxCutoff": "2026-10-14 19:55; группа: 610 элементов истории, 173 фото и 1 видео; включены два новых фото 18:20/19:39 и уточнение 19:55."
+}

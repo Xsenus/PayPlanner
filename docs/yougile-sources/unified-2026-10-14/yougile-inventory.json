@@ -1,0 +1,797 @@
+{
+  "date": "2026-10-14",
+  "projectId": "daa8d6c1-cce6-4c0c-985a-6bdc5a4b5eb4",
+  "cards": [
+    {
+      "id": "15eb93b8-7fde-4a2f-9c08-439dee8b8d32",
+      "pay": "PAY-29",
+      "title": "РЕДИЗАЙН МЕССЕНДЖЕРА В СРМ",
+      "column": "Задания",
+      "complete": false,
+      "archived": false,
+      "messages": 2,
+      "descriptionCharacters": 0,
+      "attachments": [
+        {
+          "messageId": 1790746865162,
+          "name": "textplus_ru_1790746090931.png",
+          "resourceUri": "yougile://attachment/task/15eb93b8-7fde-4a2f-9c08-439dee8b8d32/1790746865162/0"
+        }
+      ]
+    },
+    {
+      "id": "56e92dc9-3186-4cb1-ae7f-d05901712565",
+      "pay": "PAY-28",
+      "title": "СДЕЛАТЬ РЕДЕЗАН - РАЗДЕЛА  ФИНАНСЫ  В КАРТОЧКЕ ДЕЛА",
+      "column": "Задания",
+      "complete": false,
+      "archived": false,
+      "messages": 2,
+      "descriptionCharacters": 0,
+      "attachments": [
+        {
+          "messageId": 1790632635784,
+          "name": "textplus_ru_1790632509903 (1).png",
+          "resourceUri": "yougile://attachment/task/56e92dc9-3186-4cb1-ae7f-d05901712565/1790632635784/0"
+        }
+      ]
+    },
+    {
+      "id": "403a558a-e1b8-4329-b6d4-ae0e36ed7a8c",
+      "pay": "PAY-27",
+      "title": "СДЕЛАТЬ РЕДЕЗАН - РАЗДЕЛА  ПОЧТА РФ  В КАРТОЧКЕ ДЕЛА",
+      "column": "Задания",
+      "complete": false,
+      "archived": false,
+      "messages": 2,
+      "descriptionCharacters": 0,
+      "attachments": [
+        {
+          "messageId": 1790629973058,
+          "name": "textplus_ru_1790629844068.png",
+          "resourceUri": "yougile://attachment/task/403a558a-e1b8-4329-b6d4-ae0e36ed7a8c/1790629973058/0"
+        }
+      ]
+    },
+    {
+      "id": "f9294faf-6260-45b6-b7fd-efee790c59aa",
+      "pay": "PAY-26",
+      "title": "СДЕЛАТЬ РЕДЕЗАН - РАЗДЕЛА  ФССП В КАРТОЧКЕ ДЕЛА",
+      "column": "Задания",
+      "complete": false,
+      "archived": false,
+      "messages": 2,
+      "descriptionCharacters": 0,
+      "attachments": [
+        {
+          "messageId": 1790627301555,
+          "name": "b3bc44cd-ce98-465a-8e91-a19894be7055.jpg",
+          "resourceUri": "yougile://attachment/task/f9294faf-6260-45b6-b7fd-efee790c59aa/1790627301555/0"
+        }
+      ]
+    },
+    {
+      "id": "9a50de8b-d880-4cdc-92f3-e4f536b471fa",
+      "pay": "PAY-22",
+      "title": "СДЕЛАТЬ РЕДЕЗАН - РАЗДЕЛА СУД В КАРДОЧКЕ ДЕЛА",
+      "column": "Задания",
+      "complete": false,
+      "archived": false,
+      "messages": 6,
+      "descriptionCharacters": 0,
+      "attachments": [
+        {
+          "messageId": 1790619958008,
+          "name": "textplus_ru_1790619932305.png",
+          "resourceUri": "yougile://attachment/task/9a50de8b-d880-4cdc-92f3-e4f536b471fa/1790619958008/0"
+        },
+        {
+          "messageId": 1790621565599,
+          "name": "textplus_ru_1790621485322.png",
+          "resourceUri": "yougile://attachment/task/9a50de8b-d880-4cdc-92f3-e4f536b471fa/1790621565599/0"
+        }
+      ]
+    },
+    {
+      "id": "c3448093-93ac-4385-b175-11d24c033438",
+      "pay": "PAY-9",
+      "title": "РЕАЛИЗОВАТЬ СИНХРОНИЗАЦИЮ СПРАВОЧНИКА КОНТАКТОВ СРМ  И СПРАВОЧНИКА ТЕЛЕФОНА",
+      "column": "Задания",
+      "complete": false,
+      "archived": false,
+      "messages": 8,
+      "descriptionCharacters": 0,
+      "attachments": [
+        {
+          "messageId": 1790229135020,
+          "name": "2026-09-24_09-48-32.png",
+          "resourceUri": "yougile://attachment/task/c3448093-93ac-4385-b175-11d24c033438/1790229135020/0"
+        }
+      ]
+    },
+    {
+      "id": "b714cbd0-6f92-4345-9dea-dfe0785a2ee1",
+      "pay": "PAY-8",
+      "title": "РЕАЛИЗОВАТЬ ТРИГЕР ТЕЛЕФОНИИ В СРМ  НА БАЗЕ pbx",
+      "column": "Задания",
+      "complete": false,
+      "archived": false,
+      "messages": 7,
+      "descriptionCharacters": 0,
+      "attachments": []
+    },
+    {
+      "id": "cf0f1b97-e3fa-4ac0-b47c-7ded0e0c2942",
+      "pay": "PAY-30",
+      "title": "БЛОК БИЗНЕС ПРОЦЕССЫ\nПИШЕТСЯ",
+      "column": "Задания",
+      "complete": false,
+      "archived": false,
+      "messages": 0,
+      "descriptionCharacters": 0,
+      "attachments": []
+    },
+    {
+      "id": "2ff4816e-8bec-415d-8420-f394df4fec8d",
+      "pay": "PAY-18",
+      "title": "ПЕРЕРАБОТКА  РАЗДЕЛА НАСТРОЙКА ПРАВ СОТРУДНИКОВ В НОРМАЛЬНЫЙ ВИД - ПИШЕТСЯ",
+      "column": "Задания",
+      "complete": false,
+      "archived": false,
+      "messages": 0,
+      "descriptionCharacters": 0,
+      "attachments": []
+    },
+    {
+      "id": "975c7db0-a7bc-4711-9db7-2b0850a5c6dd",
+      "pay": "PAY-2",
+      "title": "РАЗДЕЛ ЗАРПЛАТА -ЗАДАНИЕ ПИШЕТСЯ",
+      "column": "Задания",
+      "complete": false,
+      "archived": false,
+      "messages": 1,
+      "descriptionCharacters": 0,
+      "attachments": []
+    },
+    {
+      "id": "5358047f-22c4-4d02-a633-8ddbdec263b9",
+      "pay": "PAY-7",
+      "title": "КОНТРОЛЬ И ОБЪЕДЕНЕНИЕ ДУБЛЕЙ КОНТАКТОВ",
+      "column": "Доработка",
+      "complete": false,
+      "archived": false,
+      "messages": 11,
+      "descriptionCharacters": 0,
+      "attachments": [
+        {
+          "messageId": 1790074181022,
+          "name": "2026-09-22_14-47-11.png",
+          "resourceUri": "yougile://attachment/task/5358047f-22c4-4d02-a633-8ddbdec263b9/1790074181022/0"
+        }
+      ]
+    },
+    {
+      "id": "cb0bf4b0-a1e5-46f8-b31c-48bd20472425",
+      "pay": "PAY-38",
+      "title": "НУЖНА КОНСУЛЬТАЦИЯ - АЛИСА",
+      "column": "Доработка",
+      "complete": false,
+      "archived": false,
+      "messages": 4,
+      "descriptionCharacters": 0,
+      "attachments": []
+    },
+    {
+      "id": "c80f2e24-63cd-457e-aa60-7a0047e2746f",
+      "pay": "PAY-37",
+      "title": "КАЛЕНДАРЬ - ВИДИМОСТЬ ЗАДАЧ",
+      "column": "Тестирование",
+      "complete": false,
+      "archived": false,
+      "messages": 17,
+      "descriptionCharacters": 0,
+      "attachments": [
+        {
+          "messageId": 1791794674964,
+          "name": "PAY-37-calendar-setting.png",
+          "resourceUri": "yougile://attachment/task/c80f2e24-63cd-457e-aa60-7a0047e2746f/1791794674964/0"
+        }
+      ]
+    },
+    {
+      "id": "fd9524b4-9723-45b4-b762-f37561e119a2",
+      "pay": "PAY-36",
+      "title": "ИНТЕГРАЦИИ С БАНКОМ",
+      "column": "Тестирование",
+      "complete": false,
+      "archived": false,
+      "messages": 5,
+      "descriptionCharacters": 0,
+      "attachments": [
+        {
+          "messageId": 1791504514347,
+          "name": "Specifikaciya_Bankovskie_integracii_Tochka_Sber_v2.docx",
+          "resourceUri": "yougile://attachment/task/fd9524b4-9723-45b4-b762-f37561e119a2/1791504514347/0"
+        }
+      ]
+    },
+    {
+      "id": "99465014-bfd6-46b1-9130-cc4b5ab6f80c",
+      "pay": "PAY-32",
+      "title": "РЕДИЗАН КАРТОЧКИ КЛИЕНТА ФИЗ. ЛИЦА",
+      "column": "Тестирование",
+      "complete": false,
+      "archived": false,
+      "messages": 12,
+      "descriptionCharacters": 0,
+      "attachments": [
+        {
+          "messageId": 1791149041414,
+          "name": "textplus_ru_1791148662304.png",
+          "resourceUri": "yougile://attachment/task/99465014-bfd6-46b1-9130-cc4b5ab6f80c/1791149041414/0"
+        }
+      ]
+    },
+    {
+      "id": "6c6ec9ef-c343-4c3b-af62-3f4228f8ad5a",
+      "pay": "PAY-25",
+      "title": "СДЕЛАТЬ РЕДЕЗАН - РАЗДЕЛА  СОБЫТИЯ В КАРТОЧКЕ ДЕЛА",
+      "column": "Тестирование",
+      "complete": false,
+      "archived": false,
+      "messages": 3,
+      "descriptionCharacters": 0,
+      "attachments": [
+        {
+          "messageId": 1790625640893,
+          "name": "textplus_ru_1790625313743 (1).png",
+          "resourceUri": "yougile://attachment/task/6c6ec9ef-c343-4c3b-af62-3f4228f8ad5a/1790625640893/0"
+        }
+      ]
+    },
+    {
+      "id": "0d9fb0ef-2ad0-4799-b049-29d72b761851",
+      "pay": "PAY-24",
+      "title": "СДЕЛАТЬ РЕДЕЗАН - РАЗДЕЛА  ЗАДАЧИ В КАРТОЧКЕ ДЕЛА",
+      "column": "Тестирование",
+      "complete": false,
+      "archived": false,
+      "messages": 3,
+      "descriptionCharacters": 0,
+      "attachments": [
+        {
+          "messageId": 1790625083578,
+          "name": "textplus_ru_1790624916252 (2).png",
+          "resourceUri": "yougile://attachment/task/0d9fb0ef-2ad0-4799-b049-29d72b761851/1790625083578/0"
+        }
+      ]
+    },
+    {
+      "id": "7d72c480-1fcc-481b-bab7-dd7f1d52f37b",
+      "pay": "PAY-23",
+      "title": "СДЕЛАТЬ РЕДЕЗАН - РАЗДЕЛА  ДОКУМЕНТЫ В КАРТОЧКЕ ДЕЛА",
+      "column": "Тестирование",
+      "complete": false,
+      "archived": false,
+      "messages": 4,
+      "descriptionCharacters": 0,
+      "attachments": [
+        {
+          "messageId": 1790624740258,
+          "name": "textplus_ru_1790624645414.png",
+          "resourceUri": "yougile://attachment/task/7d72c480-1fcc-481b-bab7-dd7f1d52f37b/1790624740258/0"
+        }
+      ]
+    },
+    {
+      "id": "ec9decc2-06b0-4247-96f2-51e916ee7e6c",
+      "pay": "PAY-21",
+      "title": "СДЕЛАТЬ РЕДИЗАЙН КАРТОЧКИ ДЕЛА",
+      "column": "Тестирование",
+      "complete": false,
+      "archived": false,
+      "messages": 5,
+      "descriptionCharacters": 0,
+      "attachments": [
+        {
+          "messageId": 1790616794207,
+          "name": "textplus_ru_1790616429824.png",
+          "resourceUri": "yougile://attachment/task/ec9decc2-06b0-4247-96f2-51e916ee7e6c/1790616794207/0"
+        }
+      ]
+    },
+    {
+      "id": "65d94840-3e9b-48fc-bb1d-00510fad1d2b",
+      "pay": "PAY-19",
+      "title": "СДЕЛАТЬ РЕДИЗАЙН ЖУРАНАЛА ЗАДАЧ",
+      "column": "Тестирование",
+      "complete": false,
+      "archived": false,
+      "messages": 6,
+      "descriptionCharacters": 0,
+      "attachments": [
+        {
+          "messageId": 1790614877769,
+          "name": "textplus_ru_1790611857232.png",
+          "resourceUri": "yougile://attachment/task/65d94840-3e9b-48fc-bb1d-00510fad1d2b/1790614877769/0"
+        },
+        {
+          "messageId": 1790614877769,
+          "name": "textplus_ru_1790611751924 (1).png",
+          "resourceUri": "yougile://attachment/task/65d94840-3e9b-48fc-bb1d-00510fad1d2b/1790614877769/1"
+        },
+        {
+          "messageId": 1790614877769,
+          "name": "textplus_ru_1790611751924.png",
+          "resourceUri": "yougile://attachment/task/65d94840-3e9b-48fc-bb1d-00510fad1d2b/1790614877769/2"
+        },
+        {
+          "messageId": 1790614877769,
+          "name": "textplus_ru_1790611069526.png",
+          "resourceUri": "yougile://attachment/task/65d94840-3e9b-48fc-bb1d-00510fad1d2b/1790614877769/3"
+        },
+        {
+          "messageId": 1790614877769,
+          "name": "textplus_ru_1790610579239.png",
+          "resourceUri": "yougile://attachment/task/65d94840-3e9b-48fc-bb1d-00510fad1d2b/1790614877769/4"
+        },
+        {
+          "messageId": 1790615162778,
+          "name": "textplus_ru_1790615155093.png",
+          "resourceUri": "yougile://attachment/task/65d94840-3e9b-48fc-bb1d-00510fad1d2b/1790615162778/0"
+        }
+      ]
+    },
+    {
+      "id": "11864365-b470-43f0-893a-a33d076be15e",
+      "pay": "PAY-35",
+      "title": "КНИГА УЧЕТА И ПРОДАЖ",
+      "column": "Тестирование",
+      "complete": false,
+      "archived": false,
+      "messages": 4,
+      "descriptionCharacters": 0,
+      "attachments": [
+        {
+          "messageId": 1791505843881,
+          "name": "Модуль КУДиР.docx",
+          "resourceUri": "yougile://attachment/task/11864365-b470-43f0-893a-a33d076be15e/1791505843881/0"
+        }
+      ]
+    },
+    {
+      "id": "c9b411c2-500a-4536-99e9-21b12a736f0f",
+      "pay": "PAY-34",
+      "title": "СРОЧНО  БУХ. ПЕРВИЧНЫЕ . ДОКУМЕНТЫ -КУБ",
+      "column": "Тестирование",
+      "complete": false,
+      "archived": false,
+      "messages": 12,
+      "descriptionCharacters": 0,
+      "attachments": [
+        {
+          "messageId": 1791501655604,
+          "name": "Specifikaciya_Schyot_CRM.docx",
+          "resourceUri": "yougile://attachment/task/c9b411c2-500a-4536-99e9-21b12a736f0f/1791501655604/0"
+        },
+        {
+          "messageId": 1791504664435,
+          "name": "Specifikaciya_Schyot_CRM.docx",
+          "resourceUri": "yougile://attachment/task/c9b411c2-500a-4536-99e9-21b12a736f0f/1791504664435/0"
+        },
+        {
+          "messageId": 1791504664435,
+          "name": "Specifikaciya_Sozdanie_dokumentov_vhodyashchie_ishodyashchie.docx",
+          "resourceUri": "yougile://attachment/task/c9b411c2-500a-4536-99e9-21b12a736f0f/1791504664435/1"
+        },
+        {
+          "messageId": 1791504664435,
+          "name": "Specifikaciya_Dokumenty_CRM.docx",
+          "resourceUri": "yougile://attachment/task/c9b411c2-500a-4536-99e9-21b12a736f0f/1791504664435/2"
+        }
+      ]
+    },
+    {
+      "id": "ae426978-a839-4230-a5f0-474d0e9dd4e9",
+      "pay": "PAY-33",
+      "title": "СРОЧНО .  ПРОФИЛЬ КОМПАНИИ - КУБ24",
+      "column": "Тестирование",
+      "complete": false,
+      "archived": false,
+      "messages": 3,
+      "descriptionCharacters": 0,
+      "attachments": [
+        {
+          "messageId": 1791504767256,
+          "name": "Specifikaciya_Profil_kompanii_filialy_CRM.docx",
+          "resourceUri": "yougile://attachment/task/ae426978-a839-4230-a5f0-474d0e9dd4e9/1791504767256/0"
+        }
+      ]
+    },
+    {
+      "id": "5bab0eae-ec0a-4056-9dea-548d64a3df77",
+      "pay": "PAY-31",
+      "title": "СОЗДАТЬ РАЗДЕЛ СРМ \nТЗ ВНУТРИ",
+      "column": "Тестирование",
+      "complete": false,
+      "archived": false,
+      "messages": 4,
+      "descriptionCharacters": 0,
+      "attachments": [
+        {
+          "messageId": 1790909358936,
+          "name": "ТЗ ПО РАЗДЕЛУ СРМ +ТРИГЕРЫ.docx",
+          "resourceUri": "yougile://attachment/task/5bab0eae-ec0a-4056-9dea-548d64a3df77/1790909358936/0"
+        }
+      ]
+    },
+    {
+      "id": "510afd33-fee8-4ec2-89a2-09c736004350",
+      "pay": "PAY-20",
+      "title": "СДЕЛАТЬ РЕДИЗАЙН КАРТОКИ ЗАДАЧИ",
+      "column": "Тестирование",
+      "complete": false,
+      "archived": false,
+      "messages": 6,
+      "descriptionCharacters": 0,
+      "attachments": [
+        {
+          "messageId": 1790617007041,
+          "name": "textplus_ru_1790615155093.png",
+          "resourceUri": "yougile://attachment/task/510afd33-fee8-4ec2-89a2-09c736004350/1790617007041/0"
+        }
+      ]
+    },
+    {
+      "id": "f5832f5b-6106-411d-84ef-ff1700530a70",
+      "pay": "PAY-16",
+      "title": "КОРРЕКТИРОВАКА КАРТОЧКИ  ЗАДАЧИ -логика по  привязанным счетам",
+      "column": "Тестирование",
+      "complete": false,
+      "archived": false,
+      "messages": 3,
+      "descriptionCharacters": 0,
+      "attachments": [
+        {
+          "messageId": 1790344275995,
+          "name": "2026-09-25_17-29-42.png",
+          "resourceUri": "yougile://attachment/task/f5832f5b-6106-411d-84ef-ff1700530a70/1790344275995/0"
+        }
+      ]
+    },
+    {
+      "id": "694a87e3-c960-4ed4-bf8e-43a0f6866fb2",
+      "pay": "PAY-14",
+      "title": "ПОДКЛЮЧИТЬ БОТА В МАКС \nДЛЯ ПОЛУЧЕНИЯ ВСЕХ УВЕДОМЛЕНИЙ",
+      "column": "Тестирование",
+      "complete": false,
+      "archived": false,
+      "messages": 15,
+      "descriptionCharacters": 0,
+      "attachments": [
+        {
+          "messageId": 1790230907066,
+          "name": "2026-09-24_09-40-53.png",
+          "resourceUri": "yougile://attachment/task/694a87e3-c960-4ed4-bf8e-43a0f6866fb2/1790230907066/0"
+        }
+      ]
+    },
+    {
+      "id": "cb50ccfa-6b11-40d5-ae41-2a5e5b07324c",
+      "pay": "PAY-4",
+      "title": "доработка расписания в задачах",
+      "column": "Тестирование",
+      "complete": false,
+      "archived": false,
+      "messages": 6,
+      "descriptionCharacters": 54,
+      "attachments": [
+        {
+          "messageId": 1790064807951,
+          "name": "2026-09-22_12-09-04.png",
+          "resourceUri": "yougile://attachment/task/cb50ccfa-6b11-40d5-ae41-2a5e5b07324c/1790064807951/0"
+        }
+      ]
+    },
+    {
+      "id": "d40a2a79-5f1f-40be-83b0-ca5b88ddc927",
+      "pay": "PAY-3",
+      "title": "РАЗРАБОТКА РАЗДЕЛА СУД",
+      "column": "Тестирование",
+      "complete": false,
+      "archived": false,
+      "messages": 35,
+      "descriptionCharacters": 27976,
+      "attachments": [
+        {
+          "messageId": 1789556915901,
+          "name": "dc57bc90-ba95-4caf-97bb-07554b0193a5.jfif",
+          "resourceUri": "yougile://attachment/task/d40a2a79-5f1f-40be-83b0-ca5b88ddc927/1789556915901/0"
+        },
+        {
+          "messageId": 1789556915901,
+          "name": "ef45bafc-31d1-404e-9393-6fe70b72a5a1.jfif",
+          "resourceUri": "yougile://attachment/task/d40a2a79-5f1f-40be-83b0-ca5b88ddc927/1789556915901/1"
+        },
+        {
+          "messageId": 1789556915901,
+          "name": "5c1e2243-5049-49a4-8a3b-99a6825e7ff1.jfif",
+          "resourceUri": "yougile://attachment/task/d40a2a79-5f1f-40be-83b0-ca5b88ddc927/1789556915901/2"
+        },
+        {
+          "messageId": 1789556915901,
+          "name": "b0af3d8e-ba0e-4b1c-9604-ce2c2cbfaec7.jfif",
+          "resourceUri": "yougile://attachment/task/d40a2a79-5f1f-40be-83b0-ca5b88ddc927/1789556915901/3"
+        },
+        {
+          "messageId": 1789556915901,
+          "name": "16f6fec8-2185-4c3c-a8d3-e77f5e24983f.jfif",
+          "resourceUri": "yougile://attachment/task/d40a2a79-5f1f-40be-83b0-ca5b88ddc927/1789556915901/4"
+        },
+        {
+          "messageId": 1789556915901,
+          "name": "7dc9f071-3296-4453-bd82-931c6ec4025f.jfif",
+          "resourceUri": "yougile://attachment/task/d40a2a79-5f1f-40be-83b0-ca5b88ddc927/1789556915901/5"
+        },
+        {
+          "messageId": 1789556915901,
+          "name": "514ead95-b803-492f-bcef-4f09b17c4f93.jfif",
+          "resourceUri": "yougile://attachment/task/d40a2a79-5f1f-40be-83b0-ca5b88ddc927/1789556915901/6"
+        },
+        {
+          "messageId": 1789562893906,
+          "name": "2026-09-16_16-46-50.png",
+          "resourceUri": "yougile://attachment/task/d40a2a79-5f1f-40be-83b0-ca5b88ddc927/1789562893906/0"
+        },
+        {
+          "messageId": 1790230307738,
+          "name": "2026-09-24_10-10-30.png",
+          "resourceUri": "yougile://attachment/task/d40a2a79-5f1f-40be-83b0-ca5b88ddc927/1790230307738/0"
+        },
+        {
+          "messageId": 1790230522051,
+          "name": "2026-09-24_10-12-48.png",
+          "resourceUri": "yougile://attachment/task/d40a2a79-5f1f-40be-83b0-ca5b88ddc927/1790230522051/0"
+        },
+        {
+          "messageId": 1790230522051,
+          "name": "ef45bafc-31d1-404e-9393-6fe70b72a5a1 (1).jfif",
+          "resourceUri": "yougile://attachment/task/d40a2a79-5f1f-40be-83b0-ca5b88ddc927/1790230522051/1"
+        },
+        {
+          "messageId": 1790230522051,
+          "name": "2026-09-24_10-11-03.png",
+          "resourceUri": "yougile://attachment/task/d40a2a79-5f1f-40be-83b0-ca5b88ddc927/1790230522051/2"
+        },
+        {
+          "messageId": 1790230522051,
+          "name": "5c1e2243-5049-49a4-8a3b-99a6825e7ff1 (1).jfif",
+          "resourceUri": "yougile://attachment/task/d40a2a79-5f1f-40be-83b0-ca5b88ddc927/1790230522051/3"
+        },
+        {
+          "messageId": 1790230522051,
+          "name": "2026-09-24_10-10-30.png",
+          "resourceUri": "yougile://attachment/task/d40a2a79-5f1f-40be-83b0-ca5b88ddc927/1790230522051/4"
+        },
+        {
+          "messageId": 1790230522051,
+          "name": "dc57bc90-ba95-4caf-97bb-07554b0193a5 (1).jfif",
+          "resourceUri": "yougile://attachment/task/d40a2a79-5f1f-40be-83b0-ca5b88ddc927/1790230522051/5"
+        },
+        {
+          "messageId": 1790230682085,
+          "name": "2026-09-24_10-16-49.png",
+          "resourceUri": "yougile://attachment/task/d40a2a79-5f1f-40be-83b0-ca5b88ddc927/1790230682085/0"
+        },
+        {
+          "messageId": 1790230766810,
+          "name": "2026-09-24_10-13-22.png",
+          "resourceUri": "yougile://attachment/task/d40a2a79-5f1f-40be-83b0-ca5b88ddc927/1790230766810/0"
+        },
+        {
+          "messageId": 1790230766810,
+          "name": "7dc9f071-3296-4453-bd82-931c6ec4025f (1).jfif",
+          "resourceUri": "yougile://attachment/task/d40a2a79-5f1f-40be-83b0-ca5b88ddc927/1790230766810/1"
+        },
+        {
+          "messageId": 1790230766810,
+          "name": "2026-09-24_10-13-07.png",
+          "resourceUri": "yougile://attachment/task/d40a2a79-5f1f-40be-83b0-ca5b88ddc927/1790230766810/2"
+        },
+        {
+          "messageId": 1790230766810,
+          "name": "b0af3d8e-ba0e-4b1c-9604-ce2c2cbfaec7 (1).jfif",
+          "resourceUri": "yougile://attachment/task/d40a2a79-5f1f-40be-83b0-ca5b88ddc927/1790230766810/3"
+        },
+        {
+          "messageId": 1790230766810,
+          "name": "2026-09-24_10-12-09.png",
+          "resourceUri": "yougile://attachment/task/d40a2a79-5f1f-40be-83b0-ca5b88ddc927/1790230766810/4"
+        },
+        {
+          "messageId": 1790230766810,
+          "name": "2026-09-24_10-11-28.png",
+          "resourceUri": "yougile://attachment/task/d40a2a79-5f1f-40be-83b0-ca5b88ddc927/1790230766810/5"
+        },
+        {
+          "messageId": 1790230766810,
+          "name": "16f6fec8-2185-4c3c-a8d3-e77f5e24983f (1).jfif",
+          "resourceUri": "yougile://attachment/task/d40a2a79-5f1f-40be-83b0-ca5b88ddc927/1790230766810/6"
+        },
+        {
+          "messageId": 1790231397312,
+          "name": "2026-09-24_10-27-13.png",
+          "resourceUri": "yougile://attachment/task/d40a2a79-5f1f-40be-83b0-ca5b88ddc927/1790231397312/0"
+        }
+      ]
+    },
+    {
+      "id": "ea6cd6db-5814-4aa8-b244-9283086a2056",
+      "pay": "PAY-1",
+      "title": "РЕАЛИЗОВАТЬ  ЧАТЫ КАК В yougile",
+      "column": "Тестирование",
+      "complete": false,
+      "archived": false,
+      "messages": 25,
+      "descriptionCharacters": 4545,
+      "attachments": [
+        {
+          "messageId": 1790227502884,
+          "name": "2026-09-24_09-23-56.png",
+          "resourceUri": "yougile://attachment/task/ea6cd6db-5814-4aa8-b244-9283086a2056/1790227502884/0"
+        },
+        {
+          "messageId": 1790248719602,
+          "name": "2026-09-24_15-11-33.png",
+          "resourceUri": "yougile://attachment/task/ea6cd6db-5814-4aa8-b244-9283086a2056/1790248719602/0"
+        },
+        {
+          "messageId": 1790248894553,
+          "name": "2026-09-24_15-18-50.png",
+          "resourceUri": "yougile://attachment/task/ea6cd6db-5814-4aa8-b244-9283086a2056/1790248894553/0"
+        },
+        {
+          "messageId": 1790256084575,
+          "name": "2026-09-24_17-17-17.png",
+          "resourceUri": "yougile://attachment/task/ea6cd6db-5814-4aa8-b244-9283086a2056/1790256084575/0"
+        },
+        {
+          "messageId": 1790257193273,
+          "name": "2026-09-24_17-37-54.png",
+          "resourceUri": "yougile://attachment/task/ea6cd6db-5814-4aa8-b244-9283086a2056/1790257193273/0"
+        }
+      ]
+    },
+    {
+      "id": "c3bf8980-9183-4fcc-8a56-3d3368582e7b",
+      "pay": "PAY-5",
+      "title": "ПРОВЕРКА УВЕДОМЛЕНИЙ ПО ЗАДАЧАМ",
+      "column": "Тестирование",
+      "complete": false,
+      "archived": false,
+      "messages": 12,
+      "descriptionCharacters": 0,
+      "attachments": [
+        {
+          "messageId": 1790066248001,
+          "name": "2026-09-22_12-37-18.png",
+          "resourceUri": "yougile://attachment/task/c3bf8980-9183-4fcc-8a56-3d3368582e7b/1790066248001/0"
+        },
+        {
+          "messageId": 1790066911338,
+          "name": "2026-09-22_12-48-06.png",
+          "resourceUri": "yougile://attachment/task/c3bf8980-9183-4fcc-8a56-3d3368582e7b/1790066911338/0"
+        }
+      ]
+    },
+    {
+      "id": "ea9352d2-66ba-4f8a-b7b4-98385b58ecac",
+      "pay": "PAY-13",
+      "title": "СДЕЛАТЬ НАСТРАЕВЫМАЕЙ ТРИГЕР ДНИ РОЖДЕНИЯ КЛИЕНТОВ И СОТРУДНИКОВ",
+      "column": "Тестирование",
+      "complete": false,
+      "archived": false,
+      "messages": 3,
+      "descriptionCharacters": 0,
+      "attachments": []
+    },
+    {
+      "id": "ea106e5b-267d-4477-90cf-2b5755cd04b0",
+      "pay": "PAY-12",
+      "title": "В ЧАТАХ НЕ ВИДНО К КОМУ ОБРАЩАЕШЬСЯ",
+      "column": "Тестирование",
+      "complete": false,
+      "archived": false,
+      "messages": 4,
+      "descriptionCharacters": 0,
+      "attachments": [
+        {
+          "messageId": 1790076855687,
+          "name": "2026-09-22_15-16-07.png",
+          "resourceUri": "yougile://attachment/task/ea106e5b-267d-4477-90cf-2b5755cd04b0/1790076855687/0"
+        }
+      ]
+    },
+    {
+      "id": "096030ea-ca1b-45c0-a0d4-811e0773753a",
+      "pay": "PAY-10",
+      "title": "ЛОГИКА БЫСТРЫХ ЗАДАЧ",
+      "column": "Готово",
+      "complete": true,
+      "archived": false,
+      "messages": 4,
+      "descriptionCharacters": 0,
+      "attachments": []
+    },
+    {
+      "id": "255b5186-0b00-4c85-9507-0292e361b3b3",
+      "pay": "PAY-15",
+      "title": "ЖЕРНАЛ ЗАДАЧ - КОРРЕКТИРОВКА",
+      "column": "Готово",
+      "complete": true,
+      "archived": false,
+      "messages": 4,
+      "descriptionCharacters": 0,
+      "attachments": [
+        {
+          "messageId": 1790234640707,
+          "name": "2026-09-24_10-33-28.png",
+          "resourceUri": "yougile://attachment/task/255b5186-0b00-4c85-9507-0292e361b3b3/1790234640707/0"
+        }
+      ]
+    },
+    {
+      "id": "c5bc6377-efec-4741-ad30-5548d8adb153",
+      "pay": "PAY-11",
+      "title": "НЕТ КНОПКИ ЗАПРОСИТЬ ПЕРЕНОС - ПРОВЕРИТЬ  В ЗАДАЧАХ",
+      "column": "Готово",
+      "complete": true,
+      "archived": false,
+      "messages": 3,
+      "descriptionCharacters": 0,
+      "attachments": []
+    },
+    {
+      "id": "b718dc5f-d69e-4509-81b4-90405e313d1b",
+      "pay": "PAY-17",
+      "title": "ПЕРЕРАБОТКА  В НОРМАЛЬНЫЙ ВИД КАРТОЧКИ  ДЕЛА ТЗ ПИЩЕТСЯ",
+      "column": "Готово",
+      "complete": true,
+      "archived": false,
+      "messages": 0,
+      "descriptionCharacters": 0,
+      "attachments": []
+    },
+    {
+      "id": "701f83cf-391e-4246-a644-7029891a3eab",
+      "pay": "PAY-6",
+      "title": "ЖУРНАЛ ЗАДАЧ - ТАБЛИЦА НАСТРОЙКА КОЛОНОК",
+      "column": "Готово",
+      "complete": true,
+      "archived": false,
+      "messages": 10,
+      "descriptionCharacters": 0,
+      "attachments": [
+        {
+          "messageId": 1790067487683,
+          "name": "2026-09-22_12-57-41.png",
+          "resourceUri": "yougile://attachment/task/701f83cf-391e-4246-a644-7029891a3eab/1790067487683/0"
+        },
+        {
+          "messageId": 1790068705311,
+          "name": "2026-09-22_13-18-11.png",
+          "resourceUri": "yougile://attachment/task/701f83cf-391e-4246-a644-7029891a3eab/1790068705311/0"
+        },
+        {
+          "messageId": 1790260243368,
+          "name": "2026-09-24_18-28-42.png",
+          "resourceUri": "yougile://attachment/task/701f83cf-391e-4246-a644-7029891a3eab/1790260243368/0"
+        }
+      ]
+    }
+  ],
+  "messageCount": 253,
+  "attachmentCount": 68,
+  "allChatPagesRead": true,
+  "privateOriginalLocation": "D:/PayPlannerReview-20261012/unified-plan-audit-20261014/yougile-full.private.json"
+}

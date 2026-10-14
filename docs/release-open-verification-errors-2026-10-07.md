@@ -128,4 +128,4 @@ HTTP-контроль и повтор загрузки в новой карто�
 
 Большие активные планы остаются открытыми: хранение 8/26 (31%), мессенджер 30/31 (97%), безопасность выпуска 4/8 (50%). Их подробные статусы и решения ниже; текущая подготовка выпуска не означает завершения всех задач PayPlanner.
 
-Подробности: [подготовка выпуска](development-release-preparation-2026-10-06.md), [приложение к планам](development-roadmap-details-2026-10-06.md), [ответы и перемещения YouGile](yougile-payplanner-release-drafts-2026-10-06.md), [история проверок](release-verification-history-2026-10-06.md).
+Подробности: [подготовка выпуска](development-release-preparation-2026-10-06.md), [приложение к планам](archive/roadmaps/unified-2026-10-14/development-roadmap-details-2026-10-06.md), [ответы и перемещения YouGile](yougile-payplanner-release-drafts-2026-10-06.md), [история проверок](release-verification-history-2026-10-06.md).

@@ -37,7 +37,7 @@
 
 ## PAY-31: требование → код → проверки → остаток
 
-Источник: [полные 1244 абзаца](yougile-sources/2026-10-10/attachments/PAY-31-specification-full-text.txt), [происхождение](yougile-sources/2026-10-10/attachments/PAY-31-specification-extraction.json), [активный план](tz-crm-applications-automation-roadmap-2026-10-07.md). Исходный DOCX и его расположение таблиц не восстановлены; текст доступен и не является блокером разработки.
+Источник: [полные 1244 абзаца](yougile-sources/2026-10-10/attachments/PAY-31-specification-full-text.txt), [происхождение](yougile-sources/2026-10-10/attachments/PAY-31-specification-extraction.json), [активный план](archive/roadmaps/unified-2026-10-14/tz-crm-applications-automation-roadmap-2026-10-07.md). Исходный DOCX и его расположение таблиц не восстановлены; текст доступен и не является блокером разработки.
 
 Общие опорные файлы: `backend/Models/SalesRequest.cs`, `backend/Services/Requests/SalesRequestService.cs`, `backend/Controllers/SalesRequestsController.cs`, `src/components/Requests/SalesRequestsPage.tsx`, `backend/PayPlanner.Api.Tests/SalesRequestTests.cs`, `backend/PayPlanner.Api.Tests/ClaudeBranchRegressionTests.cs`. Точные пути миграций искать в текущем дереве, не создавать дубли.
 

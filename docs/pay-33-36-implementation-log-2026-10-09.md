@@ -1,9 +1,9 @@
 # Журнал реализации PAY-33…PAY-36 (ветка `claude/admiring-newton-nyddyv`)
 
 Назначение: чтобы агент, проверяющий ветку локально, видел по шагам, **что изменено, зачем и как проверить**.
-Один шаг = один коммит. Основная ветка не затрагивалась. Планы-источники: [PAY-33](company-profile-yougile-roadmap-2026-10-09.md),
-[PAY-34](accounting-documents-yougile-roadmap-2026-10-09.md), [PAY-36](bank-integrations-yougile-roadmap-2026-10-09.md),
-[PAY-35](kudir-yougile-roadmap-2026-10-09.md), [PAY-31](tz-crm-applications-automation-roadmap-2026-10-07.md).
+Один шаг = один коммит. Основная ветка не затрагивалась. Планы-источники: [PAY-33](archive/roadmaps/unified-2026-10-14/company-profile-yougile-roadmap-2026-10-09.md),
+[PAY-34](archive/roadmaps/unified-2026-10-14/accounting-documents-yougile-roadmap-2026-10-09.md), [PAY-36](archive/roadmaps/unified-2026-10-14/bank-integrations-yougile-roadmap-2026-10-09.md),
+[PAY-35](archive/roadmaps/unified-2026-10-14/kudir-yougile-roadmap-2026-10-09.md), [PAY-31](archive/roadmaps/unified-2026-10-14/tz-crm-applications-automation-roadmap-2026-10-07.md).
 
 ## Как проверять локально
 
