@@ -1,0 +1,74 @@
+{
+  "Date": "2026-10-14",
+  "SourceCheckpoint": "cfca929e5402f37105fb0d54d8892e7d926a4fd7",
+  "BackendCompiledRevision": "a448f14bd7583387acb945e493ad640d3e5ad5a5",
+  "ManifestSha256": "A2AA6ACB85CB12683873C252719B4A091F480369AFEA95141660CF08AA3D3CB4",
+  "FullBackendQualified": true,
+  "BackendPassed": 7284,
+  "BackendFailed": 0,
+  "BackendSkipped": 0,
+  "AggregateQualificationSha256": "daee3f1eee6361a3d2b2ce3b7b7feca5054007b2d3e87e95b75145ac33d89319",
+  "ShardReceipts": [
+    {
+      "Shard": 0,
+      "Passed": 1821,
+      "Failed": 0,
+      "Skipped": 0,
+      "QualificationSha256": "828bbbc78c2ec1f9cb781b1123ed563d68d2a9fe22cb0a811ff3e0d885ae5709",
+      "TrxSha256": "a2a373a0d0694a905dc555c9c6d5c732933be0d6d75d321fa2a4eca8154bec92"
+    },
+    {
+      "Shard": 1,
+      "Passed": 1821,
+      "Failed": 0,
+      "Skipped": 0,
+      "QualificationSha256": "8ff790a4ea953ac31b05e56442d3e2935fa77f4f2bcedb1132a7d4711cb33449",
+      "TrxSha256": "a26fa82d758a80f7bca27791a2ea97105415d9b7ffc0ff58d9b35acb0810d332"
+    },
+    {
+      "Shard": 2,
+      "Passed": 1821,
+      "Failed": 0,
+      "Skipped": 0,
+      "QualificationSha256": "70e4daf614c9953eeb9b7150a2deb246fce34c6128499f38af96a654f377cc67",
+      "TrxSha256": "6ef2d5c774a316b880fce51fc00e209d828e55ba03d51e4b451b009f6173e33d"
+    },
+    {
+      "Shard": 3,
+      "Passed": 1821,
+      "Failed": 0,
+      "Skipped": 0,
+      "QualificationSha256": "92dbc4f1d011b84edd0c7af19a2ba57d0161a690f5cc47615e18ea40fcf5b21b",
+      "TrxSha256": "a1661658d89f62e6239819e10b058a84ee15459b7b4d943825ca9285c596c3f6"
+    }
+  ],
+  "RetainedOriginalShards": [
+    0,
+    1
+  ],
+  "NoTestReceiptsRewritten": true,
+  "RestoredNativeBrowserPassed": 5,
+  "FrontendUnitPassed": 2710,
+  "FrontendIntegrationPassed": 318,
+  "LintPassed": true,
+  "AppAndNodeTypesPassed": true,
+  "EncodingPassedAtSourceCheckpoint": true,
+  "ProductionBuildPassed": true,
+  "NativeDocumentBrowserPassed": 16,
+  "ChatNativeCasesPassedInFullGate": 2,
+  "ProductionLegalFlagsStrictPassed": true,
+  "ProductionLegalFlagsWarningFallbackUsed": false,
+  "ReleaseVersion": "1.14.88",
+  "SyntheticAcceptanceCaseApproved": true,
+  "LocalAcceptanceFixtureQualified": true,
+  "AcceptanceFixtureTasks": 51,
+  "AcceptanceFixtureRecipientsMuted": true,
+  "GlobalNotificationSettingsChanged": false,
+  "ProductionBaselineRevision": "a0cd2368d3f0e068a76303d385fb54f77f2b176f",
+  "VpsApiHealthStatus": 200,
+  "VpsSshVerified": true,
+  "Pushed": false,
+  "Deployed": false,
+  "ProductionAcceptanceCompleted": false,
+  "YouGileChanged": false
+}
