@@ -200,13 +200,15 @@ try {
   assert.ok(entry?.code, 'The synthetic task UI entry module must compile successfully.');
   await vite.waitForRequestsIdle();
   console.log('TASK_UPLOAD_STAGE_VITE_ENTRY_READY');
-  for (const channel of ['msedge', 'chrome', undefined]) {
+  // Use the Chromium version installed for this Playwright package first.
+  for (const channel of [undefined, 'msedge', 'chrome']) {
     console.log(`TASK_UPLOAD_STAGE_BROWSER_STARTING_${channel ?? 'bundled'}`);
     try { browser = await chromium.launch({ headless: true, channel }); break; }
     catch { console.log(`TASK_UPLOAD_STAGE_BROWSER_UNAVAILABLE_${channel ?? 'bundled'}`); /* Never download a browser. */ }
   }
   assert.ok(browser, 'An installed Chromium-compatible browser is required.');
   console.log('TASK_UPLOAD_STAGE_BROWSER_READY');
+  console.log(`TASK_UPLOAD_STAGE_BROWSER_VERSION_${browser.version()}`);
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, timezoneId: 'Asia/Novosibirsk' });
   await context.addInitScript(installTaskNotificationRefreshObserver, api.origin);
   if (completionFlow) {
