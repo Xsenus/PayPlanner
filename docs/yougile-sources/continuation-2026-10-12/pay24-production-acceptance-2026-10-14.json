@@ -1,0 +1,358 @@
+{
+  "Date": "2026-10-14",
+  "DeployedAcceptanceRevision": "5735673fb28af91f2069c915c341d73d023d2564",
+  "ReleaseVersion": "1.14.88",
+  "BackendCompiledRevision": "a448f14bd7583387acb945e493ad640d3e5ad5a5",
+  "BackendPassed": 7284,
+  "FrontendUnitPassed": 2710,
+  "FrontendIntegrationPassed": 318,
+  "WorkingAcceptanceQualified": true,
+  "CaseId": 181,
+  "ApprovedInitialSyntheticTasks": 51,
+  "SyntheticTasksAfterCreationChecks": 53,
+  "NoApiMocks": true,
+  "Roles": [
+    "admin",
+    "restricted executor"
+  ],
+  "CardModes": [
+    "legacy",
+    "modern"
+  ],
+  "InitialPaging": {
+    "page1": 50,
+    "page2": 1,
+    "total": 51,
+    "active": 40,
+    "completed": 11,
+    "overdue": 5
+  },
+  "FormsSaved": 4,
+  "LayoutsVerified": 6,
+  "ViewportWidths": [
+    390,
+    1024,
+    1440
+  ],
+  "ProductionThemeScope": "Actual current global theme; both themes additionally verified locally before release",
+  "Bulk": [
+    "status update and restore for both roles",
+    "assignee update and restore for admin",
+    "actual CSV for admin",
+    "export absent for restricted role",
+    "50 current-page rows selected",
+    "selection reset on page/filter",
+    "cancel retains selection",
+    "menu keyboard focus returned"
+  ],
+  "Workflows": [
+    "executor deadline request and author decision inside both forms",
+    "deadline shown in case row",
+    "approval, revision, resubmission and final completion in both forms",
+    "case counters updated",
+    "creation with owned author/assignee and case/client links",
+    "new tasks open in configured form"
+  ],
+  "OriginalGlobalTaskSettingsRestored": true,
+  "FixtureRetired": true,
+  "ExternalNotificationDeliveries": 0,
+  "TestUsersRevoked": 2,
+  "OldJwtStatuses": [
+    401,
+    401
+  ],
+  "PhysicalDeletion": false,
+  "GitHubActionsRunId": 38514477625,
+  "GitHubActionsSucceeded": false,
+  "GitHubActionsBlock": "Account billing or Actions spending limit; jobs did not execute",
+  "DeploymentMethod": "Authorized manual deployment after full applicable local gates",
+  "RelatedOpenScope": "PAY-23: document-source picker still limited to first 50; outer case shell PAY-21/22 is separate",
+  "YouGilePublished": false,
+  "EvidenceReceipts": {
+    "production-acceptance-baseline": {
+      "Sha256": "bbdc2941c3533fb3c94e60ef4d67b4e72e2313a806b7ab7d92df663691ea7d05",
+      "Result": {
+        "revision": "5735673fb28af91f2069c915c341d73d023d2564",
+        "caseId": 181,
+        "liveApi": true,
+        "noApiMocks": true,
+        "roles": [
+          {
+            "role": "admin",
+            "firstPage": 50,
+            "secondPage": 1,
+            "total": 51,
+            "summary": {
+              "total": 51,
+              "completed": 11,
+              "active": 40,
+              "overdue": 5,
+              "today": 0,
+              "highPriority": 10,
+              "unbilled": 0,
+              "invoicesToPrepare": 0,
+              "fixed": 0,
+              "invoiced": 0,
+              "nonBillable": 0,
+              "unclassified": 40
+            },
+            "releaseVersion": "1.14.88",
+            "browserPage2Rows": 1,
+            "pageErrors": []
+          },
+          {
+            "role": "restricted executor",
+            "firstPage": 50,
+            "secondPage": 1,
+            "total": 51,
+            "summary": {
+              "total": 51,
+              "completed": 11,
+              "active": 40,
+              "overdue": 5,
+              "today": 0,
+              "highPriority": 10,
+              "unbilled": 0,
+              "invoicesToPrepare": 0,
+              "fixed": 0,
+              "invoiced": 0,
+              "nonBillable": 0,
+              "unclassified": 40
+            },
+            "releaseVersion": "1.14.88",
+            "browserPage2Rows": 1,
+            "pageErrors": []
+          }
+        ],
+        "productionAcceptanceComplete": false,
+        "restrictedSettingsUpdateStatus": 403
+      }
+    },
+    "cards-layout-qualified": {
+      "Sha256": "70542b646711887150b5f4a54a8dbd732b63c66afffb1fe1bafadc31aee9e883",
+      "Result": {
+        "revision": "5735673fb28af91f2069c915c341d73d023d2564",
+        "caseId": 181,
+        "noMocks": true,
+        "forms": [
+          {
+            "mode": "legacy",
+            "role": "admin",
+            "saved": true,
+            "linksPreserved": true,
+            "deadlineMinutePreserved": true,
+            "caseReturnVerified": true
+          },
+          {
+            "mode": "legacy",
+            "role": "restricted executor",
+            "saved": true,
+            "linksPreserved": true,
+            "deadlineMinutePreserved": true,
+            "caseReturnVerified": true
+          },
+          {
+            "mode": "modern",
+            "role": "admin",
+            "saved": true,
+            "linksPreserved": true,
+            "deadlineMinutePreserved": true,
+            "caseReturnVerified": true
+          },
+          {
+            "mode": "modern",
+            "role": "restricted executor",
+            "saved": true,
+            "linksPreserved": true,
+            "deadlineMinutePreserved": true,
+            "caseReturnVerified": true
+          }
+        ],
+        "layouts": [
+          {
+            "role": "admin",
+            "width": 390,
+            "documentWidth": 390,
+            "tableWidth": 640,
+            "scrollerWidth": 332,
+            "theme": "standard"
+          },
+          {
+            "role": "admin",
+            "width": 1024,
+            "documentWidth": 1024,
+            "tableWidth": 662,
+            "scrollerWidth": 662,
+            "theme": "standard"
+          },
+          {
+            "role": "admin",
+            "width": 1440,
+            "documentWidth": 1440,
+            "tableWidth": 654,
+            "scrollerWidth": 654,
+            "theme": "standard"
+          },
+          {
+            "role": "restricted executor",
+            "width": 390,
+            "documentWidth": 390,
+            "tableWidth": 640,
+            "scrollerWidth": 332,
+            "theme": "standard"
+          },
+          {
+            "role": "restricted executor",
+            "width": 1024,
+            "documentWidth": 1024,
+            "tableWidth": 662,
+            "scrollerWidth": 662,
+            "theme": "standard"
+          },
+          {
+            "role": "restricted executor",
+            "width": 1440,
+            "documentWidth": 1440,
+            "tableWidth": 654,
+            "scrollerWidth": 654,
+            "theme": "standard"
+          }
+        ],
+        "settingsRestored": true,
+        "acceptanceComplete": false
+      }
+    },
+    "bulk-qualified": {
+      "Sha256": "028fb50e0176ca82a66d2f1340df948fb9ae659c74f5298e878d0744fcea8695",
+      "Result": {
+        "revision": "5735673fb28af91f2069c915c341d73d023d2564",
+        "noMocks": true,
+        "roles": [
+          {
+            "role": "admin",
+            "selectedPageOnly50": true,
+            "pageAndFilterReset": true,
+            "cancelPreservesSelection": true,
+            "statusUpdateAndRestore": true,
+            "assigneeUpdateAndRestore": true,
+            "exportAllowed": true,
+            "keyboardMenuFocus": true,
+            "pageErrors": 0
+          },
+          {
+            "role": "restricted executor",
+            "selectedPageOnly50": true,
+            "pageAndFilterReset": true,
+            "cancelPreservesSelection": true,
+            "statusUpdateAndRestore": true,
+            "assigneeUpdateAndRestore": false,
+            "exportAllowed": false,
+            "keyboardMenuFocus": true,
+            "pageErrors": 0
+          }
+        ]
+      }
+    },
+    "workflows-qualified": {
+      "Sha256": "352cf840b03b4ef0506ea9f70d101a5a23b643046f25aae449f5865387aebdf2",
+      "Result": {
+        "revision": "5735673fb28af91f2069c915c341d73d023d2564",
+        "noMocks": true,
+        "modes": [
+          {
+            "mode": "legacy",
+            "executorRequest": true,
+            "emptyReasonBlocked": true,
+            "dueUnchangedUntilApproval": true,
+            "authorDecisionInCard": true,
+            "deadlineDisplayedInCase": true,
+            "approvalRevisionResubmissionCompletion": true,
+            "completed": 12,
+            "pageErrors": 0
+          },
+          {
+            "mode": "modern",
+            "executorRequest": true,
+            "emptyReasonBlocked": true,
+            "dueUnchangedUntilApproval": true,
+            "authorDecisionInCard": true,
+            "deadlineDisplayedInCase": true,
+            "approvalRevisionResubmissionCompletion": true,
+            "completed": 13,
+            "pageErrors": 0
+          }
+        ],
+        "settingsRestored": true
+      }
+    },
+    "create-qualified": {
+      "Sha256": "859bfa191b069f10d1c8efd037b50046219d5a779e58f032ab4d879f700a64f4",
+      "Result": {
+        "revision": "5735673fb28af91f2069c915c341d73d023d2564",
+        "noMocks": true,
+        "created": [
+          {
+            "mode": "legacy",
+            "role": "admin",
+            "id": 1068,
+            "caseAndClientLinks": true,
+            "authorAndAssigneeOwned": true,
+            "total": 52,
+            "active": 39,
+            "openedInConfiguredForm": true,
+            "pageErrors": 0
+          },
+          {
+            "mode": "modern",
+            "role": "restricted executor",
+            "id": 1069,
+            "caseAndClientLinks": true,
+            "authorAndAssigneeOwned": true,
+            "total": 53,
+            "active": 40,
+            "openedInConfiguredForm": true,
+            "pageErrors": 0,
+            "retainedCreation": true
+          }
+        ],
+        "settingsRestored": true
+      }
+    },
+    "fixture-retired": {
+      "Sha256": "5e6fcc2bc44af574371fc0cb218d09b229c0cc0b332745262075439b7767df72",
+      "Result": {
+        "revision": "5735673fb28af91f2069c915c341d73d023d2564",
+        "before": {
+          "tasks": 53,
+          "caseClosed": 0,
+          "activeTasks": 40,
+          "activeUsers": 2,
+          "personalSettings": 4,
+          "externalDeliveries": 0
+        },
+        "after": {
+          "tasks": 53,
+          "caseClosed": 2,
+          "activeTasks": 0,
+          "activeUsers": 0,
+          "personalSettings": 4,
+          "externalDeliveries": 0
+        },
+        "retired": true,
+        "physicalDeletion": false,
+        "revokedUsers": 2
+      }
+    },
+    "fixture-token-revocation": {
+      "Sha256": "d8fe9cbf12a59f600ab7358420661c49fee4f82eba31d89e0f9dfc72f8607336",
+      "Result": {
+        "revision": "5735673fb28af91f2069c915c341d73d023d2564",
+        "revokedTokenStatuses": [
+          401,
+          401
+        ],
+        "oldSessionsRejected": true
+      }
+    }
+  }
+}
