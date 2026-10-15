@@ -289,7 +289,19 @@ public sealed class UserActivitySqliteWriteBudgetTests
             Assert.StartsWith("pp_activity_sqlite_budget_", Path.GetFileName(absolute));
             SlowFactory.Dispose();
             FastFactory.Dispose();
-            if (Directory.Exists(absolute)) Directory.Delete(absolute, recursive: true);
+            if (Directory.Exists(absolute))
+            {
+                try { Directory.Delete(absolute, recursive: true); }
+                catch (IOException) when (SlowFactory.OpeningFailed.Task.IsCompleted || FastFactory.OpeningFailed.Task.IsCompleted)
+                {
+                    // Sqlite 9.0.9 can fail in its native connection constructor before
+                    // assigning the handle to the disposable managed connection. Finalize
+                    // that unreachable handle only during cleanup of this failed-open fixture.
+                    GC.Collect();
+                    GC.WaitForPendingFinalizers();
+                    Directory.Delete(absolute, recursive: true);
+                }
+            }
             return ValueTask.CompletedTask;
         }
 
@@ -306,6 +318,7 @@ public sealed class UserActivitySqliteWriteBudgetTests
         public string ConnectionString => connectionString;
         public TaskCompletionSource Opened { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Opening { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource OpeningFailed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public int? CreatedConnectionDefaultTimeout => _lastConnection?.DefaultTimeout;
         public string? CreatedConnectionString => _lastConnection?.ConnectionString;
         public PaymentContext CreateDbContext()
@@ -317,7 +330,7 @@ public sealed class UserActivitySqliteWriteBudgetTests
             var builder = new DbContextOptionsBuilder<PaymentContext>()
                 .UseSqlite(connection, contextOwnsConnection: true)
                 .UseLoggerFactory(_logging)
-                .AddInterceptors(new OpenObserver(Opening, Opened));
+                .AddInterceptors(new OpenObserver(Opening, Opened, OpeningFailed));
             if (writerAdmission is not null) builder.AddInterceptors(writerAdmission);
             return new PaymentContext(builder.Options);
         }
@@ -365,7 +378,7 @@ public sealed class UserActivitySqliteWriteBudgetTests
         public void Dispose() { }
     }
 
-    private sealed class OpenObserver(TaskCompletionSource opening, TaskCompletionSource opened) : DbConnectionInterceptor
+    private sealed class OpenObserver(TaskCompletionSource opening, TaskCompletionSource opened, TaskCompletionSource failed) : DbConnectionInterceptor
     {
         public override ValueTask<InterceptionResult> ConnectionOpeningAsync(DbConnection connection,
             ConnectionEventData eventData, InterceptionResult result, CancellationToken cancellationToken = default)
@@ -373,6 +386,9 @@ public sealed class UserActivitySqliteWriteBudgetTests
         public override Task ConnectionOpenedAsync(DbConnection connection, ConnectionEndEventData eventData,
             CancellationToken cancellationToken = default)
         { opened.TrySetResult(); return Task.CompletedTask; }
+        public override Task ConnectionFailedAsync(DbConnection connection, ConnectionErrorEventData eventData,
+            CancellationToken cancellationToken = default)
+        { failed.TrySetResult(); return Task.CompletedTask; }
     }
 
     private sealed class AuditLogger : ILogger<UserActivityService>
