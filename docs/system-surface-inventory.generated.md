@@ -8,7 +8,7 @@
 - Разделов frontend: 55.
 - Backend-контроллеров: 89.
 - HTTP endpoints: 930; с прямой тестовой связью: 632.
-- HTTP endpoints с точной ссылкой из документации: 232; критичных без такой ссылки: 534.
+- HTTP endpoints с точной ссылкой из документации: 233; критичных без такой ссылки: 534.
 - Критичных endpoints без прямой тестовой связи: 246.
 - Реальных HTML-форм: 19; с найденной тестовой связью: 17.
 - Фоновых сервисов: 33; с найденной тестовой связью: 28.
@@ -646,7 +646,7 @@
 | GET | api/client-reference-data/okso | ClientReferenceDataController | GetOkso | backend/Controllers/ClientReferenceDataController.cs:32 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | да | нет |
 | GET | api/client-reference-data/okpdtr | ClientReferenceDataController | GetOkpdtr | backend/Controllers/ClientReferenceDataController.cs:38 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | да | нет |
 | GET | api/[controller] | ClientsController | GetAll | backend/Controllers/ClientsController.cs:229 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
-| GET | api/[controller]/{id:int} | ClientsController | GetById | backend/Controllers/ClientsController.cs:279 | [Authorize] | да | нет |
+| GET | api/[controller]/{id:int} | ClientsController | GetById | backend/Controllers/ClientsController.cs:279 | [Authorize] | да | docs/payplanner-release-roadmap-2026-10-14.md |
 | GET | api/[controller]/{id:int}/stats | ClientsController | GetStats | backend/Controllers/ClientsController.cs:314 | [Authorize] | да | нет |
 | GET | api/[controller]/{id:int}/case-finance-summaries | ClientsController | GetCaseFinanceSummaries | backend/Controllers/ClientsController.cs:412 | [Authorize] | да | нет |
 | GET | api/[controller]/{id:int}/case-expense-details | ClientsController | GetCaseExpenseDetails | backend/Controllers/ClientsController.cs:538 | [Authorize] | да | нет |
@@ -923,9 +923,9 @@
 | GET |  | LegalEntityBalancesController | GetSummary | backend/Controllers/LegalEntityBalancesController.cs:57 | не задано | да | нет |
 | GET | transactions | LegalEntityBalancesController | GetTransactions | backend/Controllers/LegalEntityBalancesController.cs:78 | не задано | да | docs/bank-integrations-api-verification-2026-10-09.md, docs/delete-behavior-contract-2026-06-10.md |
 | POST | apply | LegalEntityBalancesController | ApplyCredit | backend/Controllers/LegalEntityBalancesController.cs:116 | не задано | да | docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/payplanner-storage-roadmap-2026-10-14.md, docs/release-verification-history-2026-10-06.md, docs/storage-resilience-runbook.md, docs/unpushed-changes-map-2026-10-03.md |
-| GET | api/max/link | MaxMessengerController | GetLink | backend/Controllers/MaxMessengerController.cs:22 | [Authorize] | да | docs/development-2026-10-15-max-profile.md, docs/payplanner-messenger-roadmap-2026-10-14.md |
-| POST | api/max/link | MaxMessengerController | CreateLink | backend/Controllers/MaxMessengerController.cs:31 | [Authorize] | да | docs/development-2026-10-15-max-profile.md, docs/payplanner-messenger-roadmap-2026-10-14.md |
-| DELETE | api/max/link | MaxMessengerController | OptOut | backend/Controllers/MaxMessengerController.cs:40 | [Authorize] | да | docs/development-2026-10-15-max-profile.md, docs/payplanner-messenger-roadmap-2026-10-14.md |
+| GET | api/max/link | MaxMessengerController | GetLink | backend/Controllers/MaxMessengerController.cs:22 | [Authorize] | да | docs/development-2026-10-15-max-profile.md, docs/handoff-2026-10-15.md, docs/payplanner-messenger-roadmap-2026-10-14.md |
+| POST | api/max/link | MaxMessengerController | CreateLink | backend/Controllers/MaxMessengerController.cs:31 | [Authorize] | да | docs/development-2026-10-15-max-profile.md, docs/handoff-2026-10-15.md, docs/payplanner-messenger-roadmap-2026-10-14.md |
+| DELETE | api/max/link | MaxMessengerController | OptOut | backend/Controllers/MaxMessengerController.cs:40 | [Authorize] | да | docs/development-2026-10-15-max-profile.md, docs/handoff-2026-10-15.md, docs/payplanner-messenger-roadmap-2026-10-14.md |
 | POST | api/max/messages | MaxMessengerController | QueueMessage | backend/Controllers/MaxMessengerController.cs:49 | [Authorize]; [Authorize(Roles = "admin")] | нет | нет |
 | GET | api/max/messages | MaxMessengerController | GetMessages | backend/Controllers/MaxMessengerController.cs:64 | [Authorize]; [Authorize(Roles = "admin")] | нет | нет |
 | POST | api/max/messages/{publicId:guid}/retry | MaxMessengerController | RetryMessage | backend/Controllers/MaxMessengerController.cs:90 | [Authorize]; [Authorize(Roles = "admin")] | нет | нет |
