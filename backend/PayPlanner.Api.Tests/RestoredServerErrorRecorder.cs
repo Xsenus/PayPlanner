@@ -151,6 +151,8 @@ internal sealed class RestoredServerErrorRecorder
             {
                 ExceptionTypes = types.EnumerateArray().Take(4).Select(SafeName).ToArray(),
                 ApplicationFrames = frames.EnumerateArray().Take(8).Select(SafeName).ToArray(),
+                SqliteErrorCode = SafeSqliteCode(value, "SqliteErrorCode"),
+                SqliteExtendedErrorCode = SafeSqliteCode(value, "SqliteExtendedErrorCode"),
                 ProviderFrames = value.TryGetProperty("ProviderFrames", out var providerFrames)
                     && providerFrames.ValueKind == JsonValueKind.Array
                         ? providerFrames.EnumerateArray().Take(4).Select(SafeName)
@@ -164,13 +166,15 @@ internal sealed class RestoredServerErrorRecorder
                 CancellationTokenRequested = SafeBoolean(value, "CancellationTokenRequested"),
                 RequestAbortedAtFailure = SafeBoolean(value, "RequestAbortedAtFailure"),
                 AuditStage = value.TryGetProperty("AuditStage", out var stage) && stage.ValueKind == JsonValueKind.String
-                    && stage.GetString() is "settings" or "write-lock" or "context" or "connection" or "save" or "completed"
+                    && stage.GetString() is "settings" or "write-lock" or "context" or "connection" or "write-admission" or "save" or "commit" or "completed"
                         ? stage.GetString() : "unavailable",
                 AuditTotalMs = SafeMilliseconds(value, "AuditTotalMs"),
                 AuditLockWaitMs = SafeMilliseconds(value, "AuditLockWaitMs"),
                 AuditContextMs = SafeMilliseconds(value, "AuditContextMs"),
                 AuditConnectionMs = SafeMilliseconds(value, "AuditConnectionMs"),
+                AuditAdmissionMs = SafeMilliseconds(value, "AuditAdmissionMs"),
                 AuditSaveMs = SafeMilliseconds(value, "AuditSaveMs"),
+                AuditCommitMs = SafeMilliseconds(value, "AuditCommitMs"),
                 ThreadPoolThreads = SafeMilliseconds(value, "ThreadPoolThreads"),
                 ThreadPoolPending = SafeMilliseconds(value, "ThreadPoolPending"),
                 GcPauseTotalMs = SafeMilliseconds(value, "GcPauseTotalMs")
@@ -184,6 +188,10 @@ internal sealed class RestoredServerErrorRecorder
         => root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number
             && value.TryGetDouble(out var number) && double.IsFinite(number) && number is >= 0 and <= 3_600_000
                 ? number : null;
+
+    private static int? SafeSqliteCode(JsonElement root, string name)
+        => root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number
+            && value.TryGetInt32(out var number) && number is >= 0 and <= 65535 ? number : null;
 
     private static string? ReadSlowCommandTiming(string line)
     {

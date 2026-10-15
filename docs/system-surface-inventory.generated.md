@@ -8,7 +8,7 @@
 - Разделов frontend: 55.
 - Backend-контроллеров: 89.
 - HTTP endpoints: 930; с прямой тестовой связью: 632.
-- HTTP endpoints с точной ссылкой из документации: 233; критичных без такой ссылки: 534.
+- HTTP endpoints с точной ссылкой из документации: 234; критичных без такой ссылки: 533.
 - Критичных endpoints без прямой тестовой связи: 246.
 - Реальных HTML-форм: 19; с найденной тестовой связью: 17.
 - Фоновых сервисов: 33; с найденной тестовой связью: 28.
@@ -976,7 +976,7 @@
 | PUT | api/navigation-settings | NavigationSettingsController | Update | backend/Controllers/NavigationSettingsController.cs:52 | [Authorize] | да | нет |
 | GET | api/notifications/inbox/types | NotificationInboxController | GetTypes | backend/Controllers/NotificationInboxController.cs:36 | [Authorize] | да | нет |
 | GET | api/notifications/inbox/unread-count | NotificationInboxController | GetUnreadCount | backend/Controllers/NotificationInboxController.cs:40 | [Authorize] | да | docs/release-open-verification-errors-2026-10-07.md |
-| GET | api/notifications/inbox | NotificationInboxController | GetNotifications | backend/Controllers/NotificationInboxController.cs:67 | [Authorize] | да | docs/development-release-preparation-2026-10-06.md, docs/full-project-audit-2026-06-10.md, docs/release-verification-history-2026-10-06.md |
+| GET | api/notifications/inbox | NotificationInboxController | GetNotifications | backend/Controllers/NotificationInboxController.cs:67 | [Authorize] | да | docs/development-2026-10-15-max-profile.md, docs/development-2026-10-16-audit-write-budget.md, docs/development-release-preparation-2026-10-06.md, docs/full-project-audit-2026-06-10.md, docs/payplanner-release-roadmap-2026-10-14.md, docs/release-verification-history-2026-10-06.md |
 | POST | api/notifications/inbox/read-all | NotificationInboxController | MarkAllRead | backend/Controllers/NotificationInboxController.cs:129 | [Authorize] | да | нет |
 | POST | api/notifications/inbox/bulk/archive | NotificationInboxController | ArchiveSelected | backend/Controllers/NotificationInboxController.cs:180 | [Authorize] | да | нет |
 | POST | api/notifications/inbox/bulk/unarchive | NotificationInboxController | UnarchiveSelected | backend/Controllers/NotificationInboxController.cs:208 | [Authorize] | да | нет |
@@ -1246,7 +1246,7 @@
 | POST | api/users/{id:int}/reject | UsersController | RejectUser | backend/Controllers/UsersController.cs:178 | [Authorize(Policy = "Admin")] | нет | нет |
 | POST | api/users/merge | UsersController | MergeUsers | backend/Controllers/UsersController.cs:212 | [Authorize(Policy = "Admin")] | нет | нет |
 | PUT | api/users/{id:int} | UsersController | UpdateUser | backend/Controllers/UsersController.cs:231 | [Authorize(Policy = "Admin")] | нет | нет |
-| GET | api/user-settings/{key} | UserSettingsController | Get | backend/Controllers/UserSettingsController.cs:44 | [Authorize] | да | нет |
+| GET | api/user-settings/{key} | UserSettingsController | Get | backend/Controllers/UserSettingsController.cs:44 | [Authorize] | да | docs/development-2026-10-16-audit-write-budget.md, docs/handoff-2026-10-15.md |
 | PUT | api/user-settings/{key} | UserSettingsController | Upsert | backend/Controllers/UserSettingsController.cs:59 | [Authorize] | нет | нет |
 | GET | api/user-settings/users/{userId:int}/{key} | UserSettingsController | GetForUser | backend/Controllers/UserSettingsController.cs:68 | [Authorize]; [Authorize(Policy = "Admin")] | да | нет |
 | PUT | api/user-settings/users/{userId:int}/{key} | UserSettingsController | UpsertForUser | backend/Controllers/UserSettingsController.cs:81 | [Authorize]; [Authorize(Policy = "Admin")] | нет | нет |

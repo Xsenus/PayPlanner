@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Controllers;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Services.UserActivity;
@@ -47,10 +48,12 @@ internal sealed class OwnedAuditFailureDiagnostics : ILoggerProvider
                 ? name : "unknown";
         var types = new List<string>();
         OperationCanceledException? cancellation = null;
+        SqliteException? sqlite = null;
         for (Exception? current = exception; current is not null && types.Count < 4; current = current.InnerException)
         {
             types.Add(SafeName(current.GetType().FullName));
             if (current is OperationCanceledException canceled) cancellation ??= canceled;
+            if (current is SqliteException sqliteFailure) sqlite ??= sqliteFailure;
         }
         var action = request?.GetEndpoint()?.Metadata.GetMetadata<ControllerActionDescriptor>();
         var requestAction = action is null ? null : action.ControllerTypeInfo.FullName + "." + action.MethodInfo.Name;
@@ -62,7 +65,7 @@ internal sealed class OwnedAuditFailureDiagnostics : ILoggerProvider
         var providerFrames = methods.Where(method => IsProviderSymbol(method?.DeclaringType?.FullName))
             .Take(4).Select(method => SafeName(method!.DeclaringType!.FullName + "." + method.Name)).ToArray();
         var facts = loggingState is IEnumerable<KeyValuePair<string, object?>> values
-            ? values.Where(item => item.Key is "AuditStage" or "AuditTotalMs" or "AuditLockWaitMs" or "AuditContextMs" or "AuditConnectionMs" or "AuditSaveMs")
+            ? values.Where(item => item.Key is "AuditStage" or "AuditTotalMs" or "AuditLockWaitMs" or "AuditContextMs" or "AuditConnectionMs" or "AuditAdmissionMs" or "AuditSaveMs" or "AuditCommitMs")
                 .GroupBy(item => item.Key).ToDictionary(group => group.Key, group => group.First().Value)
             : [];
         double? Milliseconds(string key)
@@ -77,6 +80,8 @@ internal sealed class OwnedAuditFailureDiagnostics : ILoggerProvider
         return Prefix + JsonSerializer.Serialize(new
         {
             ExceptionTypes = types,
+            SqliteErrorCode = sqlite?.SqliteErrorCode is >= 0 and <= 65535 ? (int?)sqlite.SqliteErrorCode : null,
+            SqliteExtendedErrorCode = sqlite?.SqliteExtendedErrorCode is >= 0 and <= 65535 ? (int?)sqlite.SqliteExtendedErrorCode : null,
             ApplicationFrames = frames,
             ProviderFrames = providerFrames,
             RequestAction = SafeName(requestAction),
@@ -85,12 +90,14 @@ internal sealed class OwnedAuditFailureDiagnostics : ILoggerProvider
                 ? token == request.RequestAborted ? "request" : "other" : "unavailable",
             CancellationTokenRequested = token.CanBeCanceled ? (bool?)token.IsCancellationRequested : null,
             RequestAbortedAtFailure = request?.RequestAborted.IsCancellationRequested,
-            AuditStage = stage is "settings" or "write-lock" or "context" or "connection" or "save" or "completed" ? stage : "unavailable",
+            AuditStage = stage is "settings" or "write-lock" or "context" or "connection" or "write-admission" or "save" or "commit" or "completed" ? stage : "unavailable",
             AuditTotalMs = Milliseconds("AuditTotalMs"),
             AuditLockWaitMs = Milliseconds("AuditLockWaitMs"),
             AuditContextMs = Milliseconds("AuditContextMs"),
             AuditConnectionMs = Milliseconds("AuditConnectionMs"),
+            AuditAdmissionMs = Milliseconds("AuditAdmissionMs"),
             AuditSaveMs = Milliseconds("AuditSaveMs"),
+            AuditCommitMs = Milliseconds("AuditCommitMs"),
             ThreadPoolThreads = ThreadPool.ThreadCount,
             ThreadPoolPending = Math.Min(ThreadPool.PendingWorkItemCount, 3_600_000),
             GcPauseTotalMs = Math.Min(GC.GetTotalPauseDuration().TotalMilliseconds, 3_600_000)

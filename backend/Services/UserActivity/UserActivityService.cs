@@ -7,6 +7,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Extensions;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Data.Sqlite;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Helpers;
 using PayPlanner.Api.Models;
@@ -19,6 +21,7 @@ public class UserActivityService : IUserActivityService
     private const string LoggingEnabledSettingKey = "user-activity.enabled";
     private const string LoggingRetentionDaysSettingKey = "user-activity.retention-days";
     private static readonly TimeSpan SettingsCacheLifetime = TimeSpan.FromSeconds(30);
+    private const int SqliteAuditAttemptTimeoutSeconds = 1;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = false,
@@ -157,7 +160,9 @@ public class UserActivityService : IUserActivityService
         long lockWaitMilliseconds = 0;
         long contextMilliseconds = 0;
         long connectionMilliseconds = 0;
+        long admissionMilliseconds = 0;
         long saveMilliseconds = 0;
+        long commitMilliseconds = 0;
         try
         {
             if (!(await GetSettingsAsync(cancellationToken)).IsEnabled)
@@ -230,6 +235,9 @@ public class UserActivityService : IUserActivityService
                     try { context = await _contextFactory.CreateDbContextAsync(token); }
                     finally { contextMilliseconds += interval.ElapsedMilliseconds; }
                     await using var ownedContext = context;
+                    // A busy commit is rolled back with its owned transaction;
+                    // a later attempt must not reuse a now-unreserved generated ID.
+                    log.Id = 0;
                     context.UserActivityLogs.Add(log);
 
                     // Only the insert needs serialization. Preparing a context or
@@ -243,24 +251,64 @@ public class UserActivityService : IUserActivityService
                         {
                             connectionMilliseconds += interval.ElapsedMilliseconds;
                             connectionOpened = true;
-                            var lockTaken = false;
+                            var sqlite = context.Database.IsSqlite()
+                                ? context.Database.GetDbConnection() as SqliteConnection : null;
+                            var nativeTimeout = sqlite?.DefaultTimeout;
+                            var commandTimeout = sqlite is null ? null : context.Database.GetCommandTimeout();
                             try
                             {
-                                stage = "write-lock";
+                                // SQLite's async commands still wait synchronously for a writer.
+                                // Admit the owned transaction before the shared audit lock, with
+                                // short attempts that the existing bounded retry can release.
+                                if (sqlite is not null)
+                                {
+                                    sqlite.DefaultTimeout = SqliteAuditAttemptTimeoutSeconds;
+                                    context.Database.SetCommandTimeout(SqliteAuditAttemptTimeoutSeconds);
+                                }
+                                stage = "write-admission";
                                 interval.Restart();
-                                try { await WriteLock.WaitAsync(token); }
-                                finally { lockWaitMilliseconds += interval.ElapsedMilliseconds; }
-                                lockTaken = true;
-                                stage = "save";
-                                interval.Restart();
-                                try { await context.SaveChangesAsync(token); }
-                                finally { saveMilliseconds += interval.ElapsedMilliseconds; }
-                                stage = "completed";
-                                return log;
+                                IDbContextTransaction? admission;
+                                try
+                                {
+                                    admission = sqlite is not null && context.Database.CurrentTransaction is null
+                                        ? await context.Database.BeginTransactionAsync(token) : null;
+                                }
+                                finally { admissionMilliseconds += interval.ElapsedMilliseconds; }
+                                await using var ownedAdmission = admission;
+                                var lockTaken = false;
+                                try
+                                {
+                                    stage = "write-lock";
+                                    interval.Restart();
+                                    try { await WriteLock.WaitAsync(token); }
+                                    finally { lockWaitMilliseconds += interval.ElapsedMilliseconds; }
+                                    lockTaken = true;
+                                    stage = "save";
+                                    interval.Restart();
+                                    try { await context.SaveChangesAsync(token); }
+                                    finally { saveMilliseconds += interval.ElapsedMilliseconds; }
+                                    if (admission is not null)
+                                    {
+                                        stage = "commit";
+                                        interval.Restart();
+                                        try { await admission.CommitAsync(token); }
+                                        finally { commitMilliseconds += interval.ElapsedMilliseconds; }
+                                    }
+                                    stage = "completed";
+                                    return log;
+                                }
+                                finally
+                                {
+                                    if (lockTaken) WriteLock.Release();
+                                }
                             }
                             finally
                             {
-                                if (lockTaken) WriteLock.Release();
+                                if (sqlite is not null)
+                                {
+                                    sqlite.DefaultTimeout = nativeTimeout!.Value;
+                                    context.Database.SetCommandTimeout(commandTimeout);
+                                }
                             }
                         }, token);
                     }
@@ -270,15 +318,18 @@ public class UserActivityService : IUserActivityService
                     }
                 },
                 _logger,
-                cancellationToken);
+                cancellationToken,
+                // This replay creates its own context/transaction before writing.
+                // Other helper callers retain the existing BUSY-only policy.
+                retrySharedCacheLock: true);
 
             return log;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex,
-                "Не удалось сохранить журнал активности пользователя. Этап={AuditStage}; всего={AuditTotalMs} мс; ожидание={AuditLockWaitMs} мс; контекст={AuditContextMs} мс; подключение={AuditConnectionMs} мс; сохранение={AuditSaveMs} мс",
-                stage, elapsed.ElapsedMilliseconds, lockWaitMilliseconds, contextMilliseconds, connectionMilliseconds, saveMilliseconds);
+                "Не удалось сохранить журнал активности пользователя. Этап={AuditStage}; всего={AuditTotalMs} мс; ожидание={AuditLockWaitMs} мс; контекст={AuditContextMs} мс; подключение={AuditConnectionMs} мс; допуск={AuditAdmissionMs} мс; сохранение={AuditSaveMs} мс; фиксация={AuditCommitMs} мс",
+                stage, elapsed.ElapsedMilliseconds, lockWaitMilliseconds, contextMilliseconds, connectionMilliseconds, admissionMilliseconds, saveMilliseconds, commitMilliseconds);
             return null;
         }
     }

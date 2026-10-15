@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Reflection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Controllers;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Services.UserActivity;
@@ -11,6 +12,40 @@ namespace PayPlanner.Api.Tests;
 
 public sealed class OwnedAuditFailureDiagnosticsTests
 {
+    [Theory]
+    [InlineData(5, 517)]
+    [InlineData(6, 262)]
+    [InlineData(1, 1)]
+    public void SqliteFailureKeepsOnlyNumericCodesFromItsException(int code, int extended)
+    {
+        var failure = new InvalidOperationException("synthetic-private", new SqliteException("synthetic-private", code, extended));
+        var recorder = new RestoredServerErrorRecorder();
+        recorder.Receive("fail: Example.Service[0]");
+        recorder.Receive(OwnedAuditFailureDiagnostics.Format(failure, null));
+        var summary = recorder.FailureSummary();
+        Assert.Contains("Server fail log entries: 1.", summary);
+        Assert.Contains("\"SqliteErrorCode\":" + code + ",", summary);
+        Assert.Contains("\"SqliteExtendedErrorCode\":" + extended + ",", summary);
+        Assert.DoesNotContain("synthetic-private", summary);
+    }
+
+    [Theory]
+    [InlineData("\"synthetic-private\"")]
+    [InlineData("-1")]
+    [InlineData("65536")]
+    [InlineData("1.5")]
+    public void MalformedSqliteCodesCannotHideFailureOrExposeText(string value)
+    {
+        var recorder = new RestoredServerErrorRecorder();
+        recorder.Receive("fail: Example.Service[0]");
+        recorder.Receive(OwnedAuditFailureDiagnostics.Prefix + "{\"ExceptionTypes\":[],\"ApplicationFrames\":[],\"RequestAction\":\"unknown\",\"Canceled\":false,\"SqliteErrorCode\":" + value + ",\"SqliteExtendedErrorCode\":" + value + "}");
+        var summary = recorder.FailureSummary();
+        Assert.Contains("Server fail log entries: 1.", summary);
+        Assert.Contains("\"SqliteErrorCode\":null", summary);
+        Assert.Contains("\"SqliteExtendedErrorCode\":null", summary);
+        Assert.DoesNotContain("synthetic-private", summary);
+    }
+
     [Fact]
     public void RuntimePressureFactsAreNumericAndSurviveTheSafeRecorder()
     {
@@ -91,23 +126,28 @@ public sealed class OwnedAuditFailureDiagnosticsTests
         Assert.True(line.Length < 4096);
     }
 
-    [Fact]
-    public void MeasuredWriteStagesRemainBoundedAndDoNotExposeLoggingState()
+    [Theory]
+    [InlineData("connection")]
+    [InlineData("write-admission")]
+    [InlineData("commit")]
+    public void MeasuredWriteStagesRemainBoundedAndDoNotExposeLoggingState(string stage)
     {
         var lines = new List<string>();
         using var provider = new OwnedAuditFailureDiagnostics(new HttpContextAccessor(), lines.Add);
         var logger = provider.CreateLogger(typeof(UserActivityService).FullName!);
         logger.LogError(new OperationCanceledException("synthetic-private"),
-            "stage={AuditStage}, total={AuditTotalMs}, lock={AuditLockWaitMs}, context={AuditContextMs}, connection={AuditConnectionMs}, save={AuditSaveMs}, secret={Secret}",
-            "connection", 5001L, 0L, 0, 4999d, 0d, "synthetic-private");
+            "stage={AuditStage}, total={AuditTotalMs}, lock={AuditLockWaitMs}, context={AuditContextMs}, connection={AuditConnectionMs}, admission={AuditAdmissionMs}, save={AuditSaveMs}, commit={AuditCommitMs}, secret={Secret}",
+            stage, 5001L, 0L, 0, 4999d, 1d, 0d, 1d, "synthetic-private");
         var recorder = new RestoredServerErrorRecorder();
         recorder.Receive("fail: PayPlanner.Api.Services.UserActivity.UserActivityService[0]");
         recorder.Receive(Assert.Single(lines));
         var summary = recorder.FailureSummary();
         Assert.Contains("Server fail log entries: 1.", summary);
-        Assert.Contains("\"AuditStage\":\"connection\"", summary);
+        Assert.Contains("\"AuditStage\":\"" + stage + "\"", summary);
         Assert.Contains("\"AuditTotalMs\":5001", summary);
         Assert.Contains("\"AuditConnectionMs\":4999", summary);
+        Assert.Contains("\"AuditAdmissionMs\":1", summary);
+        Assert.Contains("\"AuditCommitMs\":1", summary);
         Assert.DoesNotContain("synthetic-private", summary);
     }
 
@@ -121,7 +161,9 @@ public sealed class OwnedAuditFailureDiagnosticsTests
             ["AuditLockWaitMs"] = -1,
             ["AuditContextMs"] = 3_600_001L,
             ["AuditConnectionMs"] = "synthetic-private",
-            ["AuditSaveMs"] = "synthetic-private"
+            ["AuditSaveMs"] = "synthetic-private",
+            ["AuditAdmissionMs"] = "synthetic-private",
+            ["AuditCommitMs"] = double.NaN
         };
         var recorder = new RestoredServerErrorRecorder();
         recorder.Receive("fail: Example.Service[0]");
