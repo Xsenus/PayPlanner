@@ -189,7 +189,17 @@ async function completeOwnedQueue() {
 try {
   // Do not load the developer's .env files into this synthetic UI runtime.
   console.log('TASK_UPLOAD_STAGE_VITE_STARTING');
-  vite = await createServer({ envDir: process.env.TASK_UPLOAD_ROOT, cacheDir: join(process.env.TASK_UPLOAD_ROOT, 'vite-browser-cache'), server: { host: '127.0.0.1', port, strictPort: true }, logLevel: 'error' });
+  vite = await createServer({ envDir: process.env.TASK_UPLOAD_ROOT, cacheDir: join(process.env.TASK_UPLOAD_ROOT, 'vite-browser-cache'), plugins: [{
+    name: 'task-browser-fixed-source',
+    config(config) {
+      config.server ??= {};
+      config.server.watch = null;
+    },
+  }], server: { host: '127.0.0.1', port, strictPort: true, hmr: false }, logLevel: 'error' });
+  assert.equal(vite.config.isProduction, true, 'The task browser must qualify production React behavior.');
+  assert.equal(vite.config.env.DEV, false, 'The release browser must not use development-only mount effects.');
+  assert.equal(vite.config.oxc.jsx.refresh, false, 'The release source transform must not inject React Refresh globals.');
+  assert.equal(vite.config.server.watch, null, 'The immutable task fixture must disable file watching.');
   console.log('TASK_UPLOAD_STAGE_VITE_CREATED');
   await vite.listen();
   console.log('TASK_UPLOAD_STAGE_VITE_LISTENING');
@@ -198,6 +208,8 @@ try {
   console.log('TASK_UPLOAD_STAGE_VITE_ENTRY_PREPARING');
   const entry = await vite.transformRequest('/src/main.tsx');
   assert.ok(entry?.code, 'The synthetic task UI entry module must compile successfully.');
+  const taskRoute = await vite.transformRequest('/src/components/Tasks/TaskJournal.tsx');
+  assert.ok(taskRoute?.code, 'The synthetic task route must compile successfully.');
   await vite.waitForRequestsIdle();
   console.log('TASK_UPLOAD_STAGE_VITE_ENTRY_READY');
   // Use the Chromium version installed for this Playwright package first.

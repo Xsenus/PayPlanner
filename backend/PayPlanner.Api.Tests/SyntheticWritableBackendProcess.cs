@@ -471,6 +471,7 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
             if (new[] { "PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", "LOCALAPPDATA", "APPDATA", "ProgramFiles", "ProgramFiles(x86)", "USERPROFILE" }
                 .Contains(key, StringComparer.OrdinalIgnoreCase)) start.Environment[key] = value;
         start.ArgumentList.Add(Path.Combine(repository.FullName, "scripts", "check-task-upload-live-browser.mjs"));
+        start.Environment["NODE_ENV"] = "production";
         start.Environment["TASK_UPLOAD_API"] = (apiAddress ?? Client.BaseAddress!).AbsoluteUri;
         start.Environment["TASK_UPLOAD_ROOT"] = Root;
         start.Environment["TASK_UPLOAD_EMAIL"] = Email;
