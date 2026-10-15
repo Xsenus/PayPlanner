@@ -87,6 +87,7 @@ import type {
 } from '../../types';
 import { toRuDate } from '../../utils/dateUtils';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { downloadBlob } from '../../utils/downloadBlob';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { courtAmountToInput, hasInvalidCourtAmounts, parseCourtAmountInput } from '../../utils/courtAmounts';
 import { buildCaseTaskPayload, getCaseStageTaskTemplates, isPretrialCaseStage, type CaseStageTaskTemplate } from '../../utils/caseTaskPayload';
@@ -2782,14 +2783,7 @@ export function CaseDetailPage({
     setNotice(null);
     try {
       const result = await apiService.downloadCaseDocument(caseItem.id, caseDocument.id);
-      const url = URL.createObjectURL(result.blob);
-      const link = window.document.createElement('a');
-      link.href = url;
-      link.download = result.fileName || caseDocument.originalFileName || `case-document-${caseDocument.id}`;
-      window.document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+      downloadBlob(result.blob, result.fileName || caseDocument.originalFileName || `case-document-${caseDocument.id}`);
       setNotice(`Документ «${caseDocument.originalFileName}» подготовлен к скачиванию.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось скачать документ по делу.');
@@ -2971,14 +2965,7 @@ export function CaseDetailPage({
     setNotice(null);
     try {
       const result = await apiService.downloadCaseDocument(caseItem.id, attachment.documentId);
-      const url = URL.createObjectURL(result.blob);
-      const link = window.document.createElement('a');
-      link.href = url;
-      link.download = result.fileName || attachment.fileName || `case-conversation-attachment-${attachment.documentId}`;
-      window.document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+      downloadBlob(result.blob, result.fileName || attachment.fileName || `case-conversation-attachment-${attachment.documentId}`);
       setNotice(`Файл «${attachment.fileName || result.fileName}» подготовлен к скачиванию.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось скачать вложение переписки.');

@@ -15,6 +15,7 @@ import type { ActResponsible, ClientCase, ClientCaseActivity, ClientCaseDocument
 import { useDialog } from '../../hooks/useDialog';
 import { apiService, type ContactDirectoryItemDto } from '../../services/api';
 import { formatCurrencySmart } from '../../utils/formatters';
+import { downloadBlob } from '../../utils/downloadBlob';
 import { courtAmountToInput, hasInvalidCourtAmounts, parseCourtAmountInput } from '../../utils/courtAmounts';
 import { formatDateTimeInTimeZone, fromTimeZoneDateTimeInput, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
 import { normalizeUserTimeZoneId, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
@@ -926,14 +927,7 @@ export function CaseModal({
     setDocumentsError(null);
     try {
       const result = await apiService.downloadCaseDocument(caseData.id, document.id);
-      const url = URL.createObjectURL(result.blob);
-      const link = window.document.createElement('a');
-      link.href = url;
-      link.download = result.fileName || document.originalFileName;
-      window.document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+      downloadBlob(result.blob, result.fileName || document.originalFileName);
     } catch (e: unknown) {
       setDocumentsError(e instanceof Error ? e.message : String(e));
     }

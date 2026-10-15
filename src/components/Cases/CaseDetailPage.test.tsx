@@ -1762,7 +1762,7 @@ describe('CaseDetailPage', () => {
       expect(within(details).getByText('Версия 4')).toBeTruthy();
       fireEvent.click(within(details).getByRole('button', { name: 'Скачать документ Одинаковое.pdf' }));
       await waitFor(() => expect(apiService.downloadCaseDocument).toHaveBeenCalledExactlyOnceWith(15, 72));
-      expect(revokeUrl).toHaveBeenCalledWith('blob:selected-document');
+      await waitFor(() => expect(revokeUrl).toHaveBeenCalledWith('blob:selected-document'), { timeout: 2000 });
       const file = new File(['synthetic replacement'], 'replacement.pdf', { type: 'application/pdf' });
       fireEvent.change(within(details).getByLabelText('Загрузить новую версию документа Одинаковое.pdf'), { target: { files: [file] } });
       await waitFor(() => expect(apiService.uploadCaseDocumentVersion).toHaveBeenCalledExactlyOnceWith(72, file, {
@@ -3651,12 +3651,13 @@ describe('CaseDetailPage', () => {
     });
   });
 
-  it('downloads a case document from the documents tab', async () => {
+  it('keeps a case document downloadable until the browser consumes its URL', async () => {
     const createObjectUrl = vi.fn(() => 'blob:case-document');
     const revokeObjectUrl = vi.fn();
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectUrl });
     Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectUrl });
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    onTestFinished(() => clickSpy.mockRestore());
 
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
 
@@ -3669,9 +3670,11 @@ describe('CaseDetailPage', () => {
       expect(apiService.downloadCaseDocument).toHaveBeenCalledWith(15, 7);
       expect(createObjectUrl).toHaveBeenCalledTimes(1);
       expect(clickSpy).toHaveBeenCalledTimes(1);
-      expect(revokeObjectUrl).toHaveBeenCalledWith('blob:case-document');
       expect(screen.getByText('Документ «Заявление.docx» подготовлен к скачиванию.')).toBeTruthy();
     });
+    expect(revokeObjectUrl).not.toHaveBeenCalled();
+    expect(window.document.querySelector('a[download]')).toBeNull();
+    await waitFor(() => expect(revokeObjectUrl).toHaveBeenCalledWith('blob:case-document'), { timeout: 2000 });
   });
 
   it('opens a case document preview from the documents tab', async () => {

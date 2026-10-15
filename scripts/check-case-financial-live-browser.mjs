@@ -223,7 +223,12 @@ try {
     }
     await downloadButton.waitFor();
     const downloadEvent = page.waitForEvent('download'); await downloadButton.click();
-    const download = await downloadEvent; check(await download.failure() === null, 'Financial document download failed');
+    const download = await downloadEvent;
+    const downloadFailure = await download.failure();
+    const downloadFailureKind = downloadFailure === null ? 'none'
+      : downloadFailure === 'canceled' ? 'canceled'
+      : /^(?:net::)?ERR_[A-Z_]+$/.test(downloadFailure) ? downloadFailure : 'other';
+    check(downloadFailure === null, 'Financial document download failed: ' + downloadFailureKind);
     await download.saveAs(settings.downloadPath);
     await reads.drain('browser-close');
     check(otherWrites === 0, 'Financial generation caused another business write: ' + otherWrites);
