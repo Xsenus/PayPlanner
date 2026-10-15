@@ -58,16 +58,16 @@ public sealed class OwnedAuditFailureDiagnosticsTests
         using var provider = new OwnedAuditFailureDiagnostics(new HttpContextAccessor(), lines.Add);
         var logger = provider.CreateLogger(typeof(UserActivityService).FullName!);
         logger.LogError(new OperationCanceledException("synthetic-private"),
-            "stage={AuditStage}, total={AuditTotalMs}, lock={AuditLockWaitMs}, context={AuditContextMs}, save={AuditSaveMs}, secret={Secret}",
-            "write-lock", 5001L, 4999L, 0, 0d, "synthetic-private");
+            "stage={AuditStage}, total={AuditTotalMs}, lock={AuditLockWaitMs}, context={AuditContextMs}, connection={AuditConnectionMs}, save={AuditSaveMs}, secret={Secret}",
+            "connection", 5001L, 0L, 0, 4999d, 0d, "synthetic-private");
         var recorder = new RestoredServerErrorRecorder();
         recorder.Receive("fail: PayPlanner.Api.Services.UserActivity.UserActivityService[0]");
         recorder.Receive(Assert.Single(lines));
         var summary = recorder.FailureSummary();
         Assert.Contains("Server fail log entries: 1.", summary);
-        Assert.Contains("\"AuditStage\":\"write-lock\"", summary);
+        Assert.Contains("\"AuditStage\":\"connection\"", summary);
         Assert.Contains("\"AuditTotalMs\":5001", summary);
-        Assert.Contains("\"AuditLockWaitMs\":4999", summary);
+        Assert.Contains("\"AuditConnectionMs\":4999", summary);
         Assert.DoesNotContain("synthetic-private", summary);
     }
 
@@ -80,6 +80,7 @@ public sealed class OwnedAuditFailureDiagnosticsTests
             ["AuditTotalMs"] = double.NaN,
             ["AuditLockWaitMs"] = -1,
             ["AuditContextMs"] = 3_600_001L,
+            ["AuditConnectionMs"] = "synthetic-private",
             ["AuditSaveMs"] = "synthetic-private"
         };
         var recorder = new RestoredServerErrorRecorder();
@@ -90,6 +91,50 @@ public sealed class OwnedAuditFailureDiagnosticsTests
         Assert.Contains("\"AuditStage\":\"unavailable\"", summary);
         Assert.Contains("\"AuditTotalMs\":null", summary);
         Assert.DoesNotContain("synthetic-private", summary);
+    }
+
+    [Fact]
+    public void CancellationKeepsBoundedProviderSymbolsWithoutExceptionOrRequestDetails()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var failure = Assert.Throws<OperationCanceledException>(() => cancellation.Token.ThrowIfCancellationRequested());
+        failure.Data["private"] = "synthetic-private-data";
+        var line = OwnedAuditFailureDiagnostics.Format(failure, Context(CancellationToken.None));
+        using var json = JsonDocument.Parse(line[OwnedAuditFailureDiagnostics.Prefix.Length..]);
+        var frames = json.RootElement.GetProperty("ProviderFrames").EnumerateArray().Select(value => value.GetString()!).ToArray();
+        Assert.InRange(frames.Length, 1, 4);
+        Assert.All(frames, name => Assert.True(OwnedAuditFailureDiagnostics.IsProviderSymbol(name)));
+        Assert.Contains(frames, name => name.StartsWith("System.Threading.", StringComparison.Ordinal));
+        var recorder = new RestoredServerErrorRecorder();
+        recorder.Receive("fail: Example.Service[0]");
+        recorder.Receive(line);
+        Assert.Contains("System.Threading.", recorder.FailureSummary());
+        Assert.DoesNotContain("synthetic-private", recorder.FailureSummary());
+        Assert.Contains("Server fail log entries: 1.", recorder.FailureSummary());
+    }
+
+    [Fact]
+    public void RecorderRejectsUntrustedProviderDetailsAndBoundsTheirCount()
+    {
+        var recorder = new RestoredServerErrorRecorder();
+        recorder.Receive("fail: Example.Service[0]");
+        recorder.Receive(OwnedAuditFailureDiagnostics.Prefix + JsonSerializer.Serialize(new
+        {
+            ExceptionTypes = Array.Empty<string>(),
+            ApplicationFrames = Array.Empty<string>(),
+            RequestAction = "unknown",
+            Canceled = false,
+            ProviderFrames = new[] { "Microsoft.EntityFrameworkCore.Storage.RelationalConnection.OpenAsync",
+                "private_payload", "Microsoft.Data.Sqlite.Connection.Open?token=synthetic-private", "System.Threading.CancellationToken.ThrowIfCancellationRequested",
+                "Microsoft.Data.Sqlite.Excess.Missing" }
+        }));
+        var summary = recorder.FailureSummary();
+        Assert.Contains("RelationalConnection.OpenAsync", summary);
+        Assert.Contains("CancellationToken.ThrowIfCancellationRequested", summary);
+        Assert.DoesNotContain("private", summary);
+        Assert.DoesNotContain("Excess", summary);
+        Assert.Contains("Server fail log entries: 1.", summary);
     }
 
     [Fact]

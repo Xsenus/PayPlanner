@@ -55,12 +55,14 @@ internal sealed class OwnedAuditFailureDiagnostics : ILoggerProvider
         var action = request?.GetEndpoint()?.Metadata.GetMetadata<ControllerActionDescriptor>();
         var requestAction = action is null ? null : action.ControllerTypeInfo.FullName + "." + action.MethodInfo.Name;
         var token = cancellation?.CancellationToken ?? CancellationToken.None;
-        var frames = new StackTrace(exception, false).GetFrames()
-            .Select(frame => frame.GetMethod())
+        var methods = new StackTrace(exception, false).GetFrames().Select(frame => frame.GetMethod()).ToArray();
+        var frames = methods
             .Where(method => method?.DeclaringType?.FullName?.StartsWith("PayPlanner.Api.", StringComparison.Ordinal) == true)
             .Take(8).Select(method => SafeName(method!.DeclaringType!.FullName) + "." + SafeName(method.Name)).ToArray();
+        var providerFrames = methods.Where(method => IsProviderSymbol(method?.DeclaringType?.FullName))
+            .Take(4).Select(method => SafeName(method!.DeclaringType!.FullName + "." + method.Name)).ToArray();
         var facts = loggingState is IEnumerable<KeyValuePair<string, object?>> values
-            ? values.Where(item => item.Key is "AuditStage" or "AuditTotalMs" or "AuditLockWaitMs" or "AuditContextMs" or "AuditSaveMs")
+            ? values.Where(item => item.Key is "AuditStage" or "AuditTotalMs" or "AuditLockWaitMs" or "AuditContextMs" or "AuditConnectionMs" or "AuditSaveMs")
                 .GroupBy(item => item.Key).ToDictionary(group => group.Key, group => group.First().Value)
             : [];
         double? Milliseconds(string key)
@@ -76,17 +78,24 @@ internal sealed class OwnedAuditFailureDiagnostics : ILoggerProvider
         {
             ExceptionTypes = types,
             ApplicationFrames = frames,
+            ProviderFrames = providerFrames,
             RequestAction = SafeName(requestAction),
             Canceled = cancellation is not null,
             CancellationSource = token.CanBeCanceled && request is not null
                 ? token == request.RequestAborted ? "request" : "other" : "unavailable",
             CancellationTokenRequested = token.CanBeCanceled ? (bool?)token.IsCancellationRequested : null,
             RequestAbortedAtFailure = request?.RequestAborted.IsCancellationRequested,
-            AuditStage = stage is "settings" or "write-lock" or "context" or "save" or "completed" ? stage : "unavailable",
+            AuditStage = stage is "settings" or "write-lock" or "context" or "connection" or "save" or "completed" ? stage : "unavailable",
             AuditTotalMs = Milliseconds("AuditTotalMs"),
             AuditLockWaitMs = Milliseconds("AuditLockWaitMs"),
             AuditContextMs = Milliseconds("AuditContextMs"),
+            AuditConnectionMs = Milliseconds("AuditConnectionMs"),
             AuditSaveMs = Milliseconds("AuditSaveMs")
         });
     }
+
+    internal static bool IsProviderSymbol(string? name)
+        => name?.StartsWith("Microsoft.EntityFrameworkCore.", StringComparison.Ordinal) == true
+            || name?.StartsWith("Microsoft.Data.Sqlite.", StringComparison.Ordinal) == true
+            || name?.StartsWith("System.Threading.", StringComparison.Ordinal) == true;
 }

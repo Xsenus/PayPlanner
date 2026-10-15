@@ -73,6 +73,12 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
             // arbitrary parent runtime hooks, credentials or production settings.
             ["DOTNET_PROCESSOR_COUNT"] = "2",
             ["DOTNET_gcServer"] = "0",
+            // The owned content root deliberately has no production config files.
+            // Match their console noise limits without hiding warnings, errors,
+            // or the separately registered test diagnostic providers.
+            ["Logging__LogLevel__Microsoft.AspNetCore"] = "Warning",
+            ["Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Command"] = "Warning",
+            ["Logging__LogLevel__System.Net.Http.HttpClient"] = "Warning",
             ["ASPNETCORE_ENVIRONMENT"] = "Production",
             ["ASPNETCORE_CONTENTROOT"] = Root,
             ["ASPNETCORE_URLS"] = "http://127.0.0.1:0",
@@ -547,6 +553,9 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
         foreach (var (key, value) in inherited)
             if (new[] { "PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", "LOCALAPPDATA", "APPDATA", "ProgramFiles", "ProgramFiles(x86)", "USERPROFILE", "HOME", "XDG_CACHE_HOME", "PLAYWRIGHT_BROWSERS_PATH" }
                 .Contains(key, StringComparer.OrdinalIgnoreCase)) start.Environment[key] = value;
+        // These scenarios qualify the release UI against the production-mode API.
+        // Keep development-only StrictMode mount repetitions out of this profile.
+        start.Environment["NODE_ENV"] = "production";
         if (Environment.GetEnvironmentVariable("PAYPLANNER_TEST_PLAYWRIGHT_CLI") is { } cliPath)
             start.Environment["CASE_RETIREMENT_CLI"] = cliPath;
         if (Environment.GetEnvironmentVariable("PAYPLANNER_TEST_BROWSER") is { } browser)

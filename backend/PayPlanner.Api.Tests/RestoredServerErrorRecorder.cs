@@ -140,6 +140,11 @@ internal sealed class RestoredServerErrorRecorder
             {
                 ExceptionTypes = types.EnumerateArray().Take(4).Select(SafeName).ToArray(),
                 ApplicationFrames = frames.EnumerateArray().Take(8).Select(SafeName).ToArray(),
+                ProviderFrames = value.TryGetProperty("ProviderFrames", out var providerFrames)
+                    && providerFrames.ValueKind == JsonValueKind.Array
+                        ? providerFrames.EnumerateArray().Take(4).Select(SafeName)
+                            .Select(name => OwnedAuditFailureDiagnostics.IsProviderSymbol(name) ? name : "unknown").ToArray()
+                        : [],
                 RequestAction = SafeName(action),
                 Canceled = canceled,
                 CancellationSource = value.TryGetProperty("CancellationSource", out var source)
@@ -148,11 +153,12 @@ internal sealed class RestoredServerErrorRecorder
                 CancellationTokenRequested = SafeBoolean(value, "CancellationTokenRequested"),
                 RequestAbortedAtFailure = SafeBoolean(value, "RequestAbortedAtFailure"),
                 AuditStage = value.TryGetProperty("AuditStage", out var stage) && stage.ValueKind == JsonValueKind.String
-                    && stage.GetString() is "settings" or "write-lock" or "context" or "save" or "completed"
+                    && stage.GetString() is "settings" or "write-lock" or "context" or "connection" or "save" or "completed"
                         ? stage.GetString() : "unavailable",
                 AuditTotalMs = SafeMilliseconds(value, "AuditTotalMs"),
                 AuditLockWaitMs = SafeMilliseconds(value, "AuditLockWaitMs"),
                 AuditContextMs = SafeMilliseconds(value, "AuditContextMs"),
+                AuditConnectionMs = SafeMilliseconds(value, "AuditConnectionMs"),
                 AuditSaveMs = SafeMilliseconds(value, "AuditSaveMs")
             });
         }

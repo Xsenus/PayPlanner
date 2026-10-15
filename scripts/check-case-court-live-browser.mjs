@@ -94,7 +94,9 @@ try {
       config.server ??= {};
       config.server.watch = null;
     },
-  }], server: { host: '127.0.0.1', port, strictPort: true }, logLevel: 'error' });
+  }], server: { host: '127.0.0.1', port, strictPort: true, hmr: false }, logLevel: 'error' });
+  assert.equal(vite.config.isProduction, true, 'The court browser must qualify production React behavior.');
+  assert.equal(vite.config.oxc.jsx.refresh, false, 'The release source transform must not inject React Refresh globals.');
   assert.equal(vite.config.server.watch, null, 'The immutable court browser fixture must disable file watching.');
   await vite.listen();
   // Prepare the real entry within the existing scenario budget before browser navigation.

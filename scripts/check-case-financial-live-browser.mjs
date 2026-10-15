@@ -101,8 +101,11 @@ try {
       config.server ??= {};
       config.server.watch = null;
     },
-  }], server: { host: '127.0.0.1', port, strictPort: true }, logLevel: 'error' });
+  }], server: { host: '127.0.0.1', port, strictPort: true, hmr: false }, logLevel: 'error' });
   phase('vite-listen');
+  assert.equal(vite.config.isProduction, true, 'The financial browser must qualify production React behavior.');
+  assert.equal(vite.config.env.DEV, false, 'The release browser must not use development-only mount effects.');
+  assert.equal(vite.config.oxc.jsx.refresh, false, 'The release source transform must not inject React Refresh globals.');
   assert.equal(vite.config.server.watch, null, 'The immutable financial browser fixture must disable file watching.');
   await writeFile(join(root, 'financial-watcher-config.json'), JSON.stringify({ disabled: vite.config.server.watch === null }));
   await vite.listen();

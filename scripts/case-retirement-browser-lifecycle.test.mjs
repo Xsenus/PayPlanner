@@ -218,6 +218,20 @@ describe('owned case read boundary', () => {
     lifecycle.dispose();
   });
 
+  it('distinguishes an unresponsive render frame from unfinished response bodies without exposing request details', async () => {
+    const { page, lifecycle, timers } = fixture(5000);
+    const entered = deferred();
+    const frame = deferred();
+    page.evaluate = () => { entered.resolve(); return frame.promise; };
+    const drain = lifecycle.drain('browser-close');
+    await entered.promise;
+    [...timers][0]();
+    await assert.rejects(drain, /within 5000ms \(pending=0, frame=true\)/);
+    assert.equal(timers.size, 0);
+    frame.resolve();
+    lifecycle.dispose();
+  });
+
   it('observes only owned API reads and activity, never the retirement POST itself', () => {
     const { page, lifecycle, request } = fixture();
     page.emit('request', request('/api/v2/cases/7/documents/uploads/key/retire', 'POST').value);

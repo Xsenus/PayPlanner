@@ -64,7 +64,9 @@ process.env.VITE_API_URL = new URL('/api', api).href;
 const ui = `http://127.0.0.1:${port}`;
 let vite; let opened = false;
 try {
-  vite = await createServer({ envDir: root, cacheDir: join(root, 'vite-generated-cache'), server: { host: '127.0.0.1', port, strictPort: true }, logLevel: 'error' });
+  vite = await createServer({ envDir: root, cacheDir: join(root, 'vite-generated-cache'), server: { host: '127.0.0.1', port, strictPort: true, hmr: false }, logLevel: 'error' });
+  assert.equal(vite.config.isProduction, true, 'The generated-document browser must qualify production React behavior.');
+  assert.equal(vite.config.oxc.jsx.refresh, false, 'The release source transform must not inject React Refresh globals.');
   await vite.listen();
   // Prepare the real entry within the existing scenario budget before browser navigation.
   const entry = await vite.transformRequest('/src/main.tsx');

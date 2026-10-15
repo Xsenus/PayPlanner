@@ -67,6 +67,7 @@ export function createCaseReadLifecycle(page, isOwnedRead, timeoutMs) {
       check(['client-navigation', 'server-restart', 'document-tab', 'document-upload', 'browser-close'].includes(phase), 'Unknown case read boundary');
       draining = true;
       let active = true;
+      let waitingForFrame = false;
       let timer;
       try {
         await Promise.race([
@@ -83,13 +84,16 @@ export function createCaseReadLifecycle(page, isOwnedRead, timeoutMs) {
                 check(await response.finished() === null, 'An existing case response body failed before ' + phase);
               }));
               if (!active) return;
+              waitingForFrame = true;
               await page.evaluate(() => new Promise(resolveFrame => requestAnimationFrame(() => resolveFrame())));
+              waitingForFrame = false;
               if (!active) return;
               check(failuresDuringDrain === 0, 'An existing case read was interrupted before ' + phase);
             } while (pending.size);
           })(),
           new Promise((_, reject) => {
-            timer = setTimeout(() => reject(new Error('Existing case reads did not complete before ' + phase + ' within ' + timeoutMs + 'ms')), timeoutMs);
+            timer = setTimeout(() => reject(new Error('Existing case reads did not complete before ' + phase + ' within ' + timeoutMs
+              + 'ms (pending=' + pending.size + ', frame=' + waitingForFrame + ')')), timeoutMs);
           }),
         ]);
         check(pending.size === 0, 'Owned boundary must not abort existing case reads');

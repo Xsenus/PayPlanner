@@ -10,6 +10,7 @@ using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Helpers;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services.Storage;
 
 namespace PayPlanner.Api.Services.UserActivity;
 
@@ -155,6 +156,7 @@ public class UserActivityService : IUserActivityService
         var stage = "settings";
         long lockWaitMilliseconds = 0;
         long contextMilliseconds = 0;
+        long connectionMilliseconds = 0;
         long saveMilliseconds = 0;
         try
         {
@@ -222,35 +224,49 @@ public class UserActivityService : IUserActivityService
             await SqliteRetryHelper.ExecuteAsync(
                 async token =>
                 {
-                    var lockTaken = false;
+                    stage = "context";
+                    var interval = Stopwatch.StartNew();
+                    PaymentContext context;
+                    try { context = await _contextFactory.CreateDbContextAsync(token); }
+                    finally { contextMilliseconds += interval.ElapsedMilliseconds; }
+                    await using var ownedContext = context;
+                    context.UserActivityLogs.Add(log);
+
+                    // Only the insert needs serialization. Preparing a context or
+                    // opening its connection must not block unrelated audit writes.
+                    stage = "connection";
+                    interval.Restart();
+                    var connectionOpened = false;
                     try
                     {
-                        stage = "write-lock";
-                        var interval = Stopwatch.StartNew();
-                        try { await WriteLock.WaitAsync(token); }
-                        finally { lockWaitMilliseconds += interval.ElapsedMilliseconds; }
-                        lockTaken = true;
-
-                        stage = "context";
-                        interval.Restart();
-                        PaymentContext context;
-                        try { context = await _contextFactory.CreateDbContextAsync(token); }
-                        finally { contextMilliseconds += interval.ElapsedMilliseconds; }
-                        await using var ownedContext = context;
-                        context.UserActivityLogs.Add(log);
-                        stage = "save";
-                        interval.Restart();
-                        try { await context.SaveChangesAsync(token); }
-                        finally { saveMilliseconds += interval.ElapsedMilliseconds; }
-                        stage = "completed";
-                        return log;
+                        return await DatabaseConnectionOperation.RunAsync(context, async () =>
+                        {
+                            connectionMilliseconds += interval.ElapsedMilliseconds;
+                            connectionOpened = true;
+                            var lockTaken = false;
+                            try
+                            {
+                                stage = "write-lock";
+                                interval.Restart();
+                                try { await WriteLock.WaitAsync(token); }
+                                finally { lockWaitMilliseconds += interval.ElapsedMilliseconds; }
+                                lockTaken = true;
+                                stage = "save";
+                                interval.Restart();
+                                try { await context.SaveChangesAsync(token); }
+                                finally { saveMilliseconds += interval.ElapsedMilliseconds; }
+                                stage = "completed";
+                                return log;
+                            }
+                            finally
+                            {
+                                if (lockTaken) WriteLock.Release();
+                            }
+                        }, token);
                     }
                     finally
                     {
-                        if (lockTaken)
-                        {
-                            WriteLock.Release();
-                        }
+                        if (!connectionOpened) connectionMilliseconds += interval.ElapsedMilliseconds;
                     }
                 },
                 _logger,
@@ -261,8 +277,8 @@ public class UserActivityService : IUserActivityService
         catch (Exception ex)
         {
             _logger.LogError(ex,
-                "Не удалось сохранить журнал активности пользователя. Этап={AuditStage}; всего={AuditTotalMs} мс; ожидание={AuditLockWaitMs} мс; контекст={AuditContextMs} мс; сохранение={AuditSaveMs} мс",
-                stage, elapsed.ElapsedMilliseconds, lockWaitMilliseconds, contextMilliseconds, saveMilliseconds);
+                "Не удалось сохранить журнал активности пользователя. Этап={AuditStage}; всего={AuditTotalMs} мс; ожидание={AuditLockWaitMs} мс; контекст={AuditContextMs} мс; подключение={AuditConnectionMs} мс; сохранение={AuditSaveMs} мс",
+                stage, elapsed.ElapsedMilliseconds, lockWaitMilliseconds, contextMilliseconds, connectionMilliseconds, saveMilliseconds);
             return null;
         }
     }

@@ -100,7 +100,17 @@ try {
     });
     controlUrl = `http://127.0.0.1:${control.address().port}/apply`;
   }
-  vite = await createServer({ envDir: root, cacheDir: join(root, 'vite-browser-cache'), server: { host: '127.0.0.1', port, strictPort: true }, logLevel: 'error' });
+  vite = await createServer({ envDir: root, cacheDir: join(root, 'vite-browser-cache'), plugins: [{
+    name: 'case-browser-fixed-source',
+    config(config) {
+      config.server ??= {};
+      config.server.watch = null;
+    },
+  }], server: { host: '127.0.0.1', port, strictPort: true, hmr: false }, logLevel: 'error' });
+  assert.equal(vite.config.isProduction, true, 'The case-document browser must qualify production React behavior.');
+  assert.equal(vite.config.env.DEV, false, 'The release browser must not use development-only mount effects.');
+  assert.equal(vite.config.oxc.jsx.refresh, false, 'The release source transform must not inject React Refresh globals.');
+  assert.equal(vite.config.server.watch, null, 'The immutable case-document fixture must disable file watching.');
   await vite.listen();
   // Prepare the real entry within the existing scenario budget before browser navigation.
   const entry = await vite.transformRequest('/src/main.tsx');
