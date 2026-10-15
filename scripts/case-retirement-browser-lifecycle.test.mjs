@@ -4,7 +4,46 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { runInNewContext } from 'node:vm';
 import { describe, it } from 'vitest';
-import { createCaseReadLifecycle, isCaseBoundaryRead } from './case-retirement-browser-lifecycle.mjs';
+import { createCaseReadLifecycle, createCaseStartupReadTrace, isCaseBoundaryRead } from './case-retirement-browser-lifecycle.mjs';
+
+describe('startup request diagnostics', () => {
+  it('observes completion, pending reads and failures without serializing URLs or payloads', () => {
+    const page = new EventEmitter();
+    const create = runInNewContext('(' + createCaseStartupReadTrace.toString() + ')', { URL });
+    const diagnostics = create(page, 'http://127.0.0.1:1234', 7);
+    const request = path => ({ url: () => 'http://127.0.0.1:1234' + path + '?token=synthetic-private', method: () => 'GET' });
+    const completed = request('/api/v2/cases/7');
+    const pending = request('/api/notifications/inbox');
+    const failed = request('/api/v2/cases/appeal-deadlines/expiring');
+    for (const value of [completed, pending, failed]) page.emit('request', value);
+    page.emit('response', { request: () => completed, status: () => 200 });
+    page.emit('requestfinished', completed);
+    page.emit('requestfailed', failed);
+    const snapshot = JSON.parse(JSON.stringify(diagnostics.snapshot()));
+    assert.deepEqual(snapshot.map(({ kind, status, outcome }) => ({ kind, status, outcome })), [
+      { kind: 'case-details', status: 200, outcome: 'finished' },
+      { kind: 'inbox', status: null, outcome: 'pending' },
+      { kind: 'appeal-deadlines', status: null, outcome: 'failed' },
+    ]);
+    assert.ok(snapshot.every(value => value.elapsedMs >= 0 && value.elapsedMs <= 3_600_000));
+    assert.ok(!JSON.stringify(snapshot).includes('synthetic-private'));
+    diagnostics.dispose();
+    assert.equal(page.listenerCount('request'), 0);
+  });
+
+  it('ignores external requests and writes and bounds a long request stream', () => {
+    const page = new EventEmitter();
+    const diagnostics = createCaseStartupReadTrace(page, 'http://127.0.0.1:1234', 7);
+    page.emit('request', { url: () => 'https://outside.invalid/private', method: () => 'GET' });
+    page.emit('request', { url: () => 'http://127.0.0.1:1234/api/private', method: () => 'POST' });
+    assert.equal(diagnostics.snapshot().length, 0);
+    for (let index = 0; index < 100; index++)
+      page.emit('request', { url: () => 'http://127.0.0.1:1234/api/private/' + index, method: () => 'GET' });
+    assert.equal(diagnostics.snapshot().length, 64);
+    assert.ok(diagnostics.snapshot().every(value => value.kind === 'other-read'));
+    diagnostics.dispose();
+  });
+});
 
 function deferred() {
   let resolve;

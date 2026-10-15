@@ -52,6 +52,47 @@ public sealed class OwnedAuditFailureDiagnosticsTests
     }
 
     [Fact]
+    public void MeasuredWriteStagesRemainBoundedAndDoNotExposeLoggingState()
+    {
+        var lines = new List<string>();
+        using var provider = new OwnedAuditFailureDiagnostics(new HttpContextAccessor(), lines.Add);
+        var logger = provider.CreateLogger(typeof(UserActivityService).FullName!);
+        logger.LogError(new OperationCanceledException("synthetic-private"),
+            "stage={AuditStage}, total={AuditTotalMs}, lock={AuditLockWaitMs}, context={AuditContextMs}, save={AuditSaveMs}, secret={Secret}",
+            "write-lock", 5001L, 4999L, 0, 0d, "synthetic-private");
+        var recorder = new RestoredServerErrorRecorder();
+        recorder.Receive("fail: PayPlanner.Api.Services.UserActivity.UserActivityService[0]");
+        recorder.Receive(Assert.Single(lines));
+        var summary = recorder.FailureSummary();
+        Assert.Contains("Server fail log entries: 1.", summary);
+        Assert.Contains("\"AuditStage\":\"write-lock\"", summary);
+        Assert.Contains("\"AuditTotalMs\":5001", summary);
+        Assert.Contains("\"AuditLockWaitMs\":4999", summary);
+        Assert.DoesNotContain("synthetic-private", summary);
+    }
+
+    [Fact]
+    public void InvalidStageAndTimingValuesCannotExposeStateOrSuppressFailure()
+    {
+        var state = new Dictionary<string, object?>
+        {
+            ["AuditStage"] = "synthetic-private",
+            ["AuditTotalMs"] = double.NaN,
+            ["AuditLockWaitMs"] = -1,
+            ["AuditContextMs"] = 3_600_001L,
+            ["AuditSaveMs"] = "synthetic-private"
+        };
+        var recorder = new RestoredServerErrorRecorder();
+        recorder.Receive("fail: Example.Service[0]");
+        recorder.Receive(OwnedAuditFailureDiagnostics.Format(new InvalidOperationException(), null, state));
+        var summary = recorder.FailureSummary();
+        Assert.Contains("Server fail log entries: 1.", summary);
+        Assert.Contains("\"AuditStage\":\"unavailable\"", summary);
+        Assert.Contains("\"AuditTotalMs\":null", summary);
+        Assert.DoesNotContain("synthetic-private", summary);
+    }
+
+    [Fact]
     public void ProviderDoesNotObserveUnrelatedCategoryOrNonErrorState()
     {
         var lines = new List<string>();

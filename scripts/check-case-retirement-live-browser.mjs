@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { createServer as createControlServer } from 'node:http';
 import { createServer } from 'vite';
-import { createCaseReadLifecycle, createCaseRestartObserver, isCaseBoundaryRead } from './case-retirement-browser-lifecycle.mjs';
+import { createCaseReadLifecycle, createCaseRestartObserver, createCaseStartupReadTrace, isCaseBoundaryRead } from './case-retirement-browser-lifecycle.mjs';
 
 const api = new URL(process.env.CASE_RETIREMENT_API);
 assert.equal(api.hostname, '127.0.0.1');
@@ -53,6 +53,7 @@ assert.equal(resolve(cliPath), resolve(dirname(cliPath), cliMetadata.bin['playwr
 const browser = process.env.CASE_RETIREMENT_BROWSER ?? (process.platform === 'win32' ? 'msedge' : 'chrome');
 assert.ok(['msedge', 'chrome'].includes(browser), 'Use an installed Edge or Chrome channel.');
 const session = `case-retire-${basename(root).slice(-12)}`;
+const scenarioPath = join(root, 'case-retirement-scenario.js');
 const execute = promisify(execFile);
 async function cli(...args) {
   const result = await execute(process.execPath, [cliPath, `-s=${session}`, ...args], {
@@ -126,15 +127,17 @@ try {
         status: 'Подготовлен', bytes: 'Owned browser retirement bytes' },
     email: process.env.CASE_RETIREMENT_EMAIL, password: process.env.CASE_RETIREMENT_PASSWORD,
     lostAck: process.env.CASE_RETIREMENT_LOST_ACK === 'true' });
-  const result = await cli('run-code', String.raw`async (page) => {
+  const scenario = String.raw`async (page) => {
     const settings = ${settings};
     const check = (condition, message) => { if (!condition) throw new Error(message); };
+    const startupReads = (${createCaseStartupReadTrace.toString()})(page, settings.api, settings.caseId);
     const waitAtPhase = async (locator, phase, options) => {
       try { await locator.waitFor(options); }
       catch (error) {
         // Retain the original timeout, error type and cause; add only a fixed phase name.
         if (error && typeof error.message === 'string') {
-          error.message = 'CASE_RETIREMENT_WAIT_PHASE ' + phase + ': ' + error.message;
+          error.message = 'CASE_RETIREMENT_WAIT_PHASE ' + phase + ': ' + error.message
+            + '\nCASE_RETIREMENT_STARTUP_READS ' + JSON.stringify(startupReads.snapshot());
           if (typeof error.stack === 'string')
             error.stack = 'CASE_RETIREMENT_WAIT_PHASE ' + phase + '\n' + error.stack;
         }
@@ -450,7 +453,11 @@ try {
     check(outside.length === 0, 'Browser attempted an external request');
     check(errors.length === 0, 'Browser page errors: ' + JSON.stringify(errors));
     return 'CASE_RETIREMENT_BROWSER_OK ' + JSON.stringify({ flow: settings.flow, retirePosts, filePosts, publisherPosts, lostAck: settings.lostAck, restartApplied, manualRecovery, proofRefusals, realtimeInterruptions, reconnectProved, exactProofRead: reads.some(keys => keys.includes(settings.key)), readTrace });
-  }`);
+  }`;
+  // Windows limits command lines to 32K characters. Keep the complete scenario
+  // and its synthetic credentials in the owned temporary root, not in argv.
+  await writeFile(scenarioPath, scenario, { mode: 0o600 });
+  const result = await cli('run-code', '--filename', scenarioPath);
   assert.ok(result.includes('CASE_RETIREMENT_BROWSER_OK'), result);
   // The test launcher deliberately clears non-allowlisted environment values.
   // Retain only bounded synthetic request metadata beside its owned temp roots.
@@ -483,6 +490,7 @@ try {
       finally {
         // Release the owned IPC handle only after Vite has removed its stdin termination listener.
         if (control) process.stdin.destroy();
+        await rm(scenarioPath, { force: true });
       }
     }
   }

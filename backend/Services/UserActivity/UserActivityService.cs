@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Linq;
 using System.Threading;
@@ -150,6 +151,11 @@ public class UserActivityService : IUserActivityService
 
     public async Task<UserActivityLog?> TryWriteAsync(ActivityLogEntry entry, CancellationToken cancellationToken = default)
     {
+        var elapsed = Stopwatch.StartNew();
+        var stage = "settings";
+        long lockWaitMilliseconds = 0;
+        long contextMilliseconds = 0;
+        long saveMilliseconds = 0;
         try
         {
             if (!(await GetSettingsAsync(cancellationToken)).IsEnabled)
@@ -219,12 +225,24 @@ public class UserActivityService : IUserActivityService
                     var lockTaken = false;
                     try
                     {
-                        await WriteLock.WaitAsync(token);
+                        stage = "write-lock";
+                        var interval = Stopwatch.StartNew();
+                        try { await WriteLock.WaitAsync(token); }
+                        finally { lockWaitMilliseconds += interval.ElapsedMilliseconds; }
                         lockTaken = true;
 
-                        await using var context = await _contextFactory.CreateDbContextAsync(token);
+                        stage = "context";
+                        interval.Restart();
+                        PaymentContext context;
+                        try { context = await _contextFactory.CreateDbContextAsync(token); }
+                        finally { contextMilliseconds += interval.ElapsedMilliseconds; }
+                        await using var ownedContext = context;
                         context.UserActivityLogs.Add(log);
-                        await context.SaveChangesAsync(token);
+                        stage = "save";
+                        interval.Restart();
+                        try { await context.SaveChangesAsync(token); }
+                        finally { saveMilliseconds += interval.ElapsedMilliseconds; }
+                        stage = "completed";
                         return log;
                     }
                     finally
@@ -242,7 +260,9 @@ public class UserActivityService : IUserActivityService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Не удалось сохранить журнал активности пользователя");
+            _logger.LogError(ex,
+                "Не удалось сохранить журнал активности пользователя. Этап={AuditStage}; всего={AuditTotalMs} мс; ожидание={AuditLockWaitMs} мс; контекст={AuditContextMs} мс; сохранение={AuditSaveMs} мс",
+                stage, elapsed.ElapsedMilliseconds, lockWaitMilliseconds, contextMilliseconds, saveMilliseconds);
             return null;
         }
     }

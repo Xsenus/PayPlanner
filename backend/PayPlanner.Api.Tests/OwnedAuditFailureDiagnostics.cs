@@ -36,11 +36,11 @@ internal sealed class OwnedAuditFailureDiagnostics : ILoggerProvider
             Func<TState, Exception?, string> formatter)
         {
             if (IsEnabled(logLevel) && exception is not null)
-                write(Format(exception, context.HttpContext));
+                write(Format(exception, context.HttpContext, state));
         }
     }
 
-    internal static string Format(Exception exception, HttpContext? request)
+    internal static string Format(Exception exception, HttpContext? request, object? loggingState = null)
     {
         static string SafeName(string? name)
             => name is { Length: <= 192 } && Regex.IsMatch(name, @"^[A-Za-z_][A-Za-z0-9_.+`<>]*$")
@@ -59,8 +59,19 @@ internal sealed class OwnedAuditFailureDiagnostics : ILoggerProvider
             .Select(frame => frame.GetMethod())
             .Where(method => method?.DeclaringType?.FullName?.StartsWith("PayPlanner.Api.", StringComparison.Ordinal) == true)
             .Take(8).Select(method => SafeName(method!.DeclaringType!.FullName) + "." + SafeName(method.Name)).ToArray();
-        // No message, logging state, URL, SQL, identity or credentials are serialized.
-        // Duration is deliberately absent: this provider did not observe the write start.
+        var facts = loggingState is IEnumerable<KeyValuePair<string, object?>> values
+            ? values.Where(item => item.Key is "AuditStage" or "AuditTotalMs" or "AuditLockWaitMs" or "AuditContextMs" or "AuditSaveMs")
+                .GroupBy(item => item.Key).ToDictionary(group => group.Key, group => group.First().Value)
+            : [];
+        double? Milliseconds(string key)
+        {
+            if (!facts.TryGetValue(key, out var value) || value is not (int or long or double)) return null;
+            var number = Convert.ToDouble(value, System.Globalization.CultureInfo.InvariantCulture);
+            return double.IsFinite(number) && number is >= 0 and <= 3_600_000 ? number : null;
+        }
+        var stage = facts.GetValueOrDefault("AuditStage") as string;
+        // Only explicitly measured numeric facts and known stages may supplement failures.
+        // Never serialize arbitrary logging state, messages, SQL, URLs or identities.
         return Prefix + JsonSerializer.Serialize(new
         {
             ExceptionTypes = types,
@@ -70,7 +81,12 @@ internal sealed class OwnedAuditFailureDiagnostics : ILoggerProvider
             CancellationSource = token.CanBeCanceled && request is not null
                 ? token == request.RequestAborted ? "request" : "other" : "unavailable",
             CancellationTokenRequested = token.CanBeCanceled ? (bool?)token.IsCancellationRequested : null,
-            RequestAbortedAtFailure = request?.RequestAborted.IsCancellationRequested
+            RequestAbortedAtFailure = request?.RequestAborted.IsCancellationRequested,
+            AuditStage = stage is "settings" or "write-lock" or "context" or "save" or "completed" ? stage : "unavailable",
+            AuditTotalMs = Milliseconds("AuditTotalMs"),
+            AuditLockWaitMs = Milliseconds("AuditLockWaitMs"),
+            AuditContextMs = Milliseconds("AuditContextMs"),
+            AuditSaveMs = Milliseconds("AuditSaveMs")
         });
     }
 }

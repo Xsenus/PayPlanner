@@ -1,5 +1,47 @@
 // Serialized into Playwright CLI's minimal VM. Keep all state and dependencies
 // inside the function; this observes actual requests without replacing them.
+export function createCaseStartupReadTrace(page, apiOrigin, caseId) {
+  const records = [];
+  const requests = new WeakMap();
+  const observe = request => {
+    const url = new URL(request.url());
+    if (url.origin !== apiOrigin || records.length >= 64) return;
+    const kind = request.method() === 'POST' && url.pathname === '/api/auth/login' ? 'login'
+      : request.method() !== 'GET' ? null
+        : url.pathname === '/api/v2/cases/' + caseId ? 'case-details'
+          : url.pathname === '/api/notifications/inbox' ? 'inbox'
+            : url.pathname === '/api/v2/cases/appeal-deadlines/expiring' ? 'appeal-deadlines'
+              : url.pathname.startsWith('/api/') ? 'other-read' : null;
+    if (!kind) return;
+    const record = { kind, started: Date.now(), finished: null, status: null, outcome: 'pending' };
+    requests.set(request, record);
+    records.push(record);
+  };
+  const response = value => {
+    const record = requests.get(value.request());
+    const status = value.status();
+    if (record && Number.isInteger(status) && status >= 100 && status <= 599) record.status = status;
+  };
+  const finish = outcome => request => {
+    const record = requests.get(request);
+    if (record) { record.finished = Date.now(); record.outcome = outcome; }
+  };
+  const finished = finish('finished');
+  const failed = finish('failed');
+  page.on('request', observe);
+  page.on('response', response);
+  page.on('requestfinished', finished);
+  page.on('requestfailed', failed);
+  return {
+    snapshot: () => records.map(record => ({ kind: record.kind, status: record.status, outcome: record.outcome,
+      elapsedMs: Math.min(3_600_000, Math.max(0, (record.finished ?? Date.now()) - record.started)) })),
+    dispose() {
+      page.off('request', observe); page.off('response', response);
+      page.off('requestfinished', finished); page.off('requestfailed', failed);
+    },
+  };
+}
+
 export function isCaseBoundaryRead(request, apiOrigin, caseId) {
   const url = new URL(request.url());
   return url.origin === apiOrigin && ((request.method() === 'GET' && url.pathname.startsWith('/api/'))

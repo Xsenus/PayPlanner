@@ -146,10 +146,22 @@ internal sealed class RestoredServerErrorRecorder
                     && source.ValueKind == JsonValueKind.String && source.GetString() is "request" or "other"
                         ? source.GetString() : "unavailable",
                 CancellationTokenRequested = SafeBoolean(value, "CancellationTokenRequested"),
-                RequestAbortedAtFailure = SafeBoolean(value, "RequestAbortedAtFailure")
+                RequestAbortedAtFailure = SafeBoolean(value, "RequestAbortedAtFailure"),
+                AuditStage = value.TryGetProperty("AuditStage", out var stage) && stage.ValueKind == JsonValueKind.String
+                    && stage.GetString() is "settings" or "write-lock" or "context" or "save" or "completed"
+                        ? stage.GetString() : "unavailable",
+                AuditTotalMs = SafeMilliseconds(value, "AuditTotalMs"),
+                AuditLockWaitMs = SafeMilliseconds(value, "AuditLockWaitMs"),
+                AuditContextMs = SafeMilliseconds(value, "AuditContextMs"),
+                AuditSaveMs = SafeMilliseconds(value, "AuditSaveMs")
             });
         }
         catch (JsonException) { return invalid; }
         catch (InvalidOperationException) { return invalid; }
     }
+
+    private static double? SafeMilliseconds(JsonElement root, string name)
+        => root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number
+            && value.TryGetDouble(out var number) && double.IsFinite(number) && number is >= 0 and <= 3_600_000
+                ? number : null;
 }

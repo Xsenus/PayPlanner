@@ -69,6 +69,10 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
                 .Contains(key, StringComparer.OrdinalIgnoreCase)) start.Environment[key] = value;
         var settings = new Dictionary<string, string>
         {
+            // Match the release gate's CPU/GC profile explicitly without inheriting
+            // arbitrary parent runtime hooks, credentials or production settings.
+            ["DOTNET_PROCESSOR_COUNT"] = "2",
+            ["DOTNET_gcServer"] = "0",
             ["ASPNETCORE_ENVIRONMENT"] = "Production",
             ["ASPNETCORE_CONTENTROOT"] = Root,
             ["ASPNETCORE_URLS"] = "http://127.0.0.1:0",
