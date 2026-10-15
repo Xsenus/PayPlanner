@@ -43,20 +43,25 @@ public sealed class RestoredConnectionDiagnosticsTests
         Assert.Empty(Directory.EnumerateFileSystemEntries(root.Path));
     }
 
-    [Fact]
-    public void SyntheticDiagnosticsRequireExactOwnedDatabaseAndRootWithoutOpeningDatabase()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SyntheticDiagnosticsRequireExactOwnedDatabaseAndRootWithoutOpeningDatabase(bool pooling)
     {
         using var root = new OwnedRoot("pp_task_upload_browser_");
         var settings = SyntheticSettings(root.Path);
+        settings["ConnectionStrings:Default"] = $"Data Source={Path.Combine(root.Path, "synthetic.db")};Pooling={pooling}";
         Assert.True(RestoredConnectionDiagnosticsHostingStartup.ValidateSynthetic(Configuration(settings), root.Path));
-        settings["ConnectionStrings:Default"] = $"Data Source={Path.Combine(root.Path, "foreign.db")};Pooling=False";
+        settings["ConnectionStrings:Default"] = $"Data Source={Path.Combine(root.Path, "foreign.db")};Pooling={pooling}";
         Assert.Throws<InvalidOperationException>(() => RestoredConnectionDiagnosticsHostingStartup.ValidateSynthetic(Configuration(settings), root.Path));
-        settings["ConnectionStrings:Default"] = $"Data Source={Path.Combine(root.Path, "synthetic.db")};Pooling=True";
+        using var other = new OwnedRoot("pp_task_upload_browser_");
+        settings["ConnectionStrings:Default"] = $"Data Source={Path.Combine(other.Path, "synthetic.db")};Pooling={pooling}";
         Assert.Throws<InvalidOperationException>(() => RestoredConnectionDiagnosticsHostingStartup.ValidateSynthetic(Configuration(settings), root.Path));
         using var foreign = new OwnedRoot();
         Assert.Throws<InvalidOperationException>(() => RestoredConnectionDiagnosticsHostingStartup.ValidateSynthetic(Configuration(SyntheticSettings(foreign.Path)), foreign.Path));
         Assert.Empty(Directory.EnumerateFileSystemEntries(root.Path));
         Assert.Empty(Directory.EnumerateFileSystemEntries(foreign.Path));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(other.Path));
     }
 
     [Theory]

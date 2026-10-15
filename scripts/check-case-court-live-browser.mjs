@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readdir, readFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { createServer as createControlServer } from 'node:http';
-import { createServer } from 'vite';
+import { build, preview } from 'vite';
 
 const api = new URL(process.env.CASE_RETIREMENT_API);
 assert.equal(api.hostname, '127.0.0.1');
@@ -88,21 +88,19 @@ try {
     });
     controlUrl = `http://127.0.0.1:${control.address().port}/apply`;
   }
-  vite = await createServer({ envDir: root, cacheDir: join(root, 'vite-court-cache'), plugins: [{
-    name: 'court-browser-fixed-source',
-    config(config) {
-      config.server ??= {};
-      config.server.watch = null;
-    },
-  }], server: { host: '127.0.0.1', port, strictPort: true, hmr: false }, logLevel: 'error' });
+  // Compile before browser requests, using the existing chat gate's release
+  // lifecycle and the unchanged enclosing scenario deadline.
+  const outDir = join(root, 'court-browser-ui-dist');
+  await mkdir(outDir);
+  const uiConfig = { envDir: root, cacheDir: join(root, 'vite-court-cache'),
+    build: { outDir, emptyOutDir: false }, logLevel: 'error' };
+  const built = await build(uiConfig);
+  assert.ok((Array.isArray(built) ? built : [built]).some(output =>
+    output.output?.some(chunk => chunk.type === 'chunk' && chunk.isEntry && chunk.code.length > 0)),
+  'The synthetic court UI production entry must compile successfully.');
+  vite = await preview({ ...uiConfig, preview: { host: '127.0.0.1', port, strictPort: true } });
   assert.equal(vite.config.isProduction, true, 'The court browser must qualify production React behavior.');
-  assert.equal(vite.config.oxc.jsx.refresh, false, 'The release source transform must not inject React Refresh globals.');
-  assert.equal(vite.config.server.watch, null, 'The immutable court browser fixture must disable file watching.');
-  await vite.listen();
-  // Prepare the real entry within the existing scenario budget before browser navigation.
-  const entry = await vite.transformRequest('/src/main.tsx');
-  assert.ok(entry?.code, 'The synthetic court UI entry module must compile successfully.');
-  await vite.waitForRequestsIdle();
+  assert.equal(vite.config.env.DEV, false, 'The release browser must not use development-only mount effects.');
   await cli('open', 'about:blank', '--browser', browser); opened = true;
   await cli('goto', ui + '/cases/' + caseId);
   await cli('snapshot');

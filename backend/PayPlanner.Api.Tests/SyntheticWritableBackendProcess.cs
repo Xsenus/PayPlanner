@@ -87,7 +87,10 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
             ["Cors__AllowedOrigins__0"] = $"http://127.0.0.1:{_browserPort}",
             ["Database__Provider"] = "sqlite",
             ["PAYPLANNER_DB_PROVIDER"] = "sqlite",
-            ["ConnectionStrings__Default"] = $"Data Source={DatabasePath};Pooling=False",
+            // Match production's default SQLite pooling. This pool belongs only
+            // to the uniquely named database in this owned child process; stop
+            // and await that process before removing its synthetic directory.
+            ["ConnectionStrings__Default"] = $"Data Source={DatabasePath};Pooling=True",
             ["BackgroundServices__Enabled"] = "false",
             ["Email__Enabled"] = "false",
             ["FieldEncryption__Enabled"] = "false",

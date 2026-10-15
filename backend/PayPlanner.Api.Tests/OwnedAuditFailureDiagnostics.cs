@@ -90,7 +90,10 @@ internal sealed class OwnedAuditFailureDiagnostics : ILoggerProvider
             AuditLockWaitMs = Milliseconds("AuditLockWaitMs"),
             AuditContextMs = Milliseconds("AuditContextMs"),
             AuditConnectionMs = Milliseconds("AuditConnectionMs"),
-            AuditSaveMs = Milliseconds("AuditSaveMs")
+            AuditSaveMs = Milliseconds("AuditSaveMs"),
+            ThreadPoolThreads = ThreadPool.ThreadCount,
+            ThreadPoolPending = Math.Min(ThreadPool.PendingWorkItemCount, 3_600_000),
+            GcPauseTotalMs = Math.Min(GC.GetTotalPauseDuration().TotalMilliseconds, 3_600_000)
         });
     }
 

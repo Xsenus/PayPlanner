@@ -71,7 +71,9 @@ public sealed class RestoredConnectionDiagnosticsHostingStartup : IHostingStartu
                 throw new InvalidOperationException("Synthetic diagnostic root must exist without linked directories.");
         var database = new SqliteConnectionStringBuilder(configuration["ConnectionStrings:Default"]
             ?? throw new InvalidOperationException("Missing owned synthetic diagnostic database."));
-        if (!Path.IsPathFullyQualified(database.DataSource) || database.Pooling
+        // Pooling is local to the exact owned database and the API child. It
+        // cannot make another file or a shared/non-owned root acceptable.
+        if (!Path.IsPathFullyQualified(database.DataSource)
             || database.Mode == SqliteOpenMode.Memory
             || !string.Equals(Path.GetFullPath(database.DataSource), Path.Combine(root, "synthetic.db"), comparison))
             throw new InvalidOperationException("Synthetic diagnostics require the owned disposable SQLite database.");

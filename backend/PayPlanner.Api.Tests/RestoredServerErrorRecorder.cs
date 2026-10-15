@@ -20,10 +20,20 @@ internal sealed class RestoredServerErrorRecorder
     private readonly HashSet<string> _exceptionTypes = new(StringComparer.Ordinal);
     private readonly HashSet<string> _connectionDiagnostics = new(StringComparer.Ordinal);
     private readonly HashSet<string> _auditDiagnostics = new(StringComparer.Ordinal);
+    private readonly Queue<string> _slowCommands = new();
     private long _failureCount;
 
     public void Receive(string line)
     {
+        if (ReadSlowCommandTiming(line) is { } slowCommand)
+        {
+            lock (_sync)
+            {
+                _slowCommands.Enqueue(slowCommand);
+                while (_slowCommands.Count > 8) _slowCommands.Dequeue();
+            }
+            return;
+        }
         if (line.StartsWith(OwnedAuditFailureDiagnostics.Prefix, StringComparison.Ordinal))
         {
             var diagnostic = ReadAuditDiagnostic(line[OwnedAuditFailureDiagnostics.Prefix.Length..]);
@@ -69,7 +79,8 @@ internal sealed class RestoredServerErrorRecorder
                 + string.Join(Environment.NewLine, _categories.OrderBy(name => name, StringComparer.Ordinal)
                     .Concat(_exceptionTypes.OrderBy(name => name, StringComparer.Ordinal))
                     .Concat(_connectionDiagnostics.OrderBy(name => name, StringComparer.Ordinal))
-                    .Concat(_auditDiagnostics.OrderBy(name => name, StringComparer.Ordinal)));
+                    .Concat(_auditDiagnostics.OrderBy(name => name, StringComparer.Ordinal))
+                    .Concat(_slowCommands));
             if (summary.Length <= MaximumSummaryLength) return summary;
             const string omitted = "\nAdditional diagnostic names omitted; failures remain recorded.";
             return summary[..(MaximumSummaryLength - omitted.Length)] + omitted;
@@ -159,7 +170,10 @@ internal sealed class RestoredServerErrorRecorder
                 AuditLockWaitMs = SafeMilliseconds(value, "AuditLockWaitMs"),
                 AuditContextMs = SafeMilliseconds(value, "AuditContextMs"),
                 AuditConnectionMs = SafeMilliseconds(value, "AuditConnectionMs"),
-                AuditSaveMs = SafeMilliseconds(value, "AuditSaveMs")
+                AuditSaveMs = SafeMilliseconds(value, "AuditSaveMs"),
+                ThreadPoolThreads = SafeMilliseconds(value, "ThreadPoolThreads"),
+                ThreadPoolPending = SafeMilliseconds(value, "ThreadPoolPending"),
+                GcPauseTotalMs = SafeMilliseconds(value, "GcPauseTotalMs")
             });
         }
         catch (JsonException) { return invalid; }
@@ -170,4 +184,20 @@ internal sealed class RestoredServerErrorRecorder
         => root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number
             && value.TryGetDouble(out var number) && double.IsFinite(number) && number is >= 0 and <= 3_600_000
                 ? number : null;
+
+    private static string? ReadSlowCommandTiming(string line)
+    {
+        if (line.Length > 512) return null;
+        var match = Regex.Match(line,
+            @"\A\s*Slow database command (?<operation>SELECT|INSERT|UPDATE|DELETE|PRAGMA|OTHER) \((?<source>SaveChanges|LinqQuery|ExecuteSqlRaw|Migrations|Unknown), (?:Microsoft.EntityFrameworkCore.Sqlite|Npgsql.EntityFrameworkCore.PostgreSQL), (?:PaymentContext|PostgreSqlPaymentContext)\) (?<result>completed in|failed after) (?<elapsed>\d{1,9}(?:[.,]\d{1,3})?) ms \[Fingerprint=[A-F0-9]{16}\]\.\s*\z",
+            RegexOptions.CultureInvariant);
+        if (!match.Success) return null;
+        if (!double.TryParse(match.Groups["elapsed"].Value.Replace(',', '.'),
+            System.Globalization.NumberStyles.AllowDecimalPoint, System.Globalization.CultureInfo.InvariantCulture,
+            out var elapsed) || elapsed is < 0 or > 3_600_000) return null;
+        // Retain only fixed labels and finite timing. SQL, its fingerprint and
+        // unrelated log text never enter the assertion's diagnostic summary.
+        return "Owned slow command: " + match.Groups["operation"].Value + " " + match.Groups["source"].Value
+            + " " + match.Groups["result"].Value + " " + elapsed.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + " ms";
+    }
 }

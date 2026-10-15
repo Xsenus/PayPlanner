@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { createServer as createControlServer } from 'node:http';
-import { createServer } from 'vite';
+import { build, preview } from 'vite';
 import { createCaseReadLifecycle, isCaseBoundaryRead } from './case-retirement-browser-lifecycle.mjs';
+import { redactChatBrowserDiagnostic } from './chat-browser-read-lifecycle.mjs';
 
 const api = new URL(process.env.CASE_RETIREMENT_API);
 assert.equal(api.hostname, '127.0.0.1');
@@ -94,27 +95,21 @@ try {
     controlUrl = `http://127.0.0.1:${control.address().port}/apply`;
   }
   phase('vite-create');
-  // This scenario uses a fixed source tree; avoid watching temporary databases and build files.
-  vite = await createServer({ envDir: root, cacheDir: join(root, 'vite-financial-cache'), plugins: [{
-    name: 'financial-browser-fixed-source',
-    config(config) {
-      config.server ??= {};
-      config.server.watch = null;
-    },
-  }], server: { host: '127.0.0.1', port, strictPort: true, hmr: false }, logLevel: 'error' });
+  // Match the existing chat gate: compile the released UI before navigation,
+  // so source transforms do not compete with the API during real requests.
+  // The build remains inside the unchanged enclosing three-minute deadline.
+  const outDir = join(root, 'financial-browser-ui-dist');
+  await mkdir(outDir);
+  const uiConfig = { envDir: root, cacheDir: join(root, 'vite-financial-cache'),
+    build: { outDir, emptyOutDir: false }, logLevel: 'error' };
+  const built = await build(uiConfig);
+  assert.ok((Array.isArray(built) ? built : [built]).some(output =>
+    output.output?.some(chunk => chunk.type === 'chunk' && chunk.isEntry && chunk.code.length > 0)),
+  'The synthetic financial UI production entry must compile successfully.');
   phase('vite-listen');
+  vite = await preview({ ...uiConfig, preview: { host: '127.0.0.1', port, strictPort: true } });
   assert.equal(vite.config.isProduction, true, 'The financial browser must qualify production React behavior.');
   assert.equal(vite.config.env.DEV, false, 'The release browser must not use development-only mount effects.');
-  assert.equal(vite.config.oxc.jsx.refresh, false, 'The release source transform must not inject React Refresh globals.');
-  assert.equal(vite.config.server.watch, null, 'The immutable financial browser fixture must disable file watching.');
-  await writeFile(join(root, 'financial-watcher-config.json'), JSON.stringify({ disabled: vite.config.server.watch === null }));
-  await vite.listen();
-  // Prepare the real entry within the existing scenario budget before browser navigation.
-  phase('entry-transform');
-  const entry = await vite.transformRequest('/src/main.tsx');
-  assert.ok(entry?.code, 'The synthetic financial UI entry module must compile successfully.');
-  phase('requests-idle');
-  await vite.waitForRequestsIdle();
   phase('cli-open');
   await cli('open', 'about:blank', '--browser', browser); opened = true;
   phase('cli-goto');
@@ -128,6 +123,8 @@ try {
   await writeFile(scenarioPath, String.raw`async (page) => {
     const settings = ${settings};
     const check = (value, message) => { if (!value) throw new Error(message); };
+    const checkpoint = name => page.evaluate(value => { globalThis.__ppFinancialGatePhase = value; }, name);
+    await checkpoint('started');
     // Wait for response bodies and the next render frame, using the same
     // five-second budget. Periodic inbox refreshes need no artificial quiet gap.
     const reads = (${createCaseReadLifecycle})(page,
@@ -168,11 +165,14 @@ try {
       }
       firstHandled();
     });
+    await checkpoint('login-read-boundary');
     await reads.drain('client-navigation');
+    await checkpoint('login-fields');
     await page.locator('input[type="email"]').fill(settings.email);
     await page.locator('input[type="password"]').fill(settings.password);
     await page.getByRole('button', { name: 'Войти', exact: true }).click();
     await page.locator('input[type="email"]').waitFor({ state: 'hidden' });
+    await checkpoint('authenticated');
     await page.getByRole('button', { name: 'Заказ-наряд', exact: true }).click();
     const buttonName = kind === 'invoice' ? 'Создать счет' : kind === 'act' ? 'Создать акт' : 'Создать договор';
     const createButton = page.getByRole('button', { name: buttonName, exact: true });
@@ -235,8 +235,21 @@ try {
   const result = await cli('run-code', '--filename', scenarioPath);
   assert.ok(result.includes('CASE_RETIREMENT_BROWSER_OK'), result); console.log(result);
 } catch (error) {
-  if (opened) { console.error(await cli('snapshot')); console.error(await cli('console', 'error')); }
-  throw new Error(error.stdout || error.message);
+  const safe = value => redactChatBrowserDiagnostic(value,
+    [process.env.CASE_RETIREMENT_PASSWORD, process.env.CASE_RETIREMENT_EMAIL]).slice(0, 16000);
+  const diagnostic = safe(JSON.stringify({ message: error.message, code: error.code,
+    signal: error.signal, killed: error.killed, stdout: error.stdout, stderr: error.stderr }));
+  console.error(diagnostic);
+  if (opened) {
+    try {
+      console.error(safe(await cli('run-code', 'async page => ({ phase: await page.evaluate(() => globalThis.__ppFinancialGatePhase ?? "not-started") })')));
+      console.error(safe(await cli('snapshot')));
+      console.error(safe(await cli('console', 'error')));
+    } catch (inspectionError) {
+      console.error(safe('Financial failure inspection: ' + inspectionError.message));
+    }
+  }
+  throw new Error(diagnostic);
 } finally {
   phase('browser-close');
   try { if (opened) await cli('close'); }

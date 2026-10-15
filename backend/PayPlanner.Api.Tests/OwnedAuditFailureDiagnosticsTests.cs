@@ -11,6 +11,46 @@ namespace PayPlanner.Api.Tests;
 
 public sealed class OwnedAuditFailureDiagnosticsTests
 {
+    [Fact]
+    public void RuntimePressureFactsAreNumericAndSurviveTheSafeRecorder()
+    {
+        var recorder = new RestoredServerErrorRecorder();
+        recorder.Receive("fail: Example.Service[0]");
+        recorder.Receive(OwnedAuditFailureDiagnostics.Format(new InvalidOperationException("private-value"), null));
+        var summary = recorder.FailureSummary();
+        Assert.Matches("\"ThreadPoolThreads\":[0-9]+", summary);
+        Assert.Matches("\"ThreadPoolPending\":[0-9]+", summary);
+        Assert.Matches("\"GcPauseTotalMs\":[0-9]+", summary);
+        Assert.DoesNotContain("private-value", summary);
+    }
+
+    [Fact]
+    public void SlowCommandObservationsRetainOnlyBoundedTimingAndDoNotCreateFailures()
+    {
+        var recorder = new RestoredServerErrorRecorder();
+        for (var index = 0; index < 20; index++)
+            recorder.Receive($"  Slow database command INSERT (SaveChanges, Microsoft.EntityFrameworkCore.Sqlite, PaymentContext) completed in {1000 + index}.50 ms [Fingerprint=0123456789ABCDEF].");
+        Assert.Empty(recorder.FailureSummary());
+        recorder.Receive("fail: Example.Service[0]");
+        var summary = recorder.FailureSummary();
+        Assert.Equal(8, summary.Split("Owned slow command:").Length - 1);
+        Assert.Contains("1019.50 ms", summary);
+        Assert.DoesNotContain("1000.50", summary);
+        Assert.DoesNotContain("0123456789ABCDEF", summary);
+    }
+
+    [Theory]
+    [InlineData("SELECT private-value")]
+    [InlineData("INSERT (SaveChanges, Microsoft.EntityFrameworkCore.Sqlite, PaymentContext) completed in 5000.00 ms [Fingerprint=0123456789ABCDEF]. private-value")]
+    public void SlowCommandDiagnosticsRejectUntrustedDetails(string suffix)
+    {
+        var recorder = new RestoredServerErrorRecorder();
+        recorder.Receive("  Slow database command " + suffix);
+        recorder.Receive("fail: Example.Service[0]");
+        Assert.DoesNotContain("Owned slow command", recorder.FailureSummary());
+        Assert.DoesNotContain("private-value", recorder.FailureSummary());
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

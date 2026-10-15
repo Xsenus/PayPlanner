@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readdir, readFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
-import { createServer } from 'vite';
+import { build, preview } from 'vite';
 
 const api = new URL(process.env.CASE_RETIREMENT_API);
 assert.equal(api.hostname, '127.0.0.1');
@@ -64,14 +64,19 @@ process.env.VITE_API_URL = new URL('/api', api).href;
 const ui = `http://127.0.0.1:${port}`;
 let vite; let opened = false;
 try {
-  vite = await createServer({ envDir: root, cacheDir: join(root, 'vite-generated-cache'), server: { host: '127.0.0.1', port, strictPort: true, hmr: false }, logLevel: 'error' });
+  // Match the existing chat gate's production build/preview lifecycle, keeping
+  // compilation inside the unchanged enclosing scenario deadline.
+  const outDir = join(root, 'generated-browser-ui-dist');
+  await mkdir(outDir);
+  const uiConfig = { envDir: root, cacheDir: join(root, 'vite-generated-cache'),
+    build: { outDir, emptyOutDir: false }, logLevel: 'error' };
+  const built = await build(uiConfig);
+  assert.ok((Array.isArray(built) ? built : [built]).some(output =>
+    output.output?.some(chunk => chunk.type === 'chunk' && chunk.isEntry && chunk.code.length > 0)),
+  'The synthetic generated-document UI production entry must compile successfully.');
+  vite = await preview({ ...uiConfig, preview: { host: '127.0.0.1', port, strictPort: true } });
   assert.equal(vite.config.isProduction, true, 'The generated-document browser must qualify production React behavior.');
-  assert.equal(vite.config.oxc.jsx.refresh, false, 'The release source transform must not inject React Refresh globals.');
-  await vite.listen();
-  // Prepare the real entry within the existing scenario budget before browser navigation.
-  const entry = await vite.transformRequest('/src/main.tsx');
-  assert.ok(entry?.code, 'The synthetic generated-document UI entry module must compile successfully.');
-  await vite.waitForRequestsIdle();
+  assert.equal(vite.config.env.DEV, false, 'The release browser must not use development-only mount effects.');
   await cli('open', 'about:blank', '--browser', browser); opened = true;
   await cli('goto', ui + (flow === 'generated-modal' ? '/clients/' + clientId : '/cases/' + caseId));
   await cli('snapshot');
