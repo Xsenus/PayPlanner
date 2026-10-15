@@ -65,7 +65,7 @@ internal sealed class OwnedAuditFailureDiagnostics : ILoggerProvider
         var providerFrames = methods.Where(method => IsProviderSymbol(method?.DeclaringType?.FullName))
             .Take(4).Select(method => SafeName(method!.DeclaringType!.FullName + "." + method.Name)).ToArray();
         var facts = loggingState is IEnumerable<KeyValuePair<string, object?>> values
-            ? values.Where(item => item.Key is "AuditStage" or "AuditTotalMs" or "AuditLockWaitMs" or "AuditContextMs" or "AuditConnectionMs" or "AuditAdmissionMs" or "AuditSaveMs" or "AuditCommitMs")
+            ? values.Where(item => item.Key is "AuditStage" or "AuditTotalMs" or "AuditLockWaitMs" or "AuditContextMs" or "AuditConnectionMs" or "AuditAdmissionMs" or "AuditSaveMs" or "AuditCommitMs" or "AuditQueueOwnerStage" or "AuditQueueOwnerMs" or "AuditQueueOwnerStageMs" or "AuditQueueOwnerConnectionMs" or "AuditQueueOwnerAdmissionMs" or "AuditQueueOwnerLockMs" or "AuditQueueOwnerSaveMs" or "AuditQueueOwnerCommitMs" or "AuditQueueCompletedAttempts" or "AuditQueueDepth")
                 .GroupBy(item => item.Key).ToDictionary(group => group.Key, group => group.First().Value)
             : [];
         double? Milliseconds(string key)
@@ -75,6 +75,7 @@ internal sealed class OwnedAuditFailureDiagnostics : ILoggerProvider
             return double.IsFinite(number) && number is >= 0 and <= 3_600_000 ? number : null;
         }
         var stage = facts.GetValueOrDefault("AuditStage") as string;
+        var ownerStage = facts.GetValueOrDefault("AuditQueueOwnerStage") as string;
         // Only explicitly measured numeric facts and known stages may supplement failures.
         // Never serialize arbitrary logging state, messages, SQL, URLs or identities.
         return Prefix + JsonSerializer.Serialize(new
@@ -98,6 +99,16 @@ internal sealed class OwnedAuditFailureDiagnostics : ILoggerProvider
             AuditAdmissionMs = Milliseconds("AuditAdmissionMs"),
             AuditSaveMs = Milliseconds("AuditSaveMs"),
             AuditCommitMs = Milliseconds("AuditCommitMs"),
+            AuditQueueOwnerStage = ownerStage is "connection" or "write-admission" or "write-lock" or "save" or "commit" or "completed" ? ownerStage : "unavailable",
+            AuditQueueOwnerMs = Milliseconds("AuditQueueOwnerMs"),
+            AuditQueueOwnerStageMs = Milliseconds("AuditQueueOwnerStageMs"),
+            AuditQueueOwnerConnectionMs = Milliseconds("AuditQueueOwnerConnectionMs"),
+            AuditQueueOwnerAdmissionMs = Milliseconds("AuditQueueOwnerAdmissionMs"),
+            AuditQueueOwnerLockMs = Milliseconds("AuditQueueOwnerLockMs"),
+            AuditQueueOwnerSaveMs = Milliseconds("AuditQueueOwnerSaveMs"),
+            AuditQueueOwnerCommitMs = Milliseconds("AuditQueueOwnerCommitMs"),
+            AuditQueueCompletedAttempts = Milliseconds("AuditQueueCompletedAttempts"),
+            AuditQueueDepth = Milliseconds("AuditQueueDepth"),
             ThreadPoolThreads = ThreadPool.ThreadCount,
             ThreadPoolPending = Math.Min(ThreadPool.PendingWorkItemCount, 3_600_000),
             GcPauseTotalMs = Math.Min(GC.GetTotalPauseDuration().TotalMilliseconds, 3_600_000)

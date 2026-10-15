@@ -14,6 +14,51 @@ namespace PayPlanner.Api.Tests;
 public sealed class UserActivitySqliteWriteBudgetTests
 {
     [Fact]
+    public async Task SchemaLockedConnectionOpeningCannotHoldCancelledAuditUntilDefaultNativeTimeout()
+    {
+        await using var fixture = await Fixture.CreateAsync(sharedCache: true);
+        await using var blocker = new SqliteConnection(fixture.SlowConnectionString);
+        await blocker.OpenAsync();
+        await using var transaction = blocker.BeginTransaction(deferred: false);
+        await using (var schema = blocker.CreateCommand())
+        {
+            schema.CommandText = "CREATE TABLE OwnedAuditOpeningSchemaLock (Id INTEGER PRIMARY KEY);";
+            await schema.ExecuteNonQueryAsync();
+        }
+        using var cancellation = new CancellationTokenSource();
+        var pending = Task.Run(() => fixture.Slow.TryWriteAsync(Entry("cancelled-open"), cancellation.Token));
+        UserActivityLog? result;
+        var returnedBeforeSchemaRelease = false;
+        try
+        {
+            await fixture.SlowFactory.Opening.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            cancellation.CancelAfter(TimeSpan.FromMilliseconds(500));
+            try
+            {
+                await pending.WaitAsync(TimeSpan.FromSeconds(2));
+                returnedBeforeSchemaRelease = true;
+            }
+            catch (TimeoutException) { }
+        }
+        finally
+        {
+            await transaction.RollbackAsync();
+            result = await pending.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+
+        Assert.True(returnedBeforeSchemaRelease,
+            "SQLite connection opening kept a cancelled audit inside the native default timeout before applying the short attempt timeout.");
+        Assert.Null(result);
+        Assert.Equal(30, fixture.SlowFactory.CreatedConnectionDefaultTimeout);
+        Assert.Equal(fixture.SlowConnectionString, fixture.SlowFactory.CreatedConnectionString);
+        await using var proof = fixture.SlowFactory.CreateDbContext();
+        Assert.Empty(await proof.UserActivityLogs.ToArrayAsync());
+        using var recovery = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        Assert.NotNull(await fixture.Slow.TryWriteAsync(Entry("after-open-failure"), recovery.Token));
+        Assert.Equal("after-open-failure", Assert.Single(await proof.UserActivityLogs.AsNoTracking().ToArrayAsync()).Action);
+    }
+
+    [Fact]
     public async Task ConcurrentServicesSharingSqliteFactoryQueueBeforeNativeWriterAdmission()
     {
         await using var fixture = await Fixture.CreateAsync(sharedCache: true);
@@ -61,11 +106,13 @@ public sealed class UserActivitySqliteWriteBudgetTests
         Assert.Equal(9, actions.Distinct().Count());
     }
 
-    [Fact]
-    public async Task CancellingQueuedAuditDoesNotEnterNativeAdmissionAndAllowsTheNextWrite()
+    [Theory]
+    [InlineData(false, "write-admission")]
+    [InlineData(true, "commit")]
+    public async Task CancellingQueuedAuditDoesNotEnterNativeAdmissionAndAllowsTheNextWrite(bool holdAtCommit, string expectedStage)
     {
         await using var fixture = await Fixture.CreateAsync(sharedCache: true);
-        var observer = new WriterAdmissionObserver(expectedContexts: 2);
+        var observer = new WriterAdmissionObserver(expectedContexts: 2, holdAtCommit);
         fixture.SlowFactory.WriterAdmission = observer;
         var first = Task.Run(() => fixture.Slow.TryWriteAsync(Entry("held")));
         using var cancellation = new CancellationTokenSource();
@@ -92,6 +139,17 @@ public sealed class UserActivitySqliteWriteBudgetTests
         using var nextBudget = new CancellationTokenSource(TimeSpan.FromSeconds(1));
         Assert.NotNull(await fixture.Slow.TryWriteAsync(Entry("after-cancel"), nextBudget.Token));
         Assert.Equal(1, fixture.SlowLogger.Errors); // The deliberately cancelled write only.
+        var queueFacts = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(fixture.SlowLogger.QueueFailureFacts);
+        Assert.Equal(expectedStage, queueFacts["AuditQueueOwnerStage"]);
+        Assert.InRange(Assert.IsType<long>(queueFacts["AuditQueueOwnerMs"]), 0, 5000);
+        Assert.InRange(Assert.IsType<long>(queueFacts["AuditQueueOwnerStageMs"]), 0, 5000);
+        Assert.InRange(Assert.IsType<long>(queueFacts["AuditQueueOwnerConnectionMs"]), 0, 5000);
+        Assert.InRange(Assert.IsType<long>(queueFacts["AuditQueueOwnerAdmissionMs"]), 0, 5000);
+        Assert.InRange(Assert.IsType<long>(queueFacts["AuditQueueOwnerLockMs"]), 0, 5000);
+        Assert.InRange(Assert.IsType<long>(queueFacts["AuditQueueOwnerSaveMs"]), 0, 5000);
+        Assert.InRange(Assert.IsType<long>(queueFacts["AuditQueueOwnerCommitMs"]), 0, 5000);
+        Assert.Equal(0L, queueFacts["AuditQueueCompletedAttempts"]);
+        Assert.Equal(1, queueFacts["AuditQueueDepth"]);
         await using var proof = fixture.SlowFactory.CreateDbContext();
         var actions = await proof.UserActivityLogs.Select(item => item.Action).OrderBy(action => action).ToArrayAsync();
         Assert.Equal(new[] { "after-cancel", "held" }, actions);
@@ -236,7 +294,7 @@ public sealed class UserActivitySqliteWriteBudgetTests
         }
 
         private static string ConnectionString(string path, bool sharedCache = false) => new SqliteConnectionStringBuilder
-        { DataSource = path, Pooling = false, Cache = sharedCache ? SqliteCacheMode.Shared : SqliteCacheMode.Default }.ToString();
+        { DataSource = path, Pooling = false, ForeignKeys = true, Cache = sharedCache ? SqliteCacheMode.Shared : SqliteCacheMode.Default }.ToString();
     }
 
     private sealed class Factory(string connectionString, AuditLogger logger) : IDbContextFactory<PaymentContext>, IDisposable
@@ -247,7 +305,9 @@ public sealed class UserActivitySqliteWriteBudgetTests
         public WriterAdmissionObserver? WriterAdmission { get; set; }
         public string ConnectionString => connectionString;
         public TaskCompletionSource Opened { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Opening { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public int? CreatedConnectionDefaultTimeout => _lastConnection?.DefaultTimeout;
+        public string? CreatedConnectionString => _lastConnection?.ConnectionString;
         public PaymentContext CreateDbContext()
         {
             var writerAdmission = WriterAdmission;
@@ -257,7 +317,7 @@ public sealed class UserActivitySqliteWriteBudgetTests
             var builder = new DbContextOptionsBuilder<PaymentContext>()
                 .UseSqlite(connection, contextOwnsConnection: true)
                 .UseLoggerFactory(_logging)
-                .AddInterceptors(new OpenObserver(Opened));
+                .AddInterceptors(new OpenObserver(Opening, Opened));
             if (writerAdmission is not null) builder.AddInterceptors(writerAdmission);
             return new PaymentContext(builder.Options);
         }
@@ -266,7 +326,7 @@ public sealed class UserActivitySqliteWriteBudgetTests
         public void Dispose() => _logging.Dispose();
     }
 
-    private sealed class WriterAdmissionObserver(int expectedContexts) : DbTransactionInterceptor
+    private sealed class WriterAdmissionObserver(int expectedContexts, bool holdAtCommit = false) : DbTransactionInterceptor
     {
         private int _contexts;
         private int _admissions;
@@ -288,7 +348,13 @@ public sealed class UserActivitySqliteWriteBudgetTests
         public override async ValueTask<DbTransaction> TransactionStartedAsync(DbConnection connection,
             TransactionEndEventData eventData, DbTransaction result, CancellationToken cancellationToken = default)
         {
-            if (FirstStarted.TrySetResult()) await ReleaseFirst.Task.WaitAsync(cancellationToken);
+            if (!holdAtCommit && FirstStarted.TrySetResult()) await ReleaseFirst.Task.WaitAsync(cancellationToken);
+            return result;
+        }
+        public override async ValueTask<InterceptionResult> TransactionCommittingAsync(DbTransaction transaction,
+            TransactionEventData eventData, InterceptionResult result, CancellationToken cancellationToken = default)
+        {
+            if (holdAtCommit && FirstStarted.TrySetResult()) await ReleaseFirst.Task.WaitAsync(cancellationToken);
             return result;
         }
     }
@@ -299,8 +365,11 @@ public sealed class UserActivitySqliteWriteBudgetTests
         public void Dispose() { }
     }
 
-    private sealed class OpenObserver(TaskCompletionSource opened) : DbConnectionInterceptor
+    private sealed class OpenObserver(TaskCompletionSource opening, TaskCompletionSource opened) : DbConnectionInterceptor
     {
+        public override ValueTask<InterceptionResult> ConnectionOpeningAsync(DbConnection connection,
+            ConnectionEventData eventData, InterceptionResult result, CancellationToken cancellationToken = default)
+        { opening.TrySetResult(); return ValueTask.FromResult(result); }
         public override Task ConnectionOpenedAsync(DbConnection connection, ConnectionEndEventData eventData,
             CancellationToken cancellationToken = default)
         { opened.TrySetResult(); return Task.CompletedTask; }
@@ -309,7 +378,9 @@ public sealed class UserActivitySqliteWriteBudgetTests
     private sealed class AuditLogger : ILogger<UserActivityService>
     {
         private int _errors;
+        private IReadOnlyDictionary<string, object?>? _queueFailureFacts;
         public int Errors => Volatile.Read(ref _errors);
+        public IReadOnlyDictionary<string, object?>? QueueFailureFacts => Volatile.Read(ref _queueFailureFacts);
         public TaskCompletionSource FirstBusyRetry { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
         public bool IsEnabled(LogLevel logLevel) => true;
@@ -317,6 +388,12 @@ public sealed class UserActivitySqliteWriteBudgetTests
             Func<TState, Exception?, string> formatter)
         {
             if (logLevel >= LogLevel.Error) Interlocked.Increment(ref _errors);
+            if (logLevel >= LogLevel.Error && state is IEnumerable<KeyValuePair<string, object?>> values)
+            {
+                var facts = values.Where(item => item.Key is "AuditQueueOwnerStage" or "AuditQueueOwnerMs" or "AuditQueueOwnerStageMs" or "AuditQueueOwnerConnectionMs" or "AuditQueueOwnerAdmissionMs" or "AuditQueueOwnerLockMs" or "AuditQueueOwnerSaveMs" or "AuditQueueOwnerCommitMs" or "AuditQueueCompletedAttempts" or "AuditQueueDepth")
+                    .ToDictionary(item => item.Key, item => item.Value);
+                if (facts.Count > 0) Volatile.Write(ref _queueFailureFacts, facts);
+            }
             if (logLevel == LogLevel.Warning && exception is SqliteException { SqliteErrorCode: 5 or 6 }) FirstBusyRetry.TrySetResult();
         }
     }

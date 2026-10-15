@@ -32,7 +32,42 @@ public class UserActivityService : IUserActivityService
     private static readonly SemaphoreSlim WriteLock = new(1, 1);
     // AddDbContextFactory is singleton: all SQLite audit services share this gate.
     // Weak keys bound its lifetime to the factory without retaining database names.
-    private static readonly ConditionalWeakTable<IDbContextFactory<PaymentContext>, SemaphoreSlim> SqliteWriterLocks = new();
+    private static readonly ConditionalWeakTable<IDbContextFactory<PaymentContext>, SqliteAuditWriteGate> SqliteWriterLocks = new();
+
+    private sealed class SqliteAuditWriteGate
+    {
+        public SemaphoreSlim Semaphore { get; } = new(1, 1);
+        public SqliteAuditWriter? Owner;
+        public long CompletedAttempts;
+        public int Waiting;
+    }
+
+    private sealed class SqliteAuditWriter
+    {
+        public long StartedAt { get; } = Stopwatch.GetTimestamp();
+        public long StageStartedAt = Stopwatch.GetTimestamp();
+        public string Stage = "connection";
+        public long ConnectionMs;
+        public long AdmissionMs;
+        public long LockMs;
+        public long SaveMs;
+        public long CommitMs;
+        public void SetStage(string value)
+        {
+            var now = Stopwatch.GetTimestamp();
+            var duration = (long)Stopwatch.GetElapsedTime(StageStartedAt, now).TotalMilliseconds;
+            switch (Stage)
+            {
+                case "connection": Volatile.Write(ref ConnectionMs, duration); break;
+                case "write-admission": Volatile.Write(ref AdmissionMs, duration); break;
+                case "write-lock": Volatile.Write(ref LockMs, duration); break;
+                case "save": Volatile.Write(ref SaveMs, duration); break;
+                case "commit": Volatile.Write(ref CommitMs, duration); break;
+            }
+            Volatile.Write(ref StageStartedAt, now);
+            Volatile.Write(ref Stage, value);
+        }
+    }
     private static readonly SemaphoreSlim SettingsLock = new(1, 1);
     private static bool? CachedIsEnabled;
     private static int? CachedRetentionDays;
@@ -167,6 +202,16 @@ public class UserActivityService : IUserActivityService
         long admissionMilliseconds = 0;
         long saveMilliseconds = 0;
         long commitMilliseconds = 0;
+        string queueOwnerStage = "unavailable";
+        long? queueOwnerMilliseconds = null;
+        long? queueOwnerStageMilliseconds = null;
+        long? queueOwnerConnectionMilliseconds = null;
+        long? queueOwnerAdmissionMilliseconds = null;
+        long? queueOwnerLockMilliseconds = null;
+        long? queueOwnerSaveMilliseconds = null;
+        long? queueOwnerCommitMilliseconds = null;
+        long? queueCompletedAttempts = null;
+        int? queueDepth = null;
         try
         {
             if (!(await GetSettingsAsync(cancellationToken)).IsEnabled)
@@ -248,7 +293,15 @@ public class UserActivityService : IUserActivityService
                     // opening its connection must not block unrelated audit writes.
                     var connectionOpened = false;
                     var connectionStarted = false;
-                    SemaphoreSlim? sqliteWriterLock = null;
+                    var sqlite = context.Database.IsSqlite()
+                        ? context.Database.GetDbConnection() as SqliteConnection : null;
+                    int? nativeTimeout = null;
+                    int? commandTimeout = null;
+                    string? nativeConnectionString = null;
+                    var nativeTimeoutConfigured = false;
+                    var nativeConnectionStringChanged = false;
+                    SqliteAuditWriteGate? sqliteWriterLock = null;
+                    SqliteAuditWriter? sqliteWriter = null;
                     var sqliteWriterLockTaken = false;
                     try
                     {
@@ -256,12 +309,56 @@ public class UserActivityService : IUserActivityService
                         {
                             // Queue asynchronously before SQLite's synchronous writer admission.
                             // Release between retry attempts; another factory stays independent.
-                            sqliteWriterLock = SqliteWriterLocks.GetValue(_contextFactory, static _ => new SemaphoreSlim(1, 1));
+                            sqliteWriterLock = SqliteWriterLocks.GetValue(_contextFactory, static _ => new SqliteAuditWriteGate());
                             stage = "write-lock";
                             interval.Restart();
-                            try { await sqliteWriterLock.WaitAsync(token); }
-                            finally { lockWaitMilliseconds += interval.ElapsedMilliseconds; }
+                            var completedAtWait = Volatile.Read(ref sqliteWriterLock.CompletedAttempts);
+                            Interlocked.Increment(ref sqliteWriterLock.Waiting);
+                            try { await sqliteWriterLock.Semaphore.WaitAsync(token); }
+                            catch
+                            {
+                                var owner = Volatile.Read(ref sqliteWriterLock.Owner);
+                                queueOwnerStage = owner is null ? "unavailable" : Volatile.Read(ref owner.Stage);
+                                queueOwnerMilliseconds = owner is null ? null : (long)Stopwatch.GetElapsedTime(owner.StartedAt).TotalMilliseconds;
+                                queueOwnerStageMilliseconds = owner is null ? null : (long)Stopwatch.GetElapsedTime(Volatile.Read(ref owner.StageStartedAt)).TotalMilliseconds;
+                                queueOwnerConnectionMilliseconds = owner is null ? null : Volatile.Read(ref owner.ConnectionMs);
+                                queueOwnerAdmissionMilliseconds = owner is null ? null : Volatile.Read(ref owner.AdmissionMs);
+                                queueOwnerLockMilliseconds = owner is null ? null : Volatile.Read(ref owner.LockMs);
+                                queueOwnerSaveMilliseconds = owner is null ? null : Volatile.Read(ref owner.SaveMs);
+                                queueOwnerCommitMilliseconds = owner is null ? null : Volatile.Read(ref owner.CommitMs);
+                                queueCompletedAttempts = Volatile.Read(ref sqliteWriterLock.CompletedAttempts) - completedAtWait;
+                                queueDepth = Volatile.Read(ref sqliteWriterLock.Waiting);
+                                throw;
+                            }
+                            finally
+                            {
+                                lockWaitMilliseconds += interval.ElapsedMilliseconds;
+                                Interlocked.Decrement(ref sqliteWriterLock.Waiting);
+                            }
                             sqliteWriterLockTaken = true;
+                            sqliteWriter = new SqliteAuditWriter();
+                            Volatile.Write(ref sqliteWriterLock.Owner, sqliteWriter);
+                        }
+                        // Opening also executes provider commands (for example foreign_keys).
+                        // Apply the short native timeout before opening, not just before BEGIN.
+                        if (sqlite is not null)
+                        {
+                            nativeTimeout = sqlite.DefaultTimeout;
+                            commandTimeout = context.Database.GetCommandTimeout();
+                            nativeConnectionString = sqlite.ConnectionString;
+                            nativeTimeoutConfigured = true;
+                            // Physical connection initialization uses the connection-string
+                            // timeout before consulting the managed DefaultTimeout property.
+                            if (sqlite.State == System.Data.ConnectionState.Closed)
+                            {
+                                sqlite.ConnectionString = new SqliteConnectionStringBuilder(nativeConnectionString)
+                                {
+                                    DefaultTimeout = SqliteAuditAttemptTimeoutSeconds
+                                }.ToString();
+                                nativeConnectionStringChanged = true;
+                            }
+                            sqlite.DefaultTimeout = SqliteAuditAttemptTimeoutSeconds;
+                            context.Database.SetCommandTimeout(SqliteAuditAttemptTimeoutSeconds);
                         }
                         stage = "connection";
                         interval.Restart();
@@ -270,21 +367,13 @@ public class UserActivityService : IUserActivityService
                         {
                             connectionMilliseconds += interval.ElapsedMilliseconds;
                             connectionOpened = true;
-                            var sqlite = context.Database.IsSqlite()
-                                ? context.Database.GetDbConnection() as SqliteConnection : null;
-                            var nativeTimeout = sqlite?.DefaultTimeout;
-                            var commandTimeout = sqlite is null ? null : context.Database.GetCommandTimeout();
                             try
                             {
                                 // SQLite's async commands still wait synchronously for a writer.
                                 // Admit the owned transaction before the shared audit lock, with
                                 // short attempts that the existing bounded retry can release.
-                                if (sqlite is not null)
-                                {
-                                    sqlite.DefaultTimeout = SqliteAuditAttemptTimeoutSeconds;
-                                    context.Database.SetCommandTimeout(SqliteAuditAttemptTimeoutSeconds);
-                                }
                                 stage = "write-admission";
+                                sqliteWriter?.SetStage(stage);
                                 interval.Restart();
                                 IDbContextTransaction? admission;
                                 try
@@ -298,22 +387,26 @@ public class UserActivityService : IUserActivityService
                                 try
                                 {
                                     stage = "write-lock";
+                                    sqliteWriter?.SetStage(stage);
                                     interval.Restart();
                                     try { await WriteLock.WaitAsync(token); }
                                     finally { lockWaitMilliseconds += interval.ElapsedMilliseconds; }
                                     lockTaken = true;
                                     stage = "save";
+                                    sqliteWriter?.SetStage(stage);
                                     interval.Restart();
                                     try { await context.SaveChangesAsync(token); }
                                     finally { saveMilliseconds += interval.ElapsedMilliseconds; }
                                     if (admission is not null)
                                     {
                                         stage = "commit";
+                                        sqliteWriter?.SetStage(stage);
                                         interval.Restart();
                                         try { await admission.CommitAsync(token); }
                                         finally { commitMilliseconds += interval.ElapsedMilliseconds; }
                                     }
                                     stage = "completed";
+                                    sqliteWriter?.SetStage(stage);
                                     return log;
                                 }
                                 finally
@@ -333,8 +426,28 @@ public class UserActivityService : IUserActivityService
                     }
                     finally
                     {
-                        if (connectionStarted && !connectionOpened) connectionMilliseconds += interval.ElapsedMilliseconds;
-                        if (sqliteWriterLockTaken) sqliteWriterLock!.Release();
+                        try
+                        {
+                            if (connectionStarted && !connectionOpened) connectionMilliseconds += interval.ElapsedMilliseconds;
+                            if (nativeConnectionStringChanged && sqlite!.State == System.Data.ConnectionState.Closed)
+                            {
+                                sqlite.ConnectionString = nativeConnectionString!;
+                            }
+                            if (!connectionOpened && nativeTimeoutConfigured)
+                            {
+                                sqlite!.DefaultTimeout = nativeTimeout!.Value;
+                                context.Database.SetCommandTimeout(commandTimeout);
+                            }
+                        }
+                        finally
+                        {
+                            if (sqliteWriterLockTaken)
+                            {
+                                Volatile.Write(ref sqliteWriterLock!.Owner, null);
+                                Interlocked.Increment(ref sqliteWriterLock.CompletedAttempts);
+                                sqliteWriterLock.Semaphore.Release();
+                            }
+                        }
                     }
                 },
                 _logger,
@@ -348,8 +461,8 @@ public class UserActivityService : IUserActivityService
         catch (Exception ex)
         {
             _logger.LogError(ex,
-                "Не удалось сохранить журнал активности пользователя. Этап={AuditStage}; всего={AuditTotalMs} мс; ожидание={AuditLockWaitMs} мс; контекст={AuditContextMs} мс; подключение={AuditConnectionMs} мс; допуск={AuditAdmissionMs} мс; сохранение={AuditSaveMs} мс; фиксация={AuditCommitMs} мс",
-                stage, elapsed.ElapsedMilliseconds, lockWaitMilliseconds, contextMilliseconds, connectionMilliseconds, admissionMilliseconds, saveMilliseconds, commitMilliseconds);
+                "Не удалось сохранить журнал активности пользователя. Этап={AuditStage}; всего={AuditTotalMs} мс; ожидание={AuditLockWaitMs} мс; контекст={AuditContextMs} мс; подключение={AuditConnectionMs} мс; допуск={AuditAdmissionMs} мс; сохранение={AuditSaveMs} мс; фиксация={AuditCommitMs} мс; этап владельца={AuditQueueOwnerStage}; владелец={AuditQueueOwnerMs} мс; текущий этап владельца={AuditQueueOwnerStageMs} мс; подключение владельца={AuditQueueOwnerConnectionMs} мс; допуск владельца={AuditQueueOwnerAdmissionMs} мс; замок владельца={AuditQueueOwnerLockMs} мс; сохранение владельца={AuditQueueOwnerSaveMs} мс; фиксация владельца={AuditQueueOwnerCommitMs} мс; попыток в очереди={AuditQueueCompletedAttempts}; глубина очереди={AuditQueueDepth}",
+                stage, elapsed.ElapsedMilliseconds, lockWaitMilliseconds, contextMilliseconds, connectionMilliseconds, admissionMilliseconds, saveMilliseconds, commitMilliseconds, queueOwnerStage, queueOwnerMilliseconds, queueOwnerStageMilliseconds, queueOwnerConnectionMilliseconds, queueOwnerAdmissionMilliseconds, queueOwnerLockMilliseconds, queueOwnerSaveMilliseconds, queueOwnerCommitMilliseconds, queueCompletedAttempts, queueDepth);
             return null;
         }
     }

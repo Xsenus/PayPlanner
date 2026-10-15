@@ -175,6 +175,19 @@ internal sealed class RestoredServerErrorRecorder
                 AuditAdmissionMs = SafeMilliseconds(value, "AuditAdmissionMs"),
                 AuditSaveMs = SafeMilliseconds(value, "AuditSaveMs"),
                 AuditCommitMs = SafeMilliseconds(value, "AuditCommitMs"),
+                AuditQueueOwnerStage = value.TryGetProperty("AuditQueueOwnerStage", out var ownerStage)
+                    && ownerStage.ValueKind == JsonValueKind.String
+                    && ownerStage.GetString() is "connection" or "write-admission" or "write-lock" or "save" or "commit" or "completed"
+                        ? ownerStage.GetString() : "unavailable",
+                AuditQueueOwnerMs = SafeMilliseconds(value, "AuditQueueOwnerMs"),
+                AuditQueueOwnerStageMs = SafeMilliseconds(value, "AuditQueueOwnerStageMs"),
+                AuditQueueOwnerConnectionMs = SafeMilliseconds(value, "AuditQueueOwnerConnectionMs"),
+                AuditQueueOwnerAdmissionMs = SafeMilliseconds(value, "AuditQueueOwnerAdmissionMs"),
+                AuditQueueOwnerLockMs = SafeMilliseconds(value, "AuditQueueOwnerLockMs"),
+                AuditQueueOwnerSaveMs = SafeMilliseconds(value, "AuditQueueOwnerSaveMs"),
+                AuditQueueOwnerCommitMs = SafeMilliseconds(value, "AuditQueueOwnerCommitMs"),
+                AuditQueueCompletedAttempts = SafeMilliseconds(value, "AuditQueueCompletedAttempts"),
+                AuditQueueDepth = SafeMilliseconds(value, "AuditQueueDepth"),
                 ThreadPoolThreads = SafeMilliseconds(value, "ThreadPoolThreads"),
                 ThreadPoolPending = SafeMilliseconds(value, "ThreadPoolPending"),
                 GcPauseTotalMs = SafeMilliseconds(value, "GcPauseTotalMs")

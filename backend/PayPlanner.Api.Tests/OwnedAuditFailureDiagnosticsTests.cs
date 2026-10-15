@@ -175,6 +175,77 @@ public sealed class OwnedAuditFailureDiagnosticsTests
         Assert.DoesNotContain("synthetic-private", summary);
     }
 
+    [Theory]
+    [InlineData("save")]
+    [InlineData("write-admission")]
+    public void QueueOwnerFactsSurviveBothPrivacyFiltersWithoutIdentity(string ownerStage)
+    {
+        var state = new Dictionary<string, object?>
+        {
+            ["AuditQueueOwnerStage"] = ownerStage,
+            ["AuditQueueOwnerMs"] = 4900L,
+            ["AuditQueueOwnerStageMs"] = 300L,
+            ["AuditQueueOwnerConnectionMs"] = 100L,
+            ["AuditQueueOwnerAdmissionMs"] = 200L,
+            ["AuditQueueOwnerLockMs"] = 0L,
+            ["AuditQueueOwnerSaveMs"] = 3000L,
+            ["AuditQueueOwnerCommitMs"] = 0L,
+            ["AuditQueueCompletedAttempts"] = 3L,
+            ["AuditQueueDepth"] = 8,
+            ["OwnerIdentity"] = "synthetic-private"
+        };
+        var recorder = new RestoredServerErrorRecorder();
+        recorder.Receive("fail: Example.Service[0]");
+        recorder.Receive(OwnedAuditFailureDiagnostics.Format(new OperationCanceledException("synthetic-private"), null, state));
+        var summary = recorder.FailureSummary();
+        Assert.Contains("Server fail log entries: 1.", summary);
+        Assert.Contains("\"AuditQueueOwnerStage\":\"" + ownerStage + "\"", summary);
+        Assert.Contains("\"AuditQueueOwnerMs\":4900", summary);
+        Assert.Contains("\"AuditQueueOwnerStageMs\":300", summary);
+        Assert.Contains("\"AuditQueueOwnerConnectionMs\":100", summary);
+        Assert.Contains("\"AuditQueueOwnerAdmissionMs\":200", summary);
+        Assert.Contains("\"AuditQueueOwnerLockMs\":0", summary);
+        Assert.Contains("\"AuditQueueOwnerSaveMs\":3000", summary);
+        Assert.Contains("\"AuditQueueOwnerCommitMs\":0", summary);
+        Assert.Contains("\"AuditQueueCompletedAttempts\":3", summary);
+        Assert.Contains("\"AuditQueueDepth\":8", summary);
+        Assert.DoesNotContain("synthetic-private", summary);
+    }
+
+    [Fact]
+    public void InvalidQueueOwnerFactsCannotExposeStateOrSuppressFailure()
+    {
+        var state = new Dictionary<string, object?>
+        {
+            ["AuditQueueOwnerStage"] = "synthetic-private",
+            ["AuditQueueOwnerMs"] = double.PositiveInfinity,
+            ["AuditQueueOwnerStageMs"] = "synthetic-private",
+            ["AuditQueueOwnerConnectionMs"] = -1L,
+            ["AuditQueueOwnerAdmissionMs"] = double.NaN,
+            ["AuditQueueOwnerLockMs"] = 3_600_001L,
+            ["AuditQueueOwnerSaveMs"] = "synthetic-private",
+            ["AuditQueueOwnerCommitMs"] = double.PositiveInfinity,
+            ["AuditQueueCompletedAttempts"] = -1L,
+            ["AuditQueueDepth"] = "synthetic-private"
+        };
+        var recorder = new RestoredServerErrorRecorder();
+        recorder.Receive("fail: Example.Service[0]");
+        recorder.Receive(OwnedAuditFailureDiagnostics.Format(new OperationCanceledException(), null, state));
+        var summary = recorder.FailureSummary();
+        Assert.Contains("Server fail log entries: 1.", summary);
+        Assert.Contains("\"AuditQueueOwnerStage\":\"unavailable\"", summary);
+        Assert.Contains("\"AuditQueueOwnerMs\":null", summary);
+        Assert.Contains("\"AuditQueueOwnerStageMs\":null", summary);
+        Assert.Contains("\"AuditQueueOwnerConnectionMs\":null", summary);
+        Assert.Contains("\"AuditQueueOwnerAdmissionMs\":null", summary);
+        Assert.Contains("\"AuditQueueOwnerLockMs\":null", summary);
+        Assert.Contains("\"AuditQueueOwnerSaveMs\":null", summary);
+        Assert.Contains("\"AuditQueueOwnerCommitMs\":null", summary);
+        Assert.Contains("\"AuditQueueCompletedAttempts\":null", summary);
+        Assert.Contains("\"AuditQueueDepth\":null", summary);
+        Assert.DoesNotContain("synthetic-private", summary);
+    }
+
     [Fact]
     public void CancellationKeepsBoundedProviderSymbolsWithoutExceptionOrRequestDetails()
     {
