@@ -51,7 +51,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-function fixture() {
+function fixture(timeoutMs = 20000) {
   const page = new EventEmitter();
   page.evaluate = async () => {};
   const timers = new Set();
@@ -62,7 +62,7 @@ function fixture() {
     clearTimeout: callback => timers.delete(callback),
   });
   const predicate = runInNewContext('(' + isCaseBoundaryRead.toString() + ')', { URL });
-  const lifecycle = create(page, request => predicate(request, 'http://127.0.0.1:1234', 7), 20000);
+  const lifecycle = create(page, request => predicate(request, 'http://127.0.0.1:1234', 7), timeoutMs);
   const request = (path = '/api/tasks/settings', method = 'GET', status = 200) => {
     const headers = deferred();
     const body = deferred();
@@ -191,13 +191,13 @@ describe('owned case read boundary', () => {
     lifecycle.dispose();
   });
 
-  it('keeps the original bounded deadline when a read never finishes', async () => {
-    const { page, lifecycle, request, timers } = fixture();
+  it.each([5000, 20000])('keeps the original %i ms deadline when a read never finishes', async timeoutMs => {
+    const { page, lifecycle, request, timers } = fixture(timeoutMs);
     page.emit('request', request().value);
     const drain = lifecycle.drain('server-restart');
     assert.equal(timers.size, 1);
     [...timers][0]();
-    await assert.rejects(drain, /within 20000ms/);
+    await assert.rejects(drain, new RegExp('within ' + timeoutMs + 'ms'));
     assert.equal(timers.size, 0);
     lifecycle.dispose();
   });

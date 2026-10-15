@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readdir, readFile, writeFile } from 'node:fs/promises';
+import { readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { createServer as createControlServer } from 'node:http';
 import { createServer } from 'vite';
+import { createCaseReadLifecycle, isCaseBoundaryRead } from './case-retirement-browser-lifecycle.mjs';
 
 const api = new URL(process.env.CASE_RETIREMENT_API);
 assert.equal(api.hostname, '127.0.0.1');
@@ -44,6 +45,7 @@ assert.equal(resolve(cliPath), resolve(dirname(cliPath), cliMetadata.bin['playwr
 const browser = process.env.CASE_RETIREMENT_BROWSER ?? (process.platform === 'win32' ? 'msedge' : 'chrome');
 assert.ok(['msedge', 'chrome'].includes(browser), 'Use an installed Edge or Chrome channel.');
 const session = `case-retire-${basename(root).slice(-12)}`;
+const scenarioPath = join(root, 'financial-browser-scenario.js');
 const execute = promisify(execFile);
 async function cli(...args) {
   const result = await execute(process.execPath, [cliPath, `-s=${session}`, ...args], {
@@ -120,26 +122,13 @@ try {
     downloadPath: join(root, 'financial-browser-download.html'),
     email: process.env.CASE_RETIREMENT_EMAIL, password: process.env.CASE_RETIREMENT_PASSWORD });
   phase('scenario');
-  const result = await cli('run-code', String.raw`async (page) => {
+  await writeFile(scenarioPath, String.raw`async (page) => {
     const settings = ${settings};
     const check = (value, message) => { if (!value) throw new Error(message); };
-    const reads = new Set();
-    page.on('request', request => {
-      const url = new URL(request.url());
-      if (request.method() === 'GET' && url.origin === settings.api && url.pathname.startsWith('/api/')) reads.add(request);
-    });
-    page.on('requestfinished', request => reads.delete(request));
-    page.on('requestfailed', request => reads.delete(request));
-    const settleReads = async phase => {
-      const deadline = Date.now() + 5000; let quietSince = Date.now();
-      while (Date.now() < deadline) {
-        if (reads.size) quietSince = Date.now();
-        else if (Date.now() - quietSince >= 500) return;
-        await new Promise(resolve => setTimeout(resolve, 25));
-      }
-      throw new Error('Financial browser requests did not settle before ' + phase + ': '
-        + [...reads].map(request => new URL(request.url()).pathname).join(', '));
-    };
+    // Wait for response bodies and the next render frame, using the same
+    // five-second budget. Periodic inbox refreshes need no artificial quiet gap.
+    const reads = (${createCaseReadLifecycle})(page,
+      request => (${isCaseBoundaryRead})(request, settings.api, settings.caseId), 5000);
     const kind = settings.flow.split('-')[1]; const modal = settings.flow.split('-')[2] === 'modal'; const lost = settings.flow.endsWith('-lost');
     const editor = settings.flow.split('-')[2] === 'editor';
     let firstHandled; const first = new Promise(resolve => { firstHandled = resolve; });
@@ -176,7 +165,7 @@ try {
       }
       firstHandled();
     });
-    await settleReads('login');
+    await reads.drain('client-navigation');
     await page.locator('input[type="email"]').fill(settings.email);
     await page.locator('input[type="password"]').fill(settings.password);
     await page.getByRole('button', { name: 'Войти', exact: true }).click();
@@ -192,7 +181,7 @@ try {
     check(accepted[0].key === keys[0], 'Pending financial request lost its identity');
     let card = page;
     if (modal) {
-      await settleReads('client navigation');
+      await reads.drain('client-navigation');
       await page.goto(settings.ui + '/clients/' + settings.clientId, { waitUntil: 'domcontentloaded' });
       await page.locator('main').getByRole('button', { name: 'Дела', exact: true }).click();
       await page.getByRole('button', { name: 'Редактировать дело Synthetic financial browser case', exact: true }).click();
@@ -233,12 +222,14 @@ try {
     const downloadEvent = page.waitForEvent('download'); await downloadButton.click();
     const download = await downloadEvent; check(await download.failure() === null, 'Financial document download failed');
     await download.saveAs(settings.downloadPath);
-    await settleReads('browser teardown');
+    await reads.drain('browser-close');
     check(otherWrites === 0, 'Financial generation caused another business write: ' + otherWrites);
     check(outside.length === 0, 'Browser called an external host');
     check(errors.length === 0, 'Browser errors: ' + errors.join('; '));
+    reads.dispose();
     return 'CASE_RETIREMENT_BROWSER_OK ' + JSON.stringify({ flow: settings.flow, posts: keys.length });
-  }`);
+  }`, { mode: 0o600 });
+  const result = await cli('run-code', '--filename', scenarioPath);
   assert.ok(result.includes('CASE_RETIREMENT_BROWSER_OK'), result); console.log(result);
 } catch (error) {
   if (opened) { console.error(await cli('snapshot')); console.error(await cli('console', 'error')); }
@@ -255,6 +246,7 @@ try {
       finally {
         phase('stdin-close');
         if (control) process.stdin.destroy();
+        await rm(scenarioPath, { force: true });
       }
     }
   }
