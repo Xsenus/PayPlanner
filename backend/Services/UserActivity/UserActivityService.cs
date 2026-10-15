@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Linq;
 using System.Threading;
+using System.Runtime.CompilerServices;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Extensions;
 using Microsoft.AspNetCore.WebUtilities;
@@ -29,6 +30,9 @@ public class UserActivityService : IUserActivityService
     };
 
     private static readonly SemaphoreSlim WriteLock = new(1, 1);
+    // AddDbContextFactory is singleton: all SQLite audit services share this gate.
+    // Weak keys bound its lifetime to the factory without retaining database names.
+    private static readonly ConditionalWeakTable<IDbContextFactory<PaymentContext>, SemaphoreSlim> SqliteWriterLocks = new();
     private static readonly SemaphoreSlim SettingsLock = new(1, 1);
     private static bool? CachedIsEnabled;
     private static int? CachedRetentionDays;
@@ -242,11 +246,26 @@ public class UserActivityService : IUserActivityService
 
                     // Only the insert needs serialization. Preparing a context or
                     // opening its connection must not block unrelated audit writes.
-                    stage = "connection";
-                    interval.Restart();
                     var connectionOpened = false;
+                    var connectionStarted = false;
+                    SemaphoreSlim? sqliteWriterLock = null;
+                    var sqliteWriterLockTaken = false;
                     try
                     {
+                        if (context.Database.IsSqlite())
+                        {
+                            // Queue asynchronously before SQLite's synchronous writer admission.
+                            // Release between retry attempts; another factory stays independent.
+                            sqliteWriterLock = SqliteWriterLocks.GetValue(_contextFactory, static _ => new SemaphoreSlim(1, 1));
+                            stage = "write-lock";
+                            interval.Restart();
+                            try { await sqliteWriterLock.WaitAsync(token); }
+                            finally { lockWaitMilliseconds += interval.ElapsedMilliseconds; }
+                            sqliteWriterLockTaken = true;
+                        }
+                        stage = "connection";
+                        interval.Restart();
+                        connectionStarted = true;
                         return await DatabaseConnectionOperation.RunAsync(context, async () =>
                         {
                             connectionMilliseconds += interval.ElapsedMilliseconds;
@@ -314,7 +333,8 @@ public class UserActivityService : IUserActivityService
                     }
                     finally
                     {
-                        if (!connectionOpened) connectionMilliseconds += interval.ElapsedMilliseconds;
+                        if (connectionStarted && !connectionOpened) connectionMilliseconds += interval.ElapsedMilliseconds;
+                        if (sqliteWriterLockTaken) sqliteWriterLock!.Release();
                     }
                 },
                 _logger,

@@ -14,6 +14,90 @@ namespace PayPlanner.Api.Tests;
 public sealed class UserActivitySqliteWriteBudgetTests
 {
     [Fact]
+    public async Task ConcurrentServicesSharingSqliteFactoryQueueBeforeNativeWriterAdmission()
+    {
+        await using var fixture = await Fixture.CreateAsync(sharedCache: true);
+        var observer = new WriterAdmissionObserver(expectedContexts: 9);
+        fixture.SlowFactory.WriterAdmission = observer;
+        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var writes = new List<Task<UserActivityLog?>>
+        {
+            Task.Run(() => fixture.Slow.TryWriteAsync(Entry("first"), budget.Token))
+        };
+        var simultaneousAdmissions = false;
+        UserActivityLog? independent = null;
+        UserActivityLog?[] results;
+        try
+        {
+            await observer.FirstStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            for (var index = 0; index < 8; index++)
+            {
+                var service = new UserActivityService(fixture.SlowFactory, new HttpContextAccessor(), fixture.SlowLogger);
+                var action = $"queued-{index}";
+                writes.Add(Task.Run(() => service.TryWriteAsync(Entry(action), budget.Token)));
+            }
+            await observer.AllContextsCreated.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            simultaneousAdmissions = await Task.WhenAny(observer.SecondAdmission.Task, Task.Delay(200))
+                == observer.SecondAdmission.Task;
+            using var independentBudget = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+            independent = await fixture.Fast.TryWriteAsync(Entry("other-database"), independentBudget.Token);
+        }
+        finally
+        {
+            observer.ReleaseFirst.TrySetResult();
+            results = await Task.WhenAll(writes).WaitAsync(TimeSpan.FromSeconds(8));
+        }
+
+        Assert.False(simultaneousAdmissions,
+            "Services sharing one SQLite factory entered concurrent synchronous writer admission instead of waiting asynchronously.");
+        Assert.NotNull(independent);
+        Assert.All(results, Assert.NotNull);
+        Assert.Equal(0, fixture.SlowLogger.Errors);
+        Assert.Equal(0, fixture.FastLogger.Errors);
+        fixture.SlowFactory.WriterAdmission = null;
+        await using var proof = fixture.SlowFactory.CreateDbContext();
+        var actions = await proof.UserActivityLogs.Select(item => item.Action).ToArrayAsync();
+        Assert.Equal(9, actions.Length);
+        Assert.Equal(9, actions.Distinct().Count());
+    }
+
+    [Fact]
+    public async Task CancellingQueuedAuditDoesNotEnterNativeAdmissionAndAllowsTheNextWrite()
+    {
+        await using var fixture = await Fixture.CreateAsync(sharedCache: true);
+        var observer = new WriterAdmissionObserver(expectedContexts: 2);
+        fixture.SlowFactory.WriterAdmission = observer;
+        var first = Task.Run(() => fixture.Slow.TryWriteAsync(Entry("held")));
+        using var cancellation = new CancellationTokenSource();
+        UserActivityLog? cancelled = null;
+        UserActivityLog? completed;
+        try
+        {
+            await observer.FirstStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            var pending = Task.Run(() => fixture.Slow.TryWriteAsync(Entry("cancelled-queued"), cancellation.Token));
+            await observer.AllContextsCreated.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            cancellation.Cancel();
+            cancelled = await pending.WaitAsync(TimeSpan.FromSeconds(1));
+            Assert.False(observer.SecondAdmission.Task.IsCompleted);
+        }
+        finally
+        {
+            observer.ReleaseFirst.TrySetResult();
+            completed = await first.WaitAsync(TimeSpan.FromSeconds(3));
+        }
+
+        Assert.Null(cancelled);
+        Assert.NotNull(completed);
+        fixture.SlowFactory.WriterAdmission = null;
+        using var nextBudget = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        Assert.NotNull(await fixture.Slow.TryWriteAsync(Entry("after-cancel"), nextBudget.Token));
+        Assert.Equal(1, fixture.SlowLogger.Errors); // The deliberately cancelled write only.
+        await using var proof = fixture.SlowFactory.CreateDbContext();
+        var actions = await proof.UserActivityLogs.Select(item => item.Action).OrderBy(action => action).ToArrayAsync();
+        Assert.Equal(new[] { "after-cancel", "held" }, actions);
+    }
+
+    [Fact]
     public async Task BusyWriterCannotKeepCancelledAuditBlockedUntilNativeDefaultTimeout()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -160,21 +244,53 @@ public sealed class UserActivitySqliteWriteBudgetTests
         private readonly ILoggerFactory _logging = LoggerFactory.Create(builder => builder
             .SetMinimumLevel(LogLevel.Error).AddProvider(new ErrorProvider(logger)));
         private SqliteConnection? _lastConnection;
+        public WriterAdmissionObserver? WriterAdmission { get; set; }
         public string ConnectionString => connectionString;
         public TaskCompletionSource Opened { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public int? CreatedConnectionDefaultTimeout => _lastConnection?.DefaultTimeout;
         public PaymentContext CreateDbContext()
         {
+            var writerAdmission = WriterAdmission;
+            writerAdmission?.ContextCreated();
             var connection = new SqliteConnection(connectionString);
             _lastConnection = connection;
-            return new PaymentContext(new DbContextOptionsBuilder<PaymentContext>()
+            var builder = new DbContextOptionsBuilder<PaymentContext>()
                 .UseSqlite(connection, contextOwnsConnection: true)
                 .UseLoggerFactory(_logging)
-                .AddInterceptors(new OpenObserver(Opened)).Options);
+                .AddInterceptors(new OpenObserver(Opened));
+            if (writerAdmission is not null) builder.AddInterceptors(writerAdmission);
+            return new PaymentContext(builder.Options);
         }
         public Task<PaymentContext> CreateDbContextAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(CreateDbContext());
         public void Dispose() => _logging.Dispose();
+    }
+
+    private sealed class WriterAdmissionObserver(int expectedContexts) : DbTransactionInterceptor
+    {
+        private int _contexts;
+        private int _admissions;
+        public TaskCompletionSource AllContextsCreated { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource FirstStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource SecondAdmission { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseFirst { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public void ContextCreated()
+        {
+            if (Interlocked.Increment(ref _contexts) == expectedContexts) AllContextsCreated.TrySetResult();
+        }
+        public override ValueTask<InterceptionResult<DbTransaction>> TransactionStartingAsync(DbConnection connection,
+            TransactionStartingEventData eventData, InterceptionResult<DbTransaction> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _admissions) == 2) SecondAdmission.TrySetResult();
+            return ValueTask.FromResult(result);
+        }
+        public override async ValueTask<DbTransaction> TransactionStartedAsync(DbConnection connection,
+            TransactionEndEventData eventData, DbTransaction result, CancellationToken cancellationToken = default)
+        {
+            if (FirstStarted.TrySetResult()) await ReleaseFirst.Task.WaitAsync(cancellationToken);
+            return result;
+        }
     }
 
     private sealed class ErrorProvider(AuditLogger logger) : ILoggerProvider
