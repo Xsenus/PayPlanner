@@ -1401,7 +1401,7 @@
 | POST | api/v2/clients | ClientsV2Controller | Create | backend/Controllers/V2/ClientsV2Controller.cs:561 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
 | PUT | api/v2/clients/{id:int} | ClientsV2Controller | Update | backend/Controllers/V2/ClientsV2Controller.cs:591 | [Authorize] | да | нет |
 | DELETE | api/v2/clients/{id:int} | ClientsV2Controller | Delete | backend/Controllers/V2/ClientsV2Controller.cs:635 | [Authorize] | да | нет |
-| GET | api/v2/payments | PaymentsV2Controller | Get | backend/Controllers/V2/PaymentsV2Controller.cs:65 | [Authorize] | да | docs/full-project-audit-2026-06-10.md, docs/payplanner-financial-documents-roadmap-2026-10-14.md |
+| GET | api/v2/payments | PaymentsV2Controller | Get | backend/Controllers/V2/PaymentsV2Controller.cs:65 | [Authorize] | да | docs/full-project-audit-2026-06-10.md, docs/max-finance-provenance-review-2026-10-15.md, docs/payplanner-financial-documents-roadmap-2026-10-14.md |
 | GET | api/v2/payments/export.csv | PaymentsV2Controller | ExportCsv | backend/Controllers/V2/PaymentsV2Controller.cs:289 | [Authorize] | да | нет |
 | GET | api/v2/payments/export.xls | PaymentsV2Controller | ExportExcel | backend/Controllers/V2/PaymentsV2Controller.cs:351 | [Authorize] | да | нет |
 | GET | api/v2/payments/{id:int} | PaymentsV2Controller | GetById | backend/Controllers/V2/PaymentsV2Controller.cs:413 | [Authorize] | да | нет |

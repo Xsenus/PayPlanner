@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { createServer as createControlServer } from 'node:http';
-import { createServer } from 'vite';
+import { build, preview } from 'vite';
 import { createCaseReadLifecycle, createCaseRestartObserver, createCaseStartupReadTrace, isCaseBoundaryRead } from './case-retirement-browser-lifecycle.mjs';
 
 const api = new URL(process.env.CASE_RETIREMENT_API);
@@ -54,6 +54,7 @@ const browser = process.env.CASE_RETIREMENT_BROWSER ?? (process.platform === 'wi
 assert.ok(['msedge', 'chrome'].includes(browser), 'Use an installed Edge or Chrome channel.');
 const session = `case-retire-${basename(root).slice(-12)}`;
 const scenarioPath = join(root, 'case-retirement-scenario.js');
+const fixtureEntry = join(root, 'case-retirement-fixture.mjs');
 const execute = promisify(execFile);
 async function cli(...args) {
   const result = await execute(process.execPath, [cliPath, `-s=${session}`, ...args], {
@@ -100,37 +101,44 @@ try {
     });
     controlUrl = `http://127.0.0.1:${control.address().port}/apply`;
   }
-  vite = await createServer({ envDir: root, cacheDir: join(root, 'vite-browser-cache'), plugins: [{
-    name: 'case-browser-fixed-source',
-    config(config) {
-      config.server ??= {};
-      config.server.watch = null;
-    },
-  }], server: { host: '127.0.0.1', port, strictPort: true, hmr: false }, logLevel: 'error' });
-  assert.equal(vite.config.isProduction, true, 'The case-document browser must qualify production React behavior.');
-  assert.equal(vite.config.env.DEV, false, 'The release browser must not use development-only mount effects.');
-  assert.equal(vite.config.oxc.jsx.refresh, false, 'The release source transform must not inject React Refresh globals.');
-  assert.equal(vite.config.server.watch, null, 'The immutable case-document fixture must disable file watching.');
-  await vite.listen();
-  // Prepare the real entry within the existing scenario budget before browser navigation.
-  const entry = await vite.transformRequest('/src/main.tsx');
-  assert.ok(entry?.code, 'The synthetic case-document UI entry module must compile successfully.');
-  // These real route modules are lazy imports, outside the entry's static crawl.
-  // Compile only the routes this scenario opens, within its existing deadline.
-  const routeModules = ['/src/components/Cases/CaseDetailPage.tsx'];
-  if (flow.includes('modal')) routeModules.push('/src/components/Clients/ClientDetail.tsx');
-  for (const routeModule of routeModules) {
-    const compiled = await vite.transformRequest(routeModule);
-    assert.ok(compiled?.code, 'The synthetic case-document route must compile: ' + routeModule);
-  }
-  // Finish the initial static-import crawl within the unchanged scenario budget.
-  await vite.waitForRequestsIdle();
+  // Match the existing managed-chat gate: compile the real release UI before
+  // navigation, inside the same enclosing three-minute scenario budget.
+  // A second entry exposes the real upload helper, shared with the UI bundle;
+  // it replaces source-module imports, not the browser's storage or API calls.
+  await writeFile(fixtureEntry,
+    `export { beginCaseDocumentUpload } from ${JSON.stringify(resolve('src/services/caseDocumentUploadAttempts.ts').replaceAll('\\', '/'))};\n`
+    + `export { getAuthToken } from ${JSON.stringify(resolve('src/services/api.ts').replaceAll('\\', '/'))};\n`);
+  const outDir = join(root, 'case-retirement-ui-dist');
+  await mkdir(outDir);
+  const uiConfig = { envDir: root, cacheDir: join(root, 'vite-browser-cache'), logLevel: 'error',
+    build: { outDir, emptyOutDir: false, rollupOptions: {
+      input: { index: resolve('index.html'), 'case-retirement-fixture': fixtureEntry },
+      preserveEntrySignatures: 'strict',
+    } } };
+  const built = await build(uiConfig);
+  const chunks = (Array.isArray(built) ? built : [built]).flatMap(output => output.output ?? [])
+    .filter(chunk => chunk.type === 'chunk');
+  assert.ok(chunks.some(chunk => chunk.isEntry && chunk.name === 'index' && chunk.code.length > 0),
+    'The real case-document UI entry must compile successfully.');
+  const fixtureChunks = chunks.filter(chunk => chunk.isEntry && chunk.name === 'case-retirement-fixture');
+  assert.equal(fixtureChunks.length, 1, 'The real upload helper must have one compiled fixture entry.');
+  const fixtureChunk = fixtureChunks[0];
+  assert.ok(['beginCaseDocumentUpload', 'getAuthToken'].every(name => fixtureChunk.exports.includes(name)),
+    'The compiled fixture must preserve the real upload and authentication helpers.');
+  const moduleUrls = source => chunks.filter(chunk => chunk.moduleIds.some(id => id.replaceAll('\\', '/').endsWith(source)))
+    .map(chunk => ui + '/' + chunk.fileName);
+  const realtimeDisconnectUrls = moduleUrls('/src/services/realtimeNotifications.ts');
+  const realtimePollingUrls = moduleUrls('/src/components/Notifications/RealtimeNotificationToasts.tsx');
+  assert.ok(realtimeDisconnectUrls.length > 0 && realtimePollingUrls.length > 0,
+    'The release bundle must retain the real notification modules.');
+  vite = await preview({ ...uiConfig, preview: { host: '127.0.0.1', port, strictPort: true } });
   // Own the browser before navigation so a failed page load still closes it.
   await cli('open', 'about:blank', '--browser', browser);
   opened = true;
   await cli('goto', ui + '/cases/' + caseId);
   await cli('snapshot');
   const settings = JSON.stringify({ api: api.origin, ui, caseId, key, flow, clientId, sourceDocumentId, documentKey, controlUrl,
+    fixtureModule: ui + '/' + fixtureChunk.fileName, realtimeDisconnectUrls, realtimePollingUrls,
     pending: flow.includes('writ') ? { fileName: 'retirement-browser-owned.pdf', contentType: 'application/pdf',
       documentType: 'Исполнительный лист', status: 'Получен', bytes: '%PDF-1.4\nOwned browser writ\n%%EOF' }
       : { fileName: 'retirement-browser-owned.bin', contentType: 'application/octet-stream', documentType: 'Документ',
@@ -219,14 +227,14 @@ try {
           settings.api + '/api/v2/cases/' + settings.caseId + '/documents/uploads/' + settings.key + '/retire']
           .includes(message.location().url.split('?')[0]);
       const expectedRestartDisconnect = restarted && restarting
-        && message.location().url === settings.ui + '/src/services/realtimeNotifications.ts'
+        && settings.realtimeDisconnectUrls.includes(message.location().url)
         && message.text().startsWith('Connection disconnected with error');
       const expectedRestartRefusal = restarted && restarting
         && message.text() === 'Failed to load resource: net::ERR_CONNECTION_REFUSED'
         && [settings.api + '/hubs/notifications/negotiate', settings.api + '/api/notifications/inbox']
           .includes(message.location().url.split('?')[0]);
       const expectedRestartPolling = restarted && restarting
-        && message.location().url === settings.ui + '/src/components/Notifications/RealtimeNotificationToasts.tsx'
+        && settings.realtimePollingUrls.includes(message.location().url)
         && message.text().startsWith('Fallback notifications polling failed. TypeError: Failed to fetch');
       const expectedUnavailableProof = restarted && restarting
         && message.text() === 'Failed to load resource: net::ERR_CONNECTION_REFUSED'
@@ -299,8 +307,7 @@ try {
     tracePhase = 'fixture-identity';
     // Register a fixture identity through the real helper, then bind it to the owned durable server attempt.
     await page.evaluate(async settings => {
-      const { beginCaseDocumentUpload } = await import('/src/services/caseDocumentUploadAttempts.ts');
-      const { getAuthToken } = await import('/src/services/api.ts');
+      const { beginCaseDocumentUpload, getAuthToken } = await import(settings.fixtureModule);
       const scope = JSON.stringify(settings.flow === 'version'
         ? ['version', settings.api + '/api', settings.sourceDocumentId, settings.pending.documentType, settings.pending.status]
         : ['case', settings.api + '/api', settings.caseId, settings.documentKey, settings.pending.documentType, settings.pending.status]);
@@ -501,6 +508,7 @@ try {
         // Release the owned IPC handle only after Vite has removed its stdin termination listener.
         if (control) process.stdin.destroy();
         await rm(scenarioPath, { force: true });
+        await rm(fixtureEntry, { force: true });
       }
     }
   }
