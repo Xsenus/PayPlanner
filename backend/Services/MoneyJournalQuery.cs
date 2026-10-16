@@ -251,7 +251,7 @@ internal sealed class MoneyJournalQuery(PaymentContext db, MoneyJournalQuerySour
                 AccountingType = operation.AccountingType == MoneyOperationAccountingType.Fact
                     ? nameof(MoneyOperationAccountingType.Fact)
                     : nameof(MoneyOperationAccountingType.Plan),
-                CompanyId = _db.MoneyAccounts.IgnoreQueryFilters().Where(account => account.Id == operation.MoneyAccountId)
+                CompanyId = _db.MoneyAccounts.Where(account => account.Id == operation.MoneyAccountId)
                     .Select(account => account.CompanyId).FirstOrDefault(),
                 MoneyAccountId = operation.MoneyAccountId,
                 MoneyAccountName = operation.MoneyAccount != null ? operation.MoneyAccount.Name : null,

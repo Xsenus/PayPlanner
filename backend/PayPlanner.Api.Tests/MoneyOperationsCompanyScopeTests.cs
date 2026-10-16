@@ -458,5 +458,36 @@ public partial class MoneyOperationsControllerTests
         using var body = JsonDocument.Parse(JsonSerializer.Serialize(result.Value));
         Assert.Empty(body.RootElement.EnumerateArray());
         Assert.IsType<NotFoundResult>(await controller.GetById(original.Id, default));
+
+        // Disabling an account keeps its live history; deleting a movement must
+        // still exclude it from the journal and every derived balance.
+        var live = ManualCompanyOperation(fixture.Seed, fixture.Seed.Own.Id);
+        live.Amount = 7m;
+        db.MoneyOperations.Add(live);
+        await db.SaveChangesAsync();
+        await db.MoneyAccounts.Where(account => account.Id == fixture.Seed.Own.Id)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(account => account.IsActive, false));
+        var journal = Assert.IsType<OkObjectResult>(await controller.Get(null, null, null, null, null));
+        Assert.Equal(live.Id, Assert.Single(Assert.IsAssignableFrom<IEnumerable<MoneyOperationListItemDto>>(journal.Value)).Id);
+        Assert.IsType<NotFoundResult>(await controller.GetById(original.Id, default));
+        Assert.IsType<OkObjectResult>(await controller.GetById(live.Id, default));
+
+        var pageResult = await controller.GetPaged(null, null, null, null, null);
+        var page = Assert.IsType<MoneyOperationsPageResponse>(Assert.IsType<OkObjectResult>(pageResult.Result).Value);
+        Assert.Equal(1, page.Total);
+        Assert.Equal(live.Id, Assert.Single(page.Items).Id);
+        Assert.Equal(7m, page.Summary.Expense);
+        Assert.Equal(-7m, page.Summary.EndBalance);
+        Assert.Equal(1, page.Summary.ExpenseCount);
+
+        var dailyResult = await controller.GetDailyBalances(BankScopeDate, BankScopeDate, MoneyOperationSource.Bank, null);
+        var daily = Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<MoneyOperationDailyBalanceDto>>(
+            Assert.IsType<OkObjectResult>(dailyResult.Result).Value));
+        Assert.Equal(fixture.Seed.Company.Id, daily.CompanyId);
+        Assert.Equal(fixture.Seed.Own.Id, daily.MoneyAccountId);
+        Assert.Equal("RUB", daily.Currency);
+        Assert.Equal(7m, daily.Expense);
+        Assert.Equal(-7m, daily.ClosingBalance);
+        Assert.Equal(1, daily.ExpenseCount);
     }
 }
