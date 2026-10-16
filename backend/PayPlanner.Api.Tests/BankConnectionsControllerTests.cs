@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -6,6 +7,8 @@ using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services.Banking;
+using System.Security.Claims;
+using System.Text.Json;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -17,6 +20,7 @@ public class BankConnectionsControllerTests
         public string Key => BankProviderKeys.Sber;
         public List<BankAccountInfo> Accounts { get; } = [];
         public HashSet<string> Failing { get; } = [];
+        public int StatementCalls { get; private set; }
 
         public Task<BankTokens> RefreshTokensAsync(string refreshToken, CancellationToken ct)
             => Task.FromResult(new BankTokens("a", "r", DateTime.UtcNow.AddHours(1)));
@@ -26,6 +30,7 @@ public class BankConnectionsControllerTests
 
         public Task<BankStatementPage> GetStatementPageAsync(BankCredentials credentials, string externalAccountId, DateTime from, DateTime to, string? cursor, CancellationToken ct)
         {
+            StatementCalls++;
             if (Failing.Contains(externalAccountId)) throw new InvalidOperationException("bank unavailable");
             return Task.FromResult(new BankStatementPage(
                 [new BankOperationInfo(externalAccountId + "-1", new DateTime(2026, 10, 2), 100m, true, true, "7707083893", "Клиент", null, "Оплата")], null));
@@ -38,8 +43,24 @@ public class BankConnectionsControllerTests
         await sqlite.OpenAsync();
         var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(sqlite).Options);
         await db.Database.EnsureCreatedAsync();
-        var company = new LegalEntity { ShortName = "Своя", Inn = "7707083893" };
+        var company = new LegalEntity { ShortName = "Своя", Inn = "7707083893", ProfileStatus = CompanyProfileStatuses.Active };
         db.LegalEntities.Add(company);
+        await db.SaveChangesAsync();
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "legalEntities.mainCompanyIds",
+            Value = System.Text.Json.JsonSerializer.Serialize(new[] { company.Id }),
+        });
+        var administrator = new User
+        {
+            Email = "bank-controller-fixture@example.test",
+            FullName = "Bank fixture administrator",
+            Role = new Role { Name = "admin" },
+            IsActive = true,
+            IsApproved = true,
+            IsEmployee = false,
+        };
+        db.Users.Add(administrator);
         await db.SaveChangesAsync();
         var bank = new Bank();
         var service = new BankSyncService(db, [bank], new EphemeralDataProtectionProvider());
@@ -48,7 +69,21 @@ public class BankConnectionsControllerTests
         connection.RefreshTokenExpiresAt = DateTime.UtcNow.AddDays(5);
         db.BankConnections.Add(connection);
         await db.SaveChangesAsync();
-        return (db, new BankConnectionsController(db, service), bank, connection);
+        var controller = new BankConnectionsController(db, service)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                    [
+                        new Claim(ClaimTypes.NameIdentifier, administrator.Id.ToString()),
+                        new Claim(ClaimTypes.Role, "admin"),
+                    ], "Test")),
+                },
+            },
+        };
+        return (db, controller, bank, connection);
     }
 
     private static BankAccountInfo Account(string id, string number)
@@ -81,7 +116,7 @@ public class BankConnectionsControllerTests
         await controller.SyncAccounts(connection.Id, default);
         bank.Failing.Add("bad");
 
-        var result = await controller.SyncAllStatements(connection.Id, new BankStatementPeriodRequest { From = new DateTime(2026, 10, 1), To = new DateTime(2026, 10, 9) }, default);
+        var result = await controller.SyncAllStatements(connection.Id, new BankStatementPeriodRequest { RequestId = Guid.NewGuid(), From = new DateTime(2026, 10, 1), To = new DateTime(2026, 10, 9) }, default);
 
         var run = Assert.IsType<BankStatementRunDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
         Assert.Equal("Partial", run.Status);
@@ -99,7 +134,7 @@ public class BankConnectionsControllerTests
         await using var _db = db;
 
         var result = await controller.SyncAllStatements(connection.Id,
-            new BankStatementPeriodRequest { From = new DateTime(fy, fm, fd), To = new DateTime(ty, tm, td) }, default);
+            new BankStatementPeriodRequest { RequestId = Guid.NewGuid(), From = new DateTime(fy, fm, fd), To = new DateTime(ty, tm, td) }, default);
 
         Assert.IsType<BadRequestObjectResult>(result.Result);
     }
@@ -128,7 +163,11 @@ public class BankConnectionsControllerTests
         bank.Accounts.Add(Account("a", "40702810200000000001"));
         await controller.SyncAccounts(connection.Id, default);
         var accountId = (await db.BankConnectionAccounts.SingleAsync()).Id;
-        await controller.SyncStatement(accountId, new BankStatementPeriodRequest { From = new DateTime(2026, 10, 1), To = new DateTime(2026, 10, 9) }, default);
+        var sync = Assert.IsType<BankStatementRunDto>(Assert.IsType<OkObjectResult>((await controller.SyncStatement(accountId,
+            new BankStatementPeriodRequest { RequestId = Guid.NewGuid(), From = new DateTime(2026, 10, 1), To = new DateTime(2026, 10, 9) }, default)).Result).Value);
+        Assert.Equal("Success", sync.Status);
+        Assert.Equal(1, sync.Succeeded);
+        Assert.Null(Assert.Single(sync.Accounts).Error);
 
         var operations = Assert.IsType<BankOperationsPageDto>(Assert.IsType<OkObjectResult>((await controller.GetOperations(accountId, null, null, 1, 5000, default)).Result).Value);
         var logs = Assert.IsType<BankSyncLogPageDto>(Assert.IsType<OkObjectResult>((await controller.GetLogs(connection.Id, 1, 5000, default)).Result).Value);
@@ -138,5 +177,30 @@ public class BankConnectionsControllerTests
         Assert.Equal(2, logs.Total);
         Assert.Equal("statement", logs.Items[0].Kind);
         Assert.IsType<NotFoundResult>((await controller.GetOperations(999, null, null, 1, 10, default)).Result);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SyncStatements_RejectsMissingRequestIdentityBeforeBankCall(bool allAccounts)
+    {
+        var (db, controller, bank, connection) = await CreateAsync();
+        await using var _ = db;
+        bank.Accounts.Add(Account("a", "40702810200000000001"));
+        await controller.SyncAccounts(connection.Id, default);
+        var accountId = (await db.BankConnectionAccounts.SingleAsync()).Id;
+        var request = new BankStatementPeriodRequest { From = new DateTime(2026, 10, 1), To = new DateTime(2026, 10, 9) };
+
+        var result = allAccounts
+            ? await controller.SyncAllStatements(connection.Id, request, default)
+            : await controller.SyncStatement(accountId, request, default);
+
+        var error = Assert.IsType<BadRequestObjectResult>(result.Result);
+        using var body = JsonDocument.Parse(JsonSerializer.Serialize(error.Value));
+        Assert.Contains("идентификатор", body.RootElement.GetProperty("message").GetString() ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, bank.StatementCalls);
+        Assert.Empty(await db.BankStatementOperations.ToListAsync());
+        Assert.Empty(await db.BankStatementImportBatches.ToListAsync());
+        Assert.Empty(await db.MoneyOperations.ToListAsync());
     }
 }
