@@ -6,9 +6,11 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
@@ -20,6 +22,25 @@ namespace PayPlanner.Api.Tests;
 public class ReportsControllerTests
 {
     [Fact]
+    public async Task BankStatementImports_RejectsRoleOnlyPrincipalWithoutDatabaseUser()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = new ReportsController(db, NullLogger<ReportsController>.Instance)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext { User = CreateAdminPrincipal() },
+            },
+        };
+
+        var result = await controller.BankStatementImports(
+            new DateTime(2026, 5, 1), new DateTime(2026, 5, 31), CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result.Result);
+        Assert.Empty(await db.Users.ToArrayAsync());
+    }
+
+    [Fact]
     public async Task LegalWork_GroupsVisibleCasesDeadlinesTasksAndFinance()
     {
         await using var db = await CreateContextAsync();
@@ -30,6 +51,7 @@ public class ReportsControllerTests
         };
         var responsible = new User
         {
+            IsApproved = true,
             Email = "lawyer@example.test",
             FullName = "Иванов Иван",
             IsActive = true,
@@ -240,6 +262,7 @@ public class ReportsControllerTests
         var role = new Role { Name = "manager", Description = "Manager" };
         var responsible = new User
         {
+            IsApproved = true,
             Email = "manager@example.test",
             FullName = "Manager User",
             IsActive = true,
@@ -700,6 +723,7 @@ public class ReportsControllerTests
         var role = new Role { Name = "management-exporter-timezone", Description = "Management exporter timezone" };
         var user = new User
         {
+            IsApproved = true,
             Email = "management-exporter-timezone@example.test",
             FullName = "Management Exporter Timezone",
             IsActive = true,
@@ -805,6 +829,7 @@ public class ReportsControllerTests
         var role = new Role { Name = "reports-exporter", Description = "Reports exporter" };
         var user = new User
         {
+            IsApproved = true,
             Email = "reports-exporter@example.test",
             FullName = "Reports Exporter",
             IsActive = true,
@@ -893,6 +918,7 @@ public class ReportsControllerTests
         var role = new Role { Name = "reports-exporter-dates", Description = "Reports exporter dates" };
         var user = new User
         {
+            IsApproved = true,
             Email = "reports-exporter-dates@example.test",
             FullName = "Reports Exporter Dates",
             IsActive = true,
@@ -1027,6 +1053,7 @@ public class ReportsControllerTests
         var role = new Role { Name = "reports-viewer", Description = "Reports viewer" };
         var user = new User
         {
+            IsApproved = true,
             Email = "reports-viewer@example.test",
             FullName = "Reports Viewer",
             IsActive = true,
@@ -1326,6 +1353,7 @@ public class ReportsControllerTests
         };
         var user = new User
         {
+            IsApproved = true,
             Email = $"reports-tasks-{Guid.NewGuid():N}@example.test",
             FullName = "Reports tasks export user",
             IsActive = true,
@@ -1393,6 +1421,7 @@ public class ReportsControllerTests
         };
         var user = new User
         {
+            IsApproved = true,
             Email = $"reports-tasks-scope-{Guid.NewGuid():N}@example.test",
             FullName = "Visible task export user",
             IsActive = true,
@@ -1521,6 +1550,7 @@ public class ReportsControllerTests
         var role = new Role { Name = "case-activity-admin", Description = "Admin" };
         var responsible = new User
         {
+            IsApproved = true,
             Email = "case-owner@example.test",
             FullName = "Case Owner",
             IsActive = true,
@@ -1645,6 +1675,7 @@ public class ReportsControllerTests
         var role = new Role { Name = "case-activity-lawyer", Description = "Lawyer" };
         var visibleUser = new User
         {
+            IsApproved = true,
             Email = "visible-case-report@example.test",
             FullName = "Visible User",
             IsActive = true,
@@ -1652,6 +1683,7 @@ public class ReportsControllerTests
         };
         var hiddenUser = new User
         {
+            IsApproved = true,
             Email = "hidden-case-report@example.test",
             FullName = "Hidden User",
             IsActive = true,
@@ -1795,6 +1827,7 @@ public class ReportsControllerTests
         };
         var visibleUser = new User
         {
+            IsApproved = true,
             Email = $"visible-case-activity-export-{Guid.NewGuid():N}@example.test",
             FullName = "Visible Case Activity Export User",
             IsActive = true,
@@ -1802,6 +1835,7 @@ public class ReportsControllerTests
         };
         var hiddenUser = new User
         {
+            IsApproved = true,
             Email = $"hidden-case-activity-export-{Guid.NewGuid():N}@example.test",
             FullName = "Hidden Case Activity Export User",
             IsActive = true,
@@ -1919,6 +1953,7 @@ public class ReportsControllerTests
         var role = new Role { Name = "current-cases-lawyer", Description = "Lawyer" };
         var visibleUser = new User
         {
+            IsApproved = true,
             Email = "visible-current-cases@example.test",
             FullName = "Visible Current User",
             IsActive = true,
@@ -1926,6 +1961,7 @@ public class ReportsControllerTests
         };
         var hiddenUser = new User
         {
+            IsApproved = true,
             Email = "hidden-current-cases@example.test",
             FullName = "Hidden Current User",
             IsActive = true,
@@ -2108,6 +2144,7 @@ public class ReportsControllerTests
         var role = new Role { Name = "current-cases-projection-role", Description = "Current cases reporter" };
         var user = new User
         {
+            IsApproved = true,
             Email = "current-cases-projection@example.test",
             FullName = "Projection Lawyer",
             IsActive = true,
@@ -2201,6 +2238,7 @@ public class ReportsControllerTests
         var role = new Role { Name = "task-report-role", Description = "Task reporter" };
         var visibleUser = new User
         {
+            IsApproved = true,
             Email = "visible-task-report@example.test",
             FullName = "Visible Task User",
             IsActive = true,
@@ -2208,6 +2246,7 @@ public class ReportsControllerTests
         };
         var hiddenUser = new User
         {
+            IsApproved = true,
             Email = "hidden-task-report@example.test",
             FullName = "Hidden Task User",
             IsActive = true,
@@ -2324,6 +2363,7 @@ public class ReportsControllerTests
         var role = new Role { Name = "task-report-timezone-role", Description = "Task reporter" };
         var user = new User
         {
+            IsApproved = true,
             Email = "task-report-timezone@example.test",
             FullName = "Task Report Timezone User",
             IsActive = true,
@@ -2399,6 +2439,7 @@ public class ReportsControllerTests
         var role = new Role { Name = "task-report-projection-role", Description = "Task reporter" };
         var user = new User
         {
+            IsApproved = true,
             Email = "task-report-projection@example.test",
             FullName = "Task Report Projection User",
             IsActive = true,
@@ -2500,6 +2541,7 @@ public class ReportsControllerTests
         var role = new Role { Name = "lawyer-workload-role", Description = "Lawyer" };
         var visibleUser = new User
         {
+            IsApproved = true,
             Email = "visible-workload@example.test",
             FullName = "Visible Workload User",
             IsActive = true,
@@ -2507,6 +2549,7 @@ public class ReportsControllerTests
         };
         var hiddenUser = new User
         {
+            IsApproved = true,
             Email = "hidden-workload@example.test",
             FullName = "Hidden Workload User",
             IsActive = true,
@@ -2677,6 +2720,7 @@ public class ReportsControllerTests
         var role = new Role { Name = "lawyer-workload-projection-role", Description = "Workload reporter" };
         var user = new User
         {
+            IsApproved = true,
             Email = "lawyer-workload-projection@example.test",
             FullName = "Projection Workload Lawyer",
             IsActive = true,
@@ -2797,6 +2841,7 @@ public class ReportsControllerTests
         };
         var visibleUser = new User
         {
+            IsApproved = true,
             Email = $"visible-workload-export-{Guid.NewGuid():N}@example.test",
             FullName = "Visible Workload Export User",
             IsActive = true,
@@ -2804,6 +2849,7 @@ public class ReportsControllerTests
         };
         var hiddenUser = new User
         {
+            IsApproved = true,
             Email = $"hidden-workload-export-{Guid.NewGuid():N}@example.test",
             FullName = "Hidden Workload Export User",
             IsActive = true,
@@ -2963,6 +3009,7 @@ public class ReportsControllerTests
         var role = new Role { Name = "deadline-report-lawyer", Description = "Lawyer" };
         var visibleUser = new User
         {
+            IsApproved = true,
             Email = "visible-deadline-report@example.test",
             FullName = "Visible Deadline User",
             IsActive = true,
@@ -2970,6 +3017,7 @@ public class ReportsControllerTests
         };
         var hiddenUser = new User
         {
+            IsApproved = true,
             Email = "hidden-deadline-report@example.test",
             FullName = "Hidden Deadline User",
             IsActive = true,
@@ -3120,6 +3168,7 @@ public class ReportsControllerTests
         };
         var visibleUser = new User
         {
+            IsApproved = true,
             Email = $"visible-deadline-export-{Guid.NewGuid():N}@example.test",
             FullName = "Visible Deadline Export User",
             IsActive = true,
@@ -3127,6 +3176,7 @@ public class ReportsControllerTests
         };
         var hiddenUser = new User
         {
+            IsApproved = true,
             Email = $"hidden-deadline-export-{Guid.NewGuid():N}@example.test",
             FullName = "Hidden Deadline Export User",
             IsActive = true,
@@ -3269,6 +3319,7 @@ public class ReportsControllerTests
         var role = new Role { Name = "legal-work-lawyer", Description = "Lawyer" };
         var visibleUser = new User
         {
+            IsApproved = true,
             Email = "visible-legal-work@example.test",
             FullName = "Visible Legal Work User",
             IsActive = true,
@@ -3276,6 +3327,7 @@ public class ReportsControllerTests
         };
         var hiddenUser = new User
         {
+            IsApproved = true,
             Email = "hidden-legal-work@example.test",
             FullName = "Hidden Legal Work User",
             IsActive = true,
@@ -3437,8 +3489,22 @@ public class ReportsControllerTests
     {
         await using var db = await CreateContextAsync();
         var role = new Role { Name = "legal-work-payment-scope", Description = "Legal work payment scope" };
-        var viewer = new User { Email = "legal-work-viewer@example.test", FullName = "Case Viewer", IsActive = true, Role = role };
-        var clientOwner = new User { Email = "legal-work-owner@example.test", FullName = "Client Owner", IsActive = true, Role = role };
+        var viewer = new User
+        {
+            IsApproved = true,
+            Email = "legal-work-viewer@example.test",
+            FullName = "Case Viewer",
+            IsActive = true,
+            Role = role
+        };
+        var clientOwner = new User
+        {
+            IsApproved = true,
+            Email = "legal-work-owner@example.test",
+            FullName = "Client Owner",
+            IsActive = true,
+            Role = role
+        };
         var client = new Client { Name = "Shared Client", ResponsibleUser = clientOwner };
         var clientCase = new ClientCase
         {
@@ -3511,6 +3577,7 @@ public class ReportsControllerTests
         var role = new Role { Name = "legal-work-projection-role", Description = "Legal work reporter" };
         var user = new User
         {
+            IsApproved = true,
             Email = "legal-work-projection@example.test",
             FullName = "Projection Legal Lawyer",
             IsActive = true,
@@ -3630,6 +3697,7 @@ public class ReportsControllerTests
         var role = new Role { Name = "case-finance-lawyer", Description = "Lawyer" };
         var visibleUser = new User
         {
+            IsApproved = true,
             Email = "visible-case-finance@example.test",
             FullName = "Visible Case Finance User",
             IsActive = true,
@@ -3637,6 +3705,7 @@ public class ReportsControllerTests
         };
         var hiddenUser = new User
         {
+            IsApproved = true,
             Email = "hidden-case-finance@example.test",
             FullName = "Hidden Case Finance User",
             IsActive = true,
@@ -3814,8 +3883,22 @@ public class ReportsControllerTests
     {
         await using var db = await CreateContextAsync();
         var role = new Role { Name = "case-finance-payment-scope", Description = "Case finance payment scope" };
-        var viewer = new User { Email = "case-finance-viewer@example.test", FullName = "Case Viewer", IsActive = true, Role = role };
-        var clientOwner = new User { Email = "case-finance-owner@example.test", FullName = "Client Owner", IsActive = true, Role = role };
+        var viewer = new User
+        {
+            IsApproved = true,
+            Email = "case-finance-viewer@example.test",
+            FullName = "Case Viewer",
+            IsActive = true,
+            Role = role
+        };
+        var clientOwner = new User
+        {
+            IsApproved = true,
+            Email = "case-finance-owner@example.test",
+            FullName = "Client Owner",
+            IsActive = true,
+            Role = role
+        };
         var client = new Client { Name = "Shared Client", ResponsibleUser = clientOwner };
         var clientCase = new ClientCase
         {
@@ -3883,6 +3966,7 @@ public class ReportsControllerTests
         var role = new Role { Name = "case-finance-projection-role", Description = "Case finance reporter" };
         var user = new User
         {
+            IsApproved = true,
             Email = "case-finance-projection@example.test",
             FullName = "Projection Finance Lawyer",
             IsActive = true,
@@ -4061,6 +4145,7 @@ public class ReportsControllerTests
         var role = new Role { Name = "case-success-lawyer", Description = "Lawyer" };
         var visibleUser = new User
         {
+            IsApproved = true,
             Email = "visible-case-success@example.test",
             FullName = "Visible Case Success User",
             IsActive = true,
@@ -4068,6 +4153,7 @@ public class ReportsControllerTests
         };
         var hiddenUser = new User
         {
+            IsApproved = true,
             Email = "hidden-case-success@example.test",
             FullName = "Hidden Case Success User",
             IsActive = true,
@@ -4222,6 +4308,7 @@ public class ReportsControllerTests
         var role = new Role { Name = "case-success-projection-role", Description = "Case success reporter" };
         var user = new User
         {
+            IsApproved = true,
             Email = "case-success-projection@example.test",
             FullName = "Projection Success Lawyer",
             IsActive = true,
@@ -4411,6 +4498,7 @@ public class ReportsControllerTests
         };
         var visibleUser = new User
         {
+            IsApproved = true,
             Email = "visible@example.test",
             FullName = "Видимый пользователь",
             IsActive = true,
@@ -4418,6 +4506,7 @@ public class ReportsControllerTests
         };
         var hiddenUser = new User
         {
+            IsApproved = true,
             Email = "hidden@example.test",
             FullName = "Скрытый пользователь",
             IsActive = true,
@@ -4546,6 +4635,7 @@ public class ReportsControllerTests
         };
         var user = new User
         {
+            IsApproved = true,
             Email = "limited@example.test",
             FullName = "Ограниченный пользователь",
             IsActive = true,
@@ -4597,6 +4687,7 @@ public class ReportsControllerTests
         };
         var user = new User
         {
+            IsApproved = true,
             Email = "reports-hidden@example.test",
             FullName = "Reports Hidden User",
             IsActive = true,
@@ -7867,6 +7958,28 @@ services.Id,
     {
         await using var db = await CreateContextAsync();
         var user = await CreateReportsUserWithTimeZoneAsync(db, "Europe/Samara");
+        user.IsEmployee = true;
+        var company = new LegalEntity
+        {
+            ShortName = "SYNTHETIC report timezone company",
+            ProfileStatus = CompanyProfileStatuses.Active,
+        };
+        var account = new MoneyAccount
+        {
+            Name = "SYNTHETIC report timezone account",
+            Company = company,
+            Source = MoneyOperationSource.Bank,
+            Currency = "RUB",
+            IsActive = true,
+        };
+        db.MoneyAccounts.Add(account);
+        await db.SaveChangesAsync();
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "legalEntities.mainCompanyIds",
+            Value = JsonSerializer.Serialize(new[] { company.Id }),
+        });
+        db.UserCompanyAccesses.Add(new UserCompanyAccess { UserId = user.Id, LegalEntityId = company.Id });
         db.RolePermissions.Add(new RolePermission
         {
             RoleId = user.RoleId,
@@ -7874,9 +7987,19 @@ services.Id,
             CanView = true,
             ViewScope = DataVisibilityScope.All,
         });
-        db.BankStatementImportBatches.AddRange(
+        var batches = new[]
+        {
             BankStatementImportBatch("local-may-first.txt", BankStatementImportBatchStatus.Applied, 10, 8, 2, 0, 0, new DateTime(2026, 4, 30, 21, 30, 0, DateTimeKind.Utc)),
-            BankStatementImportBatch("local-may-second.txt", BankStatementImportBatchStatus.AppliedWithErrors, 20, 10, 5, 5, 0, new DateTime(2026, 5, 1, 20, 30, 0, DateTimeKind.Utc)));
+            BankStatementImportBatch("local-may-second.txt", BankStatementImportBatchStatus.AppliedWithErrors, 20, 10, 5, 5, 0, new DateTime(2026, 5, 1, 20, 30, 0, DateTimeKind.Utc)),
+        };
+        foreach (var batch in batches)
+        {
+            batch.CompanyId = company.Id;
+            batch.MoneyAccountId = account.Id;
+            batch.ResponsibleUserId = user.Id;
+            batch.Source = BankStatementImportSources.File;
+        }
+        db.BankStatementImportBatches.AddRange(batches);
         await db.SaveChangesAsync();
         var controller = CreateController(db, CreateUserPrincipal(user.Id));
 
@@ -8349,13 +8472,52 @@ services.Id,
         ClaimsPrincipal? user = null,
         IInvoiceDocumentPdfService? pdfService = null)
     {
+        var principal = user ?? CreateAdminPrincipal();
+        if (principal.Identity?.IsAuthenticated == true && principal.IsInRole("admin")
+            && !principal.GetUserId().HasValue)
+        {
+            principal = CreateDatabaseAdminPrincipal(db);
+        }
         var controller = new ReportsController(db, NullLogger<ReportsController>.Instance, pdfService);
         controller.ControllerContext = new ControllerContext
         {
-            HttpContext = new DefaultHttpContext { User = user ?? CreateAdminPrincipal() },
+            HttpContext = new DefaultHttpContext { User = principal },
         };
 
         return controller;
+    }
+
+    private static ClaimsPrincipal CreateDatabaseAdminPrincipal(PaymentContext db)
+    {
+        // Isolate authentication setup from tracked report data and query-count assertions.
+        var options = new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite(db.Database.GetDbConnection(), contextOwnsConnection: false)
+            .UseModel(db.Model)
+            .Options;
+        using var authority = new PaymentContext(options, useObjectAuditModel: false);
+        if (db.Database.CurrentTransaction is { } transaction)
+        {
+            authority.Database.UseTransaction(transaction.GetDbTransaction());
+        }
+        const string email = "reports-fixture-administrator@example.test";
+        var admin = authority.Users.IgnoreQueryFilters().SingleOrDefault(item => item.Email == email);
+        if (admin is null)
+        {
+            var role = authority.Roles.IgnoreQueryFilters().FirstOrDefault(item => item.Name.ToLower() == "admin")
+                ?? new Role { Name = "admin", Description = "Reports fixture administrator" };
+            admin = new User
+            {
+                Email = email,
+                FullName = "Reports fixture administrator",
+                IsActive = true,
+                IsApproved = true,
+                IsEmployee = false,
+                Role = role,
+            };
+            authority.Users.Add(admin);
+            authority.SaveChanges();
+        }
+        return CreateUserPrincipal(admin.Id, includeAdminRoleClaim: true);
     }
 
     private sealed class FakeInvoiceDocumentPdfService : IInvoiceDocumentPdfService
@@ -8401,6 +8563,7 @@ services.Id,
         };
         var user = new User
         {
+            IsApproved = true,
             Email = $"reports-timezone-{Guid.NewGuid():N}@example.test",
             FullName = "Reports Timezone User",
             IsActive = true,
@@ -8437,6 +8600,7 @@ services.Id,
         };
         var user = new User
         {
+            IsApproved = true,
             Email = $"admin-timezone-{Guid.NewGuid():N}@example.test",
             FullName = "Admin Timezone User",
             IsActive = true,
@@ -8470,6 +8634,7 @@ services.Id,
         };
         var user = new User
         {
+            IsApproved = true,
             Email = $"reports-payments-{Guid.NewGuid():N}@example.test",
             FullName = "Reports payments permission user",
             IsActive = true,
