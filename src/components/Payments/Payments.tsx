@@ -1,7 +1,7 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import { AlertTriangle, Ban, CalendarPlus, ChevronDown, Download, Loader2, Lock, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Trash2, X } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
@@ -18,11 +18,10 @@ import { PaymentsTable, type PaymentTableColumnKey } from '../Calendar/PaymentsT
 import { PaymentModal } from '../Calendar/PaymentModal';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { todayYMDInTimeZone, fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
-import { useClients } from '../../hooks/useClients';
 import { useDictionaries } from '../../hooks/useDictionaries';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
-import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
+import { CounterpartyPickerModal, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
 import { StatusChangeModal, type StatusChangeOption } from '../ui/StatusChangeModal';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { apiService } from '../../services/api';
@@ -387,7 +386,6 @@ export function Payments({
   const canViewLinkedInvoices = permissions.accounts?.canView === true;
   const canCreateLinkedInvoices = canViewLinkedInvoices && permissions.accounts?.canCreate === true;
   const { t, formatDate } = useTranslation();
-  const { clients } = useClients();
   const { dealTypes, incomeTypes, paymentSources } = useDictionaries();
   const profileTimeZoneId = useUserTimeZone();
   const defaultFrom = defaultFromDate(profileTimeZoneId);
@@ -395,7 +393,12 @@ export function Payments({
 
   const [fromDate, setFromDate] = useState(() => defaultFrom);
   const [toDate, setToDate] = useState(() => defaultTo);
-  const [selectedClientId, setSelectedClientId] = useState('');
+  const [selectedCounterparty, setSelectedCounterparty] = useState<CounterpartySelection | null>(null);
+  const [counterpartyPickerOpen, setCounterpartyPickerOpen] = useState(false);
+  const selectedClientId = selectedCounterparty?.kind === 'client' ? String(selectedCounterparty.id) : '';
+  const selectedLegalEntityId = selectedCounterparty?.kind === 'legalEntity' ? selectedCounterparty.id : undefined;
+  const selectedCounterpartyKey = selectedCounterparty ? `${selectedCounterparty.kind}:${selectedCounterparty.id}` : '';
+  const counterpartySelections = useMemo(() => selectedCounterparty ? [selectedCounterparty] : [], [selectedCounterparty]);
   const [clientRoleFilter, setClientRoleFilter] = useState<ClientRoleFilter>('all');
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [minAmount, setMinAmount] = useState('');
@@ -410,6 +413,11 @@ export function Payments({
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebouncedValue(search.trim(), 400);
   const [page, setPage] = useState(1);
+  const handleCounterpartyFilterChange = useCallback((selection: CounterpartySelection | null) => {
+    setSelectedCounterparty(selection);
+    setCounterpartyPickerOpen(false);
+    setPage(1);
+  }, []);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState<Payment['type']>(
     defaultType === 'Expense' ? 'Expense' : 'Income',
@@ -475,6 +483,7 @@ export function Payments({
   const initialToRef = useRef(toDate);
   const defaultPeriodRef = useRef({ from: defaultFrom, to: defaultTo });
   const routePaymentRequestRef = useRef(0);
+  const remainderCandidatesRequestRef = useRef(0);
   const toastRef = useRef(toast);
   const [autoRetryScheduled, setAutoRetryScheduled] = useState(false);
   const autoRetryAttemptsRef = useRef(0);
@@ -541,6 +550,7 @@ export function Payments({
     from: fromInputToApiDate(fromDate),
     to: fromInputToApiDate(toDate),
     clientIds: selectedClientIds,
+    legalEntityId: selectedLegalEntityId,
     clientRole: clientRoleFilter === 'all' ? undefined : clientRoleFilter,
     categoryTokens: selectedCategories,
     type: appliedTypeFilter === 'all' ? undefined : appliedTypeFilter,
@@ -560,6 +570,7 @@ export function Payments({
       from: fromInputToApiDate(fromDate),
       to: fromInputToApiDate(toDate),
       clientIds: selectedClientIds.join(',') || undefined,
+      legalEntityId: selectedLegalEntityId,
       clientRole: clientRoleFilter === 'all' ? undefined : clientRoleFilter,
       categoryTokens: selectedCategories.join(',') || undefined,
       type: appliedTypeFilter === 'all' ? undefined : appliedTypeFilter,
@@ -581,22 +592,10 @@ export function Payments({
       minAmountValue,
       selectedCategories,
       selectedClientIds,
+      selectedLegalEntityId,
       statusFilter,
       toDate,
     ],
-  );
-
-  const clientLookupOptions = useMemo<LookupSelectOption[]>(
-    () =>
-      clients
-        .filter((client) => client?.id && client?.name)
-        .map((client) => ({
-          value: String(client.id),
-          label: client.name ?? `#${client.id}`,
-          keywords: [String(client.id), client.name ?? ''],
-        }))
-        .sort((a, b) => a.label.localeCompare(b.label, 'ru')),
-    [clients],
   );
 
   const categoryOptions = useMemo<MultiSelectOption[]>(() => {
@@ -826,7 +825,7 @@ export function Payments({
       [
         fromDate,
         toDate,
-        selectedClientId,
+        selectedCounterpartyKey,
         clientRoleFilter,
         selectedCategories.join(','),
         minAmount || '',
@@ -845,7 +844,7 @@ export function Payments({
       minAmount,
       searchQuery,
       selectedCategories,
-      selectedClientId,
+      selectedCounterpartyKey,
       statusFilter,
       toDate,
     ],
@@ -944,7 +943,7 @@ export function Payments({
     if (fromDate !== initialFromRef.current || toDate !== initialToRef.current) {
       count += 1;
     }
-    if (selectedClientId) {
+    if (selectedCounterpartyKey) {
       count += 1;
     }
     if (clientRoleFilter !== 'all') {
@@ -981,7 +980,7 @@ export function Payments({
     minAmount,
     searchQuery,
     selectedCategories,
-    selectedClientId,
+    selectedCounterpartyKey,
     statusFilter,
     toDate,
     typeFilter,
@@ -1152,7 +1151,7 @@ export function Payments({
     setToDate(defaultTo);
     initialFromRef.current = defaultFrom;
     initialToRef.current = defaultTo;
-    setSelectedClientId('');
+    setSelectedCounterparty(null);
     setClientRoleFilter('all');
     setSelectedCategories([]);
     setMinAmount('');
@@ -1706,6 +1705,7 @@ export function Payments({
   );
 
   const loadRemainderCandidates = useCallback(async (options: { openPanel?: boolean; showError?: boolean } = {}) => {
+    const requestId = ++remainderCandidatesRequestRef.current;
     const { openPanel = true, showError = true } = options;
     if (openPanel) {
       setRemainderCandidatesOpen(true);
@@ -1714,12 +1714,14 @@ export function Payments({
     try {
       const response = await apiService.getPartialPaymentRemainderCandidates({
         clientId: selectedClientId ? Number(selectedClientId) : undefined,
+        legalEntityId: selectedLegalEntityId,
         clientRole: clientRoleFilter === 'all' ? undefined : clientRoleFilter,
         type: appliedTypeFilter === 'all' ? undefined : appliedTypeFilter,
         includeFuture: false,
         page: 1,
         pageSize: 100,
       });
+      if (requestId !== remainderCandidatesRequestRef.current) return;
       setRemainderCandidates(response.items ?? []);
       setRemainderCandidatesTotal(response.total ?? 0);
       setRemainderCandidatesTotalAmount(response.totalRemainderAmount ?? 0);
@@ -1731,18 +1733,31 @@ export function Payments({
         return next;
       });
     } catch (error) {
-      if (showError) {
+      if (requestId === remainderCandidatesRequestRef.current && showError) {
         toastRef.current.error(
           extractDisplayErrorMessage(error, 'Не удалось проверить частичные оплаты без переноса.'),
           'Платежи',
         );
       }
     } finally {
-      setRemainderCandidatesLoading(false);
+      if (requestId === remainderCandidatesRequestRef.current) setRemainderCandidatesLoading(false);
     }
-  }, [appliedTypeFilter, clientRoleFilter, selectedClientId]);
+  }, [appliedTypeFilter, clientRoleFilter, selectedClientId, selectedLegalEntityId]);
+
+  const currentRemainderLoaderRef = useRef<typeof loadRemainderCandidates | null>(null);
+  useLayoutEffect(() => {
+    currentRemainderLoaderRef.current = loadRemainderCandidates;
+    return () => {
+      currentRemainderLoaderRef.current = null;
+      remainderCandidatesRequestRef.current += 1;
+    };
+  }, [loadRemainderCandidates]);
 
   useEffect(() => {
+    setRemainderCandidates([]);
+    setRemainderCandidatesTotal(0);
+    setRemainderCandidatesTotalAmount(0);
+    setRemainderCandidateDates({});
     void loadRemainderCandidates({ openPanel: false, showError: false });
   }, [loadRemainderCandidates]);
 
@@ -1772,7 +1787,7 @@ export function Payments({
         await apiService.transferExistingPaymentRemainder(candidate.payment.id, normalizedDate);
         toast.success('Остаток создан отдельным платежом.', 'Платежи');
         await refresh();
-        await loadRemainderCandidates();
+        await currentRemainderLoaderRef.current?.();
       } catch (error) {
         toast.error(
           extractDisplayErrorMessage(error, 'Не удалось создать платеж на остаток.'),
@@ -1780,7 +1795,7 @@ export function Payments({
         );
       }
     },
-    [confirm, loadRemainderCandidates, refresh, remainderCandidateDates, toast],
+    [confirm, refresh, remainderCandidateDates, toast],
   );
 
   const handleCloseModal = useCallback(() => {
@@ -1929,10 +1944,10 @@ export function Payments({
 
         <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
           <div className="grid gap-4 xl:grid-cols-[minmax(420px,1fr)_minmax(520px,0.95fr)]">
-            <div className="space-y-3">
+            <div className="min-w-0 space-y-3">
               {lockType ? (
-                <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-600">
-                  <Lock className="h-3.5 w-3.5 text-slate-500" />
+                <span className="inline-flex max-w-full items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-600">
+                  <Lock className="h-3.5 w-3.5 shrink-0 text-slate-500" />
                   {lockedTypeMessage}
                 </span>
               ) : (
@@ -1952,8 +1967,8 @@ export function Payments({
               <div className={summaryGridClass}>{summaryCards}</div>
             </div>
 
-            <div className="rounded-xl bg-slate-50/80 p-3">
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <div className="min-w-0 rounded-xl bg-slate-50/80 p-3">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                 <div className="flex flex-col gap-1">
                   <label className={centeredFieldLabelClass}>
                     {t('paymentsFilterDateFrom') ?? t('dateFrom') ?? 'Дата от'}
@@ -2015,25 +2030,32 @@ export function Payments({
                 </div>
 
                 <div className="flex flex-col gap-1 md:col-span-2">
-                  <LookupSelect
-                    label="Клиент / поставщик"
-                    value={selectedClientId}
-                    options={clientLookupOptions}
-                    onChange={setSelectedClientId}
-                    placeholder="Все контрагенты"
-                    title="Выбор клиента / поставщика"
-                    dictionaryLabel="Открыть справочник"
-                    searchPlaceholder="Поиск по ФИО, компании, телефону или email"
-                    emptyOptionLabel="Все контрагенты"
-                    emptyOptionDescription="Показать платежи всех клиентов и поставщиков"
-                    buttonClassName="border-slate-200 focus:border-blue-400"
-                    noOptionsText="Клиенты не найдены"
-                  />
+                  <label id="payments-counterparty-filter-label" htmlFor="payments-counterparty-filter" className={fieldLabelClass}>Клиент / поставщик</label>
+                  <div className="flex gap-1">
+                    <button
+                      id="payments-counterparty-filter"
+                      type="button"
+                      onClick={() => setCounterpartyPickerOpen(true)}
+                      aria-haspopup="dialog"
+                      aria-labelledby="payments-counterparty-filter-label payments-counterparty-filter-value"
+                      title="Выбор клиента / поставщика"
+                      className={`${inputClass} flex min-w-0 flex-1 items-center justify-between gap-2 text-left`}
+                    >
+                      <span id="payments-counterparty-filter-value" className="truncate">{selectedCounterparty?.name ?? 'Все контрагенты'}</span>
+                      <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
+                    </button>
+                    {selectedCounterparty && (
+                      <button type="button" aria-label="Очистить контрагента" title="Очистить контрагента"
+                        onClick={() => handleCounterpartyFilterChange(null)} className={`${inputClass} shrink-0 px-2`}>
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="flex flex-col gap-1">
                   <label htmlFor="payments-client-role-filter" className={fieldLabelClass}>
-                    Роль клиента
+                    Роль в платеже
                   </label>
                   <SystemSelect
                     id="payments-client-role-filter"
@@ -3027,6 +3049,18 @@ export function Payments({
         confirmLabel={`Изменить статус платежа #${statusChangePayment?.id ?? ''} на «${statusChangeTargetLabel}»`}
         error={statusChangeError}
         loading={statusChangeSubmitting}
+      />
+
+      <CounterpartyPickerModal
+        open={counterpartyPickerOpen}
+        title="Выбор клиента / поставщика"
+        selected={counterpartySelections}
+        initialScope={selectedCounterparty?.kind ?? (appliedTypeFilter === 'Expense' ? 'legalEntity' : 'client')}
+        allowEmpty
+        emptyLabel="Все контрагенты"
+        emptyDescription="Показать платежи всех клиентов и поставщиков."
+        onClose={() => setCounterpartyPickerOpen(false)}
+        onSelect={handleCounterpartyFilterChange}
       />
 
       <PaymentModal

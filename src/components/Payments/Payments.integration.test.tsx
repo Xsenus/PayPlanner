@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import type { Payment } from '../../types';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import type { Client, LegalEntitySummary, Payment } from '../../types';
 import { requestPaymentAdvanceReviewFilter } from '../../utils/paymentAdvanceReview';
 import { Payments } from './Payments';
 
@@ -62,6 +62,12 @@ const paymentsPagedResult = {
   refresh: vi.fn().mockResolvedValue(undefined),
   error: null,
 };
+
+async function selectCounterparty(name: string) {
+  const option = (await screen.findByText(name)).closest<HTMLElement>('[data-counterparty-option]');
+  expect(option).toBeTruthy();
+  fireEvent.click(within(option!).getByRole('button', { name: 'Выбрать' }));
+}
 
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({
@@ -229,6 +235,8 @@ vi.mock('../ui/StatusChangeModal', () => ({
 
 vi.mock('../../services/api', () => ({
   apiService: {
+    getClients: vi.fn(),
+    getLegalEntities: vi.fn(),
     getPayment: vi.fn(),
     getPaymentsV2: vi.fn(),
     createPayment: vi.fn(),
@@ -249,6 +257,7 @@ vi.mock('../../services/api', () => ({
     getLegalEntityBalanceTransactions: vi.fn(),
     applyLegalEntityBalance: vi.fn(),
     getPartialPaymentRemainderCandidates: vi.fn(),
+    transferExistingPaymentRemainder: vi.fn(),
   },
 }));
 
@@ -256,6 +265,8 @@ import { apiService } from '../../services/api';
 
 describe('Payments integration', () => {
   beforeEach(() => {
+    vi.mocked(apiService.getClients).mockReset().mockResolvedValue([]);
+    vi.mocked(apiService.getLegalEntities).mockReset().mockResolvedValue([]);
     confirmMock.mockReset();
     confirmMock.mockResolvedValue(true);
     rolePermissionsMock.mockReset();
@@ -288,6 +299,7 @@ describe('Payments integration', () => {
     vi.mocked(apiService.getLegalEntityBalanceTransactions).mockReset();
     vi.mocked(apiService.applyLegalEntityBalance).mockReset();
     vi.mocked(apiService.getPartialPaymentRemainderCandidates).mockReset();
+    vi.mocked(apiService.transferExistingPaymentRemainder).mockReset();
     vi.mocked(apiService.exportPaymentsCsv).mockResolvedValue({
       blob: new Blob(['csv'], { type: 'text/csv' }),
       fileName: 'payments-export.csv',
@@ -364,6 +376,154 @@ describe('Payments integration', () => {
       from: '2026-06-01',
       to: '2026-06-05',
     });
+  });
+
+  it('supplier filter selects a legal entity without a client and reuses it for exports and remainders', async () => {
+    const supplier: LegalEntitySummary = {
+      id: 12, shortName: 'Синтетический поставщик', inn: '0000000000', clientsCount: 0,
+      createdAt: '2026-10-01T00:00:00Z',
+    };
+    vi.mocked(apiService.getLegalEntities).mockResolvedValue([supplier]);
+    const createObjectUrl = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:supplier-export');
+    const revokeObjectUrl = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    try {
+      render(<Payments defaultType="Expense" lockType />);
+      fireEvent.click(screen.getByRole('button', { name: /Все контрагенты$/ }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Юридические лица' }));
+      expect(screen.getByText('Показать платежи всех клиентов и поставщиков.')).toBeTruthy();
+      await selectCounterparty(supplier.shortName!);
+      await waitFor(() => expect(usePaymentsPagedMock.mock.calls.at(-1)?.[0]).toMatchObject({
+        legalEntityId: supplier.id, clientIds: [], type: 'Expense', page: 1,
+      }));
+      await waitFor(() => expect(apiService.getPartialPaymentRemainderCandidates).toHaveBeenLastCalledWith(expect.objectContaining({
+        legalEntityId: supplier.id, clientId: undefined, type: 'Expense',
+      })));
+      fireEvent.click(screen.getByRole('button', { name: 'Выгрузить платежи в CSV' }));
+      await waitFor(() => expect(apiService.exportPaymentsCsv).toHaveBeenLastCalledWith(expect.objectContaining({
+        legalEntityId: supplier.id, clientIds: undefined, type: 'Expense',
+      })));
+      fireEvent.click(screen.getByRole('button', { name: 'Выгрузить платежи в Excel' }));
+      await waitFor(() => expect(apiService.exportPaymentsExcel).toHaveBeenLastCalledWith(expect.objectContaining({
+        legalEntityId: supplier.id, clientIds: undefined, type: 'Expense',
+      })));
+      fireEvent.click(screen.getByRole('button', { name: new RegExp(supplier.shortName!) }));
+      fireEvent.click(await screen.findByRole('button', { name: /Все контрагенты\s*Показать платежи всех клиентов и поставщиков/ }));
+      await waitFor(() => expect(usePaymentsPagedMock.mock.calls.at(-1)?.[0]).toMatchObject({ legalEntityId: undefined, clientIds: [] }));
+      expect(apiService.createPayment).not.toHaveBeenCalled();
+      expect(apiService.updatePayment).not.toHaveBeenCalled();
+    } finally {
+      createObjectUrl.mockRestore();
+      revokeObjectUrl.mockRestore();
+      anchorClick.mockRestore();
+    }
+  });
+
+  it('supplier filter keeps equal client and legal entity IDs separate and resets the page and selection', async () => {
+    const client: Client = { id: 12, name: 'Синтетический клиент', email: '', phone: '', company: '', address: '', notes: '',
+      createdAt: '2026-10-01T00:00:00Z', isActive: true };
+    const supplier: LegalEntitySummary = { id: 12, shortName: 'Синтетическое юрлицо', inn: '0000000000', clientsCount: 0,
+      createdAt: '2026-10-01T00:00:00Z' };
+    vi.mocked(apiService.getClients).mockResolvedValue([client]);
+    vi.mocked(apiService.getLegalEntities).mockResolvedValue([supplier]);
+    usePaymentsPagedMock.mockImplementation(() => ({ ...paymentsPagedResult, total: 120 }));
+    render(<Payments defaultType="Expense" lockType />);
+    fireEvent.click(screen.getByRole('button', { name: /Все контрагенты$/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Физические лица' }));
+    await selectCounterparty(client.name);
+    await waitFor(() => expect(usePaymentsPagedMock.mock.calls.at(-1)?.[0]).toMatchObject({
+      clientIds: ['12'], legalEntityId: undefined,
+    }));
+    fireEvent.click(screen.getByLabelText('Роль в платеже'));
+    fireEvent.click(await screen.findByRole('option', { name: 'Клиент расхода' }));
+    await waitFor(() => expect(usePaymentsPagedMock.mock.calls.at(-1)?.[0]).toMatchObject({ clientRole: 'expenseClient' }));
+    fireEvent.click(screen.getAllByTestId('pagination-next')[0]);
+    await waitFor(() => expect(usePaymentsPagedMock.mock.calls.at(-1)?.[0]).toMatchObject({ page: 2 }));
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(client.name) }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Юридические лица' }));
+    await selectCounterparty(supplier.shortName!);
+    await waitFor(() => expect(usePaymentsPagedMock.mock.calls.at(-1)?.[0]).toMatchObject({
+      clientIds: [], legalEntityId: 12, clientRole: 'expenseClient', page: 1,
+    }));
+    await waitFor(() => expect(apiService.getPartialPaymentRemainderCandidates).toHaveBeenLastCalledWith(expect.objectContaining({
+      legalEntityId: 12, clientId: undefined, clientRole: 'expenseClient',
+    })));
+    fireEvent.click(screen.getByRole('button', { name: 'Очистить контрагента' }));
+    await waitFor(() => expect(usePaymentsPagedMock.mock.calls.at(-1)?.[0]).toMatchObject({
+      clientIds: [], legalEntityId: undefined, clientRole: 'expenseClient', page: 1,
+    }));
+    await waitFor(() => expect(apiService.getPartialPaymentRemainderCandidates).toHaveBeenLastCalledWith(expect.objectContaining({
+      legalEntityId: undefined, clientId: undefined, clientRole: 'expenseClient',
+    })));
+  });
+
+  it('supplier filter ignores late remainder results after switching the counterparty type with the same ID', async () => {
+    const client: Client = { id: 12, name: 'Синтетический клиент для задержки', email: '', phone: '', company: '', address: '', notes: '',
+      createdAt: '2026-10-01T00:00:00Z', isActive: true };
+    const supplier: LegalEntitySummary = { id: 12, shortName: 'Синтетический поставщик для задержки', inn: '0000000000', clientsCount: 0,
+      createdAt: '2026-10-01T00:00:00Z' };
+    vi.mocked(apiService.getClients).mockResolvedValue([client]);
+    vi.mocked(apiService.getLegalEntities).mockResolvedValue([supplier]);
+    const remainderResponse = (total: number) => ({ items: [], total, page: 1, pageSize: 100, totalOriginalAmount: total * 100,
+      totalPaidAmount: 0, totalRemainderAmount: total * 100, includeFuture: false, checkedAt: '2026-10-01T00:00:00Z' });
+    let resolveOld!: (value: ReturnType<typeof remainderResponse>) => void;
+    const oldResponse = new Promise<ReturnType<typeof remainderResponse>>((resolve) => { resolveOld = resolve; });
+    vi.mocked(apiService.getPartialPaymentRemainderCandidates).mockImplementation((params) => params?.clientId === 12
+      ? oldResponse : Promise.resolve(remainderResponse(params?.legalEntityId === 12 ? 2 : 0)));
+    render(<Payments defaultType="Expense" lockType />);
+    fireEvent.click(screen.getByRole('button', { name: /Все контрагенты$/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Физические лица' }));
+    await selectCounterparty(client.name);
+    await waitFor(() => expect(apiService.getPartialPaymentRemainderCandidates).toHaveBeenLastCalledWith(expect.objectContaining({ clientId: 12 })));
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(client.name) }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Юридические лица' }));
+    await selectCounterparty(supplier.shortName!);
+    const action = screen.getByRole('button', { name: 'Частичные без остатка' });
+    await waitFor(() => expect(action.textContent).toContain('2'));
+    await act(async () => { resolveOld(remainderResponse(9)); });
+    expect(action.textContent).toContain('2');
+    expect(action.textContent).not.toContain('9');
+  });
+
+  it('supplier filter ignores a reload from a remainder transfer started before selection changed', async () => {
+    const client: Client = { id: 12, name: 'Синтетический клиент переноса', email: '', phone: '', company: '', address: '', notes: '',
+      createdAt: '2026-10-01T00:00:00Z', isActive: true };
+    const supplier: LegalEntitySummary = { id: 12, shortName: 'Синтетический поставщик переноса', inn: '0000000000', clientsCount: 0,
+      createdAt: '2026-10-01T00:00:00Z' };
+    const payment: Payment = { id: 901, date: '2026-10-01', plannedDate: '2026-10-01', amount: 100, paidAmount: 40,
+      outstandingAmount: 60, hasPartialPayment: true, type: 'Expense', status: 'Processing', description: 'Синтетическая частичная оплата',
+      isPaid: false, notes: '', systemNotes: '', rescheduleCount: 0, createdAt: '2026-10-01T00:00:00Z' };
+    vi.mocked(apiService.getClients).mockResolvedValue([client]);
+    vi.mocked(apiService.getLegalEntities).mockResolvedValue([supplier]);
+    vi.mocked(apiService.getPartialPaymentRemainderCandidates).mockImplementation(async (params) => ({
+      items: params?.clientId === 12 ? [{ payment, originalAmount: 100, paidAmount: 40, remainderAmount: 60, daysPastDue: 15,
+        suggestedRemainderDate: '2026-10-18' }] : [], total: params?.clientId === 12 ? 1 : params?.legalEntityId === 12 ? 2 : 0,
+      page: 1, pageSize: 100, totalOriginalAmount: 100, totalPaidAmount: 40, totalRemainderAmount: 60,
+      includeFuture: false, checkedAt: '2026-10-16T00:00:00Z',
+    }));
+    type TransferResult = Awaited<ReturnType<typeof apiService.transferExistingPaymentRemainder>>;
+    let completeTransfer!: (value: TransferResult) => void;
+    vi.mocked(apiService.transferExistingPaymentRemainder).mockImplementation(() => new Promise((resolve) => { completeTransfer = resolve; }));
+    render(<Payments defaultType="Expense" lockType />);
+    fireEvent.click(screen.getByRole('button', { name: /Все контрагенты$/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Физические лица' }));
+    await selectCounterparty(client.name);
+    const action = screen.getByRole('button', { name: 'Частичные без остатка' });
+    await waitFor(() => expect(action.textContent).toContain('1'));
+    fireEvent.click(action);
+    fireEvent.click(await screen.findByRole('button', { name: 'Создать остаток' }));
+    await waitFor(() => expect(apiService.transferExistingPaymentRemainder).toHaveBeenCalledWith(payment.id, '2026-10-18'));
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(client.name) }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Юридические лица' }));
+    await selectCounterparty(supplier.shortName!);
+    await waitFor(() => expect(action.textContent).toContain('2'));
+    const oldScopeCalls = vi.mocked(apiService.getPartialPaymentRemainderCandidates).mock.calls.filter(([params]) => params?.clientId === 12).length;
+    const currentScopeCalls = vi.mocked(apiService.getPartialPaymentRemainderCandidates).mock.calls.filter(([params]) => params?.legalEntityId === 12).length;
+    await act(async () => { completeTransfer({ payment, remainderPayment: { ...payment, id: 902 }, createdRemainder: true }); });
+    expect(vi.mocked(apiService.getPartialPaymentRemainderCandidates).mock.calls.filter(([params]) => params?.clientId === 12)).toHaveLength(oldScopeCalls);
+    expect(vi.mocked(apiService.getPartialPaymentRemainderCandidates).mock.calls.filter(([params]) => params?.legalEntityId === 12)).toHaveLength(currentScopeCalls + 1);
+    expect(action.textContent).toContain('2');
+    expect(apiService.transferExistingPaymentRemainder).toHaveBeenCalledTimes(1);
   });
 
   it('exports payments with the current filtered query', async () => {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../services/api';
 import type { ClientRole, Payment, PaymentAdvanceReviewStatus, PaymentsListSummary, PaymentStatus } from '../types';
 
@@ -116,6 +116,7 @@ export function usePaymentsPaged(params: UsePaymentsPagedParams) {
       setError(null);
       if (mode === 'initial') {
         setLoadingInitial(true);
+        setRefreshing(false);
       } else {
         setRefreshing(true);
       }
@@ -140,27 +141,31 @@ export function usePaymentsPaged(params: UsePaymentsPagedParams) {
           abortRef.current = null;
         }
         if (!controller.signal.aborted) {
-          if (mode === 'initial') {
-            setLoadingInitial(false);
-          } else {
-            setRefreshing(false);
-          }
+          setLoadingInitial(false);
+          setRefreshing(false);
         }
       }
     },
     [enabled, requestParams],
   );
 
-  useEffect(() => {
-    void fetchPage('initial');
+  const currentFetchRef = useRef<typeof fetchPage | null>(null);
+
+  useLayoutEffect(() => {
+    currentFetchRef.current = fetchPage;
     return () => {
+      currentFetchRef.current = null;
       abortRef.current?.abort();
     };
   }, [fetchPage]);
 
-  const refresh = useCallback(async () => {
-    await fetchPage('refresh');
+  useEffect(() => {
+    void fetchPage('initial');
   }, [fetchPage]);
+
+  const refresh = useCallback(async () => {
+    await currentFetchRef.current?.('refresh');
+  }, []);
 
   return {
     payments,

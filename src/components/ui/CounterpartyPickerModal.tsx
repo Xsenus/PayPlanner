@@ -1,10 +1,11 @@
 import { SystemSelect } from './SystemSelect';
 import { Building2, Check, ChevronLeft, ChevronRight, Loader2, Search, UserRoundSearch, X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { apiService } from '../../services/api';
 import type { Client, LegalEntitySummary } from '../../types';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
+import { useModalFocusTrap } from '../../hooks/useModalFocusTrap';
 
 export type CounterpartyKind = 'client' | 'legalEntity';
 export type CounterpartyRole = 'client' | 'supplier';
@@ -28,6 +29,7 @@ type CounterpartyPickerModalProps = {
   counterpartyRole?: CounterpartyRole;
   allowEmpty?: boolean;
   emptyLabel?: string;
+  emptyDescription?: string;
   disabledKeys?: string[];
   className?: string;
   overlayClassName?: string;
@@ -146,6 +148,7 @@ export function CounterpartyPickerModal({
   counterpartyRole,
   allowEmpty = false,
   emptyLabel = 'Без контрагента',
+  emptyDescription = 'Оставить документ без выбранного контрагента.',
   disabledKeys = [],
   className = 'max-w-3xl',
   overlayClassName = 'z-[2200]',
@@ -171,6 +174,14 @@ export function CounterpartyPickerModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draftSelected, setDraftSelected] = useState<CounterpartySelection[]>(selected);
+  const clientListRequestRef = useRef<Promise<Client[]> | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const trapDialogKeys = useModalFocusTrap(dialogRef, open, onClose, searchRef);
+
+  useEffect(() => {
+    if (!open) clientListRequestRef.current = null;
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -201,7 +212,16 @@ export function CounterpartyPickerModal({
       setError(null);
       try {
         if (scope === 'client') {
-          const filteredClients = (await apiService.getClients())
+          const request = clientListRequestRef.current ?? apiService.getClients();
+          clientListRequestRef.current = request;
+          let clients: Client[];
+          try {
+            clients = await request;
+          } catch (loadError) {
+            if (clientListRequestRef.current === request) clientListRequestRef.current = null;
+            throw loadError;
+          }
+          const filteredClients = clients
             .filter((client) => client.isActive !== false)
             .filter((client) => matchesClientRole(client, counterpartyRole))
             .filter((client) => matchesClientSearch(client, debouncedQuery))
@@ -299,7 +319,13 @@ export function CounterpartyPickerModal({
 
   return (
     <div className={`fixed inset-0 ${overlayClassName} flex items-center justify-center bg-slate-900/45 p-4`}>
-      <div className={`flex h-[calc(100vh-2rem)] max-h-[760px] w-full flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ${className}`}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1}
+        onKeyDown={(event) => {
+          if (event.defaultPrevented) return;
+          trapDialogKeys(event);
+          if (event.defaultPrevented) event.stopPropagation();
+        }}
+        className={`flex h-[calc(100vh-2rem)] max-h-[760px] w-full flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ${className}`}>
         <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
           <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
           <button
@@ -351,6 +377,7 @@ export function CounterpartyPickerModal({
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
+              ref={searchRef}
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
@@ -374,7 +401,7 @@ export function CounterpartyPickerModal({
             >
               <span>
                 <span className="block text-sm font-semibold text-slate-900">{emptyLabel}</span>
-                <span className="mt-0.5 block text-xs text-slate-500">Оставить документ без выбранного контрагента.</span>
+                <span className="mt-0.5 block text-xs text-slate-500">{emptyDescription}</span>
               </span>
               <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-600">Выбрать</span>
             </button>

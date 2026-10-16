@@ -36,7 +36,7 @@
 | courtCases | (permissions) => permissions.cases.canView | да | нет |
 | caseDetail | (permissions) => permissions.cases.canView | да | docs/full-project-audit-2026-06-10.md |
 | requests | (permissions) => permissions.requests?.canView === true | нет | docs/claude-branch-review-2026-10-10.md, docs/pay-33-36-implementation-log-2026-10-09.md |
-| clients | (permissions) => permissions.clients.canView | да | docs/development-pause-plan-2026-09-30.md, docs/final-acceptance-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/pay-33-36-implementation-log-2026-10-09.md |
+| clients | (permissions) => permissions.clients.canView | да | docs/development-pause-plan-2026-09-30.md, docs/final-acceptance-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/max-review-and-replies-2026-10-16.md, docs/pay-33-36-implementation-log-2026-10-09.md |
 | contacts | (permissions) => permissions.clients.canView \|\| permissions.legalEntities.canView | да | docs/contacts-directory-implementation-log.md, docs/full-project-audit-2026-06-10.md |
 | contactsClients | (permissions) => permissions.clients.canView | да | docs/full-project-audit-2026-06-10.md |
 | contactsLegal | (permissions) => permissions.legalEntities.canView | да | docs/full-project-audit-2026-06-10.md |
