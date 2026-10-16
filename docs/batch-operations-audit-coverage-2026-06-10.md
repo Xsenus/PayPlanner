@@ -1,6 +1,6 @@
-## Актуальная инвентаризация — 14 октября 2026
+## Актуальная инвентаризация — 17 октября 2026
 
-Всего **111** мест ExecuteUpdateAsync/ExecuteDeleteAsync по неизменному предикату BatchOperationAuditCoverageTests. Предыдущие описания ниже сохранены как история решений по аудиту; после форматирования их номера строк могут отличаться. Текущие номера приведены в полном перечне здесь. Перечень обновлён по фактическим исходникам после адресных исправлений и форматирования; подготовленные overlays не используются.
+Всего **129** мест ExecuteUpdateAsync/ExecuteDeleteAsync по неизменному предикату BatchOperationAuditCoverageTests. Предыдущие описания ниже сохранены как история решений по аудиту; после форматирования их номера строк могут отличаться. Текущие номера приведены в полном перечне здесь. Перечень обновлён по фактическим исходникам после адресных исправлений и форматирования; подготовленные overlays не используются.
 
 Два дополнительных технических UPDATE:
 
@@ -19,6 +19,20 @@
 
 Это технические состояния доставки. Заявка, задача и их предметная история сохраняются обычным ChangeTracker в исходной транзакции, в которую также добавляется запись очереди. Сама доставка проходит существующий сервис уведомлений с проверкой доступности задачи и стабильным ключом события. Внешняя отправка выполняется вне транзакции; неизвестный исход может потребовать повтора и не объявляется гарантией единственной внешней отправки. Дополнительный построчный объектный аудит технической очереди не создаётся. Проверяются успех, повтор, закрытая/удалённая задача, замена аренды, уже доставленный/прекращённый результат и оба провайдера БД.
 
+### Дополнение банковского блока: 18 вызовов
+
+Предикат инвентаризации сохранён: учитывается каждая строка исходника с ExecuteUpdateAsync или ExecuteDeleteAsync, без исключений для новых банковских файлов. Число выросло со 111 до 129; полный перечень ниже заново сверяет также перемещённые прежние вызовы.
+
+**15 обновлений без изменения значения удерживают строки внутри транзакции.** Они не создают самостоятельное объектное событие: присваивается прежнее значение, финансовая сумма и пользовательские поля этим SQL не меняются. Предметные записи сохраняются отдельно через SaveChanges в той же транзакции. Это не исключение операций из инвентаризации.
+
+- MoneyAccountsController (3): собственная компания → банковский источник → денежный счёт. Перед сохранением повторно проверяются права, принадлежность и реквизиты; обновление счёта использует прежний снимок. Блокировки защищают создание, изменение, отключение и выбор основного счёта от параллельной смены владельца/реквизитов.
+- MoneyOperationsController.CompanyAccess (4): та же последовательность трёх блокировок плюс удержание существующей денежной операции по прежним счёту, UpdatedAt и банковскому происхождению. Финансовая операция и кассовый документ сохраняются обычным ChangeTracker; ошибка откатывает общую транзакцию или собственный savepoint, сохраняя внешнюю работу.
+- BankStatementImportService (3) и BankStatementImportService.Native (1): удержание компании, банковского и денежного счетов перед повторной проверкой доступа и записью пакета/строк/денежных фактов; нативная загрузка дополнительно удерживает банковский источник при выборе денежного счёта. Блокировка не записывает оплату и не заменяет доказательство исходной строки. Предметная история хранится в пакете и его строках; денежные факты сохраняются через ChangeTracker.
+- MoneyBalanceReconciliationService (1): блокировка каждой разрешённой компании перед чтением фактов и записью дневных результатов, без отдельного UPDATE каждого счёта. Используется Serializable-транзакция, повторная проверка полномочий и ограниченный повтор конфликта. Денежные факты не меняются; результат сверки содержит время и действительного инициатора и сохраняется через SaveChanges.
+- SpreadsheetImportService.Rollback (3): удержание компании, исходной операции импорта и затронутых денежных счетов при откате контрагента. Изменение контрагента и результат отката сохраняются через SaveChanges в общей транзакции; техническое присваивание прежнего значения не выдаётся за отдельную пользовательскую правку.
+
+**Три обновления MoneyAccountsController меняют производные флаги основного счёта.** EnsureSingleDefaultAsync снимает IsDefault у других счетов той же компании и источника. EnsureDefaultExistsAsync снимает устаревший флаг и назначает выбранный доступный счёт. Обновляются только подходящие строки и UpdatedAt; отслеживаемые экземпляры синхронизируются с SQL. Создание, изменение и отключение самого счёта проходят SaveChanges, а эти вторичные автоматические переключения не формируют отдельного построчного объектного события. Это явная граница покрытия аудита; суммы, даты и происхождение денежных операций не меняются. Изоляция компании/источника, недоступный банк, гонки и сохранность истории проверяются сценариями счетов на SQLite/PostgreSQL.
+
 ### Полный текущий перечень
 
 | Место | Операция |
@@ -29,6 +43,16 @@
 | backend/Controllers/MessengerDocumentDeliveriesController.cs:485 | ExecuteUpdateAsync |
 | backend/Controllers/MessengerDocumentDeliveriesController.cs:496 | ExecuteUpdateAsync |
 | backend/Controllers/MessengerDocumentDeliveriesController.cs:513 | ExecuteUpdateAsync |
+| backend/Controllers/MoneyAccountsController.cs:238 | ExecuteUpdateAsync |
+| backend/Controllers/MoneyAccountsController.cs:246 | ExecuteUpdateAsync |
+| backend/Controllers/MoneyAccountsController.cs:253 | ExecuteUpdateAsync |
+| backend/Controllers/MoneyAccountsController.cs:279 | ExecuteUpdateAsync |
+| backend/Controllers/MoneyAccountsController.cs:290 | ExecuteUpdateAsync |
+| backend/Controllers/MoneyAccountsController.cs:295 | ExecuteUpdateAsync |
+| backend/Controllers/MoneyOperationsController.CompanyAccess.cs:50 | ExecuteUpdateAsync |
+| backend/Controllers/MoneyOperationsController.CompanyAccess.cs:56 | ExecuteUpdateAsync |
+| backend/Controllers/MoneyOperationsController.CompanyAccess.cs:63 | ExecuteUpdateAsync |
+| backend/Controllers/MoneyOperationsController.CompanyAccess.cs:94 | ExecuteUpdateAsync |
 | backend/Controllers/StorageAdminController.cs:145 | ExecuteUpdateAsync |
 | backend/Controllers/TasksController.cs:3226 | ExecuteUpdateAsync |
 | backend/Controllers/TasksController.cs:4538 | ExecuteUpdateAsync |
@@ -40,7 +64,11 @@
 | backend/Controllers/V2/CasesV2Controller.cs:6074 | ExecuteUpdateAsync |
 | backend/Services/AuthService.cs:261 | ExecuteUpdateAsync |
 | backend/Services/AuthService.cs:743 | ExecuteUpdateAsync |
-| backend/Services/Banking/BankSyncService.cs:408 | ExecuteUpdateAsync |
+| backend/Services/Banking/BankStatementImportService.Native.cs:74 | ExecuteUpdateAsync |
+| backend/Services/Banking/BankStatementImportService.cs:456 | ExecuteUpdateAsync |
+| backend/Services/Banking/BankStatementImportService.cs:475 | ExecuteUpdateAsync |
+| backend/Services/Banking/BankStatementImportService.cs:481 | ExecuteUpdateAsync |
+| backend/Services/Banking/BankSyncService.cs:471 | ExecuteUpdateAsync |
 | backend/Services/CalendarSyncLogRetentionService.cs:198 | ExecuteDeleteAsync |
 | backend/Services/CalendarSyncLogRetentionService.cs:209 | ExecuteDeleteAsync |
 | backend/Services/DatabaseBackupService.cs:1110 | ExecuteUpdateAsync |
@@ -54,6 +82,7 @@
 | backend/Services/MessengerDocumentDeliveryService.cs:673 | ExecuteUpdateAsync |
 | backend/Services/MessengerDocumentDeliveryService.cs:699 | ExecuteUpdateAsync |
 | backend/Services/MessengerDocumentDeliveryService.cs:771 | ExecuteUpdateAsync |
+| backend/Services/MoneyBalanceReconciliationService.cs:35 | ExecuteUpdateAsync |
 | backend/Services/Notifications/CaseDocumentNotificationDispatchProcessor.cs:42 | ExecuteUpdateAsync |
 | backend/Services/Notifications/CaseDocumentNotificationDispatchProcessor.cs:68 | ExecuteUpdateAsync |
 | backend/Services/Notifications/InternalChatNotificationRecoveryService.cs:56 | ExecuteUpdateAsync |
@@ -66,6 +95,9 @@
 | backend/Services/Requests/SalesRequestService.cs:969 | ExecuteUpdateAsync |
 | backend/Services/Requests/SalesRequestService.cs:981 | ExecuteUpdateAsync |
 | backend/Services/Requests/SalesRequestService.cs:991 | ExecuteUpdateAsync |
+| backend/Services/SpreadsheetImportService.Rollback.cs:32 | ExecuteUpdateAsync |
+| backend/Services/SpreadsheetImportService.Rollback.cs:34 | ExecuteUpdateAsync |
+| backend/Services/SpreadsheetImportService.Rollback.cs:42 | ExecuteUpdateAsync |
 | backend/Services/Storage/CaseDocumentPublicationProcessor.cs:172 | ExecuteUpdateAsync |
 | backend/Services/Storage/CaseDocumentPublicationProcessor.cs:187 | ExecuteUpdateAsync |
 | backend/Services/Storage/CaseDocumentUploadRetirementService.cs:25 | ExecuteUpdateAsync |
