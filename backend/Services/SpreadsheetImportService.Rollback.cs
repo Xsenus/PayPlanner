@@ -1,12 +1,96 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using Microsoft.EntityFrameworkCore.Storage;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services.Companies;
 
 namespace PayPlanner.Api.Services;
 
 public sealed partial class SpreadsheetImportService
 {
     private async Task<bool> RollbackCounterpartyAsync(PaymentContext db, SpreadsheetImportBatchOperation operation, CancellationToken cancellationToken)
+    {
+        await db.Entry(operation).ReloadAsync(cancellationToken);
+        if (CounterpartyRollbackCompleted(operation)) return true;
+        IDbContextTransaction? transaction = null;
+        bool? outcome = null;
+        var commitStarted = false;
+        string? failureMessage = null;
+        DateTime? failureAt = null;
+        try
+        {
+            transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            var companyId = operation.EntityId.HasValue
+                ? await db.Clients.IgnoreQueryFilters().AsNoTracking().Where(item => item.Id == operation.EntityId.Value)
+                    .Select(item => item.LegalEntityId).SingleOrDefaultAsync(cancellationToken)
+                : null;
+            companyId ??= DeserializeSnapshot<CounterpartyOperationMetadata>(operation.MetadataJson)?.LegalEntityId;
+            // Retain archived history while serializing against financial writers.
+            // A missing historical company can still be restored by the existing snapshot rules.
+            if (companyId.HasValue)
+                await db.LegalEntities.IgnoreQueryFilters().Where(item => item.Id == companyId.Value)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.ShortName, item => item.ShortName), cancellationToken);
+            if (await db.SpreadsheetImportBatchOperations.Where(item => item.Id == operation.Id && item.BatchId == operation.BatchId)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.SourceTitle, item => item.SourceTitle), cancellationToken) != 1)
+                throw new InvalidOperationException("Запись импорта больше недоступна.");
+            await db.Entry(operation).ReloadAsync(cancellationToken);
+            if (CounterpartyRollbackCompleted(operation)) outcome = true;
+            else
+            {
+                if (operation.EntityId.HasValue)
+                    await db.Clients.IgnoreQueryFilters().Where(item => item.Id == operation.EntityId.Value)
+                        .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.Name, item => item.Name), cancellationToken);
+                var success = await RollbackCounterpartyCoreAsync(db, operation, cancellationToken);
+                var stored = await db.SpreadsheetImportBatchOperations.AsNoTracking()
+                    .SingleAsync(item => item.Id == operation.Id, cancellationToken);
+                if (!success && stored.RollbackAction == SpreadsheetImportRollbackAction.Error)
+                {
+                    failureMessage = stored.RollbackMessage;
+                    failureAt = stored.RolledBackAt;
+                    await transaction.RollbackAsync(cancellationToken);
+                }
+                else outcome = success;
+            }
+            if (outcome.HasValue)
+            {
+                commitStarted = true;
+                await transaction.CommitAsync(cancellationToken);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Atomic counterparty rollback failed for operation {OperationId}", operation.Id);
+            failureMessage ??= $"Не удалось выполнить откат: {ex.Message}";
+            if (transaction is not null)
+            {
+                using var rollbackTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                try { await transaction.RollbackAsync(rollbackTimeout.Token); }
+                catch (Exception rollbackError) { ex.Data["CounterpartyRollbackFailure"] = rollbackError; }
+            }
+            outcome = null;
+        }
+        finally
+        {
+            if (transaction is not null) await transaction.DisposeAsync();
+        }
+        if (outcome.HasValue) return outcome.Value;
+        cancellationToken.ThrowIfCancellationRequested();
+        db.ChangeTracker.Clear();
+        var actual = await db.SpreadsheetImportBatchOperations.SingleAsync(item => item.Id == operation.Id, cancellationToken);
+        // A lost commit acknowledgement must not overwrite the durable receipt.
+        if (commitStarted && CounterpartyRollbackCompleted(actual)) return true;
+        if (commitStarted && actual.RollbackAction == SpreadsheetImportRollbackAction.Skipped) return false;
+        actual.RollbackAction = SpreadsheetImportRollbackAction.Error;
+        actual.RollbackMessage = failureMessage ?? "Не удалось выполнить откат контрагента.";
+        actual.RolledBackAt = failureAt ?? DateTime.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+        return false;
+    }
+
+    private static bool CounterpartyRollbackCompleted(SpreadsheetImportBatchOperation operation)
+        => operation.RollbackAction is SpreadsheetImportRollbackAction.Deleted or SpreadsheetImportRollbackAction.Restored;
+
+    private async Task<bool> RollbackCounterpartyCoreAsync(PaymentContext db, SpreadsheetImportBatchOperation operation, CancellationToken cancellationToken)
     {
         if (!operation.EntityId.HasValue)
         {
@@ -82,7 +166,7 @@ public sealed partial class SpreadsheetImportService
                     var storedLegalEntity = await db.LegalEntities
                         .IgnoreQueryFilters()
                         .FirstOrDefaultAsync(item => item.Id == legalEntity.Id, cancellationToken);
-                    if (storedLegalEntity is not null && !await IsLegalEntityStillReferencedAsync(db, storedLegalEntity.Id, null, cancellationToken))
+                    if (storedLegalEntity is not null && !await IsLegalEntityStillReferencedAsync(db, storedLegalEntity.Id, client.Id, cancellationToken))
                     {
                         db.Remove(storedLegalEntity);
                         await db.SaveChangesAsync(cancellationToken);
@@ -159,7 +243,7 @@ public sealed partial class SpreadsheetImportService
                     var storedLegalEntity = await db.LegalEntities
                         .IgnoreQueryFilters()
                         .FirstOrDefaultAsync(item => item.Id == legalEntity.Id, cancellationToken);
-                    if (storedLegalEntity is not null && !await IsLegalEntityStillReferencedAsync(db, storedLegalEntity.Id, null, cancellationToken))
+                    if (storedLegalEntity is not null && !await IsLegalEntityStillReferencedAsync(db, storedLegalEntity.Id, client.Id, cancellationToken))
                     {
                         db.Remove(storedLegalEntity);
                     }
@@ -215,29 +299,24 @@ public sealed partial class SpreadsheetImportService
         int? excludeClientId,
         CancellationToken cancellationToken)
     {
-        if (await db.Clients.AnyAsync(
-                item => item.LegalEntityId == legalEntityId && (!excludeClientId.HasValue || item.Id != excludeClientId.Value),
-                cancellationToken))
-        {
-            return true;
-        }
+        // Rollback must retain referenced history even when a related document is
+        // archived. Evaluate the indexed references in one query without loading it.
+        if (await db.LegalEntities.IgnoreQueryFilters().AnyAsync(company => company.Id == legalEntityId && (
+                db.Clients.Any(item => item.LegalEntityId == legalEntityId && (!excludeClientId.HasValue || item.Id != excludeClientId.Value))
+                || db.ExternalContacts.Any(item => item.LegalEntityId == legalEntityId || item.LinkedLegalEntityId == legalEntityId)
+                || db.AddressRecords.Any(item => item.LegalEntityId == legalEntityId)
+                || db.UserCompanyAccesses.Any(item => item.LegalEntityId == legalEntityId)
+                || db.MoneyAccounts.Any(item => item.CompanyId == legalEntityId)
+                || db.BankStatementImportBatches.Any(item => item.CompanyId == legalEntityId)
+                || db.BankConnections.Any(item => item.LegalEntityId == legalEntityId)
+                || db.CompanyBranches.Any(item => item.LegalEntityId == legalEntityId)
+                || db.Payments.Any(item => item.SellerCompanyId == legalEntityId || item.LegalEntityId == legalEntityId || item.ExpenseLegalEntityId == legalEntityId)
+                || db.Acts.Any(item => item.SellerCompanyId == legalEntityId || item.LegalEntityId == legalEntityId)
+                || db.Contracts.Any(item => item.SellerCompanyId == legalEntityId || item.LegalEntities.Any(party => party.Id == legalEntityId))),
+                cancellationToken)) return true;
 
-        if (await db.ExternalContacts.AnyAsync(item => item.LegalEntityId == legalEntityId, cancellationToken))
-        {
-            return true;
-        }
-
-        if (await db.AddressRecords.AnyAsync(item => item.LegalEntityId == legalEntityId, cancellationToken))
-        {
-            return true;
-        }
-
-        if (await db.UserCompanyAccesses.AnyAsync(item => item.LegalEntityId == legalEntityId, cancellationToken))
-        {
-            return true;
-        }
-
-        return false;
+        // Registration as an own company is also a use, before the first payment.
+        return (await OwnCompanyRegistry.LoadIdsAsync(db, cancellationToken)).Contains(legalEntityId);
     }
 
     private async Task<bool> RollbackInvoiceAsync(PaymentContext db, SpreadsheetImportBatchOperation operation, CancellationToken cancellationToken)

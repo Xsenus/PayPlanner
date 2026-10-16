@@ -733,6 +733,15 @@ namespace PayPlanner.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<int?>("BankConnectionAccountId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("CompanyId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT")
@@ -761,6 +770,28 @@ namespace PayPlanner.Api.Migrations
                     b.Property<long>("FileSize")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int?>("ImportedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("MoneyAccountId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PackageKey")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ParentBatchId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("PeriodFrom")
+                        .HasColumnType("date");
+
+                    b.Property<DateTime?>("PeriodTo")
+                        .HasColumnType("date");
+
+                    b.Property<int?>("ResponsibleUserId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("RollbackRows")
                         .HasColumnType("INTEGER");
 
@@ -773,12 +804,25 @@ namespace PayPlanner.Api.Migrations
                     b.Property<int>("SkippedRows")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Source")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceResultJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Trigger")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("BankConnectionAccountId");
 
                     b.HasIndex("CreatedAt")
                         .HasDatabaseName("IX_BankStatementImportBatches_CreatedAt");
@@ -786,8 +830,22 @@ namespace PayPlanner.Api.Migrations
                     b.HasIndex("FileHash")
                         .HasDatabaseName("IX_BankStatementImportBatches_FileHash");
 
+                    b.HasIndex("MoneyAccountId");
+
+                    b.HasIndex("PackageKey")
+                        .IsUnique()
+                        .HasDatabaseName("IX_BankStatementImportBatches_PackageKey");
+
+                    b.HasIndex("ParentBatchId");
+
                     b.HasIndex("Status")
                         .HasDatabaseName("IX_BankStatementImportBatches_Status");
+
+                    b.HasIndex("CompanyId", "CreatedAt", "Id")
+                        .HasDatabaseName("IX_BankStatementImportBatches_Company_Created_Id");
+
+                    b.HasIndex("ResponsibleUserId", "CreatedAt", "Id")
+                        .HasDatabaseName("IX_BankStatementImportBatches_Responsible_Created_Id");
 
                     b.ToTable("BankStatementImportBatches");
                 });
@@ -806,6 +864,9 @@ namespace PayPlanner.Api.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<int?>("BankStatementOperationId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("BatchId")
                         .HasColumnType("INTEGER");
 
@@ -818,6 +879,10 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("TEXT")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
+                    b.Property<string>("Currency")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("Date")
                         .HasColumnType("date");
 
@@ -825,16 +890,30 @@ namespace PayPlanner.Api.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ExternalOperationId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ImportKey")
                         .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
+
+                    b.Property<bool?>("IsBooked")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("Message")
                         .HasMaxLength(1000)
                         .HasColumnType("TEXT");
 
                     b.Property<int?>("MoneyOperationId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("MovementKey")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("OriginRowId")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("PaymentOrderNumber")
@@ -848,6 +927,10 @@ namespace PayPlanner.Api.Migrations
                     b.Property<DateTime?>("RolledBackAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("RowIdentityKey")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("RowNumber")
                         .HasColumnType("INTEGER");
 
@@ -858,6 +941,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("BankStatementOperationId")
+                        .HasDatabaseName("IX_BankStatementImportRows_BankStatementOperationId");
+
                     b.HasIndex("BatchId")
                         .HasDatabaseName("IX_BankStatementImportRows_BatchId");
 
@@ -866,6 +952,16 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("MoneyOperationId")
                         .HasDatabaseName("IX_BankStatementImportRows_MoneyOperationId");
+
+                    b.HasIndex("MovementKey")
+                        .HasDatabaseName("IX_BankStatementImportRows_MovementKey");
+
+                    b.HasIndex("OriginRowId")
+                        .HasDatabaseName("IX_BankStatementImportRows_OriginRowId");
+
+                    b.HasIndex("BatchId", "RowIdentityKey")
+                        .IsUnique()
+                        .HasDatabaseName("IX_BankStatementImportRows_Batch_RowIdentity");
 
                     b.ToTable("BankStatementImportRows");
                 });
@@ -7917,9 +8013,19 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("BankBik")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("BankConnectionAccountId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("BankName")
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("CompanyId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
@@ -7953,6 +8059,10 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("BankConnectionAccountId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_MoneyAccounts_BankConnectionAccountId");
+
                     b.HasIndex("IsActive")
                         .HasDatabaseName("IX_MoneyAccounts_IsActive");
 
@@ -7964,7 +8074,13 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("Source", "Name")
                         .IsUnique()
-                        .HasDatabaseName("IX_MoneyAccounts_Source_Name");
+                        .HasDatabaseName("IX_MoneyAccounts_Source_Name")
+                        .HasFilter("\"CompanyId\" IS NULL");
+
+                    b.HasIndex("CompanyId", "Source", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("IX_MoneyAccounts_Company_Source_Name")
+                        .HasFilter("\"CompanyId\" IS NOT NULL");
 
                     b.ToTable("MoneyAccounts");
                 });
@@ -7990,6 +8106,13 @@ namespace PayPlanner.Api.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<int?>("CompanyId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Currency")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("Date")
                         .HasColumnType("date");
 
@@ -8013,9 +8136,16 @@ namespace PayPlanner.Api.Migrations
                     b.Property<int>("IssueCount")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int?>("MoneyAccountId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<decimal>("OpeningBalance")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("ScopeKey")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("Source")
                         .IsRequired()
@@ -8029,12 +8159,23 @@ namespace PayPlanner.Api.Migrations
                     b.HasIndex("Date")
                         .HasDatabaseName("IX_MoneyBalanceReconciliationResults_Date");
 
+                    b.HasIndex("MoneyAccountId");
+
+                    b.HasIndex("ScopeKey", "Date")
+                        .IsUnique()
+                        .HasDatabaseName("IX_MoneyBalanceReconciliationResults_ScopeKey_Date")
+                        .HasFilter("\"ScopeKey\" IS NOT NULL");
+
                     b.HasIndex("Source", "Date")
                         .HasDatabaseName("IX_MoneyBalanceReconciliationResults_Source_Date");
 
+                    b.HasIndex("CompanyId", "MoneyAccountId", "Date")
+                        .HasDatabaseName("IX_MoneyBalanceReconciliationResults_Company_Account_Date");
+
                     b.HasIndex("Source", "AccountName", "Date")
                         .IsUnique()
-                        .HasDatabaseName("IX_MoneyBalanceReconciliationResults_Source_Account_Date");
+                        .HasDatabaseName("IX_MoneyBalanceReconciliationResults_Source_Account_Date")
+                        .HasFilter("\"ScopeKey\" IS NULL");
 
                     b.ToTable("MoneyBalanceReconciliationResults");
                 });
@@ -8174,6 +8315,10 @@ namespace PayPlanner.Api.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("SourceMovementKey")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("TEXT");
 
@@ -8229,6 +8374,10 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("Source")
                         .HasDatabaseName("IX_MoneyOperations_Source");
+
+                    b.HasIndex("SourceMovementKey")
+                        .IsUnique()
+                        .HasDatabaseName("IX_MoneyOperations_SourceMovementKey");
 
                     b.HasIndex("UpdatedAt")
                         .HasDatabaseName("IX_MoneyOperation_UpdatedAt_Audit");
@@ -13211,8 +13360,44 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("BankConnection");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.BankStatementImportBatch", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.BankConnectionAccount", "BankConnectionAccount")
+                        .WithMany()
+                        .HasForeignKey("BankConnectionAccountId")
+                        .OnDelete(DeleteBehavior.ClientNoAction);
+
+                    b.HasOne("PayPlanner.Api.Models.LegalEntity", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.ClientNoAction);
+
+                    b.HasOne("PayPlanner.Api.Models.MoneyAccount", "MoneyAccount")
+                        .WithMany()
+                        .HasForeignKey("MoneyAccountId")
+                        .OnDelete(DeleteBehavior.ClientNoAction);
+
+                    b.HasOne("PayPlanner.Api.Models.BankStatementImportBatch", "ParentBatch")
+                        .WithMany()
+                        .HasForeignKey("ParentBatchId")
+                        .OnDelete(DeleteBehavior.ClientNoAction);
+
+                    b.Navigation("BankConnectionAccount");
+
+                    b.Navigation("Company");
+
+                    b.Navigation("MoneyAccount");
+
+                    b.Navigation("ParentBatch");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.BankStatementImportRow", b =>
                 {
+                    b.HasOne("PayPlanner.Api.Models.BankStatementOperation", "BankStatementOperation")
+                        .WithMany()
+                        .HasForeignKey("BankStatementOperationId")
+                        .OnDelete(DeleteBehavior.ClientNoAction);
+
                     b.HasOne("PayPlanner.Api.Models.BankStatementImportBatch", "Batch")
                         .WithMany("Rows")
                         .HasForeignKey("BatchId")
@@ -13224,9 +13409,18 @@ namespace PayPlanner.Api.Migrations
                         .HasForeignKey("MoneyOperationId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("PayPlanner.Api.Models.BankStatementImportRow", "OriginRow")
+                        .WithMany()
+                        .HasForeignKey("OriginRowId")
+                        .OnDelete(DeleteBehavior.ClientNoAction);
+
+                    b.Navigation("BankStatementOperation");
+
                     b.Navigation("Batch");
 
                     b.Navigation("MoneyOperation");
+
+                    b.Navigation("OriginRow");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.BankStatementOperation", b =>
@@ -14583,6 +14777,36 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("ClientPortalAccount");
 
                     b.Navigation("VerifiedByUser");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.MoneyAccount", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.BankConnectionAccount", "BankConnectionAccount")
+                        .WithMany()
+                        .HasForeignKey("BankConnectionAccountId")
+                        .OnDelete(DeleteBehavior.ClientNoAction);
+
+                    b.HasOne("PayPlanner.Api.Models.LegalEntity", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.ClientNoAction);
+
+                    b.Navigation("BankConnectionAccount");
+
+                    b.Navigation("Company");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.MoneyBalanceReconciliationResult", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.LegalEntity", null)
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("PayPlanner.Api.Models.MoneyAccount", null)
+                        .WithMany()
+                        .HasForeignKey("MoneyAccountId")
+                        .OnDelete(DeleteBehavior.NoAction);
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.MoneyOperation", b =>

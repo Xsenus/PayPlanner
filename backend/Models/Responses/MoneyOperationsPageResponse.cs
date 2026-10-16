@@ -34,6 +34,7 @@ public sealed class MoneyOperationListItemDto
     public int? PaymentPriority { get; init; }
     public string? PaidAccountName { get; init; }
     public int? LinkedInvoiceId { get; init; }
+    public bool IsInvoiceLinkProtected { get; init; }
     public string? LinkedInvoiceNumber { get; init; }
     public DateTime? LinkedInvoiceDate { get; init; }
     public int? LinkedContractId { get; init; }
@@ -80,6 +81,12 @@ public sealed class MoneyOperationAccountSummaryDto
 
 public sealed class MoneyOperationDailyBalanceDto
 {
+    public int? CompanyId { get; init; }
+    public int? MoneyAccountId { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)]
+    public string? Currency { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)]
+    public string? BalanceKey { get; init; }
     public DateTime Date { get; init; }
     public string AccountName { get; init; } = string.Empty;
     public MoneyOperationSource Source { get; init; }
@@ -94,6 +101,12 @@ public sealed class MoneyOperationDailyBalanceDto
 
 public sealed class MoneyBalanceReconciliationResultDto
 {
+    public int? CompanyId { get; init; }
+    public int? MoneyAccountId { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)]
+    public string? Currency { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)]
+    public string? BalanceKey { get; init; }
     public int Id { get; init; }
     public DateTime Date { get; init; }
     public string AccountName { get; init; } = string.Empty;

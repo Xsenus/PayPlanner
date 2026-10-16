@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -102,5 +102,56 @@ describe('CompanyBankConnectionsSection', () => {
     expect(run.textContent).toContain('Частично (1 из 2)');
     expect(run.textContent).toContain('загружено операций: 12');
     expect(run.textContent).toContain('bank unavailable');
+  });
+
+  it('reuses the request after a lost response and partial result, then starts a new successful run', async () => {
+    const success = { status: 'Success' as const, succeeded: 1, total: 1, accounts: [{ accountId: 10, inserted: 1, updated: 0, batchId: 91 }] };
+    vi.mocked(apiService.syncBankConnectionStatements)
+      .mockRejectedValueOnce(new Error('Failed to fetch'))
+      .mockResolvedValueOnce({ ...success, status: 'Partial', succeeded: 0 })
+      .mockResolvedValue(success);
+    render(<CompanyBankConnectionsSection companyId={5} />);
+    const user = userEvent.setup();
+    const button = await screen.findByRole('button', { name: 'Загрузить выписки по всем счетам' });
+    for (let call = 1; call <= 4; call++) {
+      await user.click(button);
+      await waitFor(() => expect(apiService.syncBankConnectionStatements).toHaveBeenCalledTimes(call));
+      await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+    }
+    const calls = vi.mocked(apiService.syncBankConnectionStatements).mock.calls;
+    expect(calls[0][1].requestId).toMatch(/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i);
+    expect(calls[1][1]).toEqual(calls[0][1]);
+    expect(calls[2][1]).toEqual(calls[0][1]);
+    expect(calls[3][1].requestId).not.toBe(calls[0][1].requestId);
+  });
+
+  it('does not show or reload an old company when its statement request finishes late', async () => {
+    let finishOld!: (value: Awaited<ReturnType<typeof apiService.syncBankConnectionStatements>>) => void;
+    vi.mocked(apiService.syncBankConnectionStatements).mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }));
+    const { rerender } = render(<CompanyBankConnectionsSection companyId={5} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Загрузить выписки по всем счетам' }));
+    vi.mocked(apiService.getBankConnections).mockResolvedValue([{ ...connection(), id: 2, legalEntityId: 6, status: 'Active' }]);
+    rerender(<CompanyBankConnectionsSection companyId={6} />);
+    expect(await screen.findByText('Активно')).toBeTruthy();
+    await act(async () => { finishOld({ status: 'Success', succeeded: 1, total: 1, accounts: [{ accountId: 10, inserted: 1, updated: 0, batchId: 91 }] }); });
+    await waitFor(() => expect(screen.queryByTestId('bank-statement-run')).toBeNull());
+    expect(apiService.getBankConnections).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses a different request when the period changes after a failed call', async () => {
+    vi.mocked(apiService.syncBankConnectionStatements).mockRejectedValue(new Error('Failed to fetch'));
+    render(<CompanyBankConnectionsSection companyId={5} />);
+    const user = userEvent.setup();
+    const button = await screen.findByRole('button', { name: 'Загрузить выписки по всем счетам' });
+    await user.click(button);
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+    const first = vi.mocked(apiService.syncBankConnectionStatements).mock.calls[0][1];
+    const from = screen.getByLabelText('С');
+    fireEvent.change(from, { target: { value: '2026-01-01' } });
+    await user.click(button);
+    await waitFor(() => expect(apiService.syncBankConnectionStatements).toHaveBeenCalledTimes(2));
+    const second = vi.mocked(apiService.syncBankConnectionStatements).mock.calls[1][1];
+    expect(second.from).toBe('2026-01-01');
+    expect(second.requestId).not.toBe(first.requestId);
   });
 });

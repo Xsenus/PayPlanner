@@ -6080,14 +6080,14 @@ export class ApiService {
     );
   }
 
-  async syncBankConnectionStatements(connectionId: number, period: { from: string; to: string }) {
+  async syncBankConnectionStatements(connectionId: number, period: BankStatementPeriodRequest) {
     return this.request<BankStatementRun>(`/bank-connections/${connectionId}/sync-statements`, {
       method: 'POST',
       body: JSON.stringify(period),
     });
   }
 
-  async syncBankAccountStatement(accountId: number, period: { from: string; to: string }) {
+  async syncBankAccountStatement(accountId: number, period: BankStatementPeriodRequest) {
     return this.request<BankStatementRun>(`/bank-connections/accounts/${accountId}/sync-statement`, {
       method: 'POST',
       body: JSON.stringify(period),
@@ -8999,7 +8999,7 @@ export class ApiService {
     return this.request<string[]>(`/money-operations/accounts${q}`);
   }
 
-  async getMoneyAccounts(params?: { source?: MoneyOperationSource; activeOnly?: boolean }) {
+  async getMoneyAccounts(params?: { source?: MoneyOperationSource; activeOnly?: boolean; companyId?: number }) {
     const q = buildQuery(params ?? {});
     return this.request<MoneyAccount[]>(`/money-accounts${q}`);
   }
@@ -9446,6 +9446,7 @@ import type {
   BankAccountItem,
   BankConnectionItem,
   BankStatementRun,
+  BankStatementPeriodRequest,
   BankSyncLogPage,
   TaxRegisterBook,
   SalesRequestClientCasePage,

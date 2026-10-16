@@ -5,6 +5,7 @@ import { useToast } from '../../hooks/useToast';
 import { apiService } from '../../services/api';
 import type { BankAccountItem, BankConnectionItem, BankStatementRun, BankSyncLogItem } from '../../types';
 import { extractDisplayErrorMessage, isHttpErrorStatus } from '../../utils/errorUtils';
+import { createClientRequestId } from '../../utils/clientRequestId';
 
 interface CompanyBankConnectionsSectionProps {
   companyId: number;
@@ -57,6 +58,20 @@ export function CompanyBankConnectionsSection({ companyId }: CompanyBankConnecti
   });
   const [lastRun, setLastRun] = useState<(BankStatementRun & { connectionId: number }) | null>(null);
   const [logs, setLogs] = useState<{ connectionId: number; items: BankSyncLogItem[] } | null>(null);
+  const statementRequests = useRef(new Map<number, { companyId: number; from: string; to: string; requestId: string }>());
+  const operationSequence = useRef(0);
+  const activeOperation = useRef<number | null>(null);
+
+  useEffect(() => {
+    const sequence = operationSequence;
+    sequence.current++;
+    activeOperation.current = null;
+    statementRequests.current.clear();
+    setBusy(false);
+    setLastRun(null);
+    setLogs(null);
+    return () => { sequence.current++; };
+  }, [companyId]);
 
   const load = useCallback(async () => {
     const sequence = ++loadSequence.current;
@@ -83,15 +98,22 @@ export function CompanyBankConnectionsSection({ companyId }: CompanyBankConnecti
     return () => { sequence.current++; };
   }, [load]);
 
-  const run = async (action: () => Promise<void>, failure: string) => {
+  const run = async (action: (isCurrent: () => boolean) => Promise<void>, failure: string) => {
+    if (activeOperation.current !== null) return;
+    const sequence = operationSequence.current;
+    const isCurrent = () => sequence === operationSequence.current;
+    activeOperation.current = sequence;
     setBusy(true);
     try {
-      await action();
-      await load();
+      await action(isCurrent);
+      if (isCurrent()) await load();
     } catch (error) {
-      toast.error(extractDisplayErrorMessage(error, failure), 'Банковские подключения');
+      if (isCurrent()) toast.error(extractDisplayErrorMessage(error, failure), 'Банковские подключения');
     } finally {
-      setBusy(false);
+      if (isCurrent()) {
+        activeOperation.current = null;
+        setBusy(false);
+      }
     }
   };
 
@@ -133,9 +155,9 @@ export function CompanyBankConnectionsSection({ companyId }: CompanyBankConnecti
                 type="button"
                 disabled={busy}
                 onClick={() =>
-                  void run(async () => {
+                  void run(async (isCurrent) => {
                     const result = await apiService.syncBankConnectionAccounts(connection.id);
-                    toast.success(`Счета обновлены: новых ${result.added}, изменённых ${result.updated}.`, 'Банковские подключения');
+                    if (isCurrent()) toast.success(`Счета обновлены: новых ${result.added}, изменённых ${result.updated}.`, 'Банковские подключения');
                   }, 'Не удалось обновить счета.')
                 }
                 className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
@@ -146,10 +168,14 @@ export function CompanyBankConnectionsSection({ companyId }: CompanyBankConnecti
               <button
                 type="button"
                 disabled={busy}
-                onClick={() =>
-                  void apiService.getBankSyncLogs(connection.id).then((page) => setLogs({ connectionId: connection.id, items: page.items }))
-                    .catch((error) => toast.error(extractDisplayErrorMessage(error, 'Не удалось загрузить журнал банка.'), 'Банковские подключения'))
-                }
+                onClick={() => {
+                  const sequence = operationSequence.current;
+                  void apiService.getBankSyncLogs(connection.id).then((page) => {
+                    if (sequence === operationSequence.current) setLogs({ connectionId: connection.id, items: page.items });
+                  }).catch((error) => {
+                    if (sequence === operationSequence.current) toast.error(extractDisplayErrorMessage(error, 'Не удалось загрузить журнал банка.'), 'Банковские подключения');
+                  });
+                }}
                 className="rounded-lg border border-slate-200 px-2 py-1 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
               >
                 Журнал
@@ -180,9 +206,18 @@ export function CompanyBankConnectionsSection({ companyId }: CompanyBankConnecti
               type="button"
               disabled={busy || !period.from || !period.to}
               onClick={() =>
-                void run(async () => {
-                  const result = await apiService.syncBankConnectionStatements(connection.id, period);
-                  setLastRun({ ...result, connectionId: connection.id });
+                void run(async (isCurrent) => {
+                  const previous = statementRequests.current.get(connection.id);
+                  const request = previous?.companyId === companyId && previous.from === period.from && previous.to === period.to
+                    ? previous : { ...period, companyId, requestId: createClientRequestId() };
+                  statementRequests.current.set(connection.id, request);
+                  const result = await apiService.syncBankConnectionStatements(connection.id, {
+                    from: request.from, to: request.to, requestId: request.requestId,
+                  });
+                  if (result.status === 'Success' && statementRequests.current.get(connection.id) === request) {
+                    statementRequests.current.delete(connection.id);
+                  }
+                  if (isCurrent()) setLastRun({ ...result, connectionId: connection.id });
                 }, 'Не удалось загрузить выписки.')
               }
               className="rounded-lg bg-blue-600 px-3 py-1.5 text-white hover:bg-blue-700 disabled:opacity-50"

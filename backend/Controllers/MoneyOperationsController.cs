@@ -9,6 +9,8 @@ using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Invoices;
+using PayPlanner.Api.Services.Banking;
+using static PayPlanner.Api.Services.Banking.BankStatementImportRules;
 using System.Globalization;
 using System.Net;
 using System.Security.Claims;
@@ -23,107 +25,12 @@ namespace PayPlanner.Api.Controllers;
 [ApiController]
 [Route("api/money-operations")]
 [Authorize]
-public class MoneyOperationsController : ControllerBase
+public partial class MoneyOperationsController : ControllerBase
 {
     private const long MaxStatementFileSizeBytes = 10L * 1024L * 1024L;
     private const int MaxAutoImportStatementFiles = 20;
     private const string BankStatementAutoImportSettingKey = "money.bankStatement.autoImport";
     private const string BankStatementCategoryRulesSettingKey = "money.bankStatement.categoryRules";
-    private const string CashSourceToken = "\u043A\u0430\u0441";
-    private const string CashSourceTitleToken = "\u041A\u0430\u0441";
-    private const string CashSourceAlternativeToken = "\u043D\u0430\u043B\u0438\u0447";
-    private const string CashSourceAlternativeTitleToken = "\u041D\u0430\u043B\u0438\u0447";
-    private const string CardSourceToken = "\u043A\u0430\u0440\u0442";
-    private const string CardSourceTitleToken = "\u041A\u0430\u0440\u0442";
-    private const string EMoneySourceToken = "e-money";
-    private const string EMoneySourceTitleToken = "E-money";
-    private const string EMoneySourceCompactToken = "emoney";
-    private const string EMoneySourceCompactTitleToken = "EMoney";
-    private const string EMoneySourceRussianToken = "\u044D\u043B\u0435\u043A\u0442\u0440\u043E\u043D";
-    private const string EMoneySourceRussianTitleToken = "\u042D\u043B\u0435\u043A\u0442\u0440\u043E\u043D";
-    private const string EMoneySourceYuMoneyToken = "\u042EMoney";
-    private const string EMoneySourceYooMoneyToken = "YooMoney";
-    private const string EMoneySourceYandexToken = "\u042F\u043D\u0434\u0435\u043A\u0441";
-    private static readonly BankStatementCategoryRule[] BankStatementCategoryRules =
-    [
-        new("Оплата от клиентов", PaymentType.Income,
-        [
-            "оплата по счету",
-            "оплата услуг",
-            "за услуги",
-            "по договору оказания",
-            "поступление от клиента",
-            "оплата от покупателя",
-        ]),
-        new("Возврат от поставщика", PaymentType.Income,
-        [
-            "возврат от поставщика",
-            "возврат оплаты",
-            "возврат денежных средств",
-            "возврат переплаты",
-        ]),
-        new("Эквайринг", PaymentType.Income,
-        [
-            "эквайринг",
-            "поступление по эквайрингу",
-            "зачисление по терминалу",
-        ]),
-        new("Банковская комиссия", PaymentType.Expense,
-        [
-            "банковская комиссия",
-            "комиссия банка",
-            "комиссия за",
-            "расчетно кассов",
-            "рко",
-            "обслуживание счета",
-            "эквайринг",
-        ]),
-        new("Налоги и сборы", PaymentType.Expense,
-        [
-            "налог",
-            "ндс",
-            "ндфл",
-            "усн",
-            "страховые взносы",
-            "взносы",
-            "пени",
-            "штраф",
-            "казначейство",
-            "фнс",
-        ]),
-        new("Зарплата", PaymentType.Expense,
-        [
-            "заработная плата",
-            "зарплата",
-            "аванс",
-            "реестр на выплату",
-            "по ведомости",
-        ]),
-        new("Аренда", PaymentType.Expense,
-        [
-            "арендная плата",
-            "аренда",
-            "аренда офиса",
-            "за помещение",
-        ]),
-        new("Расчеты с поставщиками", PaymentType.Expense,
-        [
-            "оплата поставщику",
-            "за материалы",
-            "за товары",
-            "по договору поставки",
-            "за оборудование",
-            "за услуги связи",
-        ]),
-        new("Возврат клиенту", PaymentType.Expense,
-        [
-            "возврат клиенту",
-            "возврат покупателю",
-            "возврат оплаты",
-            "возврат денежных средств",
-        ]),
-    ];
-
     private readonly PaymentContext _db;
     private readonly ILogger<MoneyOperationsController> _logger;
     private readonly IInvoiceDocumentPdfService? _pdfService;
@@ -140,15 +47,22 @@ public class MoneyOperationsController : ControllerBase
         _pdfService = pdfService;
     }
 
-    private Task<DataVisibilityAccess?> ResolveMoneyVisibilityAsync(CancellationToken ct)
-        => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+    private async Task<DataVisibilityAccess?> ResolveMoneyVisibilityAsync(CancellationToken ct)
+    {
+        var access = await ResolveMoneyAccessAsync(ct);
+        moneyInvoiceReadAccess = access is null ? null
+            : await _db.ResolveSectionAccessAsync(User, RolePermissionCatalog.Accounts, ct, requireApprovedUser: true);
+        moneyContractReadAccess = access is null ? null
+            : await _db.ResolveSectionAccessAsync(User, RolePermissionCatalog.Contracts, ct, requireApprovedUser: true);
+        moneyActReadAccess = access is null ? null
+            : await _db.ResolveSectionAccessAsync(User, RolePermissionCatalog.Acts, ct, requireApprovedUser: true);
+        return access?.Visibility;
+    }
 
     private async Task<ForbidResult?> RequirePaymentsPermissionAsync(
         Func<RolePermissionValues, bool> isAllowed,
         CancellationToken ct)
-        => await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, isAllowed, ct)
-            ? null
-            : Forbid();
+        => await ResolveMoneyAccessAsync(ct) is { } access && access.Permission.CanView && isAllowed(access.Permission) ? null : Forbid();
 
     private async Task<bool> CanExportMoneyOperationsAsync(CancellationToken ct)
     {
@@ -168,24 +82,8 @@ public class MoneyOperationsController : ControllerBase
     }
 
     private static IQueryable<MoneyOperationQueryRow> ApplyMoneyOperationVisibility(
-        IQueryable<MoneyOperationQueryRow> query,
-        DataVisibilityAccess? visibility)
-    {
-        if (visibility is null)
-        {
-            return query.Where(_ => false);
-        }
-
-        if (visibility.SeesAll)
-        {
-            return query;
-        }
-
-        var visibleUserIds = visibility.VisibleUserIds.ToArray();
-        return query.Where(item =>
-            item.ResponsibleUserId.HasValue
-            && visibleUserIds.Contains(item.ResponsibleUserId.Value));
-    }
+        IQueryable<MoneyOperationQueryRow> query, DataVisibilityAccess? visibility)
+        => MoneyJournalQuery.ApplyVisibility(query, visibility);
 
     private async Task<bool> CanAccessCustomMoneyOperationAsync(
         int id,
@@ -752,12 +650,17 @@ public class MoneyOperationsController : ControllerBase
             return Unauthorized();
         }
 
-        var balances = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildDailyBalanceRowsAsync(from, to, source, accountName, visibility, cancellationToken),
-            _logger,
-            ct);
-
-        return Ok(balances);
+        try
+        {
+            var balances = await SqliteRetryHelper.ExecuteAsync(
+                cancellationToken => BuildDailyBalanceRowsAsync(from, to, source, accountName, visibility, cancellationToken),
+                _logger, ct);
+            return Ok(balances);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
     }
 
     [HttpGet("balance-reconciliation")]
@@ -783,7 +686,8 @@ public class MoneyOperationsController : ControllerBase
 
         var results = await SqliteRetryHelper.ExecuteAsync(async cancellationToken =>
         {
-            var query = _db.MoneyBalanceReconciliationResults.AsNoTracking().AsQueryable();
+            var scope = await MoneyReconciliationScope.ForUserAsync(_db, moneyAccess!, cancellationToken);
+            var query = scope.ReadResults(_db);
             if (from.HasValue)
             {
                 query = query.Where(item => item.Date >= from.Value.Date);
@@ -836,195 +740,47 @@ public class MoneyOperationsController : ControllerBase
             return Forbid();
         }
 
-        var result = await SqliteRetryHelper.ExecuteAsync(async cancellationToken =>
+        var scope = await MoneyReconciliationScope.ForUserAsync(_db, moneyAccess!, ct);
+        try
         {
-            var balances = await BuildDailyBalanceRowsAsync(from, to, source, accountName, visibility, cancellationToken);
-            var keys = balances
-                .Select(item => new { item.Source, item.AccountName, Date = item.Date.Date })
-                .ToList();
-            var keyDates = keys.Select(key => key.Date).Distinct().ToList();
-            var existingRows = keys.Count == 0
-                ? new List<MoneyBalanceReconciliationResult>()
-                : await _db.MoneyBalanceReconciliationResults
-                    .Where(item => keyDates.Contains(item.Date))
-                    .ToListAsync(cancellationToken);
-            var existingByKey = existingRows
-                .Where(item => keys.Any(key =>
-                    key.Source == item.Source &&
-                    key.AccountName == item.AccountName &&
-                    key.Date == item.Date.Date))
-                .ToDictionary(item => (item.Source, item.AccountName, item.Date.Date));
-            var checkedAt = DateTime.UtcNow;
-            var checkedByUserId = GetCurrentUserId();
-            var created = 0;
-            var updated = 0;
-
-            foreach (var balance in balances)
-            {
-                var key = (balance.Source, balance.AccountName, balance.Date.Date);
-                if (!existingByKey.TryGetValue(key, out var row))
+            var service = new MoneyBalanceReconciliationService(_db, _logger);
+            var result = await service.RunAsync(scope, from, to, source, accountName,
+                async (authorityDb, token) =>
                 {
-                    row = new MoneyBalanceReconciliationResult
-                    {
-                        Date = balance.Date.Date,
-                        Source = balance.Source,
-                        AccountName = balance.AccountName,
-                    };
-                    _db.MoneyBalanceReconciliationResults.Add(row);
-                    created++;
-                }
-                else
-                {
-                    updated++;
-                }
-
-                row.OpeningBalance = balance.OpeningBalance;
-                row.Income = balance.Income;
-                row.Expense = balance.Expense;
-                row.ClosingBalance = balance.ClosingBalance;
-                row.IncomeCount = balance.IncomeCount;
-                row.ExpenseCount = balance.ExpenseCount;
-                row.IsBalanced = balance.IsBalanced;
-                row.IssueCount = balance.IsBalanced ? 0 : 1;
-                row.CheckedAt = checkedAt;
-                row.CheckedByUserId = checkedByUserId;
-            }
-
-            await _db.SaveChangesAsync(cancellationToken);
-            var storedItems = balances.Count == 0
-                ? new List<MoneyBalanceReconciliationResult>()
-                : await _db.MoneyBalanceReconciliationResults
-                    .AsNoTracking()
-                    .Where(item => keyDates.Contains(item.Date))
-                    .ToListAsync(cancellationToken);
-            var itemDtos = storedItems
-                .Where(item => keys.Any(key =>
-                    key.Source == item.Source &&
-                    key.AccountName == item.AccountName &&
-                    key.Date == item.Date.Date))
-                .OrderBy(item => item.Date)
-                .ThenBy(item => item.AccountName)
-                .ThenBy(item => item.Source)
-                .Select(MapBalanceReconciliationResult)
-                .ToList();
-
-            return new MoneyBalanceReconciliationRunResultDto
-            {
-                CheckedAt = checkedAt,
-                Created = created,
-                Updated = updated,
-                IssueCount = itemDtos.Sum(item => item.IssueCount),
-                Items = itemDtos,
-            };
-        }, _logger, ct);
-
-        return Ok(result);
+                    var access = await BankStatementImportAccess.ResolveAsync(authorityDb, User, token);
+                    if (access is null || !access.Permission.CanView || !access.Permission.CanEdit || !access.Visibility.SeesAll)
+                        return false;
+                    return scope.SameAuthority(await MoneyReconciliationScope.ForUserAsync(authorityDb, access, token));
+                }, ct);
+            return Ok(result);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
     }
 
-    private async Task<List<MoneyOperationDailyBalanceDto>> BuildDailyBalanceRowsAsync(
+    private Task<List<MoneyOperationDailyBalanceDto>> BuildDailyBalanceRowsAsync(
         DateTime? from,
         DateTime? to,
         MoneyOperationSource? source,
         string? accountName,
         DataVisibilityAccess visibility,
         CancellationToken cancellationToken)
-    {
-        var openingQuery = from.HasValue
-            ? ApplyMoneyOperationVisibility(
-                BuildMoneyOperationsQuery(null, from.Value.Date.AddDays(-1), source, null, MoneyOperationAccountingType.Fact, null, accountName, null, null),
-                visibility)
-                .Where(item => item.AccountName != null && item.AccountName != "")
-            : null;
+        => CreateMoneyJournalQuery().BuildDailyBalanceRowsAsync(from, to, source, accountName, visibility, cancellationToken);
 
-        var openingBalances = new Dictionary<(MoneyOperationSource Source, string AccountName), decimal>();
-        if (openingQuery is not null)
-        {
-            var openingRows = await openingQuery
-                .GroupBy(item => new { item.Source, item.AccountName })
-                .Select(group => new MoneyOperationDailyBalanceOpeningQueryRow
-                {
-                    Source = group.Key.Source,
-                    AccountName = group.Key.AccountName!,
-                    Balance =
-                        group.Where(item => item.Direction == MoneyOperationDirection.Income.ToString()).Sum(item => item.Amount) -
-                        group.Where(item => item.Direction == MoneyOperationDirection.Expense.ToString()).Sum(item => item.Amount),
-                })
-                .ToListAsync(cancellationToken);
-
-            openingBalances = openingRows
-                .Select(row => new
-                {
-                    Source = ParseEnum<MoneyOperationSource>(row.Source),
-                    row.AccountName,
-                    row.Balance,
-                })
-                .ToDictionary(row => (row.Source, row.AccountName), row => row.Balance);
-        }
-
-        var movementRows = await ApplyMoneyOperationVisibility(
-                BuildMoneyOperationsQuery(from, to, source, null, MoneyOperationAccountingType.Fact, null, accountName, null, null),
-                visibility)
-            .Where(item => item.AccountName != null && item.AccountName != "")
-            .GroupBy(item => new { item.Source, item.AccountName, Date = item.Date.Date })
-            .Select(group => new MoneyOperationDailyBalanceQueryRow
-            {
-                Date = group.Key.Date,
-                Source = group.Key.Source,
-                AccountName = group.Key.AccountName!,
-                Income = group
-                    .Where(item => item.Direction == MoneyOperationDirection.Income.ToString())
-                    .Sum(item => item.Amount),
-                Expense = group
-                    .Where(item => item.Direction == MoneyOperationDirection.Expense.ToString())
-                    .Sum(item => item.Amount),
-                IncomeCount = group.Count(item => item.Direction == MoneyOperationDirection.Income.ToString()),
-                ExpenseCount = group.Count(item => item.Direction == MoneyOperationDirection.Expense.ToString()),
-            })
-            .ToListAsync(cancellationToken);
-
-        return movementRows
-            .Select(row => new
-            {
-                Row = row,
-                Source = ParseEnum<MoneyOperationSource>(row.Source),
-            })
-            .GroupBy(item => new { item.Source, item.Row.AccountName })
-            .OrderBy(group => group.Key.AccountName)
-            .ThenBy(group => group.Key.Source)
-            .SelectMany(group =>
-            {
-                var runningBalance = openingBalances.TryGetValue((group.Key.Source, group.Key.AccountName), out var openingBalance)
-                    ? openingBalance
-                    : 0m;
-
-                return group
-                    .OrderBy(item => item.Row.Date)
-                    .Select(item =>
-                    {
-                        var row = item.Row;
-                        var closingBalance = runningBalance + row.Income - row.Expense;
-                        var result = new MoneyOperationDailyBalanceDto
-                        {
-                            Date = row.Date,
-                            Source = item.Source,
-                            AccountName = row.AccountName,
-                            OpeningBalance = runningBalance,
-                            Income = row.Income,
-                            Expense = row.Expense,
-                            ClosingBalance = closingBalance,
-                            IncomeCount = row.IncomeCount,
-                            ExpenseCount = row.ExpenseCount,
-                            IsBalanced = closingBalance == runningBalance + row.Income - row.Expense,
-                        };
-                        runningBalance = closingBalance;
-                        return result;
-                    });
-            })
-            .OrderBy(row => row.Date)
-            .ThenBy(row => row.AccountName)
-            .ThenBy(row => row.Source)
-            .ToList();
-    }
+    private MoneyJournalQuery CreateMoneyJournalQuery()
+        => new(_db, new MoneyJournalQuerySources(
+            ScopeCompanyMoneyOperations(_db.MoneyOperations.AsNoTracking()),
+            ScopeCompanyPaymentOperations(_db.Payments.AsNoTracking()),
+            ReadableMoneyInvoiceOperations(),
+            moneyAccess?.Visibility.SeesAll != true,
+            ReadableMoneyContracts(),
+            ReadableMoneyActs()));
 
     private IQueryable<MoneyOperationQueryRow> BuildMoneyOperationsQuery(
         DateTime? from,
@@ -1036,600 +792,11 @@ public class MoneyOperationsController : ControllerBase
         string? accountName,
         string? categoryName,
         string? search)
-    {
-        var customOperations = ApplyMoneyOperationFilters(
-                _db.MoneyOperations.AsNoTracking(),
-                from,
-                to,
-                source,
-                direction,
-                accountingType,
-                moneyAccountId,
-                accountName,
-                categoryName,
-                search)
-            .Select(operation => new MoneyOperationQueryRow
-            {
-                Id = operation.Id,
-                Source = operation.Source == MoneyOperationSource.Cash
-                    ? nameof(MoneyOperationSource.Cash)
-                    : operation.Source == MoneyOperationSource.Card
-                        ? nameof(MoneyOperationSource.Card)
-                        : operation.Source == MoneyOperationSource.EMoney
-                            ? nameof(MoneyOperationSource.EMoney)
-                            : nameof(MoneyOperationSource.Bank),
-                Direction = operation.Direction == MoneyOperationDirection.Income
-                    ? nameof(MoneyOperationDirection.Income)
-                    : operation.Direction == MoneyOperationDirection.Expense
-                        ? nameof(MoneyOperationDirection.Expense)
-                        : nameof(MoneyOperationDirection.Transfer),
-                AccountingType = operation.AccountingType == MoneyOperationAccountingType.Fact
-                    ? nameof(MoneyOperationAccountingType.Fact)
-                    : nameof(MoneyOperationAccountingType.Plan),
-                MoneyAccountId = operation.MoneyAccountId,
-                MoneyAccountName = operation.MoneyAccount != null ? operation.MoneyAccount.Name : null,
-                AccountName = operation.AccountName,
-                CounterpartyName = operation.CounterpartyName,
-                ResponsibleUserId = operation.ResponsibleUserId ?? _db.Payments
-                    .Where(payment => operation.LinkedInvoiceId.HasValue && payment.InvoiceId == operation.LinkedInvoiceId.Value)
-                    .SelectMany(payment => payment.Responsibles)
-                    .OrderBy(link => link.UserId)
-                    .Select(link => (int?)link.UserId)
-                    .FirstOrDefault(),
-                ResponsibleName = operation.ResponsibleUser != null
-                    ? (operation.ResponsibleUser.FullName != null && operation.ResponsibleUser.FullName != ""
-                        ? operation.ResponsibleUser.FullName
-                        : operation.ResponsibleUser.Email)
-                    : _db.Payments
-                    .Where(payment => operation.LinkedInvoiceId.HasValue && payment.InvoiceId == operation.LinkedInvoiceId.Value)
-                    .SelectMany(payment => payment.Responsibles)
-                    .OrderBy(link => link.UserId)
-                    .Select(link => link.User.FullName != null && link.User.FullName != "" ? link.User.FullName : link.User.Email)
-                    .FirstOrDefault(),
-                IncomeTypeId = operation.IncomeTypeId,
-                CategoryName = operation.IncomeType != null ? operation.IncomeType.Name : operation.CategoryName,
-                Amount = operation.Amount,
-                VatRate = operation.VatRate,
-                VatAmount = operation.VatAmount,
-                Currency = operation.Currency,
-                PaymentOrderNumber = operation.PaymentOrderNumber,
-                Date = operation.Date,
-                RecognitionDate = operation.RecognitionDate,
-                IsAdvancePayment = operation.IsAdvancePayment,
-                Purpose = operation.Purpose,
-                PaidInvoiceNumber = operation.PaidInvoiceNumber,
-                PaidAmount = operation.PaidAmount,
-                ProjectName = operation.ProjectName,
-                DirectionName = operation.DirectionName,
-                SalesPointName = operation.SalesPointName,
-                PaymentPriority = operation.PaymentPriority,
-                PaidAccountName = operation.PaidAccountName,
-                LinkedInvoiceId = operation.LinkedInvoiceId,
-                LinkedInvoiceNumber = operation.LinkedInvoice != null ? operation.LinkedInvoice.Number : null,
-                LinkedInvoiceDate = operation.LinkedInvoice != null ? operation.LinkedInvoice.Date : null,
-                LinkedContractId = _db.Payments
-                    .Where(payment => operation.LinkedInvoiceId.HasValue && payment.InvoiceId == operation.LinkedInvoiceId.Value)
-                    .OrderBy(payment => payment.Id)
-                    .Select(payment => payment.ContractId)
-                    .FirstOrDefault(),
-                LinkedContractNumber = _db.Payments
-                    .Where(payment => operation.LinkedInvoiceId.HasValue && payment.InvoiceId == operation.LinkedInvoiceId.Value)
-                    .OrderBy(payment => payment.Id)
-                    .Select(payment => payment.Contract != null ? payment.Contract.Number : null)
-                    .FirstOrDefault(),
-                LinkedActId = _db.Acts
-                    .Where(act =>
-                        act.InvoiceId.HasValue &&
-                        act.Invoice != null &&
-                        operation.LinkedInvoiceId.HasValue &&
-                        act.Invoice.InvoiceId == operation.LinkedInvoiceId.Value &&
-                        act.Status != ActStatus.Terminated)
-                    .OrderByDescending(act => act.Status == ActStatus.Signed)
-                    .ThenByDescending(act => act.Date)
-                    .ThenByDescending(act => act.Id)
-                    .Select(act => (int?)act.Id)
-                    .FirstOrDefault(),
-                LinkedActNumber = _db.Acts
-                    .Where(act =>
-                        act.InvoiceId.HasValue &&
-                        act.Invoice != null &&
-                        operation.LinkedInvoiceId.HasValue &&
-                        act.Invoice.InvoiceId == operation.LinkedInvoiceId.Value &&
-                        act.Status != ActStatus.Terminated)
-                    .OrderByDescending(act => act.Status == ActStatus.Signed)
-                    .ThenByDescending(act => act.Date)
-                    .ThenByDescending(act => act.Id)
-                    .Select(act => act.Number)
-                    .FirstOrDefault(),
-                LinkedActDate = _db.Acts
-                    .Where(act =>
-                        act.InvoiceId.HasValue &&
-                        act.Invoice != null &&
-                        operation.LinkedInvoiceId.HasValue &&
-                        act.Invoice.InvoiceId == operation.LinkedInvoiceId.Value &&
-                        act.Status != ActStatus.Terminated)
-                    .OrderByDescending(act => act.Status == ActStatus.Signed)
-                    .ThenByDescending(act => act.Date)
-                    .ThenByDescending(act => act.Id)
-                    .Select(act => (DateTime?)act.Date)
-                    .FirstOrDefault(),
-                MatchStatus = operation.MatchStatus == MoneyOperationMatchStatus.Matched
-                    ? nameof(MoneyOperationMatchStatus.Matched)
-                    : operation.MatchStatus == MoneyOperationMatchStatus.ClarificationRequired
-                        ? nameof(MoneyOperationMatchStatus.ClarificationRequired)
-                        : operation.MatchStatus == MoneyOperationMatchStatus.Ignored
-                            ? nameof(MoneyOperationMatchStatus.Ignored)
-                            : nameof(MoneyOperationMatchStatus.None),
-                MatchedAt = operation.MatchedAt,
-                MatchComment = operation.MatchComment,
-                AttachmentCount = operation.BankStatementImportBatchId.HasValue ? 1 : null,
-                AttachmentSummary = operation.BankStatementImportBatch != null ? operation.BankStatementImportBatch.FileName : null,
-                CreatedAt = operation.CreatedAt,
-                UpdatedAt = operation.UpdatedAt,
-                IsReadonly = false,
-                RelatedPaymentId = null,
-                CashOrderId = _db.CashOrders
-                    .Where(order => order.MoneyOperationId == operation.Id && order.Status != CashOrderStatus.Cancelled)
-                    .OrderByDescending(order => order.Id)
-                    .Select(order => (int?)order.Id)
-                    .FirstOrDefault(),
-                CashOrderNumber = _db.CashOrders
-                    .Where(order => order.MoneyOperationId == operation.Id && order.Status != CashOrderStatus.Cancelled)
-                    .OrderByDescending(order => order.Id)
-                    .Select(order => order.Number)
-                    .FirstOrDefault(),
-                CashOrderDate = _db.CashOrders
-                    .Where(order => order.MoneyOperationId == operation.Id && order.Status != CashOrderStatus.Cancelled)
-                    .OrderByDescending(order => order.Id)
-                    .Select(order => (DateTime?)order.Date)
-                    .FirstOrDefault(),
-                CashOrderStatus = _db.CashOrders
-                    .Where(order => order.MoneyOperationId == operation.Id && order.Status != CashOrderStatus.Cancelled)
-                    .OrderByDescending(order => order.Id)
-                    .Select(order => order.Status == CashOrderStatus.Posted
-                        ? nameof(CashOrderStatus.Posted)
-                        : order.Status == CashOrderStatus.Draft
-                            ? nameof(CashOrderStatus.Draft)
-                            : nameof(CashOrderStatus.Cancelled))
-                    .FirstOrDefault(),
-                CanCreateCashOrder =
-                    operation.Source == MoneyOperationSource.Cash &&
-                    operation.AccountingType == MoneyOperationAccountingType.Fact &&
-                    operation.Amount > 0m &&
-                    (operation.Direction == MoneyOperationDirection.Income ||
-                     operation.Direction == MoneyOperationDirection.Expense) &&
-                    !_db.CashOrders.Any(order => order.MoneyOperationId == operation.Id && order.Status != CashOrderStatus.Cancelled),
-            });
+        => CreateMoneyJournalQuery().Build(from, to, source, direction, accountingType, moneyAccountId, accountName, categoryName, search);
 
-        var paymentOperations = ApplyPaymentFilters(
-                _db.Payments.AsNoTracking(),
-                from,
-                to,
-                source,
-                direction,
-                accountingType,
-                moneyAccountId,
-                accountName,
-                categoryName,
-                search)
-            .Select(payment => new MoneyOperationQueryRow
-            {
-                Id = -payment.Id,
-                Source =
-                    payment.PaymentSource != null &&
-                    payment.PaymentSource.Name != null &&
-                    (payment.PaymentSource.Name.Contains(CashSourceToken) ||
-                     payment.PaymentSource.Name.Contains(CashSourceTitleToken) ||
-                     payment.PaymentSource.Name.Contains(CashSourceAlternativeToken) ||
-                     payment.PaymentSource.Name.Contains(CashSourceAlternativeTitleToken))
-                        ? nameof(MoneyOperationSource.Cash)
-                        : payment.PaymentSource != null &&
-                          payment.PaymentSource.Name != null &&
-                          (payment.PaymentSource.Name.Contains(CardSourceToken) ||
-                           payment.PaymentSource.Name.Contains(CardSourceTitleToken))
-                            ? nameof(MoneyOperationSource.Card)
-                            : payment.PaymentSource != null &&
-                              payment.PaymentSource.Name != null &&
-                              (payment.PaymentSource.Name.Contains(EMoneySourceToken) ||
-                               payment.PaymentSource.Name.Contains(EMoneySourceTitleToken) ||
-                               payment.PaymentSource.Name.Contains(EMoneySourceCompactToken) ||
-                               payment.PaymentSource.Name.Contains(EMoneySourceCompactTitleToken) ||
-                               payment.PaymentSource.Name.Contains(EMoneySourceRussianToken) ||
-                               payment.PaymentSource.Name.Contains(EMoneySourceRussianTitleToken) ||
-                               payment.PaymentSource.Name.Contains(EMoneySourceYuMoneyToken) ||
-                               payment.PaymentSource.Name.Contains(EMoneySourceYooMoneyToken) ||
-                               payment.PaymentSource.Name.Contains(EMoneySourceYandexToken))
-                                ? nameof(MoneyOperationSource.EMoney)
-                                : nameof(MoneyOperationSource.Bank),
-                Direction = payment.Type == PaymentType.Income
-                    ? nameof(MoneyOperationDirection.Income)
-                    : nameof(MoneyOperationDirection.Expense),
-                AccountingType = payment.Status == PaymentStatus.Completed
-                    ? nameof(MoneyOperationAccountingType.Fact)
-                    : nameof(MoneyOperationAccountingType.Plan),
-                MoneyAccountId = null,
-                MoneyAccountName = null,
-                AccountName = payment.Account,
-                CounterpartyName = payment.CounterpartyName,
-                ResponsibleUserId = payment.Responsibles
-                    .OrderBy(link => link.UserId)
-                    .Select(link => (int?)link.UserId)
-                    .FirstOrDefault(),
-                ResponsibleName = payment.Responsibles
-                    .OrderBy(link => link.UserId)
-                    .Select(link => link.User.FullName != null && link.User.FullName != "" ? link.User.FullName : link.User.Email)
-                    .FirstOrDefault(),
-                IncomeTypeId = payment.IncomeTypeId,
-                CategoryName = payment.IncomeType != null
-                    ? payment.IncomeType.Name
-                    : payment.ClientCase != null
-                        ? payment.ClientCase.Title
-                        : null,
-                Amount =
-                    payment.Status == PaymentStatus.Completed && payment.PaidAmount > 0m
-                        ? payment.PaidAmount
-                        : payment.Amount,
-                VatRate = null,
-                VatAmount = null,
-                Currency = "RUB",
-                PaymentOrderNumber = null,
-                Date = payment.Status == PaymentStatus.Completed
-                    ? (payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date)
-                    : payment.Date,
-                RecognitionDate = payment.Date,
-                IsAdvancePayment = false,
-                Purpose = payment.Description,
-                PaidInvoiceNumber = payment.Account,
-                PaidAmount = payment.PaidAmount,
-                ProjectName = payment.ClientCase != null ? payment.ClientCase.Title : null,
-                DirectionName = payment.PaymentSource != null ? payment.PaymentSource.Name : null,
-                SalesPointName = null,
-                PaymentPriority = null,
-                PaidAccountName = payment.Account,
-                LinkedInvoiceId = payment.InvoiceId,
-                LinkedInvoiceNumber = payment.Invoice != null ? payment.Invoice.Number : payment.Account,
-                LinkedInvoiceDate = payment.Invoice != null ? payment.Invoice.Date : payment.AccountDate,
-                LinkedContractId = payment.ContractId,
-                LinkedContractNumber = payment.Contract != null ? payment.Contract.Number : null,
-                LinkedActId = _db.Acts
-                    .Where(act => act.InvoiceId == payment.Id && act.Status != ActStatus.Terminated)
-                    .OrderByDescending(act => act.Status == ActStatus.Signed)
-                    .ThenByDescending(act => act.Date)
-                    .ThenByDescending(act => act.Id)
-                    .Select(act => (int?)act.Id)
-                    .FirstOrDefault(),
-                LinkedActNumber = _db.Acts
-                    .Where(act => act.InvoiceId == payment.Id && act.Status != ActStatus.Terminated)
-                    .OrderByDescending(act => act.Status == ActStatus.Signed)
-                    .ThenByDescending(act => act.Date)
-                    .ThenByDescending(act => act.Id)
-                    .Select(act => act.Number)
-                    .FirstOrDefault(),
-                LinkedActDate = _db.Acts
-                    .Where(act => act.InvoiceId == payment.Id && act.Status != ActStatus.Terminated)
-                    .OrderByDescending(act => act.Status == ActStatus.Signed)
-                    .ThenByDescending(act => act.Date)
-                    .ThenByDescending(act => act.Id)
-                    .Select(act => (DateTime?)act.Date)
-                    .FirstOrDefault(),
-                MatchStatus = payment.InvoiceId.HasValue
-                    ? nameof(MoneyOperationMatchStatus.Matched)
-                    : nameof(MoneyOperationMatchStatus.None),
-                MatchedAt = payment.LastPaymentDate ?? payment.PaidDate,
-                MatchComment = null,
-                AttachmentCount = null,
-                AttachmentSummary = null,
-                CreatedAt = payment.CreatedAt,
-                UpdatedAt = null,
-                IsReadonly = true,
-                RelatedPaymentId = payment.Id,
-                CashOrderId = _db.CashOrders
-                    .Where(order => order.PaymentId == payment.Id && order.Status != CashOrderStatus.Cancelled)
-                    .OrderByDescending(order => order.Id)
-                    .Select(order => (int?)order.Id)
-                    .FirstOrDefault(),
-                CashOrderNumber = _db.CashOrders
-                    .Where(order => order.PaymentId == payment.Id && order.Status != CashOrderStatus.Cancelled)
-                    .OrderByDescending(order => order.Id)
-                    .Select(order => order.Number)
-                    .FirstOrDefault(),
-                CashOrderDate = _db.CashOrders
-                    .Where(order => order.PaymentId == payment.Id && order.Status != CashOrderStatus.Cancelled)
-                    .OrderByDescending(order => order.Id)
-                    .Select(order => (DateTime?)order.Date)
-                    .FirstOrDefault(),
-                CashOrderStatus = _db.CashOrders
-                    .Where(order => order.PaymentId == payment.Id && order.Status != CashOrderStatus.Cancelled)
-                    .OrderByDescending(order => order.Id)
-                    .Select(order => order.Status == CashOrderStatus.Posted
-                        ? nameof(CashOrderStatus.Posted)
-                        : order.Status == CashOrderStatus.Draft
-                            ? nameof(CashOrderStatus.Draft)
-                            : nameof(CashOrderStatus.Cancelled))
-                    .FirstOrDefault(),
-                CanCreateCashOrder =
-                    payment.PaymentSource != null &&
-                    payment.PaymentSource.Name != null &&
-                    (payment.PaymentSource.Name.Contains(CashSourceToken) ||
-                     payment.PaymentSource.Name.Contains(CashSourceTitleToken) ||
-                     payment.PaymentSource.Name.Contains(CashSourceAlternativeToken) ||
-                     payment.PaymentSource.Name.Contains(CashSourceAlternativeTitleToken)) &&
-                    !_db.CashOrders.Any(order => order.PaymentId == payment.Id && order.Status != CashOrderStatus.Cancelled),
-            });
 
-        var combinedQuery = customOperations.Concat(paymentOperations);
 
-        return combinedQuery;
-    }
 
-    private static IQueryable<MoneyOperation> ApplyMoneyOperationFilters(
-        IQueryable<MoneyOperation> query,
-        DateTime? from,
-        DateTime? to,
-        MoneyOperationSource? source,
-        MoneyOperationDirection? direction,
-        MoneyOperationAccountingType? accountingType,
-        int? moneyAccountId,
-        string? accountName,
-        string? categoryName,
-        string? search)
-    {
-        if (from.HasValue)
-        {
-            var fromDate = from.Value.Date;
-            query = query.Where(operation => operation.Date >= fromDate);
-        }
-
-        if (to.HasValue)
-        {
-            var toDate = to.Value.Date;
-            query = query.Where(operation => operation.Date <= toDate);
-        }
-
-        if (source.HasValue)
-        {
-            query = query.Where(operation => operation.Source == source.Value);
-        }
-
-        if (direction.HasValue)
-        {
-            query = query.Where(operation => operation.Direction == direction.Value);
-        }
-
-        if (accountingType.HasValue)
-        {
-            query = query.Where(operation => operation.AccountingType == accountingType.Value);
-        }
-
-        if (moneyAccountId.HasValue)
-        {
-            query = query.Where(operation => operation.MoneyAccountId == moneyAccountId.Value);
-        }
-
-        if (!string.IsNullOrWhiteSpace(accountName))
-        {
-            var accountTerm = accountName.Trim();
-            query = query.Where(operation => operation.AccountName == accountTerm);
-        }
-
-        if (!string.IsNullOrWhiteSpace(categoryName))
-        {
-            var categoryTerm = categoryName.Trim();
-            var categoryTitleTerm = ToTitleSearchTerm(categoryTerm);
-            query = query.Where(operation =>
-                (operation.CategoryName ?? string.Empty).Contains(categoryTerm) ||
-                (operation.IncomeType != null && operation.IncomeType.Name.Contains(categoryTerm)) ||
-                (categoryTitleTerm != categoryTerm &&
-                    ((operation.CategoryName ?? string.Empty).Contains(categoryTitleTerm) ||
-                     (operation.IncomeType != null && operation.IncomeType.Name.Contains(categoryTitleTerm)))));
-        }
-
-        if (!string.IsNullOrWhiteSpace(search))
-        {
-            var term = search.Trim();
-            var titleTerm = ToTitleSearchTerm(term);
-            query = query.Where(operation =>
-                (operation.AccountName ?? string.Empty).Contains(term) ||
-                (operation.CounterpartyName ?? string.Empty).Contains(term) ||
-                (operation.Purpose ?? string.Empty).Contains(term) ||
-                (operation.PaidInvoiceNumber ?? string.Empty).Contains(term) ||
-                (operation.CategoryName ?? string.Empty).Contains(term) ||
-                (operation.IncomeType != null && operation.IncomeType.Name.Contains(term)) ||
-                (operation.ResponsibleUser != null &&
-                    ((operation.ResponsibleUser.FullName ?? string.Empty).Contains(term) ||
-                     operation.ResponsibleUser.Email.Contains(term))) ||
-                (operation.LinkedInvoice != null && operation.LinkedInvoice.Number.Contains(term)) ||
-                (operation.BankStatementImportBatch != null && operation.BankStatementImportBatch.FileName.Contains(term)) ||
-                (operation.LinkedInvoice != null && operation.LinkedInvoice.Payments.Any(payment =>
-                    (payment.Contract != null &&
-                        ((payment.Contract.Number ?? string.Empty).Contains(term) ||
-                         (payment.Contract.Title ?? string.Empty).Contains(term))) ||
-                    payment.Responsibles.Any(link =>
-                        (link.User.FullName ?? string.Empty).Contains(term) ||
-                        link.User.Email.Contains(term)))) ||
-                (titleTerm != term &&
-                    ((operation.AccountName ?? string.Empty).Contains(titleTerm) ||
-                     (operation.CounterpartyName ?? string.Empty).Contains(titleTerm) ||
-                     (operation.Purpose ?? string.Empty).Contains(titleTerm) ||
-                     (operation.PaidInvoiceNumber ?? string.Empty).Contains(titleTerm) ||
-                      (operation.CategoryName ?? string.Empty).Contains(titleTerm) ||
-                      (operation.IncomeType != null && operation.IncomeType.Name.Contains(titleTerm)) ||
-                      (operation.ResponsibleUser != null &&
-                          ((operation.ResponsibleUser.FullName ?? string.Empty).Contains(titleTerm) ||
-                           operation.ResponsibleUser.Email.Contains(titleTerm))) ||
-                      (operation.LinkedInvoice != null && operation.LinkedInvoice.Number.Contains(titleTerm)) ||
-                     (operation.BankStatementImportBatch != null && operation.BankStatementImportBatch.FileName.Contains(titleTerm)) ||
-                     (operation.LinkedInvoice != null && operation.LinkedInvoice.Payments.Any(payment =>
-                         (payment.Contract != null &&
-                             ((payment.Contract.Number ?? string.Empty).Contains(titleTerm) ||
-                              (payment.Contract.Title ?? string.Empty).Contains(titleTerm))) ||
-                         payment.Responsibles.Any(link =>
-                             (link.User.FullName ?? string.Empty).Contains(titleTerm) ||
-                             link.User.Email.Contains(titleTerm)))))));
-        }
-
-        return query;
-    }
-
-    private static IQueryable<Payment> ApplyPaymentFilters(
-        IQueryable<Payment> query,
-        DateTime? from,
-        DateTime? to,
-        MoneyOperationSource? source,
-        MoneyOperationDirection? direction,
-        MoneyOperationAccountingType? accountingType,
-        int? moneyAccountId,
-        string? accountName,
-        string? categoryName,
-        string? search)
-    {
-        query = query.Where(payment =>
-            payment.Status == PaymentStatus.Completed &&
-            payment.DocumentKind != DocumentKind.Invoice &&
-            payment.InvoiceId == null);
-
-        if (moneyAccountId.HasValue)
-        {
-            query = query.Where(_ => false);
-        }
-
-        if (from.HasValue)
-        {
-            var fromDate = from.Value.Date;
-            query = query.Where(payment => (payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date) >= fromDate);
-        }
-
-        if (to.HasValue)
-        {
-            var toDate = to.Value.Date;
-            query = query.Where(payment => (payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date) <= toDate);
-        }
-
-        if (source.HasValue)
-        {
-            query = source.Value switch
-            {
-                MoneyOperationSource.Cash => query.Where(payment =>
-                    payment.PaymentSource != null &&
-                    payment.PaymentSource.Name != null &&
-                    (payment.PaymentSource.Name.Contains(CashSourceToken) ||
-                     payment.PaymentSource.Name.Contains(CashSourceTitleToken) ||
-                     payment.PaymentSource.Name.Contains(CashSourceAlternativeToken) ||
-                     payment.PaymentSource.Name.Contains(CashSourceAlternativeTitleToken))),
-                MoneyOperationSource.Card => query.Where(payment =>
-                    payment.PaymentSource != null &&
-                    payment.PaymentSource.Name != null &&
-                    (payment.PaymentSource.Name.Contains(CardSourceToken) ||
-                     payment.PaymentSource.Name.Contains(CardSourceTitleToken))),
-                MoneyOperationSource.EMoney => query.Where(payment =>
-                    payment.PaymentSource != null &&
-                    payment.PaymentSource.Name != null &&
-                    (payment.PaymentSource.Name.Contains(EMoneySourceToken) ||
-                     payment.PaymentSource.Name.Contains(EMoneySourceTitleToken) ||
-                     payment.PaymentSource.Name.Contains(EMoneySourceCompactToken) ||
-                     payment.PaymentSource.Name.Contains(EMoneySourceCompactTitleToken) ||
-                     payment.PaymentSource.Name.Contains(EMoneySourceRussianToken) ||
-                     payment.PaymentSource.Name.Contains(EMoneySourceRussianTitleToken) ||
-                     payment.PaymentSource.Name.Contains(EMoneySourceYuMoneyToken) ||
-                     payment.PaymentSource.Name.Contains(EMoneySourceYooMoneyToken) ||
-                     payment.PaymentSource.Name.Contains(EMoneySourceYandexToken))),
-                MoneyOperationSource.Bank => query.Where(payment =>
-                    payment.PaymentSource == null ||
-                    payment.PaymentSource.Name == null ||
-                    (!payment.PaymentSource.Name.Contains(CashSourceToken) &&
-                     !payment.PaymentSource.Name.Contains(CashSourceTitleToken) &&
-                     !payment.PaymentSource.Name.Contains(CashSourceAlternativeToken) &&
-                     !payment.PaymentSource.Name.Contains(CashSourceAlternativeTitleToken) &&
-                     !payment.PaymentSource.Name.Contains(CardSourceToken) &&
-                     !payment.PaymentSource.Name.Contains(CardSourceTitleToken) &&
-                     !payment.PaymentSource.Name.Contains(EMoneySourceToken) &&
-                     !payment.PaymentSource.Name.Contains(EMoneySourceTitleToken) &&
-                     !payment.PaymentSource.Name.Contains(EMoneySourceCompactToken) &&
-                     !payment.PaymentSource.Name.Contains(EMoneySourceCompactTitleToken) &&
-                     !payment.PaymentSource.Name.Contains(EMoneySourceRussianToken) &&
-                     !payment.PaymentSource.Name.Contains(EMoneySourceRussianTitleToken) &&
-                     !payment.PaymentSource.Name.Contains(EMoneySourceYuMoneyToken) &&
-                     !payment.PaymentSource.Name.Contains(EMoneySourceYooMoneyToken) &&
-                     !payment.PaymentSource.Name.Contains(EMoneySourceYandexToken))),
-                _ => query.Where(_ => false),
-            };
-        }
-
-        if (direction.HasValue)
-        {
-            var mappedType = direction.Value == MoneyOperationDirection.Income
-                ? PaymentType.Income
-                : direction.Value == MoneyOperationDirection.Expense
-                    ? PaymentType.Expense
-                    : (PaymentType?)null;
-
-            if (mappedType.HasValue)
-            {
-                query = query.Where(payment => payment.Type == mappedType.Value);
-            }
-            else
-            {
-                query = query.Where(_ => false);
-            }
-        }
-
-        if (accountingType.HasValue)
-        {
-            query = accountingType.Value == MoneyOperationAccountingType.Fact
-                ? query.Where(payment => payment.Status == PaymentStatus.Completed)
-                : query.Where(payment => payment.Status != PaymentStatus.Completed);
-        }
-
-        if (!string.IsNullOrWhiteSpace(accountName))
-        {
-            var accountTerm = accountName.Trim();
-            query = query.Where(payment => payment.Account == accountTerm);
-        }
-
-        if (!string.IsNullOrWhiteSpace(categoryName))
-        {
-            var categoryTerm = categoryName.Trim();
-            var categoryTitleTerm = ToTitleSearchTerm(categoryTerm);
-            query = query.Where(payment =>
-                (payment.IncomeType != null && payment.IncomeType.Name.Contains(categoryTerm)) ||
-                (payment.ClientCase != null && (payment.ClientCase.Title ?? string.Empty).Contains(categoryTerm)) ||
-                (categoryTitleTerm != categoryTerm &&
-                    ((payment.IncomeType != null && payment.IncomeType.Name.Contains(categoryTitleTerm)) ||
-                     (payment.ClientCase != null && (payment.ClientCase.Title ?? string.Empty).Contains(categoryTitleTerm)))));
-        }
-
-        if (!string.IsNullOrWhiteSpace(search))
-        {
-            var term = search.Trim();
-            var titleTerm = ToTitleSearchTerm(term);
-            query = query.Where(payment =>
-                (payment.CounterpartyName ?? string.Empty).Contains(term) ||
-                (payment.Description ?? string.Empty).Contains(term) ||
-                (payment.Account ?? string.Empty).Contains(term) ||
-                (payment.IncomeType != null && payment.IncomeType.Name.Contains(term)) ||
-                (payment.Invoice != null && payment.Invoice.Number.Contains(term)) ||
-                (payment.Contract != null &&
-                    ((payment.Contract.Number ?? string.Empty).Contains(term) ||
-                     (payment.Contract.Title ?? string.Empty).Contains(term))) ||
-                payment.Responsibles.Any(link =>
-                    (link.User.FullName ?? string.Empty).Contains(term) ||
-                    link.User.Email.Contains(term)) ||
-                (titleTerm != term &&
-                    ((payment.CounterpartyName ?? string.Empty).Contains(titleTerm) ||
-                     (payment.Description ?? string.Empty).Contains(titleTerm) ||
-                     (payment.Account ?? string.Empty).Contains(titleTerm) ||
-                     (payment.IncomeType != null && payment.IncomeType.Name.Contains(titleTerm)) ||
-                     (payment.Invoice != null && payment.Invoice.Number.Contains(titleTerm)) ||
-                     (payment.Contract != null &&
-                         ((payment.Contract.Number ?? string.Empty).Contains(titleTerm) ||
-                          (payment.Contract.Title ?? string.Empty).Contains(titleTerm))) ||
-                     payment.Responsibles.Any(link =>
-                         (link.User.FullName ?? string.Empty).Contains(titleTerm) ||
-                         link.User.Email.Contains(titleTerm)))));
-        }
-
-        return query;
-    }
 
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
@@ -1649,38 +816,24 @@ public class MoneyOperationsController : ControllerBase
             .Include(operation => operation.MoneyAccount)
             .Include(operation => operation.ResponsibleUser)
             .FirstOrDefaultAsync(operation => operation.Id == id, ct);
-        return item is null ? NotFound() : Ok(item);
+        if (item is null) return NotFound();
+        if (item.LinkedInvoiceId is int invoiceId && !await CanAccessMoneyInvoiceAsync(item, invoiceId, forWrite: false, ct))
+        {
+            item.IsInvoiceLinkProtected = true;
+            item.LinkedInvoiceId = null;
+        }
+        return Ok(item);
     }
 
-    private async Task<string?> ApplyMoneyAccountAsync(MoneyOperation model, CancellationToken ct)
+    private static string? ApplyMoneyAccount(MoneyOperation model, MoneyAccount account)
     {
-        var moneyAccountId = model.MoneyAccountId.GetValueOrDefault();
-        if (moneyAccountId <= 0)
-        {
-            model.MoneyAccountId = null;
-            return null;
-        }
-
-        var account = await _db.MoneyAccounts
-            .AsNoTracking()
-            .FirstOrDefaultAsync(item => item.Id == moneyAccountId, ct);
-        if (account is null)
-        {
-            return "Денежный счёт не найден.";
-        }
-
-        if (!account.IsActive)
-        {
-            return "Денежный счёт отключён и не может использоваться в новой операции.";
-        }
-
+        if (!string.IsNullOrWhiteSpace(model.Currency)
+            && !string.Equals(model.Currency.Trim(), account.Currency, StringComparison.OrdinalIgnoreCase))
+            return "Валюта операции должна совпадать с валютой денежного счёта.";
+        model.MoneyAccountId = account.Id;
         model.Source = account.Source;
         model.AccountName = account.Name;
-        if (string.IsNullOrWhiteSpace(model.Currency))
-        {
-            model.Currency = account.Currency;
-        }
-
+        model.Currency = account.Currency;
         return null;
     }
 
@@ -1759,6 +912,8 @@ public class MoneyOperationsController : ControllerBase
             return forbidden;
         }
 
+        if (!await CanAccessCustomMoneyOperationAsync(id, moneyAccess!.Visibility, ct)) return NotFound();
+
         var operation = await _db.MoneyOperations
             .AsNoTracking()
             .FirstOrDefaultAsync(item => item.Id == id, ct);
@@ -1772,6 +927,9 @@ public class MoneyOperationsController : ControllerBase
             return Ok(Array.Empty<MoneyOperationInvoiceCandidateDto>());
         }
 
+        var invoiceAccess = await ResolveMoneyInvoiceAccessAsync(operation, forWrite: false, ct);
+        if (invoiceAccess is null) return Forbid();
+
         var targetPaymentType = operation.Direction == MoneyOperationDirection.Expense
             ? PaymentType.Expense
             : PaymentType.Income;
@@ -1780,8 +938,7 @@ public class MoneyOperationsController : ControllerBase
         var operationAmount = Math.Round(operation.Amount, 2, MidpointRounding.AwayFromZero);
         var operationCounterparty = operation.CounterpartyName?.Trim();
 
-        var invoicePayments = await _db.Payments
-            .AsNoTracking()
+        var invoiceQuery = InvoicePaymentAccess.ScopeHeaders(_db, invoiceAccess.Section, invoiceAccess.CompanyId)
             .Include(payment => payment.Invoice)
             .Include(payment => payment.Client)
             .Include(payment => payment.ExpenseClient)
@@ -1792,101 +949,119 @@ public class MoneyOperationsController : ControllerBase
                 payment.Type == targetPaymentType &&
                 payment.Status != PaymentStatus.Cancelled &&
                 payment.InvoiceId.HasValue)
-            .ToListAsync(ct);
+            ;
 
-        var invoiceIds = invoicePayments
-            .Select(payment => payment.InvoiceId!.Value)
-            .Distinct()
-            .ToList();
+        var candidates = new List<MoneyOperationInvoiceCandidateDto>();
+        var lastPaymentId = 0;
+        while (true)
+        {
+            var invoicePayments = await invoiceQuery.Where(payment => payment.Id > lastPaymentId)
+                .OrderBy(payment => payment.Id).Take(100).ToListAsync(ct);
+            if (invoicePayments.Count == 0) break;
+            lastPaymentId = invoicePayments[^1].Id;
 
-        var aggregatePaymentsByInvoiceId = invoiceIds.Count == 0
-            ? new Dictionary<int, List<Payment>>()
-            : (await _db.Payments
-                .AsNoTracking()
-                .Where(payment => payment.InvoiceId.HasValue && invoiceIds.Contains(payment.InvoiceId.Value))
-                .ToListAsync(ct))
-            .GroupBy(payment => payment.InvoiceId!.Value)
-            .ToDictionary(group => group.Key, group => group.ToList());
+            var invoiceIds = invoicePayments
+                .Select(payment => payment.InvoiceId!.Value)
+                .Distinct()
+                .ToList();
 
-        var candidates = invoicePayments
-            .Select(payment =>
-            {
-                var invoiceNumber = payment.Invoice?.Number ?? payment.Account ?? payment.LegacyAccountNumber ?? string.Empty;
-                var invoiceNumberTokens = BuildInvoiceNumberTokenSet(payment.Invoice?.Number, payment.Account, payment.LegacyAccountNumber);
-                var contractNumberTokens = BuildInvoiceNumberTokenSet(payment.Contract?.Number);
-                var relatedPayments = aggregatePaymentsByInvoiceId.TryGetValue(payment.InvoiceId!.Value, out var aggregatePayments)
-                    ? aggregatePayments
-                    : new List<Payment> { payment };
-                var statusSourcePayments = InvoicePaymentStateService.SelectStatusSourcePayments(
-                    relatedPayments,
-                    payment.Id,
-                    payment.Amount);
-                var paidAmount = statusSourcePayments.Count > 0
-                    ? Math.Round(statusSourcePayments.Sum(InvoicePaymentStateService.ResolvePaidAmount), 2, MidpointRounding.AwayFromZero)
-                    : InvoicePaymentStateService.ResolvePaidAmount(payment);
-                var outstandingAmount = statusSourcePayments.Count > 0
-                    ? Math.Round(statusSourcePayments.Sum(InvoicePaymentStateService.ResolveOutstandingAmount), 2, MidpointRounding.AwayFromZero)
-                    : CalculateOutstandingAmount(payment.Amount, payment.PaidAmount, payment.Status);
-                var score = 0;
-                var reasons = new List<string>();
+            var aggregatePaymentsByInvoiceId = invoiceIds.Count == 0
+                ? new Dictionary<int, List<Payment>>()
+                : (await _db.Payments
+                    .AsNoTracking()
+                    .Where(payment => payment.InvoiceId.HasValue && invoiceIds.Contains(payment.InvoiceId.Value))
+                    .ToListAsync(ct))
+                .GroupBy(payment => payment.InvoiceId!.Value)
+                .ToDictionary(group => group.Key, group => group.ToList());
 
-                if (purposeTokens.Count > 0 && invoiceNumberTokens.Any(purposeTokens.Contains))
+            candidates = candidates.Concat(invoicePayments
+                .Select(payment =>
                 {
-                    score += 100;
-                    reasons.Add("номер счёта найден в назначении");
-                }
-                else if (purposeTokens.Count > 0 && contractNumberTokens.Any(purposeTokens.Contains))
-                {
-                    score += 90;
-                    reasons.Add("номер договора найден в назначении");
-                }
+                    var invoiceNumber = payment.Invoice?.Number ?? payment.Account ?? payment.LegacyAccountNumber ?? string.Empty;
+                    var invoiceNumberTokens = BuildInvoiceNumberTokenSet(payment.Invoice?.Number, payment.Account, payment.LegacyAccountNumber);
+                    var contractNumberTokens = BuildInvoiceNumberTokenSet(payment.Contract?.Number);
+                    var relatedPayments = aggregatePaymentsByInvoiceId.TryGetValue(payment.InvoiceId!.Value, out var aggregatePayments)
+                        ? aggregatePayments
+                        : new List<Payment> { payment };
+                    var statusSourcePayments = InvoicePaymentStateService.SelectStatusSourcePayments(
+                        relatedPayments,
+                        payment.Id,
+                        payment.Amount);
+                    var paidAmount = statusSourcePayments.Count > 0
+                        ? Math.Round(statusSourcePayments.Sum(InvoicePaymentStateService.ResolvePaidAmount), 2, MidpointRounding.AwayFromZero)
+                        : InvoicePaymentStateService.ResolvePaidAmount(payment);
+                    var outstandingAmount = statusSourcePayments.Count > 0
+                        ? Math.Round(statusSourcePayments.Sum(InvoicePaymentStateService.ResolveOutstandingAmount), 2, MidpointRounding.AwayFromZero)
+                        : CalculateOutstandingAmount(payment.Amount, payment.PaidAmount, payment.Status);
+                    var score = 0;
+                    var reasons = new List<string>();
 
-                if (outstandingAmount > 0m && operationAmount <= outstandingAmount + 0.009m)
-                {
-                    score += 20;
-                    reasons.Add("сумма помещается в остаток счёта");
-                }
+                    if (purposeTokens.Count > 0 && invoiceNumberTokens.Any(purposeTokens.Contains))
+                    {
+                        score += 100;
+                        reasons.Add("номер счёта найден в назначении");
+                    }
+                    else if (purposeTokens.Count > 0 && contractNumberTokens.Any(purposeTokens.Contains))
+                    {
+                        score += 90;
+                        reasons.Add("номер договора найден в назначении");
+                    }
 
-                if (Math.Abs(outstandingAmount - operationAmount) <= 0.009m)
-                {
-                    score += 40;
-                    reasons.Add("сумма совпадает с остатком счёта");
-                }
+                    if (outstandingAmount > 0m && operationAmount <= outstandingAmount + 0.009m)
+                    {
+                        score += 20;
+                        reasons.Add("сумма помещается в остаток счёта");
+                    }
 
-                var candidateName = ResolveInvoiceCandidateCounterpartyName(payment);
-                if (NamesLookRelated(operationCounterparty, candidateName))
-                {
-                    score += 20;
-                    reasons.Add(targetPaymentType == PaymentType.Expense ? "похожий поставщик" : "похожий контрагент");
-                }
+                    if (Math.Abs(outstandingAmount - operationAmount) <= 0.009m)
+                    {
+                        score += 40;
+                        reasons.Add("сумма совпадает с остатком счёта");
+                    }
 
-                return new MoneyOperationInvoiceCandidateDto
-                {
-                    InvoiceId = payment.InvoiceId!.Value,
-                    PaymentId = payment.Id,
-                    InvoiceNumber = invoiceNumber,
-                    InvoiceDate = payment.Invoice?.Date ?? payment.AccountDate,
-                    Amount = payment.Amount,
-                    PaidAmount = paidAmount,
-                    OutstandingAmount = outstandingAmount,
-                    Status = payment.Status,
-                    ClientId = targetPaymentType == PaymentType.Expense
-                        ? payment.ExpenseClientId ?? payment.ClientId
-                        : payment.ClientId,
-                    ClientName = candidateName,
-                    CounterpartyName = payment.CounterpartyName,
-                    MatchReason = reasons.Count == 0 ? null : string.Join(", ", reasons),
-                    Score = score,
-                };
-            })
-            .Where(candidate => candidate.OutstandingAmount > 0m && candidate.Score > 0)
-            .OrderByDescending(candidate => candidate.Score)
-            .ThenByDescending(candidate => candidate.InvoiceDate)
-            .ThenByDescending(candidate => candidate.InvoiceId)
-            .Take(10)
-            .ToList();
+                    var candidateName = ResolveInvoiceCandidateCounterpartyName(payment);
+                    if (NamesLookRelated(operationCounterparty, candidateName))
+                    {
+                        score += 20;
+                        reasons.Add(targetPaymentType == PaymentType.Expense ? "похожий поставщик" : "похожий контрагент");
+                    }
 
-        return Ok(candidates);
+                    return new MoneyOperationInvoiceCandidateDto
+                    {
+                        InvoiceId = payment.InvoiceId!.Value,
+                        PaymentId = payment.Id,
+                        InvoiceNumber = invoiceNumber,
+                        InvoiceDate = payment.Invoice?.Date ?? payment.AccountDate,
+                        Amount = payment.Amount,
+                        PaidAmount = paidAmount,
+                        OutstandingAmount = outstandingAmount,
+                        Status = payment.Status,
+                        ClientId = targetPaymentType == PaymentType.Expense
+                            ? payment.ExpenseClientId ?? payment.ClientId
+                            : payment.ClientId,
+                        ClientName = candidateName,
+                        CounterpartyName = payment.CounterpartyName,
+                        MatchReason = reasons.Count == 0 ? null : string.Join(", ", reasons),
+                        Score = score,
+                    };
+                }))
+                .Where(candidate => candidate.OutstandingAmount > 0m && candidate.Score > 0)
+                .OrderByDescending(candidate => candidate.Score)
+                .ThenByDescending(candidate => candidate.InvoiceDate)
+                .ThenByDescending(candidate => candidate.InvoiceId)
+                .Take(10)
+                .ToList();
+
+        }
+
+        var freshAccess = await ResolveMoneyInvoiceAccessAsync(operation, forWrite: false, ct);
+        if (freshAccess is null) return Forbid();
+        if (moneyAccess?.Permission.CanEdit != true) return Forbid();
+        var candidateIds = candidates.Select(candidate => candidate.InvoiceId).ToArray();
+        int[] allowedIds = candidateIds.Length == 0 ? [] : await InvoicePaymentAccess.ScopeHeaders(_db, freshAccess.Section, freshAccess.CompanyId)
+            .Where(payment => payment.Type == targetPaymentType && payment.InvoiceId.HasValue && candidateIds.Contains(payment.InvoiceId.Value))
+            .Select(payment => payment.InvoiceId!.Value).Distinct().ToArrayAsync(ct);
+        return Ok(candidates.Where(candidate => allowedIds.Contains(candidate.InvoiceId)).ToList());
     }
 
     [HttpPost("{id:int}/ignore")]
@@ -1897,11 +1072,20 @@ public class MoneyOperationsController : ControllerBase
             return forbidden;
         }
 
-        var operation = await _db.MoneyOperations.FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (!await CanAccessCustomMoneyOperationAsync(id, moneyAccess!.Visibility, ct)) return NotFound();
+
+        var operation = await _db.MoneyOperations.AsNoTracking().FirstOrDefaultAsync(item => item.Id == id, ct);
         if (operation is null)
         {
             return NotFound();
         }
+
+        await using var mutation = await MoneyMutationScope.BeginAsync(_db, ct);
+        var lease = await LeaseMoneyAccountsAsync([operation.MoneyAccountId.GetValueOrDefault()], static permission => permission.CanEdit, ct, allowExistingBankState: true);
+        if (lease.Error is not null) return lease.Error;
+        operation = await LockMoneyOperationAsync(operation, ct);
+        if (operation is null) return Conflict("Операция изменена другим запросом. Обновите запись.");
+        if (!await CanAccessCustomMoneyOperationAsync(id, moneyAccess!.Visibility, ct)) return NotFound();
 
         if (IsAppliedToInvoice(operation))
         {
@@ -1917,6 +1101,9 @@ public class MoneyOperationsController : ControllerBase
         operation.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(ct);
+        if (await RefreshMoneyMutationAccessAsync(lease.Accounts.Values, static permission => permission.CanEdit, ct) is { } finalAccess)
+            return finalAccess;
+        await mutation.CommitAsync(ct);
         return Ok(operation);
     }
 
@@ -1931,16 +1118,27 @@ public class MoneyOperationsController : ControllerBase
             return forbidden;
         }
 
+        if (!await CanAccessCustomMoneyOperationAsync(id, moneyAccess!.Visibility, ct)) return NotFound();
+
         if (request.InvoiceId <= 0)
         {
             return BadRequest("Не выбран счёт для сверки.");
         }
 
-        var operation = await _db.MoneyOperations.FirstOrDefaultAsync(item => item.Id == id, ct);
+        var operation = await _db.MoneyOperations.AsNoTracking().FirstOrDefaultAsync(item => item.Id == id, ct);
         if (operation is null)
         {
             return NotFound();
         }
+
+        await using var mutation = await MoneyMutationScope.BeginAsync(_db, ct);
+        var lease = await LeaseMoneyAccountsAsync([operation.MoneyAccountId.GetValueOrDefault()], static permission => permission.CanEdit, ct, allowExistingBankState: true);
+        if (lease.Error is not null) return lease.Error;
+        operation = await LockMoneyOperationAsync(operation, ct);
+        if (operation is null) return Conflict("Операция изменена другим запросом. Обновите запись.");
+        if (!await CanAccessCustomMoneyOperationAsync(id, moneyAccess!.Visibility, ct)) return NotFound();
+
+        if (!await CanAccessMoneyInvoiceAsync(operation, request.InvoiceId, forWrite: true, ct)) return Forbid();
 
         if (IsAppliedToInvoice(operation))
         {
@@ -1968,6 +1166,10 @@ public class MoneyOperationsController : ControllerBase
 
         await ApplyMoneyOperationToInvoicePaymentAsync(operation, invoice.Id, ct);
         await _db.SaveChangesAsync(ct);
+        if (await RefreshMoneyMutationAccessAsync(lease.Accounts.Values, static permission => permission.CanEdit, ct) is { } finalAccess)
+            return finalAccess;
+        if (!await CanAccessMoneyInvoiceAsync(operation, invoice.Id, forWrite: true, ct)) return Forbid();
+        await mutation.CommitAsync(ct);
         return Ok(operation);
     }
 
@@ -1979,20 +1181,32 @@ public class MoneyOperationsController : ControllerBase
             return forbidden;
         }
 
+        // This endpoint creates one manual operation. Imported provenance and
+        // related entity graphs belong to their own authorized server workflows.
+        model.Id = 0;
+        model.MoneyAccount = null;
+        model.ResponsibleUser = null;
+        model.IncomeType = null;
+        model.LinkedInvoice = null;
+        model.BankStatementImportBatch = null;
+        model.BankStatementImportBatchId = null;
+        model.SourceMovementKey = null;
+        model.CashOrders = new List<CashOrder>();
+        model.UpdatedAt = null;
+        model.MatchedAt = null;
+
         if (model.Amount <= 0)
         {
             return BadRequest("Сумма денежной операции должна быть больше нуля.");
         }
 
-        var moneyAccountError = await ApplyMoneyAccountAsync(model, ct);
+        await using var mutation = await MoneyMutationScope.BeginAsync(_db, ct);
+        var lease = await LeaseMoneyAccountsAsync([model.MoneyAccountId.GetValueOrDefault()], static permission => permission.CanCreate, ct);
+        if (lease.Error is not null) return lease.Error;
+        var moneyAccountError = ApplyMoneyAccount(model, lease.Accounts[model.MoneyAccountId!.Value]);
         if (moneyAccountError is not null)
         {
             return BadRequest(moneyAccountError);
-        }
-
-        if (!model.MoneyAccountId.HasValue && string.IsNullOrWhiteSpace(model.AccountName))
-        {
-            return BadRequest("Укажите денежный счёт или его название.");
         }
 
         var incomeTypeError = await ApplyIncomeTypeAsync(model, ct);
@@ -2041,6 +1255,8 @@ public class MoneyOperationsController : ControllerBase
         ApplyAdvanceReviewHint(model);
         model.CreatedAt = DateTime.UtcNow;
 
+        if (await RefreshMoneyMutationAccessAsync(lease.Accounts.Values, static permission => permission.CanCreate, ct) is { } changedAccess)
+            return changedAccess;
         _db.MoneyOperations.Add(model);
         await _db.SaveChangesAsync(ct);
         if (model.LinkedInvoiceId.HasValue && model.MatchStatus == MoneyOperationMatchStatus.Matched)
@@ -2049,6 +1265,10 @@ public class MoneyOperationsController : ControllerBase
             await _db.SaveChangesAsync(ct);
         }
         await SyncCashOrderAsync(model);
+        if (await RefreshMoneyMutationAccessAsync(lease.Accounts.Values, static permission => permission.CanCreate, ct) is { } finalAccess)
+            return finalAccess;
+        if (model.LinkedInvoiceId.HasValue && !await CanAccessMoneyInvoiceAsync(model, model.LinkedInvoiceId.Value, forWrite: true, ct)) return Forbid();
+        await mutation.CommitAsync(ct);
         return Created($"/api/money-operations/{model.Id}", model);
     }
 
@@ -2077,9 +1297,10 @@ public class MoneyOperationsController : ControllerBase
             return BadRequest("Для перевода выберите два разных денежных счёта.");
         }
 
-        var accounts = await _db.MoneyAccounts
-            .Where(account => account.Id == request.SourceMoneyAccountId || account.Id == request.TargetMoneyAccountId)
-            .ToListAsync(ct);
+        await using var mutation = await MoneyMutationScope.BeginAsync(_db, ct);
+        var lease = await LeaseMoneyAccountsAsync([request.SourceMoneyAccountId, request.TargetMoneyAccountId], static permission => permission.CanCreate, ct);
+        if (lease.Error is not null) return lease.Error;
+        var accounts = lease.Accounts.Values;
         var sourceAccount = accounts.FirstOrDefault(account => account.Id == request.SourceMoneyAccountId);
         var targetAccount = accounts.FirstOrDefault(account => account.Id == request.TargetMoneyAccountId);
 
@@ -2097,6 +1318,10 @@ public class MoneyOperationsController : ControllerBase
         var currency = string.IsNullOrWhiteSpace(request.Currency)
             ? sourceAccount.Currency
             : request.Currency.Trim();
+        if (!string.Equals(currency, sourceAccount.Currency, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(currency, targetAccount.Currency, StringComparison.OrdinalIgnoreCase))
+            return BadRequest("Для перевода нужны счета одной валюты. Валюта перевода должна совпадать с валютой обоих счетов.");
+        currency = sourceAccount.Currency;
         var date = request.Date == default
             ? await ResolveMoneyOperationTodayAsync(ct)
             : request.Date.Date;
@@ -2160,10 +1385,15 @@ public class MoneyOperationsController : ControllerBase
             return BadRequest(responsibleError);
         }
 
+        if (await RefreshMoneyMutationAccessAsync(accounts, static permission => permission.CanCreate, ct) is { } changedAccess)
+            return changedAccess;
         _db.MoneyOperations.AddRange(sourceOperation, targetOperation);
         await _db.SaveChangesAsync(ct);
         await SyncCashOrderAsync(sourceOperation);
         await SyncCashOrderAsync(targetOperation);
+        if (await RefreshMoneyMutationAccessAsync(accounts, static permission => permission.CanCreate, ct) is { } finalAccess)
+            return finalAccess;
+        await mutation.CommitAsync(ct);
 
         return Created(
             $"/api/money-operations/{sourceOperation.Id}",
@@ -2183,12 +1413,19 @@ public class MoneyOperationsController : ControllerBase
     [HttpPost("bank-statement/import")]
     [Consumes("multipart/form-data")]
     [RequestSizeLimit(MaxStatementFileSizeBytes)]
-    public async Task<ActionResult<BankStatementImportResultDto>> ImportBankStatement(IFormFile? file, CancellationToken ct)
+    public Task<ActionResult<BankStatementImportResultDto>> ImportBankStatement(
+        IFormFile? file, CancellationToken ct, [FromForm] int? companyId = null, [FromForm] int? moneyAccountId = null)
+        => ImportBankStatementFileAsync(file, companyId, moneyAccountId, BankStatementImportTriggers.Manual, ct);
+
+    private async Task<ActionResult<BankStatementImportResultDto>> ImportBankStatementFileAsync(
+        IFormFile? file, int? companyId, int? moneyAccountId, string trigger, CancellationToken ct)
     {
-        if (await RequirePaymentsPermissionAsync(static permission => permission.CanCreate, ct) is { } forbidden)
-        {
-            return forbidden;
-        }
+        var imports = new BankStatementImportService(_db);
+        var preparation = await imports.PrepareFileAsync(User, companyId, moneyAccountId, trigger, ct);
+        if (preparation.Status == 403) return Forbid();
+        if (preparation.Status == 404) return NotFound();
+        if (preparation.Status != 200) return BadRequest(preparation.Error);
+        var context = preparation.Context!;
 
         if (file is null || file.Length == 0)
         {
@@ -2215,7 +1452,7 @@ public class MoneyOperationsController : ControllerBase
         if (LooksLikeClientBankExchange(text))
         {
             var clientBankResult = ParseClientBankExchange(text);
-            return Ok(await ImportBankStatementItemsAsync(
+            return Ok(await imports.ImportAsync(context,
                 clientBankResult.Items,
                 clientBankResult.Result,
                 file.FileName,
@@ -2230,7 +1467,8 @@ public class MoneyOperationsController : ControllerBase
 
         if (rows.Count == 0)
         {
-            return Ok(result);
+            return Ok(await imports.ImportAsync(context, Array.Empty<BankStatementImportItem>(), result,
+                file.FileName, statementBytes.Length, fileHash, manualCategoryRules, ct));
         }
 
         var header = rows[0];
@@ -2303,11 +1541,11 @@ public class MoneyOperationsController : ControllerBase
             importItems.Add(new BankStatementImportItem(rowNumber, date.Date, direction, amount, account, counterparty, purpose, documentNumber));
         }
 
-        return Ok(await ImportBankStatementItemsAsync(importItems, result, file.FileName, statementBytes.Length, fileHash, manualCategoryRules, ct));
+        return Ok(await imports.ImportAsync(context, importItems, result, file.FileName, statementBytes.Length, fileHash, manualCategoryRules, ct));
     }
 
     [HttpPost("bank-statement/auto-import/run")]
-    public async Task<ActionResult<BankStatementAutoImportRunResultDto>> RunBankStatementAutoImport(CancellationToken ct)
+    public async Task<ActionResult<BankStatementAutoImportRunResultDto>> RunBankStatementAutoImport(CancellationToken ct, [FromQuery] int? companyId = null, [FromQuery] int? moneyAccountId = null)
     {
         if (await RequirePaymentsPermissionAsync(static permission => permission.CanCreate, ct) is { } forbidden)
         {
@@ -2373,7 +1611,7 @@ public class MoneyOperationsController : ControllerBase
             {
                 await using var stream = System.IO.File.OpenRead(filePath);
                 var formFile = new FormFile(stream, 0, stream.Length, "file", fileName);
-                var action = await ImportBankStatement(formFile, ct);
+                var action = await ImportBankStatementFileAsync(formFile, companyId, moneyAccountId, BankStatementImportTriggers.Folder, ct);
 
                 if (action.Result is OkObjectResult { Value: BankStatementImportResultDto importResult })
                 {
@@ -2417,10 +1655,13 @@ public class MoneyOperationsController : ControllerBase
         [FromQuery] int pageSize = 25,
         CancellationToken ct = default)
     {
+        var access = await BankStatementImportAccess.ResolveAsync(_db, User, ct);
+        if (access is null || !access.Permission.CanView) return Forbid();
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 5, 100);
 
-        var query = _db.BankStatementImportBatches.AsNoTracking().OrderByDescending(batch => batch.CreatedAt);
+        var query = BankStatementImportAccess.ScopeBatches(_db, _db.BankStatementImportBatches.AsNoTracking(), access)
+            .OrderByDescending(batch => batch.CreatedAt).ThenByDescending(batch => batch.Id);
         var total = await query.CountAsync(ct);
         var items = await query
             .Skip((page - 1) * pageSize)
@@ -2428,6 +1669,18 @@ public class MoneyOperationsController : ControllerBase
             .Select(batch => new BankStatementImportBatchListItemDto
             {
                 Id = batch.Id,
+                CompanyId = batch.CompanyId,
+                CompanyName = batch.Company != null ? batch.Company.ShortName : null,
+                MoneyAccountId = batch.MoneyAccountId,
+                MoneyAccountName = batch.MoneyAccount != null ? batch.MoneyAccount.Name : null,
+                BankConnectionAccountId = batch.BankConnectionAccountId,
+                ImportedByUserId = batch.ImportedByUserId,
+                ResponsibleUserId = batch.ResponsibleUserId,
+                Source = batch.Source,
+                Trigger = batch.Trigger,
+                ParentBatchId = batch.ParentBatchId,
+                PeriodFrom = batch.PeriodFrom,
+                PeriodTo = batch.PeriodTo,
                 FileName = batch.FileName,
                 Status = batch.Status,
                 RowsRead = batch.RowsRead,
@@ -2452,12 +1705,25 @@ public class MoneyOperationsController : ControllerBase
     [HttpGet("bank-statement/imports/{batchId:int}")]
     public async Task<ActionResult<BankStatementImportBatchDetailDto>> GetBankStatementImport(int batchId, CancellationToken ct)
     {
-        var batch = await _db.BankStatementImportBatches
-            .AsNoTracking()
+        var access = await BankStatementImportAccess.ResolveAsync(_db, User, ct);
+        if (access is null || !access.Permission.CanView) return Forbid();
+        var batch = await BankStatementImportAccess.ScopeBatches(_db, _db.BankStatementImportBatches.AsNoTracking(), access)
             .Where(item => item.Id == batchId)
             .Select(item => new BankStatementImportBatchDetailDto
             {
                 Id = item.Id,
+                CompanyId = item.CompanyId,
+                CompanyName = item.Company != null ? item.Company.ShortName : null,
+                MoneyAccountId = item.MoneyAccountId,
+                MoneyAccountName = item.MoneyAccount != null ? item.MoneyAccount.Name : null,
+                BankConnectionAccountId = item.BankConnectionAccountId,
+                ImportedByUserId = item.ImportedByUserId,
+                ResponsibleUserId = item.ResponsibleUserId,
+                Source = item.Source,
+                Trigger = item.Trigger,
+                ParentBatchId = item.ParentBatchId,
+                PeriodFrom = item.PeriodFrom,
+                PeriodTo = item.PeriodTo,
                 FileName = item.FileName,
                 FileHash = item.FileHash,
                 FileSize = item.FileSize,
@@ -2499,12 +1765,9 @@ public class MoneyOperationsController : ControllerBase
     [HttpPost("bank-statement/imports/{batchId:int}/rollback")]
     public async Task<ActionResult<BankStatementImportRollbackResultDto>> RollbackBankStatementImport(int batchId, CancellationToken ct)
     {
-        if (await RequirePaymentsPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
-        {
-            return forbidden;
-        }
-
-        var batch = await _db.BankStatementImportBatches
+        var access = await BankStatementImportAccess.ResolveAsync(_db, User, ct);
+        if (access is null || !access.Permission.CanView || !access.Permission.CanEdit) return Forbid();
+        var batch = await BankStatementImportAccess.ScopeBatches(_db, _db.BankStatementImportBatches, access, forMutation: true)
             .Include(item => item.Rows)
             .FirstOrDefaultAsync(item => item.Id == batchId, ct);
         if (batch is null)
@@ -2605,12 +1868,9 @@ public class MoneyOperationsController : ControllerBase
     [HttpPost("bank-statement/imports/{batchId:int}/reprocess")]
     public async Task<ActionResult<BankStatementImportResultDto>> ReprocessBankStatementImport(int batchId, CancellationToken ct)
     {
-        if (await RequirePaymentsPermissionAsync(static permission => permission.CanCreate, ct) is { } forbidden)
-        {
-            return forbidden;
-        }
-
-        var batch = await _db.BankStatementImportBatches
+        var access = await BankStatementImportAccess.ResolveAsync(_db, User, ct);
+        if (access is null || !access.Permission.CanView || !access.Permission.CanCreate) return Forbid();
+        var batch = await BankStatementImportAccess.ScopeBatches(_db, _db.BankStatementImportBatches, access, forMutation: true)
             .Include(item => item.Rows)
                 .ThenInclude(row => row.MoneyOperation)
             .AsNoTracking()
@@ -2639,23 +1899,32 @@ public class MoneyOperationsController : ControllerBase
         var items = rows
             .Select(row => new BankStatementImportItem(
                 row.RowNumber,
-                row.Date.Date,
+                row.Date,
                 row.Direction,
                 row.Amount,
                 row.AccountName ?? string.Empty,
                 row.CounterpartyName,
                 row.Purpose,
-                row.PaymentOrderNumber))
+                row.PaymentOrderNumber)
+            {
+                OriginRowId = row.Id,
+                BankStatementOperationId = row.BankStatementOperationId,
+                ExternalOperationId = row.ExternalOperationId,
+                MovementKey = row.MovementKey,
+                IsBooked = row.IsBooked ?? true,
+            })
             .ToList();
 
-        return Ok(await ImportBankStatementItemsAsync(
+        var account = await _db.MoneyAccounts.AsNoTracking().SingleAsync(item => item.Id == batch.MoneyAccountId, ct);
+        var context = BankStatementImportService.FromAuthorizedBatch(access, User, account, batch);
+        return Ok(await new BankStatementImportService(_db).ImportAsync(context,
             items,
             result,
             $"{batch.FileName} (повторная обработка)",
             batch.FileSize,
-            $"{batch.FileHash}:reprocess:{batch.Id}:{DateTime.UtcNow:O}",
+            batch.FileHash,
             await GetBankStatementManualCategoryRulesAsync(GetCurrentUserId(), ct),
-            ct));
+            ct, batch.Id, batch.RolledBackAt));
     }
 
     [HttpPut("{id:int}")]
@@ -2666,7 +1935,7 @@ public class MoneyOperationsController : ControllerBase
             return forbidden;
         }
 
-        var visibility = await ResolveMoneyVisibilityAsync(ct);
+        var visibility = moneyAccess?.Visibility;
         if (visibility is null)
         {
             return Unauthorized();
@@ -2676,7 +1945,7 @@ public class MoneyOperationsController : ControllerBase
             return NotFound();
         }
 
-        var entity = await _db.MoneyOperations.FirstOrDefaultAsync(item => item.Id == id, ct);
+        var entity = await _db.MoneyOperations.AsNoTracking().FirstOrDefaultAsync(item => item.Id == id, ct);
         if (entity is null)
         {
             return NotFound();
@@ -2687,12 +1956,28 @@ public class MoneyOperationsController : ControllerBase
             return BadRequest("Сумма денежной операции должна быть больше нуля.");
         }
 
+        if (!entity.MoneyAccountId.HasValue)
+            return BadRequest("Принадлежность исторической операции не подтверждена. Эта запись доступна только для просмотра.");
+        await using var mutation = await MoneyMutationScope.BeginAsync(_db, ct);
+        var lease = await LeaseMoneyAccountsAsync([entity.MoneyAccountId.Value, model.MoneyAccountId.GetValueOrDefault()],
+            static permission => permission.CanEdit, ct, allowExistingBankState: entity.MoneyAccountId == model.MoneyAccountId);
+        if (lease.Error is not null) return lease.Error;
+        entity = await LockMoneyOperationAsync(entity, ct);
+        if (entity is null) return Conflict("Операция изменена другим запросом. Обновите запись.");
+        if (!await CanAccessCustomMoneyOperationAsync(id, moneyAccess!.Visibility, ct)) return NotFound();
+
         var originalLinkedInvoiceId = entity.LinkedInvoiceId;
         var originalMatchStatus = entity.MatchStatus;
         var originalAmount = entity.Amount;
+        // A normal read may redact the pointer. Retain the stored relationship
+        // only for an unchanged status; never accept a different supplied ID.
+        // The response flag is intentionally not trusted for authorization.
+        var preserveInvoiceLink = originalLinkedInvoiceId.HasValue && model.MatchStatus == originalMatchStatus
+            && (model.LinkedInvoiceId == originalLinkedInvoiceId
+                || model.LinkedInvoiceId is null && !await CanAccessMoneyInvoiceAsync(entity, originalLinkedInvoiceId.Value, forWrite: false, ct));
         if (originalLinkedInvoiceId.HasValue)
         {
-            if (model.LinkedInvoiceId != originalLinkedInvoiceId)
+            if (model.LinkedInvoiceId != originalLinkedInvoiceId && !preserveInvoiceLink)
             {
                 return BadRequest("Сверенную денежную операцию нельзя отвязать или перенести на другой счёт через редактирование.");
             }
@@ -2701,18 +1986,25 @@ public class MoneyOperationsController : ControllerBase
             {
                 return BadRequest("Сумму сверенной денежной операции нельзя изменить через редактирование.");
             }
+            if (model.MatchStatus != originalMatchStatus && model.MatchStatus != MoneyOperationMatchStatus.Matched)
+                return BadRequest("Изменение распределения требует отдельной операции сверки или сторно.");
         }
 
-        var moneyAccountError = await ApplyMoneyAccountAsync(model, ct);
+        var moneyAccountError = ApplyMoneyAccount(model, lease.Accounts[model.MoneyAccountId!.Value]);
         if (moneyAccountError is not null)
         {
             return BadRequest(moneyAccountError);
         }
 
-        if (!model.MoneyAccountId.HasValue && string.IsNullOrWhiteSpace(model.AccountName))
-        {
-            return BadRequest("Укажите денежный счёт или его название.");
-        }
+        var imported = entity.BankStatementImportBatchId.HasValue || entity.SourceMovementKey is not null;
+        var changesMoney = MoneyFactsChanged(entity, model);
+        if (originalLinkedInvoiceId.HasValue && changesMoney)
+            return BadRequest("Финансовые данные связанной со счётом операции защищены от изменения через редактирование.");
+        if (imported && changesMoney)
+            return BadRequest("Финансовые данные импортированной операции защищены от изменения. Можно изменить её описание или категорию.");
+        if (changesMoney && !await CompanyMoneyAccounts(moneyAccess!, forNewOperations: true).AnyAsync(account => account.Id == model.MoneyAccountId, ct))
+            return BadRequest("Денежный счёт недоступен для изменения финансовых данных операции.");
+        if (!changesMoney) model.Date = entity.Date;
 
         var incomeTypeError = await ApplyIncomeTypeAsync(model, ct);
         if (incomeTypeError is not null)
@@ -2726,6 +2018,8 @@ public class MoneyOperationsController : ControllerBase
             return BadRequest(responsibleUserError);
         }
 
+        if (await RefreshMoneyMutationAccessAsync(lease.Accounts.Values, static permission => permission.CanEdit, ct) is { } changedAccess)
+            return changedAccess;
         entity.Source = model.Source;
         entity.Direction = model.Direction;
         entity.AccountingType = model.AccountingType;
@@ -2745,27 +2039,25 @@ public class MoneyOperationsController : ControllerBase
         entity.RecognitionDate = model.RecognitionDate;
         entity.IsAdvancePayment = model.IsAdvancePayment;
         entity.Purpose = string.IsNullOrWhiteSpace(model.Purpose) ? null : model.Purpose.Trim();
-        entity.PaidInvoiceNumber = string.IsNullOrWhiteSpace(model.PaidInvoiceNumber) ? null : model.PaidInvoiceNumber.Trim();
-        entity.PaidAmount = model.PaidAmount;
+        if (!preserveInvoiceLink)
+        {
+            entity.PaidInvoiceNumber = string.IsNullOrWhiteSpace(model.PaidInvoiceNumber) ? null : model.PaidInvoiceNumber.Trim();
+            entity.PaidAmount = model.PaidAmount;
+        }
         entity.ProjectName = string.IsNullOrWhiteSpace(model.ProjectName) ? null : model.ProjectName.Trim();
         entity.DirectionName = string.IsNullOrWhiteSpace(model.DirectionName) ? null : model.DirectionName.Trim();
         entity.SalesPointName = string.IsNullOrWhiteSpace(model.SalesPointName) ? null : model.SalesPointName.Trim();
         entity.PaymentPriority = model.PaymentPriority;
-        entity.PaidAccountName = string.IsNullOrWhiteSpace(model.PaidAccountName) ? null : model.PaidAccountName.Trim();
+        if (!preserveInvoiceLink)
+            entity.PaidAccountName = string.IsNullOrWhiteSpace(model.PaidAccountName) ? null : model.PaidAccountName.Trim();
         entity.MatchComment = string.IsNullOrWhiteSpace(model.MatchComment) ? null : model.MatchComment.Trim();
-        if (model.LinkedInvoiceId.HasValue)
+        // An unchanged link retains its status, timestamps and applied amount.
+        // Editing the money description is not a new document allocation.
+        if (!preserveInvoiceLink && model.LinkedInvoiceId.HasValue)
         {
-            var invoice = await _db.Invoices.AsNoTracking().FirstOrDefaultAsync(item => item.Id == model.LinkedInvoiceId.Value);
-            if (invoice is null)
-            {
-                return BadRequest("Счёт для сверки банковской операции не найден.");
-            }
-
-            var validation = await ValidateInvoiceLinkAsync(entity, invoice.Id);
-            if (validation.Error is not null)
-            {
-                return BadRequest(validation.Error);
-            }
+            var validation = await ValidateInvoiceLinkAsync(entity, model.LinkedInvoiceId.Value, ct);
+            if (validation.Error is not null) return BadRequest(validation.Error);
+            var invoice = validation.Invoice!;
 
             entity.LinkedInvoiceId = invoice.Id;
             entity.PaidInvoiceNumber = invoice.Number;
@@ -2777,7 +2069,7 @@ public class MoneyOperationsController : ControllerBase
                 await ApplyMoneyOperationToInvoicePaymentAsync(entity, invoice.Id);
             }
         }
-        else
+        else if (!preserveInvoiceLink)
         {
             entity.LinkedInvoiceId = null;
             entity.MatchedAt = null;
@@ -2793,51 +2085,57 @@ public class MoneyOperationsController : ControllerBase
 
         await _db.SaveChangesAsync(ct);
         await SyncCashOrderAsync(entity);
-        return Ok(entity);
+        if (await RefreshMoneyMutationAccessAsync(lease.Accounts.Values, static permission => permission.CanEdit, ct) is { } finalAccess)
+            return finalAccess;
+        if (!preserveInvoiceLink && entity.LinkedInvoiceId.HasValue
+            && !await CanAccessMoneyInvoiceAsync(entity, entity.LinkedInvoiceId.Value, forWrite: true, ct)) return Forbid();
+        await mutation.CommitAsync(ct);
+        return originalLinkedInvoiceId.HasValue ? await GetById(id, ct) : Ok(entity);
     }
 
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
         if (await RequirePaymentsPermissionAsync(static permission => permission.CanDelete, ct) is { } forbidden)
-        {
             return forbidden;
-        }
-
-        var visibility = await ResolveMoneyVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
-        if (!await CanAccessCustomMoneyOperationAsync(id, visibility, ct))
-        {
-            return NotFound();
-        }
-
-        var entity = await _db.MoneyOperations.FindAsync([id], ct);
-        if (entity is null)
-        {
-            return NotFound();
-        }
-
-        if (IsAppliedToInvoice(entity))
-        {
+        if (!await CanAccessCustomMoneyOperationAsync(id, moneyAccess!.Visibility, ct)) return NotFound();
+        var snapshot = await _db.MoneyOperations.AsNoTracking().SingleOrDefaultAsync(operation => operation.Id == id, ct);
+        if (snapshot is null) return NotFound();
+        if (IsAppliedToInvoice(snapshot))
             return BadRequest("Связанную со счётом денежную операцию нельзя удалить без операции сторно.");
-        }
+        if (await IsImportedMoneyOperationAsync(snapshot, ct))
+            return BadRequest("Операцию из выписки нельзя удалить отдельно. Используйте откат соответствующей загрузки.");
 
+        await using var mutation = await MoneyMutationScope.BeginAsync(_db, ct);
+        var lease = await LeaseMoneyAccountsAsync([snapshot.MoneyAccountId.GetValueOrDefault()], static permission => permission.CanDelete, ct);
+        if (lease.Error is not null) return lease.Error;
+        var entity = await LockMoneyOperationAsync(snapshot, ct);
+        if (entity is null) return Conflict("Операция изменена другим запросом. Обновите запись.");
+        if (!await CanAccessCustomMoneyOperationAsync(id, moneyAccess!.Visibility, ct)) return NotFound();
+        var account = lease.Accounts[entity.MoneyAccountId!.Value];
+        if (entity.Source != account.Source || !string.Equals(entity.Currency?.Trim(), account.Currency?.Trim(), StringComparison.OrdinalIgnoreCase))
+            return BadRequest("Происхождение денежной операции требует уточнения.");
+        if (IsAppliedToInvoice(entity) || await IsImportedMoneyOperationAsync(entity, ct))
+            return BadRequest("Связанную или импортированную операцию нельзя удалить отдельно.");
         var linkedOrders = await _db.CashOrders
-            .Where(order => order.MoneyOperationId == entity.Id && order.Status != CashOrderStatus.Cancelled)
-            .ToListAsync(ct);
+            .Where(order => order.MoneyOperationId == entity.Id && order.Status != CashOrderStatus.Cancelled).ToListAsync(ct);
         foreach (var order in linkedOrders)
         {
             order.Status = CashOrderStatus.Cancelled;
             order.UpdatedAt = DateTime.UtcNow;
         }
-
         _db.MoneyOperations.Remove(entity);
         await _db.SaveChangesAsync(ct);
+        if (await RefreshMoneyMutationAccessAsync(lease.Accounts.Values, static permission => permission.CanDelete, ct) is { } finalAccess)
+            return finalAccess;
+        await mutation.CommitAsync(ct);
         return NoContent();
     }
+
+    private Task<bool> IsImportedMoneyOperationAsync(MoneyOperation operation, CancellationToken ct)
+        => operation.BankStatementImportBatchId.HasValue || operation.SourceMovementKey != null
+            ? Task.FromResult(true)
+            : _db.BankStatementImportRows.AnyAsync(row => row.MoneyOperationId == operation.Id, ct);
 
     private static bool IsAppliedToInvoice(MoneyOperation operation)
         => operation.LinkedInvoiceId.HasValue && operation.MatchStatus == MoneyOperationMatchStatus.Matched;
@@ -2925,39 +2223,7 @@ public class MoneyOperationsController : ControllerBase
         operation.VatAmount = Math.Round(operation.Amount * operation.VatRate.Value / (100m + operation.VatRate.Value), 2, MidpointRounding.AwayFromZero);
     }
 
-    private static void ApplyAdvanceReviewHint(MoneyOperation operation)
-    {
-        if (!IsUnallocatedAdvanceMoneyOperation(operation))
-        {
-            return;
-        }
 
-        operation.IsAdvancePayment = true;
-        if (operation.MatchStatus == MoneyOperationMatchStatus.None)
-        {
-            operation.MatchStatus = MoneyOperationMatchStatus.ClarificationRequired;
-        }
-
-        operation.MatchComment = string.IsNullOrWhiteSpace(operation.MatchComment)
-            ? "Поступление не связано со счетом. Проверьте его как возможный нераспределенный аванс."
-            : operation.MatchComment.Trim();
-    }
-
-    private static bool IsUnallocatedAdvanceMoneyOperation(MoneyOperation operation)
-        => operation.Source == MoneyOperationSource.Bank
-           && operation.Direction == MoneyOperationDirection.Income
-           && operation.AccountingType == MoneyOperationAccountingType.Fact
-           && operation.Amount > 0m
-           && !operation.LinkedInvoiceId.HasValue
-           && operation.MatchStatus != MoneyOperationMatchStatus.Ignored;
-
-    private static string ToTitleSearchTerm(string value)
-        => string.IsNullOrWhiteSpace(value)
-            ? value
-            : string.Join(' ', value.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                .Select(part => part.Length == 1
-                    ? part.ToUpperInvariant()
-                    : char.ToUpperInvariant(part[0]) + part[1..]));
 
     private static MoneyOperationListItemDto MapMoneyOperationRow(MoneyOperationQueryRow row)
     {
@@ -3000,6 +2266,7 @@ public class MoneyOperationsController : ControllerBase
             PaymentPriority = row.PaymentPriority,
             PaidAccountName = row.PaidAccountName,
             LinkedInvoiceId = row.LinkedInvoiceId,
+            IsInvoiceLinkProtected = row.IsInvoiceLinkProtected,
             LinkedInvoiceNumber = row.LinkedInvoiceNumber,
             LinkedInvoiceDate = row.LinkedInvoiceDate,
             LinkedContractId = row.LinkedContractId,
@@ -3027,23 +2294,7 @@ public class MoneyOperationsController : ControllerBase
     }
 
     private static MoneyBalanceReconciliationResultDto MapBalanceReconciliationResult(MoneyBalanceReconciliationResult row)
-        => new()
-        {
-            Id = row.Id,
-            Date = row.Date,
-            Source = row.Source,
-            AccountName = row.AccountName,
-            OpeningBalance = row.OpeningBalance,
-            Income = row.Income,
-            Expense = row.Expense,
-            ClosingBalance = row.ClosingBalance,
-            IncomeCount = row.IncomeCount,
-            ExpenseCount = row.ExpenseCount,
-            IsBalanced = row.IsBalanced,
-            IssueCount = row.IssueCount,
-            CheckedAt = row.CheckedAt,
-            CheckedByUserId = row.CheckedByUserId,
-        };
+        => MoneyBalanceReconciliationService.Map(row);
 
     private static MoneyOperationJournalStatus ResolveJournalStatus(
         MoneyOperationSource source,
@@ -3486,291 +2737,6 @@ public class MoneyOperationsController : ControllerBase
         return string.Join(". ", new[] { source, operation.Purpose, operation.PaidInvoiceNumber }.Where(item => !string.IsNullOrWhiteSpace(item)));
     }
 
-    private static bool IsBankPaymentSource(string? sourceName)
-        => string.IsNullOrWhiteSpace(sourceName) ||
-           (!sourceName.Contains(CashSourceToken) &&
-            !sourceName.Contains(CashSourceTitleToken) &&
-           !sourceName.Contains(CashSourceAlternativeToken) &&
-           !sourceName.Contains(CashSourceAlternativeTitleToken) &&
-            !sourceName.Contains(CardSourceToken) &&
-            !sourceName.Contains(CardSourceTitleToken) &&
-            !sourceName.Contains(EMoneySourceToken) &&
-            !sourceName.Contains(EMoneySourceTitleToken) &&
-            !sourceName.Contains(EMoneySourceCompactToken) &&
-            !sourceName.Contains(EMoneySourceCompactTitleToken) &&
-            !sourceName.Contains(EMoneySourceRussianToken) &&
-            !sourceName.Contains(EMoneySourceRussianTitleToken) &&
-            !sourceName.Contains(EMoneySourceYuMoneyToken) &&
-            !sourceName.Contains(EMoneySourceYooMoneyToken) &&
-            !sourceName.Contains(EMoneySourceYandexToken));
-
-    private async Task<BankStatementImportResultDto> ImportBankStatementItemsAsync(
-        IReadOnlyCollection<BankStatementImportItem> items,
-        BankStatementImportResultDto result,
-        string fileName,
-        long fileSize,
-        string fileHash,
-        IReadOnlyCollection<BankStatementCategoryRule> manualCategoryRules,
-        CancellationToken ct)
-    {
-        if (items.Count == 0)
-        {
-            return result;
-        }
-
-        var minDate = items.Min(item => item.Date);
-        var maxDate = items.Max(item => item.Date);
-        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
-        var batch = new BankStatementImportBatch
-        {
-            FileName = Path.GetFileName(fileName),
-            FileHash = fileHash,
-            FileSize = fileSize,
-            RowsRead = result.RowsRead,
-            ErrorRows = result.Errors.Count,
-            ErrorSummary = result.Errors.Count == 0 ? null : string.Join(Environment.NewLine, result.Errors.Take(50)),
-            CreatedAt = DateTime.UtcNow,
-        };
-        _db.BankStatementImportBatches.Add(batch);
-
-        var importKeys = new HashSet<string>(StringComparer.Ordinal);
-        var pendingRows = new List<BankStatementImportRow>();
-        var pendingOperations = new List<MoneyOperation>();
-        var existingOperations = await _db.MoneyOperations
-            .AsNoTracking()
-            .Where(operation =>
-                operation.Source == MoneyOperationSource.Bank &&
-                operation.AccountingType == MoneyOperationAccountingType.Fact &&
-                operation.Date >= minDate &&
-                operation.Date <= maxDate)
-            .ToListAsync(ct);
-        var completedPayments = await _db.Payments
-            .AsNoTracking()
-            .Include(payment => payment.PaymentSource)
-            .Where(payment =>
-                payment.Status == PaymentStatus.Completed &&
-                (payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date) >= minDate &&
-                (payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date) <= maxDate)
-            .ToListAsync(ct);
-        var moneyAccountsByName = await _db.MoneyAccounts
-            .AsNoTracking()
-            .Where(account => account.Source == MoneyOperationSource.Bank && account.IsActive)
-            .ToDictionaryAsync(account => account.Name, StringComparer.OrdinalIgnoreCase, ct);
-        var incomeTypeCandidates = await _db.IncomeTypes
-            .AsNoTracking()
-            .Where(incomeType => incomeType.IsActive)
-            .Select(incomeType => new BankStatementIncomeTypeCandidate(
-                incomeType.Id,
-                incomeType.Name,
-                incomeType.PaymentType))
-            .ToListAsync(ct);
-        var invoiceNumbersFromStatement = items
-            .SelectMany(item => ExtractInvoiceNumberTokens(item.Purpose))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var statementPaymentTypes = items
-            .Select(item => item.Direction == MoneyOperationDirection.Expense ? PaymentType.Expense : PaymentType.Income)
-            .Distinct()
-            .ToList();
-        var invoiceCandidates = (await _db.Payments
-                .AsNoTracking()
-                .Include(payment => payment.Invoice)
-                .Include(payment => payment.Client)
-                .Include(payment => payment.ExpenseClient)
-                .Include(payment => payment.ExpenseLegalEntity)
-                .Include(payment => payment.Contract)
-                .Where(payment =>
-                    payment.DocumentKind == DocumentKind.Invoice &&
-                    statementPaymentTypes.Contains(payment.Type) &&
-                    payment.Status != PaymentStatus.Cancelled &&
-                    payment.InvoiceId.HasValue)
-                .ToListAsync(ct))
-                .Select(payment => new BankStatementInvoiceCandidate(
-                    payment.Id,
-                    payment.InvoiceId!.Value,
-                    payment.Invoice?.Number ?? payment.Account ?? string.Empty,
-                    payment.Account,
-                    payment.Amount,
-                    payment.PaidAmount,
-                    payment.Status,
-                    payment.Type,
-                    payment.Type == PaymentType.Expense ? payment.ExpenseClientId ?? payment.ClientId : payment.ClientId,
-                    ResolveInvoiceCandidateCounterpartyName(payment),
-                    payment.CounterpartyName,
-                    BuildInvoiceNumberTokenSet(payment.Invoice?.Number, payment.Account, payment.LegacyAccountNumber),
-                    BuildInvoiceNumberTokenSet(payment.Contract?.Number)))
-                .Where(candidate =>
-                    invoiceNumbersFromStatement.Count == 0 ||
-                    candidate.MatchingNumberTokens.Any(invoiceNumbersFromStatement.Contains) ||
-                    items.Any(item =>
-                        item.Direction == MoneyOperationDirection.Income &&
-                        Math.Abs(candidate.OutstandingAmount - item.Amount) <= 0.009m &&
-                        NamesLookRelated(item.CounterpartyName, candidate.ClientName ?? candidate.CounterpartyName)))
-                .ToList();
-
-        var reservedByInvoice = new Dictionary<int, decimal>();
-        foreach (var item in items)
-        {
-            ct.ThrowIfCancellationRequested();
-            var importKey = BuildBankStatementImportKey(
-                item.Date,
-                item.Direction,
-                item.Amount,
-                item.DocumentNumber,
-                item.CounterpartyName);
-
-            if (!importKeys.Add(importKey))
-            {
-                result.Skipped++;
-                pendingRows.Add(CreateImportRow(batch, item, importKey, BankStatementImportRowStatus.Skipped, "Повтор строки внутри файла."));
-                continue;
-            }
-
-            var alreadyExists = existingOperations.Any(operation =>
-                operation.Direction == item.Direction &&
-                operation.Date == item.Date &&
-                operation.Amount == item.Amount &&
-                (operation.PaymentOrderNumber ?? string.Empty) == (item.DocumentNumber ?? string.Empty) &&
-                (operation.CounterpartyName ?? string.Empty) == (item.CounterpartyName ?? string.Empty));
-
-            if (alreadyExists)
-            {
-                result.Skipped++;
-                pendingRows.Add(CreateImportRow(batch, item, importKey, BankStatementImportRowStatus.Skipped, "Такая банковская операция уже есть в журнале."));
-                continue;
-            }
-
-            var paymentType = item.Direction == MoneyOperationDirection.Income
-                ? PaymentType.Income
-                : PaymentType.Expense;
-            var matchingPaymentExists = completedPayments.Any(payment =>
-                payment.Type == paymentType &&
-                (payment.PaidAmount > 0m ? payment.PaidAmount : payment.Amount) == item.Amount &&
-                (payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date).Date == item.Date &&
-                string.Equals(payment.PaymentOrderNumber ?? string.Empty, item.DocumentNumber ?? string.Empty, StringComparison.Ordinal) &&
-                string.Equals(payment.CounterpartyName ?? string.Empty, item.CounterpartyName ?? string.Empty, StringComparison.Ordinal) &&
-                IsBankPaymentSource(payment.PaymentSource?.Name));
-
-            if (matchingPaymentExists)
-            {
-                result.Skipped++;
-                pendingRows.Add(CreateImportRow(batch, item, importKey, BankStatementImportRowStatus.Skipped, "Найден уже выполненный банковский платёж."));
-                continue;
-            }
-
-            var incomeTypeMatch = ResolveBankStatementIncomeType(item, incomeTypeCandidates, manualCategoryRules);
-            var categoryName = incomeTypeMatch is null
-                ? ResolveBankStatementCategoryName(item, manualCategoryRules)
-                : null;
-            var operation = new MoneyOperation
-            {
-                Source = MoneyOperationSource.Bank,
-                Direction = item.Direction,
-                AccountingType = MoneyOperationAccountingType.Fact,
-                AccountName = item.AccountName,
-                CounterpartyName = item.CounterpartyName,
-                IncomeTypeId = incomeTypeMatch?.Id,
-                CategoryName = categoryName,
-                Amount = item.Amount,
-                Currency = "RUB",
-                PaymentOrderNumber = item.DocumentNumber,
-                Date = item.Date,
-                RecognitionDate = item.Date,
-                Purpose = item.Purpose,
-                MatchStatus = MoneyOperationMatchStatus.ClarificationRequired,
-                BankStatementImportBatch = batch,
-                CreatedAt = DateTime.UtcNow,
-            };
-            if (!string.IsNullOrWhiteSpace(item.AccountName) &&
-                moneyAccountsByName.TryGetValue(item.AccountName.Trim(), out var moneyAccount))
-            {
-                operation.MoneyAccountId = moneyAccount.Id;
-                operation.AccountName = moneyAccount.Name;
-                operation.Currency = moneyAccount.Currency;
-            }
-
-            // Счета CRM ведутся в рублях. Валютная операция требует явного уточнения.
-            var autoMatch = string.Equals(operation.Currency, "RUB", StringComparison.OrdinalIgnoreCase)
-                ? TryResolveBankStatementInvoiceMatch(item, invoiceCandidates, reservedByInvoice)
-                : null;
-            var importRowMessage = (string?)null;
-            if (autoMatch is not null)
-            {
-                reservedByInvoice[autoMatch.InvoiceId] = reservedByInvoice.GetValueOrDefault(autoMatch.InvoiceId) + operation.Amount;
-                operation.LinkedInvoiceId = autoMatch.InvoiceId;
-                operation.PaidInvoiceNumber = autoMatch.InvoiceNumber;
-                operation.PaidAccountName = autoMatch.InvoiceNumber;
-                operation.MatchStatus = MoneyOperationMatchStatus.Matched;
-                operation.MatchedAt = DateTime.UtcNow;
-                operation.MatchComment = BuildBankStatementAutoMatchComment(item, autoMatch);
-                importRowMessage = operation.MatchComment;
-            }
-            ApplyAdvanceReviewHint(operation);
-
-            _db.MoneyOperations.Add(operation);
-            pendingOperations.Add(operation);
-            pendingRows.Add(CreateImportRow(batch, item, importKey, BankStatementImportRowStatus.Created, importRowMessage, operation));
-
-            result.Created++;
-            result.Operations.Add(new BankStatementImportCreatedOperationDto
-            {
-                Date = operation.Date,
-                Direction = operation.Direction,
-                Amount = operation.Amount,
-                CounterpartyName = operation.CounterpartyName,
-                PaymentOrderNumber = operation.PaymentOrderNumber,
-                MatchStatus = operation.MatchStatus,
-            });
-        }
-
-        batch.CreatedRows = result.Created;
-        batch.SkippedRows = result.Skipped;
-        batch.ErrorRows = result.Errors.Count;
-        batch.Status = result.Errors.Count > 0
-            ? BankStatementImportBatchStatus.AppliedWithErrors
-            : BankStatementImportBatchStatus.Applied;
-        _db.BankStatementImportRows.AddRange(pendingRows);
-
-        if (pendingOperations.Count > 0)
-        {
-            await _db.SaveChangesAsync(ct);
-            var createdIndex = 0;
-            for (var index = 0; index < result.Operations.Count; index++)
-            {
-                result.Operations[index].Id = pendingOperations[createdIndex].Id;
-                createdIndex++;
-            }
-
-            var matchedOperations = pendingOperations.Where(item =>
-                item.LinkedInvoiceId.HasValue && item.MatchStatus == MoneyOperationMatchStatus.Matched).ToList();
-            var paymentsByInvoice = new Dictionary<int, List<Payment>>();
-            foreach (var invoiceIds in matchedOperations.Select(item => item.LinkedInvoiceId!.Value).Distinct().Chunk(500))
-            {
-                var payments = await _db.Payments
-                    .Where(item => item.InvoiceId.HasValue && invoiceIds.Contains(item.InvoiceId.Value) && item.Status != PaymentStatus.Cancelled)
-                    .ToListAsync(ct);
-                foreach (var group in payments.GroupBy(item => item.InvoiceId!.Value)) paymentsByInvoice[group.Key] = group.ToList();
-            }
-            foreach (var operation in matchedOperations)
-            {
-                var invoiceId = operation.LinkedInvoiceId!.Value;
-                await MoneyOperationInvoiceAllocationService.ApplyAsync(_db, operation, invoiceId, ct,
-                    paymentsByInvoice.GetValueOrDefault(invoiceId) ?? []);
-            }
-
-            await _db.SaveChangesAsync(ct);
-        }
-        else
-        {
-            await _db.SaveChangesAsync(ct);
-        }
-
-        result.BatchId = batch.Id;
-
-        await transaction.CommitAsync(ct);
-        return result;
-    }
-
     private async Task<BankStatementAutoImportSettings> GetBankStatementAutoImportSettingsAsync(int userId, CancellationToken ct)
     {
         var value = await _db.UserSettings
@@ -3864,35 +2830,6 @@ public class MoneyOperationsController : ControllerBase
         }
     }
 
-    private static BankStatementCategoryRule? TryCreateManualBankStatementCategoryRule(
-        BankStatementManualCategoryRule rule)
-    {
-        if (string.IsNullOrWhiteSpace(rule.CategoryName) || string.IsNullOrWhiteSpace(rule.Keywords))
-        {
-            return null;
-        }
-
-        var paymentType = rule.PaymentType == PaymentType.Expense ? PaymentType.Expense : PaymentType.Income;
-        var keywords = rule.Keywords
-            .Split(new[] { ';', ',', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(keyword => NormalizeNameForMatch(keyword).Length >= 3)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(20)
-            .ToArray();
-        if (keywords.Length == 0)
-        {
-            return null;
-        }
-
-        var incomeTypeId = rule.IncomeTypeId.GetValueOrDefault() > 0 ? rule.IncomeTypeId : null;
-        return new BankStatementCategoryRule(
-            rule.CategoryName.Trim(),
-            paymentType,
-            keywords,
-            incomeTypeId,
-            IsManual: true);
-    }
-
     private static IReadOnlyList<string> EnumerateBankStatementAutoImportFiles(string folderPath, string fileMask)
     {
         var masks = (string.IsNullOrWhiteSpace(fileMask) ? "*.csv;*.txt;*.tsv;*.1c" : fileMask)
@@ -3930,648 +2867,40 @@ public class MoneyOperationsController : ControllerBase
     private int? GetCurrentUserId()
         => int.TryParse(User?.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : null;
 
-    private static BankStatementImportRow CreateImportRow(
-        BankStatementImportBatch batch,
-        BankStatementImportItem item,
-        string importKey,
-        string status,
-        string? message,
-        MoneyOperation? operation = null)
-        => new()
-        {
-            Batch = batch,
-            RowNumber = item.RowNumber,
-            ImportKey = importKey,
-            Status = status,
-            Message = message,
-            MoneyOperation = operation,
-            Date = item.Date,
-            Direction = item.Direction,
-            Amount = item.Amount,
-            AccountName = item.AccountName,
-            CounterpartyName = item.CounterpartyName,
-            Purpose = item.Purpose,
-            PaymentOrderNumber = item.DocumentNumber,
-            CreatedAt = DateTime.UtcNow,
-        };
-
-    private static bool LooksLikeClientBankExchange(string text)
-        => text.Contains("1CClientBankExchange", StringComparison.OrdinalIgnoreCase) ||
-           text.Contains("СекцияДокумент=", StringComparison.OrdinalIgnoreCase);
-
-    private static (List<BankStatementImportItem> Items, BankStatementImportResultDto Result) ParseClientBankExchange(string text)
-    {
-        var items = new List<BankStatementImportItem>();
-        var result = new BankStatementImportResultDto();
-        var lines = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
-        var statementAccount = string.Empty;
-        Dictionary<string, string>? document = null;
-
-        foreach (var rawLine in lines)
-        {
-            var line = rawLine.Trim();
-            if (line.Length == 0)
-            {
-                continue;
-            }
-
-            if (line.StartsWith("СекцияДокумент=", StringComparison.OrdinalIgnoreCase))
-            {
-                document = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                continue;
-            }
-
-            if (line.Equals("КонецДокумента", StringComparison.OrdinalIgnoreCase))
-            {
-                if (document is not null)
-                {
-                    AddClientBankExchangeDocument(document, statementAccount, items, result);
-                    document = null;
-                }
-
-                continue;
-            }
-
-            var separatorIndex = line.IndexOf('=');
-            if (separatorIndex <= 0)
-            {
-                continue;
-            }
-
-            var key = line[..separatorIndex].Trim();
-            var value = line[(separatorIndex + 1)..].Trim();
-            if (document is not null)
-            {
-                document[key] = value;
-            }
-            else if (key.Equals("РасчСчет", StringComparison.OrdinalIgnoreCase))
-            {
-                statementAccount = NormalizeBankAccount(value);
-            }
-        }
-
-        if (document is not null)
-        {
-            AddClientBankExchangeDocument(document, statementAccount, items, result);
-        }
-
-        return (items, result);
-    }
-
-    private static void AddClientBankExchangeDocument(
-        IReadOnlyDictionary<string, string> document,
-        string statementAccount,
-        ICollection<BankStatementImportItem> items,
-        BankStatementImportResultDto result)
-    {
-        result.RowsRead++;
-        var documentNumber = NormalizeStatementText(GetDictionaryValue(document, "Номер"));
-
-        if (!TryParseStatementDate(GetDictionaryValue(document, "Дата") ?? string.Empty, out var date))
-        {
-            result.Skipped++;
-            result.Errors.Add($"Документ {documentNumber ?? result.RowsRead.ToString(CultureInfo.InvariantCulture)}: не удалось прочитать дату.");
-            return;
-        }
-
-        if (!TryParseStatementAmount(GetDictionaryValue(document, "Сумма") ?? string.Empty, out var amount) || amount == 0m)
-        {
-            result.Skipped++;
-            result.Errors.Add($"Документ {documentNumber ?? result.RowsRead.ToString(CultureInfo.InvariantCulture)}: не удалось прочитать сумму.");
-            return;
-        }
-
-        var payerAccount = NormalizeBankAccount(GetDictionaryValue(document, "ПлательщикСчет"));
-        var recipientAccount = NormalizeBankAccount(GetDictionaryValue(document, "ПолучательСчет"));
-        var isExpense = !string.IsNullOrWhiteSpace(statementAccount) &&
-                        string.Equals(statementAccount, payerAccount, StringComparison.Ordinal);
-        var isIncome = !string.IsNullOrWhiteSpace(statementAccount) &&
-                       string.Equals(statementAccount, recipientAccount, StringComparison.Ordinal);
-        var direction = isExpense && !isIncome ? MoneyOperationDirection.Expense : MoneyOperationDirection.Income;
-        var counterparty = NormalizeStatementText(direction == MoneyOperationDirection.Expense
-            ? GetDictionaryValue(document, "Получатель")
-            : GetDictionaryValue(document, "Плательщик"));
-        var purpose = NormalizeStatementText(GetDictionaryValue(document, "НазначениеПлатежа"));
-        var account = statementAccount;
-        if (string.IsNullOrWhiteSpace(account))
-        {
-            account = direction == MoneyOperationDirection.Expense ? payerAccount : recipientAccount;
-        }
-
-        items.Add(new BankStatementImportItem(
-            result.RowsRead,
-            date.Date,
-            direction,
-            Math.Abs(amount),
-            string.IsNullOrWhiteSpace(account) ? "Расчетный счет" : account,
-            counterparty,
-            purpose,
-            documentNumber));
-    }
-
-    private static string? GetDictionaryValue(IReadOnlyDictionary<string, string> values, string key)
-        => values.TryGetValue(key, out var value) ? value : null;
-
-    private static string NormalizeBankAccount(string? value)
-        => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim().Replace(" ", string.Empty);
-
-    private static string DecodeStatementBytes(byte[] bytes)
-    {
-        if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
-        {
-            return Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
-        }
-
-        var utf8 = new UTF8Encoding(false, true);
-        try
-        {
-            return utf8.GetString(bytes);
-        }
-        catch (DecoderFallbackException)
-        {
-            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-            return Encoding.GetEncoding(1251).GetString(bytes);
-        }
-    }
-
-    private static List<List<string>> ParseDelimitedRows(string text)
-    {
-        var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
-        var firstLine = normalized.Split('\n', 2)[0];
-        var delimiter = firstLine.Count(ch => ch == ';') >= firstLine.Count(ch => ch == '\t') ? ';' : '\t';
-        if (firstLine.Count(ch => ch == ',') > firstLine.Count(ch => ch == delimiter))
-        {
-            delimiter = ',';
-        }
-
-        var rows = new List<List<string>>();
-        var row = new List<string>();
-        var cell = new StringBuilder();
-        var inQuotes = false;
-
-        for (var index = 0; index < normalized.Length; index++)
-        {
-            var ch = normalized[index];
-            if (ch == '"')
-            {
-                if (inQuotes && index + 1 < normalized.Length && normalized[index + 1] == '"')
-                {
-                    cell.Append('"');
-                    index++;
-                }
-                else
-                {
-                    inQuotes = !inQuotes;
-                }
-
-                continue;
-            }
-
-            if (!inQuotes && ch == delimiter)
-            {
-                row.Add(cell.ToString().Trim());
-                cell.Clear();
-                continue;
-            }
-
-            if (!inQuotes && ch == '\n')
-            {
-                row.Add(cell.ToString().Trim());
-                cell.Clear();
-                rows.Add(row);
-                row = new List<string>();
-                continue;
-            }
-
-            cell.Append(ch);
-        }
-
-        row.Add(cell.ToString().Trim());
-        if (row.Any(value => !string.IsNullOrWhiteSpace(value)))
-        {
-            rows.Add(row);
-        }
-
-        return rows;
-    }
-
-    private static StatementHeaderMap BuildStatementHeaderMap(IReadOnlyList<string> header)
-    {
-        var map = new StatementHeaderMap();
-        for (var index = 0; index < header.Count; index++)
-        {
-            var name = NormalizeHeaderName(header[index]);
-            if (map.Date < 0 && (name.Contains("дата") || name.Contains("date")))
-            {
-                map.Date = index;
-            }
-            else if (map.DocumentNumber < 0 && (name.Contains("номер") || name.Contains("документ") || name.Contains("поручение")))
-            {
-                map.DocumentNumber = index;
-            }
-            else if (map.Counterparty < 0 && (name.Contains("контрагент") || name.Contains("плательщик") || name.Contains("получатель") || name.Contains("payer")))
-            {
-                map.Counterparty = index;
-            }
-            else if (map.Purpose < 0 && (name.Contains("назначение") || name.Contains("комментар") || name.Contains("purpose")))
-            {
-                map.Purpose = index;
-            }
-            else if (map.Account < 0 && (name.Contains("счет") || name.Contains("счёт") || name.Contains("account")))
-            {
-                map.Account = index;
-            }
-            else if (map.Income < 0 && (name.Contains("приход") || name.Contains("поступ") || name.Contains("кредит") || name.Contains("credit")))
-            {
-                map.Income = index;
-            }
-            else if (map.Expense < 0 && (name.Contains("расход") || name.Contains("спис") || name.Contains("дебет") || name.Contains("debit")))
-            {
-                map.Expense = index;
-            }
-            else if (map.Amount < 0 && (name.Contains("сумма") || name.Contains("amount")))
-            {
-                map.Amount = index;
-            }
-        }
-
-        return map;
-    }
-
-    private static string NormalizeHeaderName(string value)
-        => value.Trim().ToLowerInvariant().Replace(" ", string.Empty).Replace("_", string.Empty);
-
-    private static bool TryGetCell(IReadOnlyList<string> row, int index, out string value)
-    {
-        if (index >= 0 && index < row.Count)
-        {
-            value = row[index].Trim();
-            return !string.IsNullOrWhiteSpace(value);
-        }
-
-        value = string.Empty;
-        return false;
-    }
-
-    private static string? GetOptionalCell(IReadOnlyList<string> row, int index)
-        => TryGetCell(row, index, out var value) ? value : null;
-
-    private static string? NormalizeStatementText(string? value)
-        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-
-    private static string BuildBankStatementImportKey(
-        DateTime date,
-        MoneyOperationDirection direction,
-        decimal amount,
-        string? documentNumber,
-        string? counterparty)
-        => string.Join("|", date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), direction, amount.ToString("0.00", CultureInfo.InvariantCulture), documentNumber ?? string.Empty, counterparty ?? string.Empty);
-
-    private static BankStatementInvoiceCandidate? TryResolveBankStatementInvoiceMatch(
-        BankStatementImportItem item,
-        IReadOnlyCollection<BankStatementInvoiceCandidate> candidates,
-        IReadOnlyDictionary<int, decimal> reservedByInvoice)
-    {
-        if (item.Direction is not (MoneyOperationDirection.Income or MoneyOperationDirection.Expense))
-        {
-            return null;
-        }
-
-        var targetPaymentType = item.Direction == MoneyOperationDirection.Expense
-            ? PaymentType.Expense
-            : PaymentType.Income;
-        var tokens = ExtractInvoiceNumberTokens(item.Purpose).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (tokens.Count > 0)
-        {
-            var matchingCandidates = candidates
-                .Where(candidate =>
-                    candidate.PaymentType == targetPaymentType &&
-                    (candidate.OutstandingAmount - reservedByInvoice.GetValueOrDefault(candidate.InvoiceId)) > 0m &&
-                    item.Amount <= (candidate.OutstandingAmount - reservedByInvoice.GetValueOrDefault(candidate.InvoiceId)) + 0.009m &&
-                    candidate.MatchingNumberTokens.Any(tokens.Contains))
-                .GroupBy(candidate => candidate.InvoiceId)
-                .Select(group => group.First())
-                .ToList();
-
-            if (matchingCandidates.Count == 1)
-            {
-                return matchingCandidates[0];
-            }
-
-            var exactAmountCandidates = matchingCandidates
-                .Where(candidate => Math.Abs((candidate.OutstandingAmount - reservedByInvoice.GetValueOrDefault(candidate.InvoiceId)) - item.Amount) <= 0.009m)
-                .ToList();
-            if (exactAmountCandidates.Count == 1)
-            {
-                return exactAmountCandidates[0];
-            }
-        }
-
-        var exactNamedCandidates = candidates
-            .Where(candidate =>
-                candidate.PaymentType == targetPaymentType &&
-                (candidate.OutstandingAmount - reservedByInvoice.GetValueOrDefault(candidate.InvoiceId)) > 0m &&
-                Math.Abs((candidate.OutstandingAmount - reservedByInvoice.GetValueOrDefault(candidate.InvoiceId)) - item.Amount) <= 0.009m &&
-                NamesLookRelated(item.CounterpartyName, candidate.ClientName ?? candidate.CounterpartyName))
-            .GroupBy(candidate => candidate.InvoiceId)
-            .Select(group => group.First())
-            .ToList();
-        return exactNamedCandidates.Count == 1 ? exactNamedCandidates[0] : null;
-    }
-
-    private static string BuildBankStatementAutoMatchComment(BankStatementImportItem item, BankStatementInvoiceCandidate candidate)
-    {
-        var tokens = ExtractInvoiceNumberTokens(item.Purpose).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (tokens.Count > 0 && candidate.InvoiceNumberTokens.Any(tokens.Contains))
-        {
-            return $"Автоматически сверено по номеру счёта {candidate.InvoiceNumber} из назначения платежа.";
-        }
-
-        if (tokens.Count > 0 && candidate.ContractNumberTokens.Any(tokens.Contains))
-        {
-            return $"Автоматически сверено со счётом {candidate.InvoiceNumber} по номеру договора из назначения платежа.";
-        }
-
-        return candidate.PaymentType == PaymentType.Expense
-            ? $"Автоматически сверено со счётом {candidate.InvoiceNumber} по сумме и поставщику из выписки."
-            : $"Автоматически сверено со счётом {candidate.InvoiceNumber} по сумме и клиенту из выписки.";
-    }
-
-    private static BankStatementIncomeTypeCandidate? ResolveBankStatementIncomeType(
-        BankStatementImportItem item,
-        IReadOnlyCollection<BankStatementIncomeTypeCandidate> candidates,
-        IReadOnlyCollection<BankStatementCategoryRule> manualCategoryRules)
-    {
-        var paymentType = item.Direction == MoneyOperationDirection.Income
-            ? PaymentType.Income
-            : PaymentType.Expense;
-        var haystack = BuildBankStatementMatchHaystack(item);
-        if (haystack.Length < 3)
-        {
-            return null;
-        }
-
-        var categoryRule = ResolveBankStatementCategoryRule(paymentType, haystack, manualCategoryRules);
-        var matches = candidates
-            .Where(candidate => candidate.PaymentType == paymentType)
-            .Select(candidate => new
-            {
-                Candidate = candidate,
-                Score = ScoreBankStatementIncomeTypeCandidate(candidate, haystack, categoryRule),
-            })
-            .Where(match => match.Score > 0)
-            .OrderByDescending(match => match.Score)
-            .ThenBy(match => match.Candidate.Name)
-            .ToList();
-
-        if (matches.Count == 0)
-        {
-            return null;
-        }
-
-        return matches.Count == 1 || matches[0].Score > matches[1].Score
-            ? matches[0].Candidate
-            : null;
-    }
-
-    private static string ResolveBankStatementCategoryName(
-        BankStatementImportItem item,
-        IReadOnlyCollection<BankStatementCategoryRule> manualCategoryRules)
-    {
-        var paymentType = item.Direction == MoneyOperationDirection.Income
-            ? PaymentType.Income
-            : PaymentType.Expense;
-        var haystack = BuildBankStatementMatchHaystack(item);
-        return ResolveBankStatementCategoryRule(paymentType, haystack, manualCategoryRules)?.CategoryName
-               ?? (item.Direction == MoneyOperationDirection.Income ? "Поступление по выписке" : "Списание по выписке");
-    }
-
-    private static BankStatementCategoryRule? ResolveBankStatementCategoryRule(
-        PaymentType paymentType,
-        string haystack,
-        IReadOnlyCollection<BankStatementCategoryRule> manualCategoryRules)
-    {
-        if (haystack.Length < 3)
-        {
-            return null;
-        }
-
-        var matches = manualCategoryRules
-            .Concat(BankStatementCategoryRules)
-            .Where(rule => rule.PaymentType == paymentType)
-            .Select(rule => new
-            {
-                Rule = rule,
-                Score = rule.Keywords.Max(keyword => ScoreBankStatementKeyword(keyword, haystack)),
-            })
-            .Where(match => match.Score > 0)
-            .OrderByDescending(match => match.Score)
-            .ThenByDescending(match => match.Rule.IsManual)
-            .ThenBy(match => match.Rule.CategoryName)
-            .ToList();
-
-        return matches.Count == 0
-            ? null
-            : matches[0].Rule;
-    }
-
-    private static int ScoreBankStatementIncomeTypeCandidate(
-        BankStatementIncomeTypeCandidate candidate,
-        string haystack,
-        BankStatementCategoryRule? categoryRule)
-    {
-        var directScore = ScoreBankStatementIncomeType(candidate.Name, haystack);
-        if (categoryRule is null)
-        {
-            return directScore;
-        }
-
-        if (categoryRule.IncomeTypeId == candidate.Id)
-        {
-            return Math.Max(directScore, 2200);
-        }
-
-        var categoryScore = ScoreBankStatementIncomeType(candidate.Name, NormalizeNameForMatch(categoryRule.CategoryName));
-        return Math.Max(directScore, categoryScore > 0 ? 800 + categoryScore : 0);
-    }
-
-    private static int ScoreBankStatementIncomeType(string name, string haystack)
-    {
-        var normalizedName = NormalizeNameForMatch(name);
-        if (normalizedName.Length < 3)
-        {
-            return 0;
-        }
-
-        if (haystack.Contains(normalizedName, StringComparison.Ordinal))
-        {
-            return 1000 + normalizedName.Length;
-        }
-
-        var words = normalizedName
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
-            .Where(word => word.Length >= 3)
-            .ToArray();
-        return words.Length > 1 && words.All(word => haystack.Contains(word, StringComparison.Ordinal))
-            ? 500 + words.Sum(word => word.Length)
-            : 0;
-    }
-
-    private static int ScoreBankStatementKeyword(string keyword, string haystack)
-    {
-        var normalizedKeyword = NormalizeNameForMatch(keyword);
-        if (normalizedKeyword.Length < 3)
-        {
-            return 0;
-        }
-
-        if (haystack.Contains(normalizedKeyword, StringComparison.Ordinal))
-        {
-            return 1000 + normalizedKeyword.Length;
-        }
-
-        var words = normalizedKeyword
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
-            .Where(word => word.Length >= 3)
-            .ToArray();
-        return words.Length > 1 && words.All(word => haystack.Contains(word, StringComparison.Ordinal))
-            ? 500 + words.Sum(word => word.Length)
-            : 0;
-    }
-
-    private static string BuildBankStatementMatchHaystack(BankStatementImportItem item)
-        => NormalizeNameForMatch(string.Join(' ', new[] { item.Purpose, item.CounterpartyName }
-            .Where(value => !string.IsNullOrWhiteSpace(value))));
-
-    private static IEnumerable<string> ExtractInvoiceNumberTokens(string? text)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            yield break;
-        }
-
-        foreach (Match match in Regex.Matches(
-                     text,
-                     @"(?:сч[её]т\w*|договор\w*|contract|agreement|invoice|inv)\s*(?:№|#|n|no\.?)?\s*([A-Za-zА-Яа-я0-9][A-Za-zА-Яа-я0-9\/\-_]*)",
-                     RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
-                     TimeSpan.FromMilliseconds(100)))
-        {
-            var token = NormalizeInvoiceNumberToken(match.Groups[1].Value);
-            if (!string.IsNullOrWhiteSpace(token))
-            {
-                yield return token;
-            }
-        }
-
-        foreach (Match match in Regex.Matches(
-                     text,
-                     @"(?:№|#)\s*([A-Za-zА-Яа-я0-9][A-Za-zА-Яа-я0-9\/\-_]*)",
-                     RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
-                     TimeSpan.FromMilliseconds(100)))
-        {
-            var token = NormalizeInvoiceNumberToken(match.Groups[1].Value);
-            if (!string.IsNullOrWhiteSpace(token))
-            {
-                yield return token;
-            }
-        }
-    }
-
-    private static HashSet<string> BuildInvoiceNumberTokenSet(params string?[] values)
-    {
-        var tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var value in values)
-        {
-            var token = NormalizeInvoiceNumberToken(value);
-            if (!string.IsNullOrWhiteSpace(token))
-            {
-                tokens.Add(token);
-            }
-        }
-
-        return tokens;
-    }
-
-    private static string? NormalizeInvoiceNumberToken(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        var normalized = value.Trim().Trim('№', '#', '.', ',', ';', ':', ')', '(', '[', ']');
-        normalized = Regex.Replace(normalized, @"\s+", string.Empty, RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
-        normalized = normalized.ToLowerInvariant();
-        if (!normalized.All(char.IsDigit))
-        {
-            return normalized;
-        }
-
-        var withoutLeadingZeroes = normalized.TrimStart('0');
-        return withoutLeadingZeroes.Length == 0 ? "0" : withoutLeadingZeroes;
-    }
-
-    private static decimal CalculateOutstandingAmount(decimal amount, decimal paidAmount, PaymentStatus status)
-        => status == PaymentStatus.Completed
-            ? 0m
-            : Math.Round(Math.Max(amount - Math.Min(Math.Max(paidAmount, 0m), amount), 0m), 2, MidpointRounding.AwayFromZero);
-
     private async Task<InvoiceLinkValidationResult> ValidateInvoiceLinkAsync(
         MoneyOperation operation,
         int invoiceId,
         CancellationToken ct = default)
     {
-        var invoice = await _db.Invoices
-            .AsNoTracking()
-            .FirstOrDefaultAsync(item => item.Id == invoiceId, ct);
-        if (invoice is null)
-        {
-            return new(null, "Счёт для сверки денежной операции не найден.");
-        }
+        if (operation.Direction is not (MoneyOperationDirection.Income or MoneyOperationDirection.Expense))
+            return new(null, "Со счётом можно сверить приходную или расходную денежную операцию.");
+        var access = await ResolveMoneyInvoiceAccessAsync(operation, forWrite: true, ct);
+        if (access is null) return new(null, "Счёт недоступен для сверки денежной операции.");
+        var paymentType = operation.Direction == MoneyOperationDirection.Expense ? PaymentType.Expense : PaymentType.Income;
+        var eligibleHeaders = await InvoicePaymentAccess.ScopeHeaders(_db, access.Section, access.CompanyId)
+            .Where(payment => payment.InvoiceId == invoiceId && payment.Type == paymentType)
+            .Include(payment => payment.Invoice).ToListAsync(ct);
+        // Compare exact monetary values for this one invoice on both database providers.
+        var invoicePayment = eligibleHeaders.OrderByDescending(payment => payment.Amount).ThenBy(payment => payment.Id).FirstOrDefault();
+        if (invoicePayment?.Invoice is not { } invoice)
+            return new(null, "Счёт недоступен для сверки денежной операции.");
 
-        if (operation.Direction != MoneyOperationDirection.Income)
-        {
-            return new(invoice, "К счёту можно привязать только приходную денежную операцию.");
-        }
-
-        var invoicePayments = await _db.Payments
-            .AsNoTracking()
-            .Where(payment =>
-                payment.InvoiceId == invoiceId &&
-                payment.Type == PaymentType.Income &&
-                payment.Status != PaymentStatus.Cancelled)
-            .ToListAsync(ct);
-        var invoicePayment = invoicePayments
-            .Where(payment => payment.DocumentKind == DocumentKind.Invoice)
-            .OrderByDescending(payment => payment.Amount)
-            .ThenBy(payment => payment.Id)
-            .FirstOrDefault();
-        if (invoicePayment is null)
-        {
-            return new(invoice, null);
-        }
-
+        var invoicePayments = await _db.Payments.AsNoTracking()
+            .Where(payment => payment.InvoiceId == invoiceId && payment.Status != PaymentStatus.Cancelled).ToListAsync(ct);
         var statusSourcePayments = InvoicePaymentStateService.SelectStatusSourcePayments(
-            invoicePayments,
-            invoicePayment.Id,
-            invoicePayment.Amount);
+            invoicePayments, invoicePayment.Id, invoicePayment.Amount);
         var outstandingAmount = statusSourcePayments.Count > 0
             ? Math.Round(statusSourcePayments.Sum(InvoicePaymentStateService.ResolveOutstandingAmount), 2, MidpointRounding.AwayFromZero)
             : CalculateOutstandingAmount(invoicePayment.Amount, invoicePayment.PaidAmount, invoicePayment.Status);
         if (outstandingAmount <= 0m)
-        {
             return new(invoice, "Счёт уже полностью оплачен, привязка денежной операции не выполнена.");
-        }
-
-        if (operation.Amount > outstandingAmount + 0.009m &&
-            (invoicePayment.Type != PaymentType.Income || !invoicePayment.ClientId.HasValue))
+        if (operation.Amount > outstandingAmount + 0.009m && (paymentType != PaymentType.Income || !invoicePayment.ClientId.HasValue))
         {
-            var overpayMessage = invoicePayment.Type == PaymentType.Expense
+            var message = paymentType == PaymentType.Expense
                 ? $"Сумма денежной операции больше остатка по расходному счёту. Остаток: {outstandingAmount:0.00}."
                 : $"Сумма денежной операции больше остатка по счёту, а клиент счёта не указан для зачисления переплаты. Остаток: {outstandingAmount:0.00}.";
-            return new(invoice, overpayMessage);
+            return new(invoice, message);
         }
-
         return new(invoice, null);
     }
 
@@ -4581,108 +2910,12 @@ public class MoneyOperationsController : ControllerBase
         CancellationToken ct = default)
         => MoneyOperationInvoiceAllocationService.ApplyAsync(_db, operation, invoiceId, ct);
 
-    private static bool NamesLookRelated(string? left, string? right)
-    {
-        if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
-        {
-            return false;
-        }
-
-        var normalizedLeft = NormalizeNameForMatch(left);
-        var normalizedRight = NormalizeNameForMatch(right);
-        if (normalizedLeft.Length < 4 || normalizedRight.Length < 4)
-        {
-            return false;
-        }
-
-        return normalizedLeft.Contains(normalizedRight, StringComparison.OrdinalIgnoreCase) ||
-               normalizedRight.Contains(normalizedLeft, StringComparison.OrdinalIgnoreCase) ||
-               normalizedLeft.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                   .Intersect(normalizedRight.Split(' ', StringSplitOptions.RemoveEmptyEntries), StringComparer.OrdinalIgnoreCase)
-                   .Any(part => part.Length >= 4);
-    }
-
-    private static string NormalizeNameForMatch(string value)
-    {
-        var normalized = value.Trim().ToLowerInvariant().Replace('ё', 'е');
-        normalized = Regex.Replace(normalized, @"[^\p{L}\p{Nd}]+", " ", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
-        return Regex.Replace(normalized, @"\s+", " ", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100)).Trim();
-    }
-
-    private static string? ResolveInvoiceCandidateCounterpartyName(Payment payment)
-        => payment.Type == PaymentType.Expense
-            ? FirstNonEmpty(
-                payment.ExpenseClient?.Name,
-                payment.ExpenseClient?.Company,
-                payment.ExpenseLegalEntity?.ShortName,
-                payment.ExpenseLegalEntity?.FullName,
-                payment.CounterpartyName,
-                payment.Client?.Name,
-                payment.Client?.Company)
-            : FirstNonEmpty(
-                payment.Client?.Name,
-                payment.Client?.Company,
-                payment.CounterpartyName,
-                payment.ExpenseClient?.Name,
-                payment.ExpenseClient?.Company,
-                payment.ExpenseLegalEntity?.ShortName,
-                payment.ExpenseLegalEntity?.FullName);
-
-    private static string? FirstNonEmpty(params string?[] values)
-        => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
-
-    private sealed record BankStatementInvoiceCandidate(
-        int PaymentId,
-        int InvoiceId,
-        string InvoiceNumber,
-        string? Account,
-        decimal Amount,
-        decimal PaidAmount,
-        PaymentStatus Status,
-        PaymentType PaymentType,
-        int? ClientId,
-        string? ClientName,
-        string? CounterpartyName,
-        HashSet<string> InvoiceNumberTokens,
-        HashSet<string> ContractNumberTokens)
-    {
-        public IEnumerable<string> MatchingNumberTokens => InvoiceNumberTokens.Concat(ContractNumberTokens);
-
-        public decimal OutstandingAmount => CalculateOutstandingAmount(Amount, PaidAmount, Status);
-    }
-
-    private sealed record BankStatementIncomeTypeCandidate(
-        int Id,
-        string Name,
-        PaymentType PaymentType);
-
-    private sealed record BankStatementCategoryRule(
-        string CategoryName,
-        PaymentType PaymentType,
-        IReadOnlyCollection<string> Keywords,
-        int? IncomeTypeId = null,
-        bool IsManual = false);
-
     private sealed class BankStatementAutoImportSettings
     {
         public bool Enabled { get; set; }
         public string? FolderPath { get; set; }
         public string FileMask { get; set; } = "*.csv;*.txt;*.1c";
         public DateTime? LastCheckedAt { get; set; }
-    }
-
-    private sealed class BankStatementManualCategoryRulesSettings
-    {
-        public List<BankStatementManualCategoryRule> Rules { get; set; } = [];
-    }
-
-    private sealed class BankStatementManualCategoryRule
-    {
-        public bool Enabled { get; set; } = true;
-        public string CategoryName { get; set; } = string.Empty;
-        public PaymentType PaymentType { get; set; } = PaymentType.Income;
-        public string Keywords { get; set; } = string.Empty;
-        public int? IncomeTypeId { get; set; }
     }
 
     private sealed record InvoiceLinkValidationResult(Invoice? Invoice, string? Error);
@@ -4693,88 +2926,7 @@ public class MoneyOperationsController : ControllerBase
         public string? Comment { get; init; }
     }
 
-    private static bool TryParseStatementDate(string value, out DateTime date)
-    {
-        var formats = new[] { "dd.MM.yyyy", "d.M.yyyy", "yyyy-MM-dd", "dd/MM/yyyy", "d/M/yyyy" };
-        return DateTime.TryParseExact(value.Trim(), formats, CultureInfo.InvariantCulture, DateTimeStyles.None, out date) ||
-               DateTime.TryParse(value.Trim(), CultureInfo.GetCultureInfo("ru-RU"), DateTimeStyles.None, out date);
-    }
 
-    private static bool TryParseStatementAmount(string value, out decimal amount)
-    {
-        var normalized = value
-            .Trim()
-            .Replace("\u00A0", string.Empty)
-            .Replace(" ", string.Empty)
-            .Replace("₽", string.Empty)
-            .Replace("руб.", string.Empty, StringComparison.OrdinalIgnoreCase)
-            .Replace("руб", string.Empty, StringComparison.OrdinalIgnoreCase);
-
-        if (normalized.Contains(',') && normalized.Contains('.'))
-        {
-            normalized = normalized.Replace(".", string.Empty).Replace(',', '.');
-        }
-        else
-        {
-            normalized = normalized.Replace(',', '.');
-        }
-
-        return decimal.TryParse(normalized, NumberStyles.Number | NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out amount);
-    }
-
-    private sealed class MoneyOperationQueryRow
-    {
-        public int Id { get; init; }
-        public string Source { get; init; } = string.Empty;
-        public string Direction { get; init; } = string.Empty;
-        public string AccountingType { get; init; } = string.Empty;
-        public int? MoneyAccountId { get; init; }
-        public string? MoneyAccountName { get; init; }
-        public string? AccountName { get; init; }
-        public string? CounterpartyName { get; init; }
-        public int? ResponsibleUserId { get; init; }
-        public string? ResponsibleName { get; init; }
-        public int? IncomeTypeId { get; init; }
-        public string? CategoryName { get; init; }
-        public decimal Amount { get; init; }
-        public decimal? VatRate { get; init; }
-        public decimal? VatAmount { get; init; }
-        public string? Currency { get; init; }
-        public string? PaymentOrderNumber { get; init; }
-        public DateTime Date { get; init; }
-        public DateTime? RecognitionDate { get; init; }
-        public bool IsAdvancePayment { get; init; }
-        public string? Purpose { get; init; }
-        public string? PaidInvoiceNumber { get; init; }
-        public decimal? PaidAmount { get; init; }
-        public string? ProjectName { get; init; }
-        public string? DirectionName { get; init; }
-        public string? SalesPointName { get; init; }
-        public int? PaymentPriority { get; init; }
-        public string? PaidAccountName { get; init; }
-        public int? LinkedInvoiceId { get; init; }
-        public string? LinkedInvoiceNumber { get; init; }
-        public DateTime? LinkedInvoiceDate { get; init; }
-        public int? LinkedContractId { get; init; }
-        public string? LinkedContractNumber { get; init; }
-        public int? LinkedActId { get; init; }
-        public string? LinkedActNumber { get; init; }
-        public DateTime? LinkedActDate { get; init; }
-        public string? MatchStatus { get; init; }
-        public DateTime? MatchedAt { get; init; }
-        public string? MatchComment { get; init; }
-        public int? AttachmentCount { get; init; }
-        public string? AttachmentSummary { get; init; }
-        public DateTime CreatedAt { get; init; }
-        public DateTime? UpdatedAt { get; init; }
-        public bool IsReadonly { get; init; }
-        public int? RelatedPaymentId { get; init; }
-        public int? CashOrderId { get; init; }
-        public string? CashOrderNumber { get; init; }
-        public DateTime? CashOrderDate { get; init; }
-        public string? CashOrderStatus { get; init; }
-        public bool CanCreateCashOrder { get; init; }
-    }
 
     private sealed class MoneyOperationSourceSummaryQueryRow
     {
@@ -4797,43 +2949,9 @@ public class MoneyOperationsController : ControllerBase
         public int ExpenseCount { get; init; }
     }
 
-    private sealed class MoneyOperationDailyBalanceOpeningQueryRow
-    {
-        public string Source { get; init; } = string.Empty;
-        public string AccountName { get; init; } = string.Empty;
-        public decimal Balance { get; init; }
-    }
 
-    private sealed class MoneyOperationDailyBalanceQueryRow
-    {
-        public DateTime Date { get; init; }
-        public string Source { get; init; } = string.Empty;
-        public string AccountName { get; init; } = string.Empty;
-        public decimal Income { get; init; }
-        public decimal Expense { get; init; }
-        public int IncomeCount { get; init; }
-        public int ExpenseCount { get; init; }
-    }
 
-    private sealed class StatementHeaderMap
-    {
-        public int Date { get; set; } = -1;
-        public int Amount { get; set; } = -1;
-        public int Income { get; set; } = -1;
-        public int Expense { get; set; } = -1;
-        public int Counterparty { get; set; } = -1;
-        public int Purpose { get; set; } = -1;
-        public int DocumentNumber { get; set; } = -1;
-        public int Account { get; set; } = -1;
-    }
 
-    private sealed record BankStatementImportItem(
-        int RowNumber,
-        DateTime Date,
-        MoneyOperationDirection Direction,
-        decimal Amount,
-        string AccountName,
-        string? CounterpartyName,
-        string? Purpose,
-        string? DocumentNumber);
+
+
 }

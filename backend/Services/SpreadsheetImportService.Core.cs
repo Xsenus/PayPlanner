@@ -265,11 +265,15 @@ public sealed partial class SpreadsheetImportService
         var rolledBackCount = 0;
         foreach (var operation in orderedOperations)
         {
-            var success = operation.SectionKey switch
+            // A failed row can clear tracking; continue with the current stored row.
+            var current = db.Entry(operation).State == EntityState.Detached
+                ? await db.SpreadsheetImportBatchOperations.SingleAsync(item => item.Id == operation.Id, cancellationToken)
+                : operation;
+            var success = current.SectionKey switch
             {
-                "acts" => await RollbackActAsync(db, operation, cancellationToken),
-                "invoices" => await RollbackInvoiceAsync(db, operation, cancellationToken),
-                "counterparties" => await RollbackCounterpartyAsync(db, operation, cancellationToken),
+                "acts" => await RollbackActAsync(db, current, cancellationToken),
+                "invoices" => await RollbackInvoiceAsync(db, current, cancellationToken),
+                "counterparties" => await RollbackCounterpartyAsync(db, current, cancellationToken),
                 _ => false,
             };
 
@@ -279,11 +283,13 @@ public sealed partial class SpreadsheetImportService
             }
         }
 
+        if (db.Entry(batch).State == EntityState.Detached)
+            batch = await db.SpreadsheetImportBatches.SingleAsync(item => item.Id == batchId, cancellationToken);
         batch.RollbackRows = rolledBackCount;
         batch.RolledBackAt = DateTime.UtcNow;
-        batch.Status = batch.Operations.Any(item =>
-                item.Action is SpreadsheetImportOperationAction.Created or SpreadsheetImportOperationAction.Updated
-                && item.RollbackAction is SpreadsheetImportRollbackAction.Skipped or SpreadsheetImportRollbackAction.Error)
+        batch.Status = await db.SpreadsheetImportBatchOperations.AsNoTracking().AnyAsync(item => item.BatchId == batchId
+                && (item.Action == SpreadsheetImportOperationAction.Created || item.Action == SpreadsheetImportOperationAction.Updated)
+                && (item.RollbackAction == SpreadsheetImportRollbackAction.Skipped || item.RollbackAction == SpreadsheetImportRollbackAction.Error), cancellationToken)
             ? SpreadsheetImportBatchStatus.RolledBackWithConflicts
             : SpreadsheetImportBatchStatus.RolledBack;
 

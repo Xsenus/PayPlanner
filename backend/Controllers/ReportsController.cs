@@ -7,6 +7,7 @@ using PayPlanner.Api.Helpers;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Banking;
 using PayPlanner.Api.Services.Invoices;
 using static PayPlanner.Api.Services.Reports.ReportQueryPeriodResolver;
 using System.Globalization;
@@ -39,6 +40,7 @@ public class ReportsController : ControllerBase
     private readonly PaymentContext _db;
     private readonly ILogger<ReportsController> _logger;
     private readonly IInvoiceDocumentPdfService? _pdfService;
+    private BankStatementImportAccessContext? moneyReportAccess;
 
     public ReportsController(PaymentContext db, ILogger<ReportsController> logger, IInvoiceDocumentPdfService? pdfService = null)
     {
@@ -57,7 +59,13 @@ public class ReportsController : ControllerBase
             return Forbid();
         }
 
-        var visibility = await _db.ResolveDataVisibilityAsync(User, section, ct);
+        moneyReportAccess = null;
+        if (section == RolePermissionCatalog.Payments)
+        {
+            if (!await ResolveMoneyReportAccessAsync(ct)) return Forbid();
+        }
+
+        var visibility = moneyReportAccess?.Visibility ?? await _db.ResolveDataVisibilityAsync(User, section, ct);
         if (visibility is null)
         {
             return Unauthorized();
@@ -69,6 +77,12 @@ public class ReportsController : ControllerBase
             ct);
 
         return Ok(report);
+    }
+
+    private async Task<bool> ResolveMoneyReportAccessAsync(CancellationToken ct)
+    {
+        moneyReportAccess = await BankStatementImportAccess.ResolveAsync(_db, User, ct);
+        return moneyReportAccess is not null && moneyReportAccess.Permission.CanView;
     }
 
     private async Task<bool> CanViewReportsAsync(CancellationToken ct)
@@ -689,6 +703,11 @@ public class ReportsController : ControllerBase
         }
 
         var normalizedReport = (NormalizeOptional(report) ?? string.Empty).ToLowerInvariant();
+        moneyReportAccess = null;
+        if (IsPaymentBackedManagementReport(normalizedReport))
+        {
+            if (!await ResolveMoneyReportAccessAsync(ct)) return (null, Forbid());
+        }
         if (IsPaymentBackedManagementReport(normalizedReport)
             && !await HasPaymentsPermissionAsync(static permission => permission.CanExport, ct))
         {
@@ -1959,11 +1978,11 @@ public class ReportsController : ControllerBase
             return Forbid();
         }
 
-        var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
-        if (paymentsVisibility is null)
+        if (!await ResolveMoneyReportAccessAsync(ct))
         {
             return Forbid();
         }
+        var paymentsVisibility = moneyReportAccess!.Visibility;
 
         var report = await SqliteRetryHelper.ExecuteAsync(
             cancellationToken => BuildCashOrderReportAsync(start, end, source, NormalizeOptional(accountName), NormalizeOptional(counterpartyName), clientId, caseId, contractId, incomeTypeId, paymentsVisibility, cancellationToken),
@@ -1992,7 +2011,7 @@ public class ReportsController : ControllerBase
             return Forbid();
         }
 
-        if (!await HasPaymentsPermissionAsync(static permission => permission.CanView, ct))
+        if (!await ResolveMoneyReportAccessAsync(ct))
         {
             return Forbid();
         }
@@ -6363,6 +6382,7 @@ public class ReportsController : ControllerBase
         IQueryable<MoneyOperation> query,
         DataVisibilityAccess paymentsVisibility)
     {
+        query = BankStatementImportAccess.ScopeMoneyOperations(_db, query, moneyReportAccess);
         if (paymentsVisibility.SeesAll)
         {
             return query;
@@ -8997,8 +9017,7 @@ public class ReportsController : ControllerBase
         DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var query = _db.CashOrders
-            .AsNoTracking()
+        var query = BankStatementImportAccess.ScopeCashOrderCompanies(_db, _db.CashOrders.AsNoTracking(), moneyReportAccess)
             .ApplyCashOrderVisibility(paymentsVisibility)
             .Where(item => item.Date >= from && item.Date <= to);
 
@@ -9225,11 +9244,17 @@ public class ReportsController : ControllerBase
             (contractId.HasValue && contractId.Value > 0) ||
             (incomeTypeId.HasValue && incomeTypeId.Value > 0);
 
+        var batches = moneyReportAccess is null
+            ? _db.BankStatementImportBatches.AsNoTracking().Where(_ => false)
+            : BankStatementImportAccess.ScopeBatches(_db, _db.BankStatementImportBatches.AsNoTracking(), moneyReportAccess);
+
         if (hasRowFilters)
         {
             var filteredRowsQuery = _db.BankStatementImportRows
+                .IgnoreQueryFilters()
                 .AsNoTracking()
-                .Where(row => row.Batch != null && row.Batch.CreatedAt >= startUtc && row.Batch.CreatedAt < endUtc);
+                .Where(row => batches.Any(batch => batch.Id == row.BatchId)
+                    && row.Batch != null && row.Batch.CreatedAt >= startUtc && row.Batch.CreatedAt < endUtc);
 
             if (!string.IsNullOrWhiteSpace(accountName))
             {
@@ -9365,8 +9390,7 @@ public class ReportsController : ControllerBase
             };
         }
 
-        var rows = await _db.BankStatementImportBatches
-            .AsNoTracking()
+        var rows = await batches
             .Where(item => item.CreatedAt >= startUtc && item.CreatedAt < endUtc)
             .GroupBy(item => item.Status)
             .Select(group => new BankStatementBatchQueryRow

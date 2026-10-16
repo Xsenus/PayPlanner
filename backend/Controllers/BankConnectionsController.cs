@@ -61,6 +61,7 @@ public sealed record BankSyncLogPageDto(int Total, int Page, int PageSize, IRead
 
 public sealed class BankStatementPeriodRequest
 {
+    public Guid RequestId { get; set; }
     public DateTime From { get; set; }
     public DateTime To { get; set; }
 }
@@ -72,7 +73,7 @@ public sealed class BankAccountSettingsRequest
     public bool? StatementsEnabled { get; set; }
 }
 
-public sealed record BankStatementRunItemDto(int AccountId, int Inserted, int Updated, string? Error);
+public sealed record BankStatementRunItemDto(int AccountId, int Inserted, int Updated, string? Error, int? BatchId = null);
 
 public sealed record BankStatementRunDto(string Status, int Succeeded, int Total, IReadOnlyList<BankStatementRunItemDto> Accounts);
 
@@ -164,7 +165,7 @@ public class BankConnectionsController : ControllerBase, IAsyncActionFilter
             return BadRequest(new { message = error });
         }
 
-        var results = await _sync.SyncAllStatementsForPeriodAsync(id, request.From, request.To, ct);
+        var results = await _sync.SyncAllStatementsForPeriodAsync(id, request.From, request.To, BankSyncInvocation.ForUser(User, request.RequestId), ct);
         return Ok(BuildRun(results));
     }
 
@@ -181,7 +182,7 @@ public class BankConnectionsController : ControllerBase, IAsyncActionFilter
             return BadRequest(new { message = error });
         }
 
-        var result = await _sync.SyncStatementAsync(accountId, request.From, request.To, ct);
+        var result = await _sync.SyncStatementAsync(accountId, request.From, request.To, BankSyncInvocation.ForUser(User, request.RequestId), ct);
         return Ok(BuildRun(new Dictionary<int, BankStatementSyncResult> { [accountId] = result }));
     }
 
@@ -264,6 +265,7 @@ public class BankConnectionsController : ControllerBase, IAsyncActionFilter
 
     private static string? ValidatePeriod(BankStatementPeriodRequest request)
     {
+        if (request.RequestId == Guid.Empty) return "Укажите идентификатор запроса синхронизации.";
         if (request.From == default || request.To == default || request.From > request.To)
         {
             return "Укажите корректный период: дата начала не позже даты окончания.";
@@ -278,7 +280,7 @@ public class BankConnectionsController : ControllerBase, IAsyncActionFilter
     {
         var items = results
             .OrderBy(item => item.Key)
-            .Select(item => new BankStatementRunItemDto(item.Key, item.Value.Inserted, item.Value.Updated, item.Value.Error))
+            .Select(item => new BankStatementRunItemDto(item.Key, item.Value.Inserted, item.Value.Updated, item.Value.Error, item.Value.BatchId))
             .ToList();
         var succeeded = items.Count(item => item.Error is null);
         // Итог по ТЗ: «Успешно / Частично (N из M) / Ошибка».

@@ -223,8 +223,6 @@ public interface IDocumentSellerService
 public sealed class DocumentSellerService : IDocumentSellerService
 {
     public const int MaxSnapshotLength = 16000;
-    private const string MainCompanyIdsSettingKey = "legalEntities.mainCompanyIds";
-    private const string LegacyMainCompanySettingKey = "legalEntities.mainCompanyId";
 
     private readonly PaymentContext _db;
 
@@ -404,40 +402,6 @@ public sealed class DocumentSellerService : IDocumentSellerService
             ? defaultCompany
             : await _db.LegalEntities.AsNoTracking().Include(le => le.Addresses).FirstOrDefaultAsync(le => le.Id == id, ct);
 
-    private async Task<HashSet<int>> LoadOwnCompanyIdsAsync(CancellationToken ct)
-    {
-        var values = await _db.SystemSettings
-            .AsNoTracking()
-            .Where(item => item.Key == MainCompanyIdsSettingKey || item.Key == LegacyMainCompanySettingKey)
-            .ToDictionaryAsync(item => item.Key, item => item.Value, ct);
-
-        var ids = new HashSet<int>();
-        if (values.TryGetValue(MainCompanyIdsSettingKey, out var raw) && !string.IsNullOrWhiteSpace(raw))
-        {
-            try
-            {
-                foreach (var id in JsonSerializer.Deserialize<List<int>>(raw) ?? [])
-                {
-                    if (id > 0)
-                    {
-                        ids.Add(id);
-                    }
-                }
-            }
-            catch (JsonException)
-            {
-                // Некорректное значение настройки игнорируется, как и в остальных местах.
-            }
-        }
-
-        if (ids.Count == 0
-            && values.TryGetValue(LegacyMainCompanySettingKey, out var legacy)
-            && int.TryParse(legacy, out var legacyId)
-            && legacyId > 0)
-        {
-            ids.Add(legacyId);
-        }
-
-        return ids;
-    }
+    private Task<HashSet<int>> LoadOwnCompanyIdsAsync(CancellationToken ct)
+        => OwnCompanyRegistry.LoadIdsAsync(_db, ct);
 }

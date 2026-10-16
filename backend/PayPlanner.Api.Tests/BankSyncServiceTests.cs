@@ -8,7 +8,7 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public class BankSyncServiceTests
+public partial class BankSyncServiceTests
 {
     private sealed class FakeBank : IBankProvider
     {
@@ -30,6 +30,7 @@ public class BankSyncServiceTests
         public int StatementCalls { get; private set; }
         public int? FailOnPage { get; set; }
         public DateTime? LastFrom { get; private set; }
+        public Func<int, Task>? BeforeStatementPage { get; set; }
 
         public Task<IReadOnlyList<BankAccountInfo>> ListAccountsAsync(BankCredentials credentials, CancellationToken ct)
         {
@@ -38,7 +39,7 @@ public class BankSyncServiceTests
             return Task.FromResult<IReadOnlyList<BankAccountInfo>>(Accounts);
         }
 
-        public Task<BankStatementPage> GetStatementPageAsync(BankCredentials credentials, string externalAccountId, DateTime from, DateTime to, string? cursor, CancellationToken ct)
+        public async Task<BankStatementPage> GetStatementPageAsync(BankCredentials credentials, string externalAccountId, DateTime from, DateTime to, string? cursor, CancellationToken ct)
         {
             StatementCalls++;
             LastFrom = from;
@@ -47,8 +48,9 @@ public class BankSyncServiceTests
             var pages = Pages.GetValueOrDefault(externalAccountId) ?? [];
             var index = cursor is null ? 0 : int.Parse(cursor);
             if (FailOnPage == index) throw new InvalidOperationException("bank unavailable");
+            if (BeforeStatementPage is not null) await BeforeStatementPage(index);
             var items = index < pages.Count ? pages[index] : [];
-            return Task.FromResult(new BankStatementPage(items, index + 1 < pages.Count ? (index + 1).ToString() : null));
+            return new BankStatementPage(items, index + 1 < pages.Count ? (index + 1).ToString() : null);
         }
     }
 
@@ -62,6 +64,10 @@ public class BankSyncServiceTests
         await db.Database.EnsureCreatedAsync();
         var company = new LegalEntity { ShortName = "Своя", Inn = companyInn };
         db.LegalEntities.Add(company);
+        await db.SaveChangesAsync();
+        db.SystemSettings.AddRange(
+            new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = System.Text.Json.JsonSerializer.Serialize(new[] { company.Id }) },
+            new SystemSetting { Key = "notifications.email.enabled", Value = "false" });
         await db.SaveChangesAsync();
 
         var bank = new FakeBank();
@@ -88,7 +94,7 @@ public class BankSyncServiceTests
         await db.SaveChangesAsync();
         bank.Pages["a"] = Enumerable.Range(1, 25).Select(i => new List<BankOperationInfo> { Op($"op{i}", 2) }).ToList();
         var from = new DateTime(2026, 10, 1);
-        var results = await service.SyncAllStatementsForPeriodAsync(connection.Id, from, new DateTime(2026, 10, 9), default);
+        var results = await service.SyncAllStatementsForPeriodAsync(connection.Id, from, new DateTime(2026, 10, 9), BankSyncInvocation.Scheduled(Guid.NewGuid().ToString("N")), default);
         Assert.Null(results[account.Id].Error);
         Assert.Equal(from, bank.LastFrom);
         Assert.Equal(25, await db.BankStatementOperations.CountAsync());
@@ -175,8 +181,8 @@ public class BankSyncServiceTests
         var accountId = (await db.BankConnectionAccounts.SingleAsync()).Id;
         bank.Pages["a"] = [[Op("1", 1), Op("2", 2)], [Op("3", 3), Op("2", 2)]];
 
-        var first = await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), default);
-        var repeat = await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), default);
+        var first = await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), BankSyncInvocation.Scheduled(Guid.NewGuid().ToString("N")), default);
+        var repeat = await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), BankSyncInvocation.Scheduled(Guid.NewGuid().ToString("N")), default);
 
         Assert.Equal(3, first.Inserted);
         Assert.Equal(0, repeat.Inserted);
@@ -194,11 +200,11 @@ public class BankSyncServiceTests
         var accountId = (await db.BankConnectionAccounts.SingleAsync()).Id;
         bank.Pages["a"] = [[Op("1", 1), Op("2", 5, booked: false), Op("3", 7)]];
 
-        var first = await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), default);
+        var first = await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), BankSyncInvocation.Scheduled(Guid.NewGuid().ToString("N")), default);
         Assert.True(first.Watermark < new DateTime(2026, 10, 5, 0, 0, 0, DateTimeKind.Utc));
 
         bank.Pages["a"] = [[Op("1", 1), Op("2", 5, amount: 150m), Op("3", 7)]];
-        var second = await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), default);
+        var second = await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), BankSyncInvocation.Scheduled(Guid.NewGuid().ToString("N")), default);
 
         Assert.Equal(1, second.Updated);
         var op = await db.BankStatementOperations.AsNoTracking().SingleAsync(o => o.ExternalOperationId == "2");
@@ -217,11 +223,11 @@ public class BankSyncServiceTests
         await service.SyncAccountsAsync(connection.Id, default);
         var accountId = (await db.BankConnectionAccounts.SingleAsync()).Id;
         bank.Pages["a"] = [[Op("1", 1)]];
-        await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), default);
+        await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), BankSyncInvocation.Scheduled(Guid.NewGuid().ToString("N")), default);
         var before = (await db.BankConnectionAccounts.AsNoTracking().SingleAsync()).StatementWatermark;
 
         bank.FailingAccounts.Add("a");
-        var failed = await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), default);
+        var failed = await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), BankSyncInvocation.Scheduled(Guid.NewGuid().ToString("N")), default);
 
         Assert.NotNull(failed.Error);
         var account = await db.BankConnectionAccounts.AsNoTracking().SingleAsync();
@@ -241,7 +247,7 @@ public class BankSyncServiceTests
         bank.FailingAccounts.Add("bad");
         bank.Pages["good"] = [[Op("1", 1)]];
 
-        var results = await service.SyncAllStatementsAsync(connection.Id, new DateTime(2026, 10, 9), default);
+        var results = await service.SyncAllStatementsAsync(connection.Id, new DateTime(2026, 10, 9), BankSyncInvocation.Scheduled(Guid.NewGuid().ToString("N")), default);
 
         Assert.Equal(2, results.Count);
         var byExternal = await db.BankConnectionAccounts.AsNoTracking().ToDictionaryAsync(a => a.Id, a => a.ExternalAccountId);
@@ -259,7 +265,7 @@ public class BankSyncServiceTests
         await service.SyncAccountsAsync(connection.Id, default);
         var accountId = (await db.BankConnectionAccounts.SingleAsync()).Id;
 
-        var result = await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), default);
+        var result = await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), BankSyncInvocation.Scheduled(Guid.NewGuid().ToString("N")), default);
 
         Assert.NotNull(result.Error);
         Assert.Equal(0, bank.StatementCalls);
@@ -326,14 +332,14 @@ public class BankSyncServiceTests
         bank.Pages["a"] = [[Op("1", 1)], [Op("2", 2)]];
         bank.FailOnPage = 1;
 
-        var result = await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), default);
+        var result = await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), BankSyncInvocation.Scheduled(Guid.NewGuid().ToString("N")), default);
 
         Assert.NotNull(result.Error);
         Assert.Equal(1, await db.BankStatementOperations.CountAsync());
         Assert.Null((await db.BankConnectionAccounts.AsNoTracking().SingleAsync()).StatementWatermark);
 
         bank.FailOnPage = null;
-        var retry = await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), default);
+        var retry = await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), BankSyncInvocation.Scheduled(Guid.NewGuid().ToString("N")), default);
         Assert.Null(retry.Error);
         Assert.Equal(2, await db.BankStatementOperations.CountAsync());
     }
@@ -347,8 +353,8 @@ public class BankSyncServiceTests
         await service.SyncAccountsAsync(connection.Id, default);
         var accountId = (await db.BankConnectionAccounts.SingleAsync()).Id;
 
-        await service.SyncAllStatementsAsync(connection.Id, DateTime.UtcNow, default);
-        await service.SyncAllStatementsAsync(connection.Id, DateTime.UtcNow, default);
+        await service.SyncAllStatementsAsync(connection.Id, DateTime.UtcNow, BankSyncInvocation.Scheduled(Guid.NewGuid().ToString("N")), default);
+        await service.SyncAllStatementsAsync(connection.Id, DateTime.UtcNow, BankSyncInvocation.Scheduled(Guid.NewGuid().ToString("N")), default);
 
         Assert.True(bank.LastFrom > new DateTime(2026, 1, 1));
     }
@@ -399,7 +405,7 @@ public class BankSyncServiceTests
         await service.SyncAccountsAsync(connection.Id, default);
         var accountId = (await db.BankConnectionAccounts.SingleAsync()).Id;
         bank.Pages["a"] = [[Op("1", 1)]];
-        await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), default);
+        await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), BankSyncInvocation.Scheduled(Guid.NewGuid().ToString("N")), default);
         Assert.True((await service.UpdateAccountSettingsAsync(accountId, true, null, null, default)).Success);
 
         bank.Accounts = [Account("a", status: BankAccountStatuses.Closed)];
@@ -467,7 +473,7 @@ public class BankSyncServiceTests
         bank.Pages["open"] = [[Op("1", 1)]];
         bank.Pages["limited"] = [[Op("2", 2)]];
 
-        var results = await service.SyncAllStatementsForPeriodAsync(connection.Id, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), default);
+        var results = await service.SyncAllStatementsForPeriodAsync(connection.Id, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), BankSyncInvocation.Scheduled(Guid.NewGuid().ToString("N")), default);
 
         Assert.Equal(2, results.Count);
         Assert.Equal(2, await db.BankStatementOperations.CountAsync());
@@ -482,9 +488,9 @@ public class BankSyncServiceTests
         await service.SyncAccountsAsync(connection.Id, default);
         var accountId = (await db.BankConnectionAccounts.SingleAsync()).Id;
         bank.Pages["a"] = [[Op("1", 1), Op("2", 2)]];
-        await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), default);
+        await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), BankSyncInvocation.Scheduled(Guid.NewGuid().ToString("N")), default);
         bank.FailingAccounts.Add("a");
-        await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), default);
+        await service.SyncStatementAsync(accountId, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9), BankSyncInvocation.Scheduled(Guid.NewGuid().ToString("N")), default);
 
         var logs = await db.BankSyncLogs.AsNoTracking().OrderBy(l => l.Id).ToListAsync();
 

@@ -18,14 +18,17 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public class MoneyOperationsControllerTests
+public partial class MoneyOperationsControllerTests
 {
     [Fact]
     public async Task CreateTransfer_CreatesPairedOperations_AndCashOrderForCashSide()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var actor = await CreateUserAsync(db, "synthetic-transfer-admin@fixture.local", "Администратор перевода", roleName: "admin");
         var bankAccount = new MoneyAccount
         {
+            CompanyId = companyId,
             Name = "Основной банк",
             Source = MoneyOperationSource.Bank,
             Currency = "RUB",
@@ -33,6 +36,7 @@ public class MoneyOperationsControllerTests
         };
         var cashAccount = new MoneyAccount
         {
+            CompanyId = companyId,
             Name = "Основная касса",
             Source = MoneyOperationSource.Cash,
             Currency = "RUB",
@@ -41,7 +45,7 @@ public class MoneyOperationsControllerTests
         db.MoneyAccounts.AddRange(bankAccount, cashAccount);
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db);
+        var controller = CreateController(db, actor.Id);
 
         var action = await controller.CreateTransfer(new MoneyOperationTransferRequest
         {
@@ -84,8 +88,11 @@ public class MoneyOperationsControllerTests
     public async Task CreateTransfer_UsesProfileTimeZoneForDefaultDate()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
         var selectedZone = ResolveTimeZoneWithDifferentLocalDate();
         var user = await CreateUserAsync(db, "transfer-timezone@example.test", "Transfer Timezone User");
+        user.IsEmployee = true;
+        db.UserCompanyAccesses.Add(new UserCompanyAccess { UserId = user.Id, LegalEntityId = companyId });
         db.UserSettings.Add(new UserSetting
         {
             UserId = user.Id,
@@ -97,6 +104,7 @@ public class MoneyOperationsControllerTests
 
         var bankAccount = new MoneyAccount
         {
+            CompanyId = companyId,
             Name = "Bank account",
             Source = MoneyOperationSource.Bank,
             Currency = "RUB",
@@ -104,6 +112,7 @@ public class MoneyOperationsControllerTests
         };
         var cashAccount = new MoneyAccount
         {
+            CompanyId = companyId,
             Name = "Cash account",
             Source = MoneyOperationSource.Cash,
             Currency = "RUB",
@@ -140,12 +149,16 @@ public class MoneyOperationsControllerTests
     public async Task CreateUpdateDeleteMoneyOperation_RoundTripsSuccessfully()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var moneyAccount = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Bank, "Расчётный счёт");
+        var nextMoneyAccount = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Bank, "Основной счёт", "USD");
         var primaryResponsible = await CreateUserAsync(db, "money-primary@example.test", "Мария Финансист");
         var nextResponsible = await CreateUserAsync(db, "money-next@example.test", "Олег Бухгалтер");
-        var controller = CreateController(db);
+        var controller = (await CreateAuthorizedJournalControllerAsync(db));
 
         var createAction = await controller.Create(new MoneyOperation
         {
+            MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Expense,
             AccountingType = MoneyOperationAccountingType.Fact,
@@ -183,6 +196,7 @@ public class MoneyOperationsControllerTests
 
         var updateAction = await controller.Update(createdOperation.Id, new MoneyOperation
         {
+            MoneyAccountId = nextMoneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
             AccountingType = MoneyOperationAccountingType.Plan,
@@ -229,11 +243,14 @@ public class MoneyOperationsControllerTests
     public async Task CreateMoneyOperation_ReturnsBadRequest_WhenResponsibleUserIsInactive()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var moneyAccount = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Bank, "Основной счёт");
         var inactiveResponsible = await CreateUserAsync(db, "inactive-money@example.test", "Неактивный", isActive: false);
-        var controller = CreateController(db);
+        var controller = (await CreateAuthorizedJournalControllerAsync(db));
 
         var action = await controller.Create(new MoneyOperation
         {
+            MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Expense,
             AccountingType = MoneyOperationAccountingType.Fact,
@@ -277,7 +294,7 @@ public class MoneyOperationsControllerTests
         };
         db.MoneyOperations.Add(operation);
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateAuthorizedJournalControllerAsync(db));
 
         var action = await controller.Delete(operation.Id, CancellationToken.None);
 
@@ -289,7 +306,7 @@ public class MoneyOperationsControllerTests
     public async Task CreateMoneyOperation_ReturnsBadRequest_WhenAmountIsNotPositive()
     {
         await using var db = await CreateContextAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateAuthorizedJournalControllerAsync(db));
 
         var action = await controller.Create(new MoneyOperation
         {
@@ -308,7 +325,7 @@ public class MoneyOperationsControllerTests
     public async Task CreateMoneyOperation_ReturnsBadRequest_WhenAccountIsMissing()
     {
         await using var db = await CreateContextAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateAuthorizedJournalControllerAsync(db));
 
         var action = await controller.Create(new MoneyOperation
         {
@@ -320,7 +337,9 @@ public class MoneyOperationsControllerTests
         });
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(action);
-        Assert.Equal("Укажите денежный счёт или его название.", badRequest.Value);
+        // Manual writes now require a stable account of an owned company.
+        Assert.Equal("Выберите денежный счёт своей компании.", badRequest.Value);
+        Assert.False(await db.MoneyOperations.AnyAsync());
         Assert.False(await db.MoneyOperations.AnyAsync());
     }
 
@@ -371,7 +390,7 @@ public class MoneyOperationsControllerTests
             });
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db);
+        var controller = await CreateAuthorizedJournalControllerAsync(db);
 
         var action = await controller.GetPaged(
             from: new DateTime(2026, 5, 1),
@@ -401,6 +420,16 @@ public class MoneyOperationsControllerTests
     public async Task GetPaged_ReturnsResponsibleFromLinkedInvoiceOnEditableOperation()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var moneyAccount = new MoneyAccount
+        {
+            CompanyId = companyId,
+            Name = "Синтетический банк связанного счёта",
+            Source = MoneyOperationSource.Bank,
+            Currency = "RUB",
+            IsActive = true,
+        };
+        db.MoneyAccounts.Add(moneyAccount);
         var role = new Role
         {
             Name = "Lawyer",
@@ -426,6 +455,7 @@ public class MoneyOperationsControllerTests
         };
         var contract = new Contract
         {
+            SellerCompanyId = companyId,
             Number = "ДОГ-55/26",
             Date = new DateTime(2026, 5, 1),
             Status = ContractStatus.Concluded,
@@ -436,6 +466,7 @@ public class MoneyOperationsControllerTests
 
         var payment = new Payment
         {
+            SellerCompanyId = companyId,
             Account = invoice.Number,
             AccountDate = invoice.Date,
             InvoiceId = invoice.Id,
@@ -458,6 +489,7 @@ public class MoneyOperationsControllerTests
         });
         var operation = new MoneyOperation
         {
+            MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
             AccountingType = MoneyOperationAccountingType.Fact,
@@ -469,6 +501,7 @@ public class MoneyOperationsControllerTests
         };
         var act = new Act
         {
+            SellerCompanyId = companyId,
             Number = "АКТ-55/26",
             Date = new DateTime(2026, 5, 8),
             Amount = 15_000m,
@@ -477,9 +510,26 @@ public class MoneyOperationsControllerTests
             WorkflowStatus = ActWorkflowStatus.Signed,
             CreatedAt = DateTime.UtcNow,
         };
+        // Keep the original paid Payment; the invoice header is a separate document.
+        db.Payments.Add(new Payment
+        {
+            SellerCompanyId = companyId,
+            InvoiceId = invoice.Id,
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = payment.Amount,
+            PaidAmount = 0m,
+            Account = invoice.Number,
+            AccountDate = invoice.Date,
+            Date = invoice.Date,
+            PlannedDate = payment.PlannedDate,
+            ContractId = contract.Id,
+            CreatedAt = DateTime.UtcNow,
+        });
         db.AddRange(payment, operation, act);
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = await CreateAuthorizedJournalControllerAsync(db);
 
         var action = await controller.GetPaged(
             from: new DateTime(2026, 5, 1),
@@ -536,7 +586,7 @@ public class MoneyOperationsControllerTests
         };
         db.MoneyOperations.Add(operation);
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = await CreateAuthorizedJournalControllerAsync(db);
 
         var action = await controller.GetPaged(
             from: new DateTime(2026, 5, 1),
@@ -595,7 +645,7 @@ public class MoneyOperationsControllerTests
                 CreatedAt = DateTime.UtcNow,
             });
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = await CreateAuthorizedJournalControllerAsync(db);
 
         var action = await controller.ExportCsv(
             from: new DateTime(2026, 5, 1),
@@ -784,7 +834,7 @@ public class MoneyOperationsControllerTests
                 CreatedAt = DateTime.UtcNow,
             });
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = await CreateAuthorizedJournalControllerAsync(db);
 
         var action = await controller.Print(
             from: new DateTime(2026, 5, 1),
@@ -857,6 +907,8 @@ public class MoneyOperationsControllerTests
                     Assert.DoesNotContain("Cash Supplier", html);
                 }));
 
+        controller.ControllerContext = (await CreateAuthorizedJournalControllerAsync(db)).ControllerContext;
+
         var action = await controller.ExportPdf(
             from: new DateTime(2026, 5, 1),
             to: new DateTime(2026, 5, 31),
@@ -909,7 +961,7 @@ public class MoneyOperationsControllerTests
                 CreatedAt = DateTime.UtcNow,
             });
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = await CreateAuthorizedJournalControllerAsync(db);
 
         var action = await controller.ExportExcel(
             from: new DateTime(2026, 5, 1),
@@ -940,6 +992,8 @@ public class MoneyOperationsControllerTests
     public async Task CreateMoneyOperation_LinksIncomeTypeWithoutDuplicatingCategoryName()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var moneyAccount = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Bank, "Основной счёт");
         var incomeType = new IncomeType
         {
             Name = "Юридические услуги",
@@ -949,10 +1003,11 @@ public class MoneyOperationsControllerTests
         };
         db.IncomeTypes.Add(incomeType);
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateAuthorizedJournalControllerAsync(db));
 
         var action = await controller.Create(new MoneyOperation
         {
+            MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
             AccountingType = MoneyOperationAccountingType.Fact,
@@ -973,6 +1028,8 @@ public class MoneyOperationsControllerTests
     public async Task CreateMoneyOperation_ReturnsBadRequest_WhenIncomeTypeDirectionDoesNotMatch()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var moneyAccount = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Bank, "Основной счёт");
         var incomeType = new IncomeType
         {
             Name = "Доход от услуг",
@@ -982,10 +1039,11 @@ public class MoneyOperationsControllerTests
         };
         db.IncomeTypes.Add(incomeType);
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateAuthorizedJournalControllerAsync(db));
 
         var action = await controller.Create(new MoneyOperation
         {
+            MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Expense,
             AccountingType = MoneyOperationAccountingType.Fact,
@@ -1004,6 +1062,8 @@ public class MoneyOperationsControllerTests
     public async Task CreateMoneyOperation_ReturnsBadRequest_WhenLinkedInvoiceAlreadyPaid()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var moneyAccount = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Bank, "Синтетический счёт разнесения");
         var invoice = new Invoice
         {
             Number = "33",
@@ -1012,6 +1072,7 @@ public class MoneyOperationsControllerTests
         };
         db.Payments.Add(new Payment
         {
+            SellerCompanyId = companyId,
             Invoice = invoice,
             Account = "33",
             DocumentKind = DocumentKind.Invoice,
@@ -1023,10 +1084,11 @@ public class MoneyOperationsControllerTests
             CreatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateAuthorizedJournalControllerAsync(db));
 
         var action = await controller.Create(new MoneyOperation
         {
+            MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
             AccountingType = MoneyOperationAccountingType.Fact,
@@ -1081,7 +1143,7 @@ public class MoneyOperationsControllerTests
         db.Payments.Add(payment);
         await db.SaveChangesAsync();
 
-        var moneyController = CreateController(db);
+        var moneyController = await CreateAuthorizedJournalControllerAsync(db);
         var beforeAction = await moneyController.GetPaged(
             from: new DateTime(2026, 1, 1),
             to: new DateTime(2026, 12, 31),
@@ -1095,7 +1157,10 @@ public class MoneyOperationsControllerTests
         Assert.True(beforeItem.CanCreateCashOrder);
         Assert.Null(beforeItem.CashOrderId);
 
-        var cashController = new CashOrdersController(db);
+        var cashController = new CashOrdersController(db)
+        {
+            ControllerContext = moneyController.ControllerContext,
+        };
         var createAction = await cashController.CreateFromPayment(payment.Id, CancellationToken.None);
         var created = Assert.IsType<CreatedResult>(createAction);
         var order = Assert.IsType<CashOrderDto>(created.Value);
@@ -1154,7 +1219,7 @@ public class MoneyOperationsControllerTests
         });
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db);
+        var controller = await CreateAuthorizedJournalControllerAsync(db);
         var action = await controller.GetPaged(
             from: new DateTime(2026, 4, 1),
             to: new DateTime(2026, 4, 30),
@@ -1188,7 +1253,7 @@ public class MoneyOperationsControllerTests
         });
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db);
+        var controller = await CreateAuthorizedJournalControllerAsync(db);
         var action = await controller.GetPaged(
             from: new DateTime(2026, 4, 1),
             to: new DateTime(2026, 4, 30),
@@ -1207,6 +1272,16 @@ public class MoneyOperationsControllerTests
     public async Task MoneyJournal_SearchFindsResponsibleContractAndStatementFile()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var moneyAccount = new MoneyAccount
+        {
+            CompanyId = companyId,
+            Name = "Синтетический банк связанного счёта",
+            Source = MoneyOperationSource.Bank,
+            Currency = "RUB",
+            IsActive = true,
+        };
+        db.MoneyAccounts.Add(moneyAccount);
         var role = new Role
         {
             Name = "Manager",
@@ -1232,6 +1307,7 @@ public class MoneyOperationsControllerTests
         };
         var contract = new Contract
         {
+            SellerCompanyId = companyId,
             Number = "ДОГ-77/26",
             Title = "Абонентское обслуживание",
             Date = new DateTime(2026, 4, 1),
@@ -1253,6 +1329,7 @@ public class MoneyOperationsControllerTests
 
         var payment = new Payment
         {
+            SellerCompanyId = companyId,
             Account = invoice.Number,
             AccountDate = invoice.Date,
             InvoiceId = invoice.Id,
@@ -1270,6 +1347,7 @@ public class MoneyOperationsControllerTests
         payment.Responsibles.Add(new PaymentResponsible { UserId = responsible.Id });
         var linkedOperation = new MoneyOperation
         {
+            MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
             AccountingType = MoneyOperationAccountingType.Fact,
@@ -1289,9 +1367,26 @@ public class MoneyOperationsControllerTests
             BankStatementImportBatchId = batch.Id,
             CreatedAt = DateTime.UtcNow,
         };
+        // Keep the original paid Payment; the invoice header is a separate document.
+        db.Payments.Add(new Payment
+        {
+            SellerCompanyId = companyId,
+            InvoiceId = invoice.Id,
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = payment.Amount,
+            PaidAmount = 0m,
+            Account = invoice.Number,
+            AccountDate = invoice.Date,
+            Date = invoice.Date,
+            PlannedDate = payment.PlannedDate,
+            ContractId = contract.Id,
+            CreatedAt = DateTime.UtcNow,
+        });
         db.AddRange(payment, linkedOperation, importedOperation);
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = await CreateAuthorizedJournalControllerAsync(db);
 
         var byResponsible = await SearchMoneyJournalAsync(controller, "анна");
         Assert.Equal(1, byResponsible.Total);
@@ -1352,7 +1447,7 @@ public class MoneyOperationsControllerTests
             });
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db);
+        var controller = await CreateAuthorizedJournalControllerAsync(db);
         var accountsAction = await controller.GetAccounts(MoneyOperationSource.Bank);
         var accountsOk = Assert.IsType<OkObjectResult>(accountsAction.Result);
         var accounts = Assert.IsAssignableFrom<IReadOnlyList<string>>(accountsOk.Value);
@@ -1465,7 +1560,7 @@ public class MoneyOperationsControllerTests
             });
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db);
+        var controller = await CreateAuthorizedJournalControllerAsync(db);
         var action = await controller.GetDailyBalances(
             from: new DateTime(2026, 5, 1),
             to: new DateTime(2026, 5, 2),
@@ -1549,6 +1644,18 @@ public class MoneyOperationsControllerTests
     public async Task RunBalanceReconciliation_PersistsAndUpdatesDailyResults()
     {
         await using var db = await CreateContextAsync();
+        var actor = new User
+        {
+            Id = 7,
+            Email = "reconciliation-admin@fixture.local",
+            PasswordHash = "hash",
+            FullName = "Администратор тестовой сверки",
+            Role = new Role { Name = "admin" },
+            IsActive = true,
+            IsApproved = true,
+        };
+        db.Users.Add(actor);
+        await db.SaveChangesAsync();
         db.MoneyOperations.AddRange(
             new MoneyOperation
             {
@@ -1585,7 +1692,7 @@ public class MoneyOperationsControllerTests
             });
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db, userId: 7);
+        var controller = CreateController(db, actor.Id);
         var firstAction = await controller.RunBalanceReconciliation(
             from: new DateTime(2026, 5, 1),
             to: new DateTime(2026, 5, 1),
@@ -1718,7 +1825,7 @@ public class MoneyOperationsControllerTests
             });
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db);
+        var controller = await CreateAuthorizedJournalControllerAsync(db);
         var action = await controller.GetPaged(
             from: new DateTime(2026, 4, 1),
             to: new DateTime(2026, 4, 30),
@@ -1778,7 +1885,7 @@ public class MoneyOperationsControllerTests
                 CreatedAt = DateTime.UtcNow,
             });
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = await CreateAuthorizedJournalControllerAsync(db);
 
         var action = await controller.GetPaged(
             from: null,
@@ -1828,7 +1935,7 @@ public class MoneyOperationsControllerTests
             });
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db);
+        var controller = await CreateAuthorizedJournalControllerAsync(db);
         var action = await controller.GetPaged(
             from: new DateTime(2026, 4, 1),
             to: new DateTime(2026, 4, 30),
@@ -1914,7 +2021,7 @@ public class MoneyOperationsControllerTests
             });
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db);
+        var controller = await CreateAuthorizedJournalControllerAsync(db);
         var action = await controller.GetPaged(
             from: new DateTime(2026, 4, 1),
             to: new DateTime(2026, 4, 30),
@@ -2096,7 +2203,7 @@ public class MoneyOperationsControllerTests
             });
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db);
+        var controller = await CreateAuthorizedJournalControllerAsync(db);
         var action = await controller.GetPaged(
             from: new DateTime(2026, 4, 1),
             to: new DateTime(2026, 4, 30),
@@ -2221,7 +2328,7 @@ public class MoneyOperationsControllerTests
             });
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db);
+        var controller = await CreateAuthorizedJournalControllerAsync(db);
         var cashPage = await GetMoneyPageAsync(controller, MoneyOperationSource.Cash);
         var bankPage = await GetMoneyPageAsync(controller, MoneyOperationSource.Bank);
         var cardPage = await GetMoneyPageAsync(controller, MoneyOperationSource.Card);
@@ -2265,7 +2372,7 @@ public class MoneyOperationsControllerTests
         }
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db);
+        var controller = await CreateAuthorizedJournalControllerAsync(db);
         var action = await controller.GetPaged(
             from: new DateTime(2026, 4, 1),
             to: new DateTime(2026, 4, 30),
@@ -2330,7 +2437,7 @@ public class MoneyOperationsControllerTests
         });
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db);
+        var controller = await CreateAuthorizedJournalControllerAsync(db);
         var action = await controller.GetAccounts(MoneyOperationSource.Bank);
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
@@ -2342,10 +2449,14 @@ public class MoneyOperationsControllerTests
     public async Task ManualCashOperation_CreatesAndSyncsCashOrder()
     {
         await using var db = await CreateContextAsync();
-        var controller = CreateController(db);
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var moneyAccount = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Cash, "Касса");
+        var nextMoneyAccount = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Cash, "Основная касса", "RUB");
+        var controller = (await CreateAuthorizedJournalControllerAsync(db));
 
         var createAction = await controller.Create(new MoneyOperation
         {
+            MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Cash,
             Direction = MoneyOperationDirection.Income,
             AccountingType = MoneyOperationAccountingType.Fact,
@@ -2383,6 +2494,7 @@ public class MoneyOperationsControllerTests
 
         var updateAction = await controller.Update(operation.Id, new MoneyOperation
         {
+            MoneyAccountId = nextMoneyAccount.Id,
             Source = MoneyOperationSource.Cash,
             Direction = MoneyOperationDirection.Income,
             AccountingType = MoneyOperationAccountingType.Fact,
@@ -3241,7 +3353,7 @@ public class MoneyOperationsControllerTests
     public async Task ImportBankStatement_CreatesBankFactOperationsAndSkipsDuplicates()
     {
         await using var db = await CreateContextAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateBankImportControllerAsync(db));
         var file = CreateFormFile(
             "Дата;Сумма;Контрагент;Назначение;Номер\n" +
             "29.04.2026;25000;Ахмедова Айтан Рафик Кызы;Оплата по счету №33;101\n" +
@@ -3286,7 +3398,8 @@ public class MoneyOperationsControllerTests
         Assert.Equal(1, batch.SkippedRows);
         Assert.Equal(3, batch.Rows.Count);
         Assert.Equal(2, batch.Rows.Count(item => item.Status == BankStatementImportRowStatus.Created));
-        Assert.Equal(1, batch.Rows.Count(item => item.Status == BankStatementImportRowStatus.Skipped));
+        Assert.Equal(1, batch.Rows.Count(item => item.Status == BankStatementImportRowStatus.ClarificationRequired));
+        Assert.Null(batch.Rows.Single(item => item.Status == BankStatementImportRowStatus.ClarificationRequired).MoneyOperationId);
         Assert.All(operations, operation => Assert.Equal(batch.Id, operation.BankStatementImportBatchId));
 
         var duplicateAction = await controller.ImportBankStatement(
@@ -3320,6 +3433,7 @@ public class MoneyOperationsControllerTests
                 Email = "auto-import@example.test",
                 PasswordHash = "hash",
                 FullName = "Auto Import User",
+                IsApproved = true,
                 Role = role,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
@@ -3343,9 +3457,12 @@ public class MoneyOperationsControllerTests
                 Encoding.UTF8);
             await File.WriteAllTextAsync(Path.Combine(folderPath, "ignore.pdf"), "ignored", Encoding.UTF8);
 
-            var controller = CreateController(db, user.Id);
+            var controller = await CreateBankImportControllerAsync(db, user.Id);
+            var account = await db.MoneyAccounts.SingleAsync();
+            account.Name = "Main bank";
+            await db.SaveChangesAsync();
 
-            var action = await controller.RunBankStatementAutoImport(CancellationToken.None);
+            var action = await controller.RunBankStatementAutoImport(CancellationToken.None, companyId: account.CompanyId, moneyAccountId: account.Id);
 
             var ok = Assert.IsType<OkObjectResult>(action.Result);
             var result = Assert.IsType<BankStatementAutoImportRunResultDto>(ok.Value);
@@ -3378,7 +3495,7 @@ public class MoneyOperationsControllerTests
     public async Task RollbackBankStatementImport_RemovesCreatedOperationsAndMarksRows()
     {
         await using var db = await CreateContextAsync();
-        var controller = CreateController(db);
+        var controller = await CreateBankImportControllerAsync(db);
         var importAction = await controller.ImportBankStatement(
             CreateFormFile(
                 "Дата;Сумма;Контрагент;Назначение;Номер\n" +
@@ -3410,7 +3527,7 @@ public class MoneyOperationsControllerTests
     public async Task ReprocessBankStatementImport_RecreatesRolledBackRows()
     {
         await using var db = await CreateContextAsync();
-        var controller = CreateController(db);
+        var controller = await CreateBankImportControllerAsync(db);
         var importAction = await controller.ImportBankStatement(
             CreateFormFile(
                 "Дата;Сумма;Контрагент;Назначение;Номер\n" +
@@ -3448,7 +3565,7 @@ public class MoneyOperationsControllerTests
     public async Task RollbackBankStatementImport_SkipsMatchedOperations()
     {
         await using var db = await CreateContextAsync();
-        var controller = CreateController(db);
+        var controller = await CreateBankImportControllerAsync(db);
         var importAction = await controller.ImportBankStatement(
             CreateFormFile(
                 "Дата;Сумма;Контрагент;Назначение;Номер\n" +
@@ -3499,7 +3616,7 @@ public class MoneyOperationsControllerTests
             CreatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateBankImportControllerAsync(db));
 
         var action = await controller.ImportBankStatement(
             CreateFormFile(
@@ -3563,7 +3680,7 @@ public class MoneyOperationsControllerTests
             CreatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateBankImportControllerAsync(db));
 
         var action = await controller.ImportBankStatement(
             CreateFormFile(
@@ -3615,7 +3732,7 @@ public class MoneyOperationsControllerTests
             CreatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateBankImportControllerAsync(db));
 
         var action = await controller.ImportBankStatement(
             CreateFormFile(
@@ -3713,7 +3830,7 @@ public class MoneyOperationsControllerTests
         db.Payments.AddRange(parentPayment, firstInstallment, secondInstallment);
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db);
+        var controller = (await CreateBankImportControllerAsync(db));
 
         var action = await controller.ImportBankStatement(
             CreateFormFile(
@@ -3773,7 +3890,7 @@ public class MoneyOperationsControllerTests
             CreatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateBankImportControllerAsync(db));
 
         var action = await controller.ImportBankStatement(
             CreateFormFile(
@@ -3834,7 +3951,7 @@ public class MoneyOperationsControllerTests
                 CreatedAt = DateTime.UtcNow,
             });
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateBankImportControllerAsync(db));
 
         var action = await controller.ImportBankStatement(
             CreateFormFile(
@@ -3885,7 +4002,7 @@ public class MoneyOperationsControllerTests
                 CreatedAt = DateTime.UtcNow,
             });
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateBankImportControllerAsync(db));
 
         var action = await controller.ImportBankStatement(
             CreateFormFile(
@@ -3908,6 +4025,8 @@ public class MoneyOperationsControllerTests
     public async Task GetInvoiceCandidates_ReturnsScoredCandidatesForBankOperation()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var moneyAccount = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Bank, "Синтетический счёт разнесения");
         var client = new Client
         {
             Name = "Ахмедова Айтан Рафик Кызы",
@@ -3916,6 +4035,7 @@ public class MoneyOperationsControllerTests
         };
         var operation = new MoneyOperation
         {
+            MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
             AccountingType = MoneyOperationAccountingType.Fact,
@@ -3935,6 +4055,7 @@ public class MoneyOperationsControllerTests
         db.MoneyOperations.Add(operation);
         db.Payments.Add(new Payment
         {
+            SellerCompanyId = companyId,
             Invoice = invoice,
             Client = client,
             Account = "33",
@@ -3948,7 +4069,7 @@ public class MoneyOperationsControllerTests
             CreatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateAuthorizedJournalControllerAsync(db));
 
         var action = await controller.GetInvoiceCandidates(operation.Id, CancellationToken.None);
 
@@ -3965,8 +4086,11 @@ public class MoneyOperationsControllerTests
     public async Task GetInvoiceCandidates_ReturnsCandidateMatchedByContractNumber()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var moneyAccount = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Bank, "Синтетический счёт разнесения");
         var operation = new MoneyOperation
         {
+            MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
             AccountingType = MoneyOperationAccountingType.Fact,
@@ -3985,6 +4109,7 @@ public class MoneyOperationsControllerTests
         };
         var contract = new Contract
         {
+            SellerCompanyId = companyId,
             Number = "ДОГ-88/26",
             Date = new DateTime(2026, 4, 1),
             Status = ContractStatus.Concluded,
@@ -3993,6 +4118,7 @@ public class MoneyOperationsControllerTests
         db.MoneyOperations.Add(operation);
         db.Payments.Add(new Payment
         {
+            SellerCompanyId = companyId,
             Invoice = invoice,
             Contract = contract,
             Account = "88",
@@ -4006,7 +4132,7 @@ public class MoneyOperationsControllerTests
             CreatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateAuthorizedJournalControllerAsync(db));
 
         var action = await controller.GetInvoiceCandidates(operation.Id, CancellationToken.None);
 
@@ -4021,6 +4147,8 @@ public class MoneyOperationsControllerTests
     public async Task GetInvoiceCandidates_ReturnsExpenseCandidatesForBankOperation()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var moneyAccount = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Bank, "Синтетический счёт разнесения");
         var supplier = new Client
         {
             Name = "Поставщик услуг",
@@ -4029,6 +4157,7 @@ public class MoneyOperationsControllerTests
         };
         var operation = new MoneyOperation
         {
+            MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Expense,
             AccountingType = MoneyOperationAccountingType.Fact,
@@ -4048,6 +4177,7 @@ public class MoneyOperationsControllerTests
         db.MoneyOperations.Add(operation);
         db.Payments.Add(new Payment
         {
+            SellerCompanyId = companyId,
             Invoice = invoice,
             ExpenseClient = supplier,
             Account = "44",
@@ -4061,7 +4191,7 @@ public class MoneyOperationsControllerTests
             CreatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateAuthorizedJournalControllerAsync(db));
 
         var action = await controller.GetInvoiceCandidates(operation.Id, CancellationToken.None);
 
@@ -4079,8 +4209,11 @@ public class MoneyOperationsControllerTests
     public async Task GetInvoiceCandidates_ReturnsCandidatesForEMoneyIncomeOperation()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var moneyAccount = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.EMoney, "Синтетический счёт разнесения");
         var operation = new MoneyOperation
         {
+            MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.EMoney,
             Direction = MoneyOperationDirection.Income,
             AccountingType = MoneyOperationAccountingType.Fact,
@@ -4094,6 +4227,7 @@ public class MoneyOperationsControllerTests
         db.MoneyOperations.Add(operation);
         db.Payments.Add(new Payment
         {
+            SellerCompanyId = companyId,
             Invoice = new Invoice { Number = "44", Date = new DateTime(2026, 4, 20), CreatedAt = DateTime.UtcNow },
             Account = "44",
             DocumentKind = DocumentKind.Invoice,
@@ -4106,7 +4240,7 @@ public class MoneyOperationsControllerTests
             CreatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateAuthorizedJournalControllerAsync(db));
 
         var action = await controller.GetInvoiceCandidates(operation.Id, CancellationToken.None);
 
@@ -4120,8 +4254,11 @@ public class MoneyOperationsControllerTests
     public async Task GetInvoiceCandidates_ExcludesFullyPaidInvoices()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var moneyAccount = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Bank, "Синтетический счёт разнесения");
         var operation = new MoneyOperation
         {
+            MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
             AccountingType = MoneyOperationAccountingType.Fact,
@@ -4133,6 +4270,7 @@ public class MoneyOperationsControllerTests
         db.MoneyOperations.Add(operation);
         db.Payments.Add(new Payment
         {
+            SellerCompanyId = companyId,
             Invoice = new Invoice { Number = "33", Date = new DateTime(2026, 4, 20), CreatedAt = DateTime.UtcNow },
             Account = "33",
             DocumentKind = DocumentKind.Invoice,
@@ -4144,7 +4282,7 @@ public class MoneyOperationsControllerTests
             CreatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateAuthorizedJournalControllerAsync(db));
 
         var action = await controller.GetInvoiceCandidates(operation.Id, CancellationToken.None);
 
@@ -4156,6 +4294,8 @@ public class MoneyOperationsControllerTests
     public async Task IgnoreMoneyOperation_ClearsInvoiceLinkAndMarksAsIgnored()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var moneyAccount = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Bank, "Синтетический счёт разнесения");
         var invoice = new Invoice
         {
             Number = "33",
@@ -4166,6 +4306,7 @@ public class MoneyOperationsControllerTests
         await db.SaveChangesAsync();
         var operation = new MoneyOperation
         {
+            MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
             AccountingType = MoneyOperationAccountingType.Fact,
@@ -4181,7 +4322,7 @@ public class MoneyOperationsControllerTests
         };
         db.MoneyOperations.Add(operation);
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateAuthorizedJournalControllerAsync(db));
 
         var action = await controller.Ignore(operation.Id, CancellationToken.None);
 
@@ -4225,7 +4366,7 @@ public class MoneyOperationsControllerTests
         };
         db.MoneyOperations.Add(operation);
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateAuthorizedJournalControllerAsync(db));
 
         var action = await controller.Ignore(operation.Id, CancellationToken.None);
 
@@ -4239,6 +4380,8 @@ public class MoneyOperationsControllerTests
     public async Task LinkInvoice_RejectsOperationAmountGreaterThanInvoiceOutstandingAmount()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var moneyAccount = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Bank, "Синтетический счёт разнесения");
         var invoice = new Invoice
         {
             Number = "33",
@@ -4247,6 +4390,7 @@ public class MoneyOperationsControllerTests
         };
         var operation = new MoneyOperation
         {
+            MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
             AccountingType = MoneyOperationAccountingType.Fact,
@@ -4258,6 +4402,7 @@ public class MoneyOperationsControllerTests
         db.MoneyOperations.Add(operation);
         db.Payments.Add(new Payment
         {
+            SellerCompanyId = companyId,
             Invoice = invoice,
             Account = "33",
             DocumentKind = DocumentKind.Invoice,
@@ -4269,7 +4414,7 @@ public class MoneyOperationsControllerTests
             CreatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateAuthorizedJournalControllerAsync(db));
 
         var action = await controller.LinkInvoice(
             operation.Id,
@@ -4287,6 +4432,8 @@ public class MoneyOperationsControllerTests
     public async Task LinkInvoice_WithOverpayment_ClosesInvoiceAndCreditsClientBalance()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var moneyAccount = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Bank, "Синтетический счёт разнесения");
         var client = new Client
         {
             Name = "Ахмедова Айтан Рафик Кызы",
@@ -4301,6 +4448,7 @@ public class MoneyOperationsControllerTests
         };
         var operation = new MoneyOperation
         {
+            MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
             AccountingType = MoneyOperationAccountingType.Fact,
@@ -4312,6 +4460,7 @@ public class MoneyOperationsControllerTests
         db.MoneyOperations.Add(operation);
         db.Payments.Add(new Payment
         {
+            SellerCompanyId = companyId,
             Invoice = invoice,
             Client = client,
             Account = "33",
@@ -4324,7 +4473,7 @@ public class MoneyOperationsControllerTests
             CreatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateAuthorizedJournalControllerAsync(db));
 
         var action = await controller.LinkInvoice(
             operation.Id,
@@ -4355,6 +4504,8 @@ public class MoneyOperationsControllerTests
     public async Task LinkInvoice_PreservesClientSignatureRequirement_WhenPaymentClosesInvoice()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var moneyAccount = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Bank, "Синтетический счёт разнесения");
         var invoice = new Invoice
         {
             Number = "SIG-33",
@@ -4363,6 +4514,7 @@ public class MoneyOperationsControllerTests
         };
         var operation = new MoneyOperation
         {
+            MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
             AccountingType = MoneyOperationAccountingType.Fact,
@@ -4374,6 +4526,7 @@ public class MoneyOperationsControllerTests
         db.MoneyOperations.Add(operation);
         db.Payments.Add(new Payment
         {
+            SellerCompanyId = companyId,
             Invoice = invoice,
             Account = "SIG-33",
             DocumentKind = DocumentKind.Invoice,
@@ -4386,7 +4539,7 @@ public class MoneyOperationsControllerTests
             CreatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateAuthorizedJournalControllerAsync(db));
 
         var action = await controller.LinkInvoice(
             operation.Id,
@@ -4406,6 +4559,8 @@ public class MoneyOperationsControllerTests
     public async Task ApplyClientBalanceCreditAfterMoneyOperationOverpayment_DoesNotCreateNewMoneyOperation()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var moneyAccount = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Bank, "Синтетический счёт разнесения");
         var client = new Client
         {
             Name = "Ахмедова Айтан Рафик Кызы",
@@ -4425,6 +4580,7 @@ public class MoneyOperationsControllerTests
         };
         var firstPayment = new Payment
         {
+            SellerCompanyId = companyId,
             Client = client,
             Invoice = firstInvoice,
             Account = "33",
@@ -4438,6 +4594,7 @@ public class MoneyOperationsControllerTests
         };
         var secondPayment = new Payment
         {
+            SellerCompanyId = companyId,
             Client = client,
             Invoice = secondInvoice,
             Account = "34",
@@ -4451,6 +4608,7 @@ public class MoneyOperationsControllerTests
         };
         var operation = new MoneyOperation
         {
+            MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
             AccountingType = MoneyOperationAccountingType.Fact,
@@ -4462,7 +4620,7 @@ public class MoneyOperationsControllerTests
         db.MoneyOperations.Add(operation);
         db.Payments.AddRange(firstPayment, secondPayment);
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateAuthorizedJournalControllerAsync(db));
 
         var linkAction = await controller.LinkInvoice(
             operation.Id,
@@ -4504,6 +4662,8 @@ public class MoneyOperationsControllerTests
     public async Task LinkInvoice_MarksBankOperationAsMatched_WhenAmountFitsOutstanding()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var moneyAccount = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Bank, "Синтетический счёт разнесения");
         var invoice = new Invoice
         {
             Number = "33",
@@ -4512,6 +4672,7 @@ public class MoneyOperationsControllerTests
         };
         var operation = new MoneyOperation
         {
+            MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
             AccountingType = MoneyOperationAccountingType.Fact,
@@ -4523,6 +4684,7 @@ public class MoneyOperationsControllerTests
         db.MoneyOperations.Add(operation);
         db.Payments.Add(new Payment
         {
+            SellerCompanyId = companyId,
             Invoice = invoice,
             Account = "33",
             DocumentKind = DocumentKind.Invoice,
@@ -4534,7 +4696,7 @@ public class MoneyOperationsControllerTests
             CreatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateAuthorizedJournalControllerAsync(db));
 
         var action = await controller.LinkInvoice(
             operation.Id,
@@ -4562,6 +4724,8 @@ public class MoneyOperationsControllerTests
     public async Task LinkInvoice_AppliesPartialMoneyOperationToInvoicePayment()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var moneyAccount = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Bank, "Синтетический счёт разнесения");
         var invoice = new Invoice
         {
             Number = "33",
@@ -4570,6 +4734,7 @@ public class MoneyOperationsControllerTests
         };
         var operation = new MoneyOperation
         {
+            MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
             AccountingType = MoneyOperationAccountingType.Fact,
@@ -4581,6 +4746,7 @@ public class MoneyOperationsControllerTests
         db.MoneyOperations.Add(operation);
         db.Payments.Add(new Payment
         {
+            SellerCompanyId = companyId,
             Invoice = invoice,
             Account = "33",
             DocumentKind = DocumentKind.Invoice,
@@ -4592,7 +4758,7 @@ public class MoneyOperationsControllerTests
             CreatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateAuthorizedJournalControllerAsync(db));
 
         var action = await controller.LinkInvoice(
             operation.Id,
@@ -4613,6 +4779,8 @@ public class MoneyOperationsControllerTests
     public async Task LinkInvoice_MarksEMoneyOperationAsMatched_WhenAmountFitsOutstanding()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var moneyAccount = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.EMoney, "Синтетический счёт разнесения");
         var invoice = new Invoice
         {
             Number = "44",
@@ -4621,6 +4789,7 @@ public class MoneyOperationsControllerTests
         };
         var operation = new MoneyOperation
         {
+            MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.EMoney,
             Direction = MoneyOperationDirection.Income,
             AccountingType = MoneyOperationAccountingType.Fact,
@@ -4632,6 +4801,7 @@ public class MoneyOperationsControllerTests
         db.MoneyOperations.Add(operation);
         db.Payments.Add(new Payment
         {
+            SellerCompanyId = companyId,
             Invoice = invoice,
             Account = "44",
             DocumentKind = DocumentKind.Invoice,
@@ -4643,7 +4813,7 @@ public class MoneyOperationsControllerTests
             CreatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateAuthorizedJournalControllerAsync(db));
 
         var action = await controller.LinkInvoice(
             operation.Id,
@@ -4662,7 +4832,7 @@ public class MoneyOperationsControllerTests
     public async Task ImportBankStatement_ReadsWindows1251AndIncomeExpenseColumns()
     {
         await using var db = await CreateContextAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateBankImportControllerAsync(db));
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
         var bytes = Encoding.GetEncoding(1251).GetBytes(
             "Дата операции;Поступило;Списано;Плательщик;Назначение платежа;Документ\n" +
@@ -4696,7 +4866,7 @@ public class MoneyOperationsControllerTests
     public async Task ImportBankStatement_ReadsClientBankExchangeTxtAndOneCExtension()
     {
         await using var db = await CreateContextAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateBankImportControllerAsync(db, selectedBankAccountNumber: "40702810900000000001"));
         var content =
             "1CClientBankExchange\n" +
             "ВерсияФормата=1.03\n" +
@@ -4782,7 +4952,7 @@ public class MoneyOperationsControllerTests
         });
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db);
+        var controller = (await CreateBankImportControllerAsync(db));
         var action = await controller.ImportBankStatement(
             CreateFormFile(
                 "Дата;Сумма;Контрагент;Назначение;Номер\n" +
@@ -4801,6 +4971,8 @@ public class MoneyOperationsControllerTests
     public async Task UpdateMoneyOperation_WithLinkedInvoice_MarksOperationAsMatched()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var moneyAccount = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Bank, "Синтетический счёт разнесения");
         var invoice = new Invoice
         {
             Number = "33",
@@ -4809,6 +4981,7 @@ public class MoneyOperationsControllerTests
         };
         var operation = new MoneyOperation
         {
+            MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
             AccountingType = MoneyOperationAccountingType.Fact,
@@ -4825,9 +4998,25 @@ public class MoneyOperationsControllerTests
         db.MoneyOperations.Add(operation);
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db);
+        // An authorized invoice document is required before accepting its link.
+        db.Payments.Add(new Payment
+        {
+            SellerCompanyId = companyId,
+            InvoiceId = invoice.Id,
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = operation.Amount,
+            Account = invoice.Number,
+            AccountDate = invoice.Date,
+            Date = invoice.Date,
+            PlannedDate = invoice.Date,
+        });
+        await db.SaveChangesAsync();
+        var controller = (await CreateAuthorizedJournalControllerAsync(db));
         var updateAction = await controller.Update(operation.Id, new MoneyOperation
         {
+            MoneyAccountId = moneyAccount.Id,
             Source = operation.Source,
             Direction = operation.Direction,
             AccountingType = operation.AccountingType,
@@ -4861,6 +5050,11 @@ public class MoneyOperationsControllerTests
     public async Task GetPaged_WithLinkedInvoiceId_ReturnsOnlyEditableInvoiceMoneyOperations()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var actor = await CreateUserAsync(db, "synthetic-invoice-filter-admin@fixture.local", "Администратор журнала", roleName: "admin");
+        var moneyAccount = new MoneyAccount { Name = "Банк старого сценария", CompanyId = companyId, Source = MoneyOperationSource.Bank, Currency = "RUB" };
+        db.MoneyAccounts.Add(moneyAccount);
+        await db.SaveChangesAsync();
         var targetInvoice = new Invoice
         {
             Number = "33",
@@ -4880,6 +5074,7 @@ public class MoneyOperationsControllerTests
         db.MoneyOperations.AddRange(
             new MoneyOperation
             {
+                MoneyAccountId = moneyAccount.Id,
                 Source = MoneyOperationSource.Bank,
                 Direction = MoneyOperationDirection.Income,
                 AccountingType = MoneyOperationAccountingType.Fact,
@@ -4892,6 +5087,7 @@ public class MoneyOperationsControllerTests
             },
             new MoneyOperation
             {
+                MoneyAccountId = moneyAccount.Id,
                 Source = MoneyOperationSource.Bank,
                 Direction = MoneyOperationDirection.Income,
                 AccountingType = MoneyOperationAccountingType.Fact,
@@ -4905,6 +5101,7 @@ public class MoneyOperationsControllerTests
 
         var representativeInvoicePayment = new Payment
         {
+            SellerCompanyId = companyId,
             InvoiceId = targetInvoice.Id,
             Account = "33",
             DocumentKind = DocumentKind.Invoice,
@@ -4919,6 +5116,7 @@ public class MoneyOperationsControllerTests
         };
         var actualLinkedPayment = new Payment
         {
+            SellerCompanyId = companyId,
             InvoiceId = targetInvoice.Id,
             Account = "33",
             DocumentKind = DocumentKind.Payment,
@@ -4934,7 +5132,7 @@ public class MoneyOperationsControllerTests
         db.Payments.AddRange(representativeInvoicePayment, actualLinkedPayment);
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db);
+        var controller = CreateController(db, actor.Id);
 
         var action = await controller.GetPaged(
             from: new DateTime(2026, 4, 1),
@@ -4975,7 +5173,7 @@ public class MoneyOperationsControllerTests
             CreatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateBankImportControllerAsync(db));
 
         var action = await controller.ImportBankStatement(
             CreateFormFile(
@@ -5019,7 +5217,7 @@ public class MoneyOperationsControllerTests
         };
         db.IncomeTypes.AddRange(incomeType, expenseType);
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateBankImportControllerAsync(db));
 
         var action = await controller.ImportBankStatement(
             CreateFormFile(
@@ -5056,7 +5254,7 @@ public class MoneyOperationsControllerTests
     public async Task ImportBankStatement_InfersCategoriesFromRealBankPurposes()
     {
         await using var db = await CreateContextAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateBankImportControllerAsync(db));
 
         var action = await controller.ImportBankStatement(
             CreateFormFile(
@@ -5096,7 +5294,7 @@ public class MoneyOperationsControllerTests
         };
         db.IncomeTypes.Add(bankCommissionType);
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateBankImportControllerAsync(db));
 
         var action = await controller.ImportBankStatement(
             CreateFormFile(
@@ -5157,7 +5355,7 @@ public class MoneyOperationsControllerTests
             UpdatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
-        var controller = CreateController(db, user.Id);
+        var controller = (await CreateBankImportControllerAsync(db, user.Id));
 
         var action = await controller.ImportBankStatement(
             CreateFormFile(
@@ -5179,8 +5377,10 @@ public class MoneyOperationsControllerTests
     public async Task MoneyAccount_CreateOperation_BindsAccountAndFiltersById()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
         var account = new MoneyAccount
         {
+            CompanyId = companyId,
             Name = "Основной банк",
             Source = MoneyOperationSource.Bank,
             Currency = "RUB",
@@ -5190,6 +5390,7 @@ public class MoneyOperationsControllerTests
         };
         var otherAccount = new MoneyAccount
         {
+            CompanyId = companyId,
             Name = "Резервный банк",
             Source = MoneyOperationSource.Bank,
             Currency = "RUB",
@@ -5200,7 +5401,7 @@ public class MoneyOperationsControllerTests
         db.MoneyAccounts.AddRange(account, otherAccount);
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db);
+        var controller = (await CreateAuthorizedJournalControllerAsync(db));
         var createAction = await controller.Create(new MoneyOperation
         {
             Source = MoneyOperationSource.Cash,
@@ -5258,10 +5459,13 @@ public class MoneyOperationsControllerTests
     public async Task CreateBankIncomeWithoutInvoice_MarksOperationAsAdvanceRequiringClarification()
     {
         await using var db = await CreateContextAsync();
-        var controller = CreateController(db);
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var moneyAccount = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Bank, "Основной счёт");
+        var controller = (await CreateAuthorizedJournalControllerAsync(db));
 
         var createAction = await controller.Create(new MoneyOperation
         {
+            MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
             AccountingType = MoneyOperationAccountingType.Fact,
@@ -5287,7 +5491,7 @@ public class MoneyOperationsControllerTests
     public async Task ImportBankStatement_UnmatchedIncomeIsMarkedAsAdvanceRequiringClarification()
     {
         await using var db = await CreateContextAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateBankImportControllerAsync(db));
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
         var bytes = Encoding.GetEncoding(1251).GetBytes(
             "Дата операции;Поступило;Списано;Плательщик;Назначение платежа;Документ\n" +
@@ -5311,11 +5515,13 @@ public class MoneyOperationsControllerTests
     public async Task MoneyAccountsController_CreatesSingleDefaultPerSource()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
         var admin = await CreateUserAsync(db, "money-accounts-admin@example.test", "Администратор счетов", roleName: "admin");
         var controller = CreateMoneyAccountsController(db, admin.Id);
 
         var firstAction = await controller.Create(new MoneyAccount
         {
+            CompanyId = companyId,
             Name = "Основной счет",
             Source = MoneyOperationSource.Bank,
             Currency = "rub",
@@ -5328,6 +5534,7 @@ public class MoneyOperationsControllerTests
 
         var secondAction = await controller.Create(new MoneyAccount
         {
+            CompanyId = companyId,
             Name = "Дополнительный счет",
             Source = MoneyOperationSource.Bank,
             Currency = "RUB",
@@ -5346,9 +5553,11 @@ public class MoneyOperationsControllerTests
     public async Task MoneyAccountsController_UpdateInactiveDefault_PromotesFallbackDefault()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
         var admin = await CreateUserAsync(db, "money-accounts-update-admin@example.test", "Администратор счетов", roleName: "admin");
         var primary = new MoneyAccount
         {
+            CompanyId = companyId,
             Name = "Основной банк",
             Source = MoneyOperationSource.Bank,
             Currency = "RUB",
@@ -5358,6 +5567,7 @@ public class MoneyOperationsControllerTests
         };
         var reserve = new MoneyAccount
         {
+            CompanyId = companyId,
             Name = "Резервный банк",
             Source = MoneyOperationSource.Bank,
             Currency = "RUB",
@@ -5371,6 +5581,7 @@ public class MoneyOperationsControllerTests
         var controller = CreateMoneyAccountsController(db, admin.Id);
         var action = await controller.Update(primary.Id, new MoneyAccount
         {
+            CompanyId = companyId,
             Name = primary.Name,
             Source = MoneyOperationSource.Bank,
             Currency = "RUB",
@@ -5388,9 +5599,11 @@ public class MoneyOperationsControllerTests
     public async Task MoneyAccountsController_DeleteUsedDefault_PromotesFallbackDefault()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
         var admin = await CreateUserAsync(db, "money-accounts-delete-admin@example.test", "Администратор счетов", roleName: "admin");
         var primary = new MoneyAccount
         {
+            CompanyId = companyId,
             Name = "Основная касса",
             Source = MoneyOperationSource.Cash,
             Currency = "RUB",
@@ -5400,6 +5613,7 @@ public class MoneyOperationsControllerTests
         };
         var reserve = new MoneyAccount
         {
+            CompanyId = companyId,
             Name = "Резервная касса",
             Source = MoneyOperationSource.Cash,
             Currency = "RUB",
@@ -5455,11 +5669,13 @@ public class MoneyOperationsControllerTests
     public async Task MoneyAccountsController_Create_AllowsUserWithAdminRoleInDatabase()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
         var admin = await CreateUserAsync(db, "money-accounts-allow@example.test", "Администратор", roleName: "admin");
         var controller = CreateMoneyAccountsController(db, admin.Id, isAdminClaim: false);
 
         var action = await controller.Create(new MoneyAccount
         {
+            CompanyId = companyId,
             Name = "Основной банк",
             Source = MoneyOperationSource.Bank,
             Currency = "RUB",
@@ -5491,7 +5707,7 @@ public class MoneyOperationsControllerTests
         };
         db.Payments.Add(payment);
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateBankImportControllerAsync(db));
         var action = await controller.ImportBankStatement(CreateFormFile(
             "Дата;Сумма;Контрагент;Назначение;Номер\n" +
             $"12.10.2026;{firstAmount};Синтетический контрагент;Оплата по счету №913;A1\n" +
@@ -5525,7 +5741,7 @@ public class MoneyOperationsControllerTests
             CounterpartyName = "Синтетический контрагент",
         });
         await db.SaveChangesAsync();
-        var action = await CreateController(db).ImportBankStatement(CreateFormFile(
+        var action = await (await CreateBankImportControllerAsync(db)).ImportBankStatement(CreateFormFile(
             "Дата;Сумма;Контрагент;Назначение;Номер\n" +
             "12.10.2026;8000;Синтетический контрагент;Оплата по счету №914;B1\n" +
             "12.10.2026;12000;Синтетический контрагент;Оплата по счету №914;B2\n" +
@@ -5580,7 +5796,7 @@ public class MoneyOperationsControllerTests
         };
         db.Payments.AddRange(parent, first, second);
         await db.SaveChangesAsync();
-        var action = await CreateController(db).ImportBankStatement(CreateFormFile(
+        var action = await (await CreateBankImportControllerAsync(db)).ImportBankStatement(CreateFormFile(
             "Дата;Сумма;Контрагент;Назначение;Номер\n" +
             $"12.10.2026;{amount};Синтетический контрагент;Оплата по счету №915;C1\n",
             "installments.csv"), CancellationToken.None);
@@ -5616,7 +5832,7 @@ public class MoneyOperationsControllerTests
             IsActive = true,
         });
         await db.SaveChangesAsync();
-        var action = await CreateController(db).ImportBankStatement(CreateFormFile(
+        var action = await (await CreateBankImportControllerAsync(db)).ImportBankStatement(CreateFormFile(
             "Дата;Сумма;Контрагент;Назначение;Номер;Счет\n" +
             "12.10.2026;1000;Синтетический контрагент;Оплата по счету №916;D1;Валютный тестовый\n",
             "foreign-currency.csv"), CancellationToken.None);
@@ -5632,11 +5848,14 @@ public class MoneyOperationsControllerTests
     public async Task LinkInvoice_RepeatedPartialAllocationDoesNotPayTwiceOrRebind()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var moneyAccount = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Bank, "Синтетический счёт разнесения");
         var date = new DateTime(2026, 10, 12);
         var invoice = new Invoice { Number = "917", Date = date };
         var otherInvoice = new Invoice { Number = "918", Date = date };
         db.Payments.AddRange(new Payment
         {
+            SellerCompanyId = companyId,
             Invoice = invoice,
             Account = invoice.Number,
             DocumentKind = DocumentKind.Invoice,
@@ -5646,6 +5865,7 @@ public class MoneyOperationsControllerTests
             Date = date,
         }, new Payment
         {
+            SellerCompanyId = companyId,
             Invoice = otherInvoice,
             Account = otherInvoice.Number,
             DocumentKind = DocumentKind.Invoice,
@@ -5656,6 +5876,7 @@ public class MoneyOperationsControllerTests
         });
         var operation = new MoneyOperation
         {
+            MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
             AccountingType = MoneyOperationAccountingType.Fact,
@@ -5665,7 +5886,7 @@ public class MoneyOperationsControllerTests
         };
         db.MoneyOperations.Add(operation);
         await db.SaveChangesAsync();
-        var controller = CreateController(db);
+        var controller = (await CreateAuthorizedJournalControllerAsync(db));
         Assert.IsType<OkObjectResult>(await controller.LinkInvoice(operation.Id,
             new MoneyOperationsController.LinkMoneyOperationInvoiceRequest { InvoiceId = invoice.Id }, CancellationToken.None));
         db.ChangeTracker.Clear();
@@ -5682,11 +5903,14 @@ public class MoneyOperationsControllerTests
     public async Task LinkInvoice_InstallmentOverpaymentCreditsOnlyRemainderAfterAllInstallments()
     {
         await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var moneyAccount = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Bank, "Синтетический счёт разнесения");
         var date = new DateTime(2026, 10, 12);
         var invoice = new Invoice { Number = "919", Date = date };
         var client = new Client { Name = "Синтетический клиент рассрочки", IsActive = true };
         var parent = new Payment
         {
+            SellerCompanyId = companyId,
             Invoice = invoice,
             Client = client,
             Account = invoice.Number,
@@ -5698,6 +5922,7 @@ public class MoneyOperationsControllerTests
         };
         var first = new Payment
         {
+            SellerCompanyId = companyId,
             Invoice = invoice,
             Client = client,
             Account = invoice.Number,
@@ -5710,6 +5935,7 @@ public class MoneyOperationsControllerTests
         };
         var second = new Payment
         {
+            SellerCompanyId = companyId,
             Invoice = invoice,
             Client = client,
             Account = invoice.Number,
@@ -5722,6 +5948,7 @@ public class MoneyOperationsControllerTests
         };
         var operation = new MoneyOperation
         {
+            MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
             AccountingType = MoneyOperationAccountingType.Fact,
@@ -5732,7 +5959,7 @@ public class MoneyOperationsControllerTests
         db.Payments.AddRange(parent, first, second);
         db.MoneyOperations.Add(operation);
         await db.SaveChangesAsync();
-        Assert.IsType<OkObjectResult>(await CreateController(db).LinkInvoice(operation.Id,
+        Assert.IsType<OkObjectResult>(await (await CreateAuthorizedJournalControllerAsync(db)).LinkInvoice(operation.Id,
             new MoneyOperationsController.LinkMoneyOperationInvoiceRequest { InvoiceId = invoice.Id }, CancellationToken.None));
         db.ChangeTracker.Clear();
         Assert.Equal(6_000m, (await db.Payments.SingleAsync(item => item.Id == first.Id)).PaidAmount);
@@ -5804,6 +6031,30 @@ public class MoneyOperationsControllerTests
                 },
             },
         };
+    }
+
+    private static async Task<MoneyAccount> CreateRegisteredMoneyAccountAsync(
+        PaymentContext db, int companyId, MoneyOperationSource source, string name, string currency = "RUB")
+    {
+        var account = new MoneyAccount
+        {
+            CompanyId = companyId,
+            Source = source,
+            Name = name,
+            Currency = currency,
+            IsActive = true,
+        };
+        db.MoneyAccounts.Add(account);
+        await db.SaveChangesAsync();
+        return account;
+    }
+
+    private static async Task<MoneyOperationsController> CreateAuthorizedJournalControllerAsync(PaymentContext db)
+    {
+        // Opt in from money workflow tests without a role-boundary assertion.
+        // Anonymous/role-boundary tests continue to use CreateController explicitly.
+        var actor = await CreateUserAsync(db, "journal-admin@fixture.local", "Администратор тестового журнала", roleName: "admin");
+        return CreateController(db, actor.Id);
     }
 
     private static MoneyOperationsController CreateController(PaymentContext db, int? userId = null, bool isAdminClaim = true)

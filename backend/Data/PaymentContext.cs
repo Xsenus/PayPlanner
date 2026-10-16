@@ -1211,12 +1211,17 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Currency).HasMaxLength(16).HasDefaultValue("RUB");
             entity.Property(e => e.BankName).HasMaxLength(200);
             entity.Property(e => e.BankAccountNumber).HasMaxLength(64);
+            entity.Property(e => e.BankBik).HasMaxLength(16);
+            entity.HasOne(e => e.Company).WithMany().HasForeignKey(e => e.CompanyId).OnDelete(DeleteBehavior.ClientNoAction);
+            entity.HasOne(e => e.BankConnectionAccount).WithMany().HasForeignKey(e => e.BankConnectionAccountId).OnDelete(DeleteBehavior.ClientNoAction);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
 
             entity.HasIndex(e => e.Name).HasDatabaseName("IX_MoneyAccounts_Name");
             entity.HasIndex(e => e.Source).HasDatabaseName("IX_MoneyAccounts_Source");
             entity.HasIndex(e => e.IsActive).HasDatabaseName("IX_MoneyAccounts_IsActive");
-            entity.HasIndex(e => new { e.Source, e.Name }).IsUnique().HasDatabaseName("IX_MoneyAccounts_Source_Name");
+            entity.HasIndex(e => new { e.Source, e.Name }).IsUnique().HasFilter("\"CompanyId\" IS NULL").HasDatabaseName("IX_MoneyAccounts_Source_Name");
+            entity.HasIndex(e => new { e.CompanyId, e.Source, e.Name }).IsUnique().HasFilter("\"CompanyId\" IS NOT NULL").HasDatabaseName("IX_MoneyAccounts_Company_Source_Name");
+            entity.HasIndex(e => e.BankConnectionAccountId).IsUnique().HasDatabaseName("IX_MoneyAccounts_BankConnectionAccountId");
         });
 
         // ------------------ MoneyOperation ------------------
@@ -1282,11 +1287,17 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.MatchStatus).HasDatabaseName("IX_MoneyOperations_MatchStatus");
             entity.HasIndex(e => e.ResponsibleUserId).HasDatabaseName("IX_MoneyOperations_ResponsibleUserId");
             entity.HasIndex(e => e.BankStatementImportBatchId).HasDatabaseName("IX_MoneyOperations_BankStatementImportBatchId");
+            entity.Property(e => e.SourceMovementKey).HasMaxLength(64);
+            entity.HasIndex(e => e.SourceMovementKey).IsUnique().HasDatabaseName("IX_MoneyOperations_SourceMovementKey");
             entity.HasIndex(e => new { e.Source, e.Date }).HasDatabaseName("IX_MoneyOperations_Source_Date");
         });
 
         modelBuilder.Entity<MoneyBalanceReconciliationResult>(entity =>
         {
+            entity.Property(e => e.Currency).HasMaxLength(32);
+            entity.Property(e => e.ScopeKey).HasMaxLength(200);
+            entity.HasOne<LegalEntity>().WithMany().HasForeignKey(e => e.CompanyId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne<MoneyAccount>().WithMany().HasForeignKey(e => e.MoneyAccountId).OnDelete(DeleteBehavior.NoAction);
             entity.Property(e => e.Date).HasColumnType("date");
             entity.Property(e => e.Source).HasConversion<string>();
             entity.Property(e => e.AccountName).HasMaxLength(200).IsRequired();
@@ -1300,7 +1311,13 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.Source, e.Date }).HasDatabaseName("IX_MoneyBalanceReconciliationResults_Source_Date");
             entity.HasIndex(e => new { e.Source, e.AccountName, e.Date })
                 .IsUnique()
+                .HasFilter("\"ScopeKey\" IS NULL")
                 .HasDatabaseName("IX_MoneyBalanceReconciliationResults_Source_Account_Date");
+            entity.HasIndex(e => new { e.ScopeKey, e.Date }).IsUnique()
+                .HasFilter("\"ScopeKey\" IS NOT NULL")
+                .HasDatabaseName("IX_MoneyBalanceReconciliationResults_ScopeKey_Date");
+            entity.HasIndex(e => new { e.CompanyId, e.MoneyAccountId, e.Date })
+                .HasDatabaseName("IX_MoneyBalanceReconciliationResults_Company_Account_Date");
         });
 
         modelBuilder.Entity<BankStatementImportBatch>(entity =>
@@ -1310,6 +1327,18 @@ public class PaymentContext : DbContext
             entity.Property(e => e.FileHash).HasMaxLength(128).IsRequired();
             entity.Property(e => e.Status).HasMaxLength(32).IsRequired();
             entity.Property(e => e.ErrorSummary).HasMaxLength(4000);
+            entity.Property(e => e.Source).HasMaxLength(32);
+            entity.Property(e => e.Trigger).HasMaxLength(32);
+            entity.Property(e => e.PackageKey).HasMaxLength(64);
+            entity.Property(e => e.PeriodFrom).HasColumnType("date");
+            entity.Property(e => e.PeriodTo).HasColumnType("date");
+            entity.HasOne(e => e.Company).WithMany().HasForeignKey(e => e.CompanyId).OnDelete(DeleteBehavior.ClientNoAction);
+            entity.HasOne(e => e.MoneyAccount).WithMany().HasForeignKey(e => e.MoneyAccountId).OnDelete(DeleteBehavior.ClientNoAction);
+            entity.HasOne(e => e.BankConnectionAccount).WithMany().HasForeignKey(e => e.BankConnectionAccountId).OnDelete(DeleteBehavior.ClientNoAction);
+            entity.HasOne(e => e.ParentBatch).WithMany().HasForeignKey(e => e.ParentBatchId).OnDelete(DeleteBehavior.ClientNoAction);
+            entity.HasIndex(e => e.PackageKey).IsUnique().HasDatabaseName("IX_BankStatementImportBatches_PackageKey");
+            entity.HasIndex(e => new { e.CompanyId, e.CreatedAt, e.Id }).HasDatabaseName("IX_BankStatementImportBatches_Company_Created_Id");
+            entity.HasIndex(e => new { e.ResponsibleUserId, e.CreatedAt, e.Id }).HasDatabaseName("IX_BankStatementImportBatches_Responsible_Created_Id");
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.HasMany(e => e.Rows)
                   .WithOne(row => row.Batch)
@@ -1331,6 +1360,16 @@ public class PaymentContext : DbContext
             entity.Property(e => e.CounterpartyName).HasMaxLength(200);
             entity.Property(e => e.Purpose).HasMaxLength(1000);
             entity.Property(e => e.PaymentOrderNumber).HasMaxLength(100);
+            entity.Property(e => e.ExternalOperationId).HasMaxLength(128);
+            entity.Property(e => e.MovementKey).HasMaxLength(64);
+            entity.Property(e => e.Currency).HasMaxLength(16);
+            entity.HasOne(e => e.BankStatementOperation).WithMany().HasForeignKey(e => e.BankStatementOperationId).OnDelete(DeleteBehavior.ClientNoAction);
+            entity.HasOne(e => e.OriginRow).WithMany().HasForeignKey(e => e.OriginRowId).OnDelete(DeleteBehavior.ClientNoAction);
+            entity.HasIndex(e => e.BankStatementOperationId).HasDatabaseName("IX_BankStatementImportRows_BankStatementOperationId");
+            entity.HasIndex(e => e.OriginRowId).HasDatabaseName("IX_BankStatementImportRows_OriginRowId");
+            entity.HasIndex(e => e.MovementKey).HasDatabaseName("IX_BankStatementImportRows_MovementKey");
+            entity.Property(e => e.RowIdentityKey).HasMaxLength(64);
+            entity.HasIndex(e => new { e.BatchId, e.RowIdentityKey }).IsUnique().HasDatabaseName("IX_BankStatementImportRows_Batch_RowIdentity");
             entity.Property(e => e.Direction).HasConversion<string>();
             entity.Property(e => e.Date).HasColumnType("date");
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");

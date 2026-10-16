@@ -827,7 +827,7 @@ public class SystemJobsControllerTests
         await using var scope = await CreateDbScopeAsync();
         var selectedZone = ResolveTimeZoneWithDifferentLocalDate();
         var targetDate = selectedZone.ProfileToday.AddDays(-1);
-        var role = new Role { Name = $"money-admin-{Guid.NewGuid():N}", Description = "Money admin" };
+        var role = new Role { Name = "admin", Description = "Money admin" };
         scope.Db.Roles.Add(role);
         await scope.Db.SaveChangesAsync();
         var user = new User

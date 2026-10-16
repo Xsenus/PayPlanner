@@ -443,6 +443,7 @@ describe('MoneyOperations integration', () => {
     const moneyAccounts: MoneyAccount[] = [
       {
         id: 101,
+        companyId: 1,
         name: 'Основной счёт',
         source: 'Bank',
         currency: 'RUB',
@@ -455,6 +456,7 @@ describe('MoneyOperations integration', () => {
       },
       {
         id: 102,
+        companyId: 1,
         name: 'Резервный счёт',
         source: 'Bank',
         currency: 'RUB',
@@ -467,6 +469,7 @@ describe('MoneyOperations integration', () => {
       },
       {
         id: 103,
+        companyId: 1,
         name: 'Основная касса',
         source: 'Cash',
         currency: 'RUB',
@@ -479,6 +482,7 @@ describe('MoneyOperations integration', () => {
       },
       {
         id: 104,
+        companyId: 1,
         name: 'Резервная касса',
         source: 'Cash',
         currency: 'RUB',
@@ -1178,6 +1182,59 @@ describe('MoneyOperations integration', () => {
     expect(screen.getByText('Сумма изменилась')).toBeTruthy();
   });
 
+  it.each(['foreign', 'unattributed', 'renamed'] as const)(
+    'matches a saved daily reconciliation by stable identity: %s',
+    async (scenario) => {
+      const current = {
+        date: '2026-05-01', accountName: 'Основной банк', source: 'Bank' as const,
+        companyId: 10, moneyAccountId: 20, currency: 'RUB', balanceKey: 'account20:RUB',
+        openingBalance: 1000, income: 500, expense: 0, closingBalance: 1500,
+        incomeCount: 1, expenseCount: 0, isBalanced: true,
+      };
+      getMoneyOperationDailyBalancesMock.mockResolvedValueOnce([current]);
+      getMoneyBalanceReconciliationResultsMock.mockResolvedValueOnce([{
+        ...current, id: 7, income: 400, closingBalance: 1400,
+        balanceKey: scenario === 'unattributed' ? null : scenario === 'foreign' ? 'account30:RUB' : current.balanceKey,
+        accountName: scenario === 'renamed' ? 'Прежнее название счёта' : current.accountName,
+        checkedAt: '2026-05-02T10:00:00Z', issueCount: 0,
+      }]);
+
+      render(<MoneyOperations source="Bank" />);
+      await screen.findByText('Дневная сверка остатков');
+      if (scenario === 'renamed') {
+        expect(await screen.findByText('Изменилось')).toBeTruthy();
+        expect(screen.getByText('Сумма изменилась')).toBeTruthy();
+      } else {
+        await waitFor(() => expect(getMoneyBalanceReconciliationResultsMock).toHaveBeenCalled());
+        expect(screen.queryByText('Изменилось')).toBeNull();
+        expect(screen.queryByText('Сумма изменилась')).toBeNull();
+      }
+    },
+  );
+
+  it('keeps reconciliation drift notifications separate for different currencies', async () => {
+    const base = {
+      date: '2026-05-01', accountName: 'Основной банк', source: 'Bank' as const,
+      companyId: 10, openingBalance: 1000, income: 500, expense: 0, closingBalance: 1500,
+      incomeCount: 1, expenseCount: 0, isBalanced: true,
+    };
+    const rows = [
+      { ...base, moneyAccountId: 20, currency: 'RUB', balanceKey: 'account20:RUB' },
+      { ...base, moneyAccountId: 30, currency: 'USD', balanceKey: 'account30:USD' },
+    ];
+    getMoneyOperationDailyBalancesMock.mockResolvedValueOnce(rows);
+    getMoneyBalanceReconciliationResultsMock.mockResolvedValueOnce(rows.map((row, index) => ({
+      ...row, id: index + 1, income: index === 0 ? 400 : 100, closingBalance: index === 0 ? 1400 : 1100,
+      checkedAt: '2026-05-02T10:00:00Z', issueCount: 0,
+    })));
+
+    render(<MoneyOperations source="Bank" />);
+    expect(await screen.findAllByText('Сумма изменилась')).toHaveLength(2);
+    expect(screen.getByText('1 дн. требуют повторной сверки. Разница: 200,00 ₽.')).toBeTruthy();
+    expect(screen.getByText('1 дн. требуют повторной сверки. Разница: 800,00 USD.')).toBeTruthy();
+    expect(screen.queryByText(/Разница: 1\s?000,00/)).toBeNull();
+  });
+
   it('shows reconciliation notifications for bank mismatches', async () => {
     operations = [
       createOperation({
@@ -1351,6 +1408,157 @@ describe('MoneyOperations integration', () => {
     expect(screen.getByText('Сверка остатков')).toBeTruthy();
   });
 
+  it('requests historical accounts and filters the journal by their stable ID', async () => {
+    const user = userEvent.setup();
+    getMoneyAccountsMock.mockResolvedValue([
+      { id: 301, companyId: 1, companyName: 'Компания Альфа', name: 'Закрытый счёт', source: 'Bank', currency: 'RUB',
+        isActive: false, isDefault: false, canUseForNewOperations: false, canEditExistingOperations: false },
+    ]);
+    operations = [createOperation({ moneyAccountId: 301, accountName: 'Закрытый счёт' })];
+    render(<MoneyOperations source="Bank" />);
+    await screen.findByText('Поставщик А');
+    expect(getMoneyAccountsMock).toHaveBeenCalledWith({ activeOnly: false });
+    await user.selectOptions(screen.getByLabelText('Банковский счёт в заголовке'), '301');
+    await waitFor(() => expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ moneyAccountId: 301 }), expectAbortOptions(),
+    ));
+  });
+
+  it('keeps server-blocked active accounts out of new operation choices', async () => {
+    const user = userEvent.setup();
+    getMoneyAccountsMock.mockResolvedValue([
+      { id: 201, companyId: 1, companyName: 'Компания Альфа', name: 'Закрытая банковская привязка', source: 'Bank', currency: 'RUB',
+        isActive: true, isDefault: true, canUseForNewOperations: false, canEditExistingOperations: true },
+      { id: 202, companyId: 1, companyName: 'Компания Альфа', name: 'Действующий счёт', source: 'Bank', currency: 'RUB',
+        isActive: true, isDefault: false, canUseForNewOperations: true, canEditExistingOperations: true },
+    ]);
+    render(<MoneyOperations source="Bank" />);
+    await screen.findByText('Поставщик А');
+    await user.click(screen.getByRole('button', { name: 'Добавить' }));
+    await screen.findByText('Добавить операцию по банку');
+    const select = screen.getByLabelText('Банковский счёт') as HTMLSelectElement;
+    expect(Array.from(select.options, option => option.value)).toEqual(['', '202']);
+    expect(select.value).toBe('202');
+  });
+
+  it('keeps historical bank account financial fields locked while its description remains editable', async () => {
+    const user = userEvent.setup();
+    getMoneyAccountsMock.mockResolvedValue([
+      { id: 201, companyId: 1, companyName: 'Компания Альфа', name: 'Закрытая банковская привязка', source: 'Bank', currency: 'RUB',
+        isActive: true, isDefault: false, canUseForNewOperations: false, canEditExistingOperations: true },
+    ]);
+    operations = [createOperation({ moneyAccountId: 201, accountName: 'Закрытая банковская привязка', purpose: 'Прежнее описание' })];
+    render(<MoneyOperations source="Bank" />);
+    await screen.findByText('Прежнее описание');
+    await user.click(screen.getByRole('button', { name: 'Изменить' }));
+    await screen.findByText('Редактировать операцию по банку');
+    expect(screen.getByLabelText('Сумма, RUB')).toHaveProperty('disabled', true);
+    expect(screen.getByLabelText(/^Дата$/)).toHaveProperty('disabled', true);
+    expect(screen.getByLabelText('Банковский счёт')).toHaveProperty('value', '201');
+    expect(screen.getByLabelText('Банковский счёт')).toHaveProperty('disabled', true);
+    await user.clear(screen.getByLabelText(/^Назначение$/));
+    await user.type(screen.getByLabelText(/^Назначение$/), 'Уточнённое описание');
+    await user.click(getLastButton('Сохранить'));
+    await waitFor(() => expect(updateMoneyOperationMock).toHaveBeenCalledTimes(1));
+    expect(updateMoneyOperationMock).toHaveBeenCalledWith(1, expect.objectContaining({
+      moneyAccountId: 201, amount: 1500, date: '2026-04-20', purpose: 'Уточнённое описание',
+    }));
+  });
+
+  it('shows inactive account history without allowing it to be reassigned through editing', async () => {
+    const user = userEvent.setup();
+    getMoneyAccountsMock.mockResolvedValue([
+      { id: 201, companyId: 1, companyName: 'Компания Альфа', name: 'Отключённый счёт', source: 'Bank', currency: 'RUB',
+        isActive: false, isDefault: false, canUseForNewOperations: false, canEditExistingOperations: false },
+      { id: 202, companyId: 1, companyName: 'Компания Альфа', name: 'Действующий счёт', source: 'Bank', currency: 'RUB',
+        isActive: true, isDefault: true, canUseForNewOperations: true, canEditExistingOperations: true },
+    ]);
+    operations = [createOperation({ moneyAccountId: 201, accountName: 'Отключённый счёт' })];
+    render(<MoneyOperations source="Bank" />);
+    await screen.findByText('Поставщик А');
+    await user.click(screen.getByRole('button', { name: 'Изменить' }));
+    await screen.findByText('Редактировать операцию по банку');
+    expect(screen.getByLabelText('Банковский счёт')).toHaveProperty('value', '201');
+    expect(getLastButton('Сохранить')).toHaveProperty('disabled', true);
+    expect(updateMoneyOperationMock).not.toHaveBeenCalled();
+  });
+
+  it('requires an explicit account when several companies have their own default', async () => {
+    const user = userEvent.setup();
+    getMoneyAccountsMock.mockResolvedValue([
+      { id: 201, companyId: 1, companyName: 'Компания Альфа', name: 'Основной счёт', source: 'Bank', currency: 'RUB', isActive: true, isDefault: true },
+      { id: 202, companyId: 2, companyName: 'Компания Бета', name: 'Основной счёт', source: 'Bank', currency: 'RUB', isActive: true, isDefault: true },
+    ]);
+    render(<MoneyOperations source="Bank" />);
+    await screen.findByText('Поставщик А');
+    await user.click(screen.getByRole('button', { name: 'Добавить' }));
+    await screen.findByText('Добавить операцию по банку');
+    const select = screen.getByLabelText('Банковский счёт') as HTMLSelectElement;
+    expect(select.value).toBe('');
+    expect(Array.from(select.options, option => [option.value, option.textContent])).toEqual([
+      ['', 'Выберите денежный счёт'],
+      ['201', 'Основной счёт · Компания Альфа'],
+      ['202', 'Основной счёт · Компания Бета'],
+    ]);
+    expect(createMoneyOperationMock).not.toHaveBeenCalled();
+  });
+
+  it('uses the explicitly selected journal account instead of another company default', async () => {
+    const user = userEvent.setup();
+    getMoneyAccountsMock.mockResolvedValue([
+      { id: 201, companyId: 1, companyName: 'Компания Альфа', name: 'Основной счёт', source: 'Bank', currency: 'RUB', isActive: true, isDefault: true },
+      { id: 202, companyId: 2, companyName: 'Компания Бета', name: 'Основной счёт', source: 'Bank', currency: 'RUB', isActive: true, isDefault: true },
+    ]);
+    render(<MoneyOperations source="Bank" />);
+    await screen.findByText('Поставщик А');
+    await user.selectOptions(screen.getByLabelText('Банковский счёт в заголовке'), '202');
+    await user.click(screen.getByRole('button', { name: 'Добавить' }));
+    await screen.findByText('Добавить операцию по банку');
+    expect((screen.getByLabelText('Банковский счёт') as HTMLSelectElement).value).toBe('202');
+  });
+
+  it('keeps an unsaved operation when the account directory arrives late', async () => {
+    const user = userEvent.setup();
+    let resolveAccounts!: (items: MoneyAccount[]) => void;
+    getMoneyAccountsMock.mockReturnValue(new Promise<MoneyAccount[]>(resolve => { resolveAccounts = resolve; }));
+    render(<MoneyOperations source="Bank" />);
+    await screen.findByText('Поставщик А');
+    await user.click(screen.getByRole('button', { name: 'Добавить' }));
+    await screen.findByText('Добавить операцию по банку');
+    await user.clear(screen.getByLabelText('Сумма, RUB'));
+    await user.type(screen.getByLabelText('Сумма, RUB'), '123');
+    await user.type(screen.getByTestId('money-operation-counterparty'), 'Несохранённый контрагент');
+    await act(async () => resolveAccounts([
+      { id: 201, companyId: 1, companyName: 'Компания Альфа', name: 'Основной счёт', source: 'Bank', currency: 'RUB', isActive: true, isDefault: true, createdAt: '2026-10-01T00:00:00Z' },
+    ]));
+    await waitFor(() => expect(screen.getByLabelText('Банковский счёт').tagName).toBe('SELECT'));
+    expect((screen.getByLabelText('Сумма, RUB') as HTMLInputElement).value).toBe('123');
+    expect((screen.getByTestId('money-operation-counterparty') as HTMLInputElement).value).toBe('Несохранённый контрагент');
+    expect((screen.getByLabelText('Банковский счёт') as HTMLSelectElement).value).toBe('');
+    expect(createMoneyOperationMock).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('requires a known company account when the directory is empty or historical: %s', async legacy => {
+    const user = userEvent.setup();
+    getMoneyAccountsMock.mockResolvedValue(legacy ? [
+      { id: 999, companyId: null, name: 'Исторический счёт', source: 'Bank', currency: 'RUB', isActive: true, isDefault: true, createdAt: '2026-10-01T00:00:00Z' },
+    ] : []);
+    render(<MoneyOperations source="Bank" />);
+    await screen.findByText('Поставщик А');
+    await user.click(screen.getByRole('button', { name: 'Добавить' }));
+    await screen.findByText('Добавить операцию по банку');
+    expect(screen.queryByLabelText('Банковский счёт', { selector: 'input' })).toBeNull();
+    expect(screen.getByLabelText('Банковский счёт')).toHaveProperty('disabled', true);
+    expect(screen.getByText('Нет доступных действующих счетов собственной компании. Обратитесь к администратору.')).toBeTruthy();
+    await user.click(screen.getByLabelText('Расход'));
+    await user.clear(screen.getByLabelText('Сумма, RUB'));
+    await user.type(screen.getByLabelText('Сумма, RUB'), '10');
+    const save = screen.getAllByRole('button', { name: 'Сохранить' }).find(button => button.className.includes('bg-blue-600'));
+    await user.click(save as HTMLElement);
+    expect(await screen.findByText('Выберите денежный счёт своей компании.')).toBeTruthy();
+    expect(createMoneyOperationMock).not.toHaveBeenCalled();
+  });
+
   it('uses the local current date when creating a bank operation and saves it', async () => {
     const user = userEvent.setup();
 
@@ -1433,7 +1641,7 @@ describe('MoneyOperations integration', () => {
     await user.selectOptions(screen.getByLabelText('Банковский счёт'), '');
     await user.click(modalSaveButton as HTMLElement);
 
-    expect(await screen.findByText('Укажите денежный счёт или его название.')).toBeTruthy();
+    expect(await screen.findByText('Выберите денежный счёт своей компании.')).toBeTruthy();
     expect(createMoneyOperationMock).not.toHaveBeenCalled();
   });
 
@@ -1905,10 +2113,81 @@ describe('MoneyOperations integration', () => {
     expect(screen.getByText('Юридические')).toBeTruthy();
   }, 15000);
 
+  it('does not infer an account for an unattributed historical operation', async () => {
+    const user = userEvent.setup();
+    operations = [createOperation({ moneyAccountId: null, purpose: 'Историческая запись без подтверждённого счёта' })];
+    render(<MoneyOperations source="Bank" />);
+    await screen.findByText('Историческая запись без подтверждённого счёта');
+    await user.click(screen.getByRole('button', { name: 'Изменить' }));
+    await screen.findByText('Редактировать операцию по банку');
+    expect((screen.getByLabelText('Банковский счёт') as HTMLSelectElement).value).toBe('');
+    expect(screen.getByLabelText('Банковский счёт')).toHaveProperty('disabled', true);
+    expect(getLastButton('Сохранить')).toHaveProperty('disabled', true);
+    expect(screen.getByText('Историческая операция доступна только для просмотра. Её счёт и принадлежность сохраняются.')).toBeTruthy();
+    expect(updateMoneyOperationMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['None', 'Matched'] as const)('preserves a protected historical invoice link while editing its description (%s)', async (matchStatus) => {
+    const user = userEvent.setup();
+    operations = [Object.assign(createOperation({
+      moneyAccountId: 101,
+      direction: 'Income',
+      accountingType: 'Fact',
+      linkedInvoiceId: null,
+      matchStatus,
+      isAdvancePayment: false,
+      purpose: 'Описание своей операции со скрытым документом',
+    }), { isInvoiceLinkProtected: true })];
+    render(<MoneyOperations source="Bank" />);
+    await screen.findByText('Описание своей операции со скрытым документом');
+    await user.click(screen.getByRole('button', { name: 'Изменить' }));
+    await screen.findByText('Редактировать операцию по банку');
+    expect(screen.getByLabelText(/^Сумма, RUB$/)).toHaveProperty('disabled', true);
+    expect(screen.getByLabelText(/^Дата$/)).toHaveProperty('disabled', true);
+    expect(screen.getByLabelText('ID счёта')).toHaveProperty('disabled', true);
+    expect(screen.getByLabelText('Банковский счёт')).toHaveProperty('disabled', true);
+    expect(getMoneyOperationInvoiceCandidatesMock).not.toHaveBeenCalled();
+    await user.clear(screen.getByLabelText(/^Назначение$/));
+    await user.type(screen.getByLabelText(/^Назначение$/), 'Уточнённое описание своей операции');
+    await user.click(getLastButton('Сохранить'));
+    await waitFor(() => expect(updateMoneyOperationMock).toHaveBeenCalledTimes(1));
+    expect(updateMoneyOperationMock).toHaveBeenCalledWith(1, expect.objectContaining({
+      linkedInvoiceId: null,
+      matchStatus,
+      purpose: 'Уточнённое описание своей операции',
+    }));
+    expect(createMoneyOperationMock).not.toHaveBeenCalled();
+  });
+
+  it('does not apply an unallocated historical invoice pointer when only its description changes', async () => {
+    const user = userEvent.setup();
+    operations = [createOperation({
+      moneyAccountId: 101,
+      direction: 'Income',
+      linkedInvoiceId: 33,
+      matchStatus: 'None',
+      purpose: 'Прежняя ссылка без зачёта',
+    })];
+    render(<MoneyOperations source="Bank" />);
+    await screen.findByText('Прежняя ссылка без зачёта');
+    await user.click(screen.getByRole('button', { name: 'Изменить' }));
+    await screen.findByText('Редактировать операцию по банку');
+    await user.clear(screen.getByLabelText(/^Назначение$/));
+    await user.type(screen.getByLabelText(/^Назначение$/), 'Описание без повторного распределения');
+    await user.click(getLastButton('Сохранить'));
+    await waitFor(() => expect(updateMoneyOperationMock).toHaveBeenCalledTimes(1));
+    expect(updateMoneyOperationMock).toHaveBeenCalledWith(1, expect.objectContaining({
+      linkedInvoiceId: 33,
+      matchStatus: 'None',
+      purpose: 'Описание без повторного распределения',
+    }));
+  });
+
   it('normalizes API dates in the edit form and updates the operation', async () => {
     const user = userEvent.setup();
     operations = [
       createOperation({
+        moneyAccountId: 101,
         date: '2026-04-20T00:00:00Z',
         recognitionDate: '2026-04-18T15:45:00Z',
         purpose: 'Старое назначение',
@@ -1948,6 +2227,7 @@ describe('MoneyOperations integration', () => {
     operations = [
       createOperation({
         id: 7,
+        moneyAccountId: 101,
         source: 'Bank',
         direction: 'Income',
         counterpartyName: 'Клиент по выписке',
@@ -1983,6 +2263,7 @@ describe('MoneyOperations integration', () => {
     operations = [
       createOperation({
         id: 8,
+        moneyAccountId: 101,
         source: 'Bank',
         direction: 'Income',
         amount: 25000,
@@ -2037,6 +2318,7 @@ describe('MoneyOperations integration', () => {
     operations = [
       createOperation({
         id: 18,
+        moneyAccountId: 501,
         source: 'EMoney',
         direction: 'Income',
         amount: 7500,
@@ -2065,6 +2347,9 @@ describe('MoneyOperations integration', () => {
       },
     ]);
 
+    getMoneyAccountsMock.mockResolvedValue([
+      { id: 501, companyId: 1, companyName: 'Компания Альфа', name: 'ЮMoney', source: 'EMoney', currency: 'RUB', isActive: true, isDefault: true, createdAt: '2026-10-01T00:00:00Z' },
+    ]);
     render(<MoneyOperations source="EMoney" />);
 
     await screen.findByText('Ахмедова Айтан Рафик Кызы');
@@ -2092,6 +2377,7 @@ describe('MoneyOperations integration', () => {
     operations = [
       createOperation({
         id: 9,
+        moneyAccountId: 101,
         source: 'Bank',
         direction: 'Income',
         counterpartyName: 'Неизвестный отправитель',
@@ -2986,7 +3272,8 @@ describe('MoneyOperations integration', () => {
     expect(screen.getByDisplayValue('C:\\BankStatements')).toBeTruthy();
     const maskInput = screen.getByDisplayValue('*.csv');
     await user.clear(maskInput);
-    await user.type(maskInput, '*.csv;*.1c');
+    await user.paste('*.csv;*.1c');
+    expect(screen.getByDisplayValue('*.csv;*.1c')).toBe(maskInput);
     await user.click(screen.getAllByRole('button', { name: 'Сохранить' })[0]);
 
     await waitFor(() => expect(upsertUserSettingMock).toHaveBeenCalled());
@@ -3061,7 +3348,8 @@ describe('MoneyOperations integration', () => {
     expect(screen.getByDisplayValue('Облачная инфраструктура')).toBeTruthy();
     const keywordsInput = screen.getByDisplayValue('хостинг; cloud');
     await user.clear(keywordsInput);
-    await user.type(keywordsInput, 'хостинг; cloud; vps');
+    await user.paste('хостинг; cloud; vps');
+    expect(screen.getByDisplayValue('хостинг; cloud; vps')).toBe(keywordsInput);
     await user.click(within(rulesPanel).getByRole('button', { name: /Сохранить/ }));
 
     await waitFor(() => expect(upsertUserSettingMock).toHaveBeenCalled());

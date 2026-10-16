@@ -7,19 +7,19 @@ namespace PayPlanner.Api.Services.Banking;
 
 public sealed record BankAccountsSyncResult(int Added, int Updated, int Skipped, string? Error);
 
-public sealed record BankStatementSyncResult(int Inserted, int Updated, DateTime? Watermark, string? Error);
+public sealed record BankStatementSyncResult(int Inserted, int Updated, DateTime? Watermark, string? Error, int? BatchId = null);
 
 public interface IBankSyncService
 {
     Task<BankAccountsSyncResult> SyncAccountsAsync(int connectionId, CancellationToken ct);
 
-    Task<BankStatementSyncResult> SyncStatementAsync(int accountId, DateTime from, DateTime to, CancellationToken ct);
+    Task<BankStatementSyncResult> SyncStatementAsync(int accountId, DateTime from, DateTime to, BankSyncInvocation invocation, CancellationToken ct);
 
     /// <summary>Загружает выписки всех разрешённых счетов подключения. Ошибка одного счёта не останавливает остальные.</summary>
-    Task<IReadOnlyDictionary<int, BankStatementSyncResult>> SyncAllStatementsAsync(int connectionId, DateTime to, CancellationToken ct);
+    Task<IReadOnlyDictionary<int, BankStatementSyncResult>> SyncAllStatementsAsync(int connectionId, DateTime to, BankSyncInvocation invocation, CancellationToken ct);
 
     /// <summary>Загружает выписки всех открытых и ограниченных счетов подключения за указанный период.</summary>
-    Task<IReadOnlyDictionary<int, BankStatementSyncResult>> SyncAllStatementsForPeriodAsync(int connectionId, DateTime from, DateTime to, CancellationToken ct);
+    Task<IReadOnlyDictionary<int, BankStatementSyncResult>> SyncAllStatementsForPeriodAsync(int connectionId, DateTime from, DateTime to, BankSyncInvocation invocation, CancellationToken ct);
 
     /// <summary>Меняет пользовательские настройки счёта: «по умолчанию», скрытие, загрузка выписок. Статус счёта вручную не меняется.</summary>
     Task<AccountSettingsResult> UpdateAccountSettingsAsync(int accountId, bool? isDefault, bool? isHidden, bool? statementsEnabled, CancellationToken ct);
@@ -215,10 +215,10 @@ public sealed class BankSyncService : IBankSyncService
         return new BankAccountsSyncResult(added, updated, skipped, null);
     }
 
-    public Task<BankStatementSyncResult> SyncStatementAsync(int accountId, DateTime from, DateTime to, CancellationToken ct)
-        => SyncStatementCoreAsync(accountId, from, to, false, ct);
+    public Task<BankStatementSyncResult> SyncStatementAsync(int accountId, DateTime from, DateTime to, BankSyncInvocation invocation, CancellationToken ct)
+        => SyncStatementCoreAsync(accountId, from, to, false, invocation, ct);
 
-    private async Task<BankStatementSyncResult> SyncStatementCoreAsync(int accountId, DateTime from, DateTime to, bool incremental, CancellationToken ct)
+    private async Task<BankStatementSyncResult> SyncStatementCoreAsync(int accountId, DateTime from, DateTime to, bool incremental, BankSyncInvocation invocation, CancellationToken ct)
     {
         var account = await _db.BankConnectionAccounts
             .Include(item => item.BankConnection)
@@ -233,10 +233,22 @@ public sealed class BankSyncService : IBankSyncService
             return new BankStatementSyncResult(0, 0, account.StatementWatermark, "Загрузка выписки для счёта отключена или счёт недоступен.");
         }
 
+        var imports = new BankStatementImportService(_db);
+        BankStatementImportSession session;
+        try
+        {
+            session = await imports.OpenNativeAsync(account, from, to, invocation, ct);
+            if (session.Replay is not null) return session.Replay;
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or InvalidOperationException or DbUpdateException)
+        {
+            _db.ChangeTracker.Clear();
+            return new BankStatementSyncResult(0, 0, account.StatementWatermark, Trim(ex.Message));
+        }
         var (provider, credentials, setupError) = await PrepareAsync(account.BankConnection, ct);
         if (provider is null || credentials is null)
         {
-            return await FailAccountAsync(account, setupError, ct, from, to);
+            return await FinishNativeFailureAsync(imports, session, setupError, false, from, to, ct);
         }
 
         // Начало периода: после отметки (или после прошлой успешной загрузки, если подтверждённых операций ещё нет)
@@ -268,45 +280,49 @@ public sealed class BankSyncService : IBankSyncService
                     .ToList();
 
                 var ids = items.Select(item => item.ExternalId.Trim()).ToList();
-                var known = await _db.BankStatementOperations
-                    .Where(item => item.BankConnectionAccountId == account.Id && ids.Contains(item.ExternalOperationId))
-                    .ToDictionaryAsync(item => item.ExternalOperationId, StringComparer.Ordinal, ct);
-
-                foreach (var info in items)
+                Dictionary<string, BankStatementOperation> known;
+                await using (var pageTransaction = await _db.Database.BeginTransactionAsync(ct))
                 {
-                    var key = info.ExternalId.Trim();
-                    if (info.IsBooked)
-                    {
-                        lastBooked = lastBooked.HasValue && lastBooked > info.Date ? lastBooked : info.Date;
-                    }
-                    else
-                    {
-                        firstPending = firstPending.HasValue && firstPending < info.Date ? firstPending : info.Date;
-                    }
+                    if (await imports.ValidateNativePageAsync(session, ct) is { } completedPage) return completedPage;
+                    known = await _db.BankStatementOperations
+                        .Where(item => item.BankConnectionAccountId == account.Id && ids.Contains(item.ExternalOperationId))
+                        .ToDictionaryAsync(item => item.ExternalOperationId, StringComparer.Ordinal, ct);
 
-                    if (known.TryGetValue(key, out var row))
+                    foreach (var info in items)
                     {
-                        // Подтверждённая операция больше не меняется; незавершённая обновляется.
-                        if (!row.IsBooked)
+                        var key = info.ExternalId.Trim();
+                        if (known.TryGetValue(key, out var row))
                         {
-                            Apply(row, info);
-                            updatedCount++;
+                            // Подтверждённая операция больше не меняется; незавершённая обновляется.
+                            if (!row.IsBooked)
+                            {
+                                Apply(row, info);
+                                updatedCount++;
+                            }
+
+                            continue;
                         }
 
-                        continue;
+                        var created = new BankStatementOperation { BankConnectionAccountId = account.Id, ExternalOperationId = key };
+                        Apply(created, info);
+                        _db.BankStatementOperations.Add(created);
+                        known.Add(key, created);
+                        inserted++;
                     }
 
-                    var created = new BankStatementOperation { BankConnectionAccountId = account.Id, ExternalOperationId = key };
-                    Apply(created, info);
-                    _db.BankStatementOperations.Add(created);
-                    known.Add(key, created);
-                    inserted++;
+                    // Страница сохраняется сразу: память ограничена размером страницы, а сбой на поздней странице
+                    // не теряет уже полученное (повтор безопасен благодаря уникальному индексу).
+                    await _db.SaveChangesAsync(ct);
+                    await pageTransaction.CommitAsync(ct);
                 }
-
-                // Страница сохраняется сразу: память ограничена размером страницы, а сбой на поздней странице
-                // не теряет уже полученное (повтор безопасен благодаря уникальному индексу).
-                await _db.SaveChangesAsync(ct);
-                foreach (var operation in known.Values) _db.Entry(operation).State = EntityState.Detached;
+                foreach (var operation in known.Values)
+                {
+                    if (operation.IsBooked) lastBooked = !lastBooked.HasValue || operation.OperationDate > lastBooked ? operation.OperationDate : lastBooked;
+                    else firstPending = !firstPending.HasValue || operation.OperationDate < firstPending ? operation.OperationDate : firstPending;
+                    _db.Entry(operation).State = EntityState.Detached;
+                }
+                foreach (var chunk in known.Values.Select(operation => operation.Id).Chunk(500))
+                    await imports.ImportNativePageAsync(session, chunk, ct);
 
                 cursor = result.NextCursor;
                 if (string.IsNullOrEmpty(cursor))
@@ -320,59 +336,106 @@ public sealed class BankSyncService : IBankSyncService
                 }
             }
         }
+        catch (UnauthorizedAccessException)
+        {
+            _db.ChangeTracker.Clear();
+            return NativeAccessDenied(account.StatementWatermark);
+        }
         catch (BankAuthorizationException ex)
         {
-            account.BankConnection.Status = BankConnectionStatuses.ReauthRequired;
-            account.BankConnection.LastError = Trim(ex.Message);
-            return await FailAccountAsync(account, ex.Message, ct, from, to);
+            return await FinishNativeFailureAsync(imports, session, ex.Message, true, from, to, ct);
         }
         catch (DbUpdateException ex)
         {
             // Параллельная загрузка того же счёта вставила те же операции: уникальный индекс защитил от дублей.
-            _db.ChangeTracker.Clear();
-            return new BankStatementSyncResult(inserted, updatedCount, account.StatementWatermark, Trim(ex.GetBaseException().Message));
+            return await FinishNativeFailureAsync(imports, session, ex.GetBaseException().Message, false, from, to, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return await FailAccountAsync(account, ex.Message, ct, from, to);
+            return await FinishNativeFailureAsync(imports, session, ex.Message, false, from, to, ct);
         }
 
-        // Отметка сдвигается только после успешного сохранения всех страниц и не заходит за незавершённые операции.
-        DateTime? newWatermark = lastBooked;
-        if (newWatermark.HasValue && firstPending.HasValue && firstPending.Value <= newWatermark.Value)
+        try
         {
-            newWatermark = firstPending.Value.AddTicks(-1);
-        }
+            await using var finishTransaction = await _db.Database.BeginTransactionAsync(ct);
+            if (await imports.ValidateNativePageAsync(session, ct) is { } completedRequest) return completedRequest;
+            await _db.Entry(account).ReloadAsync(ct);
+            // Отметка сдвигается только после успешного сохранения всех страниц и не заходит за незавершённые операции.
+            DateTime? newWatermark = lastBooked;
+            if (newWatermark.HasValue && firstPending.HasValue && firstPending.Value <= newWatermark.Value)
+            {
+                newWatermark = firstPending.Value.AddTicks(-1);
+            }
 
-        if (newWatermark.HasValue && (!account.StatementWatermark.HasValue || newWatermark > account.StatementWatermark))
-        {
-            account.StatementWatermark = newWatermark;
-        }
+            if (newWatermark.HasValue && (!account.StatementWatermark.HasValue || newWatermark > account.StatementWatermark))
+            {
+                account.StatementWatermark = newWatermark;
+            }
 
-        account.LastStatementSyncAt = DateTime.UtcNow;
-        account.LastError = null;
-        account.UpdatedAt = DateTime.UtcNow;
-        _db.BankSyncLogs.Add(new BankSyncLog
+            account.LastStatementSyncAt = DateTime.UtcNow;
+            account.LastError = null;
+            account.UpdatedAt = DateTime.UtcNow;
+            _db.BankSyncLogs.Add(new BankSyncLog
+            {
+                BankConnectionId = account.BankConnectionId,
+                BankConnectionAccountId = account.Id,
+                Kind = "statement",
+                PeriodFrom = start,
+                PeriodTo = to,
+                Result = "ok",
+                OperationsCount = inserted + updatedCount,
+            });
+            await _db.SaveChangesAsync(ct);
+            var completed = new BankStatementSyncResult(inserted, updatedCount, account.StatementWatermark, null, session.BatchId);
+            await imports.CompleteNativeAsync(session, completed, ct);
+            await finishTransaction.CommitAsync(ct);
+            return completed;
+        }
+        catch (UnauthorizedAccessException)
         {
-            BankConnectionId = account.BankConnectionId,
-            BankConnectionAccountId = account.Id,
-            Kind = "statement",
-            PeriodFrom = start,
-            PeriodTo = to,
-            Result = "ok",
-            OperationsCount = inserted + updatedCount,
-        });
-        await _db.SaveChangesAsync(ct);
-        return new BankStatementSyncResult(inserted, updatedCount, account.StatementWatermark, null);
+            _db.ChangeTracker.Clear();
+            return NativeAccessDenied(account.StatementWatermark);
+        }
     }
 
-    public Task<IReadOnlyDictionary<int, BankStatementSyncResult>> SyncAllStatementsAsync(int connectionId, DateTime to, CancellationToken ct)
-        => SyncAllCoreAsync(connectionId, null, to, ct);
+    private static BankStatementSyncResult NativeAccessDenied(DateTime? watermark = null)
+        => new(0, 0, watermark, "Доступ к загрузке изменён; повторите после проверки прав и счёта.");
 
-    public Task<IReadOnlyDictionary<int, BankStatementSyncResult>> SyncAllStatementsForPeriodAsync(int connectionId, DateTime from, DateTime to, CancellationToken ct)
-        => SyncAllCoreAsync(connectionId, from, to, ct);
+    private async Task<BankStatementSyncResult> FinishNativeFailureAsync(
+        BankStatementImportService imports, BankStatementImportSession session, string? message,
+        bool requiresReauthorization, DateTime from, DateTime to, CancellationToken ct)
+    {
+        // Discard changes belonging to a rolled-back page before recording the controlled failure.
+        _db.ChangeTracker.Clear();
+        try
+        {
+            await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+            if (await imports.ValidateNativePageAsync(session, ct) is { } completed) return completed;
+            var account = await _db.BankConnectionAccounts.Include(item => item.BankConnection).SingleAsync(item => item.Id == session.BankAccountId, ct);
+            await imports.CompleteNativeAsync(session, null, ct);
+            if (requiresReauthorization)
+            {
+                account.BankConnection.Status = BankConnectionStatuses.ReauthRequired;
+                account.BankConnection.LastError = Trim(message);
+            }
+            var result = await FailAccountAsync(account, message, ct, from, to, session.BatchId);
+            await transaction.CommitAsync(ct);
+            return result;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            _db.ChangeTracker.Clear();
+            return NativeAccessDenied();
+        }
+    }
 
-    private async Task<IReadOnlyDictionary<int, BankStatementSyncResult>> SyncAllCoreAsync(int connectionId, DateTime? from, DateTime to, CancellationToken ct)
+    public Task<IReadOnlyDictionary<int, BankStatementSyncResult>> SyncAllStatementsAsync(int connectionId, DateTime to, BankSyncInvocation invocation, CancellationToken ct)
+        => SyncAllCoreAsync(connectionId, null, to, invocation, ct);
+
+    public Task<IReadOnlyDictionary<int, BankStatementSyncResult>> SyncAllStatementsForPeriodAsync(int connectionId, DateTime from, DateTime to, BankSyncInvocation invocation, CancellationToken ct)
+        => SyncAllCoreAsync(connectionId, from, to, invocation, ct);
+
+    private async Task<IReadOnlyDictionary<int, BankStatementSyncResult>> SyncAllCoreAsync(int connectionId, DateTime? from, DateTime to, BankSyncInvocation invocation, CancellationToken ct)
     {
         var accounts = await _db.BankConnectionAccounts.AsNoTracking()
             .Where(item => item.BankConnectionId == connectionId && item.StatementsEnabled
@@ -387,7 +450,7 @@ public sealed class BankSyncService : IBankSyncService
             ct.ThrowIfCancellationRequested();
             try
             {
-                results[item.Id] = await SyncStatementCoreAsync(item.Id, from ?? item.CreatedAt.AddDays(-90), to, !from.HasValue, ct);
+                results[item.Id] = await SyncStatementCoreAsync(item.Id, from ?? item.CreatedAt.AddDays(-90), to, !from.HasValue, invocation, ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -539,7 +602,7 @@ public sealed class BankSyncService : IBankSyncService
         return new BankAccountsSyncResult(0, 0, 0, connection.LastError);
     }
 
-    private async Task<BankStatementSyncResult> FailAccountAsync(BankConnectionAccount account, string? message, CancellationToken ct, DateTime? from = null, DateTime? to = null)
+    private async Task<BankStatementSyncResult> FailAccountAsync(BankConnectionAccount account, string? message, CancellationToken ct, DateTime? from = null, DateTime? to = null, int? batchId = null)
     {
         account.LastError = Trim(message);
         account.UpdatedAt = DateTime.UtcNow;
@@ -554,7 +617,7 @@ public sealed class BankSyncService : IBankSyncService
             Error = account.LastError,
         });
         await _db.SaveChangesAsync(ct);
-        return new BankStatementSyncResult(0, 0, account.StatementWatermark, account.LastError);
+        return new BankStatementSyncResult(0, 0, account.StatementWatermark, account.LastError, batchId);
     }
 
     private static void Apply(BankStatementOperation row, BankOperationInfo info)

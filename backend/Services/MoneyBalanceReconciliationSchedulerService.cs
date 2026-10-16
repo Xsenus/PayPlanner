@@ -1,9 +1,5 @@
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
-using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models.Responses;
-using System.Security.Claims;
 
 namespace PayPlanner.Api.Services;
 
@@ -49,26 +45,28 @@ public sealed class MoneyBalanceReconciliationSchedulerService : BackgroundServi
                 {
                     var startedAt = DateTime.UtcNow;
                     var result = await RunForDateAsync(targetDate, stoppingToken);
-                    _lastRunDate = targetDate;
                     _logger.LogInformation(
                         "Daily money balance reconciliation finished for {Date}: created {Created}, updated {Updated}, issues {IssueCount}.",
                         targetDate,
-                        result?.Created ?? 0,
-                        result?.Updated ?? 0,
-                        result?.IssueCount ?? 0);
+                        result.Created,
+                        result.Updated,
+                        result.IssueCount);
                     if (_jobRunState is not null)
                     {
                         await _jobRunState.RecordSuccessAsync(
                             SystemJobKeys.MoneyBalanceReconciliation,
                             startedAt,
-                            (result?.Created ?? 0) + (result?.Updated ?? 0),
+                            result.Created + result.Updated,
                             null,
-                            result is null
-                                ? $"Сверка денежных остатков за {targetDate:dd.MM.yyyy} не вернула результат."
-                                : $"Сверка за {targetDate:dd.MM.yyyy}: создано {result.Created}, обновлено {result.Updated}, расхождений {result.IssueCount}.",
+                            $"Сверка за {targetDate:dd.MM.yyyy}: создано {result.Created}, обновлено {result.Updated}, расхождений {result.IssueCount}.",
                             stoppingToken);
                     }
+                    _lastRunDate = targetDate;
                 }
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
             }
             catch (Exception ex)
             {
@@ -96,36 +94,18 @@ public sealed class MoneyBalanceReconciliationSchedulerService : BackgroundServi
         _logger.LogInformation("MoneyBalanceReconciliationSchedulerService stopped.");
     }
 
-    public async Task<MoneyBalanceReconciliationRunResultDto?> RunForDateAsync(DateTime date, CancellationToken cancellationToken)
+    public async Task<MoneyBalanceReconciliationRunResultDto> RunForDateAsync(DateTime date, CancellationToken cancellationToken,
+        Func<PaymentContext, CancellationToken, Task<bool>>? verifyCaller = null)
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
         var loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
-        var controller = new MoneyOperationsController(
-            db,
-            loggerFactory.CreateLogger<MoneyOperationsController>());
-
-        controller.ControllerContext = new ControllerContext
-        {
-            HttpContext = new DefaultHttpContext
-            {
-                User = new ClaimsPrincipal(new ClaimsIdentity(
-                [
-                    new Claim(ClaimTypes.Role, "admin"),
-                ], "Scheduler")),
-            },
-        };
-
-        var action = await controller.RunBalanceReconciliation(
-            from: date.Date,
-            to: date.Date,
-            source: null,
-            accountName: null,
-            ct: cancellationToken);
-
-        return action.Result is OkObjectResult { Value: MoneyBalanceReconciliationRunResultDto result }
-            ? result
-            : null;
+        var authority = await MoneyReconciliationScope.ForSystemAsync(db, cancellationToken);
+        var service = new MoneyBalanceReconciliationService(db, loggerFactory.CreateLogger<MoneyBalanceReconciliationService>());
+        return await service.RunAsync(authority, date.Date, date.Date, null, null,
+            async (authorityDb, token) => authority.SameAuthority(await MoneyReconciliationScope.ForSystemAsync(authorityDb, token))
+                && (verifyCaller is null || await verifyCaller(authorityDb, token)),
+            cancellationToken);
     }
 
     public static DateTime ResolveReconciliationTargetDate(DateTime nowUtc, TimeZoneInfo? timeZone = null)

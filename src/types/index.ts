@@ -172,7 +172,13 @@ export interface BankStatementRun {
   status: 'Success' | 'Partial' | 'Error';
   succeeded: number;
   total: number;
-  accounts: Array<{ accountId: number; inserted: number; updated: number; error?: string | null }>;
+  accounts: Array<{ accountId: number; inserted: number; updated: number; error?: string | null; batchId?: number | null }>;
+}
+
+export interface BankStatementPeriodRequest {
+  requestId: string;
+  from: string;
+  to: string;
 }
 
 export interface BankSyncLogItem {
@@ -1975,11 +1981,17 @@ export type CashOrderType = 'Incoming' | 'Outgoing';
 
 export interface MoneyAccount {
   id: number;
+  companyId?: number | null;
+  companyName?: string | null;
+  canUseForNewOperations?: boolean;
+  canEditExistingOperations?: boolean;
+  bankConnectionAccountId?: number | null;
   name: string;
   source: MoneyOperationSource;
   currency: string;
   bankName?: string | null;
   bankAccountNumber?: string | null;
+  bankBik?: string | null;
   isDefault: boolean;
   isActive: boolean;
   createdAt: string;
@@ -2020,6 +2032,7 @@ export interface MoneyOperation {
   linkedInvoiceId?: number | null;
   linkedInvoiceNumber?: string | null;
   linkedInvoiceDate?: string | null;
+  isInvoiceLinkProtected?: boolean;
   linkedContractId?: number | null;
   linkedContractNumber?: string | null;
   linkedActId?: number | null;
@@ -2175,6 +2188,10 @@ export interface MoneyOperationAccountSummary {
 }
 
 export interface MoneyOperationDailyBalance {
+  companyId?: number | null;
+  moneyAccountId?: number | null;
+  currency?: string | null;
+  balanceKey?: string | null;
   date: string;
   accountName: string;
   source: MoneyOperationSource;
@@ -2188,6 +2205,10 @@ export interface MoneyOperationDailyBalance {
 }
 
 export interface MoneyBalanceReconciliationResult {
+  companyId?: number | null;
+  moneyAccountId?: number | null;
+  currency?: string | null;
+  balanceKey?: string | null;
   id: number;
   date: string;
   accountName: string;

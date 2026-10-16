@@ -333,11 +333,11 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
                     EnsureRunner(_moneyBalanceRunner);
                     var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, GetCurrentUserId(), ct);
                     var targetDate = MoneyBalanceReconciliationSchedulerService.ResolveReconciliationTargetDate(DateTime.UtcNow, timeZone);
-                    var moneyResult = await _moneyBalanceRunner!.RunForDateAsync(targetDate, ct);
-                    processedCount = (moneyResult?.Created ?? 0) + (moneyResult?.Updated ?? 0);
-                    summary = moneyResult is null
-                        ? $"Сверка денежных остатков за {targetDate:dd.MM.yyyy} не вернула результат."
-                        : $"Сверка за {targetDate:dd.MM.yyyy}: создано {moneyResult.Created}, обновлено {moneyResult.Updated}, расхождений {moneyResult.IssueCount}.";
+                    var moneyResult = await _moneyBalanceRunner!.RunForDateAsync(targetDate, ct,
+                        async (authorityDb, token) => (await authorityDb.ResolveSectionAccessAsync(User,
+                            RolePermissionCatalog.Payments, token, requireApprovedUser: true))?.Visibility.IsAdmin == true);
+                    processedCount = moneyResult.Created + moneyResult.Updated;
+                    summary = $"Сверка за {targetDate:dd.MM.yyyy}: создано {moneyResult.Created}, обновлено {moneyResult.Updated}, расхождений {moneyResult.IssueCount}.";
                     await RecordManualSuccessAsync(item.Key, startedAt, processedCount, skippedCount, summary, ct);
                     break;
 
@@ -352,6 +352,11 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
                 default:
                     return NotFound(new { message = "Фоновый сервис не найден." });
             }
+        }
+        catch (UnauthorizedAccessException ex) when (item.Key == SystemJobKeys.MoneyBalanceReconciliation)
+        {
+            await RecordManualFailureAsync(item.Key, startedAt, ex, ct);
+            return Forbid();
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

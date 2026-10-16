@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace PayPlanner.Api.Models;
 
 public class MoneyOperation
@@ -33,11 +35,17 @@ public class MoneyOperation
     public string? PaidAccountName { get; set; }
     public int? LinkedInvoiceId { get; set; }
     public Invoice? LinkedInvoice { get; set; }
+    // Response-only state: a redacted pointer must not become an unlink request.
+    [System.ComponentModel.DataAnnotations.Schema.NotMapped]
+    public bool IsInvoiceLinkProtected { get; internal set; }
     public MoneyOperationMatchStatus MatchStatus { get; set; } = MoneyOperationMatchStatus.None;
     public DateTime? MatchedAt { get; set; }
     public string? MatchComment { get; set; }
     public int? BankStatementImportBatchId { get; set; }
     public BankStatementImportBatch? BankStatementImportBatch { get; set; }
+    // Assigned by the import service, never by the public money-operation form.
+    [JsonIgnore]
+    public string? SourceMovementKey { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }
     public ICollection<CashOrder> CashOrders { get; set; } = new List<CashOrder>();

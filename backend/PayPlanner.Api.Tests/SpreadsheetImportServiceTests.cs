@@ -16,7 +16,7 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public class SpreadsheetImportServiceTests
+public partial class SpreadsheetImportServiceTests
 {
     [Fact]
     public async Task PreviewAsync_DetectsRussianSpreadsheetSections()

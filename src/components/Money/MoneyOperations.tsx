@@ -74,6 +74,8 @@ import type {
 } from '../../types';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { requestPaymentAdvanceReviewFilter } from '../../utils/paymentAdvanceReview';
+import { canEditMoneyAccountHistory, canUseMoneyAccountForNewOperation, initialMoneyAccount, moneyAccountLabel } from '../../utils/moneyAccountSelection';
+import { moneyBalanceComparisonKey, moneyBalanceCurrencyLabel } from '../../utils/moneyBalanceIdentity';
 
 type MoneyTab = MoneyOperationSource | 'Total';
 
@@ -430,7 +432,7 @@ function renderJournalStatusBadge(item: MoneyOperation) {
 }
 
 function isAppliedToInvoice(item: MoneyOperation) {
-  return Boolean(item.linkedInvoiceId && item.matchStatus === 'Matched');
+  return Boolean((item.linkedInvoiceId || item.isInvoiceLinkProtected) && item.matchStatus === 'Matched');
 }
 
 function isUnallocatedAdvanceMoneyOperation(item: MoneyOperation) {
@@ -440,6 +442,7 @@ function isUnallocatedAdvanceMoneyOperation(item: MoneyOperation) {
     item.accountingType === 'Fact' &&
     item.amount > 0 &&
     !item.linkedInvoiceId &&
+    !item.isInvoiceLinkProtected &&
     item.matchStatus !== 'Ignored'
   );
 }
@@ -447,7 +450,7 @@ function isUnallocatedAdvanceMoneyOperation(item: MoneyOperation) {
 type BalanceCheckSource = Pick<MoneyOperationsSummary | MoneyOperationAccountSummary, 'startBalance' | 'income' | 'expense' | 'endBalance'>;
 type DailyBalanceCheckSource = Pick<
   MoneyOperationDailyBalance,
-  'openingBalance' | 'income' | 'expense' | 'closingBalance' | 'incomeCount' | 'expenseCount' | 'isBalanced'
+  'openingBalance' | 'income' | 'expense' | 'closingBalance' | 'incomeCount' | 'expenseCount' | 'isBalanced' | 'currency'
 >;
 type ReconciliationNotification = {
   key: string;
@@ -520,7 +523,7 @@ function renderSavedBalanceReconciliationBadge(
     return (
       <span
         className="inline-flex rounded-full bg-rose-50 px-2 py-1 text-xs font-medium text-rose-700"
-        title={`Сохранено ${formatDate(saved.checkedAt, timeZoneId)}. Изменение сумм: ${formatMoney(drift?.amountDifference ?? 0)} ₽`}>
+        title={`Сохранено ${formatDate(saved.checkedAt, timeZoneId)}. Изменение сумм: ${formatMoney(drift?.amountDifference ?? 0)} ${moneyBalanceCurrencyLabel(current.currency)}`}>
         Изменилось
       </span>
     );
@@ -1626,6 +1629,7 @@ function MoneyOperationModal({
   source,
   initialData,
   moneyAccounts,
+  preferredMoneyAccountId,
   responsibles,
   categoryOptions,
   open,
@@ -1636,6 +1640,7 @@ function MoneyOperationModal({
   source: MoneyOperationSource;
   initialData?: MoneyOperation | null;
   moneyAccounts?: MoneyAccount[];
+  preferredMoneyAccountId?: number | null;
   responsibles?: ActResponsible[];
   categoryOptions?: MoneyOperationCategoryOption[];
   open: boolean;
@@ -1647,11 +1652,23 @@ function MoneyOperationModal({
   const [error, setError] = useState<string | null>(null);
   const [invoiceCandidates, setInvoiceCandidates] = useState<MoneyOperationInvoiceCandidate[]>([]);
   const [invoiceCandidatesLoading, setInvoiceCandidatesLoading] = useState(false);
-  const activeMoneyAccounts = useMemo(() => (moneyAccounts ?? []).filter((account) => account.isActive), [moneyAccounts]);
-  const sourceMoneyAccounts = useMemo(
-    () => (moneyAccounts ?? []).filter((account) => account.source === source && account.isActive),
-    [moneyAccounts, source],
+  const editorSession = useRef<{ source: MoneyOperationSource; initialData?: MoneyOperation | null } | null>(null);
+  const activeMoneyAccounts = useMemo(
+    () => (moneyAccounts ?? []).filter(canUseMoneyAccountForNewOperation),
+    [moneyAccounts],
   );
+  const sourceMoneyAccounts = useMemo(
+    () => (moneyAccounts ?? []).filter(account => account.source === source
+      && (canUseMoneyAccountForNewOperation(account) || account.id === initialData?.moneyAccountId)),
+    [moneyAccounts, source, initialData?.moneyAccountId],
+  );
+  const existingMoneyAccount = initialData?.moneyAccountId
+    ? moneyAccounts?.find(account => account.id === initialData.moneyAccountId)
+    : undefined;
+  const historicalReadOnly = Boolean(initialData && (!existingMoneyAccount || !canEditMoneyAccountHistory(existingMoneyAccount)));
+  const matchingAccountAvailable = Boolean(existingMoneyAccount && canUseMoneyAccountForNewOperation(existingMoneyAccount));
+  const appliedInvoiceLocked = Boolean(initialData && (isAppliedToInvoice(initialData) || initialData.isInvoiceLinkProtected));
+  const financialFieldsLocked = appliedInvoiceLocked || Boolean(initialData && !matchingAccountAvailable);
   const transferTargetAccounts = useMemo(
     () => activeMoneyAccounts.filter((account) => account.id !== form.moneyAccountId),
     [activeMoneyAccounts, form.moneyAccountId],
@@ -1664,9 +1681,15 @@ function MoneyOperationModal({
   }, [categoryOptions, form.direction]);
 
   useEffect(() => {
+    if (!open) {
+      editorSession.current = null;
+      return;
+    }
     if (open) {
+      if (editorSession.current?.source === source && editorSession.current.initialData === initialData) return;
+      editorSession.current = { source, initialData };
       const nextForm = mapMoneyOperationToForm(source, initialData);
-      const defaultAccount = sourceMoneyAccounts.find((account) => account.isDefault) ?? sourceMoneyAccounts[0];
+      const defaultAccount = initialMoneyAccount(sourceMoneyAccounts, preferredMoneyAccountId);
       setForm(
         !initialData && defaultAccount
           ? {
@@ -1681,10 +1704,11 @@ function MoneyOperationModal({
       );
       setError(null);
     }
-  }, [initialData, open, source, sourceMoneyAccounts]);
+  }, [initialData, open, preferredMoneyAccountId, source, sourceMoneyAccounts]);
 
   useEffect(() => {
-    if (!open || !initialData?.id || initialData.id < 0 || initialData.direction !== 'Income') {
+    if (!open || !initialData?.id || initialData.id < 0 || initialData.direction !== 'Income'
+        || initialData.isInvoiceLinkProtected || isAppliedToInvoice(initialData) || !matchingAccountAvailable) {
       setInvoiceCandidates([]);
       setInvoiceCandidatesLoading(false);
       return;
@@ -1713,7 +1737,7 @@ function MoneyOperationModal({
     return () => {
       cancelled = true;
     };
-  }, [initialData?.direction, initialData?.id, open, source]);
+  }, [initialData, matchingAccountAvailable, open, source]);
 
   if (!open) return null;
 
@@ -1798,18 +1822,22 @@ function MoneyOperationModal({
 
   const handleSubmit = async () => {
     setError(null);
+    if (historicalReadOnly) {
+      setError('Историческая операция доступна только для просмотра. Её счёт и принадлежность сохраняются.');
+      return;
+    }
     if (!Number.isFinite(form.amount) || form.amount <= 0) {
       setError('Сумма денежной операции должна быть больше нуля.');
       return;
     }
 
-    if (!form.moneyAccountId && !form.accountName?.trim()) {
-      setError('Укажите денежный счёт или его название.');
+    if (!sourceMoneyAccounts.some(account => account.id === form.moneyAccountId)) {
+      setError('Выберите денежный счёт своей компании.');
       return;
     }
 
     if (form.direction === 'Transfer') {
-      if (!form.moneyAccountId || !form.transferTargetMoneyAccountId) {
+      if (!form.moneyAccountId || !transferTargetAccounts.some(account => account.id === form.transferTargetMoneyAccountId)) {
         setError('Выберите счёт списания и счёт зачисления для перевода.');
         return;
       }
@@ -1846,7 +1874,6 @@ function MoneyOperationModal({
   const title = initialData
     ? `Редактировать операцию по ${SOURCE_MODAL_LABELS[source]}`
     : `Добавить операцию по ${SOURCE_MODAL_LABELS[source]}`;
-  const appliedInvoiceLocked = initialData ? isAppliedToInvoice(initialData) : false;
   const isAccountableAdvance = form.direction === 'Expense' && form.isAdvancePayment;
   const counterpartyLabel =
     form.direction === 'Income'
@@ -1875,7 +1902,12 @@ function MoneyOperationModal({
           </button>
         </div>
 
-        <div className="flex-1 space-y-6 overflow-y-auto p-6">
+        <fieldset disabled={historicalReadOnly} className="m-0 min-w-0 flex-1 space-y-6 overflow-y-auto border-0 p-6">
+          {historicalReadOnly && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              Историческая операция доступна только для просмотра. Её счёт и принадлежность сохраняются.
+            </p>
+          )}
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2">
               <span className="text-sm text-slate-500">Операция</span>
@@ -1888,6 +1920,7 @@ function MoneyOperationModal({
               <span className="text-sm text-slate-500">Учёт</span>
               <SystemSelect
                 value={form.accountingType}
+                disabled={financialFieldsLocked}
                 onChange={(event) => setField('accountingType', event.target.value as MoneyOperationAccountingType)}
                 className="border-none bg-transparent text-sm font-medium text-slate-700 focus:outline-none">
                 <option value="Fact">Факт</option>
@@ -1902,6 +1935,7 @@ function MoneyOperationModal({
                 <input
                   type="radio"
                   name="direction"
+                  disabled={financialFieldsLocked}
                   checked={form.direction === direction}
                   onChange={() => handleDirectionChange(direction)}
                 />
@@ -1915,6 +1949,7 @@ function MoneyOperationModal({
               <button
                 type="button"
                 data-testid="money-accountable-advance-preset"
+                disabled={financialFieldsLocked}
                 aria-pressed={isAccountableAdvance}
                 onClick={applyAccountableAdvancePreset}
                 className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
@@ -1930,25 +1965,21 @@ function MoneyOperationModal({
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <label className="flex flex-col gap-1 text-sm text-slate-600">
               {SOURCE_ACCOUNT_FILTER_LABELS[source]}
-              {sourceMoneyAccounts.length > 0 ? (
                 <SystemSelect
+                  aria-label={SOURCE_ACCOUNT_FILTER_LABELS[source]}
                   value={form.moneyAccountId ?? ''}
+                  disabled={financialFieldsLocked || sourceMoneyAccounts.length === 0}
                   onChange={(event) => handleMoneyAccountChange(event.target.value)}
                   className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none">
                   <option value="">Выберите денежный счёт</option>
                   {sourceMoneyAccounts.map((account) => (
-                    <option key={account.id} value={account.id}>
-                      {account.name}
+                    <option key={account.id} value={account.id} disabled={!canUseMoneyAccountForNewOperation(account)}>
+                      {moneyAccountLabel(account)}
                     </option>
                   ))}
                 </SystemSelect>
-              ) : (
-                <input
-                  value={form.accountName ?? ''}
-                  onChange={(event) => setField('accountName', event.target.value)}
-                  className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none"
-                  placeholder="Основной счёт"
-                />
+              {sourceMoneyAccounts.length === 0 && (
+                <span className="text-xs text-amber-700">Нет доступных действующих счетов собственной компании. Обратитесь к администратору.</span>
               )}
             </label>
             {form.direction === 'Transfer' && (
@@ -1963,7 +1994,7 @@ function MoneyOperationModal({
                   <option value="">Выберите счёт зачисления</option>
                   {transferTargetAccounts.map((account) => (
                     <option key={account.id} value={account.id}>
-                      {account.name}
+                      {moneyAccountLabel(account)}
                     </option>
                   ))}
                 </SystemSelect>
@@ -2030,7 +2061,7 @@ function MoneyOperationModal({
                 type="number"
                 value={form.amount}
                 onChange={(event) => setAmount(Number(event.target.value))}
-                disabled={appliedInvoiceLocked}
+                disabled={financialFieldsLocked}
                 className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none"
               />
             </label>
@@ -2062,6 +2093,7 @@ function MoneyOperationModal({
               <SystemDateInput
                 type="date"
                 value={form.date}
+                disabled={financialFieldsLocked}
                 onChange={(event) => setField('date', event.target.value)}
                 className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none"
               />
@@ -2129,10 +2161,12 @@ function MoneyOperationModal({
                       type="number"
                       min={1}
                       value={form.linkedInvoiceId ?? ''}
-                      onChange={(event) =>
-                        setField('linkedInvoiceId', event.target.value ? Number(event.target.value) : null)
-                      }
-                      disabled={appliedInvoiceLocked}
+                      onChange={(event) => {
+                        const invoiceId = event.target.value ? Number(event.target.value) : null;
+                        setForm(prev => ({ ...prev, linkedInvoiceId: invoiceId,
+                          matchStatus: invoiceId ? 'Matched' : prev.matchStatus === 'Matched' ? 'None' : prev.matchStatus }));
+                      }}
+                      disabled={financialFieldsLocked}
                       className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none"
                       placeholder="Например 33"
                     />
@@ -2149,7 +2183,7 @@ function MoneyOperationModal({
                   <label className="flex flex-col gap-1 text-sm text-slate-600">
                     Статус
                     <SystemSelect
-                      value={form.linkedInvoiceId ? 'Matched' : form.matchStatus ?? 'None'}
+                      value={form.matchStatus ?? (form.linkedInvoiceId ? 'Matched' : 'None')}
                       onChange={(event) => {
                         const value = event.target.value as MoneyOperation['matchStatus'];
                         setField('matchStatus', value);
@@ -2157,7 +2191,7 @@ function MoneyOperationModal({
                           setField('linkedInvoiceId', null);
                         }
                       }}
-                      disabled={appliedInvoiceLocked}
+                      disabled={financialFieldsLocked}
                       className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none">
                       <option value="None">Не сверено</option>
                       <option value="ClarificationRequired">Уточнить</option>
@@ -2176,7 +2210,9 @@ function MoneyOperationModal({
                 )}
                 {appliedInvoiceLocked && (
                   <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                    Операция уже зачтена в счёте. Чтобы изменить сумму или связь со счётом, нужна отдельная операция сторно.
+                    {initialData?.isInvoiceLinkProtected
+                      ? 'Связь с документом сохранена. Его реквизиты недоступны; можно изменить описание или категорию своей операции.'
+                      : 'Операция уже зачтена в счёте. Чтобы изменить сумму или связь со счётом, нужна отдельная операция сторно.'}
                   </p>
                 )}
                 <div className="mt-4 space-y-2">
@@ -2198,7 +2234,7 @@ function MoneyOperationModal({
                         type="button"
                         key={`${candidate.invoiceId}-${candidate.paymentId}`}
                         onClick={() => handleSelectInvoiceCandidate(candidate)}
-                        disabled={appliedInvoiceLocked}
+                        disabled={financialFieldsLocked}
                         className={`w-full rounded-lg border bg-white px-3 py-2 text-left transition hover:border-blue-400 ${
                           isSelected ? 'border-blue-500 ring-2 ring-blue-100' : 'border-blue-100'
                         } disabled:cursor-not-allowed disabled:opacity-60`}>
@@ -2249,14 +2285,14 @@ function MoneyOperationModal({
               />
             </label>
           </div>
-        </div>
+        </fieldset>
 
         <div className="flex items-center justify-between border-t border-slate-200 px-6 py-4">
           {error ? <div className="text-sm text-red-500">{error}</div> : <span />}
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={isSaving}
+            disabled={isSaving || historicalReadOnly}
             className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60">
             {isSaving ? 'Сохранение...' : 'Сохранить'}
           </button>
@@ -2579,10 +2615,10 @@ export function MoneyOperations({
   const balanceReconciliationByKey = useMemo(
     () =>
       new Map(
-        visibleBalanceReconciliationResults.map((item) => [
-          `${item.source}-${item.accountName}-${toDateInputValue(item.date)}`,
-          item,
-        ]),
+        visibleBalanceReconciliationResults.flatMap((item) => {
+          const key = moneyBalanceComparisonKey(item);
+          return key === null ? [] : [[key, item] as const];
+        }),
       ),
     [visibleBalanceReconciliationResults],
   );
@@ -2601,7 +2637,7 @@ export function MoneyOperations({
     const notifications: ReconciliationNotification[] = [];
     const staleRows = visibleDailyBalances
       .map((item) => {
-        const saved = balanceReconciliationByKey.get(`${item.source}-${item.accountName}-${toDateInputValue(item.date)}`);
+        const saved = balanceReconciliationByKey.get(moneyBalanceComparisonKey(item) ?? '');
         const drift = getSavedBalanceDrift(item, saved);
         return saved && drift && !drift.isActual ? { item, drift } : null;
       })
@@ -2610,13 +2646,22 @@ export function MoneyOperations({
       );
 
     if (staleRows.length > 0) {
-      const totalDifference = staleRows.reduce((sum, row) => sum + row.drift.amountDifference, 0);
-      notifications.push({
-        key: 'amount',
-        title: 'Сумма изменилась',
-        description: `${staleRows.length} дн. требуют повторной сверки. Разница: ${formatMoney(totalDifference)} ₽.`,
-        tone: 'rose',
-      });
+      const byCurrency = new Map<string, { count: number; difference: number }>();
+      for (const row of staleRows) {
+        const currency = moneyBalanceCurrencyLabel(row.item.currency);
+        const group = byCurrency.get(currency) ?? { count: 0, difference: 0 };
+        group.count++;
+        group.difference += row.drift.amountDifference;
+        byCurrency.set(currency, group);
+      }
+      for (const [currency, group] of byCurrency) {
+        notifications.push({
+          key: `amount-${currency}`,
+          title: 'Сумма изменилась',
+          description: `${group.count} дн. требуют повторной сверки. Разница: ${formatMoney(group.difference)} ${currency}.`,
+          tone: 'rose',
+        });
+      }
     }
 
     const operationsWithUnknownAccount = items.filter(
@@ -2685,11 +2730,13 @@ export function MoneyOperations({
             id: account.id as number | null,
             source: account.source,
             accountName: account.name,
+            label: moneyAccountLabel(account),
           }))
         : accountSummaries.map((account) => ({
             id: null,
             source: account.source,
             accountName: account.accountName,
+            label: account.accountName,
           })),
     [accountSummaries, moneyAccounts],
   );
@@ -2795,7 +2842,7 @@ export function MoneyOperations({
       canViewFullMoneyBalance
         ? apiService.getMoneyBalanceReconciliationResults({ from, to, source }).catch(() => [])
         : Promise.resolve([]),
-      apiService.getMoneyAccounts({ activeOnly: true }),
+      apiService.getMoneyAccounts({ activeOnly: false }),
     ])
       .then(([accounts, balances, reconciliationResults, moneyAccountItems]) => {
         if (!cancelled) {
@@ -4007,7 +4054,7 @@ export function MoneyOperations({
       incomeTypeId: selectedCategory?.id ?? payload.incomeTypeId ?? null,
       categoryName: selectedCategory ? null : payload.categoryName,
       linkedInvoiceId: normalizedLinkedInvoiceId,
-      matchStatus: normalizedLinkedInvoiceId ? 'Matched' : payload.matchStatus ?? 'None',
+      matchStatus: payload.matchStatus ?? (normalizedLinkedInvoiceId ? 'Matched' : 'None'),
     };
   };
 
@@ -4385,7 +4432,7 @@ export function MoneyOperations({
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold text-slate-900">
-            {selectedMoneyAccount ? selectedMoneyAccount.name : SOURCE_LABELS[source]}
+            {selectedMoneyAccount ? moneyAccountLabel(selectedMoneyAccount) : SOURCE_LABELS[source]}
           </h1>
           <p className="text-sm text-slate-500">{SOURCE_OPERATION_SUBTITLES[source]}</p>
           {selectedMoneyAccount && (
@@ -4407,7 +4454,7 @@ export function MoneyOperations({
                 <option value="">{SOURCE_ALL_ACCOUNTS_LABELS[source]}</option>
                 {visibleMoneyAccountOptions.map((account) => (
                   <option key={`${account.source}-${account.accountName}-${account.id ?? ''}`} value={account.id ?? account.accountName}>
-                    {account.accountName}
+                    {account.label}
                   </option>
                 ))}
               </SystemSelect>
@@ -5273,23 +5320,23 @@ export function MoneyOperations({
               <tbody className="divide-y divide-slate-100">
                 {visibleDailyBalances.slice(0, 12).map((item) => {
                   const savedResult = balanceReconciliationByKey.get(
-                    `${item.source}-${item.accountName}-${toDateInputValue(item.date)}`,
+                    moneyBalanceComparisonKey(item) ?? '',
                   );
 
                   return (
-                    <tr key={`${item.source}-${item.accountName}-${item.date}`} className="hover:bg-slate-50">
+                    <tr key={moneyBalanceComparisonKey(item) ?? `${item.source}-${item.accountName}-${item.date}`} className="hover:bg-slate-50">
                       <td className="px-4 py-2 text-slate-700">{formatDate(item.date)}</td>
                       <td className="px-4 py-2 text-slate-700">{item.accountName}</td>
-                      <td className="px-4 py-2 text-right text-amber-600">{formatMoney(item.openingBalance)} ₽</td>
+                      <td className="px-4 py-2 text-right text-amber-600">{formatMoney(item.openingBalance)} {moneyBalanceCurrencyLabel(item.currency)}</td>
                       <td className="px-4 py-2 text-right text-emerald-600">
-                        {formatMoney(item.income)} ₽
+                        {formatMoney(item.income)} {moneyBalanceCurrencyLabel(item.currency)}
                         <div className="text-[11px] text-slate-400">{item.incomeCount}</div>
                       </td>
                       <td className="px-4 py-2 text-right text-rose-600">
-                        {formatMoney(item.expense)} ₽
+                        {formatMoney(item.expense)} {moneyBalanceCurrencyLabel(item.currency)}
                         <div className="text-[11px] text-slate-400">{item.expenseCount}</div>
                       </td>
-                      <td className="px-4 py-2 text-right font-medium text-amber-600">{formatMoney(item.closingBalance)} ₽</td>
+                      <td className="px-4 py-2 text-right font-medium text-amber-600">{formatMoney(item.closingBalance)} {moneyBalanceCurrencyLabel(item.currency)}</td>
                       <td className="px-4 py-2 text-right">
                         <span
                           className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${
@@ -5375,7 +5422,7 @@ export function MoneyOperations({
                           <option
                             key={`${account.source}-${account.accountName}-${account.id ?? ''}`}
                             value={account.id ?? account.accountName}>
-                            {account.accountName}
+                            {account.label}
                           </option>
                         ))}
                       </SystemSelect>
@@ -5929,6 +5976,7 @@ export function MoneyOperations({
         source={apiSource ?? 'Bank'}
         initialData={editingOperation}
         moneyAccounts={moneyAccounts}
+        preferredMoneyAccountId={moneyAccountId === '' ? undefined : moneyAccountId}
         responsibles={responsibles}
         categoryOptions={categoryDictionaryOptions}
         open={modalOpen}

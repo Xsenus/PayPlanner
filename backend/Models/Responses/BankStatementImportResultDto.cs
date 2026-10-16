@@ -40,6 +40,18 @@ public sealed class BankStatementAutoImportFileResultDto
 public class BankStatementImportBatchListItemDto
 {
     public int Id { get; init; }
+    public int? CompanyId { get; init; }
+    public string? CompanyName { get; init; }
+    public int? MoneyAccountId { get; init; }
+    public string? MoneyAccountName { get; init; }
+    public int? BankConnectionAccountId { get; init; }
+    public int? ImportedByUserId { get; init; }
+    public int? ResponsibleUserId { get; init; }
+    public string? Source { get; init; }
+    public string? Trigger { get; init; }
+    public int? ParentBatchId { get; init; }
+    public DateTime? PeriodFrom { get; init; }
+    public DateTime? PeriodTo { get; init; }
     public string FileName { get; init; } = string.Empty;
     public string Status { get; init; } = string.Empty;
     public int RowsRead { get; init; }
