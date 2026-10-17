@@ -1,0 +1,530 @@
+{
+  "source": "Authenticated KUB UI, read-only audit",
+  "startedDate": "2026-10-16",
+  "continuedDate": "2026-10-17",
+  "timezone": "Asia/Novosibirsk",
+  "permission": "User explicitly allowed original client/financial values in these Git screenshots",
+  "credentialsIncluded": false,
+  "items": [
+    {
+      "id": 1,
+      "file": "screens/01-outgoing-invoices-empty-search.jpg",
+      "title": "Исходящие счета: пустой поиск, верхние итоги сохраняются",
+      "width": 1262,
+      "height": 710,
+      "bytes": 75688,
+      "sha256": "89b309320ed30128d657d5e6b7b2befd19e6282e69cd35574ebe4962ec9a25a0",
+      "capturedFileUtc": "2026-10-16T16:40:10.437Z"
+    },
+    {
+      "id": 2,
+      "file": "screens/02-money-turnovers.jpg",
+      "title": "Деньги → Итого: обороты и остатки по кошелькам",
+      "width": 1271,
+      "height": 827,
+      "bytes": 107155,
+      "sha256": "ad5af8eeb9d8bb214d67c09c43d5bf8c9a188188de14fe6eb41fe5bf29fd49a4",
+      "capturedFileUtc": "2026-10-16T16:43:56.129Z"
+    },
+    {
+      "id": 3,
+      "file": "screens/03-bank-journal.jpg",
+      "title": "Банковский журнал: реальные даты, контрагент, назначение и документ",
+      "width": 1262,
+      "height": 710,
+      "bytes": 93788,
+      "sha256": "259d28bbd2dfa7979f92c830b5f171ee9ea1b1ddf048e3458aedcfd4d6aa518c",
+      "capturedFileUtc": "2026-10-16T16:44:08.994Z"
+    },
+    {
+      "id": 4,
+      "file": "screens/04-bank-income-form.jpg",
+      "title": "Форма банковского прихода, полная страница; крупный вид46",
+      "width": 1280,
+      "height": 9584,
+      "bytes": 576854,
+      "sha256": "7faeca9892607cdcddd99d1e952dd6fa55bcd05ada2cb7b010443f0183afd8c5",
+      "capturedFileUtc": "2026-10-16T16:44:40.623Z"
+    },
+    {
+      "id": 5,
+      "file": "screens/05-bank-expense-form.jpg",
+      "title": "Форма банковского расхода, полная страница; крупный вид48–49",
+      "width": 1280,
+      "height": 9584,
+      "bytes": 577189,
+      "sha256": "6098991422364135d6e1900f39d6711563dba9434c8728b11f0c4ec322511dc0",
+      "capturedFileUtc": "2026-10-16T16:44:53.184Z"
+    },
+    {
+      "id": 6,
+      "file": "screens/06-bank-transfer-form.jpg",
+      "title": "Форма перевода между собственными счетами, полная страница; крупный вид47",
+      "width": 1280,
+      "height": 9584,
+      "bytes": 568854,
+      "sha256": "926a5d4acf75a5c48f523f0deb88443244dada1d2f6330f57254d27c161012a1",
+      "capturedFileUtc": "2026-10-16T16:45:06.215Z"
+    },
+    {
+      "id": 7,
+      "file": "screens/07-statement-import.jpg",
+      "title": "Выбор импорта выписки:1Сtxt/банк/иностранный банк",
+      "width": 1280,
+      "height": 720,
+      "bytes": 65579,
+      "sha256": "081fc5169c89724739f058fd397d5646341f3730496d5946081e4ce23b10bf16",
+      "capturedFileUtc": "2026-10-16T16:45:28.249Z"
+    },
+    {
+      "id": 8,
+      "file": "screens/08-cash-journal.jpg",
+      "title": "Кассовый журнал и ссылки на ПКО",
+      "width": 1262,
+      "height": 710,
+      "bytes": 92694,
+      "sha256": "a8840565d7ab92297f2c6144ca9174dcd32801fe2ce99879ac9ceb54d10d961e",
+      "capturedFileUtc": "2026-10-16T16:45:44.922Z"
+    },
+    {
+      "id": 9,
+      "file": "screens/09-cash-order-view.jpg",
+      "title": "Существующий ПКО: дата, основание, печать/PDF",
+      "width": 1262,
+      "height": 710,
+      "bytes": 63861,
+      "sha256": "29a61e45934d8306c0f941aa103087eac9c00e390a94aef8a56cddb445595329",
+      "capturedFileUtc": "2026-10-16T16:46:02.697Z"
+    },
+    {
+      "id": 10,
+      "file": "screens/10-cash-order-edit.jpg",
+      "title": "Редактирование кассовой операции и номера ПКО",
+      "width": 1280,
+      "height": 727,
+      "bytes": 54447,
+      "sha256": "f94bfa9775659893955fc596ea5e4cd39c80de9ebde9360d0575837bb2bec09b",
+      "capturedFileUtc": "2026-10-16T16:46:19.270Z"
+    },
+    {
+      "id": 11,
+      "file": "screens/11-cash-order-print-fields.jpg",
+      "title": "ПКО: раскрытые печатные основание и приложение, нижняя часть формы",
+      "width": 1280,
+      "height": 727,
+      "bytes": 53804,
+      "sha256": "5d46d1423089b06704f3f1127e4c5da99731f5430dd3ada63274cfb82a1f1d3e",
+      "capturedFileUtc": "2026-10-16T16:46:24.801Z"
+    },
+    {
+      "id": 12,
+      "file": "screens/12-company-profile.jpg",
+      "title": "Профиль компании: общие реквизиты, счета, изображения",
+      "width": 1271,
+      "height": 2556,
+      "bytes": 240270,
+      "sha256": "e6fd74f920335d167cfcd1390f5833ea000cdb26646eeec58d462229585dbd44",
+      "capturedFileUtc": "2026-10-16T16:46:37.327Z"
+    },
+    {
+      "id": 13,
+      "file": "screens/13-company-settings.jpg",
+      "title": "Профиль компании: обзор настроек документов",
+      "width": 1262,
+      "height": 710,
+      "bytes": 76238,
+      "sha256": "19adb16d12696d7d937e1d62d787e50af0470fbd3e93facabe7bbe291f5356d4",
+      "capturedFileUtc": "2026-10-16T16:46:42.692Z"
+    },
+    {
+      "id": 14,
+      "file": "screens/14-company-edit.jpg",
+      "title": "Редактирование компании: тип, налоги, реквизиты и счета",
+      "width": 1271,
+      "height": 2879,
+      "bytes": 259001,
+      "sha256": "1137decaa18af2d797fca3e4ca7fbf8c164f18f396d0105b6e6fd86c04ec46ed",
+      "capturedFileUtc": "2026-10-16T16:46:53.461Z"
+    },
+    {
+      "id": 15,
+      "file": "screens/15-company-document-options.jpg",
+      "title": "Настройки печати/подписи/QR/допномера и отсрочки",
+      "width": 1271,
+      "height": 2789,
+      "bytes": 274055,
+      "sha256": "bb6e96a41a4f696e42c3f6d44ff04b21a2c71ba10c73b1e7058929cb8c9b029a",
+      "capturedFileUtc": "2026-10-16T16:47:17.434Z"
+    },
+    {
+      "id": 16,
+      "file": "screens/16-bank-account-edit.jpg",
+      "title": "Редактирование банковского счёта в профиле",
+      "width": 1280,
+      "height": 720,
+      "bytes": 52732,
+      "sha256": "a9396f5444a66d34b4f6cb05a48f802d29b6f3c758507008dcce30fde466073a",
+      "capturedFileUtc": "2026-10-16T16:47:41.045Z"
+    },
+    {
+      "id": 17,
+      "file": "screens/17-invoice-journal.jpg",
+      "title": "Журнал исходящих счетов с документами и сроками",
+      "width": 1262,
+      "height": 710,
+      "bytes": 92602,
+      "sha256": "79be13cada8949c73e151f0861549444b1b919eb9eda2b6f28fd0737308ee5c4",
+      "capturedFileUtc": "2026-10-16T16:47:55.662Z"
+    },
+    {
+      "id": 18,
+      "file": "screens/18-invoice-create.jpg",
+      "title": "Создание исходящего счёта: верхняя часть",
+      "width": 1262,
+      "height": 710,
+      "bytes": 63391,
+      "sha256": "5e6b26d3367164c70652ff0858c834a77f1023b2711d64111a3a5b1de8810ae6",
+      "capturedFileUtc": "2026-10-16T16:48:04.316Z"
+    },
+    {
+      "id": 19,
+      "file": "screens/19-invoice-parameters.jpg",
+      "title": "Раскрытые дополнительные параметры счёта",
+      "width": 1262,
+      "height": 710,
+      "bytes": 62208,
+      "sha256": "77791eddbfcf7c8852a22240736c8866e582f54535c8b0696dc1dfa013eab168",
+      "capturedFileUtc": "2026-10-16T16:48:14.958Z"
+    },
+    {
+      "id": 20,
+      "file": "screens/20-invoice-vat-discount.jpg",
+      "title": "Включённые НДС и скидка: флажки параметров",
+      "width": 1262,
+      "height": 710,
+      "bytes": 61298,
+      "sha256": "63736af27ad64a8848ec47fee174cfe2eccf46b09763e6ef74adede5b9525167",
+      "capturedFileUtc": "2026-10-16T16:48:20.698Z"
+    },
+    {
+      "id": 21,
+      "file": "screens/21-invoice-paid-view.jpg",
+      "title": "Оплаченный счёт: первичка, связанный акт и фактическая оплата",
+      "width": 1271,
+      "height": 1286,
+      "bytes": 219253,
+      "sha256": "cc77455e0e6148fcdd0caaf3d4684b0a107561fee355cf84836c1811ddc7bad6",
+      "capturedFileUtc": "2026-10-16T16:48:49.147Z"
+    },
+    {
+      "id": 22,
+      "file": "screens/22-invoice-download-actions.jpg",
+      "title": "Меню скачивания: PDF, PDF с подписью, Word",
+      "width": 1262,
+      "height": 710,
+      "bytes": 128083,
+      "sha256": "17cc40d615e65b63daec4239ef531f9c5052983f4447fbca5435ce36f38f6d18",
+      "capturedFileUtc": "2026-10-16T16:48:53.525Z"
+    },
+    {
+      "id": 23,
+      "file": "screens/23-act-view.jpg",
+      "title": "Связанный акт: основание, позиции и оперативные действия",
+      "width": 1271,
+      "height": 1008,
+      "bytes": 149364,
+      "sha256": "237a908e125816b8cf17364e4b68ca2d886e84a6b61b92b172b5d59eb62f13a8",
+      "capturedFileUtc": "2026-10-16T16:49:00.808Z"
+    },
+    {
+      "id": 24,
+      "file": "screens/24-act-edit.jpg",
+      "title": "Редактирование акта: основание и перенесённая услуга",
+      "width": 1271,
+      "height": 1122,
+      "bytes": 108448,
+      "sha256": "f718ce2ed8cebf70ac647b75b762977840abf011edca336b239474f5dd362887",
+      "capturedFileUtc": "2026-10-16T16:49:10.440Z"
+    },
+    {
+      "id": 25,
+      "file": "screens/25-counterparty-summary.jpg",
+      "title": "Покупатель: сводка обязательств и оплаченных счетов",
+      "width": 1262,
+      "height": 710,
+      "bytes": 79408,
+      "sha256": "770f668b6b585d5822ff034a064d3e4dae701ded417fbd97b679c0916b0e1e64",
+      "capturedFileUtc": "2026-10-16T16:49:18.905Z"
+    },
+    {
+      "id": 26,
+      "file": "screens/26-counterparty-money.jpg",
+      "title": "Деньги покупателя в выбранном контексте кассы",
+      "width": 1262,
+      "height": 710,
+      "bytes": 81112,
+      "sha256": "59a1e3a64a88fb1bfe74e7934ce9d4d121438e27f63aa5385d62602a4994596a",
+      "capturedFileUtc": "2026-10-16T16:49:26.409Z"
+    },
+    {
+      "id": 27,
+      "file": "screens/27-reconciliation-options.jpg",
+      "title": "Параметры акта сверки контрагента",
+      "width": 1280,
+      "height": 720,
+      "bytes": 45929,
+      "sha256": "163c7a88b026caf9e3f0f4ed9a0866a0d7e4bbbcbcd2d92e32a603bc39f22ac3",
+      "capturedFileUtc": "2026-10-16T16:49:36.884Z"
+    },
+    {
+      "id": 28,
+      "file": "screens/28-cashflow-report-access-limit.jpg",
+      "title": "ОДДС: доступная структура и ограничение подпиской",
+      "width": 1378,
+      "height": 2184,
+      "bytes": 358482,
+      "sha256": "a79394011136d3904d4b17968331fd3e7bf179292bb68f545d9ddf709dd2f2f7",
+      "capturedFileUtc": "2026-10-16T16:50:20.148Z"
+    },
+    {
+      "id": 29,
+      "file": "screens/29-money-common-journal.jpg",
+      "title": "Общий журнал операций с текущим кошельком",
+      "width": 1262,
+      "height": 710,
+      "bytes": 90380,
+      "sha256": "3d628ed535db76758e47efcb8d614c6760b18b4e6d257f3cdd55c6d38803f8ee",
+      "capturedFileUtc": "2026-10-16T16:50:30.185Z"
+    },
+    {
+      "id": 30,
+      "file": "screens/30-money-filters.jpg",
+      "title": "Расширенный денежный фильтр: факт/план и источник",
+      "width": 1262,
+      "height": 710,
+      "bytes": 84543,
+      "sha256": "0d1225888b69ff6a027b711d993488c7fb238671a8935f3b8511859f9bfb0409",
+      "capturedFileUtc": "2026-10-16T16:50:38.392Z"
+    },
+    {
+      "id": 31,
+      "file": "screens/31-bank-reconciliation.jpg",
+      "title": "АвтоСверка банка: номер счёта, период, загрузка1Сtxt",
+      "width": 1280,
+      "height": 720,
+      "bytes": 68890,
+      "sha256": "845116d46c003303a5776b411aee838709a6f105bd96d147465c71102f999cf5",
+      "capturedFileUtc": "2026-10-16T16:51:56.279Z"
+    },
+    {
+      "id": 32,
+      "file": "screens/32-purchase-invoices.jpg",
+      "title": "Входящие счета: обязательства поставщикам",
+      "width": 1262,
+      "height": 710,
+      "bytes": 85733,
+      "sha256": "52d6feb0b711a239f6b0a4dc89a853528f2a68a4c2801334187bc72cea8e9975",
+      "capturedFileUtc": "2026-10-16T16:52:12.799Z"
+    },
+    {
+      "id": 33,
+      "file": "screens/33-supplier-settlements.jpg",
+      "title": "Физлицо-поставщик: долг и неразнесённые оплаты отдельно",
+      "width": 1262,
+      "height": 710,
+      "bytes": 77568,
+      "sha256": "9843c8e19c701021eacb3df79477dc1e98a741b796b9b2de46f86fb2b2825c5a",
+      "capturedFileUtc": "2026-10-16T16:52:19.330Z"
+    },
+    {
+      "id": 34,
+      "file": "screens/34-tax-parameters.jpg",
+      "title": "Налоговый мастерИП: проверка исходных параметров",
+      "width": 1262,
+      "height": 710,
+      "bytes": 80252,
+      "sha256": "a01a79c941d439dc63889a7b1fcf0683b18c5219e6a821a48067cba0ca0792fa",
+      "capturedFileUtc": "2026-10-16T16:52:41.203Z"
+    },
+    {
+      "id": 35,
+      "file": "screens/35-crm-deals.jpg",
+      "title": "CRM: воронка сделок и журнал",
+      "width": 1262,
+      "height": 710,
+      "bytes": 75038,
+      "sha256": "f609cba7dbbe53484450c5ade73a99d0d618d3293a70983baab5f70dea054baa",
+      "capturedFileUtc": "2026-10-16T16:52:48.475Z"
+    },
+    {
+      "id": 36,
+      "file": "screens/36-user-access-list.jpg",
+      "title": "Пользователи: роли и отдельные доступы",
+      "width": 1262,
+      "height": 710,
+      "bytes": 77467,
+      "sha256": "bcfe07a1965d92b8f8ceadf1f0cdcd90e32356226357b55dca7e84906ed2fe3f",
+      "capturedFileUtc": "2026-10-16T16:56:37.332Z"
+    },
+    {
+      "id": 37,
+      "file": "screens/37-user-permissions.jpg",
+      "title": "Тестовый менеджер: независимые права документов и оплат",
+      "width": 1262,
+      "height": 710,
+      "bytes": 60151,
+      "sha256": "abff004dde379bdc7316a62f25f11ab664bf8ff1a92363c3a05b1537ba332698",
+      "capturedFileUtc": "2026-10-16T16:58:25.312Z"
+    },
+    {
+      "id": 38,
+      "file": "screens/38-services-catalog.jpg",
+      "title": "Справочник услуг: группы, единицы и цены",
+      "width": 1262,
+      "height": 710,
+      "bytes": 86708,
+      "sha256": "89f44902eb75bfe6e3c9f10987badba487851a9d6c30620ee03dc8a4587f6b8e",
+      "capturedFileUtc": "2026-10-16T16:58:28.813Z"
+    },
+    {
+      "id": 39,
+      "file": "screens/39-document-export.jpg",
+      "title": "Пакетная выгрузка документов: состав и история",
+      "width": 1262,
+      "height": 710,
+      "bytes": 71425,
+      "sha256": "cc6b281e446a2c4b69ca55bab33b43da3249984bacc042e1c3c25cc0e49fad50",
+      "capturedFileUtc": "2026-10-16T16:58:40.195Z"
+    },
+    {
+      "id": 40,
+      "file": "screens/40-contracts-journal.jpg",
+      "title": "Договоры покупателей: журнал и реквизиты",
+      "width": 1262,
+      "height": 710,
+      "bytes": 109165,
+      "sha256": "38892b7d498e89db95ef9ba85687a8efe8b70a36ec850c2df47b729583d6c917",
+      "capturedFileUtc": "2026-10-16T16:58:47.223Z"
+    },
+    {
+      "id": 41,
+      "file": "screens/41-contract-form.jpg",
+      "title": "Несохранённая форма договора: номер/дата/контрагент/вид основания",
+      "width": 1280,
+      "height": 720,
+      "bytes": 48379,
+      "sha256": "26ed5bb80b4912703a6ca0afdc2519cedfa9581c7d17c28c4413db3bd93cd5f7",
+      "capturedFileUtc": "2026-10-16T16:59:07.230Z"
+    },
+    {
+      "id": 42,
+      "file": "screens/42-bank-rules.jpg",
+      "title": "Автоправила разнесения: список условий",
+      "width": 1280,
+      "height": 720,
+      "bytes": 57120,
+      "sha256": "8f320ccfdeb7245243ce974d42fd11c9113edcd942cc39eb0f5ba3159b0c3eba",
+      "capturedFileUtc": "2026-10-16T16:59:26.613Z"
+    },
+    {
+      "id": 43,
+      "file": "screens/43-bank-rule-form.jpg",
+      "title": "Несохранённое правило: контрагент, текст, статья, проект и применение к истории",
+      "width": 1280,
+      "height": 720,
+      "bytes": 42244,
+      "sha256": "c4f158cd4d8c119798c583fb8f6e7f686ff0094a5a62b42f26d759c04f26d7bd",
+      "capturedFileUtc": "2026-10-16T16:59:49.184Z"
+    },
+    {
+      "id": 44,
+      "file": "screens/44-bank-multiple-operations.jpg",
+      "title": "Несколько банковских операций: табличный ввод, не расписание",
+      "width": 1280,
+      "height": 720,
+      "bytes": 50687,
+      "sha256": "135653c20082cc6f337adf427a8d61bc370feda751ada36297b0ffea94b734fe",
+      "capturedFileUtc": "2026-10-16T17:00:44.403Z"
+    },
+    {
+      "id": 45,
+      "file": "screens/45-bank-plan-form.jpg",
+      "title": "Плановые операции: отдельный режим формы",
+      "width": 1280,
+      "height": 720,
+      "bytes": 49956,
+      "sha256": "aa6f21bac3356c812dab80a15b497e39e370026b0fd56528e2d398b6b938bf07",
+      "capturedFileUtc": "2026-10-16T17:00:56.970Z"
+    },
+    {
+      "id": 46,
+      "file": "screens/46-bank-income-detail.jpg",
+      "title": "Крупный вид банковского прихода",
+      "width": 1280,
+      "height": 720,
+      "bytes": 53668,
+      "sha256": "bd4611dc5298d95612256fe0afd111fec9661e5c95ae3570fa8ee9a40560564a",
+      "capturedFileUtc": "2026-10-16T17:04:29.612Z"
+    },
+    {
+      "id": 47,
+      "file": "screens/47-bank-transfer-detail.jpg",
+      "title": "Крупный вид перевода: два счёта, две суммы и дата",
+      "width": 1280,
+      "height": 720,
+      "bytes": 46110,
+      "sha256": "6f9479a152f6f1fc2cb51314a0f5a1d2546c50a11e4b97f8617600f1080ff402",
+      "capturedFileUtc": "2026-10-16T17:04:36.970Z"
+    },
+    {
+      "id": 48,
+      "file": "screens/48-bank-expense-detail.jpg",
+      "title": "Крупный вид банковского расхода: поставщик и дата",
+      "width": 1280,
+      "height": 720,
+      "bytes": 53935,
+      "sha256": "6944d64491bad2ae85708c31fd38fd72ce253c0c22a47c3beeba4681298847c0",
+      "capturedFileUtc": "2026-10-16T17:04:49.545Z"
+    },
+    {
+      "id": 49,
+      "file": "screens/49-bank-expense-lower-fields.jpg",
+      "title": "Нижние поля расхода: счета-основания и аналитика",
+      "width": 1280,
+      "height": 720,
+      "bytes": 48541,
+      "sha256": "f3987023d166671c61727e9d5618bd69d40649fd6cb05cce7700e73e1e619df9",
+      "capturedFileUtc": "2026-10-16T17:04:52.776Z"
+    },
+    {
+      "id": 50,
+      "file": "screens/50-invoice-vat-discount-columns.jpg",
+      "title": "Таблица несохранённого счёта: НДС и скидка включены",
+      "width": 1262,
+      "height": 710,
+      "bytes": 63151,
+      "sha256": "dc5e1e16ccd82e6b13436e134a76aa94a46341bf427ed4a6dc7d41efe14aa7ec",
+      "capturedFileUtc": "2026-10-16T17:08:41.678Z"
+    },
+    {
+      "id": 51,
+      "file": "screens/51-invoice-calculation-example.jpg",
+      "title": "Несохранённый расчёт:2×10000, скидка10%,18000, в том числе НДС20%=3000",
+      "width": 1262,
+      "height": 710,
+      "bytes": 65801,
+      "sha256": "c18638f34876c9b4cdf04761254d1b46a0fa2458e258c8a9213d631faf3b0242",
+      "capturedFileUtc": "2026-10-16T17:10:11.090Z"
+    },
+    {
+      "id": 52,
+      "file": "screens/52-invoice-without-vat-columns.jpg",
+      "title": "Счёт после отключения НДС: сохранён итог скидки, нижняя часть формы",
+      "width": 1262,
+      "height": 710,
+      "bytes": 64978,
+      "sha256": "7ec8b33029e0845ca2abab342ec6b97e6b49eea4bce1000c9514c5365dd61115",
+      "capturedFileUtc": "2026-10-16T17:10:12.579Z"
+    }
+  ]
+}
