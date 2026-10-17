@@ -7,9 +7,9 @@
 
 - Разделов frontend: 55.
 - Backend-контроллеров: 92.
-- HTTP endpoints: 930; с прямой тестовой связью: 638.
+- HTTP endpoints: 930; с прямой тестовой связью: 640.
 - HTTP endpoints с точной ссылкой из документации: 237; критичных без такой ссылки: 531.
-- Критичных endpoints без прямой тестовой связи: 244.
+- Критичных endpoints без прямой тестовой связи: 243.
 - Реальных HTML-форм: 19; с найденной тестовой связью: 17.
 - Фоновых сервисов: 33; с найденной тестовой связью: 28.
 - Исходящих HTTP-интеграций: 12; с найденной тестовой связью: 12.
@@ -383,7 +383,6 @@
 | GET | api/auth/admin/users | AdminUsersController.GetUsers | чувствительные данные или операция | backend/Controllers/AdminUsersController.cs:38 |
 | GET | api/auth/admin/users/{id:int} | AdminUsersController.GetUser | чувствительные данные или операция | backend/Controllers/AdminUsersController.cs:42 |
 | GET | api/calendar-sync/settings | CalendarSyncController.GetSettings | чувствительные данные или операция | backend/Controllers/CalendarSyncController.cs:74 |
-| POST | api/cash-orders/from-money-operation/{operationId:int} | CashOrdersController.CreateFromMoneyOperation | изменение данных | backend/Controllers/CashOrdersController.cs:548 |
 | GET | api/database/backups | DatabaseAdminController.GetBackupsAsync | чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:70 |
 | GET | api/database/backups/attempts | DatabaseAdminController.GetBackupAttemptsAsync | чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:104 |
 | GET | api/database/backups/catalog | DatabaseAdminController.GetBackupCatalogAsync | чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:127 |
@@ -600,27 +599,27 @@
 | POST | api/[controller] | CasesController | Create | backend/Controllers/CasesController.cs:91 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
 | PUT | api/[controller]/{id:int} | CasesController | Update | backend/Controllers/CasesController.cs:117 | [Authorize] | да | нет |
 | DELETE | api/[controller]/{id:int} | CasesController | Delete | backend/Controllers/CasesController.cs:190 | [Authorize] | да | нет |
-| GET | api/cash-orders/cashbook | CashOrdersController | GetCashBook | backend/Controllers/CashOrdersController.cs:46 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
-| GET | api/cash-orders/cashbook/print | CashOrdersController | PrintCashBook | backend/Controllers/CashOrdersController.cs:82 | [Authorize] | да | нет |
-| GET | api/cash-orders/next-number | CashOrdersController | GetNextNumber | backend/Controllers/CashOrdersController.cs:119 | [Authorize] | да | нет |
-| GET | api/cash-orders/paged | CashOrdersController | GetPaged | backend/Controllers/CashOrdersController.cs:141 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
-| GET | api/cash-orders/register | CashOrdersController | GetRegister | backend/Controllers/CashOrdersController.cs:187 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
-| GET | api/cash-orders/register/print | CashOrdersController | PrintRegister | backend/Controllers/CashOrdersController.cs:257 | [Authorize] | да | нет |
-| GET | api/cash-orders/inventories | CashOrdersController | GetInventories | backend/Controllers/CashOrdersController.cs:322 | [Authorize] | да | нет |
-| POST | api/cash-orders/inventories | CashOrdersController | CreateInventory | backend/Controllers/CashOrdersController.cs:378 | [Authorize] | да | нет |
-| GET | api/cash-orders/{id:int} | CashOrdersController | GetById | backend/Controllers/CashOrdersController.cs:451 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
-| POST | api/cash-orders/from-payment/{paymentId:int} | CashOrdersController | CreateFromPayment | backend/Controllers/CashOrdersController.cs:476 | [Authorize] | да | нет |
-| POST | api/cash-orders/from-money-operation/{operationId:int} | CashOrdersController | CreateFromMoneyOperation | backend/Controllers/CashOrdersController.cs:548 | [Authorize] | нет | нет |
-| POST | api/cash-orders | CashOrdersController | Create | backend/Controllers/CashOrdersController.cs:609 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md, docs/full-project-audit-2026-06-10.md, docs/report-inventory-2026-08-09.md |
-| PUT | api/cash-orders/{id:int} | CashOrdersController | Update | backend/Controllers/CashOrdersController.cs:646 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
-| DELETE | api/cash-orders/{id:int} | CashOrdersController | Delete | backend/Controllers/CashOrdersController.cs:701 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
-| POST | api/cash-orders/{id:int}/post | CashOrdersController | Post | backend/Controllers/CashOrdersController.cs:734 | [Authorize] | да | нет |
-| POST | api/cash-orders/{id:int}/cancel | CashOrdersController | Cancel | backend/Controllers/CashOrdersController.cs:778 | [Authorize] | да | нет |
-| POST | api/cash-orders/{id:int}/copy | CashOrdersController | Copy | backend/Controllers/CashOrdersController.cs:814 | [Authorize] | да | нет |
-| GET | api/cash-orders/{id:int}/print | CashOrdersController | Print | backend/Controllers/CashOrdersController.cs:865 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
-| GET | api/cash-orders/payment/{paymentId:int}/print | CashOrdersController | PrintForPayment | backend/Controllers/CashOrdersController.cs:895 | [Authorize] | да | нет |
-| GET | api/cash-orders/{id:int}/pdf | CashOrdersController | DownloadPdf | backend/Controllers/CashOrdersController.cs:937 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
-| GET | api/cash-orders/{id:int}/word | CashOrdersController | DownloadWord | backend/Controllers/CashOrdersController.cs:975 | [Authorize] | нет | нет |
+| GET | api/cash-orders/cashbook | CashOrdersController | GetCashBook | backend/Controllers/CashOrdersController.cs:59 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
+| GET | api/cash-orders/cashbook/print | CashOrdersController | PrintCashBook | backend/Controllers/CashOrdersController.cs:95 | [Authorize] | да | нет |
+| GET | api/cash-orders/next-number | CashOrdersController | GetNextNumber | backend/Controllers/CashOrdersController.cs:132 | [Authorize] | да | нет |
+| GET | api/cash-orders/paged | CashOrdersController | GetPaged | backend/Controllers/CashOrdersController.cs:154 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
+| GET | api/cash-orders/register | CashOrdersController | GetRegister | backend/Controllers/CashOrdersController.cs:200 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
+| GET | api/cash-orders/register/print | CashOrdersController | PrintRegister | backend/Controllers/CashOrdersController.cs:270 | [Authorize] | да | нет |
+| GET | api/cash-orders/inventories | CashOrdersController | GetInventories | backend/Controllers/CashOrdersController.cs:335 | [Authorize] | да | нет |
+| POST | api/cash-orders/inventories | CashOrdersController | CreateInventory | backend/Controllers/CashOrdersController.cs:391 | [Authorize] | да | нет |
+| GET | api/cash-orders/{id:int} | CashOrdersController | GetById | backend/Controllers/CashOrdersController.cs:464 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
+| POST | api/cash-orders/from-payment/{paymentId:int} | CashOrdersController | CreateFromPayment | backend/Controllers/CashOrdersController.cs:489 | [Authorize] | да | нет |
+| POST | api/cash-orders/from-money-operation/{operationId:int} | CashOrdersController | CreateFromMoneyOperation | backend/Controllers/CashOrdersController.cs:561 | [Authorize] | да | нет |
+| POST | api/cash-orders | CashOrdersController | Create | backend/Controllers/CashOrdersController.cs:622 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md, docs/full-project-audit-2026-06-10.md, docs/report-inventory-2026-08-09.md |
+| PUT | api/cash-orders/{id:int} | CashOrdersController | Update | backend/Controllers/CashOrdersController.cs:659 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
+| DELETE | api/cash-orders/{id:int} | CashOrdersController | Delete | backend/Controllers/CashOrdersController.cs:715 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
+| POST | api/cash-orders/{id:int}/post | CashOrdersController | Post | backend/Controllers/CashOrdersController.cs:749 | [Authorize] | да | нет |
+| POST | api/cash-orders/{id:int}/cancel | CashOrdersController | Cancel | backend/Controllers/CashOrdersController.cs:794 | [Authorize] | да | нет |
+| POST | api/cash-orders/{id:int}/copy | CashOrdersController | Copy | backend/Controllers/CashOrdersController.cs:831 | [Authorize] | да | нет |
+| GET | api/cash-orders/{id:int}/print | CashOrdersController | Print | backend/Controllers/CashOrdersController.cs:882 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
+| GET | api/cash-orders/payment/{paymentId:int}/print | CashOrdersController | PrintForPayment | backend/Controllers/CashOrdersController.cs:912 | [Authorize] | да | нет |
+| GET | api/cash-orders/{id:int}/pdf | CashOrdersController | DownloadPdf | backend/Controllers/CashOrdersController.cs:954 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
+| GET | api/cash-orders/{id:int}/word | CashOrdersController | DownloadWord | backend/Controllers/CashOrdersController.cs:992 | [Authorize] | да | нет |
 | GET |  | ClientBalancesController | GetSummary | backend/Controllers/ClientBalancesController.cs:57 | не задано | да | нет |
 | GET | transactions | ClientBalancesController | GetTransactions | backend/Controllers/ClientBalancesController.cs:78 | не задано | да | docs/bank-integrations-api-verification-2026-10-09.md, docs/delete-behavior-contract-2026-06-10.md |
 | POST | apply | ClientBalancesController | ApplyCredit | backend/Controllers/ClientBalancesController.cs:116 | не задано | да | docs/development-bank-import-verification-2026-10-16.md, docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/payplanner-storage-roadmap-2026-10-14.md, docs/release-verification-history-2026-10-06.md, docs/storage-resilience-runbook.md, docs/unpushed-changes-map-2026-10-03.md |

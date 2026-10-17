@@ -267,7 +267,8 @@ public class CashOrdersControllerTests
             });
         await db.SaveChangesAsync();
 
-        var controller = new CashOrdersController(db);
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canCreate: true);
+        var controller = CreateController(db, userId, isAdminClaim: false);
         var action = await controller.GetNextNumber(
             CashOrderType.Incoming,
             new DateTime(2026, 4, 20),
@@ -440,7 +441,8 @@ public class CashOrdersControllerTests
                 CreatedAt = DateTime.UtcNow,
             });
         await db.SaveChangesAsync();
-        var controller = new CashOrdersController(db);
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canEdit: true);
+        var controller = CreateController(db, userId, isAdminClaim: false);
 
         var action = await controller.CreateInventory(
             new CashInventoryCreateRequest
@@ -499,7 +501,8 @@ public class CashOrdersControllerTests
                 CreatedAt = DateTime.UtcNow,
             });
         await db.SaveChangesAsync();
-        var controller = new CashOrdersController(db);
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true);
+        var controller = CreateController(db, userId, isAdminClaim: false);
 
         var action = await controller.GetInventories(
             from: new DateTime(2026, 5, 1),
@@ -990,7 +993,8 @@ public class CashOrdersControllerTests
         };
         db.CashOrders.Add(order);
         await db.SaveChangesAsync();
-        var controller = CreateController(db, userId: 1);
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true);
+        var controller = CreateController(db, userId, isAdminClaim: false);
 
         var action = await controller.GetById(order.Id, CancellationToken.None);
 

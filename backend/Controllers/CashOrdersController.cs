@@ -8,6 +8,7 @@ using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Banking;
 using PayPlanner.Api.Services.Invoices;
 
 namespace PayPlanner.Api.Controllers;
@@ -22,6 +23,7 @@ public class CashOrdersController : ControllerBase
     private readonly PaymentContext _db;
     private readonly IInvoiceDocumentPdfService? _pdfService;
     private readonly IConfiguration? _configuration;
+    private BankStatementImportAccessContext? _companyAccess;
 
     public CashOrdersController(
         PaymentContext db,
@@ -40,8 +42,19 @@ public class CashOrdersController : ControllerBase
             ? null
             : Forbid();
 
-    private Task<DataVisibilityAccess?> ResolvePaymentsVisibilityAsync(CancellationToken ct)
-        => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+    private async Task<DataVisibilityAccess?> ResolvePaymentsVisibilityAsync(CancellationToken ct)
+    {
+        _companyAccess = await BankStatementImportAccess.ResolveAsync(_db, User, ct);
+        return _companyAccess?.Visibility;
+    }
+
+    private IQueryable<CashOrder> CompanyCashOrders
+        => BankStatementImportAccess.ScopeCashOrderCompanies(_db, _db.CashOrders, _companyAccess);
+
+    private IQueryable<Payment> CompanyPayments
+        => _companyAccess is null ? _db.Payments.Where(_ => false)
+            : _companyAccess.Visibility.IsAdmin ? _db.Payments
+            : BankStatementImportAccess.ScopePaymentCompanies(_db, _db.Payments, _companyAccess.AllowedCompanyIds);
 
     [HttpGet("cashbook")]
     public async Task<ActionResult<CashBookResponseDto>> GetCashBook(
@@ -462,7 +475,7 @@ public class CashOrdersController : ControllerBase
             return Forbid();
         }
 
-        var order = await _db.CashOrders
+        var order = await CompanyCashOrders
             .Include(item => item.Client)
             .Include(item => item.Payment)
             .Include(item => item.MoneyOperation)
@@ -487,7 +500,7 @@ public class CashOrdersController : ControllerBase
             return Forbid();
         }
 
-        var payment = await _db.Payments
+        var payment = await CompanyPayments
             .Include(item => item.Client)
             .Include(item => item.PaymentSource)
             .ApplyPaymentVisibility(visibility)
@@ -508,7 +521,7 @@ public class CashOrdersController : ControllerBase
             return BadRequest("ПКО создается только для платежей с источником оплаты наличными.");
         }
 
-        var existing = await _db.CashOrders
+        var existing = await CompanyCashOrders
             .Where(order => order.PaymentId == payment.Id && order.Status != CashOrderStatus.Cancelled)
             .OrderByDescending(order => order.Id)
             .FirstOrDefaultAsync(ct);
@@ -571,7 +584,7 @@ public class CashOrdersController : ControllerBase
             return BadRequest("Кассовый ордер можно создать только по фактической операции кассы с суммой больше нуля.");
         }
 
-        var existing = await _db.CashOrders
+        var existing = await CompanyCashOrders
             .Where(order => order.MoneyOperationId == operation.Id && order.Status != CashOrderStatus.Cancelled)
             .OrderByDescending(order => order.Id)
             .FirstOrDefaultAsync(ct);
@@ -657,8 +670,9 @@ public class CashOrdersController : ControllerBase
             return Forbid();
         }
 
-        var order = await _db.CashOrders
+        var order = await CompanyCashOrders
             .ApplyCashOrderVisibility(visibility)
+            .AsTracking()
             .FirstOrDefaultAsync(item => item.Id == id, ct);
         if (order is null)
         {
@@ -712,8 +726,9 @@ public class CashOrdersController : ControllerBase
             return Forbid();
         }
 
-        var order = await _db.CashOrders
+        var order = await CompanyCashOrders
             .ApplyCashOrderVisibility(visibility)
+            .AsTracking()
             .FirstOrDefaultAsync(item => item.Id == id, ct);
         if (order is null)
         {
@@ -745,8 +760,9 @@ public class CashOrdersController : ControllerBase
             return Forbid();
         }
 
-        var order = await _db.CashOrders
+        var order = await CompanyCashOrders
             .ApplyCashOrderVisibility(visibility)
+            .AsTracking()
             .FirstOrDefaultAsync(item => item.Id == id, ct);
         if (order is null)
         {
@@ -789,8 +805,9 @@ public class CashOrdersController : ControllerBase
             return Forbid();
         }
 
-        var order = await _db.CashOrders
+        var order = await CompanyCashOrders
             .ApplyCashOrderVisibility(visibility)
+            .AsTracking()
             .FirstOrDefaultAsync(item => item.Id == id, ct);
         if (order is null)
         {
@@ -825,7 +842,7 @@ public class CashOrdersController : ControllerBase
             return Forbid();
         }
 
-        var source = await _db.CashOrders
+        var source = await CompanyCashOrders
             .AsNoTracking()
             .ApplyCashOrderVisibility(visibility)
             .FirstOrDefaultAsync(item => item.Id == id, ct);
@@ -876,7 +893,7 @@ public class CashOrdersController : ControllerBase
             return Forbid();
         }
 
-        var order = await _db.CashOrders
+        var order = await CompanyCashOrders
             .Include(item => item.Client)
             .Include(item => item.Payment)
             .Include(item => item.MoneyOperation)
@@ -906,7 +923,7 @@ public class CashOrdersController : ControllerBase
             return Forbid();
         }
 
-        var payment = await _db.Payments
+        var payment = await CompanyPayments
             .Include(item => item.Client)
             .Include(item => item.ExpenseClient)
             .Include(item => item.LegalEntity)
@@ -919,7 +936,7 @@ public class CashOrdersController : ControllerBase
             return NotFound();
         }
 
-        var order = await _db.CashOrders
+        var order = await CompanyCashOrders
             .Include(item => item.Client)
             .Include(item => item.Payment)
             .Include(item => item.MoneyOperation)
@@ -948,7 +965,7 @@ public class CashOrdersController : ControllerBase
             return Forbid();
         }
 
-        var order = await _db.CashOrders
+        var order = await CompanyCashOrders
             .Include(item => item.Client)
             .Include(item => item.Payment)
             .Include(item => item.MoneyOperation)
@@ -986,7 +1003,7 @@ public class CashOrdersController : ControllerBase
             return Forbid();
         }
 
-        var order = await _db.CashOrders
+        var order = await CompanyCashOrders
             .Include(item => item.Client)
             .Include(item => item.Payment)
             .Include(item => item.MoneyOperation)
@@ -1081,10 +1098,11 @@ public class CashOrdersController : ControllerBase
            (operation.Direction == MoneyOperationDirection.Income ||
             operation.Direction == MoneyOperationDirection.Expense);
 
-    private static IQueryable<MoneyOperation> ApplyVisibleMoneyOperationForCashOrders(
+    private IQueryable<MoneyOperation> ApplyVisibleMoneyOperationForCashOrders(
         IQueryable<MoneyOperation> query,
         DataVisibilityAccess visibility)
     {
+        query = BankStatementImportAccess.ScopeMoneyOperations(_db, query, _companyAccess);
         if (visibility.SeesAll)
         {
             return query;
@@ -1158,7 +1176,7 @@ public class CashOrdersController : ControllerBase
             (fromDate, toDate) = (toDate, fromDate);
         }
 
-        var postedOrders = _db.CashOrders
+        var postedOrders = CompanyCashOrders
             .AsNoTracking()
             .ApplyCashOrderVisibility(visibility)
             .Where(order => order.Status == CashOrderStatus.Posted);
@@ -1328,7 +1346,7 @@ public class CashOrdersController : ControllerBase
     }
 
     private Task<decimal> CalculateCashBalanceAsync(DateTime date, string accountName, DataVisibilityAccess visibility, CancellationToken ct)
-        => _db.CashOrders
+        => CompanyCashOrders
             .AsNoTracking()
             .ApplyCashOrderVisibility(visibility)
             .Where(order => order.Status == CashOrderStatus.Posted)
@@ -1345,7 +1363,7 @@ public class CashOrdersController : ControllerBase
         string? accountName,
         DataVisibilityAccess visibility)
     {
-        var query = _db.CashOrders
+        var query = CompanyCashOrders
             .AsNoTracking()
             .ApplyCashOrderVisibility(visibility)
             .AsQueryable();
@@ -1409,12 +1427,14 @@ public class CashOrdersController : ControllerBase
     {
         var prefix = type == CashOrderType.Incoming ? "ПКО" : "РКО";
         var yearPrefix = $"{prefix}-{date:yyyy}-";
-        var sequence = await _db.CashOrders.CountAsync(order => order.Number.StartsWith(yearPrefix), ct) + 1;
+        // Soft-deleted documents retain their globally unique numbers.
+        var reservedOrders = _db.CashOrders.IgnoreQueryFilters().AsNoTracking();
+        var sequence = await reservedOrders.CountAsync(order => order.Number.StartsWith(yearPrefix), ct) + 1;
 
         while (true)
         {
             var number = $"{yearPrefix}{sequence:0000}";
-            if (!await _db.CashOrders.AnyAsync(order => order.Number == number, ct))
+            if (!await reservedOrders.AnyAsync(order => order.Number == number, ct))
             {
                 return number;
             }

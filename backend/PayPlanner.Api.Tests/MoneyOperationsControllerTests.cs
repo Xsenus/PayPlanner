@@ -2532,7 +2532,7 @@ public partial class MoneyOperationsControllerTests
         });
         await db.SaveChangesAsync();
 
-        var controller = new CashOrdersController(db);
+        var controller = await CreateCashOrderAdminControllerAsync(db);
         var action = await controller.GetPaged(
             from: new DateTime(2026, 4, 1),
             to: new DateTime(2026, 4, 30),
@@ -2580,7 +2580,7 @@ public partial class MoneyOperationsControllerTests
             });
         await db.SaveChangesAsync();
 
-        var controller = new CashOrdersController(db);
+        var controller = await CreateCashOrderAdminControllerAsync(db);
         var action = await controller.GetPaged(
             from: new DateTime(2026, 4, 1),
             to: new DateTime(2026, 4, 30),
@@ -2602,7 +2602,7 @@ public partial class MoneyOperationsControllerTests
     public async Task CashOrder_Create_GeneratesNumberAndNormalizesDraft()
     {
         await using var db = await CreateContextAsync();
-        var controller = new CashOrdersController(db);
+        var controller = await CreateCashOrderAdminControllerAsync(db);
 
         var action = await controller.Create(new CashOrder
         {
@@ -2655,7 +2655,7 @@ public partial class MoneyOperationsControllerTests
         });
         await db.SaveChangesAsync();
 
-        var controller = new CashOrdersController(db);
+        var controller = await CreateCashOrderAdminControllerAsync(db);
         var order = await db.CashOrders.SingleAsync();
 
         var action = await controller.Post(order.Id, CancellationToken.None);
@@ -2688,7 +2688,7 @@ public partial class MoneyOperationsControllerTests
         });
         await db.SaveChangesAsync();
 
-        var controller = new CashOrdersController(db);
+        var controller = await CreateCashOrderAdminControllerAsync(db);
         var source = await db.CashOrders.SingleAsync();
         var updateAction = await controller.Update(source.Id, new CashOrder
         {
@@ -2760,7 +2760,7 @@ public partial class MoneyOperationsControllerTests
         });
         await db.SaveChangesAsync();
 
-        var controller = new CashOrdersController(db, new FakeInvoiceDocumentPdfService("%PDF-cash%"u8.ToArray()));
+        var controller = await CreateCashOrderAdminControllerAsync(db, new FakeInvoiceDocumentPdfService("%PDF-cash%"u8.ToArray()));
         var order = await db.CashOrders.SingleAsync();
 
         var action = await controller.DownloadPdf(order.Id, CancellationToken.None);
@@ -2798,7 +2798,7 @@ public partial class MoneyOperationsControllerTests
         {
             ["App:OrganizationName"] = "ООО Тестовая организация",
         };
-        var controller = new CashOrdersController(db, configuration: configuration);
+        var controller = await CreateCashOrderAdminControllerAsync(db, configuration: configuration);
         var order = await db.CashOrders.SingleAsync();
 
         var action = await controller.Print(order.Id, CancellationToken.None);
@@ -2860,7 +2860,7 @@ public partial class MoneyOperationsControllerTests
         });
         await db.SaveChangesAsync();
 
-        var controller = new CashOrdersController(db);
+        var controller = await CreateCashOrderAdminControllerAsync(db);
         var order = await db.CashOrders.SingleAsync();
 
         var action = await controller.Print(order.Id, CancellationToken.None);
@@ -2924,7 +2924,7 @@ public partial class MoneyOperationsControllerTests
             });
         await db.SaveChangesAsync();
 
-        var controller = new CashOrdersController(db);
+        var controller = await CreateCashOrderAdminControllerAsync(db);
         var incoming = await db.CashOrders.SingleAsync(order => order.Type == CashOrderType.Incoming);
         var outgoing = await db.CashOrders.SingleAsync(order => order.Type == CashOrderType.Outgoing);
 
@@ -2968,7 +2968,7 @@ public partial class MoneyOperationsControllerTests
             });
         await db.SaveChangesAsync();
 
-        var controller = new CashOrdersController(db);
+        var controller = await CreateCashOrderAdminControllerAsync(db);
         var draft = await db.CashOrders.SingleAsync(order => order.Status == CashOrderStatus.Draft);
         var posted = await db.CashOrders.SingleAsync(order => order.Status == CashOrderStatus.Posted);
 
@@ -3029,7 +3029,7 @@ public partial class MoneyOperationsControllerTests
             });
         await db.SaveChangesAsync();
 
-        var controller = new CashOrdersController(db);
+        var controller = await CreateCashOrderAdminControllerAsync(db);
         var action = await controller.GetCashBook(new DateTime(2026, 4, 29), new DateTime(2026, 4, 30), ct: CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
@@ -3083,7 +3083,7 @@ public partial class MoneyOperationsControllerTests
             });
         await db.SaveChangesAsync();
 
-        var controller = new CashOrdersController(db);
+        var controller = await CreateCashOrderAdminControllerAsync(db);
 
         var action = await controller.GetCashBook(new DateTime(2026, 4, 1), new DateTime(2026, 4, 3), ct: CancellationToken.None);
 
@@ -3155,7 +3155,7 @@ public partial class MoneyOperationsControllerTests
             });
         await db.SaveChangesAsync();
 
-        var controller = new CashOrdersController(db);
+        var controller = await CreateCashOrderAdminControllerAsync(db);
         var bookAction = await controller.GetCashBook(
             from: new DateTime(2026, 4, 1),
             to: new DateTime(2026, 4, 30),
@@ -3258,7 +3258,7 @@ public partial class MoneyOperationsControllerTests
             });
         await db.SaveChangesAsync();
 
-        var controller = new CashOrdersController(db);
+        var controller = await CreateCashOrderAdminControllerAsync(db);
         var action = await controller.GetRegister(
             from: new DateTime(2026, 4, 1),
             to: new DateTime(2026, 4, 30),
@@ -3298,7 +3298,7 @@ public partial class MoneyOperationsControllerTests
         });
         await db.SaveChangesAsync();
 
-        var controller = new CashOrdersController(db);
+        var controller = await CreateCashOrderAdminControllerAsync(db);
         var action = await controller.PrintCashBook(new DateTime(2026, 4, 29), new DateTime(2026, 4, 29), ct: CancellationToken.None);
 
         var content = Assert.IsType<ContentResult>(action);
@@ -3327,7 +3327,7 @@ public partial class MoneyOperationsControllerTests
         });
         await db.SaveChangesAsync();
 
-        var controller = new CashOrdersController(db);
+        var controller = await CreateCashOrderAdminControllerAsync(db);
         var action = await controller.PrintRegister(
             from: new DateTime(2026, 4, 29),
             to: new DateTime(2026, 4, 29),
