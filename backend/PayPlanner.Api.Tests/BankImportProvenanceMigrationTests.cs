@@ -1,4 +1,5 @@
 using System.Data.Common;
+using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -11,6 +12,81 @@ namespace PayPlanner.Api.Tests;
 
 public sealed class BankImportProvenanceMigrationTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task OwnedMigrationCleanup_WaitsForClosingSessionAndPreservesLiveSession(bool releaseDuringCleanup)
+    {
+        var fixture = await MigrationDatabase.CreateAsync(postgres: true);
+        var settings = new NpgsqlConnectionStringBuilder(fixture.AdminConnectionString!)
+        {
+            Database = fixture.DatabaseName,
+            Pooling = false,
+            ApplicationName = "bank-migration-cleanup-held",
+        };
+        await using var held = new NpgsqlConnection(settings.ConnectionString);
+        await held.OpenAsync();
+        await using var admin = new NpgsqlConnection(fixture.AdminConnectionString);
+        await admin.OpenAsync();
+        Task? disposal = null;
+        var removed = false;
+        try
+        {
+            if (releaseDuringCleanup)
+            {
+                disposal = fixture.DisposeAsync().AsTask();
+                await Task.Delay(200);
+                Assert.False(disposal.IsCompleted);
+                await AssertHeldConnectionUsableAsync();
+                await held.CloseAsync();
+                await disposal;
+                removed = true;
+                Assert.Equal(0L, await DatabaseExistsAsync());
+            }
+            else
+            {
+                var error = await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.DisposeAsync().AsTask());
+                Assert.Contains("preserved:", error.Message);
+                await AssertHeldConnectionUsableAsync();
+                Assert.Equal(1L, await DatabaseExistsAsync());
+            }
+        }
+        finally
+        {
+            await held.CloseAsync();
+            if (disposal is not null && !removed)
+            {
+                try { await disposal; removed = true; }
+                catch (InvalidOperationException) { /* The old immediate cleanup retains the database. */ }
+            }
+            if (!removed)
+            {
+                // Preserve a failing assertion while allowing the server to observe our socket close.
+                await using var sessions = new NpgsqlCommand("SELECT count(*) FROM pg_stat_activity WHERE datname = @name", admin);
+                sessions.Parameters.AddWithValue("name", fixture.DatabaseName!);
+                for (var attempt = 0; attempt < 50; attempt++)
+                {
+                    if ((long)(await sessions.ExecuteScalarAsync())! == 0) break;
+                    await Task.Delay(100);
+                }
+                await fixture.DisposeAsync();
+            }
+        }
+
+        async Task AssertHeldConnectionUsableAsync()
+        {
+            await using var command = new NpgsqlCommand("SELECT 1", held);
+            Assert.Equal(1, (int)(await command.ExecuteScalarAsync())!);
+        }
+
+        async Task<long> DatabaseExistsAsync()
+        {
+            await using var command = new NpgsqlCommand("SELECT count(*) FROM pg_database WHERE datname = @name", admin);
+            command.Parameters.AddWithValue("name", fixture.DatabaseName!);
+            return (long)(await command.ExecuteScalarAsync())!;
+        }
+    }
+
     [Theory]
     [InlineData(false, 0)]
     [InlineData(false, 1)]
@@ -226,6 +302,8 @@ public sealed class BankImportProvenanceMigrationTests
     private sealed class MigrationDatabase(PaymentContext db, DbConnection? connection, string? databaseName, string? adminConnection) : IAsyncDisposable
     {
         public PaymentContext Db { get; } = db;
+        public string? DatabaseName => databaseName;
+        public string? AdminConnectionString => adminConnection;
 
         public static async Task<MigrationDatabase> CreateAsync(bool postgres)
         {
@@ -262,7 +340,16 @@ public sealed class BankImportProvenanceMigrationTests
             await admin.OpenAsync();
             await using var sessions = new NpgsqlCommand("SELECT count(*) FROM pg_stat_activity WHERE datname = @name", admin);
             sessions.Parameters.AddWithValue("name", databaseName);
-            if ((long)(await sessions.ExecuteScalarAsync())! != 0) throw new InvalidOperationException($"Owned migration database still has sessions; preserved: {databaseName}");
+            // A closed client socket may remain visible briefly on the server.
+            // Match the model fixture's grace period; never terminate a live session.
+            var started = Stopwatch.GetTimestamp();
+            while (true)
+            {
+                if ((long)(await sessions.ExecuteScalarAsync())! == 0) break;
+                if (Stopwatch.GetElapsedTime(started) >= TimeSpan.FromSeconds(5))
+                    throw new InvalidOperationException($"Owned migration database still has sessions; preserved: {databaseName}");
+                await Task.Delay(100);
+            }
             await using var drop = new NpgsqlCommand($"DROP DATABASE \"{databaseName}\"", admin);
             await drop.ExecuteNonQueryAsync();
         }
