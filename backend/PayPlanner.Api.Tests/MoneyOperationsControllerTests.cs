@@ -3453,13 +3453,14 @@ public partial class MoneyOperationsControllerTests
             await File.WriteAllTextAsync(
                 Path.Combine(folderPath, "statement.csv"),
                 "Дата;Сумма;Счёт;Контрагент;Назначение;Номер\n" +
-                "29.04.2026;25000;Main bank;Client;Invoice 33;101\n",
+                "29.04.2026;25000;40702810900000000001;Client;Invoice 33;101\n",
                 Encoding.UTF8);
             await File.WriteAllTextAsync(Path.Combine(folderPath, "ignore.pdf"), "ignored", Encoding.UTF8);
 
             var controller = await CreateBankImportControllerAsync(db, user.Id);
             var account = await db.MoneyAccounts.SingleAsync();
             account.Name = "Main bank";
+            account.BankAccountNumber = "40702810900000000001";
             await db.SaveChangesAsync();
 
             var action = await controller.RunBankStatementAutoImport(CancellationToken.None, companyId: account.CompanyId, moneyAccountId: account.Id);
@@ -5167,6 +5168,7 @@ public partial class MoneyOperationsControllerTests
         {
             Name = "Основной банк",
             Source = MoneyOperationSource.Bank,
+            BankAccountNumber = "40702810900000000001",
             Currency = "RUB",
             IsDefault = true,
             IsActive = true,
@@ -5178,7 +5180,7 @@ public partial class MoneyOperationsControllerTests
         var action = await controller.ImportBankStatement(
             CreateFormFile(
                 "Дата;Сумма;Счёт;Контрагент;Назначение;Номер\n" +
-                "29.04.2026;25000;Основной банк;Ахмедова Айтан Рафик Кызы;Оплата по счёту №33;301\n",
+                "29.04.2026;25000;40702810900000000001;Ахмедова Айтан Рафик Кызы;Оплата по счёту №33;301\n",
                 "statement.csv"),
             CancellationToken.None);
 
@@ -5828,17 +5830,22 @@ public partial class MoneyOperationsControllerTests
         {
             Name = "Валютный тестовый",
             Source = MoneyOperationSource.Bank,
+            BankAccountNumber = "40702810900000000002",
             Currency = "USD",
             IsActive = true,
         });
         await db.SaveChangesAsync();
         var action = await (await CreateBankImportControllerAsync(db)).ImportBankStatement(CreateFormFile(
             "Дата;Сумма;Контрагент;Назначение;Номер;Счет\n" +
-            "12.10.2026;1000;Синтетический контрагент;Оплата по счету №916;D1;Валютный тестовый\n",
+            "12.10.2026;1000;Синтетический контрагент;Оплата по счету №916;D1;40702810900000000002\n",
             "foreign-currency.csv"), CancellationToken.None);
-        Assert.IsType<OkObjectResult>(action.Result);
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var result = Assert.IsType<BankStatementImportResultDto>(ok.Value);
+        Assert.Equal(1, result.Created);
+        Assert.Empty(result.Errors);
         var operation = await db.MoneyOperations.SingleAsync();
         Assert.Equal("USD", operation.Currency);
+        Assert.Equal(1_000m, operation.Amount);
         Assert.Equal(MoneyOperationMatchStatus.ClarificationRequired, operation.MatchStatus);
         Assert.Null(operation.LinkedInvoiceId);
         Assert.Equal(0m, (await db.Payments.SingleAsync()).PaidAmount);

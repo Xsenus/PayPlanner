@@ -94,7 +94,7 @@ public partial class MoneyOperationsControllerTests
             foreach (var scenario in new[] { "csv-foreign", "csv-number-account", "csv-payer", "csv-recipient", "csv-self",
                      "csv-negative-income", "csv-both-sides", "csv-bad-total-fallback", "csv-bad-income", "csv-conflict",
                      "csv-direction", "csv-empty-account", "csv-duplicate-account", "csv-duplicate-amount",
-                     "csv-duplicate-income", "csv-unquoted-comma", "date", "missing-selected",
+                     "csv-duplicate-income", "csv-unquoted-comma", "csv-display-name", "date", "missing-selected",
                      "onec-missing-header", "onec-self", "onec-no-parties", "onec-balance-only", "onec-duplicate", "onec-truncated" })
                 yield return new object[] { postgres, scenario };
     }
@@ -126,6 +126,7 @@ public partial class MoneyOperationsControllerTests
             "csv-duplicate-amount" => Csv("Сумма;Сумма", "123.45;999.99"),
             "csv-duplicate-income" => Csv("Приход;Приход;Расход", "123.45;999.99;0"),
             "csv-unquoted-comma" => "Дата,Сумма,Контрагент\n18.10.2026,1,234.56,Синтетический плательщик\n",
+            "csv-display-name" => Csv("Сумма;Расчетный счет", "123.45;Основной банк синтетической компании"),
             "date" => StatementParsingCsv("123.45").Replace("18.10.2026", "не дата", StringComparison.Ordinal),
             "missing-selected" => validOneC,
             "onec-missing-header" => validOneC.Replace($"РасчСчет={ParsingOwnAccount}\n", string.Empty, StringComparison.Ordinal),
