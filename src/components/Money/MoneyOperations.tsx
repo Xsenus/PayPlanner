@@ -693,6 +693,8 @@ function getBankImportStatusLabel(status: string) {
       return 'Пропущено';
     case 'Error':
       return 'Ошибка';
+    case 'ClarificationRequired':
+      return 'Требует уточнения';
     case 'RollbackSkipped':
       return 'Откат пропущен';
     default:
@@ -709,6 +711,7 @@ function getBankImportStatusClassName(status: string) {
     case 'RollbackBlocked':
     case 'Skipped':
     case 'RollbackSkipped':
+    case 'ClarificationRequired':
       return 'bg-amber-50 text-amber-700';
     case 'RolledBack':
       return 'bg-slate-100 text-slate-600';

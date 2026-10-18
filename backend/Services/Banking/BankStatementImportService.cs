@@ -1,7 +1,10 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Globalization;
+using System.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
@@ -98,8 +101,8 @@ public sealed partial class BankStatementImportService(PaymentContext db)
                 FileSize = fileSize,
                 FileHash = fileHash,
                 RowsRead = parsed.RowsRead,
-                PeriodFrom = items.Count == 0 ? null : items.Min(item => item.Date),
-                PeriodTo = items.Count == 0 ? null : items.Max(item => item.Date),
+                PeriodFrom = items.Where(item => item.Date != default).Select(item => (DateTime?)item.Date).Min(),
+                PeriodTo = items.Where(item => item.Date != default).Select(item => (DateTime?)item.Date).Max(),
             };
         if (appendBatchId.HasValue)
         {
@@ -122,8 +125,9 @@ public sealed partial class BankStatementImportService(PaymentContext db)
         var incomeTypes = await db.IncomeTypes.AsNoTracking().Where(item => item.IsActive)
             .Select(item => new BankStatementIncomeTypeCandidate(item.Id, item.Name, item.PaymentType)).ToListAsync(ct);
         var seenFacts = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var chunk in items.Chunk(ChunkSize))
+        foreach (var sourceChunk in items.Chunk(ChunkSize))
         {
+            var chunk = await ValidateSqliteAmountsAsync(sourceChunk, ct);
             var keys = chunk.Select(item => ResolveMovementKey(context, fileHash, item)).ToArray();
             var existing = await db.MoneyOperations.IgnoreQueryFilters()
                 .Where(item => item.SourceMovementKey != null && keys.Contains(item.SourceMovementKey))
@@ -134,8 +138,10 @@ public sealed partial class BankStatementImportService(PaymentContext db)
                     .ToDictionaryAsync(row => row.RowIdentityKey!, StringComparer.Ordinal, ct)
                 : new Dictionary<string, BankStatementImportRow>(StringComparer.Ordinal);
             var oldStates = previousRows.ToDictionary(pair => pair.Key, pair => pair.Value.Status, StringComparer.Ordinal);
-            var ambiguousFacts = await FindAmbiguousFactsAsync(context, chunk.Where(item => !item.BankStatementOperationId.HasValue).ToArray(), ct);
-            var candidates = await LoadInvoiceCandidatesAsync(context, chunk, ct);
+            var processable = chunk.Where(item => item.ValidationError is null && item.IsBooked
+                && item.Amount > 0m && item.Date != default).ToArray();
+            var ambiguousFacts = await FindAmbiguousFactsAsync(context, processable.Where(item => !item.BankStatementOperationId.HasValue).ToArray(), ct);
+            var candidates = await LoadInvoiceCandidatesAsync(context, processable, ct);
             var reserved = new Dictionary<int, decimal>();
             var created = new List<MoneyOperation>();
             foreach (var item in chunk)
@@ -179,6 +185,17 @@ public sealed partial class BankStatementImportService(PaymentContext db)
                 row.ExternalOperationId = item.ExternalOperationId;
                 row.Currency = context.Account.Currency;
                 row.IsBooked = item.IsBooked;
+                if (item.ValidationError is not null)
+                {
+                    // Source errors require a corrected file; reprocess must not
+                    // manufacture money from the surviving partial numeric fields.
+                    row.Status = BankStatementImportRowStatus.ClarificationRequired;
+                    row.Message = item.ValidationError;
+                    result.Skipped++;
+                    if (isNewRow) errorsDelta++;
+                    if (result.Errors.Count < 50) result.Errors.Add($"Строка {item.RowNumber}: {row.Message}");
+                    continue;
+                }
                 if (!item.IsBooked)
                 {
                     row.Status = BankStatementImportRowStatus.Pending;
@@ -313,7 +330,8 @@ public sealed partial class BankStatementImportService(PaymentContext db)
         batch.CreatedRows = appendBatchId.HasValue ? batch.CreatedRows + createdDelta : result.Created;
         batch.SkippedRows = appendBatchId.HasValue ? batch.SkippedRows + newRows - createdDelta : result.Skipped;
         batch.ErrorRows = appendBatchId.HasValue ? batch.ErrorRows + errorsDelta : parsed.Errors.Count + errorsDelta;
-        batch.ErrorSummary = result.Errors.Count == 0 ? null : string.Join(Environment.NewLine, result.Errors);
+        batch.ErrorSummary = result.Errors.Count == 0 ? null
+            : TruncateStatementText(string.Join(Environment.NewLine, result.Errors), 4000);
         batch.Status = appendBatchId.HasValue ? BankStatementImportBatchStatus.Loading
             : batch.ErrorRows == 0 ? BankStatementImportBatchStatus.Applied : BankStatementImportBatchStatus.AppliedWithErrors;
         if (!appendBatchId.HasValue) batch.CompletedAt = DateTime.UtcNow;
@@ -346,9 +364,47 @@ public sealed partial class BankStatementImportService(PaymentContext db)
         return result;
     }
 
+    private async Task<BankStatementImportItem[]> ValidateSqliteAmountsAsync(BankStatementImportItem[] items, CancellationToken ct)
+    {
+        if (!db.Database.IsSqlite()) return items;
+        var amounts = items.Where(item => item.ValidationError is null && item.IsBooked && item.Amount > 0m)
+            .Select(item => item.Amount).Distinct().ToArray();
+        if (amounts.Length == 0) return items;
+        // The existing decimal columns have NUMERIC affinity. Check the actual
+        // provider conversion in one bounded query, before creating money.
+        await using var command = db.Database.GetDbConnection().CreateCommand();
+        command.Transaction = db.Database.CurrentTransaction!.GetDbTransaction();
+        var expressions = new string[amounts.Length];
+        for (var index = 0; index < amounts.Length; index++)
+        {
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = $"@amount{index}";
+            parameter.DbType = DbType.Decimal;
+            parameter.Value = amounts[index];
+            command.Parameters.Add(parameter);
+            expressions[index] = $"CAST({parameter.ParameterName} AS NUMERIC)";
+        }
+        command.CommandText = "SELECT " + string.Join(", ", expressions);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        await reader.ReadAsync(ct);
+        var lossy = new HashSet<decimal>();
+        for (var index = 0; index < amounts.Length; index++)
+            if (reader.GetDecimal(index) != amounts[index]) lossy.Add(amounts[index]);
+        if (lossy.Count == 0) return items;
+        return items.Select(item => item.ValidationError is null && lossy.Contains(item.Amount)
+            ? item with
+            {
+                Amount = 0m,
+                ValidationError = BuildStatementValidationMessage([
+                    $"Сумма «{item.Amount.ToString(CultureInfo.InvariantCulture)}» не может быть сохранена в этой базе без потери точности."]),
+            }
+            : item).ToArray();
+    }
+
     private async Task<List<BankStatementInvoiceCandidate>> LoadInvoiceCandidatesAsync(
         BankStatementImportContext context, IReadOnlyCollection<BankStatementImportItem> items, CancellationToken ct)
     {
+        if (items.Count == 0) return [];
         if (context.Access is null || context.User is null || !context.Access.Permission.CanEdit) return [];
         var accounts = await db.ResolveSectionAccessAsync(context.User, RolePermissionCatalog.Accounts, ct, requireApprovedUser: true);
         if (accounts?.Permission is not { CanView: true, CanEdit: true }) return [];

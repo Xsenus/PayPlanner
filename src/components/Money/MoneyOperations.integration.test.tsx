@@ -3374,6 +3374,29 @@ describe('MoneyOperations integration', () => {
   it('shows bank import journal details and rolls back an import batch', async () => {
     const user = userEvent.setup();
     operations = [];
+    const defaultDetails = getBankStatementImportMock.getMockImplementation()!;
+    getBankStatementImportMock.mockImplementationOnce(async (id: number) => {
+      const details = await defaultDetails(id);
+      return {
+        ...details,
+        status: 'AppliedWithErrors',
+        rowsRead: 2,
+        skippedRows: 1,
+        errorRows: 1,
+        rows: [...details.rows, {
+          ...details.rows[0],
+          id: 2,
+          rowNumber: 3,
+          status: 'ClarificationRequired',
+          moneyOperationId: null,
+          amount: 0,
+          counterpartyName: 'Синтетический плательщик',
+          purpose: 'Строка с ошибкой суммы',
+          paymentOrderNumber: '102',
+          message: 'Не удалось однозначно прочитать сумму «1,234». Исправьте исходную строку и загрузите выписку заново.',
+        }],
+      };
+    });
     getBankStatementImportsMock.mockResolvedValue({
       items: [
         {
@@ -3407,6 +3430,10 @@ describe('MoneyOperations integration', () => {
     await screen.findByText('Импорт банковской выписки');
     await screen.findByText('Ахмедова Айтан Рафик Кызы');
     await screen.findByText('Оплата по счету №33');
+
+    await screen.findByText('Требует уточнения');
+    await screen.findByText(/Не удалось однозначно прочитать сумму «1,234»/);
+    expect(screen.queryByText('ClarificationRequired')).toBeNull();
 
     await user.click(screen.getByRole('button', { name: 'Откатить импорт выписки statement.csv из карточки' }));
 

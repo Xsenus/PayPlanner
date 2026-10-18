@@ -197,121 +197,156 @@ public static class BankStatementImportRules
         => text.Contains("1CClientBankExchange", StringComparison.OrdinalIgnoreCase) ||
            text.Contains("СекцияДокумент=", StringComparison.OrdinalIgnoreCase);
 
-    public static (List<BankStatementImportItem> Items, BankStatementImportResultDto Result) ParseClientBankExchange(string text)
+    public static (List<BankStatementImportItem> Items, BankStatementImportResultDto Result) ParseClientBankExchange(
+        string text, string? selectedBankAccountNumber = null)
     {
         var items = new List<BankStatementImportItem>();
         var result = new BankStatementImportResultDto();
         var lines = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
-        var statementAccount = string.Empty;
-        Dictionary<string, string>? document = null;
-
+        var declaredAccounts = new HashSet<string>(StringComparer.Ordinal);
+        var inDocument = false;
+        var inBalance = false;
         foreach (var rawLine in lines)
         {
             var line = rawLine.Trim();
-            if (line.Length == 0)
-            {
-                continue;
-            }
-
+            if (line.StartsWith("СекцияДокумент=", StringComparison.OrdinalIgnoreCase)) { inDocument = true; continue; }
+            if (line.Equals("КонецДокумента", StringComparison.OrdinalIgnoreCase)) { inDocument = false; continue; }
+            if (line.Equals("СекцияРасчСчет", StringComparison.OrdinalIgnoreCase)) { inBalance = true; continue; }
+            if (line.Equals("КонецРасчСчет", StringComparison.OrdinalIgnoreCase)
+                || line.Equals("КонецРасчСчета", StringComparison.OrdinalIgnoreCase)) { inBalance = false; continue; }
+            if (inDocument || inBalance) continue;
+            var separator = line.IndexOf('=');
+            if (separator <= 0 || !line[..separator].Trim().Equals("РасчСчет", StringComparison.OrdinalIgnoreCase)) continue;
+            var declared = NormalizeBankAccount(line[(separator + 1)..]);
+            if (declared.Length > 0) declaredAccounts.Add(declared);
+        }
+        // Standalone parsing remains available for a single declared account.
+        // The upload caller always passes its selected number explicitly, including an empty number.
+        var selected = selectedBankAccountNumber is null && declaredAccounts.Count == 1
+            ? declaredAccounts.Single() : NormalizeBankAccount(selectedBankAccountNumber);
+        var statementError = selected.Length == 0
+            ? "Укажите номер банковского счёта в настройках выбранного денежного счёта."
+            : declaredAccounts.Count == 0
+                ? "В заголовке выписки не указан расчётный счёт."
+                : !declaredAccounts.Contains(selected)
+                    ? $"Выбранный счёт «{StatementValueForError(selected)}» отсутствует в заголовке выписки: {string.Join(", ", declaredAccounts.Take(3).Select(account => StatementValueForError(account)))}."
+                    : null;
+        Dictionary<string, string>? document = null;
+        string? documentError = null;
+        foreach (var rawLine in lines)
+        {
+            var line = rawLine.Trim();
+            if (line.Length == 0) continue;
             if (line.StartsWith("СекцияДокумент=", StringComparison.OrdinalIgnoreCase))
             {
+                if (document is not null)
+                    AddClientBankExchangeDocument(document, selected, items, result,
+                        JoinErrors(statementError, documentError, "Не завершена секция документа."));
                 document = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                documentError = null;
                 continue;
             }
-
             if (line.Equals("КонецДокумента", StringComparison.OrdinalIgnoreCase))
             {
                 if (document is not null)
-                {
-                    AddClientBankExchangeDocument(document, statementAccount, items, result);
-                    document = null;
-                }
-
+                    AddClientBankExchangeDocument(document, selected, items, result, JoinErrors(statementError, documentError));
+                document = null;
+                documentError = null;
                 continue;
             }
-
-            var separatorIndex = line.IndexOf('=');
-            if (separatorIndex <= 0)
-            {
-                continue;
-            }
-
-            var key = line[..separatorIndex].Trim();
-            var value = line[(separatorIndex + 1)..].Trim();
-            if (document is not null)
-            {
-                document[key] = value;
-            }
-            else if (key.Equals("РасчСчет", StringComparison.OrdinalIgnoreCase))
-            {
-                statementAccount = NormalizeBankAccount(value);
-            }
+            if (document is null) continue;
+            var separator = line.IndexOf('=');
+            if (separator <= 0) continue;
+            var key = line[..separator].Trim();
+            var value = line[(separator + 1)..].Trim();
+            if (document.TryGetValue(key, out var previous) && !string.Equals(previous, value, StringComparison.Ordinal)
+                && (key.Equals("Сумма", StringComparison.OrdinalIgnoreCase)
+                    || key.Equals("Дата", StringComparison.OrdinalIgnoreCase)
+                    || key.Equals("ПлательщикСчет", StringComparison.OrdinalIgnoreCase)
+                    || key.Equals("ПолучательСчет", StringComparison.OrdinalIgnoreCase)))
+                documentError ??= $"Повторяются разные значения реквизита «{StatementValueForError(key)}»: «{StatementValueForError(previous)}» и «{StatementValueForError(value)}».";
+            document[key] = value;
         }
-
         if (document is not null)
-        {
-            AddClientBankExchangeDocument(document, statementAccount, items, result);
-        }
-
+            AddClientBankExchangeDocument(document, selected, items, result,
+                JoinErrors(statementError, documentError, "Не найдена отметка конца документа."));
+        if (items.Count == 0 && statementError is not null) result.Errors.Add(statementError);
         return (items, result);
+
+        static string? JoinErrors(params string?[] errors)
+        {
+            var joined = string.Join(" ", errors.Where(error => !string.IsNullOrWhiteSpace(error)));
+            return joined.Length == 0 ? null : joined;
+        }
     }
 
     public static void AddClientBankExchangeDocument(
         IReadOnlyDictionary<string, string> document,
         string statementAccount,
         ICollection<BankStatementImportItem> items,
-        BankStatementImportResultDto result)
+        BankStatementImportResultDto result,
+        string? sourceError = null)
     {
         result.RowsRead++;
+        var errors = new List<string>();
+        if (sourceError is not null) errors.Add(sourceError);
         var documentNumber = NormalizeStatementText(GetDictionaryValue(document, "Номер"));
-
-        if (!TryParseStatementDate(GetDictionaryValue(document, "Дата") ?? string.Empty, out var date))
+        var dateText = GetDictionaryValue(document, "Дата") ?? string.Empty;
+        if (!TryParseStatementDate(dateText, out var date))
+            errors.Add($"Не удалось прочитать дату «{StatementValueForError(dateText)}».");
+        var amountText = GetDictionaryValue(document, "Сумма") ?? string.Empty;
+        if (!TryParseStatementAmount(amountText, out var amount) || amount <= 0m)
         {
-            result.Skipped++;
-            result.Errors.Add($"Документ {documentNumber ?? result.RowsRead.ToString(CultureInfo.InvariantCulture)}: не удалось прочитать дату.");
-            return;
+            errors.Add($"Не удалось однозначно прочитать положительную сумму «{StatementValueForError(amountText)}» без округления.");
+            amount = 0m;
         }
-
-        if (!TryParseStatementAmount(GetDictionaryValue(document, "Сумма") ?? string.Empty, out var amount) || amount == 0m)
-        {
-            result.Skipped++;
-            result.Errors.Add($"Документ {documentNumber ?? result.RowsRead.ToString(CultureInfo.InvariantCulture)}: не удалось прочитать сумму.");
-            return;
-        }
-
         var payerAccount = NormalizeBankAccount(GetDictionaryValue(document, "ПлательщикСчет"));
         var recipientAccount = NormalizeBankAccount(GetDictionaryValue(document, "ПолучательСчет"));
-        var isExpense = !string.IsNullOrWhiteSpace(statementAccount) &&
-                        string.Equals(statementAccount, payerAccount, StringComparison.Ordinal);
-        var isIncome = !string.IsNullOrWhiteSpace(statementAccount) &&
-                       string.Equals(statementAccount, recipientAccount, StringComparison.Ordinal);
+        var selected = NormalizeBankAccount(statementAccount);
+        var isExpense = selected.Length > 0 && selected == payerAccount;
+        var isIncome = selected.Length > 0 && selected == recipientAccount;
+        if (isExpense == isIncome)
+            errors.Add($"Нельзя определить единственную сторону выбранного счёта: плательщик «{StatementValueForError(payerAccount)}», получатель «{StatementValueForError(recipientAccount)}».");
         var direction = isExpense && !isIncome ? MoneyOperationDirection.Expense : MoneyOperationDirection.Income;
-        var counterparty = NormalizeStatementText(direction == MoneyOperationDirection.Expense
-            ? GetDictionaryValue(document, "Получатель")
-            : GetDictionaryValue(document, "Плательщик"));
-        var purpose = NormalizeStatementText(GetDictionaryValue(document, "НазначениеПлатежа"));
-        var account = statementAccount;
-        if (string.IsNullOrWhiteSpace(account))
-        {
-            account = direction == MoneyOperationDirection.Expense ? payerAccount : recipientAccount;
-        }
-
+        var sourceAccount = isExpense != isIncome
+            ? isExpense ? payerAccount : recipientAccount
+            : $"{StatementValueForError(payerAccount, 90)} → {StatementValueForError(recipientAccount, 90)}";
         items.Add(new BankStatementImportItem(
-            result.RowsRead,
-            date.Date,
-            direction,
-            Math.Abs(amount),
-            string.IsNullOrWhiteSpace(account) ? "Расчетный счет" : account,
-            counterparty,
-            purpose,
-            documentNumber));
+            result.RowsRead, date.Date, direction, amount, sourceAccount,
+            NormalizeStatementText(direction == MoneyOperationDirection.Expense
+                ? GetDictionaryValue(document, "Получатель") : GetDictionaryValue(document, "Плательщик")),
+            NormalizeStatementText(GetDictionaryValue(document, "НазначениеПлатежа")), documentNumber)
+        {
+            ValidationError = BuildStatementValidationMessage(errors),
+        });
     }
 
     public static string? GetDictionaryValue(IReadOnlyDictionary<string, string> values, string key)
         => values.TryGetValue(key, out var value) ? value : null;
 
     public static string NormalizeBankAccount(string? value)
-        => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim().Replace(" ", string.Empty);
+        => string.IsNullOrWhiteSpace(value) ? string.Empty
+            : string.Concat(value.Where(character => !char.IsWhiteSpace(character))).ToUpperInvariant();
+
+    public static string StatementValueForError(string? value, int maximumLength = 160)
+        => TruncateStatementText((value ?? string.Empty).Replace('\r', ' ').Replace('\n', ' '), maximumLength);
+
+    public static string TruncateStatementText(string text, int maximumLength)
+    {
+        if (text.Length <= maximumLength) return text;
+        var end = Math.Max(0, maximumLength - 1);
+        if (end > 0 && char.IsHighSurrogate(text[end - 1])) end--;
+        return text[..end] + "…";
+    }
+
+    public static string? BuildStatementValidationMessage(IEnumerable<string> errors)
+    {
+        var message = string.Join(" ", errors.Where(error => !string.IsNullOrWhiteSpace(error)));
+        if (message.Length == 0) return null;
+        const string action = " Исправьте исходную строку и загрузите выписку заново.";
+        var limit = 1000 - action.Length;
+        return StatementValueForError(message, limit) + action;
+    }
 
     public static string DecodeStatementBytes(byte[] bytes)
     {
@@ -395,13 +430,34 @@ public static class BankStatementImportRules
 
     public static StatementHeaderMap BuildStatementHeaderMap(IReadOnlyList<string> header)
     {
-        var map = new StatementHeaderMap();
+        var map = new StatementHeaderMap { ColumnCount = header.Count };
         for (var index = 0; index < header.Count; index++)
         {
             var name = NormalizeHeaderName(header[index]);
             if (map.Date < 0 && (name.Contains("дата") || name.Contains("date")))
             {
                 map.Date = index;
+            }
+            // Counterparty and correspondent bank details do not identify our account.
+            else if ((name.Contains("счет") || name.Contains("счёт") || name.Contains("account"))
+                && !name.Contains("контрагент") && !name.Contains("counterparty")
+                && !name.Contains("корр") && !name.Contains("correspondent"))
+            {
+                if (name.Contains("плательщик") || name.Contains("payer"))
+                {
+                    map.HasAmbiguousAccountColumns |= map.PayerAccount >= 0;
+                    map.PayerAccount = index;
+                }
+                else if (name.Contains("получател") || name.Contains("recipient") || name.Contains("payee"))
+                {
+                    map.HasAmbiguousAccountColumns |= map.RecipientAccount >= 0;
+                    map.RecipientAccount = index;
+                }
+                else
+                {
+                    map.HasAmbiguousAccountColumns |= map.Account >= 0;
+                    map.Account = index;
+                }
             }
             else if (map.DocumentNumber < 0 && (name.Contains("номер") || name.Contains("документ") || name.Contains("поручение")))
             {
@@ -415,20 +471,22 @@ public static class BankStatementImportRules
             {
                 map.Purpose = index;
             }
-            else if (map.Account < 0 && (name.Contains("счет") || name.Contains("счёт") || name.Contains("account")))
+            else if (name.Contains("приход") || name.Contains("поступ") || name.Contains("кредит") || name.Contains("credit"))
             {
-                map.Account = index;
-            }
-            else if (map.Income < 0 && (name.Contains("приход") || name.Contains("поступ") || name.Contains("кредит") || name.Contains("credit")))
-            {
+                map.HasAmbiguousAmountColumns |= map.Income >= 0;
+                map.AmountColumns.Add(index);
                 map.Income = index;
             }
-            else if (map.Expense < 0 && (name.Contains("расход") || name.Contains("спис") || name.Contains("дебет") || name.Contains("debit")))
+            else if (name.Contains("расход") || name.Contains("спис") || name.Contains("дебет") || name.Contains("debit"))
             {
+                map.HasAmbiguousAmountColumns |= map.Expense >= 0;
+                map.AmountColumns.Add(index);
                 map.Expense = index;
             }
-            else if (map.Amount < 0 && (name.Contains("сумма") || name.Contains("amount")))
+            else if (name.Contains("сумма") || name.Contains("amount"))
             {
+                map.HasAmbiguousAmountColumns |= map.Amount >= 0;
+                map.AmountColumns.Add(index);
                 map.Amount = index;
             }
         }
@@ -438,6 +496,118 @@ public static class BankStatementImportRules
 
     public static string NormalizeHeaderName(string value)
         => value.Trim().ToLowerInvariant().Replace(" ", string.Empty).Replace("_", string.Empty);
+
+    public static BankStatementImportItem ParseDelimitedStatementRow(
+        IReadOnlyList<string> row, StatementHeaderMap map, int rowNumber, string? selectedBankAccountNumber)
+    {
+        var errors = new List<string>();
+        if (map.ColumnCount > 0 && row.Count != map.ColumnCount)
+            errors.Add($"Количество полей ({row.Count}) не совпадает с заголовком ({map.ColumnCount}). Проверьте разделители и кавычки в исходной строке.");
+        var dateText = GetOptionalCell(row, map.Date) ?? string.Empty;
+        if (!TryParseStatementDate(dateText, out var date))
+            errors.Add($"Не удалось прочитать дату «{StatementValueForError(dateText)}».");
+
+        var (amount, direction, explicitDirection) = ParseDelimitedAmount(row, map, errors);
+        var own = NormalizeBankAccount(selectedBankAccountNumber);
+        var accountText = GetOptionalCell(row, map.Account);
+        var payerText = GetOptionalCell(row, map.PayerAccount);
+        var recipientText = GetOptionalCell(row, map.RecipientAccount);
+        var payer = NormalizeBankAccount(payerText);
+        var recipient = NormalizeBankAccount(recipientText);
+        if (map.HasAmbiguousAccountColumns)
+            errors.Add("Несколько колонок задают один и тот же банковский реквизит.");
+        if (map.Account >= 0 || map.PayerAccount >= 0 || map.RecipientAccount >= 0)
+        {
+            if (own.Length == 0)
+                errors.Add("Укажите номер банковского счёта в настройках выбранного денежного счёта.");
+            if (map.Account >= 0 && (own.Length == 0 || NormalizeBankAccount(accountText) != own))
+                errors.Add($"Счёт строки «{StatementValueForError(accountText)}» не совпадает с выбранным счётом «{StatementValueForError(own)}».");
+
+            var ownPayer = own.Length > 0 && payer == own;
+            var ownRecipient = own.Length > 0 && recipient == own;
+            if (map.PayerAccount >= 0 && map.RecipientAccount >= 0)
+            {
+                if (ownPayer == ownRecipient)
+                    errors.Add($"Нельзя определить единственную сторону выбранного счёта: плательщик «{StatementValueForError(payerText)}», получатель «{StatementValueForError(recipientText)}».");
+                else
+                    ApplyDirection(ownPayer ? MoneyOperationDirection.Expense : MoneyOperationDirection.Income);
+            }
+            else if (map.PayerAccount >= 0 || map.RecipientAccount >= 0)
+            {
+                // A sole party column may describe the counterparty. Check it
+                // against the amount direction rather than treating it as our account.
+                if (ownPayer || ownRecipient)
+                    ApplyDirection(ownPayer ? MoneyOperationDirection.Expense : MoneyOperationDirection.Income);
+                else if ((map.PayerAccount >= 0 && (payer.Length == 0 || direction == MoneyOperationDirection.Expense))
+                    || (map.RecipientAccount >= 0 && (recipient.Length == 0 || direction == MoneyOperationDirection.Income)))
+                    errors.Add($"Реквизиты плательщика «{StatementValueForError(payerText)}» и получателя «{StatementValueForError(recipientText)}» не подтверждают выбранную сторону операции.");
+            }
+        }
+
+        var sourceAccount = accountText ?? (map.PayerAccount >= 0 || map.RecipientAccount >= 0
+            ? $"{StatementValueForError(payerText, 90)} → {StatementValueForError(recipientText, 90)}"
+            : "Расчетный счет");
+        return new BankStatementImportItem(rowNumber, date.Date, direction, amount,
+            StatementValueForError(sourceAccount, 200),
+            NormalizeStatementText(GetOptionalCell(row, map.Counterparty)),
+            NormalizeStatementText(GetOptionalCell(row, map.Purpose)),
+            NormalizeStatementText(GetOptionalCell(row, map.DocumentNumber)))
+        {
+            ValidationError = BuildStatementValidationMessage(errors),
+        };
+
+        void ApplyDirection(MoneyOperationDirection accountDirection)
+        {
+            if (explicitDirection && direction != accountDirection)
+                errors.Add("Направление суммы противоречит стороне выбранного банковского счёта.");
+            direction = accountDirection;
+        }
+    }
+
+    private static (decimal Amount, MoneyOperationDirection Direction, bool ExplicitDirection) ParseDelimitedAmount(
+        IReadOnlyList<string> row, StatementHeaderMap map, ICollection<string> errors)
+    {
+        if (map.HasAmbiguousAmountColumns)
+        {
+            var values = map.AmountColumns.Take(4).Select(index => $"«{StatementValueForError(GetOptionalCell(row, index), 90)}»");
+            errors.Add($"Повторяются колонки сумм: {string.Join(", ", values)}.");
+            return (0m, MoneyOperationDirection.Income, false);
+        }
+        var totalText = GetOptionalCell(row, map.Amount);
+        var incomeText = GetOptionalCell(row, map.Income);
+        var expenseText = GetOptionalCell(row, map.Expense);
+        var validTotal = ReadAmount(totalText, "сумма", out var total);
+        var validIncome = ReadAmount(incomeText, "приход", out var income);
+        var validExpense = ReadAmount(expenseText, "расход", out var expense);
+        if (!validTotal || !validIncome || !validExpense)
+            return (0m, MoneyOperationDirection.Income, false);
+        if (income < 0m || expense < 0m || (income > 0m && expense > 0m))
+        {
+            errors.Add($"Противоречивые приход «{StatementValueForError(incomeText)}» и расход «{StatementValueForError(expenseText)}».");
+            return (0m, MoneyOperationDirection.Income, false);
+        }
+        var hasSides = incomeText is not null || expenseText is not null;
+        var sideAmount = income > 0m ? income : expense;
+        var direction = hasSides
+            ? expense > 0m ? MoneyOperationDirection.Expense : MoneyOperationDirection.Income
+            : total < 0m ? MoneyOperationDirection.Expense : MoneyOperationDirection.Income;
+        var amount = totalText is not null ? Math.Abs(total) : sideAmount;
+        if (amount <= 0m || (hasSides && (sideAmount <= 0m || amount != sideAmount
+            || (totalText is not null && total < 0m && direction == MoneyOperationDirection.Income))))
+        {
+            errors.Add($"Нулевая или противоречивая сумма: «{StatementValueForError(totalText)}», приход «{StatementValueForError(incomeText)}», расход «{StatementValueForError(expenseText)}».");
+            return (0m, direction, hasSides || total < 0m);
+        }
+        return (amount, direction, hasSides || total < 0m);
+
+        bool ReadAmount(string? text, string title, out decimal value)
+        {
+            value = 0m;
+            if (text is null || TryParseStatementAmount(text, out value)) return true;
+            errors.Add($"Не удалось однозначно прочитать {title} «{StatementValueForError(text)}» без округления.");
+            return false;
+        }
+    }
 
     public static bool TryGetCell(IReadOnlyList<string> row, int index, out string value)
     {
@@ -859,28 +1029,87 @@ public static class BankStatementImportRules
 
     public static bool TryParseStatementAmount(string value, out decimal amount)
     {
-        var normalized = value
-            .Trim()
-            .Replace("\u00A0", string.Empty)
-            .Replace(" ", string.Empty)
-            .Replace("₽", string.Empty)
-            .Replace("руб.", string.Empty, StringComparison.OrdinalIgnoreCase)
-            .Replace("руб", string.Empty, StringComparison.OrdinalIgnoreCase);
-
-        if (normalized.Contains(',') && normalized.Contains('.'))
+        amount = 0m;
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 128) return false;
+        var normalized = value.Trim().Replace('\u00A0', ' ').Replace('\u202F', ' ');
+        foreach (var suffix in new[] { "руб.", "руб", "₽" })
         {
-            normalized = normalized.Replace(".", string.Empty).Replace(',', '.');
+            if (!normalized.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)) continue;
+            normalized = normalized[..^suffix.Length].TrimEnd();
+            break;
         }
-        else
+        if (normalized.Length == 0) return false;
+        var sign = string.Empty;
+        if (normalized[0] is '+' or '-')
         {
-            normalized = normalized.Replace(',', '.');
+            sign = normalized[..1];
+            normalized = normalized[1..];
         }
+        if (normalized.Length == 0) return false;
 
-        return decimal.TryParse(normalized, NumberStyles.Number | NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out amount);
+        var commas = normalized.Count(character => character == ',');
+        var dots = normalized.Count(character => character == '.');
+        var integer = normalized;
+        var fraction = string.Empty;
+        char? grouping = normalized.Contains(' ') ? ' ' : null;
+        if (commas > 0 && dots > 0)
+        {
+            var decimalIndex = Math.Max(normalized.LastIndexOf(','), normalized.LastIndexOf('.'));
+            var decimalSeparator = normalized[decimalIndex];
+            if (normalized.Count(character => character == decimalSeparator) != 1) return false;
+            grouping = decimalSeparator == ',' ? '.' : ',';
+            integer = normalized[..decimalIndex];
+            fraction = normalized[(decimalIndex + 1)..];
+            if (fraction.Length is < 1 or > 2 || !IsDigits(fraction)) return false;
+        }
+        else if (commas + dots == 1)
+        {
+            var decimalIndex = Math.Max(normalized.IndexOf(','), normalized.IndexOf('.'));
+            integer = normalized[..decimalIndex];
+            fraction = normalized[(decimalIndex + 1)..];
+            // A lone three-digit suffix could be thousands or a fractional amount.
+            if (fraction.Length is < 1 or > 2 || !IsDigits(fraction)) return false;
+        }
+        else if (commas + dots > 1)
+        {
+            grouping = commas > 0 ? ',' : '.';
+        }
+        if (integer.Length == 0 && fraction.Length > 0) integer = "0";
+        if (!TryNormalizeIntegerPart(integer, grouping, out var digits)) return false;
+        var canonical = sign + digits + (fraction.Length == 0 ? string.Empty : "." + fraction);
+        if (!decimal.TryParse(canonical, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint,
+                CultureInfo.InvariantCulture, out var parsed)
+            || parsed is < -9999999999999999.99m or > 9999999999999999.99m)
+            return false;
+        amount = parsed;
+        return true;
+
+        static bool IsDigits(string text)
+            => text.Length > 0 && text.All(character => character is >= '0' and <= '9');
+
+        static bool TryNormalizeIntegerPart(string text, char? separator, out string digits)
+        {
+            digits = string.Empty;
+            if (!separator.HasValue || !text.Contains(separator.Value))
+            {
+                if (!IsDigits(text)) return false;
+                digits = text;
+                return true;
+            }
+            var groups = text.Split(separator.Value);
+            if (groups[0].Length is < 1 or > 3 || !IsDigits(groups[0])
+                || groups.Skip(1).Any(group => group.Length != 3 || !IsDigits(group)))
+                return false;
+            digits = string.Concat(groups);
+            return true;
+        }
     }
 
     public sealed class StatementHeaderMap
     {
+        public int ColumnCount { get; set; }
+        public List<int> AmountColumns { get; } = [];
+        public bool HasAmbiguousAmountColumns { get; set; }
         public int Date { get; set; } = -1;
         public int Amount { get; set; } = -1;
         public int Income { get; set; } = -1;
@@ -889,6 +1118,9 @@ public static class BankStatementImportRules
         public int Purpose { get; set; } = -1;
         public int DocumentNumber { get; set; } = -1;
         public int Account { get; set; } = -1;
+        public int PayerAccount { get; set; } = -1;
+        public int RecipientAccount { get; set; } = -1;
+        public bool HasAmbiguousAccountColumns { get; set; }
     }
 
     public sealed record BankStatementImportItem(
@@ -901,6 +1133,7 @@ public static class BankStatementImportRules
         string? Purpose,
         string? DocumentNumber)
     {
+        public string? ValidationError { get; init; }
         public int? OriginRowId { get; init; }
         public int? BankStatementOperationId { get; init; }
         public string? ExternalOperationId { get; init; }

@@ -1451,7 +1451,7 @@ public partial class MoneyOperationsController : ControllerBase
         var manualCategoryRules = await GetBankStatementManualCategoryRulesAsync(GetCurrentUserId(), ct);
         if (LooksLikeClientBankExchange(text))
         {
-            var clientBankResult = ParseClientBankExchange(text);
+            var clientBankResult = ParseClientBankExchange(text, context.Account.BankAccountNumber ?? string.Empty);
             return Ok(await imports.ImportAsync(context,
                 clientBankResult.Items,
                 clientBankResult.Result,
@@ -1492,53 +1492,7 @@ public partial class MoneyOperationsController : ControllerBase
             result.RowsRead++;
             var rowNumber = index + 1;
 
-            if (!TryGetCell(row, map.Date, out var dateValue) || !TryParseStatementDate(dateValue, out var date))
-            {
-                result.Skipped++;
-                result.Errors.Add($"Строка {rowNumber}: не удалось прочитать дату.");
-                continue;
-            }
-
-            var direction = MoneyOperationDirection.Income;
-            decimal amount;
-            if (map.Amount >= 0 && TryGetCell(row, map.Amount, out var amountValue) && TryParseStatementAmount(amountValue, out var signedAmount))
-            {
-                direction = signedAmount < 0 ? MoneyOperationDirection.Expense : MoneyOperationDirection.Income;
-                amount = Math.Abs(signedAmount);
-            }
-            else
-            {
-                var income = map.Income >= 0 && TryGetCell(row, map.Income, out var incomeValue) && TryParseStatementAmount(incomeValue, out var parsedIncome)
-                    ? parsedIncome
-                    : 0m;
-                var expense = map.Expense >= 0 && TryGetCell(row, map.Expense, out var expenseValue) && TryParseStatementAmount(expenseValue, out var parsedExpense)
-                    ? parsedExpense
-                    : 0m;
-
-                if (income == 0m && expense == 0m)
-                {
-                    result.Skipped++;
-                    result.Errors.Add($"Строка {rowNumber}: не удалось прочитать сумму.");
-                    continue;
-                }
-
-                direction = income != 0m ? MoneyOperationDirection.Income : MoneyOperationDirection.Expense;
-                amount = Math.Abs(income != 0m ? income : expense);
-            }
-
-            if (amount <= 0m)
-            {
-                result.Skipped++;
-                result.Errors.Add($"Строка {rowNumber}: нулевая сумма пропущена.");
-                continue;
-            }
-
-            var documentNumber = NormalizeStatementText(GetOptionalCell(row, map.DocumentNumber));
-            var counterparty = NormalizeStatementText(GetOptionalCell(row, map.Counterparty));
-            var purpose = NormalizeStatementText(GetOptionalCell(row, map.Purpose));
-            var account = NormalizeStatementText(GetOptionalCell(row, map.Account)) ?? "Расчетный счет";
-
-            importItems.Add(new BankStatementImportItem(rowNumber, date.Date, direction, amount, account, counterparty, purpose, documentNumber));
+            importItems.Add(ParseDelimitedStatementRow(row, map, rowNumber, context.Account.BankAccountNumber));
         }
 
         return Ok(await imports.ImportAsync(context, importItems, result, file.FileName, statementBytes.Length, fileHash, manualCategoryRules, ct));
