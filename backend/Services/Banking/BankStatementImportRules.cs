@@ -368,6 +368,9 @@ public static class BankStatementImportRules
     }
 
     public static List<List<string>> ParseDelimitedRows(string text)
+            => ParseDelimitedRows(text, out _);
+
+    public static List<List<string>> ParseDelimitedRows(string text, out Dictionary<int, string> rowErrors)
     {
         var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
         var firstLine = normalized.Split('\n', 2)[0];
@@ -378,54 +381,88 @@ public static class BankStatementImportRules
         }
 
         var rows = new List<List<string>>();
+        var errors = new Dictionary<int, string>();
+        rowErrors = errors;
         var row = new List<string>();
         var cell = new StringBuilder();
         var inQuotes = false;
+        var afterQuote = false;
+        var onlyLeadingWhitespace = true;
+        string? rowError = null;
 
         for (var index = 0; index < normalized.Length; index++)
         {
             var ch = normalized[index];
             if (ch == '"')
             {
-                if (inQuotes && index + 1 < normalized.Length && normalized[index + 1] == '"')
+                if (inQuotes)
                 {
-                    cell.Append('"');
-                    index++;
+                    if (index + 1 < normalized.Length && normalized[index + 1] == '"')
+                    {
+                        cell.Append('"');
+                        index++;
+                    }
+                    else
+                    {
+                        inQuotes = false;
+                        afterQuote = true;
+                    }
+                }
+                else if (onlyLeadingWhitespace && !afterQuote)
+                {
+                    inQuotes = true;
+                    onlyLeadingWhitespace = false;
                 }
                 else
                 {
-                    inQuotes = !inQuotes;
+                    rowError ??= "Кавычка находится внутри незаключённого в кавычки поля CSV.";
+                    cell.Append(ch);
                 }
-
                 continue;
             }
 
             if (!inQuotes && ch == delimiter)
             {
-                row.Add(cell.ToString().Trim());
-                cell.Clear();
+                FinishCell();
                 continue;
             }
 
             if (!inQuotes && ch == '\n')
             {
-                row.Add(cell.ToString().Trim());
-                cell.Clear();
-                rows.Add(row);
-                row = new List<string>();
+                FinishCell();
+                FinishRow();
                 continue;
             }
 
+            if (!inQuotes && afterQuote && !char.IsWhiteSpace(ch))
+                rowError ??= "После закрывающей кавычки CSV обнаружены дополнительные символы.";
             cell.Append(ch);
+            if (!char.IsWhiteSpace(ch)) onlyLeadingWhitespace = false;
         }
 
-        row.Add(cell.ToString().Trim());
-        if (row.Any(value => !string.IsNullOrWhiteSpace(value)))
-        {
-            rows.Add(row);
-        }
+        if (inQuotes)
+            rowError ??= $"Не закрыта кавычка поля CSV «{StatementValueForError(cell.ToString())}».";
+        FinishCell();
+        if (row.Any(value => !string.IsNullOrWhiteSpace(value)) || rowError is not null)
+            FinishRow();
 
         return rows;
+
+        void FinishCell()
+        {
+            row.Add(cell.ToString().Trim());
+            cell.Clear();
+            afterQuote = false;
+            onlyLeadingWhitespace = true;
+        }
+
+        void FinishRow()
+        {
+            if (rowError is not null) errors.Add(rows.Count, rowError);
+            rows.Add(row);
+            row = new List<string>();
+            rowError = null;
+        }
     }
 
     public static StatementHeaderMap BuildStatementHeaderMap(IReadOnlyList<string> header)
@@ -498,9 +535,11 @@ public static class BankStatementImportRules
         => value.Trim().ToLowerInvariant().Replace(" ", string.Empty).Replace("_", string.Empty);
 
     public static BankStatementImportItem ParseDelimitedStatementRow(
-        IReadOnlyList<string> row, StatementHeaderMap map, int rowNumber, string? selectedBankAccountNumber)
+        IReadOnlyList<string> row, StatementHeaderMap map, int rowNumber, string? selectedBankAccountNumber,
+        string? sourceError = null)
     {
         var errors = new List<string>();
+        if (sourceError is not null) errors.Add(sourceError);
         if (map.ColumnCount > 0 && row.Count != map.ColumnCount)
             errors.Add($"Количество полей ({row.Count}) не совпадает с заголовком ({map.ColumnCount}). Проверьте разделители и кавычки в исходной строке.");
         var dateText = GetOptionalCell(row, map.Date) ?? string.Empty;

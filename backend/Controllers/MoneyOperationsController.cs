@@ -1462,7 +1462,7 @@ public partial class MoneyOperationsController : ControllerBase
                 ct));
         }
 
-        var rows = ParseDelimitedRows(text);
+        var rows = ParseDelimitedRows(text, out var csvErrors);
         var result = new BankStatementImportResultDto();
 
         if (rows.Count == 0)
@@ -1471,6 +1471,7 @@ public partial class MoneyOperationsController : ControllerBase
                 file.FileName, statementBytes.Length, fileHash, manualCategoryRules, ct));
         }
 
+        if (csvErrors.TryGetValue(0, out var headerError)) return BadRequest(headerError);
         var header = rows[0];
         var map = BuildStatementHeaderMap(header);
         if (map.Date < 0 || (map.Amount < 0 && (map.Income < 0 || map.Expense < 0)))
@@ -1484,7 +1485,7 @@ public partial class MoneyOperationsController : ControllerBase
         {
             ct.ThrowIfCancellationRequested();
             var row = rows[index];
-            if (row.All(string.IsNullOrWhiteSpace))
+            if (row.All(string.IsNullOrWhiteSpace) && !csvErrors.ContainsKey(index))
             {
                 continue;
             }
@@ -1492,7 +1493,8 @@ public partial class MoneyOperationsController : ControllerBase
             result.RowsRead++;
             var rowNumber = index + 1;
 
-            importItems.Add(ParseDelimitedStatementRow(row, map, rowNumber, context.Account.BankAccountNumber));
+            importItems.Add(ParseDelimitedStatementRow(row, map, rowNumber, context.Account.BankAccountNumber,
+                csvErrors.GetValueOrDefault(index)));
         }
 
         return Ok(await imports.ImportAsync(context, importItems, result, file.FileName, statementBytes.Length, fileHash, manualCategoryRules, ct));

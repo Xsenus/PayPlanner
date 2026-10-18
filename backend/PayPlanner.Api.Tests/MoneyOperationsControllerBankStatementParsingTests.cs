@@ -101,7 +101,87 @@ public partial class MoneyOperationsControllerTests
 
     [Theory]
     [MemberData(nameof(StatementParsingInvalidCases))]
-    public async Task BankStatementParsing_HttpRetainsRejectedSourceAndCannotReprocessIt(bool postgres, string scenario)
+    public Task BankStatementParsing_HttpRetainsRejectedSourceAndCannotReprocessIt(bool postgres, string scenario)
+        => AssertStatementParsingRejectedAsync(postgres, scenario);
+
+    [Theory]
+    [InlineData(false, "csv-embedded-quotes")]
+    [InlineData(true, "csv-embedded-quotes")]
+    [InlineData(false, "csv-unclosed-quote")]
+    [InlineData(true, "csv-unclosed-quote")]
+    [InlineData(false, "csv-after-quote")]
+    [InlineData(true, "csv-after-quote")]
+    public Task BankStatementParsing_HttpRejectsMalformedCsvQuotes(bool postgres, string scenario)
+        => AssertStatementParsingRejectedAsync(postgres, scenario);
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BankStatementParsing_HttpMalformedCsvHeaderNeverWritesMoney(bool postgres)
+    {
+        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        var db = fixture.Db;
+        var actor = await SeedStatementParsingAsync(db);
+        var before = await CaptureStatementParsingMoneyAsync(db);
+        using var server = CreateStatementParsingServer(db);
+        using var client = server.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Fixture-User", actor.ToString(CultureInfo.InvariantCulture));
+        using var upload = new MultipartFormDataContent();
+        var account = await db.MoneyAccounts.SingleAsync();
+        upload.Add(new ByteArrayContent(Encoding.UTF8.GetBytes("\"Дата\"x;Сумма\n18.10.2026;123.45\n")), "file", "quotes.csv");
+        upload.Add(new StringContent(account.Id.ToString(CultureInfo.InvariantCulture)), "moneyAccountId");
+        upload.Add(new StringContent(account.CompanyId!.Value.ToString(CultureInfo.InvariantCulture)), "companyId");
+        using var response = await client.PostAsync("/api/money-operations/bank-statement/import", upload);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("кавычк", await response.Content.ReadAsStringAsync());
+        Assert.Equal(before, await CaptureStatementParsingMoneyAsync(db));
+        Assert.Empty(await db.BankStatementImportBatches.ToArrayAsync());
+        Assert.Empty(await db.BankStatementImportRows.ToArrayAsync());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BankStatementParsing_HttpCsvQuoteErrorsStayOnTheirOwnRows(bool postgres)
+    {
+        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        var db = fixture.Db;
+        var actor = await SeedStatementParsingAsync(db);
+        using var server = CreateStatementParsingServer(db);
+        using var client = server.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Fixture-User", actor.ToString(CultureInfo.InvariantCulture));
+        const string content = "Дата;Сумма;Номер;Контрагент\n"
+            + "18.10.2026;\"100.01\";Q-1;\"Синтетический \"\"плательщик\"\"\"\n"
+            + "18.10.2026;1\"2\"3.45;Q-2;Ошибочная строка\n"
+            + "18.10.2026;100.02;Q-3;\"Две\nстроки\"\n";
+        var result = await UploadStatementParsingAsync(client, db, content, false);
+        Assert.Equal(3, result.RowsRead);
+        Assert.Equal(2, result.Created);
+        Assert.Equal(1, result.Skipped);
+        Assert.Single(result.Errors);
+        db.ChangeTracker.Clear();
+        var money = await db.MoneyOperations.OrderBy(operation => operation.PaymentOrderNumber).ToArrayAsync();
+        Assert.Equal(new[] { 100.01m, 100.02m }, money.Select(operation => operation.Amount));
+        Assert.Equal("Синтетический \"плательщик\"", money[0].CounterpartyName);
+        Assert.Equal("Две\nстроки", money[1].CounterpartyName);
+        var rows = await db.BankStatementImportRows.OrderBy(row => row.RowNumber).ToArrayAsync();
+        Assert.Equal(3, rows.Length);
+        Assert.Equal(BankStatementImportRowStatus.ClarificationRequired, rows[1].Status);
+        Assert.Null(rows[1].MoneyOperationId);
+        Assert.Contains("кавычк", rows[1].Message!, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, (await db.BankStatementImportBatches.SingleAsync()).ErrorRows);
+        var after = await CaptureStatementParsingMoneyAsync(db);
+        var replay = await UploadStatementParsingAsync(client, db, content, false);
+        Assert.Equal(result.BatchId, replay.BatchId);
+        using var response = await client.PostAsync($"/api/money-operations/bank-statement/imports/{result.BatchId}/reprocess", null);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(0, (await response.Content.ReadFromJsonAsync<BankStatementImportResultDto>())!.Created);
+        Assert.Equal(after, await CaptureStatementParsingMoneyAsync(db));
+        Assert.Equal(1, await db.BankStatementImportBatches.CountAsync());
+        Assert.Equal(3, await db.BankStatementImportRows.CountAsync());
+    }
+
+    private static async Task AssertStatementParsingRejectedAsync(bool postgres, string scenario)
     {
         await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
         var db = fixture.Db;
@@ -126,6 +206,9 @@ public partial class MoneyOperationsControllerTests
             "csv-duplicate-amount" => Csv("Сумма;Сумма", "123.45;999.99"),
             "csv-duplicate-income" => Csv("Приход;Приход;Расход", "123.45;999.99;0"),
             "csv-unquoted-comma" => "Дата,Сумма,Контрагент\n18.10.2026,1,234.56,Синтетический плательщик\n",
+            "csv-embedded-quotes" => Csv("Сумма", "1\"2\"3.45"),
+            "csv-unclosed-quote" => Csv("Сумма", "\"123.45"),
+            "csv-after-quote" => Csv("Сумма", "\"123\".45"),
             "csv-display-name" => Csv("Сумма;Расчетный счет", "123.45;Основной банк синтетической компании"),
             "date" => StatementParsingCsv("123.45").Replace("18.10.2026", "не дата", StringComparison.Ordinal),
             "missing-selected" => validOneC,
