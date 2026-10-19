@@ -140,8 +140,10 @@ public sealed partial class BankStatementImportService(PaymentContext db)
             var oldStates = previousRows.ToDictionary(pair => pair.Key, pair => pair.Value.Status, StringComparer.Ordinal);
             var processable = chunk.Where(item => item.ValidationError is null && item.IsBooked
                 && item.Amount > 0m && item.Date != default).ToArray();
-            var ambiguousFacts = await FindAmbiguousFactsAsync(context, processable.Where(item => !item.BankStatementOperationId.HasValue).ToArray(), ct);
-            var candidates = await LoadInvoiceCandidatesAsync(context, processable, ct);
+            var crossSourceOverlaps = await FindCrossSourceOverlapsAsync(context, processable, ct);
+            var candidatesToMatch = processable.Where(item => !crossSourceOverlaps.Contains(item)).ToArray();
+            var ambiguousFacts = await FindAmbiguousFactsAsync(context, candidatesToMatch.Where(item => !item.BankStatementOperationId.HasValue).ToArray(), ct);
+            var candidates = await LoadInvoiceCandidatesAsync(context, candidatesToMatch, ct);
             var reserved = new Dictionary<int, decimal>();
             var created = new List<MoneyOperation>();
             foreach (var item in chunk)
@@ -245,6 +247,13 @@ public sealed partial class BankStatementImportService(PaymentContext db)
                     row.MoneyOperation = canonical;
                     created.Add(canonical);
                     result.Created++;
+                    continue;
+                }
+                if (crossSourceOverlaps.Contains(item))
+                {
+                    row.Status = BankStatementImportRowStatus.ClarificationRequired;
+                    row.Message = "Возможное совпадение с другим источником выписки требует уточнения; новая денежная запись не создана.";
+                    result.Skipped++;
                     continue;
                 }
                 var fact = BuildBankStatementImportKey(item.Date, item.Direction, item.Amount, item.DocumentNumber, item.CounterpartyName);
