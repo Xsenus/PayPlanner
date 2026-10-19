@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
@@ -267,19 +268,17 @@ public sealed class BankSyncService : IBankSyncService
         int inserted = 0, updatedCount = 0;
         DateTime? lastBooked = null;
         DateTime? firstPending = null;
+        var microsecondDates = _db.Database.IsNpgsql();
+        var sqlite = _db.Database.IsSqlite();
         try
         {
             string? cursor = null;
             for (var page = 0; page < MaxPages; page++)
             {
                 var result = await provider.GetStatementPageAsync(credentials, account.ExternalAccountId, start, to, cursor, ct);
-                var items = result.Items
-                    .Where(item => !string.IsNullOrWhiteSpace(item.ExternalId) && item.ExternalId.Trim().Length <= 128)
-                    .GroupBy(item => item.ExternalId.Trim(), StringComparer.Ordinal)
-                    .Select(group => group.Last())
-                    .ToList();
+                var items = SelectNativeOperations(result.Items, microsecondDates);
 
-                var ids = items.Select(item => item.ExternalId.Trim()).ToList();
+                var ids = items.Keys.ToList();
                 Dictionary<string, BankStatementOperation> known;
                 await using (var pageTransaction = await _db.Database.BeginTransactionAsync(ct))
                 {
@@ -288,15 +287,28 @@ public sealed class BankSyncService : IBankSyncService
                         .Where(item => item.BankConnectionAccountId == account.Id && ids.Contains(item.ExternalOperationId))
                         .ToDictionaryAsync(item => item.ExternalOperationId, StringComparer.Ordinal, ct);
 
-                    foreach (var info in items)
+                    var rawAmounts = sqlite ? new HashSet<decimal>() : null;
+                    foreach (var pair in items)
                     {
-                        var key = info.ExternalId.Trim();
+                        var key = pair.Key;
+                        var info = pair.Value;
                         if (known.TryGetValue(key, out var row))
                         {
+                            if (row.IsBooked && info.IsBooked)
+                            {
+                                ValidateNativeAmount(key, info.Amount);
+                                if (!FinancialFactMatches(row.OperationDate, row.Amount, row.IsIncome, info, microsecondDates))
+                                {
+                                    // SaveChanges ещё не вызывался: противоречивая страница не сохраняется.
+                                    throw NativeOperationConflict(key);
+                                }
+                            }
+
                             // Подтверждённая операция больше не меняется; незавершённая обновляется.
                             if (!row.IsBooked)
                             {
                                 Apply(row, info);
+                                rawAmounts?.Add(row.Amount);
                                 updatedCount++;
                             }
 
@@ -305,9 +317,18 @@ public sealed class BankSyncService : IBankSyncService
 
                         var created = new BankStatementOperation { BankConnectionAccountId = account.Id, ExternalOperationId = key };
                         Apply(created, info);
+                        rawAmounts?.Add(created.Amount);
                         _db.BankStatementOperations.Add(created);
                         known.Add(key, created);
                         inserted++;
+                    }
+
+                    if (rawAmounts is { Count: > 0 })
+                    {
+                        var lossy = await imports.FindLossySqliteAmountsAsync(rawAmounts, ct);
+                        if (lossy.Count > 0)
+                            throw new InvalidOperationException($"Сумма «{lossy.First().ToString(CultureInfo.InvariantCulture)}», полученная из банка, "
+                                + "не может быть сохранена точно. Загрузка не завершена; денежные операции текущей страницы не созданы.");
                     }
 
                     // Страница сохраняется сразу: память ограничена размером страницы, а сбой на поздней странице
@@ -620,8 +641,41 @@ public sealed class BankSyncService : IBankSyncService
         return new BankStatementSyncResult(0, 0, account.StatementWatermark, account.LastError, batchId);
     }
 
+    private static Dictionary<string, BankOperationInfo> SelectNativeOperations(IReadOnlyList<BankOperationInfo> operations, bool microsecondDates)
+    {
+        var selected = new Dictionary<string, BankOperationInfo>(StringComparer.Ordinal);
+        foreach (var operation in operations)
+        {
+            if (string.IsNullOrWhiteSpace(operation.ExternalId)) continue;
+            var key = operation.ExternalId.Trim();
+            if (key.Length > 128) continue;
+            if (selected.TryGetValue(key, out var previous) && previous.IsBooked)
+            {
+                if (!operation.IsBooked) continue;
+                if (!FinancialFactMatches(previous.Date, previous.Amount, previous.IsIncome, operation, microsecondDates))
+                    throw NativeOperationConflict(key);
+            }
+            selected[key] = operation;
+        }
+        return selected;
+    }
+
+    private static bool FinancialFactMatches(DateTime date, decimal amount, bool isIncome, BankOperationInfo operation, bool microsecondDates)
+        => Math.Abs(amount) == Math.Abs(operation.Amount)
+            && isIncome == operation.IsIncome
+            && StoredDateTicks(date, microsecondDates) == StoredDateTicks(operation.Date, microsecondDates);
+
+    // PostgreSQL сохраняет timestamp с точностью до микросекунд; точный повтор не становится конфликтом.
+    private static long StoredDateTicks(DateTime date, bool microsecondDates)
+        => microsecondDates ? date.Ticks / 10 : date.Ticks;
+
+    private static InvalidOperationException NativeOperationConflict(string externalId)
+        => new($"Банк вернул разные сумму, дату или направление подтверждённой операции «{externalId}». "
+            + "Загрузка не завершена; ранее сохранённые операции оставлены без изменений.");
+
     private static void Apply(BankStatementOperation row, BankOperationInfo info)
     {
+        ValidateNativeAmount(row.ExternalOperationId, info.Amount);
         row.OperationDate = info.Date;
         row.Amount = Math.Abs(info.Amount);
         row.IsIncome = info.IsIncome;
@@ -630,6 +684,13 @@ public sealed class BankSyncService : IBankSyncService
         row.CounterpartyName = Trim(info.CounterpartyName, 300);
         row.CounterpartyAccount = Trim(info.CounterpartyAccount, 34);
         row.Purpose = Trim(info.Purpose, 2000);
+    }
+
+    private static void ValidateNativeAmount(string externalId, decimal amount)
+    {
+        if (BankStatementImportRules.IsSupportedStatementAmount(amount)) return;
+        throw new InvalidOperationException($"Сумма «{amount.ToString(CultureInfo.InvariantCulture)}» операции «{externalId}» "
+            + "превышает допустимый размер или требует округления до двух знаков после запятой. Загрузка не завершена.");
     }
 
     private static string? Trim(string? value, int max = 1000)

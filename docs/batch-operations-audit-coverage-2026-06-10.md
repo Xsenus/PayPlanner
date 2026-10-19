@@ -65,10 +65,10 @@
 | backend/Services/AuthService.cs:261 | ExecuteUpdateAsync |
 | backend/Services/AuthService.cs:743 | ExecuteUpdateAsync |
 | backend/Services/Banking/BankStatementImportService.Native.cs:74 | ExecuteUpdateAsync |
-| backend/Services/Banking/BankStatementImportService.cs:512 | ExecuteUpdateAsync |
-| backend/Services/Banking/BankStatementImportService.cs:531 | ExecuteUpdateAsync |
-| backend/Services/Banking/BankStatementImportService.cs:537 | ExecuteUpdateAsync |
-| backend/Services/Banking/BankSyncService.cs:471 | ExecuteUpdateAsync |
+| backend/Services/Banking/BankStatementImportService.cs:522 | ExecuteUpdateAsync |
+| backend/Services/Banking/BankStatementImportService.cs:541 | ExecuteUpdateAsync |
+| backend/Services/Banking/BankStatementImportService.cs:547 | ExecuteUpdateAsync |
+| backend/Services/Banking/BankSyncService.cs:492 | ExecuteUpdateAsync |
 | backend/Services/CalendarSyncLogRetentionService.cs:198 | ExecuteDeleteAsync |
 | backend/Services/CalendarSyncLogRetentionService.cs:209 | ExecuteDeleteAsync |
 | backend/Services/DatabaseBackupService.cs:1110 | ExecuteUpdateAsync |

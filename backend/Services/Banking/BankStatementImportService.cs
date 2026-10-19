@@ -368,28 +368,9 @@ public sealed partial class BankStatementImportService(PaymentContext db)
     {
         if (!db.Database.IsSqlite()) return items;
         var amounts = items.Where(item => item.ValidationError is null && item.IsBooked && item.Amount > 0m)
-            .Select(item => item.Amount).Distinct().ToArray();
-        if (amounts.Length == 0) return items;
-        // The existing decimal columns have NUMERIC affinity. Check the actual
-        // provider conversion in one bounded query, before creating money.
-        await using var command = db.Database.GetDbConnection().CreateCommand();
-        command.Transaction = db.Database.CurrentTransaction!.GetDbTransaction();
-        var expressions = new string[amounts.Length];
-        for (var index = 0; index < amounts.Length; index++)
-        {
-            var parameter = command.CreateParameter();
-            parameter.ParameterName = $"@amount{index}";
-            parameter.DbType = DbType.Decimal;
-            parameter.Value = amounts[index];
-            command.Parameters.Add(parameter);
-            expressions[index] = $"CAST({parameter.ParameterName} AS NUMERIC)";
-        }
-        command.CommandText = "SELECT " + string.Join(", ", expressions);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        await reader.ReadAsync(ct);
-        var lossy = new HashSet<decimal>();
-        for (var index = 0; index < amounts.Length; index++)
-            if (reader.GetDecimal(index) != amounts[index]) lossy.Add(amounts[index]);
+            .Select(item => item.Amount).ToHashSet();
+        if (amounts.Count == 0) return items;
+        var lossy = await FindLossySqliteAmountsAsync(amounts, ct);
         if (lossy.Count == 0) return items;
         return items.Select(item => item.ValidationError is null && lossy.Contains(item.Amount)
             ? item with
@@ -399,6 +380,35 @@ public sealed partial class BankStatementImportService(PaymentContext db)
                     $"Сумма «{item.Amount.ToString(CultureInfo.InvariantCulture)}» не может быть сохранена в этой базе без потери точности."]),
             }
             : item).ToArray();
+    }
+
+    internal async Task<HashSet<decimal>> FindLossySqliteAmountsAsync(IReadOnlySet<decimal> amounts, CancellationToken ct)
+    {
+        var lossy = new HashSet<decimal>();
+        if (!db.Database.IsSqlite() || amounts.Count == 0) return lossy;
+        // The existing decimal columns have NUMERIC affinity. Check the actual
+        // provider conversion in bounded queries, before saving raw rows or money.
+        foreach (var chunk in amounts.Chunk(ChunkSize))
+        {
+            await using var command = db.Database.GetDbConnection().CreateCommand();
+            command.Transaction = db.Database.CurrentTransaction!.GetDbTransaction();
+            var expressions = new string[chunk.Length];
+            for (var index = 0; index < chunk.Length; index++)
+            {
+                var parameter = command.CreateParameter();
+                parameter.ParameterName = $"@amount{index}";
+                parameter.DbType = DbType.Decimal;
+                parameter.Value = chunk[index];
+                command.Parameters.Add(parameter);
+                expressions[index] = $"CAST({parameter.ParameterName} AS NUMERIC)";
+            }
+            command.CommandText = "SELECT " + string.Join(", ", expressions);
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            await reader.ReadAsync(ct);
+            for (var index = 0; index < chunk.Length; index++)
+                if (reader.GetDecimal(index) != chunk[index]) lossy.Add(chunk[index]);
+        }
+        return lossy;
     }
 
     private async Task<List<BankStatementInvoiceCandidate>> LoadInvoiceCandidatesAsync(

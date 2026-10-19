@@ -1066,6 +1066,10 @@ public static class BankStatementImportRules
                DateTime.TryParse(value.Trim(), CultureInfo.GetCultureInfo("ru-RU"), DateTimeStyles.None, out date);
     }
 
+    internal static bool IsSupportedStatementAmount(decimal amount)
+        => amount is >= -9999999999999999.99m and <= 9999999999999999.99m
+            && decimal.Round(amount, 2) == amount;
+
     public static bool TryParseStatementAmount(string value, out decimal amount)
     {
         amount = 0m;
@@ -1118,7 +1122,7 @@ public static class BankStatementImportRules
         var canonical = sign + digits + (fraction.Length == 0 ? string.Empty : "." + fraction);
         if (!decimal.TryParse(canonical, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint,
                 CultureInfo.InvariantCulture, out var parsed)
-            || parsed is < -9999999999999999.99m or > 9999999999999999.99m)
+            || !IsSupportedStatementAmount(parsed))
             return false;
         amount = parsed;
         return true;
