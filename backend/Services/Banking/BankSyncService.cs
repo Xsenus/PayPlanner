@@ -646,9 +646,11 @@ public sealed class BankSyncService : IBankSyncService
         var selected = new Dictionary<string, BankOperationInfo>(StringComparer.Ordinal);
         foreach (var operation in operations)
         {
-            if (string.IsNullOrWhiteSpace(operation.ExternalId)) continue;
-            var key = operation.ExternalId.Trim();
-            if (key.Length > 128) continue;
+            var key = operation.ExternalId?.Trim();
+            if (string.IsNullOrEmpty(key) || key.Length > 128 || key.Contains('\0'))
+                throw new InvalidOperationException("Банк вернул операцию без допустимого номера. "
+                    + "Загрузка текущей части выписки не завершена; ранее сохранённые операции оставлены без изменений. "
+                    + "После исправления ответа банка загрузку можно повторить.");
             if (selected.TryGetValue(key, out var previous) && previous.IsBooked)
             {
                 if (!operation.IsBooked) continue;
