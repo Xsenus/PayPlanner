@@ -3,6 +3,11 @@ name: Deploy PayPlanner
 on:
   push:
     branches: ["main"]
+    paths-ignore:
+      - "README.md"
+      - "AGENTS.md"
+      - "docs/**/*.md"
+      - "docs/yougile-sources/**"
   workflow_dispatch: {}
 
 permissions:
@@ -31,6 +36,7 @@ env:
 jobs:
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     outputs:
       frontend-artifact-id: ${{ steps.frontend-upload.outputs.artifact-id }}
     steps:
@@ -117,6 +123,7 @@ jobs:
 
   backend-format:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -159,6 +166,7 @@ jobs:
 
   backend-build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     outputs:
       manifest-sha: ${{ steps.plan.outputs.manifest-sha }}
       sdk-version: ${{ steps.plan.outputs.sdk-version }}
@@ -248,8 +256,10 @@ jobs:
           compression-level: 0
 
   backend-test:
-    needs: [backend-build]
+    # Do not spend four runners on integration tests when a preflight gate fails.
+    needs: [backend-build, backend-format, frontend]
     runs-on: ubuntu-latest
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
@@ -360,8 +370,9 @@ jobs:
 
 
   backend-browser:
-    needs: [backend-build]
+    needs: [backend-build, backend-format, frontend]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:17-alpine
@@ -465,6 +476,7 @@ jobs:
   backend:
     needs: [backend-build, backend-test, backend-browser]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       backend-artifact-id: ${{ needs.backend-build.outputs.backend-artifact-id }}
     steps:
@@ -529,6 +541,7 @@ jobs:
   deploy:
     needs: [frontend, backend-format, backend]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v6

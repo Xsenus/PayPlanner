@@ -12,6 +12,16 @@ function replaceOnce(before: string, after: string) {
   return workflow.replace(before, after);
 }
 
+function replaceInJob(id: string, change: (job: string) => string) {
+  const header = `  ${id}:\n`;
+  const begin = workflow.indexOf(header);
+  expect(begin).toBeGreaterThan(0);
+  const following = begin + header.length;
+  const next = workflow.slice(following).search(/^ {2}[a-z][a-z-]*:\n/m);
+  const end = next < 0 ? workflow.length : following + next;
+  return workflow.slice(0, begin) + change(workflow.slice(begin, end)) + workflow.slice(end);
+}
+
 describe('parallel deploy workflow release contract', () => {
   it('qualifies the actual workflow and its same-revision artifacts', () => {
     expect(validateDeployWorkflow(workflow)).toEqual({
@@ -30,6 +40,34 @@ describe('parallel deploy workflow release contract', () => {
       + workflow.slice(first, second) + workflow.slice(third);
     expect(validateDeployWorkflow(reordered).valid).toBe(true);
   });
+
+  it.each(['backend-test', 'backend-browser'])('keeps expensive %s behind all preflight gates', id => {
+    for (const needs of ['backend-build, backend-format', 'backend-build, frontend', 'backend-format, frontend']) {
+      const changed = replaceInJob(id, job => job.replace(
+        'needs: [backend-build, backend-format, frontend]', `needs: [${needs}]`,
+      ));
+      expect(() => validateDeployWorkflow(changed)).toThrow(/dependencies/);
+    }
+  });
+
+  it.each([
+    ['ignore application code', '      - "README.md"', '      - "backend/**"'],
+    ['ignore release infrastructure', '      - "README.md"', '      - ".github/**"'],
+    ['ignore arbitrary documents used by tools', '      - "docs/**/*.md"', '      - "docs/**"'],
+    ['remove manual release', '  workflow_dispatch: {}\n', ''],
+    ['remove main trigger', 'branches: ["main"]', 'branches: ["other"]'],
+  ])('rejects trigger changes that %s', (_name, before, after) => {
+    expect(() => validateDeployWorkflow(replaceOnce(before, after))).toThrow();
+  });
+
+  it.each(['frontend', 'backend-format', 'backend-build', 'backend-test', 'backend-browser', 'backend', 'deploy'])(
+    'bounds runner time for %s', id => {
+      for (const timeout of ['0', '360', '${{ vars.UNBOUNDED_TIMEOUT }}']) {
+        const changed = replaceInJob(id, job => job.replace(/timeout-minutes: \d+/, `timeout-minutes: ${timeout}`));
+        expect(() => validateDeployWorkflow(changed)).toThrow(/time budget/);
+      }
+    },
+  );
 
   it.each([
     ['missing dependency', 'needs: [frontend, backend-format, backend]', 'needs: [frontend, backend]'],
@@ -87,7 +125,7 @@ describe('parallel deploy workflow release contract', () => {
     ['conditional aggregate', '  backend:\n', '  backend:\n    if: always()\n'],
     ['aggregate missing browser gate', 'needs: [backend-build, backend-test, backend-browser]', 'needs: [backend-build, backend-test]'],
     ['aggregate missing shard gate', 'needs: [backend-build, backend-test, backend-browser]', 'needs: [backend-build, backend-browser]'],
-    ['test missing build dependency', 'needs: [backend-build]', 'needs: []'],
+    ['test missing build dependency', 'needs: [backend-build, backend-format, frontend]', 'needs: [backend-format, frontend]'],
     ['manifest producer output missing', 'manifest-sha: ${{ steps.plan.outputs.manifest-sha }}', 'manifest-sha: fake'],
     ['manifest hash recomputed downstream', 'EXPECTED_MANIFEST_SHA: ${{ needs.backend-build.outputs.manifest-sha }}', 'EXPECTED_MANIFEST_SHA: fake'],
     ['untrusted manifest not checked', '--manifest-sha "$EXPECTED_MANIFEST_SHA" --shard', '--shard'],

@@ -116,14 +116,22 @@ export function validateDeployWorkflow(source) {
   const jobs = workflow.jobs;
   const dependencies = {
     frontend: [], 'backend-format': [], 'backend-build': [],
-    'backend-test': ['backend-build'], 'backend-browser': ['backend-build'],
+    'backend-test': ['backend-build', 'backend-format', 'frontend'],
+    'backend-browser': ['backend-build', 'backend-format', 'frontend'],
     backend: ['backend-browser', 'backend-build', 'backend-test'],
     deploy: ['backend', 'backend-format', 'frontend'],
   };
   requireValue(jobs && Object.keys(jobs).sort().join(',') === Object.keys(dependencies).sort().join(','), 'Expected exactly seven release jobs');
   requireValue(workflow.defaults === undefined, 'Custom workflow shell/defaults require explicit gate review');
   requireValue(workflow.on?.push?.branches?.join(',') === 'main' && Object.hasOwn(workflow.on, 'workflow_dispatch'), 'Keep main push and manual release triggers');
+  const documentationPaths = ['README.md', 'AGENTS.md', 'docs/**/*.md', 'docs/yougile-sources/**'];
+  requireValue(Object.keys(workflow.on).sort().join(',') === 'push,workflow_dispatch'
+    && Object.keys(workflow.on.push).sort().join(',') === 'branches,paths-ignore'
+    && workflow.on.push['paths-ignore']?.join(',') === documentationPaths.join(','),
+  'Exclude only documentation from automatic releases; application and CI changes must still run all gates');
+  const timeouts = { frontend: 30, 'backend-format': 30, 'backend-build': 30, 'backend-test': 75, 'backend-browser': 15, backend: 10, deploy: 30 };
   for (const [id, job] of Object.entries(jobs)) {
+    requireValue(String(job['timeout-minutes']) === String(timeouts[id]), `${id}: keep the explicit runner time budget`);
     requireValue(!Object.hasOwn(job, 'if'), `${id}: conditional job can bypass a release gate`);
     requireValue(job.defaults === undefined, `${id}: custom job shell/defaults require explicit gate review`);
     requireValue(job['continue-on-error'] === undefined || job['continue-on-error'] === false, `${id}: continue-on-error bypass`);
