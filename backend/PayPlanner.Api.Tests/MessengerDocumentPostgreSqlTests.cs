@@ -246,13 +246,7 @@ public sealed class MessengerDocumentPostgreSqlTests
             {
                 Assert.True(databaseName.StartsWith(DatabasePrefix, StringComparison.Ordinal)
                     && Guid.TryParseExact(databaseName[DatabasePrefix.Length..], "N", out _));
-                await using var count = adminConnection.CreateCommand();
-                count.CommandText = "SELECT count(*) FROM pg_stat_activity WHERE datname = @name";
-                count.Parameters.AddWithValue("name", databaseName);
-                Assert.Equal(0L, Convert.ToInt64(await count.ExecuteScalarAsync()));
-                await using var drop = adminConnection.CreateCommand();
-                drop.CommandText = $"DROP DATABASE \"{databaseName}\"";
-                await drop.ExecuteNonQueryAsync();
+                await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(adminConnection, databaseName);
             }
             if (Directory.Exists(root))
             {

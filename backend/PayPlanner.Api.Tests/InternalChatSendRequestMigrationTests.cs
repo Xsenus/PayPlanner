@@ -67,8 +67,7 @@ public sealed class InternalChatSendRequestMigrationTests
         {
             if (created)
             {
-                await using var command = new NpgsqlCommand($"DROP DATABASE \"{name}\" WITH (FORCE)", admin);
-                await command.ExecuteNonQueryAsync();
+                await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(admin, name);
             }
         }
     }

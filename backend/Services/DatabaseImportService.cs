@@ -105,14 +105,30 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
             sqliteFilePath,
             _databaseProvider.DisplayName);
 
+        // Keep the inspected source and destination stable until the import commits.
+        await using var sourceTransaction = await source.Database.BeginTransactionAsync(cancellationToken);
+        await using var importTransaction = await target.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
+        // Inspect both sides before the first write. Ambiguous historical links need a separate repair.
+        var invoiceKeys = await BuildSafeInvoiceImportKeysAsync(source, target, cancellationToken);
         await ImportReferenceDataAsync(source, target, result, maps, cancellationToken);
-        await ImportBusinessDataAsync(source, target, result, maps, cancellationToken);
+        await ImportBusinessDataAsync(source, target, result, maps, invoiceKeys, cancellationToken);
         await RunTableAsync(result, target, "DerivedClientContracts", "Restore client-contract links", table =>
             RestoreDerivedClientContractsAsync(target, table, cancellationToken));
         await ImportActivityDataAsync(source, target, result, maps, cancellationToken);
 
         result.FinishedAt = DateTime.UtcNow;
-        result.Success = result.TablesWithErrors == 0;
+        result.Success = result.TablesWithErrors == 0 && result.Tables.All(table => table.Conflicts == 0);
+        if (result.Success) await importTransaction.CommitAsync(cancellationToken);
+        else
+        {
+            await importTransaction.RollbackAsync(cancellationToken);
+            foreach (var table in result.Tables)
+            {
+                table.Inserted = 0;
+                table.Updated = 0;
+                table.Message += " Все изменения этого импорта отменены.";
+            }
+        }
 
         _logger.LogInformation(
             "SQLite import completed. Success={Success}, tables={Tables}, tablesWithErrors={TablesWithErrors}.",
@@ -247,6 +263,7 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
         PaymentContext target,
         DatabaseImportResultDto result,
         ImportMaps maps,
+        InvoiceImportKeys invoiceKeys,
         CancellationToken cancellationToken)
     {
         await RunTableAsync(result, target, "LegalEntities", "Юрлица", table =>
@@ -279,7 +296,8 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
 
         await RunTableAsync(result, target, "Invoices", "Канонические счета", table =>
             ImportEntitiesAsync(source, target, table, ctx => ctx.Invoices.AsNoTracking(), ctx => ctx.Invoices,
-                x => x.Id, x => x.Id, BuildInvoiceKey, BuildInvoiceKey, CopyInvoice, maps.Invoices, cancellationToken));
+                x => x.Id, x => x.Id, x => invoiceKeys.Source[x.Id], x => invoiceKeys.Target.GetValueOrDefault(x.Id, string.Empty),
+                CopyInvoice, maps.Invoices, cancellationToken));
 
         await RunTableAsync(result, target, "Payments", "Платежи", table =>
             ImportEntitiesAsync(source, target, table, ctx => ctx.Payments.AsNoTracking(), ctx => ctx.Payments,
@@ -472,7 +490,10 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
         };
 
         result.Tables.Add(table);
-        await using var transaction = await target.Database.BeginTransactionAsync();
+        await using var transaction = target.Database.CurrentTransaction is null ? await target.Database.BeginTransactionAsync() : null;
+        var sharedTransaction = target.Database.CurrentTransaction!;
+        var savepoint = "import_" + tableName;
+        if (transaction is null) await sharedTransaction.CreateSavepointAsync(savepoint);
 
         try
         {
@@ -484,17 +505,20 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
                 table.Message = BuildDefaultMessage(table);
             }
 
-            await transaction.CommitAsync();
+            if (transaction is not null) await transaction.CommitAsync();
+            else await sharedTransaction.ReleaseSavepointAsync(savepoint);
         }
         catch (SqliteException ex) when (ex.SqliteErrorCode == 1 && ex.Message.Contains("no such table", StringComparison.OrdinalIgnoreCase))
         {
-            await transaction.RollbackAsync();
+            if (transaction is not null) await transaction.RollbackAsync();
+            else await sharedTransaction.RollbackToSavepointAsync(savepoint);
             table.Completed = true;
             table.Message = "В исходной SQLite-базе нет этой таблицы, этап пропущен.";
         }
         catch (Exception ex)
         {
-            await transaction.RollbackAsync();
+            if (transaction is not null) await transaction.RollbackAsync();
+            else await sharedTransaction.RollbackToSavepointAsync(savepoint);
             table.Errors += table.Errors == 0 ? 1 : 0;
             table.Completed = false;
             table.Message = GetDisplayErrorMessage(ex);

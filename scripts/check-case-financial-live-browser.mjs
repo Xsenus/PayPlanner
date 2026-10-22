@@ -117,7 +117,7 @@ try {
   phase('cli-snapshot');
   await cli('snapshot');
   const settings = JSON.stringify({ api: api.origin, ui, caseId, clientId, flow, controlUrl,
-    downloadPath: join(root, 'financial-browser-download.html'),
+    downloadPath: join(root, 'financial-browser-download.html'), printRoot: root,
     email: process.env.CASE_RETIREMENT_EMAIL, password: process.env.CASE_RETIREMENT_PASSWORD });
   phase('scenario');
   await writeFile(scenarioPath, String.raw`async (page) => {
@@ -133,7 +133,8 @@ try {
     const editor = settings.flow.split('-')[2] === 'editor';
     let firstHandled; const first = new Promise(resolve => { firstHandled = resolve; });
     const path = '/api/v2/cases/' + settings.caseId + '/work-order/create-' + kind;
-    const keys = []; const outside = []; const errors = []; let otherWrites = 0;
+    const keys = []; const outside = []; const errors = []; const unexpectedWrites = [];
+    let otherWrites = 0; let invoiceId = 0; let checkingInvoiceCard = false; let tablePreferenceWrites = 0;
     page.setDefaultTimeout(45000);
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => {
@@ -147,7 +148,11 @@ try {
       if (url.origin === settings.api && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method())
         && !['/api/auth/login', '/api/user-activity', '/api/user-activity/heartbeat', '/api/notifications/mark-read',
           '/api/v2/cases/' + settings.caseId + '/activity'].includes(url.pathname)) {
-        if (url.pathname !== path && !url.pathname.startsWith('/hubs/')) otherWrites++;
+        if (checkingInvoiceCard && request.method() === 'PUT' && url.pathname === '/api/user-settings/accounts_table_settings') {
+          tablePreferenceWrites++;
+        } else if (url.pathname !== path && !url.pathname.startsWith('/hubs/')) {
+          otherWrites++; unexpectedWrites.push(request.method() + ' ' + url.pathname);
+        }
       }
       if (url.pathname !== path || request.method() !== 'POST') return route.continue();
       const key = request.headers()['x-upload-key'];
@@ -158,6 +163,7 @@ try {
       const result = await response.json();
       if (lost) {
         check(result.documentId > 0 && result.amount === 35, 'Lost acknowledgement has no complete financial result');
+        if (kind === 'invoice') invoiceId = result.paymentId;
         await route.abort('failed');
       } else {
         check(result.status === 'pending', 'Financial pending response lost its state');
@@ -231,7 +237,59 @@ try {
     check(downloadFailure === null, 'Financial document download failed: ' + downloadFailureKind);
     await download.saveAs(settings.downloadPath);
     await reads.drain('browser-close');
-    check(otherWrites === 0, 'Financial generation caused another business write: ' + otherWrites);
+    if (kind === 'invoice' && editor && lost) {
+      check(Number.isSafeInteger(invoiceId) && invoiceId > 0, 'Invoice identity is missing');
+      checkingInvoiceCard = true;
+      await page.goto(settings.ui + '/invoices/' + invoiceId, { waitUntil: 'domcontentloaded' });
+      await page.getByRole('button', { name: /^Печать/ }).waitFor();
+      // Keep the real popup and native print call. Record that the released handler invokes it.
+      await page.evaluate(() => {
+        const open = window.open;
+        window.open = function (...args) {
+          const popup = open.apply(window, args);
+          if (popup) {
+            const print = popup.print;
+            popup.print = function () { popup.__ppInvoicePrinted = true; return print.call(popup); };
+          }
+          return popup;
+        };
+      });
+      for (const signed of [false, true]) {
+        await page.getByRole('button', { name: /^Печать/ }).click();
+        const responseReady = page.waitForResponse(response => {
+          const url = new URL(response.url());
+          return url.origin === settings.api && url.pathname === '/api/invoices/' + invoiceId + '/document'
+            && url.searchParams.get('format') === 'html';
+        });
+        const popupReady = page.waitForEvent('popup');
+        await page.getByRole('button', { name: signed ? 'С подписью и печатью' : 'Без подписи и печати', exact: true }).first().click();
+        const popup = await popupReady;
+        const response = await responseReady;
+        check(response.status() === 200, 'Live invoice print failed: HTTP ' + response.status());
+        check(new URL(response.url()).searchParams.get('includeSignatureAndSeal') === String(signed), 'Incorrect print variant');
+        await popup.waitForFunction(() => document.body.textContent.includes('Original lost response service') && globalThis.__ppInvoicePrinted === true);
+        check((await popup.locator('body').textContent()).includes('Синтетическая организация для проверки печати'), 'Invoice seller was not rendered');
+        check(await popup.getByAltText('Печать', { exact: true }).count() === Number(signed), 'Incorrect seal visibility');
+        check(await popup.getByAltText('Подпись', { exact: true }).count() === Number(signed), 'Incorrect signature visibility');
+        await popup.waitForFunction(() => [...document.images].every(image => image.complete && image.naturalWidth > 0));
+        await popup.evaluate(() => document.fonts.ready);
+        const pdf = await popup.pdf({ format: 'A4', printBackground: true,
+          path: settings.printRoot + '/invoice-print-' + (signed ? 'signed' : 'plain') + '.pdf' });
+        check(pdf.subarray(0, 5).toString() === '%PDF-' && pdf.length > 1000, 'Invoice print produced no PDF');
+        await popup.close();
+      }
+      for (const format of ['PDF', 'Word']) {
+        await page.getByRole('button', { name: /^Скачать$/ }).click();
+        const ready = page.waitForEvent('download');
+        await page.getByRole('button', { name: 'Счет: ' + format + ' без подписи и печати', exact: true }).click();
+        const file = await ready;
+        check(await file.failure() === null, 'Invoice ' + format + ' download failed');
+        check(file.suggestedFilename().endsWith(format === 'PDF' ? '.pdf' : '.docx'), 'Invoice download format mismatch');
+        await file.saveAs(settings.printRoot + '/invoice-download-' + format.toLowerCase() + (format === 'PDF' ? '.pdf' : '.docx'));
+      }
+    }
+    check(otherWrites === 0, 'Financial generation caused another business write: ' + otherWrites + ' ' + unexpectedWrites.join(', '));
+    check(tablePreferenceWrites <= 1, 'Invoice table preferences were written repeatedly');
     check(outside.length === 0, 'Browser called an external host');
     check(errors.length === 0, 'Browser errors: ' + errors.join('; '));
     reads.dispose();

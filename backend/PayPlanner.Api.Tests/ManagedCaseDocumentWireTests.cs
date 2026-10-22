@@ -11,8 +11,15 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public sealed partial class ManagedCaseDocumentWireTests
+public sealed partial class ManagedCaseDocumentWireTests : IClassFixture<SqliteMigratedTemplate>
 {
+    private readonly SqliteMigratedTemplate sqliteTemplate;
+
+    public ManagedCaseDocumentWireTests(SqliteMigratedTemplate sqliteTemplate)
+    {
+        this.sqliteTemplate = sqliteTemplate;
+    }
+
     [Theory]
     [InlineData("court-edit")]
     [InlineData("court-overview")]
@@ -27,7 +34,7 @@ public sealed partial class ManagedCaseDocumentWireTests
                 SourceUrl = SyntheticYandexHostingStartup.CourtUrl, Summary = summary }]
         };
         await using var endpoint = await LoopbackYandexDiskEndpoint.StartAsync();
-        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(workerEnabled: true,
+        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(template: sqliteTemplate, workerEnabled: true,
             uploadCapacityChecks: true, yandexCopy: endpoint, courtSource: Source("Исходная браузерная сводка"));
         var caseId = await LoginAndCreateCaseAsync(runtime);
         await using (var seed = runtime.OpenDatabase())
@@ -92,7 +99,7 @@ public sealed partial class ManagedCaseDocumentWireTests
                 ActDate = new DateTime(2026, 10, 1), SourceUrl = SyntheticYandexHostingStartup.CourtUrl, Summary = summary }]
         };
         await using var endpoint = await LoopbackYandexDiskEndpoint.StartAsync();
-        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(workerEnabled: true,
+        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(template: sqliteTemplate, workerEnabled: true,
             uploadCapacityChecks: true, yandexCopy: endpoint, courtSource: Source("Исходная судебная сводка"));
         var caseId = await LoginAndCreateCaseAsync(runtime);
         await using (var seed = runtime.OpenDatabase())
@@ -210,7 +217,7 @@ public sealed partial class ManagedCaseDocumentWireTests
     public async Task RealHttpGeneratedYandexCopiesPublishFrozenDocumentOnceAcrossRestart(bool workOrder, string failure)
     {
         await using var endpoint = await LoopbackYandexDiskEndpoint.StartAsync();
-        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(workerEnabled: true, uploadCapacityChecks: true, yandexCopy: endpoint);
+        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(template: sqliteTemplate, workerEnabled: true, uploadCapacityChecks: true, yandexCopy: endpoint);
         using (var forbidden = await runtime.Client.PostAsync(SyntheticYandexHostingStartup.WorkerPath, null))
             Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
         var caseId = await LoginAndCreateCaseAsync(runtime);
@@ -332,7 +339,7 @@ public sealed partial class ManagedCaseDocumentWireTests
     public async Task RealHttpGeneratedTwoCopyUnknownCapacityLeavesNoPartialPublication(bool workOrder)
     {
         await using var endpoint = await LoopbackS3Endpoint.StartAsync();
-        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(secondCopy: endpoint, uploadCapacityChecks: true);
+        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(template: sqliteTemplate, secondCopy: endpoint, uploadCapacityChecks: true);
         var caseId = await LoginAndCreateCaseAsync(runtime);
         await using (var seed = runtime.OpenDatabase())
         {
@@ -367,7 +374,7 @@ public sealed partial class ManagedCaseDocumentWireTests
     [InlineData("generated-order")]
     public async Task RealBrowserGeneratedLostAckReplaysOriginalAttemptWithoutDuplicate(string flow)
     {
-        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(uploadCapacityChecks: true);
+        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(template: sqliteTemplate, uploadCapacityChecks: true);
         var caseId = await LoginAndCreateCaseAsync(runtime);
         int clientId;
         await using (var seed = runtime.OpenDatabase())
@@ -395,7 +402,7 @@ public sealed partial class ManagedCaseDocumentWireTests
     [InlineData(true)]
     public async Task RealHttpRetirementReturnsProofWithoutDeletingPublishedDocumentOrResendingFile(bool pending)
     {
-        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(uploadCapacityChecks: true);
+        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(template: sqliteTemplate, uploadCapacityChecks: true);
         using (var anonymous = await runtime.Client.PostAsync($"/api/v2/cases/1/documents/uploads/{Guid.NewGuid():D}/retire", null))
             Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
         var caseId = await LoginAndCreateCaseAsync(runtime);
@@ -489,7 +496,7 @@ public sealed partial class ManagedCaseDocumentWireTests
     public async Task RealHttpCapacityRejectionWithoutSavedIntentCannotBeRetired()
     {
         await using var endpoint = await LoopbackS3Endpoint.StartAsync();
-        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(secondCopy: endpoint, uploadCapacityChecks: true);
+        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(template: sqliteTemplate, secondCopy: endpoint, uploadCapacityChecks: true);
         var caseId = await LoginAndCreateCaseAsync(runtime);
         var key = Guid.NewGuid(); var path = $"/api/v2/cases/{caseId}/documents";
         using (var upload = await UploadAsync(runtime, path, Encoding.UTF8.GetBytes("Owned unknown capacity"), key))
@@ -508,7 +515,7 @@ public sealed partial class ManagedCaseDocumentWireTests
     [Fact]
     public async Task RealMultipartRequiresIdentityAndReplaysCaseAndVersionWithoutDuplicatePublication()
     {
-        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(uploadCapacityChecks: true);
+        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(template: sqliteTemplate, uploadCapacityChecks: true);
         var caseId = await LoginAndCreateCaseAsync(runtime);
         var bytes = Encoding.UTF8.GetBytes("Synthetic case document: точные байты");
         var path = $"/api/v2/cases/{caseId}/documents";
@@ -595,7 +602,7 @@ public sealed partial class ManagedCaseDocumentWireTests
     [Fact]
     public async Task RealMultipartAcceptsExactFileLimitAndRejectsOneByteOverWithoutPublication()
     {
-        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(uploadCapacityChecks: true);
+        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(template: sqliteTemplate, uploadCapacityChecks: true);
         var caseId = await LoginAndCreateCaseAsync(runtime);
         var path = $"/api/v2/cases/{caseId}/documents";
         var bytes = new byte[25 * 1024 * 1024];
@@ -619,7 +626,7 @@ public sealed partial class ManagedCaseDocumentWireTests
     [InlineData(true, true)]
     public async Task RealHttpGeneratedDocumentReplaysExactReceiptAcrossRestart(bool workOrder, bool restart)
     {
-        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(uploadCapacityChecks: true);
+        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(template: sqliteTemplate, uploadCapacityChecks: true);
         var caseId = await LoginAndCreateCaseAsync(runtime);
         await using (var seed = runtime.OpenDatabase())
         {

@@ -897,9 +897,7 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
 
     private static async Task DropDatabaseAsync(NpgsqlConnection admin, string databaseName)
     {
-        await using var command = admin.CreateCommand();
-        command.CommandText = $"DROP DATABASE IF EXISTS \"{databaseName}\" WITH (FORCE)";
-        await command.ExecuteNonQueryAsync();
+        await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(admin, databaseName);
     }
 
     private static async Task RunPgDumpAsync(NpgsqlConnectionStringBuilder source, string backupPath)

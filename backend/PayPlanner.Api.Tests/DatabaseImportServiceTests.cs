@@ -9,7 +9,7 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public class DatabaseImportServiceTests
+public partial class DatabaseImportServiceTests
 {
     [Fact]
     public async Task ImportSqliteAsync_WhenDuplicatePaymentsShareKey_PreservesDeferredMappingsForRelations()

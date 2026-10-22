@@ -9,7 +9,7 @@ public sealed record DiscoveredCase(Guid Id, string FullyQualifiedName, string D
 public sealed record PlannedCase(Guid Id, string FullyQualifiedName, string DisplayName, int Shard);
 public sealed record ArtifactPin(string Path, string Sha256);
 public sealed record TestPlan(int SchemaVersion, string Revision, int ShardCount, string AssemblyPath,
-    ArtifactPin[] Artifacts, PlannedCase[] Cases);
+    ArtifactPin[] Artifacts, PlannedCase[] Cases, MethodTiming[]? Timings = null);
 public sealed record ShardRun(int SchemaVersion, string Revision, string ManifestSha256, int Shard,
     string AssemblySha256, DateTime StartedUtc, DateTime FinishedUtc, int ExitCode, string? ErrorKind);
 
@@ -19,7 +19,7 @@ public static partial class ShardPlan
     public static readonly JsonSerializerOptions Json = new() { WriteIndented = true, PropertyNameCaseInsensitive = false };
 
     public static TestPlan Create(string revision, string assemblyPath, ArtifactPin[] artifacts,
-        IEnumerable<DiscoveredCase> discovered, int shardCount)
+        IEnumerable<DiscoveredCase> discovered, int shardCount, MethodTiming[]? timings = null)
     {
         Require(Hex40().IsMatch(revision), "Revision must be an exact Git SHA.");
         Require(shardCount == 4, "The release gate requires four shards.");
@@ -41,27 +41,38 @@ public static partial class ShardPlan
             Require(MethodName().IsMatch(row.FullyQualifiedName), "Unsupported test method name in filter.");
             Require(!string.IsNullOrWhiteSpace(row.DisplayName), "Missing display name.");
         }
+        if (timings is not null)
+        {
+            Require(timings.All(row => MethodName().IsMatch(row.FullyQualifiedName) && row.AverageTicks > 0 && row.Cases > 0), "Invalid timing estimate.");
+            Require(timings.Select(row => row.FullyQualifiedName).Distinct(StringComparer.Ordinal).Count() == timings.Length, "Duplicate timing method.");
+            var methods = cases.Select(row => row.FullyQualifiedName).ToHashSet(StringComparer.Ordinal);
+            timings = timings.Where(row => methods.Contains(row.FullyQualifiedName)).OrderBy(row => row.FullyQualifiedName, StringComparer.Ordinal).ToArray();
+        }
+        var estimates = timings?.ToDictionary(row => row.FullyQualifiedName, row => row.AverageTicks, StringComparer.Ordinal);
+        var fallback = timings is { Length: > 0 } ? timings.Select(row => row.AverageTicks).Order().ElementAt(timings.Length / 2) : 1L;
+        decimal Weight(IGrouping<string, DiscoveredCase> group) => (decimal)(estimates?.GetValueOrDefault(group.Key, fallback) ?? 1L) * group.Count();
         var groups = cases.GroupBy(row => row.FullyQualifiedName, StringComparer.Ordinal)
-            .OrderByDescending(group => group.Count()).ThenBy(group => group.Key, StringComparer.Ordinal).ToArray();
+            .OrderByDescending(Weight).ThenBy(group => group.Key, StringComparer.Ordinal).ToArray();
         Require(groups.Length >= shardCount, "Too few methods for four nonempty shards.");
-        var loads = new int[shardCount];
+        var loads = new decimal[shardCount];
         var planned = new List<PlannedCase>(cases.Length);
         foreach (var group in groups)
         {
             var shard = Enumerable.Range(0, shardCount).OrderBy(index => loads[index]).ThenBy(index => index).First();
             foreach (var row in group) planned.Add(new(row.Id, row.FullyQualifiedName, row.DisplayName, shard));
-            loads[shard] += group.Count();
+            loads[shard] += Weight(group);
         }
         return new(SchemaVersion, revision, shardCount, assemblyPath, artifacts.OrderBy(pin => pin.Path, StringComparer.Ordinal).ToArray(),
-            planned.OrderBy(row => row.FullyQualifiedName, StringComparer.Ordinal).ThenBy(row => row.Id).ToArray());
+            planned.OrderBy(row => row.FullyQualifiedName, StringComparer.Ordinal).ThenBy(row => row.Id).ToArray(), timings);
     }
 
     public static void Validate(TestPlan plan)
     {
         Require(plan.SchemaVersion == SchemaVersion, "Unsupported plan schema.");
         var expected = Create(plan.Revision, plan.AssemblyPath, plan.Artifacts,
-            plan.Cases.Select(row => new DiscoveredCase(row.Id, row.FullyQualifiedName, row.DisplayName)), plan.ShardCount);
+            plan.Cases.Select(row => new DiscoveredCase(row.Id, row.FullyQualifiedName, row.DisplayName)), plan.ShardCount, plan.Timings);
         Require(expected.Cases.SequenceEqual(plan.Cases), "Plan ordering or method assignment is invalid.");
+        Require(expected.Timings is null ? plan.Timings is null : expected.Timings.SequenceEqual(plan.Timings!), "Plan timing estimates are not canonical.");
     }
 
     public static TestPlan Read(string path, string expectedHash)

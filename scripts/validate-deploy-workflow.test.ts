@@ -12,7 +12,63 @@ function replaceOnce(before: string, after: string) {
   return workflow.replace(before, after);
 }
 
+function replaceInJob(id: string, change: (job: string) => string) {
+  const header = `  ${id}:\n`;
+  const begin = workflow.indexOf(header);
+  expect(begin).toBeGreaterThan(0);
+  const following = begin + header.length;
+  const next = workflow.slice(following).search(/^ {2}[a-z][a-z-]*:\n/m);
+  const end = next < 0 ? workflow.length : following + next;
+  return workflow.slice(0, begin) + change(workflow.slice(begin, end)) + workflow.slice(end);
+}
+
 describe('parallel deploy workflow release contract', () => {
+  it.each(['backend-build', 'backend-test', 'backend-browser', 'backend'])(
+    'pins %s to the trusted Windows host and safe checkout', id => {
+      for (const [before, after] of [
+        ['runs-on: [self-hosted, Windows, X64, payplanner-xsenus]', 'runs-on: ubuntu-latest'],
+        ['shell: bash', 'shell: powershell'],
+        ['persist-credentials: false', 'persist-credentials: true'],
+      ]) {
+        const changed = replaceInJob(id, job => job.replace(before, after));
+        expect(() => validateDeployWorkflow(changed)).toThrow();
+      }
+    },
+  );
+
+  it('rejects a new database server and parallel memory-heavy shards', () => {
+    expect(() => validateDeployWorkflow(replaceInJob('backend-test', job => job.replace(
+      '    steps:', '    services:\n      postgres:\n        image: postgres:17-alpine\n    steps:',
+    )))).toThrow(/new servers/);
+    expect(() => validateDeployWorkflow(replaceOnce('max-parallel: 1', 'max-parallel: 4'))).toThrow();
+  });
+
+  it('requires a verified portable package and dedicated PostgreSQL preflight', () => {
+    for (const mode of ['package', 'postgres', 'build']) {
+      expect(() => validateDeployWorkflow(replaceOnce(
+        `run: node scripts/verify-xsenus-runner.mjs ${mode}`, `run: echo ${mode}`,
+      ))).toThrow();
+    }
+  });
+
+  it('rejects collecting timing estimates before full qualification', () => {
+    const begin = workflow.indexOf('      - name: Produce timing estimates from the qualified full run\n');
+    const end = workflow.indexOf('      - name: Cache qualified backend timing estimates\n', begin);
+    expect(begin).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(begin);
+    const profile = workflow.slice(begin, end);
+    const moved = (workflow.slice(0, begin) + workflow.slice(end)).replace('      - name: Verify complete backend case union\n', profile + '      - name: Verify complete backend case union\n');
+    expect(() => validateDeployWorkflow(moved)).toThrow(/Timing profile/);
+  });
+
+  it('rejects caching a profile before it has been qualified and produced', () => {
+    const begin = workflow.indexOf('      - name: Cache qualified backend timing estimates\n');
+    const end = workflow.indexOf('  deploy:\n', begin);
+    const cache = workflow.slice(begin, end);
+    const moved = (workflow.slice(0, begin) + workflow.slice(end)).replace('      - name: Produce timing estimates from the qualified full run\n', cache + '      - name: Produce timing estimates from the qualified full run\n');
+    expect(() => validateDeployWorkflow(moved)).toThrow(/Timing cache/);
+  });
+
   it('qualifies the actual workflow and its same-revision artifacts', () => {
     expect(validateDeployWorkflow(workflow)).toEqual({
       valid: true,
@@ -31,6 +87,34 @@ describe('parallel deploy workflow release contract', () => {
     expect(validateDeployWorkflow(reordered).valid).toBe(true);
   });
 
+  it.each(['backend-test', 'backend-browser'])('keeps expensive %s behind all preflight gates', id => {
+    for (const needs of ['backend-build, backend-format', 'backend-build, frontend', 'backend-format, frontend']) {
+      const changed = replaceInJob(id, job => job.replace(
+        'needs: [backend-build, backend-format, frontend]', `needs: [${needs}]`,
+      ));
+      expect(() => validateDeployWorkflow(changed)).toThrow(/dependencies/);
+    }
+  });
+
+  it.each([
+    ['ignore application code', '      - "README.md"', '      - "backend/**"'],
+    ['ignore release infrastructure', '      - "README.md"', '      - ".github/**"'],
+    ['ignore arbitrary documents used by tools', '      - "docs/**/*.md"', '      - "docs/**"'],
+    ['remove manual release', '  workflow_dispatch: {}\n', ''],
+    ['remove main trigger', 'branches: ["main"]', 'branches: ["other"]'],
+  ])('rejects trigger changes that %s', (_name, before, after) => {
+    expect(() => validateDeployWorkflow(replaceOnce(before, after))).toThrow();
+  });
+
+  it.each(['frontend', 'backend-format', 'backend-build', 'backend-test', 'backend-browser', 'backend', 'deploy'])(
+    'bounds runner time for %s', id => {
+      for (const timeout of ['0', '360', '${{ vars.UNBOUNDED_TIMEOUT }}']) {
+        const changed = replaceInJob(id, job => job.replace(/timeout-minutes: \d+/, `timeout-minutes: ${timeout}`));
+        expect(() => validateDeployWorkflow(changed)).toThrow(/time budget/);
+      }
+    },
+  );
+
   it.each([
     ['missing dependency', 'needs: [frontend, backend-format, backend]', 'needs: [frontend, backend]'],
     ['duplicate dependency', 'needs: [frontend, backend-format, backend]', 'needs: [frontend, backend, backend]'],
@@ -41,7 +125,6 @@ describe('parallel deploy workflow release contract', () => {
     ['conditional legal gate', '        run: npm run test:legal-flags:strict', '        if: false\n        run: npm run test:legal-flags:strict'],
     ['commented legal gate', '        run: npm run test:legal-flags:strict', '        run: echo npm run test:legal-flags:strict'],
     ['removed validator', '        run: node scripts/validate-deploy-workflow.mjs', '        run: echo validator'],
-    ['missing frontend browser', '        run: npx playwright install --with-deps chromium\n', '        run: echo browser\n'],
     ['failure swallowed', '        run: npm run lint', '        run: |\n          npm run lint\n          true || true'],
     ['conditional shell wrapper', '        run: npm run lint', '        run: |\n          if false; then\n            npm run lint\n          fi'],
     ['shard cases filtered', '--shard ${{ matrix.shard }} --results', '--filter Tiny --shard ${{ matrix.shard }} --results'],
@@ -88,7 +171,7 @@ describe('parallel deploy workflow release contract', () => {
     ['conditional aggregate', '  backend:\n', '  backend:\n    if: always()\n'],
     ['aggregate missing browser gate', 'needs: [backend-build, backend-test, backend-browser]', 'needs: [backend-build, backend-test]'],
     ['aggregate missing shard gate', 'needs: [backend-build, backend-test, backend-browser]', 'needs: [backend-build, backend-browser]'],
-    ['test missing build dependency', 'needs: [backend-build]', 'needs: []'],
+    ['test missing build dependency', 'needs: [backend-build, backend-format, frontend]', 'needs: [backend-format, frontend]'],
     ['manifest producer output missing', 'manifest-sha: ${{ steps.plan.outputs.manifest-sha }}', 'manifest-sha: fake'],
     ['manifest hash recomputed downstream', 'EXPECTED_MANIFEST_SHA: ${{ needs.backend-build.outputs.manifest-sha }}', 'EXPECTED_MANIFEST_SHA: fake'],
     ['untrusted manifest not checked', '--manifest-sha "$EXPECTED_MANIFEST_SHA" --shard', '--shard'],
@@ -108,7 +191,7 @@ describe('parallel deploy workflow release contract', () => {
     ['restored failure swallowed', ' || native_exit=$?', ' || true'],
     ['empty restored selection allowed', '<TreatNoTestsAsError>true</TreatNoTestsAsError>', '<TreatNoTestsAsError>false</TreatNoTestsAsError>'],
     ['restored method omitted', '|FullyQualifiedName~FullModelBackupRestoresReadableManagedGenerationsWithoutSource', ''],
-    ['PostgreSQL service omitted', 'image: postgres:17-alpine', 'image: redis:7-alpine'],
+    ['dedicated PostgreSQL replaced', 'secrets.PAYPLANNER_XSENUS_TEST_POSTGRES', 'secrets.PRODUCTION_POSTGRES'],
     ['tool analyzers disabled', 'run: dotnet build tools/PayPlanner.TestShards/PayPlanner.TestShards.csproj --no-restore -c Release', 'run: dotnet build tools/PayPlanner.TestShards/PayPlanner.TestShards.csproj --no-restore -c Release -p:RunAnalyzers=false'],
   ])('rejects incomplete or unbound coverage: %s', (_name, before, after) => {
     expect(() => validateDeployWorkflow(replaceOnce(before, after))).toThrow();
@@ -148,16 +231,6 @@ describe('parallel deploy workflow release contract', () => {
     ['download arbitrary cross-run ID', '          artifact-ids: ${{ needs.backend-build.outputs.runtime-artifact-id }}\n', '          artifact-ids: ${{ needs.backend-build.outputs.runtime-artifact-id }}\n          github-token: ${{ github.token }}\n'],
   ])('rejects unsafe rerun binding: %s', (_name, before, after) => {
     expect(() => validateDeployWorkflow(replaceOnce(before, after))).toThrow();
-  });
-
-  it('rejects installing Chromium after frontend integration', () => {
-    const browserStep = '      - name: Install Chromium for frontend integration\n        run: npx playwright install --with-deps chromium\n\n';
-    expect(workflow).toContain(browserStep);
-    const moved = workflow.replace(browserStep, '').replace(
-      '      - name: Test legal feature flags readiness\n',
-      browserStep + '      - name: Test legal feature flags readiness\n',
-    );
-    expect(() => validateDeployWorkflow(moved)).toThrow(/Chromium/);
   });
 
   it('requires completed shard diagnostics before publishing a qualified alias', () => {

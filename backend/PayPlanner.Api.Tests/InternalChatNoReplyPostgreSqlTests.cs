@@ -64,13 +64,7 @@ public sealed class InternalChatNoReplyPostgreSqlTests
         }
         finally
         {
-            await using var terminate = admin.CreateCommand();
-            terminate.CommandText = "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = @databaseName AND pid <> pg_backend_pid()";
-            terminate.Parameters.AddWithValue("databaseName", databaseName);
-            await terminate.ExecuteNonQueryAsync();
-            await using var drop = admin.CreateCommand();
-            drop.CommandText = $"DROP DATABASE IF EXISTS \"{databaseName}\"";
-            await drop.ExecuteNonQueryAsync();
+            await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(admin, databaseName);
             NpgsqlConnection.ClearAllPools();
         }
     }

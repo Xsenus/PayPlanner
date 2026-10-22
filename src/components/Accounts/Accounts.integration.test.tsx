@@ -682,6 +682,24 @@ describe('Accounts integration', () => {
     expect(screen.getByRole('button', { name: 'Сбросить все' })).toBeTruthy();
   });
 
+  it('shows the default date boundary during search and removes only dates on explicit request', async () => {
+    const { unmount } = render(<Accounts />);
+    fireEvent.click(screen.getByRole('button', { name: 'Расходные счета' }));
+    fireEvent.change(screen.getByPlaceholderText('Номер счёта, клиент или акт'), { target: { value: 'Lookup Client' } });
+    await waitFor(() => expect(getAccountsRegistryResultMock.mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({ search: 'Lookup Client', type: 'Expense', from: expect.any(String), to: expect.any(String) })));
+    expect(screen.getByText(/^Период:/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Искать за всё время' }));
+    await waitFor(() => expect(getAccountsRegistryResultMock.mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({ search: 'Lookup Client', type: 'Expense', from: undefined, to: undefined })));
+    expect(screen.queryByRole('button', { name: 'Искать за всё время' })).toBeNull();
+    expect(screen.getByText('Период: Всё время')).toBeTruthy();
+    unmount();
+    render(<Accounts />);
+    await waitFor(() => expect(getAccountsRegistryResultMock.mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({ search: 'Lookup Client', type: 'Expense', from: undefined, to: undefined })));
+  });
+
   it('resets the type filter back to all accounts', async () => {
     render(<Accounts />);
 
@@ -1034,6 +1052,34 @@ describe('Accounts integration', () => {
     expect(await screen.findByText('Representative payment for invoice 24')).toBeTruthy();
     expect(screen.getByText('Sibling payment for invoice 24')).toBeTruthy();
     expect(screen.getByText('payments-loading:false')).toBeTruthy();
+  });
+
+  it.each([0, 1])('keeps equal invoice numbers independent when expanding and opening row %s', async (index) => {
+    const invoices = [
+      createInvoice({ id: 901, invoiceEntityId: 101, number: 'SAME-109', date: '2025-06-07' }),
+      createInvoice({ id: 902, invoiceEntityId: 102, number: 'SAME-109', date: '2026-06-07' }),
+    ];
+    const rows = invoices.map((invoice, rowIndex) => ({
+      ...createAccountRow({ invoice, payments: [createSiblingPayment({ id: 1001 + rowIndex,
+        invoiceId: invoice.invoiceEntityId, description: `Independent payment ${rowIndex}` })] }),
+      groupKey: `entity:${invoice.invoiceEntityId}`,
+      accountNumber: invoice.number,
+    }));
+    getAccountsRegistryResultMock.mockReturnValue({ items: rows, total: 2, summary: createSummary(),
+      loading: false, refreshing: false, error: null, refresh: refreshAccountsMock });
+    getInvoiceMock.mockImplementation(async (id: number) => invoices.find((invoice) => invoice.id === id));
+    const onRouteInvoiceChange = vi.fn();
+    render(<Accounts onRouteInvoiceChange={onRouteInvoiceChange} />);
+    const buttons = screen.getAllByRole('button', { name: 'SAME-109' });
+    fireEvent.click(buttons[0]);
+    expect(await screen.findByText('Independent payment 0')).toBeTruthy();
+    expect(screen.queryByText('Independent payment 1')).toBeNull();
+    fireEvent.click(buttons[1]);
+    expect(await screen.findByText('Independent payment 1')).toBeTruthy();
+    fireEvent.click(buttons[index].closest('tr')!);
+    await waitFor(() => expect(getInvoiceMock).toHaveBeenCalledWith(invoices[index].id));
+    expect(onRouteInvoiceChange).toHaveBeenCalledWith(invoices[index].id);
+    expect(await screen.findByTestId('invoice-modal')).toBeTruthy();
   });
 
   it('does not pass related payment actions into invoice editor without payment rights', async () => {

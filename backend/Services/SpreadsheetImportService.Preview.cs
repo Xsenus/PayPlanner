@@ -1,4 +1,4 @@
-﻿using PayPlanner.Api.Models;
+using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 
 namespace PayPlanner.Api.Services;
@@ -274,7 +274,7 @@ public sealed partial class SpreadsheetImportService
     {
         var rows = new List<SpreadsheetImportPreviewRowDto>();
         var duplicateCounts = drafts
-            .Select(draft => BuildInvoiceNaturalKey(draft.Number, draft.Date, draft.Type))
+            .Select(BuildInvoiceDraftIdentity)
             .Where(key => !string.IsNullOrWhiteSpace(key))
             .GroupBy(key => key, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
@@ -285,10 +285,13 @@ public sealed partial class SpreadsheetImportService
             var issues = new List<string>(draft.ParseWarnings);
             var sourceKeys = BuildInvoiceMatchKeys(draft.ExternalId, draft.Number, draft.Date, draft.Type);
             var sourceKey = BuildInvoiceNaturalKey(draft.Number, draft.Date, draft.Type);
+            var draftIdentity = BuildInvoiceDraftIdentity(draft);
             var action = SpreadsheetImportOperationAction.Error;
             var selectable = false;
             string? message;
-            var existing = FindExistingInvoiceStateItem(state, sourceKeys);
+            var clientId = FindInvoiceClientId(state, draft.CounterpartyName, draft.CounterpartyInn, out var clientError);
+            var existing = FindExistingInvoiceStateItem(state, sourceKeys, clientId, out var matchError);
+            matchError ??= clientError;
             var changes = BuildInvoiceChanges(draft, existing, state.Users, localToday);
 
             if (string.IsNullOrWhiteSpace(draft.Number))
@@ -311,7 +314,11 @@ public sealed partial class SpreadsheetImportService
             {
                 message = "Не удалось сформировать уникальный ключ счета.";
             }
-            else if (!seen.Add(sourceKey))
+            else if (!string.IsNullOrWhiteSpace(matchError))
+            {
+                message = matchError;
+            }
+            else if (!seen.Add(draftIdentity))
             {
                 message = "Дубликат счета внутри загруженного набора.";
                 action = SpreadsheetImportOperationAction.Skipped;
@@ -335,7 +342,7 @@ public sealed partial class SpreadsheetImportService
             }
 
             if (!string.IsNullOrWhiteSpace(sourceKey)
-                && duplicateCounts.TryGetValue(sourceKey, out var duplicateCount)
+                && duplicateCounts.TryGetValue(draftIdentity, out var duplicateCount)
                 && duplicateCount > 1)
             {
                 issues.Add($"В файлах найдено строк с тем же номером и датой: {duplicateCount}.");
@@ -381,7 +388,7 @@ public sealed partial class SpreadsheetImportService
     {
         var rows = new List<SpreadsheetImportPreviewRowDto>();
         var duplicateCounts = drafts
-            .Select(draft => BuildActNaturalKey(draft.Number, draft.Date, draft.Type))
+            .Select(BuildActDraftIdentity)
             .Where(key => !string.IsNullOrWhiteSpace(key))
             .GroupBy(key => key, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
@@ -392,10 +399,13 @@ public sealed partial class SpreadsheetImportService
             var issues = new List<string>(draft.ParseWarnings);
             var sourceKeys = BuildActMatchKeys(draft.ExternalId, draft.Number, draft.Date, draft.Type);
             var sourceKey = BuildActNaturalKey(draft.Number, draft.Date, draft.Type);
+            var draftIdentity = BuildActDraftIdentity(draft);
             var action = SpreadsheetImportOperationAction.Error;
             var selectable = false;
             string? message;
-            var existing = FindExistingActStateItem(state, sourceKeys);
+            var clientId = FindInvoiceClientId(state, draft.CounterpartyName, draft.CounterpartyInn, out var clientError);
+            var existing = FindExistingActStateItem(state, sourceKeys, clientId, out var matchError);
+            matchError ??= clientError;
             var changes = BuildActChanges(draft, existing, state.Users);
 
             if (string.IsNullOrWhiteSpace(draft.Number))
@@ -418,7 +428,11 @@ public sealed partial class SpreadsheetImportService
             {
                 message = "Не удалось сформировать уникальный ключ акта.";
             }
-            else if (!seen.Add(sourceKey))
+            else if (matchError is not null)
+            {
+                message = matchError;
+            }
+            else if (!seen.Add(draftIdentity))
             {
                 message = "Дубликат акта внутри загруженного набора.";
                 action = SpreadsheetImportOperationAction.Skipped;
@@ -442,7 +456,7 @@ public sealed partial class SpreadsheetImportService
             }
 
             if (!string.IsNullOrWhiteSpace(sourceKey)
-                && duplicateCounts.TryGetValue(sourceKey, out var duplicateCount)
+                && duplicateCounts.TryGetValue(draftIdentity, out var duplicateCount)
                 && duplicateCount > 1)
             {
                 issues.Add($"В файлах найдено строк с тем же номером и датой: {duplicateCount}.");
@@ -482,68 +496,76 @@ public sealed partial class SpreadsheetImportService
         return BuildSection("acts", "Акты", rows);
     }
 
-    private static InvoiceStateItem? FindExistingInvoiceStateItem(ImportState state, IReadOnlyCollection<string> keys)
+    private static string BuildInvoiceDraftIdentity(InvoiceDraft draft)
+        => $"{BuildInvoiceNaturalKey(draft.Number, draft.Date, draft.Type)}|owner:{NormalizeNameKey(draft.CounterpartyName)}|inn:{NormalizeInn(draft.CounterpartyInn)}|uid:{NormalizeOneCExternalId(draft.ExternalId)}";
+
+    private static int? FindInvoiceClientId(ImportState state, string? name, string? inn, out string? error)
     {
-        foreach (var key in keys.Where(key => key.Contains("|number:", StringComparison.Ordinal)))
+        error = null;
+        var normalizedInn = NormalizeInn(inn);
+        var normalizedName = NormalizeNameKey(name);
+        var matches = !string.IsNullOrWhiteSpace(normalizedInn)
+            ? state.Clients.Where(client => client.NormalizedInn == normalizedInn).Take(2).ToList()
+            : new List<ClientStateItem>();
+        if (matches.Count == 0 && !string.IsNullOrWhiteSpace(normalizedName))
+            matches = state.Clients.Where(client => client.NormalizedName == normalizedName || client.NormalizedCompany == normalizedName
+                || client.MatchKeys.Contains(normalizedName, StringComparer.Ordinal)).Take(2).ToList();
+        if (matches.Count > 1 || (matches.Count == 1 && !string.IsNullOrWhiteSpace(normalizedInn)
+                && !string.IsNullOrWhiteSpace(matches[0].NormalizedInn) && matches[0].NormalizedInn != normalizedInn))
         {
-            if (state.Invoices.TryGetValue(key, out var existingItems))
-            {
-                return existingItems.FirstOrDefault();
-            }
+            error = "Не удалось однозначно определить контрагента счета. Уточните ИНН или название; данные не изменены.";
+            return null;
         }
-
-        foreach (var key in keys.Where(key => key.Contains("|uid:", StringComparison.Ordinal)))
-        {
-            if (!state.Invoices.TryGetValue(key, out var existingItems))
-            {
-                continue;
-            }
-
-            var distinctItems = existingItems
-                .Where(item => !item.ImportedInCurrentBatch)
-                .GroupBy(item => item.PaymentId)
-                .Select(group => group.First())
-                .Take(2)
-                .ToList();
-            if (distinctItems.Count == 1)
-            {
-                return distinctItems[0];
-            }
-        }
-
-        return null;
+        return matches.SingleOrDefault()?.Id;
     }
 
-    private static ActStateItem? FindExistingActStateItem(ImportState state, IReadOnlyCollection<string> keys)
+    private static string BuildActDraftIdentity(ActDraft draft)
+        => $"{BuildActNaturalKey(draft.Number, draft.Date, draft.Type)}|owner:{NormalizeNameKey(draft.CounterpartyName)}|inn:{NormalizeInn(draft.CounterpartyInn)}|uid:{NormalizeOneCExternalId(draft.ExternalId)}";
+
+    private static InvoiceStateItem? FindExistingInvoiceStateItem(ImportState state, IReadOnlyCollection<string> keys, int? clientId, out string? error)
+        => FindExistingDocumentStateItem(state.Invoices, keys, clientId, out error);
+
+    private static ActStateItem? FindExistingActStateItem(ImportState state, IReadOnlyCollection<string> keys, int? clientId, out string? error)
+        => FindExistingDocumentStateItem(state.Acts, keys, clientId, out error);
+
+    private static T? FindExistingDocumentStateItem<T>(
+        Dictionary<string, List<T>> index, IReadOnlyCollection<string> keys, int? clientId, out string? error) where T : class, IImportedDocumentState
     {
-        foreach (var key in keys.Where(key => key.Contains("|number:", StringComparison.Ordinal)))
+        error = null;
+        var uidKey = keys.FirstOrDefault(key => key.Contains("|uid:", StringComparison.Ordinal));
+        var externalId = uidKey is null ? null : uidKey[(uidKey.IndexOf("|uid:", StringComparison.Ordinal) + 5)..];
+        var naturalKey = keys.FirstOrDefault(key => key.Contains("|number:", StringComparison.Ordinal));
+        var naturalMatches = naturalKey is not null && index.TryGetValue(naturalKey, out var naturalItems)
+            ? naturalItems.Where(item => clientId.HasValue && item.ClientId == clientId).DistinctBy(item => item.EntityId).ToList()
+            : new List<T>();
+        // Repeated UIDs are present in legacy 1C exports. Use them with the owner and document key.
+        var exactUidMatches = externalId is null ? new List<T>()
+            : naturalMatches.Where(item => item.ExternalId == externalId).ToList();
+        var uidMatches = uidKey is not null && index.TryGetValue(uidKey, out var uidItems)
+            ? uidItems.Where(item => !item.ImportedInCurrentBatch).DistinctBy(item => item.EntityId).Take(2).ToList()
+            : new List<T>();
+        if (exactUidMatches.Count == 0 && uidMatches.Count == 1
+            && (!clientId.HasValue || uidMatches[0].ClientId != clientId))
         {
-            if (state.Acts.TryGetValue(key, out var existingItems))
-            {
-                return existingItems.FirstOrDefault();
-            }
+            error = "UID документа уже относится к другому контрагенту. Данные не изменены.";
+            return null;
         }
-
-        foreach (var key in keys.Where(key => key.Contains("|uid:", StringComparison.Ordinal)))
+        // A known unique source identity outranks a coincidental number/date of a document without a UID.
+        var candidates = exactUidMatches.Count > 0 ? exactUidMatches
+            : uidMatches.Count == 1 ? uidMatches
+            : naturalMatches.Where(item => externalId is null || string.IsNullOrWhiteSpace(item.ExternalId)).ToList();
+        if (candidates.Count > 1)
         {
-            if (!state.Acts.TryGetValue(key, out var existingItems))
-            {
-                continue;
-            }
-
-            var distinctItems = existingItems
-                .Where(item => !item.ImportedInCurrentBatch)
-                .GroupBy(item => item.ActId)
-                .Select(group => group.First())
-                .Take(2)
-                .ToList();
-            if (distinctItems.Count == 1)
-            {
-                return distinctItems[0];
-            }
+            error = "Найдено несколько документов этого контрагента с тем же номером и датой. Уточните документ; данные не изменены.";
+            return null;
         }
-
-        return null;
+        T? match = candidates.SingleOrDefault();
+        if (match?.HasConflictingLinks == true)
+        {
+            error = PayPlanner.Api.Extensions.InvoiceQueryExtensions.ConflictMessage;
+            return null;
+        }
+        return match;
     }
 
     private static SpreadsheetImportPreviewSectionDto BuildSection(

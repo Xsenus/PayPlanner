@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services.Invoices;
@@ -121,6 +122,7 @@ public sealed partial class SpreadsheetImportService
         string? invoiceNumber,
         DateTime? invoiceDate,
         PaymentType type,
+        int clientId,
         CancellationToken cancellationToken)
     {
         var normalizedExternalId = NormalizeOneCExternalId(invoiceExternalId);
@@ -134,7 +136,8 @@ public sealed partial class SpreadsheetImportService
             .AsNoTracking()
             .Include(item => item.Invoice)
             .Include(item => item.InvoiceLineItems)
-            .Where(item => item.DocumentKind == DocumentKind.Invoice && item.Type == type)
+            .Where(item => item.DocumentKind == DocumentKind.Invoice && item.Type == type && item.ClientId == clientId)
+            .ApplyUnambiguousInvoiceLinks()
             .ToListAsync(cancellationToken);
 
         var normalizedInvoiceDate = invoiceDate?.Date;
@@ -180,7 +183,7 @@ public sealed partial class SpreadsheetImportService
 
             if (byNumber.Count > 1)
             {
-                return byNumber.FirstOrDefault();
+                throw new InvalidOperationException("Для акта найдено несколько счетов этого контрагента. Уточните связь; данные не изменены.");
             }
         }
 

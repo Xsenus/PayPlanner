@@ -14,7 +14,7 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public class SpreadsheetImportServiceOneCXmlTests
+public partial class SpreadsheetImportServiceOneCXmlTests
 {
     [Fact]
     public async Task ApplyAsync_ParsesOneCZipXml_IncludingExpenseInvoicesActsAndLegalRequisites()

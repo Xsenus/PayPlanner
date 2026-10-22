@@ -102,9 +102,7 @@ public sealed class StorageProductBindingMigrationTests
         {
             if (created)
             {
-                await using var drop = admin.CreateCommand();
-                drop.CommandText = $"DROP DATABASE \"{name}\" WITH (FORCE)";
-                await drop.ExecuteNonQueryAsync();
+                await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(admin, name);
             }
         }
     }

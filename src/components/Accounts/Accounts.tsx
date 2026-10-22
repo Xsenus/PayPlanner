@@ -512,6 +512,15 @@ function mergePaymentsUnique(...groups: Payment[][]): Payment[] {
 
 void [accountKey, invoiceLegacyKey, paymentLegacyKey, mergePaymentsUnique];
 
+function normalizeAccountsPeriod(raw: unknown, fallback: PeriodFilter): PeriodFilter {
+  // An explicitly cleared range means all dates; retain it when reopening the registry.
+  if (raw && typeof raw === 'object' && 'mode' in raw && raw.mode === 'custom'
+    && !('from' in raw && raw.from) && !('to' in raw && raw.to)) {
+    return { mode: 'custom' };
+  }
+  return normalizeStoredPeriod(raw, fallback);
+}
+
 function safeRead<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key);
@@ -584,7 +593,7 @@ export function Accounts({
     [viewStateKey],
   );
   const savedPeriod = useMemo(() => safeRead<unknown>(`${storagePrefix}.period`, null), [storagePrefix]);
-  const [period, setPeriod] = useState<PeriodFilter>(() => normalizeStoredPeriod(savedPeriod, defaultPeriod));
+  const [period, setPeriod] = useState<PeriodFilter>(() => normalizeAccountsPeriod(savedPeriod, defaultPeriod));
   const periodRange = useMemo(() => resolvePeriod(period), [period]);
   const [statusFilter, setStatusFilter] = useState<'all' | AccountStatus>(() => savedViewState?.statusFilter ?? 'all');
   const [typeFilter, setTypeFilter] = useState<FilterType>(() => (
@@ -812,7 +821,7 @@ export function Accounts({
   }, [baseTypeFilter, lockType]);
 
   useEffect(() => {
-    setPeriod(normalizeStoredPeriod(savedPeriod, defaultPeriod));
+    setPeriod(normalizeAccountsPeriod(savedPeriod, defaultPeriod));
   }, [defaultPeriod, savedPeriod]);
 
   useEffect(() => {
@@ -1159,8 +1168,8 @@ export function Accounts({
   const activeFilterBadges = useMemo(() => {
     const badges: string[] = [];
 
-    if (hasCustomPeriod) {
-      badges.push(`Период: ${formatPeriodLabel(period, new Date())}`);
+    if (hasCustomPeriod || hasCustomSearch) {
+      badges.push(`Период: ${formatPeriodLabel(period, new Date(), 'Всё время')}`);
     }
     if (hasCustomStatusFilter) {
       badges.push(`Статус: ${accountStatusLabels[statusFilter]}`);
@@ -2837,6 +2846,12 @@ export function Accounts({
                         {badge}
                       </span>
                     ))}
+                    {hasCustomSearch && (periodRange.from || periodRange.to) ? (
+                      <button type="button" onClick={() => setPeriod({ mode: 'custom' })}
+                        className="inline-flex items-center rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-semibold text-amber-800 transition hover:bg-amber-100">
+                        Искать за всё время
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       onClick={handleResetFilters}
@@ -3199,7 +3214,7 @@ export function Accounts({
                     const primaryName = counterpartySummary.primaryName;
                     const caseLines = counterpartySummary.caseLines;
                     const clientId = typeof counterpartySummary.clientId === 'number' ? counterpartySummary.clientId : null;
-                    const isExpanded = expandedAccounts[row.accountNumber] ?? false;
+                    const isExpanded = expandedAccounts[row.groupKey] ?? false;
                     const colSpan = orderedVisibleColumns.length + 1 + (canEdit || canDelete ? 1 : 0);
                     const responsibleLabel = invoice?.responsibles?.length
                       ? invoice.responsibles.map((item) => item.fullName).join(', ')
@@ -3249,7 +3264,7 @@ export function Accounts({
                                   <td key={column.key} className="px-4 py-3 text-gray-900">
                                     <button
                                       type="button"
-                                      onClick={(event) => { event.stopPropagation(); toggleExpanded(row.accountNumber); }}
+                                      onClick={(event) => { event.stopPropagation(); toggleExpanded(row.groupKey); }}
                                       className="inline-flex items-center gap-2 font-semibold text-blue-700"
                                     >
                                       <ChevronDown

@@ -1,6 +1,7 @@
 ﻿using System.Globalization;
 using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
@@ -64,12 +65,16 @@ public sealed partial class SpreadsheetImportService
             })
             .ToListAsync(cancellationToken);
 
+        var safeInvoiceIds = db.Payments.ApplyUnambiguousInvoiceLinks().Select(payment => payment.Id);
         var invoices = await db.Payments
             .AsNoTracking()
             .Where(payment => payment.DocumentKind == DocumentKind.Invoice)
             .Select(payment => new
             {
                 payment.Id,
+                payment.ClientId,
+                HasConflictingLinks = !safeInvoiceIds.Contains(payment.Id)
+                    || (payment.Invoice != null && payment.Invoice.Payments.Any(other => other.Id != payment.Id && other.DocumentKind == DocumentKind.Invoice)),
                 Number = payment.Invoice != null
                     ? payment.Invoice.Number
                     : payment.Account ?? payment.LegacyAccountNumber,
@@ -100,6 +105,11 @@ public sealed partial class SpreadsheetImportService
             .Select(act => new
             {
                 act.Id,
+                act.ClientId,
+                HasConflictingLinks = act.InvoiceId.HasValue && (!safeInvoiceIds.Contains(act.InvoiceId.Value)
+                    || (act.Invoice != null && ((act.ClientId.HasValue && act.ClientId != act.Invoice.ClientId)
+                        || (act.LegalEntityId.HasValue && act.LegalEntityId != act.Invoice.LegalEntityId)
+                        || (act.SellerCompanyId.HasValue && act.SellerCompanyId != act.Invoice.SellerCompanyId)))),
                 act.Number,
                 act.Date,
                 act.Amount,
@@ -116,6 +126,8 @@ public sealed partial class SpreadsheetImportService
         var invoiceStateItems = invoices.Select(invoice => new InvoiceStateItem
         {
             PaymentId = invoice.Id,
+            ClientId = invoice.ClientId,
+            HasConflictingLinks = invoice.HasConflictingLinks,
             ExternalId = ExtractOneCExternalId(invoice.Notes),
             Number = NormalizeText(invoice.Number),
             Date = invoice.Date?.Date,
@@ -133,6 +145,8 @@ public sealed partial class SpreadsheetImportService
         var actStateItems = acts.Select(act => new ActStateItem
         {
             ActId = act.Id,
+            ClientId = act.ClientId,
+            HasConflictingLinks = act.HasConflictingLinks,
             ExternalId = ExtractOneCExternalId(act.Comment),
             Number = NormalizeText(act.Number),
             Date = ActDomainService.NormalizeLocalDate(act.Date),
@@ -253,6 +267,8 @@ public sealed partial class SpreadsheetImportService
         list.Add(new InvoiceStateItem
         {
             PaymentId = item.PaymentId,
+            ClientId = item.ClientId,
+            HasConflictingLinks = item.HasConflictingLinks,
             Key = key,
             ExternalId = item.ExternalId,
             Number = item.Number,
@@ -283,6 +299,8 @@ public sealed partial class SpreadsheetImportService
         list.Add(new ActStateItem
         {
             ActId = item.ActId,
+            ClientId = item.ClientId,
+            HasConflictingLinks = item.HasConflictingLinks,
             Key = key,
             ExternalId = item.ExternalId,
             Number = item.Number,

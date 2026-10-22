@@ -167,7 +167,7 @@ public sealed class PostgreSqlMigratedTemplate : IAsyncLifetime, IAsyncDisposabl
         Assert.Equal(0L, (long)(await command.ExecuteScalarAsync(ct))!);
     }
 
-    private static async Task RequireNoSessionsAsync(NpgsqlConnection admin, string name)
+    internal static async Task RequireNoSessionsAsync(NpgsqlConnection admin, string name, Action? waiting = null)
     {
         await using var command = new NpgsqlCommand("SELECT count(*) FROM pg_stat_activity WHERE datname = @name", admin);
         command.Parameters.AddWithValue("name", name);
@@ -177,6 +177,7 @@ public sealed class PostgreSqlMigratedTemplate : IAsyncLifetime, IAsyncDisposabl
         {
             remaining = (long)(await command.ExecuteScalarAsync())!;
             if (remaining == 0) return;
+            waiting?.Invoke();
             await Task.Delay(50);
         } while (Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(5));
         Assert.Equal(0L, remaining);
@@ -184,13 +185,29 @@ public sealed class PostgreSqlMigratedTemplate : IAsyncLifetime, IAsyncDisposabl
 
     private async Task DropDatabaseAsync(string name)
     {
-        // Names originate only from this owner's generated template or clone allocations.
-        if (!name.StartsWith("pp_", StringComparison.Ordinal) || name.Length > 63
-            || name.Length < 36 || !Guid.TryParseExact(name[^32..], "N", out _)
-            || name[..^32].Any(c => c != '_' && c is not (>= 'a' and <= 'z')))
-            throw new InvalidOperationException("Refusing to remove an unrecognized owned database.");
         await using var admin = await OpenAdminAsync();
-        await RequireNoSessionsAsync(admin, name);
+        await DropOwnedDatabaseAsync(admin, name);
+    }
+
+    internal static async Task DropOwnedDatabaseAsync(NpgsqlConnection admin, string name, Action? waiting = null)
+    {
+        if (!(name.StartsWith("pp_", StringComparison.Ordinal) || name.StartsWith("payplanner_", StringComparison.Ordinal))
+            || name.Length is < 36 or > 63 || name[^33] != '_'
+            || !Guid.TryParseExact(name[^32..], "N", out _)
+            || name.Any(c => c != '_' && c is not (>= 'a' and <= 'z') && c is not (>= '0' and <= '9')))
+            throw new InvalidOperationException("Refusing to remove an unrecognized owned database.");
+        if (admin.Database != "postgres")
+            throw new InvalidOperationException("Database cleanup requires the PostgreSQL control database.");
+        await using var owner = new NpgsqlCommand(
+            "SELECT pg_get_userbyid(datdba) = current_user FROM pg_database WHERE datname = @name", admin);
+        owner.Parameters.AddWithValue("name", name);
+        var owned = await owner.ExecuteScalarAsync();
+        if (owned is null) return;
+        if (owned is not true)
+            throw new InvalidOperationException("Refusing to remove a database owned by another role.");
+        // Fixtures must dispose their own connections. Never signal unrelated backends,
+        // including transient PostgreSQL maintenance workers, or require elevated roles.
+        await RequireNoSessionsAsync(admin, name, waiting);
         await using var drop = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{name}\"", admin);
         await drop.ExecuteNonQueryAsync();
     }

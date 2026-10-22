@@ -3870,6 +3870,7 @@ public class TasksController : ControllerBase
 
         var previousAssigneeUserId = entity.AssigneeUserId;
         var previousAssigneeName = entity.AssigneeName;
+        var previousContractorPaymentInputs = GetContractorPaymentInputs(entity);
         var changeLabels = BuildTaskChangeLabels(entity, request, binding, participants, nextStatus).ToList();
         if (newBindingBilling is not null)
         {
@@ -3972,7 +3973,13 @@ public class TasksController : ControllerBase
         var nextRecurringTask = becameDone
             ? await CreateNextRecurringTaskIfNeededAsync(entity, access, ct)
             : null;
-        await SyncContractorPaymentAsync(entity, await ResolveContractorPaymentResultBaseDateAsync(previousStatus, nextStatus, entity.UpdatedAt, ct), ct);
+        var preserveCompletedPayment = string.Equals(previousStatus, "done", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase)
+            && request.Result is not null && previousContractorPaymentInputs == GetContractorPaymentInputs(entity);
+        if (!preserveCompletedPayment)
+        {
+            await SyncContractorPaymentAsync(entity, await ResolveContractorPaymentResultBaseDateAsync(previousStatus, nextStatus, entity.UpdatedAt, ct), ct);
+        }
         await _db.SaveChangesAsync(ct);
         await updateTransaction.CommitAsync(ct);
         await SynchronizeExistingTaskChatMembersAsync([entity], ct);
@@ -4053,6 +4060,9 @@ public class TasksController : ControllerBase
         }
 
         var requestedResult = NormalizeOptional(request.Result);
+        var isCompletedResultCorrection = string.Equals(entity.Status, "done", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase)
+            && request.Result is not null && requestedDueAt == entity.DueAt;
         var nextResult = NormalizeCompletionResult(nextStatus, requestedResult ?? entity.Result);
         var authorApproverAdded = await AddAuthorAsApproverIfMissingAsync(entity, nextStatus, ct);
 
@@ -4128,7 +4138,10 @@ public class TasksController : ControllerBase
         var nextRecurringTask = becameDone
             ? await CreateNextRecurringTaskIfNeededAsync(entity, access, ct)
             : null;
-        await SyncContractorPaymentAsync(entity, await ResolveContractorPaymentResultBaseDateAsync(oldStatus, entity.Status, entity.UpdatedAt, ct), ct);
+        if (!isCompletedResultCorrection)
+        {
+            await SyncContractorPaymentAsync(entity, await ResolveContractorPaymentResultBaseDateAsync(oldStatus, entity.Status, entity.UpdatedAt, ct), ct);
+        }
         await _db.SaveChangesAsync(ct);
         await SynchronizeExistingTaskChatMembersAsync([entity], ct);
         await NotifyRecurringTaskCreatedAsync(nextRecurringTask, access, ct);
@@ -7198,6 +7211,13 @@ public class TasksController : ControllerBase
             ? (NormalizeOptional(bindingKey) ?? string.Empty)[..120]
             : NormalizeOptional(bindingKey) ?? string.Empty;
     }
+
+    private static (int? ClientId, int? LegalEntityId, int? CaseId, string Title, int? AssigneeId,
+        string? AssigneeName, bool Enabled, decimal? Amount, DateTime? DueDate, bool OnResult, int? DelayDays)
+        GetContractorPaymentInputs(TaskJournalItem task)
+        => (task.ClientId, task.LegalEntityId, task.ClientCaseId, task.Title, task.AssigneeUserId,
+            task.AssigneeName, task.ContractorPaymentEnabled, task.ContractorPaymentAmount,
+            task.ContractorPaymentDueDate, task.ContractorPaymentOnResult, task.ContractorPaymentResultDelayDays);
 
     private async Task SyncContractorPaymentAsync(TaskJournalItem entity, DateTime? resultBaseDate, CancellationToken ct)
     {

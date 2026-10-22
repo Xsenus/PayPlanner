@@ -36,6 +36,7 @@ import { useInvoiceReferenceDictionaries } from '../../hooks/useInvoiceReference
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { apiService } from '../../services/api';
 import { formatCurrencySmart } from '../../utils/formatters';
+import { downloadBlob } from '../../utils/downloadBlob';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import type { InvoiceEditorDraftState } from '../../utils/invoiceEditorBridge';
 import { storeInvoiceEditorDraft } from '../../utils/invoiceEditorBridge';
@@ -3099,16 +3100,6 @@ export function InvoiceModal({
     return `${window.location.origin}/invoices${invoiceId}`;
   }, [invoice?.id]);
 
-  const downloadBlob = (filename: string, blob: Blob) => {
-    if (typeof window === 'undefined') return;
-    const href = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = href;
-    link.download = filename;
-    link.click();
-    URL.revokeObjectURL(href);
-  };
-
   const openPendingDocumentWindow = () => {
     if (typeof window === 'undefined') return;
     const previewWindow = window.open('', '_blank', 'width=1180,height=900');
@@ -3240,7 +3231,7 @@ export function InvoiceModal({
           ? { includeSignatureAndSeal, templateKey }
           : { includeSignatureAndSeal },
       );
-      downloadBlob(buildInvoiceDocumentFileName(form.number, form.date, format, templateKey), blob);
+      downloadBlob(blob, buildInvoiceDocumentFileName(form.number, form.date, format, templateKey));
       setDownloadMenuOpen(false);
     } catch (err) {
       toast.error(getDocumentActionErrorMessage(err, 'Не удалось скачать документ.'));

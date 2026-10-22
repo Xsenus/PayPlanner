@@ -14,7 +14,7 @@ internal static class Program
     {
         try
         {
-            ShardPlan.Require(args.Length > 0, "Use discover, run, verify or verify-restored.");
+            ShardPlan.Require(args.Length > 0, "Use discover, run, verify, verify-restored or timings.");
             var options = Options(args.Skip(1).ToArray());
             Environment.SetEnvironmentVariable("Email__Enabled", "false");
             Environment.SetEnvironmentVariable("BackgroundServices__Enabled", "false");
@@ -24,6 +24,7 @@ internal static class Program
                 "run" => await RunAsync(options),
                 "verify" => Verify(options),
                 "verify-restored" => VerifyRestored(options),
+                "timings" => Timings(options),
                 _ => throw new InvalidDataException("Unknown command."),
             };
         }
@@ -41,6 +42,9 @@ internal static class Program
 
     private static async Task<int> DiscoverAsync(Dictionary<string, string> options)
     {
+        var cachedTimings = Environment.GetEnvironmentVariable("PAYPLANNER_TEST_TIMINGS");
+        var timings = options.Remove("timings", out var timingPath) ? TestTimings.Read(timingPath).Methods
+            : !string.IsNullOrWhiteSpace(cachedTimings) && File.Exists(cachedTimings) ? TestTimings.Read(cachedTimings).Methods : null;
         ExactOptions(options, "assembly", "manifest", "revision", "shards");
         var manifest = Path.GetFullPath(options["manifest"]);
         ShardPlan.Require(!File.Exists(manifest), "Preserve the existing manifest.");
@@ -61,7 +65,7 @@ internal static class Program
         };
         var cases = await ReadCasesAsync(sdk, assembly);
         AssemblyCatalog.RequireEnumeratedTheories(cases, theories);
-        var plan = ShardPlan.Create(options["revision"], relative, pins, cases, ParseInt(options["shards"]));
+        var plan = ShardPlan.Create(options["revision"], relative, pins, cases, ParseInt(options["shards"]), timings);
         ShardPlan.VerifyArtifacts(plan, manifest);
         Directory.CreateDirectory(root);
         await File.WriteAllTextAsync(manifest, JsonSerializer.Serialize(plan, ShardPlan.Json));
@@ -72,6 +76,7 @@ internal static class Program
             plan.Revision,
             CaseCount = plan.Cases.Length,
             MethodCount = plan.Cases.Select(row => row.FullyQualifiedName).Distinct(StringComparer.Ordinal).Count(),
+            TimedMethods = plan.Timings?.Length ?? 0,
             ShardCounts = Enumerable.Range(0, plan.ShardCount).Select(index => plan.Cases.Count(row => row.Shard == index)).ToArray(),
         };
         WriteJson(Path.ChangeExtension(manifest, ".summary.json"), summary);
@@ -153,6 +158,25 @@ internal static class Program
         var qualification = TrxVerifier.VerifyRestored(plan, hash, results, ParseInt(options["exit-code"]));
         WriteJson(Path.Combine(results, "restored-qualification.json"), qualification);
         Console.WriteLine(JsonSerializer.Serialize(qualification));
+        return 0;
+    }
+
+    private static int Timings(Dictionary<string, string> options)
+    {
+        ExactOptions(options, "manifest", "manifest-sha", "results-root", "output");
+        var manifest = Path.GetFullPath(options["manifest"]);
+        var plan = ShardPlan.Read(manifest, options["manifest-sha"]);
+        ShardPlan.VerifyArtifacts(plan, manifest);
+        var profile = TestTimings.FromQualifiedResults(plan, options["manifest-sha"], options["results-root"]);
+        WriteJson(options["output"], profile);
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            profile.Revision,
+            Methods = profile.Methods.Length,
+            Cases = profile.Methods.Sum(row => row.Cases),
+            Slowest = profile.Methods.OrderByDescending(row => (decimal)row.AverageTicks * row.Cases).Take(20)
+                .Select(row => new { row.FullyQualifiedName, row.Cases, Seconds = (decimal)row.AverageTicks * row.Cases / TimeSpan.TicksPerSecond }),
+        }, ShardPlan.Json));
         return 0;
     }
 

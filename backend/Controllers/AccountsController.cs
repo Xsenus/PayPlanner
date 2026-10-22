@@ -359,6 +359,27 @@ public class AccountsController : ControllerBase
             .Take(pageSize)
             .ToList();
 
+        var pageInvoiceIds = pagedGroups.Where(group => group.InvoiceEntityId.HasValue)
+            .Select(group => group.InvoiceEntityId!.Value).Distinct().ToArray();
+        if (pageInvoiceIds.Length > 0)
+        {
+            var editors = await BuildInvoiceCandidateQuery(visibility)
+                .ApplyInvoiceRepresentativeFilter(_db.Payments)
+                .Where(payment => payment.InvoiceId.HasValue && pageInvoiceIds.Contains(payment.InvoiceId.Value))
+                .Select(payment => new { payment.Id, payment.InvoiceId, payment.ClientId, payment.LegalEntityId, payment.Type })
+                .ToDictionaryAsync(payment => payment.InvoiceId!.Value, ct);
+            foreach (var group in pagedGroups)
+            {
+                if (group.InvoiceEntityId.HasValue && editors.TryGetValue(group.InvoiceEntityId.Value, out var editor)
+                    && editor.ClientId == group.Representative.ClientId
+                    && editor.LegalEntityId == group.Representative.LegalEntityId
+                    && editor.Type == group.Type)
+                {
+                    group.EditorPaymentId = editor.Id;
+                }
+            }
+        }
+
         var representativeIds = pagedGroups
             .Select(group => group.EditorPaymentId)
             .Distinct()
@@ -397,6 +418,7 @@ public class AccountsController : ControllerBase
             ? new List<ActDto>()
             : await _db.Acts
                 .AsNoTracking()
+                .ApplyInvoiceActOwnership(_db.Payments)
                 .Where(act =>
                     (act.InvoiceId.HasValue && candidateIdsForActs.Contains(act.InvoiceId.Value))
                     || (!act.InvoiceId.HasValue && act.InvoiceNumber != null && accountNumbers.Contains(act.InvoiceNumber)))
@@ -412,6 +434,7 @@ public class AccountsController : ControllerBase
                     CreationMode = act.CreationMode,
                     InvoiceNumber = act.InvoiceNumber,
                     InvoiceId = act.InvoiceId,
+                    LegalEntityId = act.LegalEntityId,
                     ContractId = act.Invoice != null ? act.Invoice.ContractId : null,
                     CounterpartyInn = act.CounterpartyInn,
                     Status = act.Status,
@@ -454,7 +477,9 @@ public class AccountsController : ControllerBase
             var groupActs = acts
                 .Where(act =>
                     (act.InvoiceId.HasValue && group.InvoicePaymentIds.Contains(act.InvoiceId.Value))
-                    || (!act.InvoiceId.HasValue && AreAccountsEqual(act.InvoiceNumber, group.Representative.Number)))
+                    || (!act.InvoiceId.HasValue && act.ClientId == group.Representative.ClientId
+                        && act.LegalEntityId == group.Representative.LegalEntityId
+                        && AreAccountsEqual(act.InvoiceNumber, group.Representative.Number)))
                 .GroupBy(act => act.Id)
                 .Select(bucket => bucket.First())
                 .ToList();
@@ -475,7 +500,7 @@ public class AccountsController : ControllerBase
                 .ToList();
 
             var visiblePayments = InvoiceManagedPaymentRules.ShouldHideRepresentativeInvoice(payments)
-                ? payments.Where(payment => payment.Id != group.EditorPaymentId).ToList()
+                ? payments.Where(payment => payment.Id != group.Representative.Id).ToList()
                 : payments;
 
             return new AccountRegistryRowDto
@@ -524,6 +549,7 @@ public class AccountsController : ControllerBase
         var query = _db.Payments
             .AsNoTracking()
             .ApplyPaymentVisibility(visibility)
+            .ApplyUnambiguousInvoiceLinks()
             .WithPaymentIncludes()
             .Include(payment => payment.InvoiceClientCases)
             .Where(payment => payment.Type == PaymentType.Expense)
@@ -736,7 +762,7 @@ public class AccountsController : ControllerBase
             query = query.ApplyPaymentVisibility(visibility);
         }
 
-        return query
+        return query.ApplyUnambiguousInvoiceLinks()
             .Where(payment =>
                 (payment.InvoiceId != null && payment.Invoice != null)
                 || (payment.DocumentKind == DocumentKind.Invoice && payment.Account != null && payment.Account != string.Empty));
@@ -836,13 +862,13 @@ public class AccountsController : ControllerBase
                 || (payment.ExpenseLegalEntity != null && payment.ExpenseLegalEntity.Inn != null && payment.ExpenseLegalEntity.Inn.ToLower().Contains(term))
                 || (payment.ClientCase != null && payment.ClientCase.Title != null && payment.ClientCase.Title.ToLower().Contains(term))
                 || payment.InvoiceClientCases.Any(link => link.ClientCase != null && link.ClientCase.Title != null && link.ClientCase.Title.ToLower().Contains(term))
-                || payment.Acts.Any(act =>
+                || _db.Acts.ApplyInvoiceActOwnership(_db.Payments).Any(act => act.InvoiceId == payment.Id && (
                     act.Number.ToLower().Contains(term)
                     || (act.Title != null && act.Title.ToLower().Contains(term))
                     || (act.InvoiceNumber != null && act.InvoiceNumber.ToLower().Contains(term))
                     || (act.CounterpartyInn != null && act.CounterpartyInn.ToLower().Contains(term))
                     || (act.Comment != null && act.Comment.ToLower().Contains(term))
-                    || (act.Client != null && act.Client.Name != null && act.Client.Name.ToLower().Contains(term))));
+                    || (act.Client != null && act.Client.Name != null && act.Client.Name.ToLower().Contains(term)))));
         }
 
         return query;
@@ -1825,7 +1851,7 @@ public class AccountsController : ControllerBase
     {
         public string GroupKey { get; init; } = string.Empty;
         public AccountInvoiceCandidate Representative { get; init; } = null!;
-        public int EditorPaymentId { get; init; }
+        public int EditorPaymentId { get; set; }
         public int? InvoiceEntityId { get; init; }
         public string? LegacyGroupKey { get; init; }
         public HashSet<int> InvoicePaymentIds { get; init; } = new();

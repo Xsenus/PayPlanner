@@ -359,7 +359,8 @@ public sealed partial class SpreadsheetImportService
 
         try
         {
-            var clientId = FindClientId(state, draft.CounterpartyName, draft.CounterpartyInn);
+            var clientId = FindInvoiceClientId(state, draft.CounterpartyName, draft.CounterpartyInn, out var clientError);
+            if (clientError is not null) throw new InvalidOperationException(clientError);
             if (!clientId.HasValue)
             {
                 db.SpreadsheetImportBatchOperations.Add(CreateOperation(
@@ -371,7 +372,8 @@ public sealed partial class SpreadsheetImportService
             }
 
             var responsibleId = FindUserId(state.Users, draft.ResponsibleName ?? draft.CreatedByName);
-            var existingPaymentId = FindExistingInvoiceStateItem(state, sourceKeys)?.PaymentId ?? 0;
+            var existingPaymentId = FindExistingInvoiceStateItem(state, sourceKeys, clientId, out var matchError)?.PaymentId ?? 0;
+            if (matchError is not null) throw new InvalidOperationException(matchError);
 
             var payment = existingPaymentId > 0
                 ? await db.Payments.Include(item => item.Invoice).Include(item => item.InvoiceLineItems).Include(item => item.Responsibles)
@@ -380,12 +382,8 @@ public sealed partial class SpreadsheetImportService
 
             var beforeJson = payment is null ? null : SerializeSnapshot(CaptureInvoiceSnapshot(payment));
             payment ??= new Payment { DocumentKind = DocumentKind.Invoice, Type = draft.Type };
-            if (payment.Id == 0)
-            {
-                db.Payments.Add(payment);
-            }
-
             var invoiceEntity = await ResolveInvoiceEntityAsync(db, payment, draft, cancellationToken);
+            if (payment.Id == 0) db.Payments.Add(payment);
             ApplyInvoiceValues(payment, draft, clientId.Value, responsibleId, invoiceEntity, localToday);
             SyncInvoiceLineItems(db, payment, BuildEffectiveLineItems(draft.ParsedLineItems, draft.Amount.Value, draft.Nomenclature, sourceTitle));
             SyncPaymentResponsibles(payment, responsibleId);
@@ -415,8 +413,9 @@ public sealed partial class SpreadsheetImportService
             state.UpsertInvoice(new InvoiceStateItem
             {
                 PaymentId = paymentId,
+                ClientId = clientId,
                 Key = sourceKey,
-                ExternalId = NormalizeOneCExternalId(draft.ExternalId),
+                ExternalId = ExtractOneCExternalId(persistedPayment.Notes),
                 Number = NormalizeText(draft.Number),
                 Date = draft.Date?.Date,
                 Amount = draft.Amount ?? 0m,

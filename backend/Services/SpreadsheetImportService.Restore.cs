@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 
@@ -25,6 +26,14 @@ public sealed partial class SpreadsheetImportService
 
     private async Task RestoreInvoiceSnapshotAsync(PaymentContext db, Payment payment, InvoiceSnapshot snapshot, CancellationToken cancellationToken)
     {
+        await EnsureInvoiceRollbackIsolatedAsync(db, payment, cancellationToken);
+        if (snapshot.InvoiceEntity is { Id: > 0 } target
+            && await db.Payments.IgnoreQueryFilters().AnyAsync(other => other.InvoiceId == target.Id && other.Id != payment.Id
+                && (other.DocumentKind == DocumentKind.Invoice
+                    || (other.ClientId.HasValue && other.ClientId != snapshot.Payment.ClientId)
+                    || (other.Invoice != null && (other.Invoice.Number != target.Number || other.Invoice.Date != target.Date))), cancellationToken))
+            throw new InvalidOperationException(InvoiceQueryExtensions.ConflictMessage);
+
         var originalInvoiceId = payment.InvoiceId;
         payment.Account = snapshot.Payment.Account;
         payment.AccountDate = snapshot.Payment.AccountDate;
@@ -58,7 +67,7 @@ public sealed partial class SpreadsheetImportService
         }
         else
         {
-            Invoice? invoice = payment.Invoice;
+            Invoice? invoice = payment.Invoice?.Id == snapshot.InvoiceEntity.Id ? payment.Invoice : null;
             if (invoice is null && snapshot.InvoiceEntity.Id > 0)
             {
                 invoice = await db.Invoices.IgnoreQueryFilters().FirstOrDefaultAsync(item => item.Id == snapshot.InvoiceEntity.Id, cancellationToken);
@@ -188,8 +197,21 @@ public sealed partial class SpreadsheetImportService
         }
     }
 
-    private static async Task DeleteInvoiceAsync(PaymentContext db, Payment payment, CancellationToken cancellationToken)
+    private static async Task DeleteInvoiceAsync(PaymentContext db, Payment payment, int batchId, CancellationToken cancellationToken)
     {
+        await EnsureInvoiceRollbackIsolatedAsync(db, payment, cancellationToken);
+        if (payment.InvoiceId.HasValue && await db.Payments.IgnoreQueryFilters()
+            .AnyAsync(other => other.InvoiceId == payment.InvoiceId && other.Id != payment.Id, cancellationToken))
+            throw new InvalidOperationException("После импорта у счета появились связанные платежи. Откат не изменил счет и оплаты.");
+        var linkedActs = db.Acts.IgnoreQueryFilters().Where(act => act.InvoiceId == payment.Id);
+        if (db.Model.FindEntityType(typeof(Act))?.FindProperty("IsDeleted") is not null)
+            linkedActs = linkedActs.Where(act => !EF.Property<bool>(act, "IsDeleted")
+                || !db.SpreadsheetImportBatchOperations.Any(operation => operation.BatchId == batchId
+                    && operation.SectionKey == "acts" && operation.EntityId == act.Id
+                    && operation.Action == SpreadsheetImportOperationAction.Created
+                    && operation.RollbackAction == SpreadsheetImportRollbackAction.Deleted));
+        if (await linkedActs.AnyAsync(cancellationToken))
+            throw new InvalidOperationException("После импорта у счета появились связанные акты. Откат не изменил счет и акты.");
         var invoiceId = payment.InvoiceId;
         if (payment.InvoiceLineItems.Count > 0)
         {
@@ -213,5 +235,14 @@ public sealed partial class SpreadsheetImportService
                 db.Remove(invoice);
             }
         }
+    }
+
+    private static async Task EnsureInvoiceRollbackIsolatedAsync(PaymentContext db, Payment payment, CancellationToken ct)
+    {
+        if (!payment.InvoiceId.HasValue) return;
+        var group = db.Payments.IgnoreQueryFilters().Where(other => other.InvoiceId == payment.InvoiceId);
+        if (await group.HasAmbiguousInvoiceLinksAsync(ct)
+            || await group.AnyAsync(other => other.Id != payment.Id && other.DocumentKind == DocumentKind.Invoice, ct))
+            throw new InvalidOperationException(InvoiceQueryExtensions.ConflictMessage);
     }
 }

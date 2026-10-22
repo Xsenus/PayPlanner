@@ -172,9 +172,8 @@ public sealed class DatabaseBackupPostgreSqlCancellationTests
         }
         finally
         {
-            // Only this GUID-named, disposable database is terminated/dropped.
-            await using (var drop = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{databaseName}\" WITH (FORCE)", admin))
-                await drop.ExecuteNonQueryAsync();
+            // Only this owned GUID-named database is dropped after its sessions close.
+            await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(admin, databaseName);
             var resolvedRoot = Path.GetFullPath(root);
             Assert.StartsWith(Path.GetFullPath(Path.GetTempPath()), resolvedRoot, StringComparison.OrdinalIgnoreCase);
             Assert.StartsWith("payplanner-dump-cancel-", Path.GetFileName(resolvedRoot), StringComparison.Ordinal);

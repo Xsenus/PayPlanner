@@ -6372,6 +6372,93 @@ describe('TaskJournal', () => {
     }));
   });
 
+  it.each([
+    ['legacy', true], ['legacy', false], ['modern', true], ['modern', false],
+  ] as const)('corrects a completed result from the %s card with retry and reopening (admin: %s)', async (taskCardWindowMode, admin) => {
+    authState.isAdmin = admin;
+    const tasks = [createTask({ status: 'done', result: 'Исходный результат с ошибкой', authorUserId: 7, assigneeUserId: 8 })];
+    apiMock.getTaskJournalItem.mockImplementation(async () => tasks[0]);
+    apiMock.updateTaskJournalStatus.mockImplementation(async (_id, status, result) => {
+      tasks[0] = { ...tasks[0], status, result };
+      return tasks[0];
+    });
+    apiMock.updateTaskJournalStatus.mockRejectedValueOnce(new Error('Временный отказ сохранения'));
+    await renderJournal(tasks, { settings: { taskCardWindowMode }, waitForTitle: null });
+    fireEvent.change(screen.getByLabelText('Статус'), { target: { value: 'all' } });
+    await screen.findAllByText('Тестовая задача');
+    fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+    let card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    const input = within(card).getByTestId('task-result-field') as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: 'Исправленный результат' } });
+    fireEvent.click(within(card).getByRole('button', { name: 'Сохранить результат' }));
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith('Временный отказ сохранения', 'Журнал задач'));
+    expect(input.value).toBe('Исправленный результат');
+    expect(tasks[0].result).toBe('Исходный результат с ошибкой');
+    fireEvent.click(within(card).getByRole('button', { name: 'Сохранить результат' }));
+    await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledTimes(2));
+    expect(apiMock.updateTaskJournalStatus).toHaveBeenLastCalledWith(101, 'done', 'Исправленный результат');
+    expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+    card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    expect((within(card).getByTestId('task-result-field') as HTMLTextAreaElement).value).toBe('Исправленный результат');
+    fireEvent.click(within(card).getByRole('button', { name: 'Отмена' }));
+    fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+    card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    expect((within(card).getByTestId('task-result-field') as HTMLTextAreaElement).value).toBe('Исправленный результат');
+    apiMock.updateTaskJournalItem.mockImplementation(async (_id, payload) => {
+      tasks[0] = { ...tasks[0], result: payload.result };
+      return tasks[0];
+    });
+    fireEvent.click(within(card).getAllByRole('button', { name: 'Редактировать задачу' })[0]);
+    await screen.findByRole('heading', { name: 'Редактировать задачу' });
+    fireEvent.change(screen.getByTestId('task-result-field'), { target: { value: 'Результат из полного редактора' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Сохранить' }).at(-1)!);
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101,
+      expect.objectContaining({ result: 'Результат из полного редактора', status: 'done' })));
+  });
+
+  it.each(['legacy', 'modern'] as const)('validates a corrected result and prevents concurrent saving in the %s card', async (taskCardWindowMode) => {
+    const task = createTask({ status: 'done', result: 'Исходный результат' });
+    apiMock.getTaskJournalItem.mockResolvedValue(task);
+    let complete!: (task: TaskJournalItem) => void;
+    const pending = new Promise<TaskJournalItem>((resolve) => { complete = resolve; });
+    apiMock.updateTaskJournalStatus.mockReturnValue(pending);
+    await renderJournal([task], { settings: { taskCardWindowMode }, waitForTitle: null });
+    fireEvent.change(screen.getByLabelText('Статус'), { target: { value: 'all' } });
+    await screen.findAllByText('Тестовая задача');
+    fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    const input = within(card).getByTestId('task-result-field') as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: '   ' } });
+    fireEvent.click(within(card).getByRole('button', { name: 'Сохранить результат' }));
+    expect(within(card).getByText('Добавьте результат по задаче перед завершением.')).toBeTruthy();
+    expect(apiMock.updateTaskJournalStatus).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: 'Исправленный результат' } });
+    const save = within(card).getByRole('button', { name: 'Сохранить результат' });
+    fireEvent.click(save);
+    fireEvent.click(save);
+    expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledTimes(1);
+    expect(input.disabled).toBe(true);
+    await act(async () => { complete({ ...task, result: 'Исправленный результат' }); await pending; });
+    expect(input.disabled).toBe(false);
+  });
+
+  it.each(['legacy', 'modern'] as const)('protects a completed result without edit permission in the %s card', async (taskCardWindowMode) => {
+    authState.isAdmin = false;
+    permissionsState.taskCanEdit = false;
+    permissionsState.taskCanEditOthers = false;
+    permissionsState.taskCanCompleteOthers = false;
+    const task = createTask({ status: 'done', result: 'Защищённый результат', authorUserId: 8, assigneeUserId: 9 });
+    apiMock.getTaskJournalItem.mockResolvedValue(task);
+    await renderJournal([task], { settings: { taskCardWindowMode }, waitForTitle: null });
+    fireEvent.change(screen.getByLabelText('Статус'), { target: { value: 'all' } });
+    await screen.findAllByText('Тестовая задача');
+    fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    expect((within(card).getByTestId('task-result-field') as HTMLTextAreaElement).disabled).toBe(true);
+    expect(within(card).queryByRole('button', { name: 'Сохранить результат' })).toBeNull();
+    expect(apiMock.updateTaskJournalStatus).not.toHaveBeenCalled();
+  });
+
   it('requires a result when completing an approved task from the editor', async () => {
     await renderJournal([
       createTask({

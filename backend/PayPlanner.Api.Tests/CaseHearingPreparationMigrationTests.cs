@@ -124,9 +124,7 @@ public sealed class CaseHearingPreparationMigrationTests
         }
         finally
         {
-            await using var drop = admin.CreateCommand();
-            drop.CommandText = $"DROP DATABASE IF EXISTS \"{databaseName}\" WITH (FORCE)";
-            await drop.ExecuteNonQueryAsync();
+            await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(admin, databaseName);
         }
     }
 }

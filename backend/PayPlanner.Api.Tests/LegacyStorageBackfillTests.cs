@@ -160,8 +160,7 @@ public sealed class LegacyStorageBackfillTests(ITestOutputHelper output)
         {
             if (created)
             {
-                await using var drop = new NpgsqlCommand($"DROP DATABASE \"{name}\" WITH (FORCE)", admin);
-                await drop.ExecuteNonQueryAsync();
+                await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(admin, name);
             }
         }
     }
@@ -377,8 +376,7 @@ public sealed class LegacyStorageBackfillTests(ITestOutputHelper output)
         {
             if (created)
             {
-                await using var drop = new NpgsqlCommand($"DROP DATABASE \"{name}\" WITH (FORCE)", admin);
-                await drop.ExecuteNonQueryAsync();
+                await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(admin, name);
             }
         }
     }
@@ -835,8 +833,7 @@ public sealed class LegacyStorageBackfillTests(ITestOutputHelper output)
         {
             if (created)
             {
-                await using var drop = new NpgsqlCommand($"DROP DATABASE \"{name}\" WITH (FORCE)", admin);
-                await drop.ExecuteNonQueryAsync();
+                await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(admin, name);
             }
         }
     }

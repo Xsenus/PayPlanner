@@ -96,8 +96,7 @@ public sealed class StorageReconciliationPostgreSqlTests(ITestOutputHelper outpu
             Assert.Matches("^pp_repair_capacity_[a-f0-9]{32}$", name);
             if (created)
             {
-                await using var command = new NpgsqlCommand($"DROP DATABASE \"{name}\" WITH (FORCE)", admin);
-                await command.ExecuteNonQueryAsync();
+                await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(admin, name);
             }
         }
     }
@@ -221,8 +220,7 @@ public sealed class StorageReconciliationPostgreSqlTests(ITestOutputHelper outpu
             Assert.Matches("^pp_repair_cycles_[a-f0-9]{32}$", name);
             if (created)
             {
-                await using var command = new NpgsqlCommand($"DROP DATABASE \"{name}\" WITH (FORCE)", admin);
-                await command.ExecuteNonQueryAsync();
+                await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(admin, name);
             }
         }
     }

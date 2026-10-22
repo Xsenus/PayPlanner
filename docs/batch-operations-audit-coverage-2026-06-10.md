@@ -1,4 +1,4 @@
-## Актуальная инвентаризация — 17 октября 2026
+## Актуальная инвентаризация — 22 октября 2026
 
 Всего **129** мест ExecuteUpdateAsync/ExecuteDeleteAsync по неизменному предикату BatchOperationAuditCoverageTests. Предыдущие описания ниже сохранены как история решений по аудиту; после форматирования их номера строк могут отличаться. Текущие номера приведены в полном перечне здесь. Перечень обновлён по фактическим исходникам после адресных исправлений и форматирования; подготовленные overlays не используются.
 
@@ -55,8 +55,8 @@
 | backend/Controllers/MoneyOperationsController.CompanyAccess.cs:94 | ExecuteUpdateAsync |
 | backend/Controllers/StorageAdminController.cs:145 | ExecuteUpdateAsync |
 | backend/Controllers/TasksController.cs:3226 | ExecuteUpdateAsync |
-| backend/Controllers/TasksController.cs:4538 | ExecuteUpdateAsync |
-| backend/Controllers/TasksController.cs:4784 | ExecuteUpdateAsync |
+| backend/Controllers/TasksController.cs:4551 | ExecuteUpdateAsync |
+| backend/Controllers/TasksController.cs:4797 | ExecuteUpdateAsync |
 | backend/Controllers/UserActivityController.cs:418 | ExecuteUpdateAsync |
 | backend/Controllers/UserActivityController.cs:540 | ExecuteDeleteAsync |
 | backend/Controllers/V2/CasesV2Controller.cs:10871 | ExecuteUpdateAsync |
@@ -95,9 +95,9 @@
 | backend/Services/Requests/SalesRequestService.cs:969 | ExecuteUpdateAsync |
 | backend/Services/Requests/SalesRequestService.cs:981 | ExecuteUpdateAsync |
 | backend/Services/Requests/SalesRequestService.cs:991 | ExecuteUpdateAsync |
-| backend/Services/SpreadsheetImportService.Rollback.cs:32 | ExecuteUpdateAsync |
-| backend/Services/SpreadsheetImportService.Rollback.cs:34 | ExecuteUpdateAsync |
-| backend/Services/SpreadsheetImportService.Rollback.cs:42 | ExecuteUpdateAsync |
+| backend/Services/SpreadsheetImportService.Rollback.cs:33 | ExecuteUpdateAsync |
+| backend/Services/SpreadsheetImportService.Rollback.cs:35 | ExecuteUpdateAsync |
+| backend/Services/SpreadsheetImportService.Rollback.cs:43 | ExecuteUpdateAsync |
 | backend/Services/Storage/CaseDocumentPublicationProcessor.cs:172 | ExecuteUpdateAsync |
 | backend/Services/Storage/CaseDocumentPublicationProcessor.cs:187 | ExecuteUpdateAsync |
 | backend/Services/Storage/CaseDocumentUploadRetirementService.cs:25 | ExecuteUpdateAsync |

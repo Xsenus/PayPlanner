@@ -346,8 +346,7 @@ public sealed class StorageObjectServiceTests
             Assert.Matches("^pp_capacity_upload_[a-f0-9]{32}$", name);
             if (created)
             {
-                await using var drop = new NpgsqlCommand($"DROP DATABASE \"{name}\" WITH (FORCE)", admin);
-                await drop.ExecuteNonQueryAsync();
+                await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(admin, name);
             }
         }
     }

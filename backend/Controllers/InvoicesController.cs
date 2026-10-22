@@ -577,6 +577,9 @@ public class InvoicesController : ControllerBase
                 || (hasPaymentFilter && paymentIds.Contains(payment.Id)));
         }
 
+        if (await candidateQuery.HasAmbiguousInvoiceLinksAsync(ct))
+            return Conflict(new { message = InvoiceQueryExtensions.ConflictMessage });
+
         var candidates = await candidateQuery
             .OrderBy(payment => payment.InvoiceId ?? int.MaxValue)
             .ThenBy(payment => payment.Id)
@@ -2406,6 +2409,9 @@ public class InvoicesController : ControllerBase
     [HttpPost("migrate-legacy-links")]
     public async Task<ActionResult<InvoiceLegacyMigrationSummaryDto>> MigrateLegacyInvoiceLinks(CancellationToken ct)
     {
+        if (!await IsCurrentUserAdminAsync(ct)) return Forbid();
+        if (await _db.Payments.HasAmbiguousInvoiceLinksAsync(ct))
+            return Conflict(new { message = InvoiceQueryExtensions.ConflictMessage });
         var currentUserId = GetUserId(User);
         var payments = await _db.Payments
             .Include(p => p.Invoice)
@@ -2704,6 +2710,9 @@ public class InvoicesController : ControllerBase
         {
             return Forbid();
         }
+
+        if (await _db.Payments.Where(p => p.InvoiceId == invoiceEntityId).HasAmbiguousInvoiceLinksAsync(ct))
+            return Conflict(new { message = InvoiceQueryExtensions.ConflictMessage });
 
         var payments = await _db.Payments
             .Include(payment => payment.Invoice)
@@ -3612,8 +3621,10 @@ public class InvoicesController : ControllerBase
         {
             Payment = payment,
             Act = _db.Acts.AsNoTracking()
+                .ApplyInvoiceActOwnership(_db.Payments)
                 .Where(a => a.InvoiceId == payment.Id
-                    || (a.InvoiceId == null && a.InvoiceNumber != null && a.InvoiceNumber == (payment.Invoice != null ? payment.Invoice.Number : payment.Account)))
+                    || (a.InvoiceId == null && a.ClientId == payment.ClientId && a.LegalEntityId == payment.LegalEntityId
+                        && a.InvoiceNumber != null && a.InvoiceNumber == (payment.Invoice != null ? payment.Invoice.Number : payment.Account)))
                 .OrderByDescending(a => a.Date)
                 .ThenByDescending(a => a.Id)
                 .FirstOrDefault(),
@@ -3631,7 +3642,7 @@ public class InvoicesController : ControllerBase
             ? _db.Payments
             : _db.Payments.ApplyPaymentVisibility(visibility);
 
-        return visiblePayments
+        return visiblePayments.ApplyUnambiguousInvoiceLinks()
             .Where(payment =>
                 (payment.InvoiceId.HasValue
                     && payment.InvoiceId.Value > 0
@@ -3652,20 +3663,7 @@ public class InvoicesController : ControllerBase
             ? payments
             : payments.ApplyPaymentVisibility(visibility);
 
-        return visiblePayments
-            .Where(payment =>
-            (payment.InvoiceId.HasValue
-                && payment.Invoice != null
-                && payment.Id == _db.Payments
-                    .Where(candidate => candidate.InvoiceId == payment.InvoiceId)
-                    .OrderByDescending(candidate => candidate.DocumentKind == DocumentKind.Invoice)
-                    .ThenBy(candidate => candidate.Id)
-                    .Select(candidate => candidate.Id)
-                    .FirstOrDefault())
-            || (!payment.InvoiceId.HasValue
-                && payment.DocumentKind == DocumentKind.Invoice
-                && payment.Account != null
-                && payment.Account != ""));
+        return visiblePayments.ApplyUnambiguousInvoiceLinks().ApplyInvoiceRepresentativeFilter(_db.Payments);
     }
 
     private IQueryable<InvoiceQueryItem> ApplyFilters(
@@ -3774,13 +3772,13 @@ public class InvoicesController : ControllerBase
                 (x.Payment.ExpenseClient != null && x.Payment.ExpenseClient.Company != null && x.Payment.ExpenseClient.Company.ToLower().Contains(term)) ||
                 (x.Payment.ClientCase != null && x.Payment.ClientCase.Title != null && x.Payment.ClientCase.Title.ToLower().Contains(term)) ||
                 x.Payment.InvoiceClientCases.Any(link => link.ClientCase != null && link.ClientCase.Title != null && link.ClientCase.Title.ToLower().Contains(term)) ||
-                x.Payment.Acts.Any(act =>
+                _db.Acts.ApplyInvoiceActOwnership(_db.Payments).Any(act => act.InvoiceId == x.Payment.Id && (
                     act.Number.ToLower().Contains(term) ||
                     (act.Title != null && act.Title.ToLower().Contains(term)) ||
                     (act.InvoiceNumber != null && act.InvoiceNumber.ToLower().Contains(term)) ||
                     (act.CounterpartyInn != null && act.CounterpartyInn.ToLower().Contains(term)) ||
                     (act.Comment != null && act.Comment.ToLower().Contains(term)) ||
-                    (act.Client != null && act.Client.Name != null && act.Client.Name.ToLower().Contains(term))) ||
+                    (act.Client != null && act.Client.Name != null && act.Client.Name.ToLower().Contains(term)))) ||
                 (x.Act != null && x.Act.Number != null && x.Act.Number.ToLower().Contains(term)) ||
                 (x.Act != null && x.Act.Title != null && x.Act.Title.ToLower().Contains(term)) ||
                 (x.Act != null && x.Act.InvoiceNumber != null && x.Act.InvoiceNumber.ToLower().Contains(term)) ||
@@ -3800,10 +3798,11 @@ public class InvoicesController : ControllerBase
         if (actId.HasValue)
         {
             query = query.Where(x =>
-                _db.Acts.Any(act =>
+                _db.Acts.ApplyInvoiceActOwnership(_db.Payments).Any(act =>
                     act.Id == actId.Value
                     && (act.InvoiceId == x.Payment.Id
                         || (!act.InvoiceId.HasValue
+                            && act.ClientId == x.Payment.ClientId && act.LegalEntityId == x.Payment.LegalEntityId
                             && act.InvoiceNumber != null
                             && act.InvoiceNumber == (x.Payment.Invoice != null ? x.Payment.Invoice.Number : x.Payment.Account)))));
         }
@@ -4845,8 +4844,11 @@ public class InvoicesController : ControllerBase
             return;
         }
 
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
         var candidatePayments = await _db.Payments
             .AsNoTracking()
+            .ApplyPaymentVisibility(visibility)
+            .ApplyUnambiguousInvoiceLinks()
             .Where(payment =>
                 (payment.InvoiceId.HasValue && invoiceEntityIds.Contains(payment.InvoiceId.Value))
                 || (!payment.InvoiceId.HasValue
@@ -5937,6 +5939,8 @@ public class InvoicesController : ControllerBase
             {
                 x.Id,
                 Number = x.Invoice != null ? x.Invoice.Number : x.Account,
+                x.ClientId,
+                x.LegalEntityId,
             })
             .ToListAsync(ct);
 
@@ -5952,6 +5956,7 @@ public class InvoicesController : ControllerBase
 
         var rows = await _db.Acts
             .AsNoTracking()
+            .ApplyInvoiceActOwnership(_db.Payments)
             .Where(a => (a.InvoiceId.HasValue && ids.Contains(a.InvoiceId.Value))
                 || (!a.InvoiceId.HasValue && a.InvoiceNumber != null && invoiceNumbers.Contains(a.InvoiceNumber)))
             .OrderByDescending(a => a.Date)
@@ -5961,6 +5966,7 @@ public class InvoicesController : ControllerBase
                 a.Id,
                 a.InvoiceId,
                 a.InvoiceNumber,
+                a.LegalEntityId,
                 Act = new InvoiceActDto
                 {
                     Id = a.Id,
@@ -6009,7 +6015,8 @@ public class InvoicesController : ControllerBase
             else if (!string.IsNullOrWhiteSpace(row.InvoiceNumber)
                 && invoiceIdsByNumber.TryGetValue(row.InvoiceNumber.Trim(), out var matchedInvoiceIds))
             {
-                targetIds.AddRange(matchedInvoiceIds);
+                targetIds.AddRange(matchedInvoiceIds.Where(id => invoiceMeta.Any(meta => meta.Id == id
+                    && meta.ClientId == row.Act.ClientId && meta.LegalEntityId == row.LegalEntityId)));
             }
 
             foreach (var targetId in targetIds.Distinct())
@@ -7064,7 +7071,7 @@ public class InvoicesController : ControllerBase
 
         var payments = requireVisibleInvoice
             ? BuildVisibleInvoicePaymentsQuery(trackChanges: false, visibility)
-            : _db.Payments.AsNoTracking().ApplyPaymentVisibility(visibility);
+            : _db.Payments.AsNoTracking().ApplyPaymentVisibility(visibility).ApplyUnambiguousInvoiceLinks();
 
         return await payments
             .Include(p => p.Invoice)

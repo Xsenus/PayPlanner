@@ -153,6 +153,16 @@ public static class DataVisibilityQueryExtensions
             || (payment.Invoice != null
                 && payment.Invoice.Payments.Any(invoicePayment =>
                     invoicePayment.DocumentKind == DocumentKind.Invoice
+                    && (!payment.ClientId.HasValue || payment.ClientId == invoicePayment.ClientId)
+                    && (!payment.LegalEntityId.HasValue || payment.LegalEntityId == invoicePayment.LegalEntityId)
+                    && (!payment.SellerCompanyId.HasValue || payment.SellerCompanyId == invoicePayment.SellerCompanyId)
+                    && (!payment.SellerBranchId.HasValue || payment.SellerBranchId == invoicePayment.SellerBranchId)
+                    && (payment.DocumentKind != DocumentKind.Invoice
+                        || (payment.ClientId == invoicePayment.ClientId && payment.LegalEntityId == invoicePayment.LegalEntityId))
+                    && (payment.Type == invoicePayment.Type
+                        || (payment.DocumentKind != DocumentKind.Invoice
+                            && ((payment.ClientId.HasValue && payment.ClientId == invoicePayment.ClientId)
+                                || (payment.LegalEntityId.HasValue && payment.LegalEntityId == invoicePayment.LegalEntityId))))
                     && (invoicePayment.Responsibles.Any(link => visibleUserIds.Contains(link.UserId))
                         || (invoicePayment.Client != null
                             && invoicePayment.Client.ResponsibleUserId.HasValue

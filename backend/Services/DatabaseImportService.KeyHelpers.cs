@@ -33,8 +33,6 @@ public sealed partial class DatabaseImportService
 
     private static string BuildContractKey(Contract item) => Key(item.Number, item.Date);
 
-    private static string BuildInvoiceKey(Invoice item) => Key(item.Number, item.Date);
-
     private static string BuildPaymentKey(Payment item, ImportMaps maps) => Key(
         MapId(maps.Clients, item.ClientId),
         MapId(maps.ClientCases, item.ClientCaseId),
@@ -67,9 +65,12 @@ public sealed partial class DatabaseImportService
         item.LegacyAccountNumber,
         item.LegacyAccountDate);
 
-    private static string BuildActKey(Act item, ImportMaps maps) => Key(item.Number, MapId(maps.Clients, item.ClientId));
+    private static string BuildActKey(Act item, ImportMaps maps) => Key(item.Number, item.Date,
+        MapId(maps.Clients, item.ClientId), MapId(maps.LegalEntities, item.LegalEntityId),
+        MapId(maps.LegalEntities, item.SellerCompanyId), MapId(maps.Payments, item.InvoiceId), SpreadsheetImportService.ExtractOneCExternalId(item.Comment));
 
-    private static string BuildTargetActKey(Act item) => Key(item.Number, item.ClientId);
+    private static string BuildTargetActKey(Act item) => Key(item.Number, item.Date, item.ClientId, item.LegalEntityId,
+        item.SellerCompanyId, item.InvoiceId, SpreadsheetImportService.ExtractOneCExternalId(item.Comment));
 
     private static string BuildAddressKey(AddressRecord item, ImportMaps maps)
     {

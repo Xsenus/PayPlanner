@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { apiService } from '../../services/api';
 import type { ClientCase } from '../../types';
@@ -22,12 +22,31 @@ const clientCase = {
 
 describe('CaseAppealDecisionAction', () => {
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-24T12:00:00Z'));
     vi.mocked(apiService.getCurrentCaseAppealDecision).mockReset();
     vi.mocked(apiService.getCurrentCaseAppealDecision).mockResolvedValue(null);
     vi.mocked(apiService.createCaseAppealTask).mockReset();
     vi.mocked(apiService.createCaseAppealTask).mockResolvedValue({
       id: 8, caseId: 42, choice: 'appeal', taskId: 91, decidedAt: '2026-09-24T00:00:00Z', decidedByUserName: 'Юрист',
     });
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  it('keeps the appeal action available on the deadline date', async () => {
+    vi.setSystemTime(new Date('2026-10-20T12:00:00Z'));
+    render(<CaseAppealDecisionAction clientCase={clientCase} canEdit />);
+    expect(await screen.findByRole('button', { name: 'Обжаловать — создать задачу' })).toBeTruthy();
+    expect(screen.queryByText(/Указанный срок обжалования уже прошёл/)).toBeNull();
+  });
+
+  it('hides the appeal action after the deadline date', async () => {
+    vi.setSystemTime(new Date('2026-10-21T12:00:00Z'));
+    render(<CaseAppealDecisionAction clientCase={clientCase} canEdit />);
+    expect(await screen.findByText(/Указанный срок обжалования уже прошёл/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Обжаловать — создать задачу' })).toBeNull();
+    expect(apiService.createCaseAppealTask).not.toHaveBeenCalled();
   });
 
   it('lets the lawyer decide before the last-three-days popup and shows the created task', async () => {

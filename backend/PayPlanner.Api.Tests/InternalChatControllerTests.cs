@@ -378,8 +378,7 @@ public sealed partial class InternalChatControllerTests : IClassFixture<PostgreS
         {
             if (created)
             {
-                await using var command = new NpgsqlCommand($"DROP DATABASE \"{name}\" WITH (FORCE)", admin);
-                await command.ExecuteNonQueryAsync();
+                await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(admin, name);
             }
             Assert.Equal(Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar), Path.GetDirectoryName(Path.GetFullPath(root)));
             Assert.StartsWith("pp_chat_atomic_", Path.GetFileName(root), StringComparison.Ordinal);
@@ -470,8 +469,7 @@ public sealed partial class InternalChatControllerTests : IClassFixture<PostgreS
             Assert.Matches("^pp_chat_delete_[a-f0-9]{32}$", name);
             if (created)
             {
-                await using var drop = new NpgsqlCommand($"DROP DATABASE \"{name}\" WITH (FORCE)", admin);
-                await drop.ExecuteNonQueryAsync();
+                await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(admin, name);
             }
             Assert.Equal(Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar), Path.GetDirectoryName(Path.GetFullPath(root)));
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);

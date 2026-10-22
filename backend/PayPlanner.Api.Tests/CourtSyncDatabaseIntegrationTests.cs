@@ -105,20 +105,8 @@ public sealed class CourtSyncDatabaseIntegrationTests
         }
         finally
         {
-            await using var terminateCommand = adminConnection.CreateCommand();
-            terminateCommand.CommandText =
-                """
-                SELECT pg_terminate_backend(pid)
-                FROM pg_stat_activity
-                WHERE datname = @databaseName AND pid <> pg_backend_pid()
-                """;
-            terminateCommand.Parameters.AddWithValue("databaseName", databaseName);
-            await terminateCommand.ExecuteNonQueryAsync();
-
             AssertSafeTemporaryDatabaseName(databaseName);
-            await using var dropCommand = adminConnection.CreateCommand();
-            dropCommand.CommandText = $"DROP DATABASE IF EXISTS \"{databaseName}\"";
-            await dropCommand.ExecuteNonQueryAsync();
+            await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(adminConnection, databaseName);
             NpgsqlConnection.ClearAllPools();
         }
     }

@@ -5125,14 +5125,18 @@ export function TaskJournal({
     }
 
     try {
-      await apiService.updateTaskJournalStatus(task.id, status, normalizedResult);
+      const updated = await apiService.updateTaskJournalStatus(task.id, status, normalizedResult);
       toast.success(
         status === 'onApproval' || status === 'overdueApproval'
           ? 'Задача отправлена на согласование.'
           : 'Результат по задаче сохранен.',
         'Журнал задач',
       );
-      closeTaskModal();
+      if (task.status === 'done' && status === 'done') {
+        setModal((current) => current?.task?.id === task.id ? { ...current, task: updated } : current);
+      } else {
+        closeTaskModal();
+      }
       await refreshTasks();
       emitTaskChange();
     } catch (error) {
@@ -11295,6 +11299,7 @@ function TaskModal({
 
   const update = <K extends keyof TaskForm>(key: K, value: TaskForm[K]) => {
     if (isReadOnly && key !== 'result') return;
+    if (isReadOnly && key === 'result' && !canSwitchToEdit) return;
     if (key === 'result' && form.status !== 'done') return;
     if (key === 'result' && resultError) {
       setResultError(null);
@@ -11523,6 +11528,24 @@ function TaskModal({
     }
 
     await saveTask(nextForm, task?.id);
+  };
+
+  const saveResultCorrection = async () => {
+    const task = state?.task;
+    if (!task || task.status !== 'done' || !canSwitchToEdit || taskSavingRef.current) return;
+    if (requireCompletionResult && !form.result.trim()) {
+      setResultError(TASK_COMPLETION_RESULT_REQUIRED_MESSAGE);
+      return;
+    }
+    taskSavingRef.current = true;
+    setTaskSaving(true);
+    setResultError(null);
+    try {
+      await onResultSave(task, 'done', form.result);
+    } finally {
+      taskSavingRef.current = false;
+      setTaskSaving(false);
+    }
   };
 
   const withChangeComment = (nextForm: TaskForm = form): TaskForm => ({
@@ -11927,7 +11950,7 @@ function TaskModal({
     return () => {
       active = false;
     };
-  }, [taskId, toast]);
+  }, [taskId, state?.task?.result, toast]);
 
   useEffect(() => {
     if (!taskId) {
@@ -12199,7 +12222,14 @@ function TaskModal({
   const bodyClassName = isPage
     ? isModernChrome ? 'px-5 py-4' : 'px-6 py-5'
     : isModernChrome ? 'min-h-0 overflow-y-auto px-5 py-4' : 'min-h-0 overflow-y-auto px-6 py-5';
-  const canEditResult = form.status === 'done';
+  const canEditResult = form.status === 'done' && (!isReadOnly || canSwitchToEdit);
+  const resultCorrectionButton = isReadOnly && canEditResult ? (
+    <button type="button" onClick={() => void saveResultCorrection()}
+      disabled={taskSaving || form.result.trim() === state?.task?.result.trim()}
+      className="mt-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">
+      {taskSaving ? 'Сохраняем...' : 'Сохранить результат'}
+    </button>
+  ) : null;
   const statusOption = STATUS_OPTIONS.find((option) => option.value === form.status) ?? STATUS_OPTIONS[0];
   const typeOption = TYPE_OPTIONS.find((option) => option.value === form.type) ?? TYPE_OPTIONS[0];
   const assigneesById = useMemo(
@@ -13007,19 +13037,20 @@ function TaskModal({
                   </div>
                   {!canEditResult ? (
                     <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-500 ring-1 ring-slate-200">
-                      Доступен при завершении
+                      {form.status === 'done' ? 'Нет прав на изменение' : 'Доступен при завершении'}
                     </span>
                   ) : null}
                 </div>
                 <textarea
                   value={form.result}
                   onChange={(event) => update('result', event.target.value)}
-                  disabled={!canEditResult}
+                  disabled={!canEditResult || taskSaving}
                   data-testid="task-result-field"
                   className="min-h-[92px] w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
                   rows={4}
                   placeholder={canEditResult ? TASK_COMPLETION_RESULT_HINT : 'Результат появится при завершении задачи'}
                 />
+                {resultCorrectionButton}
                 {resultError ? <p className="mt-2 text-xs font-semibold text-rose-600">{resultError}</p> : null}
               </section>
 
@@ -14350,7 +14381,8 @@ function TaskModal({
               <textarea value={form.description} onChange={(event) => update('description', event.target.value)} disabled={isReadOnly} data-testid="task-description-field" className="form-textarea min-h-[140px] resize-y" rows={6} placeholder="Контекст, телефоны, комментарии, откуда пришла задача" />
             </Field>
             <Field label="Результат">
-              <textarea value={form.result} onChange={(event) => update('result', event.target.value)} disabled={!canEditResult} data-testid="task-result-field" className="form-textarea min-h-[120px] resize-y" rows={5} placeholder={canEditResult ? TASK_COMPLETION_RESULT_HINT : 'Результат доступен при завершении задачи'} />
+              <textarea value={form.result} onChange={(event) => update('result', event.target.value)} disabled={!canEditResult || taskSaving} data-testid="task-result-field" className="form-textarea min-h-[120px] resize-y" rows={5} placeholder={canEditResult ? TASK_COMPLETION_RESULT_HINT : 'Результат доступен при завершении задачи'} />
+              {resultCorrectionButton}
               <p className="mt-1 text-xs text-slate-500">{canEditResult ? TASK_COMPLETION_RESULT_HINT : 'Поле станет доступным после выбора завершенного статуса или нажатия кнопки завершения.'}</p>
               {resultError ? <p className="mt-1 text-xs font-semibold text-rose-600">{resultError}</p> : null}
             </Field>

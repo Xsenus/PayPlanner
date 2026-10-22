@@ -141,6 +141,7 @@ public sealed partial class SpreadsheetImportService : ISpreadsheetImportService
         public List<LegalEntityStateItem> LegalEntities { get; init; } = new();
         public Dictionary<string, List<InvoiceStateItem>> Invoices { get; init; } = new(StringComparer.Ordinal);
         public Dictionary<string, List<ActStateItem>> Acts { get; init; } = new(StringComparer.Ordinal);
+        private Dictionary<int, List<string>>? _invoiceKeysByPayment;
 
         public void UpsertClient(ClientStateItem item)
         {
@@ -157,9 +158,12 @@ public sealed partial class SpreadsheetImportService : ISpreadsheetImportService
 
         public void UpsertInvoice(InvoiceStateItem item)
         {
-            foreach (var list in Invoices.Values)
+            _invoiceKeysByPayment ??= Invoices.SelectMany(pair => pair.Value.Select(invoice => (invoice.PaymentId, pair.Key)))
+                .GroupBy(item => item.PaymentId).ToDictionary(group => group.Key, group => group.Select(item => item.Key).Distinct().ToList());
+            foreach (var oldKey in _invoiceKeysByPayment.GetValueOrDefault(item.PaymentId, new List<string>()))
             {
-                list.RemoveAll(current => current.PaymentId == item.PaymentId);
+                Invoices[oldKey].RemoveAll(current => current.PaymentId == item.PaymentId);
+                if (Invoices[oldKey].Count == 0) Invoices.Remove(oldKey);
             }
 
             var keys = BuildInvoiceMatchKeys(item.ExternalId, item.Number, item.Date, item.Type);
@@ -167,6 +171,7 @@ public sealed partial class SpreadsheetImportService : ISpreadsheetImportService
             {
                 keys.Add(item.Key);
             }
+            _invoiceKeysByPayment[item.PaymentId] = keys;
 
             foreach (var key in keys)
             {
@@ -179,6 +184,8 @@ public sealed partial class SpreadsheetImportService : ISpreadsheetImportService
                 list.Add(new InvoiceStateItem
                 {
                     PaymentId = item.PaymentId,
+                    ClientId = item.ClientId,
+                    HasConflictingLinks = item.HasConflictingLinks,
                     Key = key,
                     ExternalId = item.ExternalId,
                     Number = item.Number,
@@ -233,6 +240,8 @@ public sealed partial class SpreadsheetImportService : ISpreadsheetImportService
                 list.Add(new ActStateItem
                 {
                     ActId = item.ActId,
+                    ClientId = item.ClientId,
+                    HasConflictingLinks = item.HasConflictingLinks,
                     Key = key,
                     ExternalId = item.ExternalId,
                     Number = item.Number,
@@ -300,9 +309,21 @@ public sealed partial class SpreadsheetImportService : ISpreadsheetImportService
         public List<string> MatchKeys { get; init; } = new();
     }
 
-    private sealed class InvoiceStateItem
+    private interface IImportedDocumentState
+    {
+        int EntityId { get; }
+        int? ClientId { get; }
+        string? ExternalId { get; }
+        bool ImportedInCurrentBatch { get; }
+        bool HasConflictingLinks { get; }
+    }
+
+    private sealed class InvoiceStateItem : IImportedDocumentState
     {
         public int PaymentId { get; init; }
+        public int EntityId => PaymentId;
+        public int? ClientId { get; init; }
+        public bool HasConflictingLinks { get; init; }
         public string Key { get; init; } = string.Empty;
         public string? ExternalId { get; init; }
         public string? Number { get; init; }
@@ -318,9 +339,12 @@ public sealed partial class SpreadsheetImportService : ISpreadsheetImportService
         public bool ImportedInCurrentBatch { get; init; }
     }
 
-    private sealed class ActStateItem
+    private sealed class ActStateItem : IImportedDocumentState
     {
         public int ActId { get; init; }
+        public int EntityId => ActId;
+        public int? ClientId { get; init; }
+        public bool HasConflictingLinks { get; init; }
         public string Key { get; init; } = string.Empty;
         public string? ExternalId { get; init; }
         public string? Number { get; init; }

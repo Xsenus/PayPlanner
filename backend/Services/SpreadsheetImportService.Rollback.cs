@@ -1,5 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using Microsoft.EntityFrameworkCore.Storage;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services.Companies;
@@ -332,7 +333,7 @@ public sealed partial class SpreadsheetImportService
                 .Include(item => item.Responsibles)
                 .FirstOrDefaultAsync(item => item.Id == id, cancellationToken),
             entity => SerializeSnapshot(CaptureInvoiceSnapshot(entity)),
-            entity => DeleteInvoiceAsync(db, entity, cancellationToken),
+            entity => DeleteInvoiceAsync(db, entity, operation.BatchId, cancellationToken),
             (entity, snapshot) => RestoreInvoiceSnapshotAsync(db, entity, snapshot, cancellationToken));
     }
 
@@ -357,10 +358,13 @@ public sealed partial class SpreadsheetImportService
                 db.Remove(entity);
                 return Task.CompletedTask;
             },
-            (entity, snapshot) =>
+            async (entity, snapshot) =>
             {
+                if (snapshot.Act.InvoiceId.HasValue && !await db.Payments.IgnoreQueryFilters()
+                    .ApplyUnambiguousInvoiceLinks().AnyAsync(payment => payment.Id == snapshot.Act.InvoiceId.Value
+                        && payment.ClientId == snapshot.Act.ClientId, cancellationToken))
+                    throw new InvalidOperationException(InvoiceQueryExtensions.ConflictMessage);
                 RestoreActSnapshot(db, entity, snapshot);
-                return Task.CompletedTask;
             });
     }
 

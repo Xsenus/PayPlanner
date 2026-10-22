@@ -214,9 +214,7 @@ public sealed class ManagedProfilePhotoPostgreSqlTests
         {
             if (created)
             {
-                await using var drop = admin.CreateCommand();
-                drop.CommandText = $"DROP DATABASE \"{name}\" WITH (FORCE)";
-                await drop.ExecuteNonQueryAsync();
+                await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(admin, name);
             }
             Assert.Equal(name, Path.GetFileName(root));
             Assert.StartsWith(prefix, name, StringComparison.Ordinal);

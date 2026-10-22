@@ -28,7 +28,7 @@ public sealed partial class ManagedCaseDocumentWireTests
                 ActDate = new DateTime(2026, 10, 1), SourceUrl = SyntheticYandexHostingStartup.CourtUrl, Summary = summary }]
         };
         await using var endpoint = await LoopbackYandexDiskEndpoint.StartAsync();
-        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(workerEnabled: true,
+        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(template: sqliteTemplate, workerEnabled: true,
             uploadCapacityChecks: true, yandexCopy: endpoint, courtSource: kind == "court" ? Court("Original court summary") : null,
             localAckFault: true);
         var caseId = await LoginAndCreateCaseAsync(runtime);

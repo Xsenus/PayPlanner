@@ -15,7 +15,7 @@ public static class InvoicePaymentAccess
     public static IQueryable<Payment> ScopeHeaders(PaymentContext db, SectionAccessContext access)
     {
         var all = db.Payments.AsNoTracking();
-        var visible = all.ApplyPaymentVisibility(access.Visibility);
+        var visible = all.ApplyPaymentVisibility(access.Visibility).ApplyUnambiguousInvoiceLinks();
         if (access.Permission?.CanView != true) return all.Where(_ => false);
         return visible.Where(header => header.DocumentKind == DocumentKind.Invoice
             && header.InvoiceId.HasValue && header.Status != PaymentStatus.Cancelled && header.SellerCompanyId > 0

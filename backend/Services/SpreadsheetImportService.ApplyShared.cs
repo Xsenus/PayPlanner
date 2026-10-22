@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
@@ -31,7 +32,8 @@ public sealed partial class SpreadsheetImportService
 
         try
         {
-            var clientId = FindClientId(state, draft.CounterpartyName, draft.CounterpartyInn);
+            var clientId = FindInvoiceClientId(state, draft.CounterpartyName, draft.CounterpartyInn, out var clientError);
+            if (clientError is not null) throw new InvalidOperationException(clientError);
             if (!clientId.HasValue)
             {
                 db.SpreadsheetImportBatchOperations.Add(CreateOperation(
@@ -42,7 +44,8 @@ public sealed partial class SpreadsheetImportService
                 return;
             }
 
-            var existingActId = FindExistingActStateItem(state, sourceKeys)?.ActId ?? 0;
+            var existingActId = FindExistingActStateItem(state, sourceKeys, clientId, out var matchError)?.ActId ?? 0;
+            if (matchError is not null) throw new InvalidOperationException(matchError);
 
             var act = existingActId > 0
                 ? await db.Acts.Include(item => item.LineItems).FirstOrDefaultAsync(item => item.Id == existingActId, cancellationToken)
@@ -56,7 +59,7 @@ public sealed partial class SpreadsheetImportService
             }
 
             var responsibleId = FindUserId(state.Users, draft.ResponsibleName);
-            var invoicePayment = await FindInvoicePaymentForActAsync(db, draft.InvoiceExternalId, draft.InvoiceNumber, draft.InvoiceDate, draft.Type, cancellationToken);
+            var invoicePayment = await FindInvoicePaymentForActAsync(db, draft.InvoiceExternalId, draft.InvoiceNumber, draft.InvoiceDate, draft.Type, clientId.Value, cancellationToken);
             ApplyActValues(act, draft, clientId.Value, responsibleId, invoicePayment);
             SyncActLineItems(db, act, invoicePayment, BuildEffectiveLineItems(draft.ParsedLineItems, draft.Amount.Value, draft.Nomenclature, sourceTitle));
 
@@ -85,8 +88,9 @@ public sealed partial class SpreadsheetImportService
             state.UpsertAct(new ActStateItem
             {
                 ActId = actId,
+                ClientId = clientId,
                 Key = sourceKey,
-                ExternalId = NormalizeOneCExternalId(draft.ExternalId),
+                ExternalId = ExtractOneCExternalId(persistedAct.Comment),
                 Number = NormalizeText(draft.Number),
                 Date = draft.Date.HasValue ? ActDomainService.NormalizeLocalDate(draft.Date.Value) : null,
                 Amount = draft.Amount ?? 0m,
@@ -207,6 +211,11 @@ public sealed partial class SpreadsheetImportService
 
     private async Task<Invoice> ResolveInvoiceEntityAsync(PaymentContext db, Payment payment, InvoiceDraft draft, CancellationToken cancellationToken)
     {
+        if (payment.InvoiceId.HasValue && (await db.Payments.Where(item => item.InvoiceId == payment.InvoiceId)
+            .HasAmbiguousInvoiceLinksAsync(cancellationToken)
+            || await db.Payments.AnyAsync(item => item.InvoiceId == payment.InvoiceId && item.Id != payment.Id && item.DocumentKind == DocumentKind.Invoice, cancellationToken)))
+            throw new InvalidOperationException(InvoiceQueryExtensions.ConflictMessage);
+
         if (payment.Invoice is not null)
         {
             payment.Invoice.Number = Truncate(draft.Number, 120);
@@ -216,12 +225,10 @@ public sealed partial class SpreadsheetImportService
 
         var number = Truncate(draft.Number, 120);
         var date = draft.Date!.Value.Date;
-        var invoice = await db.Invoices.FirstOrDefaultAsync(item => item.Number == number && item.Date == date, cancellationToken);
-        if (invoice is null)
-        {
-            invoice = new Invoice { Number = number, Date = date };
-            db.Invoices.Add(invoice);
-        }
+        // The existing document was already resolved by owner and source identity above.
+        // A new document always receives its own header, even when its number/date are reused.
+        var invoice = new Invoice { Number = number, Date = date };
+        db.Invoices.Add(invoice);
 
         payment.Invoice = invoice;
         payment.InvoiceId = invoice.Id > 0 ? invoice.Id : null;

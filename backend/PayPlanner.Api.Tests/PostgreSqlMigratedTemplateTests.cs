@@ -252,6 +252,56 @@ public sealed class PostgreSqlMigratedTemplateTests
         Assert.Null(owner.TemplateName);
     }
 
+    [Theory]
+    [InlineData("postgres")]
+    [InlineData("payplanner")]
+    [InlineData("foreign_0123456789abcdef0123456789abcdef")]
+    [InlineData("pp_missing_guid")]
+    [InlineData("pp_upper_0123456789ABCDEF0123456789ABCDEF")]
+    [InlineData("pp_no_separator0123456789abcdef0123456789abcdef")]
+    [InlineData("pp_bad-name_0123456789abcdef0123456789abcdef")]
+    [InlineData("pp_quote_\"0123456789abcdef0123456789abcdef")]
+    [InlineData("pp_name_exceeding_postgresql_limit_0123456789abcdef0123456789abcdef")]
+    public async Task CleanupRejectsUnsafeNamesBeforeExecutingSql(string name)
+    {
+        await using var unopened = new NpgsqlConnection("Host=localhost;Database=postgres;Pooling=false");
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(unopened, name));
+        Assert.Contains("unrecognized owned database", error.Message);
+        Assert.Equal(System.Data.ConnectionState.Closed, unopened.State);
+    }
+
+    [Fact]
+    public async Task CleanupRequiresControlDatabaseBeforeExecutingSql()
+    {
+        await using var unopened = new NpgsqlConnection("Host=localhost;Database=payplanner;Pooling=false");
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(
+            unopened, "pp_cleanup_" + Guid.NewGuid().ToString("N")));
+        Assert.Contains("control database", error.Message);
+        Assert.Equal(System.Data.ConnectionState.Closed, unopened.State);
+    }
+
+    [Fact]
+    public async Task CleanupDropsOwnedDatabaseAndIsIdempotent()
+    {
+        var settings = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES"))
+        {
+            Database = "postgres",
+            Pooling = false
+        };
+        await using var admin = new NpgsqlConnection(settings.ConnectionString);
+        await admin.OpenAsync();
+        var name = "pp_cleanup_" + Guid.NewGuid().ToString("N");
+        await using (var create = new NpgsqlCommand($"CREATE DATABASE \"{name}\"", admin))
+            await create.ExecuteNonQueryAsync();
+        try
+        {
+            await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(admin, name);
+            Assert.False(await ExistsAsync(settings.ConnectionString, name));
+            await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(admin, name);
+        }
+        finally { await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(admin, name); }
+    }
+
     private static PostgreSqlPaymentContext Context(PostgreSqlMigratedTemplate.DatabaseLease lease)
         => new(new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(lease.ConnectionString).Options);
 

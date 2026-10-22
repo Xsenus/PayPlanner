@@ -116,16 +116,35 @@ export function validateDeployWorkflow(source) {
   const jobs = workflow.jobs;
   const dependencies = {
     frontend: [], 'backend-format': [], 'backend-build': [],
-    'backend-test': ['backend-build'], 'backend-browser': ['backend-build'],
+    'backend-test': ['backend-build', 'backend-format', 'frontend'],
+    'backend-browser': ['backend-build', 'backend-format', 'frontend'],
     backend: ['backend-browser', 'backend-build', 'backend-test'],
     deploy: ['backend', 'backend-format', 'frontend'],
   };
   requireValue(jobs && Object.keys(jobs).sort().join(',') === Object.keys(dependencies).sort().join(','), 'Expected exactly seven release jobs');
   requireValue(workflow.defaults === undefined, 'Custom workflow shell/defaults require explicit gate review');
   requireValue(workflow.on?.push?.branches?.join(',') === 'main' && Object.hasOwn(workflow.on, 'workflow_dispatch'), 'Keep main push and manual release triggers');
+  const documentationPaths = ['README.md', 'AGENTS.md', 'docs/**/*.md', 'docs/yougile-sources/**'];
+  requireValue(Object.keys(workflow.on).sort().join(',') === 'push,workflow_dispatch'
+    && Object.keys(workflow.on.push).sort().join(',') === 'branches,paths-ignore'
+    && workflow.on.push['paths-ignore']?.join(',') === documentationPaths.join(','),
+  'Exclude only documentation from automatic releases; application and CI changes must still run all gates');
+  const timeouts = { frontend: 30, 'backend-format': 30, 'backend-build': 30, 'backend-test': 150, 'backend-browser': 15, backend: 10, deploy: 30 };
   for (const [id, job] of Object.entries(jobs)) {
+    requireValue(String(job['timeout-minutes']) === String(timeouts[id]), `${id}: keep the explicit runner time budget`);
     requireValue(!Object.hasOwn(job, 'if'), `${id}: conditional job can bypass a release gate`);
-    requireValue(job.defaults === undefined, `${id}: custom job shell/defaults require explicit gate review`);
+    const localRunner = ['backend-build', 'backend-test', 'backend-browser', 'backend'].includes(id);
+    requireValue(localRunner
+      ? job['runs-on']?.join(',') === 'self-hosted,Windows,X64,payplanner-xsenus'
+        && JSON.stringify(job.defaults) === JSON.stringify({ run: { shell: 'bash' } })
+      : job['runs-on'] === 'ubuntu-latest' && job.defaults === undefined,
+    `${id}: trusted runner labels and reviewed failure-preserving shell required`);
+    if (localRunner) {
+      const checkout = job.steps.filter(step => step.uses === 'actions/checkout@v6');
+      requireValue(checkout.length === 1 && checkout[0].with?.['persist-credentials'] === false,
+        `${id}: do not retain repository credentials on the persistent host`);
+    }
+    requireValue(job.services === undefined, `${id}: use existing PostgreSQL; new servers are forbidden`);
     requireValue(job['continue-on-error'] === undefined || job['continue-on-error'] === false, `${id}: continue-on-error bypass`);
     requireValue(Array.isArray(job.steps) && job.steps.length > 0, `${id}: missing steps`);
     const stepIds = job.steps.filter(step => step.id !== undefined).map(step => step.id);
@@ -134,7 +153,8 @@ export function validateDeployWorkflow(source) {
     requireValue(Array.isArray(needs) && [...needs].sort().join(',') === dependencies[id].join(','), `${id}: exact successful dependencies required`);
     if (id === 'backend-test') {
       requireValue(job.strategy?.['fail-fast'] === false
-        && Object.keys(job.strategy).sort().join(',') === 'fail-fast,matrix'
+        && Object.keys(job.strategy).sort().join(',') === 'fail-fast,matrix,max-parallel'
+        && job.strategy['max-parallel'] === '1'
         && Object.keys(job.strategy.matrix ?? {}).join(',') === 'shard'
         && job.strategy.matrix.shard?.join(',') === '0,1,2,3', 'All four shards must run with fail-fast disabled');
     } else requireValue(job.strategy === undefined, `${id}: unexpected matrix/strategy`);
@@ -217,7 +237,7 @@ export function validateDeployWorkflow(source) {
   requireValue(String(discover.step.env?.BackgroundServices__Enabled) === 'false' && String(discover.step.env?.Email__Enabled) === 'false', 'Discovery mail/background isolation missing');
   requireValue(jobs['backend-build'].outputs?.['manifest-sha'] === '${{ steps.plan.outputs.manifest-sha }}'
     && jobs['backend-build'].outputs?.['sdk-version'] === '${{ steps.plan.outputs.sdk-version }}', 'Consumers must use producer manifest hash and SDK outputs');
-  requireValue(discover.lines.includes(`printf 'manifest-sha=%s\\n' "$(jq -er '.ManifestSha256' test-plan.summary.json)" >> "$GITHUB_OUTPUT"`)
+  requireValue(discover.lines.includes(`printf 'manifest-sha=%s\\n' "$(node -p "require('./test-plan.summary.json').ManifestSha256")" >> "$GITHUB_OUTPUT"`)
     && discover.lines.includes(`printf 'sdk-version=%s\\n' "$(dotnet --version)" >> "$GITHUB_OUTPUT"`), 'Discovery outputs must come from the producer summary and SDK');
   const runtimePack = command('backend-build', `tar -czf test-runtime.tar.gz test-plan.json test-plan.summary.json backend/PayPlanner.Api.Tests/bin/Release/net9.0 tools/PayPlanner.TestShards/bin/Release/net9.0`);
   const runtimeUpload = archiveUpload('backend-build', `test-runtime-${sha}-${attempt}`, 'test-runtime.tar.gz', 'runtime-upload', 'runtime-artifact-id');
@@ -238,6 +258,15 @@ export function validateDeployWorkflow(source) {
   requireValue(restored.lines.includes(`printf '%s\\n' '<RunSettings><RunConfiguration><TreatNoTestsAsError>true</TreatNoTestsAsError></RunConfiguration></RunSettings>' > test-results/restored-browser/gate.runsettings`), 'Restored browser gate must fail on empty selection');
   requireValue(String(restored.step.env?.PAYPLANNER_TEST_RESTORED_BROWSER) === 'true', 'Restored browser gate must execute');
   const union = command('backend', `${tool} verify --manifest test-plan.json --manifest-sha "$EXPECTED_MANIFEST_SHA" --results-root test-results`);
+  const timingProfile = command('backend', `${tool} timings --manifest test-plan.json --manifest-sha "$EXPECTED_MANIFEST_SHA" --results-root test-results --output "$RUNNER_TEMP/payplanner-test-timings.json"`);
+  requireValue(union.index < timingProfile.index && timingProfile.step.env?.EXPECTED_MANIFEST_SHA === '${{ needs.backend-build.outputs.manifest-sha }}',
+    'Timing profile must follow complete union qualification with the producer hash');
+  const timingCache = jobs.backend.steps.map((step, index) => ({ step, index }))
+    .filter(({ step }) => step.uses === 'actions/cache/save@v5');
+  requireValue(timingCache.length === 1 && timingCache[0].index > timingProfile.index
+    && timingCache[0].step.with?.path === '${{ runner.temp }}/payplanner-test-timings.json'
+    && timingCache[0].step.with?.key === 'backend-timings-v1-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}',
+  'Timing cache must publish only the qualified profile after its creation');
   for (const gate of [shard, restored, union]) requireValue(gate.step.env?.EXPECTED_MANIFEST_SHA === '${{ needs.backend-build.outputs.manifest-sha }}', 'Consumers must use the trusted producer manifest hash');
   for (const [id, gate] of [['backend-test', shard], ['backend-browser', restored], ['backend', union]]) {
     requireValue(gate.lines[0] === 'set -euo pipefail', `${id}: preserve failure exit status`);
@@ -257,15 +286,22 @@ export function validateDeployWorkflow(source) {
   }
   for (const [id, gate] of [['backend-test', shard], ['backend-browser', restored]]) {
     requireValue(String(gate.step.env?.BackgroundServices__Enabled) === 'false' && String(gate.step.env?.Email__Enabled) === 'false', `${id}: test mail/background isolation missing`);
-    requireValue(gate.step.env?.PAYPLANNER_TEST_POSTGRES === 'Host=127.0.0.1;Port=5432;Database=postgres;Username=postgres;Password=postgres;Pooling=false'
-      && gate.step.env?.PAYPLANNER_TEST_PG_DUMP === '/usr/lib/postgresql/17/bin/pg_dump'
-      && gate.step.env?.PAYPLANNER_TEST_PSQL === '/usr/lib/postgresql/17/bin/psql', `${id}: disposable PostgreSQL prerequisites missing`);
-    requireValue(jobs[id].services?.postgres?.image === 'postgres:17-alpine'
-      && jobs[id].services.postgres.ports?.join(',') === '5432:5432', `${id}: isolated PostgreSQL 17 service required`);
-    for (const prereq of ['npm ci', 'npx playwright install --with-deps chromium chrome', 'npm install --global @playwright/cli@0.1.22', 'sudo apt-get install -y postgresql-client-17']) {
+    requireValue(gate.step.env?.PAYPLANNER_TEST_POSTGRES === '${{ secrets.PAYPLANNER_XSENUS_TEST_POSTGRES }}'
+      && gate.step.env?.PAYPLANNER_TEST_PG_DUMP === 'C:/Program Files/PostgreSQL/17/bin/pg_dump.exe'
+      && gate.step.env?.PAYPLANNER_TEST_PSQL === 'C:/Program Files/PostgreSQL/17/bin/psql.exe', `${id}: dedicated existing PostgreSQL prerequisites missing`);
+    const preflight = command(id, 'node scripts/verify-xsenus-runner.mjs postgres');
+    requireValue(preflight.step.env?.PAYPLANNER_TEST_POSTGRES === '${{ secrets.PAYPLANNER_XSENUS_TEST_POSTGRES }}',
+      `${id}: preflight must verify the same dedicated test connection`);
+    for (const prereq of ['npm ci', 'npx playwright install chromium chrome', 'npm install --global @playwright/cli@0.1.22']) {
       requireValue(command(id, prereq).index < gate.index, `${id}: complete prerequisites must precede tests`);
     }
+    requireValue(preflight.index < gate.index, `${id}: verify isolation before running tests`);
   }
+  requireValue(command('backend-build', 'node scripts/verify-xsenus-runner.mjs build').index < beRestore.index,
+    'Trusted host preflight must precede build');
+  const portable = command('backend-build', 'node scripts/verify-xsenus-runner.mjs package');
+  requireValue(publish.index < portable.index && portable.index < bePack.index,
+    'Verify Linux-compatible portable package before archiving');
   const shardDiagnostic = artifact('backend-test', 'upload', `backend-shard-${matrixShard}-${sha}-${attempt}`, 'test-results/');
   const restoredDiagnostic = artifact('backend-browser', 'upload', `restored-browser-${sha}-${attempt}`, 'test-results/restored-browser/');
   const qualifiedAlias = artifact('backend-test', 'upload', qualifiedShardName(matrixShard), 'test-results/');

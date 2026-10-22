@@ -116,8 +116,8 @@ public sealed class ClaudeBranchRegressionTests
         {
             if (Admin is not null)
             {
-                await using var command = new NpgsqlCommand($"DROP DATABASE \"{Name}\" WITH (FORCE)", Admin);
-                await command.ExecuteNonQueryAsync();
+                Assert.NotNull(Name);
+                await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(Admin, Name);
                 await Admin.DisposeAsync();
             }
             if (File is not null) System.IO.File.Delete(File);

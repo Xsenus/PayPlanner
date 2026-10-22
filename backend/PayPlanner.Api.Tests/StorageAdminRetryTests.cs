@@ -151,8 +151,7 @@ public sealed class StorageAdminRetryTests
             Assert.Matches("^pp_admin_retry_[a-f0-9]{32}$", name);
             if (created)
             {
-                await using var drop = new NpgsqlCommand($"DROP DATABASE \"{name}\" WITH (FORCE)", admin);
-                await drop.ExecuteNonQueryAsync();
+                await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(admin, name);
             }
         }
     }

@@ -3,6 +3,11 @@ name: Deploy PayPlanner
 on:
   push:
     branches: ["main"]
+    paths-ignore:
+      - "README.md"
+      - "AGENTS.md"
+      - "docs/**/*.md"
+      - "docs/yougile-sources/**"
   workflow_dispatch: {}
 
 permissions:
@@ -31,6 +36,7 @@ env:
 jobs:
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     outputs:
       frontend-artifact-id: ${{ steps.frontend-upload.outputs.artifact-id }}
     steps:
@@ -120,6 +126,7 @@ jobs:
 
   backend-format:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -161,38 +168,29 @@ jobs:
         run: dotnet format "${{ env.BE_SLN }}" --verify-no-changes --no-restore --verbosity minimal
 
   backend-build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64, payplanner-xsenus]
+    timeout-minutes: 30
     outputs:
       manifest-sha: ${{ steps.plan.outputs.manifest-sha }}
       sdk-version: ${{ steps.plan.outputs.sdk-version }}
       runtime-artifact-id: ${{ steps.runtime-upload.outputs.artifact-id }}
       backend-artifact-id: ${{ steps.backend-upload.outputs.artifact-id }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "9.0.x"
 
-      - name: Prepare memory for backend compilation
-        shell: bash
-        run: |
-          set -euo pipefail
-          # The generated migration models require more than 6 GiB during
-          # compilation. Keep all analyzers and give smaller hosted runners
-          # additional virtual memory for the complete release gate.
-          memory_kib="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)"
-          if [ "$memory_kib" -lt 12582912 ]; then
-            swap_file="$RUNNER_TEMP/payplanner-build.swap"
-            test ! -e "$swap_file"
-            sudo fallocate -l 8G "$swap_file"
-            sudo chmod 600 "$swap_file"
-            sudo mkswap "$swap_file" >/dev/null
-            sudo swapon "$swap_file"
-          fi
-          free -h
+      - name: Verify trusted Windows build host
+        run: node scripts/verify-xsenus-runner.mjs build
 
       - name: Cache downloaded NuGet packages
         uses: actions/cache@v5
@@ -218,15 +216,23 @@ jobs:
       - name: Build test shard tool with analyzers
         run: dotnet build tools/PayPlanner.TestShards/PayPlanner.TestShards.csproj --no-restore -c Release
 
+      - name: Restore backend timing estimates
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ runner.temp }}/payplanner-test-timings.json
+          key: backend-timings-v1-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: backend-timings-v1-${{ runner.os }}-
+
       - name: Discover complete backend test plan
         id: plan
         env:
           BackgroundServices__Enabled: "false"
           Email__Enabled: "false"
+          PAYPLANNER_TEST_TIMINGS: ${{ runner.temp }}/payplanner-test-timings.json
         run: |
           set -euo pipefail
           dotnet tools/PayPlanner.TestShards/bin/Release/net9.0/PayPlanner.TestShards.dll discover --assembly backend/PayPlanner.Api.Tests/bin/Release/net9.0/PayPlanner.Api.Tests.dll --manifest test-plan.json --revision "${{ github.sha }}" --shards 4
-          printf 'manifest-sha=%s\n' "$(jq -er '.ManifestSha256' test-plan.summary.json)" >> "$GITHUB_OUTPUT"
+          printf 'manifest-sha=%s\n' "$(node -p "require('./test-plan.summary.json').ManifestSha256")" >> "$GITHUB_OUTPUT"
           printf 'sdk-version=%s\n' "$(dotnet --version)" >> "$GITHUB_OUTPUT"
 
       - name: Pack compiled test runtime
@@ -245,6 +251,9 @@ jobs:
       - name: Publish backend
         run: dotnet publish "${{ env.BE_CSPROJ }}" -c Release --no-build --no-restore -o "${{ env.OUT_DIR }}/be"
 
+      - name: Verify portable backend package
+        run: node scripts/verify-xsenus-runner.mjs package
+
       - name: Pack backend artifact
         run: tar -czf backend.tar.gz -C "${{ env.OUT_DIR }}" be
 
@@ -259,46 +268,28 @@ jobs:
           compression-level: 0
 
   backend-test:
-    needs: [backend-build]
-    runs-on: ubuntu-latest
+    # Do not spend four runners on integration tests when a preflight gate fails.
+    needs: [backend-build, backend-format, frontend]
+    runs-on: [self-hosted, Windows, X64, payplanner-xsenus]
+    timeout-minutes: 150
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         shard: [0, 1, 2, 3]
-    services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ needs.backend-build.outputs.sdk-version }}
-
-      - name: Install PostgreSQL 17 client for restore drill
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y curl ca-certificates
-          sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl --fail --silent --show-error -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
-          . /etc/os-release
-          printf 'Types: deb\nURIs: https://apt.postgresql.org/pub/repos/apt\nSuites: %s-pgdg\nComponents: main\nSigned-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc\n' "$VERSION_CODENAME" | sudo tee /etc/apt/sources.list.d/pgdg.sources > /dev/null
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client-17
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -307,11 +298,16 @@ jobs:
           cache: "npm"
           cache-dependency-path: package-lock.json
 
+      - name: Verify existing PostgreSQL and trusted runner
+        env:
+          PAYPLANNER_TEST_POSTGRES: ${{ secrets.PAYPLANNER_XSENUS_TEST_POSTGRES }}
+        run: node scripts/verify-xsenus-runner.mjs postgres
+
       - name: Install FE deps
         run: npm ci
 
       - name: Install browsers for writable and restored CRM verification
-        run: npx playwright install --with-deps chromium chrome
+        run: npx playwright install chromium chrome
 
       - name: Install pinned Playwright CLI for writable CRM verification
         run: |
@@ -342,9 +338,9 @@ jobs:
         env:
           BackgroundServices__Enabled: "false"
           Email__Enabled: "false"
-          PAYPLANNER_TEST_POSTGRES: Host=127.0.0.1;Port=5432;Database=postgres;Username=postgres;Password=postgres;Pooling=false
-          PAYPLANNER_TEST_PG_DUMP: /usr/lib/postgresql/17/bin/pg_dump
-          PAYPLANNER_TEST_PSQL: /usr/lib/postgresql/17/bin/psql
+          PAYPLANNER_TEST_POSTGRES: ${{ secrets.PAYPLANNER_XSENUS_TEST_POSTGRES }}
+          PAYPLANNER_TEST_PG_DUMP: C:/Program Files/PostgreSQL/17/bin/pg_dump.exe
+          PAYPLANNER_TEST_PSQL: C:/Program Files/PostgreSQL/17/bin/psql.exe
           EXPECTED_MANIFEST_SHA: ${{ needs.backend-build.outputs.manifest-sha }}
         run: |
           set -euo pipefail
@@ -371,42 +367,22 @@ jobs:
 
 
   backend-browser:
-    needs: [backend-build]
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-
+    needs: [backend-build, backend-format, frontend]
+    runs-on: [self-hosted, Windows, X64, payplanner-xsenus]
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ needs.backend-build.outputs.sdk-version }}
-
-      - name: Install PostgreSQL 17 client for restore drill
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y curl ca-certificates
-          sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl --fail --silent --show-error -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
-          . /etc/os-release
-          printf 'Types: deb\nURIs: https://apt.postgresql.org/pub/repos/apt\nSuites: %s-pgdg\nComponents: main\nSigned-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc\n' "$VERSION_CODENAME" | sudo tee /etc/apt/sources.list.d/pgdg.sources > /dev/null
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client-17
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -415,11 +391,16 @@ jobs:
           cache: "npm"
           cache-dependency-path: package-lock.json
 
+      - name: Verify existing PostgreSQL and trusted runner
+        env:
+          PAYPLANNER_TEST_POSTGRES: ${{ secrets.PAYPLANNER_XSENUS_TEST_POSTGRES }}
+        run: node scripts/verify-xsenus-runner.mjs postgres
+
       - name: Install FE deps
         run: npm ci
 
       - name: Install browsers for writable and restored CRM verification
-        run: npx playwright install --with-deps chromium chrome
+        run: npx playwright install chromium chrome
 
       - name: Install pinned Playwright CLI for writable CRM verification
         run: |
@@ -451,9 +432,9 @@ jobs:
           PAYPLANNER_TEST_RESTORED_BROWSER: "true"
           BackgroundServices__Enabled: "false"
           Email__Enabled: "false"
-          PAYPLANNER_TEST_POSTGRES: Host=127.0.0.1;Port=5432;Database=postgres;Username=postgres;Password=postgres;Pooling=false
-          PAYPLANNER_TEST_PG_DUMP: /usr/lib/postgresql/17/bin/pg_dump
-          PAYPLANNER_TEST_PSQL: /usr/lib/postgresql/17/bin/psql
+          PAYPLANNER_TEST_POSTGRES: ${{ secrets.PAYPLANNER_XSENUS_TEST_POSTGRES }}
+          PAYPLANNER_TEST_PG_DUMP: C:/Program Files/PostgreSQL/17/bin/pg_dump.exe
+          PAYPLANNER_TEST_PSQL: C:/Program Files/PostgreSQL/17/bin/psql.exe
           EXPECTED_MANIFEST_SHA: ${{ needs.backend-build.outputs.manifest-sha }}
         run: |
           set -euo pipefail
@@ -475,12 +456,18 @@ jobs:
 
   backend:
     needs: [backend-build, backend-test, backend-browser]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64, payplanner-xsenus]
+    timeout-minutes: 10
     outputs:
       backend-artifact-id: ${{ needs.backend-build.outputs.backend-artifact-id }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v5
@@ -537,9 +524,23 @@ jobs:
           set -euo pipefail
           dotnet tools/PayPlanner.TestShards/bin/Release/net9.0/PayPlanner.TestShards.dll verify --manifest test-plan.json --manifest-sha "$EXPECTED_MANIFEST_SHA" --results-root test-results
 
+      - name: Produce timing estimates from the qualified full run
+        env:
+          EXPECTED_MANIFEST_SHA: ${{ needs.backend-build.outputs.manifest-sha }}
+        run: |
+          set -euo pipefail
+          dotnet tools/PayPlanner.TestShards/bin/Release/net9.0/PayPlanner.TestShards.dll timings --manifest test-plan.json --manifest-sha "$EXPECTED_MANIFEST_SHA" --results-root test-results --output "$RUNNER_TEMP/payplanner-test-timings.json"
+
+      - name: Cache qualified backend timing estimates
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ runner.temp }}/payplanner-test-timings.json
+          key: backend-timings-v1-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+
   deploy:
     needs: [frontend, backend-format, backend]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v6

@@ -349,13 +349,7 @@ public sealed class ExternalAuthControllerSecurityTests
         finally
         {
             NpgsqlConnection.ClearAllPools();
-            await using var terminate = adminConnection.CreateCommand();
-            terminate.CommandText = "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = @databaseName";
-            terminate.Parameters.AddWithValue("databaseName", databaseName);
-            await terminate.ExecuteNonQueryAsync();
-            await using var drop = adminConnection.CreateCommand();
-            drop.CommandText = $"DROP DATABASE IF EXISTS \"{databaseName}\"";
-            await drop.ExecuteNonQueryAsync();
+            await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(adminConnection, databaseName);
             NpgsqlConnection.ClearAllPools();
         }
     }

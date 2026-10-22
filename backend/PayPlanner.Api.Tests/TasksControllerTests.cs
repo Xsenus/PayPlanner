@@ -2846,6 +2846,158 @@ public class TasksControllerTests
         Assert.Null(stored.Result);
     }
 
+    [Theory]
+    [InlineData("pending", true, false)]
+    [InlineData("paid", true, false)]
+    [InlineData("missing", true, false)]
+    [InlineData("pending", false, false)]
+    [InlineData("paid", false, false)]
+    [InlineData("missing", false, false)]
+    [InlineData("pending", true, true)]
+    [InlineData("paid", true, true)]
+    [InlineData("missing", true, true)]
+    [InlineData("pending", false, true)]
+    [InlineData("paid", false, true)]
+    [InlineData("missing", false, true)]
+    public async Task UpdateStatus_CompletedResultCorrectionPreservesFinancesAndDoesNotCompleteAgain(string paymentState, bool admin, bool fullEdit)
+    {
+        await using var db = await CreateContextAsync();
+        var author = admin
+            ? await CreateAdminUserAsync(db, "result-correction@fixture.local", "Автор результата")
+            : await CreateTaskUserAsync(db, "result-correction@fixture.local", "Автор результата", canEdit: true);
+        var assignee = await CreateAdminUserAsync(db, "result-contractor@fixture.local", "Исполнитель", isExternalContractor: true);
+        var client = await CreateClientAsync(db, "Клиент исправления результата");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id, result: "Первоначальный результат");
+        task.Status = "done";
+        task.RecurrenceEnabled = true;
+        task.RecurrenceFrequency = "monthly";
+        task.RecurrenceInterval = 1;
+        task.RecurrenceDayOfMonth = task.DueAt.Day;
+        task.RecurrenceTimeMinutes = 12 * 60;
+        task.RecurrenceTimeZoneId = "UTC";
+        task.ContractorPaymentEnabled = true;
+        task.ContractorPaymentAmount = 900m;
+        task.ContractorPaymentOnResult = true;
+        task.ContractorPaymentResultDelayDays = 5;
+        if (paymentState != "missing")
+        {
+            var paid = paymentState == "paid";
+            task.ContractorPayment = new Payment
+            {
+                Type = PaymentType.Expense,
+                DocumentKind = DocumentKind.Payment,
+                Status = paid ? PaymentStatus.Completed : PaymentStatus.Pending,
+                Amount = 800m,
+                PaidAmount = paid ? 800m : 0m,
+                IsPaid = paid,
+                Date = new DateTime(2026, 10, 1),
+                PlannedDate = new DateTime(2026, 10, 1),
+                Description = "Сохранённая выплата",
+                CounterpartyName = "Исполнитель",
+                Notes = "История выплаты",
+                SystemNotes = "Сохранённые сведения",
+                CreatedAt = DateTime.UtcNow,
+            };
+        }
+        await db.SaveChangesAsync();
+        var dueAt = task.DueAt;
+        var paymentId = task.ContractorPaymentId;
+        async Task<string> Finances() => JsonSerializer.Serialize(await db.Payments.AsNoTracking().OrderBy(row => row.Id)
+            .Select(row => new
+            {
+                row.Id,
+                row.Type,
+                row.Status,
+                row.Amount,
+                row.PaidAmount,
+                row.IsPaid,
+                row.Date,
+                row.PlannedDate,
+                row.PaidDate,
+                row.LastPaymentDate,
+                row.Description,
+                row.CounterpartyName,
+                row.SystemNotes
+            }).ToArrayAsync());
+        var finances = await Finances();
+        var notifications = new RecordingNotificationService();
+        var controller = CreateController(db, notifications, author);
+        UpsertTaskJournalItemRequest EditRequest() => new()
+        {
+            ClientId = task.ClientId,
+            ClientCaseId = task.ClientCaseId,
+            Title = task.Title,
+            Description = task.Description,
+            AuthorUserId = task.AuthorUserId,
+            AssigneeUserId = task.AssigneeUserId,
+            AssigneeName = task.AssigneeName,
+            DueAt = task.DueAt,
+            PlannedDurationMinutes = task.PlannedDurationMinutes,
+            ApprovalDueAt = task.ApprovalDueAt,
+            Status = "done",
+            Result = "Исправленный результат",
+            ContractorPaymentEnabled = task.ContractorPaymentEnabled,
+            ContractorPaymentAmount = task.ContractorPaymentAmount,
+            ContractorPaymentDueDate = task.ContractorPaymentDueDate,
+            ContractorPaymentOnResult = task.ContractorPaymentOnResult,
+            ContractorPaymentResultDelayDays = task.ContractorPaymentResultDelayDays,
+            RecurrenceEnabled = task.RecurrenceEnabled,
+            RecurrenceFrequency = task.RecurrenceFrequency,
+            RecurrenceInterval = task.RecurrenceInterval,
+            RecurrenceDayOfMonth = task.RecurrenceDayOfMonth,
+            RecurrenceTimeMinutes = task.RecurrenceTimeMinutes,
+            RecurrenceTimeZoneId = task.RecurrenceTimeZoneId,
+        };
+        foreach (var _ in Enumerable.Range(0, 2))
+        {
+            var response = fullEdit
+                ? await controller.UpdateTask(task.Id, EditRequest(), CancellationToken.None)
+                : await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+                { Status = "done", Result = "Исправленный результат" }, CancellationToken.None);
+            Assert.IsType<OkObjectResult>(response.Result);
+        }
+        db.ChangeTracker.Clear();
+        var stored = await db.TaskJournalItems.SingleAsync(row => row.Id == task.Id);
+        Assert.Equal("done", stored.Status);
+        Assert.Equal("Исправленный результат", stored.Result);
+        Assert.Equal(dueAt, stored.DueAt);
+        Assert.Equal(paymentId, stored.ContractorPaymentId);
+        Assert.Equal(finances, await Finances());
+        Assert.Equal(1, await db.TaskJournalItems.CountAsync());
+        Assert.Empty(notifications.CompletedTaskIds);
+        Assert.Single(await db.TaskJournalComments.Where(row => row.TaskJournalItemId == task.Id
+            && row.Text.Contains(fullEdit ? "Результат" : "результат обновлён")).ToArrayAsync());
+        if (fullEdit && paymentState == "pending")
+        {
+            var changePayment = EditRequest();
+            changePayment.ContractorPaymentAmount = 950m;
+            Assert.IsType<OkObjectResult>((await controller.UpdateTask(task.Id, changePayment, CancellationToken.None)).Result);
+            db.ChangeTracker.Clear();
+            Assert.Equal(950m, await db.Payments.Where(row => row.Id == paymentId).Select(row => row.Amount).SingleAsync());
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task UpdateStatus_CompletedResultCorrectionStillRequiresPermission(bool author)
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateTaskUserAsync(db, "result-denied@fixture.local", "Без прав редактирования", canEdit: false);
+        var other = await CreateAdminUserAsync(db, "result-other@fixture.local", "Другой сотрудник");
+        var client = await CreateClientAsync(db, "Клиент защищённого результата");
+        var task = await CreateTaskAsync(db, author ? user.Id : other.Id, client.Id, author ? other.Id : user.Id, result: "Защищённый результат");
+        task.Status = "done";
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), user);
+        var response = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        { Status = "done", Result = "Запрещённое изменение" }, CancellationToken.None);
+        Assert.IsType<ForbidResult>(response.Result);
+        db.ChangeTracker.Clear();
+        Assert.Equal("Защищённый результат", await db.TaskJournalItems.Where(row => row.Id == task.Id).Select(row => row.Result).SingleAsync());
+        Assert.Empty(await db.TaskJournalComments.Where(row => row.TaskJournalItemId == task.Id).ToArrayAsync());
+    }
+
     [Fact]
     public async Task UpdateStatus_DoneCreatesExactlyOneRecurringTaskWithoutResultCommentsFilesOrPayment()
     {

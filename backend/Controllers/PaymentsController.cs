@@ -67,7 +67,23 @@ public class PaymentsController : ControllerBase
         => await _db.Payments
             .AsNoTracking()
             .ApplyPaymentVisibility(visibility)
+            .ApplyUnambiguousInvoiceLinks()
             .AnyAsync(payment => payment.Id == id, ct);
+
+    private async Task<IActionResult?> ValidateInvoiceLinkAccessAsync(Payment payment, CancellationToken ct)
+    {
+        if (!payment.InvoiceId.HasValue) return null;
+        var visibility = await ResolvePaymentsVisibilityAsync(ct)
+            ?? await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        if (visibility?.SeesAll == true
+            && await _db.Invoices.AnyAsync(invoice => invoice.Id == payment.InvoiceId && !invoice.Payments.Any(), ct))
+            return null;
+        if (visibility is null || !await _db.Payments.AsNoTracking().ApplyPaymentVisibility(visibility)
+            .ApplyUnambiguousInvoiceLinks().AnyAsync(document => document.InvoiceId == payment.InvoiceId
+                && document.DocumentKind == DocumentKind.Invoice, ct))
+            return NotFound();
+        return null;
+    }
 
     private async Task<int[]> ResolvePaymentNotificationCandidatesAsync(
         IEnumerable<int> candidateUserIds,
@@ -446,6 +462,7 @@ public class PaymentsController : ControllerBase
         }
 
         await SyncInvoiceLinkAsync(model, ct);
+        if (await ValidateInvoiceLinkAccessAsync(model, ct) is { } invalidInvoice) return invalidInvoice;
         await PopulateMissingExpenseAttributionFromCaseAsync(model, ct);
         var createValidationError = await ValidatePaymentAttributionAsync(model, ct);
         if (createValidationError is not null) return createValidationError;
@@ -577,6 +594,7 @@ public class PaymentsController : ControllerBase
         e.SystemNotes = MergeSystemNotes(originalSystemNotes, model.SystemNotes);
 
         await SyncInvoiceLinkAsync(e, ct);
+        if (await ValidateInvoiceLinkAccessAsync(e, ct) is { } invalidInvoice) return invalidInvoice;
         await PopulateMissingExpenseAttributionFromCaseAsync(e, ct);
         var updateValidationError = await ValidatePaymentAttributionAsync(e, ct);
         if (updateValidationError is not null) return updateValidationError;
@@ -1833,6 +1851,7 @@ public class PaymentsController : ControllerBase
             await SyncInvoiceLinkAsync(source, ct);
         }
 
+        if (await ValidateInvoiceLinkAccessAsync(source, ct) is { } invalidInvoice) return invalidInvoice;
         var sourceValidationError = await ValidatePaymentAttributionAsync(source, ct);
         if (sourceValidationError is not null) return sourceValidationError;
         PaymentDomainService.Normalize(source);
@@ -3104,6 +3123,7 @@ public class PaymentsController : ControllerBase
 
     private async Task<Payment?> LoadPaymentForRemainderTransferAsync(int id, CancellationToken ct)
         => await _db.Payments
+            .ApplyUnambiguousInvoiceLinks()
             .Include(payment => payment.Responsibles)
             .Include(payment => payment.InvoiceClientCases)
             .FirstOrDefaultAsync(payment => payment.Id == id, ct);
@@ -3122,6 +3142,7 @@ public class PaymentsController : ControllerBase
         }
 
         var legacyCandidates = await _db.Payments
+            .ApplyUnambiguousInvoiceLinks()
             .Include(payment => payment.Responsibles)
             .Include(payment => payment.InvoiceClientCases)
             .Where(payment => payment.SystemNotes != null
@@ -3501,6 +3522,9 @@ public class PaymentsController : ControllerBase
     [HttpPost("repair-invoice-links")]
     public async Task<IActionResult> RepairInvoiceLinks(CancellationToken ct)
     {
+        if (!await _db.IsUserAdminOrLegacyFallbackAsync(User, ct)) return Forbid();
+        if (await _db.Payments.Where(payment => payment.Invoice != null).HasAmbiguousInvoiceLinksAsync(ct))
+            return Conflict(new { message = InvoiceQueryExtensions.ConflictMessage });
         var payments = await _db.Payments
             .Where(p => (p.Account != null && p.Account != "") || p.InvoiceId != null)
             .OrderBy(p => p.Id)
@@ -3631,6 +3655,7 @@ public class PaymentsController : ControllerBase
         {
             var linked = await _db.Payments
                 .AsNoTracking()
+                .ApplyUnambiguousInvoiceLinks()
                 .Include(x => x.Invoice)
                 .Include(x => x.InvoiceClientCases)
                 .FirstOrDefaultAsync(x => x.InvoiceId == payment.InvoiceId.Value && x.DocumentKind == DocumentKind.Invoice, ct);
@@ -3719,6 +3744,7 @@ public class PaymentsController : ControllerBase
 
         var candidates = await _db.Payments
             .AsNoTracking()
+            .ApplyUnambiguousInvoiceLinks()
             .Where(x => x.InvoiceId.HasValue && x.ClientId == payment.ClientId.Value && x.Type == payment.Type)
             .Where(x => caseId.HasValue
                 ? x.ClientCaseId == caseId.Value || x.InvoiceClientCases.Any(link => link.ClientCaseId == caseId.Value)

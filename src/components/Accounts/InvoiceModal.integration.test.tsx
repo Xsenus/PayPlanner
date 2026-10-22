@@ -3343,9 +3343,16 @@ describe('InvoiceModal integration', () => {
     });
   });
 
-  it('downloads document variant without signature and seal on demand', async () => {
+  it.each([
+    { format: 'pdf', label: 'PDF' },
+    { format: 'word', label: 'Word' },
+  ])('keeps the $label invoice download alive until the browser consumes it', async ({ format, label }) => {
     const downloadMock = vi.mocked(apiService.downloadInvoiceDocument);
     downloadMock.mockClear();
+    const clicks: { connected: boolean; filename: string; href: string }[] = [];
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      clicks.push({ connected: this.isConnected, filename: this.download, href: this.href });
+    });
 
     const invoice = {
       id: 551,
@@ -3376,11 +3383,17 @@ describe('InvoiceModal integration', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: /Скачать/i }));
-    fireEvent.click(screen.getByRole('button', { name: 'Счет: PDF без подписи и печати' }));
+    fireEvent.click(screen.getByRole('button', { name: `Счет: ${label} без подписи и печати` }));
 
     await waitFor(() => {
-      expect(downloadMock).toHaveBeenCalledWith(551, 'pdf', { includeSignatureAndSeal: false });
+      expect(downloadMock).toHaveBeenCalledWith(551, format, { includeSignatureAndSeal: false });
+      expect(click).toHaveBeenCalledTimes(1);
     });
+    expect(clicks[0]).toMatchObject({ connected: true, href: 'blob:test' });
+    expect(clicks[0].filename).toMatch(format === 'pdf' ? /\.pdf$/ : /\.docx$/);
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+    expect(document.querySelector('a[download]')).toBeNull();
+    await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:test'), { timeout: 2000 });
   });
 
   it('downloads invoice offer with the offer template', async () => {

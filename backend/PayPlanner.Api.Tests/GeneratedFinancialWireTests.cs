@@ -21,12 +21,32 @@ public sealed partial class ManagedCaseDocumentWireTests
     [InlineData("contract", false, true)]
     public async Task RealBrowserFinancialLostReadyAcknowledgementDiscoversOriginalWinnerWithoutNewPost(string kind, bool modal, bool editor)
     {
-        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(uploadCapacityChecks: true);
+        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(template: sqliteTemplate, uploadCapacityChecks: true);
         var caseId = await LoginAndCreateCaseAsync(runtime); int clientId;
         await using (var seed = runtime.OpenDatabase())
         {
             var clientCase = await seed.ClientCases.SingleAsync(c => c.Id == caseId);
             clientId = Assert.IsType<int>(clientCase.ClientId); clientCase.Title = "Synthetic financial browser case";
+            if (kind == "invoice" && editor)
+            {
+                static string Image(string svg) => "data:image/svg+xml;base64," + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(svg));
+                var company = new LegalEntity
+                {
+                    ShortName = "ТЕСТОВЫЙ ПОСТАВЩИК",
+                    FullName = "Синтетическая организация для проверки печати",
+                    Inn = "0000000000",
+                    Kpp = "000000000",
+                    Address = "Тестовый адрес, дом 1",
+                    BankAccountsJson = "[{\"bank\":\"Тестовый банк\",\"bik\":\"000000000\",\"accountNumber\":\"00000000000000000000\"}]",
+                    SealDataUrl = Image("<svg xmlns='http://www.w3.org/2000/svg' width='90' height='90'><circle cx='45' cy='45' r='40' fill='none' stroke='blue' stroke-width='3'/><text x='45' y='50' font-size='16' text-anchor='middle' fill='blue'>ТЕСТ</text></svg>"),
+                    DirectorSignatureDataUrl = Image("<svg xmlns='http://www.w3.org/2000/svg' width='120' height='40'><text x='5' y='28' font-size='20' fill='blue'>ОБРАЗЕЦ</text></svg>"),
+                    DocumentDirectorJson = "{\"position\":\"Директор\",\"lastName\":\"Тестовый\",\"firstName\":\"Иван\",\"noMiddleName\":true}",
+                };
+                seed.LegalEntities.Add(company);
+                await seed.SaveChangesAsync();
+                seed.SystemSettings.AddRange(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = $"[{company.Id}]" },
+                    new SystemSetting { Key = "legalEntities.defaultMainCompanyId", Value = company.Id.ToString() });
+            }
             seed.ClientCaseWorkOrders.Add(new ClientCaseWorkOrder
             {
                 ClientCaseId = caseId,
@@ -41,6 +61,22 @@ public sealed partial class ManagedCaseDocumentWireTests
         }
         await runtime.CheckCaseRetirementBrowserAsync(caseId, Guid.NewGuid(), true,
             $"financial-{kind}-{(editor ? "editor" : modal ? "modal" : "edit")}-lost", clientId, financialDocuments: true);
+        if (kind == "invoice" && editor)
+        {
+            foreach (var name in new[] { "invoice-print-plain.pdf", "invoice-print-signed.pdf", "invoice-download-pdf.pdf", "invoice-download-word.docx" })
+            {
+                var bytes = await File.ReadAllBytesAsync(Path.Combine(runtime.Root, name));
+                Assert.True(bytes.Length > 1000);
+                Assert.Equal(name.EndsWith(".pdf", StringComparison.Ordinal) ? "%PDF-" : "PK", System.Text.Encoding.ASCII.GetString(bytes, 0, name.EndsWith(".pdf", StringComparison.Ordinal) ? 5 : 2));
+                if (Environment.GetEnvironmentVariable("PAYPLANNER_TEST_PRINT_ARTIFACT_ROOT") is { } artifacts)
+                {
+                    Assert.True(Path.IsPathFullyQualified(artifacts));
+                    Directory.CreateDirectory(artifacts);
+                    await using var file = new FileStream(Path.Combine(artifacts, name), FileMode.CreateNew);
+                    await file.WriteAsync(bytes);
+                }
+            }
+        }
         await using var proof = runtime.OpenDatabase();
         var document = Assert.Single(await proof.ClientCaseDocuments.ToArrayAsync());
         var attempt = Assert.Single(await proof.GeneratedFinancialDocumentAttempts.ToArrayAsync());
@@ -70,7 +106,7 @@ public sealed partial class ManagedCaseDocumentWireTests
     public async Task RealBrowserFinancialYandexCopiesPreserveAttemptAndUnsavedCaseFields(string kind, bool modal, bool editor)
     {
         await using var endpoint = await LoopbackYandexDiskEndpoint.StartAsync();
-        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(workerEnabled: true,
+        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(template: sqliteTemplate, workerEnabled: true,
             uploadCapacityChecks: true, yandexCopy: endpoint);
         var caseId = await LoginAndCreateCaseAsync(runtime); int clientId;
         await using (var seed = runtime.OpenDatabase())
@@ -149,7 +185,7 @@ public sealed partial class ManagedCaseDocumentWireTests
     public async Task RealHttpFinancialYandexCopiesPublishOneFrozenFinancialResultAcrossRestart(string kind, string failure)
     {
         await using var endpoint = await LoopbackYandexDiskEndpoint.StartAsync();
-        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(workerEnabled: true,
+        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(template: sqliteTemplate, workerEnabled: true,
             uploadCapacityChecks: true, yandexCopy: endpoint);
         var caseId = await LoginAndCreateCaseAsync(runtime);
         await using (var seed = runtime.OpenDatabase())

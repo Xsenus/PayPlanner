@@ -84,6 +84,39 @@ public sealed class TaskBillingConcurrencyTests
         Assert.Equal(task.ClientCaseId, invoice.ClientCaseId);
     }
 
+    [Fact]
+    public async Task FixtureCleanupWaitsForOwnedConnectionsWithoutTerminatingThem()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        if (fixture is null) return;
+        await using var held = fixture.Open();
+        await held.Database.OpenConnectionAsync();
+        var databaseName = held.Database.GetDbConnection().Database;
+        var waiting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.WaitingForCleanupConnections = () => waiting.TrySetResult();
+        var cleanup = fixture.DisposeAsync().AsTask();
+        try
+        {
+            var reached = await Task.WhenAny(waiting.Task, cleanup).WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Same(waiting.Task, reached);
+            Assert.False(cleanup.IsCompleted);
+            Assert.Equal(1, await held.Database.SqlQueryRaw<int>("SELECT 1 AS \"Value\"").SingleAsync());
+        }
+        finally
+        {
+            await held.Database.CloseConnectionAsync();
+            await cleanup;
+        }
+
+        var settings = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES"))
+        { Database = "postgres", Pooling = false };
+        await using var admin = new NpgsqlConnection(settings.ConnectionString);
+        await admin.OpenAsync();
+        await using var exists = new NpgsqlCommand("SELECT count(*) FROM pg_database WHERE datname = @name", admin);
+        exists.Parameters.AddWithValue("name", databaseName);
+        Assert.Equal(0L, (long)(await exists.ExecuteScalarAsync())!);
+    }
+
     private sealed class Fixture(string connectionString, string adminConnectionString, string databaseName) : IAsyncDisposable
     {
         public int UserId { get; private set; }
@@ -93,6 +126,7 @@ public sealed class TaskBillingConcurrencyTests
         public int OriginalCaseId { get; private set; }
         public int OtherClientId { get; private set; }
         public int OtherCaseId { get; private set; }
+        public Action? WaitingForCleanupConnections { get; set; }
 
         public PostgreSqlPaymentContext Open(IInterceptor? interceptor = null)
         {
@@ -259,8 +293,7 @@ public sealed class TaskBillingConcurrencyTests
             Assert.StartsWith("payplanner_task_billing_", databaseName, StringComparison.Ordinal);
             await using var connection = new NpgsqlConnection(adminConnectionString);
             await connection.OpenAsync();
-            await using var drop = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{databaseName}\" WITH (FORCE)", connection);
-            await drop.ExecuteNonQueryAsync();
+            await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(connection, databaseName, WaitingForCleanupConnections);
         }
     }
 

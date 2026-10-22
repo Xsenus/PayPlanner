@@ -1043,6 +1043,7 @@ public class InvoicesControllerCoverageTests
 
         Assert.IsType<ForbidResult>((await nonAdminController.CleanupCounterpartyNames(CancellationToken.None)).Result);
         Assert.IsType<ForbidResult>((await nonAdminController.CleanupOrphanInvoices(CancellationToken.None)).Result);
+        Assert.IsType<ForbidResult>((await nonAdminController.MigrateLegacyInvoiceLinks(CancellationToken.None)).Result);
 
         var adminController = CreateController(db, isAdmin: true, userId: null);
         Assert.IsType<BadRequestObjectResult>((await adminController.UpsertRulesSettings(new InvoiceRulesSettingsRequest
@@ -1073,6 +1074,7 @@ public class InvoicesControllerCoverageTests
         }, CancellationToken.None)).Result);
         Assert.IsType<ForbidResult>((await controller.CleanupCounterpartyNames(CancellationToken.None)).Result);
         Assert.IsType<ForbidResult>((await controller.CleanupOrphanInvoices(CancellationToken.None)).Result);
+        Assert.IsType<ForbidResult>((await controller.MigrateLegacyInvoiceLinks(CancellationToken.None)).Result);
         Assert.IsType<ForbidResult>((await controller.RepairLegacyInstallments(
             invoiceEntityId: 1,
             dryRun: true,
@@ -1435,7 +1437,7 @@ public class InvoicesControllerCoverageTests
     public async Task MigrateLegacyInvoiceLinks_UsesUserNumberingSettings_ForNumericConflicts()
     {
         await using var db = await CreateContextAsync();
-        var userId = await CreateUserAsync(db, "Migration Numbering User");
+        var userId = await CreateUserAsync(db, "Migration Numbering User", roleName: "admin");
         var clientId = await CreateClientAsync(db, "Migration Numbering Client");
         var clientCaseId = await CreateClientCaseAsync(db, clientId, "Migration Numbering Case");
 
@@ -1479,7 +1481,7 @@ public class InvoicesControllerCoverageTests
         });
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db, isAdmin: false, userId: userId);
+        var controller = CreateController(db, isAdmin: true, userId: userId);
 
         var action = await controller.MigrateLegacyInvoiceLinks(CancellationToken.None);
 

@@ -14,8 +14,101 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public class InvoicesControllerListTests
+public partial class InvoicesControllerListTests
 {
+    [Theory]
+    [InlineData(null)]
+    [InlineData("SEARCH-109")]
+    [InlineData("Lookup Client")]
+    [InlineData("second historical row")]
+    public async Task GetById_OpensEveryRegistryLink_WhenHistoricalInvoiceHasSeveralDocumentRows(string? search)
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db, "Lookup Client");
+        var first = await CreateInvoiceDocumentAsync(db, "SEARCH-109", new DateTime(2025, 6, 7), 9750m);
+        first.ClientId = client.Id;
+        var second = CreatePayment(first.Date, 10750m, "second historical row");
+        second.DocumentKind = DocumentKind.Invoice;
+        second.InvoiceId = first.InvoiceId;
+        second.Account = first.Account;
+        second.AccountDate = first.AccountDate;
+        second.ClientId = client.Id;
+        db.Payments.Add(second);
+        await db.SaveChangesAsync();
+        var before = await db.Payments.AsNoTracking().OrderBy(row => row.Id)
+            .Select(row => new { row.Id, row.InvoiceId, row.Account, row.Amount, row.PaidAmount, row.Status }).ToListAsync();
+
+        var registry = new AccountsController(db);
+        var page = Assert.IsType<AccountsPageResponse>(Assert.IsType<OkObjectResult>((await registry.GetRegistry(
+            null, null, null, search, null, null, null, clientId: client.Id)).Result).Value);
+        var row = Assert.Single(page.Items);
+        var link = Assert.IsType<InvoiceDto>(row.Invoice);
+        // Keep the established editor identity; the display aggregate must not become an editor ID.
+        Assert.Equal(first.Id, link.Id);
+        var opened = Assert.IsType<InvoiceDto>(Assert.IsType<OkObjectResult>((await CreateController(db)
+            .GetById(link.Id, CancellationToken.None)).Result).Value);
+        Assert.Equal(first.Id, opened.Id);
+        Assert.Equal(client.Id, opened.ClientId);
+        Assert.Equal(first.InvoiceId, opened.InvoiceEntityId);
+        Assert.Equal(before, await db.Payments.AsNoTracking().OrderBy(item => item.Id)
+            .Select(item => new { item.Id, item.InvoiceId, item.Account, item.Amount, item.PaidAmount, item.Status }).ToListAsync());
+    }
+
+    [Theory]
+    [InlineData("number", false)]
+    [InlineData("client", false)]
+    [InlineData("number", true)]
+    [InlineData("client", true)]
+    public async Task Get_SearchKeepsDistinctInvoiceIds_WithSameNumberAndHidesUnrelatedOrArchivedDocuments(string by, bool restricted)
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = restricted ? "lookup-own" : "admin", Description = "Lookup fixture" };
+        role.Permissions.Add(new RolePermission { Section = RolePermissionCatalog.Accounts, CanView = true, ViewScope = DataVisibilityScope.Own });
+        var user = new User { Email = "lookup@fixture.local", FullName = "Lookup", PasswordHash = "unused", Role = role, IsActive = true, IsApproved = true };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        var client = await CreateClientAsync(db, "Lookup Client");
+        client.ResponsibleUserId = user.Id;
+        var outside = await CreateClientAsync(db, "Other Client");
+        var first = await CreateInvoiceDocumentAsync(db, "SAME-109", new DateTime(2025, 6, 7), 100m);
+        first.ClientId = client.Id;
+        var second = await CreateInvoiceDocumentAsync(db, "SAME-109", new DateTime(2026, 6, 7), 200m);
+        second.ClientId = client.Id;
+        var foreign = await CreateInvoiceDocumentAsync(db, "SAME-109", new DateTime(2026, 6, 8), 900m);
+        foreign.ClientId = outside.Id;
+        var archived = await CreateInvoiceDocumentAsync(db, "SAME-109", new DateTime(2026, 6, 9), 300m);
+        archived.ClientId = client.Id;
+        db.Entry(archived).Property<bool>("IsDeleted").CurrentValue = true;
+        await db.SaveChangesAsync();
+        var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "Fixture"));
+        var controller = CreateController(db);
+        controller.ControllerContext.HttpContext.User = principal;
+        var registry = new AccountsController(db) { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = principal } } };
+        var search = by == "number" ? "SAME-109" : "lookup client";
+        var page = Assert.IsType<AccountsPageResponse>(Assert.IsType<OkObjectResult>((await registry.GetRegistry(
+            null, null, null, search, null, null, null, clientId: client.Id)).Result).Value);
+        Assert.Equal(2, page.Total);
+        Assert.Equal(new[] { first.Id, second.Id }, page.Items.Select(row => row.Invoice!.Id).Order().ToArray());
+        foreach (var id in new[] { first.Id, second.Id })
+        {
+            var opened = Assert.IsType<InvoiceDto>(Assert.IsType<OkObjectResult>((await controller.GetById(id, CancellationToken.None)).Result).Value);
+            Assert.Equal(id, opened.Id);
+            Assert.Equal(client.Id, opened.ClientId);
+        }
+        Assert.IsType<NotFoundResult>((await controller.GetById(archived.Id, CancellationToken.None)).Result);
+        if (restricted)
+        {
+            Assert.IsType<NotFoundResult>((await controller.GetById(foreign.Id, CancellationToken.None)).Result);
+            var visible = Assert.IsType<AccountsPageResponse>(Assert.IsType<OkObjectResult>((await registry.GetRegistry(
+                null, null, null, "SAME-109", null, null, null)).Result).Value);
+            Assert.DoesNotContain(visible.Items, row => row.Invoice!.Id == foreign.Id);
+        }
+        var list = ExtractInvoiceItems(Assert.IsType<OkObjectResult>(await controller.Get(null, null, null,
+            client.Id, null, null, null, null, search, null, null, null, page: 1, pageSize: 20, ct: CancellationToken.None)));
+        Assert.Equal(new[] { first.Id, second.Id }, list.Select(row => row.Id).Order().ToArray());
+        Assert.Equal(4, await db.Invoices.IgnoreQueryFilters().CountAsync());
+    }
+
     [Fact]
     public async Task Get_ReturnsSingleInvoiceRow_WhenInvoiceHasInstallmentPayments()
     {

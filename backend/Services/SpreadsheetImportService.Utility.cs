@@ -228,7 +228,7 @@ public sealed partial class SpreadsheetImportService
             : normalized.ToUpperInvariant();
     }
 
-    private static string? ExtractOneCExternalId(string? value)
+    internal static string? ExtractOneCExternalId(string? value)
     {
         var normalized = NormalizeText(value);
         if (string.IsNullOrWhiteSpace(normalized))

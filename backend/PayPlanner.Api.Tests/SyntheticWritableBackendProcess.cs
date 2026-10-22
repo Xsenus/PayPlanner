@@ -236,18 +236,25 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
     public static async Task<SyntheticWritableBackendProcess> StartAsync(string cardMode = "legacy", bool workerEnabled = false,
         LoopbackS3Endpoint? secondCopy = null, bool capacityChecks = false, bool uploadCapacityChecks = false,
         LoopbackYandexDiskEndpoint? yandexCopy = null, SudrfCourtCaseData? courtSource = null, bool localAckFault = false,
-        bool chatAttachments = false)
+        bool chatAttachments = false, SqliteMigratedTemplate? template = null)
     {
         Assert.Contains(cardMode, new[] { "legacy", "modern" });
         var result = new SyntheticWritableBackendProcess(workerEnabled, secondCopy, capacityChecks, uploadCapacityChecks, yandexCopy, courtSource is not null, localAckFault, chatAttachments);
         try
         {
             if (courtSource is not null) await result.SetCourtSourceAsync(courtSource);
+            if (template is not null)
+            {
+                // Reuse only the prepared schema. This runtime owns its independent writable file.
+                await using var clone = await template.CreateFileDatabaseAsync(result.DatabasePath);
+            }
             // Explicit database override exists BEFORE the backend can instantiate notification services.
             await using (var db = result.OpenDatabase())
             {
-                await db.Database.MigrateAsync();
-                db.SystemSettings.Add(new SystemSetting { Key = "notifications.email.enabled", Value = "false" });
+                if (template is null) await db.Database.MigrateAsync();
+                var email = await db.SystemSettings.SingleOrDefaultAsync(row => row.Key == "notifications.email.enabled");
+                if (email is null) db.SystemSettings.Add(new SystemSetting { Key = "notifications.email.enabled", Value = "false" });
+                else email.Value = "false";
                 db.SystemSettings.Add(new SystemSetting { Key = "tasks.taskCardWindowMode", Value = cardMode });
                 await db.SaveChangesAsync();
                 if (yandexCopy is not null)

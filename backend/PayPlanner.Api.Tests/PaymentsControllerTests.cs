@@ -1475,14 +1475,16 @@ public class PaymentsControllerTests
         Assert.Equal("2026-05-20", document.RootElement.GetProperty("item").GetProperty("date").GetString());
     }
 
-    [Fact]
-    public async Task UpdateInvoiceManaged_SyncsGeneratedInstallmentBindingsFromRepresentative()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UpdateInvoiceManaged_SyncsAllowedBindingsButPreservesConflictingHistoricalOwner(bool foreignOwner)
     {
         await using var db = await CreateContextAsync();
 
         var invoiceClient = new Client { Name = "Correct invoice client" };
         var staleClient = new Client { Name = "Stale installment client" };
-        var staleCase = new ClientCase { Client = staleClient, Title = "Stale installment case" };
+        var staleCase = new ClientCase { Client = foreignOwner ? staleClient : invoiceClient, Title = "Stale installment case" };
         var invoice = new Invoice { Number = "166", Date = new DateTime(2025, 9, 16) };
         db.AddRange(invoiceClient, staleClient, staleCase, invoice);
         await db.SaveChangesAsync();
@@ -1499,7 +1501,7 @@ public class PaymentsControllerTests
         installment.InvoiceId = invoice.Id;
         installment.Account = invoice.Number;
         installment.AccountDate = invoice.Date;
-        installment.ClientId = staleClient.Id;
+        installment.ClientId = foreignOwner ? staleClient.Id : invoiceClient.Id;
         installment.ClientCaseId = staleCase.Id;
         installment.SystemNotes = $"{InstallmentPaymentMarker} {{\"Sequence\":1}}";
         db.Payments.AddRange(representative, installment);
@@ -1517,6 +1519,19 @@ public class PaymentsControllerTests
 
         var actionResult = await controller.UpdateInvoiceManaged(installment.Id, update, CancellationToken.None);
 
+        if (foreignOwner)
+        {
+            Assert.IsType<NotFoundResult>(actionResult);
+            db.ChangeTracker.Clear();
+            var unchanged = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == installment.Id);
+            Assert.Equal(staleClient.Id, unchanged.ClientId);
+            Assert.Equal(staleCase.Id, unchanged.ClientCaseId);
+            Assert.Equal(invoice.Id, unchanged.InvoiceId);
+            Assert.Equal(20_000m, unchanged.Amount);
+            Assert.Equal(new DateTime(2026, 4, 30), unchanged.Date);
+            Assert.Equal("Installment 1/17", unchanged.Description);
+            return;
+        }
         var ok = Assert.IsType<OkObjectResult>(actionResult);
         var updated = Assert.IsType<Payment>(ok.Value);
         Assert.Equal(invoice.Id, updated.InvoiceId);
@@ -2205,7 +2220,7 @@ public class PaymentsControllerTests
         db.Payments.AddRange(primaryInvoiceDocument, duplicateInvoiceDocument, orphanPayment);
         await db.SaveChangesAsync();
 
-        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var controller = await CreateAdminRepairControllerAsync(db);
 
         var actionResult = await controller.RepairInvoiceLinks(CancellationToken.None);
 
@@ -2407,7 +2422,7 @@ public class PaymentsControllerTests
         await db.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = ON;");
         db.ChangeTracker.Clear();
 
-        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var controller = await CreateAdminRepairControllerAsync(db);
 
         var actionResult = await controller.RepairInvoiceLinks(CancellationToken.None);
 
@@ -6585,6 +6600,23 @@ public class PaymentsControllerTests
                 },
             },
         };
+    }
+
+    private static async Task<PaymentsController> CreateAdminRepairControllerAsync(PaymentContext db)
+    {
+        var role = await db.Roles.FirstOrDefaultAsync(item => item.Name == "admin") ?? new Role { Name = "admin", Description = "Admin" };
+        var user = new User
+        {
+            Email = $"repair-{Guid.NewGuid():N}@fixture.local",
+            FullName = "Repair admin",
+            PasswordHash = "unused",
+            Role = role,
+            IsActive = true,
+            IsApproved = true
+        };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        return CreatePaymentsController(db, user.Id);
     }
 
     private static NotificationService CreateNotificationService(PaymentContext db)

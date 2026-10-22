@@ -335,8 +335,7 @@ public sealed class StorageReconciliationPagingTests
         finally
         {
             Assert.Matches("^pp_reconcile_paging_[a-f0-9]{32}$", name);
-            await using var drop = new NpgsqlCommand($"DROP DATABASE \"{name}\" WITH (FORCE)", admin);
-            await drop.ExecuteNonQueryAsync();
+            await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(admin, name);
         }
     }
 

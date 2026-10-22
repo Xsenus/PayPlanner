@@ -36,6 +36,7 @@ public sealed partial class SpreadsheetImportService
 
         var parsed = ParseFiles(files);
         await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
         var state = await LoadStateAsync(db, cancellationToken);
         var localToday = await GetCurrentUserLocalDateAsync(db, cancellationToken);
         var preview = BuildPreview(parsed, state, localToday);
@@ -193,6 +194,7 @@ public sealed partial class SpreadsheetImportService
 
         await db.SaveChangesAsync(cancellationToken);
 
+        await transaction.CommitAsync(cancellationToken);
         return await GetBatchCoreAsync(batchId, 1, 25, cancellationToken)
                ?? throw new InvalidOperationException("Не удалось загрузить результат импорта.");
     }

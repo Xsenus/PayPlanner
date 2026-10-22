@@ -374,6 +374,9 @@ public sealed partial class DatabaseImportService
         target.Amount = source.Amount;
         target.ClientId = MapId(maps.Clients, source.ClientId);
         target.ClientCaseId = MapId(maps.ClientCases, source.ClientCaseId);
+        target.LegalEntityId = MapId(maps.LegalEntities, source.LegalEntityId);
+        target.SellerCompanyId = MapId(maps.LegalEntities, source.SellerCompanyId);
+        target.SellerSnapshotJson = source.SellerSnapshotJson;
         target.ContractId = MapId(maps.Contracts, source.ContractId);
         target.DocumentKind = source.DocumentKind;
         target.CreatedAt = source.CreatedAt;
@@ -405,10 +408,13 @@ public sealed partial class DatabaseImportService
         target.Date = source.Date;
         target.Amount = source.Amount;
         target.InvoiceNumber = source.InvoiceNumber;
-        target.InvoiceId = MapId(maps.Invoices, source.InvoiceId);
+        target.InvoiceId = MapId(maps.Payments, source.InvoiceId);
         target.CounterpartyInn = source.CounterpartyInn;
         target.Status = source.Status;
         target.ClientId = MapId(maps.Clients, source.ClientId);
+        target.LegalEntityId = MapId(maps.LegalEntities, source.LegalEntityId);
+        target.SellerCompanyId = MapId(maps.LegalEntities, source.SellerCompanyId);
+        target.SellerSnapshotJson = source.SellerSnapshotJson;
         target.ResponsibleId = MapId(maps.Users, source.ResponsibleId);
         target.Comment = source.Comment;
         target.CreatedAt = source.CreatedAt;

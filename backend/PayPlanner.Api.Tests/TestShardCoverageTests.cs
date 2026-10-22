@@ -8,6 +8,95 @@ namespace PayPlanner.Api.Tests;
 public sealed class TestShardCoverageTests
 {
     [Fact]
+    public void TimingPlanSeparatesSlowMethodsWithoutLosingTheoryRowsOrNewMethods()
+    {
+        using var f = new Fixture();
+        var cases = Enumerable.Range(0, 16).Select(index => new DiscoveredCase(Guid.NewGuid(),
+            "Tests.Duration.Method" + index / 2, "row " + index)).ToArray();
+        var timings = Enumerable.Range(0, 8).Select(index => new MethodTiming("Tests.Duration.Method" + index,
+            index is 0 or 4 ? 900 : 10, 2)).ToArray();
+        var plain = ShardPlan.Create(f.Plan.Revision, "tests.dll", f.Plan.Artifacts, cases, 4);
+        var timed = ShardPlan.Create(f.Plan.Revision, "tests.dll", f.Plan.Artifacts, cases, 4, timings);
+        decimal Longest(TestPlan plan) => plan.Cases.GroupBy(row => row.Shard)
+            .Max(group => group.Sum(row => (decimal)timings.Single(t => t.FullyQualifiedName == row.FullyQualifiedName).AverageTicks));
+        Assert.True(Longest(timed) < Longest(plain));
+        Assert.Equal(cases.Select(row => row.Id).Order(), timed.Cases.Select(row => row.Id).Order());
+        Assert.All(timed.Cases.GroupBy(row => row.FullyQualifiedName), group => Assert.Single(group.Select(row => row.Shard).Distinct()));
+        var reversed = ShardPlan.Create(f.Plan.Revision, "tests.dll", f.Plan.Artifacts, cases.Reverse(), 4, timings.Reverse().ToArray());
+        Assert.Equal(JsonSerializer.Serialize(timed), JsonSerializer.Serialize(reversed));
+        ShardPlan.Validate(timed);
+        var newCase = new DiscoveredCase(Guid.NewGuid(), "Tests.Duration.Unknown", "new theory row");
+        var expanded = ShardPlan.Create(f.Plan.Revision, "tests.dll", f.Plan.Artifacts, cases.Append(newCase), 4, timings);
+        Assert.Contains(expanded.Cases, row => row.Id == newCase.Id);
+        Assert.Equal(cases.Length + 1, expanded.Cases.Length);
+    }
+
+    [Theory]
+    [InlineData("negative")]
+    [InlineData("zero")]
+    [InlineData("no-cases")]
+    [InlineData("duplicate")]
+    [InlineData("filter-injection")]
+    public void InvalidTimingProfileCannotChangeTheTestPlan(string scenario)
+    {
+        using var f = new Fixture();
+        var row = new MethodTiming(f.Cases[0].FullyQualifiedName, 100, 2);
+        var timings = scenario switch
+        {
+            "negative" => new[] { row with { AverageTicks = -1 } },
+            "zero" => new[] { row with { AverageTicks = 0 } },
+            "no-cases" => new[] { row with { Cases = 0 } },
+            "duplicate" => new[] { row, row },
+            "filter-injection" => new[] { row with { FullyQualifiedName = "Tests.Method|FullyQualifiedName~Other" } },
+            _ => throw new ArgumentOutOfRangeException(nameof(scenario)),
+        };
+        Assert.Throws<InvalidDataException>(() => ShardPlan.Create(f.Plan.Revision, "tests.dll", f.Plan.Artifacts, f.Cases, 4, timings));
+    }
+
+    [Fact]
+    public void TimingsRequireACompleteQualifiedRunAndPreserveAllCaseCounts()
+    {
+        using var f = new Fixture();
+        f.WriteAll();
+        var profile = TestTimings.FromQualifiedResults(f.Plan, f.ManifestHash, f.Root);
+        Assert.Equal(f.Plan.Revision, profile.Revision);
+        Assert.Equal(f.ManifestHash, profile.ManifestSha256);
+        Assert.Equal(f.Cases.Length, profile.Methods.Sum(row => row.Cases));
+        Assert.All(profile.Methods, row => Assert.Equal(TimeSpan.FromSeconds(0.5).Ticks, row.AverageTicks));
+        var path = Path.Combine(f.Root, "shard-0", "results.trx");
+        var document = XDocument.Load(path);
+        document.Descendants(Fixture.Ns + "UnitTestResult").First().SetAttributeValue("outcome", "NotExecuted");
+        document.Save(path);
+        Assert.Throws<InvalidDataException>(() => TestTimings.FromQualifiedResults(f.Plan, f.ManifestHash, f.Root));
+    }
+
+    [Fact]
+    public void TimingPlanQualifiesOnlyItsExactUnionAndRejectsAnAlteredAssignment()
+    {
+        using var f = new Fixture(weighted: true);
+        f.WriteAll();
+        Assert.Equal(f.Cases.Length, TrxVerifier.VerifyAll(f.Plan, f.ManifestHash, f.Root).Sum(row => row.Cases));
+        var rows = f.Plan.Cases.ToArray();
+        rows[0] = rows[0] with { Shard = (rows[0].Shard + 1) % 4 };
+        Assert.Throws<InvalidDataException>(() => TrxVerifier.VerifyAll(f.Plan with { Cases = rows }, f.ManifestHash, f.Root));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("-00:00:01")]
+    [InlineData("NaN")]
+    public void MissingOrInvalidDurationCannotProduceATimingBaseline(string? duration)
+    {
+        using var f = new Fixture();
+        f.WriteAll();
+        var path = Path.Combine(f.Root, "shard-0", "results.trx");
+        var document = XDocument.Load(path);
+        document.Descendants(Fixture.Ns + "UnitTestResult").First().SetAttributeValue("duration", duration);
+        document.Save(path);
+        Assert.Throws<InvalidDataException>(() => TestTimings.FromQualifiedResults(f.Plan, f.ManifestHash, f.Root));
+    }
+
+    [Fact]
     public void PlanKeepsEveryTheoryRowWithItsMethodAndUsesFourNonemptyShards()
     {
         using var f = new Fixture();
@@ -242,7 +331,7 @@ public sealed class TestShardCoverageTests
         public TestPlan Plan { get; }
         public string ManifestHash { get; }
 
-        public Fixture()
+        public Fixture(bool weighted = false)
         {
             Directory.CreateDirectory(Root);
             var assembly = Path.Combine(Root, "tests.dll");
@@ -252,7 +341,8 @@ public sealed class TestShardCoverageTests
                 var method = "Tests.Class.Method" + (index / 2);
                 return new DiscoveredCase(Guid.NewGuid(), method, method + "(value: " + index + ")");
             }).ToArray();
-            Plan = ShardPlan.Create(new string('a', 40), "tests.dll", [new("tests.dll", ShardPlan.HashFile(assembly))], Cases, 4);
+            var timings = weighted ? Cases.GroupBy(row => row.FullyQualifiedName).Select((group, index) => new MethodTiming(group.Key, (index + 1) * 100, group.Count())).ToArray() : null;
+            Plan = ShardPlan.Create(new string('a', 40), "tests.dll", [new("tests.dll", ShardPlan.HashFile(assembly))], Cases, 4, timings);
             File.WriteAllText(Manifest, JsonSerializer.Serialize(Plan));
             ManifestHash = ShardPlan.HashFile(Manifest);
         }
@@ -269,7 +359,7 @@ public sealed class TestShardCoverageTests
                 var counters = new XElement(Ns + "Counters", new XAttribute("total", cases.Length), new XAttribute("executed", cases.Length), new XAttribute("passed", cases.Length));
                 foreach (var name in new[] { "failed", "error", "timeout", "aborted", "inconclusive", "passedButRunAborted", "notRunnable", "notExecuted", "disconnected", "warning", "inProgress", "pending" }) counters.Add(new XAttribute(name, 0));
                 new XDocument(new XElement(Ns + "TestRun",
-                    new XElement(Ns + "Results", cases.Select(row => new XElement(Ns + "UnitTestResult", new XAttribute("testId", row.Id), new XAttribute("executionId", Guid.NewGuid()), new XAttribute("testName", row.DisplayName), new XAttribute("outcome", "Passed")))),
+                    new XElement(Ns + "Results", cases.Select(row => new XElement(Ns + "UnitTestResult", new XAttribute("testId", row.Id), new XAttribute("executionId", Guid.NewGuid()), new XAttribute("testName", row.DisplayName), new XAttribute("duration", "00:00:00.5000000"), new XAttribute("outcome", "Passed")))),
                     new XElement(Ns + "TestDefinitions", cases.Select(row => new XElement(Ns + "UnitTest", new XAttribute("id", row.Id), new XAttribute("name", row.DisplayName),
                         new XElement(Ns + "TestMethod", new XAttribute("className", row.FullyQualifiedName[..row.FullyQualifiedName.LastIndexOf('.')]), new XAttribute("name", row.FullyQualifiedName[(row.FullyQualifiedName.LastIndexOf('.') + 1)..]))))),
                     new XElement(Ns + "ResultSummary", new XAttribute("outcome", "Completed"), counters)))
