@@ -2,6 +2,7 @@ using System.Data.Common;
 using System.Net;
 using System.Security.Claims;
 using System.Text.Json;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
@@ -1692,6 +1693,65 @@ public class NotificationServiceTests
         Assert.Equal(paymentId, notification.ObjectId);
         Assert.Single(realtime.Notifications);
         Assert.Single(webPush.Notifications);
+    }
+
+    [Fact]
+    public async Task NotifyTaskCompletedAsync_RetainsMaxNotificationAfterTwentiethDailyMessageWithoutDuplicates()
+    {
+        await using var db = await CreateContextAsync();
+        var (task, author, _, _) = await CreateTaskWithObserverAsync(db, "max-daily-limit");
+        task.Status = "done";
+        var now = new DateTimeOffset(2026, 10, 22, 12, 43, 0, TimeSpan.Zero);
+        var link = new MaxRecipientLink
+        {
+            UserId = author.Id,
+            MaxUserId = 7001,
+            Status = MaxRecipientLinkStatuses.Verified,
+            LinkTokenHash = Guid.NewGuid().ToString("N"),
+            VerifiedAt = now.UtcDateTime.AddDays(-1),
+        };
+        db.MaxRecipientLinks.Add(link);
+        for (var i = 0; i < 20; i++)
+        {
+            db.MaxOutboxMessages.Add(new MaxOutboxMessage
+            {
+                RecipientLink = link,
+                RecipientUserId = author.Id,
+                EventKey = $"earlier:{i}",
+                IdempotencyKey = $"earlier:{i}",
+                Scenario = MaxMessengerScenarios.Notifications,
+                Status = MaxOutboxStatuses.Sent,
+                AttemptCount = 1,
+                SentAt = now.UtcDateTime.AddHours(-1),
+                NextAttemptAt = now.UtcDateTime.AddHours(-1),
+            });
+        }
+        await db.SaveChangesAsync();
+        var settings = new ReadyMaxNotificationService();
+        var clock = new FixedTimeProvider(now);
+        var max = new MaxOutboxService(db, settings, new EphemeralDataProtectionProvider(), clock);
+        var logger = new RecordingLogger<NotificationService>();
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var email = new RecordingEmailService();
+        var telegram = new RecordingTelegramService();
+        var service = CreateService(db, email, telegram, realtime, timeProvider: clock, logger: logger,
+            maxService: settings, maxOutboxService: max,
+            configurationValues: new Dictionary<string, string?> { ["App:FrontendUrl"] = "https://crm.example.test/" });
+
+        await service.NotifyTaskCompletedAsync(task);
+        await service.NotifyTaskCompletedAsync(task);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(UserNotificationTypes.TaskCompleted, notification.Type);
+        var queued = await db.MaxOutboxMessages.SingleAsync(item => item.EventKey == notification.EventKey);
+        Assert.Equal(MaxOutboxStatuses.Queued, queued.Status);
+        Assert.Equal(new DateTime(2026, 10, 22, 17, 0, 0, DateTimeKind.Utc), queued.NextAttemptAt);
+        Assert.Equal(0, queued.AttemptCount);
+        Assert.Equal(21, await db.MaxOutboxMessages.CountAsync());
+        Assert.Single(realtime.ToastEnabledValues);
+        Assert.DoesNotContain(logger.Records, record => record.Level >= LogLevel.Warning);
+        Assert.Empty(email.Messages);
+        Assert.Empty(telegram.Messages);
     }
 
     [Fact]

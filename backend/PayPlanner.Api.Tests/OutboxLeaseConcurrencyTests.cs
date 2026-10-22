@@ -89,6 +89,7 @@ public sealed class OutboxLeaseConcurrencyTests
         };
         var maxLink = new MaxRecipientLink
         {
+            User = user,
             MaxUserId = 7001,
             MaxChatId = 7001,
             Status = MaxRecipientLinkStatuses.Verified,
@@ -116,7 +117,8 @@ public sealed class OutboxLeaseConcurrencyTests
             EventKey = "parallel-max",
             Scenario = MaxMessengerScenarios.Notifications,
             RecipientLinkId = maxLink.Id,
-            ProtectedText = maxProtector.Protect("Безопасное уведомление"),
+            RecipientUserId = user.Id,
+            ProtectedText = maxProtector.Protect(MaxMessageTemplateCatalog.RenderNotification(UserNotificationTypes.SystemAdminWarning)),
             BodyPreview = "Содержимое скрыто: сообщение MAX.",
             IdempotencyKey = Guid.NewGuid().ToString("N"),
             Status = MaxOutboxStatuses.Queued,

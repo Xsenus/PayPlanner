@@ -23,7 +23,7 @@
 | messenger | () => true | да | docs/claude-yougile-development-handoff-2026-10-10.md, docs/claude-yougile-operations-development-spec-2026-10-10.md, docs/development-release-preparation-2026-10-06.md, docs/payplanner-roadmap-coverage-2026-10-14.md, docs/public-access-link-security.md, docs/storage-backup-snapshot-boundary-audit-2026-09-28.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/unpushed-changes-map-2026-10-03.md |
 | profile | () => true | да | docs/development-pause-plan-2026-09-30.md, docs/development-release-preparation-2026-10-06.md, docs/full-project-audit-2026-06-10.md, docs/payplanner-esign-roadmap-2026-10-14.md, docs/payplanner-roadmap-coverage-2026-10-14.md, docs/release-verification-history-2026-10-06.md, docs/storage-resilience-runbook.md, docs/storage-s3-backup-audit-2026-09-22.md |
 | calendar | (permissions) => permissions.calendar.canView | да | docs/action-map-pay-20-task-cards-2026-10-12.md, docs/claude-yougile-development-handoff-2026-10-10.md, docs/date-time-inventory.md, docs/final-acceptance-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/legal-feature-flag-ci-gate-2026-06-10.md, docs/owner-decisions-2026-10-12.md, docs/payplanner-court-roadmap-2026-10-14.md, docs/payplanner-roadmap-coverage-2026-10-14.md, docs/yougile-drafts-continuation-2026-10-12.md, docs/yougile-payplanner-drafts-2026-10-12.md, docs/yougile-work-categories-2026-10-12.md |
-| tasks | (permissions) => permissions.tasks.canView | да | docs/crm-legal-module-gap-report-2026-05-25.md, docs/development-release-preparation-2026-10-06.md, docs/final-acceptance-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/pay-33-36-implementation-log-2026-10-09.md, docs/release-verification-history-2026-10-06.md, docs/report-inventory-2026-08-09.md, docs/storage-resilience-runbook.md, docs/task-critical-events-matrix-2026-07-09.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-journal-query-optimization.md, docs/task-result-approval-current-state-2026-07-09.md, docs/task-template-current-state-2026-07-09.md |
+| tasks | (permissions) => permissions.tasks.canView | да | docs/crm-legal-module-gap-report-2026-05-25.md, docs/deployment-manual-2026-10-22.md, docs/development-release-preparation-2026-10-06.md, docs/final-acceptance-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/pay-33-36-implementation-log-2026-10-09.md, docs/release-verification-history-2026-10-06.md, docs/report-inventory-2026-08-09.md, docs/storage-resilience-runbook.md, docs/task-critical-events-matrix-2026-07-09.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-journal-query-optimization.md, docs/task-result-approval-current-state-2026-07-09.md, docs/task-template-current-state-2026-07-09.md |
 | tasksUntriaged | (permissions) => permissions.tasks.canView | да | нет |
 | tasksControl | (permissions) => permissions.tasks.canView | да | нет |
 | tasksApprovals | (permissions) => permissions.tasks.canView | да | docs/full-project-audit-2026-06-10.md |
@@ -126,7 +126,7 @@
 | CaseDocumentNotificationDispatchWorker | backend/Services/Notifications/CaseDocumentNotificationDispatchWorker.cs | 3 | нет | docs/unpushed-changes-map-2026-10-03.md |
 | InternalChatNoReplyReminderService | backend/Services/Notifications/InternalChatNoReplyReminderService.cs | 7 | да | docs/hosted-service-lifecycle-coverage-2026-06-10.md |
 | InternalChatNotificationRecoveryService | backend/Services/Notifications/InternalChatNotificationRecoveryService.cs | 8 | да | docs/batch-operations-audit-coverage-2026-06-10.md, docs/unpushed-changes-map-2026-10-03.md |
-| MaxOutboxWorker | backend/Services/Notifications/MaxOutboxService.cs | 454 | нет | нет |
+| MaxOutboxWorker | backend/Services/Notifications/MaxOutboxService.cs | 578 | нет | нет |
 | NotificationDeliveryRetentionService | backend/Services/Notifications/NotificationDeliveryRetentionService.cs | 6 | да | docs/batch-operations-audit-coverage-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md |
 | NotificationRetrySchedulerService | backend/Services/Notifications/NotificationRetrySchedulerService.cs | 8 | да | docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md |
 | SmsChannelMonitoringService | backend/Services/Notifications/SmsChannelMonitoringService.cs | 122 | да | нет |
@@ -150,7 +150,7 @@
 | ExternalCalendarTaskSyncOutboxWorker | backend/Services/ExternalCalendarTaskSyncOutboxService.cs:194 | нет |
 | MessengerDocumentOutboxWorker | backend/Services/MessengerDocumentOutboxService.cs:288 | нет |
 | CaseDocumentNotificationDispatchWorker | backend/Services/Notifications/CaseDocumentNotificationDispatchWorker.cs:3 | docs/unpushed-changes-map-2026-10-03.md |
-| MaxOutboxWorker | backend/Services/Notifications/MaxOutboxService.cs:454 | нет |
+| MaxOutboxWorker | backend/Services/Notifications/MaxOutboxService.cs:578 | нет |
 | SalesRequestAutomationService | backend/Services/Requests/SalesRequestAutomationService.cs:9 | docs/pay-33-36-implementation-log-2026-10-09.md |
 
 ## Контроллеры
