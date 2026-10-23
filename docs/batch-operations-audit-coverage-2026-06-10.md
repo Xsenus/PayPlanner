@@ -1,6 +1,8 @@
-## Актуальная инвентаризация — 22 октября 2026
+## Актуальная инвентаризация — 23 октября 2026
 
-Всего **129** мест ExecuteUpdateAsync/ExecuteDeleteAsync по неизменному предикату BatchOperationAuditCoverageTests. Предыдущие описания ниже сохранены как история решений по аудиту; после форматирования их номера строк могут отличаться. Текущие номера приведены в полном перечне здесь. Перечень обновлён по фактическим исходникам после адресных исправлений и форматирования; подготовленные overlays не используются.
+Всего **130** мест ExecuteUpdateAsync/ExecuteDeleteAsync по неизменному предикату BatchOperationAuditCoverageTests. Предыдущие описания ниже сохранены как история решений по аудиту; после форматирования их номера строк могут отличаться. Текущие номера приведены в полном перечне здесь. Перечень обновлён по фактическим исходникам после адресных исправлений и форматирования; подготовленные overlays не используются.
+
+Добавлен технический UPDATE календарной сводки: `backend/Services/CalendarSyncConnectionFailureLog.cs:107`. Он меняет только сообщение и JSON диагностики одной общей ошибки подключения при точном совпадении прежнего JSON, сигнатуры причины, подключения и суток. Счётчик, первое и последнее время сохраняются в самом журнале; отдельное построчное объектное событие на каждый повтор не создаётся, чтобы не переносить разрастание в общий аудит. Конфликт обновления ограниченно повторяется, а при невозможности сохранить счётчик добавляется новая диагностическая запись. Задачи, календарные связи, успешные отметки синхронизации и предметная история не изменяются этим UPDATE. Конкурентные обновления и очистка проверены на SQLite/PostgreSQL.
 
 Два дополнительных технических UPDATE:
 
@@ -69,6 +71,7 @@
 | backend/Services/Banking/BankStatementImportService.cs:550 | ExecuteUpdateAsync |
 | backend/Services/Banking/BankStatementImportService.cs:556 | ExecuteUpdateAsync |
 | backend/Services/Banking/BankSyncService.cs:492 | ExecuteUpdateAsync |
+| backend/Services/CalendarSyncConnectionFailureLog.cs:107 | ExecuteUpdateAsync |
 | backend/Services/CalendarSyncLogRetentionService.cs:198 | ExecuteDeleteAsync |
 | backend/Services/CalendarSyncLogRetentionService.cs:209 | ExecuteDeleteAsync |
 | backend/Services/DatabaseBackupService.cs:1110 | ExecuteUpdateAsync |

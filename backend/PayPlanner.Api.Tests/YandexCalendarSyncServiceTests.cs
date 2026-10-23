@@ -18,7 +18,7 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public class YandexCalendarSyncServiceTests
+public partial class YandexCalendarSyncServiceTests
 {
     private static readonly IDataProtectionProvider TestDataProtectionProvider =
         DataProtectionProvider.Create(new DirectoryInfo(Path.Combine(Path.GetTempPath(), "pp-yandex-calendar-tests")));

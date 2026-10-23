@@ -19,7 +19,7 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public class GoogleCalendarSyncServiceTests
+public partial class GoogleCalendarSyncServiceTests
 {
     private static readonly IDataProtectionProvider TestDataProtectionProvider =
         DataProtectionProvider.Create(new DirectoryInfo(Path.Combine(Path.GetTempPath(), "pp-google-tests")));
