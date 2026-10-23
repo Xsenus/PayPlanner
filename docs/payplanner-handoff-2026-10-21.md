@@ -1,6 +1,6 @@
 # PayPlanner HOME — передача, итог 23 октября 2026
 
-Рабочая папка `C:/Users/ilel/source/repos/PayPlanner`, ветка **claude/practical-bardeen-pglcf3**. Исходный HEAD итогового MAX-кандидата — `ce2f4b60efe5acb220f02377940de1370f0c20b8`. Точные итоговые commit/tree/remote SHA и фактический результат доставки записываются после commit/push вне Git в `D:/PayPlannerRelease/20261022-max-final/git-delivery.json`. Ветку не менять и не сливать в main. YouGile только читать. Предыдущая квалификация и установленный пакет `3ff9c478` сохранены как история.
+Рабочая папка `C:/Users/ilel/source/repos/PayPlanner`, ветка **main**. Исходный HEAD итогового MAX-кандидата — `ce2f4b60efe5acb220f02377940de1370f0c20b8`. Точные итоговые commit/tree/remote SHA и фактический результат доставки записываются после commit/push вне Git в `D:/PayPlannerRelease/20261022-max-final/git-delivery.json`. Продолжать в основной ветке main. YouGile только читать. Предыдущая квалификация и установленный пакет `3ff9c478` сохранены как история.
 
 ## Установлено на VPS 23 октября
 
@@ -71,7 +71,7 @@ Backend build/test/browser/aggregate направлены на доверенн�
 ## Текст для нового чата
 
 ```text
-Продолжай PayPlanner в C:\Users\ilel\source\repos\PayPlanner, ветка claude/practical-bardeen-pglcf3. Прочитай AGENTS.md, docs/payplanner-handoff-2026-10-21.md, docs/development-max-final-gate-2026-10-22.md и docs/payplanner-work-order-2026-10-21.md. Сверь HEAD/origin с D:/PayPlannerRelease/20261022-max-final/git-delivery.json: там фактический итоговый SHA после commit/push. Ветку не менять, в main не сливать.
+Продолжай PayPlanner в C:\Users\ilel\source\repos\PayPlanner, ветка main. Прочитай AGENTS.md, docs/payplanner-handoff-2026-10-21.md, docs/development-max-final-gate-2026-10-22.md и docs/payplanner-work-order-2026-10-21.md. Сверь HEAD/origin с D:/PayPlannerRelease/20261022-max-final/git-delivery.json: там фактический итоговый SHA после commit/push. Продолжать в основной ветке main.
 
 Оба исправления MAX (перенос при дневной квоте и личные запреты при длинных ключах) прошли один полный backend gate 9441/9441 + 5/5 реального восстановления, без пропусков, native exit 0. Дополнительно исправлен вечный резерв после обрыва последней попытки, адресно 4/4 до полного прогона. Доказательства D:/PayPlannerRelease/20261022-max-final, backend-package там же; manifest SHA256 551E19EBDC6B9BB06D9B25AF316561FBC414FD5A0392CC4AED8A411DB612E468. Успешные проверки без влияющих изменений НЕ повторять. Frontend 2839/2839 и integration 345/345 переиспользованы; проверенный frontend-package в D:/PayPlannerRelease/20261021-final. Рабочий dist для выпуска не брать. Исправления и диагностику заново не начинать.
 
