@@ -1,4 +1,5 @@
 using System.Data.Common;
+using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
 using System.Security.Claims;
@@ -29,7 +30,7 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public class CasesV2ControllerTests
+public class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplate) : IClassFixture<PostgreSqlModelTemplate>
 {
     [Fact]
     public async Task ResolveCaseNotificationRecipientIdsAsync_UsesFixedQueryCountForSeveralRecipients()
@@ -7902,7 +7903,54 @@ public class CasesV2ControllerTests
             for (var source = 0; source < 4; source++) yield return [source, stage];
     }
 
-    private static async Task AssertDocumentWriteFailureOnPostgreSqlAsync(bool failAfterCommit, int source, string? stage = null)
+    [Fact]
+    public async Task DocumentFailureModelClonesKeepRowsAndFaultInterceptorsIndependent()
+    {
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES")))
+        {
+            Assert.False(string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase),
+                "PAYPLANNER_TEST_POSTGRES must be configured in CI.");
+            return;
+        }
+        await using var firstLease = await modelTemplate.CreateDatabaseAsync();
+        await using var secondLease = await modelTemplate.CreateDatabaseAsync();
+        await using var first = CreateDocumentFailurePostgreSqlContext(firstLease, "before-save", out var firstAudit, out var firstSave);
+        await using var second = CreateDocumentFailurePostgreSqlContext(secondLease, "before-save", out var secondAudit, out var secondSave);
+        Assert.NotEqual(firstLease.Name, secondLease.Name);
+        Assert.NotSame(firstAudit, secondAudit);
+        Assert.NotNull(firstSave);
+        Assert.NotNull(secondSave);
+        Assert.NotSame(firstSave, secondSave);
+        Assert.Empty(await first.Clients.ToArrayAsync());
+        Assert.Empty(await second.Clients.ToArrayAsync());
+        Assert.Equal("false", (await first.SystemSettings.SingleAsync(row => row.Key == "notifications.email.enabled")).Value);
+
+        firstSave.Enabled = true;
+        first.Clients.Add(new Client { Name = "rejected first document clone" });
+        await Assert.ThrowsAsync<InvalidOperationException>(() => first.SaveChangesAsync());
+        firstSave.Enabled = false;
+        first.ChangeTracker.Clear();
+        first.Clients.Add(new Client { Name = "first document clone only" });
+        await first.SaveChangesAsync();
+        Assert.False(await second.Clients.AnyAsync(row => row.Name == "first document clone only"));
+        second.Clients.Add(new Client { Name = "second document clone only" });
+        await second.SaveChangesAsync();
+        Assert.Single(await first.Clients.ToArrayAsync());
+        Assert.Single(await second.Clients.ToArrayAsync());
+        Assert.False(secondSave.Enabled);
+
+        await using var reopened = CreateDocumentFailurePostgreSqlContext(firstLease, "before-save", out var reopenedAudit, out var reopenedSave);
+        Assert.NotSame(firstAudit, reopenedAudit);
+        Assert.NotSame(firstSave, reopenedSave);
+        Assert.True(await reopened.Clients.AnyAsync(row => row.Name == "first document clone only"));
+        Assert.NotNull(reopenedSave);
+        reopenedSave.Enabled = true;
+        reopened.Clients.Add(new Client { Name = "rejected reopened document clone" });
+        await Assert.ThrowsAsync<InvalidOperationException>(() => reopened.SaveChangesAsync());
+        Assert.Single(await second.Clients.ToArrayAsync());
+    }
+
+    private async Task AssertDocumentWriteFailureOnPostgreSqlAsync(bool failAfterCommit, int source, string? stage = null)
     {
         var raw = Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES");
         if (string.IsNullOrWhiteSpace(raw))
@@ -7913,42 +7961,41 @@ public class CasesV2ControllerTests
         }
         var settings = new NpgsqlConnectionStringBuilder(raw) { Pooling = false };
         Assert.Contains(settings.Host, new[] { "127.0.0.1", "localhost" });
-        var name = "payplanner_document_atomicity_" + Guid.NewGuid().ToString("N");
-        Console.WriteLine($"Owned case document database: {name}");
-        var adminSettings = new NpgsqlConnectionStringBuilder(raw) { Database = "postgres", Pooling = false };
-        await using var admin = new NpgsqlConnection(adminSettings.ConnectionString);
-        await admin.OpenAsync();
+        var started = Stopwatch.GetTimestamp();
+        var lease = await modelTemplate.CreateDatabaseAsync();
         try
         {
-            await using (var create = new NpgsqlCommand($"CREATE DATABASE \"{name}\"", admin))
-                await create.ExecuteNonQueryAsync();
-            settings.Database = name;
-            var interceptor = new FailingDocumentAuditInterceptor();
-            var options = new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
-                .UseNpgsql(settings.ConnectionString).AddInterceptors(interceptor);
-            var saveInterceptor = stage is null ? null : new FailingDocumentSaveInterceptor(stage);
-            if (saveInterceptor is not null)
-                options.AddInterceptors(saveInterceptor, new FailingDocumentTransactionInterceptor(saveInterceptor));
-            await using var db = new PostgreSqlPaymentContext(options.Options);
-            await db.Database.EnsureCreatedAsync();
+            ReportDocumentFixturePhase("model-pg", "clone", started);
+            var contextStarted = Stopwatch.GetTimestamp();
+            await using var db = CreateDocumentFailurePostgreSqlContext(lease, stage, out var interceptor, out var saveInterceptor);
+            ReportDocumentFixturePhase("model-pg", "context", contextStarted);
             await AssertDocumentWriteFailureAsync(db, interceptor, failAfterCommit, source, saveInterceptor);
         }
         finally
         {
-            await using var sessions = new NpgsqlCommand("SELECT count(*) FROM pg_stat_activity WHERE datname = @database", admin);
-            sessions.Parameters.AddWithValue("database", name);
-            var deadline = DateTime.UtcNow.AddSeconds(5);
-            long remainingSessions;
-            do
-            {
-                remainingSessions = (long)(await sessions.ExecuteScalarAsync())!;
-                if (remainingSessions == 0) break;
-                await Task.Delay(50);
-            } while (DateTime.UtcNow < deadline);
-            Assert.Equal(0L, remainingSessions);
-            await using var drop = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{name}\"", admin);
-            await drop.ExecuteNonQueryAsync();
+            started = Stopwatch.GetTimestamp();
+            await lease.DisposeAsync();
+            ReportDocumentFixturePhase("model-pg", "cleanup", started);
         }
+    }
+
+    private static PostgreSqlPaymentContext CreateDocumentFailurePostgreSqlContext(PostgreSqlModelTemplate.DatabaseLease lease,
+        string? stage, out FailingDocumentAuditInterceptor interceptor, out FailingDocumentSaveInterceptor? saveInterceptor)
+    {
+        interceptor = new FailingDocumentAuditInterceptor();
+        var options = new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
+            .UseNpgsql(lease.ConnectionString).AddInterceptors(interceptor);
+        saveInterceptor = stage is null ? null : new FailingDocumentSaveInterceptor(stage);
+        if (saveInterceptor is not null)
+            options.AddInterceptors(saveInterceptor, new FailingDocumentTransactionInterceptor(saveInterceptor));
+        return new PostgreSqlPaymentContext(options.Options);
+    }
+
+    private static void ReportDocumentFixturePhase(string mode, string phase, long started)
+    {
+        try { Console.WriteLine(FormattableString.Invariant($"PP_FIXTURE_PHASE family=CasesV2DocumentFailure mode={mode} phase={phase} elapsedMs={Stopwatch.GetElapsedTime(started).TotalMilliseconds:F3}")); }
+        catch (Exception error) when (error is IOException or ObjectDisposedException)
+        { /* Diagnostics must not hide a business failure or lose a lease. */ }
     }
 
     [Theory]
@@ -7987,6 +8034,7 @@ public class CasesV2ControllerTests
         FailingDocumentAuditInterceptor interceptor, bool failAfterCommit, int source,
         FailingDocumentSaveInterceptor? saveInterceptor = null)
     {
+        var seedStarted = Stopwatch.GetTimestamp();
         var owner = await CreateUserAsync(db, "upload-atomicity@example.local", "Владелец");
         await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Accounts);
         var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = owner.Id };
@@ -8007,6 +8055,7 @@ public class CasesV2ControllerTests
             CreatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
+        ReportDocumentFixturePhase(db.Database.IsNpgsql() ? "model-pg" : "sqlite", "seed", seedStarted);
         var caseId = clientCase.Id;
         var originalHistory = clientCase.EventHistory;
         var root = Path.Combine(Path.GetTempPath(), "payplanner-upload-atomicity-" + Guid.NewGuid().ToString("N"));

@@ -107,7 +107,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(InvoiceScopeDeniedCases))]
     public async Task InvoiceScope_DeniedDocumentNeverLeaksOrChangesMoney(bool postgres, string endpoint, string reason)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: false);
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin: false);
         await using var db = fixture.Open();
         var invoice = await PrepareInvoiceScopeAsync(db, fixture.Seed, reason);
         var before = await CaptureInvoiceScopeAsync(db);
@@ -131,7 +131,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(InvoiceScopeAllowedCases))]
     public async Task InvoiceScope_AuthorizedOwnDocumentPreservesPartialAllocation(bool postgres, bool admin, string endpoint, PaymentType direction)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin);
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin);
         await using var db = fixture.Open();
         var invoice = await PrepareInvoiceScopeAsync(db, fixture.Seed, direction: direction);
         var before = await CaptureInvoiceScopeAsync(db);
@@ -172,7 +172,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, "update")]
     public async Task InvoiceScope_ReadOnlyAccountsAllowsCandidatesButCannotAllocate(bool postgres, string endpoint)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: false);
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin: false);
         await using var db = fixture.Open();
         var invoice = await PrepareInvoiceScopeAsync(db, fixture.Seed, "no-edit");
         var before = await CaptureInvoiceScopeAsync(db);
@@ -189,7 +189,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task InvoiceScope_BestOlderMatchIsNotLostBeyondFirstReadBatch(bool postgres)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: false);
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin: false);
         await using var db = fixture.Open();
         var seed = fixture.Seed;
         var setup = await PrepareInvoiceScopeAsync(db, seed);
@@ -233,7 +233,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, "update")]
     public async Task InvoiceScope_InstallmentInheritsExistingHeaderVisibility(bool postgres, string endpoint)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: false);
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin: false);
         await using var db = fixture.Open();
         var invoice = await PrepareInvoiceScopeAsync(db, fixture.Seed, "inherited-installment");
         var access = await db.ResolveSectionAccessAsync(CreateController(db, fixture.Seed.Actor.Id).User,

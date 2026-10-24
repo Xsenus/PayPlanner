@@ -27,7 +27,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, true)]
     public async Task ReconciliationPeriod_SupportsLongBoundedPeriodsAndRejectsReversedDates(bool postgres, bool reversed)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres);
+        await using var fixture = await CreateAccountSessionsAsync(postgres);
         await using var db = fixture.Open();
         await SeedReconciliationFactAsync(db, fixture.Seed);
         var from = BankScopeDate.Date;
@@ -64,7 +64,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(ReconciliationManualCallerCases))]
     public async Task ReconciliationManualCaller_UsesCurrentAdminAndRecordsRealOutcome(bool postgres, string reason, bool afterSave)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres);
+        await using var fixture = await CreateAccountSessionsAsync(postgres);
         var day = MoneyBalanceReconciliationSchedulerService.ResolveReconciliationTargetDate(DateTime.UtcNow);
         string facts;
         await using (var setup = fixture.Open())
@@ -200,7 +200,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task ReconciliationConcurrency_IndependentSessionsDoNotDuplicateSavedBalance(bool postgres)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres);
+        await using var fixture = await CreateAccountSessionsAsync(postgres);
         string facts;
         await using (var setup = fixture.Open())
         {
@@ -231,7 +231,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(ReconciliationRevocationCases))]
     public async Task ReconciliationRun_RejectsAuthorityRevokedAfterRequestAuthorization(bool postgres, string reason, bool afterSave)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: false);
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin: false);
         string facts;
         await using (var setup = fixture.Open())
         {
@@ -267,7 +267,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task ReconciliationScheduler_SaveFailureRollsBackAndNextRunCanRetry(bool postgres)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres);
+        await using var fixture = await CreateAccountSessionsAsync(postgres);
         await using (var setup = fixture.Open()) await SeedReconciliationFactAsync(setup, fixture.Seed);
         await using var failingDb = fixture.Open(new ReconciliationAfterSave(() => throw new InvalidOperationException("synthetic reconciliation save failure")));
         var services = new ServiceCollection();
@@ -290,7 +290,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task ReconciliationHistory_ProtectsAccountCurrencyAfterMoneyRowsAreRemoved(bool postgres)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres);
+        await using var fixture = await CreateAccountSessionsAsync(postgres);
         await using var db = fixture.Open();
         await SeedReconciliationFactAsync(db, fixture.Seed);
         await RunIdentityReconciliationAsync(db, fixture.Seed.Actor.Id, BankScopeDate.Date);
@@ -335,7 +335,7 @@ public partial class MoneyOperationsControllerTests
     public async Task ReconciliationIdentity_SeparatesAccountsAndProtectsSavedHistory(bool postgres, string scenario)
     {
         var restricted = scenario is "legacy-read" or "legacy-write";
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: !restricted);
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin: !restricted);
         await using var db = fixture.Open();
         var seed = fixture.Seed;
         var permission = await db.RolePermissions.SingleAsync(item => item.RoleId == seed.Actor.RoleId

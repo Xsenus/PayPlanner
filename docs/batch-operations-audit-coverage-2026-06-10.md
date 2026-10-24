@@ -1,6 +1,10 @@
 ## Актуальная инвентаризация — 23 октября 2026
 
-Всего **130** мест ExecuteUpdateAsync/ExecuteDeleteAsync по неизменному предикату BatchOperationAuditCoverageTests. Предыдущие описания ниже сохранены как история решений по аудиту; после форматирования их номера строк могут отличаться. Текущие номера приведены в полном перечне здесь. Перечень обновлён по фактическим исходникам после адресных исправлений и форматирования; подготовленные overlays не используются.
+Всего **131** место ExecuteUpdateAsync/ExecuteDeleteAsync по неизменному предикату BatchOperationAuditCoverageTests. Предыдущие описания ниже сохранены как история решений по аудиту; после форматирования их номера строк могут отличаться. Текущие номера приведены в полном перечне здесь. Перечень обновлён по фактическим исходникам; наличие записи здесь не подменяет результаты проверок текущего кандидата.
+
+Для прямого сохранения актов и создания/изменения/аннулирования договоров добавлен `backend/Services/Invoices/FinancialSourceLease.cs`: PostgreSQL получает ограниченный набор строк через параметризованные `SELECT … FOR UPDATE NOWAIT`, SQLite допускает запрос в настоящую немедленную транзакцию с ограниченным ожиданием провайдера в одну секунду. Эти операции не меняют предметные данные и не создают фиктивного объектного события. Изменения акта, договора, позиций и связей сохраняются через ChangeTracker вместе с существующим аудитом в одной транзакции; отказ до commit откатывает весь запрос. Dirty tracker отклоняется без сохранения или удаления чужой ожидающей работы. Новых `ExecuteUpdateAsync`/`ExecuteDeleteAsync` нет, поэтому инвентаризация остаётся **131**. PostgreSQL NOWAIT относится к строкам, а ожидания DDL/табличных блокировок и административный импорт остаются отдельной границей. Адресные регрессии нового кандидата пока не запускались; эта запись не объявляет их успешными.
+
+Подготовлен один технический UPDATE массового учёта задач: `backend/Controllers/TasksController.cs:4621`. Только SQLite, внутри транзакции он присваивает UpdatedAt прежнее значение для получения write lock до свежего чтения. Сам UPDATE не меняет класс, связи, сумму или дату и не создаёт отдельного объектного события. Последующее разрешённое изменение класса и запись истории сохраняются обычным ChangeTracker в той же транзакции. PostgreSQL использует упорядоченный FOR UPDATE. Это ещё не проверенное внедрение: адресные и выпускные проверки отдельного DOC-11/TSK-10 пакета остаются обязательными; старый срочный кандидат этим изменением не расширяется.
 
 Добавлен технический UPDATE календарной сводки: `backend/Services/CalendarSyncConnectionFailureLog.cs:107`. Он меняет только сообщение и JSON диагностики одной общей ошибки подключения при точном совпадении прежнего JSON, сигнатуры причины, подключения и суток. Счётчик, первое и последнее время сохраняются в самом журнале; отдельное построчное объектное событие на каждый повтор не создаётся, чтобы не переносить разрастание в общий аудит. Конфликт обновления ограниченно повторяется, а при невозможности сохранить счётчик добавляется новая диагностическая запись. Задачи, календарные связи, успешные отметки синхронизации и предметная история не изменяются этим UPDATE. Конкурентные обновления и очистка проверены на SQLite/PostgreSQL.
 
@@ -56,9 +60,10 @@
 | backend/Controllers/MoneyOperationsController.CompanyAccess.cs:63 | ExecuteUpdateAsync |
 | backend/Controllers/MoneyOperationsController.CompanyAccess.cs:94 | ExecuteUpdateAsync |
 | backend/Controllers/StorageAdminController.cs:145 | ExecuteUpdateAsync |
-| backend/Controllers/TasksController.cs:3226 | ExecuteUpdateAsync |
-| backend/Controllers/TasksController.cs:4551 | ExecuteUpdateAsync |
-| backend/Controllers/TasksController.cs:4797 | ExecuteUpdateAsync |
+| backend/Controllers/TasksController.cs:3234 | ExecuteUpdateAsync |
+| backend/Controllers/TasksController.cs:4621 | ExecuteUpdateAsync |
+| backend/Controllers/TasksController.cs:4842 | ExecuteUpdateAsync |
+| backend/Controllers/TasksController.cs:5088 | ExecuteUpdateAsync |
 | backend/Controllers/UserActivityController.cs:418 | ExecuteUpdateAsync |
 | backend/Controllers/UserActivityController.cs:540 | ExecuteDeleteAsync |
 | backend/Controllers/V2/CasesV2Controller.cs:10871 | ExecuteUpdateAsync |

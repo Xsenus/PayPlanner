@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   ChevronDown,
   Ban,
+  UserRound,
   Users,
   TrendingUp,
   TrendingDown,
@@ -6505,15 +6506,18 @@ export function ClientDetail({
               {clientFormState.kind === "individual" ? (
                 <>
                   <section
-                    className="md:col-span-2 rounded-xl border border-gray-200 bg-gray-50/50 p-4"
+                    className={`md:col-span-2 rounded-xl border ${clientProfileEditing ? "border-gray-200 bg-gray-50/50 p-4" : "border-blue-100 bg-white p-3"}`}
                     aria-labelledby="client-profile-card-main-info"
                   >
                     <h3
                       id="client-profile-card-main-info"
-                      className="mb-3 text-base font-semibold text-gray-900"
+                      className={clientProfileEditing ? "mb-3 text-base font-semibold text-gray-900" : "mb-3 flex items-center gap-2 text-base font-semibold text-blue-700"}
                     >
+                      {!clientProfileEditing && <UserRound className="h-5 w-5 shrink-0" aria-hidden="true" />}
                       Основная информация
                     </h3>
+                  {clientProfileEditing ? (
+                    <>
                   <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(min(100%,150px),1fr))]">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -6634,6 +6638,44 @@ export function ClientDetail({
                       </SystemSelect>
                     </div>
                   </div>
+                    </>
+                  ) : (
+                    <dl className="grid gap-x-6 md:grid-cols-2">
+                      {[
+                        {
+                          label: "ФИО",
+                          value: [clientFormState.lastName, clientFormState.firstName, clientFormState.middleName]
+                            .filter((value) => value.trim())
+                            .join(" "),
+                          fullWidth: true,
+                        },
+                        {
+                          label: "Дата рождения",
+                          value: clientFormState.birthDate ? formatClientBirthDate(clientFormState.birthDate) : "",
+                        },
+                        {
+                          label: "Пол",
+                          value: clientFormState.gender === "male" ? "Мужской" : clientFormState.gender === "female" ? "Женский" : clientFormState.gender,
+                        },
+                        {
+                          label: "Семейное положение",
+                          value: MARITAL_STATUS_OPTIONS.find((option) => option.value === clientFormState.maritalStatus)?.label ?? clientFormState.maritalStatus,
+                        },
+                        { label: "ИНН", value: clientFormState.inn },
+                        { label: "СНИЛС", value: clientFormState.snils },
+                      ].map((field) => (
+                        <div
+                          key={field.label}
+                          className={`grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,2fr)] items-start gap-3 border-t border-blue-100 py-2 first:border-t-0 ${field.fullWidth ? "md:col-span-2" : ""}`}
+                        >
+                          <dt className="min-w-0 text-sm text-gray-500">{field.label}</dt>
+                          <dd className="min-w-0 text-sm text-gray-900 [overflow-wrap:anywhere]">
+                            {field.value || "Не указано"}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  )}
                   </section>
                 </>
               ) : (

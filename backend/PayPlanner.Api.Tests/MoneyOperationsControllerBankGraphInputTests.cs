@@ -24,7 +24,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, "nested-account")]
     public async Task BankPackageInput_ManualHttpCreateCannotForgeImportOriginOrPrivilegedAccount(bool postgres, string attack)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateFromModelTemplateAsync(postgres, bankModelTemplate);
         var db = fixture.Db;
         var seed = await SeedBankScopeAsync(db, "foreign-company");
         var packageBefore = await CaptureBankScopeStateAsync(db);

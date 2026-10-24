@@ -21,9 +21,9 @@ public partial class BankSyncServiceTests
         public int AccountId => seed.AccountId;
         public BankSyncService Service(PaymentContext db, FakeBank bank) => new(db, [bank], protector);
 
-        public static async Task<NativeDurabilityFixture> CreateAsync(bool postgres, params IInterceptor[] interceptors)
+        public static async Task<NativeDurabilityFixture> CreateAsync(bool postgres, PostgreSqlModelTemplate modelTemplate, params IInterceptor[] interceptors)
         {
-            var seed = await CreateSharedAsync(postgres);
+            var seed = await CreateSharedAsync(postgres, modelTemplate);
             string? file = null;
             PaymentContext? first = null, second = null;
             try
@@ -88,7 +88,7 @@ public partial class BankSyncServiceTests
     [InlineData(true)]
     public async Task Durability_CompletedResultReplaysInFreshContextWithoutBankCall(bool postgres)
     {
-        await using var fixture = await NativeDurabilityFixture.CreateAsync(postgres);
+        await using var fixture = await NativeDurabilityFixture.CreateAsync(postgres, bankModelTemplate);
         var invocation = BankSyncInvocation.Scheduled("restart-completed");
         var first = await fixture.Service(fixture.First, NativeOnePage()).SyncStatementAsync(fixture.AccountId, SharedFrom, SharedTo, invocation, default);
         Assert.Null(first.Error);
@@ -105,7 +105,7 @@ public partial class BankSyncServiceTests
     [InlineData(true)]
     public async Task Durability_PartialRunResumesInFreshContextWithOriginalMoney(bool postgres)
     {
-        await using var fixture = await NativeDurabilityFixture.CreateAsync(postgres);
+        await using var fixture = await NativeDurabilityFixture.CreateAsync(postgres, bankModelTemplate);
         var bank = NativeOnePage();
         bank.Pages["shared"] = [[Op("one", 1)], [Op("two", 2)]];
         bank.FailOnPage = 1;
@@ -130,7 +130,7 @@ public partial class BankSyncServiceTests
     [InlineData(true)]
     public async Task Durability_FailedRunReturnsPersistedPackageId(bool postgres)
     {
-        await using var fixture = await NativeDurabilityFixture.CreateAsync(postgres);
+        await using var fixture = await NativeDurabilityFixture.CreateAsync(postgres, bankModelTemplate);
         var bank = NativeOnePage();
         bank.FailOnPage = 0;
         var failed = await fixture.Service(fixture.First, bank).SyncStatementAsync(fixture.AccountId, SharedFrom, SharedTo, BankSyncInvocation.Scheduled("failed-receipt"), default);
@@ -148,7 +148,7 @@ public partial class BankSyncServiceTests
     [MemberData(nameof(NativeRevokedFailureCases))]
     public async Task Durability_ProviderFailureAfterRevocationReturnsControlledDenial(bool postgres, bool authorizationError, bool removeCompany)
     {
-        await using var fixture = await NativeDurabilityFixture.CreateAsync(postgres);
+        await using var fixture = await NativeDurabilityFixture.CreateAsync(postgres, bankModelTemplate);
         var db = fixture.First;
         var (user, principal) = await AddNativeAdminAsync(db);
         var bank = NativeOnePage();
@@ -178,7 +178,7 @@ public partial class BankSyncServiceTests
     [InlineData(true)]
     public async Task Durability_OverlappingSameRequestReturnsFirstResponseAndOneJournal(bool postgres)
     {
-        await using var fixture = await NativeDurabilityFixture.CreateAsync(postgres);
+        await using var fixture = await NativeDurabilityFixture.CreateAsync(postgres, bankModelTemplate);
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var delayedBank = NativeOnePage();
@@ -224,7 +224,7 @@ public partial class BankSyncServiceTests
     public async Task Durability_CompletionFailureRollsBackWatermarkAndSuccessJournal(bool postgres)
     {
         var fault = new NativeCompletionSaveFault();
-        await using var fixture = await NativeDurabilityFixture.CreateAsync(postgres, fault);
+        await using var fixture = await NativeDurabilityFixture.CreateAsync(postgres, bankModelTemplate, fault);
         fault.Enabled = true;
         var invocation = BankSyncInvocation.Scheduled("atomic-completion");
         var error = await Record.ExceptionAsync(async () => await fixture.Service(fixture.First, NativeOnePage()).SyncStatementAsync(fixture.AccountId, SharedFrom, SharedTo, invocation, default));
@@ -260,7 +260,7 @@ public partial class BankSyncServiceTests
     public async Task Durability_LostCommitAcknowledgementReplaysPersistedResponseAfterRestart(bool postgres)
     {
         var fault = new NativeCommitAckLoss();
-        await using var fixture = await NativeDurabilityFixture.CreateAsync(postgres, fault);
+        await using var fixture = await NativeDurabilityFixture.CreateAsync(postgres, bankModelTemplate, fault);
         var invocation = BankSyncInvocation.Scheduled("lost-final-ack");
         var error = await Record.ExceptionAsync(async () => await fixture.Service(fixture.First, NativeOnePage()).SyncStatementAsync(fixture.AccountId, SharedFrom, SharedTo, invocation, default));
         Assert.NotNull(error);

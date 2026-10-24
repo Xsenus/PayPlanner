@@ -23,7 +23,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(FileCompanyLifetimeCases))]
     public async Task BankFile_RequiresExistingCompanyBeforeCreatingPackage(bool postgres, bool admin, bool deleted)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateFromModelTemplateAsync(postgres, bankModelTemplate);
         var db = fixture.Db;
         var actor = await CreateUserAsync(db, "company-lifetime@example.test", "Синтетический оператор",
             roleName: admin ? "admin" : "company-lifetime");
@@ -74,7 +74,7 @@ public partial class BankSyncServiceTests
     [MemberData(nameof(NativeCompanyDisappearanceCases))]
     public async Task SharedNative_CompanyDisappearingBeforePageCannotWriteMoreFacts(bool postgres, bool scheduled, int beforePage)
     {
-        await using var fixture = await NativeDurabilityFixture.CreateAsync(postgres);
+        await using var fixture = await NativeDurabilityFixture.CreateAsync(postgres, bankModelTemplate);
         var db = fixture.First;
         var (_, principal) = await AddNativeAdminAsync(db);
         var companyId = (await db.BankConnections.AsNoTracking().SingleAsync()).LegalEntityId;

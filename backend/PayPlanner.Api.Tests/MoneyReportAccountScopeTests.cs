@@ -31,9 +31,9 @@ public partial class MoneyOperationsControllerTests
     public async Task MoneyReportAccountScope_PreservesPermittedHistory(bool postgres, string endpoint, string scenario)
         => await AssertCompanyReportAsync(postgres, endpoint, scenario);
 
-    private static async Task AssertCompanyReportAsync(bool postgres, string endpoint, string scenario)
+    private async Task AssertCompanyReportAsync(bool postgres, string endpoint, string scenario)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: scenario == "admin");
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin: scenario == "admin");
         await using var db = fixture.Open();
         var seed = fixture.Seed;
         const string ownMarker = "SYNTHETIC-REPORT-OWN-COUNTERPARTY-92641";
@@ -134,7 +134,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(MoneyReportRevokedPermissionCases))]
     public async Task MoneyReportAccountScope_UsesFreshPermissions(bool postgres, string endpoint, string reason)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: false);
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin: false);
         await using var db = fixture.Open();
         var actor = fixture.Seed.Actor;
         await db.RolePermissions.Where(item => item.RoleId == actor.RoleId && item.Section == RolePermissionCatalog.Payments)

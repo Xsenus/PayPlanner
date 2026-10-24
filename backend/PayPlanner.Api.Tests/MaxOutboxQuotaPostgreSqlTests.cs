@@ -10,7 +10,7 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public sealed class MaxOutboxQuotaPostgreSqlTests(PostgreSqlMigratedTemplate databases)
+public sealed partial class MaxOutboxQuotaPostgreSqlTests(PostgreSqlMigratedTemplate databases)
     : IClassFixture<PostgreSqlMigratedTemplate>
 {
     [Theory]

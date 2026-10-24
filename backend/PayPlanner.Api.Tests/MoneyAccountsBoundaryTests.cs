@@ -25,6 +25,9 @@ namespace PayPlanner.Api.Tests;
 
 public partial class MoneyOperationsControllerTests
 {
+    private Task<AccountSessionsFixture> CreateAccountSessionsAsync(bool postgres, bool admin = true)
+        => AccountSessionsFixture.CreateAsync(postgres, bankModelTemplate, admin);
+
     private sealed class AccountSessionsFixture(BankImportProvenanceModelTests.ModelDatabase database,
         AccountScopeSeed seed, string connection, bool postgres, string? sqliteFile) : IAsyncDisposable
     {
@@ -34,9 +37,9 @@ public partial class MoneyOperationsControllerTests
             ? new PostgreSqlPaymentContext(new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(connection).AddInterceptors(interceptors).Options)
             : new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection).AddInterceptors(interceptors).Options);
 
-        public static async Task<AccountSessionsFixture> CreateAsync(bool postgres, bool admin = true)
+        public static async Task<AccountSessionsFixture> CreateAsync(bool postgres, PostgreSqlModelTemplate modelTemplate, bool admin = true)
         {
-            var database = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+            var database = await BankImportProvenanceModelTests.ModelDatabase.CreateFromModelTemplateAsync(postgres, modelTemplate);
             string? file = null;
             try
             {
@@ -129,7 +132,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task AccountHttp_ListExposesOnlyAssignedCoherentAccountAndDerivedCompany(bool postgres)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: false);
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin: false);
         using var server = fixture.HttpServer();
         using var client = fixture.Client(server);
         using var response = await client.GetAsync("/api/money-accounts?activeOnly=false");
@@ -152,7 +155,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, "incoherent")]
     public async Task AccountHttp_DirectIdDoesNotDiscloseHiddenAccount(bool postgres, string kind)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: false);
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin: false);
         using var server = fixture.HttpServer();
         using var client = fixture.Client(server);
         var id = kind == "foreign" ? fixture.Seed.Foreign.Id : kind == "unknown" ? fixture.Seed.Unknown.Id : fixture.Seed.Incoherent.Id;
@@ -173,7 +176,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(AccountHttpRevokedCases))]
     public async Task AccountHttp_ReadRechecksDatabaseAfterSessionIssued(bool postgres, string endpoint, string reason)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: false);
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin: false);
         using var server = fixture.HttpServer();
         using var client = fixture.Client(server);
         await using var db = fixture.Open();
@@ -198,7 +201,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(AccountHttpWriteDeniedCases))]
     public async Task AccountHttp_WritesRequirePolicyAndFreshDatabaseAdmin(bool postgres, string verb, string reason)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: reason != "stale-admin");
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin: reason != "stale-admin");
         using var server = fixture.HttpServer();
         using var client = fixture.Client(server, claim: reason != "claim-missing");
         await using var db = fixture.Open();
@@ -222,7 +225,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, "DELETE")]
     public async Task AccountHttp_AnonymousCannotReachReadOrWrite(bool postgres, string verb)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres);
+        await using var fixture = await CreateAccountSessionsAsync(postgres);
         using var server = fixture.HttpServer();
         using var client = fixture.Client(server, authenticated: false);
         await using var db = fixture.Open();
@@ -241,7 +244,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, "PUT")]
     public async Task AccountHttp_JsonCannotWriteRootIdentityOrNavigationGraph(bool postgres, string verb)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres);
+        await using var fixture = await CreateAccountSessionsAsync(postgres);
         using var server = fixture.HttpServer();
         using var client = fixture.Client(server);
         var seed = fixture.Seed;
@@ -356,7 +359,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, "delete-update")]
     public async Task AccountConcurrency_IndependentSessionsPreserveDefaultsAndHistory(bool postgres, string scenario)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres);
+        await using var fixture = await CreateAccountSessionsAsync(postgres);
         var seed = fixture.Seed;
         MoneyAccount Cash(string name) => new() { Name = name, CompanyId = seed.Company.Id, Source = MoneyOperationSource.Cash, IsActive = true, IsDefault = true };
         var firstModel = Cash("Первая касса");
@@ -420,7 +423,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task AccountConcurrency_FallbackNeverPromotesIncoherentBankOrigin(bool postgres)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres);
+        await using var fixture = await CreateAccountSessionsAsync(postgres);
         await using var db = fixture.Open();
         var valid = new MoneyAccount { Name = "Явный резерв", CompanyId = fixture.Seed.Company.Id, Source = MoneyOperationSource.Bank, IsActive = true };
         db.MoneyAccounts.Add(valid);
@@ -436,7 +439,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task AccountConcurrency_FirstEligibleAccountBecomesDefaultDespiteHistoricalIncoherence(bool postgres)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres);
+        await using var fixture = await CreateAccountSessionsAsync(postgres);
         await using var db = fixture.Open();
         await db.MoneyAccounts.Where(item => item.Id == fixture.Seed.Own.Id).ExecuteUpdateAsync(setters => setters.SetProperty(item => item.IsActive, false).SetProperty(item => item.IsDefault, false));
         var model = NewScopedAccount(fixture.Seed);
@@ -458,7 +461,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(AccountUnavailableBankCases))]
     public async Task AccountConcurrency_FallbackRejectsUnavailableLinkedBank(bool postgres, string state)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres);
+        await using var fixture = await CreateAccountSessionsAsync(postgres);
         await using var db = fixture.Open();
         var seed = fixture.Seed;
         var bank = await db.BankConnectionAccounts.SingleAsync(item => item.Id == seed.AvailableBank.Id);
@@ -481,7 +484,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(AccountUnavailableBankCases))]
     public async Task AccountHttp_CreateRejectsUnavailableLinkedBank(bool postgres, string state)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres);
+        await using var fixture = await CreateAccountSessionsAsync(postgres);
         await using var db = fixture.Open();
         var seed = fixture.Seed;
         await db.BankConnectionAccounts.Where(item => item.Id == seed.AvailableBank.Id).ExecuteUpdateAsync(setters => setters
@@ -503,7 +506,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(AccountActiveChoiceCases))]
     public async Task AccountHttp_ActiveChoicesExcludeUnknownOrUnavailableOrigin(bool postgres, string state)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: false);
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin: false);
         await using var db = fixture.Open();
         var seed = fixture.Seed;
         var candidate = NewScopedAccount(seed);

@@ -7,15 +7,19 @@ import type { TaskJournalItem } from '../../utils/taskJournalStore';
 import { CaseTaskActions } from './CaseTaskActions';
 
 const confirm = vi.hoisted(() => vi.fn());
+const actor = vi.hoisted(() => ({ user: { id: 7 } }));
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => actor }));
 vi.mock('../../hooks/useDialog', () => ({ useDialog: () => ({ confirm }) }));
-vi.mock('../../services/api', () => ({ apiService: { bulkUpdateTaskJournalItems: vi.fn(), getTaskJournalAssignees: vi.fn() } }));
+vi.mock('../../services/api', () => ({ apiService: { bulkUpdateTaskJournalItems: vi.fn(), getTaskJournalAssignees: vi.fn(), getTaskJournalItem: vi.fn() } }));
 vi.mock('../../utils/caseTaskCsv', async (original) => ({ ...await original<typeof import('../../utils/caseTaskCsv')>(), downloadCaseTaskCsv: vi.fn() }));
 
 const rows = [{ id: 10, title: 'Первая', status: 'new' }, { id: 11, title: 'Вторая', status: 'new' }] as TaskJournalItem[];
 const changed = vi.fn();
-function View({ tasks = rows, canEdit = true, canExport = true, loading = false, scope = '3:all:1' }) {
+function View({ tasks = rows, canEdit = true, canEditBilling = canEdit, canExport = true, loading = false, scope = '3:all:1', remount = true }: {
+  tasks?: TaskJournalItem[]; canEdit?: boolean; canEditBilling?: boolean; canExport?: boolean; loading?: boolean; scope?: string; remount?: boolean;
+}) {
   const [message, setMessage] = useState('');
-  return <><p role="status">{message}</p><CaseTaskActions key={scope} tasks={tasks} caseId={3} loading={loading} canEdit={canEdit} canExport={canExport} statusLabels={{ new: 'Новая' }} onChanged={(value) => { changed(value); setMessage(value); }}>
+  return <><p role="status">{message}</p><CaseTaskActions key={remount ? scope : 'stable'} scopeKey={scope} tasks={tasks} caseId={3} loading={loading} canEdit={canEdit} canEditBilling={canEditBilling} canExport={canExport} statusLabels={{ new: 'Новая' }} onChanged={(value) => { changed(value); setMessage(value); }}>
     {(selection) => <div>
       {selection.enabled ? <>
         <button disabled={selection.busy} onClick={selection.toggleAll}>Выбрать страницу</button>
@@ -32,6 +36,45 @@ const changeSelect = (label: string, value: string) => fireEvent.change(screen.g
 beforeEach(() => { vi.clearAllMocks(); confirm.mockResolvedValue(true); vi.mocked(apiService.bulkUpdateTaskJournalItems).mockResolvedValue({ requested: 2, updated: 2, skipped: 0 }); });
 
 describe('case task page actions', () => {
+  it('supports a separate billing-only permission without granting old status/assignee writes', async () => {
+    vi.mocked(apiService.bulkUpdateTaskJournalItems).mockResolvedValueOnce({ requested: 2, updated: 2, unchanged: 0, skipped: 0, conflicted: 0,
+      items: [10, 11].map((id) => ({ id, outcome: 'updated', reason: null, updatedAt: '2026-10-24T02:03:04.7654321Z' })) });
+    render(<View canEdit={false} canEditBilling canExport={false} />); selectPage();
+    expect(screen.queryByRole('button', { name: 'Применить к выбранным' })).toBeNull();
+    expect(screen.queryByLabelText('Массовое действие')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Изменить учёт выбранных' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Изменить учёт' }));
+    await waitFor(() => expect(changed).toHaveBeenCalledOnce());
+    expect(apiService.bulkUpdateTaskJournalItems).toHaveBeenCalledWith(expect.objectContaining({ billingClassification: 'internal' }));
+    expect(apiService.getTaskJournalAssignees).not.toHaveBeenCalled();
+  });
+  it('uses the shared billing dialog and keeps failed selected IDs instead of clearing all rows', async () => {
+    vi.mocked(apiService.bulkUpdateTaskJournalItems).mockResolvedValue({ requested: 2, updated: 1, unchanged: 0, skipped: 1, conflicted: 0,
+      items: [{ id: 10, outcome: 'updated', reason: null, updatedAt: '2026-10-24T01:02:03.1234567Z' },
+        { id: 11, outcome: 'skipped', reason: 'contractual', updatedAt: null }] });
+    render(<View remount={false} />); selectPage();
+    fireEvent.click(screen.getByRole('button', { name: 'Изменить учёт выбранных' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Изменить учёт' }));
+    await waitFor(() => expect(changed).toHaveBeenCalledOnce());
+    expect(apiService.bulkUpdateTaskJournalItems).toHaveBeenCalledExactlyOnceWith({ ids: [10, 11], billingClassification: 'internal', includeCompleted: false, expectedUpdatedAtById: { '10': null, '11': null } });
+    expect(screen.getByTestId('selection').textContent).toBe('11');
+    expect(changed).toHaveBeenCalledWith(expect.stringContaining('Изменено: 1'));
+  });
+  it('preserves a pending billing result across page changes without refreshing the new scope', async () => {
+    let resolve!: (value: Awaited<ReturnType<typeof apiService.bulkUpdateTaskJournalItems>>) => void;
+    vi.mocked(apiService.bulkUpdateTaskJournalItems).mockImplementation(() => new Promise((done) => { resolve = done; }));
+    const { rerender } = render(<View remount={false} />); selectPage();
+    fireEvent.click(screen.getByRole('button', { name: 'Изменить учёт выбранных' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Изменить учёт' }));
+    await waitFor(() => expect(apiService.bulkUpdateTaskJournalItems).toHaveBeenCalledOnce());
+    rerender(<View remount={false} scope="3:all:2" tasks={[{ ...rows[0], id: 99 }]} />);
+    expect(screen.getByRole('button', { name: 'Ожидание операции…' })).toBeTruthy();
+    await act(async () => resolve({ requested: 2, updated: 2, unchanged: 0, skipped: 0, conflicted: 0,
+      items: [10, 11].map((id) => ({ id, outcome: 'updated', reason: null, updatedAt: '2026-10-24T02:03:04.7654321Z' })) }));
+    expect(changed).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Построчный итог смены учёта').textContent).toContain('#11');
+    expect(screen.getByLabelText('Построчный итог смены учёта').textContent).not.toContain('#99');
+  });
   it('offers no selection or actions to a role without edit/export', () => {
     render(<View canEdit={false} canExport={false} />);
     expect(screen.queryByRole('button')).toBeNull();

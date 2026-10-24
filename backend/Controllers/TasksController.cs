@@ -7,8 +7,10 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Npgsql;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
@@ -28,6 +30,7 @@ namespace PayPlanner.Api.Controllers;
 public class TasksController : ControllerBase
 {
     private const long MaxTaskFileBytes = 25L * 1024L * 1024L;
+    private const int PlanningReportTaskLimit = 5000;
     private const string InternalTaskObjectName = "Внутренняя задача";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HashSet<string> AllowedStatuses = new(StringComparer.OrdinalIgnoreCase)
@@ -1260,8 +1263,13 @@ public class TasksController : ControllerBase
             .ThenBy(task => task.ClientCase != null ? task.ClientCase.Title : task.ObjectName)
             .ThenBy(task => task.DueAt)
             .ThenBy(task => task.Id)
-            .Take(5000)
+            .Take(PlanningReportTaskLimit + 1)
             .ToListAsync(ct);
+
+        if (tasks.Count > PlanningReportTaskLimit)
+        {
+            return BadRequest($"В планинг можно выгрузить не более {PlanningReportTaskLimit} задач за один раз. Сузьте отбор по датам, клиенту или другим фильтрам и повторите выгрузку.");
+        }
 
         var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
         var generatedAtUtc = NormalizeUtcInstant(DateTime.UtcNow);
@@ -4266,6 +4274,11 @@ public class TasksController : ControllerBase
             return Unauthorized();
         }
 
+        if (request.BillingClassification is not null || request.IncludeCompleted || request.ExpectedUpdatedAtById is not null)
+        {
+            return await BulkUpdateTaskBillingAsync(request, access, ct);
+        }
+
         if (!access.IsAdmin && access.Permission?.CanEdit != true)
         {
             return Forbid();
@@ -4516,6 +4529,284 @@ public class TasksController : ControllerBase
             updated,
             skipped = ids.Count - updated,
         });
+    }
+
+    private async Task<ActionResult<object>> BulkUpdateTaskBillingAsync(
+        BulkUpdateTaskJournalItemsRequest request,
+        TaskAccess access,
+        CancellationToken ct)
+    {
+        if (!access.IsAdmin && access.Permission?.CanEdit != true && access.Permission?.CanEditOthers != true)
+        {
+            return Forbid();
+        }
+
+        if (!TaskClientBillingClassification.IsDecision(request.BillingClassification)
+            || request.AssigneeUserId.HasValue || request.Priority is not null || request.Status is not null
+            || request.DueAt.HasValue || request.Result is not null)
+        {
+            return BadRequest(new { message = "Смена учёта выполняется отдельно от остальных массовых изменений." });
+        }
+
+        if (request.Ids is null || request.Ids.Count == 0)
+        {
+            return BadRequest(new { message = "Выберите задачи для массовой смены учёта." });
+        }
+        if (request.Ids.Count > 500)
+        {
+            return BadRequest(new { message = "За один раз можно изменить учёт не более 500 выбранных задач." });
+        }
+        if (request.Ids.Any(id => id <= 0))
+        {
+            return BadRequest(new { message = "Выберите задачи для массовой смены учёта." });
+        }
+        var ids = request.Ids.Distinct().OrderBy(id => id).ToArray();
+
+        if (request.ExpectedUpdatedAtById is null
+            || request.ExpectedUpdatedAtById.Count != ids.Length
+            || ids.Any(id => !request.ExpectedUpdatedAtById.ContainsKey(id)))
+        {
+            return BadRequest(new { message = "Обновите выбранные задачи перед сменой учёта." });
+        }
+
+        var expected = new Dictionary<int, DateTime?>();
+        foreach (var id in ids)
+        {
+            var token = request.ExpectedUpdatedAtById[id];
+            if (token is null)
+            {
+                expected[id] = null;
+            }
+            else if (DateTime.TryParseExact(token, "O", CultureInfo.InvariantCulture,
+                         DateTimeStyles.RoundtripKind, out var timestamp) && timestamp.Kind == DateTimeKind.Utc)
+            {
+                expected[id] = timestamp;
+            }
+            else
+            {
+                return BadRequest(new { message = "Некорректная версия выбранной задачи. Обновите список." });
+            }
+        }
+
+        var classification = TaskClientBillingClassification.NormalizeDecision(request.BillingClassification);
+        var results = ids.Select(id => new TaskBulkBillingRowResultDto
+        {
+            Id = id,
+            Outcome = "skipped",
+            Reason = "notAvailable",
+        }).ToDictionary(row => row.Id);
+        var changedIds = new List<int>();
+        if (_db.ChangeTracker.HasChanges())
+        {
+            throw new InvalidOperationException("Bulk task billing requires a context without unrelated pending changes.");
+        }
+        try
+        {
+            await using var transaction = _db.Database.IsNpgsql()
+                ? await _db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct)
+                : await _db.Database.BeginTransactionAsync(ct);
+            var visibleIds = await BuildVisibleTaskBaseQuery(access)
+                .Where(task => ids.Contains(task.Id)).Select(task => task.Id).ToArrayAsync(ct);
+            if (visibleIds.Length > 0)
+            {
+                if (_db.Database.IsNpgsql())
+                {
+                    await _db.Database.SqlQuery<int>($"SELECT \"Id\" FROM \"TaskJournalItems\" WHERE \"Id\" = ANY({visibleIds}) ORDER BY \"Id\" FOR UPDATE")
+                        .ToListAsync(ct);
+                }
+                else if (_db.Database.IsSqlite())
+                {
+                    // As in bulk deletion, acquire the owned write lock before reading decisions.
+                    await _db.TaskJournalItems.Where(task => visibleIds.Contains(task.Id))
+                        .ExecuteUpdateAsync(update => update.SetProperty(task => task.UpdatedAt, task => task.UpdatedAt), ct);
+                }
+            }
+
+            // Authority and persisted row state must be read again after waiting for billing locks.
+            var freshAccess = await GetTaskAccessAsync(ct);
+            if (freshAccess is null) return Unauthorized();
+            access = freshAccess;
+            if (!access.IsAdmin && access.Permission?.CanEdit != true && access.Permission?.CanEditOthers != true)
+            {
+                return Forbid();
+            }
+            var settings = await GetTaskJournalSettingsAsync(ct);
+            var entities = await BuildVisibleTaskBaseQuery(access).AsNoTracking()
+                .Include(task => task.Participants)
+                .Where(task => visibleIds.Contains(task.Id)).OrderBy(task => task.Id).ToListAsync(ct);
+            var freshVisibleIds = entities.Select(task => task.Id).ToArray();
+            HashSet<int> validBillableIds = classification == TaskClientBillingClassification.Billable
+                ? (await _db.TaskJournalItems.AsNoTracking().Where(task => freshVisibleIds.Contains(task.Id)
+                    && task.ClientCaseId.HasValue
+                    && (task.ClientId.HasValue && !task.LegalEntityId.HasValue
+                        && _db.Clients.Any(client => client.Id == task.ClientId.Value)
+                        && _db.ClientCases.Any(clientCase => clientCase.Id == task.ClientCaseId.Value && clientCase.ClientId == task.ClientId.Value)
+                        || task.LegalEntityId.HasValue && !task.ClientId.HasValue
+                        && _db.LegalEntities.Any(company => company.Id == task.LegalEntityId.Value)
+                        && _db.ClientCases.Any(clientCase => clientCase.Id == task.ClientCaseId.Value && clientCase.LegalEntityId == task.LegalEntityId.Value)))
+                    .Select(task => task.Id).ToArrayAsync(ct)).ToHashSet()
+                : [];
+            var payoutTaskIds = entities.Where(task => task.ContractorPaymentId.HasValue)
+                .GroupBy(task => task.ContractorPaymentId!.Value)
+                .ToDictionary(group => group.Key, group => group.Select(task => task.Id).ToArray());
+            var payoutIds = payoutTaskIds.Keys.ToArray();
+            var selectedIds = freshVisibleIds.ToHashSet();
+            var protectedContractorTasks = new HashSet<int>();
+            var paidContractorTasks = new HashSet<int>();
+            if (freshVisibleIds.Length > 0)
+            {
+                // One streaming pass, rather than a task/payment cross join or one lookup per
+                // task. Raw payout links stay protected even when their payment is unavailable.
+                // Legacy markers have no index; scan their candidates once and parse complete
+                // decimal IDs so task 1 never matches task 11. No financial navigation is loaded.
+                var payoutFacts = _db.Payments.IgnoreQueryFilters().AsNoTracking()
+                    .Where(payment => payoutIds.Contains(payment.Id)
+                        || payment.SystemNotes != null && payment.SystemNotes.Contains(ContractorPaymentMarker + ":"))
+                    .Select(payment => new
+                    {
+                        payment.Id,
+                        payment.SystemNotes,
+                        Paid = payment.PaidAmount > 0m || payment.IsPaid || payment.Status == PaymentStatus.Completed
+                            || payment.PaidDate.HasValue || payment.LastPaymentDate.HasValue,
+                    });
+                await foreach (var fact in payoutFacts.AsAsyncEnumerable().WithCancellation(ct))
+                {
+                    if (payoutTaskIds.TryGetValue(fact.Id, out var linkedTaskIds))
+                    {
+                        foreach (var id in linkedTaskIds)
+                        {
+                            protectedContractorTasks.Add(id);
+                            if (fact.Paid) paidContractorTasks.Add(id);
+                        }
+                    }
+                    foreach (var id in ReadContractorPaymentTaskIds(fact.SystemNotes))
+                    {
+                        if (!selectedIds.Contains(id)) continue;
+                        protectedContractorTasks.Add(id);
+                        if (fact.Paid) paidContractorTasks.Add(id);
+                    }
+                }
+            }
+            var tracked = _db.ChangeTracker.Entries<TaskJournalItem>().ToDictionary(entry => entry.Entity.Id);
+            var now = DateTime.UtcNow;
+            foreach (var entity in entities)
+            {
+                var result = results[entity.Id];
+                result.UpdatedAt = entity.UpdatedAt.HasValue ? ToIso(entity.UpdatedAt.Value) : null;
+                string? reason = null;
+                if (!CanFullyModifyTask(entity, access, access.Permission?.CanEdit == true,
+                        access.Permission?.CanEditOthers == true, settings)) reason = "forbidden";
+                else if (entity.BillingInvoiceId.HasValue) reason = "invoiced";
+                else if (paidContractorTasks.Contains(entity.Id)) reason = "paid";
+                else if (entity.ContractorPaymentId.HasValue || protectedContractorTasks.Contains(entity.Id)) reason = "contractorPaymentProtected";
+                else if (string.Equals(entity.Status, "done", StringComparison.OrdinalIgnoreCase)
+                         && entity.ContractorPaymentEnabled && entity.ContractorPaymentOnResult) reason = "contractorPaymentProtected";
+                else if (entity.BillingContractId.HasValue || !string.IsNullOrEmpty(entity.BillingModeSnapshot)) reason = "contractual";
+                else if (!AllowedStatuses.Contains(entity.Status)) reason = "unsupportedStatus";
+                else if (string.Equals(entity.Status, "cancelled", StringComparison.OrdinalIgnoreCase)) reason = "cancelled";
+                else if (!request.IncludeCompleted && string.Equals(entity.Status, "done", StringComparison.OrdinalIgnoreCase)) reason = "completedExcluded";
+                else if (entity.ClientBillingClassification is not (TaskClientBillingClassification.Legacy
+                             or TaskClientBillingClassification.Billable or TaskClientBillingClassification.Internal)) reason = "unknownClassification";
+                else if (classification == TaskClientBillingClassification.Billable && !validBillableIds.Contains(entity.Id)) reason = "clientCaseRequired";
+
+                if (reason is not null)
+                {
+                    result.Reason = reason;
+                    continue;
+                }
+                if (entity.ClientBillingClassification == classification)
+                {
+                    // A lost response may repeat a completed decision with its old token.
+                    result.Outcome = "unchanged";
+                    result.Reason = null;
+                    continue;
+                }
+                if (entity.UpdatedAt?.Ticks != expected[entity.Id]?.Ticks)
+                {
+                    result.Outcome = "conflict";
+                    result.Reason = "versionConflict";
+                    continue;
+                }
+
+                var previousClassification = entity.ClientBillingClassification;
+                var previousDecisionAt = entity.BillingDecisionAt;
+                var mutation = entity;
+                if (tracked.TryGetValue(entity.Id, out var entry))
+                {
+                    // The controller may have a previously read task; do not make it authoritative.
+                    entry.CurrentValues.SetValues(entity);
+                    entry.OriginalValues.SetValues(entity);
+                    entry.State = EntityState.Unchanged;
+                    mutation = entry.Entity;
+                }
+                else _db.Entry(mutation).State = EntityState.Unchanged;
+                mutation.ClientBillingClassification = classification;
+                mutation.BillingDecisionAt = now;
+                mutation.UpdatedAt = now;
+                AddTaskHistory(mutation, access,
+                    $"Учёт задачи изменён: {DescribeTaskBillingStatus(previousClassification == TaskClientBillingClassification.Billable ? "unbilled" : previousClassification)} → {DescribeTaskBillingStatus(classification == TaskClientBillingClassification.Billable ? "unbilled" : classification)}.",
+                    new { previousClassification, previousDecisionAt, classification });
+                changedIds.Add(entity.Id);
+                result.Outcome = "updated";
+                result.Reason = null;
+            }
+
+            if (changedIds.Count > 0)
+            {
+                await _db.SaveChangesAsync(ct);
+                // Audit may replace UpdatedAt; PostgreSQL also persists only microsecond precision.
+                var persisted = await _db.TaskJournalItems.AsNoTracking().Where(task => changedIds.Contains(task.Id))
+                    .Select(task => new { task.Id, task.UpdatedAt }).ToListAsync(ct);
+                foreach (var row in persisted)
+                    results[row.Id].UpdatedAt = row.UpdatedAt.HasValue ? ToIso(row.UpdatedAt.Value) : null;
+            }
+            await transaction.CommitAsync(ct);
+        }
+        catch (Exception error) when (IsTaskBillingWriteConflict(error))
+        {
+            return Conflict(new { message = "Задачи изменились одновременно с другой операцией. Обновите список и повторите смену учёта." });
+        }
+
+        // A publisher failure cannot turn an already committed change into a claimed rollback.
+        if (changedIds.Count > 0) await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+        var items = ids.Select(id => results[id]).ToArray();
+        return Ok(new TaskBulkBillingResultDto
+        {
+            Requested = ids.Length,
+            Updated = items.Count(row => row.Outcome == "updated"),
+            Unchanged = items.Count(row => row.Outcome == "unchanged"),
+            Skipped = items.Count(row => row.Outcome == "skipped"),
+            Conflicted = items.Count(row => row.Outcome == "conflict"),
+            Items = items,
+        });
+    }
+
+    private static IEnumerable<int> ReadContractorPaymentTaskIds(string? notes)
+    {
+        if (string.IsNullOrEmpty(notes)) yield break;
+        var marker = ContractorPaymentMarker + ":";
+        var offset = 0;
+        while ((offset = notes.IndexOf(marker, offset, StringComparison.Ordinal)) >= 0)
+        {
+            var start = offset + marker.Length;
+            var end = start;
+            while (end < notes.Length && notes[end] is >= '0' and <= '9') end++;
+            if (end > start && int.TryParse(notes.AsSpan(start, end - start), NumberStyles.None,
+                    CultureInfo.InvariantCulture, out var id) && id > 0) yield return id;
+            offset = end;
+        }
+    }
+
+    private static bool IsTaskBillingWriteConflict(Exception error)
+    {
+        for (Exception? current = error; current is not null; current = current.InnerException)
+        {
+            if (current is DbUpdateConcurrencyException
+                || current is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.DeadlockDetected or PostgresErrorCodes.LockNotAvailable }
+                || current is SqliteException { SqliteErrorCode: 5 }
+                || current is SqliteException { SqliteErrorCode: 6, SqliteExtendedErrorCode: 262 }) return true;
+        }
+        return false;
     }
 
     [HttpPost("bulk/delete")]

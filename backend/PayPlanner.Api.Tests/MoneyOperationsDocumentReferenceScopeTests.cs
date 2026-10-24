@@ -24,7 +24,7 @@ public partial class MoneyOperationsControllerTests
     public async Task MoneyDocumentReferences_ProtectIndependentSectionsAndCompanyWithoutChangingMoney(
         bool postgres, string origin, string scenario)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: scenario.StartsWith("admin-", StringComparison.Ordinal));
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin: scenario.StartsWith("admin-", StringComparison.Ordinal));
         await using var db = fixture.Open();
         var seed = fixture.Seed;
         const string contractNumber = "DOC-CONTRACT-ALPHA-481";

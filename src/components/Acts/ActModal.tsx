@@ -1021,6 +1021,18 @@ export function ActModal({
     () => legalEntities.find((entity) => String(entity.id) === String(form.legalEntityId)) ?? null,
     [legalEntities, form.legalEntityId],
   );
+  const retainedCounterparty = useMemo<CounterpartySelection | null>(() => {
+    if (!isEdit || !act || !selectedCounterpartyKey) return null;
+
+    const retainedAct = currentAct?.id === act.id ? currentAct : act;
+    const legalEntityId = retainedAct.legalEntityId ?? null;
+    const clientId = legalEntityId ? null : retainedAct.clientId ?? null;
+    if (buildOwnerKey({ clientId, legalEntityId }) !== selectedCounterpartyKey) return null;
+
+    const id = legalEntityId || clientId;
+    const name = (legalEntityId ? retainedAct.legalEntityName : retainedAct.clientName)?.trim();
+    return id && name ? { kind: legalEntityId ? 'legalEntity' : 'client', id, name } : null;
+  }, [act, currentAct, isEdit, selectedCounterpartyKey]);
   const selectedCounterpartyPickerValue = useMemo<CounterpartySelection[]>(() => {
     if (selectedClient) {
       return [{
@@ -1042,8 +1054,8 @@ export function ActModal({
       }];
     }
 
-    return [];
-  }, [selectedClient, selectedLegalEntity]);
+    return retainedCounterparty ? [retainedCounterparty] : [];
+  }, [retainedCounterparty, selectedClient, selectedLegalEntity]);
 
   const selectedResponsible = useMemo(
     () => responsibles.find((responsible) => String(responsible.id) === String(form.responsibleId)) ?? null,
@@ -1152,6 +1164,7 @@ export function ActModal({
   const selectedCounterpartyName = selectedClient?.name
     || (selectedLegalEntity ? getLegalEntityDisplayName(selectedLegalEntity) : '')
     || linkedCounterpartyName
+    || retainedCounterparty?.name
     || 'Не выбран';
   const selectedResponsibleLabel = selectedResponsible?.fullName
     || (form.responsibleId ? `#${form.responsibleId}` : 'Будет указан автоматически');

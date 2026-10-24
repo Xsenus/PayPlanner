@@ -727,15 +727,28 @@ describe('ClientDetail integration', () => {
 
   it('opens the client profile in readonly mode until editing is requested', async () => {
     const user = userEvent.setup();
+    vi.mocked(apiService.getClient).mockResolvedValue(createClient({
+      birthDate: '1985-03-15',
+      gender: 'male',
+      maritalStatus: 'married',
+      inn: '123456789012',
+      snils: '123-456-789 00',
+    }));
 
     render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
 
-    const lastNameInput = await screen.findByDisplayValue('Иванов');
-    expect((lastNameInput as HTMLInputElement).disabled).toBe(true);
+    const mainInfo = await screen.findByRole('region', { name: 'Основная информация' });
+    expect(await within(mainInfo).findByText('Иванов Иван Иванович')).toBeTruthy();
+    for (const value of ['15.03.1985', 'Мужской', 'В браке', '123456789012', '123-456-789 00']) {
+      expect(within(mainInfo).getByText(value)).toBeTruthy();
+    }
+    expect(within(mainInfo).queryByRole('textbox')).toBeNull();
+    expect(within(mainInfo).queryByRole('combobox')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Сохранить' })).toBeNull();
 
     await user.click(screen.getByRole('button', { name: 'Редактировать' }));
 
+    const lastNameInput = await within(mainInfo).findByDisplayValue('Иванов');
     expect((lastNameInput as HTMLInputElement).disabled).toBe(false);
     await user.clear(lastNameInput);
     await user.type(lastNameInput, 'Петров');
@@ -743,9 +756,8 @@ describe('ClientDetail integration', () => {
 
     await user.click(screen.getByRole('button', { name: 'Отмена' }));
 
-    await waitFor(() => {
-      expect((screen.getByDisplayValue('Иванов') as HTMLInputElement).disabled).toBe(true);
-    });
+    expect(await within(mainInfo).findByText('Иванов Иван Иванович')).toBeTruthy();
+    expect(within(mainInfo).queryByRole('textbox')).toBeNull();
     expect(screen.queryByDisplayValue('Петров')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Сохранить' })).toBeNull();
   });
@@ -1039,7 +1051,7 @@ describe('ClientDetail integration', () => {
 
     render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
 
-    await screen.findByDisplayValue('Иванов');
+    await screen.findByRole('heading', { level: 1, name: 'Иванов Иван Иванович' });
     await user.click(screen.getByRole('button', { name: 'Редактировать' }));
 
     expect(await screen.findByRole('button', { name: 'Удалить телефон' })).toBeTruthy();
@@ -1110,7 +1122,7 @@ describe('ClientDetail integration', () => {
 
     render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
 
-    await screen.findByDisplayValue('Иванов');
+    await screen.findByRole('heading', { level: 1, name: 'Иванов Иван Иванович' });
     await user.click(screen.getByRole('button', { name: 'Редактировать' }));
     await user.click(screen.getByRole('button', { name: 'Дополнительная информация' }));
     await user.click(screen.getByRole('button', { name: 'Доверенности' }));
@@ -1191,7 +1203,7 @@ describe('ClientDetail integration', () => {
 
     render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
 
-    await screen.findByDisplayValue('Иванов');
+    await screen.findByRole('heading', { level: 1, name: 'Иванов Иван Иванович' });
     await user.click(screen.getByRole('button', { name: 'Редактировать' }));
     await user.click(screen.getByRole('button', { name: 'Сохранить' }));
 
@@ -1221,7 +1233,7 @@ describe('ClientDetail integration', () => {
 
     render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
 
-    await screen.findByDisplayValue('Иванов');
+    await screen.findByRole('heading', { level: 1, name: 'Иванов Иван Иванович' });
     await user.click(screen.getByRole('button', { name: 'Редактировать' }));
     expect(screen.queryByDisplayValue('НГУ')).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Сохранить' }));

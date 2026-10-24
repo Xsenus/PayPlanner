@@ -8,8 +8,13 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public partial class BankSyncServiceTests
+public partial class BankSyncServiceTests : IClassFixture<PostgreSqlModelTemplate>
 {
+    private readonly PostgreSqlModelTemplate bankModelTemplate;
+
+    public BankSyncServiceTests(PostgreSqlModelTemplate bankModelTemplate)
+        => this.bankModelTemplate = bankModelTemplate;
+
     private sealed class FakeBank : IBankProvider
     {
         public string Key => BankProviderKeys.Tochka;

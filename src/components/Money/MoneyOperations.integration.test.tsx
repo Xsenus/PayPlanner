@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MoneyOperations } from './MoneyOperations';
-import type { MoneyAccount, MoneyOperation, MoneyOperationsSummary } from '../../types';
+import type { BankStatementAutoImportRunResult, MoneyAccount, MoneyOperation, MoneyOperationsSummary } from '../../types';
 
 const {
   createCashOrderMock,
@@ -50,6 +50,7 @@ const {
   rollbackBankStatementImportMock,
   toastMock,
   toastErrorMock,
+  toastInfoMock,
   toastSuccessMock,
   dialogConfirmMock,
   setActiveTabMock,
@@ -58,6 +59,7 @@ const {
   upsertUserSettingMock,
 } = vi.hoisted(() => {
   const toastErrorMock = vi.fn();
+  const toastInfoMock = vi.fn();
   const toastSuccessMock = vi.fn();
 
   return {
@@ -103,8 +105,9 @@ const {
     runBankStatementAutoImportMock: vi.fn(),
     reprocessBankStatementImportMock: vi.fn(),
     rollbackBankStatementImportMock: vi.fn(),
-    toastMock: { error: toastErrorMock, success: toastSuccessMock },
+    toastMock: { error: toastErrorMock, info: toastInfoMock, success: toastSuccessMock },
     toastErrorMock,
+    toastInfoMock,
     toastSuccessMock,
     dialogConfirmMock: vi.fn(),
     setActiveTabMock: vi.fn(),
@@ -117,6 +120,7 @@ const {
 const permissionsState = vi.hoisted(() => ({
   accountsCanView: true,
   clientsCanView: true,
+  paymentsCanView: true,
   paymentsCanCreate: true,
   paymentsCanEdit: true,
   paymentsCanDelete: true,
@@ -153,6 +157,7 @@ vi.mock('../../hooks/useRolePermissions', () => ({
       acts: { ...section },
       payments: {
         ...section,
+        canView: permissionsState.paymentsCanView,
         canCreate: permissionsState.paymentsCanCreate,
         canEdit: permissionsState.paymentsCanEdit,
         canDelete: permissionsState.paymentsCanDelete,
@@ -363,6 +368,27 @@ async function clickJournalAction(user: ReturnType<typeof userEvent.setup>, name
   await user.click(await screen.findByRole('button', { name }));
 }
 
+async function selectBankImportAccount(user: ReturnType<typeof userEvent.setup>, id = '101') {
+  const select = await screen.findByLabelText('Банковский счёт в заголовке') as HTMLSelectElement;
+  await waitFor(() => expect(Array.from(select.options, option => option.value)).toContain(id));
+  await user.selectOptions(select, id);
+  return select;
+}
+
+function enableBankImportFolderFixture() {
+  getUserSettingMock.mockImplementation(async (key: string) => {
+    if (key !== 'money.bankStatement.autoImport') throw new Error('not found');
+    return { key, value: JSON.stringify({ enabled: true, folderPath: 'C:\\BankStatements', fileMask: '*.csv' }), updatedAt: '2026-10-24T00:00:00Z' };
+  });
+}
+
+function createBankFolderRunResult(overrides: Partial<BankStatementAutoImportRunResult> = {}): BankStatementAutoImportRunResult {
+  return {
+    enabled: true, folderPath: 'C:\\BankStatements', fileMask: '*.csv', checkedAt: '2026-10-24T00:00:00Z',
+    filesFound: 0, filesImported: 0, rowsRead: 0, created: 0, skipped: 0, errors: [], files: [], ...overrides,
+  };
+}
+
 describe('MoneyOperations integration', () => {
   let operations: MoneyOperation[];
   let nextId: number;
@@ -414,6 +440,7 @@ describe('MoneyOperations integration', () => {
     reprocessBankStatementImportMock.mockReset();
     rollbackBankStatementImportMock.mockReset();
     toastErrorMock.mockReset();
+    toastInfoMock.mockReset();
     toastSuccessMock.mockReset();
     dialogConfirmMock.mockReset();
     dialogConfirmMock.mockResolvedValue(true);
@@ -423,6 +450,7 @@ describe('MoneyOperations integration', () => {
     upsertUserSettingMock.mockReset();
     permissionsState.accountsCanView = true;
     permissionsState.clientsCanView = true;
+    permissionsState.paymentsCanView = true;
     permissionsState.paymentsCanCreate = true;
     permissionsState.paymentsCanEdit = true;
     permissionsState.paymentsCanDelete = true;
@@ -3198,6 +3226,7 @@ describe('MoneyOperations integration', () => {
   }, 15000);
 
   it('imports a bank statement file and reloads bank operations', async () => {
+    const user = userEvent.setup();
     operations = [];
     importBankStatementMock.mockResolvedValueOnce({
       batchId: 1,
@@ -3228,12 +3257,15 @@ describe('MoneyOperations integration', () => {
     const { container } = render(<MoneyOperations source="Bank" />);
 
     await screen.findByText('Загрузить выписку');
+    await selectBankImportAccount(user, '102');
+    const requestsBeforeImport = getMoneyOperationsPagedMock.mock.calls.length;
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;
     expect(input.accept).toContain('.1c');
     const file = new File(['Дата;Сумма\n29.04.2026;25000'], 'statement.csv', { type: 'text/csv' });
+    await user.click(screen.getByRole('button', { name: 'Загрузить выписку' }));
     fireEvent.change(input, { target: { files: [file] } });
 
-    await waitFor(() => expect(importBankStatementMock).toHaveBeenCalledWith(file));
+    await waitFor(() => expect(importBankStatementMock).toHaveBeenCalledWith(file, { companyId: 1, moneyAccountId: 102 }));
     await screen.findByText('Импорт выписки: прочитано 2, создано 2, пропущено 0');
     await screen.findByText('Ахмедова Айтан Рафик Кызы');
     await screen.findByText('101');
@@ -3241,7 +3273,7 @@ describe('MoneyOperations integration', () => {
     await waitFor(() => expect(getMoneyOperationMock).toHaveBeenCalledWith(301));
     await screen.findByText('Редактировать операцию по банку');
     expect(toastSuccessMock).toHaveBeenCalledWith('Создано операций: 2. Пропущено: 0.', 'Выписка банка');
-    await waitFor(() => expect(getMoneyOperationsPagedMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(getMoneyOperationsPagedMock).toHaveBeenCalledTimes(requestsBeforeImport + 1));
   }, 15000);
 
   it('loads and saves bank statement auto import settings', async () => {
@@ -3309,12 +3341,332 @@ describe('MoneyOperations integration', () => {
         },
       ],
     });
+    await selectBankImportAccount(user, '102');
     await user.click(screen.getByRole('button', { name: 'Проверить' }));
 
-    await waitFor(() => expect(runBankStatementAutoImportMock).toHaveBeenCalled());
+    await waitFor(() => expect(runBankStatementAutoImportMock).toHaveBeenCalledWith({ companyId: 1, moneyAccountId: 102 }));
     expect(await screen.findByText(/Проверено файлов: 1/)).toBeTruthy();
     expect(await screen.findByText('statement.csv: +1 / 0')).toBeTruthy();
   }, 15000);
+
+  it.each([0, 2])('bank folder result: keeps a successful result without errors when created=%s', async created => {
+    const user = userEvent.setup();
+    enableBankImportFolderFixture();
+    const filesFound = created > 0 ? 1 : 0;
+    runBankStatementAutoImportMock.mockResolvedValueOnce(createBankFolderRunResult({ created, rowsRead: created, filesFound, filesImported: filesFound }));
+    render(<MoneyOperations source="Bank" />);
+    await selectBankImportAccount(user);
+    const requestsBefore = getMoneyOperationsPagedMock.mock.calls.length;
+    await user.click(screen.getByRole('button', { name: 'Проверить' }));
+    const result = await screen.findByRole('status', { name: 'Результат подгрузки выписок' });
+    expect(within(result).getByText(`Проверено файлов: ${filesFound}. Создано операций: ${created}. Пропущено: 0.`)).toBeTruthy();
+    expect(screen.queryByRole('alert', { name: 'Результат подгрузки выписок' })).toBeNull();
+    expect(within(result).queryByText(/Ошибок:/)).toBeNull();
+    await waitFor(() => expect(toastSuccessMock).toHaveBeenCalledWith(
+      `Проверено файлов: ${filesFound}. Создано операций: ${created}. Пропущено: 0.`, 'Выписка банка',
+    ));
+    expect(toastInfoMock).not.toHaveBeenCalled();
+    expect(toastErrorMock).not.toHaveBeenCalled();
+    expect(getMoneyOperationsPagedMock).toHaveBeenCalledTimes(requestsBefore + (created > 0 ? 1 : 0));
+  });
+
+  it.each([
+    { created: 2, errorCount: 1 }, { created: 0, errorCount: 1 },
+    { created: 2, errorCount: 5 }, { created: 0, errorCount: 5 },
+    { created: 2, errorCount: 6 }, { created: 0, errorCount: 6 },
+  ])('bank folder result: reports created=$created with $errorCount errors without claiming full success', async ({ created, errorCount }) => {
+    const user = userEvent.setup();
+    enableBankImportFolderFixture();
+    const errors = Array.from({ length: errorCount }, (_, index) => `statement-${index + 1}.csv: Не удалось прочитать строку ${index + 1}.`);
+    const filesFound = errorCount + (created > 0 ? 1 : 0);
+    runBankStatementAutoImportMock.mockResolvedValueOnce(createBankFolderRunResult({
+      created, rowsRead: created, skipped: errorCount, filesFound, filesImported: created > 0 ? 1 : 0, errors,
+    }));
+    render(<MoneyOperations source="Bank" />);
+    await selectBankImportAccount(user);
+    await user.type(screen.getByPlaceholderText('Поиск по контрагенту...'), 'Текущий поиск{Enter}');
+    await waitFor(() => expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ search: 'Текущий поиск', moneyAccountId: 101 }), expectAbortOptions(),
+    ));
+    const requestsBefore = getMoneyOperationsPagedMock.mock.calls.length;
+    await user.click(screen.getByRole('button', { name: 'Проверить' }));
+    const result = await screen.findByRole('alert', { name: 'Результат подгрузки выписок' });
+    expect(within(result).getByText(`Ошибок: ${errorCount}`)).toBeTruthy();
+    const visibleErrors = within(result).getAllByRole('listitem');
+    expect(visibleErrors.map(item => item.textContent)).toEqual(errors.slice(0, 5));
+    if (errorCount > 5) {
+      expect(within(result).getByText(`Ещё ошибок: ${errorCount - 5}`)).toBeTruthy();
+      expect(within(result).queryByText(errors[5])).toBeNull();
+    } else expect(within(result).queryByText(/Ещё ошибок:/)).toBeNull();
+    const status = created > 0 ? 'Подгрузка завершена частично. Созданные операции сохранены.' : 'Подгрузка завершена с ошибками.';
+    expect(within(result).getByText(status)).toBeTruthy();
+    const message = `${status} Проверено файлов: ${filesFound}. Создано операций: ${created}. Пропущено: ${errorCount}. Ошибок: ${errorCount}.`;
+    await waitFor(() => expect(created > 0 ? toastInfoMock : toastErrorMock).toHaveBeenCalledWith(message, 'Выписка банка'));
+    expect(toastSuccessMock).not.toHaveBeenCalled();
+    expect(created > 0 ? toastErrorMock : toastInfoMock).not.toHaveBeenCalled();
+    expect(getMoneyOperationsPagedMock).toHaveBeenCalledTimes(requestsBefore + (created > 0 ? 1 : 0));
+    expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ search: 'Текущий поиск', moneyAccountId: 101 }), expectAbortOptions(),
+    );
+    expect(runBankStatementAutoImportMock).toHaveBeenCalledTimes(1);
+    expect(runBankStatementAutoImportMock).toHaveBeenCalledWith({ companyId: 1, moneyAccountId: 101 });
+  });
+
+  it('bank folder result: renders aggregated errors once as plain text without HTML execution', async () => {
+    const user = userEvent.setup();
+    enableBankImportFolderFixture();
+    const rawError = '<img src=x onerror="window.bankFolderInjected=true"><script>window.bankFolderInjected=true</script>';
+    const aggregate = `bad.csv: ${rawError}`;
+    runBankStatementAutoImportMock.mockResolvedValueOnce(createBankFolderRunResult({
+      filesFound: 1, skipped: 1, errors: [aggregate],
+      files: [{ fileName: 'bad.csv', rowsRead: 0, created: 0, skipped: 1, errors: [rawError] }],
+    }));
+    render(<MoneyOperations source="Bank" />);
+    await selectBankImportAccount(user);
+    await user.click(screen.getByRole('button', { name: 'Проверить' }));
+    const result = await screen.findByRole('alert', { name: 'Результат подгрузки выписок' });
+    expect(within(result).getAllByText(aggregate)).toHaveLength(1);
+    expect(within(result).getAllByRole('listitem')).toHaveLength(1);
+    expect(within(result).queryByText(rawError)).toBeNull();
+    expect(result.querySelector('img,script')).toBeNull();
+    expect(result.textContent).toContain(aggregate);
+  });
+
+  it('bank folder result: replaces old errors with the next successful run', async () => {
+    const user = userEvent.setup();
+    enableBankImportFolderFixture();
+    runBankStatementAutoImportMock.mockResolvedValueOnce(createBankFolderRunResult({ filesFound: 1, skipped: 1, errors: ['bad.csv: Ошибка чтения.'] }));
+    runBankStatementAutoImportMock.mockResolvedValueOnce(createBankFolderRunResult());
+    render(<MoneyOperations source="Bank" />);
+    await selectBankImportAccount(user);
+    await user.click(screen.getByRole('button', { name: 'Проверить' }));
+    expect(await screen.findByText('bad.csv: Ошибка чтения.')).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Проверить' })).toHaveProperty('disabled', false));
+    await user.click(screen.getByRole('button', { name: 'Проверить' }));
+    await screen.findByRole('status', { name: 'Результат подгрузки выписок' });
+    expect(screen.queryByText('bad.csv: Ошибка чтения.')).toBeNull();
+    expect(screen.queryByRole('alert', { name: 'Результат подгрузки выписок' })).toBeNull();
+    await waitFor(() => expect(toastSuccessMock).toHaveBeenCalledTimes(1));
+    expect(toastErrorMock).toHaveBeenCalledTimes(1);
+    expect(toastInfoMock).not.toHaveBeenCalled();
+    expect(runBankStatementAutoImportMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('bank folder result: ignores returned errors when permission was revoked during the request', async () => {
+    const user = userEvent.setup();
+    enableBankImportFolderFixture();
+    let complete!: (value: BankStatementAutoImportRunResult) => void;
+    runBankStatementAutoImportMock.mockReturnValueOnce(new Promise<BankStatementAutoImportRunResult>(resolve => { complete = resolve; }));
+    const { rerender } = render(<MoneyOperations source="Bank" />);
+    await selectBankImportAccount(user);
+    await user.click(screen.getByRole('button', { name: 'Проверить' }));
+    await waitFor(() => expect(runBankStatementAutoImportMock).toHaveBeenCalledTimes(1));
+    const requestsBefore = getMoneyOperationsPagedMock.mock.calls.length;
+    permissionsState.paymentsCanCreate = false;
+    rerender(<MoneyOperations source="Bank" />);
+    await act(async () => complete(createBankFolderRunResult({ filesFound: 1, created: 1, errors: ['bad.csv: Ошибка чтения.'] })));
+    expect(screen.queryByRole('alert', { name: 'Результат подгрузки выписок' })).toBeNull();
+    expect(screen.queryByRole('status', { name: 'Результат подгрузки выписок' })).toBeNull();
+    expect(toastInfoMock).not.toHaveBeenCalled();
+    expect(toastErrorMock).not.toHaveBeenCalled();
+    expect(toastSuccessMock).not.toHaveBeenCalled();
+    expect(getMoneyOperationsPagedMock).toHaveBeenCalledTimes(requestsBefore);
+  });
+
+  it.each(['file', 'folder'] as const)('bank import context: %s uses the explicitly selected stable ID across identical account names', async mode => {
+    const user = userEvent.setup();
+    if (mode === 'folder') enableBankImportFolderFixture();
+    getMoneyAccountsMock.mockResolvedValue([
+      { id: 201, companyId: 11, companyName: 'Компания Альфа', name: 'Основной счёт', source: 'Bank', currency: 'RUB', isActive: true, isDefault: true },
+      { id: 202, companyId: 22, companyName: 'Компания Бета', name: 'Основной счёт', source: 'Bank', currency: 'RUB', isActive: true, isDefault: true },
+    ]);
+    const { container } = render(<MoneyOperations source="Bank" />);
+    const select = await selectBankImportAccount(user, '202');
+    expect(select.selectedOptions[0].textContent).toBe('Основной счёт · Компания Бета');
+    if (mode === 'file') {
+      await user.click(screen.getByRole('button', { name: 'Загрузить выписку' }));
+      const file = new File(['synthetic'], 'statement.csv');
+      fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [file] } });
+      await waitFor(() => expect(importBankStatementMock).toHaveBeenCalledWith(file, { companyId: 22, moneyAccountId: 202 }));
+    } else {
+      await user.click(screen.getByRole('button', { name: 'Проверить' }));
+      await waitFor(() => expect(runBankStatementAutoImportMock).toHaveBeenCalledWith({ companyId: 22, moneyAccountId: 202 }));
+    }
+  });
+
+  it.each(['all', 'legacy', 'unknown-company', 'inactive', 'server-blocked'] as const)(
+    'bank import context: refuses %s selection for both file and folder without guessing a default', async scenario => {
+      const user = userEvent.setup();
+      enableBankImportFolderFixture();
+      if (scenario === 'legacy') getMoneyAccountsMock.mockResolvedValue([]);
+      if (!['all', 'legacy'].includes(scenario)) getMoneyAccountsMock.mockResolvedValue([
+        { id: 201, companyId: scenario === 'unknown-company' ? null : 11, name: 'Недоступный счёт', source: 'Bank', currency: 'RUB',
+          isActive: scenario !== 'inactive', isDefault: true, canUseForNewOperations: scenario !== 'server-blocked' },
+      ]);
+      const { container } = render(<MoneyOperations source="Bank" />);
+      await screen.findByText('Загрузить выписку');
+      if (scenario !== 'all') await selectBankImportAccount(user, scenario === 'legacy' ? 'Основной счёт' : '201');
+      const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+      const picker = vi.spyOn(input, 'click');
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Проверить' })).toHaveProperty('disabled', false));
+      await user.click(screen.getByRole('button', { name: 'Загрузить выписку' }));
+      await user.click(screen.getByRole('button', { name: 'Проверить' }));
+      expect(picker).not.toHaveBeenCalled();
+      expect(importBankStatementMock).not.toHaveBeenCalled();
+      expect(runBankStatementAutoImportMock).not.toHaveBeenCalled();
+      expect(toastErrorMock).toHaveBeenCalledWith('Выберите действующий банковский счёт своей компании в заголовке.', 'Выписка банка');
+      expect(document.activeElement).toBe(screen.getByRole('combobox', { name: /Банковский счёт в заголовке/ }));
+    },
+  );
+
+  it.each(['paymentsCanCreate', 'paymentsCanView'] as const)('bank import context: disables both entry points without %s', async permission => {
+    const user = userEvent.setup();
+    enableBankImportFolderFixture();
+    permissionsState[permission] = false;
+    render(<MoneyOperations source="Bank" />);
+    await selectBankImportAccount(user);
+    for (const name of ['Загрузить выписку', 'Проверить']) {
+      const button = screen.getByRole('button', { name });
+      expect(button).toHaveProperty('disabled', true);
+      await user.click(button);
+    }
+    expect(importBankStatementMock).not.toHaveBeenCalled();
+    expect(runBankStatementAutoImportMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['changed-account', 'returned-account', 'revoked-permission'] as const)(
+    'bank import context: rejects a picker opened before %s', async change => {
+      const user = userEvent.setup();
+      const { container, rerender } = render(<MoneyOperations source="Bank" />);
+      await selectBankImportAccount(user);
+      await user.click(screen.getByRole('button', { name: 'Загрузить выписку' }));
+      if (change === 'revoked-permission') {
+        permissionsState.paymentsCanCreate = false;
+        rerender(<MoneyOperations source="Bank" />);
+      } else {
+        await selectBankImportAccount(user, '102');
+        if (change === 'returned-account') await selectBankImportAccount(user, '101');
+      }
+      fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(['synthetic'], 'statement.csv')] } });
+      expect(importBankStatementMock).not.toHaveBeenCalled();
+      expect(toastErrorMock).toHaveBeenCalledWith(expect.stringContaining('Выбранный счёт или права изменились'), 'Выписка банка');
+    },
+  );
+
+  it.each(['file', 'folder'] as const)('bank import context: %s blocks reentry and both account selectors until completion', async mode => {
+    const user = userEvent.setup();
+    enableBankImportFolderFixture();
+    let complete!: (value: unknown) => void;
+    const response = new Promise(resolve => { complete = resolve; });
+    const pendingRequest = mode === 'file' ? importBankStatementMock : runBankStatementAutoImportMock;
+    pendingRequest.mockReturnValueOnce(response);
+    const { container } = render(<MoneyOperations source="Bank" />);
+    const header = await selectBankImportAccount(user);
+    await user.click(screen.getByRole('button', { name: 'Фильтр' }));
+    const second = screen.getByLabelText('Банковский счёт', { selector: 'select' });
+    const file = new File(['synthetic'], 'statement.csv');
+    const input = container.querySelector('input[type="file"]')!;
+    if (mode === 'file') {
+      await user.click(screen.getByRole('button', { name: 'Загрузить выписку' }));
+      fireEvent.change(input, { target: { files: [file] } });
+    } else await user.click(screen.getByRole('button', { name: 'Проверить' }));
+    await waitFor(() => expect(pendingRequest).toHaveBeenCalledTimes(1));
+    expect(header).toHaveProperty('disabled', true);
+    expect(second).toHaveProperty('disabled', true);
+    fireEvent.change(header, { target: { value: '102' } });
+    fireEvent.change(second, { target: { value: '102' } });
+    fireEvent.change(input, { target: { files: [file] } });
+    const other = mode === 'file' ? 'Проверить' : 'Загрузить выписку';
+    expect(screen.getByRole('button', { name: other })).toHaveProperty('disabled', true);
+    await user.click(screen.getByRole('button', { name: other }));
+    expect(pendingRequest).toHaveBeenCalledTimes(1);
+    expect(mode === 'file' ? runBankStatementAutoImportMock : importBankStatementMock).not.toHaveBeenCalled();
+    expect(header).toHaveProperty('value', '101');
+    await act(async () => complete(mode === 'file'
+      ? { rowsRead: 0, created: 0, skipped: 0, errors: [], operations: [] }
+      : { enabled: true, checkedAt: '2026-10-24T00:00:00Z', filesFound: 0, created: 0, skipped: 0, files: [] }));
+    await waitFor(() => expect(header).toHaveProperty('disabled', false));
+  });
+
+  it.each([
+    ['file', false], ['file', true], ['folder', false], ['folder', true],
+  ] as const)('bank import context: ignores a late %s response after permission revocation, failure=%s', async (mode, fail) => {
+    const user = userEvent.setup();
+    if (mode === 'folder') enableBankImportFolderFixture();
+    let complete!: (value: unknown) => void;
+    let reject!: (reason: Error) => void;
+    const response = new Promise((resolve, rejectPromise) => { complete = resolve; reject = rejectPromise; });
+    const pendingRequest = mode === 'file' ? importBankStatementMock : runBankStatementAutoImportMock;
+    pendingRequest.mockReturnValueOnce(response);
+    const { container, rerender } = render(<MoneyOperations source="Bank" />);
+    await selectBankImportAccount(user);
+    if (mode === 'file') {
+      await user.click(screen.getByRole('button', { name: 'Загрузить выписку' }));
+      fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(['synthetic'], 'statement.csv')] } });
+    } else await user.click(screen.getByRole('button', { name: 'Проверить' }));
+    await waitFor(() => expect(pendingRequest).toHaveBeenCalledTimes(1));
+    const requestsBeforeCompletion = getMoneyOperationsPagedMock.mock.calls.length;
+    permissionsState.paymentsCanCreate = false;
+    rerender(<MoneyOperations source="Bank" />);
+    await act(async () => {
+      if (fail) reject(new Error('stale failure'));
+      else complete({ rowsRead: 1, created: 1, skipped: 0, errors: [], operations: [], checkedAt: '2026-10-24T00:00:00Z', filesFound: 1, files: [] });
+    });
+    expect(toastSuccessMock).not.toHaveBeenCalled();
+    expect(toastErrorMock).not.toHaveBeenCalled();
+    expect(getMoneyOperationsPagedMock).toHaveBeenCalledTimes(requestsBeforeCompletion);
+    expect(screen.queryByText(/Импорт выписки: прочитано/)).toBeNull();
+    expect(screen.queryByText(/Проверено файлов:/)).toBeNull();
+  });
+
+  it.each(['file', 'folder'] as const)('bank import context: %s completion reloads the latest journal search', async mode => {
+    const user = userEvent.setup();
+    if (mode === 'folder') enableBankImportFolderFixture();
+    let complete!: (value: unknown) => void;
+    const request = mode === 'file' ? importBankStatementMock : runBankStatementAutoImportMock;
+    request.mockReturnValueOnce(new Promise(resolve => { complete = resolve; }));
+    const { container } = render(<MoneyOperations source="Bank" />);
+    await selectBankImportAccount(user);
+    if (mode === 'file') {
+      await user.click(screen.getByRole('button', { name: 'Загрузить выписку' }));
+      fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(['synthetic'], 'statement.csv')] } });
+    } else await user.click(screen.getByRole('button', { name: 'Проверить' }));
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    await user.type(screen.getByPlaceholderText('Поиск по контрагенту...'), 'Синтетический{Enter}');
+    await waitFor(() => expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ search: 'Синтетический', moneyAccountId: 101 }), expectAbortOptions(),
+    ));
+    const requestsBeforeCompletion = getMoneyOperationsPagedMock.mock.calls.length;
+    await act(async () => complete({ rowsRead: 1, created: 1, skipped: 0, errors: [], operations: [], checkedAt: '2026-10-24T00:00:00Z', filesFound: 1, files: [] }));
+    await waitFor(() => expect(getMoneyOperationsPagedMock).toHaveBeenCalledTimes(requestsBeforeCompletion + 1));
+    expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ search: 'Синтетический', moneyAccountId: 101 }), expectAbortOptions(),
+    );
+  });
+
+  it.each(['file', 'folder'] as const)('bank import context: %s failure unlocks the same account for an explicit retry', async mode => {
+    const user = userEvent.setup();
+    if (mode === 'folder') enableBankImportFolderFixture();
+    const request = mode === 'file' ? importBankStatementMock : runBankStatementAutoImportMock;
+    request.mockRejectedValueOnce(new Error('Синтетический отказ'));
+    const { container } = render(<MoneyOperations source="Bank" />);
+    const header = await selectBankImportAccount(user);
+    const start = async () => {
+      if (mode === 'file') {
+        await user.click(screen.getByRole('button', { name: 'Загрузить выписку' }));
+        fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(['synthetic'], 'statement.csv')] } });
+      } else await user.click(screen.getByRole('button', { name: 'Проверить' }));
+    };
+    await start();
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith('Синтетический отказ', 'Выписка банка'));
+    expect(header).toHaveProperty('disabled', false);
+    expect(header).toHaveProperty('value', '101');
+    await start();
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    const target = { companyId: 1, moneyAccountId: 101 };
+    if (mode === 'file') expect(request).toHaveBeenLastCalledWith(expect.any(File), target);
+    else expect(request).toHaveBeenLastCalledWith(target);
+  });
 
   it('loads and saves bank statement recognition rules', async () => {
     const user = userEvent.setup();

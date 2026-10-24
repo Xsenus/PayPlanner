@@ -25,7 +25,7 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public class NotificationServiceTests
+public partial class NotificationServiceTests
 {
     [Theory]
     [InlineData("own", false, false, true, false, false)]

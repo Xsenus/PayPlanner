@@ -73,7 +73,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(ManualCompanyDeniedCases))]
     public async Task ManualCompany_WriteCannotBypassAccountScope(bool postgres, string endpoint, string reason)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: false);
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin: false);
         await using var db = fixture.Open();
         var seed = fixture.Seed;
         var cash = await PrepareManualCompanyAsync(db, seed);
@@ -134,7 +134,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(ManualCompanyAllowedCases))]
     public async Task ManualCompany_AllowedOwnAccountKeepsFinancialBehavior(bool postgres, bool admin, string endpoint)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin);
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin);
         await using var db = fixture.Open();
         var seed = fixture.Seed;
         var cash = await PrepareManualCompanyAsync(db, seed);
@@ -188,7 +188,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, "transfer")]
     public async Task ManualCompany_AdminCannotMutateUnattributedHistoricalAccount(bool postgres, string endpoint)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres);
+        await using var fixture = await CreateAccountSessionsAsync(postgres);
         await using var db = fixture.Open();
         var seed = fixture.Seed;
         await PrepareManualCompanyAsync(db, seed);
@@ -220,7 +220,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, "link-invoice")]
     public async Task ManualCompany_ForeignCompanyCannotBeReadOrChangedThroughOperationId(bool postgres, string endpoint)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: false);
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin: false);
         await using var db = fixture.Open();
         var seed = fixture.Seed;
         await PrepareManualCompanyAsync(db, seed);
@@ -253,7 +253,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, true)]
     public async Task ManualCompany_OrdinaryEditCannotMoveImportedMoneyToAnotherAccount(bool postgres, bool admin)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin);
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin);
         await using var db = fixture.Open();
         var seed = fixture.Seed;
         var cash = await PrepareManualCompanyAsync(db, seed);
@@ -274,7 +274,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task ManualCompany_ClosedBankAllowsMetadataWithoutChangingMoneyFacts(bool postgres)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: false);
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin: false);
         await using var db = fixture.Open();
         var seed = fixture.Seed;
         await PrepareManualCompanyAsync(db, seed);
@@ -302,7 +302,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, "transfer")]
     public async Task ManualCompany_DifferentCurrencyCannotBeWrittenToAccount(bool postgres, string endpoint)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: false);
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin: false);
         await using var db = fixture.Open();
         var seed = fixture.Seed;
         var cash = await PrepareManualCompanyAsync(db, seed);
@@ -325,7 +325,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task ManualCompany_EmptyCurrencyUsesDeclaredAccountCurrency(bool postgres)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: false);
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin: false);
         await using var db = fixture.Open();
         await PrepareManualCompanyAsync(db, fixture.Seed);
         var model = ManualCompanyOperation(fixture.Seed, fixture.Seed.Own.Id);
@@ -340,7 +340,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task ManualCompany_TransferDoesNotSilentlyConvertBetweenCurrencies(bool postgres)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: false);
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin: false);
         await using var db = fixture.Open();
         var cash = await PrepareManualCompanyAsync(db, fixture.Seed);
         await db.MoneyAccounts.Where(account => account.Id == cash.Id).ExecuteUpdateAsync(setters => setters.SetProperty(account => account.Currency, "USD"));
@@ -361,7 +361,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(ManualImportedFactCases))]
     public async Task ManualCompany_ImportedMoneyFactsRemainImmutable(bool postgres, bool admin, string field)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin);
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin);
         await using var db = fixture.Open();
         var seed = fixture.Seed;
         await PrepareManualCompanyAsync(db, seed);
@@ -406,7 +406,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(ManualCashFailureCases))]
     public async Task ManualCompany_CashFailureRollsBackWholeMutationAndPreservesOuterWork(bool postgres, string endpoint, bool outer)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: false);
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin: false);
         var fault = new ManualCashSaveFault();
         await using var db = fixture.Open(fault);
         var seed = fixture.Seed;
@@ -445,7 +445,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, true)]
     public async Task ManualCompany_AccountScopeDoesNotResurrectArchivedMoney(bool postgres, bool admin)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin);
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin);
         await using var db = fixture.Open();
         var original = ManualCompanyOperation(fixture.Seed, fixture.Seed.Own.Id);
         db.MoneyOperations.Add(original);

@@ -168,7 +168,8 @@ public class LegalEntitiesControllerCoverageTests
     public async Task GetCompanyProfile_UsesLegacyFallback_AndReportsMissingConfigurations()
     {
         await using var db = await CreateContextAsync();
-        var controller = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: 1);
+        var owner = await CreateAdminUserAsync(db);
+        var controller = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: owner.Id);
 
         var notConfigured = await controller.GetCompanyProfile(CancellationToken.None);
         Assert.IsType<NotFoundObjectResult>(notConfigured.Result);
@@ -216,7 +217,8 @@ public class LegalEntitiesControllerCoverageTests
     public async Task SetCompanyProfileMain_UpsertsSettings_AndReturnsNotFoundWhenMissing()
     {
         await using var db = await CreateContextAsync();
-        var controller = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: 1);
+        var owner = await CreateAdminUserAsync(db);
+        var controller = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: owner.Id);
 
         Assert.IsType<NotFoundResult>((await controller.SetCompanyProfileMain(404, CancellationToken.None)).Result);
 
@@ -238,9 +240,10 @@ public class LegalEntitiesControllerCoverageTests
     public async Task GetMainCompanySettings_FallsBackToFirstAvailableCompany_WhenDefaultIsInvalidOrMissing()
     {
         await using var db = await CreateContextAsync();
+        var owner = await CreateAdminUserAsync(db);
         var firstId = await CreateLegalEntityAsync(db, "Компания A");
         var secondId = await CreateLegalEntityAsync(db, "Компания B");
-        var controller = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: 1);
+        var controller = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: owner.Id);
 
         db.SystemSettings.AddRange(
             new SystemSetting
@@ -1152,7 +1155,8 @@ public class LegalEntitiesControllerCoverageTests
         var firstCompanyId = await CreateLegalEntityAsync(db, "Компания 1");
         var secondCompanyId = await CreateLegalEntityAsync(db, "Компания 2");
         var userId = (await CreateUserAsync(db, isActive: true)).Id;
-        var controller = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: 1);
+        var owner = await CreateAdminUserAsync(db);
+        var controller = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: owner.Id);
 
         var missingAction = await controller.UpdateMainCompanySettings(
             new UpdateMainCompanySettingsRequest

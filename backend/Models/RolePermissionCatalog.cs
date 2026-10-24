@@ -11,6 +11,7 @@ public static class RolePermissionCatalog
     public const string Reports = "reports";
     public const string Calculator = "calculator";
     public const string LegalEntities = "legalEntities";
+    public const string CompanyProfile = "companyProfile";
     public const string Clients = "clients";
     public const string Cases = "cases";
     public const string Requests = "requests";
@@ -34,6 +35,7 @@ public static class RolePermissionCatalog
         Reports,
         Calculator,
         LegalEntities,
+        CompanyProfile,
         Clients,
         Cases,
         Requests,
@@ -138,6 +140,7 @@ public static class RolePermissionCatalog
             [Reports] = new(true, true, true, true, true, false, GetDefaultViewScope(Reports, allowRoleManagement)),
             [Calculator] = new(true, true, true, true, true, false, GetDefaultViewScope(Calculator, allowRoleManagement)),
             [LegalEntities] = new(true, true, true, true, true, false, GetDefaultViewScope(LegalEntities, allowRoleManagement)),
+            [CompanyProfile] = new(allowRoleManagement, false, allowRoleManagement, false, false, false, DataVisibilityScope.All),
             [Clients] = new(true, true, true, true, true, false, GetDefaultViewScope(Clients, allowRoleManagement)),
             [Cases] = new(true, true, true, true, true, false, GetDefaultViewScope(Cases, allowRoleManagement)),
             [Accounts] = new(true, true, true, true, true, false, GetDefaultViewScope(Accounts, allowRoleManagement)),
@@ -215,6 +218,7 @@ public static class RolePermissionCatalog
             Reports = ToSection(defaults[Reports]),
             Calculator = ToSection(defaults[Calculator]),
             LegalEntities = ToSection(defaults[LegalEntities]),
+            CompanyProfile = ToSection(defaults[CompanyProfile]),
             Clients = ToSection(defaults[Clients]),
             Cases = ToSection(defaults[Cases]),
             Requests = ToRequests(defaults[Requests]),

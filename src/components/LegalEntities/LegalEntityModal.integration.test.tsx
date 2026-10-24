@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { LegalEntityModal } from './LegalEntityModal';
 import { apiService } from '../../services/api';
+import type { MenuSectionPermissions } from '../../types/permissions';
 import type {
   ActsSummary,
   InvoiceSummary,
@@ -130,7 +131,7 @@ vi.mock('../ui/ObjectAuditModal', () => ({
 vi.mock('../Calendar/PaymentModal', () => ({
   PaymentModal: (props: unknown) => {
     paymentModalPropsSpy(props);
-    return null;
+    return <div data-testid="legal-related-payment-modal" />;
   },
 }));
 
@@ -156,6 +157,9 @@ function createInitialLegalEntity(
 
 describe('LegalEntityModal integration', () => {
   beforeEach(() => {
+    vi.mocked(apiService.getCompanyBranches).mockClear();
+    vi.mocked(apiService.getCompanyRequisitesCheck).mockClear();
+    vi.mocked(apiService.getBankConnections).mockClear();
     confirmMock.mockReset();
     toastErrorMock.mockReset();
     toastInfoMock.mockReset();
@@ -198,6 +202,77 @@ describe('LegalEntityModal integration', () => {
       },
     });
     vi.mocked(apiService.getLegalEntityCaseFinanceSummaries).mockResolvedValue([]);
+  });
+
+  const relatedPermissions = (allowed: Partial<MenuSectionPermissions> = {}): MenuSectionPermissions => ({
+    canView: true, canCreate: false, canEdit: false, canDelete: false, canExport: false, ...allowed,
+  });
+
+  it('related permissions: viewing sections does not enable creation from an editable company profile', async () => {
+    const initial = createInitialLegalEntity({ shortName: 'Editable profile' });
+    render(<LegalEntityModal isOpen initial={initial} onClose={vi.fn()} onSubmit={vi.fn()} suggest={vi.fn()} findById={vi.fn()}
+      allowEdit allowDelete={false} relatedRecordPermissions={{ cases: relatedPermissions(), accounts: relatedPermissions(), acts: relatedPermissions(), payments: relatedPermissions() }} />);
+    for (const name of ['Дело', 'Счёт', 'Акт', 'Платёж']) {
+      for (const button of await screen.findAllByRole('button', { name })) expect(button).toHaveProperty('disabled', true);
+    }
+    expect(screen.queryByTestId('legal-related-payment-modal')).toBeNull();
+  });
+
+  it.each(['cases', 'accounts', 'acts', 'payments'] as const)('related permissions: only independently granted %s creation is available', async section => {
+    const initial = createInitialLegalEntity({ shortName: 'Editable profile' });
+    const props = {
+      isOpen: true, initial, onClose: vi.fn(), onSubmit: vi.fn(), suggest: vi.fn(), findById: vi.fn(), allowEdit: true, allowDelete: false,
+      relatedRecordPermissions: { [section]: relatedPermissions({ canCreate: true }) },
+    };
+    render(<LegalEntityModal {...props} />);
+    const names = { cases: 'Дело', accounts: 'Счёт', acts: 'Акт', payments: 'Платёж' };
+    for (const [key, name] of Object.entries(names)) {
+      for (const button of await screen.findAllByRole('button', { name })) expect(button).toHaveProperty('disabled', key !== section);
+    }
+    if (section === 'payments') {
+      await userEvent.click(screen.getByRole('button', { name: 'Платёж' }));
+      expect(await screen.findByTestId('legal-related-payment-modal')).toBeTruthy();
+      expect(paymentModalPropsSpy).toHaveBeenLastCalledWith(expect.objectContaining({ canCreateLinkedInvoices: false }));
+    }
+  });
+
+  it('related permissions: explicit account creation prohibition applies without an additional matrix', async () => {
+    const initial = createInitialLegalEntity();
+    render(<LegalEntityModal isOpen initial={initial} onClose={vi.fn()} onSubmit={vi.fn()} suggest={vi.fn()} findById={vi.fn()}
+      allowEdit allowDelete={false} canViewAccounts canCreateAccounts={false} />);
+    for (const button of await screen.findAllByRole('button', { name: 'Счёт' })) expect(button).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Платёж' })).toHaveProperty('disabled', false);
+  });
+
+  it('related permissions: an opened payment form disappears immediately when its creation permission is revoked', async () => {
+    const initial = createInitialLegalEntity();
+    const props = { isOpen: true, initial, onClose: vi.fn(), onSubmit: vi.fn(), suggest: vi.fn(), findById: vi.fn(), allowEdit: true, allowDelete: false };
+    const { rerender } = render(<LegalEntityModal {...props} relatedRecordPermissions={{ payments: relatedPermissions({ canCreate: true }) }} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Платёж' }));
+    expect(await screen.findByTestId('legal-related-payment-modal')).toBeTruthy();
+    rerender(<LegalEntityModal {...props} relatedRecordPermissions={{ payments: relatedPermissions() }} />);
+    expect(screen.queryByTestId('legal-related-payment-modal')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Платёж' })).toHaveProperty('disabled', true);
+  });
+
+  it.each([false, true])('related permissions: payment viewing preserves independent edit permission=%s', async canEdit => {
+    const initial = createInitialLegalEntity();
+    const payment = { id: 901, description: 'Visible related payment', date: '2026-10-23', type: 'Expense', status: 'Pending', amount: 100, paidAmount: 0 } as Payment;
+    vi.mocked(apiService.getPaymentsV2).mockResolvedValue({ items: [payment], total: 1, page: 1, pageSize: 5,
+      summary: { income: 0, expense: 100, balance: -100, incomeCount: 0, expenseCount: 1, total: 1 } });
+    vi.mocked(apiService.getPayment).mockResolvedValue(payment);
+    render(<LegalEntityModal isOpen initial={initial} onClose={vi.fn()} onSubmit={vi.fn()} suggest={vi.fn()} findById={vi.fn()}
+      allowEdit allowDelete={false} relatedRecordPermissions={{ payments: relatedPermissions({ canEdit }) }} />);
+    const button = await screen.findByRole('button', { name: payment.description! });
+    expect(button).toHaveProperty('disabled', !canEdit);
+    await userEvent.click(button);
+    if (canEdit) {
+      expect(await screen.findByTestId('legal-related-payment-modal')).toBeTruthy();
+      expect(apiService.getPayment).toHaveBeenCalledWith(901);
+    } else {
+      expect(apiService.getPayment).not.toHaveBeenCalled();
+      expect(screen.queryByTestId('legal-related-payment-modal')).toBeNull();
+    }
   });
 
   it('loads full payment details before opening the legal entity payment editor', async () => {
@@ -455,6 +530,27 @@ describe('LegalEntityModal integration', () => {
 
     expect(await screen.findAllByText('ИП Кожеваткин Андрей Владимирович')).toHaveLength(1);
     expect(screen.getByText('ООО Пример')).toBeTruthy();
+  });
+
+  it('allows delegated profile requisites editing without administrator or financial actions', async () => {
+    const user = userEvent.setup();
+    const initial = createInitialLegalEntity({ id: 9, shortName: 'Assigned own company' });
+    const onSubmit = vi.fn().mockResolvedValue(initial);
+    render(<LegalEntityModal isOpen initial={initial} onClose={vi.fn()} onSubmit={onSubmit}
+      suggest={vi.fn().mockResolvedValue([])} findById={vi.fn()} allowEdit allowDelete={false}
+      mode="page" canManageOwnCompanySettings={false} canViewCases={false} canViewAccounts={false}
+      canCreateAccounts={false} canViewActs={false} canViewPayments={false} />);
+    await screen.findByText('Печать компании');
+    expect(vi.mocked(apiService.getCompanyBranches)).not.toHaveBeenCalled();
+    expect(vi.mocked(apiService.getCompanyRequisitesCheck)).not.toHaveBeenCalled();
+    expect(vi.mocked(apiService.getBankConnections)).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('Состояние профиля компании')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Добавить клиента' })).toBeNull();
+    const name = screen.getByDisplayValue('Assigned own company');
+    expect(name).toHaveProperty('disabled', false);
+    await user.clear(name); await user.type(name, 'Updated own company');
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ shortName: 'Updated own company' })));
   });
 
   it('renders company profile page as read-only when profile mode hides editing controls', () => {

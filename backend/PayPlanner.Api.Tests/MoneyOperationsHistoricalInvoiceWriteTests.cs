@@ -54,7 +54,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(HistoricalInvoiceAnnotationCases))]
     public async Task HistoricalInvoiceWrite_AnnotationRoundTripPreservesLinkAndAllocation(bool postgres, string reason, bool applied)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: false);
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin: false);
         await using var db = fixture.Open();
         var seed = fixture.Seed;
         var setup = await PrepareInvoiceScopeAsync(db, seed, reason == "allowed" ? null : reason);
@@ -110,7 +110,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(HistoricalInvoiceProtectedWriteCases))]
     public async Task HistoricalInvoiceWrite_NoDocumentWriteCannotAlterFinancialLink(bool postgres, string reason, bool applied, string change)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: false);
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin: false);
         await using var db = fixture.Open();
         var setup = await PrepareInvoiceScopeAsync(db, fixture.Seed, reason);
         setup.Header.Invoice!.Number = "SYNTHETIC-SECRET-DOCUMENT-347281";

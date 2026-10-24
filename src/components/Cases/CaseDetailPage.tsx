@@ -111,6 +111,7 @@ interface CaseDetailPageProps {
   canViewTasks?: boolean;
   canCreateTasks?: boolean;
   canEditTasks?: boolean;
+  canEditTaskBilling?: boolean;
   canExportTasks?: boolean;
   canSendMessenger?: boolean;
 }
@@ -1539,6 +1540,7 @@ export function CaseDetailPage({
   canViewTasks = true,
   canCreateTasks = true,
   canEditTasks = false,
+  canEditTaskBilling = canEditTasks,
   canExportTasks = false,
   canSendMessenger = false,
 }: CaseDetailPageProps) {
@@ -1546,6 +1548,7 @@ export function CaseDetailPage({
   const initialViewState = readCaseDetailViewState(caseId);
   const canCreateCaseTask = canViewTasks && canCreateTasks;
   const [caseItem, setCaseItem] = useState<ClientCase | null>(null);
+  const [caseTaskBulkBusy, setCaseTaskBulkBusy] = useState(false);
   const markedViewedCaseIdRef = useRef<number | null>(null);
   const [caseTimeZoneId, setCaseTimeZoneId] = useState(() => normalizeUserTimeZoneId());
   const [responsibles, setResponsibles] = useState<ActResponsible[]>([]);
@@ -2594,7 +2597,7 @@ export function CaseDetailPage({
   };
 
   const openCaseEditPage = () => {
-    if (!caseItem) return;
+    if (!caseItem || caseTaskBulkBusy) return;
     setCaseEditDraft(buildCaseEditDraft(caseItem));
     setEditPageOpen(true);
     setError(null);
@@ -4002,7 +4005,7 @@ export function CaseDetailPage({
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(520px,auto)] xl:items-start">
             <div className="min-w-0">
-              <button type="button" onClick={onBack} className="mb-4 inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              <button type="button" onClick={onBack} disabled={caseTaskBulkBusy} className="mb-4 inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
                 <ArrowLeft className="h-4 w-4" /> Реестр дел
               </button>
               <div className="flex flex-wrap items-center gap-2">
@@ -4023,7 +4026,7 @@ export function CaseDetailPage({
 
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:justify-end">
               {canEdit ? (
-                <button type="button" onClick={openCaseEditPage} className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700">
+                <button type="button" onClick={openCaseEditPage} disabled={caseTaskBulkBusy} className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700">
                   <Pencil className="h-4 w-4" /> Редактировать дело
                 </button>
               ) : null}
@@ -4197,7 +4200,7 @@ export function CaseDetailPage({
               onCreatePayment={canViewFinance ? onCreatePayment : undefined}
             />
             <div className="xl:order-3">
-              <CaseQuickAccess tabs={visibleDetailTabs} activeTab={activeTab} onSelect={setActiveTab} />
+              <fieldset disabled={caseTaskBulkBusy} className="contents"><CaseQuickAccess tabs={visibleDetailTabs} activeTab={activeTab} onSelect={setActiveTab} /></fieldset>
             </div>
             <div className="min-w-0 xl:order-2">
           <div className="mb-5 flex flex-wrap gap-2">
@@ -4205,6 +4208,7 @@ export function CaseDetailPage({
               <button
                 key={tab.key}
                 type="button"
+                disabled={caseTaskBulkBusy}
                 onClick={() => setActiveTab(tab.key)}
                 className={`rounded-lg px-3 py-2 text-sm font-semibold ${activeTab === tab.key ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>
                 {tab.label}
@@ -4371,8 +4375,12 @@ export function CaseDetailPage({
             <TaskList
               caseId={caseId}
               canEditTasks={canViewTasks && canEditTasks}
+              canEditTaskBilling={canViewTasks && canEditTaskBilling}
+              billingBusy={caseTaskBulkBusy}
+              onBusyChange={setCaseTaskBulkBusy}
               canExportTasks={canViewTasks && canExportTasks}
               onTasksChanged={(message) => { setNotice(message); setReloadToken((value) => value + 1); }}
+              onTaskBillingChanged={(message) => { setNotice(message); taskPage.refresh(); }}
               pageData={taskPage}
               progress={progress}
               filter={taskFilter}
@@ -6758,8 +6766,12 @@ function RelatedParties({
 function TaskList({
   caseId,
   canEditTasks,
+  canEditTaskBilling,
+  billingBusy,
+  onBusyChange,
   canExportTasks,
   onTasksChanged,
+  onTaskBillingChanged,
   pageData,
   progress,
   filter,
@@ -6775,8 +6787,12 @@ function TaskList({
 }: {
   caseId: number;
   canEditTasks: boolean;
+  canEditTaskBilling: boolean;
+  billingBusy: boolean;
+  onBusyChange: (busy: boolean) => void;
   canExportTasks: boolean;
   onTasksChanged: (message: string) => void;
+  onTaskBillingChanged: (message: string) => void;
   pageData: ReturnType<typeof useCaseTaskPage>;
   progress: number;
   filter: CaseTaskFilter;
@@ -6794,7 +6810,7 @@ function TaskList({
   const filterGroupId = useId();
   const paginationTotal = pageData.loading || pageData.error ? counts?.[filter] ?? 0 : pageData.total;
   const totalPages = Math.max(1, Math.ceil(paginationTotal / pageData.pageSize));
-  const hasRowActions = Boolean(onOpenTask) || canEditTasks || canExportTasks;
+  const hasRowActions = Boolean(onOpenTask) || canEditTasks || canEditTaskBilling || canExportTasks;
 
   return (
     <div className="space-y-3">
@@ -6816,6 +6832,7 @@ function TaskList({
               <button
                 key={option.value}
                 type="button"
+                disabled={billingBusy}
                 onClick={() => onFilterChange(option.value)}
                 aria-pressed={filter === option.value}
                 className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${filter === option.value ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>
@@ -6884,9 +6901,9 @@ function TaskList({
       ) : tasks.length === 0 ? (
         <div className="rounded-lg border border-dashed border-slate-200 p-3 text-sm text-slate-500">По выбранному фильтру задач нет.</div>
       ) : null}
-      <CaseTaskActions key={`${caseId}:${filter}:${pageData.page}:${pageData.pageSize}`}
+      <CaseTaskActions scopeKey={`${caseId}:${filter}:${pageData.page}:${pageData.pageSize}`} onBusyChange={onBusyChange}
         tasks={tasks} caseId={caseId} loading={pageData.loading || Boolean(pageData.error)}
-        canEdit={canEditTasks} canExport={canExportTasks} statusLabels={TASK_STATUS_LABELS} onChanged={onTasksChanged}>
+        canEdit={canEditTasks} canEditBilling={canEditTaskBilling} canExport={canExportTasks} statusLabels={TASK_STATUS_LABELS} onChanged={onTasksChanged} onBillingChanged={onTaskBillingChanged}>
         {(selection) => <div className="max-w-full overflow-x-auto" aria-busy={pageData.loading}>
         <table aria-label="Задачи дела" className="w-full min-w-[640px] table-fixed text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase tracking-[0.12em] text-slate-500">
@@ -6954,7 +6971,7 @@ function TaskList({
       {!pageData.loading && !pageData.error ? (
         <div className="text-sm text-slate-500" aria-live="polite">Показано {tasks.length} из {pageData.total}</div>
       ) : null}
-      <TablePagination
+      <fieldset disabled={billingBusy} className="m-0 min-w-0 max-w-full border-0 p-0"><TablePagination
         page={pageData.page}
         totalPages={totalPages}
         totalItems={paginationTotal}
@@ -6965,8 +6982,8 @@ function TaskList({
         recordsLabel="Найдено задач"
         previousLabel="Предыдущая страница задач"
         nextLabel="Следующая страница задач"
-        className="!gap-3 !p-3"
-      />
+        className="!gap-3 !p-3 [&>div:last-child]:flex-wrap"
+      /></fieldset>
     </div>
   );
 }

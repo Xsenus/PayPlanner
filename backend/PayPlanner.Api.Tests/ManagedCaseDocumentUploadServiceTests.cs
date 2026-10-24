@@ -1,4 +1,5 @@
 using System.Data.Common;
+using System.Diagnostics;
 using System.Globalization;
 using System.Security.Claims;
 using System.Text;
@@ -26,8 +27,10 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public sealed class ManagedCaseDocumentUploadServiceTests
+public sealed class ManagedCaseDocumentUploadServiceTests(PostgreSqlModelTemplate modelTemplate) : IClassFixture<PostgreSqlModelTemplate>
 {
+    private Task<Fixture> CreateFixtureAsync(bool postgres = false, int requiredCopies = 1, bool migrated = false)
+        => Fixture.CreateAsync(postgres, requiredCopies, migrated, modelTemplate);
     [Theory]
     [InlineData(false, false)]
     [InlineData(false, true)]
@@ -35,7 +38,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, true)]
     public async Task InitialTaskSourceUploadKeepsSourceAcrossVersionsAndReplay(bool postgres, bool managed)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         if (!managed) f.Options.ProductWriteEnabledClasses.Clear();
         f.User.Role!.Permissions.Add(new RolePermission
         {
@@ -84,7 +87,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [MemberData(nameof(UnavailableInitialTaskSources))]
     public async Task InitialTaskSourceUploadRejectsUnavailableSourceBeforeStorage(bool postgres, bool managed, string reason)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         if (!managed) f.Options.ProductWriteEnabledClasses.Clear();
         if (reason != "permission")
             f.User.Role!.Permissions.Add(new RolePermission
@@ -121,7 +124,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, true)]
     public async Task ManagedWorkOrderHttpFeedsAutomaticQueueWithFrozenSource(bool postgres, bool automaticAtWrite)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         var order = await f.SeedGeneratedWorkOrderAsync();
         f.Options.AutoCaseDocumentPublicationEnabled = automaticAtWrite;
         var key = Guid.NewGuid();
@@ -161,7 +164,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, "lost-commit")]
     public async Task ManagedWorkOrderHttpRecoversRollbackAndLostCommitResponse(bool postgres, string stage)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         await f.SeedGeneratedWorkOrderAsync();
         var key = Guid.NewGuid();
         f.Fault.Enabled = true;
@@ -187,7 +190,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, true)]
     public async Task ManagedWorkOrderHttpRollsBackSourceOrFlagChangeAfterDomainSave(bool postgres, bool disabled)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var order = await f.SeedGeneratedWorkOrderAsync();
         var key = Guid.NewGuid();
         f.Fault.Enabled = true;
@@ -218,7 +221,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, 2)]
     public async Task ManagedWorkOrderHttpFreezesSourceAndReplaysExactReceipt(bool postgres, int copies)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: copies);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: copies);
         var order = await f.SeedGeneratedWorkOrderAsync();
         var key = Guid.NewGuid();
         var first = await f.GenerateWorkOrderHttp(key);
@@ -267,7 +270,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task ManagedWorkOrderHttpRecoversReservedAttemptWithoutAnotherWrite(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         await f.SeedGeneratedWorkOrderAsync();
         var key = Guid.NewGuid();
         f.Local.LoseAcknowledgement = true;
@@ -288,7 +291,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task ManagedWorkOrderHttpRejectsMissingSourceBeforeProviderRead(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         var order = await f.SeedGeneratedWorkOrderAsync();
         var key = Guid.NewGuid();
         Assert.Equal(503, Assert.IsType<ObjectResult>((await f.GenerateWorkOrderHttp(key)).Result).StatusCode);
@@ -307,7 +310,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task ManagedWorkOrderHttpRequiresKeyAndNeverFallsBackForOwnedAttempt(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         await f.SeedGeneratedWorkOrderAsync();
         Assert.IsType<BadRequestObjectResult>((await f.Controller().GenerateWorkOrderDocument(f.Case.Id, CancellationToken.None)).Result);
         var key = Guid.NewGuid();
@@ -325,7 +328,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, true)]
     public async Task ManagedTemplateStatusDiscoversExactOwnedSourceWithoutProviderRead(bool postgres, bool reserved)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         await f.SeedGeneratedTemplateAsync();
         f.Options.AutoCaseDocumentPublicationEnabled = true;
         f.Options.WorkerEnabled = true;
@@ -365,7 +368,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, true)]
     public async Task ManagedTemplateStatusProvesPublishedOrRetiredAttemptWithoutProviderRead(bool postgres, bool retired)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         await f.SeedGeneratedTemplateAsync();
         f.Options.AutoCaseDocumentPublicationEnabled = true;
         var key = Guid.NewGuid();
@@ -407,7 +410,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, true)]
     public async Task ManagedTemplateStatusMasksUnprovenPendingSource(bool postgres, bool reserved)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         await f.SeedGeneratedTemplateAsync();
         f.Local.LoseAcknowledgement = reserved;
         var key = Guid.NewGuid();
@@ -437,7 +440,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task ManagedWorkOrderRetirementSupportsExactSavedSource(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         var order = await f.SeedGeneratedWorkOrderAsync();
         var key = Guid.NewGuid();
         Assert.Equal("pending", (await f.StageGeneratedWorkOrderAsync(order, key)).Status);
@@ -462,7 +465,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, "published")]
     public async Task ManagedTemplateRetirementPreservesCopiesAndPublishedDocuments(bool postgres, string state)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: state == "published" ? 1 : 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: state == "published" ? 1 : 2);
         await f.SeedGeneratedTemplateAsync();
         f.Options.AutoCaseDocumentPublicationEnabled = true;
         f.Local.LoseAcknowledgement = state == "reserved";
@@ -516,7 +519,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, true, "unhandled-kind")]
     public async Task ManagedTemplateRetirementRejectsUnprovenGeneratedSource(bool postgres, bool reserved, string field)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         await f.SeedGeneratedTemplateAsync();
         f.Local.LoseAcknowledgement = reserved;
         var key = Guid.NewGuid();
@@ -555,7 +558,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, true)]
     public async Task ManagedTemplateHttpProducerFeedsQueueAndPreservesReceipt(bool postgres, bool automaticAtWrite)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         await f.SeedGeneratedTemplateAsync();
         f.Options.AutoCaseDocumentPublicationEnabled = automaticAtWrite;
         var key = Guid.NewGuid();
@@ -605,7 +608,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, "lost-commit")]
     public async Task ManagedTemplateHttpRecoversRollbackAndLostCommitResponse(bool postgres, string stage)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         await f.SeedGeneratedTemplateAsync();
         var key = Guid.NewGuid();
         f.Fault.Enabled = true;
@@ -631,7 +634,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task ManagedTemplateHttpRecoversLostLocalAcknowledgementWithoutSecondPut(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         await f.SeedGeneratedTemplateAsync();
         var key = Guid.NewGuid();
         f.Local.LoseAcknowledgement = true;
@@ -653,7 +656,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task ManagedTemplateHttpRejectsRevokedSourceBeforeReadingSavedBytes(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         await f.SeedGeneratedTemplateAsync();
         var key = Guid.NewGuid();
         Assert.Equal(503, Assert.IsType<ObjectResult>((await f.GenerateTemplateHttp(key)).Result).StatusCode);
@@ -677,7 +680,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, 2)]
     public async Task ManagedTemplateHttpCopiesAndExactReplay(bool postgres, int copies)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: copies);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: copies);
         await f.SeedGeneratedTemplateAsync();
         var key = Guid.NewGuid();
         var request = new CasesV2Controller.GenerateCaseDocumentTemplateRequest
@@ -744,7 +747,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, "00000000-0000-0000-0000-000000000000")]
     public async Task ManagedTemplateHttpRequiresIdentityBeforeStorage(bool postgres, string header)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         await f.SeedGeneratedTemplateAsync();
         var controller = f.Controller();
         if (header.Length > 0) controller.Request.Headers["X-Upload-Key"] = header;
@@ -761,7 +764,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task ManagedTemplateHttpBlocksChangedRequestAndDisabledFallback(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         await f.SeedGeneratedTemplateAsync();
         var controller = f.Controller();
         var key = Guid.NewGuid();
@@ -795,7 +798,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, true)]
     public async Task TemplateKeyMigrationRefusesDowngradeOfPublishedOrPendingLongIdentity(bool postgres, bool published)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2, migrated: true);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2, migrated: true);
         await f.SeedGeneratedTemplateAsync(new string('a', 64));
         f.Options.AutoCaseDocumentPublicationEnabled = true;
         Assert.Equal("pending", (await f.StageGeneratedTemplateAsync(Guid.NewGuid(), new string('a', 64))).Status);
@@ -857,7 +860,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task TemplateKeyMigrationPreservesShortDocumentAndBindingAcrossDowngradeAndUpgrade(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2, migrated: true);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2, migrated: true);
         // Exercise the preceding schema's exact 64-character boundary.
         var templateKey = new string('a', 55);
         await f.SeedGeneratedTemplateAsync(templateKey);
@@ -907,7 +910,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [MemberData(nameof(InvalidCaseDocumentKeys))]
     public async Task TemplateKeyBoundaryRejectsInvalidManualTargetBeforeStorage(bool postgres, string documentKey)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var key = Guid.NewGuid();
         Assert.IsType<BadRequestObjectResult>((await f.Upload(key, documentKey: documentKey)).Result);
         Assert.Equal(0, f.Local.PutCount);
@@ -924,7 +927,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task TemplateKeyBoundaryCannotCreateArbitraryManualDocumentAtNewLimit(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var key = Guid.NewGuid();
         Assert.IsType<BadRequestObjectResult>((await f.Upload(key, documentKey: new string('ш', 73))).Result);
         Assert.Equal(0, f.Local.PutCount);
@@ -946,7 +949,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [MemberData(nameof(GeneratedTemplateKeyBoundaries))]
     public async Task GeneratedTemplateQueueSupportsCompleteKeyReceiptReplayAndNewVersion(bool postgres, string templateKey)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2, migrated: true);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2, migrated: true);
         await f.SeedGeneratedTemplateAsync(templateKey);
         f.Options.AutoCaseDocumentPublicationEnabled = true;
         var originalKey = Guid.NewGuid();
@@ -1023,6 +1026,67 @@ public sealed class ManagedCaseDocumentUploadServiceTests
             .FindProperty(nameof(ClientCaseDocument.DocumentKey))!.GetMaxLength());
     }
 
+    [Fact]
+    public async Task ModelFixtureClonesKeepSeedsRootsAndRecreatedFaultInterceptorsIndependent()
+    {
+        await using var first = await CreateFixtureAsync(postgres: true, requiredCopies: 2);
+        await using var second = await CreateFixtureAsync(postgres: true, requiredCopies: 2);
+        Assert.NotEqual(first.Db.Database.GetDbConnection().Database, second.Db.Database.GetDbConnection().Database);
+        Assert.NotEqual(first.Root, second.Root);
+        Assert.Equal(first.User.Id, second.User.Id);
+        Assert.Equal(first.Case.Id, second.Case.Id);
+        Assert.NotSame(first.Fault, second.Fault);
+        Assert.NotSame(first.StatusHook, second.StatusHook);
+        Assert.Equal("false", (await first.Db.SystemSettings.SingleAsync(row => row.Key == "notifications.email.enabled")).Value);
+
+        first.Fault.Enabled = first.Fault.Armed = true;
+        first.Fault.Stage = "before-save";
+        first.Db.Clients.Add(new Client { Name = "rejected first clone" });
+        await Assert.ThrowsAsync<IOException>(() => first.Db.SaveChangesAsync());
+        first.Fault.Enabled = false;
+        first.Db.ChangeTracker.Clear();
+        first.Db.Clients.Add(new Client { Name = "first clone only" });
+        await first.Db.SaveChangesAsync();
+        await first.RecreateContext();
+        Assert.True(await first.Db.Clients.AnyAsync(row => row.Name == "first clone only"));
+        Assert.False(await second.Db.Clients.AnyAsync(row => row.Name == "first clone only"));
+
+        first.Fault.Enabled = first.Fault.Armed = true;
+        first.Db.Clients.Add(new Client { Name = "recreated rejected clone" });
+        await Assert.ThrowsAsync<IOException>(() => first.Db.SaveChangesAsync());
+        first.Fault.Enabled = false;
+        second.Db.Clients.Add(new Client { Name = "independent second clone" });
+        await second.Db.SaveChangesAsync();
+        await File.WriteAllTextAsync(Path.Combine(first.Root, "first-only.txt"), "synthetic");
+        Assert.False(File.Exists(Path.Combine(second.Root, "first-only.txt")));
+        Assert.Equal(2, await second.Db.Clients.CountAsync());
+
+        string? failedRoot = null;
+        string? failedDatabase = null;
+        var setupFailure = await Assert.ThrowsAsync<IOException>(() => Fixture.CreateAsync(postgres: true, modelTemplate: modelTemplate,
+            beforeReady: async fixture =>
+            {
+                failedRoot = fixture.Root;
+                failedDatabase = fixture.Db.Database.GetDbConnection().Database;
+                fixture.Fault.Enabled = fixture.Fault.Armed = true;
+                fixture.Fault.Stage = "before-save";
+                fixture.Db.Clients.Add(new Client { Name = "failed setup clone" });
+                await fixture.Db.SaveChangesAsync();
+            }));
+        Assert.Equal("Owned managed case save failure", setupFailure.Message);
+        Assert.NotNull(failedRoot);
+        Assert.NotNull(failedDatabase);
+        Assert.False(Directory.Exists(failedRoot));
+        Assert.StartsWith("pp_bank_model_", failedDatabase, StringComparison.Ordinal);
+        await using var observer = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(System.Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES"))
+        { Database = "postgres", Pooling = false }.ConnectionString);
+        await observer.OpenAsync();
+        await using var exists = new NpgsqlCommand("SELECT count(*) FROM pg_database WHERE datname = @name", observer);
+        exists.Parameters.AddWithValue("name", failedDatabase);
+        Assert.Equal(0L, (long)(await exists.ExecuteScalarAsync())!);
+        Assert.Equal(2, await second.Db.Clients.CountAsync());
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(false, true)]
@@ -1030,7 +1094,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, true)]
     public async Task GeneratedTemplateQueuePreservesFrozenHistoryAuditAndNotification(bool postgres, bool automaticAtWrite)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         await f.SeedGeneratedTemplateAsync();
         f.Options.AutoCaseDocumentPublicationEnabled = automaticAtWrite;
         Assert.Equal("pending", (await f.StageGeneratedTemplateAsync(Guid.NewGuid())).Status);
@@ -1095,7 +1159,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, true)]
     public async Task GeneratedTemplateTypedResumePreservesFrozenBytesAndExactReceipt(bool postgres, bool reservedOnly)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         await f.SeedGeneratedTemplateAsync();
         var key = Guid.NewGuid();
         f.Local.LoseAcknowledgement = reservedOnly;
@@ -1142,7 +1206,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task GeneratedTemplateTypedResumeRejectsReservedSourceBeforeProviderRead(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         await f.SeedGeneratedTemplateAsync();
         var key = Guid.NewGuid();
         f.Local.LoseAcknowledgement = true;
@@ -1167,7 +1231,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, true)]
     public async Task GeneratedTemplateTypedResumeRollsBackLateSourceOrFlagChange(bool postgres, bool disabled)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         await f.SeedGeneratedTemplateAsync();
         var key = Guid.NewGuid();
         Assert.Equal("pending", (await f.StageGeneratedTemplateAsync(key)).Status);
@@ -1209,7 +1273,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, true)]
     public async Task GeneratedTemplateInitialPublicationRollsBackLateSourceOrFlagChange(bool postgres, bool disabled)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         await f.SeedGeneratedTemplateAsync();
         var key = Guid.NewGuid();
         f.Fault.Enabled = true;
@@ -1242,7 +1306,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [MemberData(nameof(GeneratedTemplateSnapshotBoundaries))]
     public async Task GeneratedTemplateTypedResumeRejectsUnboundSourceBeforeProviderRead(bool postgres, string boundary)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         await f.SeedGeneratedTemplateAsync();
         var key = Guid.NewGuid();
         Assert.Equal("pending", (await f.StageGeneratedTemplateAsync(key)).Status);
@@ -1276,7 +1340,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [MemberData(nameof(GeneratedTemplateSourceBoundaries))]
     public async Task GeneratedTemplateTypedResumeRechecksSourceAndRightsAcrossRead(bool postgres, string boundary, bool afterRead)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         await f.SeedGeneratedTemplateAsync();
         var key = Guid.NewGuid();
         Assert.Equal("pending", (await f.StageGeneratedTemplateAsync(key)).Status);
@@ -1307,7 +1371,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [MemberData(nameof(GeneratedTemplateSnapshotBoundaries))]
     public async Task GeneratedTemplateQueueRejectsUnboundSnapshotBeforeProviderRead(bool postgres, string boundary)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         await f.SeedGeneratedTemplateAsync();
         f.Options.AutoCaseDocumentPublicationEnabled = true;
         Assert.Equal("pending", (await f.StageGeneratedTemplateAsync(Guid.NewGuid())).Status);
@@ -1344,7 +1408,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [MemberData(nameof(GeneratedTemplateSourceBoundaries))]
     public async Task GeneratedTemplateQueueRechecksCurrentSelectionApplicabilityAndRights(bool postgres, string boundary, bool afterRead)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         await f.SeedGeneratedTemplateAsync();
         f.Options.AutoCaseDocumentPublicationEnabled = true;
         Assert.Equal("pending", (await f.StageGeneratedTemplateAsync(Guid.NewGuid())).Status);
@@ -1380,7 +1444,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, "lost-commit")]
     public async Task GeneratedTemplateQueueRecoversAtomicFailureWithoutDuplicateRecords(bool postgres, string stage)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         await f.SeedGeneratedTemplateAsync();
         f.Options.AutoCaseDocumentPublicationEnabled = true;
         Assert.Equal("pending", (await f.StageGeneratedTemplateAsync(Guid.NewGuid())).Status);
@@ -1419,7 +1483,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [MemberData(nameof(GeneratedReplayProofBoundaries))]
     public async Task GeneratedReplayRejectsUnprovenOwnerAndGenerationBeforeProviderRead(bool postgres, string boundary)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var key = Guid.NewGuid();
         Assert.Equal("pending", (await f.Generate(key, new("template", new string('a', 64), "{}"))).Status);
         var obj = await f.Db.StorageObjects.SingleAsync();
@@ -1451,7 +1515,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task GeneratedReplayProvesConcurrentPublishedWinnerBeforeProviderRead(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var key = Guid.NewGuid();
         var generation = new ManagedCaseDocumentGeneration("template", new string('a', 64), "{\"source\":\"original\"}");
         await f.Generate(key, generation);
@@ -1484,7 +1548,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task GeneratedReplayRejectsChangedFrozenMetadataDuringProviderRead(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, 2);
+        await using var f = await CreateFixtureAsync(postgres, 2);
         var key = Guid.NewGuid();
         await f.Generate(key, new("template", new string('a', 64), "{}"));
         await f.CopyPendingAsync();
@@ -1510,7 +1574,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, "foreign-generation")]
     public async Task GeneratedReplayRequiresExactPublishedCommitScopeWithoutProviderRead(bool postgres, string boundary)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var key = Guid.NewGuid();
         Assert.Equal("uploaded", (await f.Generate(key, new("template", new string('a', 64), "{}"))).Status);
         var commit = await f.Db.StorageOperations.SingleAsync(o => o.OperationType == "commit");
@@ -1553,7 +1617,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, 2)]
     public async Task GeneratedFoundationPreservesFrozenDataAndSeparatesUploadConsumer(bool postgres, int copies)
     {
-        await using var f = await Fixture.CreateAsync(postgres, copies);
+        await using var f = await CreateFixtureAsync(postgres, copies);
         var key = Guid.NewGuid();
         var generation = new ManagedCaseDocumentGeneration("template", new string('a', 64), "{\"source\":\"original\"}");
         Assert.Null(await f.ResumeGenerated(key));
@@ -1594,7 +1658,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task GeneratedFoundationRechecksAuthorityInsidePublication(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var calls = 0;
         var result = await f.Generate(Guid.NewGuid(), new("template", new string('a', 64), "{}"),
             (_, _, _) => Task.FromResult(++calls == 1));
@@ -1611,7 +1675,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task GeneratedFoundationKeepsUncertainReservationAndCorruptionFromNewRendering(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var key = Guid.NewGuid();
         f.Local.LoseAcknowledgement = true;
         Assert.Equal("unavailable", (await f.Generate(key, new("template", new string('a', 64), "{}"))).Status);
@@ -1632,7 +1696,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, 2)]
     public async Task GeneratedReservedReplayRecoversExactBytesAfterLostAcknowledgement(bool postgres, int copies)
     {
-        await using var f = await Fixture.CreateAsync(postgres, copies);
+        await using var f = await CreateFixtureAsync(postgres, copies);
         var key = Guid.NewGuid();
         f.Local.LoseAcknowledgement = true;
         var frozen = new ManagedCaseDocumentGeneration("template", new string('a', 64), "{\"source\":\"original\"}");
@@ -1666,7 +1730,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task GeneratedReservedReplayRejectsChangedFinalReceipt(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var key = Guid.NewGuid();
         f.Local.LoseAcknowledgement = true;
         Assert.Equal("unavailable", (await f.Generate(key, new("template", new string('a', 64), "{}"))).Status);
@@ -1694,7 +1758,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, "metadata")]
     public async Task GeneratedReservedReplayRetainsUncertainOrChangedSource(bool postgres, string boundary)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var key = Guid.NewGuid();
         f.Local.LoseAcknowledgement = true;
         Assert.Equal("unavailable", (await f.Generate(key, new("template", new string('a', 64), "{}"))).Status);
@@ -1722,7 +1786,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, true)]
     public async Task GeneratedWorkOrderQueuePreservesFrozenHistoryAuditAndNotification(bool postgres, bool automaticAtWrite)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         var order = await f.SeedGeneratedWorkOrderAsync();
         f.Options.AutoCaseDocumentPublicationEnabled = automaticAtWrite;
         Assert.Equal("pending", (await f.StageGeneratedWorkOrderAsync(order, Guid.NewGuid())).Status);
@@ -1775,7 +1839,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, "permission")]
     public async Task GeneratedWorkOrderQueueRequiresCurrentSourceAndPermissionBeforeRead(bool postgres, string boundary)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         var order = await f.SeedGeneratedWorkOrderAsync();
         f.Options.AutoCaseDocumentPublicationEnabled = true;
         Assert.Equal("pending", (await f.StageGeneratedWorkOrderAsync(order, Guid.NewGuid())).Status);
@@ -1810,7 +1874,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, "flag")]
     public async Task GeneratedWorkOrderQueueRechecksSourceLeaseAndFlagAfterRead(bool postgres, string boundary)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         var order = await f.SeedGeneratedWorkOrderAsync();
         f.Options.AutoCaseDocumentPublicationEnabled = true;
         Assert.Equal("pending", (await f.StageGeneratedWorkOrderAsync(order, Guid.NewGuid())).Status);
@@ -1847,7 +1911,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, "lost-commit")]
     public async Task GeneratedWorkOrderQueueRecoversAtomicFailureWithoutDuplicateRecords(bool postgres, string stage)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         var order = await f.SeedGeneratedWorkOrderAsync();
         f.Options.AutoCaseDocumentPublicationEnabled = true;
         Assert.Equal("pending", (await f.StageGeneratedWorkOrderAsync(order, Guid.NewGuid())).Status);
@@ -1882,7 +1946,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, true)]
     public async Task GeneratedReplayRejectsTombstoneRecordBeforeProviderRead(bool postgres, bool published)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: published ? 1 : 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: published ? 1 : 2);
         var key = Guid.NewGuid();
         Assert.Equal(published ? "uploaded" : "pending", (await f.Generate(key, new("template", new string('a', 64), "{}"))).Status);
         var obj = await f.Db.StorageObjects.AsNoTracking().SingleAsync();
@@ -1918,7 +1982,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, "kind-snapshot-mismatch")]
     public async Task GeneratedWorkOrderQueueRejectsUnboundSnapshotBeforeProviderRead(bool postgres, string boundary)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         var order = await f.SeedGeneratedWorkOrderAsync();
         f.Options.AutoCaseDocumentPublicationEnabled = true;
         Assert.Equal("pending", (await f.StageGeneratedWorkOrderAsync(order, Guid.NewGuid())).Status);
@@ -1958,7 +2022,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData("template", "broken")]
     public async Task GeneratedFoundationRejectsInvalidServerMetadataBeforeWriting(string kind, string json)
     {
-        await using var f = await Fixture.CreateAsync();
+        await using var f = await CreateFixtureAsync();
         Assert.Equal("invalid", (await f.Generate(Guid.NewGuid(), new(kind, new string('a', 64), json))).Status);
         Assert.Equal(0, f.Local.PutCount);
         Assert.Empty(await f.Db.StorageOperations.ToArrayAsync());
@@ -1969,7 +2033,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task RetirementEndpointStopsOnlyOwnedAttemptAndIsIdempotent(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         var key = Guid.NewGuid(); await f.Upload(key);
         var controller = f.Controller();
         Assert.IsType<BadRequestObjectResult>((await controller.RetireDocumentUpload(f.Case.Id, Guid.Empty, CancellationToken.None)).Result);
@@ -2014,7 +2078,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task RetirementEndpointRequiresVerifiedPublishedReceipt(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var key = Guid.NewGuid(); var document = f.Created(await f.Upload(key));
         var controller = f.Controller();
         var receipt = Assert.IsType<CaseDocumentUploadState>(Assert.IsType<OkObjectResult>(
@@ -2034,7 +2098,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task RetirementEndpointLostCommitResponseCanBeProvedWithoutAnotherUpload(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         var key = Guid.NewGuid(); await f.Upload(key);
         var pending = new Client { Name = "Owned pending endpoint retirement" }; f.Db.Clients.Add(pending);
         f.Fault.Enabled = true; f.Fault.Armed = true; f.Fault.Stage = "lost-commit";
@@ -2057,7 +2121,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task RetirementStatusUsesExactOwnedFenceWithoutIntentAndRechecksLiveAccess(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var key = Guid.NewGuid(); var foreignKey = Guid.NewGuid();
         f.Db.CaseDocumentUploadRetirements.AddRange(
             new CaseDocumentUploadRetirement { CaseId = f.Case.Id, ActorId = f.User.Id, UploadKey = key, StorageObjectId = Guid.NewGuid(), RetiredAt = DateTime.UtcNow },
@@ -2092,7 +2156,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, "permission")]
     public async Task LegacyUploadRechecksFenceAfterFileSaveAndPreservesUnrelatedState(bool postgres, string boundary)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         var protectedPath = f.CaseStorage.BuildRelativePath(f.Case.Id, "owned-protected.txt");
         await f.CaseStorage.SaveAsync(protectedPath, Encoding.UTF8.GetBytes("protected bytes"), CancellationToken.None);
         var pending = new Client { Name = "Owned unsaved legacy-fence client" };
@@ -2167,7 +2231,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task RetiredAttemptCannotFallBackToLegacyWhenManagedRoutingIsDisabled(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         var key = Guid.NewGuid(); await f.Upload(key);
         Assert.Equal("retired", await new CaseDocumentUploadRetirementService(f.Db)
             .RetireAsync(f.Case.Id, f.User.Id, key, CancellationToken.None));
@@ -2183,7 +2247,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task PendingManagedAttemptCannotFallBackToLegacyWhenRoutingIsDisabled(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         var key = Guid.NewGuid(); await f.Upload(key);
         f.Options.Enabled = false;
         var blocked = Assert.IsType<ObjectResult>((await f.Upload(key)).Result);
@@ -2197,7 +2261,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [Fact]
     public async Task PostgreSqlRetirementTimestampKeepsUtcClockFieldsInDifferentSessionTimeZone()
     {
-        await using var f = await Fixture.CreateAsync(postgres: true, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres: true, requiredCopies: 2);
         var key = Guid.NewGuid(); await f.Upload(key);
         await f.Db.Database.OpenConnectionAsync();
         await f.Db.Database.ExecuteSqlRawAsync("SET TIME ZONE 'Asia/Novosibirsk'");
@@ -2214,7 +2278,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task PostgreSqlRetirementAndPublicationSerializeAtTheCaseLock(bool retirementWins)
     {
-        await using var f = await Fixture.CreateAsync(postgres: true, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres: true, requiredCopies: 2);
         var key = Guid.NewGuid(); await f.Upload(key); await f.CopyPendingAsync();
         var barrier = new RetirementPublicationLockBarrier();
         await using var first = f.OpenSiblingContext(barrier);
@@ -2292,7 +2356,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task RetiredAttemptCannotPublishThroughHttpResumeOrWorkerButNewKeyCan(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         f.Options.AutoCaseDocumentPublicationEnabled = true;
         var key = Guid.NewGuid();
         await f.Upload(key);
@@ -2337,7 +2401,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task RetirementRejectsUnknownAndForeignAttemptsAndPreservesPublishedDocument(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var retire = new CaseDocumentUploadRetirementService(f.Db);
         Assert.Equal("unknown", await retire.RetireAsync(f.Case.Id, f.User.Id, Guid.NewGuid(), CancellationToken.None));
         Assert.Equal("forbidden", await retire.RetireAsync(f.Case.Id, int.MaxValue, Guid.NewGuid(), CancellationToken.None));
@@ -2356,7 +2420,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, "lost-commit")]
     public async Task RetirementRollbackAndLostAckRetainUnrelatedTrackedChanges(bool postgres, string stage)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         var key = Guid.NewGuid(); await f.Upload(key);
         var pending = new Client { Name = "Owned unsaved retirement client" };
         f.Db.Clients.Add(pending);
@@ -2378,7 +2442,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task RetirementDuringResumeReadPreventsDomainPublication(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         var key = Guid.NewGuid(); await f.Upload(key); await f.CopyPendingAsync(); await f.RecreateContext();
         var commit = await f.Db.StorageOperations.AsNoTracking().SingleAsync(item => item.OperationType == "commit");
         f.Local.AfterRead = async () => Assert.Equal("retired", await new CaseDocumentUploadRetirementService(f.Db)
@@ -2396,7 +2460,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, true)]
     public async Task AutoCaseQueueWaitsForCopiesThenPublishesWithoutHttpOrBrowserFile(bool postgres, bool lateEnabled)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         f.Options.AutoCaseDocumentPublicationEnabled = !lateEnabled;
         var key = Guid.NewGuid();
         await f.Upload(key);
@@ -2433,7 +2497,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task AutoCaseQueueAcknowledgesRacingHttpPublicationWithoutDuplicateRecords(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         f.Options.AutoCaseDocumentPublicationEnabled = true;
         var key = Guid.NewGuid(); await f.Upload(key); await f.CopyPendingAsync();
         var document = f.Created(await f.Upload(key));
@@ -2454,7 +2518,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData("flag")]
     public async Task AutoCaseQueueRechecksAuthorityAfterProviderReadAndRetainsCopies(string boundary)
     {
-        await using var f = await Fixture.CreateAsync(requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(requiredCopies: 2);
         f.Options.AutoCaseDocumentPublicationEnabled = true;
         await f.Upload(Guid.NewGuid()); await f.CopyPendingAsync(); await f.RecreateContext();
         f.Local.AfterRead = async () =>
@@ -2491,7 +2555,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(false, "expired-before-commit")]
     public async Task AutoCaseQueueRecoversDomainFailureOrLostAcknowledgementAndFencesExpiredLease(bool postgres, string stage)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         f.Options.AutoCaseDocumentPublicationEnabled = true;
         await f.Upload(Guid.NewGuid()); await f.CopyPendingAsync(); await f.RecreateContext();
         var clock = new MutableCaseClock();
@@ -2513,7 +2577,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [Fact]
     public async Task AutoCaseQueueBackfillIsBoundedAndExcludesTaskCaseOwners()
     {
-        await using var f = await Fixture.CreateAsync(requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(requiredCopies: 2);
         await f.Upload(Guid.NewGuid()); await f.Upload(Guid.NewGuid());
         f.Options.AutoCaseDocumentPublicationEnabled = true; f.Options.WorkerBatchSize = 1;
         var consumer = f.CasePublisher();
@@ -2540,7 +2604,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [Fact]
     public async Task AutoCaseQueueConcurrentPostgreSqlSchedulersCreateOneDurableJob()
     {
-        await using var f = await Fixture.CreateAsync(postgres: true, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres: true, requiredCopies: 2);
         await f.Upload(Guid.NewGuid());
         f.Options.AutoCaseDocumentPublicationEnabled = true;
         var barrier = new CaseSchedulingBarrier();
@@ -2582,7 +2646,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, true)]
     public async Task StoredCaseUploadResumesWithoutBrowserFileAndPreservesOriginalIntent(bool postgres, bool version)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         var receiver = new User
         {
             Email = "case-resume-receiver@example.local",
@@ -2653,7 +2717,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData("intent-during-read")]
     public async Task StoredCaseResumeCannotPublishAfterAuthorityOrIntentChanges(string boundary)
     {
-        await using var f = await Fixture.CreateAsync(requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(requiredCopies: 2);
         var key = Guid.NewGuid(); await f.Upload(key); await f.CopyPendingAsync();
         await f.RecreateContext();
         var operation = await f.Db.StorageOperations.SingleAsync(o => o.OperationType == "commit");
@@ -2696,7 +2760,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData("metadata-sha")]
     public async Task StoredCaseResumeRejectsInvalidIntentBeforeReadingProvider(string field)
     {
-        await using var f = await Fixture.CreateAsync(requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(requiredCopies: 2);
         await f.Upload(Guid.NewGuid()); await f.CopyPendingAsync();
         var operation = await f.Db.StorageOperations.SingleAsync(o => o.OperationType == "commit");
         var intent = ReadStoredIntent(operation.PayloadJson)!;
@@ -2728,7 +2792,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, "lost-commit")]
     public async Task StoredCaseResumeSurvivesPublicationFailureAndLostCommitAcknowledgement(bool postgres, string stage)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         await f.Upload(Guid.NewGuid()); await f.CopyPendingAsync();
         var operation = await f.Db.StorageOperations.AsNoTracking().SingleAsync(o => o.OperationType == "commit");
         f.Fault.Stage = stage; f.Fault.Enabled = true;
@@ -2753,7 +2817,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData("clock")]
     public async Task StoredCaseReceiptRejectsChangedPublicationWithoutProviderRead(string field)
     {
-        await using var f = await Fixture.CreateAsync();
+        await using var f = await CreateFixtureAsync();
         var document = f.Created(await f.Upload(Guid.NewGuid()));
         await f.RecreateContext();
         var operation = await f.Db.StorageOperations.SingleAsync(o => o.OperationType == "commit");
@@ -2772,7 +2836,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [Fact]
     public async Task CaseDocumentNotificationsAreNotSentBeforeOuterCommit()
     {
-        await using var f = await Fixture.CreateAsync();
+        await using var f = await CreateFixtureAsync();
         var actor = new User
         {
             Email = "notification-author@example.local",
@@ -2828,7 +2892,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, "lost-commit")]
     public async Task CommittedCaseNotificationRecoversWithoutHttpAndRechecksRecipient(bool postgres, string scenario)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var actor = new User
         {
             Email = "recovery-author@example.local",
@@ -2959,7 +3023,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData("replaced-after-send")]
     public async Task CaseNotificationDispatchLeaseProtectsConcurrentWorkersOnPostgreSql(string scenario)
     {
-        await using var f = await Fixture.CreateAsync(postgres: true);
+        await using var f = await CreateFixtureAsync(postgres: true);
         var notification = new UserNotification
         {
             RecipientUserId = f.User.Id,
@@ -3062,7 +3126,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(false)]
     public async Task SharedPublicationRecordsKeepExplicitAuthorClockAndCurrentHistoryWithoutHttp(bool firstVersion)
     {
-        await using var f = await Fixture.CreateAsync();
+        await using var f = await CreateFixtureAsync();
         var actor = new User
         {
             Email = "publication-author@example.local",
@@ -3129,7 +3193,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task SharedPublicationRecordsRejectMissingTransactionOrMismatchedCaseBeforeSaving(bool transaction)
     {
-        await using var f = await Fixture.CreateAsync();
+        await using var f = await CreateFixtureAsync();
         var history = f.Case.EventHistory;
         var records = new CaseDocumentPublicationRecords(f.Db, new CaseDocumentNotificationService(f.Db));
         var document = new ClientCaseDocument { ClientCaseId = transaction ? f.Case.Id + 1 : f.Case.Id };
@@ -3147,7 +3211,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task UploadAndExactReplayPublishOneCaseDocumentAndManagedDownload(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var key = Guid.NewGuid();
         var saved = f.Created(await f.Upload(key));
         var replay = f.Created(await f.Upload(key));
@@ -3175,7 +3239,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task ExactStatusBatchConfirmsReceiptWithoutProviderIoOrDomainChanges(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var key = Guid.NewGuid();
         var uploaded = f.Created(await f.Upload(key));
         var missing = Guid.NewGuid();
@@ -3203,7 +3267,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task DiscoveryPagesDurableReservationsAndAdvancesAcrossCorruptPayloads(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var firstKey = Guid.ParseExact(1.ToString("x32"), "N");
         f.Local.LoseAcknowledgement = true;
         await f.Upload(firstKey);
@@ -3247,7 +3311,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task DiscoveryDeduplicatesReserveAndCommitAndRefreshesPublishedAttempt(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         f.Options.AutoCaseDocumentPublicationEnabled = true;
         var key = Guid.NewGuid(); await f.Upload(key);
         var commit = await f.Db.StorageOperations.AsNoTracking().SingleAsync(o => o.OperationType == "commit");
@@ -3276,7 +3340,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task DiscoveryCursorAdvancesPastInvalidUnicodeKeysWithoutPublishingOrReadingFiles(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var prefix = $"write:case-document:{f.Case.Id}:{f.User.Id}:";
         var resource = System.Text.Json.JsonSerializer.Serialize(new string?[] { "local", null });
         var suffixes = Enumerable.Range(1, 49).Select(i => i.ToString("x32"))
@@ -3310,7 +3374,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task StatusRejectsAnotherObjectsGenerationEvenWhenBytesAndGenerationNumberMatch(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var key = Guid.NewGuid(); f.Created(await f.Upload(key)); f.Created(await f.Upload(Guid.NewGuid()));
         var first = await f.Db.StorageOperations.AsNoTracking().SingleAsync(o => o.IdempotencyKey ==
             StorageObjectService.GetCommitOperationKey($"case-document:{f.Case.Id}:{f.User.Id}:{key:N}"));
@@ -3326,7 +3390,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [Fact]
     public async Task PostgreSqlDiscoveryRevocationAfterWindowReadReturnsNoNames()
     {
-        await using var f = await Fixture.CreateAsync(true, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(true, requiredCopies: 2);
         await f.Upload(Guid.NewGuid());
         await using var sibling = f.OpenSiblingContext();
         f.StatusHook.AfterDiscoveryRead = async () =>
@@ -3340,7 +3404,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [Fact]
     public async Task PostgreSqlDiscoveryUsesScopedIndexesWithUnrelatedPendingHistory()
     {
-        await using var f = await Fixture.CreateAsync(true, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(true, requiredCopies: 2);
         await f.Upload(Guid.NewGuid());
         var obj = await f.Db.StorageObjects.AsNoTracking().Select(o => o.Id).SingleAsync();
         var localResource = System.Text.Json.JsonSerializer.Serialize(new string?[] { "local", null });
@@ -3399,7 +3463,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, "succeeded", "failed")]
     public async Task QueueAwareStatusReportsOnlyTheBoundPublicationWithoutProviderIo(bool postgres, string queueStatus, string expected)
     {
-        await using var f = await Fixture.CreateAsync(postgres, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(postgres, requiredCopies: 2);
         f.Options.AutoCaseDocumentPublicationEnabled = true; f.Options.WorkerEnabled = true;
         var key = Guid.NewGuid();
         await f.Upload(key);
@@ -3440,7 +3504,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData("wrongKey", "manualRetry")]
     public async Task QueueAwareStatusNeverPromisesAnUnavailableOrForeignWorker(string change, string expected)
     {
-        await using var f = await Fixture.CreateAsync(requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(requiredCopies: 2);
         f.Options.AutoCaseDocumentPublicationEnabled = true; f.Options.WorkerEnabled = true;
         var key = Guid.NewGuid(); await f.Upload(key);
         if (change == "workerDisabled") f.Options.WorkerEnabled = false;
@@ -3462,7 +3526,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [Fact]
     public async Task QueueAwareStatusRefreshesAReceiptPublishedBetweenMetadataReadsOnPostgreSql()
     {
-        await using var f = await Fixture.CreateAsync(true, requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(true, requiredCopies: 2);
         var receiver = new User
         {
             Email = "case-status-receiver@example.local",
@@ -3506,7 +3570,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task StatusReadsDurableReservationBeforeCatalogAndPausesWithoutAutomaticPromise(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var key = Guid.NewGuid();
         f.Local.LoseAcknowledgement = true;
         Assert.Equal(503, Assert.IsType<ObjectResult>((await f.Upload(key)).Result).StatusCode);
@@ -3537,7 +3601,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData("payload")]
     public async Task StatusNeverConfirmsMissingOrChangedReceipt(string change)
     {
-        await using var f = await Fixture.CreateAsync();
+        await using var f = await CreateFixtureAsync();
         var key = Guid.NewGuid();
         f.Created(await f.Upload(key));
         if (change == "document") await f.Db.ClientCaseDocuments.ExecuteDeleteAsync();
@@ -3565,7 +3629,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData("visibility")]
     public async Task StatusRevokedAccessReturnsNoNamesOrMetadata(string change)
     {
-        await using var f = await Fixture.CreateAsync();
+        await using var f = await CreateFixtureAsync();
         var key = Guid.NewGuid();
         f.Created(await f.Upload(key));
         if (change == "inactive") await f.Db.Users.ExecuteUpdateAsync(s => s.SetProperty(u => u.IsActive, false));
@@ -3582,7 +3646,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [Fact]
     public async Task StatusKeysAreScopedToActorAndCaseAndBoundBeforeQuerying()
     {
-        await using var f = await Fixture.CreateAsync();
+        await using var f = await CreateFixtureAsync();
         var key = Guid.NewGuid();
         f.Created(await f.Upload(key));
         var other = new User
@@ -3623,7 +3687,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData("version")]
     public async Task ReusingKeyForDifferentRequestCannotOverwriteOrDuplicate(string field)
     {
-        await using var f = await Fixture.CreateAsync();
+        await using var f = await CreateFixtureAsync();
         var key = Guid.NewGuid();
         var first = f.Created(await f.Upload(key));
         var changed = await f.Upload(key, body: field == "content" ? "other case bytes" : "owned case bytes",
@@ -3640,7 +3704,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [Fact]
     public async Task NewVersionAndReplayPreserveOriginalBytes()
     {
-        await using var f = await Fixture.CreateAsync();
+        await using var f = await CreateFixtureAsync();
         var first = f.Created(await f.Upload(Guid.NewGuid()));
         var key = Guid.NewGuid();
         var version = f.Created(await f.Upload(key, body: "new case version", versionOf: first.Id));
@@ -3657,7 +3721,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [Fact]
     public async Task MutableDocumentMetadataIsNotRevertedByExactReceiptReplay()
     {
-        await using var f = await Fixture.CreateAsync();
+        await using var f = await CreateFixtureAsync();
         var key = Guid.NewGuid();
         var first = f.Created(await f.Upload(key));
         var row = await f.Db.ClientCaseDocuments.SingleAsync(d => d.Id == first.Id);
@@ -3674,7 +3738,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [Fact]
     public async Task RequiredCopiesGateKeepsDomainEmptyUntilMirrorIsVerified()
     {
-        await using var f = await Fixture.CreateAsync(requiredCopies: 2);
+        await using var f = await CreateFixtureAsync(requiredCopies: 2);
         var key = Guid.NewGuid();
         Assert.Equal(503, Assert.IsType<ObjectResult>((await f.Upload(key)).Result).StatusCode);
         Assert.Empty(await f.Db.ClientCaseDocuments.ToListAsync());
@@ -3696,7 +3760,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, false)]
     public async Task LostLocalAcknowledgementResumesWithoutSecondPut(bool postgres, bool badHead)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         f.Local.LoseAcknowledgement = true;
         var key = Guid.NewGuid();
         Assert.Equal(503, Assert.IsType<ObjectResult>((await f.Upload(key)).Result).StatusCode);
@@ -3732,7 +3796,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true, "lost-commit")]
     public async Task PublicationFailurePreservesDurableIntentAndExactContextRetry(bool postgres, string stage)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var key = Guid.NewGuid();
         f.Fault.Stage = stage;
         f.Fault.Enabled = true;
@@ -3757,7 +3821,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task PostgreSqlOverlappingRequestsRespectReservedIntentAndPublishedReceipt(bool conflictingBytes)
     {
-        await using var f = await Fixture.CreateAsync(postgres: true);
+        await using var f = await CreateFixtureAsync(postgres: true);
         await using var sibling = f.OpenSiblingContext();
         var written = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -3799,7 +3863,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData("flag")]
     public async Task PublicationRechecksLiveRightsAndFlagsAfterProviderWrite(string change)
     {
-        await using var f = await Fixture.CreateAsync();
+        await using var f = await CreateFixtureAsync();
         f.Local.AfterPut = async () =>
         {
             if (change == "flag") f.Options.ProductWriteEnabledClasses.Clear();
@@ -3827,7 +3891,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData("00000000-0000-0000-0000-000000000000")]
     public async Task ManagedEndpointRequiresAttemptIdentityBeforeReadingBytes(string header)
     {
-        await using var f = await Fixture.CreateAsync();
+        await using var f = await CreateFixtureAsync();
         var controller = f.Controller();
         if (header.Length > 0) controller.Request.Headers["X-Upload-Key"] = header;
         var result = await controller.UploadDocument(f.Case.Id, CreateFile("owned case bytes"), "Документ", "Подготовлен", null, CancellationToken.None);
@@ -3839,7 +3903,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [Fact]
     public async Task CapacityPrerequisiteCannotFallBackToLegacyOrPublishDocument()
     {
-        await using var f = await Fixture.CreateAsync();
+        await using var f = await CreateFixtureAsync();
         f.Options.UploadCapacityChecksEnabled = false;
         Assert.Equal(503, Assert.IsType<ObjectResult>((await f.Upload(Guid.NewGuid())).Result).StatusCode);
         Assert.Equal(0, f.Local.PutCount);
@@ -3850,7 +3914,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [Fact]
     public async Task DisabledManagedRouteKeepsExistingLegacyUpload()
     {
-        await using var f = await Fixture.CreateAsync();
+        await using var f = await CreateFixtureAsync();
         f.Options.ProductWriteEnabledClasses.Clear();
         f.Created(await f.Upload(Guid.NewGuid()));
         Assert.Equal(0, f.Local.PutCount);
@@ -3861,7 +3925,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [Fact]
     public async Task ExactGuidIsScopedByCaseAndActor()
     {
-        await using var f = await Fixture.CreateAsync();
+        await using var f = await CreateFixtureAsync();
         var key = Guid.NewGuid();
         f.Created(await f.Upload(key));
         var otherCase = new ClientCase { ClientId = f.Case.ClientId, ResponsibleUserId = f.User.Id, Title = "Другое дело" };
@@ -3885,7 +3949,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task DeletedDomainOrCatalogCannotBeResurrectedByReceiptReplay(bool deleteCatalog)
     {
-        await using var f = await Fixture.CreateAsync();
+        await using var f = await CreateFixtureAsync();
         var key = Guid.NewGuid();
         var first = f.Created(await f.Upload(key));
         // Administrative deletion is a later request with fresh concurrency tokens.
@@ -3905,7 +3969,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [Fact]
     public async Task CapacityCannotAdmitStageWhenSafetyMarginExceedsKnownDiskSpace()
     {
-        await using var f = await Fixture.CreateAsync();
+        await using var f = await CreateFixtureAsync();
         f.Options.UploadMinimumFreeBytes = long.MaxValue;
         Assert.Equal(503, Assert.IsType<ObjectResult>((await f.Upload(Guid.NewGuid())).Result).StatusCode);
         Assert.Equal(0, f.Local.PutCount);
@@ -3916,7 +3980,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [Fact]
     public async Task SharedTaskWriterRecoversReservedMetadataAfterLocalAckLoss()
     {
-        await using var f = await Fixture.CreateAsync();
+        await using var f = await CreateFixtureAsync();
         f.Options.ProductWriteEnabledClasses.Add("task-file");
         var task = new TaskJournalItem
         {
@@ -3944,7 +4008,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [Fact]
     public async Task SharedPhotoWriterRetainsOriginalPointerAcrossAckLossAndConcurrentPhotoChange()
     {
-        await using var f = await Fixture.CreateAsync();
+        await using var f = await CreateFixtureAsync();
         f.Options.ProductWriteEnabledClasses.Add("profile-photo");
         var key = Guid.NewGuid();
         f.Local.LoseAcknowledgement = true;
@@ -3974,7 +4038,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [Fact]
     public async Task PostgreSqlStatusRevocationDuringMetadataReadDoesNotDiscloseTheReceipt()
     {
-        await using var f = await Fixture.CreateAsync(postgres: true);
+        await using var f = await CreateFixtureAsync(postgres: true);
         await using var sibling = f.OpenSiblingContext();
         var key = Guid.NewGuid();
         f.Created(await f.Upload(key));
@@ -3988,7 +4052,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
     [InlineData(true)]
     public async Task StatusReadsFiftyAttemptsInBoundedStorageAndFinancialMetadataQueries(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var key = Guid.NewGuid();
         f.Created(await f.Upload(key));
         f.StatusHook.ResetMetadataReads();
@@ -4071,6 +4135,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
         public IConfiguration Configuration { get; init; } = null!;
         private IStorageObjectService Storage { get; set; } = null!;
         public IManagedCaseDocumentUploadService Managed { get; private set; } = null!;
+        private PostgreSqlModelTemplate.DatabaseLease? ModelLease { get; init; }
         private SqliteConnection? Sqlite { get; init; }
         private NpgsqlConnection? Admin { get; init; }
         private string? DatabaseName { get; init; }
@@ -4312,111 +4377,175 @@ public sealed class ManagedCaseDocumentUploadServiceTests
         public ClientCaseDocumentDto Created(ActionResult<ClientCaseDocumentDto> result)
             => Assert.IsType<ClientCaseDocumentDto>(Assert.IsType<CreatedResult>(result.Result).Value);
 
-        public static async Task<Fixture> CreateAsync(bool postgres = false, int requiredCopies = 1, bool migrated = false)
+        public static async Task<Fixture> CreateAsync(bool postgres = false, int requiredCopies = 1, bool migrated = false,
+            PostgreSqlModelTemplate? modelTemplate = null, Func<Fixture, Task>? beforeReady = null)
         {
+            var setupStarted = Stopwatch.GetTimestamp();
             var root = Path.Combine(Path.GetTempPath(), "pp-managed-case-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(root);
             var fault = new PublicationFault();
             var statusHook = new StatusReadHook();
-            PaymentContext db;
+            var schemaStarted = Stopwatch.GetTimestamp();
+            PostgreSqlModelTemplate.DatabaseLease? modelLease = null;
+            PaymentContext? db = null;
             SqliteConnection? sqlite = null;
             NpgsqlConnection? admin = null;
             string? databaseName = null;
             string? connectionString = null;
-            if (postgres)
+            try
             {
-                var raw = System.Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES");
-                Assert.False(string.IsNullOrWhiteSpace(raw), "Owned PostgreSQL fixture requires PAYPLANNER_TEST_POSTGRES.");
-                var settings = new NpgsqlConnectionStringBuilder(raw) { Pooling = false };
-                Assert.Contains(settings.Host, new[] { "127.0.0.1", "localhost", "::1" });
-                databaseName = "pp_managed_case_" + Guid.NewGuid().ToString("N");
-                Console.WriteLine($"Owned managed case database: {databaseName}");
-                admin = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(settings.ConnectionString) { Database = "postgres" }.ConnectionString);
-                await admin.OpenAsync();
-                await using (var create = new NpgsqlCommand($"CREATE DATABASE \"{databaseName}\"", admin)) await create.ExecuteNonQueryAsync();
-                settings.Database = databaseName;
-                connectionString = settings.ConnectionString;
-                db = new PostgreSqlPaymentContext(new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(settings.ConnectionString)
-                    .AddInterceptors(fault, new PublicationSaveFault(fault), statusHook).Options);
-            }
-            else
-            {
-                sqlite = new SqliteConnection("Data Source=:memory:");
-                await sqlite.OpenAsync();
-                var sqliteOptions = new DbContextOptionsBuilder<PaymentContext>().UseSqlite(sqlite)
-                    .AddInterceptors(fault, new PublicationSaveFault(fault), statusHook);
-                if (migrated) sqliteOptions.UsePayPlannerSqliteMigrations();
-                db = new PaymentContext(sqliteOptions.Options, useObjectAuditModel: true);
-            }
-            if (migrated) await db.Database.MigrateAsync();
-            else await db.Database.EnsureCreatedAsync();
-            var role = new Role
-            {
-                Name = "owned-case-editor",
-                Permissions = [new RolePermission {
-                Section = RolePermissionCatalog.Cases, CanView = true, CanEdit = true, ViewScope = DataVisibilityScope.Own }]
-            };
-            var user = new User { Email = "managed-case@example.local", FullName = "Автор", PasswordHash = "synthetic", IsActive = true, IsApproved = true, Role = role };
-            var client = new Client { Name = "Синтетический клиент", ResponsibleUser = user };
-            var clientCase = new ClientCase { Client = client, ResponsibleUser = user, Title = "Синтетическое дело", Status = ClientCaseStatus.Open };
-            db.ClientCases.Add(clientCase); await db.SaveChangesAsync();
-            var environment = new TestEnvironment(root);
-            var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["FileStorage:RootPath"] = Path.Combine(root, "files"),
-                ["StorageOrchestration:LocalRoot"] = Path.Combine(root, "objects"),
-                ["Email:Enabled"] = "false",
-                ["BackgroundServices:Enabled"] = "false"
-            }).Build();
-            var mirrorConfig = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["StorageOrchestration:LocalRoot"] = Path.Combine(root, "mirror")
-            }).Build();
-            var local = new ObservedProvider("local", new LocalStorageProvider(environment, config));
-            var mirror = new ObservedProvider("mirror", new LocalStorageProvider(environment, mirrorConfig));
-            var registry = new StorageProviderRegistry([local, mirror, new LegacyLocalStorageProvider(environment, config)]);
-            var options = new StorageOrchestrationOptions
-            {
-                Enabled = true,
-                UploadCapacityChecksEnabled = true,
-                UploadMinimumFreeBytes = 0,
-                ProductWriteEnabledClasses = ["case-document"],
-                ProductReadEnabledClasses = ["case-document"],
-                ProviderConnections = new() { ["mirror"] = "owned-synthetic" },
-                DefaultPolicy = new()
+                if (postgres)
                 {
-                    RequiredCopies = requiredCopies,
-                    WriteProviders = requiredCopies == 2 ? ["local", "mirror"] : ["local"],
-                    ReadProviders = requiredCopies == 2 ? ["local", "mirror"] : ["local"]
+                    var raw = System.Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES");
+                    Assert.False(string.IsNullOrWhiteSpace(raw), "Owned PostgreSQL fixture requires PAYPLANNER_TEST_POSTGRES.");
+                    var settings = new NpgsqlConnectionStringBuilder(raw) { Pooling = false };
+                    Assert.Contains(settings.Host, new[] { "127.0.0.1", "localhost", "::1" });
+                    if (!migrated && modelTemplate is not null)
+                    {
+                        modelLease = await modelTemplate.CreateDatabaseAsync();
+                        databaseName = modelLease.Name;
+                        connectionString = modelLease.ConnectionString;
+                        settings = new NpgsqlConnectionStringBuilder(connectionString);
+                    }
+                    else
+                    {
+                        databaseName = "pp_managed_case_" + Guid.NewGuid().ToString("N");
+                        Console.WriteLine($"Owned managed case database: {databaseName}");
+                        admin = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(settings.ConnectionString) { Database = "postgres" }.ConnectionString);
+                        await admin.OpenAsync();
+                        await using (var create = new NpgsqlCommand($"CREATE DATABASE \"{databaseName}\"", admin)) await create.ExecuteNonQueryAsync();
+                        settings.Database = databaseName;
+                        connectionString = settings.ConnectionString;
+                    }
+                    db = new PostgreSqlPaymentContext(new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(settings.ConnectionString)
+                        .AddInterceptors(fault, new PublicationSaveFault(fault), statusHook).Options);
                 }
-            };
-            var monitor = new StaticOptions(options);
-            var policies = new StoragePolicyService(monitor, registry);
-            var storage = new StorageObjectService(db, policies, registry, monitor);
-            var capacity = new StorageStageCapacityService(db, registry, monitor, environment, config);
-            return new Fixture
+                else
+                {
+                    sqlite = new SqliteConnection("Data Source=:memory:");
+                    await sqlite.OpenAsync();
+                    if (!migrated)
+                    {
+                        // Keep this fixture's connection ownership and all three fault/status
+                        // interceptors; clone only the existing factory's empty EnsureCreated schema.
+                        await using var schema = await SqliteTestContextFactory.CreateAsync(useObjectAuditModel: true);
+                        ((SqliteConnection)schema.Database.GetDbConnection()).BackupDatabase(sqlite);
+                    }
+                    var sqliteOptions = new DbContextOptionsBuilder<PaymentContext>().UseSqlite(sqlite)
+                        .AddInterceptors(fault, new PublicationSaveFault(fault), statusHook);
+                    if (migrated) sqliteOptions.UsePayPlannerSqliteMigrations();
+                    db = new PaymentContext(sqliteOptions.Options, useObjectAuditModel: true);
+                }
+                if (migrated) await db.Database.MigrateAsync();
+                else if (postgres && modelLease is null) await db.Database.EnsureCreatedAsync();
+                var mode = migrated ? postgres ? "migrated-pg" : "migrated-sqlite"
+                    : postgres ? modelLease is null ? "native-pg" : "model-pg" : "sqlite-template";
+                ReportPhase(mode, "schema", schemaStarted);
+                var seedStarted = Stopwatch.GetTimestamp();
+                var role = new Role
+                {
+                    Name = "owned-case-editor",
+                    Permissions = [new RolePermission {
+                    Section = RolePermissionCatalog.Cases, CanView = true, CanEdit = true, ViewScope = DataVisibilityScope.Own }]
+                };
+                var user = new User { Email = "managed-case@example.local", FullName = "Автор", PasswordHash = "synthetic", IsActive = true, IsApproved = true, Role = role };
+                var client = new Client { Name = "Синтетический клиент", ResponsibleUser = user };
+                var clientCase = new ClientCase { Client = client, ResponsibleUser = user, Title = "Синтетическое дело", Status = ClientCaseStatus.Open };
+                db.ClientCases.Add(clientCase); await db.SaveChangesAsync();
+                ReportPhase(mode, "seed", seedStarted);
+                var storageStarted = Stopwatch.GetTimestamp();
+                var environment = new TestEnvironment(root);
+                var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["FileStorage:RootPath"] = Path.Combine(root, "files"),
+                    ["StorageOrchestration:LocalRoot"] = Path.Combine(root, "objects"),
+                    ["Email:Enabled"] = "false",
+                    ["BackgroundServices:Enabled"] = "false"
+                }).Build();
+                var mirrorConfig = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["StorageOrchestration:LocalRoot"] = Path.Combine(root, "mirror")
+                }).Build();
+                var local = new ObservedProvider("local", new LocalStorageProvider(environment, config));
+                var mirror = new ObservedProvider("mirror", new LocalStorageProvider(environment, mirrorConfig));
+                var registry = new StorageProviderRegistry([local, mirror, new LegacyLocalStorageProvider(environment, config)]);
+                var options = new StorageOrchestrationOptions
+                {
+                    Enabled = true,
+                    UploadCapacityChecksEnabled = true,
+                    UploadMinimumFreeBytes = 0,
+                    ProductWriteEnabledClasses = ["case-document"],
+                    ProductReadEnabledClasses = ["case-document"],
+                    ProviderConnections = new() { ["mirror"] = "owned-synthetic" },
+                    DefaultPolicy = new()
+                    {
+                        RequiredCopies = requiredCopies,
+                        WriteProviders = requiredCopies == 2 ? ["local", "mirror"] : ["local"],
+                        ReadProviders = requiredCopies == 2 ? ["local", "mirror"] : ["local"]
+                    }
+                };
+                var monitor = new StaticOptions(options);
+                var policies = new StoragePolicyService(monitor, registry);
+                var storage = new StorageObjectService(db, policies, registry, monitor);
+                var capacity = new StorageStageCapacityService(db, registry, monitor, environment, config);
+                var fixture = new Fixture
+                {
+                    Root = root,
+                    Db = db,
+                    User = user,
+                    Case = clientCase,
+                    Options = options,
+                    Monitor = monitor,
+                    Local = local,
+                    Mirror = mirror,
+                    Registry = registry,
+                    Fault = fault,
+                    StatusHook = statusHook,
+                    Environment = environment,
+                    Configuration = config,
+                    CaseStorage = new LocalCaseDocumentStorage(environment, config),
+                    Storage = storage,
+                    Managed = new ManagedCaseDocumentUploadService(db, storage, new ProductStorageBindingService(db, policies), environment, config, monitor, capacity),
+                    ModelLease = modelLease,
+                    Sqlite = sqlite,
+                    Admin = admin,
+                    DatabaseName = databaseName,
+                    ConnectionString = connectionString
+                };
+                ReportPhase(mode, "storage", storageStarted);
+                if (beforeReady is not null) await beforeReady(fixture);
+                ReportPhase(mode, "setup", setupStarted);
+                return fixture;
+            }
+            catch (Exception error) when (postgres && !migrated && modelTemplate is not null)
             {
-                Root = root,
-                Db = db,
-                User = user,
-                Case = clientCase,
-                Options = options,
-                Monitor = monitor,
-                Local = local,
-                Mirror = mirror,
-                Registry = registry,
-                Fault = fault,
-                StatusHook = statusHook,
-                Environment = environment,
-                Configuration = config,
-                CaseStorage = new LocalCaseDocumentStorage(environment, config),
-                Storage = storage,
-                Managed = new ManagedCaseDocumentUploadService(db, storage, new ProductStorageBindingService(db, policies), environment, config, monitor, capacity),
-                Sqlite = sqlite,
-                Admin = admin,
-                DatabaseName = databaseName,
-                ConnectionString = connectionString
-            };
+                var errors = new List<Exception> { error };
+                if (db is not null)
+                {
+                    try { await db.DisposeAsync(); }
+                    catch (Exception cleanup) { errors.Add(cleanup); }
+                }
+                if (modelLease is not null)
+                {
+                    try { await modelLease.DisposeAsync(); }
+                    catch (Exception cleanup) { errors.Add(cleanup); }
+                }
+                try
+                {
+                    Assert.StartsWith("pp-managed-case-", Path.GetFileName(root));
+                    if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+                }
+                catch (Exception cleanup) { errors.Add(cleanup); }
+                if (errors.Count > 1) throw new AggregateException("Model fixture setup and cleanup failed.", errors);
+                throw;
+            }
+        }
+
+        private static void ReportPhase(string mode, string phase, long started)
+        {
+            try { Console.WriteLine(FormattableString.Invariant($"PP_FIXTURE_PHASE family=ManagedCaseUpload mode={mode} phase={phase} elapsedMs={Stopwatch.GetElapsedTime(started).TotalMilliseconds:F3}")); }
+            catch (Exception error) when (error is IOException or ObjectDisposedException)
+            { /* Diagnostics must not hide a business failure or lose a lease. */ }
         }
 
         public IManagedTaskFileUploadService TaskWriter() => new ManagedTaskFileUploadService(Db, Storage,
@@ -4441,8 +4570,10 @@ public sealed class ManagedCaseDocumentUploadServiceTests
 
         public async ValueTask DisposeAsync()
         {
+            var started = Stopwatch.GetTimestamp();
             await Db.DisposeAsync();
             if (Sqlite is not null) await Sqlite.DisposeAsync();
+            if (ModelLease is not null) await ModelLease.DisposeAsync();
             if (Admin is not null)
             {
                 await using var sessions = new NpgsqlCommand("SELECT count(*) FROM pg_stat_activity WHERE datname = @name", Admin);
@@ -4457,6 +4588,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests
             }
             Assert.StartsWith("pp-managed-case-", Path.GetFileName(Root));
             Directory.Delete(Root, true);
+            ReportPhase(ModelLease is not null ? "model-pg" : Admin is not null ? "native-pg" : "sqlite", "cleanup", started);
         }
     }
 

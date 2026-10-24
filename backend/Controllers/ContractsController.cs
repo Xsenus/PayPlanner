@@ -1042,44 +1042,57 @@ public class ContractsController : ControllerBase
         if (reason is null) return ValidationError(nameof(request.Reason), "Причина аннулирования обязательна.");
         ApplyAuditReason(reason);
 
-        var contract = await LoadEditableContractDetailAsync(id, ct);
-        if (contract is null) return NotFound();
-        if (await RequireSectionPermissionAsync(RolePermissionCatalog.Contracts, permission => permission.CanEdit, ct) is { } forbidden)
+        var initialVisibility = await ResolveContractsVisibilityAsync(ct);
+        if (initialVisibility is null) return MissingContractsVisibilityResult();
+        if (await RequireSectionPermissionAsync(RolePermissionCatalog.Contracts, permission => permission.CanEdit, ct) is { } initialForbidden)
+            return initialForbidden;
+        if (!await _db.Contracts.AsNoTracking().ApplyContractVisibility(initialVisibility).AnyAsync(contract => contract.Id == id, ct))
+            return NotFound();
+
+        return await FinancialSourceLease.RunAsync<ContractDto>(_db, async lease =>
         {
-            return forbidden;
-        }
-        if (!string.Equals(contract.Status, ContractStatus.Draft, StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(contract.Status, ContractStatus.NotSigned, StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(contract.Status, ContractStatus.RequiresClientSignature, StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(contract.Status, ContractStatus.OnApproval, StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(contract.Status, ContractStatus.Approved, StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(contract.Status, ContractStatus.ApprovalRejected, StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(contract.Status, ContractStatus.NeedsCorrection, StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(contract.Status, ContractStatus.OnSigning, StringComparison.OrdinalIgnoreCase))
-        {
-            return BadRequest("Аннулирование доступно только для черновиков и договоров на подписании.");
-        }
+            await lease.AcquireContractAsync(id, null, ct);
 
-        var originalStatus = contract.Status;
-        var originalValidUntil = contract.ValidUntil;
-        var originalAmount = contract.Amount;
-        var now = DateTime.UtcNow;
-        var contractTimeZone = await ResolveContractTimeZoneAsync(ct);
-        contract.Status = ContractStatus.Cancelled;
-        contract.CancelledAt ??= ContractDomainService.NormalizeLocalDate(now);
-        contract.CancelledReason = reason;
-        contract.UpdatedAt = now;
-        ApplyContractCancellationSideEffects(contract, reason, now, contractTimeZone);
+            var contract = await LoadEditableContractDetailAsync(id, ct);
+            if (contract is null) return NotFound();
+            if (await RequireSectionPermissionAsync(RolePermissionCatalog.Contracts, permission => permission.CanEdit, ct) is { } forbidden)
+            {
+                return forbidden;
+            }
+            if (!string.Equals(contract.Status, ContractStatus.Draft, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(contract.Status, ContractStatus.NotSigned, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(contract.Status, ContractStatus.RequiresClientSignature, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(contract.Status, ContractStatus.OnApproval, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(contract.Status, ContractStatus.Approved, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(contract.Status, ContractStatus.ApprovalRejected, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(contract.Status, ContractStatus.NeedsCorrection, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(contract.Status, ContractStatus.OnSigning, StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest("Аннулирование доступно только для черновиков и договоров на подписании.");
+            }
 
-        await _db.SaveChangesAsync(ct);
+            var originalStatus = contract.Status;
+            var originalValidUntil = contract.ValidUntil;
+            var originalAmount = contract.Amount;
+            var now = DateTime.UtcNow;
+            var contractTimeZone = await ResolveContractTimeZoneAsync(ct);
+            contract.Status = ContractStatus.Cancelled;
+            contract.CancelledAt ??= ContractDomainService.NormalizeLocalDate(now);
+            contract.CancelledReason = reason;
+            contract.UpdatedAt = now;
+            ApplyContractCancellationSideEffects(contract, reason, now, contractTimeZone);
 
-        var updatedContract = await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct);
-        await NotifyContractChangedAsync(
-            updatedContract,
-            BuildContractChangeLabels(originalStatus, updatedContract.Status, originalValidUntil, updatedContract.ValidUntil, originalAmount, updatedContract.Amount),
-            ct);
-        var dto = MapToDto(updatedContract);
-        return Ok(dto);
+            await _db.SaveChangesAsync(ct);
+            await lease.CommitAsync(ct);
+
+            var updatedContract = await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct);
+            await NotifyContractChangedAsync(
+                updatedContract,
+                BuildContractChangeLabels(originalStatus, updatedContract.Status, originalValidUntil, updatedContract.ValidUntil, originalAmount, updatedContract.Amount),
+                ct);
+            var dto = MapToDto(updatedContract);
+            return Ok(dto);
+        }, ct);
     }
 
     [HttpGet("numbering-settings")]
@@ -1146,45 +1159,53 @@ public class ContractsController : ControllerBase
         var missingCreate = await _formRequirements.GetMissingFieldsAsync("contracts", request, ct);
         if (missingCreate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingCreate });
         if (!ModelState.IsValid) return ValidationProblem(ModelState);
-        var normalized = await ValidateAndNormalizePayload(request, null, ct);
-        if (normalized.Error is not null) return normalized.Error;
-        var status = NormalizeContractStatusOrNull(request.Status) ?? ContractStatus.Draft;
-        if (!string.IsNullOrWhiteSpace(request.Status) && !ContractStatus.IsValid(request.Status))
+        return await FinancialSourceLease.RunAsync<ContractDto>(_db, async lease =>
         {
-            return ValidationError(nameof(request.Status), "Unknown contract status.");
-        }
+            await lease.AcquireContractAsync(null, request, ct);
+            if (await RequireSectionPermissionAsync(RolePermissionCatalog.Contracts, permission => permission.CanCreate, ct) is { } changedPermission)
+                return changedPermission;
 
-        var contract = new Contract
-        {
-            Number = normalized.Number!,
-            Title = Normalize(request.Title),
-            Description = Normalize(request.Description),
-            BillingMode = normalized.BillingMode!,
-            Status = status,
-            IsOpenEnded = normalized.IsOpenEnded,
-            Amount = normalized.Amount,
-            Date = ContractDomainService.NormalizeLocalDate(request.Date),
-            StartDate = ContractDomainService.NormalizeLocalDate(request.StartDate),
-            ValidUntil = normalized.ValidUntil,
-            TerminationDate = ContractDomainService.NormalizeLocalDate(request.TerminationDate),
-            TerminationReason = Normalize(request.TerminationReason),
-            TerminationTerms = Normalize(request.TerminationTerms),
-            TerminationFinancialTerms = Normalize(request.TerminationFinancialTerms),
-            CancelledAt = ContractDomainService.NormalizeLocalDate(request.CancelledAt),
-            CancelledReason = Normalize(request.CancelledReason),
-            CreatedAt = DateTime.UtcNow,
-        };
+            var normalized = await ValidateAndNormalizePayload(request, null, ct);
+            if (normalized.Error is not null) return normalized.Error;
+            var status = NormalizeContractStatusOrNull(request.Status) ?? ContractStatus.Draft;
+            if (!string.IsNullOrWhiteSpace(request.Status) && !ContractStatus.IsValid(request.Status))
+            {
+                return ValidationError(nameof(request.Status), "Unknown contract status.");
+            }
 
-        ApplyLinks(contract, normalized.Clients, normalized.LegalEntities, normalized.ActIds, normalized.InvoiceIds, normalized.PaymentIds);
-        _db.Contracts.Add(contract);
-        await _db.SaveChangesAsync(ct);
-        await AssignCanonicalContractLinks(contract, normalized.InvoiceIds, normalized.PaymentIds, ct);
-        await _db.SaveChangesAsync(ct);
-        _db.ChangeTracker.Clear();
-        var createdContract = await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct);
-        await NotifyContractCreatedAsync(createdContract, ct);
-        var dto = MapToDto(createdContract);
-        return Created($"/api/contracts/{dto.Id}", dto);
+            var contract = new Contract
+            {
+                Number = normalized.Number!,
+                Title = Normalize(request.Title),
+                Description = Normalize(request.Description),
+                BillingMode = normalized.BillingMode!,
+                Status = status,
+                IsOpenEnded = normalized.IsOpenEnded,
+                Amount = normalized.Amount,
+                Date = ContractDomainService.NormalizeLocalDate(request.Date),
+                StartDate = ContractDomainService.NormalizeLocalDate(request.StartDate),
+                ValidUntil = normalized.ValidUntil,
+                TerminationDate = ContractDomainService.NormalizeLocalDate(request.TerminationDate),
+                TerminationReason = Normalize(request.TerminationReason),
+                TerminationTerms = Normalize(request.TerminationTerms),
+                TerminationFinancialTerms = Normalize(request.TerminationFinancialTerms),
+                CancelledAt = ContractDomainService.NormalizeLocalDate(request.CancelledAt),
+                CancelledReason = Normalize(request.CancelledReason),
+                CreatedAt = DateTime.UtcNow,
+            };
+
+            ApplyLinks(contract, normalized.Clients, normalized.LegalEntities, normalized.ActIds, normalized.InvoiceIds, normalized.PaymentIds);
+            _db.Contracts.Add(contract);
+            await _db.SaveChangesAsync(ct);
+            await AssignCanonicalContractLinks(contract, normalized.InvoiceIds, normalized.PaymentIds, ct);
+            await _db.SaveChangesAsync(ct);
+            await lease.CommitAsync(ct);
+            _db.ChangeTracker.Clear();
+            var createdContract = await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct);
+            await NotifyContractCreatedAsync(createdContract, ct);
+            var dto = MapToDto(createdContract);
+            return Created($"/api/contracts/{dto.Id}", dto);
+        }, ct);
     }
 
     [HttpPut("{id:int}")]
@@ -1204,57 +1225,70 @@ public class ContractsController : ControllerBase
             return forbidden;
         }
 
-        var contract = await _db.Contracts
-            .ApplyContractVisibility(visibility)
-            .Include(c => c.ClientContracts).Include(c => c.LegalEntityContracts)
-            .Include(c => c.ContractActs).Include(c => c.ContractInvoices).Include(c => c.ContractPayments)
-            .FirstOrDefaultAsync(c => c.Id == id, ct);
-        if (contract is null) return NotFound();
+        if (!await _db.Contracts.AsNoTracking().ApplyContractVisibility(visibility).AnyAsync(contract => contract.Id == id, ct))
+            return NotFound();
 
-        var originalStatus = contract.Status;
-        var originalValidUntil = contract.ValidUntil;
-        var originalAmount = contract.Amount;
-        var normalized = await ValidateAndNormalizePayload(request, id, ct);
-        if (normalized.Error is not null) return normalized.Error;
-        var status = NormalizeContractStatusOrNull(request.Status) ?? contract.Status;
-        if (!string.IsNullOrWhiteSpace(request.Status) && !ContractStatus.IsValid(request.Status))
+        return await FinancialSourceLease.RunAsync<ContractDto>(_db, async lease =>
         {
-            return ValidationError(nameof(request.Status), "Unknown contract status.");
-        }
+            await lease.AcquireContractAsync(id, request, ct);
+            visibility = await ResolveContractsVisibilityAsync(ct);
+            if (visibility is null) return MissingContractsVisibilityResult();
+            if (await RequireSectionPermissionAsync(RolePermissionCatalog.Contracts, permission => permission.CanEdit, ct) is { } changedPermission)
+                return changedPermission;
 
-        contract.Number = normalized.Number!;
-        contract.Title = Normalize(request.Title);
-        contract.Description = Normalize(request.Description);
-        contract.BillingMode = normalized.BillingMode!;
-        contract.Status = status;
-        contract.IsOpenEnded = normalized.IsOpenEnded;
-        contract.Amount = normalized.Amount;
-        contract.Date = ContractDomainService.NormalizeLocalDate(request.Date);
-        contract.StartDate = ContractDomainService.NormalizeLocalDate(request.StartDate);
-        contract.ValidUntil = normalized.ValidUntil;
-        contract.TerminationDate = ContractDomainService.NormalizeLocalDate(request.TerminationDate);
-        contract.TerminationReason = Normalize(request.TerminationReason);
-        contract.TerminationTerms = Normalize(request.TerminationTerms);
-        contract.TerminationFinancialTerms = Normalize(request.TerminationFinancialTerms);
-        contract.CancelledAt = ContractDomainService.NormalizeLocalDate(request.CancelledAt);
-        contract.CancelledReason = Normalize(request.CancelledReason);
-        contract.UpdatedAt = DateTime.UtcNow;
+            var contract = await _db.Contracts
+                .ApplyContractVisibility(visibility)
+                .Include(c => c.ClientContracts).Include(c => c.LegalEntityContracts)
+                .Include(c => c.ContractActs).Include(c => c.ContractInvoices).Include(c => c.ContractPayments)
+                .FirstOrDefaultAsync(c => c.Id == id, ct);
+            if (contract is null) return NotFound();
 
-        SyncClientLinks(contract, normalized.Clients);
-        SyncLegalEntityLinks(contract, normalized.LegalEntities);
-        SyncLinks(contract.ContractActs, normalized.ActIds, id, actId => new ContractAct { ContractId = id, ActId = actId }, (l, v) => l.ActId == v);
-        SyncLinks(contract.ContractInvoices, normalized.InvoiceIds, id, invoiceId => new ContractInvoice { ContractId = id, InvoiceId = invoiceId }, (l, v) => l.InvoiceId == v);
-        SyncLinks(contract.ContractPayments, normalized.PaymentIds, id, paymentId => new ContractPayment { ContractId = id, PaymentId = paymentId }, (l, v) => l.PaymentId == v);
-        await AssignCanonicalContractLinks(contract, normalized.InvoiceIds, normalized.PaymentIds, ct);
-        await _db.SaveChangesAsync(ct);
-        _db.ChangeTracker.Clear();
-        var updatedContract = await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct);
-        await NotifyContractChangedAsync(
-            updatedContract,
-            BuildContractChangeLabels(originalStatus, updatedContract.Status, originalValidUntil, updatedContract.ValidUntil, originalAmount, updatedContract.Amount),
-            ct);
-        var dto = MapToDto(updatedContract);
-        return Ok(dto);
+            var originalStatus = contract.Status;
+            var originalValidUntil = contract.ValidUntil;
+            var originalAmount = contract.Amount;
+            var normalized = await ValidateAndNormalizePayload(request, id, ct);
+            if (normalized.Error is not null) return normalized.Error;
+            var status = NormalizeContractStatusOrNull(request.Status) ?? contract.Status;
+            if (!string.IsNullOrWhiteSpace(request.Status) && !ContractStatus.IsValid(request.Status))
+            {
+                return ValidationError(nameof(request.Status), "Unknown contract status.");
+            }
+
+            contract.Number = normalized.Number!;
+            contract.Title = Normalize(request.Title);
+            contract.Description = Normalize(request.Description);
+            contract.BillingMode = normalized.BillingMode!;
+            contract.Status = status;
+            contract.IsOpenEnded = normalized.IsOpenEnded;
+            contract.Amount = normalized.Amount;
+            contract.Date = ContractDomainService.NormalizeLocalDate(request.Date);
+            contract.StartDate = ContractDomainService.NormalizeLocalDate(request.StartDate);
+            contract.ValidUntil = normalized.ValidUntil;
+            contract.TerminationDate = ContractDomainService.NormalizeLocalDate(request.TerminationDate);
+            contract.TerminationReason = Normalize(request.TerminationReason);
+            contract.TerminationTerms = Normalize(request.TerminationTerms);
+            contract.TerminationFinancialTerms = Normalize(request.TerminationFinancialTerms);
+            contract.CancelledAt = ContractDomainService.NormalizeLocalDate(request.CancelledAt);
+            contract.CancelledReason = Normalize(request.CancelledReason);
+            contract.UpdatedAt = DateTime.UtcNow;
+
+            SyncClientLinks(contract, normalized.Clients);
+            SyncLegalEntityLinks(contract, normalized.LegalEntities);
+            SyncLinks(contract.ContractActs, normalized.ActIds, id, actId => new ContractAct { ContractId = id, ActId = actId }, (l, v) => l.ActId == v);
+            SyncLinks(contract.ContractInvoices, normalized.InvoiceIds, id, invoiceId => new ContractInvoice { ContractId = id, InvoiceId = invoiceId }, (l, v) => l.InvoiceId == v);
+            SyncLinks(contract.ContractPayments, normalized.PaymentIds, id, paymentId => new ContractPayment { ContractId = id, PaymentId = paymentId }, (l, v) => l.PaymentId == v);
+            await AssignCanonicalContractLinks(contract, normalized.InvoiceIds, normalized.PaymentIds, ct);
+            await _db.SaveChangesAsync(ct);
+            await lease.CommitAsync(ct);
+            _db.ChangeTracker.Clear();
+            var updatedContract = await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct);
+            await NotifyContractChangedAsync(
+                updatedContract,
+                BuildContractChangeLabels(originalStatus, updatedContract.Status, originalValidUntil, updatedContract.ValidUntil, originalAmount, updatedContract.Amount),
+                ct);
+            var dto = MapToDto(updatedContract);
+            return Ok(dto);
+        }, ct);
     }
 
     [HttpDelete("{id:int}")]

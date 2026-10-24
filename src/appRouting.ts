@@ -79,7 +79,7 @@ export const TAB_ACCESS_RULES = {
   contracts: (permissions) => permissions.contracts.canView,
   contractCreate: (permissions) => permissions.contracts.canView && permissions.contracts.canCreate,
   contractDetail: (permissions) => permissions.contracts.canView,
-  companyProfile: (_permissions, options) => options.isAdminRole === true,
+  companyProfile: (permissions, options) => options.isAdminRole === true || permissions.companyProfile?.canView === true,
   users: (_permissions, options) => options.isAdminRole === true,
   userDetail: (_permissions, options) => options.isAdminRole === true,
   userActivity: (_permissions, options) => options.isAdminRole === true,

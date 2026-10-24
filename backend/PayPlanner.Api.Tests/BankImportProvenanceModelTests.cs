@@ -428,9 +428,36 @@ public sealed class BankImportProvenanceModelTests
         return account;
     }
 
-    internal sealed class ModelDatabase(PaymentContext db, string? databaseName = null, string? adminConnection = null) : IAsyncDisposable
+    internal sealed class ModelDatabase(PaymentContext db, string? databaseName = null, string? adminConnection = null,
+        PostgreSqlModelTemplate.DatabaseLease? modelLease = null) : IAsyncDisposable
     {
         public PaymentContext Db { get; } = db;
+
+        public static async Task<ModelDatabase> CreateFromModelTemplateAsync(bool postgres, PostgreSqlModelTemplate modelTemplate)
+        {
+            ArgumentNullException.ThrowIfNull(modelTemplate);
+            if (!postgres) return await CreateAsync(false);
+            var lease = await modelTemplate.CreateDatabaseAsync();
+            PostgreSqlPaymentContext? db = null;
+            try
+            {
+                db = new PostgreSqlPaymentContext(new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
+                    .UseNpgsql(lease.ConnectionString).Options);
+                Assert.Equal("false", await db.SystemSettings.Where(row => row.Key == "notifications.email.enabled")
+                    .Select(row => row.Value).SingleAsync());
+                return new ModelDatabase(db, modelLease: lease);
+            }
+            catch (Exception error)
+            {
+                try
+                {
+                    try { if (db is not null) await db.DisposeAsync(); }
+                    finally { await lease.DisposeAsync(); }
+                }
+                catch (Exception cleanup) { throw new AggregateException(error, cleanup); }
+                throw;
+            }
+        }
 
         public static async Task<ModelDatabase> CreateAsync(bool postgres)
         {
@@ -468,6 +495,12 @@ public sealed class BankImportProvenanceModelTests
 
         public async ValueTask DisposeAsync()
         {
+            if (modelLease is not null)
+            {
+                try { await Db.DisposeAsync(); }
+                finally { await modelLease.DisposeAsync(); }
+                return;
+            }
             await Db.DisposeAsync();
             if (databaseName is null) return;
             Assert.Matches("^pp_bank_model_[a-f0-9]{32}$", databaseName);

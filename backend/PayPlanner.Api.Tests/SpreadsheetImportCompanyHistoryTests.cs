@@ -27,7 +27,7 @@ public partial class SpreadsheetImportServiceTests
     [MemberData(nameof(CompanyHistoryReferences))]
     public async Task RollbackAsync_PreservesCompanyUsedByFinancialHistory(bool postgres, bool updatedClient, string reference)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateFromModelTemplateAsync(postgres, bankModelTemplate);
         var db = fixture.Db;
         const string name = "ООО Синтетический импорт";
         if (updatedClient)

@@ -19,7 +19,7 @@ public sealed record OwnCompanyOption(int Id, string ShortName, bool IsDefault, 
 [ApiController]
 [Route("api/own-companies")]
 [Authorize]
-public class OwnCompaniesController : ControllerBase
+public partial class OwnCompaniesController : ControllerBase
 {
     private const string MainCompanyIdsSettingKey = "legalEntities.mainCompanyIds";
     private const string DefaultMainCompanyIdSettingKey = "legalEntities.defaultMainCompanyId";

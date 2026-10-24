@@ -16,8 +16,13 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public partial class SpreadsheetImportServiceTests
+public partial class SpreadsheetImportServiceTests : IClassFixture<PostgreSqlModelTemplate>
 {
+    private readonly PostgreSqlModelTemplate bankModelTemplate;
+
+    public SpreadsheetImportServiceTests(PostgreSqlModelTemplate bankModelTemplate)
+        => this.bankModelTemplate = bankModelTemplate;
+
     [Fact]
     public async Task PreviewAsync_DetectsRussianSpreadsheetSections()
     {

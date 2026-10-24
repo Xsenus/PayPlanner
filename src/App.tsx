@@ -1445,6 +1445,7 @@ function AppContent() {
             canViewTasks={permissions.tasks.canView}
             canCreateTasks={permissions.tasks.canView && permissions.tasks.canCreate}
             canEditTasks={permissions.tasks.canEdit}
+            canEditTaskBilling={isAdminRole || permissions.tasks.canEdit || permissions.tasks.canEditOthers}
             canExportTasks={permissions.tasks.canExport}
             canSendMessenger={isAdminRole}
             onBack={() => {
@@ -1942,9 +1943,9 @@ function AppContent() {
           : renderNoAccess('Раздел договоров недоступен для вашей роли.');
 
       case 'companyProfile':
-        return isAdminRole
+        return isAdminRole || permissions.companyProfile?.canView === true
           ? <CompanyProfile />
-          : renderNoAccess('Раздел доступен только администратору.');
+          : renderNoAccess('Нет разрешения на просмотр профиля компании.');
 
       case 'profile':
         return <ProfilePage />;

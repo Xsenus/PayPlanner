@@ -77,6 +77,12 @@ type GroupConfig = {
 };
 
 const SECTION_CONFIG: Record<MenuSectionKey, SectionConfig> = {
+  companyProfile: {
+    key: 'companyProfile',
+    title: 'Профиль компании',
+    description: 'Просмотр и редактирование реквизитов только компаний, назначенных сотруднику в его профиле. Права на счета и акты задаются отдельно.',
+    icon: Building2,
+  },
   calendar: {
     key: 'calendar',
     title: 'Календарь',
@@ -222,7 +228,7 @@ const GROUPS: GroupConfig[] = [
     key: 'administration',
     title: 'Администрирование прав',
     description: 'Просмотр ролей, уведомлений и делегирование управления правилами.',
-    sections: ['notifications', 'roles', 'audit', 'integrations', 'yandexDisk', 's3Storage'],
+    sections: ['companyProfile', 'notifications', 'roles', 'audit', 'integrations', 'yandexDisk', 's3Storage'],
   },
 ];
 
@@ -470,7 +476,7 @@ function getOpenedSectionsCount(permissions: RolePermissions, sections: MenuSect
 function getEnabledPermissionCount(sectionKey: MenuSectionKey, permissions: RolePermissions) {
   const section = permissions[sectionKey];
 
-  if (sectionKey === 'audit' || sectionKey === 'notifications' || sectionKey === 'integrations') {
+  if (sectionKey === 'audit' || sectionKey === 'notifications' || sectionKey === 'integrations' || sectionKey === 'companyProfile') {
     let count = 0;
     if (section.canView) {
       count += 1;
@@ -507,7 +513,7 @@ function getTotalPermissionCount(sectionKey: MenuSectionKey) {
     return AUDIT_PERMISSION_META.length;
   }
 
-  if (sectionKey === 'notifications' || sectionKey === 'integrations') {
+  if (sectionKey === 'notifications' || sectionKey === 'integrations' || sectionKey === 'companyProfile') {
     return NOTIFICATION_PERMISSION_META.length;
   }
 
@@ -725,7 +731,7 @@ export function RolePermissionsModal({
 
   const setSectionAll = (sectionKey: MenuSectionKey, value: boolean) => {
     updateSection(sectionKey, (section) => {
-      if (sectionKey === 'audit' || sectionKey === 'notifications' || sectionKey === 'integrations') {
+      if (sectionKey === 'audit' || sectionKey === 'notifications' || sectionKey === 'integrations' || sectionKey === 'companyProfile') {
         return {
           ...section,
           canView: value,
@@ -1055,7 +1061,9 @@ export function RolePermissionsModal({
                   const sectionConfig = SECTION_CONFIG[sectionKey];
                   const section = permissions[sectionKey];
                   const permissionMeta =
-                    sectionKey === 'roles'
+                    sectionKey === 'companyProfile'
+                      ? DEFAULT_PERMISSION_META.filter((permission) => permission.key === 'canView' || permission.key === 'canEdit')
+                      : sectionKey === 'roles'
                       ? ROLES_PERMISSION_META
                       : sectionKey === 'audit'
                         ? AUDIT_PERMISSION_META
@@ -1121,7 +1129,7 @@ export function RolePermissionsModal({
                       </div>
 
                       <div className="grid gap-4 px-5 py-5 xl:grid-cols-2">
-                        {permissionMeta.map((permission) => (
+                        {permissionMeta.filter((permission) => sectionKey !== 'companyProfile' || permission.key === 'canView' || permission.key === 'canEdit').map((permission) => (
                           <PermissionToggle
                             key={`${sectionKey}-${permission.key}`}
                             label={permission.label}

@@ -28,7 +28,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, CashOrderType.Outgoing)]
     public async Task CashCompany_DeletedDraftKeepsItsNumberReserved(bool postgres, CashOrderType type)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateFromModelTemplateAsync(postgres, bankModelTemplate);
         var db = fixture.Db;
         var seed = await SeedAccountScopeAsync(db, admin: false);
         await db.RolePermissions.Where(item => item.RoleId == seed.Actor.RoleId).ExecuteUpdateAsync(setters => setters.SetProperty(item => item.CanCreate, true));
@@ -57,7 +57,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task CashCompany_UnknownUserCannotUseAnAdministratorClaim(bool postgres)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateFromModelTemplateAsync(postgres, bankModelTemplate);
         var seed = await SeedAccountScopeAsync(fixture.Db, admin: false);
         var own = await SeedCompanyCashOrderAsync(fixture.Db, seed, foreign: false, paymentSource: false);
         var before = await CaptureManualCompanyAsync(fixture.Db);
@@ -127,7 +127,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, true)]
     public async Task CashCompany_ListsAndCashBookUseAssignedCompany(bool postgres, bool paymentSource)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateFromModelTemplateAsync(postgres, bankModelTemplate);
         var db = fixture.Db;
         var seed = await SeedAccountScopeAsync(db, admin: false);
         var own = await SeedCompanyCashOrderAsync(db, seed, foreign: false, paymentSource);
@@ -162,7 +162,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(CashCompanyDirectCases))]
     public async Task CashCompany_ForeignOrderCannotBeReadOrChanged(bool postgres, bool paymentSource, string endpoint)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateFromModelTemplateAsync(postgres, bankModelTemplate);
         var db = fixture.Db;
         var seed = await SeedAccountScopeAsync(db, admin: false);
         await db.RolePermissions.Where(item => item.RoleId == seed.Actor.RoleId).ExecuteUpdateAsync(setters => setters
@@ -197,7 +197,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task CashCompany_PaymentPrintDoesNotBypassCompanyScope(bool postgres)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateFromModelTemplateAsync(postgres, bankModelTemplate);
         var db = fixture.Db;
         var seed = await SeedAccountScopeAsync(db, admin: false);
         var foreign = await SeedCompanyCashOrderAsync(db, seed, foreign: true, paymentSource: true);
@@ -213,7 +213,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, true)]
     public async Task CashCompany_AllowedLifecyclePreservesMoneyFacts(bool postgres, bool paymentSource)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateFromModelTemplateAsync(postgres, bankModelTemplate);
         var db = fixture.Db;
         var seed = await SeedAccountScopeAsync(db, admin: false);
         await db.RolePermissions.Where(item => item.RoleId == seed.Actor.RoleId).ExecuteUpdateAsync(setters => setters
@@ -271,7 +271,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, true)]
     public async Task CashCompany_AdministratorKeepsAccessToBothCompanies(bool postgres, bool paymentSource)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateFromModelTemplateAsync(postgres, bankModelTemplate);
         var db = fixture.Db;
         var seed = await SeedAccountScopeAsync(db, admin: true);
         var own = await SeedCompanyCashOrderAsync(db, seed, foreign: false, paymentSource);
@@ -291,7 +291,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, true)]
     public async Task CashCompany_CompanyAccessIsFreshForEveryRequest(bool postgres, bool paymentSource)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateFromModelTemplateAsync(postgres, bankModelTemplate);
         var db = fixture.Db;
         var seed = await SeedAccountScopeAsync(db, admin: false);
         var own = await SeedCompanyCashOrderAsync(db, seed, foreign: false, paymentSource);

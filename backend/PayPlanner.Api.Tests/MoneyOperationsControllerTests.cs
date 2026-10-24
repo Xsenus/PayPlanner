@@ -18,8 +18,13 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public partial class MoneyOperationsControllerTests
+public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlModelTemplate>
 {
+    private readonly PostgreSqlModelTemplate bankModelTemplate;
+
+    public MoneyOperationsControllerTests(PostgreSqlModelTemplate bankModelTemplate)
+        => this.bankModelTemplate = bankModelTemplate;
+
     [Fact]
     public async Task CreateTransfer_CreatesPairedOperations_AndCashOrderForCashSide()
     {

@@ -20,6 +20,20 @@ vi.mock('../../hooks/useUserTimeZone', () => ({ useUserTimeZone: () => 'Asia/Nov
 
 beforeEach(() => vi.clearAllMocks());
 
+it('saves company profile view and edit separately without granting financial access', async () => {
+  const user = userEvent.setup();
+  render(<RolePermissionsModal role={{ id: 82, name: 'Сотрудник' } as Role} canEdit onClose={() => {}} />);
+  await user.click(screen.getByRole('button', { name: /Администрирование прав/ }));
+  const section = screen.getByRole('heading', { name: 'Профиль компании' }).closest('section')!;
+  expect(within(section).getAllByRole('checkbox')).toHaveLength(2);
+  await user.click(within(section).getByRole('checkbox', { name: /^Просмотр(?:\s|$)/ }));
+  await user.click(screen.getByRole('button', { name: /Сохранить/ }));
+  await waitFor(() => expect(setRolePermissions).toHaveBeenLastCalledWith(82, expect.objectContaining({ companyProfile: expect.objectContaining({ canView: true, canEdit: false }), accounts: expect.objectContaining({ canView: false }), acts: expect.objectContaining({ canView: false }) })));
+  await user.click(within(section).getByRole('checkbox', { name: /^Редактирование(?:\s|$)/ }));
+  await user.click(screen.getByRole('button', { name: /Сохранить/ }));
+  await waitFor(() => expect(setRolePermissions).toHaveBeenLastCalledWith(82, expect.objectContaining({ companyProfile: expect.objectContaining({ canView: true, canEdit: true }) })));
+});
+
 it('saves the separate request analytics grant and clears it when viewing is revoked', async () => {
   const user = userEvent.setup();
   render(<RolePermissionsModal role={{ id: 81, name: 'Менеджер' } as Role} canEdit onClose={() => {}} />);

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reflection;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
@@ -15,7 +16,7 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public sealed class TaskBillingConcurrencyTests
+public sealed class TaskBillingConcurrencyTests(PostgreSqlModelTemplate modelTemplate) : IClassFixture<PostgreSqlModelTemplate>
 {
     [Theory]
     [InlineData("link", false)]
@@ -24,7 +25,7 @@ public sealed class TaskBillingConcurrencyTests
     [InlineData("create", true)]
     public async Task MovingTaskAndBillingItCannotCommitIncompatibleBindings(string billingOperation, bool billingFirst)
     {
-        await using var fixture = await Fixture.CreateAsync();
+        await using var fixture = await Fixture.CreateAsync(modelTemplate: modelTemplate);
         if (fixture is null) return;
         var firstOperation = billingFirst ? billingOperation : "move";
         var secondOperation = billingFirst ? "move" : billingOperation;
@@ -52,7 +53,7 @@ public sealed class TaskBillingConcurrencyTests
     [InlineData("create", "link")]
     public async Task ConcurrentInvoiceCreationAndLinkingCannotBillTheSameTaskTwice(string firstOperation, string secondOperation)
     {
-        await using var fixture = await Fixture.CreateAsync();
+        await using var fixture = await Fixture.CreateAsync(modelTemplate: modelTemplate);
         if (fixture is null) return;
         var (first, second) = await fixture.RaceAsync(firstOperation, secondOperation);
         Assert.True(first is OkObjectResult or CreatedResult);
@@ -71,7 +72,7 @@ public sealed class TaskBillingConcurrencyTests
     [InlineData("moveInvoice", false)]
     public async Task LinkingTaskPreventsConcurrentInvoiceDeletionOrCounterpartyChange(string operation, bool hasInvoiceEntity = true)
     {
-        await using var fixture = await Fixture.CreateAsync(hasInvoiceEntity);
+        await using var fixture = await Fixture.CreateAsync(hasInvoiceEntity, modelTemplate);
         if (fixture is null) return;
         var (linked, invoiceChange) = await fixture.RaceAsync("link", operation);
         Assert.IsType<OkObjectResult>(linked);
@@ -117,7 +118,41 @@ public sealed class TaskBillingConcurrencyTests
         Assert.Equal(0L, (long)(await exists.ExecuteScalarAsync())!);
     }
 
-    private sealed class Fixture(string connectionString, string adminConnectionString, string databaseName) : IAsyncDisposable
+    [Fact]
+    public async Task ModelFixtureClonesKeepBillingSeedsAndOpenInterceptorsIndependent()
+    {
+        await using var first = await Fixture.CreateAsync(modelTemplate: modelTemplate);
+        await using var second = await Fixture.CreateAsync(modelTemplate: modelTemplate);
+        if (first is null || second is null) return;
+        Assert.Equal(first.UserId, second.UserId);
+        Assert.Equal(first.TaskId, second.TaskId);
+        Assert.Equal(first.InvoiceId, second.InvoiceId);
+        var firstInterceptor = new CountingSaveInterceptor();
+        var secondInterceptor = new CountingSaveInterceptor();
+        await using var firstDb = first.Open(firstInterceptor);
+        await using var secondDb = second.Open(secondInterceptor);
+        Assert.NotEqual(firstDb.Database.GetDbConnection().Database, secondDb.Database.GetDbConnection().Database);
+        Assert.Equal("false", (await firstDb.SystemSettings.SingleAsync(row => row.Key == "notifications.email.enabled")).Value);
+        Assert.Equal(2, await firstDb.Clients.CountAsync());
+        Assert.Equal(2, await secondDb.Clients.CountAsync());
+        firstDb.Clients.Add(new Client { Name = "first billing clone only" });
+        await firstDb.SaveChangesAsync();
+        Assert.Equal(1, firstInterceptor.Saves);
+        Assert.Equal(0, secondInterceptor.Saves);
+        Assert.False(await secondDb.Clients.AnyAsync(row => row.Name == "first billing clone only"));
+        secondDb.Clients.Add(new Client { Name = "second billing clone only" });
+        await secondDb.SaveChangesAsync();
+        Assert.Equal(1, firstInterceptor.Saves);
+        Assert.Equal(1, secondInterceptor.Saves);
+        await using var reopened = first.Open();
+        Assert.True(await reopened.Clients.AnyAsync(row => row.Name == "first billing clone only"));
+        Assert.False(await reopened.Clients.AnyAsync(row => row.Name == "second billing clone only"));
+        Assert.Single(await firstDb.TaskJournalItems.ToArrayAsync());
+        Assert.Single(await secondDb.TaskJournalItems.ToArrayAsync());
+    }
+
+    private sealed class Fixture(string connectionString, string adminConnectionString, string databaseName,
+        PostgreSqlModelTemplate.DatabaseLease? modelLease = null) : IAsyncDisposable
     {
         public int UserId { get; private set; }
         public int TaskId { get; private set; }
@@ -135,8 +170,9 @@ public sealed class TaskBillingConcurrencyTests
             return new PostgreSqlPaymentContext(options.Options);
         }
 
-        public static async Task<Fixture?> CreateAsync(bool hasInvoiceEntity = true)
+        public static async Task<Fixture?> CreateAsync(bool hasInvoiceEntity = true, PostgreSqlModelTemplate? modelTemplate = null)
         {
+            var setupStarted = Stopwatch.GetTimestamp();
             var configured = Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES");
             if (string.IsNullOrWhiteSpace(configured))
             {
@@ -147,18 +183,31 @@ public sealed class TaskBillingConcurrencyTests
 
             var name = "payplanner_task_billing_" + Guid.NewGuid().ToString("N");
             var admin = new NpgsqlConnectionStringBuilder(configured) { Database = "postgres", Pooling = false };
-            await using (var connection = new NpgsqlConnection(admin.ConnectionString))
+            var schemaStarted = Stopwatch.GetTimestamp();
+            PostgreSqlModelTemplate.DatabaseLease? modelLease = null;
+            if (modelTemplate is not null)
             {
-                await connection.OpenAsync();
-                await using var create = new NpgsqlCommand($"CREATE DATABASE \"{name}\"", connection);
-                await create.ExecuteNonQueryAsync();
+                modelLease = await modelTemplate.CreateDatabaseAsync();
+                name = modelLease.Name;
+            }
+            else
+            {
+                await using (var connection = new NpgsqlConnection(admin.ConnectionString))
+                {
+                    await connection.OpenAsync();
+                    await using var create = new NpgsqlCommand($"CREATE DATABASE \"{name}\"", connection);
+                    await create.ExecuteNonQueryAsync();
+                }
             }
             var target = new NpgsqlConnectionStringBuilder(admin.ConnectionString) { Database = name };
-            var fixture = new Fixture(target.ConnectionString, admin.ConnectionString, name);
+            var fixture = new Fixture(modelLease?.ConnectionString ?? target.ConnectionString, admin.ConnectionString, name, modelLease);
             try
             {
                 await using var db = fixture.Open();
-                await db.Database.EnsureCreatedAsync();
+                if (modelLease is null) await db.Database.EnsureCreatedAsync();
+                var mode = modelLease is null ? "native-pg" : "model-pg";
+                ReportPhase(mode, "schema", schemaStarted);
+                var seedStarted = Stopwatch.GetTimestamp();
                 var role = await db.Roles.FirstOrDefaultAsync(item => item.Name == "admin") ?? new Role { Name = "admin" };
                 var actor = new User { Role = role, Email = "billing-race@payplanner.local", FullName = "Synthetic billing actor", PasswordHash = "unused", IsActive = true, IsApproved = true };
                 var original = new Client { Name = "Original synthetic client" };
@@ -196,6 +245,8 @@ public sealed class TaskBillingConcurrencyTests
                 fixture.OtherClientId = other.Id;
                 fixture.OriginalCaseId = originalCase.Id;
                 fixture.OtherCaseId = otherCase.Id;
+                ReportPhase(mode, "seed", seedStarted);
+                ReportPhase(mode, "setup", setupStarted);
                 return fixture;
             }
             catch
@@ -290,10 +341,36 @@ public sealed class TaskBillingConcurrencyTests
 
         public async ValueTask DisposeAsync()
         {
+            var started = Stopwatch.GetTimestamp();
+            if (modelLease is not null)
+            {
+                await modelLease.DisposeAsync();
+                ReportPhase("model-pg", "cleanup", started);
+                return;
+            }
             Assert.StartsWith("payplanner_task_billing_", databaseName, StringComparison.Ordinal);
             await using var connection = new NpgsqlConnection(adminConnectionString);
             await connection.OpenAsync();
             await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(connection, databaseName, WaitingForCleanupConnections);
+            ReportPhase("native-pg", "cleanup", started);
+        }
+
+        private static void ReportPhase(string mode, string phase, long started)
+        {
+            try { Console.WriteLine(FormattableString.Invariant($"PP_FIXTURE_PHASE family=TaskBillingConcurrency mode={mode} phase={phase} elapsedMs={Stopwatch.GetElapsedTime(started).TotalMilliseconds:F3}")); }
+            catch (Exception error) when (error is IOException or ObjectDisposedException)
+            { /* Diagnostics must not hide a business failure or lose a lease. */ }
+        }
+    }
+
+    private sealed class CountingSaveInterceptor : SaveChangesInterceptor
+    {
+        public int Saves { get; private set; }
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData,
+            InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (eventData.Context!.ChangeTracker.Entries<Client>().Any(entry => entry.State == EntityState.Added)) Saves++;
+            return ValueTask.FromResult(result);
         }
     }
 

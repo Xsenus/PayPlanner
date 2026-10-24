@@ -62,6 +62,9 @@ public class BulkUpdateTaskJournalItemsRequest
     public string? Status { get; set; }
     public DateTime? DueAt { get; set; }
     public string? Result { get; set; }
+    public string? BillingClassification { get; set; }
+    public bool IncludeCompleted { get; set; }
+    public Dictionary<int, string?>? ExpectedUpdatedAtById { get; set; }
 }
 
 public class BulkDeleteTaskJournalItemsRequest

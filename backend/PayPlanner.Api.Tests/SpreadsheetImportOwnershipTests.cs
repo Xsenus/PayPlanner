@@ -33,7 +33,7 @@ public partial class SpreadsheetImportServiceTests
     [Fact]
     public async Task ImportOwnership_ConcurrentPostgreSqlImportsDoNotCreateDuplicateDocuments()
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres: true);
+        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateFromModelTemplateAsync(postgres: true, modelTemplate: bankModelTemplate);
         var accessor = new Microsoft.AspNetCore.Http.HttpContextAccessor { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
         var factory = new CompanyHistoryContextFactory(fixture.Db, postgres: true, accessor);
         var service = new SpreadsheetImportService(factory, accessor, Microsoft.Extensions.Logging.Abstractions.NullLogger<SpreadsheetImportService>.Instance);
