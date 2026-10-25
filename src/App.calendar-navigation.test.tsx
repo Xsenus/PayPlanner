@@ -8,6 +8,8 @@ import { apiService } from './services/api';
 
 const permissionsState = vi.hoisted(() => ({
   paymentsCanView: true,
+  casesCanView: true,
+  tasksCanView: true,
   loaded: true,
 }));
 
@@ -61,13 +63,14 @@ vi.mock('./hooks/useRolePermissions', () => {
       const currentSection = permissionsState.loaded ? section : blocked;
       return {
         calendar: { ...currentSection, canViewAnalytics: permissionsState.loaded },
-        tasks: currentSection,
+        tasks: { ...currentSection, canView: permissionsState.loaded && permissionsState.tasksCanView },
         notes: currentSection,
         reports: currentSection,
         calculator: currentSection,
         legalEntities: currentSection,
         clients: currentSection,
-        cases: currentSection,
+        cases: { ...currentSection, canView: permissionsState.loaded && permissionsState.casesCanView },
+        requests: currentSection,
         accounts: currentSection,
         acts: currentSection,
         payments: { ...currentSection, canView: permissionsState.loaded && permissionsState.paymentsCanView },
@@ -174,6 +177,18 @@ vi.mock('./components/Cases/CaseDetailPage', () => ({
   ),
 }));
 
+vi.mock('./components/Requests/SalesRequestsPage', () => ({
+  SalesRequestsPage: ({ currentUserId, onOpenCaseTasks }: {
+    currentUserId?: number | null;
+    onOpenCaseTasks?: (caseId: number) => void;
+  }) => (
+    <section data-testid="requests-view">
+      <span>request actor {currentUserId}</span>
+      <button type="button" disabled={!onOpenCaseTasks} onClick={() => onOpenCaseTasks?.(91)}>open existing case tasks</button>
+    </section>
+  ),
+}));
+
 vi.mock('./components/LegalEntities/LegalEntities', () => ({
   LegalEntities: ({ initialLegalEntityId }: { initialLegalEntityId?: number | null }) => (
     <section data-testid="legal-entities-view">legal entity {initialLegalEntityId ?? 'none'}</section>
@@ -252,6 +267,8 @@ describe('App calendar client navigation', () => {
     window.localStorage.clear();
     window.sessionStorage.clear();
     permissionsState.paymentsCanView = true;
+    permissionsState.casesCanView = true;
+    permissionsState.tasksCanView = true;
     permissionsState.loaded = true;
     authState.loading = false;
   });
@@ -283,6 +300,37 @@ describe('App calendar client navigation', () => {
 
     expect((await screen.findByTestId('legal-entities-view')).textContent).toContain('legal entity 37');
     expect(apiService.getLegalEntity).toHaveBeenCalledWith(37);
+  });
+
+  it('uses the existing case task navigation with a clean route instead of carrying request parameters', async () => {
+    window.history.replaceState({}, '', '/?ppTab=requests&requestId=7&summary=private-sales');
+    const replaceRoute = vi.spyOn(window.history, 'replaceState');
+    render(<App />);
+
+    expect(await screen.findByText('request actor 1')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'open existing case tasks' }));
+
+    expect((await screen.findByTestId('case-detail')).textContent).toContain('case 91');
+    expect(replaceRoute).toHaveBeenCalledWith({}, document.title, '/cases/91?ppCaseTab=tasks');
+    expect(window.location.pathname).toBe('/cases/91');
+    expect(window.location.search).not.toContain('requestId');
+    expect(window.location.search).not.toContain('private-sales');
+    expect(window.sessionStorage.getItem('pp.case-detail.91.view.v1')).toBe(JSON.stringify({ activeTab: 'tasks' }));
+    replaceRoute.mockRestore();
+  });
+
+  it.each(['casesCanView', 'tasksCanView'] as const)('does not grant request case navigation without %s', async (permission) => {
+    window.history.replaceState({}, '', '/?ppTab=requests&requestId=7');
+    permissionsState[permission] = false;
+    render(<App />);
+
+    const openCase = await screen.findByRole('button', { name: 'open existing case tasks' });
+    expect((openCase as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(openCase);
+
+    expect(screen.queryByTestId('case-detail')).toBeNull();
+    expect(window.location.search).toContain('requestId=7');
+    expect(window.sessionStorage.getItem('pp.case-detail.91.view.v1')).toBeNull();
   });
 
   it('returns to notifications after saving a task opened from notifications', async () => {

@@ -29,7 +29,9 @@ import {
   Download,
   ExternalLink,
   Eye,
+  FileImage,
   FilePlus2,
+  FileSpreadsheet,
   FileText,
   Gavel,
   Loader2,
@@ -4009,8 +4011,9 @@ export function CaseDetailPage({
                 <ArrowLeft className="h-4 w-4" /> Реестр дел
               </button>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-sm font-semibold text-blue-700">
-                  <Briefcase className="h-4 w-4" /> {caseItem.caseNumber || `#${caseItem.id}`}
+                <span className="inline-flex max-w-full min-w-0 items-start gap-2 rounded-full bg-blue-50 px-3 py-1 text-sm font-semibold text-blue-700">
+                  <Briefcase className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span className="min-w-0 [overflow-wrap:anywhere]">{caseItem.caseNumber || `#${caseItem.id}`}</span>
                 </span>
                 <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">{STATUS_LABELS[caseItem.status] ?? caseItem.status}</span>
                 <span className="rounded-full bg-amber-50 px-3 py-1 text-sm font-medium text-amber-700">{PRIORITY_LABELS[caseItem.priority ?? ''] ?? caseItem.priority ?? 'Обычный'}</span>
@@ -4021,7 +4024,7 @@ export function CaseDetailPage({
                 ) : null}
               </div>
               <h1 className="mt-3 break-words text-3xl font-bold text-slate-900">{caseItem.title || 'Без названия'}</h1>
-              <p className="mt-2 max-w-3xl text-sm text-slate-600">{caseItem.description || 'Описание по делу пока не заполнено.'}</p>
+              <p className="mt-2 max-w-3xl text-sm text-slate-600 [overflow-wrap:anywhere]">{caseItem.description || 'Описание по делу пока не заполнено.'}</p>
             </div>
 
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:justify-end">
@@ -4397,9 +4400,9 @@ export function CaseDetailPage({
           ) : null}
 
           {activeTab === 'events' ? (
-            <section className="space-y-3 rounded-xl border border-slate-200 p-4" aria-label="Журнал событий дела">
+            <section className="space-y-3 rounded-xl border border-slate-200 p-3" aria-label="Журнал событий дела">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Журнал событий ({courtEvents.length})</h2>
+                <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Судебные события ({courtEvents.length})</h2>
                 {canEdit ? (
                   <button
                     type="button"
@@ -4440,13 +4443,18 @@ export function CaseDetailPage({
               ) : visibleCourtEvents.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">{courtEvents.length ? 'Нет судебных событий, соответствующих фильтрам.' : 'По делу пока нет событий.'}</div>
               ) : (
-                <ol className="divide-y divide-slate-100">
+                <ol>
                   {visibleCourtEvents
                     .map((event) => (
-                      <li key={event.id} className="grid gap-1 py-3 sm:grid-cols-[170px_1fr]">
-                        <div className="text-sm font-semibold text-slate-900">{formatCourtEventSchedule(event) || '—'}</div>
-                        <div className="min-w-0">
-                          <div className="font-semibold text-slate-900">{event.title}</div>
+                      <li key={event.id} className="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-x-3 gap-y-1 py-2 sm:grid-cols-[150px_1.5rem_minmax(0,1fr)]">
+                        <div className="col-start-2 row-start-1 min-w-0 pt-1 text-xs font-semibold text-slate-700 sm:col-start-1">{formatCourtEventSchedule(event) || '—'}</div>
+                        <span aria-hidden="true" className="relative col-start-1 row-span-2 row-start-1 flex justify-center before:absolute before:-bottom-2 before:left-1/2 before:-top-2 before:w-px before:-translate-x-1/2 before:bg-slate-200 sm:col-start-2 sm:row-span-1">
+                          <span className="relative z-10 mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded-full border border-blue-100 bg-blue-50 text-blue-600">
+                            <Gavel className="h-3.5 w-3.5" />
+                          </span>
+                        </span>
+                        <div className="col-start-2 row-start-2 min-w-0 [overflow-wrap:anywhere] sm:col-start-3 sm:row-start-1">
+                          <div className="break-words font-semibold text-slate-900">{event.title}</div>
                           <div className="text-xs text-slate-500">
                             {event.eventTypeLabel}
                             {event.courtName ? ` · ${event.courtName}` : ''}
@@ -8615,7 +8623,7 @@ function DocumentList({
 
   return (
     <div className="space-y-3">
-      <section className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+      <section className="rounded-lg bg-slate-50 p-3">
         <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-[minmax(220px,1fr)_180px_180px_auto]">
           <label className="text-sm font-medium text-slate-700">
             <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Поиск</span>
@@ -8782,12 +8790,36 @@ type DocumentTableRowProps = Parameters<typeof DocumentCard>[0] & {
   uploadedAtTimestamp: number | null;
 };
 
+function getCaseDocumentFormatPresentation(contentType?: string | null) {
+  const mimeType = (contentType ?? '').split(';', 1)[0].trim().toLowerCase();
+  if (mimeType === 'application/pdf') {
+    return { Icon: FileText, label: 'PDF', className: 'text-rose-600' };
+  }
+  if (['application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.ms-word.document.macroenabled.12'].includes(mimeType)) {
+    return { Icon: FileText, label: 'Word', className: 'text-blue-600' };
+  }
+  if (mimeType.startsWith('image/')) {
+    return { Icon: FileImage, label: 'Изображение', className: 'text-violet-600' };
+  }
+  if (['application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'text/csv'].includes(mimeType)) {
+    return { Icon: FileSpreadsheet, label: 'Таблица', className: 'text-emerald-600' };
+  }
+  if (['application/zip', 'application/x-7z-compressed', 'application/x-rar-compressed', 'application/vnd.rar', 'application/x-tar', 'application/gzip'].includes(mimeType)) {
+    return { Icon: Archive, label: 'Архив', className: 'text-amber-600' };
+  }
+  if (mimeType.startsWith('text/')) {
+    return { Icon: FileText, label: 'Текстовый файл', className: 'text-slate-500' };
+  }
+  return { Icon: FileText, label: 'Файл', className: 'text-slate-400' };
+}
+
 function DocumentTableRow({ uploadedAtTimestamp, ...cardProps }: DocumentTableRowProps) {
   const { document, previewing, deleting, onPreview } = cardProps;
   const [expanded, setExpanded] = useState(false);
   const [hasOpened, setHasOpened] = useState(false);
   const actionsButtonRef = useRef<HTMLButtonElement | null>(null);
   const displayName = document.originalFileName?.trim() || `Документ №${document.id}`;
+  const { Icon: FormatIcon, label: formatLabel, className: formatClassName } = getCaseDocumentFormatPresentation(document.contentType);
   const detailsId = `case-document-details-${document.clientCaseId}-${document.id}`;
   const actionsLabel = `Сведения и действия документа ${displayName}`;
   const closeDetailsOnEscape = (event: KeyboardEvent<HTMLElement>) => {
@@ -8801,16 +8833,18 @@ function DocumentTableRow({ uploadedAtTimestamp, ...cardProps }: DocumentTableRo
   return (
     <Fragment>
       <tr aria-label={`Документ ${displayName}`} className="align-top hover:bg-slate-50/60">
-        <td className="px-3 py-3">
+        <td className="px-3 py-2">
           <div className="flex min-w-0 items-start gap-2">
-            <FileText className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" aria-hidden="true" />
-            <div className="min-w-0">
+            <span role="img" aria-label={`Формат файла: ${formatLabel}`} title={formatLabel} className={`mt-0.5 shrink-0 ${formatClassName}`}>
+              <FormatIcon className="h-4 w-4" aria-hidden="true" />
+            </span>
+            <div className="min-w-0 flex-1">
               <button
                 type="button"
                 onClick={() => onPreview(document)}
                 disabled={previewing || deleting}
                 aria-label={`Открыть предпросмотр документа ${displayName}`}
-                className="rounded text-left font-semibold text-blue-700 [overflow-wrap:anywhere] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-50"
+                className="block w-full min-w-0 rounded text-left font-semibold text-blue-700 [overflow-wrap:anywhere] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-50"
               >
                 {displayName}
               </button>
@@ -8824,16 +8858,16 @@ function DocumentTableRow({ uploadedAtTimestamp, ...cardProps }: DocumentTableRo
             </div>
           </div>
         </td>
-        <td className="px-3 py-3 text-xs text-slate-500">
+        <td className="px-3 py-2 text-xs text-slate-500">
           {uploadedAtTimestamp === null ? '—' : formatRuDateTime(document.uploadedAt) || '—'}
         </td>
-        <td className="px-3 py-3 text-xs text-slate-700 [overflow-wrap:anywhere]">
+        <td className="px-3 py-2 text-xs text-slate-700 [overflow-wrap:anywhere]">
           {document.documentType?.trim() || '—'}
         </td>
-        <td className="px-3 py-3 text-xs text-slate-500 [overflow-wrap:anywhere]">
+        <td className="px-3 py-2 text-xs text-slate-500 [overflow-wrap:anywhere]">
           {document.uploadedByName?.trim() || '—'}
         </td>
-        <td className="px-3 py-3 text-xs text-slate-500">{formatFileSize(document.sizeBytes)}</td>
+        <td className="px-3 py-2 text-xs text-slate-500">{formatFileSize(document.sizeBytes)}</td>
         <td className="px-2 py-2">
           <button
             ref={actionsButtonRef}

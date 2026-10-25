@@ -727,7 +727,12 @@ describe('ClientDetail integration', () => {
 
   it('opens the client profile in readonly mode until editing is requested', async () => {
     const user = userEvent.setup();
+    const phones = ['+79990000001', '+79990000002'];
+    const emails = ['long-address-without-spaces-for-the-client-profile@example.test', 'second@example.test'];
+    const updateCallsBefore = vi.mocked(apiService.updateClient).mock.calls.length;
     vi.mocked(apiService.getClient).mockResolvedValue(createClient({
+      phones,
+      emails,
       birthDate: '1985-03-15',
       gender: 'male',
       maritalStatus: 'married',
@@ -744,9 +749,27 @@ describe('ClientDetail integration', () => {
     }
     expect(within(mainInfo).queryByRole('textbox')).toBeNull();
     expect(within(mainInfo).queryByRole('combobox')).toBeNull();
+    const contacts = screen.getByLabelText('Телефоны и email');
+    for (const value of [...phones, ...emails]) {
+      expect(within(contacts).getByText(value)).toBeTruthy();
+    }
+    expect(within(contacts).queryByRole('textbox')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Удалить телефон' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Удалить email' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Сохранить' })).toBeNull();
 
     await user.click(screen.getByRole('button', { name: 'Редактировать' }));
+
+    const phoneInput = screen.getByDisplayValue(phones[0]);
+    const emailInput = screen.getByDisplayValue(emails[0]);
+    expect((phoneInput as HTMLInputElement).disabled).toBe(false);
+    expect((emailInput as HTMLInputElement).disabled).toBe(false);
+    expect(screen.getByDisplayValue(phones[1])).toBeTruthy();
+    expect(screen.getByDisplayValue(emails[1])).toBeTruthy();
+    await user.clear(phoneInput);
+    await user.type(phoneInput, '+79991111111');
+    await user.clear(emailInput);
+    await user.type(emailInput, 'draft@example.test');
 
     const lastNameInput = await within(mainInfo).findByDisplayValue('Иванов');
     expect((lastNameInput as HTMLInputElement).disabled).toBe(false);
@@ -759,6 +782,68 @@ describe('ClientDetail integration', () => {
     expect(await within(mainInfo).findByText('Иванов Иван Иванович')).toBeTruthy();
     expect(within(mainInfo).queryByRole('textbox')).toBeNull();
     expect(screen.queryByDisplayValue('Петров')).toBeNull();
+    const restoredContacts = screen.getByLabelText('Телефоны и email');
+    for (const value of [...phones, ...emails]) {
+      expect(within(restoredContacts).getByText(value)).toBeTruthy();
+    }
+    expect(within(restoredContacts).queryByText('draft@example.test')).toBeNull();
+    expect(within(restoredContacts).queryByText('+79991111111')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Сохранить' })).toBeNull();
+    expect(vi.mocked(apiService.updateClient).mock.calls.length).toBe(updateCallsBefore);
+  });
+
+  it('shows complete notes as readonly text and preserves their explicit edit payload', async () => {
+    const user = userEvent.setup();
+    const updateCallsBefore = vi.mocked(apiService.updateClient).mock.calls.length;
+    const comment = 'Комментарий из нескольких строк\nВторая строка\nТретья строка\nЧетвёртая строка';
+    const legacyNotes = 'Историческая запись\n<script>Это текст, а не код</script>';
+    const editedComment = 'Уточнённый комментарий\nСохранённый перенос строки';
+    vi.mocked(apiService.getClient).mockResolvedValue(createClient({ comment, legacyNotes }));
+    vi.mocked(apiService.updateClient).mockResolvedValue(createClient({ comment: editedComment, legacyNotes }));
+    const { container } = render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+
+    const notes = await screen.findByLabelText('Заметки клиента');
+    expect([...notes.querySelectorAll('dd')].map((element) => element.textContent)).toEqual([comment, legacyNotes]);
+    expect(within(notes).queryByRole('textbox')).toBeNull();
+    expect(notes.querySelector('script')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Редактировать' }));
+    const commentInput = container.querySelector<HTMLTextAreaElement>('textarea[name="comment"]');
+    const legacyInput = container.querySelector<HTMLTextAreaElement>('textarea[name="legacyNotes"]');
+    expect(commentInput?.value).toBe(comment);
+    expect(commentInput?.disabled).toBe(false);
+    expect(legacyInput?.value).toBe(legacyNotes);
+    await user.clear(commentInput!);
+    await user.type(commentInput!, editedComment);
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiService.updateClient).toHaveBeenCalledTimes(updateCallsBefore + 1));
+    const [id, payload] = vi.mocked(apiService.updateClient).mock.calls.at(-1) ?? [];
+    expect(id).toBe(1);
+    const serialized = (payload as { notes: string }).notes;
+    expect(serialized.startsWith(CLIENT_PROFILE_NOTES_PREFIX)).toBe(true);
+    expect(JSON.parse(serialized.slice(CLIENT_PROFILE_NOTES_PREFIX.length))).toEqual(expect.objectContaining({
+      kind: 'individual', lastName: 'Иванов', firstName: 'Иван', middleName: 'Иванович', comment: editedComment, legacyNotes,
+    }));
+    const savedNotes = await screen.findByLabelText('Заметки клиента');
+    expect([...savedNotes.querySelectorAll('dd')].map((element) => element.textContent)).toEqual([editedComment, legacyNotes]);
+    expect(within(savedNotes).queryByRole('textbox')).toBeNull();
+  });
+
+  it('shows empty contact text without exposing edit controls to a read-only role', async () => {
+    Object.assign(permissionsResult.clients, { canEdit: false });
+    vi.mocked(apiService.getClient).mockResolvedValue(createClient({ phones: [], emails: [] }));
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+
+    const contacts = await screen.findByLabelText('Телефоны и email');
+    expect(within(contacts).getAllByText('Не указано')).toHaveLength(2);
+    expect(within(contacts).queryByRole('textbox')).toBeNull();
+    const notes = screen.getByLabelText('Заметки клиента');
+    expect(within(notes).getAllByText('Не указано')).toHaveLength(2);
+    expect(within(notes).queryByRole('textbox')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Редактировать' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Удалить телефон' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Удалить email' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Сохранить' })).toBeNull();
   });
 
@@ -1230,6 +1315,10 @@ describe('ClientDetail integration', () => {
 
   it('PAY-32: saving without opening the collapsed block keeps education, professions, workplaces and relatives', async () => {
     const user = userEvent.setup();
+    const updateCallsBefore = vi.mocked(apiService.updateClient).mock.calls.length;
+    const phones = ['+79990000001', '+79990000002'];
+    const emails = ['first@example.test', 'second@example.test'];
+    vi.mocked(apiService.getClient).mockResolvedValue(createClient({ phones, emails }));
 
     render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
 
@@ -1239,16 +1328,21 @@ describe('ClientDetail integration', () => {
     await user.click(screen.getByRole('button', { name: 'Сохранить' }));
 
     await waitFor(() => {
-      expect(apiService.updateClient).toHaveBeenCalled();
+      expect(apiService.updateClient).toHaveBeenCalledTimes(updateCallsBefore + 1);
     });
     const [, payload] = vi.mocked(apiService.updateClient).mock.calls.at(-1) ?? [];
     const notes = (payload as { notes?: string | null }).notes ?? '';
     const profile = JSON.parse(notes.slice(CLIENT_PROFILE_NOTES_PREFIX.length)) as {
+      phones: string[];
+      emails: string[];
       education: Array<{ institution: string }>;
       professions: Array<{ profession: string }>;
       workplaces: Array<{ organizationName: string }>;
       relatives: Array<{ relation: string }>;
     };
+    expect(profile.phones).toEqual(phones);
+    expect(profile.emails).toEqual(emails);
+    expect(payload).toEqual(expect.objectContaining({ phone: phones[0], email: emails[0] }));
     expect(profile.education.map((item) => item.institution)).toEqual(['НГУ', 'МГУ']);
     expect(profile.professions[0].profession).toBe('Юрист');
     expect(profile.workplaces[0].organizationName).toBe('ООО Альфа');

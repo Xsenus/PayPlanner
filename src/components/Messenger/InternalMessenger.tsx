@@ -274,6 +274,7 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
   const [membersSaving, setMembersSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const composingRef = useRef(false);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const scrollIntentRef = useRef<{ mode: 'bottom' | 'preserve' | 'prepend' | 'unread'; height: number; top: number; unreadId?: number } | null>(null);
   const hasLoadedMessagesRef = useRef(false);
@@ -725,7 +726,7 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
         <div className="flex items-end gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 focus-within:border-blue-300 focus-within:ring-2 focus-within:ring-blue-100">
           <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(event) => setFiles(Array.from(event.target.files ?? []).slice(0, 10))} />
           <button type="button" onClick={() => fileInputRef.current?.click()} className="rounded-lg p-2 text-slate-500 hover:bg-white" title="Прикрепить файлы"><Paperclip className="h-4 w-4" /></button>
-          <textarea ref={textareaRef} value={text} onChange={(event) => { setText(event.target.value); if (!editing) saveChatDraft(currentUserId, thread.id, event.target.value); }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(); } }} rows={1} maxLength={8000} placeholder="Напишите сообщение…" className="max-h-32 min-h-9 flex-1 resize-y border-0 bg-transparent px-1 py-2 text-sm outline-none" />
+          <textarea ref={textareaRef} value={text} onChange={(event) => { setText(event.target.value); if (!editing) saveChatDraft(currentUserId, thread.id, event.target.value); }} onCompositionStart={() => { composingRef.current = true; }} onCompositionEnd={() => { composingRef.current = false; }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !composingRef.current) { event.preventDefault(); void submit(); } }} rows={1} maxLength={8000} placeholder="Напишите сообщение…" className="max-h-32 min-h-9 flex-1 resize-y border-0 bg-transparent px-1 py-2 text-sm outline-none" />
           <button type="button" onClick={() => void submit()} disabled={sending || (!text.trim() && files.length === 0)} className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-white disabled:bg-slate-300" aria-label="Отправить">{sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}</button>
         </div>
         {text && !editing ? <p className="mt-1 text-[11px] text-slate-500">Черновик сохранён в этой вкладке до её закрытия.</p> : null}

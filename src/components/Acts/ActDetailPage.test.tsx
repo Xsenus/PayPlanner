@@ -701,6 +701,89 @@ describe('ActDetailPage', () => {
       expect(updateActMock).toHaveBeenCalledTimes(1);
     });
 
+    it.each([401, 403, 404] as const)('invalidates the parent act and preview after the editor reports mandatory GET %s', async (status) => {
+      const onBack = vi.fn();
+      render(<ActDetailPage actId={35} onBack={onBack} />);
+      const props = await openEditor();
+      const unavailable = props.onActUnavailable as (id: number, status: 401 | 403 | 404) => void;
+
+      await act(async () => {
+        unavailable(35, status);
+        await (props.onSubmit as (payload: unknown) => Promise<void>)({ clientId: 7, invoiceId: 618 });
+        (props.onBack as () => void)();
+      });
+
+      expect(screen.queryByText('Разрешённый клиент')).toBeNull();
+      expect(screen.queryByTestId('act-modal-page')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Редактировать акт' })).toBeNull();
+      expect(screen.queryByText('Печатный шаблон акта')).toBeNull();
+      expect(document.querySelector('iframe')).toBeNull();
+      expect(updateActMock).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('button', { name: 'К списку актов' }));
+      expect(onBack).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['route', 'actor'] as const)('ignores an old editor denial and submit after a %s change', async (boundary) => {
+      const { rerender } = render(<ActDetailPage actId={35} onBack={vi.fn()} />);
+      const props = await openEditor();
+      const nextId = boundary === 'route' ? 36 : 35;
+      if (boundary === 'actor') authState.user = { id: 2, role: { id: 2 } };
+      getActMock.mockResolvedValue(sourceAct(nextId, 'Текущий разрешённый акт'));
+      rerender(<ActDetailPage actId={nextId} onBack={vi.fn()} />);
+      await screen.findByText('Текущий разрешённый акт');
+
+      await act(async () => {
+        (props.onActUnavailable as (id: number, status: number) => void)(35, 403);
+        await (props.onSubmit as (payload: unknown) => Promise<void>)({ clientId: 7, invoiceId: 618 });
+      });
+
+      expect(screen.getByText('Текущий разрешённый акт')).toBeTruthy();
+      expect(screen.queryByText('Нет доступа к акту.')).toBeNull();
+      expect((await openEditor()).act).toMatchObject({ id: nextId, clientId: 7, invoiceId: 618 });
+      expect(updateActMock).not.toHaveBeenCalled();
+    });
+
+    it.each(['route-aba', 'reopen'] as const)('rejects an earlier editor callback and submit after a %s cycle', async (cycle) => {
+      const { rerender } = render(<ActDetailPage actId={35} onBack={vi.fn()} />);
+      const previous = await openEditor();
+      if (cycle === 'route-aba') {
+        getActMock.mockResolvedValue(sourceAct(36, 'Промежуточный акт'));
+        rerender(<ActDetailPage actId={36} onBack={vi.fn()} />);
+        await screen.findByText('Промежуточный акт');
+        getActMock.mockResolvedValue(sourceAct());
+        rerender(<ActDetailPage actId={35} onBack={vi.fn()} />);
+        await screen.findByText('Разрешённый клиент');
+      } else {
+        act(() => { (previous.onBack as () => void)(); });
+        await screen.findByText('Разрешённый клиент');
+      }
+      const current = await openEditor();
+
+      await act(async () => {
+        (previous.onActUnavailable as (id: number, status: number) => void)(35, 403);
+        await (previous.onSubmit as (payload: unknown) => Promise<void>)({ clientId: 7, invoiceId: 618 });
+      });
+
+      expect(screen.getByTestId('act-modal-page')).toBeTruthy();
+      expect(editorProps().act).toBe(current.act);
+      expect(editorProps().errorMessage).toBeNull();
+      expect(updateActMock).not.toHaveBeenCalled();
+    });
+
+    it('does not restore a cached preview when its late response arrives after editor access denial', async () => {
+      const preview = deferred<Blob>();
+      downloadActDocumentMock.mockReturnValue(preview.promise);
+      render(<ActDetailPage actId={35} onBack={vi.fn()} />);
+      const props = await openEditor();
+      await act(async () => { (props.onActUnavailable as (id: number, status: number) => void)(35, 404); });
+      await act(async () => { preview.resolve(new Blob(['<html>OLD PRIVATE PREVIEW</html>'], { type: 'text/html' })); });
+
+      expect(screen.queryByText('Разрешённый клиент')).toBeNull();
+      expect(screen.queryByText('Печатный шаблон акта')).toBeNull();
+      expect(document.querySelector('iframe')).toBeNull();
+      expect(screen.getByRole('button', { name: 'К списку актов' })).toBeTruthy();
+    });
+
     it('does not show or fetch optional catalogs for a response belonging to another act ID', async () => {
       getActMock.mockResolvedValue(sourceAct(36));
       render(<ActDetailPage actId={35} onBack={vi.fn()} />);

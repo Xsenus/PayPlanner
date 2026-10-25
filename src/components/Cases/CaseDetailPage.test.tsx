@@ -1488,7 +1488,7 @@ describe('CaseDetailPage', () => {
     const titles = within(journal).getAllByText(/заседание$/u).map((node) => node.textContent);
     expect(titles).toEqual(['Новое заседание', 'Старое заседание']);
     expect(within(journal).getByText('ГАС «Правосудие»')).toBeTruthy();
-    expect(within(journal).getByRole('heading', { name: 'Журнал событий (2)' })).toBeTruthy();
+    expect(within(journal).getByRole('heading', { name: 'Судебные события (2)' })).toBeTruthy();
 
     fireEvent.click(within(journal).getByRole('button', { name: /Добавить событие/ }));
     expect(screen.queryByLabelText('Журнал событий дела')).toBeNull();

@@ -22,6 +22,8 @@ interface SalesRequestsPageProps {
   allowAnalytics: boolean;
   allowConfigure?: boolean;
   initialRequestId?: number | null;
+  currentUserId?: number | null;
+  onOpenCaseTasks?: (caseId: number) => void;
 }
 
 const SOURCE_LABELS: Record<SalesRequestSource, string> = {
@@ -63,7 +65,7 @@ const emptyForm = () => ({
  * Раздел «Заявки»: список, создание с поиском клиента и проверкой дел, карточка с переходами по статусам.
  * Доступ задаёт серверный раздел прав «requests»; здесь только отображение и подсказки.
  */
-export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allowConfigure = false, initialRequestId = null }: SalesRequestsPageProps) {
+export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allowConfigure = false, initialRequestId = null, currentUserId = null, onOpenCaseTasks }: SalesRequestsPageProps) {
   const toast = useToast();
   const dialog = useDialog();
   const [statuses, setStatuses] = useState<SalesRequestStatusItem[]>([]);
@@ -88,6 +90,11 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
 
   const listSequence = useRef(0);
   const detailSequence = useRef(0);
+  const loadedDetailSequence = useRef(0);
+  const loadedDetailActorId = useRef<number | null>(null);
+  const caseNavigationPending = useRef(false);
+  const caseNavigationContext = useRef({ currentUserId, onOpenCaseTasks, busy });
+  caseNavigationContext.current = { currentUserId, onOpenCaseTasks, busy };
 
   const statusById = useMemo(() => new Map(statuses.map((item) => [item.id, item])), [statuses]);
   const userName = useCallback((id?: number | null) => assignees.find((item) => item.id === id)?.name ?? (id ? `№${id}` : ''), [assignees]);
@@ -113,11 +120,22 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
   }, [filters, toast]);
 
   useEffect(() => {
+    const sequence = detailSequence;
+    sequence.current++;
+    setDetail(null);
+    setEditing(null);
+    setConflict(false);
+    setTaskForm({ assigneeUserId: '', title: '' });
+    setPaymentId('');
+    return () => { sequence.current++; };
+  }, [currentUserId]);
+
+  useEffect(() => {
     if (initialRequestId) {
       void openDetail(initialRequestId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialRequestId]);
+  }, [initialRequestId, currentUserId]);
 
   const loadStatuses = useCallback(() => {
     void apiService.getSalesRequestStatuses().then(setStatuses).catch(() => setStatuses([]));
@@ -149,16 +167,19 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
 
   const openDetail = async (id: number) => {
     const sequence = ++detailSequence.current;
+    const actorId = currentUserId;
     try {
       const loaded = await apiService.getSalesRequest(id);
-      if (sequence !== detailSequence.current) return;
+      if (sequence !== detailSequence.current || actorId !== caseNavigationContext.current.currentUserId) return;
+      loadedDetailSequence.current = sequence;
+      loadedDetailActorId.current = actorId;
       setDetail(loaded);
       setEditing(null);
       setConflict(false);
       setTaskForm({ assigneeUserId: '', title: '' });
       setPaymentId('');
     } catch (error) {
-      if (sequence === detailSequence.current) toast.error(extractDisplayErrorMessage(error, 'Не удалось открыть заявку.'), 'Заявки');
+      if (sequence === detailSequence.current && actorId === caseNavigationContext.current.currentUserId) toast.error(extractDisplayErrorMessage(error, 'Не удалось открыть заявку.'), 'Заявки');
     }
   };
 
@@ -168,6 +189,33 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
     setDetail(null);
     setEditing(null);
     setConflict(false);
+  };
+
+  const openLinkedCaseTasks = async () => {
+    const caseId = detail?.request.clientCaseId;
+    const sequence = detailSequence.current;
+    const actorId = currentUserId;
+    if (!onOpenCaseTasks || currentUserId === null || loadedDetailActorId.current !== currentUserId
+      || busy || caseNavigationPending.current || loadedDetailSequence.current !== sequence
+      || typeof caseId !== 'number' || !Number.isSafeInteger(caseId) || caseId <= 0) return;
+
+    caseNavigationPending.current = true;
+    try {
+      if (editing || creating || taskForm.title.trim() || taskForm.assigneeUserId || paymentId.trim()) {
+        const confirmed = await dialog.confirm({
+          title: 'Перейти к задачам дела?',
+          description: 'Открытые формы заявки и незавершённое поручение будут закрыты. Введённые данные не сохранятся.',
+          confirmLabel: 'Перейти',
+          cancelLabel: 'Остаться',
+        });
+        if (!confirmed) return;
+      }
+      const current = caseNavigationContext.current;
+      if (sequence !== detailSequence.current || actorId !== current.currentUserId || current.busy || !current.onOpenCaseTasks) return;
+      current.onOpenCaseTasks(caseId);
+    } finally {
+      caseNavigationPending.current = false;
+    }
   };
 
   const caseSequence = useRef(0);
@@ -533,6 +581,15 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
           </div>
           <p className="mt-2 whitespace-pre-wrap text-sm">{detail.request.summary}</p>
           {detail.request.comment ? <p className="mt-1 text-xs text-slate-500">{detail.request.comment}</p> : null}
+          {onOpenCaseTasks && typeof detail.request.clientCaseId === 'number'
+            && Number.isSafeInteger(detail.request.clientCaseId) && detail.request.clientCaseId > 0 ? (
+              <div className="mt-2 text-sm">
+                <button type="button" disabled={busy} onClick={() => void openLinkedCaseTasks()} className="text-blue-700 underline disabled:opacity-50">
+                  Открыть задачи дела
+                </button>
+                <p className="mt-1 text-xs text-slate-500">Рабочая задача создаётся в деле и не открывает заявку юристу. Данные заявки не переносятся.</p>
+              </div>
+            ) : null}
           {allowEdit && !finalClosed ? (
             editing ? (
               <div className="mt-2 grid gap-2 rounded-lg border border-slate-200 p-2 text-sm" data-testid="sales-request-edit">
