@@ -1,4 +1,5 @@
 using System.Data.Common;
+using System.Diagnostics;
 using System.Globalization;
 using System.Security.Claims;
 using System.Text;
@@ -27,23 +28,87 @@ using Xunit;
 namespace PayPlanner.Api.Tests;
 
 public sealed class ManagedCaseDocumentUploadServiceTests : IClassFixture<CurrentModelDatabaseTemplates>,
-    IClassFixture<PostgreSqlMigratedTemplate>, IClassFixture<SqliteMigratedTemplate>
+    IClassFixture<PostgreSqlModelTemplate>, IClassFixture<PostgreSqlMigratedTemplate>, IClassFixture<SqliteMigratedTemplate>
 {
     private readonly CurrentModelDatabaseTemplates currentModel;
+    private readonly PostgreSqlModelTemplate modelTemplate;
     private readonly PostgreSqlMigratedTemplate postgresMigrations;
     private readonly SqliteMigratedTemplate sqliteMigrations;
 
-    public ManagedCaseDocumentUploadServiceTests(CurrentModelDatabaseTemplates currentModel,
+    public ManagedCaseDocumentUploadServiceTests(CurrentModelDatabaseTemplates currentModel, PostgreSqlModelTemplate modelTemplate,
         PostgreSqlMigratedTemplate postgresMigrations, SqliteMigratedTemplate sqliteMigrations)
     {
         this.currentModel = currentModel;
+        this.modelTemplate = modelTemplate;
         this.postgresMigrations = postgresMigrations;
         this.sqliteMigrations = sqliteMigrations;
     }
 
-    private Task<Fixture> CreateFixtureAsync(bool postgres = false, int requiredCopies = 1, bool migrated = false)
-        => Fixture.CreateFromTemplateAsync(migrated ? postgresMigrations : currentModel.PostgreSql,
-            migrated ? sqliteMigrations : currentModel.Sqlite, postgres, requiredCopies, migrated);
+    private Task<Fixture> CreateFixtureAsync(bool postgres = false, int requiredCopies = 1, bool migrated = false,
+        Func<Fixture, Task>? beforeReady = null)
+        => Fixture.CreateFromTemplateAsync(postgresMigrations, migrated ? sqliteMigrations : currentModel.Sqlite,
+            postgres, requiredCopies, migrated, modelTemplate, beforeReady);
+
+    [Fact]
+    public async Task ModelFixtureClonesKeepSeedsRootsAndRecreatedFaultInterceptorsIndependent()
+    {
+        await using var first = await CreateFixtureAsync(postgres: true, requiredCopies: 2);
+        await using var second = await CreateFixtureAsync(postgres: true, requiredCopies: 2);
+        Assert.NotEqual(first.Db.Database.GetDbConnection().Database, second.Db.Database.GetDbConnection().Database);
+        Assert.NotEqual(first.Root, second.Root);
+        Assert.Equal(first.User.Id, second.User.Id);
+        Assert.Equal(first.Case.Id, second.Case.Id);
+        Assert.NotSame(first.Fault, second.Fault);
+        Assert.NotSame(first.StatusHook, second.StatusHook);
+        Assert.Equal("false", (await first.Db.SystemSettings.SingleAsync(row => row.Key == "notifications.email.enabled")).Value);
+
+        first.Fault.Enabled = first.Fault.Armed = true;
+        first.Fault.Stage = "before-save";
+        first.Db.Clients.Add(new Client { Name = "rejected first clone" });
+        await Assert.ThrowsAsync<IOException>(() => first.Db.SaveChangesAsync());
+        first.Fault.Enabled = false;
+        first.Db.ChangeTracker.Clear();
+        first.Db.Clients.Add(new Client { Name = "first clone only" });
+        await first.Db.SaveChangesAsync();
+        await first.RecreateContext();
+        Assert.True(await first.Db.Clients.AnyAsync(row => row.Name == "first clone only"));
+        Assert.False(await second.Db.Clients.AnyAsync(row => row.Name == "first clone only"));
+
+        first.Fault.Enabled = first.Fault.Armed = true;
+        first.Db.Clients.Add(new Client { Name = "recreated rejected clone" });
+        await Assert.ThrowsAsync<IOException>(() => first.Db.SaveChangesAsync());
+        first.Fault.Enabled = false;
+        second.Db.Clients.Add(new Client { Name = "independent second clone" });
+        await second.Db.SaveChangesAsync();
+        await File.WriteAllTextAsync(Path.Combine(first.Root, "first-only.txt"), "synthetic");
+        Assert.False(File.Exists(Path.Combine(second.Root, "first-only.txt")));
+        Assert.Equal(2, await second.Db.Clients.CountAsync());
+
+        string? failedRoot = null;
+        string? failedDatabase = null;
+        var setupFailure = await Assert.ThrowsAsync<IOException>(() => CreateFixtureAsync(postgres: true,
+            beforeReady: async fixture =>
+            {
+                failedRoot = fixture.Root;
+                failedDatabase = fixture.Db.Database.GetDbConnection().Database;
+                fixture.Fault.Enabled = fixture.Fault.Armed = true;
+                fixture.Fault.Stage = "before-save";
+                fixture.Db.Clients.Add(new Client { Name = "failed setup clone" });
+                await fixture.Db.SaveChangesAsync();
+            }));
+        Assert.Equal("Owned managed case save failure", setupFailure.Message);
+        Assert.NotNull(failedRoot);
+        Assert.NotNull(failedDatabase);
+        Assert.False(Directory.Exists(failedRoot));
+        Assert.StartsWith("pp_bank_model_", failedDatabase, StringComparison.Ordinal);
+        await using var observer = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(System.Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES"))
+        { Database = "postgres", Pooling = false }.ConnectionString);
+        await observer.OpenAsync();
+        await using var exists = new NpgsqlCommand("SELECT count(*) FROM pg_database WHERE datname = @name", observer);
+        exists.Parameters.AddWithValue("name", failedDatabase);
+        Assert.Equal(0L, (long)(await exists.ExecuteScalarAsync())!);
+        Assert.Equal(2, await second.Db.Clients.CountAsync());
+    }
 
     [Fact]
     public async Task PostgreSqlFixtureRetainsIndependentConnectionsAcrossRecreationAndReleasesOwnedDatabase()
@@ -54,7 +119,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests : IClassFixture<Curren
         {
             var settings = new NpgsqlConnectionStringBuilder(f.Db.Database.GetConnectionString()!);
             databaseName = settings.Database!;
-            Assert.StartsWith("pp_managed_case_", databaseName);
+            Assert.StartsWith("pp_bank_model_", databaseName);
             Assert.False(settings.Pooling);
             settings.Database = "postgres";
             adminConnectionString = settings.ConnectionString;
@@ -4135,6 +4200,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests : IClassFixture<Curren
         private IStorageObjectService Storage { get; set; } = null!;
         public IManagedCaseDocumentUploadService Managed { get; private set; } = null!;
         private SqliteConnection? Sqlite { get; init; }
+        private PostgreSqlModelTemplate.DatabaseLease? ModelLease { get; init; }
         private PostgreSqlMigratedTemplate.DatabaseLease? PostgresLease { get; init; }
         private SqliteMigratedTemplate.DatabaseLease? SqliteLease { get; init; }
         private string? ConnectionString { get; init; }
@@ -4389,12 +4455,16 @@ public sealed class ManagedCaseDocumentUploadServiceTests : IClassFixture<Curren
             => Assert.IsType<ClientCaseDocumentDto>(Assert.IsType<CreatedResult>(result.Result).Value);
 
         public static async Task<Fixture> CreateFromTemplateAsync(PostgreSqlMigratedTemplate postgresTemplate,
-            SqliteMigratedTemplate sqliteTemplate, bool postgres, int requiredCopies, bool migrated)
+            SqliteMigratedTemplate sqliteTemplate, bool postgres, int requiredCopies, bool migrated,
+            PostgreSqlModelTemplate modelTemplate, Func<Fixture, Task>? beforeReady = null)
         {
+            var setupStarted = Stopwatch.GetTimestamp();
             var root = Path.Combine(Path.GetTempPath(), "pp-managed-case-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(root);
             var fault = new PublicationFault();
             var statusHook = new StatusReadHook();
+            var schemaStarted = Stopwatch.GetTimestamp();
+            PostgreSqlModelTemplate.DatabaseLease? modelLease = null;
             PaymentContext? db = null;
             SqliteConnection? sqlite = null;
             PostgreSqlMigratedTemplate.DatabaseLease? postgresLease = null;
@@ -4404,8 +4474,16 @@ public sealed class ManagedCaseDocumentUploadServiceTests : IClassFixture<Curren
             {
                 if (postgres)
                 {
-                    postgresLease = await postgresTemplate.CreateDatabaseAsync("pp_managed_case_");
-                    connectionString = postgresLease.ConnectionString;
+                    if (migrated)
+                    {
+                        postgresLease = await postgresTemplate.CreateDatabaseAsync("pp_managed_case_");
+                        connectionString = postgresLease.ConnectionString;
+                    }
+                    else
+                    {
+                        modelLease = await modelTemplate.CreateDatabaseAsync();
+                        connectionString = modelLease.ConnectionString;
+                    }
                     db = new PostgreSqlPaymentContext(new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(connectionString)
                         .AddInterceptors(fault, new PublicationSaveFault(fault), statusHook).Options);
                 }
@@ -4419,8 +4497,12 @@ public sealed class ManagedCaseDocumentUploadServiceTests : IClassFixture<Curren
                     db = new PaymentContext(sqliteOptions.Options, useObjectAuditModel: true);
                 }
                 // Migration roundtrips retain their original connection lifecycle.
-                var retainPostgresConnection = postgresLease is not null && !migrated;
+                var retainPostgresConnection = modelLease is not null;
                 if (retainPostgresConnection) await db.Database.OpenConnectionAsync();
+                var mode = migrated ? postgres ? "migrated-pg" : "migrated-sqlite"
+                    : postgres ? "model-pg" : "sqlite-template";
+                ReportPhase(mode, "schema", schemaStarted);
+                var seedStarted = Stopwatch.GetTimestamp();
                 var role = new Role
                 {
                     Name = "owned-case-editor",
@@ -4431,6 +4513,8 @@ public sealed class ManagedCaseDocumentUploadServiceTests : IClassFixture<Curren
                 var client = new Client { Name = "Синтетический клиент", ResponsibleUser = user };
                 var clientCase = new ClientCase { Client = client, ResponsibleUser = user, Title = "Синтетическое дело", Status = ClientCaseStatus.Open };
                 db.ClientCases.Add(clientCase); await db.SaveChangesAsync();
+                ReportPhase(mode, "seed", seedStarted);
+                var storageStarted = Stopwatch.GetTimestamp();
                 var environment = new TestEnvironment(root);
                 var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
                 {
@@ -4465,7 +4549,7 @@ public sealed class ManagedCaseDocumentUploadServiceTests : IClassFixture<Curren
                 var policies = new StoragePolicyService(monitor, registry);
                 var storage = new StorageObjectService(db, policies, registry, monitor);
                 var capacity = new StorageStageCapacityService(db, registry, monitor, environment, config);
-                return new Fixture
+                var fixture = new Fixture
                 {
                     Root = root,
                     Db = db,
@@ -4484,21 +4568,58 @@ public sealed class ManagedCaseDocumentUploadServiceTests : IClassFixture<Curren
                     Storage = storage,
                     Managed = new ManagedCaseDocumentUploadService(db, storage, new ProductStorageBindingService(db, policies), environment, config, monitor, capacity),
                     Sqlite = sqlite,
+                    ModelLease = modelLease,
                     PostgresLease = postgresLease,
                     SqliteLease = sqliteLease,
                     ConnectionString = connectionString,
                     RetainPostgresConnection = retainPostgresConnection
                 };
+                ReportPhase(mode, "storage", storageStarted);
+                if (beforeReady is not null) await beforeReady(fixture);
+                ReportPhase(mode, "setup", setupStarted);
+                return fixture;
             }
-            catch
+            catch (Exception error)
             {
-                if (db is not null) await db.DisposeAsync();
-                if (sqliteLease is not null) await sqliteLease.DisposeAsync();
-                if (postgresLease is not null) await postgresLease.DisposeAsync();
-                Directory.Delete(root, true);
+                var errors = new List<Exception> { error };
+                if (db is not null)
+                {
+                    try { await db.DisposeAsync(); }
+                    catch (Exception cleanup) { errors.Add(cleanup); }
+                }
+                if (sqliteLease is not null)
+                {
+                    try { await sqliteLease.DisposeAsync(); }
+                    catch (Exception cleanup) { errors.Add(cleanup); }
+                }
+                if (postgresLease is not null)
+                {
+                    try { await postgresLease.DisposeAsync(); }
+                    catch (Exception cleanup) { errors.Add(cleanup); }
+                }
+                if (modelLease is not null)
+                {
+                    try { await modelLease.DisposeAsync(); }
+                    catch (Exception cleanup) { errors.Add(cleanup); }
+                }
+                try
+                {
+                    Assert.StartsWith("pp-managed-case-", Path.GetFileName(root));
+                    if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+                }
+                catch (Exception cleanup) { errors.Add(cleanup); }
+                if (errors.Count > 1) throw new AggregateException("Model fixture setup and cleanup failed.", errors);
                 throw;
             }
         }
+
+        private static void ReportPhase(string mode, string phase, long started)
+        {
+            try { Console.WriteLine(FormattableString.Invariant($"PP_FIXTURE_PHASE family=ManagedCaseUpload mode={mode} phase={phase} elapsedMs={Stopwatch.GetElapsedTime(started).TotalMilliseconds:F3}")); }
+            catch (Exception error) when (error is IOException or ObjectDisposedException)
+            { /* Diagnostics must not hide a business failure or lose a lease. */ }
+        }
+
 
         public IManagedTaskFileUploadService TaskWriter() => new ManagedTaskFileUploadService(Db, Storage,
             new ProductStorageBindingService(Db, new StoragePolicyService(Monitor, Registry)), Environment, Configuration, Monitor,
@@ -4533,11 +4654,14 @@ public sealed class ManagedCaseDocumentUploadServiceTests : IClassFixture<Curren
 
         public async ValueTask DisposeAsync()
         {
+            var started = Stopwatch.GetTimestamp();
             await Db.DisposeAsync();
             if (SqliteLease is not null) await SqliteLease.DisposeAsync();
             if (PostgresLease is not null) await PostgresLease.DisposeAsync();
+            if (ModelLease is not null) await ModelLease.DisposeAsync();
             Assert.StartsWith("pp-managed-case-", Path.GetFileName(Root));
             Directory.Delete(Root, true);
+            ReportPhase(ModelLease is not null ? "model-pg" : PostgresLease is not null ? "migrated-pg" : "sqlite", "cleanup", started);
         }
     }
 

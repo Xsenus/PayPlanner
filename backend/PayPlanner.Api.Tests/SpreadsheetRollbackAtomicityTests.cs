@@ -31,7 +31,7 @@ public partial class SpreadsheetImportServiceTests
     [MemberData(nameof(CounterpartyRollbackFaults))]
     public async Task RollbackAsync_LateCounterpartyFailureIsAtomicAndNextRowRetryRemainUsable(bool postgres, bool updated, string phase)
     {
-        await using var fixture = await SpreadsheetRollbackSessions.CreateAsync(postgres);
+        await using var fixture = await SpreadsheetRollbackSessions.CreateAsync(postgres, bankModelTemplate);
         var failure = new CounterpartyRollbackSavedFailure(phase);
         var service = fixture.Service(failure);
         var target = await SeedAtomicRollbackAsync(fixture, service, updated, independent: true);
@@ -86,7 +86,7 @@ public partial class SpreadsheetImportServiceTests
     [MemberData(nameof(CounterpartyRollbackRaces))]
     public async Task RollbackAsync_ConcurrentCommittedFinancialReferencePreservesCompanyAndClient(bool postgres, bool updated, string reference)
     {
-        await using var fixture = await SpreadsheetRollbackSessions.CreateAsync(postgres);
+        await using var fixture = await SpreadsheetRollbackSessions.CreateAsync(postgres, bankModelTemplate);
         var gate = new CounterpartyRollbackTransactionGate();
         var service = fixture.Service(gate, gate.Commands);
         var target = await SeedAtomicRollbackAsync(fixture, service, updated, independent: false);
@@ -134,7 +134,7 @@ public partial class SpreadsheetImportServiceTests
     [InlineData(true, true)]
     public async Task RollbackAsync_LostCommitAcknowledgementKeepsDurableCounterpartyResult(bool postgres, bool updated)
     {
-        await using var fixture = await SpreadsheetRollbackSessions.CreateAsync(postgres);
+        await using var fixture = await SpreadsheetRollbackSessions.CreateAsync(postgres, bankModelTemplate);
         var fault = new CounterpartyRollbackCommitFailure();
         var service = fixture.Service(fault);
         var target = await SeedAtomicRollbackAsync(fixture, service, updated, independent: false);
@@ -321,9 +321,9 @@ public partial class SpreadsheetImportServiceTests
         public PaymentContext Observer { get; } = observer;
         private readonly IHttpContextAccessor accessor = new HttpContextAccessor { HttpContext = new DefaultHttpContext() };
 
-        public static async Task<SpreadsheetRollbackSessions> CreateAsync(bool postgres)
+        public static async Task<SpreadsheetRollbackSessions> CreateAsync(bool postgres, PostgreSqlModelTemplate modelTemplate)
         {
-            var source = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+            var source = await BankImportProvenanceModelTests.ModelDatabase.CreateFromModelTemplateAsync(postgres, modelTemplate);
             string? file = null;
             try
             {

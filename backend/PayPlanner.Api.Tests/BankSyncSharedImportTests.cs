@@ -13,9 +13,12 @@ public partial class BankSyncServiceTests
 {
     private sealed record SharedFixture(BankImportProvenanceModelTests.ModelDatabase Database, FakeBank Bank, BankSyncService Service, BankConnection Connection, int AccountId);
 
-    private static async Task<SharedFixture> CreateSharedAsync(bool postgres)
+    private Task<SharedFixture> CreateSharedAsync(bool postgres)
+        => CreateSharedAsync(postgres, bankModelTemplate);
+
+    private static async Task<SharedFixture> CreateSharedAsync(bool postgres, PostgreSqlModelTemplate modelTemplate)
     {
-        var database = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        var database = await BankImportProvenanceModelTests.ModelDatabase.CreateFromModelTemplateAsync(postgres, modelTemplate);
         var db = database.Db;
         var company = new LegalEntity { ShortName = "Синтетическая собственная компания", Inn = "7707083893" };
         db.LegalEntities.Add(company);

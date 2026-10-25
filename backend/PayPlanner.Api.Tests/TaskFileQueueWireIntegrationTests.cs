@@ -18,8 +18,15 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public sealed class TaskFileQueueWireIntegrationTests
+public sealed class TaskFileQueueWireIntegrationTests : IClassFixture<SqliteMigratedTemplate>
 {
+    private readonly SqliteMigratedTemplate sqliteTemplate;
+
+    public TaskFileQueueWireIntegrationTests(SqliteMigratedTemplate sqliteTemplate)
+    {
+        this.sqliteTemplate = sqliteTemplate;
+    }
+
     [Theory]
     [InlineData(null, "replay")]
     [InlineData("legacy", "replay")]
@@ -53,10 +60,10 @@ public sealed class TaskFileQueueWireIntegrationTests
     public Task BrowserWaitsForActualCardSettingsWithoutShowingDefaultForm(string cardMode)
         => RunBrowserQueueFlowAsync(cardMode, "replay", delayCardSettings: true);
 
-    private static async Task RunBrowserQueueFlowAsync(string? cardMode, string flow, bool delayCardSettings = false)
+    private async Task RunBrowserQueueFlowAsync(string? cardMode, string flow, bool delayCardSettings = false)
     {
         await using var endpoint = await LoopbackS3Endpoint.StartAsync();
-        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(cardMode ?? "legacy", workerEnabled: true, secondCopy: endpoint);
+        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(cardMode ?? "legacy", workerEnabled: true, secondCopy: endpoint, template: sqliteTemplate);
         await using var live = flow == "live" ? await SyntheticLiveNotificationGateway.StartAsync(runtime) : null;
         using var login = await runtime.Client.PostAsJsonAsync("/api/auth/login", new { email = runtime.Email, password = runtime.Password });
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);

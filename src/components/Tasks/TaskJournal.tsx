@@ -6,6 +6,7 @@ import { TASK_TYPE_OPTIONS as TYPE_OPTIONS } from './taskTypeOptions';
 import { submitTaskFileUpload, TaskFileUploadWaitingError } from '../../services/taskFileUpload';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
+import { useTaskBulkBilling } from './useTaskBulkBilling';
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import {
   AlarmClock,
@@ -3119,9 +3120,9 @@ export function TaskJournal({
     onRouteTaskChange?.(null);
   }, [onRouteTaskChange]);
 
-  const emitTaskChange = useCallback(() => {
+  const emitTaskChange = useCallback((bulkBillingIds?: number[]) => {
     window.dispatchEvent(new CustomEvent(TASK_JOURNAL_EVENT, {
-      detail: { source: taskJournalEventSourceRef.current },
+      detail: { source: taskJournalEventSourceRef.current, bulkBillingIds },
     }));
   }, []);
 
@@ -4545,6 +4546,81 @@ export function TaskJournal({
     [selectedTasks],
   );
   const hasInvoiceOnlySelection = selectedTasksForInvoice.some((task) => !editableTaskIds.has(task.id));
+  const bulkBilling = useTaskBulkBilling({
+    tasks: selectedTasksForBulk,
+    scopeKey: `${currentUserId}:${listFilterKey}:${taskPage}:${viewMode}:${isRouteTaskPage}`,
+    scopeLabel: `Журнал задач, страница ${taskPage}`,
+    identityKey: String(currentUserId),
+    canEdit: Boolean(currentUserId && (isAdminUser || permissions.tasks.canEdit || permissions.tasks.canEditOthers) && !offlineCalendarSnapshot && !isRouteTaskPage),
+    loading: loading || !taskSettingsReady || bulkSaving || bulkDeleting,
+    onApplied: (result) => {
+      const ids = result.items.filter((item) => item.outcome === 'updated' || item.outcome === 'unchanged').map((item) => item.id);
+      setSelectedTaskIds((previous) => new Set([...previous].filter((id) => !ids.includes(id))));
+      emitTaskChange(ids);
+      void refreshTasks();
+    },
+  });
+
+  const modalBillingReadScope = JSON.stringify([
+    currentUserId, user?.role?.id ?? null, user?.departmentId ?? null, user?.companyIds ?? [],
+    contextFilter?.clientId ?? null, contextFilter?.legalEntityId ?? null,
+    permissions.tasks, isAdminUser, Boolean(offlineCalendarSnapshot), taskSettings.taskCardWindowMode,
+  ]);
+  const modalBillingReadScopeRef = useRef(modalBillingReadScope);
+  modalBillingReadScopeRef.current = modalBillingReadScope;
+  const canReadModalBilling = Boolean(currentUserId && (isAdminUser || permissions.tasks.canView) && !offlineCalendarSnapshot);
+
+  // Both card modes share this model. Refresh only billing fields; retain every unsaved form field.
+  useEffect(() => {
+    const id = modal?.task?.id;
+    if (!id || !canReadModalBilling) return;
+    let active = true;
+    let revision = 0;
+    let timer: number | null = null;
+    let inFlight = false;
+    let queued = false;
+    const isCurrent = () => active && modalBillingReadScopeRef.current === modalBillingReadScope;
+    const scheduleBilling = () => {
+      // Invalidate an earlier response immediately, before the next debounced read starts.
+      revision += 1;
+      // A fixed coalescing window bounds the wait even while server signals keep arriving.
+      if (timer !== null) return;
+      timer = window.setTimeout(() => {
+        timer = null;
+        if (!isCurrent()) return;
+        if (inFlight) { queued = true; return; }
+        const request = revision;
+        inFlight = true;
+        void apiService.getTaskJournalItem(id).then((fresh) => {
+          if (!isCurrent() || request !== revision || fresh.id !== id) return;
+          setModal((current) => isCurrent() && request === revision && current?.task?.id === id
+            ? { ...current, task: { ...current.task,
+              clientBillingClassification: fresh.clientBillingClassification, billingContractId: fresh.billingContractId,
+              billingContractNumber: fresh.billingContractNumber, billingMode: fresh.billingMode,
+              billingInvoiceId: fresh.billingInvoiceId, billingInvoiceNumber: fresh.billingInvoiceNumber,
+              billingStatus: fresh.billingStatus, updatedAt: fresh.updatedAt,
+            } } : current);
+        }).catch(() => { /* A revoked/read failure must not replace the retained card or its draft. */ }).finally(() => {
+          inFlight = false;
+          if (queued && isCurrent()) { queued = false; scheduleBilling(); }
+        });
+      }, REALTIME_TASK_REFRESH_DEBOUNCE_MS);
+    };
+    const refreshBilling = (event: Event) => {
+      const ids: unknown = event instanceof CustomEvent ? event.detail?.bulkBillingIds : null;
+      if (!Array.isArray(ids) || ids.length > 500 || !ids.includes(id)) return;
+      scheduleBilling();
+    };
+    window.addEventListener(TASK_JOURNAL_EVENT, refreshBilling);
+    window.addEventListener(TASK_JOURNAL_REALTIME_EVENT, scheduleBilling);
+    return () => {
+      active = false;
+      revision += 1;
+      if (timer !== null) window.clearTimeout(timer);
+      window.removeEventListener(TASK_JOURNAL_EVENT, refreshBilling);
+      window.removeEventListener(TASK_JOURNAL_REALTIME_EVENT, scheduleBilling);
+    };
+  }, [canReadModalBilling, modal?.task?.id, modalBillingReadScope]);
   const billingAnalysis = useMemo(() => {
     if (viewMode === 'list' && taskListSummary) {
       return {
@@ -4717,6 +4793,7 @@ export function TaskJournal({
   };
 
   const toggleTaskSelection = (taskId: number, checked: boolean) => {
+    if (bulkBilling.busy) return;
     setSelectedTaskIds((previous) => {
       const next = new Set(previous);
       if (checked) {
@@ -4729,6 +4806,7 @@ export function TaskJournal({
   };
 
   const toggleAllVisibleSelection = (checked: boolean) => {
+    if (bulkBilling.busy) return;
     setSelectedTaskIds((previous) => {
       const next = new Set(previous);
       selectableTasks.forEach((task) => {
@@ -4743,6 +4821,7 @@ export function TaskJournal({
   };
 
   const clearBulkSelection = () => {
+    if (bulkBilling.busy) return;
     setSelectedTaskIds(new Set());
   };
 
@@ -4821,6 +4900,7 @@ export function TaskJournal({
   };
 
   const handleBulkUpdate = async () => {
+    if (bulkBilling.busy || bulkSaving || bulkDeleting) return;
     const ids = selectedTasksForBulk.map((task) => task.id);
     if (ids.length === 0) {
       toast.error('Выберите задачи для массового изменения.', 'Журнал задач');
@@ -4870,6 +4950,7 @@ export function TaskJournal({
   };
 
   const handleBulkDelete = async () => {
+    if (bulkBilling.busy || bulkSaving || bulkDeleting) return;
     if (!canDeleteTasks) {
       toast.error('У роли нет права на удаление задач.', 'Журнал задач');
       return;
@@ -5981,7 +6062,7 @@ export function TaskJournal({
     <TaskStickerStylesProvider styles={taskSettings.stickerStyles}>
       <div className={embedded ? 'bg-transparent' : 'min-h-screen bg-slate-50'}>
       <div data-testid="task-journal-shell" className={embedded ? 'w-full min-w-0' : 'w-full min-w-0 p-3 sm:p-4 lg:p-4'}>
-        <section className="mb-6">
+        <section className="mb-3">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
             <div>
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
@@ -6146,7 +6227,7 @@ export function TaskJournal({
           />
         ) : null}
 
-        <section className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <section className="mb-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <MetricCard
             label="Активные"
             value={stats.active}
@@ -6181,7 +6262,7 @@ export function TaskJournal({
           />
         </section>
 
-        <div className="mb-6 min-w-0 max-w-full rounded-xl border border-slate-200 bg-white p-3" data-testid="task-filters-and-views">
+        <div className="mb-3 min-w-0 max-w-full rounded-xl border border-slate-200 bg-white p-3" data-testid="task-filters-and-views">
           <button
             type="button"
             onClick={() => {
@@ -6660,7 +6741,7 @@ export function TaskJournal({
             priority={bulkPriority}
             status={bulkStatus}
             dueAt={bulkDueAt}
-            saving={bulkSaving}
+            saving={bulkSaving || bulkBilling.busy}
             deleting={bulkDeleting}
             canDelete={canDeleteTasks}
             onAssigneeChange={setBulkAssigneeUserId}
@@ -6670,6 +6751,7 @@ export function TaskJournal({
             onApply={handleBulkUpdate}
             onDelete={handleBulkDelete}
             onClear={clearBulkSelection}
+            onBilling={bulkBilling.begin}
           />
         ) : null}
 
@@ -6884,6 +6966,10 @@ export function TaskJournal({
         )}
       </div>
 
+      {bulkBilling.hasDraft ? <button type="button" onClick={bulkBilling.begin} disabled={bulkBilling.busy}
+        className="rounded border px-3 py-1.5 text-sm disabled:opacity-50">Открыть зафиксированный учёт задач</button> : null}
+      {bulkBilling.error ? <p role="alert" className="text-sm text-rose-700">{bulkBilling.error}</p> : null}
+      {bulkBilling.dialog}
       {modal && taskSettingsReady ? (
         <TaskCardComponent
           key={`${modal.task ? `edit-${modal.task.id}` : 'create'}-${currentUserId}`}
@@ -8034,6 +8120,7 @@ function TaskBulkActionsPanel({
   onApply,
   onDelete,
   onClear,
+  onBilling,
 }: {
   selectedCount: number;
   assignees: TaskJournalAssignee[];
@@ -8051,6 +8138,7 @@ function TaskBulkActionsPanel({
   onApply: () => void;
   onDelete: () => void;
   onClear: () => void;
+  onBilling: () => void;
 }) {
   const busy = saving || deleting;
 
@@ -8116,6 +8204,8 @@ function TaskBulkActionsPanel({
           </label>
         </div>
         <div className="flex shrink-0 flex-wrap justify-end gap-2">
+          <button type="button" onClick={onBilling} disabled={busy}
+            className="inline-flex h-10 items-center justify-center rounded-xl border border-blue-100 bg-white px-3 text-sm font-semibold disabled:opacity-60">Изменить учёт выбранных</button>
           <button
             type="button"
             onClick={onClear}

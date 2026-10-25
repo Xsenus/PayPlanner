@@ -313,12 +313,39 @@ export interface TaskJournalBulkUpdatePayload {
   priority?: TaskJournalPriority;
   status?: TaskJournalStatus;
   dueAt?: string;
+  billingClassification?: 'billable' | 'internal';
+  includeCompleted?: boolean;
+  expectedUpdatedAtById?: Record<string, string | null>;
+}
+
+export type TaskBillingBulkReason = 'notAvailable' | 'forbidden' | 'invoiced' | 'paid'
+  | 'contractorPaymentProtected' | 'contractual' | 'unsupportedStatus' | 'cancelled'
+  | 'completedExcluded' | 'unknownClassification' | 'clientCaseRequired' | 'versionConflict';
+
+export interface TaskBillingBulkItemResult {
+  id: number;
+  outcome: 'updated' | 'unchanged' | 'skipped' | 'conflict';
+  reason: TaskBillingBulkReason | null;
+  updatedAt: string | null;
+}
+
+export interface TaskBillingBulkResult {
+  requested: number;
+  updated: number;
+  unchanged: number;
+  skipped: number;
+  conflicted: number;
+  items: TaskBillingBulkItemResult[];
 }
 
 export interface TaskJournalBulkUpdateResult {
   requested: number;
   updated: number;
   skipped: number;
+  // Legacy status/assignee bulk responses do not contain billing outcomes.
+  unchanged?: number;
+  conflicted?: number;
+  items?: TaskBillingBulkItemResult[];
 }
 
 const STORAGE_KEY = 'pp.task_journal.items.v1';

@@ -27,7 +27,7 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public class TasksControllerTests : IDisposable
+public partial class TasksControllerTests : IDisposable
 {
     private const string FileStoragePrefix = "pp-task-controller-";
     private readonly string _fileStorageRoot = Path.GetFullPath(
@@ -9229,6 +9229,7 @@ public class TasksControllerTests : IDisposable
     [Fact]
     public async Task UploadFile_AllowsExecutorWithPersonalCompletionAccess()
     {
+        using var storage = new TaskUploadStorageScope();
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "upload-result-author@example.com", "Постановщик");
         var assignee = await CreateTaskUserAsync(db, "upload-result-assignee@example.com", "Исполнитель", canEdit: false);
@@ -9242,7 +9243,7 @@ public class TasksControllerTests : IDisposable
             UpdatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
-        var controller = CreateController(db, new RecordingNotificationService(), assignee);
+        var controller = CreateController(db, new RecordingNotificationService(), assignee, configuration: storage.Configuration);
 
         var result = await controller.UploadFile(
             task.Id,
@@ -9255,13 +9256,14 @@ public class TasksControllerTests : IDisposable
         Assert.Equal(assignee.Id, file.UploadedByUserId);
         Assert.Equal("результат.txt", file.OriginalFileName);
 
-        var adminController = CreateController(db, new RecordingNotificationService(), author);
+        var adminController = CreateController(db, new RecordingNotificationService(), author, configuration: storage.Configuration);
         Assert.IsType<NoContentResult>(await adminController.DeleteFile(task.Id, file.Id, CancellationToken.None));
     }
 
     [Fact]
     public async Task UploadFile_AllowsExecutorToAttachCorrectedResultAfterRevision()
     {
+        using var storage = new TaskUploadStorageScope();
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "revision-file-author@example.com", "Постановщик");
         var assignee = await CreateTaskUserAsync(db, "revision-file-assignee@example.com", "Исполнитель", canEdit: false);
@@ -9278,7 +9280,7 @@ public class TasksControllerTests : IDisposable
             Resolution = "Приложите исправленный документ.",
         });
         await db.SaveChangesAsync();
-        var controller = CreateController(db, new RecordingNotificationService(), assignee);
+        var controller = CreateController(db, new RecordingNotificationService(), assignee, configuration: storage.Configuration);
 
         var result = await controller.UploadFile(
             task.Id,
@@ -9291,19 +9293,20 @@ public class TasksControllerTests : IDisposable
         Assert.Equal(assignee.Id, file.UploadedByUserId);
         Assert.Equal("исправлено.txt", file.OriginalFileName);
 
-        var adminController = CreateController(db, new RecordingNotificationService(), author);
+        var adminController = CreateController(db, new RecordingNotificationService(), author, configuration: storage.Configuration);
         Assert.IsType<NoContentResult>(await adminController.DeleteFile(task.Id, file.Id, CancellationToken.None));
     }
 
     [Fact]
     public async Task UploadFile_AllowsAssignedExecutorWithoutPersonalCompletionAccess()
     {
+        using var storage = new TaskUploadStorageScope();
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "upload-forbidden-author@example.com", "Постановщик");
         var assignee = await CreateTaskUserAsync(db, "upload-forbidden-assignee@example.com", "Исполнитель", canEdit: false);
         var client = await CreateClientAsync(db, "Клиент без доступа к итоговым файлам");
         var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id);
-        var controller = CreateController(db, new RecordingNotificationService(), assignee);
+        var controller = CreateController(db, new RecordingNotificationService(), assignee, configuration: storage.Configuration);
 
         var result = await controller.UploadFile(
             task.Id,
@@ -9319,7 +9322,7 @@ public class TasksControllerTests : IDisposable
         Assert.IsType<ForbidResult>(await controller.DeleteFile(task.Id, file.Id, CancellationToken.None));
         Assert.Single(await db.TaskJournalFiles.Where(item => item.TaskJournalItemId == task.Id).ToListAsync());
 
-        var adminController = CreateController(db, new RecordingNotificationService(), author);
+        var adminController = CreateController(db, new RecordingNotificationService(), author, configuration: storage.Configuration);
         Assert.IsType<NoContentResult>(await adminController.DeleteFile(task.Id, file.Id, CancellationToken.None));
     }
 
@@ -9640,15 +9643,65 @@ public class TasksControllerTests : IDisposable
         }
     }
 
+    private sealed class TaskUploadStorageScope : IDisposable
+    {
+        private readonly string parent = Path.GetFullPath(Path.GetTempPath());
+        private readonly string name = $"pp-task-upload-{Guid.NewGuid():N}";
+
+        public string Root { get; }
+        public IConfiguration Configuration { get; }
+
+        public TaskUploadStorageScope()
+        {
+            Root = Path.GetFullPath(Path.Combine(parent, name));
+            Configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                [ApplicationFileStoragePaths.RootPathConfigurationKey] = Root,
+            }).Build();
+            Directory.CreateDirectory(Root);
+        }
+
+        public void Dispose()
+        {
+            var root = Path.GetFullPath(Root);
+            if (!string.Equals(Path.GetDirectoryName(root), Path.TrimEndingDirectorySeparator(parent), StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(Path.GetFileName(root), name, StringComparison.Ordinal))
+                throw new InvalidOperationException("Task upload cleanup target is not its owned temporary directory.");
+
+            FileAttributes rootAttributes;
+            try { rootAttributes = File.GetAttributes(root); }
+            catch (FileNotFoundException) { return; }
+            catch (DirectoryNotFoundException) { return; }
+            if ((rootAttributes & FileAttributes.ReparsePoint) != 0)
+                throw new IOException("Task upload cleanup refuses a reparse point.");
+            if ((rootAttributes & FileAttributes.Directory) == 0)
+                throw new IOException("Task upload temporary directory was replaced by a file.");
+
+            var pending = new Stack<string>();
+            pending.Push(root);
+            while (pending.TryPop(out var path))
+            {
+                var attributes = File.GetAttributes(path);
+                if ((attributes & FileAttributes.ReparsePoint) != 0)
+                    throw new IOException("Task upload cleanup refuses a reparse point.");
+                if ((attributes & FileAttributes.Directory) != 0)
+                    foreach (var child in Directory.EnumerateFileSystemEntries(path)) pending.Push(child);
+            }
+
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task UploadFile_PersistsExactCaseLinkWhenTaskIsLinkedAfterItsFirstVersion()
     {
+        using var storage = new TaskUploadStorageScope();
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "late-case@example.test", "Автор");
         var client = await CreateClientAsync(db, "Клиент");
         var clientCase = await CreateCaseAsync(db, client.Id, "Дело");
         var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id);
-        var controller = CreateController(db, new RecordingNotificationService(), author);
+        var controller = CreateController(db, new RecordingNotificationService(), author, configuration: storage.Configuration);
         var firstResult = await controller.UploadFile(task.Id, CreateFormFile("первая версия", "Документ.txt"), null, CancellationToken.None);
         var first = Assert.IsType<TaskJournalFileDto>(Assert.IsType<CreatedResult>(firstResult.Result).Value);
         Assert.Null(first.ClientCaseDocumentId);
@@ -9691,12 +9744,13 @@ public class TasksControllerTests : IDisposable
     [Fact]
     public async Task UploadFile_CreatesDocumentVersionsAndHistory()
     {
+        using var storage = new TaskUploadStorageScope();
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
         var client = await CreateClientAsync(db, "Иванов Иван Иванович");
         var clientCase = await CreateCaseAsync(db, client.Id, "Документы по задаче");
         var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, clientCaseId: clientCase.Id);
-        var controller = CreateController(db, new RecordingNotificationService(), author);
+        var controller = CreateController(db, new RecordingNotificationService(), author, configuration: storage.Configuration);
 
         var firstResult = await controller.UploadFile(
             task.Id,
@@ -9752,11 +9806,12 @@ public class TasksControllerTests : IDisposable
     [Fact]
     public async Task GetFiles_HidesMissingFilesAndFallsBackToLatestAvailableVersion()
     {
+        using var storage = new TaskUploadStorageScope();
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "author-files@example.com", "Автор");
         var client = await CreateClientAsync(db, "Иванов Иван Иванович");
         var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id);
-        var controller = CreateController(db, new RecordingNotificationService(), author);
+        var controller = CreateController(db, new RecordingNotificationService(), author, configuration: storage.Configuration);
 
         var firstResult = await controller.UploadFile(
             task.Id,
@@ -9776,7 +9831,7 @@ public class TasksControllerTests : IDisposable
             .AsNoTracking()
             .SingleAsync(item => item.Id == second.Id);
         var secondPath = Path.Combine(
-            _fileStorageRoot,
+            storage.Root,
             "task-files",
             secondStored.StoragePath);
         File.Delete(secondPath);
@@ -9839,11 +9894,12 @@ public class TasksControllerTests : IDisposable
     [InlineData("..%2foutside%2fevil?.txt")]
     public async Task UploadFile_SanitizesTraversalFileNameAndKeepsStoragePathUnderTask(string fileName)
     {
+        using var storage = new TaskUploadStorageScope();
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "author-path@example.com", "Автор");
         var client = await CreateClientAsync(db, "Иванов Иван Иванович");
         var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id);
-        var controller = CreateController(db, new RecordingNotificationService(), author);
+        var controller = CreateController(db, new RecordingNotificationService(), author, configuration: storage.Configuration);
 
         var result = await controller.UploadFile(
             task.Id,
@@ -9954,6 +10010,7 @@ public class TasksControllerTests : IDisposable
     [Fact]
     public async Task DownloadFile_ReturnsNotFoundForFileFromAnotherTask()
     {
+        using var storage = new TaskUploadStorageScope();
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "author-other-task-file@example.com", "Автор");
         var client = await CreateClientAsync(db, "Иванов Иван Иванович");
@@ -9962,7 +10019,7 @@ public class TasksControllerTests : IDisposable
         secondTask.Title = "Вторая задача";
         await db.SaveChangesAsync();
         var reader = new RecordingProductReader(ProductStorageReadStatus.Available);
-        var controller = CreateController(db, new RecordingNotificationService(), author, productStorageReader: reader);
+        var controller = CreateController(db, new RecordingNotificationService(), author, productStorageReader: reader, configuration: storage.Configuration);
         var upload = await controller.UploadFile(
             firstTask.Id,
             CreateFormFile("task file", "document.txt"),

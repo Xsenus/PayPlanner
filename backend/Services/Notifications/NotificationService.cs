@@ -4863,15 +4863,12 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
             || NotificationPriorities.IsSilent(typeDefinition.Priority))
             return;
 
-        var configuredUrl = (_configuration["App:FrontendUrl"]
-            ?? _configuration["Frontend:BaseUrl"]
-            ?? _configuration["Frontend:PublicUrl"])?.Trim();
-        if (!Uri.TryCreate(configuredUrl, UriKind.Absolute, out var baseUri)
-            || baseUri.Scheme != Uri.UriSchemeHttps
-            || !string.IsNullOrEmpty(baseUri.UserInfo)
-            || !string.IsNullOrEmpty(baseUri.Query)
-            || !string.IsNullOrEmpty(baseUri.Fragment))
-            return;
+        var baseUri = MaxTaskNotificationPresentation.FrontendUri(_configuration);
+        if (baseUri is null) return;
+        var taskLink = UserNotificationDomains.Resolve(notification.Type) == UserNotificationDomains.Task
+            && notification.ObjectType == "task" && notification.ObjectId is > 0
+            && (!notification.TaskJournalItemId.HasValue || notification.TaskJournalItemId == notification.ObjectId)
+                ? MaxTaskNotificationPresentation.TaskUri(baseUri, notification.ObjectId.Value) : null;
 
         try
         {
@@ -4889,8 +4886,8 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
                 MaxMessengerScenarios.Notifications,
                 notification.EventKey,
                 string.Empty,
-                "Открыть CRM",
-                baseUri.AbsoluteUri,
+                taskLink is null ? "Открыть CRM" : "Открыть задачу",
+                (taskLink ?? baseUri).AbsoluteUri,
                 notification.Type), cancellationToken);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)

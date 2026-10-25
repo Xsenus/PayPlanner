@@ -14,7 +14,7 @@ vi.mock("../../services/api", () => ({
     getPaymentsV2: vi.fn(),
     getActs: vi.fn(),
     getClientBalanceTransactions: vi.fn(),
-    getCompanyProfileLegalEntity: vi.fn(),
+    getReconciliationCompanyParty: vi.fn(),
   },
 }));
 
@@ -334,14 +334,11 @@ describe("ClientReconciliationAct", () => {
       pageSize: 500,
     });
     apiMock.getClientBalanceTransactions.mockResolvedValue([]);
-    apiMock.getCompanyProfileLegalEntity.mockResolvedValue({
+    apiMock.getReconciliationCompanyParty.mockResolvedValue({
       id: 100,
       shortName: "ЭлитПраво",
       fullName: "ООО ЭлитПраво",
       inn: "1234567890",
-      clientsCount: 0,
-      createdAt: "2026-04-01T00:00:00Z",
-      clients: [],
     });
   });
 

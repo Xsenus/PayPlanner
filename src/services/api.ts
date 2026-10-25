@@ -2309,6 +2309,11 @@ export interface MainCompanySettingsDto {
   companies: LegalEntitySummary[];
 }
 
+export type ReconciliationCompanyParty = Pick<LegalEntitySummary,
+  'id' | 'shortName' | 'fullName' | 'inn' | 'kpp' | 'ogrn' | 'address' | 'director'
+  | 'organizationForm' | 'treasuryBankName' | 'treasuryBankBik' | 'treasuryAccountNumber'
+  | 'directorSignatureDataUrl' | 'sealDataUrl'>;
+
 export interface UpdateMainCompanySettingsRequest {
   companyIds: number[];
   defaultCompanyId?: number | null;
@@ -6021,6 +6026,10 @@ export class ApiService {
     return this.request<LegalEntityDetail>('/legal-entities/company-profile');
   }
 
+  async getReconciliationCompanyParty(clientId: number) {
+    return this.request<ReconciliationCompanyParty>(`/own-companies/reconciliation-party?clientId=${clientId}`);
+  }
+
   async getMainCompanySettings() {
     return this.request<MainCompanySettingsDto>('/legal-entities/main-companies/settings');
   }
@@ -9107,17 +9116,19 @@ export class ApiService {
     return this.request<void>(`/money-operations/${id}`, { method: 'DELETE' });
   }
 
-  async importBankStatement(file: File) {
+  async importBankStatement(file: File, context: { companyId: number; moneyAccountId: number }) {
     const payload = new FormData();
     payload.append('file', file);
+    payload.append('companyId', String(context.companyId));
+    payload.append('moneyAccountId', String(context.moneyAccountId));
     return this.request<BankStatementImportResult>('/money-operations/bank-statement/import', {
       method: 'POST',
       body: payload,
     });
   }
 
-  async runBankStatementAutoImport() {
-    return this.request<BankStatementAutoImportRunResult>('/money-operations/bank-statement/auto-import/run', {
+  async runBankStatementAutoImport(context: { companyId: number; moneyAccountId: number }) {
+    return this.request<BankStatementAutoImportRunResult>(`/money-operations/bank-statement/auto-import/run${buildQuery(context)}`, {
       method: 'POST',
     });
   }

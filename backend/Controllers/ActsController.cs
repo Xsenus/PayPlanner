@@ -337,7 +337,71 @@ public class ActsController : ControllerBase
             invoice?.LegalEntityId is > 0 ? invoice.LegalEntityId : null);
     }
 
-    private async Task<ActionResult?> ValidateActOwnerAsync(int? clientId, int? legalEntityId, CancellationToken ct)
+    private ActionResult UnavailableActSource()
+        => NotFound(new { message = "Выбранное основание акта недоступно." });
+
+    private async Task<(ActionResult? Error, Payment? Invoice, CounterpartyOwner Owner)> ResolveAvailableActSourcesAsync(
+        UpsertActRequest request, Act? currentAct, CancellationToken ct)
+    {
+        Payment? invoice = null;
+        if (request.InvoiceId.HasValue)
+        {
+            invoice = await LoadAvailableActInvoiceAsync(request.InvoiceId.Value, ct);
+            if (invoice is null) return (UnavailableActSource(), null, new CounterpartyOwner(null, null));
+        }
+        var owner = ResolveActOwner(request, invoice);
+        var error = await ValidateActOwnerAsync(owner.ClientId, owner.LegalEntityId, invoice, currentAct, ct)
+            ?? await ValidateActContractLinkAsync(request.ContractId, owner.ClientId, owner.LegalEntityId, invoice, currentAct, ct);
+        return (error, invoice, owner);
+    }
+
+    private async Task<Act?> LoadActSourceMetadataAsync(int id, int? contractId, DataVisibilityAccess visibility, CancellationToken ct)
+        => await _db.Acts.AsNoTracking().ApplyActVisibility(visibility).Where(act => act.Id == id)
+            .Select(act => new Act
+            {
+                Id = act.Id,
+                ClientId = act.ClientId,
+                LegalEntityId = act.LegalEntityId,
+                InvoiceId = act.InvoiceId,
+                ContractActs = act.ContractActs.Where(link => link.ContractId == contractId).Take(1)
+                    .Select(link => new ContractAct { ActId = link.ActId, ContractId = link.ContractId }).ToList(),
+            }).FirstOrDefaultAsync(ct);
+
+    private async Task<Payment?> LoadAvailableActInvoiceAsync(int invoiceId, CancellationToken ct)
+    {
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        return await _db.Payments.AsNoTracking()
+            .ApplyPaymentVisibility(visibility)
+            .ApplyUnambiguousInvoiceLinks()
+            .ApplyInvoiceRepresentativeFilter(_db.Payments)
+            .Where(payment => payment.Id == invoiceId)
+            // Legacy SystemNotes can contain invoice lines. Read only metadata until all sources are authorized.
+            .Select(payment => new Payment
+            {
+                Id = payment.Id,
+                Account = payment.Account,
+                ClientId = payment.ClientId,
+                LegalEntityId = payment.LegalEntityId,
+                ExpenseClientId = payment.ExpenseClientId,
+                ExpenseLegalEntityId = payment.ExpenseLegalEntityId,
+                Type = payment.Type,
+                ContractId = payment.ContractId,
+            })
+            .FirstOrDefaultAsync(ct);
+    }
+
+    private static bool HasInvoiceOwner(Payment invoice, int? clientId, int? legalEntityId)
+        => clientId == invoice.ClientId && legalEntityId == invoice.LegalEntityId
+            || invoice.Type == PaymentType.Expense
+                && clientId == (invoice.ExpenseClientId ?? invoice.ClientId)
+                && legalEntityId == (invoice.ExpenseLegalEntityId ?? invoice.LegalEntityId);
+
+    private async Task<ActionResult?> ValidateActOwnerAsync(
+        int? clientId,
+        int? legalEntityId,
+        Payment? invoice,
+        Act? currentAct,
+        CancellationToken ct)
     {
         var hasClient = clientId.HasValue && clientId.Value > 0;
         var hasLegalEntity = legalEntityId.HasValue && legalEntityId.Value > 0;
@@ -346,15 +410,48 @@ public class ActsController : ControllerBase
             return BadRequest("Act must reference either clientId or legalEntityId.");
         }
 
-        if (hasClient && !await _db.Clients.AsNoTracking().AnyAsync(client => client.Id == clientId!.Value, ct))
+        if (invoice is not null && !HasInvoiceOwner(invoice, clientId, legalEntityId))
         {
-            return BadRequest($"Unknown clientId {clientId!.Value}");
+            return UnavailableActSource();
         }
 
-        if (hasLegalEntity && !await _db.LegalEntities.AsNoTracking().AnyAsync(entity => entity.Id == legalEntityId!.Value, ct))
+        // An allowed invoice already exposes its counterparty. An unchanged standalone act
+        // likewise preserves its limited existing context without requiring client/profile editing.
+        var hasExistingContext = invoice is not null
+            || currentAct is not null && currentAct.InvoiceId is null
+                && currentAct.ClientId == clientId && currentAct.LegalEntityId == legalEntityId;
+
+        if (hasClient)
         {
-            return BadRequest($"Unknown legalEntityId {legalEntityId!.Value}");
+            var clients = _db.Clients.AsNoTracking();
+            if (!hasExistingContext)
+            {
+                var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Clients, ct);
+                clients = clients.ApplyClientVisibility(visibility);
+            }
+            return await clients.AnyAsync(client => client.Id == clientId!.Value, ct)
+                ? null : UnavailableActSource();
         }
+
+        var companies = _db.LegalEntities.AsNoTracking();
+        if (!hasExistingContext)
+        {
+            var ownCompanyIds = await OwnCompanyRegistry.LoadIdsAsync(_db, ct);
+            if (ownCompanyIds.Contains(legalEntityId!.Value))
+            {
+                var profileAccess = await CompanyProfileAccess.ResolveAsync(_db, User, ct);
+                if (profileAccess is null || !profileAccess.CompanyIds.Contains(legalEntityId.Value))
+                    return UnavailableActSource();
+            }
+            else
+            {
+                var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.LegalEntities, ct);
+                companies = companies.ApplyLegalEntityVisibility(visibility);
+            }
+        }
+
+        if (!await companies.AnyAsync(entity => entity.Id == legalEntityId!.Value, ct))
+            return UnavailableActSource();
 
         return null;
     }
@@ -364,6 +461,7 @@ public class ActsController : ControllerBase
         int? clientId,
         int? legalEntityId,
         Payment? invoice,
+        Act? currentAct,
         CancellationToken ct)
     {
         if (!contractId.HasValue || contractId.Value <= 0)
@@ -371,13 +469,18 @@ public class ActsController : ControllerBase
             return null;
         }
 
-        var contractExists = await _db.Contracts
-            .AsNoTracking()
-            .AnyAsync(contract => contract.Id == contractId.Value, ct);
-        if (!contractExists)
+        var preservesExistingContract = currentAct is not null
+            && currentAct.InvoiceId == invoice?.Id
+            && currentAct.ClientId == clientId && currentAct.LegalEntityId == legalEntityId
+            && currentAct.ContractActs.Any(link => link.ContractId == contractId.Value);
+        var contracts = _db.Contracts.AsNoTracking();
+        if (!preservesExistingContract)
         {
-            return BadRequest($"Unknown contractId {contractId.Value}");
+            var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Contracts, ct);
+            contracts = contracts.ApplyContractVisibility(visibility);
         }
+        if (!await contracts.AnyAsync(contract => contract.Id == contractId.Value, ct))
+            return UnavailableActSource();
 
         if (clientId.HasValue)
         {
@@ -977,60 +1080,74 @@ public class ActsController : ControllerBase
             return ValidationError(nameof(request.WorkflowStatus), "Unknown act workflow status.");
         }
 
-        Payment? invoice = null;
-        if (request.InvoiceId.HasValue)
+        if (!ActCreationMode.IsValid(request.CreationMode))
+            return ValidationError(nameof(request.CreationMode), "Некорректный режим создания акта.");
+
+        // Without an invoice this resolves only submitted manual drafts and never reads a source.
+        var preparedManualLineItems = request.InvoiceId.HasValue
+            ? default
+            : await ResolveActLineItemsAsync(null, request, null, ct);
+        if (!request.InvoiceId.HasValue && preparedManualLineItems.Error is not null)
+            return preparedManualLineItems.Error;
+
+        var preflight = await ResolveAvailableActSourcesAsync(request, null, ct);
+        if (preflight.Error is not null) return preflight.Error;
+
+        return await FinancialSourceLease.RunAsync<ActDto>(_db, async lease =>
         {
-            invoice = await _db.Payments.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.InvoiceId.Value, ct);
-            if (invoice is null) return BadRequest($"Unknown invoiceId {request.InvoiceId.Value}");
-        }
+            await lease.AcquireActAsync(null, null, request, ct);
+            if (await RequireActsPermissionAsync(permission => permission.CanCreate, ct) is { } changedPermission)
+                return changedPermission;
 
-        var resolvedLineItems = await ResolveActLineItemsAsync(invoice, request, null, ct);
-        if (resolvedLineItems.Error is not null)
-        {
-            return resolvedLineItems.Error;
-        }
+            var sources = await ResolveAvailableActSourcesAsync(request, null, ct);
+            if (sources.Error is not null) return sources.Error;
+            var invoice = sources.Invoice;
+            var owner = sources.Owner;
 
-        var owner = ResolveActOwner(request, invoice);
-        var ownerValidationError = await ValidateActOwnerAsync(owner.ClientId, owner.LegalEntityId, ct);
-        if (ownerValidationError is not null) return ownerValidationError;
+            var resolvedLineItems = request.InvoiceId.HasValue
+                ? await ResolveActLineItemsAsync(invoice, request, null, ct)
+                : preparedManualLineItems;
+            if (resolvedLineItems.Error is not null)
+            {
+                return resolvedLineItems.Error;
+            }
 
-        var contractValidationError = await ValidateActContractLinkAsync(request.ContractId, owner.ClientId, owner.LegalEntityId, invoice, ct);
-        if (contractValidationError is not null) return contractValidationError;
+            var act = new Act
+            {
+                Number = request.Number.Trim(),
+                Title = Normalize(request.Title),
+                Date = ActDomainService.NormalizeLocalDate(request.Date),
+                Amount = resolvedLineItems.Amount,
+                CreationMode = resolvedLineItems.CreationMode,
+                InvoiceNumber = Normalize(request.InvoiceNumber) ?? invoice?.Account,
+                InvoiceId = request.InvoiceId,
+                CounterpartyInn = Normalize(request.CounterpartyInn),
+                Status = ResolveActStatus(workflowStatus),
+                WorkflowStatus = workflowStatus,
+                ClientId = owner.ClientId,
+                LegalEntityId = owner.LegalEntityId,
+                ResponsibleId = request.ResponsibleId ?? User.GetUserId(),
+                Comment = Normalize(request.Comment),
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            };
 
-        var act = new Act
-        {
-            Number = request.Number.Trim(),
-            Title = Normalize(request.Title),
-            Date = ActDomainService.NormalizeLocalDate(request.Date),
-            Amount = resolvedLineItems.Amount,
-            CreationMode = resolvedLineItems.CreationMode,
-            InvoiceNumber = Normalize(request.InvoiceNumber) ?? invoice?.Account,
-            InvoiceId = request.InvoiceId,
-            CounterpartyInn = Normalize(request.CounterpartyInn),
-            Status = ResolveActStatus(workflowStatus),
-            WorkflowStatus = workflowStatus,
-            ClientId = owner.ClientId,
-            LegalEntityId = owner.LegalEntityId,
-            ResponsibleId = request.ResponsibleId ?? User.GetUserId(),
-            Comment = Normalize(request.Comment),
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-        };
+            _db.Acts.Add(act);
+            SyncActLineItems(act, resolvedLineItems.LineItems);
+            SyncActContractLink(act, request.ContractId);
+            await _db.SaveChangesAsync(ct);
+            await lease.CommitAsync(ct);
 
-        _db.Acts.Add(act);
-        SyncActLineItems(act, resolvedLineItems.LineItems);
-        SyncActContractLink(act, request.ContractId);
-        await _db.SaveChangesAsync(ct);
+            await _db.Entry(act).Reference(a => a.Client).LoadAsync(ct);
+            await _db.Entry(act).Reference(a => a.LegalEntity).LoadAsync(ct);
+            await _db.Entry(act).Reference(a => a.Responsible).LoadAsync(ct);
+            await _db.Entry(act).Reference(a => a.Invoice).LoadAsync(ct);
+            await _db.Entry(act).Collection(a => a.LineItems).LoadAsync(ct);
+            await _db.Entry(act).Collection(a => a.ContractActs).LoadAsync(ct);
+            await NotifyActCreatedAsync(act, ct);
 
-        await _db.Entry(act).Reference(a => a.Client).LoadAsync(ct);
-        await _db.Entry(act).Reference(a => a.LegalEntity).LoadAsync(ct);
-        await _db.Entry(act).Reference(a => a.Responsible).LoadAsync(ct);
-        await _db.Entry(act).Reference(a => a.Invoice).LoadAsync(ct);
-        await _db.Entry(act).Collection(a => a.LineItems).LoadAsync(ct);
-        await _db.Entry(act).Collection(a => a.ContractActs).LoadAsync(ct);
-        await NotifyActCreatedAsync(act, ct);
-
-        return Created($"/api/acts/{act.Id}", Map(act));
+            return Created($"/api/acts/{act.Id}", Map(act));
+        }, ct);
     }
 
     [HttpPut("{id:int}")]
@@ -1061,67 +1178,87 @@ public class ActsController : ControllerBase
             return MissingActsVisibilityResult();
         }
 
-        var act = await _db.Acts
-            .ApplyActVisibility(visibility)
-            .Include(a => a.LineItems)
-            .Include(a => a.ContractActs)
-            .FirstOrDefaultAsync(a => a.Id == id, ct);
-        if (act is null)
+        var preflightAct = await LoadActSourceMetadataAsync(id, request.ContractId, visibility, ct);
+        if (preflightAct is null) return NotFound();
+        if (!ActCreationMode.IsValid(request.CreationMode))
+            return ValidationError(nameof(request.CreationMode), "Некорректный режим создания акта.");
+
+        // Without an invoice this resolves only submitted manual drafts and never reads a source.
+        var preparedManualLineItems = request.InvoiceId.HasValue
+            ? default
+            : await ResolveActLineItemsAsync(null, request, null, ct);
+        if (!request.InvoiceId.HasValue && preparedManualLineItems.Error is not null)
+            return preparedManualLineItems.Error;
+
+        var preflight = await ResolveAvailableActSourcesAsync(request, preflightAct, ct);
+        if (preflight.Error is not null) return preflight.Error;
+
+        return await FinancialSourceLease.RunAsync<ActDto>(_db, async lease =>
         {
-            return NotFound();
-        }
+            await lease.AcquireActAsync(id, preflightAct.InvoiceId, request, ct);
+            if (await RequireActsPermissionAsync(permission => permission.CanEdit, ct) is { } changedPermission)
+                return changedPermission;
+            visibility = await ResolveActsVisibilityAsync(ct);
+            if (visibility is null) return MissingActsVisibilityResult();
 
-        var originalStatus = act.Status;
-        var originalWorkflowStatus = act.WorkflowStatus;
-        Payment? invoice = null;
-        if (request.InvoiceId.HasValue)
-        {
-            invoice = await _db.Payments.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.InvoiceId.Value, ct);
-            if (invoice is null) return BadRequest($"Unknown invoiceId {request.InvoiceId.Value}");
-        }
+            var act = await _db.Acts
+                .ApplyActVisibility(visibility)
+                .Include(a => a.LineItems)
+                .Include(a => a.ContractActs)
+                .FirstOrDefaultAsync(a => a.Id == id, ct);
+            if (act is null)
+            {
+                return NotFound();
+            }
 
-        var resolvedLineItems = await ResolveActLineItemsAsync(invoice, request, act, ct);
-        if (resolvedLineItems.Error is not null)
-        {
-            return resolvedLineItems.Error;
-        }
+            var originalStatus = act.Status;
+            var originalWorkflowStatus = act.WorkflowStatus;
+            var sources = await ResolveAvailableActSourcesAsync(request, act, ct);
+            if (sources.Error is not null) return sources.Error;
+            var invoice = sources.Invoice;
+            var owner = sources.Owner;
 
-        var owner = ResolveActOwner(request, invoice);
-        var ownerValidationError = await ValidateActOwnerAsync(owner.ClientId, owner.LegalEntityId, ct);
-        if (ownerValidationError is not null) return ownerValidationError;
+            var resolvedLineItems = request.InvoiceId.HasValue
+                ? await ResolveActLineItemsAsync(invoice, request, act, ct)
+                : preparedManualLineItems;
+            if (resolvedLineItems.Error is not null)
+            {
+                return resolvedLineItems.Error;
+            }
 
-        var contractValidationError = await ValidateActContractLinkAsync(request.ContractId, owner.ClientId, owner.LegalEntityId, invoice, ct);
-        if (contractValidationError is not null) return contractValidationError;
+            var preserveContractLinks = act.InvoiceId == request.InvoiceId
+                && act.ClientId == owner.ClientId && act.LegalEntityId == owner.LegalEntityId;
+            act.Number = request.Number.Trim();
+            act.Title = Normalize(request.Title);
+            act.Date = ActDomainService.NormalizeLocalDate(request.Date);
+            act.Amount = resolvedLineItems.Amount;
+            act.CreationMode = resolvedLineItems.CreationMode;
+            act.InvoiceNumber = Normalize(request.InvoiceNumber) ?? invoice?.Account;
+            act.InvoiceId = request.InvoiceId;
+            act.CounterpartyInn = Normalize(request.CounterpartyInn);
+            act.Status = ResolveActStatus(workflowStatus);
+            act.WorkflowStatus = workflowStatus;
+            act.ClientId = owner.ClientId;
+            act.LegalEntityId = owner.LegalEntityId;
+            act.ResponsibleId = request.ResponsibleId;
+            act.Comment = Normalize(request.Comment);
+            act.UpdatedAt = DateTime.UtcNow;
+            SyncActLineItems(act, resolvedLineItems.LineItems);
+            SyncActContractLink(act, request.ContractId, preserveContractLinks);
 
-        act.Number = request.Number.Trim();
-        act.Title = Normalize(request.Title);
-        act.Date = ActDomainService.NormalizeLocalDate(request.Date);
-        act.Amount = resolvedLineItems.Amount;
-        act.CreationMode = resolvedLineItems.CreationMode;
-        act.InvoiceNumber = Normalize(request.InvoiceNumber) ?? invoice?.Account;
-        act.InvoiceId = request.InvoiceId;
-        act.CounterpartyInn = Normalize(request.CounterpartyInn);
-        act.Status = ResolveActStatus(workflowStatus);
-        act.WorkflowStatus = workflowStatus;
-        act.ClientId = owner.ClientId;
-        act.LegalEntityId = owner.LegalEntityId;
-        act.ResponsibleId = request.ResponsibleId;
-        act.Comment = Normalize(request.Comment);
-        act.UpdatedAt = DateTime.UtcNow;
-        SyncActLineItems(act, resolvedLineItems.LineItems);
-        SyncActContractLink(act, request.ContractId);
+            await _db.SaveChangesAsync(ct);
+            await lease.CommitAsync(ct);
 
-        await _db.SaveChangesAsync(ct);
+            await _db.Entry(act).Reference(a => a.Client).LoadAsync(ct);
+            await _db.Entry(act).Reference(a => a.LegalEntity).LoadAsync(ct);
+            await _db.Entry(act).Reference(a => a.Responsible).LoadAsync(ct);
+            await _db.Entry(act).Reference(a => a.Invoice).LoadAsync(ct);
+            await _db.Entry(act).Collection(a => a.LineItems).LoadAsync(ct);
+            await _db.Entry(act).Collection(a => a.ContractActs).LoadAsync(ct);
+            await NotifyActChangedAsync(act, BuildActStatusChangeLabels(originalStatus, act.Status, originalWorkflowStatus, act.WorkflowStatus), ct);
 
-        await _db.Entry(act).Reference(a => a.Client).LoadAsync(ct);
-        await _db.Entry(act).Reference(a => a.LegalEntity).LoadAsync(ct);
-        await _db.Entry(act).Reference(a => a.Responsible).LoadAsync(ct);
-        await _db.Entry(act).Reference(a => a.Invoice).LoadAsync(ct);
-        await _db.Entry(act).Collection(a => a.LineItems).LoadAsync(ct);
-        await _db.Entry(act).Collection(a => a.ContractActs).LoadAsync(ct);
-        await NotifyActChangedAsync(act, BuildActStatusChangeLabels(originalStatus, act.Status, originalWorkflowStatus, act.WorkflowStatus), ct);
-
-        return Ok(Map(act));
+            return Ok(Map(act));
+        }, ct);
     }
 
     [HttpDelete("{id:int}")]
@@ -1742,7 +1879,7 @@ public class ActsController : ControllerBase
             return (null, ActCreationMode.Manual, manualAmount, manualLineItems.LineItems);
         }
 
-        var sourceItems = await LoadInvoiceSourceLineItemsAsync(invoice.Id, invoice.SystemNotes, ct);
+        var sourceItems = await LoadInvoiceSourceLineItemsAsync(invoice.Id, ct);
         if (sourceItems.Count == 0)
         {
             var manualLineItems = ResolveManualActLineItems(request.LineItems);
@@ -1927,7 +2064,7 @@ public class ActsController : ControllerBase
         return (null, resolved);
     }
 
-    private async Task<List<InvoiceLineItemDto>> LoadInvoiceSourceLineItemsAsync(int invoicePaymentId, string? invoiceSystemNotes, CancellationToken ct)
+    private async Task<List<InvoiceLineItemDto>> LoadInvoiceSourceLineItemsAsync(int invoicePaymentId, CancellationToken ct)
     {
         var storedItems = await _db.InvoiceLineItems
             .AsNoTracking()
@@ -1948,9 +2085,13 @@ public class ActsController : ControllerBase
             })
             .ToListAsync(ct);
 
-        return storedItems.Count > 0
-            ? storedItems
-            : InvoiceLineItemStorage.ExtractFromSystemNotes(invoiceSystemNotes);
+        if (storedItems.Count > 0) return storedItems;
+
+        var invoiceSystemNotes = await _db.Payments.AsNoTracking()
+            .Where(payment => payment.Id == invoicePaymentId)
+            .Select(payment => payment.SystemNotes)
+            .FirstOrDefaultAsync(ct);
+        return InvoiceLineItemStorage.ExtractFromSystemNotes(invoiceSystemNotes);
     }
 
     private static void SyncActLineItems(Act act, IReadOnlyCollection<ActLineItemDraft> lineItems)
@@ -1985,8 +2126,12 @@ public class ActsController : ControllerBase
         }
     }
 
-    private static void SyncActContractLink(Act act, int? contractId)
+    private static void SyncActContractLink(Act act, int? contractId, bool preserveExisting = false)
     {
+        // Preserve existing link entities, including legacy additional links, on an unchanged selection.
+        if (preserveExisting && contractId is > 0 && act.ContractActs.Any(link => link.ContractId == contractId.Value)) return;
+        if (contractId is not > 0 && act.ContractActs.Count == 0) return;
+
         foreach (var existing in act.ContractActs.ToList())
         {
             act.ContractActs.Remove(existing);

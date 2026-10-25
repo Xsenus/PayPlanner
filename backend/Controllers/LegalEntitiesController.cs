@@ -1196,6 +1196,11 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
+        if ((await OwnCompanyRegistry.LoadIdsAsync(_db, ct)).Contains(id) && !await IsDatabaseAdminAsync(ct))
+        {
+            return Forbid();
+        }
+
         var access = await GetCurrentAccessAsync(ct);
         if (access is null)
         {
@@ -1262,26 +1267,32 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
     }
 
     [HttpGet("main-companies/settings")]
-    [Authorize(Policy = "Admin")]
     public async Task<ActionResult<MainCompanySettingsDto>> GetMainCompanySettings(CancellationToken ct)
     {
+        var access = await CompanyProfileAccess.ResolveAsync(_db, User, ct);
+        if (access is null) return Forbid();
         var state = await LoadMainCompanySettingsStateAsync(ct);
-        var companies = state.CompanyIds.Count == 0
-            ? new List<LegalEntity>()
+        var companies = access.CompanyIds.Count == 0
+            ? new List<LegalEntityListItemDto>()
             : await _db.LegalEntities
                 .AsNoTracking()
-                .Include(le => le.Clients)
-                .Include(le => le.Addresses)
-                .Include(le => le.ResponsibleUser)
-                .Include(le => le.ClientStatus)
-                .Where(le => state.CompanyIds.Contains(le.Id))
+                .Where(le => access.CompanyIds.Contains(le.Id))
                 .OrderBy(le => le.ShortName)
-                .ToListAsync(ct);
+                .Select(le => new LegalEntityListItemDto
+                {
+                    Id = le.Id,
+                    ShortName = le.ShortName,
+                    FullName = le.FullName,
+                    Inn = le.Inn,
+                    Kpp = le.Kpp,
+                    ProfileStatus = le.ProfileStatus,
+                }).ToListAsync(ct);
 
         return Ok(new MainCompanySettingsDto
         {
-            DefaultCompanyId = state.DefaultCompanyId,
-            Companies = companies.Select(item => (LegalEntityListItemDto)MapDetail(item)).ToList(),
+            DefaultCompanyId = state.DefaultCompanyId is int defaultId && access.CompanyIds.Contains(defaultId)
+                ? defaultId : companies.FirstOrDefault()?.Id,
+            Companies = companies,
         });
     }
 
@@ -1347,11 +1358,14 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
     [HttpGet("company-profile")]
     public async Task<ActionResult<LegalEntityDetailDto>> GetCompanyProfile(CancellationToken ct)
     {
+        var access = await CompanyProfileAccess.ResolveAsync(_db, User, ct);
+        if (access is null) return Forbid();
         var mainCompanyId = await GetMainCompanyIdAsync(ct);
         if (!mainCompanyId.HasValue)
         {
             return NotFound("Головная организация не выбрана.");
         }
+        if (!access.CompanyIds.Contains(mainCompanyId.Value)) return NotFound();
 
         var entity = await _db.LegalEntities
             .Include(le => le.Clients)
@@ -1859,17 +1873,20 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
     public async Task<ActionResult<LegalEntityDetailDto>> GetById(int id, CancellationToken ct)
     {
         var mainCompanyIds = (await LoadMainCompanySettingsStateAsync(ct)).CompanyIds;
-        if (!await IsDatabaseAdminAsync(ct) && mainCompanyIds.Contains(id))
+        var isProfile = mainCompanyIds.Contains(id);
+        if (isProfile)
         {
-            return NotFound();
+            var profileAccess = await CompanyProfileAccess.ResolveAsync(_db, User, ct);
+            if (profileAccess is null || !profileAccess.CompanyIds.Contains(id)) return NotFound();
         }
 
-        var query = await ApplyResponsibleVisibilityAsync(_db.LegalEntities
+        var query = _db.LegalEntities
             .Include(le => le.Clients)
             .Include(le => le.Addresses)
             .Include(le => le.ResponsibleUser)
             .Include(le => le.ClientStatus)
-            .AsQueryable(), ct);
+            .AsQueryable();
+        if (!isProfile) query = await ApplyResponsibleVisibilityAsync(query, ct);
 
         var entity = await query.FirstOrDefaultAsync(le => le.Id == id, ct);
 
@@ -2065,6 +2082,15 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
     [RequestSizeLimit(MaxLegalEntityRequestSizeBytes)]
     public async Task<ActionResult<LegalEntityDetailDto>> Update(int id, [FromBody] LegalEntityRequest request, CancellationToken ct)
     {
+        var isProfile = (await OwnCompanyRegistry.LoadIdsAsync(_db, ct)).Contains(id);
+        CompanyProfileAccess? profileAccess = null;
+        if (isProfile)
+        {
+            profileAccess = await CompanyProfileAccess.ResolveAsync(_db, User, ct);
+            if (profileAccess is null || !profileAccess.CanEdit) return Forbid();
+            if (!profileAccess.CompanyIds.Contains(id)) return NotFound();
+        }
+
         var missingUpdate = await _formRequirements.GetMissingFieldsAsync("legal-entities", request, ct);
         if (missingUpdate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingUpdate });
 
@@ -2073,23 +2099,24 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             return BadRequest("Необходимо указать краткое название");
         }
 
-        var access = await GetCurrentAccessAsync(ct);
+        var access = profileAccess?.Section.Visibility ?? await GetCurrentAccessAsync(ct);
         if (access is null)
         {
             return Unauthorized();
         }
 
-        if (!await HasLegalEntitiesPermissionAsync(static permission => permission.CanEdit, ct))
+        if (!isProfile && !await HasLegalEntitiesPermissionAsync(static permission => permission.CanEdit, ct))
         {
             return Forbid();
         }
 
-        var query = await ApplyResponsibleVisibilityAsync(_db.LegalEntities
+        var query = _db.LegalEntities
             .Include(le => le.Clients)
             .Include(le => le.Addresses)
             .Include(le => le.ResponsibleUser)
             .Include(le => le.ClientStatus)
-            .AsQueryable(), ct);
+            .AsQueryable();
+        if (!isProfile) query = await ApplyResponsibleVisibilityAsync(query, ct);
 
         var entity = await query.FirstOrDefaultAsync(le => le.Id == id, ct);
         if (entity is null)
@@ -2120,6 +2147,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         var duplicateInnError = await ValidateInnUniquenessAsync(request.Inn, id, ct);
         if (duplicateInnError is not null)
         {
+            if (isProfile && !access.IsAdmin) return Conflict("Юридическое лицо с таким ИНН уже существует.");
             return duplicateInnError;
         }
 
@@ -2162,7 +2190,10 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             return Conflict(new { message = "Компания выбрана собственной: сначала уберите её из списка собственных компаний." });
         }
 
-        var (clientIds, errorResult) = await ValidateClientIdsAsync(request.ClientIds, ct);
+        // Editing own-company requisites does not grant management of its client relations.
+        var (clientIds, errorResult) = isProfile && !access.IsAdmin
+            ? ((IReadOnlyCollection<int>)entity.Clients.Select(client => client.Id).ToArray(), (ActionResult?)null)
+            : await ValidateClientIdsAsync(request.ClientIds, ct);
         if (errorResult is not null)
         {
             return errorResult;

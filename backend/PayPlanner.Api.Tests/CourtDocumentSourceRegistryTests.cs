@@ -11,14 +11,20 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public sealed class CourtDocumentSourceRegistryTests
+public sealed class CourtDocumentSourceRegistryTests(
+    PostgreSqlMigratedTemplate postgresTemplate,
+    SqliteMigratedTemplate sqliteTemplate)
+    : IClassFixture<PostgreSqlMigratedTemplate>, IClassFixture<SqliteMigratedTemplate>
 {
+    private Task<Fixture> CreateFixtureAsync(bool postgres, bool migrateFromEmpty = false)
+        => Fixture.CreateAsync(postgres, postgresTemplate, sqliteTemplate, migrateFromEmpty);
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task SoftDeletedCaseRetainsCourtEvidenceButBlocksPublicationUntilRestored(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var registry = new CourtDocumentSourceRegistry(f.Db);
         var receipt = Assert.Single((await registry.RecordAcceptedBatchAsync(f.CaseId, f.ActorId, "Первый автор",
             Binding, CheckedAt, [Input()], default)).Sources);
@@ -67,7 +73,7 @@ public sealed class CourtDocumentSourceRegistryTests
     [InlineData(true)]
     public async Task ReplayRetainsOriginalAttemptAndRejectsRemovedOrStaleEvidence(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var registry = new CourtDocumentSourceRegistry(f.Db);
         var first = Assert.Single((await registry.RecordAcceptedBatchAsync(f.CaseId, f.ActorId, "Первый автор",
             Binding, CheckedAt, [Input(), Input()], default)).Sources);
@@ -103,7 +109,7 @@ public sealed class CourtDocumentSourceRegistryTests
     [InlineData(true)]
     public async Task PublicationUsesFreshAuthorityAndStoredProofWithoutActorTakeover(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var registry = new CourtDocumentSourceRegistry(f.Db);
         var receipt = Assert.Single((await registry.RecordAcceptedBatchAsync(f.CaseId, f.ActorId, "Первый автор",
             Binding, CheckedAt, [Input()], default)).Sources);
@@ -142,7 +148,7 @@ public sealed class CourtDocumentSourceRegistryTests
     [InlineData(true)]
     public async Task CaptureDoesNotCommitUnrelatedPendingWork(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var pending = new Client { Name = "Незавершённая запись пользователя" };
         f.Db.Clients.Add(pending);
         await Assert.ThrowsAsync<InvalidOperationException>(() => new CourtDocumentSourceRegistry(f.Db)
@@ -156,7 +162,7 @@ public sealed class CourtDocumentSourceRegistryTests
     [Fact]
     public async Task ConcurrentPostgresCapturesShareOneDurableAttempt()
     {
-        await using var f = await Fixture.CreateAsync(true);
+        await using var f = await CreateFixtureAsync(true);
         await using var other = f.NewContext();
         var results = await Task.WhenAll(
             new CourtDocumentSourceRegistry(f.Db).RecordAcceptedBatchAsync(f.CaseId, f.ActorId, "Первый автор", Binding, CheckedAt, [Input()], default),
@@ -173,7 +179,7 @@ public sealed class CourtDocumentSourceRegistryTests
     [InlineData(true)]
     public async Task UpgradePreservesExistingRecordsAndDowngradeProtectsClaims(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres, migrateFromEmpty: true);
         await f.Db.Database.MigrateAsync(f.PreviousMigration);
         var deadline = new ClientCaseProceduralDeadline
         {
@@ -216,7 +222,7 @@ public sealed class CourtDocumentSourceRegistryTests
     [InlineData(true)]
     public async Task SourceScopeCannotBeAttachedToAnotherCase(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var registry = new CourtDocumentSourceRegistry(f.Db);
         var receipt = Assert.Single((await registry.RecordAcceptedBatchAsync(f.CaseId, f.ActorId, "Первый автор",
             Binding, CheckedAt, [Input()], default)).Sources);
@@ -247,7 +253,7 @@ public sealed class CourtDocumentSourceRegistryTests
     [InlineData(true)]
     public async Task InactiveHistoryIsUnchangedUntilItsSourceReappears(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var registry = new CourtDocumentSourceRegistry(f.Db);
         var first = Assert.Single((await registry.RecordAcceptedBatchAsync(f.CaseId, f.ActorId, "Первый автор",
             Binding, CheckedAt, [Input()], default)).Sources);
@@ -270,7 +276,7 @@ public sealed class CourtDocumentSourceRegistryTests
     [InlineData(true)]
     public async Task FrozenUnicodeContentSurvivesRestartAndRejectsByteCorruption(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var input = Input() with { RenderedHtml = "<html><body>" + new string('Ж', 50000) + "\0Конец</body></html>" };
         var receipt = Assert.Single((await new CourtDocumentSourceRegistry(f.Db).RecordAcceptedBatchAsync(f.CaseId,
             f.ActorId, "Первый автор", Binding, CheckedAt, [input], default)).Sources);
@@ -295,7 +301,7 @@ public sealed class CourtDocumentSourceRegistryTests
     [InlineData(true)]
     public async Task ContentLimitIsMeasuredInUtf8BytesAndDoesNotCreatePartialClaims(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var input = Input() with { RenderedHtml = new string('Ж', 25 * 1024 * 1024 / 2 + 1) };
         Assert.True(input.RenderedHtml.Length < 25 * 1024 * 1024);
         var result = await new CourtDocumentSourceRegistry(f.Db).RecordAcceptedBatchAsync(f.CaseId, f.ActorId,
@@ -311,7 +317,7 @@ public sealed class CourtDocumentSourceRegistryTests
     [InlineData(true)]
     public async Task CaptureFailureRollsBackContentAndCanRetryInTheSameCleanContext(bool postgres)
     {
-        await using var f = await Fixture.CreateAsync(postgres);
+        await using var f = await CreateFixtureAsync(postgres);
         var interceptor = new AfterContentSaveInterceptor(() => throw new IOException("Owned court capture failure"));
         await using var capture = f.NewContext(interceptor);
         var registry = new CourtDocumentSourceRegistry(capture);
@@ -349,6 +355,8 @@ public sealed class CourtDocumentSourceRegistryTests
     private sealed class Fixture : IAsyncDisposable
     {
         private SqliteConnection? sqlite;
+        private SqliteMigratedTemplate.DatabaseLease? sqliteLease;
+        private PostgreSqlMigratedTemplate.DatabaseLease? postgresLease;
         private NpgsqlConnection? admin;
         private string? databaseName;
         private string? connectionString;
@@ -362,12 +370,19 @@ public sealed class CourtDocumentSourceRegistryTests
                 .AddInterceptors(interceptors).Options)
             : new PostgreSqlPaymentContext(new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(connectionString)
                 .AddInterceptors(interceptors).Options);
-        public static async Task<Fixture> CreateAsync(bool postgres)
+        public static async Task<Fixture> CreateAsync(bool postgres,
+            PostgreSqlMigratedTemplate postgresTemplate, SqliteMigratedTemplate sqliteTemplate,
+            bool migrateFromEmpty)
         {
             var f = new Fixture();
             try
             {
-                if (postgres)
+                if (postgres && !migrateFromEmpty)
+                {
+                    f.postgresLease = await postgresTemplate.CreateDatabaseAsync("pp_court_sources_");
+                    f.connectionString = f.postgresLease.ConnectionString;
+                }
+                else if (postgres)
                 {
                     var raw = Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES");
                     Assert.False(string.IsNullOrWhiteSpace(raw));
@@ -379,12 +394,23 @@ public sealed class CourtDocumentSourceRegistryTests
                     f.databaseName = name;
                     settings.Database = name; f.connectionString = settings.ConnectionString;
                 }
-                else { f.sqlite = new SqliteConnection("Data Source=:memory:"); await f.sqlite.OpenAsync(); }
+                else if (migrateFromEmpty)
+                {
+                    f.sqlite = new SqliteConnection("Data Source=:memory:");
+                    await f.sqlite.OpenAsync();
+                }
+                else
+                {
+                    f.sqliteLease = await sqliteTemplate.CreateDatabaseAsync();
+                    f.sqlite = f.sqliteLease.Connection;
+                }
                 f.Db = f.NewContext();
                 var migrations = f.Db.Database.GetMigrations().ToArray();
                 var claims = Assert.Single(migrations, m => m.Contains("_AddCourtDocumentSourceClaims", StringComparison.Ordinal));
                 f.PreviousMigration = migrations[Array.IndexOf(migrations, claims) - 1];
-                await f.Db.Database.MigrateAsync();
+                if (migrateFromEmpty) await f.Db.Database.MigrateAsync();
+                Assert.Equal(migrations, (await f.Db.Database.GetAppliedMigrationsAsync()).ToArray());
+                Assert.Empty(await f.Db.Database.GetPendingMigrationsAsync());
                 Assert.False(f.Db.Database.HasPendingModelChanges());
                 var email = await f.Db.SystemSettings.SingleOrDefaultAsync(s => s.Key == "notifications.email.enabled");
                 if (email is null) f.Db.SystemSettings.Add(new SystemSetting { Key = "notifications.email.enabled", Value = "false" });
@@ -431,7 +457,9 @@ public sealed class CourtDocumentSourceRegistryTests
         public async ValueTask DisposeAsync()
         {
             if (Db is not null) await Db.DisposeAsync();
-            if (sqlite is not null) await sqlite.DisposeAsync();
+            if (sqliteLease is not null) await sqliteLease.DisposeAsync();
+            else if (sqlite is not null) await sqlite.DisposeAsync();
+            if (postgresLease is not null) await postgresLease.DisposeAsync();
             if (admin is not null)
             {
                 if (databaseName is not null)

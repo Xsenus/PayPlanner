@@ -50,9 +50,9 @@ public partial class MoneyOperationsControllerTests
             }
         }
 
-        public static async Task<AccountSessionsFixture> CreateFromTemplateAsync(PostgreSqlMigratedTemplate template, bool postgres, bool admin)
+        public static async Task<AccountSessionsFixture> CreateAsync(bool postgres, PostgreSqlModelTemplate modelTemplate, bool admin = true)
         {
-            var database = await BankImportProvenanceModelTests.ModelDatabase.CreateFromTemplateAsync(postgres, template);
+            var database = await BankImportProvenanceModelTests.ModelDatabase.CreateFromModelTemplateAsync(postgres, modelTemplate);
             string? file = null;
             try
             {
@@ -72,10 +72,14 @@ public partial class MoneyOperationsControllerTests
                 }
                 return new(database, seed, connection, postgres, file);
             }
-            catch
+            catch (Exception error)
             {
-                await database.DisposeAsync();
-                DeleteOwnedFile(file);
+                var errors = new List<Exception> { error };
+                try { await database.DisposeAsync(); }
+                catch (Exception cleanup) { errors.Add(cleanup); }
+                try { DeleteOwnedFile(file); }
+                catch (Exception cleanup) { errors.Add(cleanup); }
+                if (errors.Count > 1) throw new AggregateException(errors);
                 throw;
             }
         }
@@ -111,7 +115,13 @@ public partial class MoneyOperationsControllerTests
 
         public async ValueTask DisposeAsync()
         {
-            await database.DisposeAsync();
+            try { await database.DisposeAsync(); }
+            catch (Exception error)
+            {
+                try { DeleteOwnedFile(sqliteFile); }
+                catch (Exception cleanup) { throw new AggregateException(error, cleanup); }
+                throw;
+            }
             DeleteOwnedFile(sqliteFile);
         }
 

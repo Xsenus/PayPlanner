@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ActModal } from './ActModal';
-import type { Act, ActResponsible, Client, Invoice } from '../../types';
+import type { Act, ActInput, ActResponsible, Client, Invoice } from '../../types';
 
 const {
   getActMock,
@@ -735,5 +735,163 @@ describe('ActModal integration', () => {
       clientId: 7,
     });
     expect(payload.lineItems).toEqual([]);
+  });
+
+  describe('retained counterparty labels from an available act', () => {
+    const createRetainedAct = (overrides: Partial<Act> = {}): Act => ({
+      id: 41, number: 'ACT-41', date: '2026-04-20', amount: 12345.67,
+      creationMode: 'Manual', status: 'Created', workflowStatus: 'Draft', type: 'Income',
+      clientId: 901, clientName: 'Клиент из доступного акта', legalEntityId: null,
+      invoiceId: 618, invoiceNumber: 'INV-618', lineItems: [], createdAt: '2026-04-20T00:00:00Z',
+      ...overrides,
+    });
+    const editorElement = (act: Act | null, onSubmit: (payload: ActInput) => Promise<void>, clients: Client[] = []) => (
+      <ActModal
+        open mode={act ? 'edit' : 'create'} act={act} onClose={vi.fn()} onSubmit={onSubmit}
+        submitting={false} clients={clients} responsibles={[]} lookupsLoading={false}
+        canViewInvoices={false} presentation="page"
+      />
+    );
+    const counterpartyInput = () => screen.getByPlaceholderText('Выберите контрагента') as HTMLInputElement;
+    const saveAct = async () => {
+      const button = screen.getByRole('button', { name: 'Сохранить' }) as HTMLButtonElement;
+      await waitFor(() => expect(button.disabled).toBe(false));
+      fireEvent.click(button);
+    };
+
+    beforeEach(() => {
+      getActMock.mockReset().mockResolvedValue(null);
+    });
+
+    it.each([
+      ['Income', 'client', 901, 'Клиент из доступного акта'],
+      ['Expense', 'client', 902, 'Поставщик из доступного акта'],
+      ['Income', 'legalEntity', 903, 'ООО Клиент из доступного акта'],
+      ['Expense', 'legalEntity', 904, 'ООО Поставщик из доступного акта'],
+    ] as const)('shows the retained %s %s label and preserves IDs and money on submit', async (type, kind, id, name) => {
+      const act = createRetainedAct({
+        type, clientId: kind === 'client' ? id : null, legalEntityId: kind === 'legalEntity' ? id : null,
+        clientName: kind === 'client' ? name : null, legalEntityName: kind === 'legalEntity' ? name : null,
+      });
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+      render(editorElement(act, onSubmit));
+
+      expect(counterpartyInput().value).toBe(name);
+      await saveAct();
+
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({
+        number: 'ACT-41', amount: 12345.67, invoiceId: 618, invoiceNumber: 'INV-618',
+        clientId: act.clientId, legalEntityId: act.legalEntityId, lineItems: [],
+      });
+      expect(getClientsMock).not.toHaveBeenCalled();
+      expect(getClientsV2Mock).not.toHaveBeenCalled();
+      expect(getLegalEntitiesMock).not.toHaveBeenCalled();
+      expect(getLegalEntitiesPagedMock).not.toHaveBeenCalled();
+      expect(getInvoiceMock).not.toHaveBeenCalled();
+    });
+
+    it('retains the legal entity label with the existing legal entity priority over a legacy client ID', async () => {
+      const act = createRetainedAct({ legalEntityId: 903, legalEntityName: 'Приоритетная организация' });
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+      render(editorElement(act, onSubmit, [createClient(901, 'Клиент из каталога')]));
+
+      expect(counterpartyInput().value).toBe('Приоритетная организация');
+      await saveAct();
+
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({ clientId: null, legalEntityId: 903, amount: 12345.67, invoiceId: 618 });
+    });
+
+    it('uses the fresh detail name for the same act and owner instead of the older prop name', async () => {
+      const act = createRetainedAct();
+      getActMock.mockResolvedValue({ ...act, clientName: 'Актуальное имя клиента' });
+      render(editorElement(act, vi.fn()));
+
+      await waitFor(() => expect(counterpartyInput().value).toBe('Актуальное имя клиента'));
+
+      expect(getActMock).toHaveBeenCalledTimes(1);
+      expect(getClientsMock).not.toHaveBeenCalled();
+      expect(getClientsV2Mock).not.toHaveBeenCalled();
+    });
+
+    it('does not reuse a prop name when fresh detail has a different owner kind with the same numeric ID', async () => {
+      const act = createRetainedAct();
+      getActMock.mockResolvedValue({ ...act, clientId: null, legalEntityId: 901, legalEntityName: 'Другая организация' });
+      render(editorElement(act, vi.fn()));
+
+      await waitFor(() => expect(counterpartyInput().value).toBe('Не выбран'));
+
+      expect(screen.queryByDisplayValue('Клиент из доступного акта')).toBeNull();
+      expect(screen.queryByDisplayValue('Другая организация')).toBeNull();
+    });
+
+    it('does not resurrect an older prop name when fresh detail no longer contains that name', async () => {
+      const act = createRetainedAct();
+      getActMock.mockResolvedValue({ ...act, clientName: null });
+      render(editorElement(act, vi.fn()));
+
+      await waitFor(() => expect(counterpartyInput().value).toBe('Не выбран'));
+    });
+
+    it('replaces the retained name after an explicit selection without reusing the previous owner', async () => {
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+      render(editorElement(createRetainedAct(), onSubmit, [createClient(7, 'Иван Иванов')]));
+      expect(counterpartyInput().value).toBe('Клиент из доступного акта');
+      fireEvent.click(screen.getByRole('button', { name: 'Выбрать' }));
+      await selectPickerOption('Иван Иванов');
+
+      expect(counterpartyInput().value).toBe('Иван Иванов');
+      await saveAct();
+
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({ clientId: 7, legalEntityId: null, amount: 12345.67 });
+      expect(onSubmit.mock.calls[0]?.[0].invoiceId).toBe(618);
+    });
+
+    it('removes the retained name after clearing the owner and keeps the existing empty manual act behavior', async () => {
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+      render(editorElement(createRetainedAct(), onSubmit));
+      fireEvent.click(screen.getByRole('button', { name: 'Очистить' }));
+
+      expect(counterpartyInput().value).toBe('');
+      expect(screen.queryByDisplayValue('Клиент из доступного акта')).toBeNull();
+      await saveAct();
+
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({ clientId: null, legalEntityId: null, amount: 12345.67 });
+      expect(onSubmit.mock.calls[0]?.[0].invoiceId).toBe(618);
+    });
+
+    it('uses the next act prop while its detail is pending instead of the previous act detail with the same owner', async () => {
+      const initialAct = createRetainedAct();
+      getActMock.mockResolvedValue({ ...initialAct, clientName: 'Имя из прежней детали' });
+      const onSubmit = vi.fn();
+      const { rerender } = render(editorElement(initialAct, onSubmit));
+      await waitFor(() => expect(counterpartyInput().value).toBe('Имя из прежней детали'));
+      getActMock.mockReturnValue(new Promise(() => {}));
+      const nextAct = createRetainedAct({ id: 42, clientName: 'Имя из нового акта' });
+
+      rerender(editorElement(nextAct, onSubmit));
+
+      expect(counterpartyInput().value).toBe('Имя из нового акта');
+      expect(screen.queryByDisplayValue('Имя из прежней детали')).toBeNull();
+    });
+
+    it('does not invent an act fallback when first creating a document from initial values', () => {
+      render(
+        <ActModal
+          open mode="create" act={null} onClose={vi.fn()} onSubmit={vi.fn()} submitting={false}
+          clients={[]} responsibles={[]} lookupsLoading={false} presentation="page" canViewInvoices={false}
+          initialValues={{ clientId: 901, clientName: 'Имя из начальных значений' } as Partial<Act>}
+        />,
+      );
+
+      expect(counterpartyInput().value).toBe('Не выбран');
+      expect(screen.queryByDisplayValue('Имя из начальных значений')).toBeNull();
+      expect(getActMock).not.toHaveBeenCalled();
+      expect(getClientsMock).not.toHaveBeenCalled();
+      expect(getClientsV2Mock).not.toHaveBeenCalled();
+    });
   });
 });

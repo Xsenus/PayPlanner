@@ -15,8 +15,15 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public sealed class CaseDocumentRetirementBrowserTests
+public sealed class CaseDocumentRetirementBrowserTests : IClassFixture<SqliteMigratedTemplate>
 {
+    private readonly SqliteMigratedTemplate sqliteTemplate;
+
+    public CaseDocumentRetirementBrowserTests(SqliteMigratedTemplate sqliteTemplate)
+    {
+        this.sqliteTemplate = sqliteTemplate;
+    }
+
     [Theory]
     [InlineData(false, "documents")]
     [InlineData(true, "documents")]
@@ -36,7 +43,7 @@ public sealed class CaseDocumentRetirementBrowserTests
     [InlineData(true, "restart-slow-modal")]
     public async Task RealBrowserRetiresOwnedAttemptAndSeparatelyUploadsDocumentAndVersion(bool lostAcknowledgement, string flow)
     {
-        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(uploadCapacityChecks: true);
+        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(uploadCapacityChecks: true, template: sqliteTemplate);
         using var login = await runtime.Client.PostAsJsonAsync("/api/auth/login", new { email = runtime.Email, password = runtime.Password });
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
         var authentication = (await login.Content.ReadFromJsonAsync<LoginResponse>())!;

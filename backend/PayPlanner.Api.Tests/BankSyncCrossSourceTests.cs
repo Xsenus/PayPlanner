@@ -448,7 +448,7 @@ public partial class BankSyncServiceTests
     [InlineData(true)]
     public async Task SharedNative_ConcurrentFileAndBankKeepOneFactInIndependentContexts(bool postgres)
     {
-        await using var fixture = await NativeDurabilityFixture.CreateAsync(postgres);
+        await using var fixture = await NativeDurabilityFixture.CreateAsync(postgres, bankModelTemplate);
         var companyId = (await fixture.First.BankConnections.AsNoTracking().SingleAsync()).LegalEntityId;
         var account = await AddCrossSourceAccountAsync(fixture.First, companyId);
         var (_, principal) = await AddNativeAdminAsync(fixture.First);

@@ -15,7 +15,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useUserTimeZone } from "../../hooks/useUserTimeZone";
-import { apiService } from "../../services/api";
+import { apiService, type ReconciliationCompanyParty } from "../../services/api";
 import type {
   Act,
   Client,
@@ -23,8 +23,6 @@ import type {
   ClientBalanceTransaction,
   Contract,
   Invoice,
-  LegalEntityDetail,
-  LegalEntitySummary,
   Payment,
 } from "../../types";
 import { todayYMD, toRuDate } from "../../utils/dateUtils";
@@ -129,14 +127,14 @@ function formatMoney(value: number) {
 }
 
 function getPartyName(
-  entity: LegalEntitySummary | LegalEntityDetail | null | undefined,
+  entity: ReconciliationCompanyParty | null | undefined,
   fallback: string,
 ) {
   return entity?.fullName || entity?.shortName || fallback || "—";
 }
 
 function getPartyDetails(
-  entity: LegalEntitySummary | LegalEntityDetail | null | undefined,
+  entity: ReconciliationCompanyParty | null | undefined,
   fallbackName: string,
 ) {
   return [
@@ -152,14 +150,14 @@ function getPartyDetails(
 }
 
 function getPartySignerName(
-  entity: LegalEntitySummary | LegalEntityDetail | null | undefined,
+  entity: ReconciliationCompanyParty | null | undefined,
   fallbackName: string,
 ) {
   return entity?.director?.trim() || getPartyName(entity, fallbackName);
 }
 
 function getPartySignerPosition(
-  entity: LegalEntitySummary | LegalEntityDetail | null | undefined,
+  entity: ReconciliationCompanyParty | null | undefined,
   fallback: string,
 ) {
   if (entity?.organizationForm?.toLowerCase().includes("ип")) {
@@ -200,7 +198,7 @@ function formatSignatureName(value: string) {
 }
 
 function createParty(
-  entity: LegalEntitySummary | LegalEntityDetail | null | undefined,
+  entity: ReconciliationCompanyParty | null | undefined,
   fallbackName: string,
   signerPosition: string,
 ): ReconciliationParty {
@@ -620,7 +618,7 @@ export function ClientReconciliationAct({
   const [payments, setPayments] = useState<Payment[]>([]);
   const [acts, setActs] = useState<Act[]>([]);
   const [balanceTransactions, setBalanceTransactions] = useState<ClientBalanceTransaction[]>([]);
-  const [companyProfile, setCompanyProfile] = useState<LegalEntityDetail | null>(null);
+  const [companyProfile, setCompanyProfile] = useState<ReconciliationCompanyParty | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [savedLabel, setSavedLabel] = useState<string | null>(null);
@@ -682,7 +680,7 @@ export function ClientReconciliationAct({
           sortDir: "desc",
         }),
         apiService.getClientBalanceTransactions(clientId),
-        apiService.getCompanyProfileLegalEntity().catch(() => null),
+        apiService.getReconciliationCompanyParty(clientId).catch(() => null),
       ]);
 
       setCases(extractItems<ClientCase>(casesResponse));

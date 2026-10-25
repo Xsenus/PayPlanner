@@ -4,6 +4,7 @@ import { Bell, Building2, Info, LogOut, User } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTabNavigation } from '../../contexts/TabContext';
 import { useDialog } from '../../hooks/useDialog';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { apiService } from '../../services/api';
 import { setStoredCompanyProfileCompanyId, setStoredCompanyProfileMode } from '../../utils/companyProfileBridge';
 import { USER_NOTIFICATIONS_EVENT, type UserNotificationsChangedDetail } from '../../utils/userNotifications';
@@ -27,6 +28,8 @@ const getInitials = (fullName?: string | null) =>
 
 export default function TopBar({ title, onSignOut, onOpenProfile, onOpenNotifications, onOpenAppVersion }: TopBarProps) {
   const { user, isAdmin } = useAuth();
+  const isAdminUser = isAdmin();
+  const permissions = useRolePermissions(isAdminUser ? null : user?.role?.id);
   const { setActiveTab } = useTabNavigation();
   const { confirm } = useDialog();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -157,7 +160,7 @@ export default function TopBar({ title, onSignOut, onOpenProfile, onOpenNotifica
                 </div>
 
                 <div className="py-2">
-                  {isAdmin() ? (
+                  {isAdminUser || permissions.companyProfile?.canView === true ? (
                     <button
                       type="button"
                       onClick={() => {

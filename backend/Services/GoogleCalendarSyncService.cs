@@ -344,7 +344,8 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         var userIds = await _db.GoogleCalendarConnections
             .AsNoTracking()
             .Where(item => item.IsEnabled && item.SyncEnabled && item.RefreshTokenProtected != null)
-            .OrderBy(item => item.LastIncrementalSyncAt ?? item.LastFullSyncAt ?? item.CreatedAt)
+            .OrderBy(item => item.LastError != null && item.LastError != ""
+                ? item.UpdatedAt : item.LastIncrementalSyncAt ?? item.LastFullSyncAt ?? item.CreatedAt)
             .Take(Math.Clamp(batchSize, 1, 500))
             .Select(item => item.UserId)
             .ToListAsync(cancellationToken);
@@ -588,6 +589,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
 
         var errors = 0;
         var importedEvents = 0;
+        var previousError = connection.LastError;
         try
         {
             var accessToken = await ResolveAccessTokenAsync(connection, cancellationToken);
@@ -599,6 +601,11 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             errors++;
             connection.LastError = Trim(ex.Message, 2000);
             await AddLogAsync(connection.Id, null, null, "system", "ensure-calendars", "error", "Не удалось подготовить календари сотрудников в Google Calendar.", ex.Message, cancellationToken);
+            // A failed connection preparation must not be retried once for every task.
+            // Keep task/link state and successful-sync timestamps available for the next run.
+            connection.UpdatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(cancellationToken);
+            return new ConnectionSyncResult(0, 0, errors);
         }
 
         try
@@ -692,6 +699,11 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         if (errors == 0)
         {
             connection.LastError = null;
+            if (!string.IsNullOrWhiteSpace(previousError))
+            {
+                await AddLogAsync(connection.Id, null, null, "system", "connection-recovered", "success",
+                    "Синхронизация Google Calendar восстановлена.", null, cancellationToken);
+            }
         }
         connection.UpdatedAt = now;
         await _db.SaveChangesAsync(cancellationToken);
@@ -2574,6 +2586,10 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             DetailsJson = detailsJson,
             CreatedAt = DateTime.UtcNow,
         };
+        if (await CalendarSyncConnectionFailureLog.TryAggregateAsync(_db, log, details, cancellationToken))
+        {
+            return;
+        }
         _db.GoogleCalendarSyncLogs.Add(log);
         if (logContext is not null && logContext.ConnectionId == connectionId)
         {

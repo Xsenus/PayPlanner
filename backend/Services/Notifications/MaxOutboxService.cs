@@ -1,9 +1,11 @@
 using System.Data;
 using System.Security.Cryptography;
+using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
 
@@ -337,7 +339,8 @@ public sealed class MaxOutboxProcessor(
     IMaxApiClient apiClient,
     IDataProtectionProvider dataProtectionProvider,
     TimeProvider timeProvider,
-    ILogger<MaxOutboxProcessor> logger) : IMaxOutboxProcessor
+    ILogger<MaxOutboxProcessor> logger,
+    IConfiguration? configuration = null) : IMaxOutboxProcessor
 {
     private const string UnknownDeliveryError = "delivery-outcome-unknown";
     private readonly IDataProtector _protector = dataProtectionProvider.CreateProtector(MaxOutboxService.ProtectorPurpose);
@@ -357,7 +360,7 @@ public sealed class MaxOutboxProcessor(
             : now;
         List<MaxOutboxMessage> messages;
         var lastSendByRecipient = new Dictionary<long, DateTime>();
-        var processableMessages = new List<(MaxOutboxMessage Message, long RecipientId, string? NotificationText)>();
+        var processableMessages = new List<(MaxOutboxMessage Message, long RecipientId, string? NotificationType)>();
         try
         {
             await using var leaseTransaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
@@ -430,7 +433,7 @@ public sealed class MaxOutboxProcessor(
                     continue;
                 }
 
-                string? notificationText = null;
+                string? resolvedNotificationType = null;
                 if (message.Scenario == MaxMessengerScenarios.Notifications)
                 {
                     if (message.RecipientUserId is not int userId
@@ -455,7 +458,7 @@ public sealed class MaxOutboxProcessor(
                             message.UpdatedAt = now;
                             continue;
                         }
-                        notificationText = MaxMessageTemplateCatalog.RenderNotification(notificationType);
+                        resolvedNotificationType = notificationType;
                         var typedPayload = MaxMessageTemplateCatalog.CreateNotificationPayload(notificationType);
                         if (payload != typedPayload)
                             message.ProtectedText = _protector.Protect(typedPayload);
@@ -497,10 +500,7 @@ public sealed class MaxOutboxProcessor(
                 message.Status = MaxOutboxStatuses.Processing;
                 message.AttemptCount++;
                 message.UpdatedAt = now;
-                // Идентификатор фиксируется вместе с решением о допустимости отправки.
-                // Последующий цикл не перечитывает nullable-поле связи и работает
-                // только с уже проверенным значением получателя.
-                processableMessages.Add((message, recipientId, notificationText));
+                processableMessages.Add((message, recipientId, resolvedNotificationType));
             }
 
             if (messages.Count > 0)
@@ -517,7 +517,7 @@ public sealed class MaxOutboxProcessor(
             return 0;
         }
 
-        foreach (var (message, recipientId, notificationText) in processableMessages)
+        foreach (var (message, recipientId, notificationType) in processableMessages)
         {
             try
             {
@@ -526,10 +526,66 @@ public sealed class MaxOutboxProcessor(
                     var remaining = TimeSpan.FromMilliseconds(500) - (timeProvider.GetUtcNow().UtcDateTime - lastSend);
                     if (remaining > TimeSpan.Zero) await Task.Delay(remaining, ct);
                 }
-                var text = notificationText ?? _protector.Unprotect(message.ProtectedText);
+                var text = notificationType is null ? _protector.Unprotect(message.ProtectedText)
+                    : MaxMessageTemplateCatalog.RenderNotification(notificationType);
                 var actionUrl = string.IsNullOrWhiteSpace(message.ProtectedActionUrl)
                     ? null
                     : new Uri(_protector.Unprotect(message.ProtectedActionUrl));
+                // Порция могла ждать провайдера: запрет, отвязку и доступ проверяем
+                // свежими запросами после ожидания, а не по отслеживаемым сущностям.
+                var linkValid = await db.MaxRecipientLinks.AsNoTracking().AnyAsync(link => link.Id == message.RecipientLinkId
+                    && link.Status == MaxRecipientLinkStatuses.Verified && link.MaxUserId == recipientId
+                    && link.UserId == message.RecipientUserId, ct);
+                if (!linkValid)
+                {
+                    await CancelAsync(message, "recipient-unlinked", ct);
+                    continue;
+                }
+                if (notificationType is not null)
+                {
+                    var current = await MaxNotificationRecipientPolicy.LoadAsync(db, [message.RecipientUserId!.Value], ct);
+                    if (!current.TryGetValue(message.RecipientUserId.Value, out var preference)
+                        || !UserNotificationPreferenceSettings.IsChannelEnabled(preference, notificationType, NotificationChannels.Max))
+                    {
+                        await CancelAsync(message, "recipient-preference-disabled", ct);
+                        continue;
+                    }
+                    if (UserNotificationDomains.Resolve(notificationType) == UserNotificationDomains.Task)
+                    {
+                        var frontend = MaxTaskNotificationPresentation.FrontendUri(configuration);
+                        if (actionUrl?.AbsolutePath.StartsWith("/tasks", StringComparison.OrdinalIgnoreCase) == true)
+                        {
+                            if (!MaxTaskNotificationPresentation.TryTaskId(actionUrl, frontend, out var taskId))
+                            {
+                                await CancelAsync(message, "task-link-invalid", ct);
+                                continue;
+                            }
+                            var principal = new ClaimsPrincipal(new ClaimsIdentity(
+                                [new Claim(ClaimTypes.NameIdentifier, message.RecipientUserId.Value.ToString(System.Globalization.CultureInfo.InvariantCulture))], "MAX"));
+                            var access = await db.ResolveSectionAccessAsync(principal, RolePermissionCatalog.Tasks, ct, requireApprovedUser: true);
+                            var title = access?.Permission?.CanView == true
+                                ? await db.TaskJournalItems.AsNoTracking().Where(task => task.Id == taskId)
+                                    .ApplyTaskVisibility(access.Visibility, db).Select(task => task.Title).SingleOrDefaultAsync(ct) : null;
+                            if (title is null)
+                            {
+                                await CancelAsync(message, "task-access-revoked", ct);
+                                continue;
+                            }
+                            text = MaxTaskNotificationPresentation.Render(title, notificationType, actionUrl!);
+                        }
+                        else if (frontend is not null)
+                        {
+                            // Старые записи не содержат ID задачи. Оставляем нейтральный
+                            // шаблон и доверенный вход в CRM без поиска по всей истории.
+                            actionUrl = frontend;
+                        }
+                    }
+                }
+                if (text.Length > MaxApiClient.MaxTextLength)
+                {
+                    await CancelAsync(message, "message-too-long", ct);
+                    continue;
+                }
                 var result = await apiClient.SendTextAsync(
                     recipientId, text, settings.BotToken, message.ActionText, actionUrl, ct);
                 lastSendByRecipient[recipientId] = timeProvider.GetUtcNow().UtcDateTime;
@@ -558,6 +614,14 @@ public sealed class MaxOutboxProcessor(
             await db.SaveChangesAsync(ct);
         }
         return messages.Count;
+    }
+
+    private async Task CancelAsync(MaxOutboxMessage message, string code, CancellationToken ct)
+    {
+        message.Status = MaxOutboxStatuses.Cancelled;
+        message.LastErrorCode = code;
+        message.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
+        await db.SaveChangesAsync(ct);
     }
 
     private static void MarkFailed(MaxOutboxMessage message, string code, bool retry, DateTime now)

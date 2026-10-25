@@ -5,7 +5,6 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
@@ -18,8 +17,97 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public class LegalEntitiesControllerTests
+public partial class LegalEntitiesControllerTests
 {
+    [Fact]
+    public async Task CompanyProfile_RejectsEmployeeWithoutProfilePermission()
+    {
+        await using var db = await CreateContextAsync();
+        var companyId = await CreateLegalEntityAsync(db, "Private own company");
+        var userId = await CreateUserAsync(db);
+        db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyId", Value = companyId.ToString() });
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db, userId, isAdmin: false).GetCompanyProfile(CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Theory]
+    [InlineData(true, false, false, false, true, true)]
+    [InlineData(false, false, false, true, false, false)]
+    [InlineData(false, true, false, true, true, false)]
+    [InlineData(false, true, true, true, true, true)]
+    [InlineData(false, true, true, false, false, false)]
+    [InlineData(false, false, true, true, false, false)]
+    public async Task CompanyProfile_RequiresFreshPermissionAndCompanyAssignment(
+        bool owner, bool view, bool edit, bool assigned, bool expectedView, bool expectedEdit)
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db, owner ? "admin" : null);
+        var companyId = await CreateLegalEntityAsync(db, "Private own company");
+        var otherId = await CreateLegalEntityAsync(db, "Other own company");
+        db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = $"[{companyId},{otherId}]" });
+        db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.defaultMainCompanyId", Value = companyId.ToString() });
+        var roleId = (await db.Users.SingleAsync(user => user.Id == userId)).RoleId;
+        db.RolePermissions.Add(new RolePermission { RoleId = roleId, Section = RolePermissionCatalog.CompanyProfile, CanView = view, CanEdit = edit });
+        if (assigned) db.UserCompanyAccesses.Add(new UserCompanyAccess { UserId = userId, LegalEntityId = companyId });
+        await db.SaveChangesAsync();
+        // Opposite JWT claim verifies that the database role, not an old token, decides access.
+        var controller = CreateController(db, userId, isAdmin: !owner);
+        var detail = await controller.GetById(companyId, CancellationToken.None);
+        Assert.Equal(expectedView, detail.Result is OkObjectResult);
+        var settings = await controller.GetMainCompanySettings(CancellationToken.None);
+        if (settings.Result is OkObjectResult settingsOk)
+        {
+            var list = Assert.IsType<MainCompanySettingsDto>(settingsOk.Value);
+            Assert.Equal(owner ? 2 : expectedView ? 1 : 0, list.Companies.Count);
+            Assert.All(list.Companies, item => { Assert.Null(item.SealDataUrl); Assert.Empty(item.Clients); });
+        }
+        else Assert.False(expectedView);
+        var result = await controller.Update(companyId, new LegalEntityRequest { ShortName = "Changed company" }, CancellationToken.None);
+        Assert.Equal(expectedEdit, result.Result is OkObjectResult);
+        Assert.Equal(expectedEdit ? "Changed company" : "Private own company", (await db.LegalEntities.SingleAsync(item => item.Id == companyId)).ShortName);
+        if (!owner)
+        {
+            Assert.IsType<NotFoundResult>((await controller.GetById(otherId, CancellationToken.None)).Result);
+            Assert.IsType<ForbidResult>(await controller.Delete(companyId, CancellationToken.None));
+        }
+    }
+
+    [Theory]
+    [InlineData("permission")]
+    [InlineData("company")]
+    [InlineData("inactive")]
+    [InlineData("approval")]
+    [InlineData("role")]
+    public async Task CompanyProfile_RevokedAccessImmediatelyHidesAssets(string revoke)
+    {
+        await using var db = await CreateContextAsync();
+        var id = await CreateUserAsync(db);
+        var companyId = await CreateLegalEntityAsync(db, "Own company");
+        var company = await db.LegalEntities.SingleAsync(item => item.Id == companyId);
+        company.SealDataUrl = "data:image/png;base64,QUFB";
+        db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyId", Value = companyId.ToString() });
+        var user = await db.Users.SingleAsync(item => item.Id == id);
+        var permission = new RolePermission { RoleId = user.RoleId, Section = RolePermissionCatalog.CompanyProfile, CanView = true, CanEdit = true };
+        var assignment = new UserCompanyAccess { UserId = id, LegalEntityId = companyId };
+        db.RolePermissions.Add(permission); db.UserCompanyAccesses.Add(assignment); await db.SaveChangesAsync();
+        var controller = CreateController(db, id);
+        var read = Assert.IsType<OkObjectResult>((await controller.GetCompanyProfile(CancellationToken.None)).Result);
+        Assert.Equal(company.SealDataUrl, Assert.IsType<LegalEntityDetailDto>(read.Value).SealDataUrl);
+        if (revoke == "permission") permission.CanView = false;
+        if (revoke == "company") db.UserCompanyAccesses.Remove(assignment);
+        if (revoke == "inactive") user.IsActive = false;
+        if (revoke == "approval") user.IsApproved = false;
+        if (revoke == "role") { var role = new Role { Name = "restricted" }; db.Roles.Add(role); user.Role = role; }
+        await db.SaveChangesAsync();
+        Assert.IsType<NotFoundResult>((await controller.GetById(companyId, CancellationToken.None)).Result);
+        Assert.False((await controller.GetCompanyProfile(CancellationToken.None)).Result is OkObjectResult);
+        Assert.False((await controller.Update(companyId, new LegalEntityRequest { ShortName = "Forbidden" }, CancellationToken.None)).Result is OkObjectResult);
+        Assert.Equal("Own company", company.ShortName);
+    }
+
     [Fact]
     public async Task AdminFilter_ReturnsForbid_ForUserWithoutAdminRoleInDatabase()
     {
@@ -108,7 +196,7 @@ public class LegalEntitiesControllerTests
         var secondCompanyId = await CreateLegalEntityAsync(db, "Основная компания 2");
         var regularCompanyId = await CreateLegalEntityAsync(db, "Обычное юрлицо");
 
-        var controller = CreateController(db, userId: 31);
+        var controller = CreateController(db, await CreateUserAsync(db, roleName: "admin"));
 
         var settingsAction = await controller.UpdateMainCompanySettings(
             new UpdateMainCompanySettingsRequest
@@ -268,7 +356,7 @@ public class LegalEntitiesControllerTests
         var firstCompanyId = await CreateLegalEntityAsync(db, "Компания для удаления");
         var secondCompanyId = await CreateLegalEntityAsync(db, "Компания которая остается");
 
-        var controller = CreateController(db, userId: 32);
+        var controller = CreateController(db, await CreateUserAsync(db, roleName: "admin"));
         await controller.UpdateMainCompanySettings(
             new UpdateMainCompanySettingsRequest
             {
@@ -322,7 +410,7 @@ public class LegalEntitiesControllerTests
             new UserCompanyAccess { UserId = user.Id, LegalEntityId = secondCompanyId });
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db, userId: 33);
+        var controller = CreateController(db, await CreateUserAsync(db, roleName: "admin"));
         var action = await controller.UpdateMainCompanySettings(
             new UpdateMainCompanySettingsRequest
             {
@@ -1182,7 +1270,7 @@ public class LegalEntitiesControllerTests
     }
 
     [Fact]
-    public async Task BrandFiles_OfOwnCompany_CanBeChangedByRoleWithLegalEntityEditRight_AndNotWithoutIt()
+    public async Task BrandFiles_OfOwnCompany_RequireSeparateProfileEditAndCompanyAssignment()
     {
         await using var db = await CreateContextAsync();
         var adminId = await CreateUserAsync(db, roleName: "admin");
@@ -1197,6 +1285,12 @@ public class LegalEntitiesControllerTests
         var request = new LegalEntityRequest { ShortName = "Своя компания", SealDataUrl = "data:image/png;base64,QUFB" };
 
         var denied = await CreateController(db, viewerId, isAdmin: false).Update(companyId, request, CancellationToken.None);
+        var legalOnly = await CreateController(db, editorId, isAdmin: false).Update(companyId, request, CancellationToken.None);
+        Assert.IsType<ForbidResult>(legalOnly.Result);
+        var editor = await db.Users.SingleAsync(user => user.Id == editorId);
+        db.RolePermissions.Add(new RolePermission { RoleId = editor.RoleId, Section = RolePermissionCatalog.CompanyProfile, CanView = true, CanEdit = true });
+        db.UserCompanyAccesses.Add(new UserCompanyAccess { UserId = editorId, LegalEntityId = companyId });
+        await db.SaveChangesAsync();
         var allowed = await CreateController(db, editorId, isAdmin: false).Update(companyId, request, CancellationToken.None);
 
         Assert.IsType<ForbidResult>(denied.Result);
@@ -1362,16 +1456,7 @@ public class LegalEntitiesControllerTests
 
     private static async Task<PaymentContext> CreateContextAsync()
     {
-        var connection = new SqliteConnection("Data Source=:memory:");
-        await connection.OpenAsync();
-
-        var options = new DbContextOptionsBuilder<PaymentContext>()
-            .UseSqlite(connection)
-            .Options;
-
-        var db = new PaymentContext(options);
-        await db.Database.EnsureCreatedAsync();
-        return db;
+        return await SqliteTestContextFactory.CreateAsync();
     }
 
     private static LegalEntitiesController CreateController(PaymentContext db, int userId, bool isAdmin = true)

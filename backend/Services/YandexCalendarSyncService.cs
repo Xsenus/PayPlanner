@@ -345,7 +345,8 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         var userIds = await _db.YandexCalendarConnections
             .AsNoTracking()
             .Where(item => item.IsEnabled && item.SyncEnabled && item.AccessTokenProtected != null)
-            .OrderBy(item => item.LastIncrementalSyncAt ?? item.LastFullSyncAt ?? item.CreatedAt)
+            .OrderBy(item => item.LastError != null && item.LastError != ""
+                ? item.UpdatedAt : item.LastIncrementalSyncAt ?? item.LastFullSyncAt ?? item.CreatedAt)
             .Take(Math.Clamp(batchSize, 1, 500))
             .Select(item => item.UserId)
             .ToListAsync(cancellationToken);
@@ -544,10 +545,12 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
 
         var errors = 0;
         var importedEvents = 0;
+        var previousError = connection.LastError;
         // A fresh decision belongs only to this connection operation, not the service lifetime.
         var visibility = await ResolveConnectionCalendarVisibilityAsync(connection.UserId, cancellationToken);
         try
         {
+            await ResolveAccessTokenAsync(connection, cancellationToken);
             await EnsureAdminAssigneeCalendarsAsync(connection, visibility, cancellationToken);
         }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
@@ -555,6 +558,10 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             errors++;
             connection.LastError = Trim(ex.Message, 2000);
             await AddLogAsync(connection.Id, null, null, "system", "ensure-calendars", "error", "Не удалось подготовить календари сотрудников в Яндекс.Календаре.", ex.Message, cancellationToken);
+            // Don't fan a connection-wide failure out into one error per task.
+            connection.UpdatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(cancellationToken);
+            return new ConnectionSyncResult(0, 0, errors);
         }
 
         try
@@ -644,6 +651,11 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         if (errors == 0)
         {
             connection.LastError = null;
+            if (!string.IsNullOrWhiteSpace(previousError))
+            {
+                await AddLogAsync(connection.Id, null, null, "system", "connection-recovered", "success",
+                    "Синхронизация Яндекс.Календаря восстановлена.", null, cancellationToken);
+            }
         }
         connection.UpdatedAt = now;
         await _db.SaveChangesAsync(cancellationToken);
@@ -2590,6 +2602,10 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             DetailsJson = detailsJson,
             CreatedAt = DateTime.UtcNow,
         };
+        if (await CalendarSyncConnectionFailureLog.TryAggregateAsync(_db, log, details, cancellationToken))
+        {
+            return;
+        }
         _db.YandexCalendarSyncLogs.Add(log);
         if (logContext is not null && logContext.ConnectionId == connectionId)
         {

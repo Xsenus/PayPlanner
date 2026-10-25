@@ -507,8 +507,8 @@ public sealed partial class MaxOutboxServiceTests
             "https://crm.example.test/opaque-link",
             UserNotificationTypes.SystemAdminWarning);
 
-        public MaxOutboxProcessor Processor(IMaxApiClient api) => new(
-            Db, _settings, api, _protection, _time, NullLogger<MaxOutboxProcessor>.Instance);
+        public MaxOutboxProcessor Processor(IMaxApiClient api, Microsoft.Extensions.Configuration.IConfiguration? configuration = null) => new(
+            Db, _settings, api, _protection, _time, NullLogger<MaxOutboxProcessor>.Instance, configuration);
 
         public async Task ConfigureLimitsAsync(bool quietHoursEnabled, int dailyLimit, string timeZone = "Asia/Novosibirsk") => await _settings.UpdateSettingsAsync(new UpdateMaxNotificationSettingsRequest
         {

@@ -1,6 +1,9 @@
-import { setupTaskJournalTests, apiMock, toastMock, authState, permissionsState, todayAt, createTask, renderJournal } from './TaskJournal.test-support';
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { setupTaskJournalTests, apiMock, toastMock, authState, permissionsState, todayAt, createTask, renderJournal, openFirstTaskForEdit } from './TaskJournal.test-support';
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { TaskJournal } from './TaskJournal';
+import { TASK_JOURNAL_REALTIME_EVENT } from '../../services/realtimeNotifications';
+import { TASK_JOURNAL_EVENT, type TaskJournalItem } from '../../utils/taskJournalStore';
 
 describe('TaskJournal', () => {
   setupTaskJournalTests();
@@ -306,6 +309,186 @@ describe('TaskJournal', () => {
       priority: 'urgent',
     });
     expect(toastMock.success).toHaveBeenCalledWith(expect.stringContaining('Обновлено задач: 1'), 'Журнал задач');
+  });
+
+  it('opens shared billing for editable selected page rows with exact tokens and no unrelated bulk fields', async () => {
+    const task = createTask({ id: 101, title: 'Изменить только учёт', updatedAt: '2026-10-24T01:02:03.1234567Z' });
+    await renderJournal([task], { waitForTitle: task.title });
+    apiMock.bulkUpdateTaskJournalItems.mockResolvedValueOnce({ requested: 1, updated: 1, unchanged: 0, skipped: 0, conflicted: 0,
+      items: [{ id: 101, outcome: 'updated', reason: null, updatedAt: '2026-10-24T02:03:04.7654321Z' }] });
+    fireEvent.click(screen.getByRole('checkbox', { name: `Выбрать задачу ${task.title}` }));
+    fireEvent.change(screen.getByLabelText('Массово изменить приоритет'), { target: { value: 'urgent' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Изменить учёт выбранных' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Изменить учёт' }));
+    await screen.findByText(/Изменено: 1.*Уже установлен нужный учёт/);
+    expect(apiMock.bulkUpdateTaskJournalItems).toHaveBeenCalledExactlyOnceWith({ ids: [101], billingClassification: 'internal', includeCompleted: false,
+      expectedUpdatedAtById: { '101': task.updatedAt } });
+    expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+    expect(apiMock.updateTaskBillingClassification).not.toHaveBeenCalled();
+  });
+
+  it('allows billing of an editable foreign task with canEditOthers only', async () => {
+    authState.isAdmin = false; permissionsState.taskCanEdit = false; permissionsState.taskCanEditOthers = true;
+    const task = createTask({ assigneeUserId: 9, authorUserId: 8, title: 'Чужая разрешённая задача' });
+    await renderJournal([task], { waitForTitle: task.title });
+    apiMock.bulkUpdateTaskJournalItems.mockResolvedValueOnce({ requested: 1, updated: 1, unchanged: 0, skipped: 0, conflicted: 0,
+      items: [{ id: task.id, outcome: 'updated', reason: null, updatedAt: '2026-10-24T02:03:04.7654321Z' }] });
+    fireEvent.click(screen.getByRole('checkbox', { name: `Выбрать задачу ${task.title}` }));
+    fireEvent.click(screen.getByRole('button', { name: 'Изменить учёт выбранных' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Изменить учёт' }));
+    await waitFor(() => expect(apiMock.bulkUpdateTaskJournalItems).toHaveBeenCalledOnce());
+    expect(apiMock.bulkUpdateTaskJournalItems.mock.calls[0][0]).toEqual(expect.objectContaining({ ids: [task.id], billingClassification: 'internal' }));
+  });
+
+  it.each(['legacy', 'modern'] as const)('refreshes billing after bulk without saving or replacing the draft in the %s card', async (taskCardWindowMode) => {
+    const task = createTask({ clientBillingClassification: 'billable', billingStatus: 'unbilled' });
+    await renderJournal([task], { settings: { taskCardWindowMode } });
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    fireEvent.change(within(card).getByTestId('task-title-input'), { target: { value: 'Несохранённый черновик названия' } });
+    apiMock.getTaskJournalItem.mockResolvedValueOnce({ ...task, clientBillingClassification: 'internal', billingStatus: 'internal', updatedAt: '2026-10-24T02:03:04.7654321Z' });
+    act(() => window.dispatchEvent(new CustomEvent(TASK_JOURNAL_EVENT, { detail: { bulkBillingIds: [task.id] } })));
+    await waitFor(() => expect(within(card).getAllByTestId(`task-billing-badge-${task.id}`).some((badge) => badge.textContent?.includes('НЕ ДЛЯ СЧЁТА'))).toBe(true));
+    expect((within(card).getByTestId('task-title-input') as HTMLInputElement).value).toBe('Несохранённый черновик названия');
+    expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+    expect(apiMock.updateTaskJournalStatus).not.toHaveBeenCalled();
+  });
+
+  describe('server billing card refresh', () => {
+    async function openBillingDraft(taskCardWindowMode: 'legacy' | 'modern') {
+      const task = createTask({ clientBillingClassification: 'billable', billingStatus: 'unbilled' });
+      const view = await renderJournal([task], { settings: { taskCardWindowMode } });
+      await openFirstTaskForEdit();
+      const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+      fireEvent.change(within(card).getByTestId('task-title-input'), { target: { value: 'Несохранённый серверный черновик' } });
+      apiMock.getTaskJournalItem.mockClear();
+      return { task, view, card };
+    }
+
+    function expectRetainedDraft(card: HTMLElement, id: number, title = 'Несохранённый серверный черновик') {
+      expect((within(card).getByTestId('task-title-input') as HTMLInputElement).value).toBe(title);
+      expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+      expect(apiMock.updateTaskJournalStatus).not.toHaveBeenCalled();
+      return within(card).getAllByTestId(`task-billing-badge-${id}`).map((badge) => badge.textContent ?? '').join(' ');
+    }
+
+    it.each(['legacy', 'modern'] as const)('refreshes billing from the real no-detail server signal while retaining the %s card draft', async (mode) => {
+      const { task, card } = await openBillingDraft(mode);
+      apiMock.getTaskJournalItem.mockResolvedValueOnce({ ...task, title: 'Чужое сохранённое название', result: 'Чужой сохранённый результат',
+        clientBillingClassification: 'internal', billingStatus: 'internal', updatedAt: '2026-10-24T02:03:04.7654321Z' });
+      act(() => window.dispatchEvent(new CustomEvent(TASK_JOURNAL_REALTIME_EVENT)));
+      await waitFor(() => expect(expectRetainedDraft(card, task.id)).toContain('НЕ ДЛЯ СЧЁТА'));
+      expect(apiMock.getTaskJournalItem).toHaveBeenCalledExactlyOnceWith(task.id);
+    });
+
+    it.each(['legacy', 'modern'] as const)('coalesces real/local bursts and retires an older billing response in the %s card', async (mode) => {
+      const { task, card } = await openBillingDraft(mode);
+      let finishOld!: (value: TaskJournalItem) => void;
+      let finishFresh!: (value: TaskJournalItem) => void;
+      apiMock.getTaskJournalItem
+        .mockImplementationOnce(() => new Promise<TaskJournalItem>((resolve) => { finishOld = resolve; }))
+        .mockImplementationOnce(() => new Promise<TaskJournalItem>((resolve) => { finishFresh = resolve; }));
+      vi.useFakeTimers();
+      try {
+        act(() => {
+          window.dispatchEvent(new CustomEvent(TASK_JOURNAL_REALTIME_EVENT));
+          window.dispatchEvent(new CustomEvent(TASK_JOURNAL_REALTIME_EVENT));
+          window.dispatchEvent(new CustomEvent(TASK_JOURNAL_EVENT, { detail: { bulkBillingIds: [task.id] } }));
+        });
+        await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+        expect(apiMock.getTaskJournalItem).toHaveBeenCalledTimes(1);
+        act(() => {
+          window.dispatchEvent(new CustomEvent(TASK_JOURNAL_REALTIME_EVENT));
+          window.dispatchEvent(new CustomEvent(TASK_JOURNAL_REALTIME_EVENT));
+        });
+        await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+        expect(apiMock.getTaskJournalItem).toHaveBeenCalledTimes(1);
+        await act(async () => {
+          finishOld({ ...task, clientBillingClassification: 'internal', billingStatus: 'internal' });
+        });
+        expect(expectRetainedDraft(card, task.id)).toBe('ПЛАТНАЯ · НЕ ВЫСТАВЛЕН СЧЁТ');
+        await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+        expect(apiMock.getTaskJournalItem).toHaveBeenCalledTimes(2);
+        await act(async () => {
+          finishFresh({ ...task, clientBillingClassification: 'internal', billingStatus: 'internal', updatedAt: '2026-10-24T02:04:05.7654321Z' });
+        });
+        expect(expectRetainedDraft(card, task.id)).toContain('НЕ ДЛЯ СЧЁТА');
+        await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+        expect(apiMock.getTaskJournalItem.mock.calls.map(([id]) => id)).toEqual([task.id, task.id]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it.each(['legacy', 'modern'] as const)('does not postpone the billing read indefinitely during server signals in the %s card', async (mode) => {
+      const { task, card } = await openBillingDraft(mode);
+      apiMock.getTaskJournalItem.mockResolvedValueOnce({ ...task, clientBillingClassification: 'internal', billingStatus: 'internal' });
+      vi.useFakeTimers();
+      try {
+        for (let i = 0; i < 4; i += 1) {
+          act(() => window.dispatchEvent(new CustomEvent(TASK_JOURNAL_REALTIME_EVENT)));
+          await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+        }
+        expect(apiMock.getTaskJournalItem).toHaveBeenCalledExactlyOnceWith(task.id);
+        expect(expectRetainedDraft(card, task.id)).toContain('НЕ ДЛЯ СЧЁТА');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it.each(['legacy', 'modern'] as const)('retains the billing badge and draft after a real-event 403 in the %s card', async (mode) => {
+      const { task, card } = await openBillingDraft(mode);
+      apiMock.getTaskJournalItem.mockRejectedValueOnce(Object.assign(new Error('HTTP 403'), { status: 403 }));
+      act(() => window.dispatchEvent(new CustomEvent(TASK_JOURNAL_REALTIME_EVENT)));
+      await waitFor(() => expect(apiMock.getTaskJournalItem).toHaveBeenCalledExactlyOnceWith(task.id));
+      await act(async () => { await Promise.resolve(); });
+      expect(expectRetainedDraft(card, task.id)).toBe('ПЛАТНАЯ · НЕ ВЫСТАВЛЕН СЧЁТ');
+    });
+
+    it.each(['legacy', 'modern'] as const)('cancels a queued real-event read when the %s card unmounts', async (mode) => {
+      const { view } = await openBillingDraft(mode);
+      act(() => window.dispatchEvent(new CustomEvent(TASK_JOURNAL_REALTIME_EVENT)));
+      view.unmount();
+      await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 300)); });
+      expect(apiMock.getTaskJournalItem).not.toHaveBeenCalled();
+      expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+    });
+
+    it.each((['legacy', 'modern'] as const).flatMap((mode) => (
+      ['employee', 'company', 'permission', 'reopen', 'unmount'].map((scope) => [mode, scope] as const)
+    )))('ignores a pending real-event billing response after the %s card changes %s scope', async (mode, scope) => {
+      const { task, view, card } = await openBillingDraft(mode);
+      let finish!: (value: TaskJournalItem) => void;
+      apiMock.getTaskJournalItem.mockImplementationOnce(() => new Promise<TaskJournalItem>((resolve) => { finish = resolve; }));
+      act(() => window.dispatchEvent(new CustomEvent(TASK_JOURNAL_REALTIME_EVENT)));
+      await waitFor(() => expect(apiMock.getTaskJournalItem).toHaveBeenCalledExactlyOnceWith(task.id));
+      let retainedCard = card;
+      let retainedTitle = 'Несохранённый серверный черновик';
+      if (scope === 'employee') {
+        authState.user = { ...authState.user, id: 8 };
+        view.rerender(<TaskJournal />);
+      } else if (scope === 'company') {
+        view.rerender(<TaskJournal contextFilter={{ legalEntityId: 20 }} />);
+      } else if (scope === 'permission') {
+        permissionsState.taskViewScope = 'own';
+        view.rerender(<TaskJournal />);
+      } else if (scope === 'reopen') {
+        fireEvent.click(within(card).getByRole('button', { name: 'Отмена' }));
+        await waitFor(() => expect(screen.queryByTestId(`task-${mode}-card-window`)).toBeNull());
+        await openFirstTaskForEdit();
+        retainedCard = await screen.findByTestId(`task-${mode}-card-window`);
+        retainedTitle = 'Черновик после повторного открытия';
+        fireEvent.change(within(retainedCard).getByTestId('task-title-input'), { target: { value: retainedTitle } });
+      } else {
+        view.unmount();
+      }
+      await act(async () => {
+        finish({ ...task, title: 'Устаревшее название', clientBillingClassification: 'internal', billingStatus: 'internal' });
+      });
+      if (scope !== 'unmount') expect(expectRetainedDraft(retainedCard, task.id, retainedTitle)).toBe('ПЛАТНАЯ · НЕ ВЫСТАВЛЕН СЧЁТ');
+      expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+      expect(apiMock.updateTaskJournalStatus).not.toHaveBeenCalled();
+    });
   });
 
   it('sends selected tasks to done through the bulk actions panel', async () => {

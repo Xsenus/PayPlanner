@@ -196,6 +196,8 @@ export function StickyNotes() {
   const noteEditRevisionsRef = useRef<Map<number, number>>(new Map());
   const noteSavesInFlightRef = useRef<Set<number>>(new Set());
   const pendingNoteSavesRef = useRef<Map<number, StickyNoteItem>>(new Map());
+  const composingNoteIdsRef = useRef<Set<number>>(new Set());
+  const unsavedNoteIdsRef = useRef<Set<number>>(new Set());
   const textareaRefsRef = useRef<Map<number, HTMLTextAreaElement>>(new Map());
   const boardLoadRequestIdRef = useRef(0);
   const notesLoadRequestIdRef = useRef(0);
@@ -261,6 +263,8 @@ export function StickyNotes() {
     noteEditRevisionsRef.current.delete(noteId);
     noteSavesInFlightRef.current.delete(noteId);
     pendingNoteSavesRef.current.delete(noteId);
+    composingNoteIdsRef.current.delete(noteId);
+    unsavedNoteIdsRef.current.delete(noteId);
     setSelectedNoteId((current) => (current === noteId ? null : current));
     setDeletedNoteId((current) => (current === noteId ? null : current));
     setColorPaletteNoteId((current) => (current === noteId ? null : current));
@@ -288,6 +292,8 @@ export function StickyNotes() {
     noteEditRevisionsRef.current.clear();
     noteSavesInFlightRef.current.clear();
     pendingNoteSavesRef.current.clear();
+    composingNoteIdsRef.current.clear();
+    unsavedNoteIdsRef.current.clear();
     setSavingNoteIds(new Set());
     setNotes([]);
     setMembers([]);
@@ -549,10 +555,11 @@ export function StickyNotes() {
           return;
         }
 
-        if (event.type === 'noteUpdated' && (autosaveTimersRef.current.has(event.note.id) || noteSavesInFlightRef.current.has(event.note.id))) {
+        if (event.type === 'noteUpdated' && (autosaveTimersRef.current.has(event.note.id) || noteSavesInFlightRef.current.has(event.note.id) || composingNoteIdsRef.current.has(event.note.id) || unsavedNoteIdsRef.current.has(event.note.id))) {
           const localNote = notesRef.current.find((note) => note.id === event.note!.id);
           if (localNote) {
             clearAutosaveTimer(event.note.id);
+            unsavedNoteIdsRef.current.add(event.note.id);
             setNoteConflict({ local: localNote, server: event.note });
             toast.error('Заметка уже изменена другим пользователем. Проверьте конфликт перед сохранением.');
             return;
@@ -722,8 +729,9 @@ export function StickyNotes() {
     }
   };
 
-  const saveNote = async (note: StickyNoteItem) => {
-    if (!canEditActiveBoard) {
+  const saveNote = async (note: StickyNoteItem, resolveConflict = false) => {
+    if (!canEditActiveBoard || composingNoteIdsRef.current.has(note.id)
+      || (!resolveConflict && noteConflict?.local.id === note.id)) {
       return;
     }
 
@@ -742,6 +750,7 @@ export function StickyNotes() {
 
     noteSavesInFlightRef.current.add(note.id);
     const savedRevision = noteEditRevisionsRef.current.get(note.id) ?? 0;
+    let canSavePending = true;
 
     setSavingNoteIds((current) => new Set(current).add(note.id));
     try {
@@ -769,6 +778,7 @@ export function StickyNotes() {
 
       const currentNote = notesRef.current.find((item) => item.id === saved.id);
       const currentRevision = noteEditRevisionsRef.current.get(saved.id) ?? 0;
+      if (currentRevision === savedRevision) unsavedNoteIdsRef.current.delete(saved.id);
       const nextNote = currentNote && currentRevision !== savedRevision
         ? {
           ...saved,
@@ -797,21 +807,21 @@ export function StickyNotes() {
       setNoteConflict((current) => current?.local.id === saved.id ? null : current);
     } catch (error) {
       console.error(error);
+      canSavePending = false;
       if (activeBoardIdRef.current !== requestedBoardId) {
         return;
       }
+      clearAutosaveTimer(note.id);
+      unsavedNoteIdsRef.current.add(note.id);
       if (error instanceof StickyNoteConflictError) {
         if (error.serverNote.boardId !== requestedBoardId) {
           return;
         }
-        setNoteConflict({ local: note, server: error.serverNote });
-        setNotes((current) => sortNotes(current.map((item) => (item.id === note.id ? note : item))));
+        const latest = notesRef.current.find((item) => item.id === note.id) ?? note;
+        setNoteConflict({ local: latest, server: error.serverNote });
         toast.error('Заметка уже изменена другим пользователем. Проверьте конфликт перед сохранением.');
       } else {
-        toast.error('Не удалось сохранить заметку.');
-        if (activeBoardId) {
-          await loadNotes(activeBoardId);
-        }
+        toast.error('Не удалось сохранить заметку. Текст остался в открытой заметке. Повторите сохранение.');
       }
     } finally {
       noteSavesInFlightRef.current.delete(note.id);
@@ -823,7 +833,7 @@ export function StickyNotes() {
 
       const pendingNote = pendingNoteSavesRef.current.get(note.id);
       pendingNoteSavesRef.current.delete(note.id);
-      if (pendingNote && activeBoardIdRef.current === requestedBoardId) {
+      if (canSavePending && pendingNote && activeBoardIdRef.current === requestedBoardId) {
         const latest = notesRef.current.find((item) => item.id === note.id) ?? pendingNote;
         void saveNote(latest);
       }
@@ -831,7 +841,7 @@ export function StickyNotes() {
   };
 
   const scheduleNoteAutosave = (noteId: number) => {
-    if (!canEditActiveBoard) {
+    if (!canEditActiveBoard || composingNoteIdsRef.current.has(noteId) || noteConflict?.local.id === noteId) {
       return;
     }
 
@@ -879,6 +889,7 @@ export function StickyNotes() {
         if (error.serverNote.boardId !== requestedBoardId) {
           return;
         }
+        unsavedNoteIdsRef.current.add(note.id);
         setNoteConflict({ local: note, server: error.serverNote });
         setNotes((current) => sortNotes(current.map((item) => (item.id === note.id ? note : item))));
         toast.error('Расположение заметки уже изменено другим пользователем. Проверьте конфликт перед сохранением.');
@@ -893,7 +904,13 @@ export function StickyNotes() {
       return;
     }
 
-    setNotes((current) => sortNotes(current.map((note) => (note.id === noteConflict.server.id ? noteConflict.server : note))));
+    const noteId = noteConflict.server.id;
+    clearAutosaveTimer(noteId);
+    pendingNoteSavesRef.current.delete(noteId);
+    unsavedNoteIdsRef.current.delete(noteId);
+    const nextNotes = sortNotes(notesRef.current.map((note) => (note.id === noteId ? noteConflict.server : note)));
+    notesRef.current = nextNotes;
+    setNotes(nextNotes);
     setNoteConflict(null);
   };
 
@@ -933,7 +950,7 @@ export function StickyNotes() {
     };
 
     setNoteConflict(null);
-    await saveNote(note);
+    await saveNote(note, true);
   };
 
   const patchNote = (noteId: number, patch: Partial<StickyNoteItem>) => {
@@ -941,6 +958,9 @@ export function StickyNotes() {
     const nextNotes = sortNotes(notesRef.current.map((note) => (note.id === noteId ? { ...note, ...patch } : note)));
     notesRef.current = nextNotes;
     setNotes(nextNotes);
+    setNoteConflict((current) => current?.local.id === noteId
+      ? { ...current, local: { ...current.local, ...patch } }
+      : current);
   };
 
   const updateNoteAppearance = (note: StickyNoteItem, patch: Partial<StickyNoteItem>) => {
@@ -1609,8 +1629,18 @@ export function StickyNotes() {
             patchNote(note.id, { text: event.target.value });
             scheduleNoteAutosave(note.id);
           }}
+          onCompositionStart={() => {
+            composingNoteIdsRef.current.add(note.id);
+            clearAutosaveTimer(note.id);
+          }}
+          onCompositionEnd={(event) => {
+            composingNoteIdsRef.current.delete(note.id);
+            patchNote(note.id, { text: event.currentTarget.value });
+            scheduleNoteAutosave(note.id);
+          }}
           onKeyDown={(event) => {
-            if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+            if ((event.ctrlKey || event.metaKey) && event.key === 'Enter'
+              && !event.nativeEvent.isComposing && !composingNoteIdsRef.current.has(note.id)) {
               event.preventDefault();
               void saveNote({ ...note, text: event.currentTarget.value });
             }

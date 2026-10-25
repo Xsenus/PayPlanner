@@ -39,6 +39,7 @@ public class RolePermissionsDto
     public MenuSectionPermissionsDto Cases { get; set; } = new();
     public RequestSectionPermissionsDto Requests { get; set; } = new();
     public MenuSectionPermissionsDto LegalEntities { get; set; } = new();
+    public MenuSectionPermissionsDto CompanyProfile { get; set; } = new();
     public MenuSectionPermissionsDto Accounts { get; set; } = new();
     public MenuSectionPermissionsDto Acts { get; set; } = new();
     public MenuSectionPermissionsDto Payments { get; set; } = new();

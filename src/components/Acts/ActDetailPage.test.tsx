@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ActDetailPage } from './ActDetailPage';
@@ -9,6 +9,7 @@ const {
   getClientsMock,
   getActResponsiblesMock,
   getDocumentStatusesMock,
+  updateActMock,
   updateActWorkflowStatusMock,
   createActCorrectionMock,
   downloadActDocumentMock,
@@ -16,36 +17,41 @@ const {
   dialogConfirmMock,
   dialogPromptMock,
   rolePermissionsMock,
+  authState,
 } = vi.hoisted(() => ({
   actModalSpy: vi.fn(),
   getActMock: vi.fn(),
   getClientsMock: vi.fn(),
   getActResponsiblesMock: vi.fn(),
   getDocumentStatusesMock: vi.fn(),
+  updateActMock: vi.fn(),
   updateActWorkflowStatusMock: vi.fn(),
   createActCorrectionMock: vi.fn(),
   downloadActDocumentMock: vi.fn(),
   sendActByEmailMock: vi.fn(),
   dialogConfirmMock: vi.fn(),
   dialogPromptMock: vi.fn(),
+  authState: { user: { id: 1, role: { id: 1 } } },
   rolePermissionsMock: {
     acts: {
+      canView: true,
       canEdit: true,
       canDelete: true,
+      viewScope: 'all',
     },
     accounts: {
       canView: true,
     },
     clients: {
       canView: true,
+      canEdit: false,
+      viewScope: 'all',
     },
   },
 }));
 
 vi.mock('../../contexts/AuthContext', () => ({
-  useAuth: () => ({
-    user: { id: 1, role: { id: 1 } },
-  }),
+  useAuth: () => authState,
 }));
 
 vi.mock('../../hooks/useRolePermissions', () => ({
@@ -77,7 +83,7 @@ vi.mock('../../services/api', () => ({
     getClients: getClientsMock,
     getActResponsibles: getActResponsiblesMock,
     getDocumentStatuses: getDocumentStatusesMock,
-    updateAct: vi.fn(),
+    updateAct: updateActMock,
     updateActWorkflowStatus: updateActWorkflowStatusMock,
     createActCorrection: createActCorrectionMock,
     deleteAct: vi.fn(),
@@ -106,10 +112,14 @@ describe('ActDetailPage', () => {
     vi.clearAllMocks();
     dialogConfirmMock.mockResolvedValue(true);
     dialogPromptMock.mockResolvedValue('Уточнение суммы');
+    authState.user = { id: 1, role: { id: 1 } };
+    rolePermissionsMock.acts.canView = true;
     rolePermissionsMock.acts.canEdit = true;
     rolePermissionsMock.acts.canDelete = true;
+    rolePermissionsMock.acts.viewScope = 'all';
     rolePermissionsMock.accounts.canView = true;
     rolePermissionsMock.clients.canView = true;
+    rolePermissionsMock.clients.viewScope = 'all';
     getDocumentStatusesMock.mockResolvedValue([]);
     createActCorrectionMock.mockResolvedValue({
       id: 40,
@@ -217,7 +227,7 @@ describe('ActDetailPage', () => {
       expect(screen.getByText('Печатный шаблон акта')).toBeTruthy();
     });
 
-    expect(screen.getByText('Тестовый клиент')).toBeTruthy();
+    expect(await screen.findByText('Тестовый клиент')).toBeTruthy();
     expect(screen.getByText((_, node) => node?.textContent === 'Позиции: 1')).toBeTruthy();
     expect(screen.queryByText(/ИНН/i)).toBeNull();
     expect(screen.queryByText('Позиции акта')).toBeNull();
@@ -444,6 +454,263 @@ describe('ActDetailPage', () => {
     });
     await waitFor(() => {
       expect(screen.queryByRole('heading', { name: 'Смена статуса документа' })).toBeNull();
+    });
+  });
+
+  describe('independent optional catalogs and access boundaries', () => {
+    const sourceAct = (id = 35, clientName = 'Разрешённый клиент') => ({
+      id, number: String(id), date: '2026-04-14', amount: 11_000,
+      status: 'Created', workflowStatus: 'Draft', type: 'Income',
+      clientId: 7, clientName, invoiceId: 618, invoiceNumber: 'INV-618', lineItems: [],
+    });
+    const sourceClient = (id = 7, name = 'Клиент из справочника') => ({
+      id, name, email: '', phone: '', company: '', address: '', notes: '',
+      createdAt: '2026-04-01T00:00:00Z', isActive: true,
+    });
+    const deferred = <T,>() => {
+      let resolve!: (value: T) => void;
+      let reject!: (reason: unknown) => void;
+      const promise = new Promise<T>((accept, decline) => { resolve = accept; reject = decline; });
+      return { promise, resolve, reject };
+    };
+    const editorProps = () => actModalSpy.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    const openEditor = async () => {
+      fireEvent.click(await screen.findByRole('button', { name: 'Редактировать акт' }));
+      await screen.findByTestId('act-modal-page');
+      return editorProps();
+    };
+
+    beforeEach(() => {
+      getActMock.mockReset().mockResolvedValue(sourceAct());
+      getClientsMock.mockReset().mockResolvedValue({ items: [] });
+      getActResponsiblesMock.mockReset().mockResolvedValue({ items: [] });
+      updateActMock.mockReset();
+    });
+
+    it('keeps invoice-linked editing and source IDs without client view or client edit rights', async () => {
+      rolePermissionsMock.clients.canView = false;
+      const onOpenInvoice = vi.fn();
+      render(<ActDetailPage actId={35} onBack={vi.fn()} onOpenInvoice={onOpenInvoice} />);
+
+      const props = await openEditor();
+
+      expect(getClientsMock).not.toHaveBeenCalled();
+      expect(props.act).toMatchObject({ id: 35, clientId: 7, invoiceId: 618 });
+      expect(props.clients).toEqual([]);
+      expect(props.canViewInvoices).toBe(true);
+      expect(props.onOpenInvoice).toBe(onOpenInvoice);
+      expect(rolePermissionsMock.clients.canEdit).toBe(false);
+    });
+
+    it('preserves the allowed act and independent responsibles when the client catalog returns 403', async () => {
+      const responsible = { id: 4, fullName: 'Ответственный по акту', name: 'Ответственный по акту' };
+      getClientsMock.mockRejectedValue(new Error('HTTP 403 Forbidden at /api/clients - Справочник клиентов недоступен.'));
+      getActResponsiblesMock.mockResolvedValue({ items: [responsible] });
+      render(<ActDetailPage actId={35} onBack={vi.fn()} />);
+
+      await screen.findByText('Разрешённый клиент');
+      expect((await screen.findByRole('status')).textContent).toContain('Недостаточно прав для выполнения действия.');
+      const props = await openEditor();
+
+      expect(props.act).toMatchObject({ id: 35, clientId: 7, invoiceId: 618 });
+      expect(props.clients).toEqual([]);
+      expect(props.responsibles).toEqual([expect.objectContaining({ id: 4 })]);
+      expect(props.lookupsLoading).toBe(false);
+      expect(props.lookupsError).toContain('Недостаточно прав для выполнения действия.');
+      expect(props.lookupsError).not.toContain('/api/clients');
+      expect(downloadActDocumentMock).toHaveBeenCalledWith(35, 'html', { includeSignatureAndSeal: false });
+    });
+
+    it('opens the allowed act before a slow client catalog and retains the editor act when it arrives', async () => {
+      const clients = deferred<{ items: ReturnType<typeof sourceClient>[] }>();
+      getClientsMock.mockReturnValue(clients.promise);
+      render(<ActDetailPage actId={35} onBack={vi.fn()} />);
+
+      const initialProps = await openEditor();
+      expect(initialProps.lookupsLoading).toBe(true);
+      expect(initialProps.clients).toEqual([]);
+      await act(async () => { clients.resolve({ items: [sourceClient()] }); });
+
+      await waitFor(() => expect(editorProps().lookupsLoading).toBe(false));
+      expect(screen.getByTestId('act-modal-page')).toBeTruthy();
+      expect(editorProps().act).toBe(initialProps.act);
+      expect(editorProps().act).toMatchObject({ clientId: 7, invoiceId: 618 });
+      expect(editorProps().clients).toEqual([expect.objectContaining({ id: 7 })]);
+      expect(getActMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the client catalog and editable act when the responsible catalog fails', async () => {
+      getClientsMock.mockResolvedValue({ items: [sourceClient()] });
+      getActResponsiblesMock.mockRejectedValue(new Error('Ответственные недоступны.'));
+      render(<ActDetailPage actId={35} onBack={vi.fn()} />);
+
+      await screen.findByRole('status');
+      const props = await openEditor();
+
+      expect(props.act).toMatchObject({ id: 35, clientId: 7, invoiceId: 618 });
+      expect(props.clients).toEqual([expect.objectContaining({ id: 7 })]);
+      expect(props.responsibles).toEqual([]);
+      expect(props.lookupsError).toContain('Ответственные недоступны.');
+    });
+
+    it.each([403, 404])('does not retain the previous act or fall back to catalogs when the new act returns %s', async (status) => {
+      const { rerender } = render(<ActDetailPage actId={35} onBack={vi.fn()} />);
+      await screen.findByText('Разрешённый клиент');
+      await waitFor(() => expect(getClientsMock).toHaveBeenCalledTimes(1));
+      getActMock.mockRejectedValueOnce(new Error(`HTTP ${status} - Новый акт недоступен.`));
+      getClientsMock.mockClear();
+      getActResponsiblesMock.mockClear();
+      downloadActDocumentMock.mockClear();
+
+      rerender(<ActDetailPage actId={36} onBack={vi.fn()} />);
+
+      expect(screen.queryByText('Разрешённый клиент')).toBeNull();
+      expect(await screen.findByText(status === 403 ? 'Недостаточно прав для выполнения действия.' : 'Новый акт недоступен.')).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Редактировать акт' })).toBeNull();
+      expect(screen.queryByTestId('act-modal-page')).toBeNull();
+      expect(screen.queryByText('Печатный шаблон акта')).toBeNull();
+      expect(getClientsMock).not.toHaveBeenCalled();
+      expect(getActResponsiblesMock).not.toHaveBeenCalled();
+      expect(downloadActDocumentMock).not.toHaveBeenCalled();
+    });
+
+    it.each(['success', 'failure'])('ignores a late old route %s after the next act has loaded', async (outcome) => {
+      const oldAct = deferred<ReturnType<typeof sourceAct>>();
+      getActMock.mockReturnValueOnce(oldAct.promise).mockResolvedValueOnce(sourceAct(36, 'Текущий клиент'));
+      const { rerender } = render(<ActDetailPage actId={35} onBack={vi.fn()} />);
+      rerender(<ActDetailPage actId={36} onBack={vi.fn()} />);
+      await screen.findByText('Текущий клиент');
+
+      await act(async () => {
+        if (outcome === 'success') oldAct.resolve(sourceAct(35, 'Старый клиент'));
+        else oldAct.reject(new Error('Ошибка старого маршрута'));
+      });
+
+      expect(screen.getByText('Текущий клиент')).toBeTruthy();
+      expect(screen.queryByText('Старый клиент')).toBeNull();
+      expect(screen.queryByText('Ошибка старого маршрута')).toBeNull();
+      expect((await openEditor()).act).toMatchObject({ id: 36, clientId: 7, invoiceId: 618 });
+    });
+
+    it('ignores a previous actor response for the same act ID', async () => {
+      const oldAct = deferred<ReturnType<typeof sourceAct>>();
+      getActMock.mockReturnValueOnce(oldAct.promise).mockResolvedValueOnce(sourceAct(35, 'Клиент текущего сотрудника'));
+      const { rerender } = render(<ActDetailPage actId={35} onBack={vi.fn()} />);
+      authState.user = { id: 2, role: { id: 2 } };
+      rerender(<ActDetailPage actId={35} onBack={vi.fn()} />);
+      await screen.findByText('Клиент текущего сотрудника');
+
+      await act(async () => { oldAct.resolve(sourceAct(35, 'Клиент прежнего сотрудника')); });
+
+      expect(screen.queryByText('Клиент прежнего сотрудника')).toBeNull();
+      expect((await openEditor()).act).toMatchObject({ clientName: 'Клиент текущего сотрудника' });
+      expect(getClientsMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('ignores previous actor catalog responses for the same act ID', async () => {
+      const oldClients = deferred<{ items: ReturnType<typeof sourceClient>[] }>();
+      getClientsMock.mockReturnValueOnce(oldClients.promise).mockResolvedValueOnce({ items: [sourceClient(8, 'Новый справочник')] });
+      const { rerender } = render(<ActDetailPage actId={35} onBack={vi.fn()} />);
+      await waitFor(() => expect(getClientsMock).toHaveBeenCalledTimes(1));
+      authState.user = { id: 2, role: { id: 2 } };
+      rerender(<ActDetailPage actId={35} onBack={vi.fn()} />);
+      await waitFor(() => expect(getClientsMock).toHaveBeenCalledTimes(2));
+      await openEditor();
+
+      await act(async () => { oldClients.resolve({ items: [sourceClient(9, 'Старый справочник')] }); });
+
+      expect(editorProps().clients).toEqual([expect.objectContaining({ id: 8, name: 'Новый справочник' })]);
+      expect(editorProps().act).toMatchObject({ id: 35, clientId: 7, invoiceId: 618 });
+    });
+
+    it('clears revoked client catalogs without losing the open act editor or accepting the old response', async () => {
+      const clients = deferred<{ items: ReturnType<typeof sourceClient>[] }>();
+      getClientsMock.mockReturnValue(clients.promise);
+      const { rerender } = render(<ActDetailPage actId={35} onBack={vi.fn()} />);
+      const initialProps = await openEditor();
+      rolePermissionsMock.clients.canView = false;
+      rerender(<ActDetailPage actId={35} onBack={vi.fn()} />);
+
+      expect(screen.getByTestId('act-modal-page')).toBeTruthy();
+      expect(editorProps().clients).toEqual([]);
+      expect(editorProps().act).toBe(initialProps.act);
+      await act(async () => { clients.resolve({ items: [sourceClient()] }); });
+
+      expect(editorProps().clients).toEqual([]);
+      expect(editorProps().act).toMatchObject({ clientId: 7, invoiceId: 618 });
+      expect(getActMock).toHaveBeenCalledTimes(1);
+      expect(getClientsMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not reveal a pending act after its view permission is revoked', async () => {
+      const pendingAct = deferred<ReturnType<typeof sourceAct>>();
+      getActMock.mockReturnValue(pendingAct.promise);
+      const { rerender } = render(<ActDetailPage actId={35} onBack={vi.fn()} />);
+      rolePermissionsMock.acts.canView = false;
+      rerender(<ActDetailPage actId={35} onBack={vi.fn()} />);
+      await screen.findByText('Нет доступа к акту.');
+
+      await act(async () => { pendingAct.resolve(sourceAct()); });
+
+      expect(screen.getByText('Нет доступа к акту.')).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Редактировать акт' })).toBeNull();
+      expect(getActMock).toHaveBeenCalledTimes(1);
+      expect(getClientsMock).not.toHaveBeenCalled();
+      expect(downloadActDocumentMock).not.toHaveBeenCalled();
+    });
+
+    it('closes the editor when act editing rights are revoked and retains the current read-only source IDs', async () => {
+      const { rerender } = render(<ActDetailPage actId={35} onBack={vi.fn()} />);
+      const initialProps = await openEditor();
+      rolePermissionsMock.acts.canEdit = false;
+      rerender(<ActDetailPage actId={35} onBack={vi.fn()} />);
+
+      expect(screen.queryByTestId('act-modal-page')).toBeNull();
+      await screen.findByText('Разрешённый клиент');
+      expect(screen.queryByRole('button', { name: 'Редактировать акт' })).toBeNull();
+      expect(initialProps.act).toMatchObject({ clientId: 7, invoiceId: 618 });
+      expect(getActMock).toHaveBeenCalledTimes(2);
+    });
+
+    it.each([['route', 'success'], ['route', 'failure'], ['actor', 'success'], ['actor', 'failure']])('ignores a previous save after a %s change (%s) without changing the next editor', async (boundary, outcome) => {
+      const savedAct = deferred<ReturnType<typeof sourceAct>>();
+      updateActMock.mockReturnValue(savedAct.promise);
+      const { rerender } = render(<ActDetailPage actId={35} onBack={vi.fn()} />);
+      const firstProps = await openEditor();
+      let submit!: Promise<void>;
+      act(() => { submit = (firstProps.onSubmit as (payload: unknown) => Promise<void>)({ clientId: 7, invoiceId: 618 }); });
+      expect(editorProps().submitting).toBe(true);
+
+      const nextId = boundary === 'route' ? 36 : 35;
+      if (boundary === 'actor') authState.user = { id: 2, role: { id: 2 } };
+      getActMock.mockResolvedValue(sourceAct(nextId, 'Следующий акт'));
+      rerender(<ActDetailPage actId={nextId} onBack={vi.fn()} />);
+      const nextProps = await openEditor();
+      expect(nextProps.submitting).toBe(false);
+      await act(async () => {
+        if (outcome === 'success') savedAct.resolve(sourceAct(35, 'Устаревшее сохранение'));
+        else savedAct.reject(new Error('Ошибка старого сохранения'));
+        await submit;
+      });
+
+      expect(screen.getByTestId('act-modal-page')).toBeTruthy();
+      expect(editorProps().act).toBe(nextProps.act);
+      expect(editorProps().act).toMatchObject({ id: nextId, clientId: 7, invoiceId: 618 });
+      expect(editorProps().submitting).toBe(false);
+      expect(editorProps().errorMessage).toBeNull();
+      expect(updateActMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not show or fetch optional catalogs for a response belonging to another act ID', async () => {
+      getActMock.mockResolvedValue(sourceAct(36));
+      render(<ActDetailPage actId={35} onBack={vi.fn()} />);
+
+      await screen.findByText('Акт не найден.');
+
+      expect(screen.queryByRole('button', { name: 'Редактировать акт' })).toBeNull();
+      expect(getClientsMock).not.toHaveBeenCalled();
+      expect(getActResponsiblesMock).not.toHaveBeenCalled();
+      expect(downloadActDocumentMock).not.toHaveBeenCalled();
     });
   });
 });

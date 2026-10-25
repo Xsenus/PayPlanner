@@ -19,6 +19,28 @@ public class RolePermissionsAuditTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
+    public async Task Update_PreservesSeparateCompanyProfileRightsAndRejectsUnsupportedCapabilities(bool view)
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "profile-editor" };
+        db.Roles.Add(role); await db.SaveChangesAsync();
+        var admin = await CreateAdminUserAsync(db);
+        var controller = CreateController(db, CreateAdminPrincipal(admin.Id));
+        var request = RolePermissionCatalog.CreateDto(allowRoleManagement: false);
+        Assert.False(request.CompanyProfile.CanView);
+        request.CompanyProfile = new MenuSectionPermissionsDto { CanView = view, CanEdit = true, CanCreate = true, CanDelete = true, CanExport = true };
+        Assert.IsType<NoContentResult>(await controller.Update(role.Id, request, CancellationToken.None));
+        var dto = AssertOk<RolePermissionsDto>(await controller.Get(role.Id, CancellationToken.None));
+        Assert.Equal(view, dto.CompanyProfile.CanView); Assert.Equal(view, dto.CompanyProfile.CanEdit);
+        Assert.False(dto.CompanyProfile.CanCreate); Assert.False(dto.CompanyProfile.CanDelete); Assert.False(dto.CompanyProfile.CanExport);
+        var persisted = await db.RolePermissions.SingleAsync(item => item.RoleId == role.Id && item.Section == RolePermissionCatalog.CompanyProfile);
+        Assert.Equal(view, persisted.CanView); Assert.Equal(view, persisted.CanEdit);
+        Assert.Equal(request.Accounts.CanView, dto.Accounts.CanView); Assert.Equal(request.Acts.CanView, dto.Acts.CanView);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
     public async Task Update_PreservesRequestAnalyticsOnlyWhenViewingIsAllowed(bool canView)
     {
         await using var db = await CreateContextAsync();

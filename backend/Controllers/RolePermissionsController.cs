@@ -395,6 +395,9 @@ public class RolePermissionsController : ControllerBase
                 case RolePermissionCatalog.LegalEntities:
                     dto.LegalEntities = ToSection(permission);
                     break;
+                case RolePermissionCatalog.CompanyProfile:
+                    dto.CompanyProfile = ToSection(permission);
+                    break;
                 case RolePermissionCatalog.Clients:
                     dto.Clients = ToSection(permission);
                     break;
@@ -464,6 +467,7 @@ public class RolePermissionsController : ControllerBase
             Reports = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Reports]),
             Calculator = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Calculator]),
             LegalEntities = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.LegalEntities]),
+            CompanyProfile = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.CompanyProfile]),
             Clients = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Clients]),
             Cases = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Cases]),
             Accounts = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Accounts]),
@@ -754,6 +758,7 @@ public class RolePermissionsController : ControllerBase
             [RolePermissionCatalog.Reports] = ToValues(dto.Reports),
             [RolePermissionCatalog.Calculator] = ToValues(dto.Calculator),
             [RolePermissionCatalog.LegalEntities] = ToValues(dto.LegalEntities),
+            [RolePermissionCatalog.CompanyProfile] = ToValues(dto.CompanyProfile),
             [RolePermissionCatalog.Clients] = ToValues(dto.Clients),
             [RolePermissionCatalog.Cases] = ToValues(dto.Cases),
             [RolePermissionCatalog.Accounts] = ToValues(dto.Accounts),
@@ -823,7 +828,8 @@ public class RolePermissionsController : ControllerBase
             };
         }
 
-        if (string.Equals(section, RolePermissionCatalog.Notifications, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(section, RolePermissionCatalog.Notifications, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(section, RolePermissionCatalog.CompanyProfile, StringComparison.OrdinalIgnoreCase))
         {
             return values with
             {

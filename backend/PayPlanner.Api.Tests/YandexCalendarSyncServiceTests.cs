@@ -18,7 +18,7 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public class YandexCalendarSyncServiceTests
+public partial class YandexCalendarSyncServiceTests
 {
     // Token fixtures and their services share this process; parallel workers must not share a disk key ring.
     private static readonly IDataProtectionProvider TestDataProtectionProvider = new EphemeralDataProtectionProvider();

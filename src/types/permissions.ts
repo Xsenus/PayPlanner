@@ -5,6 +5,7 @@ export type MenuSectionKey =
   | 'reports'
   | 'calculator'
   | 'legalEntities'
+  | 'companyProfile'
   | 'clients'
   | 'cases'
   | 'requests'
@@ -70,6 +71,7 @@ export const MENU_SECTION_KEYS: MenuSectionKey[] = [
   'reports',
   'calculator',
   'legalEntities',
+  'companyProfile',
   'clients',
   'cases',
   'requests',
@@ -128,6 +130,7 @@ export const defaultRolePermissions: RolePermissions = {
   notes: { ...defaultMenuPermissions, canExport: false },
   calculator: { ...defaultMenuPermissions },
   legalEntities: { ...defaultMenuPermissions },
+  companyProfile: { ...defaultRestrictedMenuPermissions },
   clients: { ...defaultMenuPermissions },
   cases: { ...defaultMenuPermissions },
   requests: { ...defaultMenuPermissions, canViewAnalytics: false },
@@ -160,6 +163,7 @@ export const defaultRestrictedRolePermissions: RolePermissions = {
   notes: { ...defaultRestrictedMenuPermissions },
   calculator: { ...defaultRestrictedMenuPermissions },
   legalEntities: { ...defaultRestrictedMenuPermissions },
+  companyProfile: { ...defaultRestrictedMenuPermissions },
   clients: { ...defaultRestrictedMenuPermissions },
   cases: { ...defaultRestrictedMenuPermissions },
   requests: { ...defaultRestrictedMenuPermissions, canViewAnalytics: false },

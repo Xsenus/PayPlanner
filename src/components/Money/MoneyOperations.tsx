@@ -79,6 +79,12 @@ import { moneyBalanceComparisonKey, moneyBalanceCurrencyLabel } from '../../util
 
 type MoneyTab = MoneyOperationSource | 'Total';
 
+type BankStatementImportScope = {
+  key: string;
+  canImport: boolean;
+  target: { companyId: number; moneyAccountId: number } | null;
+};
+
 type BankStatementAutoImportSettings = {
   enabled: boolean;
   folderPath: string;
@@ -2418,7 +2424,20 @@ export function MoneyOperations({
     error: null as string | null,
   });
   const bankStatementInputRef = useRef<HTMLInputElement | null>(null);
+  const moneyAccountFilterRef = useRef<HTMLDivElement | null>(null);
+  const bankImportInFlightRef = useRef(false);
+  const bankStatementPickerScopeRef = useRef<BankStatementImportScope | null>(null);
+  const bankImportScopeRef = useRef<BankStatementImportScope>({ key: '', canImport: false, target: null });
+  const bankImportMountedRef = useRef(true);
   const journalActionsRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    bankImportMountedRef.current = true;
+    return () => {
+      bankImportMountedRef.current = false;
+      bankStatementPickerScopeRef.current = null;
+    };
+  }, []);
 
   const currentYear = new Date().getFullYear();
   const [from, setFrom] = useState(`${currentYear}-01-01`);
@@ -2487,6 +2506,8 @@ export function MoneyOperations({
     page,
     pageSize: effectivePageSize,
   });
+  const bankImportReloadRef = useRef(reload);
+  bankImportReloadRef.current = reload;
   const categoryOptions = useMemo(
     () => buildUniqueOptions([...categoryDictionaryOptions.map((item) => item.name), ...items.map((item) => item.categoryName)]),
     [categoryDictionaryOptions, items],
@@ -2721,7 +2742,42 @@ export function MoneyOperations({
     () => (moneyAccountId === '' ? null : moneyAccounts.find((account) => account.id === moneyAccountId) ?? null),
     [moneyAccountId, moneyAccounts],
   );
+  const bankImportBusy = bankStatementImporting || bankAutoImportRunning;
+  const bankAutoImportErrors = bankAutoImportRunResult?.errors ?? [];
+  const canImportBankStatements = Boolean(user?.id && permissions.payments.canView && canCreateMoneyOperations);
+  const bankImportTarget = source === 'Bank' && selectedMoneyAccount?.source === 'Bank'
+    && canUseMoneyAccountForNewOperation(selectedMoneyAccount)
+    ? { companyId: selectedMoneyAccount.companyId!, moneyAccountId: selectedMoneyAccount.id }
+    : null;
+  const bankImportScopeKey = `${user?.id ?? ''}|${source}|${moneyAccountId}|${canImportBankStatements}|${bankImportTarget?.companyId ?? ''}|${bankImportTarget?.moneyAccountId ?? ''}`;
+  // Keep each selection generation distinct, including A -> B -> A while a picker/request is open.
+  if (bankImportScopeRef.current.key !== bankImportScopeKey) {
+    bankImportScopeRef.current = { key: bankImportScopeKey, canImport: canImportBankStatements, target: bankImportTarget };
+  }
+  const requireBankImportScope = () => {
+    const scope = bankImportScopeRef.current;
+    if (!scope.canImport) {
+      toast.error('У вас нет прав на импорт операций денег.', 'Выписка банка');
+      return null;
+    }
+    if (!scope.target) {
+      toast.error('Выберите действующий банковский счёт своей компании в заголовке.', 'Выписка банка');
+      moneyAccountFilterRef.current?.querySelector<HTMLButtonElement>('[role="combobox"]')?.focus();
+      return null;
+    }
+    return scope;
+  };
+  const isCurrentBankImportScope = (scope: BankStatementImportScope) =>
+    bankImportMountedRef.current && bankImportScopeRef.current === scope;
+  const handleChooseBankStatementFile = () => {
+    if (bankImportInFlightRef.current) return;
+    const scope = requireBankImportScope();
+    if (!scope) return;
+    bankStatementPickerScopeRef.current = scope;
+    bankStatementInputRef.current?.click();
+  };
   const selectMoneyAccount = (value: string) => {
+    if (bankImportInFlightRef.current) return;
     const account = moneyAccounts.find((item) => String(item.id) === value);
     setMoneyAccountId(account?.id ?? '');
     setAccountName(account?.name ?? value);
@@ -2759,6 +2815,7 @@ export function MoneyOperations({
         label: 'Счет',
         value: accountName,
         onClear: () => {
+          if (bankImportInFlightRef.current) return;
           setMoneyAccountId('');
           setAccountName('');
         },
@@ -3212,14 +3269,16 @@ export function MoneyOperations({
   };
 
   const handleRunBankAutoImport = async () => {
-    if (!canCreateMoneyOperations) {
-      toast.error('У вас нет прав на создание операций денег.', 'Выписка банка');
-      return;
-    }
+    if (bankImportInFlightRef.current) return;
+    const scope = requireBankImportScope();
+    if (!scope?.target) return;
 
+    bankStatementPickerScopeRef.current = null;
+    bankImportInFlightRef.current = true;
     setBankAutoImportRunning(true);
     try {
-      const result = await apiService.runBankStatementAutoImport();
+      const result = await apiService.runBankStatementAutoImport(scope.target);
+      if (!isCurrentBankImportScope(scope)) return;
       setBankAutoImportRunResult(result);
       setBankAutoImportSettings((current) => ({
         ...current,
@@ -3227,17 +3286,25 @@ export function MoneyOperations({
       }));
       setBankImportsRefreshKey((value) => value + 1);
       if (result.created > 0) {
-        await reload();
+        await bankImportReloadRef.current();
       }
-      toast.success(
-        `Проверено файлов: ${result.filesFound}. Создано операций: ${result.created}. Пропущено: ${result.skipped}.`,
-        'Выписка банка',
-      );
+      if (!isCurrentBankImportScope(scope)) return;
+      const summary = `Проверено файлов: ${result.filesFound}. Создано операций: ${result.created}. Пропущено: ${result.skipped}.`;
+      const errors = result.errors ?? [];
+      if (errors.length > 0) {
+        const status = result.created > 0
+          ? 'Подгрузка завершена частично. Созданные операции сохранены.'
+          : 'Подгрузка завершена с ошибками.';
+        const message = `${status} ${summary} Ошибок: ${errors.length}.`;
+        if (result.created > 0) toast.info(message, 'Выписка банка');
+        else toast.error(message, 'Выписка банка');
+      } else toast.success(summary, 'Выписка банка');
     } catch (error) {
       const message = extractDisplayErrorMessage(error, 'Не удалось запустить автоподгрузку выписок.');
-      toast.error(message, 'Выписка банка');
+      if (isCurrentBankImportScope(scope)) toast.error(message, 'Выписка банка');
     } finally {
-      setBankAutoImportRunning(false);
+      bankImportInFlightRef.current = false;
+      if (bankImportMountedRef.current) setBankAutoImportRunning(false);
     }
   };
 
@@ -3708,16 +3775,20 @@ export function MoneyOperations({
   const handleBankStatementFileSelected = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
-    if (!file) return;
-    if (!canCreateMoneyOperations) {
-      toast.error('У вас нет прав на импорт операций денег.', 'Выписка банка');
+    const scope = bankStatementPickerScopeRef.current;
+    bankStatementPickerScopeRef.current = null;
+    if (!file || bankImportInFlightRef.current) return;
+    if (!scope?.target || !isCurrentBankImportScope(scope)) {
+      toast.error('Выбранный счёт или права изменились. Нажмите «Загрузить выписку» и выберите файл заново.', 'Выписка банка');
       return;
     }
 
+    bankImportInFlightRef.current = true;
     setBankStatementImporting(true);
     setBankStatementImportResult(null);
     try {
-      const result = await apiService.importBankStatement(file);
+      const result = await apiService.importBankStatement(file, scope.target);
+      if (!isCurrentBankImportScope(scope)) return;
       setBankStatementImportResult({
         batchId: result.batchId ?? null,
         rowsRead: result.rowsRead,
@@ -3727,14 +3798,16 @@ export function MoneyOperations({
         operations: result.operations ?? [],
       });
       toast.success(`Создано операций: ${result.created}. Пропущено: ${result.skipped}.`, 'Выписка банка');
-      await reload();
+      await bankImportReloadRef.current();
+      if (!isCurrentBankImportScope(scope)) return;
       setShowBankImportsJournal(true);
       setBankImportsRefreshKey((value) => value + 1);
     } catch (error) {
       const message = extractDisplayErrorMessage(error, 'Не удалось загрузить банковскую выписку.');
-      toast.error(message, 'Выписка банка');
+      if (isCurrentBankImportScope(scope)) toast.error(message, 'Выписка банка');
     } finally {
-      setBankStatementImporting(false);
+      bankImportInFlightRef.current = false;
+      if (bankImportMountedRef.current) setBankStatementImporting(false);
     }
   };
 
@@ -4447,10 +4520,11 @@ export function MoneyOperations({
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {(
-            <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-slate-400">
+            <div ref={moneyAccountFilterRef} className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-slate-400">
               <span>{SOURCE_ACCOUNT_FILTER_LABELS[source]}</span>
               <SystemSelect
                 aria-label={`${SOURCE_ACCOUNT_FILTER_LABELS[source]} в заголовке`}
+                disabled={bankImportBusy}
                 value={moneyAccountId === '' ? accountName : String(moneyAccountId)}
                 onChange={(event) => selectMoneyAccount(event.target.value)}
                 className="min-w-52 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal normal-case tracking-normal text-slate-700 focus:border-blue-500 focus:outline-none">
@@ -4475,8 +4549,8 @@ export function MoneyOperations({
               <button
                 className="flex items-center gap-2 rounded-lg border border-blue-500 px-4 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
                 type="button"
-                disabled={bankStatementImporting || !canCreateMoneyOperations}
-                onClick={() => bankStatementInputRef.current?.click()}>
+                disabled={bankImportBusy || !canImportBankStatements}
+                onClick={handleChooseBankStatementFile}>
                 <UploadCloud className="h-4 w-4" />
                 {bankStatementImporting ? 'Загружаем...' : 'Загрузить выписку'}
               </button>
@@ -4556,7 +4630,7 @@ export function MoneyOperations({
               <button
                 type="button"
                 onClick={() => void handleRunBankAutoImport()}
-                disabled={bankAutoImportLoading || bankAutoImportSaving || bankAutoImportRunning || !canCreateMoneyOperations}
+                disabled={bankAutoImportLoading || bankAutoImportSaving || bankImportBusy || !canImportBankStatements}
                 className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-blue-200 bg-white px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60">
                 <RefreshCw className={`h-4 w-4 ${bankAutoImportRunning ? 'animate-spin' : ''}`} />
                 {bankAutoImportRunning ? 'Проверяем...' : 'Проверить'}
@@ -4569,11 +4643,35 @@ export function MoneyOperations({
               : 'Ожидает первой проверки.'}
           </div>
           {bankAutoImportRunResult && (
-            <div className="mt-3 rounded-lg border border-blue-100 bg-white px-3 py-2 text-xs text-slate-600">
+            <div
+              role={bankAutoImportErrors.length > 0 ? 'alert' : 'status'}
+              aria-label="Результат подгрузки выписок"
+              aria-atomic="true"
+              className={`mt-3 rounded-lg border bg-white px-3 py-2 text-xs text-slate-600 ${bankAutoImportErrors.length > 0 ? 'border-amber-200' : 'border-blue-100'}`}>
+              {bankAutoImportErrors.length > 0 && (
+                <div className="mb-1 font-medium text-amber-900">
+                  {bankAutoImportRunResult.created > 0
+                    ? 'Подгрузка завершена частично. Созданные операции сохранены.'
+                    : 'Подгрузка завершена с ошибками.'}
+                </div>
+              )}
               <div className="font-medium text-slate-800">
                 Проверено файлов: {bankAutoImportRunResult.filesFound}. Создано операций: {bankAutoImportRunResult.created}.
                 Пропущено: {bankAutoImportRunResult.skipped}.
               </div>
+              {bankAutoImportErrors.length > 0 && (
+                <div className="mt-2 text-xs text-amber-900">
+                  <div className="font-medium">Ошибок: {bankAutoImportErrors.length}</div>
+                  <ul className="mt-1 max-h-24 list-disc space-y-0.5 overflow-y-auto pl-4">
+                    {bankAutoImportErrors.slice(0, 5).map((error, index) => (
+                      <li key={index} className="break-words">{error}</li>
+                    ))}
+                  </ul>
+                  {bankAutoImportErrors.length > 5 && (
+                    <div className="mt-1">Ещё ошибок: {bankAutoImportErrors.length - 5}</div>
+                  )}
+                </div>
+              )}
               {bankAutoImportRunResult.files.length > 0 && (
                 <div className="mt-1 flex flex-wrap gap-2">
                   {bankAutoImportRunResult.files.slice(0, 4).map((file) => (
@@ -5415,6 +5513,7 @@ export function MoneyOperations({
                     <label className="flex flex-col gap-1">
                       {SOURCE_ACCOUNT_FILTER_LABELS[source]}
                       <SystemSelect
+                        disabled={bankImportBusy}
                         value={moneyAccountId === '' ? accountName : String(moneyAccountId)}
                         onChange={(event) => {
                           selectMoneyAccount(event.target.value);
@@ -5485,6 +5584,7 @@ export function MoneyOperations({
                       <button
                         type="button"
                         onClick={() => {
+                          if (bankImportInFlightRef.current) return;
                           setMoneyAccountId('');
                           setAccountName('');
                           setCategoryName('');

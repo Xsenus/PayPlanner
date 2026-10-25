@@ -74,7 +74,7 @@ public partial class BankSyncServiceTests
     [MemberData(nameof(NativeCompanyDisappearanceCases))]
     public async Task SharedNative_CompanyDisappearingBeforePageCannotWriteMoreFacts(bool postgres, bool scheduled, int beforePage)
     {
-        await using var fixture = await NativeDurabilityFixture.CreateAsync(postgres);
+        await using var fixture = await NativeDurabilityFixture.CreateAsync(postgres, bankModelTemplate);
         var db = fixture.First;
         var (_, principal) = await AddNativeAdminAsync(db);
         var companyId = (await db.BankConnections.AsNoTracking().SingleAsync()).LegalEntityId;

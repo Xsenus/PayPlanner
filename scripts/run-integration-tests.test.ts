@@ -62,6 +62,7 @@ describe('integration runner', () => {
       'src/components/LegalEntities/LegalEntityModal.integration.test.tsx',
       'src/components/Money/MoneyOperations.integration.test.tsx',
       'src/components/Payments/Payments.integration.test.tsx',
+      'src/components/Tasks/useTaskBulkBilling.integration.test.tsx',
       'vite.restored-browser.integration.test.ts',
       'vite.restored-runtime.integration.test.ts',
     ]);

@@ -549,6 +549,8 @@ public sealed class CalendarSyncController : ControllerBase
             "skip" => "Изменение пропущено по правилу конфликтов",
             "upsert" => "Создание или обновление события",
             "import" => "Чтение изменений календаря",
+            "ensure-calendars" => "Подготовка подключения",
+            "connection-recovered" => "Синхронизация восстановлена",
             "create-calendar" => "Создание календаря сотрудника",
             "delete-calendar" => "Удаление календаря сотрудника",
             "delete-calendar-missing" => "Календарь уже отсутствует",
@@ -565,6 +567,11 @@ public sealed class CalendarSyncController : ControllerBase
         if (!string.IsNullOrWhiteSpace(taskTitle) || operation.Contains("event", StringComparison.OrdinalIgnoreCase) || operation.Contains("task", StringComparison.OrdinalIgnoreCase))
         {
             return "task";
+        }
+
+        if (operation is "ensure-calendars" or "connection-recovered")
+        {
+            return "connection";
         }
 
         if (!string.IsNullOrWhiteSpace(calendarName) || operation.Contains("calendar", StringComparison.OrdinalIgnoreCase))

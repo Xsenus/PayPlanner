@@ -19,7 +19,7 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public class GoogleCalendarSyncServiceTests
+public partial class GoogleCalendarSyncServiceTests
 {
     // Token fixtures and their services share this process; parallel workers must not share a disk key ring.
     private static readonly IDataProtectionProvider TestDataProtectionProvider = new EphemeralDataProtectionProvider();

@@ -170,6 +170,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
   const { confirm, prompt } = useDialog();
   const toast = useToast();
   const permissions = useRolePermissions(user?.role?.id);
+  const canView = permissions.acts.canView;
   const canEdit = permissions.acts.canEdit;
   const canDelete = permissions.acts.canDelete;
   const canViewLinkedAccounts = permissions.accounts.canView;
@@ -177,9 +178,39 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
   const requiresFinancialActionReason = Boolean(user?.requiresFinancialActionReason);
   const documentStatusSettings = useDocumentStatusSettings();
 
-  const [act, setAct] = useState<Act | null>(null);
-  const [clients, setClients] = useState<Client[]>([]);
-  const [responsibles, setResponsibles] = useState<ActResponsible[]>([]);
+  const actScope = JSON.stringify([actId, user?.id, user?.role?.id, canView, canEdit, permissions.acts.viewScope]);
+  const actScopeRef = useRef(actScope);
+  actScopeRef.current = actScope;
+  const clientsScope = JSON.stringify([actScope, canViewLinkedClients, permissions.clients.viewScope]);
+  const clientsScopeRef = useRef(clientsScope);
+  clientsScopeRef.current = clientsScope;
+  const actLoadRevisionRef = useRef(0);
+  const [actState, setActState] = useState<{ scope: string; value: Act | null }>({ scope: actScope, value: null });
+  const act = actState.scope === actScope ? actState.value : null;
+  const loadedActId = act?.id ?? null;
+  const setAct = useCallback((value: Act | null) => {
+    if (actScopeRef.current === actScope) setActState({ scope: actScope, value });
+  }, [actScope]);
+  const [clientLookup, setClientLookup] = useState<{
+    scope: string; items: Client[]; loading: boolean; error: string | null;
+  }>({ scope: clientsScope, items: [], loading: false, error: null });
+  const [responsibleLookup, setResponsibleLookup] = useState<{
+    scope: string; items: ActResponsible[]; loading: boolean; error: string | null;
+  }>({ scope: actScope, items: [], loading: false, error: null });
+  const clients = useMemo(
+    () => canViewLinkedClients && clientLookup.scope === clientsScope ? clientLookup.items : [],
+    [canViewLinkedClients, clientLookup.items, clientLookup.scope, clientsScope],
+  );
+  const responsibles = useMemo(
+    () => responsibleLookup.scope === actScope ? responsibleLookup.items : [],
+    [actScope, responsibleLookup.items, responsibleLookup.scope],
+  );
+  const lookupsLoading = (clientLookup.scope === clientsScope && clientLookup.loading)
+    || (responsibleLookup.scope === actScope && responsibleLookup.loading);
+  const lookupsError = [
+    canViewLinkedClients && clientLookup.scope === clientsScope ? clientLookup.error : null,
+    responsibleLookup.scope === actScope ? responsibleLookup.error : null,
+  ].filter(Boolean).join(' ') || null;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [documentPreviewHtml, setDocumentPreviewHtml] = useState('');
@@ -203,36 +234,83 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
   const downloadMenuRef = useRef<HTMLDivElement | null>(null);
 
   const loadActBundle = useCallback(async () => {
+    const revision = ++actLoadRevisionRef.current;
+    const isCurrent = () => actScopeRef.current === actScope && actLoadRevisionRef.current === revision;
+    setAct(null);
     setLoading(true);
     setError(null);
+    if (!canView) {
+      setError('Нет доступа к акту.');
+      setLoading(false);
+      return;
+    }
     try {
-      const [targetResponse, clientsData, responsiblesData] = await Promise.all([
-        apiService.getAct(actId),
-        canViewLinkedClients ? apiService.getClients() : Promise.resolve([]),
-        apiService.getActResponsibles(),
-      ]);
-
+      const targetResponse = await apiService.getAct(actId);
+      if (!isCurrent()) return;
       const target = normalizeAct(targetResponse);
-      if (!target) {
+      if (!target || target.id !== actId) {
         setAct(null);
         setError('Акт не найден.');
         return;
       }
 
       setAct(target);
-      setClients(normalizeClientArray(clientsData));
-      setResponsibles(normalizeActResponsibleArray(responsiblesData));
     } catch (loadError) {
+      if (!isCurrent()) return;
       setAct(null);
       setError(extractDisplayErrorMessage(loadError, 'Не удалось загрузить данные акта.'));
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [actId, canViewLinkedClients]);
+  }, [actId, actScope, canView, setAct]);
 
   useEffect(() => {
+    setEditorOpen(false);
+    setEditorSubmitting(false);
+    setEditorError(null);
     void loadActBundle();
+    return () => { actLoadRevisionRef.current += 1; };
   }, [loadActBundle]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const isCurrent = () => !cancelled && clientsScopeRef.current === clientsScope;
+    setClientLookup({ scope: clientsScope, items: [], loading: Boolean(loadedActId) && canView && canViewLinkedClients, error: null });
+    if (loadedActId && canView && canViewLinkedClients) {
+      void (async () => {
+        try {
+          const response = await apiService.getClients();
+          if (isCurrent()) setClientLookup({ scope: clientsScope, items: normalizeClientArray(response), loading: false, error: null });
+        } catch (lookupError) {
+          if (isCurrent()) setClientLookup({
+            scope: clientsScope, items: [], loading: false,
+            error: extractDisplayErrorMessage(lookupError, 'Не удалось загрузить список клиентов. Данные акта доступны.'),
+          });
+        }
+      })();
+    }
+    return () => { cancelled = true; };
+  }, [canView, canViewLinkedClients, clientsScope, loadedActId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const isCurrent = () => !cancelled && actScopeRef.current === actScope;
+    setResponsibleLookup({ scope: actScope, items: [], loading: Boolean(loadedActId) && canView, error: null });
+    if (loadedActId && canView) {
+      void (async () => {
+        try {
+          const response = await apiService.getActResponsibles();
+          if (isCurrent()) setResponsibleLookup({ scope: actScope, items: normalizeActResponsibleArray(response), loading: false, error: null });
+        } catch (lookupError) {
+          if (isCurrent()) setResponsibleLookup({
+            scope: actScope, items: [], loading: false,
+            error: extractDisplayErrorMessage(lookupError, 'Не удалось загрузить ответственных. Данные акта доступны.'),
+          });
+        }
+      })();
+    }
+    return () => { cancelled = true; };
+  }, [actScope, canView, loadedActId]);
 
   useEffect(() => {
     if (!act?.id) {
@@ -472,12 +550,15 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
   };
 
   const handleActSubmit = async (payload: ActInput) => {
-    if (!act) return;
+    if (!act || !canEdit || editorSubmitting) return;
+    const revision = actLoadRevisionRef.current;
+    const isCurrent = () => actScopeRef.current === actScope && actLoadRevisionRef.current === revision;
 
     setEditorSubmitting(true);
     setEditorError(null);
     try {
       const updated = normalizeAct(await apiService.updateAct(act.id, payload));
+      if (!isCurrent()) return;
       if (!updated) {
         throw new Error('Не удалось прочитать обновленный акт.');
       }
@@ -486,11 +567,12 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
       setEditorOpen(false);
       toast.success('Изменения по акту сохранены.');
     } catch (submitError) {
+      if (!isCurrent()) return;
       const message = extractDisplayErrorMessage(submitError, 'Не удалось сохранить акт.');
       setEditorError(message);
       throw submitError;
     } finally {
-      setEditorSubmitting(false);
+      if (isCurrent()) setEditorSubmitting(false);
     }
   };
 
@@ -551,7 +633,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
     } finally {
       setPageActionLoading(null);
     }
-  }, [act, confirm, prompt, requiresFinancialActionReason, toast]);
+  }, [act, confirm, prompt, requiresFinancialActionReason, setAct, toast]);
 
   const openStatusChange = useCallback(() => {
     if (!canEdit || !act) return;
@@ -593,7 +675,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
     } finally {
       setStatusChangeSubmitting(false);
     }
-  }, [act, canEdit, statusChangeReason, statusChangeValue, toast]);
+  }, [act, canEdit, setAct, statusChangeReason, statusChangeValue, toast]);
 
   const handleDelete = useCallback(async () => {
     if (!act) return;
@@ -649,7 +731,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
     } finally {
       setPageActionLoading(null);
     }
-  }, [act, prompt, toast]);
+  }, [act, prompt, setAct, toast]);
 
   const handleCreateCorrection = useCallback(async () => {
     if (!act) return;
@@ -772,7 +854,8 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
           errorMessage={editorError}
           clients={clients}
           responsibles={responsibles}
-          lookupsLoading={loading}
+          lookupsLoading={lookupsLoading}
+          lookupsError={lookupsError}
           presentation="page"
           onOpenInvoice={canViewLinkedAccounts ? onOpenInvoice : undefined}
           canViewInvoices={canViewLinkedAccounts}
@@ -781,7 +864,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
     );
   }
 
-  if (loading) {
+  if (loading || actState.scope !== actScope) {
     return (
       <div className="p-8">
         <div className="inline-flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
@@ -804,6 +887,11 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
 
   return (
     <div className="w-full px-4 py-6 sm:px-6 lg:px-8">
+      {lookupsError ? (
+        <div role="status" className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          {lookupsError}
+        </div>
+      ) : null}
       <div className="relative w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
           <div className="flex items-center gap-3">

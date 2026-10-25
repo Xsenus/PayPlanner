@@ -6,6 +6,7 @@ import { apiService } from '../../services/api';
 import type { ClientCase, ClientCaseCourtEvent, ClientCaseDocument, ClientCaseWorkOrder } from '../../types';
 import type { TaskJournalItem } from '../../utils/taskJournalStore';
 import { CaseDetailPage, CourtSourceProvenance } from './CaseDetailPage';
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 7 } }) }));
 
 function createJournalEvent(overrides: Partial<ClientCaseCourtEvent> = {}): ClientCaseCourtEvent {
   return { id: 80, clientCaseId: 15, eventType: 'hearing', eventTypeLabel: 'Заседание', title: 'Заседание',
@@ -3101,6 +3102,32 @@ describe('CaseDetailPage', () => {
     expect(apiService.bulkUpdateTaskJournalItems).toHaveBeenCalledWith({ ids: [11, 12], status: 'inProgress' });
     expect(screen.getByRole('button', { name: 'Активные · 2' }).getAttribute('aria-pressed')).toBe('true');
     expect((screen.getByRole('checkbox', { name: 'Выбрать все задачи на этой странице' }) as HTMLInputElement).checked).toBe(false);
+  });
+
+  it('PAY-24 billing: keeps its page mounted and blocks tabs/back/edit while the bulk response is pending', async () => {
+    const back = vi.fn();
+    mockCaseTaskServer([createTask({ id: 11, title: 'Ожидающая смена учёта' })]);
+    let resolve!: (value: Awaited<ReturnType<typeof apiService.bulkUpdateTaskJournalItems>>) => void;
+    vi.mocked(apiService.bulkUpdateTaskJournalItems).mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    dialogMock.confirm.mockResolvedValue(true);
+    render(<CaseDetailPage caseId={15} onBack={back} canEditTasks canExportTasks />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Задачи' })); await screen.findByText('Ожидающая смена учёта');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Выбрать все задачи на этой странице' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Изменить учёт выбранных' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Изменить учёт' }));
+    await waitFor(() => expect(apiService.bulkUpdateTaskJournalItems).toHaveBeenCalledOnce());
+    for (const name of ['Реестр дел', 'Редактировать дело', 'Документы', 'Быстрый доступ: Документы']) {
+      expect(screen.getByRole('button', { name }).matches(':disabled')).toBe(true);
+    }
+    fireEvent.keyDown(screen.getByRole('dialog', { name: 'Массовая смена учёта задач' }), { key: 'Escape' });
+    expect(screen.getByRole('dialog', { name: 'Массовая смена учёта задач' })).toBeTruthy(); expect(back).not.toHaveBeenCalled();
+    await act(async () => resolve({ requested: 1, updated: 1, unchanged: 0, skipped: 0, conflicted: 0,
+      items: [{ id: 11, outcome: 'updated', reason: null, updatedAt: '2026-10-24T02:03:04.7654321Z' }] }));
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Реестр дел' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.getByRole('dialog', { name: 'Массовая смена учёта задач' })).toBeTruthy();
+    expect(screen.getByLabelText('Построчный итог смены учёта').textContent).toContain('Учёт изменён.');
+    expect(apiService.getCaseV2).toHaveBeenCalledOnce();
   });
 
   it('PAY-24 pages: reaches task 61 with whole-case counters and the same open callback', async () => {

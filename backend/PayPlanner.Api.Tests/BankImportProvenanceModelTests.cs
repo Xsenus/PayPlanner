@@ -429,26 +429,29 @@ public sealed class BankImportProvenanceModelTests
     }
 
     internal sealed class ModelDatabase(PaymentContext db, string? databaseName = null, string? adminConnection = null,
-        PostgreSqlMigratedTemplate.DatabaseLease? lease = null) : IAsyncDisposable
+        PostgreSqlModelTemplate.DatabaseLease? modelLease = null) : IAsyncDisposable
     {
         public PaymentContext Db { get; } = db;
 
-        internal static async Task<ModelDatabase> CreateFromTemplateAsync(bool postgres, PostgreSqlMigratedTemplate template)
+        public static async Task<ModelDatabase> CreateFromModelTemplateAsync(bool postgres, PostgreSqlModelTemplate modelTemplate)
         {
-            if (!postgres) return new(await SqliteTestContextFactory.CreateAsync());
-            var lease = await template.CreateDatabaseAsync("pp_bank_model_");
-            PostgreSqlPaymentContext? context = null;
+            ArgumentNullException.ThrowIfNull(modelTemplate);
+            if (!postgres) return await CreateAsync(false);
+            var lease = await modelTemplate.CreateDatabaseAsync();
+            PostgreSqlPaymentContext? db = null;
             try
             {
-                context = new PostgreSqlPaymentContext(new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
+                db = new PostgreSqlPaymentContext(new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
                     .UseNpgsql(lease.ConnectionString).Options);
-                await context.Database.OpenConnectionAsync();
-                return new(context, lease: lease);
+                await db.Database.OpenConnectionAsync();
+                Assert.Equal("false", await db.SystemSettings.Where(row => row.Key == "notifications.email.enabled")
+                    .Select(row => row.Value).SingleAsync());
+                return new ModelDatabase(db, modelLease: lease);
             }
             catch (Exception error)
             {
                 var errors = new List<Exception> { error };
-                try { if (context is not null) await context.DisposeAsync(); }
+                try { if (db is not null) await db.DisposeAsync(); }
                 catch (Exception cleanup) { errors.Add(cleanup); }
                 try { await lease.DisposeAsync(); }
                 catch (Exception cleanup) { errors.Add(cleanup); }
@@ -493,12 +496,19 @@ public sealed class BankImportProvenanceModelTests
 
         public async ValueTask DisposeAsync()
         {
-            await Db.DisposeAsync();
-            if (lease is not null)
+            if (modelLease is not null)
             {
-                await lease.DisposeAsync();
+                try { await Db.DisposeAsync(); }
+                catch (Exception error)
+                {
+                    try { await modelLease.DisposeAsync(); }
+                    catch (Exception cleanup) { throw new AggregateException(error, cleanup); }
+                    throw;
+                }
+                await modelLease.DisposeAsync();
                 return;
             }
+            await Db.DisposeAsync();
             if (databaseName is null) return;
             Assert.Matches("^pp_bank_model_[a-f0-9]{32}$", databaseName);
             await using var admin = new NpgsqlConnection(adminConnection!);

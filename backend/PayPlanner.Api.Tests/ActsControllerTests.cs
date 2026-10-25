@@ -361,6 +361,8 @@ public class ActsControllerTests
             "responsible@example.com",
             isActive: true,
             isApproved: true);
+        client.ResponsibleUserId = responsible.Id;
+        await db.SaveChangesAsync();
 
         var controller = new ActsController(db, new NoopFormRequirementsService())
         {

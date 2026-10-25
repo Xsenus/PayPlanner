@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { useTranslation } from "../../hooks/useTranslation";
+import type { RolePermissions } from "../../types/permissions";
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
 import type {
   Act,
@@ -123,11 +124,13 @@ interface LegalEntityModalProps {
   hideAuditSection?: boolean;
   hideDictionaryButtons?: boolean;
   compactReadOnlyView?: boolean;
+  canManageOwnCompanySettings?: boolean;
   canViewCases?: boolean;
   canViewAccounts?: boolean;
   canCreateAccounts?: boolean;
   canViewActs?: boolean;
   canViewPayments?: boolean;
+  relatedRecordPermissions?: Partial<Pick<RolePermissions, 'cases' | 'accounts' | 'acts' | 'payments'>>;
 }
 
 interface LegalEntityImageFieldProps {
@@ -753,11 +756,13 @@ export function LegalEntityModal({
   hideAuditSection = false,
   hideDictionaryButtons = false,
   compactReadOnlyView = false,
+  canManageOwnCompanySettings = true,
   canViewCases = true,
   canViewAccounts = true,
   canCreateAccounts = true,
   canViewActs = true,
   canViewPayments = true,
+  relatedRecordPermissions,
 }: LegalEntityModalProps) {
   const { t } = useTranslation();
   const { confirm } = useDialog();
@@ -961,6 +966,13 @@ export function LegalEntityModal({
   );
 
   const readOnly = !allowEdit && !!initial;
+  const canMutateRelated = (
+    section: 'cases' | 'accounts' | 'acts' | 'payments',
+    permission: 'canCreate' | 'canEdit' | 'canDelete',
+  ) => !readOnly
+    && ({ cases: canViewCases, accounts: canViewAccounts, acts: canViewActs, payments: canViewPayments })[section]
+    && (section !== 'accounts' || permission !== 'canCreate' || canCreateAccounts)
+    && (relatedRecordPermissions === undefined || relatedRecordPermissions[section]?.[permission] === true);
   const isPageMode = mode === "page";
   const currentLegalEntityId = initial?.id ?? null;
   const isOwnLegalEntity =
@@ -2374,21 +2386,21 @@ export function LegalEntityModal({
   };
 
   const openCreateCase = () => {
-    if (!canViewCases || !currentLegalEntityId || readOnly) return;
+    if (!canMutateRelated('cases', 'canCreate') || !currentLegalEntityId) return;
     setCaseMode("create");
     setEditingCase(null);
     setCaseModalOpen(true);
   };
 
   const openEditCase = (clientCase: ClientCase) => {
-    if (!canViewCases || readOnly) return;
+    if (!canMutateRelated('cases', 'canEdit')) return;
     setCaseMode("edit");
     setEditingCase(clientCase);
     setCaseModalOpen(true);
   };
 
   const saveLegalEntityCase = async (patch: Partial<ClientCase>) => {
-    if (!canViewCases || !currentLegalEntityId) return;
+    if (!canMutateRelated('cases', caseMode === 'edit' ? 'canEdit' : 'canCreate') || !currentLegalEntityId) return;
 
     const payload: LegalEntityCasePayload = {
       clientId: null,
@@ -2436,7 +2448,7 @@ export function LegalEntityModal({
   };
 
   const removeLegalEntityCase = async () => {
-    if (!canViewCases || !editingCase) return;
+    if (!canMutateRelated('cases', 'canDelete') || !editingCase) return;
     await deleteLegalEntityCase(editingCase.id);
     if (selectedLegalEntityCaseId === editingCase.id) {
       setSelectedLegalEntityCaseId("all");
@@ -2445,7 +2457,7 @@ export function LegalEntityModal({
   };
 
   const openCreateInvoice = () => {
-    if (!canViewAccounts || !currentLegalEntityId || readOnly) return;
+    if (!canMutateRelated('accounts', 'canCreate') || !currentLegalEntityId) return;
     setInvoiceModalMode("create");
     setSelectedInvoice(null);
     setInvoiceModalError(null);
@@ -2453,7 +2465,7 @@ export function LegalEntityModal({
   };
 
   const openEditInvoice = (invoice: Invoice) => {
-    if (!canViewAccounts || readOnly) return;
+    if (!canMutateRelated('accounts', 'canEdit')) return;
     setInvoiceModalMode("edit");
     setSelectedInvoice(invoice);
     setInvoiceModalError(null);
@@ -2467,7 +2479,7 @@ export function LegalEntityModal({
   };
 
   const submitInvoice = async (payload: InvoiceInput) => {
-    if (!canViewAccounts) return;
+    if (!canMutateRelated('accounts', invoiceModalMode === 'edit' ? 'canEdit' : 'canCreate')) return;
     try {
       setInvoiceSubmitting(true);
       setInvoiceModalError(null);
@@ -2490,7 +2502,7 @@ export function LegalEntityModal({
   };
 
   const openCreateAct = () => {
-    if (!canViewActs || !currentLegalEntityId || readOnly) return;
+    if (!canMutateRelated('acts', 'canCreate') || !currentLegalEntityId) return;
     setActModalMode("create");
     setSelectedAct(null);
     setActModalError(null);
@@ -2498,7 +2510,7 @@ export function LegalEntityModal({
   };
 
   const openEditAct = (act: Act) => {
-    if (!canViewActs || readOnly) return;
+    if (!canMutateRelated('acts', 'canEdit')) return;
     setActModalMode("edit");
     setSelectedAct(act);
     setActModalError(null);
@@ -2512,7 +2524,7 @@ export function LegalEntityModal({
   };
 
   const submitAct = async (payload: ActInput) => {
-    if (!canViewActs) return;
+    if (!canMutateRelated('acts', actModalMode === 'edit' ? 'canEdit' : 'canCreate')) return;
     try {
       setActSubmitting(true);
       setActModalError(null);
@@ -2546,7 +2558,7 @@ export function LegalEntityModal({
   };
 
   const openCreatePayment = (caseId?: number) => {
-    if (!canViewPayments || !currentLegalEntityId || readOnly) return;
+    if (!canMutateRelated('payments', 'canCreate') || !currentLegalEntityId) return;
     if (caseId) {
       setSelectedLegalEntityCaseId(caseId);
     }
@@ -2556,7 +2568,7 @@ export function LegalEntityModal({
   };
 
   const openEditPayment = async (payment: Payment) => {
-    if (!canViewPayments || readOnly) return;
+    if (!canMutateRelated('payments', 'canEdit')) return;
     try {
       const detailedPayment = await apiService.getPayment(payment.id);
       setPaymentModalMode("edit");
@@ -2595,6 +2607,7 @@ export function LegalEntityModal({
   const submitPayment = async (
     payload: PaymentPayload | ({ id: number } & PaymentPayload),
   ) => {
+    if (!canMutateRelated('payments', 'id' in payload ? 'canEdit' : 'canCreate')) return;
     try {
       if ("id" in payload) {
         const { id, ...rest } = payload;
@@ -2620,6 +2633,7 @@ export function LegalEntityModal({
     payload: { id: number } & PaymentPayload,
     remainderDate: string,
   ) => {
+    if (!canMutateRelated('payments', 'canEdit')) return;
     try {
       const { id, ...rest } = payload;
       await apiService.transferPaymentRemainder(
@@ -2643,6 +2657,7 @@ export function LegalEntityModal({
   };
 
   const rollbackPaymentRemainderTransfer = async (paymentId: number) => {
+    if (!canMutateRelated('payments', 'canEdit')) return;
     try {
       await apiService.rollbackPaymentRemainderTransfer(paymentId);
       if (canViewPayments) await legalEntityPaymentsResult.refresh();
@@ -2665,6 +2680,7 @@ export function LegalEntityModal({
     paidAmount: number,
     remainderDate: string,
   ) => {
+    if (!canMutateRelated('payments', 'canEdit')) return;
     try {
       await apiService.adjustPaymentRemainderTransfer(paymentId, paidAmount, remainderDate);
       if (canViewPayments) await legalEntityPaymentsResult.refresh();
@@ -2872,6 +2888,7 @@ export function LegalEntityModal({
             <button
               type="button"
               onClick={openCreateCase}
+              disabled={!canMutateRelated('cases', 'canCreate')}
               className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-100"
             >
               <Plus className="h-4 w-4" />
@@ -2880,6 +2897,7 @@ export function LegalEntityModal({
             <button
               type="button"
               onClick={openCreateInvoice}
+              disabled={!canMutateRelated('accounts', 'canCreate')}
               className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
             >
               <FileText className="h-4 w-4" />
@@ -2888,6 +2906,7 @@ export function LegalEntityModal({
             <button
               type="button"
               onClick={openCreateAct}
+              disabled={!canMutateRelated('acts', 'canCreate')}
               className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
             >
               <FileCheck2 className="h-4 w-4" />
@@ -3017,6 +3036,7 @@ export function LegalEntityModal({
                             <button
                               type="button"
                               onClick={() => openEditCase(clientCase)}
+                              disabled={!canMutateRelated('cases', 'canEdit')}
                               className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
                             >
                               <Pencil className="h-3.5 w-3.5" />
@@ -3061,7 +3081,7 @@ export function LegalEntityModal({
                           <button
                             type="button"
                             onClick={() => openEditInvoice(invoice)}
-                            disabled={readOnly}
+                            disabled={!canMutateRelated('accounts', 'canEdit')}
                             className="truncate text-left font-medium text-slate-900 transition hover:text-blue-700 disabled:hover:text-slate-900"
                           >
                             № {invoice.number || invoice.id}
@@ -3110,7 +3130,7 @@ export function LegalEntityModal({
                           <button
                             type="button"
                             onClick={() => openEditAct(act)}
-                            disabled={readOnly}
+                            disabled={!canMutateRelated('acts', 'canEdit')}
                             className="truncate text-left font-medium text-slate-900 transition hover:text-blue-700 disabled:hover:text-slate-900"
                           >
                             № {act.number || act.id}
@@ -3158,6 +3178,7 @@ export function LegalEntityModal({
               <button
                 type="button"
                 onClick={openCreateCase}
+                disabled={!canMutateRelated('cases', 'canCreate')}
                 className="inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-600 px-3 text-sm font-medium text-white shadow-sm transition hover:bg-emerald-700"
               >
                 <Plus className="h-4 w-4" />
@@ -3168,6 +3189,7 @@ export function LegalEntityModal({
               <button
                 type="button"
                 onClick={() => openCreatePayment()}
+                disabled={!canMutateRelated('payments', 'canCreate')}
                 className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
               >
                 <WalletCards className="h-4 w-4" />
@@ -3178,6 +3200,7 @@ export function LegalEntityModal({
               <button
                 type="button"
                 onClick={openCreateInvoice}
+                disabled={!canMutateRelated('accounts', 'canCreate')}
                 className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
               >
                 <FileText className="h-4 w-4" />
@@ -3188,6 +3211,7 @@ export function LegalEntityModal({
               <button
                 type="button"
                 onClick={openCreateAct}
+                disabled={!canMutateRelated('acts', 'canCreate')}
                 className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
               >
                 <FileCheck2 className="h-4 w-4" />
@@ -3309,6 +3333,7 @@ export function LegalEntityModal({
                 <button
                   type="button"
                   onClick={openCreateCase}
+                  disabled={!canMutateRelated('cases', 'canCreate')}
                   className="mt-5 inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-emerald-700"
                 >
                   <Plus className="h-4 w-4" />
@@ -3443,6 +3468,7 @@ export function LegalEntityModal({
                               <button
                                 type="button"
                                 onClick={() => openCreatePayment(caseItem.id)}
+                                disabled={!canMutateRelated('payments', 'canCreate')}
                                 className="inline-flex h-10 items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-100"
                               >
                                 <Plus className="h-4 w-4" />
@@ -3537,7 +3563,7 @@ export function LegalEntityModal({
                               <button
                                 type="button"
                                 onClick={() => openEditPayment(payment)}
-                                disabled={readOnly}
+                                disabled={!canMutateRelated('payments', 'canEdit')}
                                 className="truncate text-left font-medium text-slate-900 transition hover:text-blue-700 disabled:hover:text-slate-900"
                               >
                                 {payment.description || `Платёж #${payment.id}`}
@@ -3594,7 +3620,7 @@ export function LegalEntityModal({
                             <button
                               type="button"
                               onClick={() => openEditInvoice(invoice)}
-                              disabled={readOnly}
+                              disabled={!canMutateRelated('accounts', 'canEdit')}
                               className="truncate text-left font-medium text-slate-900 transition hover:text-blue-700 disabled:hover:text-slate-900"
                             >
                               № {invoice.number || invoice.id}
@@ -3645,7 +3671,7 @@ export function LegalEntityModal({
                             <button
                               type="button"
                               onClick={() => openEditAct(act)}
-                              disabled={readOnly}
+                              disabled={!canMutateRelated('acts', 'canEdit')}
                               className="truncate text-left font-medium text-slate-900 transition hover:text-blue-700 disabled:hover:text-slate-900"
                             >
                               № {act.number || act.id}
@@ -4546,7 +4572,7 @@ export function LegalEntityModal({
 
         {!compactReadOnlyView ? legalEntityWorkSection : null}
 
-        {clientsSection}
+        {canManageOwnCompanySettings ? clientsSection : null}
 
         <div className="mt-6">
           <LegalEntityFinanceSection
@@ -4561,7 +4587,7 @@ export function LegalEntityModal({
           />
         </div>
 
-        {isOwnLegalEntity && currentLegalEntityId !== null ? (
+        {isOwnLegalEntity && currentLegalEntityId !== null && canManageOwnCompanySettings ? (
           <>
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <label className="text-sm font-medium text-slate-700" htmlFor="company-profile-status">
@@ -5044,7 +5070,7 @@ export function LegalEntityModal({
         ) : null}
       </form>
 
-      {caseModalOpen && canViewCases ? (
+      {caseModalOpen && canMutateRelated('cases', caseMode === 'edit' ? 'canEdit' : 'canCreate') ? (
         <CaseModal
           isOpen={caseModalOpen}
           onClose={() => setCaseModalOpen(false)}
@@ -5058,13 +5084,13 @@ export function LegalEntityModal({
             setEditingCase((current) => current ? { ...current, ...confirmation } : current);
             setLegalEntityCases((current) => current.map((item) => item.id === editingCase?.id ? { ...item, ...confirmation } : item));
           }}
-          onDelete={caseMode === "edit" && !readOnly ? removeLegalEntityCase : undefined}
+          onDelete={caseMode === "edit" && canMutateRelated('cases', 'canDelete') ? removeLegalEntityCase : undefined}
           responsibles={responsibles}
           canViewFinance={canViewPayments}
         />
       ) : null}
 
-      {invoiceModalOpen && canViewAccounts ? (
+      {invoiceModalOpen && canMutateRelated('accounts', invoiceModalMode === 'edit' ? 'canEdit' : 'canCreate') ? (
         <InvoiceModal
           mode={invoiceModalMode}
           open={invoiceModalOpen}
@@ -5102,7 +5128,7 @@ export function LegalEntityModal({
         />
       ) : null}
 
-      {actModalOpen && canViewActs ? (
+      {actModalOpen && canMutateRelated('acts', actModalMode === 'edit' ? 'canEdit' : 'canCreate') ? (
         <ActModal
           open={actModalOpen}
           mode={actModalMode}
@@ -5128,7 +5154,7 @@ export function LegalEntityModal({
         />
       ) : null}
 
-      {paymentModalOpen && canViewPayments ? (
+      {paymentModalOpen && canMutateRelated('payments', paymentModalMode === 'edit' ? 'canEdit' : 'canCreate') ? (
         <PaymentModal
           key={
             paymentModalMode === "edit" && selectedPayment
@@ -5143,7 +5169,7 @@ export function LegalEntityModal({
           onRollbackRemainderTransfer={rollbackPaymentRemainderTransfer}
           onAdjustRemainderTransfer={adjustPaymentRemainderTransfer}
           canViewLinkedInvoices={canViewAccounts}
-          canCreateLinkedInvoices={canViewAccounts && canCreateAccounts && !readOnly}
+          canCreateLinkedInvoices={canMutateRelated('accounts', 'canCreate')}
           defaultLegalEntityId={currentLegalEntityId ?? undefined}
           defaultClientCaseId={selectedCaseId}
           casesPrefetch={canViewCases ? legalEntityCases : []}

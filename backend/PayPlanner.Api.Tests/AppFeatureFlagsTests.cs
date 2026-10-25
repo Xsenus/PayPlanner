@@ -600,6 +600,26 @@ public class AppFeatureFlagsTests
         Assert.DoesNotContain("aka.ms", JsonSerializer.Serialize(item), StringComparison.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [InlineData(true, "ensure-calendars", "Подготовка подключения")]
+    [InlineData(false, "ensure-calendars", "Подготовка подключения")]
+    [InlineData(true, "connection-recovered", "Синхронизация восстановлена")]
+    [InlineData(false, "connection-recovered", "Синхронизация восстановлена")]
+    public async Task CalendarSyncController_GetLogs_LabelsConnectionIncident(bool google, string operation, string label)
+    {
+        await using var scope = await CreateDbScopeAsync();
+        if (google) scope.Db.GoogleCalendarSyncLogs.Add(new GoogleCalendarSyncLog { Direction = "system", Operation = operation, Message = "Диагностика подключения" });
+        else scope.Db.YandexCalendarSyncLogs.Add(new YandexCalendarSyncLog { Direction = "system", Operation = operation, Message = "Диагностика подключения" });
+        await scope.Db.SaveChangesAsync();
+        var controller = new CalendarSyncController(new TestOptionsSnapshot<AppFeatureFlagsOptions>(new AppFeatureFlagsOptions()), scope.Db);
+        var result = await controller.GetLogs(null, null, null, null, ct: CancellationToken.None);
+        var page = Assert.IsType<CalendarSyncLogPageDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        var item = Assert.Single(page.Items);
+        Assert.Equal(label, item.OperationLabel);
+        Assert.Equal("connection", item.TargetType);
+        Assert.Equal("Диагностика подключения", item.Message);
+    }
+
     [Fact]
     public async Task CalendarSyncController_GetLogs_LimitsProviderQueriesForLargePagedLog()
     {
