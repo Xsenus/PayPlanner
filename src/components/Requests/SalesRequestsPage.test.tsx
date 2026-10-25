@@ -30,6 +30,7 @@ vi.mock('../../services/api', () => ({
     createSalesRequest: vi.fn(),
     transitionSalesRequest: vi.fn(),
     createSalesRequestTask: vi.fn(),
+    createTaskJournalItem: vi.fn(),
     getSalesRequestReport: vi.fn(),
     replaceSalesRequestRules: vi.fn(),
     saveSalesRequestStatus: vi.fn(),
@@ -222,6 +223,151 @@ describe('SalesRequestsPage', () => {
     await waitFor(() =>
       expect(apiService.transitionSalesRequest).toHaveBeenLastCalledWith(7, expect.objectContaining({ toStatusId: 3, forceCloseTasks: true })),
     );
+  });
+
+  it('opens only the existing case tasks for a readonly request without creating or copying sales data', async () => {
+    const onOpenCaseTasks = vi.fn();
+    vi.mocked(apiService.getSalesRequest).mockResolvedValue(detail(request({
+      clientCaseId: 45, resultClientCaseId: 99, amount: 123456, comment: 'Private sales negotiations',
+    })));
+    render(<SalesRequestsPage allowCreate={false} allowEdit={false} allowAnalytics={false} initialRequestId={7} currentUserId={1} onOpenCaseTasks={onOpenCaseTasks} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Открыть задачи дела' }));
+
+    expect(onOpenCaseTasks.mock.calls).toEqual([[45]]);
+    expect(screen.getByText(/Рабочая задача создаётся в деле и не открывает заявку юристу/)).toBeTruthy();
+    expect(apiService.createTaskJournalItem).not.toHaveBeenCalled();
+    expect(apiService.createSalesRequestTask).not.toHaveBeenCalled();
+    expect(apiService.updateSalesRequest).not.toHaveBeenCalled();
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, null, 0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
+    'does not substitute a result case when the existing case id is %s', async (clientCaseId) => {
+      const onOpenCaseTasks = vi.fn();
+      vi.mocked(apiService.getSalesRequest).mockResolvedValue(detail(request({ clientCaseId, resultClientCaseId: 99 })));
+      render(<SalesRequestsPage allowCreate allowEdit allowAnalytics={false} initialRequestId={7} currentUserId={1} onOpenCaseTasks={onOpenCaseTasks} />);
+
+      await screen.findByTestId('sales-request-detail');
+
+      expect(screen.queryByRole('button', { name: 'Открыть задачи дела' })).toBeNull();
+      expect(onOpenCaseTasks).not.toHaveBeenCalled();
+      expect(apiService.createTaskJournalItem).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not offer case navigation without the host cases and tasks view permission', async () => {
+    vi.mocked(apiService.getSalesRequest).mockResolvedValue(detail(request({ clientCaseId: 45 })));
+    render(<SalesRequestsPage allowCreate allowEdit allowAnalytics={false} initialRequestId={7} currentUserId={1} />);
+
+    await screen.findByTestId('sales-request-detail');
+
+    expect(screen.queryByRole('button', { name: 'Открыть задачи дела' })).toBeNull();
+  });
+
+  it('keeps a request draft when case navigation is cancelled', async () => {
+    const onOpenCaseTasks = vi.fn();
+    confirm.mockResolvedValue(false);
+    vi.mocked(apiService.getSalesRequest).mockResolvedValue(detail(request({ clientCaseId: 45 })));
+    render(<SalesRequestsPage allowCreate allowEdit allowAnalytics={false} initialRequestId={7} currentUserId={1} onOpenCaseTasks={onOpenCaseTasks} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Изменить данные заявки' }));
+    await userEvent.type(screen.getByLabelText('Суть запроса (правка)'), ' несохранённый текст');
+    const originalAddress = window.location.href;
+
+    await userEvent.click(screen.getByRole('button', { name: 'Открыть задачи дела' }));
+    await waitFor(() => expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Перейти к задачам дела?' })));
+
+    expect(onOpenCaseTasks).not.toHaveBeenCalled();
+    expect((screen.getByLabelText('Суть запроса (правка)') as HTMLTextAreaElement).value).toContain('несохранённый текст');
+    expect(window.location.href).toBe(originalAddress);
+    expect(apiService.updateSalesRequest).not.toHaveBeenCalled();
+  });
+
+  it('opens the case only after confirmation without saving a pending sales task', async () => {
+    const onOpenCaseTasks = vi.fn();
+    vi.mocked(apiService.getSalesRequest).mockResolvedValue(detail(request({ clientCaseId: 45 })));
+    render(<SalesRequestsPage allowCreate allowEdit allowAnalytics={false} initialRequestId={7} currentUserId={1} onOpenCaseTasks={onOpenCaseTasks} />);
+    await userEvent.type(await screen.findByRole('textbox', { name: 'Текст задачи' }), 'Незавершённое поручение');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Открыть задачи дела' }));
+
+    await waitFor(() => expect(onOpenCaseTasks.mock.calls).toEqual([[45]]));
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(apiService.createSalesRequestTask).not.toHaveBeenCalled();
+    expect(apiService.createTaskJournalItem).not.toHaveBeenCalled();
+  });
+
+  it('does not navigate after case rights are revoked while confirmation is pending', async () => {
+    let finishConfirmation!: (confirmed: boolean) => void;
+    confirm.mockImplementationOnce(() => new Promise<boolean>((resolve) => { finishConfirmation = resolve; }));
+    const onOpenCaseTasks = vi.fn();
+    vi.mocked(apiService.getSalesRequest).mockResolvedValue(detail(request({ clientCaseId: 45 })));
+    const props = { allowCreate: true, allowEdit: true, allowAnalytics: false, initialRequestId: 7, currentUserId: 1 };
+    const view = render(<SalesRequestsPage {...props} onOpenCaseTasks={onOpenCaseTasks} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Изменить данные заявки' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Открыть задачи дела' }));
+    await waitFor(() => expect(confirm).toHaveBeenCalled());
+
+    view.rerender(<SalesRequestsPage {...props} />);
+    await act(async () => { finishConfirmation(true); });
+
+    expect(onOpenCaseTasks).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Открыть задачи дела' })).toBeNull();
+    expect(screen.getByLabelText('Суть запроса (правка)')).toBeTruthy();
+  });
+
+  it('does not navigate an old detail after another request opens during confirmation', async () => {
+    let finishConfirmation!: (confirmed: boolean) => void;
+    confirm.mockImplementationOnce(() => new Promise<boolean>((resolve) => { finishConfirmation = resolve; }));
+    const onOpenCaseTasks = vi.fn();
+    vi.mocked(apiService.getSalesRequest).mockImplementation(async (id) => detail(request({ id, clientCaseId: id === 7 ? 45 : 88 })));
+    const props = { allowCreate: true, allowEdit: true, allowAnalytics: false, currentUserId: 1, onOpenCaseTasks };
+    const view = render(<SalesRequestsPage {...props} initialRequestId={7} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Изменить данные заявки' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Открыть задачи дела' }));
+    await waitFor(() => expect(confirm).toHaveBeenCalled());
+
+    view.rerender(<SalesRequestsPage {...props} initialRequestId={8} />);
+    await waitFor(() => expect(screen.getByRole('heading', { name: /Заявка №8/ })).toBeTruthy());
+    await act(async () => { finishConfirmation(true); });
+
+    expect(onOpenCaseTasks).not.toHaveBeenCalled();
+  });
+
+  it('ignores the previous actor detail response and navigates only the fresh actor detail', async () => {
+    let finishOldRead!: (value: ReturnType<typeof detail>) => void;
+    vi.mocked(apiService.getSalesRequest)
+      .mockImplementationOnce(() => new Promise((resolve) => { finishOldRead = resolve; }))
+      .mockResolvedValueOnce(detail(request({ clientCaseId: 88 })));
+    const onOpenCaseTasks = vi.fn();
+    const props = { allowCreate: true, allowEdit: true, allowAnalytics: false, initialRequestId: 7, onOpenCaseTasks };
+    const view = render(<SalesRequestsPage {...props} currentUserId={1} />);
+    await waitFor(() => expect(apiService.getSalesRequest).toHaveBeenCalledOnce());
+
+    view.rerender(<SalesRequestsPage {...props} currentUserId={2} />);
+    await screen.findByRole('button', { name: 'Открыть задачи дела' });
+    await act(async () => { finishOldRead(detail(request({ clientCaseId: 45 }))); });
+    await userEvent.click(screen.getByRole('button', { name: 'Открыть задачи дела' }));
+
+    expect(onOpenCaseTasks.mock.calls).toEqual([[88]]);
+    expect(apiService.createTaskJournalItem).not.toHaveBeenCalled();
+  });
+
+  it('does not navigate after the actor changes during confirmation', async () => {
+    let finishConfirmation!: (confirmed: boolean) => void;
+    confirm.mockImplementationOnce(() => new Promise<boolean>((resolve) => { finishConfirmation = resolve; }));
+    const onOpenCaseTasks = vi.fn();
+    vi.mocked(apiService.getSalesRequest).mockResolvedValue(detail(request({ clientCaseId: 45 })));
+    const props = { allowCreate: true, allowEdit: true, allowAnalytics: false, initialRequestId: 7, onOpenCaseTasks };
+    const view = render(<SalesRequestsPage {...props} currentUserId={1} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Изменить данные заявки' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Открыть задачи дела' }));
+    await waitFor(() => expect(confirm).toHaveBeenCalled());
+
+    view.rerender(<SalesRequestsPage {...props} currentUserId={2} />);
+    await act(async () => { finishConfirmation(true); });
+
+    expect(onOpenCaseTasks).not.toHaveBeenCalled();
   });
 });
 

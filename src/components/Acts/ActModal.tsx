@@ -3,6 +3,7 @@ import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { ArrowLeft, ChevronDown, Link2, Loader2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../services/api';
 import type {
   Act,
@@ -23,7 +24,7 @@ import { useFormRequirements } from '../../hooks/useFormRequirements';
 import { useDocumentStatusSettings } from '../../hooks/useDocumentStatusSettings';
 import { fromInputToApiDate, todayYMDInTimeZone, toDateInputValue } from '../../utils/dateUtils';
 import { getDocumentStatusCodes, getDocumentStatusLabels } from '../../utils/documentStatusSettings';
-import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { extractDisplayErrorMessage, isHttpErrorStatus } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
@@ -52,6 +53,15 @@ interface ActModalProps {
   onBack?: () => void;
   onOpenInvoice?: (invoiceId: number, type?: PaymentKind) => void;
   canViewInvoices?: boolean;
+  accessScopeKey?: string;
+  onActUnavailable?: (actId: number, status: 401 | 403 | 404) => void;
+}
+
+type ActReadState = { scope: string; kind: 'loading' | 'ready' | 'retry' | 'unavailable'; status?: 401 | 403 | 404 };
+
+function actUnavailableMessage(status: 401 | 403 | 404): string {
+  if (status === 401) return 'Сеанс истёк. Войдите снова, чтобы открыть акт.';
+  return status === 403 ? 'Нет доступа к акту.' : 'Акт больше недоступен или не найден.';
 }
 
 type FormState = {
@@ -498,14 +508,31 @@ export function ActModal({
   onBack,
   onOpenInvoice,
   canViewInvoices = true,
+  accessScopeKey,
+  onActUnavailable,
 }: ActModalProps) {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const actorScope = JSON.stringify([user?.id, user?.role?.id]);
+  const editorScope = JSON.stringify([open, mode, act?.id, actorScope, accessScopeKey]);
+  const editorScopeRef = useRef(editorScope);
+  editorScopeRef.current = editorScope;
+  const verifiedActorScopeRef = useRef(actorScope);
+  const onActUnavailableRef = useRef(onActUnavailable);
+  onActUnavailableRef.current = onActUnavailable;
+  const actReadRevisionRef = useRef(0);
+  const [actReadAttempt, setActReadAttempt] = useState(0);
+  const [actReadState, setActReadState] = useState<ActReadState>({ scope: editorScope, kind: 'loading' });
+  const actReadStateRef = useRef(actReadState);
+  actReadStateRef.current = actReadState;
   const { isRequired } = useFormRequirements('acts', open);
   const documentStatusSettings = useDocumentStatusSettings();
   const { legalEntities } = useLegalEntities();
   const profileTimeZoneId = useUserTimeZone();
   const profileTimeZoneIdRef = useRef(profileTimeZoneId);
   profileTimeZoneIdRef.current = profileTimeZoneId;
+  const formDefaultsRef = useRef({ defaultClientId, defaultResponsibleId, initialValues });
+  formDefaultsRef.current = { defaultClientId, defaultResponsibleId, initialValues };
   const defaultDate = todayYMDInTimeZone(profileTimeZoneId);
   const defaultDateRef = useRef(defaultDate);
   const [form, setForm] = useState<FormState>(() =>
@@ -519,6 +546,7 @@ export function ActModal({
   const [invoiceOptionsLoading, setInvoiceOptionsLoading] = useState(false);
   const [invoiceOptionsError, setInvoiceOptionsError] = useState<string | null>(null);
   const [actDetails, setActDetails] = useState<Act | null>(null);
+  const [actDetailsScope, setActDetailsScope] = useState(editorScope);
   const [actDetailsLoading, setActDetailsLoading] = useState(false);
   const [actDetailsError, setActDetailsError] = useState<string | null>(null);
   const [selectedLineQuantities, setSelectedLineQuantities] = useState<Record<string, string>>({});
@@ -531,6 +559,8 @@ export function ActModal({
 
   const isEdit = mode === 'edit';
   const isPageMode = presentation === 'page';
+  const actUnavailable = actReadState.scope === editorScope && actReadState.kind === 'unavailable';
+  const actReadBlocked = isEdit && (actReadState.scope !== editorScope || actReadState.kind !== 'ready');
   const linkedInvoiceId = form.invoiceId ? Number(form.invoiceId) : null;
 
   useEffect(() => {
@@ -547,8 +577,9 @@ export function ActModal({
       setManualLineItems([]);
       manualLineItemsSeedRef.current = null;
       setLineItemPickerOpen(false);
+      setCounterpartyPickerOpen(false);
     }
-  }, [open, act, defaultClientId, defaultResponsibleId, initialValues]);
+  }, [actorScope, open, act, defaultClientId, defaultResponsibleId, initialValues]);
 
   useEffect(() => {
     if (!open || isEdit) {
@@ -565,7 +596,7 @@ export function ActModal({
   }, [defaultDate, isEdit, open]);
 
   useEffect(() => {
-    if (!open || !canViewInvoices) {
+    if (!open || !canViewInvoices || actUnavailable) {
       setInvoiceOptions([]);
       setInvoiceOptionsLoading(false);
       setInvoiceOptionsError(null);
@@ -625,10 +656,10 @@ export function ActModal({
     return () => {
       cancelled = true;
     };
-  }, [canViewInvoices, open]);
+  }, [actUnavailable, canViewInvoices, editorScope, open]);
 
   useEffect(() => {
-    if (!open || !linkedInvoiceId || !canViewInvoices) {
+    if (!open || !linkedInvoiceId || !canViewInvoices || actUnavailable) {
       setInvoiceDetails(null);
       setInvoiceError(null);
       setInvoiceLoading(false);
@@ -665,49 +696,75 @@ export function ActModal({
     return () => {
       cancelled = true;
     };
-  }, [canViewInvoices, open, linkedInvoiceId]);
+  }, [actUnavailable, canViewInvoices, editorScope, open, linkedInvoiceId]);
 
   useEffect(() => {
+    const revision = ++actReadRevisionRef.current;
+    let cancelled = false;
+    const isCurrent = () => !cancelled && editorScopeRef.current === editorScope && actReadRevisionRef.current === revision;
+    const setRead = (kind: ActReadState['kind'], status?: 401 | 403 | 404) => {
+      const next = { scope: editorScope, kind, status };
+      actReadStateRef.current = next;
+      setActReadState(next);
+    };
+    const unavailable = (status: 401 | 403 | 404) => {
+      setRead('unavailable', status);
+      setActDetails(null);
+      setActDetailsError(actUnavailableMessage(status));
+      setCounterpartyPickerOpen(false);
+      setLineItemPickerOpen(false);
+      if (act?.id) onActUnavailableRef.current?.(act.id, status);
+    };
     if (!open || !isEdit || !act?.id) {
+      setRead(isEdit ? 'unavailable' : 'ready', isEdit ? 404 : undefined);
       setActDetails(null);
       setActDetailsError(null);
       setActDetailsLoading(false);
-      return;
+      return () => { cancelled = true; actReadRevisionRef.current += 1; };
     }
 
-    let cancelled = false;
+    setRead('loading');
     setActDetailsLoading(true);
     setActDetailsError(null);
 
     void apiService
       .getAct(act.id)
       .then((value) => {
-        if (cancelled) {
-          return;
+        if (!isCurrent()) return;
+        if (!value || value.id !== act.id) { unavailable(404); return; }
+        if (verifiedActorScopeRef.current !== actorScope) {
+          const defaults = formDefaultsRef.current;
+          setForm(normalizeActToForm(value, defaults.defaultClientId, defaults.defaultResponsibleId, defaults.initialValues, profileTimeZoneIdRef.current));
+          setLocalError(null);
         }
-
+        verifiedActorScopeRef.current = actorScope;
         setActDetails(value);
+        setActDetailsScope(editorScope);
+        setRead('ready');
       })
       .catch((error) => {
-        if (cancelled) {
-          return;
-        }
-
-        setActDetails(act);
-        setActDetailsError(extractDisplayErrorMessage(error, 'Не удалось загрузить позиции акта'));
+        if (!isCurrent()) return;
+        const status = ([401, 403, 404] as const).find((candidate) => isHttpErrorStatus(error, candidate));
+        if (status) { unavailable(status); return; }
+        setRead('retry');
+        setActDetailsError('Не удалось загрузить актуальные данные акта. Черновик сохранён. Повторите загрузку перед сохранением.');
       })
       .finally(() => {
-        if (!cancelled) {
+        if (isCurrent()) {
           setActDetailsLoading(false);
         }
       });
 
     return () => {
       cancelled = true;
+      actReadRevisionRef.current += 1;
     };
-  }, [open, isEdit, act]);
+  }, [act, actorScope, actReadAttempt, editorScope, isEdit, open]);
 
-  const currentAct = useMemo(() => actDetails ?? act, [act, actDetails]);
+  const currentAct = useMemo(
+    () => actDetailsScope === editorScope && actDetails?.id === act?.id ? actDetails : act,
+    [act, actDetails, actDetailsScope, editorScope],
+  );
   const selectedInvoiceLookupRecord = useMemo(
     () => invoiceOptions.find((item) => String(item.id) === String(form.invoiceId)) ?? null,
     [form.invoiceId, invoiceOptions],
@@ -1350,6 +1407,10 @@ export function ActModal({
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (editorScopeRef.current !== editorScope || submitting || (isEdit && (
+      actReadStateRef.current.scope !== editorScope || actReadStateRef.current.kind !== 'ready'
+    ))) return;
+    const revision = actReadRevisionRef.current;
     setLocalError(null);
 
     if (!form.number.trim()) {
@@ -1495,7 +1556,7 @@ export function ActModal({
     try {
       await onSubmit(payload);
     } catch (error) {
-      if (error instanceof Error && !errorMessage) {
+      if (editorScopeRef.current === editorScope && actReadRevisionRef.current === revision && error instanceof Error && !errorMessage) {
         setLocalError(error.message);
       }
     }
@@ -1503,6 +1564,28 @@ export function ActModal({
 
   if (!open) {
     return null;
+  }
+
+  if (isEdit && (actUnavailable || actReadState.scope !== editorScope || verifiedActorScopeRef.current !== actorScope)) {
+    const pending = actReadState.scope !== editorScope || actReadState.kind === 'loading';
+    const unavailableContent = (
+      <div className="w-full max-w-xl rounded-xl border border-slate-200 bg-white p-4">
+        <p role={pending ? 'status' : 'alert'} className="text-sm text-slate-700">
+          {pending ? 'Проверка доступа к акту...' : actDetailsError || 'Акт недоступен.'}
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button type="button" onClick={isPageMode ? (onBack ?? onClose) : onClose} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+            {isPageMode ? 'Назад' : 'Закрыть'}
+          </button>
+          {actReadState.scope === editorScope && actReadState.kind === 'retry' ? (
+            <button type="button" onClick={() => setActReadAttempt((attempt) => attempt + 1)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">Повторить загрузку акта</button>
+          ) : null}
+        </div>
+      </div>
+    );
+    return isPageMode
+      ? <div className="w-full px-4 py-6 sm:px-6 lg:px-8">{unavailableContent}</div>
+      : <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4 py-8">{unavailableContent}</div>;
   }
 
   const content = (
@@ -2275,7 +2358,10 @@ export function ActModal({
 
         {(lookupsError || invoiceError || actDetailsError) && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-            {lookupsError || invoiceError || actDetailsError}
+            {actDetailsError || lookupsError || invoiceError}
+            {isEdit && actReadState.scope === editorScope && actReadState.kind === 'retry' ? (
+              <button type="button" onClick={() => setActReadAttempt((attempt) => attempt + 1)} className="ml-2 underline">Повторить загрузку акта</button>
+            ) : null}
           </div>
         )}
 
@@ -2295,7 +2381,7 @@ export function ActModal({
           </button>
           <button
             type="submit"
-            disabled={submitting || invoiceLoading || actDetailsLoading}
+            disabled={submitting || invoiceLoading || actDetailsLoading || actReadBlocked}
             className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-indigo-300"
           >
             {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

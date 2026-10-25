@@ -226,6 +226,63 @@ describe('InternalMessenger', () => {
     expect(await screen.findByText('Готово')).toBeTruthy();
   });
 
+  it.each(['messenger', 'task'] as const)('keeps IME confirmation in the draft and sends only ordinary Enter: %s', async (host) => {
+    const threadId = host === 'task' ? 44 : thread.id;
+    if (host === 'task') chatApiMock.openTask.mockResolvedValue({ ...thread, id: threadId, kind: 'task', taskJournalItemId: 101 });
+    render(host === 'task' ? <TaskChatPanel taskId={101} /> : <InternalMessenger />);
+    const editor = await screen.findByPlaceholderText('Напишите сообщение…');
+    const draft = 'Многострочный черновик\n入力中';
+    fireEvent.change(editor, { target: { value: draft } });
+    fireEvent.compositionStart(editor);
+    fireEvent.keyDown(editor, { key: 'Enter', code: 'Enter', isComposing: false });
+    expect(chatApiMock.sendMessage).not.toHaveBeenCalled();
+    expect(chatApiMock.editMessage).not.toHaveBeenCalled();
+    expect((editor as HTMLTextAreaElement).value).toBe(draft);
+    expect(sessionStorage.getItem(`payplanner.chatDraft.v1.7.${threadId}`)).toBe(draft);
+
+    fireEvent.compositionEnd(editor);
+    fireEvent.keyDown(editor, { key: 'Enter', code: 'Enter', isComposing: true });
+    fireEvent.keyDown(editor, { key: 'Enter', code: 'Enter', shiftKey: true });
+    expect(chatApiMock.sendMessage).not.toHaveBeenCalled();
+    expect((editor as HTMLTextAreaElement).value).toBe(draft);
+    expect(sessionStorage.getItem(`payplanner.chatDraft.v1.7.${threadId}`)).toBe(draft);
+
+    fireEvent.keyDown(editor, { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(chatApiMock.sendMessage).toHaveBeenCalledWith(threadId, draft, [], null, [], expect.any(String)));
+    expect(chatApiMock.sendMessage).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect((editor as HTMLTextAreaElement).value).toBe(''));
+    expect(sessionStorage.getItem(`payplanner.chatDraft.v1.7.${threadId}`)).toBeNull();
+  });
+
+  it('does not save a composing message edit or replace the separate chat draft', async () => {
+    const mine = { ...message, authorUserId: 7, authorName: 'Я', text: 'Моё сообщение' };
+    chatApiMock.getMessages.mockResolvedValue({ items: [mine], hasMore: false });
+    chatApiMock.editMessage.mockImplementation(async (_id: number, text: string) => ({ ...mine, text }));
+    render(<InternalMessenger />);
+    await screen.findByText(mine.text);
+    const editor = screen.getByPlaceholderText('Напишите сообщение…');
+    const draft = 'Отдельный черновик\nНе отправлять';
+    fireEvent.change(editor, { target: { value: draft } });
+    fireEvent.click(screen.getByRole('button', { name: 'Действия' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать' }));
+    const edited = 'Исправленное сообщение\n入力中';
+    fireEvent.change(editor, { target: { value: edited } });
+    fireEvent.compositionStart(editor);
+    fireEvent.keyDown(editor, { key: 'Enter', isComposing: true });
+    expect(chatApiMock.editMessage).not.toHaveBeenCalled();
+    expect(chatApiMock.sendMessage).not.toHaveBeenCalled();
+    expect((editor as HTMLTextAreaElement).value).toBe(edited);
+    expect(sessionStorage.getItem('payplanner.chatDraft.v1.7.12')).toBe(draft);
+
+    fireEvent.compositionEnd(editor);
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    await waitFor(() => expect(chatApiMock.editMessage).toHaveBeenCalledWith(mine.id, edited));
+    expect(chatApiMock.editMessage).toHaveBeenCalledTimes(1);
+    expect(chatApiMock.sendMessage).not.toHaveBeenCalled();
+    await waitFor(() => expect((editor as HTMLTextAreaElement).value).toBe(draft));
+    expect(sessionStorage.getItem('payplanner.chatDraft.v1.7.12')).toBe(draft);
+  });
+
   it('keeps reply, text, files and identity while copies wait, including a failed exact retry', async () => {
     chatApiMock.sendMessage.mockImplementationOnce(async (...args) => ({ clientRequestId: args[5], status: 'waiting',
       automaticRecovery: true, description: 'Подготавливаются копии файлов.' }));

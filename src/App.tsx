@@ -697,6 +697,13 @@ function AppContent() {
     [activeTab, permissions.cases.canView],
   );
 
+  const openRequestCaseTasks = useCallback((caseId: number) => {
+    if (!user || !permissionsLoaded || !Number.isSafeInteger(caseId) || caseId <= 0 || !permissions.cases.canView || !permissions.tasks.canView) return;
+    // Start from a clean case route: a request deep-link must not travel to the task context.
+    window.history.replaceState({}, document.title, `/cases/${caseId}?ppCaseTab=tasks`);
+    openCaseDetailSection(caseId, 'tasks');
+  }, [openCaseDetailSection, permissions.cases.canView, permissions.tasks.canView, permissionsLoaded, user]);
+
   const openTaskDetail = useCallback(
     (taskId: number, options?: { returnTo?: Tab | null }) => {
       if (!permissions.tasks.canView || !(taskId > 0)) {
@@ -1347,6 +1354,8 @@ function AppContent() {
                 allowAnalytics={isAdminRole || permissions.requests?.canViewAnalytics === true}
                 allowConfigure={isAdminRole}
                 initialRequestId={Number(new URLSearchParams(window.location.search).get('requestId')) || null}
+                currentUserId={user?.id ?? null}
+                onOpenCaseTasks={user && permissionsLoaded && permissions.cases.canView && permissions.tasks.canView ? openRequestCaseTasks : undefined}
               />
             )
           : renderNoAccess('Раздел заявок недоступен для вашей роли.');

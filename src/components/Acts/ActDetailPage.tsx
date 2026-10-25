@@ -187,6 +187,8 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
   const actLoadRevisionRef = useRef(0);
   const [actState, setActState] = useState<{ scope: string; value: Act | null }>({ scope: actScope, value: null });
   const act = actState.scope === actScope ? actState.value : null;
+  const availableActRef = useRef(act);
+  availableActRef.current = act;
   const loadedActId = act?.id ?? null;
   const setAct = useCallback((value: Act | null) => {
     if (actScopeRef.current === actScope) setActState({ scope: actScope, value });
@@ -549,9 +551,10 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
     }
   };
 
+  const editorRevision = actLoadRevisionRef.current;
   const handleActSubmit = async (payload: ActInput) => {
-    if (!act || !canEdit || editorSubmitting) return;
-    const revision = actLoadRevisionRef.current;
+    if (!act || !editorOpen || actScopeRef.current !== actScope || actLoadRevisionRef.current !== editorRevision || availableActRef.current?.id !== act.id || !canEdit || editorSubmitting) return;
+    const revision = editorRevision;
     const isCurrent = () => actScopeRef.current === actScope && actLoadRevisionRef.current === revision;
 
     setEditorSubmitting(true);
@@ -575,6 +578,21 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
       if (isCurrent()) setEditorSubmitting(false);
     }
   };
+
+  const handleEditorActUnavailable = useCallback((unavailableId: number, status: 401 | 403 | 404) => {
+    if (actScopeRef.current !== actScope || actLoadRevisionRef.current !== editorRevision || unavailableId !== actId) return;
+    actLoadRevisionRef.current += 1;
+    availableActRef.current = null;
+    setAct(null);
+    setLoading(false);
+    setError(status === 401 ? 'Сеанс истёк. Войдите снова, чтобы открыть акт.' : status === 403 ? 'Нет доступа к акту.' : 'Акт больше недоступен или не найден.');
+    setDocumentPreviewHtml('');
+    setDocumentPreviewError(null);
+    setDocumentPreviewLoading(false);
+    setEditorOpen(false);
+    setEditorSubmitting(false);
+    setEditorError(null);
+  }, [actId, actScope, editorRevision, setAct]);
 
   const handleStatusAction = useCallback(async (
     targetStatus: ActStatus,
@@ -841,11 +859,13 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
           act={act}
           onClose={() => {
             if (editorSubmitting) return;
+            actLoadRevisionRef.current += 1;
             setEditorError(null);
             setEditorOpen(false);
           }}
           onBack={() => {
             if (editorSubmitting) return;
+            actLoadRevisionRef.current += 1;
             setEditorError(null);
             setEditorOpen(false);
           }}
@@ -859,6 +879,8 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
           presentation="page"
           onOpenInvoice={canViewLinkedAccounts ? onOpenInvoice : undefined}
           canViewInvoices={canViewLinkedAccounts}
+          accessScopeKey={actScope}
+          onActUnavailable={handleEditorActUnavailable}
         />
       </div>
     );
@@ -881,6 +903,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
         <div className="rounded-2xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-700">
           {error ?? 'Акт не найден.'}
         </div>
+        <button type="button" onClick={onBack} className="mt-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">К списку актов</button>
       </div>
     );
   }
@@ -893,19 +916,19 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
         </div>
       ) : null}
       <div className="relative w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-          <div className="flex items-center gap-3">
+        <div className="flex flex-col items-stretch gap-3 border-b border-slate-200 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-3 sm:flex-1">
             <button
               type="button"
               onClick={onBack}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+              className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
             >
               <ArrowLeft className="h-4 w-4" />
               Назад
             </button>
 
-            <div>
-              <h2 className="text-xl font-semibold text-slate-900">
+            <div className="min-w-0">
+              <h2 className="break-words text-xl font-semibold text-slate-900">
                 Акт №{act.number || '—'} от {formatDate(act.date)}
               </h2>
               <p className="text-sm text-slate-500">
@@ -914,7 +937,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2 self-end sm:self-auto">
             {renderWorkflowStatusControl()}
             {canEdit ? (
               <button

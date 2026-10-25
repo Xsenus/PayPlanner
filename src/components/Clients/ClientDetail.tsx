@@ -6775,7 +6775,7 @@ export function ClientDetail({
                     {profileCardTitles.contacts}
                   </h3>
                   <div className="grid gap-4 md:grid-cols-2">
-                      {clientFormState.kind === "individual" && (
+                      {clientProfileEditing ? (
                           <div className="md:col-span-2 grid gap-4 md:grid-cols-2">
                             {(["phones", "emails"] as const).map((field) => (
                               <div key={field}>
@@ -6835,6 +6835,21 @@ export function ClientDetail({
                               </div>
                             ))}
                           </div>
+                        ) : (
+                          <dl className="md:col-span-2 grid gap-3 md:grid-cols-2" aria-label="Телефоны и email">
+                            {(["phones", "emails"] as const).map((field) => (
+                              <div key={field} className="min-w-0">
+                                <dt className="mb-2 text-sm text-gray-500">{field === "phones" ? "Телефоны" : "Email"}</dt>
+                                <dd className="min-w-0 text-sm text-gray-900">
+                                  <ul className="space-y-1">
+                                    {(clientFormState[field].length > 0 ? clientFormState[field] : [""]).map((value, index) => (
+                                      <li key={`${field}-${index}`} className="[overflow-wrap:anywhere]">{value || "Не указано"}</li>
+                                    ))}
+                                  </ul>
+                                </dd>
+                              </div>
+                            ))}
+                          </dl>
                         )}
                       {clientFormState.kind === "individual" && (
                           <ClientAddressEntriesForm
@@ -7808,37 +7823,56 @@ export function ClientDetail({
                 </section>
               )}
 
-              <div className="md:col-span-2 grid gap-3 md:grid-cols-2">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    {"Комментарий к расширенной карточке" +
-                      requiredMark("Comment")}
-                  </label>
-                  <textarea
-                    name="comment"
-                    value={clientFormState.comment}
-                    onChange={handleClientFormChange}
-                    rows={3}
-                    disabled={!canEditClientProfile}
-                    className={`w-full px-3 py-2 border rounded-lg focus:ring-2 ${canEditClientProfile ? "bg-white" : "bg-gray-100"} ${requiredInputClass("Comment", clientFormState.comment)}`}
-                    placeholder={t("additionalInfo")}
-                  />
+              {clientFormState.kind === "individual" && !clientProfileEditing ? (
+                <dl aria-label="Заметки клиента" className="md:col-span-2 grid min-w-0 gap-3 md:grid-cols-2">
+                  <div className="min-w-0">
+                    <dt className="mb-2 text-sm text-gray-500">
+                      {"Комментарий к расширенной карточке" + requiredMark("Comment")}
+                    </dt>
+                    <dd className="min-w-0 whitespace-pre-wrap text-sm text-gray-900 [overflow-wrap:anywhere]">
+                      {clientFormState.comment || "Не указано"}
+                    </dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="mb-2 text-sm text-gray-500">Исторические заметки (не удаляются)</dt>
+                    <dd className="min-w-0 whitespace-pre-wrap text-sm text-gray-900 [overflow-wrap:anywhere]">
+                      {clientFormState.legacyNotes || "Не указано"}
+                    </dd>
+                  </div>
+                </dl>
+              ) : (
+                <div className="md:col-span-2 grid gap-3 md:grid-cols-2">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      {"Комментарий к расширенной карточке" +
+                        requiredMark("Comment")}
+                    </label>
+                    <textarea
+                      name="comment"
+                      value={clientFormState.comment}
+                      onChange={handleClientFormChange}
+                      rows={3}
+                      disabled={!canEditClientProfile}
+                      className={`w-full px-3 py-2 border rounded-lg focus:ring-2 ${canEditClientProfile ? "bg-white" : "bg-gray-100"} ${requiredInputClass("Comment", clientFormState.comment)}`}
+                      placeholder={t("additionalInfo")}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Исторические заметки (не удаляются)
+                    </label>
+                    <textarea
+                      name="legacyNotes"
+                      value={clientFormState.legacyNotes}
+                      onChange={handleClientFormChange}
+                      rows={3}
+                      disabled={!canEditClientProfile}
+                      className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 ${canEditClientProfile ? "bg-white" : "bg-gray-100"}`}
+                      placeholder={t("notes") || "Заметки"}
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Исторические заметки (не удаляются)
-                  </label>
-                  <textarea
-                    name="legacyNotes"
-                    value={clientFormState.legacyNotes}
-                    onChange={handleClientFormChange}
-                    rows={3}
-                    disabled={!canEditClientProfile}
-                    className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 ${canEditClientProfile ? "bg-white" : "bg-gray-100"}`}
-                    placeholder={t("notes") || "Заметки"}
-                  />
-                </div>
-              </div>
+              )}
               <div className="md:col-span-2 flex items-center gap-3">
                 <SystemCheckbox
                   type="checkbox"

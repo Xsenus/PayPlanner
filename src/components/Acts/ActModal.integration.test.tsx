@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ActModal } from './ActModal';
@@ -12,6 +12,7 @@ const {
   getClientsV2Mock,
   getLegalEntitiesMock,
   getLegalEntitiesPagedMock,
+  modalAuthState,
 } = vi.hoisted(() => ({
   getActMock: vi.fn(),
   getInvoiceMock: vi.fn(),
@@ -20,7 +21,10 @@ const {
   getClientsV2Mock: vi.fn(),
   getLegalEntitiesMock: vi.fn(),
   getLegalEntitiesPagedMock: vi.fn(),
+  modalAuthState: { user: { id: 1, role: { id: 1 } } },
 }));
+
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => modalAuthState }));
 
 vi.mock('../../hooks/useTranslation', () => ({
   useTranslation: () => ({ t: () => undefined }),
@@ -138,6 +142,7 @@ async function selectPickerOption(name: string): Promise<void> {
 describe('ActModal integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    modalAuthState.user = { id: 1, role: { id: 1 } };
     getActMock.mockResolvedValue(null);
     const clientLookups = [
       createClient(1, 'Базовый клиент'),
@@ -698,6 +703,7 @@ describe('ActModal integration', () => {
     } as unknown as Act;
 
     getInvoiceMock.mockResolvedValue(invoice);
+    getActMock.mockResolvedValue(act);
 
     render(
       <ActModal
@@ -737,6 +743,237 @@ describe('ActModal integration', () => {
     expect(payload.lineItems).toEqual([]);
   });
 
+  describe('mandatory act access checks', () => {
+    const sourceAct = (overrides: Partial<Act> = {}): Act => ({
+      id: 61, number: 'ACT-PRIVATE-61', date: '2026-04-20', amount: 12345.67,
+      creationMode: 'Manual', status: 'Created', workflowStatus: 'Draft', type: 'Income',
+      clientId: 901, clientName: 'Клиент из разрешённого акта', invoiceId: 618,
+      invoiceNumber: 'INV-618', lineItems: [], createdAt: '2026-04-20T00:00:00Z', ...overrides,
+    });
+    const deferred = <T,>() => {
+      let resolve!: (value: T) => void;
+      let reject!: (reason: unknown) => void;
+      const promise = new Promise<T>((accept, decline) => { resolve = accept; reject = decline; });
+      return { promise, resolve, reject };
+    };
+    const element = (value: Act, submit: (payload: ActInput) => Promise<void>, unavailable: (id: number, status: 401 | 403 | 404) => void = vi.fn(), open = true) => (
+      <ActModal open={open} mode="edit" act={value} onClose={vi.fn()} onSubmit={submit}
+        submitting={false} clients={[]} responsibles={[]} lookupsLoading={false}
+        canViewInvoices={false} presentation="page" onActUnavailable={unavailable} />
+    );
+    const saveButton = () => screen.getByRole('button', { name: 'Сохранить' }) as HTMLButtonElement;
+    const ready = async () => { await waitFor(() => expect(saveButton().disabled).toBe(false)); };
+
+    beforeEach(() => { getActMock.mockReset(); });
+
+    it.each([401, 403, 404] as const)('removes cached act data after mandatory GET %s and never submits it', async (status) => {
+      const pending = deferred<Act>();
+      getActMock.mockReturnValue(pending.promise);
+      const submit = vi.fn<(payload: ActInput) => Promise<void>>().mockResolvedValue(undefined);
+      const unavailable = vi.fn();
+      render(element(sourceAct(), submit, unavailable));
+      const form = screen.getByLabelText('Номер акта').closest('form');
+      expect(form).not.toBeNull();
+      expect(saveButton().disabled).toBe(true);
+      fireEvent.submit(form!);
+      expect(submit).not.toHaveBeenCalled();
+
+      await act(async () => { pending.reject(new Error(`HTTP ${status} Forbidden - secret internal URL`)); });
+
+      expect(await screen.findByRole('alert')).toBeTruthy();
+      expect(screen.queryByDisplayValue('ACT-PRIVATE-61')).toBeNull();
+      expect(screen.queryByDisplayValue('Клиент из разрешённого акта')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Сохранить' })).toBeNull();
+      expect(screen.queryByText(/secret internal URL/)).toBeNull();
+      expect(unavailable).toHaveBeenCalledTimes(1);
+      expect(unavailable).toHaveBeenCalledWith(61, status);
+      expect(submit).not.toHaveBeenCalled();
+      expect(getClientsMock).not.toHaveBeenCalled();
+      expect(getClientsV2Mock).not.toHaveBeenCalled();
+    });
+
+    it.each(['null', 'wrong-id'] as const)('does not authorise cached data after a %s mandatory response', async (response) => {
+      getActMock.mockResolvedValue(response === 'null' ? null : sourceAct({ id: 62 }));
+      const submit = vi.fn<(payload: ActInput) => Promise<void>>().mockResolvedValue(undefined);
+      const unavailable = vi.fn();
+      render(element(sourceAct(), submit, unavailable));
+      expect(await screen.findByRole('alert')).toBeTruthy();
+      expect(screen.queryByDisplayValue('ACT-PRIVATE-61')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Сохранить' })).toBeNull();
+      expect(unavailable).toHaveBeenCalledTimes(1);
+      expect(unavailable).toHaveBeenCalledWith(61, 404);
+      expect(submit).not.toHaveBeenCalled();
+    });
+
+    it('keeps a same-session draft after network failure and retries GET before allowing one save', async () => {
+      const retry = deferred<Act>();
+      getActMock.mockRejectedValueOnce(new Error('HTTP 503 Service Unavailable - network failure')).mockReturnValueOnce(retry.promise);
+      const submit = vi.fn<(payload: ActInput) => Promise<void>>().mockResolvedValue(undefined);
+      const unavailable = vi.fn();
+      render(element(sourceAct(), submit, unavailable));
+      await screen.findByRole('button', { name: 'Повторить загрузку акта' });
+      fireEvent.change(screen.getByLabelText('Комментарий'), { target: { value: 'Несохранённый черновик' } });
+      fireEvent.submit(screen.getByLabelText('Номер акта').closest('form')!);
+      expect(saveButton().disabled).toBe(true);
+      expect(submit).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку акта' }));
+      expect(getActMock).toHaveBeenCalledTimes(2);
+      expect(screen.getByDisplayValue('Несохранённый черновик')).toBeTruthy();
+      await act(async () => { retry.resolve(sourceAct()); });
+      await ready();
+      expect(screen.getByDisplayValue('Несохранённый черновик')).toBeTruthy();
+      fireEvent.click(saveButton());
+      await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+      expect(submit.mock.calls[0][0]).toMatchObject({ clientId: 901, invoiceId: 618, amount: 12345.67, comment: 'Несохранённый черновик' });
+      expect(unavailable).not.toHaveBeenCalled();
+    });
+
+    it('keeps a freshly available act editable when only its optional client catalog is forbidden', async () => {
+      getActMock.mockResolvedValue(sourceAct());
+      const submit = vi.fn<(payload: ActInput) => Promise<void>>().mockResolvedValue(undefined);
+      render(<ActModal open mode="edit" act={sourceAct()} onClose={vi.fn()} onSubmit={submit}
+        submitting={false} clients={[]} responsibles={[]} lookupsLoading={false}
+        lookupsError="HTTP 403 Forbidden - Справочник клиентов недоступен" canViewInvoices={false} presentation="page" />);
+      await ready();
+      expect((screen.getByPlaceholderText('Выберите контрагента') as HTMLInputElement).value).toBe('Клиент из разрешённого акта');
+      fireEvent.click(saveButton());
+      await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+      expect(submit.mock.calls[0][0]).toMatchObject({ clientId: 901, invoiceId: 618, amount: 12345.67 });
+      expect(getClientsMock).not.toHaveBeenCalled();
+      expect(getClientsV2Mock).not.toHaveBeenCalled();
+    });
+
+    it.each(['resolve', 'reject'] as const)('ignores the first A %s after an A-to-B-to-A route change', async (outcome) => {
+      const first = deferred<Act>();
+      const latest = deferred<Act>();
+      const a = sourceAct();
+      getActMock.mockReturnValueOnce(first.promise).mockReturnValueOnce(new Promise<Act>(() => {})).mockReturnValueOnce(latest.promise);
+      const submit = vi.fn<(payload: ActInput) => Promise<void>>().mockResolvedValue(undefined);
+      const unavailable = vi.fn();
+      const { rerender } = render(element(a, submit, unavailable));
+      rerender(element(sourceAct({ id: 62, number: 'B' }), submit, unavailable));
+      rerender(element(a, submit, unavailable));
+      await act(async () => {
+        if (outcome === 'resolve') first.resolve(a);
+        else first.reject(new Error('HTTP 403 Forbidden - old A'));
+      });
+      expect(saveButton().disabled).toBe(true);
+      fireEvent.submit(screen.getByLabelText('Номер акта').closest('form')!);
+      expect(submit).not.toHaveBeenCalled();
+      expect(unavailable).not.toHaveBeenCalled();
+      await act(async () => { latest.resolve(a); });
+      await ready();
+      expect(screen.queryByRole('alert')).toBeNull();
+      expect(getActMock).toHaveBeenCalledTimes(3);
+    });
+
+    it.each(['resolve', 'reject'] as const)('does not reuse the previous actor data or late %s for the same act', async (outcome) => {
+      const first = deferred<Act>();
+      const current = deferred<Act>();
+      const value = sourceAct();
+      getActMock.mockReturnValueOnce(first.promise).mockReturnValueOnce(current.promise);
+      const unavailable = vi.fn();
+      const submit = vi.fn<(payload: ActInput) => Promise<void>>().mockResolvedValue(undefined);
+      const { rerender } = render(element(value, submit, unavailable));
+      modalAuthState.user = { id: 2, role: { id: 2 } };
+      rerender(element(value, submit, unavailable));
+      expect(screen.queryByDisplayValue('ACT-PRIVATE-61')).toBeNull();
+      await act(async () => {
+        if (outcome === 'resolve') first.resolve(value);
+        else first.reject(new Error('HTTP 403 Forbidden - old actor'));
+      });
+      expect(screen.queryByDisplayValue('ACT-PRIVATE-61')).toBeNull();
+      expect(unavailable).not.toHaveBeenCalled();
+      await act(async () => { current.resolve(sourceAct({ number: 'CURRENT-61', clientName: 'Текущий клиент' })); });
+      await ready();
+      expect(screen.getByDisplayValue('CURRENT-61')).toBeTruthy();
+      expect(screen.queryByDisplayValue('ACT-PRIVATE-61')).toBeNull();
+    });
+
+    it('ignores a late denial after closing and reopening the same act', async () => {
+      const first = deferred<Act>();
+      const value = sourceAct();
+      getActMock.mockReturnValueOnce(first.promise).mockResolvedValueOnce(value);
+      const submit = vi.fn<(payload: ActInput) => Promise<void>>().mockResolvedValue(undefined);
+      const unavailable = vi.fn();
+      const { rerender } = render(element(value, submit, unavailable));
+      rerender(element(value, submit, unavailable, false));
+      rerender(element(value, submit, unavailable));
+      await ready();
+      await act(async () => { first.reject(new Error('HTTP 404 Not Found - previous opening')); });
+      expect(saveButton().disabled).toBe(false);
+      expect(unavailable).not.toHaveBeenCalled();
+    });
+
+    it('ignores invoice data requested by the previous actor for the same linked invoice', async () => {
+      const previousInvoice = deferred<object>();
+      const value = sourceAct();
+      getActMock.mockResolvedValue(value);
+      getInvoiceMock.mockReturnValueOnce(previousInvoice.promise).mockResolvedValueOnce({
+        id: 618, number: 'INV-618', date: '2026-04-20', amount: 12345.67,
+        type: 'Income', clientId: 901, lineItems: [], acts: [],
+      });
+      const submit = vi.fn<(payload: ActInput) => Promise<void>>().mockResolvedValue(undefined);
+      const view = () => <ActModal open mode="edit" act={value} onClose={vi.fn()} onSubmit={submit}
+        submitting={false} clients={[]} responsibles={[]} lookupsLoading={false} presentation="page" />;
+      const { rerender } = render(view());
+      await waitFor(() => expect(getInvoiceMock).toHaveBeenCalledTimes(1));
+      modalAuthState.user = { id: 2, role: { id: 2 } };
+      rerender(view());
+      await ready();
+      await waitFor(() => expect(getInvoiceMock).toHaveBeenCalledTimes(2));
+
+      await act(async () => { previousInvoice.resolve({
+        id: 618, number: 'OLD-PRIVATE-INVOICE', date: '2026-04-20', amount: 999999,
+        type: 'Income', clientId: 777, clientName: 'Прежний закрытый клиент',
+        lineItems: [{ id: 1, name: 'Прежняя закрытая позиция', quantity: 1, price: 999999 }], acts: [],
+      }); });
+
+      expect(screen.queryByText('OLD-PRIVATE-INVOICE')).toBeNull();
+      expect(screen.queryByDisplayValue('OLD-PRIVATE-INVOICE')).toBeNull();
+      expect(screen.queryByText('Прежняя закрытая позиция')).toBeNull();
+      expect(screen.queryByDisplayValue('Прежний закрытый клиент')).toBeNull();
+      expect(screen.getByDisplayValue('12345.67')).toBeTruthy();
+      expect(submit).not.toHaveBeenCalled();
+    });
+
+    it('keeps the next actor draft when an older save rejects late', async () => {
+      const save = deferred<void>();
+      const value = sourceAct();
+      getActMock.mockResolvedValue(value);
+      const submit = vi.fn<(payload: ActInput) => Promise<void>>().mockReturnValue(save.promise);
+      const { rerender } = render(element(value, submit));
+      await ready();
+      fireEvent.click(saveButton());
+      expect(submit).toHaveBeenCalledTimes(1);
+      modalAuthState.user = { id: 2, role: { id: 2 } };
+      getActMock.mockResolvedValue(sourceAct({ number: 'CURRENT-61' }));
+      rerender(element(value, submit));
+      await ready();
+      fireEvent.change(screen.getByLabelText('Комментарий'), { target: { value: 'Черновик текущего сотрудника' } });
+
+      await act(async () => { save.reject(new Error('Ошибка прежнего сохранения')); });
+
+      expect(screen.getByDisplayValue('CURRENT-61')).toBeTruthy();
+      expect(screen.getByDisplayValue('Черновик текущего сотрудника')).toBeTruthy();
+      expect(screen.queryByText('Ошибка прежнего сохранения')).toBeNull();
+      expect(submit).toHaveBeenCalledTimes(1);
+    });
+
+    it('removes an open counterparty picker when mandatory access is denied', async () => {
+      const pending = deferred<Act>();
+      getActMock.mockReturnValue(pending.promise);
+      render(element(sourceAct(), vi.fn<(payload: ActInput) => Promise<void>>().mockResolvedValue(undefined)));
+      fireEvent.click(screen.getByRole('button', { name: 'Выбрать' }));
+      await screen.findByText('Базовый клиент');
+      await act(async () => { pending.reject(new Error('HTTP 403 Forbidden')); });
+      expect(await screen.findByRole('alert')).toBeTruthy();
+      expect(screen.queryByText('Базовый клиент')).toBeNull();
+      expect(screen.queryByPlaceholderText('Выберите контрагента')).toBeNull();
+    });
+  });
+
   describe('retained counterparty labels from an available act', () => {
     const createRetainedAct = (overrides: Partial<Act> = {}): Act => ({
       id: 41, number: 'ACT-41', date: '2026-04-20', amount: 12345.67,
@@ -760,7 +997,7 @@ describe('ActModal integration', () => {
     };
 
     beforeEach(() => {
-      getActMock.mockReset().mockResolvedValue(null);
+      getActMock.mockReset().mockResolvedValue(createRetainedAct());
     });
 
     it.each([
@@ -773,6 +1010,7 @@ describe('ActModal integration', () => {
         type, clientId: kind === 'client' ? id : null, legalEntityId: kind === 'legalEntity' ? id : null,
         clientName: kind === 'client' ? name : null, legalEntityName: kind === 'legalEntity' ? name : null,
       });
+      getActMock.mockResolvedValue(act);
       const onSubmit = vi.fn().mockResolvedValue(undefined);
       render(editorElement(act, onSubmit));
 
@@ -793,6 +1031,7 @@ describe('ActModal integration', () => {
 
     it('retains the legal entity label with the existing legal entity priority over a legacy client ID', async () => {
       const act = createRetainedAct({ legalEntityId: 903, legalEntityName: 'Приоритетная организация' });
+      getActMock.mockResolvedValue(act);
       const onSubmit = vi.fn().mockResolvedValue(undefined);
       render(editorElement(act, onSubmit, [createClient(901, 'Клиент из каталога')]));
 
