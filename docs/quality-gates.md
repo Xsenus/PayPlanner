@@ -160,6 +160,15 @@ Choose the smallest set that proves the change during implementation, then the c
 
 ## CI Gate Before Deploy
 
+All workflow jobs use the existing XSENUS Windows runner. Deployment uses native
+OpenSSH with the required repository variable `VPS_SSH_HOST_FINGERPRINT`, obtained
+from a verified administrative connection to the existing VPS. The private key stays
+in `VPS_SSH_KEY`. The deployment bridge verifies that fingerprint before authentication,
+runs both Linux filesystem test scripts in a private temporary directory on the VPS,
+and only then uploads the qualified release. No database checks or additional runner
+are installed on the production VPS. Linux permission and symlink assertions remain
+mandatory; Windows Git Bash results do not replace them.
+
 The workflow keeps frontend, formatting and backend qualification as mandatory dependencies of `deploy`. Backend execution uses one analyzed Release build and four separate test jobs; it does not reduce the discovered test catalog.
 
 | Job | Required result |

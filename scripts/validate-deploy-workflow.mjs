@@ -133,13 +133,10 @@ export function validateDeployWorkflow(source) {
   for (const [id, job] of Object.entries(jobs)) {
     requireValue(String(job['timeout-minutes']) === String(timeouts[id]), `${id}: keep the explicit runner time budget`);
     requireValue(!Object.hasOwn(job, 'if'), `${id}: conditional job can bypass a release gate`);
-    const localRunner = id !== 'deploy';
-    requireValue(localRunner
-      ? job['runs-on']?.join(',') === 'self-hosted,Windows,X64,payplanner-xsenus'
-        && JSON.stringify(job.defaults) === JSON.stringify({ run: { shell: 'bash' } })
-      : job['runs-on'] === 'ubuntu-latest' && job.defaults === undefined,
+    requireValue(Array.isArray(job['runs-on']) && job['runs-on'].join(',') === 'self-hosted,Windows,X64,payplanner-xsenus'
+      && JSON.stringify(job.defaults) === JSON.stringify({ run: { shell: 'bash' } }),
     `${id}: trusted runner labels and reviewed failure-preserving shell required`);
-    if (localRunner) {
+    {
       const checkout = job.steps.filter(step => step.uses === 'actions/checkout@v6');
       requireValue(checkout.length === 1 && checkout[0].with?.['persist-credentials'] === false,
         `${id}: do not retain repository credentials on the persistent host`);
@@ -348,15 +345,29 @@ export function validateDeployWorkflow(source) {
   const tar = command('deploy', 'tar -czf "${{ env.TAR_NAME }}" -C "${{ env.OUT_DIR }}" .');
   const unpackBackend = command('deploy', 'tar -xzf deploy-artifacts/backend.tar.gz -C "${{ env.OUT_DIR }}"');
   const unpackFrontend = command('deploy', 'tar -xzf deploy-artifacts/frontend.tar.gz -C "${{ env.OUT_DIR }}"');
-  const scp = deploy.findIndex(step => step.uses?.startsWith('appleboy/scp-action@'));
-  const ssh = deploy.findIndex(step => step.uses?.startsWith('appleboy/ssh-action@'));
+  const bridge = command('deploy', 'node scripts/windows-vps-deploy.mjs');
+  const bridgeTests = command('deploy', 'node --test scripts/windows-vps-deploy.node-tests.mjs');
+  const trustedDeploy = command('deploy', 'node scripts/verify-xsenus-runner.mjs build');
   const readiness = command('deploy', 'node scripts/run-production-deploy-readiness.mjs', true);
-  for (const check of ['bash scripts/prune-deploy-backups.test.sh', 'bash scripts/preserve-data-protection-keys.test.sh']) {
-    requireValue(command('deploy', check).index < scp, 'Linux filesystem checks must pass before deployment');
-  }
+  const requiredBridgeEnv = {
+    DEPLOY_SHA: sha, DEPLOY_ARCHIVE_NAME: '${{ env.TAR_NAME }}',
+    VPS_SSH_HOST_FINGERPRINT: '${{ vars.VPS_SSH_HOST_FINGERPRINT }}', VPS_SSH_KEY: '${{ secrets.VPS_SSH_KEY }}',
+    PAYPLANNER_WEBPUSH_ENABLED: "${{ vars.PAYPLANNER_WEBPUSH_ENABLED || 'false' }}",
+    PAYPLANNER_WEBPUSH_PUBLIC_KEY: '${{ secrets.PAYPLANNER_WEBPUSH_PUBLIC_KEY }}',
+    PAYPLANNER_WEBPUSH_PRIVATE_KEY: '${{ secrets.PAYPLANNER_WEBPUSH_PRIVATE_KEY }}',
+    PAYPLANNER_WEBPUSH_SUBJECT: '${{ secrets.PAYPLANNER_WEBPUSH_SUBJECT }}',
+  };
+  requireValue(bridge.lines.join('\n') === 'node scripts/windows-vps-deploy.mjs'
+    && JSON.stringify(bridge.step.env) === JSON.stringify(requiredBridgeEnv), 'Deploy requires the pinned native SSH bridge and structured secret environment');
+  requireValue(!deploy.some(step => step.uses?.startsWith('appleboy/')), 'Windows deployment must use native OpenSSH with Linux filesystem gates');
+  requireValue(trustedDeploy.index < bridgeTests.index && bridgeTests.index < bridge.index,
+    'Trusted host and bridge regression tests must precede Linux filesystem gates and deployment');
+  requireValue(readiness.lines.includes('--expected-sha="${{ github.sha }}" \\')
+    && readiness.lines.includes('--token="" \\') && readiness.lines.includes('--require-websocket=true \\')
+    && readiness.lines.includes('--allow-websocket-auth-challenge=true \\'), 'Preserve exact-revision public production readiness without a stored JWT');
   requireValue(downloads.every(({ index }) => index < unpackBackend.index && index < unpackFrontend.index)
     && unpackBackend.index < tar.index && unpackFrontend.index < tar.index
-    && tar.index < scp && scp < ssh && ssh < readiness.index, 'Deploy download/unpack/tar/scp/ssh/readiness order');
+    && tar.index < bridge.index && bridge.index < readiness.index, 'Deploy download/unpack/tar/Linux-gates/SSH/readiness order');
   requireValue(!deploy.some(step => /(?:dotnet (?:test|build|publish)|npm (?:ci|run build))/.test(step.run ?? '')), 'Deploy must use qualified artifacts without rebuilding');
   return { valid: true, gates: ['frontend', 'backend-format', 'backend'], deployNeeds: jobs.deploy.needs, artifacts: downloads.map(({ step }) => step.with['artifact-ids']) };
 }

@@ -50,7 +50,7 @@ public sealed class LegalFeatureFlagCiGateTests
     public void DeployWorkflow_ConfiguresWebPushRuntimeEnvironmentSafely()
     {
         var root = FindRepositoryRoot();
-        var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "deploy.yml"));
+        var workflow = ReadWorkflowAndDeployment(root);
 
         Assert.Contains("PAYPLANNER_WEBPUSH_ENABLED", workflow, StringComparison.Ordinal);
         Assert.Contains("PAYPLANNER_WEBPUSH_ENABLED: ${{ vars.PAYPLANNER_WEBPUSH_ENABLED || 'false' }}", workflow, StringComparison.Ordinal);
@@ -80,7 +80,7 @@ public sealed class LegalFeatureFlagCiGateTests
     public void DeployWorkflow_BuildsFrontendWithApiUrlAndPublishesServiceWorkerArtifact()
     {
         var root = FindRepositoryRoot();
-        var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "deploy.yml"));
+        var workflow = ReadWorkflowAndDeployment(root);
 
         Assert.Contains("VITE_API_URL: ${{ env.FE_API_URL }}", workflow, StringComparison.Ordinal);
         Assert.Contains("cp -r dist/* \"${{ env.OUT_DIR }}/fe/\"", workflow, StringComparison.Ordinal);
@@ -113,7 +113,7 @@ public sealed class LegalFeatureFlagCiGateTests
         AssertInOrder(
             workflow,
             [
-                "appleboy/ssh-action",
+                "node scripts/windows-vps-deploy.mjs",
                 "Check production deploy readiness",
                 "scripts/run-production-deploy-readiness.mjs",
             ]);
@@ -123,7 +123,7 @@ public sealed class LegalFeatureFlagCiGateTests
     public void DeployWorkflow_PreservesHistoricalDataProtectionKeysBeforeChangingRuntimeOrRelease()
     {
         var root = FindRepositoryRoot();
-        var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "deploy.yml"))
+        var workflow = ReadWorkflowAndDeployment(root)
             .Replace("\r\n", "\n", StringComparison.Ordinal);
 
         Assert.Contains("bash scripts/preserve-data-protection-keys.test.sh", workflow, StringComparison.Ordinal);
@@ -134,8 +134,8 @@ public sealed class LegalFeatureFlagCiGateTests
         Assert.DoesNotContain("printf 'DataProtection__ApplicationName=", workflow, StringComparison.Ordinal);
         AssertInOrder(workflow,
         [
-            "            preserve_data_protection_keys\n",
-            "            configure_runtime_env\n",
+            "\npreserve_data_protection_keys\n",
+            "\nconfigure_runtime_env\n",
             "sudo rsync -a --delete \"$STAGE/be/\"",
             "sudo systemctl restart payplanner.service",
         ]);
@@ -145,7 +145,7 @@ public sealed class LegalFeatureFlagCiGateTests
     public void DeployWorkflow_RestartsBackendOnlyOnceAfterFilesAreSynced()
     {
         var root = FindRepositoryRoot();
-        var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "deploy.yml"));
+        var workflow = ReadWorkflowAndDeployment(root);
 
         Assert.DoesNotContain("sudo systemctl stop payplanner.service", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("sudo systemctl enable --now payplanner.service", workflow, StringComparison.Ordinal);
@@ -165,7 +165,7 @@ public sealed class LegalFeatureFlagCiGateTests
     public void DeployWorkflow_PreservesUploadedFilesOutsideReleaseDirectory()
     {
         var root = FindRepositoryRoot();
-        var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "deploy.yml"));
+        var workflow = ReadWorkflowAndDeployment(root);
 
         Assert.Contains("PERSISTENT_FILE_ROOT=\"/opt/payplanner/shared/files\"", workflow, StringComparison.Ordinal);
         Assert.Contains("FileStorage__RootPath=%s", workflow, StringComparison.Ordinal);
@@ -182,6 +182,29 @@ public sealed class LegalFeatureFlagCiGateTests
                 "sudo rsync -a --delete \"$STAGE/be/\" \"$BE_DIR/\"",
                 "sudo systemctl restart payplanner.service",
             ]);
+    }
+
+    [Fact]
+    public void DeployWorkflow_RunsLinuxFileSystemGatesBeforeTransferringRelease()
+    {
+        var root = FindRepositoryRoot();
+        var bridge = File.ReadAllText(Path.Combine(root, "scripts", "windows-vps-deploy.mjs"));
+
+        Assert.Contains("test \"$(uname -s)\" = Linux", bridge, StringComparison.Ordinal);
+        Assert.Contains("export TMPDIR=\"$PWD/fixtures\"", bridge, StringComparison.Ordinal);
+        Assert.Contains("sha256sum -c -", bridge, StringComparison.Ordinal);
+        Assert.Contains("StrictHostKeyChecking=yes", bridge, StringComparison.Ordinal);
+        AssertInOrder(bridge,
+        [
+            "const knownHosts = trustedHostLine(",
+            "directory = workspace(config, run)",
+            "writeFileSync(join(directory, 'identity')",
+            "bash prune-deploy-backups.test.sh",
+            "bash preserve-data-protection-keys.test.sh",
+            "{ input: preflight, timeout: 300000 }",
+            "execute('scp', [...scpArgs, config.archive",
+            "{ input: payload, timeout: 1200000 }",
+        ]);
     }
 
     [Fact]
@@ -230,6 +253,15 @@ public sealed class LegalFeatureFlagCiGateTests
         }
     }
 
+    private static string ReadWorkflowAndDeployment(string root)
+    {
+        var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "deploy.yml"));
+        var bridge = File.ReadAllText(Path.Combine(root, "scripts", "windows-vps-deploy.mjs"));
+        Assert.Contains("node scripts/windows-vps-deploy.mjs", workflow, StringComparison.Ordinal);
+        Assert.Contains("content.get(join(config.root, 'scripts/deploy-vps.sh')).toString('utf8')", bridge, StringComparison.Ordinal);
+        return workflow + "\n" + File.ReadAllText(Path.Combine(root, "scripts", "deploy-vps.sh"));
+    }
+
     private static string FindRepositoryRoot()
     {
         var current = TestRepository.FindDirectory();
@@ -255,8 +287,8 @@ public sealed class LegalFeatureFlagCiGateTests
         foreach (var marker in markers)
         {
             var index = text.IndexOf(marker, StringComparison.Ordinal);
-            Assert.True(index >= 0, $"deploy.yml must contain '{marker}'.");
-            Assert.True(index > previousIndex, $"deploy.yml must keep '{marker}' after previous verification/deploy step.");
+            Assert.True(index >= 0, $"Deployment sources must contain '{marker}'.");
+            Assert.True(index > previousIndex, $"Deployment sources must keep '{marker}' after previous verification/deploy step.");
             previousIndex = index;
         }
     }

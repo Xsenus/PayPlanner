@@ -23,7 +23,7 @@ function replaceInJob(id: string, change: (job: string) => string) {
 }
 
 describe('parallel deploy workflow release contract', () => {
-  it.each(['frontend', 'backend-format', 'backend-build', 'backend-test', 'backend-browser', 'backend'])(
+  it.each(['frontend', 'backend-format', 'backend-build', 'backend-test', 'backend-browser', 'backend', 'deploy'])(
     'pins %s to the trusted Windows host and safe checkout', id => {
       for (const [before, after] of [
         ['runs-on: [self-hosted, Windows, X64, payplanner-xsenus]', 'runs-on: ubuntu-latest'],
@@ -52,15 +52,16 @@ describe('parallel deploy workflow release contract', () => {
     },
   );
 
-  it('keeps Linux filesystem assertions before the Docker-based deployment actions', () => {
-    for (const script of ['prune-deploy-backups', 'preserve-data-protection-keys']) {
-      expect(() => validateDeployWorkflow(replaceInJob('deploy', job => job.replace(
-        `run: bash scripts/${script}.test.sh`, 'run: echo skipped',
-      )))).toThrow(/missing.*gate/);
-    }
-    expect(() => validateDeployWorkflow(replaceInJob('deploy', job => job.replace(
-      'runs-on: ubuntu-latest', 'runs-on: [self-hosted, Windows, X64, payplanner-xsenus]',
-    )))).toThrow(/trusted runner/);
+  it.each([
+    ['bridge tests', 'node --test scripts/windows-vps-deploy.node-tests.mjs', 'echo skipped'],
+    ['native bridge', 'node scripts/windows-vps-deploy.mjs', 'echo deployed'],
+    ['host pin', '${{ vars.VPS_SSH_HOST_FINGERPRINT }}', 'SHA256:unreviewed'],
+    ['private key source', '${{ secrets.VPS_SSH_KEY }}', 'literal-key'],
+    ['expected revision', 'DEPLOY_SHA: ${{ github.sha }}', 'DEPLOY_SHA: main'],
+    ['native bridge arguments', 'run: node scripts/windows-vps-deploy.mjs', 'run: node scripts/windows-vps-deploy.mjs --skip-linux-tests'],
+    ['readiness revision', '--expected-sha="${{ github.sha }}"', '--expected-sha=old'],
+  ])('preserves the reviewed Windows SSH deployment contract: %s', (_name, before, after) => {
+    expect(() => validateDeployWorkflow(replaceInJob('deploy', job => job.replace(before, after)))).toThrow();
   });
 
   it('rejects a new database server and parallel memory-heavy shards', () => {
