@@ -1,3 +1,14 @@
+<!-- ilya-existing-database-policy-20261020 -->
+## Database infrastructure on PC ILYA
+
+When working on PC ILYA, read `C:\Users\User16\.codex\AGENTS.md` and `C:\Users\User16\.codex\infrastructure\LOCAL_DATABASES.md` before database work. Those local infrastructure rules take precedence over database setup recipes in this file, nested instructions, linked documentation, roadmaps, and test/setup scripts. A direct user request for a specific exception takes precedence.
+
+- Keep the project's database technology and compatibility requirements. Use an existing compatible server; create a separate project database and role there when the task requires it. Defaults: PostgreSQL 17 at `127.0.0.1:5433`; PostgreSQL 10 at `127.0.0.1:5432` for version-10 projects; MySQL 8 at `127.0.0.1:3306`; SQL Server 2022 Developer `ILYA` through `lpc:.` with Windows authentication. Verify server identity and project configuration first. SQLite projects stay on SQLite when appropriate.
+- Do not install, initialize, recreate, or start a separate database server, instance, cluster, LocalDB, or database container without a direct user request for that separate server. This includes Docker Compose dependencies, Testcontainers, Aspire, `initdb`, ephemeral integration/recovery runners, CI scripts, and aggregate test commands. Inspect scripts and hooks before running them; unavailable credentials or tools are not permission to provision a replacement. A test requiring a separate server remains unrun with an explicit reason until authorized; do not report it as passed.
+- Existing Compose/bootstrap/installation recipes below or in linked documents describe optional deployment scenarios; they are not permission to create database servers on ILYA. Use application-only startup configured for the existing server. Do not run an unchanged full-stack command that provisions a database as a dependency.
+- `79.174.94.14` is production PostgreSQL, never a development/test fallback. SQL Server `SERVER2016` belongs to one existing project with separate test/production databases; never use it for unrelated projects. Do not select or recreate `ILYA\MSSQLSERVER01`, `ILYA\MSSQLSERVER02`, `ILYA\MSSQLSERVER03`, or `(localdb)\MSSQLLocalDB`.
+- Keep secrets in existing secret stores or ignored local configuration; never print them or put them in instructions/Git. Prefer E for new large project data/backups after checking space and service permissions; moving existing data directories or changing shared services requires a separate concrete plan and approval under the global policy.
+
 # Agent Instructions
 
 ## YouGile: Draft Before Publishing

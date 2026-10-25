@@ -18,7 +18,8 @@ public static class TrxVerifier
         ShardPlan.Require(run.SchemaVersion == ShardPlan.SchemaVersion && run.Shard == shard && run.Revision == plan.Revision
             && string.Equals(run.ManifestSha256, manifestHash, StringComparison.OrdinalIgnoreCase)
             && string.Equals(run.AssemblySha256, plan.Artifacts.Single(pin => pin.Path == plan.AssemblyPath).Sha256, StringComparison.OrdinalIgnoreCase)
-            && run.ExitCode == 0 && run.ErrorKind is null && run.FinishedUtc >= run.StartedUtc, "Shard invocation did not complete successfully with the planned artifact.");
+            && run.ExitCode == 0 && run.ErrorKind is null && run.Suite == "all" && run.FinishedUtc >= run.StartedUtc, "Shard invocation did not complete successfully with the planned artifact.");
+        if (plan.Execution is not null) _ = BatchResults.VerifyAll(plan, manifestHash, shard, directory, "all");
         var cases = plan.Cases.Where(row => row.Shard == shard).ToArray();
         VerifyCases(cases, directory);
         return new(true, shard, cases.Length, manifestHash, plan.Revision);
@@ -42,7 +43,7 @@ public static class TrxVerifier
         return cases;
     }
 
-    private static void VerifyCases(PlannedCase[] cases, string directory)
+    public static void VerifyCases(PlannedCase[] cases, string directory, string fileName = "results.trx")
     {
         var expected = cases.ToDictionary(row => row.Id);
         var definitions = new Dictionary<Guid, (string Name, string Method)>();
@@ -54,7 +55,7 @@ public static class TrxVerifier
         var counterNodes = 0;
         var section = "";
         var sections = new Dictionary<string, int>(StringComparer.Ordinal);
-        using var reader = XmlReader.Create(Path.Combine(directory, "results.trx"), new XmlReaderSettings
+        using var reader = XmlReader.Create(Path.Combine(directory, fileName), new XmlReaderSettings
         {
             DtdProcessing = DtdProcessing.Prohibit,
             XmlResolver = null,

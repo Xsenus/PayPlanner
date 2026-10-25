@@ -30,11 +30,91 @@ For local copies of production data, configuration flags alone are insufficient:
 
 ## Final Applicable Local Gates
 
+### Durable local backend run
+
+`node scripts/run-backend-gate.mjs --results E:/ProjectTemp/PayPlanner/<unique-run> --detach`
+builds the Release candidate once, copies its runtime, discovers the exact four-part catalog,
+runs cheap source guards, then verifies every shard and the five restored-browser cases.
+Prepare restored NuGet assets, the dedicated existing PostgreSQL role, pinned browser CLI,
+installed browser and environment variables listed below first. The command does not install
+a database server, use the working database, or report frontend/format/security checks as done.
+
+Use `--workers 1` to force sequential execution. `auto` admits up to two processes with
+at least 8 GiB available memory and four processors, or up to four with 12 GiB and
+eight processors. The coordinator checks resources again before starting more work;
+already running tests finish normally if available memory falls. xUnit stays sequential
+inside each testhost. The four outer parts run one at a time, so their concurrency budgets
+cannot multiply. Ordinary testhosts have a 2 GiB managed heap limit; exclusive testhosts
+retain 3 GiB. Admission reserves another 4 GiB for native processes, API children and
+host headroom; this is not a strict memory ceiling for the complete process tree.
+The build requires 8 GiB available memory.
+The results volume must have at least 24 GiB free, including the 20 GiB safety reserve.
+Redirect `TEMP` and `TMP` to a suitable SSD fixture directory before starting.
+If the user explicitly chooses to continue under the current memory pressure, use
+`--workers auto --allow-memory-pressure` on that invocation. This records available RAM
+and bypasses only the minimum-free-memory preflight; GC limits, disk reserve, complete
+test coverage and all qualification checks remain enforced. Timings under contention
+must be identified as such. Auto uses one worker below the ordinary parallel thresholds;
+the override does not reduce the 8/12 GiB thresholds or the native 1 GiB execution floor.
+Use `--workers 1 --allow-memory-pressure` to keep the entire run sequential. Explicit
+parallel counts cannot be combined with the pressure override.
+
+The bounded execution plan separates short tests (`fast`), ordinary longer tests
+(`heavy`), and browser/process/load-sensitive tests (`exclusive`). Exclusive batches
+run alone and are included in the user-facing heavy suite. A checked-in timing baseline
+provides scheduling estimates on a fresh checkout; `--timings <prior-run>/timings.json`
+can supply newer qualified measurements. Estimates never authorize skipping tests.
+Unreviewed new methods use the conservative serial lane until their resource use has
+been reviewed. All Theory rows belonging to one method remain in the same batch.
+
+```powershell
+# Short development feedback, with an explicitly partial receipt.
+npm run test:backend:fast -- --results E:/ProjectTemp/PayPlanner/<unique-fast-run>
+# Longer tests, including exclusive browser and process scenarios; also partial.
+npm run test:backend:heavy -- --results E:/ProjectTemp/PayPlanner/<unique-heavy-run>
+# Complete backend gate, including the five additional restored-browser cases.
+npm run test:backend:all -- --results E:/ProjectTemp/PayPlanner/<unique-full-run>
+```
+
+Partial suites return `qualified: false` and `subsetPassed: true` only after verifying
+their exact selected identities and native exits. They do not produce a full release
+receipt. A full run requires the complete four-part union plus restored-browser.
+Keep the same `--suite` on resume; a partial run cannot be resumed as a full gate.
+Each part preserves its individual batch TRX files and execution resource telemetry.
+CI uses this same bounded scheduler inside each of its four jobs; the separate
+restored-browser job waits for all four jobs, preserving its exclusive execution.
+
+Read `state.json`, `supervisor.log` and individual stage logs in the results directory.
+Use `--prepare-only` to build, copy and fingerprint the candidate without starting tests;
+continue with `--resume` without that flag. `prepared` is not a passed test gate.
+On Windows the native supervisor owns its process tree through a Job Object, preserves
+the child's exit code and terminates descendants when their owner exits. Heavy builds
+use `UseSharedCompilation=false` so their memory limits apply to the actual compiler.
+After an interruption, the same command with `--resume` reuses only successful parts
+with identical source, dependency, runtime and environment fingerprints. It refuses to
+reuse live child processes, changed inputs or incomplete/failed results, preserves earlier
+attempts, and re-verifies the complete union and restored-browser TRX before qualification.
+Do not delete a lock while its runner/children are alive. A changed candidate needs a new
+results directory and its applicable final gate.
+
+Known, reviewed documentation outside the test inputs can be excluded with repeatable
+`--untested-doc docs/<exact-file>.md`. Unknown/new files remain inputs by default. Do not
+exclude tested instructions, fixtures or coverage inventories. Committing identical bytes
+does not invalidate evidence; changing an influencing input does. This local receipt is
+not a successful GitHub CI or a deployment receipt.
+
+For the development loop, `node scripts/verification-scope.mjs --help` explains area
+selection; uncertain/shared changes expand the checks. Release CI remains a full barrier.
+`npm run lint` and `npm run typecheck` reuse content-aware local caches;
+`npm run typecheck:clean` is available for diagnosing the compiler cache.
+`npm run typecheck` includes `npx tsc -p tsconfig.app.json --noEmit` and the
+equivalent `tsconfig.node.json` check; both must succeed.
+
 Frontend changes require the complete frontend unit set, lint, typecheck, encoding audit and production build. Include integrations, dates, surface, security and browser checks when the changed boundary or release workflow requires them. Run the commands below for the relevant area, not automatically after every small edit.
 
 ```powershell
 npm run lint
-npx tsc -p tsconfig.app.json --noEmit
+npm run typecheck
 npm run test:ci
 npm run test:integration
 npm run audit:dates:test
@@ -87,7 +167,7 @@ The workflow keeps frontend, formatting and backend qualification as mandatory d
 | `frontend` | All frontend audits, lint, types, unit/guard/integration tests, strict legal readiness, build and immutable SHA/attempt-named archive with its uploader artifact ID. |
 | `backend-format` | Forced strict restore and complete solution format verification. |
 | `backend-build` | Forced strict restore, analyzed test/API and shard-tool builds, complete machine-discovered manifest, compiled test runtime and backend archive. |
-| `backend-test` | Four shards (`0..3`), each with its own PostgreSQL 17 service and complete browser/CLI/client prerequisites. `fail-fast: false` preserves the other results when one shard fails. |
+| `backend-test` | Four shards (`0..3`), using isolated disposable databases on the existing PostgreSQL 17 service and complete browser/CLI/client prerequisites. `fail-fast: false` preserves the other results when one shard fails. |
 | `backend-browser` | The existing restored-CRM filter with browser verification enabled: exactly five cases from the two required methods, every case passed and no skipped/error results. |
 | `backend` | All build/test/browser jobs succeeded, then the four result artifacts match the producer manifest exactly: no missing, duplicated, extra or skipped cases. |
 | `deploy` | `frontend`, `backend-format` and the aggregate `backend` all succeeded. Download the exact same-run frontend/backend artifact IDs supplied by their qualified producers, then perform the existing VPS deployment and readiness checks. |

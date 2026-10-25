@@ -21,7 +21,19 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\PayPlanner.Api.csproj" />
+    <ProjectReference Include="..\PayPlanner.Api.csproj" AdditionalProperties="PayPlannerSkipMigrationsBuild=true" />
   </ItemGroup>
+
+  <!-- The API cannot reference its migrations without a cycle. Copy after this graph node has
+       actually built, so tests/solution builds never use a stale or merely existing DLL. -->
+  <Target Name="CopyMigrationsToApi" AfterTargets="Build">
+    <MSBuild Projects="..\PayPlanner.Api.csproj" Targets="GetTargetPath"
+             Properties="Configuration=$(Configuration);PayPlannerSkipMigrationsBuild=true;BuildProjectReferences=false">
+      <Output TaskParameter="TargetOutputs" ItemName="_ApiAssemblyTargetPath" />
+    </MSBuild>
+    <Error Condition="'@(_ApiAssemblyTargetPath)' == ''" Text="Не удалось определить выходную сборку API для миграций." />
+    <Copy SourceFiles="$(TargetPath)" DestinationFiles="@(_ApiAssemblyTargetPath->'%(RootDir)%(Directory)PayPlanner.Api.Migrations.dll')"
+          SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

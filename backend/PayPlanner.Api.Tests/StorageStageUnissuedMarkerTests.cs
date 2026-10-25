@@ -17,7 +17,7 @@ public sealed partial class StorageStagePhysicalSizeTests
     public async Task MarkerCreationFollowsCommitAndFailedCreationNeverIssuesWriter(bool postgres, bool blockMarker)
     {
         var order = new MarkerCommitOrder(blockMarker);
-        await using var fixture = await Fixture.CreateAsync(postgres, order);
+        await using var fixture = await CreateFixtureAsync(postgres, order);
         order.MarkerDirectory = Path.Combine(fixture.Root, "signatures", ".stage-writer-fences-v1");
         var path = Path.Combine(fixture.Root, "signatures", "ordered.tmp");
         var admission = await fixture.Stage.ReserveCompatibilityAsync("esign:marker-order", path, 8, "esign-current", default);
@@ -63,7 +63,7 @@ public sealed partial class StorageStagePhysicalSizeTests
         var fault = new CommitFault(afterCommit);
         var unavailable = false;
         var proof = new UnavailableStageReleaseProof(() => unavailable && !fault.Armed);
-        await using var fixture = await Fixture.CreateAsync(postgres, fault, proof);
+        await using var fixture = await CreateFixtureAsync(postgres, fault, proof);
         var path = Path.Combine(fixture.Root, "signatures", "unconfirmed.tmp");
         fault.Armed = true;
         unavailable = true;
@@ -111,7 +111,7 @@ public sealed partial class StorageStagePhysicalSizeTests
         var fault = new CommitFault(afterCommit, ignoredCommits: 1);
         var blockProof = unavailable;
         var proof = new UnavailableStageReleaseProof(() => blockProof && !fault.Armed);
-        await using var fixture = await Fixture.CreateAsync(postgres, fault, proof);
+        await using var fixture = await CreateFixtureAsync(postgres, fault, proof);
         var path = Path.Combine(fixture.Root, "signatures", "activation-ack.tmp");
         fault.Armed = true;
         await Assert.ThrowsAsync<IOException>(() => fixture.Stage.ReserveCompatibilityAsync(
@@ -192,7 +192,7 @@ public sealed partial class StorageStagePhysicalSizeTests
         var fault = new ReserveAcknowledgementFault("before");
         var started = false;
         var unavailable = new UnavailableStageReleaseProof(() => proofUnavailable && started && !fault.Armed);
-        await using var fixture = await Fixture.CreateAsync(postgres, fault, unavailable);
+        await using var fixture = await CreateFixtureAsync(postgres, fault, unavailable);
         StorageStageCapacityTicket? winner = null;
         try
         {

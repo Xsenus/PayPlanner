@@ -9,9 +9,9 @@ public sealed record DiscoveredCase(Guid Id, string FullyQualifiedName, string D
 public sealed record PlannedCase(Guid Id, string FullyQualifiedName, string DisplayName, int Shard);
 public sealed record ArtifactPin(string Path, string Sha256);
 public sealed record TestPlan(int SchemaVersion, string Revision, int ShardCount, string AssemblyPath,
-    ArtifactPin[] Artifacts, PlannedCase[] Cases, MethodTiming[]? Timings = null);
+    ArtifactPin[] Artifacts, PlannedCase[] Cases, MethodTiming[]? Timings = null, ExecutionProfile? Execution = null);
 public sealed record ShardRun(int SchemaVersion, string Revision, string ManifestSha256, int Shard,
-    string AssemblySha256, DateTime StartedUtc, DateTime FinishedUtc, int ExitCode, string? ErrorKind);
+    string AssemblySha256, DateTime StartedUtc, DateTime FinishedUtc, int ExitCode, string? ErrorKind, string Suite = "all", int? BatchCount = null);
 
 public static partial class ShardPlan
 {
@@ -19,9 +19,10 @@ public static partial class ShardPlan
     public static readonly JsonSerializerOptions Json = new() { WriteIndented = true, PropertyNameCaseInsensitive = false };
 
     public static TestPlan Create(string revision, string assemblyPath, ArtifactPin[] artifacts,
-        IEnumerable<DiscoveredCase> discovered, int shardCount, MethodTiming[]? timings = null)
+        IEnumerable<DiscoveredCase> discovered, int shardCount, MethodTiming[]? timings = null, ExecutionProfile? execution = null)
     {
         Require(Hex40().IsMatch(revision), "Revision must be an exact Git SHA.");
+        if (execution is not null) ExecutionScheduling.Validate(execution);
         Require(shardCount == 4, "The release gate requires four shards.");
         ValidateRelativePath(assemblyPath);
         Require(artifacts.Length > 0, "Artifact pins are missing.");
@@ -63,14 +64,14 @@ public static partial class ShardPlan
             loads[shard] += Weight(group);
         }
         return new(SchemaVersion, revision, shardCount, assemblyPath, artifacts.OrderBy(pin => pin.Path, StringComparer.Ordinal).ToArray(),
-            planned.OrderBy(row => row.FullyQualifiedName, StringComparer.Ordinal).ThenBy(row => row.Id).ToArray(), timings);
+            planned.OrderBy(row => row.FullyQualifiedName, StringComparer.Ordinal).ThenBy(row => row.Id).ToArray(), timings, execution);
     }
 
     public static void Validate(TestPlan plan)
     {
         Require(plan.SchemaVersion == SchemaVersion, "Unsupported plan schema.");
         var expected = Create(plan.Revision, plan.AssemblyPath, plan.Artifacts,
-            plan.Cases.Select(row => new DiscoveredCase(row.Id, row.FullyQualifiedName, row.DisplayName)), plan.ShardCount, plan.Timings);
+            plan.Cases.Select(row => new DiscoveredCase(row.Id, row.FullyQualifiedName, row.DisplayName)), plan.ShardCount, plan.Timings, plan.Execution);
         Require(expected.Cases.SequenceEqual(plan.Cases), "Plan ordering or method assignment is invalid.");
         Require(expected.Timings is null ? plan.Timings is null : expected.Timings.SequenceEqual(plan.Timings!), "Plan timing estimates are not canonical.");
     }
@@ -109,11 +110,22 @@ public static partial class ShardPlan
     }
 
     public static void WriteRunSettings(string path, TestPlan plan, int shard)
+        => WriteRunSettings(path, Filter(plan, shard));
+
+    public static void WriteRunSettings(string path, IEnumerable<PlannedCase> cases)
+    {
+        var methods = cases.Select(row => row.FullyQualifiedName).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+        Require(methods.Length > 0, "An execution batch must not be empty.");
+        WriteRunSettings(path, string.Join('|', methods.Select(method => $"FullyQualifiedName={method}")));
+    }
+
+    private static void WriteRunSettings(string path, string filter)
     {
         using var writer = XmlWriter.Create(path, new XmlWriterSettings { Indent = true });
         writer.WriteStartElement("RunSettings");
         writer.WriteStartElement("RunConfiguration");
-        writer.WriteElementString("TestCaseFilter", Filter(plan, shard));
+        writer.WriteElementString("TestCaseFilter", filter);
+        writer.WriteElementString("MaxCpuCount", "1");
         writer.WriteElementString("TreatNoTestsAsError", "true");
         writer.WriteEndElement();
         writer.WriteEndElement();

@@ -10,15 +10,18 @@ namespace PayPlanner.Api.Tests;
 
 public sealed class SqliteMigratedTemplateTests
 {
-    [Fact]
-    public async Task ConcurrentCopiesMigrateOnceAndIsolateRowsSchemaAndSequences()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ConcurrentCopiesMigrateOnceAndIsolateRowsSchemaAndSequences(bool migratedSchema)
     {
         var migrations = 0;
         await using var owner = new SqliteMigratedTemplate(async (db, ct) =>
         {
             Interlocked.Increment(ref migrations);
-            await db.Database.MigrateAsync(ct);
-        });
+            if (migratedSchema) await db.Database.MigrateAsync(ct);
+            else await db.Database.EnsureCreatedAsync(ct);
+        }, migratedSchema: migratedSchema);
         var pending = Enumerable.Range(0, 3).Select(_ => Task.Run(() => owner.CreateDatabaseAsync())).ToArray();
         try
         {
@@ -53,6 +56,36 @@ public sealed class SqliteMigratedTemplateTests
             foreach (var task in pending)
                 if (task.IsCompletedSuccessfully) await (await task).DisposeAsync();
         }
+    }
+
+    [Fact]
+    public async Task CurrentModelCopyMatchesFreshSchemaWithoutInventingMigrationHistory()
+    {
+        await using var fresh = new SqliteConnection("Data Source=:memory:;Pooling=False");
+        await fresh.OpenAsync();
+        await using var baseline = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(fresh).Options);
+        await baseline.Database.EnsureCreatedAsync();
+        await using var owner = new CurrentModelDatabaseTemplates();
+        await using var lease = await owner.Sqlite.CreateDatabaseAsync();
+        await using var clone = Context(lease.Connection);
+        lease.AssertUsesValidatedModel(clone);
+        Assert.Equal(await CatalogAsync(fresh), await CatalogAsync(lease.Connection));
+        Assert.Empty(await clone.Database.GetAppliedMigrationsAsync());
+        Assert.Equal("false", await clone.SystemSettings.Where(row => row.Key == "notifications.email.enabled").Select(row => row.Value).SingleAsync());
+        Assert.Equal("ok", await ScalarAsync(lease.Connection, "PRAGMA integrity_check"));
+        Assert.Empty(await RowsAsync(lease.Connection, "PRAGMA foreign_key_check"));
+    }
+
+    [Fact]
+    public async Task PreparedSchemaProofRejectsADifferentAuditModel()
+    {
+        await using var owner = new CurrentModelDatabaseTemplates();
+        await using var lease = await owner.Sqlite.CreateDatabaseAsync();
+        await using var changed = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite(lease.Connection).UsePayPlannerSqliteMigrations().Options, useObjectAuditModel: false);
+        Assert.Throws<Xunit.Sdk.SameException>(() => lease.AssertUsesValidatedModel(changed));
+        await using var original = Context(lease.Connection);
+        lease.AssertUsesValidatedModel(original);
     }
 
     [Fact]

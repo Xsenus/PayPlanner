@@ -18,7 +18,9 @@ public sealed class SqliteMigratedTemplate : IAsyncLifetime, IAsyncDisposable
     private readonly Dictionary<string, string> pragmas = [];
     private readonly Func<PaymentContext, CancellationToken, Task> migrate;
     private readonly Action<SqliteConnection, SqliteConnection> copy;
+    private readonly bool migratedSchema;
     private SqliteConnection? source;
+    private Microsoft.EntityFrameworkCore.Metadata.IModel? validatedModel;
     private ExceptionDispatchInfo? initializationFailure;
     private bool ready;
     private bool closing;
@@ -27,10 +29,11 @@ public sealed class SqliteMigratedTemplate : IAsyncLifetime, IAsyncDisposable
     public SqliteMigratedTemplate() : this((db, ct) => db.Database.MigrateAsync(ct)) { }
 
     internal SqliteMigratedTemplate(Func<PaymentContext, CancellationToken, Task> migrate,
-        Action<SqliteConnection, SqliteConnection>? copy = null)
+        Action<SqliteConnection, SqliteConnection>? copy = null, bool migratedSchema = true)
     {
         this.migrate = migrate;
         this.copy = copy ?? ((source, destination) => source.BackupDatabase(destination));
+        this.migratedSchema = migratedSchema;
     }
 
     public Task InitializeAsync() => Task.CompletedTask;
@@ -110,19 +113,30 @@ public sealed class SqliteMigratedTemplate : IAsyncLifetime, IAsyncDisposable
             {
                 await migrate(db, ct);
                 Assert.False(db.Database.HasPendingModelChanges());
-                var expected = db.Database.GetMigrations().ToArray();
-                Assert.NotEmpty(expected);
-                Assert.Equal(expected, (await db.Database.GetAppliedMigrationsAsync(ct)).ToArray());
-                Assert.Empty(await db.Database.GetPendingMigrationsAsync(ct));
-                migrationCount = expected.Length;
+                if (migratedSchema)
+                {
+                    var expected = db.Database.GetMigrations().ToArray();
+                    Assert.NotEmpty(expected);
+                    Assert.Equal(expected, (await db.Database.GetAppliedMigrationsAsync(ct)).ToArray());
+                    Assert.Empty(await db.Database.GetPendingMigrationsAsync(ct));
+                    migrationCount = expected.Length;
+                }
+                else
+                {
+                    Assert.Empty(await db.Database.GetAppliedMigrationsAsync(ct));
+                    Assert.False(await db.Database.EnsureCreatedAsync(ct));
+                    migrationCount = 0;
+                }
                 Assert.Empty(await db.Users.ToArrayAsync(ct));
                 var email = await db.SystemSettings.SingleOrDefaultAsync(row => row.Key == "notifications.email.enabled", ct);
                 if (email is null) db.SystemSettings.Add(new SystemSetting { Key = "notifications.email.enabled", Value = "false" });
                 else email.Value = "false";
                 await db.SaveChangesAsync(ct);
                 Assert.Null(db.Database.CurrentTransaction);
+                validatedModel = db.Model;
             }
-            Assert.Equal("0", await ScalarAsync(source, "SELECT COUNT(*) FROM \"__EFMigrationsLock\"", ct));
+            if (migratedSchema)
+                Assert.Equal("0", await ScalarAsync(source, "SELECT COUNT(*) FROM \"__EFMigrationsLock\"", ct));
             foreach (var name in ConnectionPragmas)
             {
                 var value = await ScalarAsync(source, $"PRAGMA {name}", ct);
@@ -202,6 +216,11 @@ public sealed class SqliteMigratedTemplate : IAsyncLifetime, IAsyncDisposable
     {
         internal SqliteConnection Connection { get; } = connection;
         internal bool Released { get; set; }
+        internal void AssertUsesValidatedModel(PaymentContext context)
+        {
+            Assert.NotNull(owner.validatedModel);
+            Assert.Same(owner.validatedModel, context.Model);
+        }
         public ValueTask DisposeAsync() => owner.ReleaseAsync(this);
     }
 }

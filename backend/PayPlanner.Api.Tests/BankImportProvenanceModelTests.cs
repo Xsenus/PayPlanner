@@ -428,9 +428,34 @@ public sealed class BankImportProvenanceModelTests
         return account;
     }
 
-    internal sealed class ModelDatabase(PaymentContext db, string? databaseName = null, string? adminConnection = null) : IAsyncDisposable
+    internal sealed class ModelDatabase(PaymentContext db, string? databaseName = null, string? adminConnection = null,
+        PostgreSqlMigratedTemplate.DatabaseLease? lease = null) : IAsyncDisposable
     {
         public PaymentContext Db { get; } = db;
+
+        internal static async Task<ModelDatabase> CreateFromTemplateAsync(bool postgres, PostgreSqlMigratedTemplate template)
+        {
+            if (!postgres) return new(await SqliteTestContextFactory.CreateAsync());
+            var lease = await template.CreateDatabaseAsync("pp_bank_model_");
+            PostgreSqlPaymentContext? context = null;
+            try
+            {
+                context = new PostgreSqlPaymentContext(new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
+                    .UseNpgsql(lease.ConnectionString).Options);
+                await context.Database.OpenConnectionAsync();
+                return new(context, lease: lease);
+            }
+            catch (Exception error)
+            {
+                var errors = new List<Exception> { error };
+                try { if (context is not null) await context.DisposeAsync(); }
+                catch (Exception cleanup) { errors.Add(cleanup); }
+                try { await lease.DisposeAsync(); }
+                catch (Exception cleanup) { errors.Add(cleanup); }
+                if (errors.Count > 1) throw new AggregateException(errors);
+                throw;
+            }
+        }
 
         public static async Task<ModelDatabase> CreateAsync(bool postgres)
         {
@@ -469,6 +494,11 @@ public sealed class BankImportProvenanceModelTests
         public async ValueTask DisposeAsync()
         {
             await Db.DisposeAsync();
+            if (lease is not null)
+            {
+                await lease.DisposeAsync();
+                return;
+            }
             if (databaseName is null) return;
             Assert.Matches("^pp_bank_model_[a-f0-9]{32}$", databaseName);
             await using var admin = new NpgsqlConnection(adminConnection!);

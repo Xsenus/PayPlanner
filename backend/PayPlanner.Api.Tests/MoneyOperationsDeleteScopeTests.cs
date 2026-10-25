@@ -36,7 +36,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(MoneyDeleteDeniedCases))]
     public async Task MoneyDelete_DeniedOriginNeverChangesFinancialHistory(bool postgres, string reason)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: false);
+        await using var fixture = await CreateAccountSessionsFixtureAsync(postgres, admin: false);
         await using var db = fixture.Open();
         var seed = fixture.Seed;
         await PrepareMoneyDeleteAsync(db, seed);
@@ -67,7 +67,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(MoneyDeleteImportedCases))]
     public async Task MoneyDelete_ImportedOriginRequiresImportWorkflow(bool postgres, bool admin, string origin)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin);
+        await using var fixture = await CreateAccountSessionsFixtureAsync(postgres, admin);
         await using var db = fixture.Open();
         await PrepareMoneyDeleteAsync(db, fixture.Seed);
         var operation = ManualCompanyOperation(fixture.Seed, fixture.Seed.Own.Id);
@@ -105,7 +105,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task MoneyDelete_AdminUnattributedHistoryRemainsReadOnly(bool postgres)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres);
+        await using var fixture = await CreateAccountSessionsFixtureAsync(postgres);
         await using var db = fixture.Open();
         await PrepareMoneyDeleteAsync(db, fixture.Seed);
         var operation = ManualCompanyOperation(fixture.Seed, fixture.Seed.Unknown.Id);
@@ -139,7 +139,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, true)]
     public async Task MoneyDelete_LateSaveFailurePreservesOperationCashOrderAndOuterWork(bool postgres, bool outer)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: false);
+        await using var fixture = await CreateAccountSessionsFixtureAsync(postgres, admin: false);
         var fault = new MoneyDeleteSavedFault();
         await using var db = fixture.Open(fault);
         var cash = await PrepareMoneyDeleteAsync(db, fixture.Seed);
@@ -167,7 +167,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, true)]
     public async Task MoneyDelete_AllowedOwnCashCancelsOrderAndPreservesArchivedIdentity(bool postgres, bool admin)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin);
+        await using var fixture = await CreateAccountSessionsFixtureAsync(postgres, admin);
         await using var db = fixture.Open();
         var cash = await PrepareMoneyDeleteAsync(db, fixture.Seed);
         var operation = ManualCompanyOperation(fixture.Seed, cash.Id);
@@ -186,7 +186,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, true)]
     public async Task MoneyDelete_AppliedInvoiceRequiresReversalAndPreservesPayment(bool postgres, bool admin)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin);
+        await using var fixture = await CreateAccountSessionsFixtureAsync(postgres, admin);
         await using var db = fixture.Open();
         var seed = fixture.Seed;
         await PrepareMoneyDeleteAsync(db, seed);

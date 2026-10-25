@@ -35,7 +35,8 @@ Thumbs.db
 .ReSharper*/
 *_ReSharper*/
 *.DotSettings.user
-.cr/  # DevExpress CodeRush artifacts
+# DevExpress CodeRush artifacts
+.cr/
 
 # ---- .NET / C# ----
 bin/
@@ -74,9 +75,15 @@ out/
 # Databases (на случай локальной SQLite)
 *.db
 *.sqlite
+*.sqlite3
 *.sqlite-journal
 *.db-shm
 *.db-wal
+*.backup
+*.dump
+*.bak
+*.mdf
+*.ldf
 
 # ---- Misc ----
 # /build/

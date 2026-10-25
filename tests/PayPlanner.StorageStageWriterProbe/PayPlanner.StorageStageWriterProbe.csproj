@@ -7,7 +7,8 @@
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
-    <ProjectReference Include="../../backend/PayPlanner.Api.csproj" />
+    <ProjectReference Include="../../backend/PayPlanner.Api.csproj" AdditionalProperties="PayPlannerSkipMigrationsBuild=true" />
+    <ProjectReference Include="../../backend/PayPlanner.Api.Migrations/PayPlanner.Api.Migrations.csproj" />
     <Compile Include="../../backend/PayPlanner.Api.Tests/OwnedProcessIdentity.cs" Link="OwnedProcessIdentity.cs" />
   </ItemGroup>
 </Project>

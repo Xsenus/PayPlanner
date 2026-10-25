@@ -36,7 +36,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(BankPackageDenialCases))]
     public async Task BankPackageScope_RejectsWholeForbiddenPackageBeforeReadOrMutation(bool postgres, string endpoint, string boundary)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var db = fixture.Db;
         var seed = await SeedBankScopeAsync(db, boundary);
         var before = await CaptureBankScopeStateAsync(db);
@@ -72,7 +72,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, "archived-own")]
     public async Task BankPackageScope_ReadsOwnHistoryAndReturnsPersistedOrigin(bool postgres, string kind)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var db = fixture.Db;
         var seed = await SeedBankScopeAsync(db, kind);
         var controller = CreateController(db, seed.ActorId, isAdminClaim: true);
@@ -101,7 +101,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task BankPackageScope_AdminReadsUnattributedHistoryWithoutAssigningOrigin(bool postgres)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var db = fixture.Db;
         var seed = await SeedBankScopeAsync(db, "admin-unknown");
         var before = await CaptureBankScopeStateAsync(db);
@@ -119,7 +119,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task BankPackageScope_RollbackOwnPackageRetainsOriginAndArchivedIdentity(bool postgres)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var db = fixture.Db;
         var seed = await SeedBankScopeAsync(db, "own");
         var operationId = (await db.MoneyOperations.SingleAsync()).Id;
@@ -140,7 +140,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task BankPackageScope_ReprocessOwnRowsPreservesLineageAndReplaysSameResult(bool postgres)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var db = fixture.Db;
         var seed = await SeedBankScopeAsync(db, "errors-own");
         var origin = await db.BankStatementImportRows.SingleAsync();
@@ -183,7 +183,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, "reprocess")]
     public async Task BankPackageScope_ViewPermissionDoesNotGrantMutation(bool postgres, string endpoint)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var db = fixture.Db;
         var seed = await SeedBankScopeAsync(db, "own");
         var permission = await db.RolePermissions.SingleAsync();

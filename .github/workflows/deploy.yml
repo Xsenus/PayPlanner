@@ -35,20 +35,28 @@ env:
 
 jobs:
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64, payplanner-xsenus]
     timeout-minutes: 30
     outputs:
       frontend-artifact-id: ${{ steps.frontend-upload.outputs.artifact-id }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
           cache-dependency-path: package-lock.json
+
+      - name: Verify trusted Windows frontend host
+        run: node scripts/verify-xsenus-runner.mjs build
 
       - name: Install FE deps
         run: npm ci
@@ -72,7 +80,7 @@ jobs:
         run: npm run lint
 
       - name: Typecheck FE
-        run: npx tsc -p tsconfig.app.json --noEmit
+        run: npm run typecheck
 
       - name: Verify date/time audit
         run: npm run audit:dates:test
@@ -90,7 +98,7 @@ jobs:
         run: npm run test:ci
 
       - name: Install Chromium for frontend integration
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
 
       - name: Test FE integration
         run: npm run test:integration
@@ -125,34 +133,31 @@ jobs:
           compression-level: 0
 
   backend-format:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64, payplanner-xsenus]
     timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Prepare Windows .NET installer
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.tool_cache }}/payplanner-dotnet
+        run: node scripts/prepare-windows-ci-toolchain.mjs
 
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "9.0.x"
-
-      - name: Prepare memory for backend compilation
-        shell: bash
-        run: |
-          set -euo pipefail
-          # The generated migration models require more than 6 GiB during
-          # compilation. Keep all analyzers and give smaller hosted runners
-          # additional virtual memory for the complete release gate.
-          memory_kib="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)"
-          if [ "$memory_kib" -lt 12582912 ]; then
-            swap_file="$RUNNER_TEMP/payplanner-build.swap"
-            test ! -e "$swap_file"
-            sudo fallocate -l 8G "$swap_file"
-            sudo chmod 600 "$swap_file"
-            sudo mkswap "$swap_file" >/dev/null
-            sudo swapon "$swap_file"
-          fi
-          free -h
 
       - name: Cache downloaded NuGet packages
         uses: actions/cache@v5
@@ -184,6 +189,16 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Setup Node for reference cache audit
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Prepare Windows .NET installer
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.tool_cache }}/payplanner-dotnet
+        run: node scripts/prepare-windows-ci-toolchain.mjs
+
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v5
         with:
@@ -201,11 +216,6 @@ jobs:
 
       - name: Restore backend
         run: dotnet restore "${{ env.BE_SLN }}" --force -p:PayPlannerReleaseAudit=true
-
-      - name: Setup Node for reference cache audit
-        uses: actions/setup-node@v6
-        with:
-          node-version: "20"
 
       - name: Verify reference assembly cache contracts
         run: npm run audit:reference-cache
@@ -231,7 +241,7 @@ jobs:
           PAYPLANNER_TEST_TIMINGS: ${{ runner.temp }}/payplanner-test-timings.json
         run: |
           set -euo pipefail
-          dotnet tools/PayPlanner.TestShards/bin/Release/net9.0/PayPlanner.TestShards.dll discover --assembly backend/PayPlanner.Api.Tests/bin/Release/net9.0/PayPlanner.Api.Tests.dll --manifest test-plan.json --revision "${{ github.sha }}" --shards 4
+          dotnet tools/PayPlanner.TestShards/bin/Release/net9.0/PayPlanner.TestShards.dll discover --assembly backend/PayPlanner.Api.Tests/bin/Release/net9.0/PayPlanner.Api.Tests.dll --manifest test-plan.json --revision "${{ github.sha }}" --shards 4 --execution-profile bounded
           printf 'manifest-sha=%s\n' "$(node -p "require('./test-plan.summary.json').ManifestSha256")" >> "$GITHUB_OUTPUT"
           printf 'sdk-version=%s\n' "$(dotnet --version)" >> "$GITHUB_OUTPUT"
 
@@ -286,17 +296,22 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Prepare Windows .NET installer
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.tool_cache }}/payplanner-dotnet
+        run: node scripts/prepare-windows-ci-toolchain.mjs
+
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ needs.backend-build.outputs.sdk-version }}
-
-      - name: Setup Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: package-lock.json
 
       - name: Verify existing PostgreSQL and trusted runner
         env:
@@ -345,7 +360,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p test-results
-          dotnet tools/PayPlanner.TestShards/bin/Release/net9.0/PayPlanner.TestShards.dll run --manifest test-plan.json --manifest-sha "$EXPECTED_MANIFEST_SHA" --shard ${{ matrix.shard }} --results test-results/shard-${{ matrix.shard }} 2>&1 | tee test-results/shard-${{ matrix.shard }}.log
+          dotnet tools/PayPlanner.TestShards/bin/Release/net9.0/PayPlanner.TestShards.dll run --manifest test-plan.json --manifest-sha "$EXPECTED_MANIFEST_SHA" --shard ${{ matrix.shard }} --results test-results/shard-${{ matrix.shard }} --workers auto --suite all 2>&1 | tee test-results/shard-${{ matrix.shard }}.log
 
       - name: Preserve exact shard results
         if: always()
@@ -367,7 +382,7 @@ jobs:
 
 
   backend-browser:
-    needs: [backend-build, backend-format, frontend]
+    needs: [backend-build, backend-format, frontend, backend-test]
     runs-on: [self-hosted, Windows, X64, payplanner-xsenus]
     timeout-minutes: 15
     defaults:
@@ -379,17 +394,22 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Prepare Windows .NET installer
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.tool_cache }}/payplanner-dotnet
+        run: node scripts/prepare-windows-ci-toolchain.mjs
+
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ needs.backend-build.outputs.sdk-version }}
-
-      - name: Setup Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: package-lock.json
 
       - name: Verify existing PostgreSQL and trusted runner
         env:
@@ -469,6 +489,16 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Prepare Windows .NET installer
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.tool_cache }}/payplanner-dotnet
+        run: node scripts/prepare-windows-ci-toolchain.mjs
+
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v5
         with:
@@ -544,6 +574,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      # Keep Linux filesystem permission/symlink checks on the deployment platform.
+      - name: Test deploy backup retention on Linux
+        run: bash scripts/prune-deploy-backups.test.sh
+
+      - name: Test Data Protection key preservation on Linux
+        run: bash scripts/preserve-data-protection-keys.test.sh
 
       - name: Setup Node
         uses: actions/setup-node@v6

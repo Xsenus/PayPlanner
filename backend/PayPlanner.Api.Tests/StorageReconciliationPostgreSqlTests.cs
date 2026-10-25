@@ -5,7 +5,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Npgsql;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services.Storage;
@@ -14,7 +13,8 @@ using Xunit.Abstractions;
 
 namespace PayPlanner.Api.Tests;
 
-public sealed class StorageReconciliationPostgreSqlTests(ITestOutputHelper output)
+public sealed class StorageReconciliationPostgreSqlTests(ITestOutputHelper output, PostgreSqlMigratedTemplate postgresTemplate)
+    : IClassFixture<PostgreSqlMigratedTemplate>
 {
     [Theory]
     [InlineData(-1, false)]
@@ -29,19 +29,12 @@ public sealed class StorageReconciliationPostgreSqlTests(ITestOutputHelper outpu
                 "PAYPLANNER_TEST_POSTGRES must be configured in CI.");
             return;
         }
-        var name = "pp_repair_capacity_" + Guid.NewGuid().ToString("N");
-        var settings = new NpgsqlConnectionStringBuilder(raw) { Database = "postgres", Pooling = false };
-        await using var admin = new NpgsqlConnection(settings.ConnectionString);
-        await admin.OpenAsync();
-        var created = false;
+        PostgreSqlMigratedTemplate.DatabaseLease? lease = null;
         try
         {
-            await using (var command = new NpgsqlCommand($"CREATE DATABASE \"{name}\"", admin))
-            { await command.ExecuteNonQueryAsync(); created = true; }
-            settings.Database = name;
-            var options = new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(settings.ConnectionString).Options;
+            lease = await postgresTemplate.CreateDatabaseAsync("pp_repair_capacity_");
+            var options = new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(lease.ConnectionString).Options;
             await using var db = new PostgreSqlPaymentContext(options);
-            await db.Database.MigrateAsync();
             var good = new byte[] { 1, 2, 3, 4, 5 };
             var damaged = new byte[] { 9, 9, 9, 9, 9 };
             var hash = Convert.ToHexString(SHA256.HashData(good)).ToLowerInvariant();
@@ -93,11 +86,7 @@ public sealed class StorageReconciliationPostgreSqlTests(ITestOutputHelper outpu
         }
         finally
         {
-            Assert.Matches("^pp_repair_capacity_[a-f0-9]{32}$", name);
-            if (created)
-            {
-                await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(admin, name);
-            }
+            if (lease is not null) await lease.DisposeAsync();
         }
     }
 
@@ -117,22 +106,14 @@ public sealed class StorageReconciliationPostgreSqlTests(ITestOutputHelper outpu
                 "PAYPLANNER_TEST_POSTGRES must be configured in CI.");
             return;
         }
-        const string prefix = "pp_repair_cycles_";
-        var name = prefix + Guid.NewGuid().ToString("N");
-        var settings = new NpgsqlConnectionStringBuilder(raw) { Database = "postgres", Pooling = false };
-        await using var admin = new NpgsqlConnection(settings.ConnectionString);
-        await admin.OpenAsync();
-        var created = false;
+        PostgreSqlMigratedTemplate.DatabaseLease? lease = null;
         try
         {
-            await using (var command = new NpgsqlCommand($"CREATE DATABASE \"{name}\"", admin))
-            { await command.ExecuteNonQueryAsync(); created = true; }
-            settings.Database = name;
+            lease = await postgresTemplate.CreateDatabaseAsync("pp_repair_cycles_");
             var race = new BeforeSave();
-            var plain = new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(settings.ConnectionString).Options;
-            var options = new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(settings.ConnectionString).AddInterceptors(race).Options;
+            var plain = new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(lease.ConnectionString).Options;
+            var options = new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(lease.ConnectionString).AddInterceptors(race).Options;
             await using var db = new PostgreSqlPaymentContext(options);
-            await db.Database.MigrateAsync();
             var bytes = new byte[] { 1, 2, 3, 4, 5 };
             var hash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
             var source = new OwnedProvider("local"); var target = new OwnedProvider("mirror");
@@ -217,11 +198,7 @@ public sealed class StorageReconciliationPostgreSqlTests(ITestOutputHelper outpu
         }
         finally
         {
-            Assert.Matches("^pp_repair_cycles_[a-f0-9]{32}$", name);
-            if (created)
-            {
-                await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(admin, name);
-            }
+            if (lease is not null) await lease.DisposeAsync();
         }
     }
 

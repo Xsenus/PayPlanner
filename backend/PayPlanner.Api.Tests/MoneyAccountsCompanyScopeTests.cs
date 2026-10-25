@@ -100,7 +100,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task AccountScope_ListOnlyAssignedCompanyAndCoherentAccounts(bool postgres)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var seed = await SeedAccountScopeAsync(fixture.Db, false);
         var result = await CreateMoneyAccountsController(fixture.Db, seed.Actor.Id).Get(activeOnly: false);
         var accounts = Assert.IsAssignableFrom<IReadOnlyList<MoneyAccount>>(Assert.IsType<OkObjectResult>(result.Result).Value);
@@ -117,7 +117,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(AccountReadDeniedCases))]
     public async Task AccountScope_ReadRequiresCurrentApprovedPermission(bool postgres, string endpoint, string reason)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var db = fixture.Db;
         var seed = await SeedAccountScopeAsync(db, false);
         if (reason == "inactive") await db.Users.Where(item => item.Id == seed.Actor.Id).ExecuteUpdateAsync(setters => setters.SetProperty(item => item.IsActive, false));
@@ -139,7 +139,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, "incoherent")]
     public async Task AccountScope_DirectIdDoesNotRevealUnassignedOrIncoherentAccount(bool postgres, string kind)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var seed = await SeedAccountScopeAsync(fixture.Db, false);
         var id = kind == "foreign" ? seed.Foreign.Id : kind == "unknown" ? seed.Unknown.Id : seed.Incoherent.Id;
         Assert.IsType<NotFoundResult>((await CreateMoneyAccountsController(fixture.Db, seed.Actor.Id).GetById(id, default)).Result);
@@ -150,7 +150,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task AccountScope_CompanyGrantDoesNotActivateNonEmployee(bool postgres)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var seed = await SeedAccountScopeAsync(fixture.Db, false);
         await fixture.Db.Users.Where(item => item.Id == seed.Actor.Id).ExecuteUpdateAsync(setters => setters.SetProperty(item => item.IsEmployee, false));
         var controller = CreateMoneyAccountsController(fixture.Db, seed.Actor.Id);
@@ -163,7 +163,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task AccountScope_AdminReadsUnknownWithoutAssigningCompany(bool postgres)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var seed = await SeedAccountScopeAsync(fixture.Db, true);
         var before = await CaptureAccountScopeAsync(fixture.Db);
         var account = Assert.IsType<MoneyAccount>(Assert.IsType<OkObjectResult>((await CreateMoneyAccountsController(fixture.Db, seed.Actor.Id, false).GetById(seed.Unknown.Id, default)).Result).Value);
@@ -180,7 +180,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(AccountCreateDeniedCases))]
     public async Task AccountScope_CreateValidatesDeclaredOriginBeforeWriting(bool postgres, string boundary)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var db = fixture.Db;
         var seed = await SeedAccountScopeAsync(db, true);
         var model = NewScopedAccount(seed);
@@ -208,7 +208,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task AccountScope_CreatePersistsExplicitCompanyAndBankOrigin(bool postgres)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var seed = await SeedAccountScopeAsync(fixture.Db, true);
         var account = Assert.IsType<MoneyAccount>(Assert.IsType<CreatedAtActionResult>((await CreateMoneyAccountsController(fixture.Db, seed.Actor.Id, false).Create(NewScopedAccount(seed), default)).Result).Value);
         Assert.Equal(seed.Company.Id, account.CompanyId);
@@ -223,7 +223,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task AccountScope_DefaultsRemainIndependentBetweenCompanies(bool postgres)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var seed = await SeedAccountScopeAsync(fixture.Db, true);
         var controller = CreateMoneyAccountsController(fixture.Db, seed.Actor.Id, false);
         var first = NewScopedAccount(seed);
@@ -241,7 +241,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task AccountScope_SameNameAllowedInDifferentOwnCompanies(bool postgres)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var seed = await SeedAccountScopeAsync(fixture.Db, true);
         var controller = CreateMoneyAccountsController(fixture.Db, seed.Actor.Id, false);
         foreach (var company in new[] { seed.Company.Id, seed.Other.Id })
@@ -283,7 +283,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, "unused")]
     public async Task AccountScope_DeleteArchivesEveryReferencedAccountAndKeepsHistory(bool postgres, string kind)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var db = fixture.Db;
         var seed = await SeedAccountScopeAsync(db, true);
         await AddAccountHistoryAsync(db, seed, kind);
@@ -313,7 +313,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(AccountIdentityChangeCases))]
     public async Task AccountScope_UsedAccountCannotChangeFinancialIdentity(bool postgres, string field)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var db = fixture.Db;
         var seed = await SeedAccountScopeAsync(db, true);
         await AddAccountHistoryAsync(db, seed, "active");
@@ -336,7 +336,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, "delete")]
     public async Task AccountScope_UnknownHistoryRemainsReadOnlyForAdmin(bool postgres, string endpoint)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var db = fixture.Db;
         var seed = await SeedAccountScopeAsync(db, true);
         var controller = CreateMoneyAccountsController(db, seed.Actor.Id, false);
@@ -362,7 +362,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, "delete", true)]
     public async Task AccountScope_WritesRequireCurrentApprovedDatabaseAdmin(bool postgres, string endpoint, bool unapprovedAdmin)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var db = fixture.Db;
         var seed = await SeedAccountScopeAsync(db, unapprovedAdmin);
         if (unapprovedAdmin) await db.Users.Where(item => item.Id == seed.Actor.Id).ExecuteUpdateAsync(setters => setters.SetProperty(item => item.IsApproved, false));
@@ -383,7 +383,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task AccountScope_CreateIgnoresRootIdentityAndNestedGraph(bool postgres)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var db = fixture.Db;
         var seed = await SeedAccountScopeAsync(db, true);
         var model = NewScopedAccount(seed);
@@ -407,7 +407,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task AccountScope_DoesNotDuplicatePhysicalBankAccountWhenLinkIsOmitted(bool postgres)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var seed = await SeedAccountScopeAsync(fixture.Db, true);
         var model = NewScopedAccount(seed);
         model.BankConnectionAccountId = null;
@@ -426,7 +426,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, "Deleted")]
     public async Task AccountScope_ActiveAccountRequiresExistingActiveOwnProfile(bool postgres, string state)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var seed = await SeedAccountScopeAsync(fixture.Db, true);
         if (state == "Deleted")
         {
@@ -444,7 +444,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task AccountScope_CompanyFilterNarrowsGrantedCompaniesAndReturnsName(bool postgres)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var seed = await SeedAccountScopeAsync(fixture.Db, false);
         fixture.Db.UserCompanyAccesses.Add(new UserCompanyAccess { UserId = seed.Actor.Id, LegalEntityId = seed.Other.Id });
         await fixture.Db.SaveChangesAsync();
@@ -459,7 +459,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task AccountScope_DuplicateNameUsesSameUnicodeComparisonOnBothProviders(bool postgres)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var seed = await SeedAccountScopeAsync(fixture.Db, true);
         var model = NewScopedAccount(seed);
         model.Name = seed.Own.Name.ToUpperInvariant();

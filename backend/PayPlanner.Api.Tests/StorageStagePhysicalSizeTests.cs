@@ -15,14 +15,22 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public sealed partial class StorageStagePhysicalSizeTests
+public sealed partial class StorageStagePhysicalSizeTests : IClassFixture<PostgreSqlMigratedTemplate>
 {
+    private readonly PostgreSqlMigratedTemplate physicalPostgresTemplate;
+
+    public StorageStagePhysicalSizeTests(PostgreSqlMigratedTemplate physicalPostgresTemplate)
+        => this.physicalPostgresTemplate = physicalPostgresTemplate;
+
+    private Task<Fixture> CreateFixtureAsync(bool postgres, params IInterceptor[] interceptors)
+        => Fixture.CreateAsync(physicalPostgresTemplate, postgres, interceptors);
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task MissingFileReleaseRecoversOriginalUpperBoundReceiptWithoutAcceptingForgedAuthority(bool postgres)
     {
-        await using var fixture = await Fixture.CreateAsync(postgres);
+        await using var fixture = await CreateFixtureAsync(postgres);
         var original = await fixture.ReserveAsync();
         var confirmed = await fixture.Stage.ConfirmPhysicalSizeAsync(original, 4, CancellationToken.None);
         File.Delete(original.AbsolutePath);
@@ -45,7 +53,7 @@ public sealed partial class StorageStagePhysicalSizeTests
     [InlineData(true)]
     public async Task ConfirmedSizeKeepsIdentityAndRecoversDebtWithoutChangingBytesOrUnrelatedTrackedData(bool postgres)
     {
-        await using var fixture = await Fixture.CreateAsync(postgres);
+        await using var fixture = await CreateFixtureAsync(postgres);
         var original = await fixture.ReserveAsync();
         var client = new Client { Name = "persisted" };
         fixture.Db.Clients.Add(client);
@@ -90,7 +98,7 @@ public sealed partial class StorageStagePhysicalSizeTests
     public async Task CommitFailurePreservesPhysicalBytesAndExactRepeatResolvesTheOriginalReservation(bool postgres, bool afterCommit)
     {
         var fault = new CommitFault(afterCommit);
-        await using var fixture = await Fixture.CreateAsync(postgres, fault);
+        await using var fixture = await CreateFixtureAsync(postgres, fault);
         var original = await fixture.ReserveAsync();
         fault.Armed = true;
         await Assert.ThrowsAsync<IOException>(() => fixture.Stage.ConfirmPhysicalSizeAsync(original, 4, CancellationToken.None));
@@ -116,7 +124,7 @@ public sealed partial class StorageStagePhysicalSizeTests
     [InlineData(3)]
     public async Task InvalidWrittenSizeCannotShrinkOrReleaseTheAdmittedReservation(int actualSize)
     {
-        await using var fixture = await Fixture.CreateAsync(false);
+        await using var fixture = await CreateFixtureAsync(false);
         var original = await fixture.ReserveAsync();
         if (actualSize is <= 0 or > 8)
             await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => fixture.Stage.ConfirmPhysicalSizeAsync(original, actualSize, CancellationToken.None));
@@ -135,7 +143,7 @@ public sealed partial class StorageStagePhysicalSizeTests
     [InlineData("path")]
     public async Task ChangedReceiptCannotConfirmAnOwnedReservation(string change)
     {
-        await using var fixture = await Fixture.CreateAsync(false);
+        await using var fixture = await CreateFixtureAsync(false);
         var original = await fixture.ReserveAsync();
         var altered = change switch
         {
@@ -151,7 +159,7 @@ public sealed partial class StorageStagePhysicalSizeTests
     [Fact]
     public async Task ConfirmedCompletionCannotBeResizedThroughTheReturnedReceipt()
     {
-        await using var fixture = await Fixture.CreateAsync(false);
+        await using var fixture = await CreateFixtureAsync(false);
         var original = await fixture.ReserveAsync();
         var confirmed = await fixture.Stage.ConfirmPhysicalSizeAsync(original, 4, CancellationToken.None);
         await File.WriteAllBytesAsync(original.AbsolutePath, [1, 2, 3]);
@@ -165,7 +173,7 @@ public sealed partial class StorageStagePhysicalSizeTests
     [Fact]
     public async Task EqualSizeConfirmationAlsoRecordsImmutableCompletion()
     {
-        await using var fixture = await Fixture.CreateAsync(false);
+        await using var fixture = await CreateFixtureAsync(false);
         var original = await fixture.ReserveAsync();
         await File.WriteAllBytesAsync(original.AbsolutePath, new byte[8]);
         var confirmed = await fixture.Stage.ConfirmPhysicalSizeAsync(original, 8, CancellationToken.None);
@@ -183,7 +191,7 @@ public sealed partial class StorageStagePhysicalSizeTests
     [InlineData("size")]
     public async Task ChangedCompletionReceiptBlocksRepeatAndAutomaticDebtRelease(string change)
     {
-        await using var fixture = await Fixture.CreateAsync(false);
+        await using var fixture = await CreateFixtureAsync(false);
         var original = await fixture.ReserveAsync();
         await fixture.Stage.ConfirmPhysicalSizeAsync(original, 4, CancellationToken.None);
         var row = await fixture.Db.StorageCapacityReservations.AsNoTracking().SingleAsync();
@@ -206,7 +214,7 @@ public sealed partial class StorageStagePhysicalSizeTests
     [Fact]
     public async Task ExhaustedBudgetEpochRollsBackConfirmedSizeAndPreservesBytes()
     {
-        await using var fixture = await Fixture.CreateAsync(false);
+        await using var fixture = await CreateFixtureAsync(false);
         var original = await fixture.ReserveAsync();
         await fixture.Db.StorageCapacityEpochs.ExecuteUpdateAsync(setters => setters.SetProperty(item => item.Version, long.MaxValue));
         await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Stage.ConfirmPhysicalSizeAsync(original, 4, CancellationToken.None));
@@ -236,10 +244,8 @@ public sealed partial class StorageStagePhysicalSizeTests
 
     private sealed class Fixture : IAsyncDisposable
     {
-        private readonly SqliteConnection? _sqlite;
-        private readonly NpgsqlConnection? _admin;
-        private readonly string? _name;
-        private readonly string? _postgresConnection;
+        private SqliteConnection? _sqlite;
+        private PostgreSqlMigratedTemplate.DatabaseLease? _databaseLease;
         private readonly IInterceptor[] _interceptors;
         private readonly List<StorageStageCapacityTicket> _ownedWriterTickets = [];
         public string Root { get; }
@@ -248,46 +254,41 @@ public sealed partial class StorageStagePhysicalSizeTests
         private readonly TestEnvironment _environment;
         private readonly IConfiguration _configuration;
         private readonly StaticOptions _options = new(new StorageOrchestrationOptions { Enabled = true, UploadCapacityChecksEnabled = true, UploadMinimumFreeBytes = 0 });
-        private Fixture(string root, SqliteConnection? sqlite, NpgsqlConnection? admin, string? name, string? postgresConnection, IInterceptor[] interceptors)
+        private Fixture(string root, IInterceptor[] interceptors)
         {
-            Root = root; _sqlite = sqlite; _admin = admin; _name = name; _postgresConnection = postgresConnection; _interceptors = interceptors;
+            Root = root; _interceptors = interceptors;
             _environment = new(root);
             _configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
             { [ElectronicSignatureStoragePaths.StorageRootConfigurationKey] = Path.Combine(root, "signatures") }).Build();
         }
-        public static async Task<Fixture> CreateAsync(bool postgres, params IInterceptor[] interceptors)
+        public static async Task<Fixture> CreateAsync(PostgreSqlMigratedTemplate postgresTemplate, bool postgres, params IInterceptor[] interceptors)
         {
             var root = Path.Combine(Path.GetTempPath(), "pp-stage-physical-" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(Path.Combine(root, "signatures"));
-            SqliteConnection? sqlite = null; NpgsqlConnection? admin = null; string? name = null; string? connectionString = null;
-            if (postgres)
-            {
-                var raw = Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES");
-                Assert.False(string.IsNullOrWhiteSpace(raw), "Local PostgreSQL is required for this qualification.");
-                var settings = new NpgsqlConnectionStringBuilder(raw!) { Database = "postgres", Pooling = false };
-                Assert.Contains(settings.Host, new[] { "127.0.0.1", "::1", "localhost" });
-                admin = new(settings.ConnectionString); await admin.OpenAsync();
-                name = "pp_stage_physical_" + Guid.NewGuid().ToString("N");
-                await using var create = new NpgsqlCommand($"CREATE DATABASE \"{name}\"", admin);
-                await create.ExecuteNonQueryAsync();
-                Console.WriteLine("Owned physical stage database: " + name);
-                settings.Database = name; connectionString = settings.ConnectionString;
-            }
-            else { sqlite = new("Data Source=:memory:"); await sqlite.OpenAsync(); }
-            var fixture = new Fixture(root, sqlite, admin, name, connectionString, interceptors);
+            var fixture = new Fixture(root, interceptors);
             try
             {
+                Directory.CreateDirectory(Path.Combine(root, "signatures"));
+                if (postgres)
+                {
+                    var raw = Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES");
+                    Assert.False(string.IsNullOrWhiteSpace(raw), "Local PostgreSQL is required for this qualification.");
+                    var settings = new NpgsqlConnectionStringBuilder(raw!) { Database = "postgres", Pooling = false };
+                    Assert.Contains(settings.Host, new[] { "127.0.0.1", "::1", "localhost" });
+                    fixture._databaseLease = await postgresTemplate.CreateDatabaseAsync("pp_stage_physical_");
+                }
+                else { fixture._sqlite = new("Data Source=:memory:"); await fixture._sqlite.OpenAsync(); }
                 fixture.Db = fixture.NewContext();
-                if (postgres) await fixture.Db.Database.MigrateAsync(); else await fixture.Db.Database.EnsureCreatedAsync();
+                if (fixture._databaseLease is not null) fixture._databaseLease.AssertUsesValidatedModel(fixture.Db);
+                else await fixture.Db.Database.EnsureCreatedAsync();
                 return fixture;
             }
             catch { await fixture.DisposeAsync(); throw; }
         }
         public PaymentContext NewContext()
         {
-            if (_postgresConnection is not null)
+            if (_databaseLease is not null)
             {
-                var builder = new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(_postgresConnection);
+                var builder = new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(_databaseLease.ConnectionString);
                 builder.AddInterceptors(_interceptors);
                 return new PostgreSqlPaymentContext(builder.Options);
             }
@@ -311,19 +312,10 @@ public sealed partial class StorageStagePhysicalSizeTests
             foreach (var ticket in _ownedWriterTickets) await ticket.CloseWriterAsync();
             if (Db is not null) await Db.DisposeAsync();
             if (_sqlite is not null) await _sqlite.DisposeAsync();
-            if (_admin is not null && _name is not null)
+            if (_databaseLease is not null)
             {
-                Assert.Matches("^pp_stage_physical_[a-f0-9]{32}$", _name);
-                long count = -1;
-                for (var attempt = 0; attempt < 50; attempt++)
-                {
-                    await using var query = new NpgsqlCommand("SELECT count(*) FROM pg_stat_activity WHERE datname=@name", _admin);
-                    query.Parameters.AddWithValue("name", _name); count = Convert.ToInt64(await query.ExecuteScalarAsync());
-                    if (count == 0) break; await Task.Delay(100);
-                }
-                Assert.Equal(0L, count);
-                await using var drop = new NpgsqlCommand($"DROP DATABASE \"{_name}\"", _admin); await drop.ExecuteNonQueryAsync();
-                await _admin.DisposeAsync();
+                Assert.Matches("^pp_stage_physical_[a-f0-9]{32}$", _databaseLease.Name);
+                await _databaseLease.DisposeAsync();
             }
             Assert.Matches("^pp-stage-physical-[a-f0-9]{32}$", Path.GetFileName(Root));
             Assert.StartsWith(Path.GetFullPath(Path.GetTempPath()), Path.GetFullPath(Root), StringComparison.OrdinalIgnoreCase);

@@ -20,7 +20,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(StandalonePaymentCompanyCases))]
     public async Task StandalonePaymentCompany_ReadsNeverMixKnownCompanies(bool postgres, string scenario, string endpoint)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: scenario == "admin-foreign");
+        await using var fixture = await CreateAccountSessionsFixtureAsync(postgres, admin: scenario == "admin-foreign");
         await using var db = fixture.Open();
         var seed = fixture.Seed;
         const string marker = "SYNTHETIC-STANDALONE-PAYMENT-682194";

@@ -7,6 +7,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="baseline-timings.json" LogicalName="PayPlanner.TestShards.baseline-timings.json" />
     <AssemblyMetadata Include="TestShardsSdkVersion" Value="$(NETCoreSdkVersion)" />
     <Reference Include="Microsoft.TestPlatform.VsTestConsole.TranslationLayer">
       <HintPath>$(MSBuildSDKsPath)/../Microsoft.TestPlatform.VsTestConsole.TranslationLayer.dll</HintPath>

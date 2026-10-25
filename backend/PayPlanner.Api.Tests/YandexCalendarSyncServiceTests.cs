@@ -20,8 +20,8 @@ namespace PayPlanner.Api.Tests;
 
 public class YandexCalendarSyncServiceTests
 {
-    private static readonly IDataProtectionProvider TestDataProtectionProvider =
-        DataProtectionProvider.Create(new DirectoryInfo(Path.Combine(Path.GetTempPath(), "pp-yandex-calendar-tests")));
+    // Token fixtures and their services share this process; parallel workers must not share a disk key ring.
+    private static readonly IDataProtectionProvider TestDataProtectionProvider = new EphemeralDataProtectionProvider();
 
     [Fact]
     public async Task HandleCallbackAsync_WhenStateMissingDoesNotCreateAuthRequest()

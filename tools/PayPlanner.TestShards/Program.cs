@@ -14,8 +14,9 @@ internal static class Program
     {
         try
         {
-            ShardPlan.Require(args.Length > 0, "Use discover, run, verify, verify-restored or timings.");
+            ShardPlan.Require(args.Length > 0, "Use discover, run, verify, verify-restored, timings or exec.");
             var options = Options(args.Skip(1).ToArray());
+            OwnedProcessTree.InitializeForCurrentProcess();
             Environment.SetEnvironmentVariable("Email__Enabled", "false");
             Environment.SetEnvironmentVariable("BackgroundServices__Enabled", "false");
             return args[0] switch
@@ -25,6 +26,7 @@ internal static class Program
                 "verify" => Verify(options),
                 "verify-restored" => VerifyRestored(options),
                 "timings" => Timings(options),
+                "exec" => await ExecuteAsync(options),
                 _ => throw new InvalidDataException("Unknown command."),
             };
         }
@@ -40,20 +42,69 @@ internal static class Program
         }
     }
 
+    private static async Task<int> ExecuteAsync(Dictionary<string, string> options)
+    {
+        ExactOptions(options, "spec");
+        ShardPlan.Require(OperatingSystem.IsWindows(), "Owned exec requires Windows job objects; no unqualified portable fallback is allowed.");
+        var spec = Path.GetFullPath(options["spec"]);
+        ShardPlan.Require(new FileInfo(spec).Length <= 1024 * 1024, "Execution specification exceeds its size limit.");
+        using var document = JsonDocument.Parse(await File.ReadAllTextAsync(spec));
+        var root = document.RootElement;
+        ShardPlan.Require(root.ValueKind == JsonValueKind.Object, "Execution specification must be an object.");
+        var properties = root.EnumerateObject().Select(property => property.Name).ToArray();
+        ShardPlan.Require(properties.Length == 2
+            && properties.Contains("FileName", StringComparer.Ordinal)
+            && properties.Contains("Arguments", StringComparer.Ordinal), "Execution specification accepts only FileName and Arguments; keep secrets in the inherited environment.");
+        var fileName = root.GetProperty("FileName");
+        var arguments = root.GetProperty("Arguments");
+        ShardPlan.Require(fileName.ValueKind == JsonValueKind.String
+            && !string.IsNullOrWhiteSpace(fileName.GetString()) && !fileName.GetString()!.Contains('\0'), "Execution FileName must be a nonempty native executable name.");
+        ShardPlan.Require(arguments.ValueKind == JsonValueKind.Array, "Execution Arguments must be an array of strings.");
+        var start = new ProcessStartInfo(fileName.GetString()!)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        foreach (var argument in arguments.EnumerateArray())
+        {
+            ShardPlan.Require(argument.ValueKind == JsonValueKind.String && !argument.GetString()!.Contains('\0'), "Execution arguments must be strings without NUL characters.");
+            start.ArgumentList.Add(argument.GetString()!);
+        }
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("Owned child did not start.");
+        // A no-window Windows child does not reliably inherit a Node parent's
+        // redirected file handles. Forward both byte streams concurrently so a
+        // full stderr pipe cannot block stdout (or vice versa), without recoding.
+        var stdout = process.StandardOutput.BaseStream.CopyToAsync(Console.OpenStandardOutput());
+        var stderr = process.StandardError.BaseStream.CopyToAsync(Console.OpenStandardError());
+        await process.WaitForExitAsync();
+        await Task.WhenAll(stdout, stderr);
+        return process.ExitCode;
+    }
+
     private static async Task<int> DiscoverAsync(Dictionary<string, string> options)
     {
+        var execution = options.Remove("execution-profile", out var executionName) ? executionName == "bounded"
+            ? ExecutionProfile.Bounded() : throw new InvalidDataException("Unsupported execution profile.") : null;
         var cachedTimings = Environment.GetEnvironmentVariable("PAYPLANNER_TEST_TIMINGS");
         var timings = options.Remove("timings", out var timingPath) ? TestTimings.Read(timingPath).Methods
-            : !string.IsNullOrWhiteSpace(cachedTimings) && File.Exists(cachedTimings) ? TestTimings.Read(cachedTimings).Methods : null;
+            : !string.IsNullOrWhiteSpace(cachedTimings) && File.Exists(cachedTimings) ? TestTimings.Read(cachedTimings).Methods
+            : execution is not null ? TestTimings.ReadBaseline().Methods : null;
         ExactOptions(options, "assembly", "manifest", "revision", "shards");
         var manifest = Path.GetFullPath(options["manifest"]);
         ShardPlan.Require(!File.Exists(manifest), "Preserve the existing manifest.");
         var assembly = Path.GetFullPath(options["assembly"]);
         var root = Path.GetDirectoryName(manifest)!;
         var relative = Path.GetRelativePath(root, assembly).Replace('\\', '/');
-        var runnerConfig = Path.Combine(Path.GetDirectoryName(assembly)!, "xunit.runner.json");
-        var pins = new[] { assembly, Path.ChangeExtension(assembly, ".deps.json"), Path.ChangeExtension(assembly, ".runtimeconfig.json"), Path.Combine(Path.GetDirectoryName(assembly)!, "PayPlanner.Api.dll") }
-            .Concat(File.Exists(runnerConfig) ? [runnerConfig] : [])
+        // Pin the entire runtime: migrations, probes, fixtures, native libraries and
+        // transitive dependencies can change behaviour without changing Tests.dll.
+        var runtime = Path.GetDirectoryName(assembly)!;
+        if (execution is not null) ExecutionScheduling.RequireSerialXunit(runtime);
+        var runtimeFiles = Directory.GetFiles(runtime, "*", SearchOption.AllDirectories);
+        ShardPlan.Require(!Directory.EnumerateFileSystemEntries(runtime, "*", SearchOption.AllDirectories)
+            .Any(path => (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0), "Runtime links are not supported.");
+        var pins = runtimeFiles
             .Select(path => new ArtifactPin(Path.GetRelativePath(root, path).Replace('\\', '/'), ShardPlan.HashFile(path))).ToArray();
         var theories = AssemblyCatalog.ReadTheoryMethods(assembly);
         var sdk = await LocateSdkAsync();
@@ -65,7 +116,7 @@ internal static class Program
         };
         var cases = await ReadCasesAsync(sdk, assembly);
         AssemblyCatalog.RequireEnumeratedTheories(cases, theories);
-        var plan = ShardPlan.Create(options["revision"], relative, pins, cases, ParseInt(options["shards"]), timings);
+        var plan = ShardPlan.Create(options["revision"], relative, pins, cases, ParseInt(options["shards"]), timings, execution);
         ShardPlan.VerifyArtifacts(plan, manifest);
         Directory.CreateDirectory(root);
         await File.WriteAllTextAsync(manifest, JsonSerializer.Serialize(plan, ShardPlan.Json));
@@ -77,6 +128,9 @@ internal static class Program
             CaseCount = plan.Cases.Length,
             MethodCount = plan.Cases.Select(row => row.FullyQualifiedName).Distinct(StringComparer.Ordinal).Count(),
             TimedMethods = plan.Timings?.Length ?? 0,
+            ExecutionProfile = execution is null ? "legacy" : "bounded",
+            LaneCounts = execution is null ? null : Enumerable.Range(0, plan.ShardCount).SelectMany(shard => ExecutionScheduling.Batches(plan, shard))
+                .GroupBy(batch => batch.Lane, StringComparer.Ordinal).ToDictionary(group => group.Key, group => group.Sum(batch => batch.Cases.Length)),
             ShardCounts = Enumerable.Range(0, plan.ShardCount).Select(index => plan.Cases.Count(row => row.Shard == index)).ToArray(),
         };
         WriteJson(Path.ChangeExtension(manifest, ".summary.json"), summary);
@@ -89,6 +143,10 @@ internal static class Program
 
     private static async Task<int> RunAsync(Dictionary<string, string> options)
     {
+        var workers = options.Remove("workers", out var requestedWorkers) ? requestedWorkers : "auto";
+        var suite = options.Remove("suite", out var requestedSuite) ? requestedSuite : "all";
+        ShardPlan.Require(workers is "auto" or "1" or "2" or "4", "Workers must be auto, 1, 2 or 4.");
+        ShardPlan.Require(suite is "all" or "fast" or "heavy", "Suite must be all, fast or heavy.");
         ExactOptions(options, "manifest", "manifest-sha", "shard", "results");
         var manifest = Path.GetFullPath(options["manifest"]);
         var hash = options["manifest-sha"];
@@ -97,6 +155,12 @@ internal static class Program
         var shard = ParseInt(options["shard"]);
         _ = ShardPlan.Filter(plan, shard);
         var results = Path.GetFullPath(options["results"]);
+        if (plan.Execution is not null)
+        {
+            ExecutionScheduling.RequireSerialXunit(Path.GetDirectoryName(ShardPlan.Resolve(manifest, plan.AssemblyPath))!);
+            return await BoundedTestRunner.RunAsync(plan, manifest, hash, shard, results, workers, suite);
+        }
+        ShardPlan.Require(suite == "all", "A partial suite requires a bounded execution manifest.");
         ShardPlan.Require(!Directory.Exists(results) && !File.Exists(results), "Preserve existing shard results.");
         Directory.CreateDirectory(results);
         var settings = Path.Combine(results, "shard.runsettings");
@@ -135,11 +199,34 @@ internal static class Program
 
     private static int Verify(Dictionary<string, string> options)
     {
+        var suite = options.Remove("suite", out var requestedSuite) ? requestedSuite : "all";
+        ShardPlan.Require(suite is "all" or "fast" or "heavy", "Suite must be all, fast or heavy.");
         ExactOptions(options, "manifest", "manifest-sha", "results-root");
         var manifest = Path.GetFullPath(options["manifest"]);
         var plan = ShardPlan.Read(manifest, options["manifest-sha"]);
         ShardPlan.VerifyArtifacts(plan, manifest);
         var root = Path.GetFullPath(options["results-root"]);
+        if (suite != "all")
+        {
+            ShardPlan.Require(Directory.GetDirectories(root).Select(Path.GetFileName).Order(StringComparer.Ordinal)
+                .SequenceEqual(Enumerable.Range(0, plan.ShardCount).Select(index => $"shard-{index}")), "The subset aggregate must contain exactly four shard directories.");
+            var subsets = Enumerable.Range(0, plan.ShardCount)
+                .Select(shard => BatchResults.VerifySubset(plan, options["manifest-sha"], shard, Path.Combine(root, $"shard-{shard}"), suite)).ToArray();
+            ShardPlan.Require(subsets.Sum(row => row.Cases) > 0, "The requested subset is empty; review its qualified timing baseline.");
+            var subsetResult = new
+            {
+                Qualified = false,
+                SubsetPassed = true,
+                Suite = suite,
+                plan.Revision,
+                ManifestSha256 = options["manifest-sha"],
+                CaseCount = subsets.Sum(row => row.Cases),
+                Shards = subsets
+            };
+            WriteJson(Path.Combine(root, "aggregate-subset-qualification.json"), subsetResult);
+            Console.WriteLine(JsonSerializer.Serialize(subsetResult, ShardPlan.Json));
+            return 0;
+        }
         var shards = TrxVerifier.VerifyAll(plan, options["manifest-sha"], root);
         var result = new { Qualified = true, plan.Revision, ManifestSha256 = options["manifest-sha"], CaseCount = shards.Sum(row => row.Cases), Shards = shards };
         WriteJson(Path.Combine(root, "aggregate-qualification.json"), result);

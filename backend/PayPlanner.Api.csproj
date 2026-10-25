@@ -80,8 +80,9 @@
   <!--
     Миграции живут в отдельной сборке PayPlanner.Api.Migrations. Прямая ссылка проекта API на неё невозможна
     (она ссылается на API), поэтому сборка запускается вложенным вызовом после компиляции API, а её DLL
-    копируется в выходной каталог и в публикацию. Пропустить шаг можно только свойством
-    PayPlannerSkipMigrationsBuild=true (например, когда сборку миграций уже выполнил граф проектов).
+    копируется в выходной каталог и в публикацию. При сборке tests/solution проект миграций уже входит
+    в граф: ссылки на API передают PayPlannerSkipMigrationsBuild=true, а migrations копирует актуальную
+    DLL после собственной сборки. При отдельной сборке API сохраняется вложенный Build, но не Restore.
   -->
   <PropertyGroup>
     <MigrationsProjectPath>$(MSBuildProjectDirectory)\PayPlanner.Api.Migrations\PayPlanner.Api.Migrations.csproj</MigrationsProjectPath>
@@ -101,9 +102,19 @@
     </ItemGroup>
   </Target>
 
-  <Target Name="BuildMigrationsAssembly" AfterTargets="CopyFilesToOutputDirectory" Condition="'$(PayPlannerSkipMigrationsBuild)' != 'true'">
-    <MSBuild Projects="$(MigrationsProjectPath)" Targets="Restore" Properties="Configuration=$(Configuration);MSBuildRestoreSessionId=$([System.Guid]::NewGuid())" />
-    <MSBuild Projects="$(MigrationsProjectPath)" Targets="Build" Properties="Configuration=$(Configuration);BuildProjectReferences=false" />
+  <!-- A standalone API restore must also restore its runtime migration assembly. The no-restore flag is
+       respected by Build; missing/stale assets now produce the normal SDK diagnostic rather than
+       silently performing a fresh network restore during compilation. -->
+  <Target Name="RestoreMigrationsAssembly" AfterTargets="Restore"
+          Condition="'$(PayPlannerSkipMigrationsBuild)' != 'true' And '$(BuildingSolutionFile)' != 'true'">
+    <MSBuild Projects="$(MigrationsProjectPath)" Targets="Restore"
+             Properties="Configuration=$(Configuration);PayPlannerSkipMigrationsBuild=true" />
+  </Target>
+
+  <Target Name="BuildMigrationsAssembly" AfterTargets="CopyFilesToOutputDirectory"
+          Condition="'$(PayPlannerSkipMigrationsBuild)' != 'true' And '$(BuildingSolutionFile)' != 'true'">
+    <MSBuild Projects="$(MigrationsProjectPath)" Targets="Build"
+             Properties="Configuration=$(Configuration);BuildProjectReferences=false;PayPlannerSkipMigrationsBuild=true" />
     <Copy SourceFiles="$(MigrationsOutputDll)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
   </Target>
 

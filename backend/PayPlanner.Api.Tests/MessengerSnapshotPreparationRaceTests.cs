@@ -13,8 +13,13 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public sealed partial class MessengerSnapshotPreparationRaceTests
+public sealed partial class MessengerSnapshotPreparationRaceTests : IClassFixture<PostgreSqlMigratedTemplate>
 {
+    private readonly PostgreSqlMigratedTemplate postgresTemplate;
+
+    public MessengerSnapshotPreparationRaceTests(PostgreSqlMigratedTemplate postgresTemplate)
+        => this.postgresTemplate = postgresTemplate;
+
     [Theory]
     [InlineData(false, "none")]
     [InlineData(true, "none")]
@@ -35,8 +40,7 @@ public sealed partial class MessengerSnapshotPreparationRaceTests
         var name = "pp_msg_race_" + Guid.NewGuid().ToString("N");
         var root = Path.Combine(Path.GetTempPath(), name);
         Directory.CreateDirectory(root);
-        NpgsqlConnection? admin = null;
-        var created = false;
+        PostgreSqlMigratedTemplate.DatabaseLease? lease = null;
         try
         {
             var barrier = new WinnerBeforeTransaction { FailRollback = fault == "rollback" };
@@ -44,21 +48,9 @@ public sealed partial class MessengerSnapshotPreparationRaceTests
             DbContextOptionsBuilder racing = postgres ? new DbContextOptionsBuilder<PostgreSqlPaymentContext>() : new DbContextOptionsBuilder<PaymentContext>();
             if (postgres)
             {
-                var connection = Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES");
-                Assert.False(string.IsNullOrWhiteSpace(connection), "This native race test requires PAYPLANNER_TEST_POSTGRES.");
-                var settings = new NpgsqlConnectionStringBuilder(connection) { Database = "postgres", Pooling = false };
-                Assert.True(settings.Host is "127.0.0.1" or "::1", "Disposable databases require literal loopback.");
-                admin = new NpgsqlConnection(settings.ConnectionString);
-                await admin.OpenAsync();
-                await using (var command = admin.CreateCommand())
-                {
-                    command.CommandText = $"CREATE DATABASE \"{name}\"";
-                    await command.ExecuteNonQueryAsync();
-                    created = true;
-                }
-                settings.Database = name;
-                normal.UseNpgsql(settings.ConnectionString);
-                racing.UseNpgsql(settings.ConnectionString);
+                lease = await postgresTemplate.CreateDatabaseAsync("pp_msg_race_");
+                normal.UseNpgsql(lease.ConnectionString);
+                racing.UseNpgsql(lease.ConnectionString);
             }
             else
             {
@@ -87,8 +79,7 @@ public sealed partial class MessengerSnapshotPreparationRaceTests
             int bindingId;
             await using (var setup = Create(normal.Options))
             {
-                if (postgres) await setup.Database.MigrateAsync();
-                else await setup.Database.EnsureCreatedAsync();
+                if (!postgres) await setup.Database.EnsureCreatedAsync();
                 var user = new User
                 {
                     Email = "race@example.test",
@@ -157,25 +148,7 @@ public sealed partial class MessengerSnapshotPreparationRaceTests
         }
         finally
         {
-            if (admin is not null)
-            {
-                if (created)
-                {
-                    await using var command = admin.CreateCommand();
-                    command.CommandText = "SELECT count(*) FROM pg_stat_activity WHERE datname = @name";
-                    command.Parameters.AddWithValue("name", name);
-                    for (var attempt = 0; attempt < 50; attempt++)
-                    {
-                        if (Convert.ToInt64(await command.ExecuteScalarAsync()) == 0) break;
-                        await Task.Delay(100);
-                    }
-                    Assert.Equal(0, Convert.ToInt64(await command.ExecuteScalarAsync()));
-                    command.Parameters.Clear();
-                    command.CommandText = $"DROP DATABASE \"{name}\"";
-                    await command.ExecuteNonQueryAsync();
-                }
-                await admin.DisposeAsync();
-            }
+            if (lease is not null) await lease.DisposeAsync();
             if (Directory.Exists(root)) Directory.Delete(root, true);
         }
     }

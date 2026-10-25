@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdir, readdir, readFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
-import { build, preview } from 'vite';
+import { prepareSyntheticBrowserUi } from './synthetic-browser-ui.mjs';
 import { createChatPostRecorder, createChatReadLifecycle, drainChatNavigationReads, redactChatBrowserDiagnostic } from './chat-browser-read-lifecycle.mjs';
 
 const api = new URL(process.env.CASE_RETIREMENT_API);
@@ -80,19 +80,10 @@ const settings = JSON.stringify({ api: api.origin, ui, threadId, email: process.
   screenshots, suffix: basename(root).slice(-12) });
 try {
   console.log('PP_CHAT_BROWSER_PHASE ui-build');
-  // Exercise the released React lifecycle, not development StrictMode's extra
-  // mount/cleanup cycle, which deliberately aborts the initial status read.
-  const outDir = join(root, 'chat-browser-ui-dist');
-  await mkdir(outDir);
-  const uiConfig = { envDir: root, cacheDir: join(root, 'vite-chat-cache'),
-    build: { outDir, emptyOutDir: false }, logLevel: 'error' };
-  const built = await build(uiConfig);
-  assert.ok((Array.isArray(built) ? built : [built]).some(output =>
-    output.output?.some(chunk => chunk.type === 'chunk' && chunk.isEntry && chunk.code.length > 0)),
-  'The synthetic chat UI entry module must compile successfully.');
-  // The existing enclosing three-minute scenario budget includes this build.
+  // Qualify production React once per unchanged input set, keeping real HTTP and browser assertions.
+  const browserUi = await prepareSyntheticBrowserUi({ api, port });
   console.log('PP_CHAT_BROWSER_PHASE preview-listen');
-  vite = await preview({ ...uiConfig, preview: { host: '127.0.0.1', port, strictPort: true } });
+  vite = await browserUi.startPreview();
   await cli('open', 'about:blank', '--browser', channel); opened = true;
   await cli('snapshot');
   console.log('PP_CHAT_BROWSER_PHASE pending-scenario');

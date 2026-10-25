@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
-using Npgsql;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
@@ -36,28 +35,14 @@ public sealed partial class ElectronicSignaturePreparationRaceTests
         const string prefix = "pp_esign_identity_";
         var name = prefix + Guid.NewGuid().ToString("N");
         var root = Path.Combine(Path.GetTempPath(), name);
-        NpgsqlConnection? admin = null;
-        var created = false;
+        PostgreSqlMigratedTemplate.DatabaseLease? lease = null;
         try
         {
-            var connection = Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES");
-            Assert.False(string.IsNullOrWhiteSpace(connection), "Native identity cases require PAYPLANNER_TEST_POSTGRES.");
-            var settings = new NpgsqlConnectionStringBuilder(connection) { Database = "postgres", Pooling = false };
-            Assert.True(settings.Host is "127.0.0.1" or "::1", "Disposable database requires literal loopback.");
-            admin = new NpgsqlConnection(settings.ConnectionString);
-            await admin.OpenAsync();
-            await using (var create = admin.CreateCommand())
-            {
-                create.CommandText = $"CREATE DATABASE \"{name}\"";
-                await create.ExecuteNonQueryAsync();
-                created = true;
-            }
+            lease = await postgresTemplate.CreateDatabaseAsync(prefix);
             Directory.CreateDirectory(root);
-            settings.Database = name;
-            var dbOptions = new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(settings.ConnectionString)
+            var dbOptions = new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(lease.ConnectionString)
                 .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning)).Options;
             await using var db = new PostgreSqlPaymentContext(dbOptions, useObjectAuditModel: false);
-            await db.Database.MigrateAsync();
             var user = new User
             {
                 Email = "identity@example.test",
@@ -184,24 +169,7 @@ public sealed partial class ElectronicSignaturePreparationRaceTests
         }
         finally
         {
-            if (admin is not null)
-            {
-                if (created)
-                {
-                    Assert.StartsWith(prefix, name);
-                    Assert.True(Guid.TryParseExact(name[prefix.Length..], "N", out _));
-                    await using var command = admin.CreateCommand();
-                    command.CommandText = "SELECT count(*) FROM pg_stat_activity WHERE datname = @name";
-                    command.Parameters.AddWithValue("name", name);
-                    for (var attempt = 0; attempt < 50 && Convert.ToInt64(await command.ExecuteScalarAsync()) != 0; attempt++)
-                        await Task.Delay(100);
-                    Assert.Equal(0, Convert.ToInt64(await command.ExecuteScalarAsync()));
-                    command.Parameters.Clear();
-                    command.CommandText = $"DROP DATABASE \"{name}\"";
-                    await command.ExecuteNonQueryAsync();
-                }
-                await admin.DisposeAsync();
-            }
+            if (lease is not null) await lease.DisposeAsync();
             Assert.Equal(Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar),
                 Path.GetDirectoryName(Path.GetFullPath(root)));
             Assert.Equal(name, Path.GetFileName(root));

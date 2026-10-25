@@ -36,6 +36,18 @@ describe('frontend test performance configuration', () => {
     expect(packageJson.scripts?.['test:unit:serial']).toContain('--no-file-parallelism');
   });
 
+  it('runs guards early and excludes exactly those files from the second CI pass', () => {
+    const guard = packageJson.scripts?.['test:guard'] ?? '';
+    const remaining = packageJson.scripts?.['test:unit:after-guard'] ?? '';
+    const guardFiles = guard.split(/\s+/).filter(value => value.endsWith('.test.ts') || value.endsWith('.test.tsx'));
+    const exclusions = [...remaining.matchAll(/--exclude ([^ ]+)/g)].map(match => match[1]);
+
+    expect(packageJson.scripts?.['test:ci']).toBe('npm run test:guard && npm run test:unit:after-guard');
+    expect(guardFiles).toHaveLength(2);
+    expect(exclusions).toEqual(['"**/*.integration.test.*"', ...guardFiles]);
+    expect(remaining).toContain('--maxWorkers=3');
+  });
+
   it('documents the optimized and diagnostic commands for developers', () => {
     expect(readme).toContain('`npm test` — полный набор frontend unit-тестов');
     expect(readme).toContain('`npm run test:watch`');
@@ -53,10 +65,15 @@ describe('frontend test performance configuration', () => {
       readFileSync(file, 'utf8').includes('@vitest-environment node'),
     ).length;
     const setup = readFileSync(resolve(process.cwd(), 'src/test/setup.ts'), 'utf8');
+    const domSetup = readFileSync(resolve(process.cwd(), 'src/test/setup.dom.ts'), 'utf8');
 
     expect(nodeTestCount).toBeGreaterThanOrEqual(25);
     expect(setup).toContain("typeof window !== 'undefined' && typeof document !== 'undefined'");
-    expect(setup).toContain('if (!hasDom) return;');
+    expect(setup).toContain("if (hasDom) {\n  await import('./setup.dom');");
+    expect(setup).not.toContain("from '@testing-library/react'");
+    expect(domSetup).toContain('cleanup();');
+    expect(typeof window).toBe('undefined');
+    expect(typeof document).toBe('undefined');
   });
 });
 

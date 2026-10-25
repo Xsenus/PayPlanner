@@ -23,7 +23,7 @@ public partial class MoneyOperationsControllerTests
     public async Task MoneyReportLinkedScope_ViewAllDoesNotGrantAnotherCompany(
         bool postgres, string report, bool filtered, bool csv)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: false);
+        await using var fixture = await CreateAccountSessionsFixtureAsync(postgres, admin: false);
         await using var db = fixture.Open();
         var seed = fixture.Seed;
         const string name = "SYNTHETIC-SAME-REPORT-ACCOUNT-84872";

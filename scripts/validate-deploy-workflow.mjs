@@ -117,7 +117,7 @@ export function validateDeployWorkflow(source) {
   const dependencies = {
     frontend: [], 'backend-format': [], 'backend-build': [],
     'backend-test': ['backend-build', 'backend-format', 'frontend'],
-    'backend-browser': ['backend-build', 'backend-format', 'frontend'],
+    'backend-browser': ['backend-build', 'backend-format', 'backend-test', 'frontend'],
     backend: ['backend-browser', 'backend-build', 'backend-test'],
     deploy: ['backend', 'backend-format', 'frontend'],
   };
@@ -133,7 +133,7 @@ export function validateDeployWorkflow(source) {
   for (const [id, job] of Object.entries(jobs)) {
     requireValue(String(job['timeout-minutes']) === String(timeouts[id]), `${id}: keep the explicit runner time budget`);
     requireValue(!Object.hasOwn(job, 'if'), `${id}: conditional job can bypass a release gate`);
-    const localRunner = ['backend-build', 'backend-test', 'backend-browser', 'backend'].includes(id);
+    const localRunner = id !== 'deploy';
     requireValue(localRunner
       ? job['runs-on']?.join(',') === 'self-hosted,Windows,X64,payplanner-xsenus'
         && JSON.stringify(job.defaults) === JSON.stringify({ run: { shell: 'bash' } })
@@ -212,14 +212,14 @@ export function validateDeployWorkflow(source) {
     'npm ci', 'node scripts/validate-deploy-workflow.mjs',
     'bash scripts/prune-deploy-backups.test.sh', 'bash scripts/preserve-data-protection-keys.test.sh',
     'node --test scripts/storage-legacy-backfill.node-tests.mjs', 'npm run lint',
-    'npx tsc -p tsconfig.app.json --noEmit', 'npm run audit:dates:test', 'npm run audit:encoding',
+    'npm run typecheck', 'npm run audit:dates:test', 'npm run audit:encoding',
     'npm run audit:surface:test && npm run audit:surface', 'npm audit --audit-level=moderate',
     'npm run test:ci', 'npm run test:integration',
     'npm run test:legal-flags:strict -- --warn-on-feature-flags-summary-failure', 'npm run build',
     'tar -czf frontend.tar.gz -C "${{ env.OUT_DIR }}" fe',
   ];
   const fe = frontendCommands.map(value => command('frontend', value));
-  const feBrowser = command('frontend', 'npx playwright install --with-deps chromium');
+  const feBrowser = command('frontend', 'npx playwright install chromium');
   requireValue(feBrowser.index > fe[0].index && feBrowser.index < fe[12].index,
     'Compatible Chromium must be installed after dependencies and before frontend integration');
   requireValue(fe.every(({ index }) => index < feUpload.index), 'Frontend gates/build must precede frontend upload');
@@ -228,11 +228,25 @@ export function validateDeployWorkflow(source) {
   requireValue(fe[13].step.env?.PAYPLANNER_READINESS_API_URL === '${{ env.FE_API_URL }}', 'Legal readiness API configuration missing');
   requireValue(fe[14].step.env?.VITE_API_URL === '${{ env.FE_API_URL }}', 'Frontend build API configuration missing');
   requireValue(command('backend-format', restore).index < command('backend-format', format).index, 'Strict restore must precede full format');
+  requireValue(command('frontend', 'node scripts/verify-xsenus-runner.mjs build').index < fe[0].index,
+    'Trusted host preflight must precede frontend tools');
+
+  for (const id of ['backend-format', 'backend-build', 'backend-test', 'backend-browser', 'backend']) {
+    const job = jobs[id];
+    const preparation = command(id, 'node scripts/prepare-windows-ci-toolchain.mjs');
+    const sdkIndex = job.steps.findIndex(step => step.uses === 'actions/setup-dotnet@v5');
+    const node = job.steps.findIndex(step => step.uses === 'actions/setup-node@v6' && step.with?.['node-version'] === '22');
+    requireValue(preparation.step.env?.DOTNET_INSTALL_DIR === '${{ runner.tool_cache }}/payplanner-dotnet'
+      && node >= 0 && node < preparation.index && preparation.index < sdkIndex,
+    `${id}: prepare writable .NET installation and runnable PowerShell before setup-dotnet`);
+    requireValue(job.steps[sdkIndex].env?.DOTNET_INSTALL_DIR === undefined,
+      `${id}: do not override the verified .NET installation directory`);
+  }
 
   const beRestore = command('backend-build', restore);
   const build = command('backend-build', `dotnet build ${project} --no-restore -c Release`);
   const toolBuild = command('backend-build', `dotnet build ${toolProject} --no-restore -c Release`);
-  const discover = command('backend-build', `${tool} discover --assembly ${assembly} --manifest test-plan.json --revision "${sha}" --shards 4`);
+  const discover = command('backend-build', `${tool} discover --assembly ${assembly} --manifest test-plan.json --revision "${sha}" --shards 4 --execution-profile bounded`);
   requireValue(discover.lines[0] === 'set -euo pipefail' && discover.step.id === 'plan', 'Discovery must preserve failure status and produce job outputs');
   requireValue(String(discover.step.env?.BackgroundServices__Enabled) === 'false' && String(discover.step.env?.Email__Enabled) === 'false', 'Discovery mail/background isolation missing');
   requireValue(jobs['backend-build'].outputs?.['manifest-sha'] === '${{ steps.plan.outputs.manifest-sha }}'
@@ -246,7 +260,7 @@ export function validateDeployWorkflow(source) {
   const beUpload = archiveUpload('backend-build', `backend-${sha}-${attempt}`, 'backend.tar.gz', 'backend-upload', 'backend-artifact-id');
   const beOrder = [beRestore, build, toolBuild, discover, runtimePack, runtimeUpload, publish, bePack, beUpload].map(item => item.index);
   requireValue(beOrder.every((value, index) => index === 0 || value > beOrder[index - 1]), 'Backend strict restore/build/discover/artifact order');
-  const shard = command('backend-test', `${tool} run --manifest test-plan.json --manifest-sha "$EXPECTED_MANIFEST_SHA" --shard ${matrixShard} --results test-results/shard-${matrixShard} 2>&1 | tee test-results/shard-${matrixShard}.log`);
+  const shard = command('backend-test', `${tool} run --manifest test-plan.json --manifest-sha "$EXPECTED_MANIFEST_SHA" --shard ${matrixShard} --results test-results/shard-${matrixShard} --workers auto --suite all 2>&1 | tee test-results/shard-${matrixShard}.log`);
   requireValue(shard.lines.length === 3 && shard.lines[1] === 'mkdir -p test-results', 'Shard result directory must be fresh and created by the runner');
   const restoredCommand = `dotnet vstest ${assembly} --Settings:test-results/restored-browser/gate.runsettings --Logger:'trx;LogFileName=results.trx' --ResultsDirectory:test-results/restored-browser --TestCaseFilter:'${restoredFilter}' > test-results/restored-browser/test.log 2>&1 || native_exit=$?`;
   const restored = command('backend-browser', restoredCommand, false, true);
@@ -337,6 +351,9 @@ export function validateDeployWorkflow(source) {
   const scp = deploy.findIndex(step => step.uses?.startsWith('appleboy/scp-action@'));
   const ssh = deploy.findIndex(step => step.uses?.startsWith('appleboy/ssh-action@'));
   const readiness = command('deploy', 'node scripts/run-production-deploy-readiness.mjs', true);
+  for (const check of ['bash scripts/prune-deploy-backups.test.sh', 'bash scripts/preserve-data-protection-keys.test.sh']) {
+    requireValue(command('deploy', check).index < scp, 'Linux filesystem checks must pass before deployment');
+  }
   requireValue(downloads.every(({ index }) => index < unpackBackend.index && index < unpackFrontend.index)
     && unpackBackend.index < tar.index && unpackFrontend.index < tar.index
     && tar.index < scp && scp < ssh && ssh < readiness.index, 'Deploy download/unpack/tar/scp/ssh/readiness order');

@@ -17,8 +17,8 @@ namespace PayPlanner.Api.Tests;
 
 public sealed class YandexDiskServiceTests
 {
-    private static readonly IDataProtectionProvider TestDataProtectionProvider =
-        DataProtectionProvider.Create(new DirectoryInfo(Path.Combine(Path.GetTempPath(), "pp-yandex-disk-tests")));
+    // Token fixtures and their services share this process; parallel workers must not share a disk key ring.
+    private static readonly IDataProtectionProvider TestDataProtectionProvider = new EphemeralDataProtectionProvider();
 
     [Theory]
     [InlineData(1000L, 200L, 800L)]

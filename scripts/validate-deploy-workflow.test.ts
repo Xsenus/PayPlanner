@@ -23,7 +23,7 @@ function replaceInJob(id: string, change: (job: string) => string) {
 }
 
 describe('parallel deploy workflow release contract', () => {
-  it.each(['backend-build', 'backend-test', 'backend-browser', 'backend'])(
+  it.each(['frontend', 'backend-format', 'backend-build', 'backend-test', 'backend-browser', 'backend'])(
     'pins %s to the trusted Windows host and safe checkout', id => {
       for (const [before, after] of [
         ['runs-on: [self-hosted, Windows, X64, payplanner-xsenus]', 'runs-on: ubuntu-latest'],
@@ -35,6 +35,33 @@ describe('parallel deploy workflow release contract', () => {
       }
     },
   );
+
+  it.each(['backend-format', 'backend-build', 'backend-test', 'backend-browser', 'backend'])(
+    'prepares a writable SDK directory and executable PowerShell before setup-dotnet in %s', id => {
+      for (const [before, after] of [
+        ['DOTNET_INSTALL_DIR: ${{ runner.tool_cache }}/payplanner-dotnet', 'DOTNET_INSTALL_DIR: C:/Program Files/dotnet'],
+        ['run: node scripts/prepare-windows-ci-toolchain.mjs', 'run: echo prepared'],
+        ['node-version: "22"', 'node-version: "18"'],
+      ]) {
+        expect(() => validateDeployWorkflow(replaceInJob(id, job => job.replace(before, after)))).toThrow();
+      }
+      expect(() => validateDeployWorkflow(replaceInJob(id, job => job.replace(
+        '        uses: actions/setup-dotnet@v5\n',
+        '        uses: actions/setup-dotnet@v5\n        env:\n          DOTNET_INSTALL_DIR: C:/Program Files/dotnet\n',
+      )))).toThrow(/installation directory/);
+    },
+  );
+
+  it('keeps Linux filesystem assertions before the Docker-based deployment actions', () => {
+    for (const script of ['prune-deploy-backups', 'preserve-data-protection-keys']) {
+      expect(() => validateDeployWorkflow(replaceInJob('deploy', job => job.replace(
+        `run: bash scripts/${script}.test.sh`, 'run: echo skipped',
+      )))).toThrow(/missing.*gate/);
+    }
+    expect(() => validateDeployWorkflow(replaceInJob('deploy', job => job.replace(
+      'runs-on: ubuntu-latest', 'runs-on: [self-hosted, Windows, X64, payplanner-xsenus]',
+    )))).toThrow(/trusted runner/);
+  });
 
   it('rejects a new database server and parallel memory-heavy shards', () => {
     expect(() => validateDeployWorkflow(replaceInJob('backend-test', job => job.replace(
@@ -88,12 +115,35 @@ describe('parallel deploy workflow release contract', () => {
   });
 
   it.each(['backend-test', 'backend-browser'])('keeps expensive %s behind all preflight gates', id => {
+    const originalNeeds = id === 'backend-browser'
+      ? 'needs: [backend-build, backend-format, frontend, backend-test]'
+      : 'needs: [backend-build, backend-format, frontend]';
     for (const needs of ['backend-build, backend-format', 'backend-build, frontend', 'backend-format, frontend']) {
       const changed = replaceInJob(id, job => job.replace(
-        'needs: [backend-build, backend-format, frontend]', `needs: [${needs}]`,
+        originalNeeds, `needs: [${needs}]`,
       ));
       expect(() => validateDeployWorkflow(changed)).toThrow(/dependencies/);
     }
+  });
+
+  it('runs restored browser checks after every bounded shard completes', () => {
+    expect(() => validateDeployWorkflow(replaceInJob('backend-browser', job => job.replace(
+      'needs: [backend-build, backend-format, frontend, backend-test]',
+      'needs: [backend-build, backend-format, frontend]',
+    )))).toThrow(/dependencies/);
+  });
+
+  it.each([
+    ['unprofiled discovery', ' --execution-profile bounded', ''],
+    ['unknown discovery profile', '--execution-profile bounded', '--execution-profile unrestricted'],
+    ['missing worker budget', ' --workers auto', ''],
+    ['unbounded workers', '--workers auto', '--workers 0'],
+    ['fixed workers bypass resource adaptation', '--workers auto', '--workers 4'],
+    ['missing full-suite selection', ' --suite all', ''],
+    ['fast-only release', '--suite all', '--suite fast'],
+    ['heavy-only release', '--suite all', '--suite heavy'],
+  ])('rejects a bounded execution bypass: %s', (_name, before, after) => {
+    expect(() => validateDeployWorkflow(replaceOnce(before, after))).toThrow(/missing.*gate/);
   });
 
   it.each([

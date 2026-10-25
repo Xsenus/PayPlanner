@@ -19,7 +19,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(HistoricalInvoiceReadCases))]
     public async Task HistoricalInvoiceRead_KeepsOwnMoneyWithoutDisclosingInaccessibleDocument(bool postgres, string reason, string endpoint)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: false);
+        await using var fixture = await CreateAccountSessionsFixtureAsync(postgres, admin: false);
         await using var db = fixture.Open();
         var seed = fixture.Seed;
         var ownScope = reason.StartsWith("own-scope-", StringComparison.Ordinal);

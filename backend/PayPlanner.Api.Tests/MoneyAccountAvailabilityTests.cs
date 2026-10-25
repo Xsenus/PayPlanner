@@ -16,7 +16,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task AccountAvailability_HttpKeepsComputedFlagsAcrossReadCreateAndUpdate(bool postgres)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: true);
+        await using var fixture = await CreateAccountSessionsFixtureAsync(postgres, admin: true);
         using var server = fixture.HttpServer();
         using var client = fixture.Client(server);
         using var get = await client.GetAsync("/api/money-accounts?activeOnly=false");
@@ -72,7 +72,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(AccountAvailabilityCases))]
     public async Task AccountAvailability_HistoryKeepsIdentityAndSeparatesNewOperations(bool postgres, string state, string endpoint)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: state.EndsWith("-admin", StringComparison.Ordinal));
+        await using var fixture = await CreateAccountSessionsFixtureAsync(postgres, admin: state.EndsWith("-admin", StringComparison.Ordinal));
         await using var db = fixture.Open();
         var seed = fixture.Seed;
         var target = state.StartsWith("unknown-", StringComparison.Ordinal) ? seed.Unknown
@@ -155,7 +155,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(AccountHistoryMutationCases))]
     public async Task AccountAvailability_AnnotationUsesTheSameExistingAccountState(bool postgres, string state)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: false);
+        await using var fixture = await CreateAccountSessionsFixtureAsync(postgres, admin: false);
         await using var db = fixture.Open();
         var seed = fixture.Seed;
         await PrepareManualCompanyAsync(db, seed);
@@ -195,7 +195,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task AccountAvailability_AdditionalAccountsDoNotAddDatabaseRoundTrips(bool postgres)
     {
-        await using var fixture = await AccountSessionsFixture.CreateAsync(postgres, admin: false);
+        await using var fixture = await CreateAccountSessionsFixtureAsync(postgres, admin: false);
         var counter = new AccountLookupCommandCounter();
         await using var db = fixture.Open(counter);
         await CreateMoneyAccountsController(db, fixture.Seed.Actor.Id).Get(activeOnly: false);

@@ -20,7 +20,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\\PayPlanner.Api.csproj" />
+    <ProjectReference Include="..\\PayPlanner.Api.csproj" AdditionalProperties="PayPlannerSkipMigrationsBuild=true" />
     <ProjectReference Include="..\\PayPlanner.Api.Migrations\\PayPlanner.Api.Migrations.csproj" />
     <ProjectReference Include="../../tests/PayPlanner.StorageStageWriterProbe/PayPlanner.StorageStageWriterProbe.csproj"
                       ReferenceOutputAssembly="false" />
@@ -48,6 +48,11 @@
     <Compile Include="../../tools/PayPlanner.TestShards/TestTimings.cs" Link="TestShards/TestTimings.cs" />
     <Compile Include="../../tools/PayPlanner.TestShards/TrxVerifier.cs" Link="TestShards/TrxVerifier.cs" />
     <Compile Include="../../tools/PayPlanner.TestShards/AssemblyCatalog.cs" Link="TestShards/AssemblyCatalog.cs" />
+    <Compile Include="../../tools/PayPlanner.TestShards/ExecutionScheduling.cs" Link="TestShards/ExecutionScheduling.cs" />
+    <Compile Include="../../tools/PayPlanner.TestShards/BatchResults.cs" Link="TestShards/BatchResults.cs" />
+    <Compile Include="../../tools/PayPlanner.TestShards/OwnedOutputDrain.cs" Link="TestShards/OwnedOutputDrain.cs" />
+    <Compile Include="../../tools/PayPlanner.TestShards/BoundedBatchScheduler.cs" Link="TestShards/BoundedBatchScheduler.cs" />
+    <EmbeddedResource Include="../../tools/PayPlanner.TestShards/baseline-timings.json" LogicalName="PayPlanner.TestShards.baseline-timings.json" />
   </ItemGroup>
 
 </Project>

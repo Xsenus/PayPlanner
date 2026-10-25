@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { createServer as createControlServer } from 'node:http';
-import { build, preview } from 'vite';
+import { prepareSyntheticBrowserUi } from './synthetic-browser-ui.mjs';
 import { createCaseReadLifecycle, isCaseBoundaryRead } from './case-retirement-browser-lifecycle.mjs';
 import { redactChatBrowserDiagnostic } from './chat-browser-read-lifecycle.mjs';
 
@@ -95,19 +95,10 @@ try {
     controlUrl = `http://127.0.0.1:${control.address().port}/apply`;
   }
   phase('vite-create');
-  // Match the existing chat gate: compile the released UI before navigation,
-  // so source transforms do not compete with the API during real requests.
-  // The build remains inside the unchanged enclosing three-minute deadline.
-  const outDir = join(root, 'financial-browser-ui-dist');
-  await mkdir(outDir);
-  const uiConfig = { envDir: root, cacheDir: join(root, 'vite-financial-cache'),
-    build: { outDir, emptyOutDir: false }, logLevel: 'error' };
-  const built = await build(uiConfig);
-  assert.ok((Array.isArray(built) ? built : [built]).some(output =>
-    output.output?.some(chunk => chunk.type === 'chunk' && chunk.isEntry && chunk.code.length > 0)),
-  'The synthetic financial UI production entry must compile successfully.');
+  // Reuse only a fully qualified production artifact; API/data/port remain scenario-owned.
+  const browserUi = await prepareSyntheticBrowserUi({ api, port });
   phase('vite-listen');
-  vite = await preview({ ...uiConfig, preview: { host: '127.0.0.1', port, strictPort: true } });
+  vite = await browserUi.startPreview();
   assert.equal(vite.config.isProduction, true, 'The financial browser must qualify production React behavior.');
   assert.equal(vite.config.env.DEV, false, 'The release browser must not use development-only mount effects.');
   phase('cli-open');

@@ -1,0 +1,211 @@
+{
+  "checkedAt": "2026-10-21T06:19:32.406165+07:00",
+  "method": "authenticated browser UI; read-only; latest visible conversation of every known PAY card",
+  "companyId": "a9848b434609",
+  "projectId": "daa8d6c1-cce6-4c0c-985a-6bdc5a4b5eb4",
+  "knownCardsRead": 38,
+  "cards": [
+    {
+      "id": "PAY-1",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-1",
+      "latestVisibleMessage": "9 октября 15:33"
+    },
+    {
+      "id": "PAY-2",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-2",
+      "latestVisibleMessage": "24 сентября 12:23"
+    },
+    {
+      "id": "PAY-3",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-3",
+      "latestVisibleMessage": "9 октября 17:54"
+    },
+    {
+      "id": "PAY-4",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-4",
+      "latestVisibleMessage": "9 октября 15:33"
+    },
+    {
+      "id": "PAY-5",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-5",
+      "latestVisibleMessage": "9 октября 17:53"
+    },
+    {
+      "id": "PAY-6",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-6",
+      "latestVisibleMessage": "25 сентября 19:17"
+    },
+    {
+      "id": "PAY-7",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-7",
+      "latestVisibleMessage": "28 сентября 20:56"
+    },
+    {
+      "id": "PAY-8",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-8",
+      "latestVisibleMessage": "24 сентября 13:01"
+    },
+    {
+      "id": "PAY-9",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-9",
+      "latestVisibleMessage": "24 сентября 12:54"
+    },
+    {
+      "id": "PAY-10",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-10",
+      "latestVisibleMessage": "25 сентября 19:24"
+    },
+    {
+      "id": "PAY-11",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-11",
+      "latestVisibleMessage": "25 сентября 19:24"
+    },
+    {
+      "id": "PAY-12",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-12",
+      "latestVisibleMessage": "25 сентября 19:24"
+    },
+    {
+      "id": "PAY-13",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-13",
+      "latestVisibleMessage": "28 сентября 19:02"
+    },
+    {
+      "id": "PAY-14",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-14",
+      "latestVisibleMessage": "14 октября 13:47"
+    },
+    {
+      "id": "PAY-15",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-15",
+      "latestVisibleMessage": "28 сентября 20:21"
+    },
+    {
+      "id": "PAY-16",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-16",
+      "latestVisibleMessage": "9 октября 15:33"
+    },
+    {
+      "id": "PAY-17",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-17",
+      "latestVisibleMessage": "сообщений нет"
+    },
+    {
+      "id": "PAY-18",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-18",
+      "latestVisibleMessage": "сообщений нет"
+    },
+    {
+      "id": "PAY-19",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-19",
+      "latestVisibleMessage": "14 октября 13:46"
+    },
+    {
+      "id": "PAY-20",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-20",
+      "latestVisibleMessage": "9 октября 17:53"
+    },
+    {
+      "id": "PAY-21",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-21",
+      "latestVisibleMessage": "14 октября 13:47"
+    },
+    {
+      "id": "PAY-22",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-22",
+      "latestVisibleMessage": "5 октября 11:28"
+    },
+    {
+      "id": "PAY-23",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-23",
+      "latestVisibleMessage": "14 октября 13:58"
+    },
+    {
+      "id": "PAY-24",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-24",
+      "latestVisibleMessage": "14 октября 13:47"
+    },
+    {
+      "id": "PAY-25",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-25",
+      "latestVisibleMessage": "14 октября 13:56"
+    },
+    {
+      "id": "PAY-26",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-26",
+      "latestVisibleMessage": "5 октября 11:28"
+    },
+    {
+      "id": "PAY-27",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-27",
+      "latestVisibleMessage": "5 октября 11:27"
+    },
+    {
+      "id": "PAY-28",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-28",
+      "latestVisibleMessage": "5 октября 11:27"
+    },
+    {
+      "id": "PAY-29",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-29",
+      "latestVisibleMessage": "5 октября 11:26"
+    },
+    {
+      "id": "PAY-30",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-30",
+      "latestVisibleMessage": "сообщений нет"
+    },
+    {
+      "id": "PAY-31",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-31",
+      "latestVisibleMessage": "12 октября 15:39"
+    },
+    {
+      "id": "PAY-32",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-32",
+      "latestVisibleMessage": "14 октября 13:58"
+    },
+    {
+      "id": "PAY-33",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-33",
+      "latestVisibleMessage": "12 октября 08:55"
+    },
+    {
+      "id": "PAY-34",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-34",
+      "latestVisibleMessage": "12 октября 15:38"
+    },
+    {
+      "id": "PAY-35",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-35",
+      "latestVisibleMessage": "12 октября 15:31"
+    },
+    {
+      "id": "PAY-36",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-36",
+      "latestVisibleMessage": "14 октября 13:47"
+    },
+    {
+      "id": "PAY-37",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-37",
+      "latestVisibleMessage": "14 октября 13:47"
+    },
+    {
+      "id": "PAY-38",
+      "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#PAY-38",
+      "latestVisibleMessage": "12 октября 15:41"
+    }
+  ],
+  "projectChat": {
+    "url": "https://ru.yougile.com/team/a9848b434609/PayPlanner#chat:d628027b1fa7",
+    "latestVisibleMessage": "16 сентября 14:16",
+    "newDevelopmentQuestions": 0
+  },
+  "maxLiveCheck": "blocked: current browser requires QR login; no claim of freshness after stored 16 October audit",
+  "notes": [
+    "This is a structured current observation, not a complete raw export of all messages or attachments.",
+    "Original specifications, screenshots and older full YouGile inventory remain in existing sources.",
+    "No YouGile messages posted or cards changed.",
+    "No new task titles were found in the visible PayPlanner board/chat list; hidden or other-company projects were not scanned."
+  ]
+}

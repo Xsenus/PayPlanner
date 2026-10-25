@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Npgsql;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
@@ -14,6 +15,47 @@ namespace PayPlanner.Api.Tests;
 
 public sealed partial class InternalChatControllerTests
 {
+    [Fact]
+    public async Task PostgreSqlChatFixtureRetainsIndependentConnectionsAndReleasesOwnedDatabase()
+    {
+        string databaseName;
+        string adminConnectionString;
+        await using (var f = await CreateMigratedFixtureAsync(true))
+        {
+            var settings = new NpgsqlConnectionStringBuilder(f.Db.Database.GetConnectionString()!);
+            databaseName = settings.Database!;
+            Assert.StartsWith("pp_chat_replay_", databaseName);
+            Assert.True(Guid.TryParseExact(databaseName["pp_chat_replay_".Length..], "N", out _));
+            Assert.False(settings.Pooling);
+            settings.Database = "postgres";
+            adminConnectionString = settings.ConnectionString;
+            var author = await f.AddUserAsync("capture-lifecycle@example.test", "Автор");
+            await using var first = CaptureFreshDb(f);
+            await using var second = CaptureFreshDb(f);
+            PaymentContext[] contexts = [f.Db, first, second];
+            var pids = new List<int>();
+            foreach (var context in contexts)
+            {
+                Assert.False(new NpgsqlConnectionStringBuilder(context.Database.GetConnectionString()!).Pooling);
+                pids.Add(await BackendPidAsync(context));
+            }
+            Assert.Equal(3, pids.Distinct().Count());
+            for (var index = 0; index < contexts.Length; index++)
+            {
+                Assert.Equal(1, await contexts[index].Users.CountAsync(user => user.Id == author.Id));
+                Assert.Equal(pids[index], await BackendPidAsync(contexts[index]));
+            }
+        }
+        await using var admin = new NpgsqlConnection(adminConnectionString);
+        await admin.OpenAsync();
+        await using var absent = new NpgsqlCommand("SELECT count(*) FROM pg_database WHERE datname = @name", admin);
+        absent.Parameters.AddWithValue("name", databaseName);
+        Assert.Equal(0L, (long)(await absent.ExecuteScalarAsync())!);
+
+        static Task<int> BackendPidAsync(PaymentContext context)
+            => context.Database.SqlQueryRaw<int>("SELECT pg_backend_pid() AS \"Value\"").SingleAsync();
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -364,13 +406,26 @@ public sealed partial class InternalChatControllerTests
             { Name = "Реестр отправки", MemberUserIds = others.Select(user => user.Id).ToList() }, default)).Result).Value);
 
     private static PaymentContext CaptureFreshDb(Fixture f, bool independentSqlite = false)
-        => f.Db.Database.IsNpgsql()
+    {
+        PaymentContext db = f.Db.Database.IsNpgsql()
             ? new PostgreSqlPaymentContext(new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
                 .UseNpgsql(f.Db.Database.GetConnectionString()).Options)
             : new PaymentContext((independentSqlite
                 ? new DbContextOptionsBuilder<PaymentContext>().UseSqlite(f.Db.Database.GetConnectionString())
                 : new DbContextOptionsBuilder<PaymentContext>().UseSqlite(f.Db.Database.GetDbConnection()))
                 .UsePayPlannerSqliteMigrations().Options);
+        try
+        {
+            if (f.UsesPostgreSqlTemplate) db.Database.OpenConnection();
+            return db;
+        }
+        catch (Exception error)
+        {
+            try { db.Dispose(); }
+            catch (Exception cleanup) { throw new AggregateException(error, cleanup); }
+            throw;
+        }
+    }
 
     private sealed class RejectChatCaptureSave : SaveChangesInterceptor
     {

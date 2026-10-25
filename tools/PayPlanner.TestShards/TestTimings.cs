@@ -10,6 +10,14 @@ public sealed record TimingProfile(int SchemaVersion, string Revision, string Ma
 /// <summary>Scheduling hints only. Qualification still checks every discovered identity and native result.</summary>
 public static class TestTimings
 {
+    public static TimingProfile ReadBaseline()
+    {
+        using var stream = typeof(TestTimings).Assembly.GetManifestResourceStream("PayPlanner.TestShards.baseline-timings.json")
+            ?? throw new InvalidDataException("The reviewed qualified timing baseline is missing.");
+        return JsonSerializer.Deserialize<TimingProfile>(stream, ShardPlan.Json)
+            ?? throw new InvalidDataException("The reviewed qualified timing baseline is empty.");
+    }
+
     public static TimingProfile Read(string path)
     {
         var profile = JsonSerializer.Deserialize<TimingProfile>(File.ReadAllText(path), ShardPlan.Json)

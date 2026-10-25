@@ -8,15 +8,18 @@ namespace PayPlanner.Api.Tests;
 
 public sealed class PostgreSqlMigratedTemplateTests
 {
-    [Fact]
-    public async Task ConcurrentClonesMigrateOnceAndIsolateRowsSchemaAndSequences()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ConcurrentClonesMigrateOnceAndIsolateRowsSchemaAndSequences(bool migratedSchema)
     {
         var migrations = 0;
         await using var owner = new PostgreSqlMigratedTemplate(async (db, ct) =>
         {
             Interlocked.Increment(ref migrations);
-            await db.Database.MigrateAsync(ct);
-        });
+            if (migratedSchema) await db.Database.MigrateAsync(ct);
+            else await db.Database.EnsureCreatedAsync(ct);
+        }, migratedSchema: migratedSchema);
         var pending = Enumerable.Range(0, 3).Select(_ => owner.CreateDatabaseAsync("pp_template_test_")).ToArray();
         try
         {
@@ -31,7 +34,8 @@ public sealed class PostgreSqlMigratedTemplateTests
                 Assert.Empty(await db.Clients.ToArrayAsync());
                 Assert.Empty(await db.Users.ToArrayAsync());
                 Assert.Equal("false", await db.SystemSettings.Where(s => s.Key == "notifications.email.enabled").Select(s => s.Value).SingleAsync());
-                Assert.Equal(db.Database.GetMigrations(), await db.Database.GetAppliedMigrationsAsync());
+                if (migratedSchema) Assert.Equal(db.Database.GetMigrations(), await db.Database.GetAppliedMigrationsAsync());
+                else Assert.Empty(await db.Database.GetAppliedMigrationsAsync());
             }
             var firstClient = new Client { Name = "first clone" };
             first.Clients.Add(firstClient);
@@ -58,6 +62,57 @@ public sealed class PostgreSqlMigratedTemplateTests
                 if (task.IsCompletedSuccessfully) await (await task).DisposeAsync();
         }
     }
+
+    [Fact]
+    public async Task CurrentModelCloneMatchesFreshSchemaWithoutInventingMigrationHistory()
+    {
+        await using var baseline = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(true);
+        await using var owner = new CurrentModelDatabaseTemplates();
+        await using var lease = await owner.PostgreSql.CreateDatabaseAsync("pp_template_test_");
+        await using var clone = Context(lease);
+        lease.AssertUsesValidatedModel(clone);
+        Assert.Equal(await CatalogAsync(baseline.Db.Database.GetConnectionString()!), await CatalogAsync(lease.ConnectionString));
+        Assert.Empty(await clone.Database.GetAppliedMigrationsAsync());
+        Assert.Equal("false", await clone.SystemSettings.Where(row => row.Key == "notifications.email.enabled").Select(row => row.Value).SingleAsync());
+        Assert.Equal("false:false", await ScalarAsync(Admin(lease.ConnectionString),
+            "SELECT datallowconn::text || ':' || datistemplate::text FROM pg_database WHERE datname = @name", owner.PostgreSql.TemplateName));
+        Assert.Equal(await ScalarAsync(Admin(lease.ConnectionString),
+            "SELECT dattablespace FROM pg_database WHERE datname = @name", owner.PostgreSql.TemplateName),
+            await ScalarAsync(Admin(lease.ConnectionString), "SELECT dattablespace FROM pg_database WHERE datname = @name", lease.Name));
+        var configured = (string)(await ScalarAsync(Admin(lease.ConnectionString), "SELECT current_setting('default_tablespace')"))!;
+        if (configured.Length != 0)
+            Assert.Equal(configured, await ScalarAsync(Admin(lease.ConnectionString),
+                "SELECT t.spcname::text FROM pg_database d JOIN pg_tablespace t ON t.oid = d.dattablespace WHERE d.datname = @name", lease.Name));
+    }
+
+    [Fact]
+    public async Task PreparedSchemaProofRejectsADifferentAuditModel()
+    {
+        await using var owner = new CurrentModelDatabaseTemplates();
+        await using var lease = await owner.PostgreSql.CreateDatabaseAsync("pp_template_test_");
+        await using var changed = new PostgreSqlPaymentContext(new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
+            .UseNpgsql(lease.ConnectionString).Options, useObjectAuditModel: false);
+        Assert.Throws<Xunit.Sdk.SameException>(() => lease.AssertUsesValidatedModel(changed));
+        await using var original = Context(lease);
+        lease.AssertUsesValidatedModel(original);
+    }
+
+    [Theory]
+    [InlineData("", "")]
+    [InlineData("payplanner_tests", " TABLESPACE \"payplanner_tests\"")]
+    [InlineData("pg_default", " TABLESPACE \"pg_default\"")]
+    public void ConfiguredTablespaceIsAppliedExplicitly(string name, string expected)
+        => Assert.Equal(expected, PostgreSqlMigratedTemplate.TablespaceClause(name));
+
+    [Theory]
+    [InlineData(" ")]
+    [InlineData("pg-default")]
+    [InlineData("9bad")]
+    [InlineData("quoted\"; DROP DATABASE postgres; --")]
+    [InlineData("payplanner,pg_default")]
+    [InlineData("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012345678901")]
+    public void UnsafeTablespaceIsRejectedBeforeCreatingDatabase(string name)
+        => Assert.Throws<InvalidOperationException>(() => PostgreSqlMigratedTemplate.TablespaceClause(name));
 
     [Fact]
     public async Task ClonePreservesMigratedCatalogAndTemplateRejectsConnections()
@@ -108,6 +163,63 @@ public sealed class PostgreSqlMigratedTemplateTests
         Assert.Same(marker, await Assert.ThrowsAsync<InvalidOperationException>(() => owner.CreateDatabaseAsync("pp_template_test_")));
         Assert.Equal(1, calls);
         Assert.Null(owner.TemplateName);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LostCloneAcknowledgementCleansOnlyFailedDatabaseWithoutRetry(bool cancel)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var created = new List<string>();
+        var failNext = false;
+        var migrations = 0;
+        await using var owner = new PostgreSqlMigratedTemplate(async (db, ct) =>
+        {
+            migrations++;
+            await db.Database.MigrateAsync(ct);
+        }, cloneCreated: name =>
+        {
+            created.Add(name);
+            if (!failNext) return;
+            failNext = false;
+            if (cancel)
+            {
+                cancellation.Cancel();
+                cancellation.Token.ThrowIfCancellationRequested();
+            }
+            throw new TimeoutException("Owned lost CREATE acknowledgement.");
+        });
+        await using var sibling = await owner.CreateDatabaseAsync("pp_template_test_");
+        await using (var db = Context(sibling))
+        {
+            db.Clients.Add(new Client { Name = "keep sibling" });
+            await db.SaveChangesAsync();
+        }
+        var template = owner.TemplateName;
+        failNext = true;
+        if (cancel)
+        {
+            var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => owner.CreateDatabaseAsync("pp_template_test_", cancellation.Token));
+            Assert.Equal(cancellation.Token, error.CancellationToken);
+        }
+        else
+            await Assert.ThrowsAsync<TimeoutException>(() => owner.CreateDatabaseAsync("pp_template_test_"));
+
+        Assert.Equal(2, created.Count);
+        Assert.NotEqual(sibling.Name, created[1]);
+        Assert.False(await ExistsAsync(Admin(sibling.ConnectionString), created[1]));
+        Assert.True(await ExistsAsync(Admin(sibling.ConnectionString), template!));
+        Assert.Equal(template, owner.TemplateName);
+        await using (var db = Context(sibling))
+            Assert.Equal("keep sibling", (await db.Clients.SingleAsync()).Name);
+
+        await using var later = await owner.CreateDatabaseAsync("pp_template_test_");
+        await using var laterDb = Context(later);
+        Assert.Empty(await laterDb.Clients.ToArrayAsync());
+        Assert.Equal(3, created.Distinct().Count());
+        Assert.Equal(1, migrations);
     }
 
     [Fact]

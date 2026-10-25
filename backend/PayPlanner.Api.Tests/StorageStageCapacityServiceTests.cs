@@ -413,21 +413,15 @@ public sealed partial class StorageStageCapacityServiceTests
                 "PAYPLANNER_TEST_POSTGRES must be configured in CI.");
             return;
         }
-        var name = "pp_stage_capacity_" + Guid.NewGuid().ToString("N");
+        await using var databaseLease = await writerPostgresTemplate.CreateDatabaseAsync("pp_stage_capacity_");
+        var name = databaseLease.Name;
         var root = Path.Combine(Path.GetTempPath(), "pp-stage-capacity-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
-        var settings = new NpgsqlConnectionStringBuilder(raw) { Database = "postgres", Pooling = false };
-        await using var admin = new NpgsqlConnection(settings.ConnectionString);
-        await admin.OpenAsync();
-        var created = false;
         try
         {
-            await using (var command = new NpgsqlCommand($"CREATE DATABASE \"{name}\"", admin))
-            { await command.ExecuteNonQueryAsync(); created = true; }
-            settings.Database = name;
             await using var db = new PostgreSqlPaymentContext(new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
-                .UseNpgsql(settings.ConnectionString).Options);
-            await db.Database.MigrateAsync();
+                .UseNpgsql(databaseLease.ConnectionString).Options);
+            databaseLease.AssertUsesValidatedModel(db);
             var storageRoot = Path.Combine(root, "objects");
             var stageRoot = Path.Combine(storageRoot, ".photo-uploads");
             Directory.CreateDirectory(stageRoot);
@@ -488,21 +482,6 @@ public sealed partial class StorageStageCapacityServiceTests
         finally
         {
             Assert.Matches("^pp_stage_capacity_[a-f0-9]{32}$", name);
-            if (created)
-            {
-                long connections = -1;
-                for (var attempt = 0; attempt < 50; attempt++)
-                {
-                    await using var count = new NpgsqlCommand("SELECT count(*) FROM pg_stat_activity WHERE datname = @name", admin);
-                    count.Parameters.AddWithValue("name", name);
-                    connections = Convert.ToInt64(await count.ExecuteScalarAsync());
-                    if (connections == 0) break;
-                    await Task.Delay(100);
-                }
-                Assert.Equal(0L, connections);
-                await using var drop = new NpgsqlCommand($"DROP DATABASE \"{name}\"", admin);
-                await drop.ExecuteNonQueryAsync();
-            }
             Assert.StartsWith(Path.Combine(Path.GetFullPath(Path.GetTempPath()), "pp-stage-capacity-"), root,
                 StringComparison.OrdinalIgnoreCase);
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
@@ -584,24 +563,19 @@ public sealed partial class StorageStageCapacityServiceTests
         Assert.False(string.IsNullOrWhiteSpace(raw), "This qualification requires an explicit local PostgreSQL endpoint.");
         var settings = new NpgsqlConnectionStringBuilder(raw!) { Database = "postgres", Pooling = false };
         Assert.Contains(settings.Host, new[] { "127.0.0.1", "::1", "localhost" });
-        var name = "pp_stage_esign_root_" + Guid.NewGuid().ToString("N");
+        await using var databaseLease = await writerPostgresTemplate.CreateDatabaseAsync("pp_stage_esign_root_");
+        var name = databaseLease.Name;
         var root = Path.Combine(Path.GetTempPath(), "pp-stage-capacity-esign-" + Guid.NewGuid().ToString("N"));
         var files = Path.Combine(root, "files");
         var signatures = Path.Combine(root, "configured-signatures");
         Directory.CreateDirectory(files);
         Directory.CreateDirectory(signatures);
-        await using var admin = new NpgsqlConnection(settings.ConnectionString);
-        await admin.OpenAsync();
-        var created = false;
         try
         {
-            await using (var create = new NpgsqlCommand($"CREATE DATABASE \"{name}\"", admin))
-            { await create.ExecuteNonQueryAsync(); created = true; }
             Console.WriteLine("Owned signature stage database: " + name);
-            settings.Database = name;
             await using var db = new PostgreSqlPaymentContext(new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
-                .UseNpgsql(settings.ConnectionString).Options);
-            await db.Database.MigrateAsync();
+                .UseNpgsql(databaseLease.ConnectionString).Options);
+            databaseLease.AssertUsesValidatedModel(db);
             var environment = new TestEnvironment(root);
             var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
             {
@@ -646,21 +620,6 @@ public sealed partial class StorageStageCapacityServiceTests
         finally
         {
             Assert.Matches("^pp_stage_esign_root_[a-f0-9]{32}$", name);
-            if (created)
-            {
-                long connections = -1;
-                for (var attempt = 0; attempt < 50; attempt++)
-                {
-                    await using var count = new NpgsqlCommand("SELECT count(*) FROM pg_stat_activity WHERE datname = @name", admin);
-                    count.Parameters.AddWithValue("name", name);
-                    connections = Convert.ToInt64(await count.ExecuteScalarAsync());
-                    if (connections == 0) break;
-                    await Task.Delay(100);
-                }
-                Assert.Equal(0L, connections);
-                await using var drop = new NpgsqlCommand($"DROP DATABASE \"{name}\"", admin);
-                await drop.ExecuteNonQueryAsync();
-            }
             Assert.Matches("^pp-stage-capacity-esign-[a-f0-9]{32}$", Path.GetFileName(root));
             Assert.StartsWith(Path.GetFullPath(Path.GetTempPath()), Path.GetFullPath(root), StringComparison.OrdinalIgnoreCase);
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);

@@ -27,8 +27,29 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public class TasksControllerTests
+public class TasksControllerTests : IDisposable
 {
+    private const string FileStoragePrefix = "pp-task-controller-";
+    private readonly string _fileStorageRoot = Path.GetFullPath(
+        Path.Combine(Path.GetTempPath(), FileStoragePrefix + Guid.NewGuid().ToString("N")));
+    private IConfiguration? _fileStorageConfiguration;
+
+    private IConfiguration FileStorageConfiguration => _fileStorageConfiguration ??=
+        new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            [ApplicationFileStoragePaths.RootPathConfigurationKey] = _fileStorageRoot,
+        }).Build();
+
+    public void Dispose()
+    {
+        // xUnit owns one instance per test, including failed upload assertions.
+        Assert.Equal(Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar),
+            Path.GetDirectoryName(_fileStorageRoot));
+        Assert.StartsWith(FileStoragePrefix, Path.GetFileName(_fileStorageRoot), StringComparison.Ordinal);
+        Assert.True(Guid.TryParseExact(Path.GetFileName(_fileStorageRoot)[FileStoragePrefix.Length..], "N", out _));
+        if (Directory.Exists(_fileStorageRoot)) Directory.Delete(_fileStorageRoot, recursive: true);
+    }
+
     [Theory]
     [InlineData("list")]
     [InlineData("candidates")]
@@ -9755,8 +9776,7 @@ public class TasksControllerTests
             .AsNoTracking()
             .SingleAsync(item => item.Id == second.Id);
         var secondPath = Path.Combine(
-            AppContext.BaseDirectory,
-            "App_Data",
+            _fileStorageRoot,
             "task-files",
             secondStored.StoragePath);
         File.Delete(secondPath);
@@ -11126,7 +11146,7 @@ public class TasksControllerTests
         Assert.IsType<BadRequestObjectResult>(result.Result);
     }
 
-    private static TasksController CreateController(
+    private TasksController CreateController(
         PaymentContext db,
         INotificationService notificationService,
         User user,
@@ -11148,7 +11168,7 @@ public class TasksControllerTests
             caseInactivityAutomationMutationGate: caseInactivityAutomationMutationGate,
             realtimePublisher: realtimePublisher,
             productStorageReader: productStorageReader,
-            configuration: configuration,
+            configuration: configuration ?? FileStorageConfiguration,
             managedTaskUploads: managedTaskUploads,
             productStorageDeletion: productStorageDeletion)
         {

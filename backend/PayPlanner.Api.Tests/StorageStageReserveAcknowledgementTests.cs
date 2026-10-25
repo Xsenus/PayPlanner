@@ -18,7 +18,7 @@ public sealed partial class StorageStagePhysicalSizeTests
     public async Task FailedStageAdmissionReleasesOnlyItsUndeliveredReceiptWithoutSavingUnrelatedChanges(bool postgres, string outcome)
     {
         var fault = new ReserveAcknowledgementFault(outcome);
-        await using var fixture = await Fixture.CreateAsync(postgres, fault);
+        await using var fixture = await CreateFixtureAsync(postgres, fault);
         var path = Path.Combine(fixture.Root, "signatures", "undelivered.tmp");
         Client? unsaved = null;
         fault.AfterCommit = () =>
@@ -61,7 +61,7 @@ public sealed partial class StorageStagePhysicalSizeTests
     public async Task UndeliveredStageWithExistingBytesIsRetainedWithoutDeletingOrSettlingThem(bool postgres)
     {
         var fault = new ReserveAcknowledgementFault("after");
-        await using var fixture = await Fixture.CreateAsync(postgres, fault);
+        await using var fixture = await CreateFixtureAsync(postgres, fault);
         var path = Path.Combine(fixture.Root, "signatures", "foreign.tmp");
         var bytes = new byte[] { 9, 8, 7, 6, 5, 4, 3, 2 };
         fault.AfterCommit = () => File.WriteAllBytesAsync(path, bytes);
@@ -80,7 +80,7 @@ public sealed partial class StorageStagePhysicalSizeTests
     [InlineData(true)]
     public async Task ConcurrentStageAdmissionCannotRetireTheDeliveredWinnerEvenBeforeItsFirstByte(bool postgres)
     {
-        await using var fixture = await Fixture.CreateAsync(postgres);
+        await using var fixture = await CreateFixtureAsync(postgres);
         var path = Path.Combine(fixture.Root, "signatures", "active.tmp");
         var (winner, error) = await fixture.Stage.ReserveCompatibilityAsync(
             "esign:active", path, 8, "esign-current", CancellationToken.None);

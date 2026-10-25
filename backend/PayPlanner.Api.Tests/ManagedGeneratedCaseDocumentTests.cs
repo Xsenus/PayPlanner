@@ -41,6 +41,41 @@ public sealed partial class ManagedGeneratedCaseDocumentTests : IClassFixture<Po
     private Task<Fixture> CreateFixtureAsync(bool postgres, int copies, bool autoPublication = false, params IInterceptor[] interceptors)
         => Fixture.CreateFromTemplateAsync(postgresTemplate, sqliteTemplate, postgres, copies, autoPublication, interceptors);
 
+    [Fact]
+    public async Task PostgreSqlFixtureRetainsIndependentConnectionsAndReleasesOwnedDatabase()
+    {
+        string databaseName;
+        string adminConnectionString;
+        await using (var f = await CreateFixtureAsync(true, 1))
+        {
+            var settings = new NpgsqlConnectionStringBuilder(f.Db.Database.GetConnectionString()!);
+            databaseName = settings.Database!;
+            Assert.StartsWith("pp_generated_case_", databaseName);
+            Assert.False(settings.Pooling);
+            settings.Database = "postgres";
+            adminConnectionString = settings.ConnectionString;
+            await using var first = f.Observer();
+            await using var second = f.Observer();
+            PaymentContext[] contexts = [f.Db, first, second];
+            var pids = new List<int>();
+            foreach (var context in contexts) pids.Add(await BackendPidAsync(context));
+            Assert.Equal(3, pids.Distinct().Count());
+            for (var index = 0; index < contexts.Length; index++)
+            {
+                Assert.Equal(1, await contexts[index].Users.CountAsync());
+                Assert.Equal(pids[index], await BackendPidAsync(contexts[index]));
+            }
+        }
+        await using var admin = new NpgsqlConnection(adminConnectionString);
+        await admin.OpenAsync();
+        await using var absent = new NpgsqlCommand("SELECT count(*) FROM pg_database WHERE datname = @name", admin);
+        absent.Parameters.AddWithValue("name", databaseName);
+        Assert.Equal(0L, (long)(await absent.ExecuteScalarAsync())!);
+
+        static Task<int> BackendPidAsync(PaymentContext context)
+            => context.Database.SqlQueryRaw<int>("SELECT pg_backend_pid() AS \"Value\"").SingleAsync();
+    }
+
     [Theory]
     [InlineData(false, GeneratedFinancialDocumentKind.Invoice)]
     [InlineData(true, GeneratedFinancialDocumentKind.Invoice)]
@@ -1449,7 +1484,22 @@ public sealed partial class ManagedGeneratedCaseDocumentTests : IClassFixture<Po
                         .UseSqlite(f.sqlite).UsePayPlannerSqliteMigrations().AddInterceptors(interceptors).Options);
                 }
                 if (postgres ? template is null : sqliteTemplate is null) await f.Db.Database.MigrateAsync();
-                Assert.False(f.Db.Database.HasPendingModelChanges());
+                var schemaValidationStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+                // The source checked the full migration history and snapshot. Only the identical
+                // immutable EF model can reuse that proof; another model is an immediate failure.
+                // Fresh migration/down/up fixtures retain their original snapshot comparison.
+                if (f.databaseLease is not null) f.databaseLease.AssertUsesValidatedModel(f.Db);
+                else if (f.sqliteLease is not null) f.sqliteLease.AssertUsesValidatedModel(f.Db);
+                else Assert.False(f.Db.Database.HasPendingModelChanges());
+                // Opt-in A/B profiling performs the old check as well, on the same compiled inputs.
+                if (Environment.GetEnvironmentVariable("PAYPLANNER_TEST_RECHECK_TEMPLATE_MODEL") == "1"
+                    && (f.databaseLease is not null || f.sqliteLease is not null))
+                    Assert.False(f.Db.Database.HasPendingModelChanges());
+                if (Environment.GetEnvironmentVariable("PAYPLANNER_PROFILE_FIXTURES") == "1")
+                    Console.WriteLine($"Owned generated schema validation: postgres={postgres}; elapsedMs={System.Diagnostics.Stopwatch.GetElapsedTime(schemaValidationStarted).TotalMilliseconds:F1}");
+                // Keep this context's own session through ordinary commands; observers own separate sessions.
+                // Fresh migration fixtures retain their original connection lifecycle.
+                if (f.databaseLease is not null) await f.Db.Database.OpenConnectionAsync();
                 var email = await f.Db.SystemSettings.SingleOrDefaultAsync(s => s.Key == "notifications.email.enabled");
                 if (email is null) f.Db.SystemSettings.Add(new SystemSetting { Key = "notifications.email.enabled", Value = "false" });
                 else email.Value = "false";
@@ -1560,9 +1610,25 @@ public sealed partial class ManagedGeneratedCaseDocumentTests : IClassFixture<Po
                 provider.GetRequiredService<IOptionsMonitor<AppFeatureFlagsOptions>>(), configuration,
                 NullLogger<ClientCaseCourtSyncSchedulerService>.Instance).RunOnceAsync(default);
         }
-        public PaymentContext Observer() => Db.Database.IsNpgsql()
-            ? new PostgreSqlPaymentContext(new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(Db.Database.GetConnectionString()!).Options)
-            : new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(sqlite!).UsePayPlannerSqliteMigrations().Options);
+        public PaymentContext Observer()
+        {
+            if (!Db.Database.IsNpgsql())
+                return new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(sqlite!).UsePayPlannerSqliteMigrations().Options);
+            var observer = new PostgreSqlPaymentContext(new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
+                .UseNpgsql(Db.Database.GetConnectionString()!).Options);
+            if (databaseLease is null) return observer;
+            try
+            {
+                observer.Database.OpenConnection();
+                return observer;
+            }
+            catch (Exception error)
+            {
+                try { observer.Dispose(); }
+                catch (Exception cleanup) { throw new AggregateException(error, cleanup); }
+                throw;
+            }
+        }
 
         public void PrepareIdentityObservers()
         {

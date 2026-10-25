@@ -21,8 +21,8 @@ namespace PayPlanner.Api.Tests;
 
 public class GoogleCalendarSyncServiceTests
 {
-    private static readonly IDataProtectionProvider TestDataProtectionProvider =
-        DataProtectionProvider.Create(new DirectoryInfo(Path.Combine(Path.GetTempPath(), "pp-google-tests")));
+    // Token fixtures and their services share this process; parallel workers must not share a disk key ring.
+    private static readonly IDataProtectionProvider TestDataProtectionProvider = new EphemeralDataProtectionProvider();
 
     [Fact]
     public async Task ServiceProvider_ResolvesGoogleCalendarSyncService()

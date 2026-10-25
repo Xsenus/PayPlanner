@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { createServer as createControlServer } from 'node:http';
-import { build, preview } from 'vite';
+import { prepareSyntheticBrowserUi } from './synthetic-browser-ui.mjs';
 import { createCaseReadLifecycle, createCaseRestartObserver, createCaseStartupReadTrace, isCaseBoundaryRead } from './case-retirement-browser-lifecycle.mjs';
 
 const api = new URL(process.env.CASE_RETIREMENT_API);
@@ -54,7 +54,6 @@ const browser = process.env.CASE_RETIREMENT_BROWSER ?? (process.platform === 'wi
 assert.ok(['msedge', 'chrome'].includes(browser), 'Use an installed Edge or Chrome channel.');
 const session = `case-retire-${basename(root).slice(-12)}`;
 const scenarioPath = join(root, 'case-retirement-scenario.js');
-const fixtureEntry = join(root, 'case-retirement-fixture.mjs');
 const execute = promisify(execFile);
 async function cli(...args) {
   const result = await execute(process.execPath, [cliPath, `-s=${session}`, ...args], {
@@ -101,24 +100,10 @@ try {
     });
     controlUrl = `http://127.0.0.1:${control.address().port}/apply`;
   }
-  // Match the existing managed-chat gate: compile the real release UI before
-  // navigation, inside the same enclosing three-minute scenario budget.
-  // A second entry exposes the real upload helper, shared with the UI bundle;
-  // it replaces source-module imports, not the browser's storage or API calls.
-  await writeFile(fixtureEntry,
-    `export { beginCaseDocumentUpload } from ${JSON.stringify(resolve('src/services/caseDocumentUploadAttempts.ts').replaceAll('\\', '/'))};\n`
-    + `export { getAuthToken } from ${JSON.stringify(resolve('src/services/api.ts').replaceAll('\\', '/'))};\n`);
-  const outDir = join(root, 'case-retirement-ui-dist');
-  await mkdir(outDir);
-  const uiConfig = { envDir: root, cacheDir: join(root, 'vite-browser-cache'), logLevel: 'error',
-    build: { outDir, emptyOutDir: false, rollupOptions: {
-      input: { index: resolve('index.html'), 'case-retirement-fixture': fixtureEntry },
-      preserveEntrySignatures: 'strict',
-    } } };
-  const built = await build(uiConfig);
-  const chunks = (Array.isArray(built) ? built : [built]).flatMap(output => output.output ?? [])
-    .filter(chunk => chunk.type === 'chunk');
-  assert.ok(chunks.some(chunk => chunk.isEntry && chunk.name === 'index' && chunk.code.length > 0),
+  // The shared second entry still exposes the actual production upload/auth helpers.
+  const browserUi = await prepareSyntheticBrowserUi({ api, port });
+  const { chunks } = browserUi;
+  assert.ok(chunks.some(chunk => chunk.isEntry && chunk.name === 'index' && chunk.codeLength > 0),
     'The real case-document UI entry must compile successfully.');
   const fixtureChunks = chunks.filter(chunk => chunk.isEntry && chunk.name === 'case-retirement-fixture');
   assert.equal(fixtureChunks.length, 1, 'The real upload helper must have one compiled fixture entry.');
@@ -131,7 +116,7 @@ try {
   const realtimePollingUrls = moduleUrls('/src/components/Notifications/RealtimeNotificationToasts.tsx');
   assert.ok(realtimeDisconnectUrls.length > 0 && realtimePollingUrls.length > 0,
     'The release bundle must retain the real notification modules.');
-  vite = await preview({ ...uiConfig, preview: { host: '127.0.0.1', port, strictPort: true } });
+  vite = await browserUi.startPreview();
   // Own the browser before navigation so a failed page load still closes it.
   await cli('open', 'about:blank', '--browser', browser);
   opened = true;
@@ -508,7 +493,6 @@ try {
         // Release the owned IPC handle only after Vite has removed its stdin termination listener.
         if (control) process.stdin.destroy();
         await rm(scenarioPath, { force: true });
-        await rm(fixtureEntry, { force: true });
       }
     }
   }

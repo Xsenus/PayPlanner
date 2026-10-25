@@ -35,7 +35,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true, "foreign-row")]
     public async Task BankStatementParsing_HttpRejectsAmbiguousAmountOrUnownedRowBeforeMoney(bool postgres, string scenario)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var db = fixture.Db;
         var actor = await SeedStatementParsingAsync(db);
         var before = await CaptureStatementParsingMoneyAsync(db);
@@ -66,7 +66,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task BankStatementParsing_HttpMixedSeparatorsPreserveTheActualAmount(bool postgres)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var db = fixture.Db;
         var actor = await SeedStatementParsingAsync(db);
         using var server = CreateStatementParsingServer(db);
@@ -119,7 +119,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task BankStatementParsing_HttpMalformedCsvHeaderNeverWritesMoney(bool postgres)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var db = fixture.Db;
         var actor = await SeedStatementParsingAsync(db);
         var before = await CaptureStatementParsingMoneyAsync(db);
@@ -144,7 +144,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task BankStatementParsing_HttpCsvQuoteErrorsStayOnTheirOwnRows(bool postgres)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var db = fixture.Db;
         var actor = await SeedStatementParsingAsync(db);
         using var server = CreateStatementParsingServer(db);
@@ -181,9 +181,9 @@ public partial class MoneyOperationsControllerTests
         Assert.Equal(3, await db.BankStatementImportRows.CountAsync());
     }
 
-    private static async Task AssertStatementParsingRejectedAsync(bool postgres, string scenario)
+    private async Task AssertStatementParsingRejectedAsync(bool postgres, string scenario)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var db = fixture.Db;
         var actor = await SeedStatementParsingAsync(db);
         var oneC = scenario.StartsWith("onec-", StringComparison.Ordinal) || scenario == "missing-selected";
@@ -271,7 +271,7 @@ public partial class MoneyOperationsControllerTests
     [MemberData(nameof(StatementParsingValidCases))]
     public async Task BankStatementParsing_HttpValidFormatsAndAccountSidesPreserveExactMoney(bool postgres, string scenario)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var db = fixture.Db;
         var actor = await SeedStatementParsingAsync(db);
         using var server = CreateStatementParsingServer(db);
@@ -322,7 +322,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task BankStatementParsing_HttpStorageBoundaryPreservesKopecksOrRejectsBeforeMoney(bool postgres)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var db = fixture.Db;
         var actor = await SeedStatementParsingAsync(db);
         var before = await CaptureStatementParsingMoneyAsync(db);
@@ -357,7 +357,7 @@ public partial class MoneyOperationsControllerTests
     [InlineData(true)]
     public async Task BankStatementParsing_HttpMixedBatchKeepsEveryErrorBeyondResponseLimitAndReplaysSafely(bool postgres)
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(postgres);
+        await using var fixture = await CreateModelDatabaseAsync(postgres);
         var db = fixture.Db;
         var actor = await SeedStatementParsingAsync(db);
         using var server = CreateStatementParsingServer(db);
@@ -394,7 +394,7 @@ public partial class MoneyOperationsControllerTests
     [Fact]
     public async Task BankStatementParsing_HttpSqliteStoragePreflightHandlesFullDistinctChunk()
     {
-        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateAsync(false);
+        await using var fixture = await CreateModelDatabaseAsync(false);
         var db = fixture.Db;
         var actor = await SeedStatementParsingAsync(db);
         using var server = CreateStatementParsingServer(db);

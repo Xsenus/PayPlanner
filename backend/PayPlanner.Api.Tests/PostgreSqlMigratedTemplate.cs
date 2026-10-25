@@ -12,12 +12,18 @@ namespace PayPlanner.Api.Tests;
 public sealed class PostgreSqlMigratedTemplate : IAsyncLifetime, IAsyncDisposable
 {
     private const string TemplatePrefix = "pp_schema_template_";
+    // Copying/removing a database can outlast a query timeout under host I/O pressure.
+    // Keep this bounded budget local to owned database DDL, not application queries.
+    private const int DatabaseLifecycleTimeoutSeconds = 120;
     private readonly SemaphoreSlim gate = new(1, 1);
     private readonly Dictionary<string, DatabaseLease> leases = [];
     private readonly HashSet<string> pendingCleanup = [];
     private readonly Func<PostgreSqlPaymentContext, CancellationToken, Task> migrate;
+    private readonly bool migratedSchema;
+    private readonly Action<string>? cloneCreated;
     private string? adminConnectionString;
     private string? templateName;
+    private Microsoft.EntityFrameworkCore.Metadata.IModel? validatedModel;
     private ExceptionDispatchInfo? initializationFailure;
     private bool ready;
     private bool closing;
@@ -26,8 +32,13 @@ public sealed class PostgreSqlMigratedTemplate : IAsyncLifetime, IAsyncDisposabl
     public PostgreSqlMigratedTemplate() : this((db, ct) => db.Database.MigrateAsync(ct)) { }
 
     // Failure injection is confined to this test helper; readiness still checks the real schema.
-    internal PostgreSqlMigratedTemplate(Func<PostgreSqlPaymentContext, CancellationToken, Task> migrate)
-        => this.migrate = migrate;
+    internal PostgreSqlMigratedTemplate(Func<PostgreSqlPaymentContext, CancellationToken, Task> migrate, bool migratedSchema = true,
+        Action<string>? cloneCreated = null)
+    {
+        this.migrate = migrate;
+        this.migratedSchema = migratedSchema;
+        this.cloneCreated = cloneCreated;
+    }
 
     public Task InitializeAsync() => Task.CompletedTask;
     internal string? TemplateName => templateName;
@@ -54,8 +65,11 @@ public sealed class PostgreSqlMigratedTemplate : IAsyncLifetime, IAsyncDisposabl
                 created = true; // Reconcile an unknown CREATE outcome during cancellation as well.
                 pendingCleanup.Add(name);
                 var started = Stopwatch.GetTimestamp();
-                await using var create = new NpgsqlCommand($"CREATE DATABASE \"{name}\" TEMPLATE \"{templateName}\"", admin);
+                await using var create = new NpgsqlCommand($"CREATE DATABASE \"{name}\" TEMPLATE \"{templateName}\"", admin)
+                { CommandTimeout = DatabaseLifecycleTimeoutSeconds };
                 await create.ExecuteNonQueryAsync(ct);
+                // Test-only acknowledgement fault injection after the server created the database.
+                cloneCreated?.Invoke(name);
                 var settings = new NpgsqlConnectionStringBuilder(adminConnectionString!) { Database = name };
                 var lease = new DatabaseLease(this, name, settings.ConnectionString);
                 leases.Add(name, lease);
@@ -98,9 +112,15 @@ public sealed class PostgreSqlMigratedTemplate : IAsyncLifetime, IAsyncDisposabl
             await using (var admin = await OpenAdminAsync(ct))
             {
                 await RequireAbsentAsync(admin, name, ct);
+                await using var readTablespace = new NpgsqlCommand("SELECT current_setting('default_tablespace')", admin);
+                var tablespace = (string)(await readTablespace.ExecuteScalarAsync(ct))!;
+                var tablespaceClause = TablespaceClause(tablespace);
                 created = true;
                 templateName = name;
-                await using var create = new NpgsqlCommand($"CREATE DATABASE \"{name}\"", admin);
+                // default_tablespace controls created relations, not pg_database's default.
+                // Set the source database explicitly; its owned clones inherit the location.
+                await using var create = new NpgsqlCommand($"CREATE DATABASE \"{name}\"{tablespaceClause}", admin)
+                { CommandTimeout = DatabaseLifecycleTimeoutSeconds };
                 await create.ExecuteNonQueryAsync(ct);
             }
             settings.Database = name;
@@ -111,16 +131,26 @@ public sealed class PostgreSqlMigratedTemplate : IAsyncLifetime, IAsyncDisposabl
             {
                 await migrate(db, ct);
                 Assert.False(db.Database.HasPendingModelChanges());
-                var expected = db.Database.GetMigrations().ToArray();
-                Assert.NotEmpty(expected);
-                Assert.Equal(expected, (await db.Database.GetAppliedMigrationsAsync(ct)).ToArray());
-                Assert.Empty(await db.Database.GetPendingMigrationsAsync(ct));
-                migrations = expected.Length;
+                if (migratedSchema)
+                {
+                    var expected = db.Database.GetMigrations().ToArray();
+                    Assert.NotEmpty(expected);
+                    Assert.Equal(expected, (await db.Database.GetAppliedMigrationsAsync(ct)).ToArray());
+                    Assert.Empty(await db.Database.GetPendingMigrationsAsync(ct));
+                    migrations = expected.Length;
+                }
+                else
+                {
+                    Assert.Empty(await db.Database.GetAppliedMigrationsAsync(ct));
+                    Assert.False(await db.Database.EnsureCreatedAsync(ct));
+                    migrations = 0;
+                }
                 Assert.Empty(await db.Users.ToArrayAsync(ct));
                 var email = await db.SystemSettings.SingleOrDefaultAsync(row => row.Key == "notifications.email.enabled", ct);
                 if (email is null) db.SystemSettings.Add(new SystemSetting { Key = "notifications.email.enabled", Value = "false" });
                 else email.Value = "false";
                 await db.SaveChangesAsync(ct);
+                validatedModel = db.Model;
             }
             await using (var admin = await OpenAdminAsync(ct))
             {
@@ -144,6 +174,15 @@ public sealed class PostgreSqlMigratedTemplate : IAsyncLifetime, IAsyncDisposabl
             else templateName = null;
             throw;
         }
+    }
+
+    internal static string TablespaceClause(string tablespace)
+    {
+        if (tablespace.Length == 0) return "";
+        if (tablespace.Length > 63 || (tablespace[0] != '_' && tablespace[0] is not (>= 'a' and <= 'z'))
+            || tablespace.Any(c => c != '_' && c is not (>= 'a' and <= 'z') && c is not (>= '0' and <= '9')))
+            throw new InvalidOperationException("Owned PostgreSQL templates require a simple lowercase tablespace identifier.");
+        return $" TABLESPACE \"{tablespace}\"";
     }
 
     private async Task<NpgsqlConnection> OpenAdminAsync(CancellationToken ct = default)
@@ -208,7 +247,8 @@ public sealed class PostgreSqlMigratedTemplate : IAsyncLifetime, IAsyncDisposabl
         // Fixtures must dispose their own connections. Never signal unrelated backends,
         // including transient PostgreSQL maintenance workers, or require elevated roles.
         await RequireNoSessionsAsync(admin, name, waiting);
-        await using var drop = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{name}\"", admin);
+        await using var drop = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{name}\"", admin)
+        { CommandTimeout = DatabaseLifecycleTimeoutSeconds };
         await drop.ExecuteNonQueryAsync();
     }
 
@@ -258,6 +298,11 @@ public sealed class PostgreSqlMigratedTemplate : IAsyncLifetime, IAsyncDisposabl
         internal string Name { get; } = name;
         internal string ConnectionString { get; } = connectionString;
         internal bool Released { get; set; }
+        internal void AssertUsesValidatedModel(PaymentContext context)
+        {
+            Assert.NotNull(owner.validatedModel);
+            Assert.Same(owner.validatedModel, context.Model);
+        }
         public ValueTask DisposeAsync() => owner.ReleaseAsync(this);
     }
 }

@@ -1423,6 +1423,7 @@ public sealed partial class InternalChatControllerTests : IClassFixture<PostgreS
         private string? _sqliteRoot;
         private readonly Role _role;
         public PaymentContext Db { get; }
+        public bool UsesPostgreSqlTemplate => _databaseLease is not null;
 
         public PaymentContext NewDb() => new(new DbContextOptionsBuilder<PaymentContext>()
             .UseSqlite(_connection ?? throw new InvalidOperationException("This fixture has no shared SQLite connection.")).Options);
@@ -1518,6 +1519,8 @@ public sealed partial class InternalChatControllerTests : IClassFixture<PostgreS
                 var role = new Role { Name = "chat-replay-employee", Description = "Сотрудник" };
                 fixture = new Fixture(sqlite, db, role)
                 { _admin = admin, _databaseName = name, _databaseLease = databaseLease, _sqliteLease = sqliteLease, _sqliteRoot = sqliteRoot };
+                // The context owns this non-pooled connection until disposal; each observer owns another.
+                if (databaseLease is not null) await db.Database.OpenConnectionAsync();
                 if (databaseLease is null && sqliteLease is null) await db.Database.MigrateAsync();
                 Assert.False(db.Database.HasPendingModelChanges());
                 var email = await db.SystemSettings.SingleOrDefaultAsync(item => item.Key == "notifications.email.enabled");
