@@ -1,3 +1,5 @@
+> **Текущая передача: [25 октября, ускорение и CI](payplanner-handoff-2026-10-25.md).** Код fe4cda5c отправлен; local9882+5/backend и3552/frontend успешны. Автоматическая доставка остановлена квотой GitHub и двумя file-symlink EPERM на XSENUS, deploy не запускался. Ниже сохранён предыдущий продуктовый срез.
+
 # PayPlanner HOME — передача, итог 25 октября 2026
 
 **Полный frontend UI136 завершён:** 3000/3000 unit + 419/419 integration = **3419/3419**, без ошибок и пропусков; точный состав случаев совпал. Guard 70/70 входит в unit. Статические проверки, строгие legal flags без предупреждений, production build и итоговая сверка входов успешны. State `D:/PayPlannerRelease/20261024-next-final-frontend-plan/prepared/run-01/frontend-state.json`, SHA **bee5da53b63a07616dcae20e60b67ba789d2f3deebe7cfebbcb47a8ac80b8e0f**, завершение 25 октября 02:46:44 UTC. В сборке 112 файлов; повторно успешные проверки не запускать.

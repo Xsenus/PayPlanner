@@ -1,0 +1,63 @@
+# Передача PayPlanner — 25 октября 2026
+
+**Доставка не завершена: код `fe4cda5c31e218d3ca164b4e4f918c71e9847b9c` отправлен в `main`, локальные полные проверки успешны, CI остановлен двумя ошибками окружения; deployment не запускался.** [Протокол CI и точные отказы](deployment-ci-2026-10-25.md). Для продолжения ожидаются выбор хранилища артефактов и доступ к диагностике Windows XSENUS. Не объявлять эту передачу подтверждением установленного нового выпуска.
+
+## Код и выполненная работа
+
+Технический пакет ускорения безопасно объединён с актуальным продуктовым main `9448c76f`. Цепочка: `80f8b891` → merge `72487472` → merge `f1ba7539` → `fe4cda5c`. История не переписывалась, push обычный. UI14/REQ-01 до 136 сохранены из main; историческую задачу их переноса не начинать заново. Новых бизнес-правил этим техническим diff не добавлено, отдельная пользовательская release note не требуется.
+
+- API/migrations используют согласованный граф сборки; повторный Restore внутри Build устранён, migrations DLL копируется после её сборки. Анализаторы и release-аудит сохранены.
+- Фикстуры повторно используют подготовленные схемы с отдельными БД/соединениями каждого сценария. Чистые миграции, откат, отмена, конкуренция и очистка продолжают проверяться. Локально используется существующий PostgreSQL 17 `127.0.0.1:5433` и ограниченная роль `payplanner_ci`, без новых серверов.
+- Backend разделён на fast/heavy/exclusive и четыре части, с управляемой ресурсами параллельностью и строгой квалификацией полного каталога/TRX. Повседневные проверки могут быть адресными; полный release gate обязателен.
+- Повторно используются применимые browser/UI-артефакты и статические результаты. TaskJournal tests разделены тематически без потери утверждений.
+- Семь release job definitions переведены на существующий XSENUS. Deploy использует native OpenSSH с host pin, реальные Linux filesystem gates, сохранение backup/Data Protection и проверку установленного SHA. Его фактическое выполнение в этом CI ещё не подтверждено. Отдельный scheduled/manual Visual Smoke остаётся Ubuntu.
+
+## Подтверждённые локальные результаты
+
+Корень доказательств: `E:/ProjectTemp/PayPlanner/20261025-delivery/`. Они не заменяют самостоятельный CI.
+
+| Проверка | Результат | Receipt |
+|---|---|---|
+| Полный frontend | **3133 unit + 419 integration = 3552**, без пропусков; lint/types/encoding/surface/audit/build успешны; npm audit 0 vulnerabilities. Native 0, 1129.719 с. | `frontend-full-01/state.json`, `frontend-native-owner-exit-01.json` |
+| Применимость frontend после EOL | Только две замены CRLF→LF в C# tests; canonical Git blobs и остальные входы/dist прежние. Encoding/surface повторно успешны. | `frontend-eol-audit-01/state.json` |
+| Strict restore | 5 проектов, audited 5 / skipped 0, native 0, 5.500 с. | `restore-solution-01/state.json` |
+| Полное форматирование backend | Native0, 518.344 с. | `format-backend-02/state.json` |
+| Холодная Release-сборка с анализаторами | Native0, 517.672 с, 0 ошибок / одно CS9124. Compiler 8 GiB / CPU1 / GC9 / workstation, `/parallel-`; анализаторы не выключены. | `build-tests-08/state.json` |
+| Targeted backend | 302/302, 95 методов, без failed/error/skipped; native 0, outer667.875 с. | `targeted-launch-01-observation.json` |
+| Полный backend | **9882/9882 + restored 5/5**, точный union, все 14 этапов — exit 0, входы/артефакты неизменны. Actual helper/owner/held-process exit 0. | `backend-full-03-observation.json` |
+| Linux preflight | Два исходных shell-теста retention/Data Protection, native 0, четыре source SHA совпали. Только собственный VPS `/tmp`, без установки/рестарта/БД. | `linux-filesystem-preflight-01.json` |
+
+Full backend observation SHA256 **`f3a67931bbb14a2a78fd76708467589f41bdb99b6127972c3684ac182f8f37a6`**; manifest **`333325de476a054e0e2e7559bb47771469d477639e3bd5543ce194d9a0a66f1c`**. Input digest `84b6c662c4bd599ec1de49d3819a51ac8102e5406df2372b39264e3c0624e92e`, artifact digest `8e0659fd754b84bea8b511d9be4c691b45863c9d718b9215f5dbf3183eb4481a`.
+
+| Часть | Cases | Auto workers | Native wrapper, с |
+|---|---:|---:|---:|
+| 0 | 2522 | 2 | 2143.414 |
+| 1 | 2483 | 2 | 2092.408 |
+| 2 | 2375 | 1 | 2943.386 |
+| 3 | 2502 | 2 | 2104.059 |
+
+Native helper **9456.563 с**, actual outer **9458.297 с = 2:37:38.297**, завершение `2026-10-25T09:34:01.204390Z`. Restored5 — 149.244 с. `state.elapsedSeconds=11641.691` включает prepare/ожидание и не является временем тестов. RAM min free 4.446 GiB, max owned RSS 3.394 GiB. Исторические часы на другом каталоге/host/load не являются контролируемым baseline ускорения.
+
+Полный набор по-прежнему дорог: top4 по сумме времени случаев — real-browser financial 472.151 с / 9, retirement 389.172 с / 16, real-HTTP financial 314.513 с / 15, generated 204.803 с / 8. Точные FQN/top 10 есть в итоговом JSON. Это не причинная разбивка DB/browser/network; тайм-ауты не считать фактическими задержками. Следующий performance-этап — измерять создание runtime/БД/browser отдельно, сохраняя все сценарии. Кандидат SourceLink/cold migration compilation ещё не реализован.
+
+Прежние OOM, EOL failure и full02 `EPERM rename state.json` сохранены как неуспехи. На Windows во время producer не читать изменяемые state/execution JSON даже с FileShare.Delete: наблюдать append logs/resources, а закрытые receipts читать после actual exit. Full03 повторно использовал только успешно завершённый preflight 60; эти случаи не прибавляются к 9882. Future bounded retry atomic writer записан в REL-01, но не реализован. Эта ошибка rename отличается от нынешней CI ошибки создания symlink.
+
+Local legal-flags step сохранил разрешённое warning `featureFlags summary failed: fetch failed`; позднейшая отдельная внешняя проверка health/features 200, TLS valid и 7 выключенных legal-флагов не переписывает прежний warning. Причина ранних HTTPS timeout неизвестна.
+
+## Сначала продолжить доставку
+
+1. Получить ответ пользователя: восстановление квоты GitHub либо новое хранилище на XSENUS. В PayPlanner artifacts 0, удалять здесь нечего; ни платёжные настройки, ни чужие репозитории не менялись. Если выбран transport — читать review-only `xsenus-artifact-store-proposal-01/PLAN.md`, реализовать helper/validator/security tests полностью, подтвердить matrix rerun outputs либо использовать четыре явных job с отдельными trusted outputs. Старый full digest не переименовывать под новые scripts/workflow; выполнить требуемый новый применимый gate и полный CI.
+2. Получить диагностику точного XSENUS runner token. Готовы `xsenus-symlink-diagnostic-02.ps1` и README02, SHA скрипта `638f30e87895298841481fb53be00073587b26914d69bc277df6f40f1dfa59a6`. Проверка ILYA 0 не квалифицирует XSENUS. Не заменять file symlink hardlink/copy, не skip тесты и не принимать EPERM как pass. Изменение системных прав — только по фактической диагностике и отдельному решению. Доступ по SSH/WinRM с ILYA сейчас отсутствует; требуется существующий способ администрирования либо выполнение пользователем.
+3. После исправления причин повторить упавшие/затронутые CI checks по текущему SHA, сохранить успешные результаты при совпадающих входах; дождаться всех обязательных jobs. Настоящий run40181241823 имеет 1 success / 2 failure / 4 skipped, а не успешные 10 instances. Backend CI tests ещё не выполнялись.
+4. После успеха всех обязательных pre-deploy jobs — штатный deploy того же квалифицированного пакета. Затем подтвердить полный успешный CI и внешний API health/frontend/SW/revision/readiness, прямые VPS service/revision/file SHA. Подготовленный `vps-after-deploy-01.py` ожидает fe4, **не исполнен**. При новом codeSHA подготовить новую версию ожидания, старую не переписывать. Последняя ранее подтверждённая VPS-ревизия 9448; deployment этой попытки skipped.
+5. Обновить эту передачу и протокол фактическими CI/deploy/live результатами; поздний docs-only commit отличать от установленного codeSHA. В `deploy.yml` docs Markdown исключён из push-trigger; docs-only commit не означает повторный CI или новый deployment.
+
+## Очередь продукта и ограничения
+
+Рабочие источники — [единый план](payplanner-unified-roadmap-2026-10-14.md), [work-order](payplanner-work-order-2026-10-21.md), [release roadmap](payplanner-release-roadmap-2026-10-14.md). Общий прогресс **9/167 (5.4%)**, 21 активный блок: 9 выполнено, 84 в работе, 31 не начато, 3 blocked, 20 решений, 20 приёмок. REL **0/3 (0%)**. Подготовка плана 12/12 и техническая квалификация не закрывают продуктовые приёмки.
+
+После доставки продолжать маленькие законченные/срочные задачи перед тяжёлыми по актуальным активным планам. UI/REQдо 136 уже сохранены вmain; следующий самостоятельный SETTINGS — CMP-02, договорная политика, импорт и календарные права; BANK-09 ручной выбор счёта — подготовленный будущий срез без native-проверок. Не включать его автоматически в квалифицированный пакет. Старые заголовки R8/9808/3372/89689498 в иных документах — история; архивные roadmaps не возобновлять.
+
+Последняя прочитанная сверка чатов/YouGile — документы 21/24 октября; нового чтения/публикации 25 октября эта доставка не заявляет. Черновики ответов/приглашения сохраняются, публикация и перемещение карточек требуют отдельной команды. Не создавать новый чат и не посылать сообщения другим чатам без явного поручения.
+
+Соблюдать локальные AGENTS и существующую инфраструктуру: PostgreSQL 17:5433, отдельные синтетические БД/ограниченная роль, без новых серверов/контейнеров и без tests на production VPS. Перед любым local backend `BackgroundServices__Enabled=false`, `Email__Enabled=false`, у копии production БД также DB setting `notifications.email.enabled=false` и изоляция SMTP/очередей. Секреты остаются в DPAPI/игнорируемой конфигурации; backups, чужие БД и пользовательские процессы не очищать. Работать при текущей памяти, не просить повторно закрывать приложения.
