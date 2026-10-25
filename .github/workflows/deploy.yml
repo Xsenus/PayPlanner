@@ -1,4 +1,4 @@
-name: XSENUS read-only diagnostics
+name: XSENUS read-only ACL diagnostics
 
 on:
   workflow_dispatch: {}
@@ -37,8 +37,8 @@ jobs:
           & node scripts/verify-xsenus-runner.mjs build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Read host and runner metadata and probe an owned temporary file symlink
+      - name: Read fixed artifact-store candidate ACL metadata only
         run: |
           $ErrorActionPreference = 'Stop'
-          & .\scripts\xsenus-ci-readonly-diagnostic.ps1
+          & .\scripts\xsenus-ci-acl-diagnostic.ps1
           exit $LASTEXITCODE
