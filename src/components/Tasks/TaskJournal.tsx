@@ -147,8 +147,8 @@ import {
 import { applyTaskTemplateDefaults, type TaskTemplateField } from '../../utils/taskTemplateApplication';
 import {
   FORCED_TASK_SNOOZE_OPTIONS,
-  FORCED_TASK_SNOOZE_STORAGE_KEY,
   FORCED_TASK_SNOOZES_EVENT,
+  getForcedTaskSnoozeStorageKey,
   getForcedTaskApprovalSnoozeKey,
   getForcedTaskDeadlineChangeSnoozeKey,
   readForcedTaskSnoozes,
@@ -2737,8 +2737,8 @@ export function TaskJournal({
   const [forcedDecisionSnoozeRevision, setForcedDecisionSnoozeRevision] = useState(0);
   const forcedDecisionSnoozes = useMemo(() => ({
     revision: forcedDecisionSnoozeRevision,
-    values: readForcedTaskSnoozes(),
-  }), [forcedDecisionSnoozeRevision]);
+    values: readForcedTaskSnoozes(currentUserId),
+  }), [currentUserId, forcedDecisionSnoozeRevision]);
   const [highlightedTaskId, setHighlightedTaskId] = useState<number | null>(routeTaskId);
   const [calendarAnchorDate, setCalendarAnchorDate] = useState(() => getCurrentCalendarDate());
   const [calendarSelectedDate, setCalendarSelectedDate] = useState(() => getCurrentCalendarDate());
@@ -3509,26 +3509,32 @@ export function TaskJournal({
   ]);
 
   useEffect(() => {
-    if (!isApprovalsMode) {
+    const storageKey = getForcedTaskSnoozeStorageKey(currentUserId);
+    if (!isApprovalsMode || !storageKey) {
       return;
     }
 
-    const refreshSnoozes = () => setForcedDecisionSnoozeRevision(Date.now());
+    const refreshSnoozes = () => setForcedDecisionSnoozeRevision(value => value + 1);
+    const handleSnoozesChanged = (event: Event) => {
+      if ((event as CustomEvent<{ userId?: number }>).detail?.userId === currentUserId) {
+        refreshSnoozes();
+      }
+    };
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === FORCED_TASK_SNOOZE_STORAGE_KEY) {
+      if (event.key === storageKey || event.key === null) {
         refreshSnoozes();
       }
     };
     const intervalId = window.setInterval(refreshSnoozes, 30_000);
-    window.addEventListener(FORCED_TASK_SNOOZES_EVENT, refreshSnoozes);
+    window.addEventListener(FORCED_TASK_SNOOZES_EVENT, handleSnoozesChanged);
     window.addEventListener('storage', handleStorage);
 
     return () => {
       window.clearInterval(intervalId);
-      window.removeEventListener(FORCED_TASK_SNOOZES_EVENT, refreshSnoozes);
+      window.removeEventListener(FORCED_TASK_SNOOZES_EVENT, handleSnoozesChanged);
       window.removeEventListener('storage', handleStorage);
     };
-  }, [isApprovalsMode]);
+  }, [currentUserId, isApprovalsMode]);
 
   useEffect(() => {
     if (isRouteTaskPage) {
@@ -5340,7 +5346,7 @@ export function TaskJournal({
     if (!deadlineChangeDecisionPrompt || deadlineChangeDecisionSaving) return;
 
     const { task, request } = deadlineChangeDecisionPrompt;
-    snoozeForcedTaskActions([getForcedTaskDeadlineChangeSnoozeKey(task.id, request.id)], minutes);
+    snoozeForcedTaskActions(currentUserId, [getForcedTaskDeadlineChangeSnoozeKey(task.id, request.id)], minutes);
     resetDeadlineChangeDecisionPrompt();
   };
 
@@ -5592,7 +5598,7 @@ export function TaskJournal({
   const snoozeApprovalDecisionPrompt = (minutes: number) => {
     if (!approvalDecisionPrompt || approvalDecisionSaving) return;
 
-    snoozeForcedTaskActions([getForcedTaskApprovalSnoozeKey(approvalDecisionPrompt.task.id)], minutes);
+    snoozeForcedTaskActions(currentUserId, [getForcedTaskApprovalSnoozeKey(approvalDecisionPrompt.task.id)], minutes);
     resetApprovalDecisionPrompt();
   };
 

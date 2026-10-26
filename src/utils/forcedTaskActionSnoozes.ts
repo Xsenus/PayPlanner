@@ -1,6 +1,12 @@
 export const FORCED_TASK_SNOOZE_STORAGE_KEY = 'pp.forcedTaskModalSnoozes.v1';
 export const FORCED_TASK_SNOOZES_EVENT = 'payplanner:forced-task-snoozes-changed';
 
+export function getForcedTaskSnoozeStorageKey(userId: number | null | undefined): string | null {
+  return typeof userId === 'number' && Number.isSafeInteger(userId) && userId > 0
+    ? `pp.forcedTaskModalSnoozes.v2.user.${userId}`
+    : null;
+}
+
 export const FORCED_TASK_SNOOZE_OPTIONS = [
   { minutes: 10, label: '10 мин' },
   { minutes: 30, label: '30 мин' },
@@ -20,51 +26,62 @@ export function getForcedTaskDeadlineChangeSnoozeKey(taskId: number, requestId: 
   return `task-deadline-change:${taskId}:${requestId}`;
 }
 
-export function readForcedTaskSnoozes(now = Date.now()): Record<string, number> {
+export function readForcedTaskSnoozes(userId: number | null | undefined, now = Date.now()): Record<string, number> {
+  const storageKey = getForcedTaskSnoozeStorageKey(userId);
+  if (!storageKey) return {};
+
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(FORCED_TASK_SNOOZE_STORAGE_KEY) || '{}') as Record<string, unknown>;
+    // The owner of the old v1 value is unknown; never assign its snoozes to a signed-in user.
+    const stored = window.localStorage.getItem(storageKey) || '{}';
+    const parsed: unknown = JSON.parse(stored);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
     const active: Record<string, number> = {};
     Object.entries(parsed).forEach(([key, value]) => {
-      if (typeof value === 'number' && value > now) {
+      if (typeof value === 'number' && Number.isFinite(value) && value > now) {
         active[key] = value;
       }
     });
-    window.localStorage.setItem(FORCED_TASK_SNOOZE_STORAGE_KEY, JSON.stringify(active));
+    const serialized = JSON.stringify(active);
+    if (serialized !== stored) window.localStorage.setItem(storageKey, serialized);
     return active;
   } catch {
     return {};
   }
 }
 
-export function isForcedTaskActionSnoozed(key: string, now = Date.now()): boolean {
-  return (readForcedTaskSnoozes(now)[key] ?? 0) > now;
+export function isForcedTaskActionSnoozed(userId: number | null | undefined, key: string, now = Date.now()): boolean {
+  return (readForcedTaskSnoozes(userId, now)[key] ?? 0) > now;
 }
 
-export function snoozeForcedTaskActions(keys: Array<string | null | undefined>, minutes: number, now = Date.now()) {
-  const snoozes = readForcedTaskSnoozes(now);
+export function snoozeForcedTaskActions(userId: number | null | undefined, keys: Array<string | null | undefined>, minutes: number, now = Date.now()) {
+  const storageKey = getForcedTaskSnoozeStorageKey(userId);
+  if (!storageKey) return;
+
+  const snoozes = readForcedTaskSnoozes(userId, now);
   const snoozedUntil = now + minutes * 60_000;
   keys.forEach((key) => {
     if (key) {
       snoozes[key] = snoozedUntil;
     }
   });
-  window.localStorage.setItem(FORCED_TASK_SNOOZE_STORAGE_KEY, JSON.stringify(snoozes));
-  window.dispatchEvent(new Event(FORCED_TASK_SNOOZES_EVENT));
+  window.localStorage.setItem(storageKey, JSON.stringify(snoozes));
+  window.dispatchEvent(new CustomEvent(FORCED_TASK_SNOOZES_EVENT, { detail: { userId } }));
 }
 
-export function shareForcedTaskSnooze(sourceKey: string, targetKey: string | null | undefined, now = Date.now()): boolean {
-  if (!targetKey) {
+export function shareForcedTaskSnooze(userId: number | null | undefined, sourceKey: string, targetKey: string | null | undefined, now = Date.now()): boolean {
+  const storageKey = getForcedTaskSnoozeStorageKey(userId);
+  if (!storageKey || !targetKey) {
     return false;
   }
 
-  const snoozes = readForcedTaskSnoozes(now);
+  const snoozes = readForcedTaskSnoozes(userId, now);
   const sourceUntil = snoozes[sourceKey] ?? 0;
   if (sourceUntil <= now || (snoozes[targetKey] ?? 0) >= sourceUntil) {
     return false;
   }
 
   snoozes[targetKey] = sourceUntil;
-  window.localStorage.setItem(FORCED_TASK_SNOOZE_STORAGE_KEY, JSON.stringify(snoozes));
-  window.dispatchEvent(new Event(FORCED_TASK_SNOOZES_EVENT));
+  window.localStorage.setItem(storageKey, JSON.stringify(snoozes));
+  window.dispatchEvent(new CustomEvent(FORCED_TASK_SNOOZES_EVENT, { detail: { userId } }));
   return true;
 }
