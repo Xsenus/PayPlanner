@@ -282,6 +282,9 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
   const initialUnreadCountRef = useRef(thread.unreadCount);
   const firstUnreadMessageIdRef = useRef(thread.firstUnreadMessageId);
   const draftBeforeEditRef = useRef('');
+  const editRevisionRef = useRef(0);
+  const editInFlightRef = useRef(false);
+  const editScopeRef = useRef<{ actorId: number; threadId: number } | null>(null);
   const pendingSendRef = useRef<({ threadId: number } & PendingChatSend) | null>(null);
   const [managedSendState, setManagedSendState] = useState<InternalChatSendState | null>(null);
   const [initialSendKey, setInitialSendKey] = useState(() => readPendingChatSend(currentUserId, thread.id)?.id ?? null);
@@ -295,6 +298,12 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
   const memberSummary = otherMemberNames.length > 3
     ? `${otherMemberNames.slice(0, 3).join(', ')} и ещё ${otherMemberNames.length - 3}`
     : otherMemberNames.join(', ');
+
+  useLayoutEffect(() => {
+    editScopeRef.current = user?.id === currentUserId && currentUserId > 0
+      ? { actorId: currentUserId, threadId: thread.id } : null;
+    return () => { editScopeRef.current = null; };
+  }, [currentUserId, thread.id, user?.id]);
 
   useEffect(() => {
     lastReadMessageIdRef.current = Math.max(lastReadMessageIdRef.current, thread.lastReadMessageId ?? 0);
@@ -455,6 +464,7 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
   const insertMarkup = (left: string, right = left) => {
     const element = textareaRef.current;
     if (!element) return;
+    if (editing) editRevisionRef.current += 1;
     const start = element.selectionStart;
     const end = element.selectionEnd;
     setText((value) => {
@@ -468,6 +478,7 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
   const insertListMarker = (marker: string) => {
     const element = textareaRef.current;
     if (!element) return;
+    if (editing) editRevisionRef.current += 1;
     const cursor = element.selectionStart;
     const lineStart = cursor > 0 ? text.lastIndexOf('\n', cursor - 1) + 1 : 0;
     setText((value) => {
@@ -482,21 +493,33 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
   };
 
   const insertMention = (person: InternalChatPerson) => {
+    if (editing) editRevisionRef.current += 1;
     setText((value) => `${value}${value && !value.endsWith(' ') ? ' ' : ''}@[${person.id}] `);
     textareaRef.current?.focus();
   };
 
   const submit = async () => {
+    if (editInFlightRef.current) return;
     if (editing) {
-      if (!text.trim()) return;
+      const scope = editScopeRef.current;
+      if (!text.trim() || sending || !scope) return;
+      const revision = editRevisionRef.current;
+      editInFlightRef.current = true;
       setSending(true);
       try {
         const updated = await internalChatApi.editMessage(editing.id, text);
+        if (editScopeRef.current !== scope) return;
         setMessages((current) => current.map((item) => item.id === updated.id ? updated : item));
-        setEditing(null);
-        setText(draftBeforeEditRef.current);
-      } catch (error) { toast.error(errorMessage(error)); }
-      finally { setSending(false); }
+        if (editRevisionRef.current === revision) {
+          setEditing(null);
+          setText(draftBeforeEditRef.current);
+        }
+      } catch (error) {
+        if (editScopeRef.current === scope) toast.error(errorMessage(error));
+      } finally {
+        editInFlightRef.current = false;
+        if (editScopeRef.current === scope) setSending(false);
+      }
       return;
     }
     if (!text.trim() && files.length === 0) return;
@@ -696,7 +719,7 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
                         <button type="button" onClick={() => void internalChatApi.setPinned(message.id, !message.isPinned).then(refreshMessage).catch((error) => toast.error(errorMessage(error)))} className="flex w-full items-center gap-2 px-3 py-2 hover:bg-slate-50"><Pin className="h-3.5 w-3.5" />{message.isPinned ? 'Открепить' : 'Закрепить'}</button>
                         {mine && message.kind === 'user' ? <button type="button" onClick={() => { setActionsFor(null); void internalChatApi.setNoReplyReminder(message.id, !message.noReplyReminderEnabled).then((updated) => setMessages((current) => current.map((item) => item.id === updated.id ? updated : item))).catch((error) => toast.error(errorMessage(error))); }} className="flex w-full items-center gap-2 px-3 py-2 hover:bg-slate-50" title="Первое напоминание через 24 часа, затем раз в сутки до ответа"><BellRing className="h-3.5 w-3.5" />{message.noReplyReminderEnabled ? 'Отключить напоминание' : 'Напомнить, если нет ответа'}</button> : null}
                         {canCreateTasks ? <button type="button" onClick={() => { setTaskSource(message); setTaskTitle(''); setTaskDescription(message.text.slice(0, 4000)); setActionsFor(null); }} className="flex w-full items-center gap-2 px-3 py-2 hover:bg-slate-50"><FilePlus2 className="h-3.5 w-3.5" />Создать задачу</button> : null}
-                        {mine && message.kind === 'user' ? <><button type="button" onClick={() => { draftBeforeEditRef.current = text; setEditing(message); setText(message.text); setActionsFor(null); }} className="flex w-full items-center gap-2 px-3 py-2 hover:bg-slate-50"><Pencil className="h-3.5 w-3.5" />Редактировать</button><button type="button" onClick={() => void internalChatApi.deleteMessage(message.id).then(refreshMessage).catch((error) => toast.error(errorMessage(error)))} className="flex w-full items-center gap-2 px-3 py-2 text-rose-600 hover:bg-rose-50"><Trash2 className="h-3.5 w-3.5" />Удалить</button></> : null}
+                        {mine && message.kind === 'user' ? <><button type="button" onClick={() => { editRevisionRef.current += 1; if (!editing) draftBeforeEditRef.current = text; setEditing(message); setText(message.text); setActionsFor(null); }} className="flex w-full items-center gap-2 px-3 py-2 hover:bg-slate-50"><Pencil className="h-3.5 w-3.5" />Редактировать</button><button type="button" onClick={() => void internalChatApi.deleteMessage(message.id).then(refreshMessage).catch((error) => toast.error(errorMessage(error)))} className="flex w-full items-center gap-2 px-3 py-2 text-rose-600 hover:bg-rose-50"><Trash2 className="h-3.5 w-3.5" />Удалить</button></> : null}
                       </div> : null}
                     </div>
                   </article>
@@ -711,7 +734,7 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
       </div>
 
       <footer className="border-t border-slate-200 bg-white p-3">
-        {replyTo || restoredReplyId || editing ? <div className="mb-2 flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600"><Reply className="h-3.5 w-3.5" /><span className="min-w-0 flex-1 truncate">{editing ? 'Редактирование сообщения' : replyTo ? `Ответ на сообщение ${replyTo.authorName} (виден всем участникам чата): ${replyTo.text}` : `Ответ на сообщение №${restoredReplyId} · сохранённый черновик`}</span><button type="button" onClick={() => { setReplyTo(null); setRestoredReplyId(null); if (editing) { setEditing(null); setText(draftBeforeEditRef.current); } }} aria-label="Отменить ответ или редактирование"><X className="h-4 w-4" /></button></div> : null}
+        {replyTo || restoredReplyId || editing ? <div className="mb-2 flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600"><Reply className="h-3.5 w-3.5" /><span className="min-w-0 flex-1 truncate">{editing ? 'Редактирование сообщения' : replyTo ? `Ответ на сообщение ${replyTo.authorName} (виден всем участникам чата): ${replyTo.text}` : `Ответ на сообщение №${restoredReplyId} · сохранённый черновик`}</span><button type="button" onClick={() => { setReplyTo(null); setRestoredReplyId(null); if (editing) { editRevisionRef.current += 1; setEditing(null); setText(draftBeforeEditRef.current); } }} aria-label="Отменить ответ или редактирование"><X className="h-4 w-4" /></button></div> : null}
         {files.length ? <div className="mb-2 flex flex-wrap gap-1.5">{files.map((file, index) => <span key={`${file.name}-${index}`} className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-xs text-blue-700"><Paperclip className="h-3 w-3" />{file.name}<button type="button" onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X className="h-3 w-3" /></button></span>)}</div> : null}
         <div className="mb-1 flex flex-wrap items-center gap-1 text-xs text-slate-500">
           <div className="w-full"><PendingChatSends threadId={thread.id} actorId={currentUserId} initialKey={initialSendKey}
@@ -726,7 +749,7 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
         <div className="flex items-end gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 focus-within:border-blue-300 focus-within:ring-2 focus-within:ring-blue-100">
           <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(event) => setFiles(Array.from(event.target.files ?? []).slice(0, 10))} />
           <button type="button" onClick={() => fileInputRef.current?.click()} className="rounded-lg p-2 text-slate-500 hover:bg-white" title="Прикрепить файлы"><Paperclip className="h-4 w-4" /></button>
-          <textarea ref={textareaRef} value={text} onChange={(event) => { setText(event.target.value); if (!editing) saveChatDraft(currentUserId, thread.id, event.target.value); }} onCompositionStart={() => { composingRef.current = true; }} onCompositionEnd={() => { composingRef.current = false; }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !composingRef.current) { event.preventDefault(); void submit(); } }} rows={1} maxLength={8000} placeholder="Напишите сообщение…" className="max-h-32 min-h-9 flex-1 resize-y border-0 bg-transparent px-1 py-2 text-sm outline-none" />
+          <textarea ref={textareaRef} value={text} onChange={(event) => { if (editing) editRevisionRef.current += 1; setText(event.target.value); if (!editing) saveChatDraft(currentUserId, thread.id, event.target.value); }} onCompositionStart={() => { composingRef.current = true; }} onCompositionEnd={() => { composingRef.current = false; }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !composingRef.current) { event.preventDefault(); void submit(); } }} rows={1} maxLength={8000} placeholder="Напишите сообщение…" className="max-h-32 min-h-9 flex-1 resize-y border-0 bg-transparent px-1 py-2 text-sm outline-none" />
           <button type="button" onClick={() => void submit()} disabled={sending || (!text.trim() && files.length === 0)} className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-white disabled:bg-slate-300" aria-label="Отправить">{sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}</button>
         </div>
         {text && !editing ? <p className="mt-1 text-[11px] text-slate-500">Черновик сохранён в этой вкладке до её закрытия.</p> : null}

@@ -5,6 +5,24 @@ import { describe, expect, it, vi } from 'vitest';
 describe('TaskJournal', () => {
   setupTaskJournalTests();
 
+  it.each(['legacy', 'modern'] as const)('uses the shared task chat in the %s card selected by global settings', async (mode) => {
+    await renderJournal([createTask()], { settings: { taskCardWindowMode: mode } });
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId(`task-${mode}-card-window`);
+    expect(screen.queryByTestId(`task-${mode === 'legacy' ? 'modern' : 'legacy'}-card-window`)).toBeNull();
+    expect(within(card).queryByTestId('task-chat-panel')).toBeNull();
+    const openChat = () => fireEvent.click(mode === 'modern'
+      ? within(card).getByRole('tab', { name: 'Чат' })
+      : within(card).getByRole('button', { name: /Чат задачи/ }));
+    openChat();
+    expect((await within(card).findByTestId('task-chat-panel')).textContent).toBe('Чат задачи 101');
+    if (mode === 'modern') fireEvent.click(within(card).getByRole('tab', { name: /Комментарии/ }));
+    else openChat();
+    expect(within(card).queryByTestId('task-chat-panel')).toBeNull();
+    openChat();
+    expect((await within(card).findByTestId('task-chat-panel')).textContent).toBe('Чат задачи 101');
+  });
+
 
   it.each([
     ['legacy', 'assignees', 'pending'], ['modern', 'assignees', 'pending'],

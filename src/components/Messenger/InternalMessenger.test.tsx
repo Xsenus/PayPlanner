@@ -30,13 +30,14 @@ const chatApiMock = vi.hoisted(() => ({
 
 const toastMock = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
 const permissionState = vi.hoisted(() => ({ canCreateTasks: true }));
+const authState = vi.hoisted(() => ({ userId: 7 as number | null }));
 const connectionMock = vi.hoisted(() => ({ on: vi.fn(), start: vi.fn(() => Promise.resolve()), stop: vi.fn(() => Promise.resolve()) }));
 
 vi.mock('../../services/internalChatApi', async () => {
   const actual = await vi.importActual<typeof import('../../services/internalChatApi')>('../../services/internalChatApi');
   return { ...actual, internalChatApi: chatApiMock };
 });
-vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 7, email: 'me@example.test', fullName: 'Я' }, isAdmin: () => false }) }));
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ user: authState.userId === null ? null : { id: authState.userId, email: 'me@example.test', fullName: 'Я' }, isAdmin: () => false }) }));
 vi.mock('../../hooks/useRolePermissions', () => ({ useRolePermissions: () => ({ tasks: { canCreate: permissionState.canCreateTasks } }) }));
 vi.mock('../../hooks/useToast', () => ({ useToast: () => toastMock }));
 vi.mock('../../services/realtimeNotifications', () => ({
@@ -83,6 +84,7 @@ describe('InternalMessenger', () => {
 
   beforeEach(() => {
     sessionStorage.clear();
+    authState.userId = 7;
     permissionState.canCreateTasks = true;
     Object.values(chatApiMock).forEach((mock) => mock.mockReset());
     toastMock.error.mockReset();
@@ -281,6 +283,168 @@ describe('InternalMessenger', () => {
     expect(chatApiMock.sendMessage).not.toHaveBeenCalled();
     await waitFor(() => expect((editor as HTMLTextAreaElement).value).toBe(draft));
     expect(sessionStorage.getItem('payplanner.chatDraft.v1.7.12')).toBe(draft);
+  });
+
+  const renderOwnMessageEdit = async (host: 'messenger' | 'task' = 'messenger', withSecondMessage = false) => {
+    const threadId = host === 'task' ? 44 : thread.id;
+    const mine = { ...message, threadId, authorUserId: 7, authorName: 'Я', text: 'Моё редактируемое сообщение' };
+    const second = { ...mine, id: mine.id + 1, text: 'Моё второе сообщение' };
+    chatApiMock.getMessages.mockResolvedValue({ items: withSecondMessage ? [mine, second] : [mine], hasMore: false });
+    if (host === 'task') chatApiMock.openTask.mockResolvedValue({ ...thread, id: threadId, kind: 'task', taskJournalItemId: 101 });
+    const view = render(host === 'task' ? <TaskChatPanel taskId={101} /> : <InternalMessenger />);
+    await screen.findByText(mine.text);
+    const editor = screen.getByPlaceholderText('Напишите сообщение…') as HTMLTextAreaElement;
+    const draft = 'Отдельный черновик перед правкой';
+    fireEvent.change(editor, { target: { value: draft } });
+    fireEvent.click(within(screen.getByText(mine.text).closest('article')!).getByRole('button', { name: 'Действия' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать' }));
+    return { view, editor, mine, second, draft, threadId };
+  };
+
+  it.each(['messenger', 'task'] as const)('preserves the original draft when switching edit targets during a pending save: %s', async (host) => {
+    const { editor, mine, second, draft, threadId } = await renderOwnMessageEdit(host, true);
+    let finish: (value: typeof mine) => void = () => undefined;
+    chatApiMock.editMessage.mockImplementation(() => new Promise<typeof mine>((resolve) => { finish = resolve; }));
+    fireEvent.change(editor, { target: { value: 'Правка первого сообщения' } });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    fireEvent.click(within(screen.getByText(second.text).closest('article')!).getByRole('button', { name: 'Действия' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать' }));
+    expect(editor.value).toBe(second.text);
+    fireEvent.change(editor, { target: { value: 'Продолжение правки второго сообщения' } });
+    await act(async () => { finish({ ...mine, text: 'Правка первого сообщения' }); });
+    expect(editor.value).toBe('Продолжение правки второго сообщения');
+    fireEvent.click(screen.getByRole('button', { name: 'Отменить ответ или редактирование' }));
+    expect(editor.value).toBe(draft);
+    expect(sessionStorage.getItem(`payplanner.chatDraft.v1.7.${threadId}`)).toBe(draft);
+    expect(chatApiMock.editMessage).toHaveBeenCalledExactlyOnceWith(mine.id, 'Правка первого сообщения');
+    expect(chatApiMock.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it.each(['messenger', 'task'] as const)('keeps later edit text and ignores repeated Enter while the edit is saving: %s', async (host) => {
+    const { editor, mine, draft, threadId } = await renderOwnMessageEdit(host);
+    let finish: (value: typeof mine) => void = () => undefined;
+    chatApiMock.editMessage.mockImplementation(async (_id: number, text: string) => ({ ...mine, text }));
+    chatApiMock.editMessage.mockImplementationOnce(() => new Promise<typeof mine>((resolve) => { finish = resolve; }));
+    fireEvent.change(editor, { target: { value: 'Первая правка' } });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    expect(chatApiMock.editMessage).toHaveBeenCalledTimes(1);
+    expect(chatApiMock.editMessage).toHaveBeenCalledWith(mine.id, 'Первая правка');
+    fireEvent.change(editor, { target: { value: 'Более новая правка' } });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    expect(chatApiMock.editMessage).toHaveBeenCalledTimes(1);
+    await act(async () => { finish({ ...mine, text: 'Первая правка' }); });
+    expect(screen.getByText('Первая правка')).toBeTruthy();
+    expect(editor.value).toBe('Более новая правка');
+    expect(screen.getByText('Редактирование сообщения')).toBeTruthy();
+    expect(sessionStorage.getItem(`payplanner.chatDraft.v1.7.${threadId}`)).toBe(draft);
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    await waitFor(() => expect(chatApiMock.editMessage).toHaveBeenCalledTimes(2));
+    expect(chatApiMock.editMessage).toHaveBeenLastCalledWith(mine.id, 'Более новая правка');
+    await waitFor(() => expect(editor.value).toBe(draft));
+    expect(sessionStorage.getItem(`payplanner.chatDraft.v1.7.${threadId}`)).toBe(draft);
+    expect(chatApiMock.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('keeps a new composer draft after an edit was cancelled before its acknowledgement', async () => {
+    const { editor, mine } = await renderOwnMessageEdit();
+    let finish: (value: typeof mine) => void = () => undefined;
+    chatApiMock.editMessage.mockImplementation(() => new Promise<typeof mine>((resolve) => { finish = resolve; }));
+    fireEvent.change(editor, { target: { value: 'Сохранённая правка' } });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    fireEvent.click(screen.getByRole('button', { name: 'Отменить ответ или редактирование' }));
+    fireEvent.change(editor, { target: { value: 'Новый отдельный черновик' } });
+    await act(async () => { finish({ ...mine, text: 'Сохранённая правка' }); });
+    expect(screen.getByText('Сохранённая правка')).toBeTruthy();
+    expect(editor.value).toBe('Новый отдельный черновик');
+    expect(screen.queryByText('Редактирование сообщения')).toBeNull();
+    expect(sessionStorage.getItem('payplanner.chatDraft.v1.7.12')).toBe('Новый отдельный черновик');
+    expect(chatApiMock.editMessage).toHaveBeenCalledTimes(1);
+    expect(chatApiMock.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('keeps a reopened edit of the same message even when its text matches the old request', async () => {
+    const { editor, mine, draft } = await renderOwnMessageEdit();
+    let finish: (value: typeof mine) => void = () => undefined;
+    chatApiMock.editMessage.mockImplementation(() => new Promise<typeof mine>((resolve) => { finish = resolve; }));
+    fireEvent.change(editor, { target: { value: 'Совпадающий текст' } });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    fireEvent.click(screen.getByRole('button', { name: 'Отменить ответ или редактирование' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Действия' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать' }));
+    fireEvent.change(editor, { target: { value: 'Совпадающий текст' } });
+    await act(async () => { finish({ ...mine, text: 'Совпадающий текст' }); });
+    expect(editor.value).toBe('Совпадающий текст');
+    expect(screen.getByText('Редактирование сообщения')).toBeTruthy();
+    expect(sessionStorage.getItem('payplanner.chatDraft.v1.7.12')).toBe(draft);
+    expect(chatApiMock.editMessage).toHaveBeenCalledTimes(1);
+    expect(chatApiMock.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it.each(['messenger', 'task'] as const)('ignores the previous actor edit acknowledgement after logout and another login: %s', async (host) => {
+    const { view, editor, mine, draft, threadId } = await renderOwnMessageEdit(host);
+    let finish: (value: typeof mine) => void = () => undefined;
+    chatApiMock.editMessage.mockImplementation(() => new Promise<typeof mine>((resolve) => { finish = resolve; }));
+    fireEvent.change(editor, { target: { value: 'Правка прежнего сотрудника' } });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    authState.userId = null;
+    view.rerender(host === 'task' ? <TaskChatPanel taskId={101} /> : <InternalMessenger />);
+    expect(screen.queryByPlaceholderText('Напишите сообщение…')).toBeNull();
+    const next = { ...mine, authorUserId: 8, authorName: 'Анна', text: 'Сообщение нового сотрудника' };
+    chatApiMock.getMessages.mockResolvedValue({ items: [next], hasMore: false });
+    sessionStorage.setItem(`payplanner.chatDraft.v1.8.${threadId}`, 'Личный черновик Анны');
+    authState.userId = 8;
+    view.rerender(host === 'task' ? <TaskChatPanel taskId={101} /> : <InternalMessenger />);
+    await screen.findByText(next.text);
+    const nextEditor = screen.getByPlaceholderText('Напишите сообщение…') as HTMLTextAreaElement;
+    expect(nextEditor.value).toBe('Личный черновик Анны');
+    fireEvent.change(nextEditor, { target: { value: 'Продолжение черновика Анны' } });
+    await act(async () => { finish({ ...mine, text: 'Правка прежнего сотрудника' }); });
+    expect(nextEditor.value).toBe('Продолжение черновика Анны');
+    expect(sessionStorage.getItem(`payplanner.chatDraft.v1.8.${threadId}`)).toBe('Продолжение черновика Анны');
+    expect(sessionStorage.getItem(`payplanner.chatDraft.v1.7.${threadId}`)).toBe(draft);
+    expect(screen.getByText(next.text)).toBeTruthy();
+    expect(screen.queryByText('Правка прежнего сотрудника')).toBeNull();
+    expect(toastMock.error).not.toHaveBeenCalled();
+    expect(chatApiMock.editMessage).toHaveBeenCalledTimes(1);
+    expect(chatApiMock.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('keeps failed edit input and retries explicitly without creating another message', async () => {
+    const { editor, mine, draft } = await renderOwnMessageEdit();
+    let reject: (error: Error) => void = () => undefined;
+    chatApiMock.editMessage.mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; }));
+    fireEvent.change(editor, { target: { value: 'Не терять после ошибки' } });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    await act(async () => { reject(new Error('Не удалось сохранить правку')); });
+    expect(toastMock.error).toHaveBeenCalledWith('Не удалось сохранить правку');
+    expect(editor.value).toBe('Не терять после ошибки');
+    expect(screen.getByText('Редактирование сообщения')).toBeTruthy();
+    expect(sessionStorage.getItem('payplanner.chatDraft.v1.7.12')).toBe(draft);
+    chatApiMock.editMessage.mockResolvedValue({ ...mine, text: 'Не терять после ошибки' });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    await waitFor(() => expect(chatApiMock.editMessage).toHaveBeenCalledTimes(2));
+    expect(chatApiMock.editMessage).toHaveBeenLastCalledWith(mine.id, 'Не терять после ошибки');
+    await waitFor(() => expect(editor.value).toBe(draft));
+    expect(chatApiMock.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('does not show the previous actor edit failure in the next actor conversation', async () => {
+    const { view, editor } = await renderOwnMessageEdit();
+    let reject: (error: Error) => void = () => undefined;
+    chatApiMock.editMessage.mockImplementation(() => new Promise((_, fail) => { reject = fail; }));
+    fireEvent.change(editor, { target: { value: 'Правка сотрудника 7' } });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    authState.userId = 8;
+    sessionStorage.setItem('payplanner.chatDraft.v1.8.12', 'Черновик сотрудника 8');
+    view.rerender(<InternalMessenger />);
+    const nextEditor = await screen.findByPlaceholderText('Напишите сообщение…') as HTMLTextAreaElement;
+    expect(nextEditor.value).toBe('Черновик сотрудника 8');
+    await act(async () => { reject(new Error('Ошибка прежнего сотрудника')); });
+    expect(toastMock.error).not.toHaveBeenCalled();
+    expect(nextEditor.value).toBe('Черновик сотрудника 8');
+    expect(sessionStorage.getItem('payplanner.chatDraft.v1.8.12')).toBe('Черновик сотрудника 8');
+    expect(chatApiMock.editMessage).toHaveBeenCalledTimes(1);
   });
 
   it('keeps reply, text, files and identity while copies wait, including a failed exact retry', async () => {
