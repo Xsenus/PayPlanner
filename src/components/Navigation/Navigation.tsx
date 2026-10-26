@@ -1120,8 +1120,8 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
           )}
         </div>
 
-        {/* Desktop toggle button */}
-        <div className="hidden lg:block">
+        {/* Sidebar width toggle */}
+        <div>
           <button
             type="button"
             onClick={() => setCollapsed((v) => !v)}
