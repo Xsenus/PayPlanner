@@ -126,6 +126,30 @@ function normalizeNavigationRootOrder(
   return [...existing, ...missingItems, ...missingGroups];
 }
 
+function readSidebarCollapsed(storageKey: string | null): boolean {
+  if (!storageKey || typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(storageKey) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function readSidebarExpanded(storageKey: string | null): Record<string, boolean> {
+  if (!storageKey || typeof window === 'undefined') return {};
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(storageKey) ?? '{}');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const entries: Array<[string, boolean]> = [];
+    for (const [id, value] of Object.entries(parsed)) {
+      if (typeof value === 'boolean') entries.push([id, value]);
+    }
+    return Object.fromEntries(entries);
+  } catch {
+    return {};
+  }
+}
+
 export default function Navigation({ activeTab, onTabChange }: NavigationProps) {
   const { t } = useTranslation();
   const toast = useToast();
@@ -133,16 +157,16 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
   const permissions = useRolePermissions(user?.role?.id);
   const orderStorageKey = `${ORDER_KEY}.${user?.id ?? 'guest'}`;
   const hiddenStorageKey = `${HIDDEN_STORAGE_KEY}.${user?.id ?? 'guest'}`;
+  const currentUserId = user?.id;
+  const sidebarOwnerId = typeof currentUserId === 'number' && Number.isSafeInteger(currentUserId) && currentUserId > 0
+    ? currentUserId : null;
+  const collapsedStorageKey = sidebarOwnerId === null ? null : `${LS_KEY}.${sidebarOwnerId}`;
+  const expandedStorageKey = sidebarOwnerId === null ? null : `${EXPANDED_KEY}.${sidebarOwnerId}`;
+  const [sidebarPreferencesOwnerId, setSidebarPreferencesOwnerId] = useState(sidebarOwnerId);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [advanceDecisionCount, setAdvanceDecisionCount] = useState(0);
 
-  const [collapsed, setCollapsed] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(LS_KEY) === '1';
-    } catch {
-      return false;
-    }
-  });
+  const [collapsed, setCollapsed] = useState(() => readSidebarCollapsed(collapsedStorageKey));
 
   useLayoutEffect(() => {
     let styleEl = document.getElementById(STYLE_ID) as HTMLStyleElement | null;
@@ -191,12 +215,13 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
   }, [collapsed]);
 
   useEffect(() => {
+    if (!collapsedStorageKey || sidebarPreferencesOwnerId !== sidebarOwnerId) return;
     try {
-      localStorage.setItem(LS_KEY, collapsed ? '1' : '0');
+      localStorage.setItem(collapsedStorageKey, collapsed ? '1' : '0');
     } catch {
       /** */
     }
-  }, [collapsed]);
+  }, [collapsed, collapsedStorageKey, sidebarOwnerId, sidebarPreferencesOwnerId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -540,32 +565,27 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
       .filter((node): node is SidebarNode => node !== null);
   }, [availableSidebarItemIds, globalOrderIds, hiddenItemIds, navigationGroups, sidebarItems]);
 
-  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(() => {
-    if (typeof window === 'undefined') {
-      return {};
-    }
-    try {
-      const raw = window.localStorage.getItem(EXPANDED_KEY);
-      if (!raw) return {};
-      const parsed = JSON.parse(raw) as Record<string, boolean>;
-      return parsed && typeof parsed === 'object' ? parsed : {};
-    } catch {
-      return {};
-    }
-  });
+  const [expandedSections, setExpandedSections] = useState(() => readSidebarExpanded(expandedStorageKey));
+
+  useLayoutEffect(() => {
+    if (sidebarPreferencesOwnerId === sidebarOwnerId) return;
+    setCollapsed(readSidebarCollapsed(collapsedStorageKey));
+    setExpandedSections(readSidebarExpanded(expandedStorageKey));
+    setSidebarPreferencesOwnerId(sidebarOwnerId);
+  }, [collapsedStorageKey, expandedStorageKey, sidebarOwnerId, sidebarPreferencesOwnerId]);
 
   useEffect(() => {
+    if (!expandedStorageKey || sidebarPreferencesOwnerId !== sidebarOwnerId) return;
     try {
-      localStorage.setItem(EXPANDED_KEY, JSON.stringify(expandedSections));
+      localStorage.setItem(expandedStorageKey, JSON.stringify(expandedSections));
     } catch {
       /** */
     }
-  }, [expandedSections]);
+  }, [expandedSections, expandedStorageKey, sidebarOwnerId, sidebarPreferencesOwnerId]);
 
-  const toggleSection = useCallback((id: string) => {
+  const toggleSection = useCallback((id: string, defaultExpanded = false) => {
     setExpandedSections((prev) => {
-      const current = prev[id];
-      const nextValue = current === undefined ? false : !current;
+      const nextValue = !(prev[id] ?? defaultExpanded);
       return { ...prev, [id]: nextValue };
     });
   }, []);
@@ -1126,7 +1146,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
                 <li key={node.id} className="space-y-1" data-testid={`navigation-group-${node.id}`}>
                   <button
                     type="button"
-                    onClick={() => toggleSection(node.id)}
+                    onClick={() => toggleSection(node.id, true)}
                     className={[
                       'relative flex w-full items-center rounded-xl transition-colors',
                       collapsed ? 'justify-center p-3' : 'gap-3 px-4 py-3',

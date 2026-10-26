@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import userEvent from '@testing-library/user-event';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,6 +13,7 @@ import {
 } from '../../utils/paymentAdvanceReview';
 
 const authState = vi.hoisted(() => ({
+  userId: 1 as number | null,
   isAdmin: true,
   roleId: 1,
   roleName: 'admin',
@@ -25,7 +27,7 @@ const toastMocks = vi.hoisted(() => ({
 
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({
-    user: { id: 1, role: { id: authState.roleId, name: authState.roleName } },
+    user: authState.userId === null ? null : { id: authState.userId, role: { id: authState.roleId, name: authState.roleName } },
     isAdmin: () => authState.isAdmin,
   }),
 }));
@@ -108,7 +110,7 @@ function createLawyerTemplatePermissions(): RolePermissions {
 }
 
 function renderNavigation(onTabChange = vi.fn()) {
-  window.localStorage.setItem('pp.sidebar_expanded', JSON.stringify(expandedSections));
+  window.localStorage.setItem(`pp.sidebar_expanded.${authState.userId}`, JSON.stringify(expandedSections));
   render(<Navigation activeTab="calendar" onTabChange={onTabChange} />);
   return onTabChange;
 }
@@ -132,6 +134,7 @@ describe('Navigation links', () => {
     window.localStorage.clear();
     window.sessionStorage.clear();
     vi.clearAllMocks();
+    authState.userId = 1;
     authState.isAdmin = true;
     authState.roleId = 1;
     authState.roleName = 'admin';
@@ -153,6 +156,178 @@ describe('Navigation links', () => {
         expenseCount: 0,
         total: 0,
       },
+    });
+  });
+
+  describe('employee-owned sidebar layout', () => {
+    function toggleTaskSubmenu() {
+      const toggle = findLinkByHref(getTabHref('tasks'))?.parentElement?.querySelector('button');
+      if (!toggle) throw new Error('The visible task section must have its real expand control.');
+      fireEvent.click(toggle);
+    }
+
+    it('restores A after B and reload without ever saving the previous layout under B', async () => {
+      window.localStorage.setItem('pp.sidebar_collapsed.1', '1');
+      window.localStorage.setItem('pp.sidebar_expanded.1', '{"tasks":false}');
+      window.localStorage.setItem('pp.sidebar_collapsed.2', '0');
+      window.localStorage.setItem('pp.sidebar_expanded.2', '{"tasks":true}');
+      const writes = vi.spyOn(Storage.prototype, 'setItem');
+      try {
+        const view = render(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+        await waitForNavigationPermissions();
+        expect(screen.getByRole('button', { name: 'Развернуть меню' })).toBeTruthy();
+
+        authState.userId = 2;
+        view.rerender(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Свернуть меню' })).toBeTruthy());
+        expect(findLinkByHref(getTabHref('tasksApprovals'))).toBeTruthy();
+        const collapsedWritesB = writes.mock.calls.filter(([key]) => key === 'pp.sidebar_collapsed.2');
+        expect(collapsedWritesB.length).toBeGreaterThan(0);
+        expect(collapsedWritesB.every(([, value]) => value === '0')).toBe(true);
+        const expandedWritesB = writes.mock.calls.filter(([key]) => key === 'pp.sidebar_expanded.2');
+        expect(expandedWritesB.length).toBeGreaterThan(0);
+        expect(expandedWritesB.every(([, value]) => JSON.parse(value).tasks === true)).toBe(true);
+        expect(window.localStorage.getItem('pp.sidebar_collapsed.1')).toBe('1');
+        expect(window.localStorage.getItem('pp.sidebar_expanded.1')).toBe('{"tasks":false}');
+
+        authState.userId = 1;
+        view.rerender(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+        expect(screen.getByRole('button', { name: 'Развернуть меню' })).toBeTruthy();
+        fireEvent.click(screen.getByRole('button', { name: 'Развернуть меню' }));
+        expect(findLinkByHref(getTabHref('tasksApprovals'))).toBeFalsy();
+        await waitFor(() => expect(window.localStorage.getItem('pp.sidebar_collapsed.1')).toBe('0'));
+        view.unmount();
+        render(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+        await waitForNavigationPermissions();
+        expect(screen.getByRole('button', { name: 'Свернуть меню' })).toBeTruthy();
+        expect(findLinkByHref(getTabHref('tasksApprovals'))).toBeFalsy();
+        expect(window.localStorage.getItem('pp.sidebar_collapsed.2')).toBe('0');
+        expect(window.localStorage.getItem('pp.sidebar_expanded.2')).toBe('{"tasks":true}');
+      } finally {
+        writes.mockRestore();
+      }
+    });
+
+    it('starts with defaults instead of adopting ownerless globals and persists employee toggles', async () => {
+      window.localStorage.setItem('pp.sidebar_collapsed', '1');
+      window.localStorage.setItem('pp.sidebar_expanded', '{"tasks":true}');
+      render(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+      await waitForNavigationPermissions();
+      expect(screen.getByRole('button', { name: 'Свернуть меню' })).toBeTruthy();
+      expect(findLinkByHref(getTabHref('tasksApprovals'))).toBeFalsy();
+      toggleTaskSubmenu();
+      expect(findLinkByHref(getTabHref('tasksApprovals'))).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'Свернуть меню' }));
+      await waitFor(() => expect(window.localStorage.getItem('pp.sidebar_collapsed.1')).toBe('1'));
+      expect(JSON.parse(window.localStorage.getItem('pp.sidebar_expanded.1') ?? '{}').tasks).toBe(true);
+      expect(window.localStorage.getItem('pp.sidebar_collapsed')).toBe('1');
+      expect(window.localStorage.getItem('pp.sidebar_expanded')).toBe('{"tasks":true}');
+    });
+
+    it('keeps StrictMode logout and the next employee separate from guest and previous layout', async () => {
+      window.localStorage.setItem('pp.sidebar_collapsed.1', '1');
+      window.localStorage.setItem('pp.sidebar_expanded.1', '{"tasks":false}');
+      window.localStorage.setItem('pp.sidebar_collapsed.2', '0');
+      window.localStorage.setItem('pp.sidebar_expanded.2', '{"tasks":true}');
+      window.localStorage.setItem('pp.sidebar_collapsed.guest', '1');
+      window.localStorage.setItem('pp.sidebar_expanded.guest', '{"tasks":true}');
+      const writes = vi.spyOn(Storage.prototype, 'setItem');
+      try {
+        const view = render(<StrictMode><Navigation activeTab="calendar" onTabChange={vi.fn()} /></StrictMode>);
+        await waitForNavigationPermissions();
+        expect(screen.getByRole('button', { name: 'Развернуть меню' })).toBeTruthy();
+        authState.userId = null;
+        view.rerender(<StrictMode><Navigation activeTab="calendar" onTabChange={vi.fn()} /></StrictMode>);
+        expect(screen.getByRole('button', { name: 'Свернуть меню' })).toBeTruthy();
+        authState.userId = 2;
+        view.rerender(<StrictMode><Navigation activeTab="calendar" onTabChange={vi.fn()} /></StrictMode>);
+        await waitFor(() => expect(findLinkByHref(getTabHref('tasksApprovals'))).toBeTruthy());
+        expect(screen.getByRole('button', { name: 'Свернуть меню' })).toBeTruthy();
+        expect(writes.mock.calls.filter(([key]) => key === 'pp.sidebar_collapsed.2').every(([, value]) => value === '0')).toBe(true);
+        expect(writes.mock.calls.filter(([key]) => key === 'pp.sidebar_expanded.2').every(([, value]) => JSON.parse(value).tasks === true)).toBe(true);
+        expect(writes.mock.calls.filter(([key]) => key === 'pp.sidebar_collapsed.guest' || key === 'pp.sidebar_expanded.guest')).toHaveLength(0);
+        expect(window.localStorage.getItem('pp.sidebar_collapsed.guest')).toBe('1');
+        expect(window.localStorage.getItem('pp.sidebar_expanded.guest')).toBe('{"tasks":true}');
+      } finally {
+        writes.mockRestore();
+      }
+    });
+
+    it.each([null, 0, -1, Number.NaN, Number.POSITIVE_INFINITY, 1.5, Number.MAX_SAFE_INTEGER + 1])('does not read or persist employee layout for invalid actor %s', async (userId) => {
+      authState.userId = userId;
+      window.localStorage.setItem('pp.sidebar_collapsed', '1');
+      window.localStorage.setItem('pp.sidebar_expanded', '{"tasks":true}');
+      const writes = vi.spyOn(Storage.prototype, 'setItem');
+      try {
+        render(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+        expect(screen.getByRole('button', { name: 'Свернуть меню' })).toBeTruthy();
+        fireEvent.click(screen.getByRole('button', { name: 'Свернуть меню' }));
+        expect(screen.getByRole('button', { name: 'Развернуть меню' })).toBeTruthy();
+        expect(writes.mock.calls.filter(([key]) => key.startsWith('pp.sidebar_collapsed.') || key.startsWith('pp.sidebar_expanded.'))).toHaveLength(0);
+        expect(window.localStorage.getItem('pp.sidebar_collapsed')).toBe('1');
+        expect(window.localStorage.getItem('pp.sidebar_expanded')).toBe('{"tasks":true}');
+      } finally {
+        writes.mockRestore();
+      }
+    });
+
+    it.each(['null', '[]', '{"tasks":"false"}', '{', '42'])('ignores malformed expanded layout %s without hiding navigation', async (stored) => {
+      window.localStorage.setItem('pp.sidebar_collapsed.1', 'invalid');
+      window.localStorage.setItem('pp.sidebar_expanded.1', stored);
+      render(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+      await waitForNavigationPermissions();
+      expect(screen.getByRole('button', { name: 'Свернуть меню' })).toBeTruthy();
+      expect(findLinkByHref(getTabHref('tasks'))).toBeTruthy();
+      expect(findLinkByHref(getTabHref('tasksApprovals'))).toBeFalsy();
+      toggleTaskSubmenu();
+      expect(findLinkByHref(getTabHref('tasksApprovals'))).toBeTruthy();
+      expect(JSON.parse(window.localStorage.getItem('pp.sidebar_expanded.1') ?? '{}').tasks).toBe(true);
+    });
+
+    it('keeps layout controls usable when only their local storage reads and writes throw', async () => {
+      const originalGet = Storage.prototype.getItem;
+      const originalSet = Storage.prototype.setItem;
+      const isLayoutKey = (key: string) => key.startsWith('pp.sidebar_collapsed.') || key.startsWith('pp.sidebar_expanded.');
+      const reads = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+        if (isLayoutKey(key)) throw new Error('Synthetic layout storage unavailable');
+        return originalGet.call(this, key);
+      });
+      const writes = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+        if (isLayoutKey(key)) throw new Error('Synthetic layout storage unavailable');
+        return originalSet.call(this, key, value);
+      });
+      try {
+        render(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+        await waitForNavigationPermissions();
+        expect(screen.getByRole('button', { name: 'Свернуть меню' })).toBeTruthy();
+        toggleTaskSubmenu();
+        expect(findLinkByHref(getTabHref('tasksApprovals'))).toBeTruthy();
+        fireEvent.click(screen.getByRole('button', { name: 'Свернуть меню' }));
+        expect(screen.getByRole('button', { name: 'Развернуть меню' })).toBeTruthy();
+      } finally {
+        reads.mockRestore();
+        writes.mockRestore();
+      }
+    });
+
+    it('does not reload a manually changed layout when the same employee permissions refresh', async () => {
+      const view = render(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+      await waitForNavigationPermissions();
+      toggleTaskSubmenu();
+      fireEvent.click(screen.getByRole('button', { name: 'Свернуть меню' }));
+      expect(screen.getByRole('button', { name: 'Развернуть меню' })).toBeTruthy();
+      window.localStorage.setItem('pp.sidebar_collapsed.1', '0');
+      window.localStorage.setItem('pp.sidebar_expanded.1', '{"tasks":false}');
+      const reads = vi.spyOn(Storage.prototype, 'getItem');
+      try {
+        authState.roleId = 147001;
+        authState.roleName = 'employee';
+        view.rerender(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+        expect(screen.getByRole('button', { name: 'Развернуть меню' })).toBeTruthy();
+        expect(reads.mock.calls.filter(([key]) => key === 'pp.sidebar_collapsed.1' || key === 'pp.sidebar_expanded.1')).toHaveLength(0);
+      } finally {
+        reads.mockRestore();
+      }
     });
   });
 
@@ -345,6 +520,21 @@ describe('Navigation links', () => {
     expect(findLinkByHref(getTabHref('contacts'))).toBeTruthy();
     expect(findLinkByHref(getTabHref('legalEntities'))).toBeFalsy();
     expect(screen.queryByRole('button', { name: 'Группы и порядок' })).toBeNull();
+  });
+
+  it('toggles a custom group from its default expanded state', async () => {
+    apiMock.getNavigationSettings.mockResolvedValueOnce({
+      order: ['group-contacts'], labels: {},
+      groups: [{ id: 'group-contacts', name: 'Работа с клиентами', itemIds: ['contacts'] }],
+      updatedAt: null,
+    });
+    render(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+    const group = await screen.findByRole('button', { name: /Работа с клиентами/i });
+    expect(findLinkByHref(getTabHref('contacts'))).toBeTruthy();
+    fireEvent.click(group);
+    expect(findLinkByHref(getTabHref('contacts'))).toBeFalsy();
+    fireEvent.click(group);
+    expect(findLinkByHref(getTabHref('contacts'))).toBeTruthy();
   });
 
   it('shows settings for a non-admin role that can view integrations only', async () => {
