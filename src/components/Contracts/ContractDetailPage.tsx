@@ -1408,6 +1408,7 @@ export function ContractDetailPage({
               companyId={contract.sellerCompanyId}
               branchId={contract.sellerBranchId}
               frozen={contract.sellerFrozen}
+              snapshotInfo={contract.sellerSnapshotInfo}
               canEdit={rolePermissions.contracts.canEdit}
             />
           </div>

@@ -2121,6 +2121,8 @@ export interface DocumentTemplateVersionDto {
   restoredFromVersionId?: number | null;
 }
 
+export type ContractTaskBillingMode = 'retainContractTasks' | 'allowFutureClassification';
+
 export interface TaskJournalSettingsDto {
   restrictExecutorEditing: boolean;
   allowExecutorDeadlineChangeRequests: boolean;
@@ -2143,6 +2145,7 @@ export interface TaskJournalSettingsDto {
   approvalDueDays: number;
   taskCardWindowMode: 'legacy' | 'modern';
   approvalQuickActionMode: 'completionButton' | 'separateButton';
+  contractTaskBillingMode?: ContractTaskBillingMode;
   caseInactivityAutomationEnabled: boolean;
   caseInactivityDays: number;
   caseInactivityLimit: number;
@@ -2293,6 +2296,7 @@ export interface UpdateTaskJournalSettingsRequest {
   approvalDueDays: number;
   taskCardWindowMode: 'legacy' | 'modern';
   approvalQuickActionMode: 'completionButton' | 'separateButton';
+  contractTaskBillingMode?: ContractTaskBillingMode;
   caseInactivityAutomationEnabled: boolean;
   caseInactivityDays: number;
   caseInactivityLimit: number;
@@ -2304,9 +2308,12 @@ export interface UpdateTaskJournalSettingsRequest {
   stickerStyles: TaskStickerStyles;
 }
 
+export type DocumentSellerSnapshotTiming = 'first-file' | 'on-create';
+
 export interface MainCompanySettingsDto {
   defaultCompanyId?: number | null;
   companies: LegalEntitySummary[];
+  sellerSnapshotTiming?: DocumentSellerSnapshotTiming;
 }
 
 export type ReconciliationCompanyParty = Pick<LegalEntitySummary,
@@ -2317,6 +2324,7 @@ export type ReconciliationCompanyParty = Pick<LegalEntitySummary,
 export interface UpdateMainCompanySettingsRequest {
   companyIds: number[];
   defaultCompanyId?: number | null;
+  sellerSnapshotTiming?: DocumentSellerSnapshotTiming;
 }
 
 export interface BankDto {
@@ -4983,7 +4991,12 @@ export class ApiService {
 
   async getTaskJournalSettings() {
     if (!this.taskJournalSettingsRequest) {
-      const request = this.request<TaskJournalSettingsDto>('/tasks/settings');
+      const request = this.request<TaskJournalSettingsDto>('/tasks/settings').then((response): TaskJournalSettingsDto => ({
+        ...response,
+        contractTaskBillingMode: response.contractTaskBillingMode === 'allowFutureClassification'
+          ? 'allowFutureClassification'
+          : 'retainContractTasks',
+      }));
       this.taskJournalSettingsRequest = request;
       request.then(
         () => {
@@ -5006,13 +5019,18 @@ export class ApiService {
     return this.request<{ count: number }>('/tasks/overdue-summary');
   }
 
-  async updateTaskJournalSettings(payload: UpdateTaskJournalSettingsRequest) {
+  async updateTaskJournalSettings(payload: UpdateTaskJournalSettingsRequest): Promise<TaskJournalSettingsDto> {
     const response = await this.request<TaskJournalSettingsDto>('/tasks/settings', {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
     this.taskJournalSettingsRequest = null;
-    return response;
+    return {
+      ...response,
+      contractTaskBillingMode: response.contractTaskBillingMode === 'allowFutureClassification'
+        ? 'allowFutureClassification'
+        : 'retainContractTasks',
+    };
   }
 
   async getTaskJournalAutomationDiagnostics() {
@@ -5393,10 +5411,20 @@ export class ApiService {
     });
   }
 
-  async updateTaskBillingClassification(id: number, classification: 'billable' | 'internal', billingContractId: number | null) {
+  async updateTaskBillingClassification(
+    id: number,
+    classification: 'billable' | 'internal',
+    billingContractId: number | null,
+    options?: { expectedUpdatedAt: string | null; allowContractClassification?: boolean },
+  ) {
     return this.request<TaskJournalItem>(`/tasks/${id}/billing-classification`, {
       method: 'PUT',
-      body: JSON.stringify({ classification, billingContractId }),
+      body: JSON.stringify({
+        classification,
+        billingContractId,
+        ...(options === undefined ? {} : { expectedUpdatedAt: options.expectedUpdatedAt, hasExpectedUpdatedAt: true }),
+        ...(options?.allowContractClassification === true ? { allowContractClassification: true } : {}),
+      }),
     });
   }
 
@@ -6237,6 +6265,14 @@ export class ApiService {
 
   async getOwnCompanyOptions() {
     return this.request<OwnCompanyOption[]>('/own-companies/options');
+  }
+
+  async getDocumentSellerSnapshotPolicy(): Promise<DocumentSellerSnapshotTiming> {
+    const result = await this.request<{ timing: unknown }>('/own-companies/snapshot-policy');
+    if (result.timing !== 'first-file' && result.timing !== 'on-create') {
+      throw new Error('Не удалось определить правило фиксации реквизитов документа.');
+    }
+    return result.timing;
   }
 
   async setInvoiceSeller(invoiceId: number, payload: { companyId: number | null; branchId: number | null }) {

@@ -2,7 +2,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { closeSync, cpSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync, statfsSync } from 'node:fs';
 import { freemem, availableParallelism } from 'node:os';
-import { dirname, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { snapshotVerificationInputs, assertUnchanged } from './verification-inputs.mjs';
 import { verifyPostgres, postgresSettings } from './verify-xsenus-runner.mjs';
@@ -13,6 +13,28 @@ const script = fileURLToPath(import.meta.url);
 const hashFile = path => createHash('sha256').update(readFileSync(path)).digest('hex').toUpperCase();
 const readJson = path => JSON.parse(readFileSync(path, 'utf8'));
 const alive = pid => { try { process.kill(pid, 0); return true; } catch (e) { return e.code !== 'ESRCH'; } };
+
+// Bind discovery's build SDK entry point before preparation can be reused.
+export function captureVstestEntryPoint(summaryPath) {
+  const summary = readFileSync(summaryPath);
+  const path = JSON.parse(summary.toString('utf8')).VstestConsolePath;
+  if (typeof path !== 'string' || !isAbsolute(path)
+    || basename(path) !== 'vstest.console.dll' || !existsSync(path))
+    throw new Error('Discovery must record the build SDK VSTest entry point; preserve old preparation and create a new one');
+  return { path, sha256: hashFile(path), summarySha256: createHash('sha256').update(summary).digest('hex').toUpperCase() };
+}
+
+export function assertVstestEntryPoint(summaryPath, expected) {
+  if (expected?.invalidated) throw new Error('This preparation was invalidated by SDK input drift; preserve it and create a new one');
+  if (!expected || ['path', 'sha256', 'summarySha256'].some(key => typeof expected[key] !== 'string'))
+    throw new Error('Prepared results lack the bound SDK VSTest input; preserve them and create a new preparation');
+  try {
+    const actual = captureVstestEntryPoint(summaryPath);
+    if (actual.path !== expected.path || actual.sha256 !== expected.sha256 || actual.summarySha256 !== expected.summarySha256)
+      throw new Error('Discovery summary or SDK VSTest input changed; preserve the original results');
+    return actual.path;
+  } catch (error) { expected.invalidated = true; throw error; }
+}
 
 export function workerCount(requested = 'auto', free = freemem(), cores = availableParallelism(), allowMemoryPressure = false) {
   requested = String(requested);
@@ -41,6 +63,7 @@ export function selectPendingShards(states, count = 4) {
 }
 
 export function assertStageCanResume(state) {
+  if (state.vstestEntryPoint?.invalidated) throw new Error('This preparation was invalidated by SDK input drift; preserve it and create a new one');
   if (state.activeLaunchPending) throw new Error('An owned stage has an unrecorded launch outcome; resolve its process before resuming');
   if (state.activePid && alive(state.activePid)) throw new Error('A preserved child process is still alive; wait for it before resuming');
 }
@@ -158,7 +181,15 @@ async function run(options) {
         shards: Array.from({ length: 4 }, (_, shard) => ({ shard, status: 'pending', attempts: 0 })) };
       save(stateFile, state);
     }
+    function checkedVstestEntryPoint() {
+      try { return assertVstestEntryPoint(discoverySummary, state.vstestEntryPoint); }
+      finally {
+        // Persist drift before unwinding/draining siblings: restoring bytes must not revive this preparation.
+        if (state.vstestEntryPoint?.invalidated) { state.qualified = false; save(stateFile, state); }
+      }
+    }
     async function command(name, executable, args, env = {}, shardState) {
+      if (state.vstestEntryPoint) checkedVstestEntryPoint();
       const log = resolve(results, `${name}.log`);
       const fd = openSync(log, 'a');
       const started = Date.now();
@@ -187,6 +218,7 @@ async function run(options) {
       (state.stages ??= []).push({ name, executable: nativeExecutable, args: nativeArgs, log, exitCode: exit, elapsedSeconds: (Date.now() - started) / 1000 });
       save(stateFile, state);
       if (exit !== 0) throw new Error(`${name} exited ${exit}; see ${log}`);
+      if (state.vstestEntryPoint) checkedVstestEntryPoint();
     }
     const config = options.configuration;
     const runtime = resolve(results, 'runtime');
@@ -194,6 +226,7 @@ async function run(options) {
     const tool = resolve(toolDir, 'PayPlanner.TestShards.dll');
     const assembly = resolve(runtime, 'PayPlanner.Api.Tests.dll');
     const manifest = resolve(results, 'test-plan.json');
+    const discoverySummary = manifest.replace(/\.json$/, '.summary.json');
     if (!state.prepared) {
       if (existsSync(manifest) || existsSync(runtime) || existsSync(toolDir)) throw new Error('Preparation was interrupted; preserve evidence and start in a new directory');
       const disk = statfsSync(results);
@@ -226,6 +259,7 @@ async function run(options) {
       await command('discover', 'dotnet', [tool, 'discover', '--assembly', assembly, '--manifest', manifest, '--revision', revision.stdout.trim(), '--shards', '4', '--execution-profile', 'bounded', ...timingArgs]);
       if (state.timingProfile && hashFile(resolve(results, 'input-timings.json')) !== state.timingProfile.sha256) throw new Error('The copied timing profile changed during discovery');
       state.manifestSha = hashFile(manifest);
+      state.vstestEntryPoint = captureVstestEntryPoint(discoverySummary);
       state.artifacts = await snapshotVerificationInputs({ ...inputOptions, artifactRoots: [runtime, toolDir] });
       state.prepared = true;
       save(stateFile, state);
@@ -234,6 +268,7 @@ async function run(options) {
     if (state.manifestSha !== hashFile(manifest)) throw new Error('Preserve the original manifest; its hash changed');
     const artifactOptions = { ...inputOptions, artifactRoots: [runtime, toolDir] };
     await assertUnchanged(state.artifacts, artifactOptions);
+    const vstestConsolePath = checkedVstestEntryPoint();
     if (options.prepareOnly) {
       state.status = 'prepared'; state.qualified = false; save(stateFile, state);
       console.log(JSON.stringify({ prepared: true, qualified: false, results, cases: readJson(manifest).Cases.length }));
@@ -245,7 +280,7 @@ async function run(options) {
       const preflight = resolve(results, 'preflight'); mkdirSync(preflight, { recursive: true });
       const settings = resolve(preflight, 'gate.runsettings');
       writeFileSync(settings, '<RunSettings><RunConfiguration><TreatNoTestsAsError>true</TreatNoTestsAsError></RunConfiguration></RunSettings>');
-      await command('backend-preflight', 'dotnet', ['vstest', assembly, `/Settings:${settings}`, '/TestCaseFilter:FullyQualifiedName~BatchOperationAuditCoverageTests|FullyQualifiedName~DocumentationProcessTests|FullyQualifiedName~TestShardCoverageTests', '/Logger:trx;LogFileName=preflight.trx', `/ResultsDirectory:${preflight}`], testEnv);
+      await command('backend-preflight', 'dotnet', ['exec', vstestConsolePath, assembly, `/Settings:${settings}`, '/TestCaseFilter:FullyQualifiedName~BatchOperationAuditCoverageTests|FullyQualifiedName~DocumentationProcessTests|FullyQualifiedName~TestShardCoverageTests', '/Logger:trx;LogFileName=preflight.trx', `/ResultsDirectory:${preflight}`], testEnv);
       state.guardsPassed = true; save(stateFile, state);
     }
     const freeMemory = freemem();
@@ -274,6 +309,7 @@ async function run(options) {
     await command('verify-union', 'dotnet', [tool, 'verify', '--manifest', manifest, '--manifest-sha', state.manifestSha, '--results-root', shardRoot, ...suiteArgs]);
     if (options.suite !== 'all') {
       await assertUnchanged(state.artifacts, artifactOptions);
+      checkedVstestEntryPoint();
       state.status = 'completed'; state.qualified = false; state.subsetPassed = true; state.finishedUtc = new Date().toISOString();
       state.elapsedSeconds = (Date.parse(state.finishedUtc) - Date.parse(state.startedUtc)) / 1000;
       save(stateFile, state);
@@ -286,7 +322,7 @@ async function run(options) {
       mkdirSync(restored);
       const settings = resolve(restored, 'gate.runsettings');
       writeFileSync(settings, '<RunSettings><RunConfiguration><TreatNoTestsAsError>true</TreatNoTestsAsError></RunConfiguration></RunSettings>');
-      await command('restored-browser', 'dotnet', ['vstest', assembly, `/Settings:${settings}`, '/Logger:trx;LogFileName=results.trx', `/ResultsDirectory:${restored}`, '/TestCaseFilter:FullyQualifiedName~RestoredFullModelQualifiesProtectedSettingsWithCopiedKeysWithoutSourceRing|FullyQualifiedName~FullModelBackupRestoresReadableManagedGenerationsWithoutSource'], { ...testEnv, PAYPLANNER_TEST_RESTORED_BROWSER: 'true' });
+      await command('restored-browser', 'dotnet', ['exec', vstestConsolePath, assembly, `/Settings:${settings}`, '/Logger:trx;LogFileName=results.trx', `/ResultsDirectory:${restored}`, '/TestCaseFilter:FullyQualifiedName~RestoredFullModelQualifiesProtectedSettingsWithCopiedKeysWithoutSourceRing|FullyQualifiedName~FullModelBackupRestoresReadableManagedGenerationsWithoutSource'], { ...testEnv, PAYPLANNER_TEST_RESTORED_BROWSER: 'true' });
       state.restoredExitCode = 0;
       state.restoredPassed = true; save(stateFile, state);
     }
@@ -298,6 +334,7 @@ async function run(options) {
     await assertUnchanged(state.artifacts, artifactOptions);
     const timingPath = resolve(results, 'timings.json');
     if (!existsSync(timingPath)) await command('timings', 'dotnet', [tool, 'timings', '--manifest', manifest, '--manifest-sha', state.manifestSha, '--results-root', shardRoot, '--output', timingPath]);
+    checkedVstestEntryPoint();
     state.status = 'completed'; state.qualified = true; state.finishedUtc = new Date().toISOString();
     state.elapsedSeconds = (Date.parse(state.finishedUtc) - Date.parse(state.startedUtc)) / 1000;
     save(stateFile, state);

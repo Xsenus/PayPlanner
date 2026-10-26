@@ -83,6 +83,10 @@ If the user explicitly asks to defer tests during a series of small edits, postp
 
 Full CI checks remain a mandatory release barrier. Do not weaken coverage thresholds, security checks, migration checks, tests, or build gates and do not delete or skip tests merely to save time. If CI fails, inspect the exact failing step, reproduce it locally where practical, fix the cause, and rerun only the failed or affected checks before the next complete release gate.
 
+### Explicit final-gate instruction for the post-142 merged candidate
+
+On 26 October 2026, the user explicitly selected this verification order for integrating the deployed SETTINGS 1.14.142 release (`e85d1f22`) with the acceleration changes from `origin/main` (`f696bb15`): run the affected targeted checks locally, then run one complete mandatory GitHub CI against the final merged candidate. Do not run a duplicate full local frontend/backend gate before that CI. This instruction changes where the final full verification runs for this candidate and takes precedence over the local full-before-push wording above; it does not remove any required check. Preserve all seven mandatory jobs, test cases, assertions, coverage thresholds, migration, security, browser, formatting, and build gates. Local evidence must not be presented as successful CI. Deploy the merged candidate only after every mandatory CI job actually passes, then verify the expected revision live. Failed or affected checks may be corrected and rerun; retain successful evidence only while its influencing inputs remain unchanged.
+
 ## Local Email Safety
 
 Never allow a local, development, test, or preview environment to send email through production SMTP servers or to real recipients. This rule also applies when the local database is a copy of the production database and therefore contains working mail settings, credentials, sender addresses, notification rules, or queued deliveries.

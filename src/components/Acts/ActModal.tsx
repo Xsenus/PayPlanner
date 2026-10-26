@@ -32,6 +32,7 @@ import { CounterpartyPickerModal, type CounterpartySelection } from '../ui/Count
 import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { VatRateSelect } from '../Documents/VatRateSelect';
+import { DocumentSellerPicker } from '../Documents/DocumentSellerPicker';
 
 interface ActModalProps {
   open: boolean;
@@ -539,6 +540,7 @@ export function ActModal({
     normalizeActToForm(act, defaultClientId, defaultResponsibleId, initialValues, profileTimeZoneId),
   );
   const [localError, setLocalError] = useState<string | null>(null);
+  const [sellerSelection, setSellerSelection] = useState<{ companyId: number | null; branchId: number | null }>({ companyId: null, branchId: null });
   const [invoiceDetails, setInvoiceDetails] = useState<Invoice | null>(null);
   const [invoiceLoading, setInvoiceLoading] = useState(false);
   const [invoiceError, setInvoiceError] = useState<string | null>(null);
@@ -566,6 +568,7 @@ export function ActModal({
   useEffect(() => {
     if (open) {
       setForm(normalizeActToForm(act, defaultClientId, defaultResponsibleId, initialValues, profileTimeZoneIdRef.current));
+      setSellerSelection({ companyId: initialValues?.sellerCompanyId ?? null, branchId: initialValues?.sellerBranchId ?? null });
       setLocalError(null);
       setInvoiceDetails(null);
       setInvoiceError(null);
@@ -1536,6 +1539,7 @@ export function ActModal({
     }
 
     const payload: ActInput = {
+      ...(!isEdit ? { sellerCompanyId: sellerSelection.companyId, sellerBranchId: sellerSelection.branchId } : {}),
       number: form.number.trim(),
       title: form.title.trim() ? form.title.trim() : undefined,
       date: fromInputToApiDate(form.date) ?? form.date,
@@ -1626,7 +1630,13 @@ export function ActModal({
       </div>
 
       <form id="act-edit-form" onSubmit={handleSubmit} className={`${isPageMode ? 'px-6 py-5' : 'max-h-[82vh] overflow-y-auto px-6 py-5'} space-y-6`}>
-        <div className={isPageMode ? 'grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]' : 'space-y-6'}>
+        {!isEdit ? (
+          <div className="text-sm">
+            <DocumentSellerPicker kind="act" documentId={0} draft canEdit={!submitting}
+              companyId={sellerSelection.companyId} branchId={sellerSelection.branchId} onChanged={setSellerSelection} />
+          </div>
+        ) : null}
+        <div className={isPageMode ? 'grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_320px]' : 'space-y-6'}>
           <div className="space-y-6">
             <section className="rounded-2xl border border-slate-200 bg-slate-50/70 p-5">
               <div className="mb-4">

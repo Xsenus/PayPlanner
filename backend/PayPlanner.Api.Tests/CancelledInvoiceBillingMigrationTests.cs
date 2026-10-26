@@ -124,18 +124,34 @@ public sealed class CancelledInvoiceBillingMigrationTests
         var cancelledWorkflow = CreateInvoice("INV-OLD-WORKFLOW", date, PaymentStatus.Pending);
         cancelledWorkflow.InvoiceWorkflowStatus = InvoiceWorkflowStatus.Cancelled;
         var active = CreateInvoice("INV-ACTIVE", date, PaymentStatus.Pending);
-        // The current EF model already contains columns that later migrations add to Payments.
-        // Add them temporarily so the historical schema accepts the model insert, then drop them
-        // again so the real migration under test (or a later one) creates them itself.
-        await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Payments\" ADD COLUMN \"SellerCompanyId\" INTEGER NULL");
-        await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Payments\" ADD COLUMN \"SellerBranchId\" INTEGER NULL");
-        await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Payments\" ADD COLUMN \"SellerSnapshotJson\" TEXT NULL");
-
-        context.Payments.AddRange(cancelled, cancelledWorkflow, active);
-        await context.SaveChangesAsync();
-        await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Payments\" DROP COLUMN \"SellerCompanyId\"");
-        await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Payments\" DROP COLUMN \"SellerBranchId\"");
-        await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Payments\" DROP COLUMN \"SellerSnapshotJson\"");
+        // Insert only columns present in both historical schemas. The current EF
+        // Payment model includes seller fields added later and cannot seed this boundary.
+        var invoices = new[] { cancelled, cancelledWorkflow, active };
+        for (var index = 0; index < invoices.Length; index++)
+        {
+            var payment = invoices[index];
+            payment.Id = 2001 + index;
+            payment.InvoiceId = 3001 + index;
+            var invoice = payment.Invoice!;
+            object invoiceCreatedAt = context.Database.IsNpgsql()
+                ? new NpgsqlParameter($"invoiceCreatedAt{index}", NpgsqlTypes.NpgsqlDbType.Timestamp) { Value = DateTime.SpecifyKind(invoice.CreatedAt, DateTimeKind.Unspecified) }
+                : DateTime.SpecifyKind(invoice.CreatedAt, DateTimeKind.Unspecified);
+            object paymentCreatedAt = context.Database.IsNpgsql()
+                ? new NpgsqlParameter($"paymentCreatedAt{index}", NpgsqlTypes.NpgsqlDbType.Timestamp) { Value = DateTime.SpecifyKind(payment.CreatedAt, DateTimeKind.Unspecified) }
+                : DateTime.SpecifyKind(payment.CreatedAt, DateTimeKind.Unspecified);
+            await context.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO "Invoices" ("Id", "Number", "Date", "CreatedAt")
+                VALUES ({payment.InvoiceId.Value}, {invoice.Number}, {invoice.Date}, {invoiceCreatedAt})
+                """);
+            await context.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO "Payments"
+                    ("Id", "InvoiceId", "Account", "AccountDate", "Amount", "CreatedAt", "Date", "PlannedDate",
+                     "Status", "Type", "DocumentKind", "InvoiceWorkflowStatus", "Description", "Notes", "SystemNotes", "PaidAmount", "IsPaid")
+                VALUES ({payment.Id}, {payment.InvoiceId.Value}, {payment.Account}, {payment.AccountDate}, {payment.Amount}, {paymentCreatedAt}, {payment.Date}, {payment.PlannedDate},
+                        {payment.Status.ToString()}, {payment.Type.ToString()}, {payment.DocumentKind.ToString()}, {payment.InvoiceWorkflowStatus},
+                        {payment.Description}, {payment.Notes}, {payment.SystemNotes}, {payment.PaidAmount}, {payment.IsPaid})
+                """);
+        }
 
         // Seed against the migrated historical schema, not the current EF model: newer
         // task columns do not exist yet at this point in an upgrade-path test.

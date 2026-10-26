@@ -607,7 +607,497 @@ public sealed class TaskBulkBillingTests
         Assert.Equal(1, fixture.Realtime.ChangeCount);
     }
 
-    private static byte[] ScalarSnapshot(PaymentContext db, TaskJournalItem task)
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("retainContractTasks", true)]
+    [InlineData("unknown", true)]
+    [InlineData("allowFutureClassification", false)]
+    public async Task ContractPolicyAndExplicitRequestOptInAreBothRequired(string? policy, bool optIn)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var task = fixture.AddTask();
+        await fixture.AttachContractAsync(task, ContractBillingMode.Fixed);
+        if (policy is not null) await fixture.SetContractPolicyAsync(policy);
+        var before = await fixture.Db.TaskJournalItems.AsNoTracking().SingleAsync();
+        var request = await fixture.RequestAsync([task.Id]);
+        request.AllowContractClassification = optIn;
+        var result = await fixture.ApplyAsync(request);
+        var after = await fixture.Db.TaskJournalItems.AsNoTracking().SingleAsync();
+        Assert.Equal("contractual", Assert.Single(result.Items).Reason);
+        Assert.Equal(ScalarSnapshot(fixture.Db, before), ScalarSnapshot(fixture.Db, after));
+        Assert.Empty(await fixture.Db.TaskJournalComments.ToArrayAsync());
+        Assert.Empty(await fixture.Db.Payments.ToArrayAsync());
+    }
+
+    [Theory]
+    [InlineData("Fixed", "new")]
+    [InlineData("Actual", "new")]
+    [InlineData("Fixed", "done")]
+    [InlineData("Actual", "done")]
+    public async Task ContractClassificationIsReversibleWithoutRepricingOrChangingSnapshot(string mode, string status)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var task = fixture.AddTask(status);
+        var contract = await fixture.AttachContractAsync(task, mode);
+        await fixture.SetContractPolicyAsync("allowFutureClassification");
+        var oldHistory = new TaskJournalComment { TaskJournalItemId = task.Id, Kind = "history", AuthorName = "Synthetic history", Text = "Previous decision", MetadataJson = "{\"immutable\":true}" };
+        fixture.Db.TaskJournalComments.Add(oldHistory);
+        await fixture.SaveAsync();
+        var before = await fixture.Db.TaskJournalItems.AsNoTracking().SingleAsync();
+        var contractBefore = JsonSerializer.Serialize(await fixture.Db.Contracts.AsNoTracking().SingleAsync());
+        var request = await fixture.RequestAsync([task.Id]);
+        request.AllowContractClassification = true;
+        request.IncludeCompleted = status == "done";
+        Assert.Equal(1, (await fixture.ApplyAsync(request)).Updated);
+        var internalTask = await fixture.Db.TaskJournalItems.AsNoTracking().SingleAsync();
+        Assert.Equal(TaskClientBillingClassification.Internal, internalTask.ClientBillingClassification);
+        Assert.Equal(contract.Id, internalTask.BillingContractId);
+        Assert.Equal(mode, internalTask.BillingModeSnapshot);
+        Assert.Equal(before.Status, internalTask.Status);
+        Assert.Equal(before.Result, internalTask.Result);
+        Assert.Equal(before.DueAt, internalTask.DueAt);
+        var back = await fixture.RequestAsync([task.Id], TaskClientBillingClassification.Billable);
+        back.AllowContractClassification = true;
+        back.IncludeCompleted = status == "done";
+        var result = await fixture.ApplyAsync(back);
+        Assert.Equal(1, result.Updated);
+        var after = await fixture.Db.TaskJournalItems.AsNoTracking().SingleAsync();
+        Assert.Equal(TaskClientBillingClassification.Billable, after.ClientBillingClassification);
+        Assert.Equal(contract.Id, after.BillingContractId);
+        Assert.Equal(mode, after.BillingModeSnapshot);
+        Assert.Equal(contractBefore, JsonSerializer.Serialize(await fixture.Db.Contracts.AsNoTracking().SingleAsync()));
+        Assert.Empty(await fixture.Db.Payments.ToArrayAsync());
+        Assert.Empty(await fixture.Db.ContractInvoices.ToArrayAsync());
+        Assert.Empty(await fixture.Db.ContractPayments.ToArrayAsync());
+        Assert.Equal("Previous decision", (await fixture.Db.TaskJournalComments.AsNoTracking().SingleAsync(row => row.Id == oldHistory.Id)).Text);
+        Assert.Equal("{\"immutable\":true}", (await fixture.Db.TaskJournalComments.AsNoTracking().SingleAsync(row => row.Id == oldHistory.Id)).MetadataJson);
+        Assert.Equal(3, await fixture.Db.TaskJournalComments.CountAsync());
+        if (mode == ContractBillingMode.Fixed)
+            Assert.Contains("по фиксированному договору", (await fixture.Db.TaskJournalComments.AsNoTracking().OrderByDescending(row => row.Id).FirstAsync()).Text);
+        Assert.Equal(Token(after.UpdatedAt), Assert.Single(result.Items).UpdatedAt);
+        Assert.Equal(1, (await fixture.ApplyAsync(back)).Unchanged);
+        Assert.Equal(3, await fixture.Db.TaskJournalComments.CountAsync());
+    }
+
+    [Theory]
+    [InlineData("missing-mode")]
+    [InlineData("unknown-mode")]
+    [InlineData("wrong-case")]
+    [InlineData("changed-contract-mode")]
+    [InlineData("foreign-owner")]
+    [InlineData("cancelled")]
+    [InlineData("expired")]
+    [InlineData("legacy")]
+    [InlineData("payment")]
+    [InlineData("legacy-invoice")]
+    [InlineData("legacy-payment")]
+    [InlineData("payout-obligation")]
+    public async Task OptInNeverRepairsAmbiguousOrFinanciallyLinkedContractTasks(string protection)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var task = fixture.AddTask();
+        var contract = await fixture.AttachContractAsync(task, ContractBillingMode.Fixed);
+        await fixture.SetContractPolicyAsync("allowFutureClassification");
+        var stored = await fixture.Db.TaskJournalItems.SingleAsync();
+        var storedContract = await fixture.Db.Contracts.SingleAsync();
+        switch (protection)
+        {
+            case "missing-mode": stored.BillingModeSnapshot = null; break;
+            case "unknown-mode": stored.BillingModeSnapshot = "Unexpected"; break;
+            case "wrong-case": stored.BillingModeSnapshot = "fixed"; break;
+            case "changed-contract-mode": storedContract.BillingMode = ContractBillingMode.Actual; break;
+            case "foreign-owner": fixture.Db.ClientContracts.RemoveRange(await fixture.Db.ClientContracts.ToArrayAsync()); break;
+            case "cancelled": storedContract.Status = ContractStatus.Cancelled; break;
+            case "expired": storedContract.ValidUntil = DateTime.UtcNow.Date.AddDays(-1); break;
+            case "legacy": stored.ClientBillingClassification = TaskClientBillingClassification.Legacy; break;
+            case "payout-obligation": stored.ContractorPaymentEnabled = true; break;
+            default:
+                var payment = new Payment { Amount = 100m, Status = PaymentStatus.Cancelled };
+                fixture.Db.Payments.Add(payment);
+                if (protection == "payment") payment.ContractId = contract.Id;
+                else if (protection == "legacy-invoice") storedContract.ContractInvoices.Add(new ContractInvoice { Invoice = payment });
+                else storedContract.ContractPayments.Add(new ContractPayment { Payment = payment });
+                break;
+        }
+        await fixture.SaveAsync();
+        var before = await fixture.Db.TaskJournalItems.AsNoTracking().SingleAsync();
+        var request = await fixture.RequestAsync([task.Id]); request.AllowContractClassification = true;
+        var result = await fixture.ApplyAsync(request);
+        Assert.Equal(protection == "payout-obligation" ? "contractorPaymentProtected" : "contractual", Assert.Single(result.Items).Reason);
+        Assert.Equal(ScalarSnapshot(fixture.Db, before), ScalarSnapshot(fixture.Db, await fixture.Db.TaskJournalItems.AsNoTracking().SingleAsync()));
+        Assert.Empty(await fixture.Db.TaskJournalComments.ToArrayAsync());
+    }
+
+    [Theory]
+    [InlineData("invoice")]
+    [InlineData("payment")]
+    [InlineData("act")]
+    public async Task OptInPreservesSoftDeletedLinkOnlyFinancialHistory(string linkKind)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var task = fixture.AddTask();
+        var contract = await fixture.AttachContractAsync(task, ContractBillingMode.Actual);
+        await fixture.SetContractPolicyAsync("allowFutureClassification");
+        if (linkKind == "act")
+        {
+            var act = new Act { Number = "SYNTHETIC-HISTORY", Date = DateTime.UtcNow.Date, Amount = 876.54m };
+            fixture.Db.ContractActs.Add(new ContractAct { ContractId = contract.Id, Act = act });
+        }
+        else
+        {
+            var payment = new Payment
+            {
+                Amount = 123.45m,
+                Date = DateTime.UtcNow.Date,
+                Status = PaymentStatus.Cancelled,
+                DocumentKind = linkKind == "invoice" ? DocumentKind.Invoice : DocumentKind.Payment,
+                ContractId = null
+            };
+            if (linkKind == "invoice") fixture.Db.ContractInvoices.Add(new ContractInvoice { ContractId = contract.Id, Invoice = payment });
+            else fixture.Db.ContractPayments.Add(new ContractPayment { ContractId = contract.Id, Payment = payment });
+        }
+        // Added rows receive IsDeleted=false from auditing; delete only the freshly persisted parent.
+        await fixture.SaveAsync();
+        if (linkKind == "act") fixture.Db.Entry(await fixture.Db.Acts.SingleAsync()).Property("IsDeleted").CurrentValue = true;
+        else fixture.Db.Entry(await fixture.Db.Payments.SingleAsync()).Property("IsDeleted").CurrentValue = true;
+        fixture.Db.TaskJournalComments.Add(new TaskJournalComment
+        {
+            TaskJournalItemId = task.Id,
+            Kind = "history",
+            AuthorName = "Synthetic history",
+            Text = "Previous financial decision",
+            MetadataJson = "{\"immutable\":true}"
+        });
+        await fixture.SaveAsync();
+        Assert.True(linkKind == "act"
+            ? await fixture.Db.Acts.IgnoreQueryFilters().Select(act => EF.Property<bool>(act, "IsDeleted")).SingleAsync()
+            : await fixture.Db.Payments.IgnoreQueryFilters().Select(payment => EF.Property<bool>(payment, "IsDeleted")).SingleAsync());
+        Assert.Empty(await fixture.Db.ContractInvoices.AsNoTracking().ToArrayAsync());
+        Assert.Empty(await fixture.Db.ContractPayments.AsNoTracking().ToArrayAsync());
+        Assert.Empty(await fixture.Db.ContractActs.AsNoTracking().ToArrayAsync());
+        Assert.Equal(linkKind == "invoice" ? 1 : 0, await fixture.Db.ContractInvoices.IgnoreQueryFilters().CountAsync());
+        Assert.Equal(linkKind == "payment" ? 1 : 0, await fixture.Db.ContractPayments.IgnoreQueryFilters().CountAsync());
+        Assert.Equal(linkKind == "act" ? 1 : 0, await fixture.Db.ContractActs.IgnoreQueryFilters().CountAsync());
+        Assert.All(await fixture.Db.Payments.IgnoreQueryFilters().AsNoTracking().ToArrayAsync(), payment => Assert.Null(payment.ContractId));
+        Assert.Null((await fixture.Db.TaskJournalItems.AsNoTracking().SingleAsync()).BillingInvoiceId);
+        var before = await ReadContractBillingStateAsync(fixture.Db);
+        var request = await fixture.RequestAsync([task.Id]); request.AllowContractClassification = true;
+
+        var result = await fixture.ApplyAsync(request);
+
+        var row = Assert.Single(result.Items);
+        Assert.Equal("skipped", row.Outcome);
+        Assert.Equal("contractual", row.Reason);
+        Assert.Equal(Assert.IsType<Dictionary<int, string?>>(request.ExpectedUpdatedAtById)[task.Id], row.UpdatedAt);
+        Assert.Equal(0, result.Updated);
+        Assert.Equal(before, await ReadContractBillingStateAsync(fixture.Db));
+        Assert.Equal(0, fixture.Realtime.ChangeCount);
+    }
+
+    [Fact]
+    public async Task ExplicitContractOptInPreservesRawInvoiceLinkBeforeAnyClassificationChange()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var task = fixture.AddTask();
+        await fixture.AttachContractAsync(task, ContractBillingMode.Actual);
+        await fixture.SetContractPolicyAsync("allowFutureClassification");
+        var stored = await fixture.Db.TaskJournalItems.SingleAsync();
+        var invoice = new Payment
+        {
+            Amount = 654.32m,
+            Date = DateTime.UtcNow.Date,
+            DocumentKind = DocumentKind.Invoice,
+            Status = PaymentStatus.Cancelled,
+            ContractId = null
+        };
+        stored.BillingInvoice = invoice;
+        fixture.Db.Payments.Add(invoice);
+        await fixture.SaveAsync();
+        var storedInvoice = await fixture.Db.Payments.SingleAsync();
+        fixture.Db.Entry(storedInvoice).Property("IsDeleted").CurrentValue = true;
+        fixture.Db.TaskJournalComments.Add(new TaskJournalComment
+        {
+            TaskJournalItemId = task.Id,
+            Kind = "history",
+            AuthorName = "Synthetic history",
+            Text = "Existing invoice decision",
+            MetadataJson = "{\"immutable\":true}"
+        });
+        await fixture.SaveAsync();
+        Assert.True(await fixture.Db.Payments.IgnoreQueryFilters().Select(payment => EF.Property<bool>(payment, "IsDeleted")).SingleAsync());
+        Assert.Empty(await fixture.Db.Payments.AsNoTracking().ToArrayAsync());
+        Assert.Null((await fixture.Db.Payments.IgnoreQueryFilters().AsNoTracking().SingleAsync()).ContractId);
+        Assert.Equal(invoice.Id, (await fixture.Db.TaskJournalItems.AsNoTracking().SingleAsync()).BillingInvoiceId);
+        var before = await ReadContractBillingStateAsync(fixture.Db);
+        var request = await fixture.RequestAsync([task.Id]); request.AllowContractClassification = true;
+
+        var result = await fixture.ApplyAsync(request);
+
+        var row = Assert.Single(result.Items);
+        Assert.Equal("skipped", row.Outcome);
+        Assert.Equal("invoiced", row.Reason);
+        Assert.Equal(Assert.IsType<Dictionary<int, string?>>(request.ExpectedUpdatedAtById)[task.Id], row.UpdatedAt);
+        Assert.Equal(0, result.Updated);
+        Assert.Equal(before, await ReadContractBillingStateAsync(fixture.Db));
+        Assert.Equal(0, fixture.Realtime.ChangeCount);
+    }
+
+    [Theory]
+    [InlineData("contract")]
+    [InlineData("client")]
+    public async Task RawFinancialExistenceQueryNeverDisablesContractOrClientVisibilityFilters(string deletedParent)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var task = fixture.AddTask();
+        var contract = await fixture.AttachContractAsync(task, ContractBillingMode.Actual);
+        await fixture.SetContractPolicyAsync("allowFutureClassification");
+        if (deletedParent == "contract")
+        {
+            var stored = await fixture.Db.Contracts.SingleAsync();
+            fixture.Db.Entry(stored).Property("IsDeleted").CurrentValue = true;
+        }
+        else
+        {
+            var stored = await fixture.Db.Clients.SingleAsync();
+            fixture.Db.Entry(stored).Property("IsDeleted").CurrentValue = true;
+        }
+        fixture.Db.TaskJournalComments.Add(new TaskJournalComment
+        {
+            TaskJournalItemId = task.Id,
+            Kind = "history",
+            AuthorName = "Synthetic history",
+            Text = "Existing protected ownership",
+            MetadataJson = "{\"immutable\":true}"
+        });
+        await fixture.SaveAsync();
+        Assert.Equal(deletedParent == "contract" ? 0 : 1, await fixture.Db.Contracts.CountAsync());
+        Assert.Equal(deletedParent == "client" ? 0 : 1, await fixture.Db.Clients.CountAsync());
+        Assert.Equal(contract.Id, (await fixture.Db.Contracts.IgnoreQueryFilters().AsNoTracking().SingleAsync()).Id);
+        Assert.Empty(await fixture.Db.ClientContracts.AsNoTracking().ToArrayAsync());
+        Assert.Single(await fixture.Db.ClientContracts.IgnoreQueryFilters().AsNoTracking().ToArrayAsync());
+        Assert.Empty(await fixture.Db.ContractInvoices.IgnoreQueryFilters().ToArrayAsync());
+        Assert.Empty(await fixture.Db.ContractPayments.IgnoreQueryFilters().ToArrayAsync());
+        Assert.Empty(await fixture.Db.ContractActs.IgnoreQueryFilters().ToArrayAsync());
+        Assert.Empty(await fixture.Db.Payments.IgnoreQueryFilters().ToArrayAsync());
+        var before = await ReadContractBillingStateAsync(fixture.Db);
+        var request = await fixture.RequestAsync([task.Id]); request.AllowContractClassification = true;
+
+        var result = await fixture.ApplyAsync(request);
+
+        var row = Assert.Single(result.Items);
+        Assert.Equal("skipped", row.Outcome);
+        Assert.Equal("contractual", row.Reason);
+        Assert.Equal(Assert.IsType<Dictionary<int, string?>>(request.ExpectedUpdatedAtById)[task.Id], row.UpdatedAt);
+        Assert.Equal(0, result.Updated);
+        Assert.Equal(before, await ReadContractBillingStateAsync(fixture.Db));
+        Assert.Equal(0, fixture.Realtime.ChangeCount);
+    }
+
+    [Fact]
+    public async Task SingleEditorPreservesContractAndRequiresFreshExplicitVersionAndOptIn()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var task = fixture.AddTask();
+        var contract = await fixture.AttachContractAsync(task, ContractBillingMode.Fixed);
+        await fixture.SetContractPolicyAsync("allowFutureClassification");
+        var version = Token((await fixture.Db.TaskJournalItems.AsNoTracking().SingleAsync()).UpdatedAt);
+        var controller = fixture.Controller();
+        Assert.IsType<BadRequestObjectResult>((await controller.UpdateTaskBillingClassification(task.Id,
+            new UpdateTaskBillingClassificationRequest { Classification = "internal", BillingContractId = contract.Id }, CancellationToken.None)).Result);
+        Assert.IsType<BadRequestObjectResult>((await controller.UpdateTaskBillingClassification(task.Id,
+            new UpdateTaskBillingClassificationRequest { Classification = "internal", HasExpectedUpdatedAt = true, ExpectedUpdatedAt = version, AllowContractClassification = true }, CancellationToken.None)).Result);
+        var request = new UpdateTaskBillingClassificationRequest
+        {
+            Classification = "internal",
+            BillingContractId = contract.Id,
+            HasExpectedUpdatedAt = true,
+            ExpectedUpdatedAt = Token(DateTime.ParseExact(version!, "O", CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind).AddTicks(1)),
+            AllowContractClassification = true
+        };
+        Assert.IsType<ConflictObjectResult>((await controller.UpdateTaskBillingClassification(task.Id, request, CancellationToken.None)).Result);
+        Assert.Empty(await fixture.Db.TaskJournalComments.ToArrayAsync());
+        request.ExpectedUpdatedAt = version;
+        Assert.IsType<OkObjectResult>((await controller.UpdateTaskBillingClassification(task.Id, request, CancellationToken.None)).Result);
+        var after = await fixture.Db.TaskJournalItems.AsNoTracking().SingleAsync();
+        Assert.Equal(contract.Id, after.BillingContractId); Assert.Equal(ContractBillingMode.Fixed, after.BillingModeSnapshot);
+        Assert.Equal("internal", after.ClientBillingClassification);
+        await fixture.SetContractPolicyAsync("retainContractTasks");
+        request.Classification = "billable"; request.ExpectedUpdatedAt = Token(after.UpdatedAt);
+        Assert.IsType<BadRequestObjectResult>((await fixture.Controller().UpdateTaskBillingClassification(task.Id, request, CancellationToken.None)).Result);
+        var retained = await fixture.Db.TaskJournalItems.AsNoTracking().SingleAsync();
+        Assert.Equal(contract.Id, retained.BillingContractId); Assert.Equal(ContractBillingMode.Fixed, retained.BillingModeSnapshot);
+        Assert.Equal("internal", retained.ClientBillingClassification);
+    }
+
+    [Fact]
+    public async Task DisablingContractPolicyDoesNotClearGrandfatheredContextOnUnrelatedTaskSave()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var task = fixture.AddTask(classification: "internal");
+        var contract = await fixture.AttachContractAsync(task, ContractBillingMode.Fixed);
+        await fixture.SetContractPolicyAsync("retainContractTasks");
+        var before = await fixture.Db.TaskJournalItems.AsNoTracking().SingleAsync();
+        var result = await fixture.Controller(allowOrdinarySave: true).UpdateTask(task.Id, new UpsertTaskJournalItemRequest
+        {
+            ClientId = before.ClientId,
+            ClientCaseId = before.ClientCaseId,
+            AssigneeUserId = before.AssigneeUserId,
+            Title = "Unrelated edited title",
+            ObjectName = before.ObjectName,
+            DueAt = before.DueAt,
+            Status = before.Status,
+            Result = before.Result,
+            ClientBillingClassification = "billable",
+            BillingContractId = null,
+        }, CancellationToken.None);
+        Assert.IsType<OkObjectResult>(result.Result);
+        var after = await fixture.Db.TaskJournalItems.AsNoTracking().SingleAsync();
+        Assert.Equal("Unrelated edited title", after.Title);
+        Assert.Equal("internal", after.ClientBillingClassification);
+        Assert.Equal(contract.Id, after.BillingContractId);
+        Assert.Equal(ContractBillingMode.Fixed, after.BillingModeSnapshot);
+        Assert.Equal(before.BillingDecisionAt, after.BillingDecisionAt);
+        Assert.Empty(await fixture.Db.Payments.ToArrayAsync());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OnlyAdminCanChangeContractPolicyWithoutReclassifyingAnyTask(bool admin)
+    {
+        await using var fixture = await Fixture.CreateAsync(admin: admin);
+        var task = fixture.AddTask(); await fixture.AttachContractAsync(task, ContractBillingMode.Fixed);
+        var before = await fixture.Db.TaskJournalItems.AsNoTracking().SingleAsync();
+        var response = await fixture.Controller().UpdateSettings(new TaskJournalSettingsRequest { ContractTaskBillingMode = "allowFutureClassification" }, CancellationToken.None);
+        if (admin)
+        {
+            Assert.Equal("allowFutureClassification", Assert.IsType<TaskJournalSettingsDto>(Assert.IsType<OkObjectResult>(response.Result).Value).ContractTaskBillingMode);
+            Assert.Equal("allowFutureClassification", (await fixture.Db.SystemSettings.AsNoTracking().SingleAsync(row => row.Key == "tasks.contractTaskBillingMode")).Value);
+            // An older settings editor must not silently turn an existing policy off by omitting the new field.
+            Assert.IsType<OkObjectResult>((await fixture.Controller().UpdateSettings(new TaskJournalSettingsRequest(), CancellationToken.None)).Result);
+            Assert.Equal("allowFutureClassification", (await fixture.Db.SystemSettings.AsNoTracking().SingleAsync(row => row.Key == "tasks.contractTaskBillingMode")).Value);
+        }
+        else
+        {
+            Assert.IsType<ForbidResult>(response.Result);
+            Assert.False(await fixture.Db.SystemSettings.AnyAsync(row => row.Key == "tasks.contractTaskBillingMode"));
+        }
+        Assert.Equal(ScalarSnapshot(fixture.Db, before), ScalarSnapshot(fixture.Db, await fixture.Db.TaskJournalItems.AsNoTracking().SingleAsync()));
+        Assert.Empty(await fixture.Db.TaskJournalComments.ToArrayAsync());
+        Assert.Empty(await fixture.Db.Payments.ToArrayAsync());
+    }
+
+    [Fact]
+    public async Task MissingOrUnknownStoredContractPolicyIsConservativeAndInvalidPutDoesNotMutateSettings()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var controller = fixture.Controller();
+        Assert.Equal("retainContractTasks", Assert.IsType<TaskJournalSettingsDto>(Assert.IsType<OkObjectResult>((await controller.GetSettings(CancellationToken.None)).Result).Value).ContractTaskBillingMode);
+        await fixture.SetContractPolicyAsync("unexpected");
+        Assert.Equal("retainContractTasks", Assert.IsType<TaskJournalSettingsDto>(Assert.IsType<OkObjectResult>((await controller.GetSettings(CancellationToken.None)).Result).Value).ContractTaskBillingMode);
+        Assert.IsType<BadRequestObjectResult>((await controller.UpdateSettings(new TaskJournalSettingsRequest { ContractTaskBillingMode = "unexpected" }, CancellationToken.None)).Result);
+        Assert.Equal("unexpected", (await fixture.Db.SystemSettings.AsNoTracking().SingleAsync(row => row.Key == "tasks.contractTaskBillingMode")).Value);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ContractOptInStillRequiresExplicitCompletionScopeAndExactVersion(bool stale)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var task = fixture.AddTask(stale ? "new" : "done"); await fixture.AttachContractAsync(task, ContractBillingMode.Actual);
+        await fixture.SetContractPolicyAsync("allowFutureClassification");
+        var before = await fixture.Db.TaskJournalItems.AsNoTracking().SingleAsync();
+        var request = await fixture.RequestAsync([task.Id]); request.AllowContractClassification = true;
+        if (stale) request.ExpectedUpdatedAtById![task.Id] = Token(before.UpdatedAt!.Value.AddTicks(1));
+        var result = await fixture.ApplyAsync(request);
+        Assert.Equal(stale ? "versionConflict" : "completedExcluded", Assert.Single(result.Items).Reason);
+        Assert.Equal(stale ? "conflict" : "skipped", Assert.Single(result.Items).Outcome);
+        Assert.Equal(ScalarSnapshot(fixture.Db, before), ScalarSnapshot(fixture.Db, await fixture.Db.TaskJournalItems.AsNoTracking().SingleAsync()));
+        Assert.Empty(await fixture.Db.TaskJournalComments.ToArrayAsync());
+    }
+
+    [Theory]
+    [InlineData(0, 0, false, false, true)]
+    [InlineData(1, 0, false, false, false)]
+    [InlineData(-1, 0, false, false, false)]
+    [InlineData(0, 1, false, false, false)]
+    [InlineData(0, -1, false, false, false)]
+    [InlineData(0, 0, true, false, false)]
+    [InlineData(0, 0, false, true, false)]
+    public async Task InactiveZeroPayoutMetadataIsNotAnObligationButActiveOrNonzeroSettingsStayProtected(int amount, int delay, bool enabled, bool onResult, bool allowed)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var task = fixture.AddTask();
+        task.ContractorPaymentAmount = amount; task.ContractorPaymentResultDelayDays = delay;
+        task.ContractorPaymentEnabled = enabled; task.ContractorPaymentOnResult = onResult;
+        await fixture.AttachContractAsync(task, ContractBillingMode.Actual);
+        await fixture.SetContractPolicyAsync("allowFutureClassification");
+        var before = await fixture.Db.TaskJournalItems.AsNoTracking().SingleAsync();
+        var request = await fixture.RequestAsync([task.Id]); request.AllowContractClassification = true;
+        var result = await fixture.ApplyAsync(request);
+        Assert.Equal(allowed ? "updated" : "skipped", Assert.Single(result.Items).Outcome);
+        Assert.Equal(allowed ? null : "contractorPaymentProtected", Assert.Single(result.Items).Reason);
+        var after = await fixture.Db.TaskJournalItems.AsNoTracking().SingleAsync();
+        Assert.Equal(before.ContractorPaymentAmount, after.ContractorPaymentAmount);
+        Assert.Equal(before.ContractorPaymentResultDelayDays, after.ContractorPaymentResultDelayDays);
+        Assert.Equal(before.ContractorPaymentEnabled, after.ContractorPaymentEnabled);
+        Assert.Equal(before.ContractorPaymentOnResult, after.ContractorPaymentOnResult);
+        Assert.Equal(before.BillingContractId, after.BillingContractId); Assert.Equal(before.BillingModeSnapshot, after.BillingModeSnapshot);
+        Assert.Empty(await fixture.Db.Payments.ToArrayAsync());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TaskEditAuthorityDoesNotGrantContractVisibilityOrContractEditingPower(bool mayViewContract)
+    {
+        await using var fixture = await Fixture.CreateAsync(admin: false);
+        var task = fixture.AddTask(); await fixture.AttachContractAsync(task, ContractBillingMode.Fixed);
+        await fixture.SetContractPolicyAsync("allowFutureClassification");
+        var roleId = (await fixture.Db.Users.AsNoTracking().SingleAsync(user => user.Id == fixture.UserId)).RoleId;
+        fixture.Db.RolePermissions.Add(new RolePermission { RoleId = roleId, Section = RolePermissionCatalog.Contracts, CanView = mayViewContract, CanEdit = false, ViewScope = DataVisibilityScope.All });
+        await fixture.SaveAsync();
+        var request = await fixture.RequestAsync([task.Id]); request.AllowContractClassification = true;
+        var before = JsonSerializer.Serialize(await fixture.Db.Contracts.AsNoTracking().SingleAsync());
+        var result = await fixture.ApplyAsync(request);
+        Assert.Equal(mayViewContract ? "updated" : "skipped", Assert.Single(result.Items).Outcome);
+        Assert.Equal(mayViewContract ? null : "contractual", Assert.Single(result.Items).Reason);
+        Assert.Equal(before, JsonSerializer.Serialize(await fixture.Db.Contracts.AsNoTracking().SingleAsync()));
+        Assert.Empty(await fixture.Db.Payments.ToArrayAsync());
+    }
+
+    private static async Task<byte[]> ReadContractBillingStateAsync(PaymentContext db)
+    {
+        db.ChangeTracker.Clear();
+        try
+        {
+            return JsonSerializer.SerializeToUtf8Bytes(new Dictionary<string, byte[][]>
+            {
+                ["tasks"] = await ReadScalarsAsync<TaskJournalItem>(),
+                ["clients"] = await ReadScalarsAsync<Client>(),
+                ["clientCases"] = await ReadScalarsAsync<ClientCase>(),
+                ["clientContracts"] = await ReadScalarsAsync<ClientContract>(),
+                ["contracts"] = await ReadScalarsAsync<Contract>(),
+                ["payments"] = await ReadScalarsAsync<Payment>(),
+                ["acts"] = await ReadScalarsAsync<Act>(),
+                ["contractInvoices"] = await ReadScalarsAsync<ContractInvoice>(),
+                ["contractPayments"] = await ReadScalarsAsync<ContractPayment>(),
+                ["contractActs"] = await ReadScalarsAsync<ContractAct>(),
+                ["history"] = await ReadScalarsAsync<TaskJournalComment>(),
+            });
+        }
+        finally { db.ChangeTracker.Clear(); }
+
+        async Task<byte[][]> ReadScalarsAsync<TEntity>() where TEntity : class
+        {
+            // Tracking retains shadow audit/deletion values in the exact scalar snapshot.
+            var rows = await db.Set<TEntity>().IgnoreQueryFilters().AsTracking().ToArrayAsync();
+            return rows.Select(row => ScalarSnapshot(db, row)).OrderBy(row => Convert.ToHexString(row), StringComparer.Ordinal).ToArray();
+        }
+    }
+
+    private static byte[] ScalarSnapshot<TEntity>(PaymentContext db, TEntity task) where TEntity : class
     {
         var values = db.Entry(task).CurrentValues;
         return JsonSerializer.SerializeToUtf8Bytes(values.Properties.OrderBy(property => property.Name)
@@ -644,8 +1134,8 @@ public sealed class TaskBulkBillingTests
         {
             var task = new TaskJournalItem
             {
-                AuthorUserId = userId,
-                AssigneeUserId = userId,
+                AuthorUserId = UserId,
+                AssigneeUserId = UserId,
                 ClientId = clientId,
                 ClientCaseId = caseId,
                 Title = "Synthetic task",
@@ -662,6 +1152,22 @@ public sealed class TaskBulkBillingTests
 
         public async Task SaveAsync() { await Db.SaveChangesAsync(); Db.ChangeTracker.Clear(); }
 
+        public async Task<Contract> AttachContractAsync(TaskJournalItem task, string mode)
+        {
+            var contract = new Contract { Number = "SYNTHETIC-CONTRACT", BillingMode = mode, Date = DateTime.UtcNow.Date.AddDays(-1), Amount = 12345.67m };
+            contract.ClientContracts.Add(new ClientContract { ClientId = clientId });
+            Db.Contracts.Add(contract); task.BillingContract = contract; task.BillingModeSnapshot = mode;
+            await SaveAsync(); return contract;
+        }
+
+        public async Task SetContractPolicyAsync(string mode)
+        {
+            var setting = await Db.SystemSettings.SingleOrDefaultAsync(item => item.Key == "tasks.contractTaskBillingMode");
+            if (setting is null) Db.SystemSettings.Add(new SystemSetting { Key = "tasks.contractTaskBillingMode", Value = mode });
+            else setting.Value = mode;
+            await SaveAsync();
+        }
+
         public async Task<BulkUpdateTaskJournalItemsRequest> RequestAsync(IEnumerable<int> ids, string target = TaskClientBillingClassification.Internal)
         {
             var selected = ids.ToList();
@@ -675,13 +1181,14 @@ public sealed class TaskBulkBillingTests
             };
         }
 
-        public TasksController Controller() => new(Db, DispatchProxy.Create<INotificationService, RejectNotifications>(), realtimePublisher: Realtime)
+        public TasksController Controller(bool allowOrdinarySave = false) => new(Db,
+            allowOrdinarySave ? DispatchProxy.Create<INotificationService, SafeOrdinarySaveNotifications>() : DispatchProxy.Create<INotificationService, RejectNotifications>(), realtimePublisher: Realtime)
         {
             ControllerContext = new ControllerContext
             {
                 HttpContext = new DefaultHttpContext
                 {
-                    User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture)), new Claim(ClaimTypes.Name, "Synthetic actor")], "Synthetic")),
+                    User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, UserId.ToString(CultureInfo.InvariantCulture)), new Claim(ClaimTypes.Name, "Synthetic actor")], "Synthetic")),
                 }
             },
         };
@@ -712,6 +1219,16 @@ public sealed class TaskBulkBillingTests
         }
         public Task PublishUserNotificationAsync(UserNotification notification, bool toastEnabled = true, CancellationToken cancellationToken = default)
             => throw new InvalidOperationException("Bulk classification must not create user notifications.");
+    }
+
+    public class SafeOrdinarySaveNotifications : DispatchProxy
+    {
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            if (targetMethod?.ReturnType == typeof(Task)) return Task.CompletedTask;
+            if (targetMethod?.ReturnType == typeof(Task<IReadOnlyList<NotificationDelivery>>)) return Task.FromResult<IReadOnlyList<NotificationDelivery>>([]);
+            throw new InvalidOperationException("Unexpected outbound operation in isolated ordinary task save.");
+        }
     }
 
     public class RejectNotifications : DispatchProxy

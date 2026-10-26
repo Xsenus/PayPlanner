@@ -10,6 +10,7 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { CounterpartyPickerModal, type CounterpartyKind, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
+import { DocumentSellerPicker } from '../Documents/DocumentSellerPicker';
 
 interface ContractModalProps {
   open: boolean;
@@ -113,6 +114,7 @@ export function ContractModal({
   const defaultDateRef = useRef(defaultDate);
   const [form, setForm] = useState<FormState>(() => normalizeContractToForm(contract, profileTimeZoneId));
   const [localError, setLocalError] = useState<string | null>(null);
+  const [sellerSelection, setSellerSelection] = useState<{ companyId: number | null; branchId: number | null }>({ companyId: null, branchId: null });
   const [numberManuallyEdited, setNumberManuallyEdited] = useState(isEdit);
   const numberManuallyEditedRef = useRef(isEdit);
   const [contractRules, setContractRules] = useState<ContractRulesSettingsDto>({
@@ -128,6 +130,7 @@ export function ContractModal({
   useEffect(() => {
     if (open) {
       setForm(normalizeContractToForm(contract, profileTimeZoneIdRef.current));
+      setSellerSelection({ companyId: null, branchId: null });
       setLocalError(null);
       setSelectedCounterparties(buildInitialCounterparties(contract, defaultClients));
       setPickerOpen(false);
@@ -310,6 +313,7 @@ export function ContractModal({
     }
 
     const payload: ContractInput = {
+      ...(!isEdit ? { sellerCompanyId: sellerSelection.companyId, sellerBranchId: sellerSelection.branchId } : {}),
       number: form.number.trim(),
       title: form.title.trim() ? form.title.trim() : undefined,
       date: fromInputToApiDate(form.date) ?? form.date,
@@ -364,6 +368,12 @@ export function ContractModal({
         </div>
 
         <form onSubmit={handleSubmit} className="max-h-[75vh] overflow-y-auto px-6 py-5">
+          {!isEdit ? (
+            <div className="mb-3 text-sm">
+              <DocumentSellerPicker kind="contract" documentId={0} draft canEdit={!submitting}
+                companyId={sellerSelection.companyId} branchId={sellerSelection.branchId} onChanged={setSellerSelection} />
+            </div>
+          ) : null}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-slate-700">{t('contractNumber') ?? 'Номер договора'}</span>

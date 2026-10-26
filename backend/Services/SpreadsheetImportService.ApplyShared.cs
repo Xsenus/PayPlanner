@@ -15,6 +15,7 @@ public sealed partial class SpreadsheetImportService
         int batchId,
         ActDraft draft,
         ImportState state,
+        string sellerSnapshotPolicy,
         CancellationToken cancellationToken)
     {
         var sourceKeys = BuildActMatchKeys(draft.ExternalId, draft.Number, draft.Date, draft.Type);
@@ -30,6 +31,7 @@ public sealed partial class SpreadsheetImportService
             return;
         }
 
+        var atomicSellerCreation = false;
         try
         {
             var clientId = FindInvoiceClientId(state, draft.CounterpartyName, draft.CounterpartyInn, out var clientError);
@@ -62,6 +64,14 @@ public sealed partial class SpreadsheetImportService
             var invoicePayment = await FindInvoicePaymentForActAsync(db, draft.InvoiceExternalId, draft.InvoiceNumber, draft.InvoiceDate, draft.Type, clientId.Value, cancellationToken);
             ApplyActValues(act, draft, clientId.Value, responsibleId, invoicePayment);
             SyncActLineItems(db, act, invoicePayment, BuildEffectiveLineItems(draft.ParsedLineItems, draft.Amount.Value, draft.Nomenclature, sourceTitle));
+
+            if (beforeJson is null)
+            {
+                act.SellerSnapshotPolicy = sellerSnapshotPolicy;
+                atomicSellerCreation = sellerSnapshotPolicy == DocumentSellerSnapshotPolicy.OnCreate;
+                await new Companies.DocumentSellerService(db).InitializeForCreationAsync(act,
+                    await Companies.OwnCompanyRegistry.LoadDefaultAsync(db, cancellationToken), cancellationToken);
+            }
 
             var provisionalAfterJson = SerializeSnapshot(CaptureActSnapshot(act));
             if (beforeJson is not null && string.Equals(beforeJson, provisionalAfterJson, StringComparison.Ordinal))
@@ -117,7 +127,7 @@ public sealed partial class SpreadsheetImportService
                 JsonSerializer.Serialize(new { draft.ParseWarnings }, JsonOptions)));
             await db.SaveChangesAsync(cancellationToken);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!atomicSellerCreation)
         {
             _logger.LogError(ex, "Spreadsheet act import failed for {FileName}:{RowNumber}", draft.FileName, draft.RowNumber);
             db.ChangeTracker.Clear();

@@ -2341,6 +2341,194 @@ describe('MoneyOperations integration', () => {
     );
   }, 15000);
 
+  it.each(['Income', 'Expense'] as const)('requires an explicit invoice choice before saving multiple candidates (%s)', async (direction) => {
+    const user = userEvent.setup();
+    operations = [createOperation({
+      id: 8,
+      moneyAccountId: 101,
+      source: 'Bank',
+      direction,
+      amount: 25000,
+      counterpartyName: 'Ручной выбор бухгалтера',
+      purpose: 'Оплата по счету №33',
+      isAdvancePayment: false,
+      matchStatus: 'ClarificationRequired',
+      linkedInvoiceId: null,
+      linkedInvoiceNumber: null,
+    })];
+    getMoneyOperationInvoiceCandidatesMock.mockResolvedValueOnce([
+      {
+        invoiceId: 33, paymentId: 330, invoiceNumber: '33', invoiceDate: '2026-04-20T00:00:00',
+        amount: 25000, paidAmount: 0, outstandingAmount: 25000, status: 'Pending',
+        counterpartyName: 'Ручной выбор бухгалтера', matchReason: 'номер и сумма совпадают', score: 160,
+      },
+      {
+        invoiceId: 34, paymentId: 340, invoiceNumber: '33', invoiceDate: '2026-04-21T00:00:00',
+        amount: 30000, paidAmount: 0, outstandingAmount: 30000, status: 'Pending',
+        counterpartyName: 'Второй документ', matchReason: 'номер счёта найден в назначении', score: 120,
+      },
+    ]);
+    render(<MoneyOperations source="Bank" />);
+    await screen.findByText('Ручной выбор бухгалтера');
+    await user.click(screen.getByRole('button', { name: 'Изменить' }));
+    await screen.findByRole('button', { name: /Счёт 33 от 21\.04\.2026/ });
+    expect(getMoneyOperationInvoiceCandidatesMock).toHaveBeenCalledWith(8);
+    expect(screen.getByLabelText('ID счёта')).toHaveProperty('value', '');
+    expect(operations[0].linkedInvoiceId).toBeNull();
+    expect(updateMoneyOperationMock).not.toHaveBeenCalled();
+    expect(createMoneyOperationMock).not.toHaveBeenCalled();
+    if (direction === 'Expense') expect(screen.getByText('Сверка с расходным счётом')).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: /Счёт 33 от 21\.04\.2026/ }));
+    expect(screen.getByLabelText('ID счёта')).toHaveProperty('value', '34');
+    expect(updateMoneyOperationMock).not.toHaveBeenCalled();
+    await user.click(getLastButton('Сохранить'));
+    await waitFor(() => expect(updateMoneyOperationMock).toHaveBeenCalledTimes(1));
+    expect(updateMoneyOperationMock).toHaveBeenCalledWith(8, expect.objectContaining({
+      direction, linkedInvoiceId: 34, paidInvoiceNumber: '33', matchStatus: 'Matched',
+    }));
+    expect(createMoneyOperationMock).not.toHaveBeenCalled();
+  }, 15000);
+
+  it.each(['Income', 'Expense'] as const)('hides loaded and late invoice candidates after changing direction (%s)', async (direction) => {
+    const user = userEvent.setup();
+    operations = [createOperation({
+      id: 8, moneyAccountId: 101, direction, amount: 25000, isAdvancePayment: false,
+      linkedInvoiceId: null, matchStatus: 'ClarificationRequired', purpose: 'Смена направления до сверки',
+    })];
+    const candidates = [{
+      invoiceId: 33, paymentId: 330, invoiceNumber: '33', amount: 25000, paidAmount: 0,
+      outstandingAmount: 25000, status: 'Pending', score: 160,
+    }];
+    let complete!: (items: typeof candidates) => void;
+    getMoneyOperationInvoiceCandidatesMock.mockResolvedValueOnce(candidates)
+      .mockReturnValueOnce(new Promise<typeof candidates>(resolve => { complete = resolve; }));
+    render(<MoneyOperations source="Bank" />);
+    await screen.findByText('Смена направления до сверки');
+    await user.click(screen.getByRole('button', { name: 'Изменить' }));
+    await screen.findByRole('button', { name: /Счёт 33/ });
+    const originalLabel = direction === 'Income' ? 'Приход' : 'Расход';
+    const changedLabel = direction === 'Income' ? 'Расход' : 'Приход';
+    await user.click(screen.getByRole('radio', { name: changedLabel }));
+    expect(screen.queryByRole('button', { name: /Счёт 33/ })).toBeNull();
+    expect(screen.getByText('После смены направления или денежного счёта сохраните операцию и откройте её снова для выбора подходящего счёта.')).toBeTruthy();
+    expect(getMoneyOperationInvoiceCandidatesMock).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole('radio', { name: originalLabel }));
+    await waitFor(() => expect(getMoneyOperationInvoiceCandidatesMock).toHaveBeenCalledTimes(2));
+    await user.click(screen.getByRole('radio', { name: changedLabel }));
+    await act(async () => { complete(candidates); });
+    expect(screen.queryByRole('button', { name: /Счёт 33/ })).toBeNull();
+    expect(screen.getByLabelText('ID счёта')).toHaveProperty('value', '');
+    expect(getMoneyOperationInvoiceCandidatesMock).toHaveBeenCalledTimes(2);
+    expect(updateMoneyOperationMock).not.toHaveBeenCalled();
+    expect(createMoneyOperationMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['Income', 'Expense'] as const)('clears an unsaved invoice choice when saving another direction (%s)', async (direction) => {
+    const user = userEvent.setup();
+    operations = [createOperation({
+      id: 8, moneyAccountId: 101, direction, amount: 25000, isAdvancePayment: true,
+      linkedInvoiceId: null, matchStatus: 'ClarificationRequired', purpose: 'Смена направления после выбора',
+    })];
+    getMoneyOperationInvoiceCandidatesMock.mockResolvedValueOnce([{
+      invoiceId: 33, paymentId: 330, invoiceNumber: '33', amount: 25000, paidAmount: 0,
+      outstandingAmount: 25000, status: 'Pending', score: 160,
+    }]);
+    render(<MoneyOperations source="Bank" />);
+    await screen.findByText('Смена направления после выбора');
+    await user.click(screen.getByRole('button', { name: 'Изменить' }));
+    await user.click(await screen.findByRole('button', { name: /Счёт 33/ }));
+    expect(screen.getByLabelText('ID счёта')).toHaveProperty('value', '33');
+    expect(updateMoneyOperationMock).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('radio', { name: direction === 'Income' ? 'Расход' : 'Приход' }));
+    expect(screen.getByLabelText('ID счёта')).toHaveProperty('value', '');
+    expect(screen.queryByRole('button', { name: /Счёт 33/ })).toBeNull();
+    expect(getMoneyOperationInvoiceCandidatesMock).toHaveBeenCalledTimes(1);
+    await user.click(getLastButton('Сохранить'));
+    await waitFor(() => expect(updateMoneyOperationMock).toHaveBeenCalledTimes(1));
+    expect(updateMoneyOperationMock).toHaveBeenCalledWith(8, expect.objectContaining({
+      direction: direction === 'Income' ? 'Expense' : 'Income', amount: 25000,
+      linkedInvoiceId: null, paidInvoiceNumber: '', paidAccountName: '', paidAmount: 0,
+      matchStatus: 'None', matchComment: '',
+    }));
+    expect(createMoneyOperationMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['Income', 'Expense'] as const)('clears a provisional invoice and ignores late candidates after switching company account (%s)', async (direction) => {
+    const user = userEvent.setup();
+    getMoneyAccountsMock.mockResolvedValue([
+      { id: 101, companyId: 1, companyName: 'Компания Альфа', name: 'Банк Альфа', source: 'Bank', currency: 'RUB', isActive: true, isDefault: true },
+      { id: 202, companyId: 2, companyName: 'Компания Бета', name: 'Банк Бета', source: 'Bank', currency: 'RUB', isActive: true, isDefault: true },
+    ]);
+    operations = [createOperation({
+      id: 8, moneyAccountId: 101, direction, amount: 25000, isAdvancePayment: true,
+      linkedInvoiceId: null, matchStatus: 'ClarificationRequired', purpose: 'Смена компании до сверки',
+    })];
+    const candidates = [{
+      invoiceId: 33, paymentId: 330, invoiceNumber: '33', amount: 25000, paidAmount: 0,
+      outstandingAmount: 25000, status: 'Pending', score: 160,
+    }];
+    let complete!: (items: typeof candidates) => void;
+    getMoneyOperationInvoiceCandidatesMock.mockResolvedValueOnce(candidates)
+      .mockReturnValueOnce(new Promise<typeof candidates>(resolve => { complete = resolve; }));
+    render(<MoneyOperations source="Bank" />);
+    await screen.findByText('Смена компании до сверки');
+    await user.click(screen.getByRole('button', { name: 'Изменить' }));
+    await user.click(await screen.findByRole('button', { name: /Счёт 33/ }));
+    expect(screen.getByLabelText('ID счёта')).toHaveProperty('value', '33');
+    await user.selectOptions(screen.getByLabelText('Банковский счёт'), '202');
+    expect(screen.queryByRole('button', { name: /Счёт 33/ })).toBeNull();
+    expect(screen.getByLabelText('ID счёта')).toHaveProperty('value', '');
+    expect(getMoneyOperationInvoiceCandidatesMock).toHaveBeenCalledTimes(1);
+    await user.selectOptions(screen.getByLabelText('Банковский счёт'), '101');
+    await waitFor(() => expect(getMoneyOperationInvoiceCandidatesMock).toHaveBeenCalledTimes(2));
+    await user.selectOptions(screen.getByLabelText('Банковский счёт'), '202');
+    await act(async () => { complete(candidates); });
+    expect(screen.queryByRole('button', { name: /Счёт 33/ })).toBeNull();
+    expect(updateMoneyOperationMock).not.toHaveBeenCalled();
+    await user.click(getLastButton('Сохранить'));
+    await waitFor(() => expect(updateMoneyOperationMock).toHaveBeenCalledTimes(1));
+    expect(updateMoneyOperationMock).toHaveBeenCalledWith(8, expect.objectContaining({
+      direction, moneyAccountId: 202, amount: 25000, linkedInvoiceId: null,
+      paidInvoiceNumber: '', paidAccountName: '', paidAmount: 0, matchStatus: 'None', matchComment: '',
+    }));
+    expect(getMoneyOperationInvoiceCandidatesMock).toHaveBeenCalledTimes(2);
+    expect(createMoneyOperationMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['applied', 'protected', 'unavailable-account'] as const)('keeps expense invoice selection locked for %s', async (boundary) => {
+    const user = userEvent.setup();
+    operations = [Object.assign(createOperation({
+      direction: 'Expense',
+      moneyAccountId: boundary === 'unavailable-account' ? 999 : 101,
+      linkedInvoiceId: boundary === 'applied' ? 33 : null,
+      matchStatus: boundary === 'applied' ? 'Matched' : 'ClarificationRequired',
+      purpose: 'Расход с защищённой финансовой связью',
+    }), { isInvoiceLinkProtected: boundary === 'protected' })];
+    render(<MoneyOperations source="Bank" />);
+    await screen.findByText('Расход с защищённой финансовой связью');
+    await user.click(screen.getByRole('button', { name: 'Изменить' }));
+    await screen.findByText('Редактировать операцию по банку');
+    expect(screen.getByLabelText('ID счёта')).toHaveProperty('disabled', true);
+    expect(getMoneyOperationInvoiceCandidatesMock).not.toHaveBeenCalled();
+    expect(updateMoneyOperationMock).not.toHaveBeenCalled();
+  });
+
+  it('does not open expense invoice selection without payments edit permission', async () => {
+    const user = userEvent.setup();
+    permissionsState.paymentsCanEdit = false;
+    operations = [createOperation({ moneyAccountId: 101, direction: 'Expense', purpose: 'Расход без права редактирования' })];
+    render(<MoneyOperations source="Bank" />);
+    await screen.findByText('Расход без права редактирования');
+    const edit = screen.getByRole('button', { name: 'Изменить' });
+    expect(edit).toHaveProperty('disabled', true);
+    await user.click(edit);
+    expect(screen.queryByText('Подходящие счета')).toBeNull();
+    expect(getMoneyOperationInvoiceCandidatesMock).not.toHaveBeenCalled();
+    expect(updateMoneyOperationMock).not.toHaveBeenCalled();
+  });
+
   it('allows linking an e-money income operation to an invoice', async () => {
     const user = userEvent.setup();
     operations = [

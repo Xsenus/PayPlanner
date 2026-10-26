@@ -1,11 +1,14 @@
 import { useRef } from 'react';
 import { useModalFocusTrap } from '../../hooks/useModalFocusTrap';
+import type { ContractTaskBillingMode } from '../../services/api';
 import type { TaskBillingBulkItemResult } from '../../utils/taskJournalStore';
 import { SystemSelect } from '../ui/SystemSelect';
 import { BILLING_REASONS, billingPreview, billingSummary, type BillingSnapshot, type BillingTarget } from './taskBulkBilling';
 
-export function TaskBulkBillingDialog({ snapshot, outcomes, target, includeCompleted, busy, attempted, error, scopeCurrent, refreshRequired, remaining, readyCount, readErrors, canReplace, onTarget, onIncludeCompleted, onApply, onRefresh, onReplace, onClose }: {
+export function TaskBulkBillingDialog({ snapshot, outcomes, target, includeCompleted, policyReady, policyLoading, policyError, contractMode, allowContracts, onAllowContracts, onPolicyRetry, busy, attempted, error, scopeCurrent, refreshRequired, remaining, readyCount, readErrors, canReplace, onTarget, onIncludeCompleted, onApply, onRefresh, onReplace, onClose }: {
   snapshot: BillingSnapshot | null; outcomes: TaskBillingBulkItemResult[]; target: BillingTarget; includeCompleted: boolean;
+  policyReady: boolean; policyLoading: boolean; policyError: string; contractMode: ContractTaskBillingMode; allowContracts: boolean;
+  onAllowContracts: (value: boolean) => void; onPolicyRetry: () => void;
   busy: boolean; attempted: boolean; error: string; scopeCurrent: boolean; refreshRequired: boolean; remaining: number; readyCount: number; readErrors: Record<number, string>; canReplace: boolean;
   onTarget: (value: BillingTarget) => void; onIncludeCompleted: (value: boolean) => void;
   onApply: () => void; onRefresh: () => void; onReplace: () => void; onClose: () => void;
@@ -24,7 +27,10 @@ export function TaskBulkBillingDialog({ snapshot, outcomes, target, includeCompl
           <option value="internal">Неоплачиваемая / внутренняя</option><option value="billable">Платная</option>
         </SystemSelect></label>
         <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={includeCompleted} disabled={busy || attempted} onChange={(event) => onIncludeCompleted(event.target.checked)} />Также включить выбранные завершённые задачи без счёта</label>
-        <p className="text-xs text-slate-600">Задачи со счётом, выплатой исполнителю, учётом по договору, отменённые и недоступные задачи будут пропущены. Суммы, счета, выплаты, статус, результат и файлы не меняются. Предварительная оценка ниже не гарантирует изменение.</p>
+        {policyLoading ? <p className="text-sm">Проверяем настройку учёта договорных задач…</p> : null}
+        {policyError ? <p role="alert" className="text-sm text-rose-700">{policyError}</p> : null}
+        <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={allowContracts} disabled={busy || attempted || (!allowContracts && (!policyReady || contractMode !== 'allowFutureClassification'))} onChange={(event) => onAllowContracts(event.target.checked)} />Также включить договорные задачи без счетов и выплат, сохранив договор и его сумму</label>
+        <p className="text-xs text-slate-600">{policyReady && contractMode === 'allowFutureClassification' ? 'Договорные задачи включаются только по отдельной отметке выше. Меняется дальнейший учёт; договор, его сумма, способ расчёта и прежние начисления сохраняются. Задачи по фиксированной сумме не включаются в отдельный счёт.' : 'Включение договорных задач отключено или ещё не подтверждено.'} Задачи со счётом или созданной выплатой, завершённые задачи с выплатой по результату, отменённые и недоступные задачи будут пропущены. Договорные задачи также пропускаются, если предусмотрена выплата исполнителю или её расчёт требует отдельной проверки. Суммы, счета, выплаты, статус, результат и файлы не меняются. Предварительная оценка ниже не гарантирует изменение.</p>
         {!scopeCurrent ? <p role="alert" className="text-sm text-amber-800">Изменилась страница, компания или право редактирования. Отправка исходного набора заблокирована. Вернитесь к исходной области либо явно замените выбор.</p> : null}
         {outcomes.length ? <p role="status" className="text-sm font-semibold">{billingSummary(outcomes)}</p> : null}
         {refreshRequired ? <p className="text-sm">Перед повтором оставшихся {remaining} задач обновите их сведения. Уже изменённые и совпадающие строки повторно не отправляются.</p> : null}
@@ -33,7 +39,7 @@ export function TaskBulkBillingDialog({ snapshot, outcomes, target, includeCompl
           {snapshot.tasks.map((task) => {
             const item = byId.get(task.id);
             return <li key={task.id} className="rounded border border-slate-200 p-2"><span className="font-semibold">#{task.id} · {task.title}</span>
-              <div>{item ? item.outcome === 'updated' ? 'Учёт изменён.' : item.outcome === 'unchanged' ? 'Уже установлен нужный учёт.' : item.reason ? BILLING_REASONS[item.reason] : 'Не изменена; причина не указана.' : billingPreview(task, target, includeCompleted)}</div>
+              <div>{item ? item.outcome === 'updated' ? 'Учёт изменён.' : item.outcome === 'unchanged' ? 'Уже установлен нужный учёт.' : item.reason ? BILLING_REASONS[item.reason] : 'Не изменена; причина не указана.' : billingPreview(task, target, includeCompleted, policyReady && allowContracts ? contractMode : 'retainContractTasks')}</div>
               {readErrors[task.id] ? <div className="text-xs text-amber-800">Обновление перед повтором: {readErrors[task.id]}</div> : null}
             </li>;
           })}
@@ -43,8 +49,9 @@ export function TaskBulkBillingDialog({ snapshot, outcomes, target, includeCompl
       <div className="flex flex-wrap justify-end gap-2">
         <button type="button" disabled={busy} onClick={onClose} className="rounded border px-3 py-1.5 text-sm disabled:opacity-50">Закрыть</button>
         <button type="button" disabled={busy || !canReplace} onClick={onReplace} className="rounded border px-3 py-1.5 text-sm disabled:opacity-50">Новый выбор с текущей страницы</button>
+        {snapshot && !policyLoading && !policyReady ? <button type="button" disabled={busy || !scopeCurrent} onClick={onPolicyRetry} className="rounded border px-3 py-1.5 text-sm disabled:opacity-50">Повторить проверку настройки</button> : null}
         {refreshRequired || Object.keys(readErrors).length ? <button type="button" disabled={busy || !scopeCurrent || !remaining} onClick={onRefresh} className="rounded border px-3 py-1.5 text-sm disabled:opacity-50">Обновить оставшиеся задачи</button> : null}
-        <button type="button" disabled={busy || !scopeCurrent || refreshRequired || !readyCount} onClick={onApply} className="rounded bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50">{busy ? 'Ожидание операции…' : attempted ? 'Подтвердить повтор оставшихся' : 'Изменить учёт'}</button>
+        <button type="button" disabled={busy || !scopeCurrent || refreshRequired || !readyCount || !policyReady || (allowContracts && contractMode !== 'allowFutureClassification')} onClick={onApply} className="rounded bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50">{busy ? 'Ожидание операции…' : attempted ? 'Подтвердить повтор оставшихся' : 'Изменить учёт'}</button>
       </div>
     </div>
   </div>;

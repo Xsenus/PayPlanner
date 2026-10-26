@@ -144,4 +144,50 @@ describe('fixed bulk billing contract', () => {
       contractorPaymentOnResult: false, contractorPaymentDueDate: '2026-10-31', contractorPaymentId: null, contractorPaymentStatus: '' }), target, true))
       .toBe('Предварительно подходит; окончательное решение принимает сервер.');
   });
+  it('includes the contractual opt-in only when explicitly requested', () => {
+    expect(billingPayload([task(1)], 'internal', false, false)).not.toHaveProperty('allowContractClassification');
+    expect(billingPayload([task(1)], 'internal', false, true)).toEqual({ ids: [1], billingClassification: 'internal', includeCompleted: false,
+      expectedUpdatedAtById: { '1': '2026-10-24T01:02:03.1234567Z' }, allowContractClassification: true });
+  });
+  it.each(['Fixed', 'Actual'] as const)('previews a canonical %s contract only under the explicit allowed mode without altering its snapshot', mode => {
+    const row = task(1, { billingContractId: 23, billingMode: mode, clientId: 12, clientCaseId: 15 });
+    const before = { ...row };
+    expect(billingPreview(row, 'billable', true)).toBe(BILLING_REASONS.contractual);
+    expect(billingPreview(row, 'billable', true, 'allowFutureClassification')).toBe('Предварительно подходит; окончательное решение принимает сервер.');
+    expect(row).toEqual(before);
+  });
+  it.each([
+    { billingContractId: 23, billingMode: null }, { billingContractId: null, billingMode: 'Fixed' },
+    { billingContractId: 0, billingMode: 'Actual' }, { billingContractId: -1, billingMode: 'Fixed' },
+    { billingContractId: 1.5, billingMode: 'Actual' }, { billingContractId: 23, billingMode: 'fixed' },
+    { billingContractId: 23, billingMode: 'Actual ' }, { billingContractId: 23, billingMode: 'unknown' },
+  ])('protects a malformed contract pair %j despite the allowed policy', fields => {
+    const row = task(1);
+    // Deliberately malformed runtime values must reach the preview unchanged.
+    Object.assign(row, fields);
+    expect(billingPreview(row, 'internal', true, 'allowFutureClassification')).toBe(BILLING_REASONS.contractual);
+  });
+  it.each([
+    { contractorPaymentEnabled: true }, { contractorPaymentOnResult: true },
+    { contractorPaymentAmount: 1200 }, { contractorPaymentAmount: -1 }, { contractorPaymentAmount: Number.NaN }, { contractorPaymentDueDate: '' },
+    { contractorPaymentDueDate: '2026-10-31' }, { contractorPaymentResultDelayDays: 7 }, { contractorPaymentResultDelayDays: -1 },
+    { contractorPaymentId: 11 }, { contractorPaymentStatus: 'pending' },
+  ])('protects an existing or configured contractual payout %j before no-op preview', fields => {
+    expect(billingPreview(task(1, { billingContractId: 23, billingMode: 'Actual', clientBillingClassification: 'internal', ...fields }), 'internal', true, 'allowFutureClassification'))
+      .toBe(BILLING_REASONS.contractorPaymentProtected);
+  });
+  it('retains invoice, completion, status and client/case protections when contractual classification is allowed', () => {
+    const row = task(1, { billingContractId: 23, billingMode: 'Fixed' });
+    expect(billingPreview({ ...row, billingInvoiceId: 90 }, 'internal', true, 'allowFutureClassification')).toBe(BILLING_REASONS.invoiced);
+    expect(billingPreview({ ...row, status: 'done' }, 'internal', false, 'allowFutureClassification')).toBe(BILLING_REASONS.completedExcluded);
+    expect(billingPreview({ ...row, status: 'cancelled' }, 'internal', true, 'allowFutureClassification')).toBe(BILLING_REASONS.cancelled);
+    expect(billingPreview(row, 'billable', true, 'allowFutureClassification')).toBe(BILLING_REASONS.clientCaseRequired);
+  });
+
+  it('does not treat inactive zero contractual payout defaults as an obligation', () => {
+    const row = task(1, { billingContractId: 23, billingMode: 'Actual', contractorPaymentEnabled: false,
+      contractorPaymentOnResult: false, contractorPaymentAmount: 0, contractorPaymentResultDelayDays: 0, contractorPaymentDueDate: null });
+    expect(billingPreview(row, 'internal', true, 'allowFutureClassification')).toBe('Предварительно подходит; окончательное решение принимает сервер.');
+  });
+
 });

@@ -1,3 +1,4 @@
+import type { ContractTaskBillingMode } from '../../services/api';
 import type { TaskBillingBulkItemResult, TaskBillingBulkReason, TaskBillingBulkResult, TaskJournalItem } from '../../utils/taskJournalStore';
 
 export type BillingTarget = 'billable' | 'internal';
@@ -25,21 +26,30 @@ export function freezeBillingSelection(tasks: TaskJournalItem[], scopeKey: strin
   return { scopeKey, scopeLabel, tasks: [...new Map(tasks.map((task) => [task.id, { ...task, updatedAt: task.updatedAt ?? null }])).values()] };
 }
 
-export function billingPayload(tasks: TaskJournalItem[], target: BillingTarget, includeCompleted: boolean) {
+export function billingPayload(tasks: TaskJournalItem[], target: BillingTarget, includeCompleted: boolean, allowContractClassification = false) {
   const fixed = freezeBillingSelection(tasks, '', '').tasks;
   return {
     ids: fixed.map((task) => task.id), billingClassification: target, includeCompleted,
     // Never parse/format these strings: API concurrency tokens can contain seven fractional digits.
     expectedUpdatedAtById: Object.fromEntries(fixed.map((task) => [String(task.id), task.updatedAt ?? null])),
+    ...(allowContractClassification === true ? { allowContractClassification: true } : {}),
   };
 }
 
-export function billingPreview(task: TaskJournalItem, target: BillingTarget, includeCompleted: boolean): string {
+export function billingPreview(task: TaskJournalItem, target: BillingTarget, includeCompleted: boolean, contractMode: ContractTaskBillingMode = 'retainContractTasks'): string {
   if (task.billingInvoiceId != null) return BILLING_REASONS.invoiced;
   if (task.contractorPaymentId != null || task.contractorPaymentStatus) return BILLING_REASONS.contractorPaymentProtected;
   // Updating a completed result-triggered task also shifts delayed payout backfill, even before a payment exists.
   if (task.status === 'done' && task.contractorPaymentEnabled && task.contractorPaymentOnResult) return BILLING_REASONS.contractorPaymentProtected;
-  if (task.billingContractId != null || task.billingMode) return BILLING_REASONS.contractual;
+  if (task.billingContractId != null || task.billingMode) {
+    if (contractMode !== 'allowFutureClassification' || !Number.isSafeInteger(task.billingContractId)
+      || Number(task.billingContractId) <= 0 || !['Fixed', 'Actual'].includes(task.billingMode ?? '')) return BILLING_REASONS.contractual;
+    // Inactive zero defaults are not an obligation; nonzero/malformed saved configuration stays protected.
+    if (task.contractorPaymentEnabled || task.contractorPaymentOnResult
+      || (task.contractorPaymentAmount != null && task.contractorPaymentAmount !== 0)
+      || task.contractorPaymentDueDate != null
+      || (task.contractorPaymentResultDelayDays != null && task.contractorPaymentResultDelayDays !== 0)) return BILLING_REASONS.contractorPaymentProtected;
+  }
   if (task.status === 'cancelled') return BILLING_REASONS.cancelled;
   if (task.status === 'done' && !includeCompleted) return BILLING_REASONS.completedExcluded;
   if (!['new', 'inProgress', 'waiting', 'onApproval', 'approved', 'revision', 'overdueApproval', 'done'].includes(task.status)) return BILLING_REASONS.unsupportedStatus;

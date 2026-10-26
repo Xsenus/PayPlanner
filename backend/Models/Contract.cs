@@ -22,6 +22,9 @@ public class Contract : PayPlanner.Api.Services.Companies.IDocumentSeller
     /// <summary>Снимок реквизитов, сохранённый при первой выдаче документа договора.</summary>
     public string? SellerSnapshotJson { get; set; }
 
+    /// <summary>Правило новых документов; null сохраняет поведение старых записей.</summary>
+    public string? SellerSnapshotPolicy { get; set; }
+
     /// <summary>
     /// Номер договора.
     /// </summary>

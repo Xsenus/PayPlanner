@@ -64,6 +64,7 @@ public class BulkUpdateTaskJournalItemsRequest
     public string? Result { get; set; }
     public string? BillingClassification { get; set; }
     public bool IncludeCompleted { get; set; }
+    public bool AllowContractClassification { get; set; }
     public Dictionary<int, string?>? ExpectedUpdatedAtById { get; set; }
 }
 
@@ -81,6 +82,9 @@ public sealed class UpdateTaskBillingClassificationRequest
 {
     public string? Classification { get; set; }
     public int? BillingContractId { get; set; }
+    public bool HasExpectedUpdatedAt { get; set; }
+    public bool AllowContractClassification { get; set; }
+    public string? ExpectedUpdatedAt { get; set; }
 }
 
 public sealed class LinkTaskBillingInvoiceRequest

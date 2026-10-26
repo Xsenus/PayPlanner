@@ -1,10 +1,11 @@
 // @vitest-environment node
 import { spawn } from 'node:child_process';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { assertStageCanResume, parseArguments, pool, selectPendingShards, workerCount } from './run-backend-gate.mjs';
+import { assertStageCanResume, assertVstestEntryPoint, captureVstestEntryPoint, parseArguments, pool, selectPendingShards, workerCount } from './run-backend-gate.mjs';
 
 const gib = 1024 ** 3;
 const states = () => Array.from({ length: 4 }, (_, shard) => ({ shard, status: 'pending', exitCode: undefined as number | undefined, pid: undefined as number | undefined }));
@@ -207,5 +208,90 @@ describe('bounded shard worker pool', () => {
     const invoked: number[] = [];
     await expect(pool([0, 1], count, async (value: number) => { invoked.push(value); })).rejects.toThrow();
     expect(invoked).toEqual([]);
+  });
+});
+
+describe('discovery-bound SDK VSTest input', () => {
+  async function fixture(check: (value: { directory: string; summary: string; vstest: string }) => Promise<void>) {
+    const directory = await mkdtemp(join(tmpdir(), 'pp-gate-sdk-contract-'));
+    const sdk = join(directory, 'sdk', '9.0.319');
+    const summary = join(directory, 'test-plan.summary.json');
+    const vstest = join(sdk, 'vstest.console.dll');
+    try {
+      await mkdir(sdk, { recursive: true });
+      await writeFile(vstest, 'synthetic-sdk-entry-point');
+      await writeFile(summary, JSON.stringify({ VstestConsolePath: vstest, ExecutionProfile: 'bounded' }));
+      await check({ directory, summary, vstest });
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  }
+
+  it('binds the SDK chosen by discovery, including its exact summary and entry-point bytes', async () => {
+    await fixture(async ({ summary, vstest }) => {
+      const bound = captureVstestEntryPoint(summary);
+      expect(bound).toEqual({ path: vstest,
+        sha256: createHash('sha256').update('synthetic-sdk-entry-point').digest('hex').toUpperCase(),
+        summarySha256: createHash('sha256').update(await readFile(summary)).digest('hex').toUpperCase() });
+      expect(assertVstestEntryPoint(summary, bound)).toBe(vstest);
+    });
+  });
+
+  it.each(['missing', 'camelCase', 'relative', 'wrongName', 'notString'])('rejects an unusable discovery SDK contract (%s)', async kind => {
+    await fixture(async ({ directory, summary, vstest }) => {
+      const value = kind === 'missing' ? {} : kind === 'camelCase' ? { vstestConsolePath: vstest }
+        : { VstestConsolePath: kind === 'relative' ? 'sdk/vstest.console.dll' : kind === 'wrongName' ? join(directory, 'dotnet.exe') : 9 };
+      await writeFile(summary, JSON.stringify(value));
+      expect(() => captureVstestEntryPoint(summary)).toThrow(/build SDK VSTest entry point/);
+    });
+  });
+
+  it('refuses an old preparation without a recorded SDK binding instead of adopting current files', async () => {
+    await fixture(async ({ summary }) => {
+      expect(() => assertVstestEntryPoint(summary, undefined)).toThrow(/lack the bound SDK/);
+    });
+  });
+
+  it('refuses changed discovery metadata even when the chosen SDK path is unchanged', async () => {
+    await fixture(async ({ summary, vstest }) => {
+      const bound = captureVstestEntryPoint(summary);
+      await writeFile(summary, JSON.stringify({ VstestConsolePath: vstest, ExecutionProfile: 'changed' }));
+      expect(() => assertVstestEntryPoint(summary, bound)).toThrow(/input changed/);
+    });
+  });
+
+  it('refuses changed SDK entry-point bytes at the same path', async () => {
+    await fixture(async ({ summary, vstest }) => {
+      const bound = captureVstestEntryPoint(summary);
+      await writeFile(vstest, 'different-sdk-entry-point');
+      expect(() => assertVstestEntryPoint(summary, bound)).toThrow(/input changed/);
+    });
+  });
+
+  it('keeps a post-command drift invalidation after bytes are restored, preserving the actual passed native outcome', async () => {
+    await fixture(async ({ directory, summary, vstest }) => {
+      const bound = captureVstestEntryPoint(summary);
+      const value = { vstestEntryPoint: bound, qualified: false,
+        shards: states().map(item => ({ ...item, status: 'passed', exitCode: 0 })) };
+      await writeFile(vstest, 'mutated-while-native-was-running');
+      expect(() => assertVstestEntryPoint(summary, bound)).toThrow(/input changed/);
+      const stateFile = join(directory, 'state.json');
+      await writeFile(stateFile, JSON.stringify(value));
+      await writeFile(vstest, 'synthetic-sdk-entry-point');
+      const restored = JSON.parse(await readFile(stateFile, 'utf8'));
+      expect(restored.shards.map((item: { exitCode: number }) => item.exitCode)).toEqual([0, 0, 0, 0]);
+      expect(selectPendingShards(restored.shards)).toEqual([]);
+      expect(() => assertStageCanResume(restored)).toThrow(/invalidated by SDK input drift/);
+      expect(() => assertVstestEntryPoint(summary, restored.vstestEntryPoint)).toThrow(/invalidated by SDK input drift/);
+    });
+  });
+
+  it('refuses a redirected SDK path even when both entry-point files have the same bytes', async () => {
+    await fixture(async ({ directory, summary }) => {
+      const bound = captureVstestEntryPoint(summary);
+      const alternate = join(directory, 'sdk', '9.0.100', 'vstest.console.dll');
+      await mkdir(join(directory, 'sdk', '9.0.100'), { recursive: true });
+      await writeFile(alternate, 'synthetic-sdk-entry-point');
+      await writeFile(summary, JSON.stringify({ VstestConsolePath: alternate, ExecutionProfile: 'bounded' }));
+      expect(() => assertVstestEntryPoint(summary, bound)).toThrow(/input changed/);
+    });
   });
 });

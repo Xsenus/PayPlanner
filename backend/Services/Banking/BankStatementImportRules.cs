@@ -704,13 +704,9 @@ public static class BankStatementImportRules
             {
                 return matchingCandidates[0];
             }
-
-            var exactAmountCandidates = matchingCandidates
-                .Where(candidate => Math.Abs((candidate.OutstandingAmount - reservedByInvoice.GetValueOrDefault(candidate.InvoiceId)) - item.Amount) <= 0.009m)
-                .ToList();
-            if (exactAmountCandidates.Count == 1)
+            if (matchingCandidates.Count > 1)
             {
-                return exactAmountCandidates[0];
+                return null;
             }
         }
 

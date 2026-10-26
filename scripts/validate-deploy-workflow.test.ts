@@ -64,6 +64,26 @@ describe('parallel deploy workflow release contract', () => {
     expect(() => validateDeployWorkflow(replaceInJob('deploy', job => job.replace(before, after)))).toThrow();
   });
 
+  it.each([
+    ['format overlaps frontend', 'needs: [frontend]', 'needs: []'],
+    ['build overlaps format', 'needs: [backend-format]', 'needs: []'],
+    ['unbounded Node heap', '--max-old-space-size=1536', '--max-old-space-size=3072'],
+    ['different coordinator CPU budget', 'DOTNET_PROCESSOR_COUNT: "1"', 'DOTNET_PROCESSOR_COUNT: "2"'],
+    ['compiler server enabled', 'UseSharedCompilation: "false"', 'UseSharedCompilation: "true"'],
+    ['unreviewed compiler response file', 'scripts/compiler-serial.rsp', 'scripts/other.rsp'],
+    ['format managed cap omitted', '      DOTNET_GCHeapHardLimit: "180000000"\n', ''],
+    ['parallel unit invocation', 'run: npm run test:unit:serial', 'run: npm run test:ci'],
+    ['parallel restore', '--force --disable-parallel', '--force'],
+    ['build server reuse', '-m:1 -nr:false -p:UseSharedCompilation=false', '-m:1 -p:UseSharedCompilation=false'],
+    ["missing full Tests format", "dotnet format backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --verify-no-changes --no-restore --verbosity diagnostic", "echo tests-format-omitted"],
+    ["missing Migrations analyzer category", "dotnet format analyzers backend/PayPlanner.Api.Migrations/PayPlanner.Api.Migrations.csproj --verify-no-changes --no-restore --verbosity diagnostic", "dotnet format whitespace backend/PayPlanner.Api.Migrations/PayPlanner.Api.Migrations.csproj --verify-no-changes --no-restore --verbosity diagnostic"],
+    ["partial Migrations diagnostic filter", "dotnet format analyzers backend/PayPlanner.Api.Migrations/PayPlanner.Api.Migrations.csproj --verify-no-changes --no-restore --verbosity diagnostic", "dotnet format analyzers backend/PayPlanner.Api.Migrations/PayPlanner.Api.Migrations.csproj --verify-no-changes --no-restore --verbosity diagnostic --diagnostics IDE0005"],
+    ["narrow full API include", "dotnet format backend/PayPlanner.Api.csproj --verify-no-changes --no-restore --verbosity minimal", "dotnet format backend/PayPlanner.Api.csproj --verify-no-changes --no-restore --verbosity minimal --include backend/Program.cs"],
+    ["local workspace skip property", "  UseSharedCompilation: \"false\"", "  UseSharedCompilation: \"false\"\n  PayPlannerSkipMigrationsBuild: \"true\""],
+  ])('rejects a widened or overlapping resource profile: %s', (_name, before, after) => {
+    expect(() => validateDeployWorkflow(replaceOnce(before, after))).toThrow();
+  });
+
   it('rejects a new database server and parallel memory-heavy shards', () => {
     expect(() => validateDeployWorkflow(replaceInJob('backend-test', job => job.replace(
       '    steps:', '    services:\n      postgres:\n        image: postgres:17-alpine\n    steps:',
@@ -182,12 +202,12 @@ describe('parallel deploy workflow release contract', () => {
     ['pipe failure lost', '          set -euo pipefail\n          mkdir -p test-results\n', '          set -eu\n          mkdir -p test-results\n'],
     ['restored browser disabled', 'PAYPLANNER_TEST_RESTORED_BROWSER: "true"', 'PAYPLANNER_TEST_RESTORED_BROWSER: "false"'],
     ['mail enabled', 'Email__Enabled: "false"', 'Email__Enabled: "true"'],
-    ['non-strict restore', '--force -p:PayPlannerReleaseAudit=true', '--force'],
+    ['non-strict restore', '--force --disable-parallel -p:PayPlannerReleaseAudit=true', '--force'],
     ['format disabled', '--verify-no-changes --no-restore --verbosity minimal', '--no-restore --verbosity minimal'],
-    ['analyzers disabled', 'run: dotnet build backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-restore -c Release', 'run: dotnet build backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-restore -c Release -p:RunAnalyzers=false'],
-    ['wrong artifact revision', 'name: frontend-${{ github.sha }}', 'name: frontend-main'],
-    ['missing artifact tolerated', 'if-no-files-found: error', 'if-no-files-found: warn'],
-    ['cross-run download', '          artifact-ids: ${{ needs.backend.outputs.backend-artifact-id }}\n          path: deploy-artifacts', '          artifact-ids: ${{ needs.backend.outputs.backend-artifact-id }}\n          run-id: 123\n          path: deploy-artifacts'],
+    ['analyzers disabled', 'run: dotnet build backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-restore -c Release -m:1 -nr:false -p:UseSharedCompilation=false', 'run: dotnet build backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-restore -c Release -m:1 -nr:false -p:UseSharedCompilation=false -p:RunAnalyzers=false'],
+    ['wrong artifact revision context', 'ARTIFACT_NEEDS_JSON: ${{ toJSON(needs) }}', 'ARTIFACT_NEEDS_JSON: ${{ toJSON(needs) }}\n          GITHUB_SHA: main'],
+    ['missing artifact tolerated', '--kind frontend --source frontend.tar.gz --retention-days 3', '--kind frontend --source frontend.tar.gz --retention-days 3 || true'],
+    ['cross-run download', 'EXPECTED_ARTIFACT_ID: ${{ needs.backend.outputs.backend-artifact-id }}', 'EXPECTED_ARTIFACT_ID: ${{ needs.backend.outputs.backend-artifact-id }}\n          GITHUB_RUN_ID: 123'],
     ['conditional artifact upload', '      - name: Upload frontend build artifact\n', '      - name: Upload frontend build artifact\n        if: always()\n'],
     ['conditional readiness', '      - name: Check production deploy readiness\n', '      - name: Check production deploy readiness\n        if: false\n'],
     ['custom shell', '        run: npm run lint', '        shell: bash {0}\n        run: npm run lint'],
@@ -230,11 +250,11 @@ describe('parallel deploy workflow release contract', () => {
     ['union wrong root', '--results-root test-results', '--results-root other-results'],
     ['runtime missing manifest', 'tar -czf test-runtime.tar.gz test-plan.json ', 'tar -czf test-runtime.tar.gz '],
     ['runtime missing probe dependencies', ' backend/PayPlanner.Api.Tests/bin/Release/net9.0 tools/', ' backend/PayPlanner.Api.Tests/bin/Release/net9.0/PayPlanner.Api.Tests.dll tools/'],
-    ['wrong shard result directory', 'path: test-results\n', 'path: test-results/shard-0\n'],
+    ['wrong shard result directory', '--producer-job backend-test-0 --destination test-results --shard 0', '--producer-job backend-test-0 --destination test-results/shard-0 --shard 0'],
     ['precreated shard directory', 'mkdir -p test-results\n', 'mkdir -p test-results/shard-${{ matrix.shard }}\n'],
-    ['wrong shard artifact', 'name: qualified-backend-shard-3-${{ github.sha }}', 'name: qualified-backend-shard-2-${{ github.sha }}'],
-    ['wrong attempt diagnostics', 'name: backend-shard-${{ matrix.shard }}-${{ github.sha }}-${{ github.run_attempt }}', 'name: backend-shard-${{ matrix.shard }}-${{ github.sha }}-1'],
-    ['results only on success', '        if: always()\n        uses: actions/upload-artifact@v6', '        uses: actions/upload-artifact@v6'],
+    ['wrong shard artifact', '--producer-job backend-test-3 --destination test-results --shard 3', '--producer-job backend-test-2 --destination test-results --shard 3'],
+    ['wrong attempt diagnostics', '--kind shard-diagnostics --source test-results/ --retention-days 14', '--kind shard-diagnostics --source test-results/ --retention-days 14 --attempt 1'],
+    ['results only on success', '        if: always()\n        env:', '        env:'],
     ['test SDK drift', 'dotnet-version: ${{ needs.backend-build.outputs.sdk-version }}', 'dotnet-version: "8.0.x"'],
     ['restored native exit replaced', '--exit-code "$native_exit"', '--exit-code 0'],
     ['restored verifier omitted', ' verify-restored --manifest', ' help --manifest'],
@@ -243,7 +263,7 @@ describe('parallel deploy workflow release contract', () => {
     ['empty restored selection allowed', '<TreatNoTestsAsError>true</TreatNoTestsAsError>', '<TreatNoTestsAsError>false</TreatNoTestsAsError>'],
     ['restored method omitted', '|FullyQualifiedName~FullModelBackupRestoresReadableManagedGenerationsWithoutSource', ''],
     ['dedicated PostgreSQL replaced', 'secrets.PAYPLANNER_XSENUS_TEST_POSTGRES', 'secrets.PRODUCTION_POSTGRES'],
-    ['tool analyzers disabled', 'run: dotnet build tools/PayPlanner.TestShards/PayPlanner.TestShards.csproj --no-restore -c Release', 'run: dotnet build tools/PayPlanner.TestShards/PayPlanner.TestShards.csproj --no-restore -c Release -p:RunAnalyzers=false'],
+    ['tool analyzers disabled', 'run: dotnet build tools/PayPlanner.TestShards/PayPlanner.TestShards.csproj --no-restore -c Release -m:1 -nr:false -p:UseSharedCompilation=false', 'run: dotnet build tools/PayPlanner.TestShards/PayPlanner.TestShards.csproj --no-restore -c Release -m:1 -nr:false -p:UseSharedCompilation=false -p:RunAnalyzers=false'],
   ])('rejects incomplete or unbound coverage: %s', (_name, before, after) => {
     expect(() => validateDeployWorkflow(replaceOnce(before, after))).toThrow();
   });
@@ -257,29 +277,29 @@ describe('parallel deploy workflow release contract', () => {
   it.each([
     ['alias on failure', '        if: success()\n', '        if: always()\n'],
     ['alias without explicit success guard', '        if: success()\n', ''],
-    ['alias cannot replace prior success', '          overwrite: true\n', '          overwrite: false\n'],
-    ['alias missing manifest binding', '-${{ needs.backend-build.outputs.manifest-sha }}-${{ needs.backend-build.outputs.sdk-version }}', '-${{ needs.backend-build.outputs.sdk-version }}'],
-    ['alias missing SDK binding', '-${{ needs.backend-build.outputs.manifest-sha }}-${{ needs.backend-build.outputs.sdk-version }}', '-${{ needs.backend-build.outputs.manifest-sha }}'],
-    ['alias tied to current attempt', 'name: qualified-backend-shard-0-${{ github.sha }}', 'name: qualified-backend-shard-0-${{ github.sha }}-${{ github.run_attempt }}'],
-    ['diagnostics overwritten', '          name: backend-shard-${{ matrix.shard }}-${{ github.sha }}-${{ github.run_attempt }}\n', '          name: backend-shard-${{ matrix.shard }}-${{ github.sha }}-${{ github.run_attempt }}\n          overwrite: true\n'],
-    ['diagnostics history shortened', '          retention-days: 14\n', '          retention-days: 1\n'],
-    ['archive attempt omitted', 'name: test-runtime-${{ github.sha }}-${{ github.run_attempt }}', 'name: test-runtime-${{ github.sha }}'],
-    ['archive overwritten', '          name: frontend-${{ github.sha }}-${{ github.run_attempt }}\n', '          name: frontend-${{ github.sha }}-${{ github.run_attempt }}\n          overwrite: true\n'],
+    ['qualified object must remain immutable', '--kind qualified-shard --source test-results/ --retention-days 14', '--kind qualified-shard --source test-results/ --retention-days 14 --overwrite'],
+    ['alias missing manifest binding', 'EXPECTED_MANIFEST_SHA: ${{ needs.backend-build.outputs.manifest-sha }}', 'EXPECTED_MANIFEST_SHA: unbound'],
+    ['alias missing SDK binding', 'EXPECTED_SDK_VERSION: ${{ needs.backend-build.outputs.sdk-version }}', 'EXPECTED_SDK_VERSION: unbound'],
+    ['qualified ID replaced by current attempt label', 'shard_0_id: ${{ steps.qualified-upload.outputs.shard_0_id }}', 'shard_0_id: ${{ github.run_attempt }}'],
+    ['diagnostics overwritten', '--kind shard-diagnostics --source test-results/ --retention-days 14', '--kind shard-diagnostics --source test-results/ --retention-days 14 --overwrite'],
+    ['diagnostics retention class shortened', '--retention-days 14', '--retention-days 1'],
+    ['archive attempt overridden', 'EXPECTED_MANIFEST_SHA: ${{ steps.plan.outputs.manifest-sha }}', 'EXPECTED_MANIFEST_SHA: ${{ steps.plan.outputs.manifest-sha }}\n          GITHUB_RUN_ATTEMPT: 1'],
+    ['archive overwritten', '--kind frontend --source frontend.tar.gz --retention-days 3', '--kind frontend --source frontend.tar.gz --retention-days 3 --overwrite'],
     ['runtime ID not uploader output', 'runtime-artifact-id: ${{ steps.runtime-upload.outputs.artifact-id }}', 'runtime-artifact-id: ${{ github.run_id }}'],
     ['frontend ID not uploader output', 'frontend-artifact-id: ${{ steps.frontend-upload.outputs.artifact-id }}', 'frontend-artifact-id: 123'],
     ['backend ID not uploader output', 'backend-artifact-id: ${{ steps.backend-upload.outputs.artifact-id }}', 'backend-artifact-id: 123'],
     ['aggregate substitutes backend ID', 'backend-artifact-id: ${{ needs.backend-build.outputs.backend-artifact-id }}', 'backend-artifact-id: 123'],
-    ['runtime falls back to name', 'artifact-ids: ${{ needs.backend-build.outputs.runtime-artifact-id }}', 'name: test-runtime-${{ github.sha }}'],
-    ['runtime allows multiple IDs', 'artifact-ids: ${{ needs.backend-build.outputs.runtime-artifact-id }}', 'artifact-ids: ${{ needs.backend-build.outputs.runtime-artifact-id }},123'],
-    ['runtime allows empty ID', '[[ "$RUNTIME_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]', 'true'],
+    ['runtime falls back to name', 'EXPECTED_ARTIFACT_ID: ${{ needs.backend-build.outputs.runtime-artifact-id }}', 'EXPECTED_ARTIFACT_ID: test-runtime-${{ github.sha }}'],
+    ['runtime allows multiple IDs', 'EXPECTED_ARTIFACT_ID: ${{ needs.backend-build.outputs.runtime-artifact-id }}', 'EXPECTED_ARTIFACT_ID: ${{ needs.backend-build.outputs.runtime-artifact-id }},123'],
+    ['runtime allows empty ID', '[[ "$RUNTIME_ARTIFACT_ID" =~ ^xsenus-local-v1:[a-f0-9]{64}$ ]]', 'true'],
     ['runtime compares wrong SDK', 'test "$actual_sdk" = "$EXPECTED_SDK_VERSION"', 'test "$actual_sdk" = "9.0.100"'],
     ['SDK check only echoes expected label', 'actual_sdk="$(dotnet --version)"', 'actual_sdk="$EXPECTED_SDK_VERSION"'],
     ['SDK check hides command failure', 'actual_sdk="$(dotnet --version)"', 'actual_sdk="$(dotnet --version || true)"'],
-    ['deploy allows empty backend ID', '[[ "$BACKEND_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]', 'true'],
-    ['deploy allows empty frontend ID', '[[ "$FRONTEND_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]', 'true'],
+    ['deploy allows empty backend ID', '[[ "$BACKEND_ARTIFACT_ID" =~ ^xsenus-local-v1:[a-f0-9]{64}$ ]]', 'true'],
+    ['deploy allows empty frontend ID', '[[ "$FRONTEND_ARTIFACT_ID" =~ ^xsenus-local-v1:[a-f0-9]{64}$ ]]', 'true'],
     ['deploy accepts same archive twice', '[[ "$BACKEND_ARTIFACT_ID" != "$FRONTEND_ARTIFACT_ID" ]]', 'true'],
-    ['deploy ID bypasses backend qualification', 'artifact-ids: ${{ needs.backend.outputs.backend-artifact-id }}', 'artifact-ids: ${{ needs.backend-build.outputs.backend-artifact-id }}'],
-    ['download arbitrary cross-run ID', '          artifact-ids: ${{ needs.backend-build.outputs.runtime-artifact-id }}\n', '          artifact-ids: ${{ needs.backend-build.outputs.runtime-artifact-id }}\n          github-token: ${{ github.token }}\n'],
+    ['deploy ID bypasses backend qualification', 'EXPECTED_ARTIFACT_ID: ${{ needs.backend.outputs.backend-artifact-id }}', 'EXPECTED_ARTIFACT_ID: ${{ needs.backend-build.outputs.backend-artifact-id }}'],
+    ['download arbitrary cross-run ID', 'EXPECTED_ARTIFACT_ID: ${{ needs.backend-build.outputs.runtime-artifact-id }}', 'EXPECTED_ARTIFACT_ID: ${{ needs.backend-build.outputs.runtime-artifact-id }}\n          GITHUB_TOKEN: ${{ github.token }}'],
   ])('rejects unsafe rerun binding: %s', (_name, before, after) => {
     expect(() => validateDeployWorkflow(replaceOnce(before, after))).toThrow();
   });
@@ -303,37 +323,84 @@ describe('parallel deploy workflow release contract', () => {
     expect(() => validateDeployWorkflow(changed)).toThrow(/fallback/);
   });
 
-  it('keeps qualified shard keys stable for shard-only, browser-only and aggregate-only retries', () => {
+  it('forwards each qualified shard output independently for shard-only, browser-only and aggregate-only retries', () => {
     const jobs = parseWorkflow(workflow).jobs;
-    const upload = jobs['backend-test'].steps.find(step => step.name === 'Publish qualified shard alias').with.name;
-    const downloads = jobs.backend.steps.filter(step => step.with?.name?.startsWith('qualified-backend-shard-'));
-    const context = { 'github.sha': 'a'.repeat(40), 'needs.backend-build.outputs.manifest-sha': 'b'.repeat(64), 'needs.backend-build.outputs.sdk-version': '9.0.318' };
-    function evaluate(template: string, attempt: number, shard: number, changes: Record<string, string> = {}) {
-      const values: Record<string, string> = { ...context, ...changes, 'github.run_attempt': String(attempt), 'matrix.shard': String(shard) };
-      return template.replace(/\$\{\{ (.*?) \}\}/g, (_match, key) => values[key]);
-    }
+    const outputs = jobs['backend-test'].outputs;
+    const upload = jobs['backend-test'].steps.find(step => step.name === 'Publish qualified shard alias');
+    const downloads = jobs.backend.steps.filter(step => step.run?.includes(' get --kind qualified-shard '));
+    expect(Object.keys(outputs).sort()).toEqual(['shard_0_id', 'shard_1_id', 'shard_2_id', 'shard_3_id']);
+    expect(upload.if).toBe('success()');
+    expect(upload.env.EXPECTED_DIAGNOSTIC_ARTIFACT_ID).toBe('${{ steps.shard-diagnostics.outputs.artifact-id }}');
     expect(downloads.length).toBe(4);
     for (let index = 0; index < 4; index += 1) {
-      expect(evaluate(downloads[index].with.name, 2, index)).toBe(evaluate(upload, index === 1 ? 2 : 1, index));
-      expect(evaluate(downloads[index].with.name, 3, index)).toBe(evaluate(upload, 1, index));
+      expect(outputs[`shard_${index}_id`]).toBe(`\${{ steps.qualified-upload.outputs.shard_${index}_id }}`);
+      expect(downloads[index].env.EXPECTED_ARTIFACT_ID).toBe(`\${{ needs.backend-test.outputs.shard_${index}_id }}`);
+      expect(downloads[index].env.EXPECTED_MANIFEST_SHA).toBe('${{ needs.backend-build.outputs.manifest-sha }}');
+      expect(downloads[index].env.EXPECTED_SDK_VERSION).toBe('${{ needs.backend-build.outputs.sdk-version }}');
+      expect(downloads[index].env.EXPECTED_RUNTIME_ARTIFACT_ID).toBe('${{ needs.backend-build.outputs.runtime-artifact-id }}');
+      expect(downloads[index].run).toContain(`--producer-job backend-test-${index} --destination test-results --shard ${index} --merge-disjoint`);
     }
-    expect(evaluate(upload, 1, 0) === evaluate(upload, 2, 0, { 'needs.backend-build.outputs.manifest-sha': 'c'.repeat(64) })).toBe(false);
-    expect(evaluate(upload, 1, 0) === evaluate(upload, 2, 0, { 'needs.backend-build.outputs.sdk-version': '9.0.319' })).toBe(false);
-    expect(evaluate(upload, 1, 0) === evaluate(upload, 2, 0, { 'github.sha': 'd'.repeat(40) })).toBe(false);
+    expect(jobs.backend.outputs['manifest-sha']).toBe('${{ needs.backend-build.outputs.manifest-sha }}');
+    expect(jobs.backend.outputs['sdk-version']).toBe('${{ needs.backend-build.outputs.sdk-version }}');
   });
 
-  it('uses distinct immutable archive attempt names and exact producer IDs for rerun consumers', () => {
+  it('uses immutable content-addressed archive receipts and exact producer IDs for rerun consumers', () => {
     const jobs = parseWorkflow(workflow).jobs;
-    for (const [job, id] of [['frontend', 'frontend-upload'], ['backend-build', 'runtime-upload'], ['backend-build', 'backend-upload']]) {
+    for (const [job, id, kind, source] of [['frontend', 'frontend-upload', 'frontend', 'frontend.tar.gz'],
+      ['backend-build', 'runtime-upload', 'test-runtime', 'test-runtime.tar.gz'], ['backend-build', 'backend-upload', 'backend', 'backend.tar.gz']]) {
       const upload = jobs[job].steps.find(step => step.id === id);
-      expect(upload.with.name.includes('${{ github.sha }}-${{ github.run_attempt }}')).toBe(true);
-      expect(upload.with.name.replace('${{ github.run_attempt }}', '1') === upload.with.name.replace('${{ github.run_attempt }}', '2')).toBe(false);
-      expect(upload.with.overwrite).toBe(undefined);
+      expect(upload.run).toBe(`set -euo pipefail\nnode scripts/xsenus-artifact-store.mjs put --kind ${kind} --source ${source} --retention-days 3`);
+      expect(upload.with).toBe(undefined);
+      expect(upload.if).toBe(undefined);
+      expect(upload.env.ARTIFACT_NEEDS_JSON).toBe('${{ toJSON(needs) }}');
     }
     for (const id of ['backend-test', 'backend-browser', 'backend']) {
       const download = jobs[id].steps.find(step => step.name === 'Download compiled test runtime');
-      expect(download.with).toEqual({ 'artifact-ids': '${{ needs.backend-build.outputs.runtime-artifact-id }}', path: 'test-artifacts' });
+      expect(download.run).toBe('set -euo pipefail\nnode scripts/xsenus-artifact-store.mjs get --kind test-runtime --producer-job backend-build --destination test-artifacts');
+      expect(download.env.EXPECTED_ARTIFACT_ID).toBe('${{ needs.backend-build.outputs.runtime-artifact-id }}');
+      expect(download.env.EXPECTED_MANIFEST_SHA).toBe('${{ needs.backend-build.outputs.manifest-sha }}');
+      expect(download.env.EXPECTED_SDK_VERSION).toBe('${{ needs.backend-build.outputs.sdk-version }}');
     }
+  });
+  it.each(['frontend', 'backend-format', 'backend-build', 'backend-test', 'backend-browser', 'backend', 'deploy'])(
+    'requires ordinary private-store preflight before any gates in %s', id => {
+      expect(() => validateDeployWorkflow(replaceInJob(id, job => job.replace('node scripts/xsenus-artifact-store.mjs check', 'echo checked')))).toThrow(/store|gate/);
+    },
+  );
+
+  it.each([
+    ['production root is not probe root', "'D:\\PayPlannerCIArtifacts\\main-store'", "'D:\\PayPlannerCIArtifacts\\store'"],
+    ['qualified shard output cannot collide', 'shard_3_id: ${{ steps.qualified-upload.outputs.shard_3_id }}', 'shard_3_id: ${{ steps.qualified-upload.outputs.shard_2_id }}'],
+    ['native matrix identity is not forged', 'ARTIFACT_SHARD: ${{ matrix.shard }}', 'ARTIFACT_SHARD: ${{ matrix.shard }}\n          GITHUB_JOB: backend-test-0'],
+    ['diagnostic receipt is required', 'EXPECTED_DIAGNOSTIC_ARTIFACT_ID: ${{ steps.shard-diagnostics.outputs.artifact-id }}', 'EXPECTED_DIAGNOSTIC_ARTIFACT_ID: unverified'],
+    ['deploy manifest is forwarded', 'manifest-sha: ${{ needs.backend-build.outputs.manifest-sha }}', 'manifest-sha: fake'],
+    ['deploy SDK is forwarded', 'sdk-version: ${{ needs.backend-build.outputs.sdk-version }}', 'sdk-version: fake'],
+    ['digest canonicalization remains exact', '.ManifestSha256.toLowerCase()', '.ManifestSha256.slice(0, 8)'],
+    ['canonical producer digest output is required', '.ManifestSha256.toLowerCase()', '.ManifestSha256'],
+    ['no overlapping result overwrite', '--shard 3 --merge-disjoint', '--shard 3 --overwrite'],
+    ['all four shard outputs are consumed', 'needs.backend-test.outputs.shard_3_id', 'needs.backend-test.outputs.shard_2_id'],
+    ['frontend package merge is disjoint', '--producer-job frontend --destination deploy-artifacts --merge-disjoint', '--producer-job frontend --destination deploy-artifacts'],
+  ])('rejects local artifact protocol drift: %s', (_name, before, after) => {
+    expect(() => validateDeployWorkflow(replaceOnce(before, after))).toThrow();
+  });
+
+  it('resolves restored VSTest from the transported discovery summary through the existing SDK input library', () => {
+    const jobs = parseWorkflow(workflow).jobs;
+    const packaged = jobs['backend-build'].steps.find(step => step.run?.startsWith('tar -czf test-runtime.tar.gz'));
+    expect(packaged.run).toContain('test-plan.json test-plan.summary.json');
+    const restored = jobs['backend-browser'].steps.find(step => step.name === 'Verify restored CRM through HTTP and browser');
+    expect(restored.run).toContain("vstest_console=\"$(node --input-type=module --eval \"import { captureVstestEntryPoint } from './scripts/run-backend-gate.mjs'; process.stdout.write(captureVstestEntryPoint('test-plan.summary.json').path)\")\"");
+    expect(restored.run).toContain('dotnet exec "$vstest_console" backend/PayPlanner.Api.Tests/bin/Release/net9.0/PayPlanner.Api.Tests.dll');
+    expect(restored.run).not.toContain('dotnet vstest ');
+    expect(restored.run).toContain(' || native_exit=$?');
+    expect(restored.run).toContain(' verify-restored --manifest test-plan.json');
+  });
+  it.each([
+    ['SDK dispatch wrapper', 'dotnet exec "$vstest_console" backend/PayPlanner.Api.Tests/bin/Release/net9.0/PayPlanner.Api.Tests.dll', 'dotnet vstest backend/PayPlanner.Api.Tests/bin/Release/net9.0/PayPlanner.Api.Tests.dll'],
+    ['hardcoded SDK path', "vstest_console=\"$(node --input-type=module --eval \"import { captureVstestEntryPoint } from './scripts/run-backend-gate.mjs'; process.stdout.write(captureVstestEntryPoint('test-plan.summary.json').path)\")\"", 'vstest_console="C:/Program Files/dotnet/sdk/9.0.100/vstest.console.dll"'],
+    ['summary missing from transported runtime', 'test-plan.json test-plan.summary.json backend/PayPlanner.Api.Tests/bin/Release/net9.0', 'test-plan.json backend/PayPlanner.Api.Tests/bin/Release/net9.0'],
+  ])('rejects restored SDK entry-point drift: %s', (_name, before, after) => {
+    expect(() => validateDeployWorkflow(replaceOnce(before, after))).toThrow();
   });
 
 });

@@ -20,6 +20,7 @@ public class TaskJournalSettingsRequest
     public int? FinancialDocumentsResponsibleUserId { get; set; }
     public int ApprovalDueDays { get; set; } = 5;
     public string? TaskCardWindowMode { get; set; } = "legacy";
+    public string? ContractTaskBillingMode { get; set; }
     public string? ApprovalQuickActionMode { get; set; } = "completionButton";
     public bool CaseInactivityAutomationEnabled { get; set; } = true;
     public int CaseInactivityDays { get; set; } = 14;

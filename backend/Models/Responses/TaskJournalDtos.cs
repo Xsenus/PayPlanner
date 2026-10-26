@@ -350,6 +350,7 @@ public class TaskJournalSettingsDto
     public string FinancialDocumentsResponsibleUserName { get; set; } = string.Empty;
     public int ApprovalDueDays { get; set; } = 5;
     public string TaskCardWindowMode { get; set; } = "legacy";
+    public string ContractTaskBillingMode { get; set; } = "retainContractTasks";
     public string ApprovalQuickActionMode { get; set; } = "completionButton";
     public bool CaseInactivityAutomationEnabled { get; set; } = true;
     public int CaseInactivityDays { get; set; } = 14;

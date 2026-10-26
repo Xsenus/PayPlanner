@@ -13,6 +13,7 @@ import type { ContractBillingMode, ContractClient, ContractInput, ContractLegalE
 import { fromInputToApiDate, todayYMDInTimeZone } from '../../utils/dateUtils';
 import { TablePagination } from '../ui/TablePagination';
 import { CounterpartyPickerModal, type CounterpartyKind, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
+import { DocumentSellerPicker } from '../Documents/DocumentSellerPicker';
 
 interface ContractCreatePageProps {
   onBack: () => void;
@@ -81,6 +82,7 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
   const defaultDateRef = useRef(defaultDate);
   const [form, setForm] = useState<FormState>(() => createInitialForm(profileTimeZoneId));
   const [localError, setLocalError] = useState<string | null>(null);
+  const [sellerSelection, setSellerSelection] = useState<{ companyId: number | null; branchId: number | null }>({ companyId: null, branchId: null });
   const [numberManuallyEdited, setNumberManuallyEdited] = useState(false);
   const numberManuallyEditedRef = useRef(false);
   const [contractRules, setContractRules] = useState<ContractRulesSettingsDto>({
@@ -238,6 +240,8 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
     const payload: ContractInput = {
       number: form.number.trim(),
       title: form.title.trim() || undefined,
+      sellerCompanyId: sellerSelection.companyId,
+      sellerBranchId: sellerSelection.branchId,
       date: fromInputToApiDate(form.date) ?? form.date,
       startDate: form.startDate ? fromInputToApiDate(form.startDate) : undefined,
       billingMode: form.billingMode,
@@ -291,6 +295,10 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
         </div>
 
         <form onSubmit={handleSubmit} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-3 text-sm">
+            <DocumentSellerPicker kind="contract" documentId={0} draft canEdit={!submitting}
+              companyId={sellerSelection.companyId} branchId={sellerSelection.branchId} onChanged={setSellerSelection} />
+          </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-slate-700">Номер договора</span>

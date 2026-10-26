@@ -315,6 +315,7 @@ export interface TaskJournalBulkUpdatePayload {
   dueAt?: string;
   billingClassification?: 'billable' | 'internal';
   includeCompleted?: boolean;
+  allowContractClassification?: boolean;
   expectedUpdatedAtById?: Record<string, string | null>;
 }
 

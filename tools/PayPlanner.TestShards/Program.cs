@@ -128,6 +128,7 @@ internal static class Program
             CaseCount = plan.Cases.Length,
             MethodCount = plan.Cases.Select(row => row.FullyQualifiedName).Distinct(StringComparer.Ordinal).Count(),
             TimedMethods = plan.Timings?.Length ?? 0,
+            VstestConsolePath = Path.Combine(sdk, "vstest.console.dll"),
             ExecutionProfile = execution is null ? "legacy" : "bounded",
             LaneCounts = execution is null ? null : Enumerable.Range(0, plan.ShardCount).SelectMany(shard => ExecutionScheduling.Batches(plan, shard))
                 .GroupBy(batch => batch.Lane, StringComparer.Ordinal).ToDictionary(group => group.Key, group => group.Sum(batch => batch.Cases.Length)),
@@ -158,7 +159,7 @@ internal static class Program
         if (plan.Execution is not null)
         {
             ExecutionScheduling.RequireSerialXunit(Path.GetDirectoryName(ShardPlan.Resolve(manifest, plan.AssemblyPath))!);
-            return await BoundedTestRunner.RunAsync(plan, manifest, hash, shard, results, workers, suite);
+            return await BoundedTestRunner.RunAsync(plan, manifest, hash, shard, results, workers, suite, Path.Combine(await LocateSdkAsync(), "vstest.console.dll"));
         }
         ShardPlan.Require(suite == "all", "A partial suite requires a bounded execution manifest.");
         ShardPlan.Require(!Directory.Exists(results) && !File.Exists(results), "Preserve existing shard results.");
@@ -167,7 +168,7 @@ internal static class Program
         ShardPlan.WriteRunSettings(settings, plan, shard);
         var assembly = ShardPlan.Resolve(manifest, plan.AssemblyPath);
         var start = new ProcessStartInfo("dotnet") { UseShellExecute = false };
-        foreach (var argument in new[] { "vstest", assembly, "/Settings:" + settings, "/Logger:console;verbosity=normal", "/Logger:trx;LogFileName=results.trx", "/ResultsDirectory:" + results })
+        foreach (var argument in new[] { "exec", Path.Combine(await LocateSdkAsync(), "vstest.console.dll"), assembly, "/Settings:" + settings, "/Logger:console;verbosity=normal", "/Logger:trx;LogFileName=results.trx", "/ResultsDirectory:" + results })
             start.ArgumentList.Add(argument);
         start.Environment["Email__Enabled"] = "false";
         start.Environment["BackgroundServices__Enabled"] = "false";

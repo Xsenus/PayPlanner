@@ -12,7 +12,11 @@ public interface IDocumentSeller
     int? SellerCompanyId { get; set; }
     int? SellerBranchId { get; set; }
     string? SellerSnapshotJson { get; set; }
+    string? SellerSnapshotPolicy { get; set; }
 }
+
+public sealed record SellerSnapshotMetadata(DateTime? FrozenAtUtc, string? FreezeReason, bool LegacyImages,
+    string? CompanyName = null, string? BranchName = null);
 
 /// <summary>
 /// Собирает «виртуальное юрлицо» продавца из компании и выбранного подразделения, чтобы существующие
@@ -47,7 +51,10 @@ public static class SellerLegalEntityComposer
         int? LogoVersionId = null,
         int? SealVersionId = null,
         int? SignatureVersionId = null,
-        bool? ImagesFrozen = null);
+        bool? ImagesFrozen = null,
+        DateTime? FrozenAtUtc = null,
+        string? FreezeReason = null,
+        string? BranchName = null);
 
     public static LegalEntity Compose(LegalEntity company, CompanyBranch? branch)
     {
@@ -106,15 +113,28 @@ public static class SellerLegalEntityComposer
         };
     }
 
-    public static string ToSnapshotJson(LegalEntity seller, int? logoVersionId = null, int? sealVersionId = null, int? signatureVersionId = null, bool imagesFrozen = false)
+    public static string ToSnapshotJson(LegalEntity seller, int? logoVersionId = null, int? sealVersionId = null, int? signatureVersionId = null, bool imagesFrozen = false,
+        DateTime? frozenAtUtc = null, string? freezeReason = null, string? branchName = null)
         => JsonSerializer.Serialize(new SellerSnapshotData(
             seller.Id, seller.ShortName, seller.FullName, seller.OrganizationForm, seller.Inn, seller.Kpp,
             seller.Ogrn, seller.Okpo, seller.Okved, seller.TaxSystem, seller.VatWithoutVat,
             seller.Address, seller.Phone, seller.Email, seller.Director, seller.DocumentDirectorJson,
             seller.BankAccountsJson, seller.TreasuryBankName,
             seller.TreasuryBankBik, seller.TreasuryAccountNumber, seller.TreasuryCorrAccountNumber,
-            logoVersionId, sealVersionId, signatureVersionId, imagesFrozen ? true : null),
+            logoVersionId, sealVersionId, signatureVersionId, imagesFrozen ? true : null, frozenAtUtc, freezeReason, branchName),
             new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+
+    public static SellerSnapshotMetadata? ReadMetadata(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            var data = JsonSerializer.Deserialize<SellerSnapshotData>(json);
+            return data is null ? null : new SellerSnapshotMetadata(data.FrozenAtUtc, data.FreezeReason, data.ImagesFrozen != true,
+                data.ShortName, data.BranchName);
+        }
+        catch (JsonException) { return null; }
+    }
 
     /// <summary>Номера версий фирменных изображений из снимка (пусто у старых снимков, где изображения берутся из профиля).</summary>
     public static IReadOnlyList<int> ReadImageVersionIds(string? json)
@@ -210,6 +230,11 @@ public sealed class SellerSnapshotTooLargeException(int length, int limit) : Exc
 
 public interface IDocumentSellerService
 {
+    Task<string> ReadCreationPolicyAsync(CancellationToken ct);
+
+    /// <summary>Вызывается только для нового документа в его атомарной транзакции, после проверки seller choice.</summary>
+    Task InitializeForCreationAsync(IDocumentSeller document, LegalEntity? defaultCompany, CancellationToken ct);
+
     /// <summary>Проверяет выбор продавца: компания собственная и активная, подразделение её и активное. <c>null</c> — всё в порядке.</summary>
     Task<string?> ValidateSelectionAsync(int? companyId, int? branchId, CancellationToken ct);
 
@@ -217,7 +242,10 @@ public interface IDocumentSellerService
     /// Возвращает продавца для печатной формы. Если у документа есть снимок — по нему; иначе по выбору документа
     /// (или компании по умолчанию). При <paramref name="freeze"/> снимок сохраняется в документ; вызывающий сохраняет изменения.
     /// </summary>
-    Task<LegalEntity?> ResolveAsync(IDocumentSeller document, LegalEntity? defaultCompany, bool freeze, CancellationToken ct);
+    Task<LegalEntity?> ResolveAsync(IDocumentSeller document, LegalEntity? defaultCompany, bool freeze, CancellationToken ct,
+        Func<CancellationToken, Task<bool>>? canStillRead = null);
+    Task UpdateSelectionAsync(IDocumentSeller document, int? companyId, int? branchId, CancellationToken ct,
+        Func<CancellationToken, Task<bool>> canStillEdit);
 }
 
 public sealed class DocumentSellerService : IDocumentSellerService
@@ -231,7 +259,40 @@ public sealed class DocumentSellerService : IDocumentSellerService
         _db = db;
     }
 
+    public async Task<string> ReadCreationPolicyAsync(CancellationToken ct)
+    {
+        var value = await _db.SystemSettings.AsNoTracking()
+            .Where(item => item.Key == DocumentSellerSnapshotPolicy.SettingKey)
+            .Select(item => item.Value).FirstOrDefaultAsync(ct);
+        return DocumentSellerSnapshotPolicy.Effective(value);
+    }
+
+    public async Task InitializeForCreationAsync(IDocumentSeller document, LegalEntity? defaultCompany, CancellationToken ct)
+    {
+        // Существующий snapshot имеет приоритет; его JSON/дата/версии не обновляются настройкой.
+        if (!string.IsNullOrWhiteSpace(document.SellerSnapshotJson)) return;
+        var policy = document.SellerSnapshotPolicy ?? await ReadCreationPolicyAsync(ct);
+        document.SellerSnapshotPolicy = DocumentSellerSnapshotPolicy.Effective(policy);
+        if (document.SellerSnapshotPolicy != DocumentSellerSnapshotPolicy.OnCreate)
+        {
+            if (await ValidateSelectionAsync(document.SellerCompanyId, document.SellerBranchId, ct) is { } error)
+                throw new SellerSelectionException(error);
+            return;
+        }
+        if (_db.Database.CurrentTransaction is null)
+            throw new InvalidOperationException("Создание документа со снимком требует общей транзакции.");
+        // New private records may have a reserved server ID before being inserted.
+        // Their creator owns the transaction; do not mistake that ID for a persisted root.
+        var seller = await DocumentSellerLease.RunAsync(_db,
+            lease => ResolveCoreAsync(document, defaultCompany, freeze: true, lease, ct, strictSelection: true), ct);
+        if (seller is null || string.IsNullOrWhiteSpace(document.SellerSnapshotJson))
+            throw new SellerSelectionException("Выберите доступную собственную компанию до создания документа.");
+    }
+
     public async Task<string?> ValidateSelectionAsync(int? companyId, int? branchId, CancellationToken ct)
+        => await ValidateSelectionCoreAsync(companyId, branchId, await LoadOwnCompanyIdsAsync(ct), ct);
+
+    private async Task<string?> ValidateSelectionCoreAsync(int? companyId, int? branchId, HashSet<int> ownIds, CancellationToken ct)
     {
         if (branchId.HasValue && !companyId.HasValue)
         {
@@ -243,7 +304,6 @@ public sealed class DocumentSellerService : IDocumentSellerService
             return null;
         }
 
-        var ownIds = await LoadOwnCompanyIdsAsync(ct);
         if (!ownIds.Contains(companyId.Value))
         {
             return "Продавцом можно выбрать только собственную компанию.";
@@ -284,13 +344,140 @@ public sealed class DocumentSellerService : IDocumentSellerService
         IDocumentSeller document,
         LegalEntity? defaultCompany,
         bool freeze,
-        CancellationToken ct)
+        CancellationToken ct,
+        Func<CancellationToken, Task<bool>>? canStillRead = null)
+    {
+        if (!freeze) return await ResolveCoreAsync(document, defaultCompany, false, null, ct);
+        var id = DocumentId(document);
+        if (id == 0)
+            return await DocumentSellerLease.RunAsync(_db,
+                lease => ResolveCoreAsync(document, defaultCompany, true, lease, ct), ct);
+
+        DocumentSellerLease.RequireCleanTracker(_db);
+        return await DocumentSellerLease.RunAsync(_db, async lease =>
+        {
+            var rows = await lease.LockDocumentAsync(document, ct);
+            if (canStillRead is not null && !await canStillRead(ct)) throw new SellerSnapshotConflictException();
+            lease.AdmitCleanTracker();
+            var current = new Act();
+            CopySnapshot(rows.Single(row => DocumentId(row) == id), current);
+            var winners = rows.Where(row => !string.IsNullOrWhiteSpace(row.SellerSnapshotJson)).ToArray();
+            var winner = winners.FirstOrDefault();
+            if (winner is not null)
+            {
+                if (winners.Any(row => row.SellerSnapshotJson != winner.SellerSnapshotJson
+                    || row.SellerCompanyId != winner.SellerCompanyId || row.SellerBranchId != winner.SellerBranchId))
+                    throw new SellerSnapshotConflictException();
+                CopySnapshot(winner, current);
+            }
+            var seller = await ResolveCoreAsync(current, defaultCompany, true, lease, ct);
+            if (!string.IsNullOrWhiteSpace(current.SellerSnapshotJson))
+            {
+                DocumentSellerLease.RequireCleanTracker(_db);
+                var tracked = TrackedSellers();
+                foreach (var row in rows)
+                {
+                    // Expense invoices keep their existing counterparty print semantics.
+                    if (row is Payment { Type: PaymentType.Expense }) continue;
+                    PersistSnapshotFields(row, current, tracked);
+                }
+                await _db.SaveChangesAsync(ct);
+            }
+            CopySnapshot(current, document);
+            return seller;
+        }, ct);
+    }
+
+    public async Task UpdateSelectionAsync(IDocumentSeller document, int? companyId, int? branchId, CancellationToken ct,
+        Func<CancellationToken, Task<bool>> canStillEdit)
+    {
+        DocumentSellerLease.RequireCleanTracker(_db);
+        await DocumentSellerLease.RunAsync(_db, async lease =>
+        {
+            var rows = await lease.LockDocumentAsync(document, ct);
+            if (!await canStillEdit(ct)) throw new SellerSnapshotConflictException();
+            if (rows.Any(row => !string.IsNullOrWhiteSpace(row.SellerSnapshotJson))) throw new SellerSnapshotConflictException();
+            lease.AdmitCleanTracker();
+            var registry = await OwnCompanyRegistry.ReadStateAsync(_db, ct);
+            if (await ValidateSelectionCoreAsync(companyId, branchId, registry.OwnIds(), ct) is { } error)
+                throw new SellerSelectionException(error);
+            if (companyId.HasValue)
+            {
+                await lease.LockRegistryAsync(ct);
+                if (registry != await OwnCompanyRegistry.ReadStateAsync(_db, ct)) throw new SellerSnapshotConflictException();
+                await lease.LockCompanyAsync(companyId.Value, branchId, ct);
+                if (registry != await OwnCompanyRegistry.ReadStateAsync(_db, ct)
+                    || await ValidateSelectionCoreAsync(companyId, branchId, registry.OwnIds(), ct) is not null)
+                    throw new SellerSnapshotConflictException();
+            }
+            DocumentSellerLease.RequireCleanTracker(_db);
+            var tracked = TrackedSellers();
+            foreach (var row in rows)
+            {
+                var selection = new Act
+                {
+                    SellerCompanyId = companyId,
+                    SellerBranchId = companyId.HasValue ? branchId : null,
+                    SellerSnapshotPolicy = row.SellerSnapshotPolicy
+                };
+                PersistSnapshotFields(row, selection, tracked);
+            }
+            await _db.SaveChangesAsync(ct);
+            document.SellerCompanyId = companyId;
+            document.SellerBranchId = companyId.HasValue ? branchId : null;
+            return true;
+        }, ct);
+    }
+
+    private static int DocumentId(IDocumentSeller document) => document switch
+    {
+        Payment payment => payment.Id,
+        Act act => act.Id,
+        Contract contract => contract.Id,
+        _ => throw new NotSupportedException("Неизвестный документ продавца."),
+    };
+
+    private static void CopySnapshot(IDocumentSeller source, IDocumentSeller target)
+    {
+        target.SellerCompanyId = source.SellerCompanyId;
+        target.SellerBranchId = source.SellerBranchId;
+        target.SellerSnapshotJson = source.SellerSnapshotJson;
+        target.SellerSnapshotPolicy = source.SellerSnapshotPolicy;
+    }
+
+    private Dictionary<(Type Type, int Id), object> TrackedSellers()
+        => _db.ChangeTracker.Entries().Where(entry => entry.Entity is IDocumentSeller)
+            .ToDictionary(entry => (entry.Entity.GetType(), DocumentId((IDocumentSeller)entry.Entity)), entry => entry.Entity);
+
+    private void PersistSnapshotFields(IDocumentSeller persisted, IDocumentSeller value, Dictionary<(Type Type, int Id), object> tracked)
+    {
+        var key = (persisted.GetType(), DocumentId(persisted));
+        if (!tracked.TryGetValue(key, out var entity)) tracked.Add(key, entity = persisted);
+        var entry = _db.Entry(entity);
+        if (entry.State == EntityState.Detached) entry.State = EntityState.Unchanged;
+        Set(nameof(IDocumentSeller.SellerCompanyId), persisted.SellerCompanyId, value.SellerCompanyId);
+        Set(nameof(IDocumentSeller.SellerBranchId), persisted.SellerBranchId, value.SellerBranchId);
+        Set(nameof(IDocumentSeller.SellerSnapshotJson), persisted.SellerSnapshotJson, value.SellerSnapshotJson);
+        Set(nameof(IDocumentSeller.SellerSnapshotPolicy), persisted.SellerSnapshotPolicy, value.SellerSnapshotPolicy);
+
+        void Set(string name, object? before, object? after)
+        {
+            var property = entry.Property(name);
+            property.OriginalValue = before;
+            property.CurrentValue = after;
+            property.IsModified = !Equals(before, after);
+        }
+    }
+
+    private async Task<LegalEntity?> ResolveCoreAsync(IDocumentSeller document, LegalEntity? defaultCompany, bool freeze,
+        DocumentSellerLease? lease, CancellationToken ct, bool strictSelection = false)
     {
         var companyId = document.SellerCompanyId ?? defaultCompany?.Id;
 
         if (!string.IsNullOrWhiteSpace(document.SellerSnapshotJson))
         {
-            var live = companyId.HasValue ? await LoadCompanyAsync(companyId.Value, defaultCompany, ct) : null;
+            var metadata = SellerLegalEntityComposer.ReadMetadata(document.SellerSnapshotJson);
+            var live = metadata?.LegacyImages == true && companyId.HasValue ? await LoadCompanyAsync(companyId.Value, defaultCompany, ct) : null;
             var versionIds = SellerLegalEntityComposer.ReadImageVersionIds(document.SellerSnapshotJson);
             var versionImages = versionIds.Count == 0
                 ? null
@@ -302,54 +489,71 @@ public sealed class DocumentSellerService : IDocumentSellerService
             {
                 return fromSnapshot;
             }
+            throw new SellerSelectionException("Сохранённые реквизиты документа повреждены. Автоматическая замена текущим профилем недоступна.");
         }
 
-        if (!companyId.HasValue)
-        {
-            return defaultCompany;
-        }
-
-        // Выбор мог устареть после сохранения: компанию убрали из собственных, архивировали, подразделение закрыли.
-        // Такой выбор не применяется и не фиксируется в документе — берётся компания по умолчанию.
-        var selectionIsUsable = !document.SellerCompanyId.HasValue
-            || await ValidateSelectionAsync(document.SellerCompanyId, document.SellerBranchId, ct) is null;
-        if (!selectionIsUsable)
-        {
-            if (defaultCompany is null)
-            {
-                return null;
-            }
-
-            companyId = defaultCompany.Id;
-        }
-
-        var company = await LoadCompanyAsync(companyId.Value, defaultCompany, ct);
-        if (company is null)
-        {
-            return defaultCompany;
-        }
-
+        LegalEntity? company;
         CompanyBranch? branch = null;
-        if (selectionIsUsable && document.SellerBranchId.HasValue)
+        if (freeze && lease is not null)
         {
-            branch = await _db.CompanyBranches
-                .AsNoTracking()
-                .FirstOrDefaultAsync(b => b.Id == document.SellerBranchId.Value && b.LegalEntityId == company.Id, ct);
+            var registry = await OwnCompanyRegistry.ReadStateAsync(_db, ct);
+            var selected = await SelectForFreezeAsync(document, registry, strictSelection, ct);
+            if (!selected.CompanyId.HasValue) return null;
+            // Never lease an arbitrary unavailable ID. Determine the one admitted
+            // target from metadata first, then require that same decision after locks.
+            await lease.LockRegistryAsync(ct);
+            if (registry != await OwnCompanyRegistry.ReadStateAsync(_db, ct)) throw new SellerSnapshotConflictException();
+            await lease.LockCompanyAsync(selected.CompanyId.Value, selected.BranchId, ct);
+            var freshRegistry = await OwnCompanyRegistry.ReadStateAsync(_db, ct);
+            if (registry != freshRegistry)
+                throw new SellerSnapshotConflictException();
+            FreezeSelection freshSelection;
+            try { freshSelection = await SelectForFreezeAsync(document, freshRegistry, false, ct); }
+            catch (SellerSelectionException) { throw new SellerSnapshotConflictException(); }
+            if (selected != freshSelection) throw new SellerSnapshotConflictException();
+            company = await _db.LegalEntities.AsNoTracking().Include(item => item.Addresses)
+                .SingleOrDefaultAsync(item => item.Id == selected.CompanyId, ct);
+            if (company is null) throw new SellerSnapshotConflictException();
+            if (selected.BranchId.HasValue)
+                branch = await _db.CompanyBranches.AsNoTracking()
+                    .SingleOrDefaultAsync(item => item.Id == selected.BranchId && item.LegalEntityId == company.Id, ct)
+                    ?? throw new SellerSnapshotConflictException();
+        }
+        else
+        {
+            if (!companyId.HasValue) return defaultCompany;
+            // Historical preview fallback is unchanged and never writes a snapshot.
+            var usable = !document.SellerCompanyId.HasValue || await ValidateSelectionAsync(document.SellerCompanyId, document.SellerBranchId, ct) is null;
+            if (!usable) companyId = defaultCompany?.Id;
+            if (!companyId.HasValue) return null;
+            company = await LoadCompanyAsync(companyId.Value, defaultCompany, ct);
+            if (company is null) return defaultCompany;
+            if (usable && document.SellerBranchId.HasValue)
+                branch = await _db.CompanyBranches.AsNoTracking()
+                    .FirstOrDefaultAsync(item => item.Id == document.SellerBranchId && item.LegalEntityId == company.Id, ct);
         }
 
         var composed = SellerLegalEntityComposer.Compose(company, branch);
         if (freeze)
         {
-            // Текст ограничен колонкой, а изображения лежат в неизменяемых версиях и в JSON попадают только номерами.
+            if (!_db.Database.IsSqlite() && !_db.Database.IsNpgsql())
+                throw new NotSupportedException("Снимки продавца поддерживаются только SQLite и PostgreSQL.");
+            // Не SaveChanges: чужие Added/Modified/Deleted entries остаются только в памяти вызывающего контекста.
+            // Если транзакция уже есть, версии и документ commit/rollback вместе с ней.
+            await using var versionTransaction = _db.Database.CurrentTransaction is null
+                ? await _db.Database.BeginTransactionAsync(ct) : null;
             var logo = await EnsureImageVersionAsync(company.Id, CompanyBrandImageKinds.Logo, composed.LogoDataUrl, ct);
             var seal = await EnsureImageVersionAsync(company.Id, CompanyBrandImageKinds.Seal, composed.SealDataUrl, ct);
             var signature = await EnsureImageVersionAsync(company.Id, CompanyBrandImageKinds.Signature, composed.DirectorSignatureDataUrl, ct);
-            var snapshot = SellerLegalEntityComposer.ToSnapshotJson(composed, logo, seal, signature, imagesFrozen: true);
+            var snapshot = SellerLegalEntityComposer.ToSnapshotJson(composed, logo, seal, signature, imagesFrozen: true,
+                frozenAtUtc: DateTime.UtcNow, freezeReason: DocumentSellerSnapshotPolicy.Effective(document.SellerSnapshotPolicy), branchName: branch?.Name);
             if (snapshot.Length > MaxSnapshotLength)
             {
                 // Молча оставить документ «живым» нельзя: выданный файл потеряет защиту от правок профиля.
                 throw new SellerSnapshotTooLargeException(snapshot.Length, MaxSnapshotLength);
             }
+
+            if (versionTransaction is not null) await versionTransaction.CommitAsync(ct);
 
             document.SellerCompanyId = company.Id;
             document.SellerBranchId = branch?.Id;
@@ -357,6 +561,23 @@ public sealed class DocumentSellerService : IDocumentSellerService
         }
 
         return composed;
+    }
+
+    private sealed record FreezeSelection(int? CompanyId, int? BranchId, string? OriginalSelectionError);
+
+    private async Task<FreezeSelection> SelectForFreezeAsync(IDocumentSeller document, OwnCompanyRegistry.State registry,
+        bool strictSelection, CancellationToken ct)
+    {
+        var ownIds = registry.OwnIds();
+        var error = await ValidateSelectionCoreAsync(document.SellerCompanyId, document.SellerBranchId, ownIds, ct);
+        if (strictSelection && error is not null) throw new SellerSelectionException(error);
+        if (error is null && document.SellerCompanyId.HasValue)
+            return new(document.SellerCompanyId, document.SellerBranchId, null);
+        var defaultId = registry.SelectedDefaultId();
+        if (defaultId is not > 0) return new(null, null, error);
+        if (await ValidateSelectionCoreAsync(defaultId, null, ownIds, ct) is { } defaultError)
+            throw new SellerSelectionException(defaultError);
+        return new(defaultId, null, error);
     }
 
     /// <summary>
@@ -371,30 +592,7 @@ public sealed class DocumentSellerService : IDocumentSellerService
         }
 
         var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(dataUrl)));
-        var existing = await _db.CompanyBrandImageVersions.AsNoTracking()
-            .Where(item => item.LegalEntityId == companyId && item.Kind == kind && item.Sha256 == hash)
-            .Select(item => (int?)item.Id)
-            .FirstOrDefaultAsync(ct);
-        if (existing.HasValue)
-        {
-            return existing;
-        }
-
-        var version = new CompanyBrandImageVersion { LegalEntityId = companyId, Kind = kind, Sha256 = hash, DataUrl = dataUrl };
-        _db.CompanyBrandImageVersions.Add(version);
-        try
-        {
-            await _db.SaveChangesAsync(ct);
-            return version.Id;
-        }
-        catch (DbUpdateException)
-        {
-            _db.Entry(version).State = EntityState.Detached;
-            return await _db.CompanyBrandImageVersions.AsNoTracking()
-                .Where(item => item.LegalEntityId == companyId && item.Kind == kind && item.Sha256 == hash)
-                .Select(item => (int?)item.Id)
-                .FirstAsync(ct);
-        }
+        return await CompanyBrandImageVersionStore.GetOrCreateAsync(_db, companyId, kind, hash, dataUrl, ct);
     }
 
     private async Task<LegalEntity?> LoadCompanyAsync(int id, LegalEntity? defaultCompany, CancellationToken ct)

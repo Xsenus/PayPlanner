@@ -18,7 +18,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  DOTNET_PROCESSOR_COUNT: "2"
+  PAYPLANNER_CI_ARTIFACT_ROOT: 'D:\PayPlannerCIArtifacts\main-store'
+  DOTNET_PROCESSOR_COUNT: "1"
+  NODE_OPTIONS: "--max-old-space-size=1536"
+  UseSharedCompilation: "false"
   DOTNET_gcServer: "0"
   DOTNET_GCConserveMemory: "9"
   BE_CSPROJ: backend/PayPlanner.Api.csproj
@@ -54,6 +57,11 @@ jobs:
           node-version: "22"
           cache: "npm"
           cache-dependency-path: package-lock.json
+
+      - name: Check private local artifact store before gates
+        run: |
+          set -euo pipefail
+          node scripts/xsenus-artifact-store.mjs check
 
       - name: Verify trusted Windows frontend host
         run: node scripts/verify-xsenus-runner.mjs build
@@ -95,7 +103,7 @@ jobs:
         run: npm audit --audit-level=moderate
 
       - name: Test FE guard and unit
-        run: npm run test:ci
+        run: npm run test:unit:serial
 
       - name: Install Chromium for frontend integration
         run: npx playwright install chromium
@@ -124,15 +132,16 @@ jobs:
 
       - name: Upload frontend build artifact
         id: frontend-upload
-        uses: actions/upload-artifact@v6
-        with:
-          name: frontend-${{ github.sha }}-${{ github.run_attempt }}
-          path: frontend.tar.gz
-          if-no-files-found: error
-          retention-days: 3
-          compression-level: 0
+        env:
+          ARTIFACT_NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          node scripts/xsenus-artifact-store.mjs put --kind frontend --source frontend.tar.gz --retention-days 3
 
   backend-format:
+    needs: [frontend]
+    env:
+      DOTNET_GCHeapHardLimit: "180000000"
     runs-on: [self-hosted, Windows, X64, payplanner-xsenus]
     timeout-minutes: 30
     defaults:
@@ -148,6 +157,11 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: "22"
+
+      - name: Check private local artifact store before gates
+        run: |
+          set -euo pipefail
+          node scripts/xsenus-artifact-store.mjs check
 
       - name: Prepare Windows .NET installer
         env:
@@ -167,12 +181,43 @@ jobs:
           restore-keys: ${{ runner.os }}-nuget-v1-
 
       - name: Restore backend
-        run: dotnet restore "${{ env.BE_SLN }}" --force -p:PayPlannerReleaseAudit=true
+        run: dotnet restore "${{ env.BE_SLN }}" --force --disable-parallel -p:PayPlannerReleaseAudit=true
 
-      - name: Verify backend formatting
-        run: dotnet format "${{ env.BE_SLN }}" --verify-no-changes --no-restore --verbosity minimal
+      - name: Verify full API semantic formatting
+        run: dotnet format backend/PayPlanner.Api.csproj --verify-no-changes --no-restore --verbosity minimal
+
+      - name: Verify all Migrations whitespace formatting
+        env:
+          DOTNET_GCHeapHardLimit: "200000000"
+          CompilerResponseFile: ${{ github.workspace }}/scripts/compiler-serial.rsp
+        run: dotnet format whitespace backend/PayPlanner.Api.Migrations/PayPlanner.Api.Migrations.csproj --verify-no-changes --no-restore --verbosity diagnostic
+
+      - name: Verify all Migrations style formatting
+        env:
+          DOTNET_GCHeapHardLimit: "200000000"
+          CompilerResponseFile: ${{ github.workspace }}/scripts/compiler-serial.rsp
+        run: dotnet format style backend/PayPlanner.Api.Migrations/PayPlanner.Api.Migrations.csproj --verify-no-changes --no-restore --verbosity diagnostic
+
+      - name: Verify all Migrations analyzer formatting
+        env:
+          DOTNET_GCHeapHardLimit: "200000000"
+          CompilerResponseFile: ${{ github.workspace }}/scripts/compiler-serial.rsp
+        run: dotnet format analyzers backend/PayPlanner.Api.Migrations/PayPlanner.Api.Migrations.csproj --verify-no-changes --no-restore --verbosity diagnostic
+
+      - name: Verify full test shard tool semantic formatting
+        run: dotnet format tools/PayPlanner.TestShards/PayPlanner.TestShards.csproj --verify-no-changes --no-restore --verbosity diagnostic
+
+      - name: Verify full storage probe semantic formatting
+        run: dotnet format tests/PayPlanner.StorageStageWriterProbe/PayPlanner.StorageStageWriterProbe.csproj --verify-no-changes --no-restore --verbosity diagnostic
+
+      - name: Verify full Tests semantic formatting
+        run: dotnet format backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --verify-no-changes --no-restore --verbosity diagnostic
 
   backend-build:
+    needs: [backend-format]
+    env:
+      DOTNET_GCHeapHardLimit: "200000000"
+      CompilerResponseFile: ${{ github.workspace }}/scripts/compiler-serial.rsp
     runs-on: [self-hosted, Windows, X64, payplanner-xsenus]
     timeout-minutes: 30
     outputs:
@@ -193,6 +238,11 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: "22"
+
+      - name: Check private local artifact store before gates
+        run: |
+          set -euo pipefail
+          node scripts/xsenus-artifact-store.mjs check
 
       - name: Prepare Windows .NET installer
         env:
@@ -215,16 +265,16 @@ jobs:
           restore-keys: ${{ runner.os }}-nuget-v1-
 
       - name: Restore backend
-        run: dotnet restore "${{ env.BE_SLN }}" --force -p:PayPlannerReleaseAudit=true
+        run: dotnet restore "${{ env.BE_SLN }}" --force --disable-parallel -p:PayPlannerReleaseAudit=true
 
       - name: Verify reference assembly cache contracts
         run: npm run audit:reference-cache
 
       - name: Build backend with analyzers
-        run: dotnet build backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-restore -c Release
+        run: dotnet build backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-restore -c Release -m:1 -nr:false -p:UseSharedCompilation=false
 
       - name: Build test shard tool with analyzers
-        run: dotnet build tools/PayPlanner.TestShards/PayPlanner.TestShards.csproj --no-restore -c Release
+        run: dotnet build tools/PayPlanner.TestShards/PayPlanner.TestShards.csproj --no-restore -c Release -m:1 -nr:false -p:UseSharedCompilation=false
 
       - name: Restore backend timing estimates
         uses: actions/cache/restore@v5
@@ -242,7 +292,7 @@ jobs:
         run: |
           set -euo pipefail
           dotnet tools/PayPlanner.TestShards/bin/Release/net9.0/PayPlanner.TestShards.dll discover --assembly backend/PayPlanner.Api.Tests/bin/Release/net9.0/PayPlanner.Api.Tests.dll --manifest test-plan.json --revision "${{ github.sha }}" --shards 4 --execution-profile bounded
-          printf 'manifest-sha=%s\n' "$(node -p "require('./test-plan.summary.json').ManifestSha256")" >> "$GITHUB_OUTPUT"
+          printf 'manifest-sha=%s\n' "$(node -p "require('./test-plan.summary.json').ManifestSha256.toLowerCase()")" >> "$GITHUB_OUTPUT"
           printf 'sdk-version=%s\n' "$(dotnet --version)" >> "$GITHUB_OUTPUT"
 
       - name: Pack compiled test runtime
@@ -250,13 +300,13 @@ jobs:
 
       - name: Upload compiled test runtime
         id: runtime-upload
-        uses: actions/upload-artifact@v6
-        with:
-          name: test-runtime-${{ github.sha }}-${{ github.run_attempt }}
-          path: test-runtime.tar.gz
-          if-no-files-found: error
-          retention-days: 3
-          compression-level: 0
+        env:
+          ARTIFACT_NEEDS_JSON: ${{ toJSON(needs) }}
+          EXPECTED_MANIFEST_SHA: ${{ steps.plan.outputs.manifest-sha }}
+          EXPECTED_SDK_VERSION: ${{ steps.plan.outputs.sdk-version }}
+        run: |
+          set -euo pipefail
+          node scripts/xsenus-artifact-store.mjs put --kind test-runtime --source test-runtime.tar.gz --retention-days 3
 
       - name: Publish backend
         run: dotnet publish "${{ env.BE_CSPROJ }}" -c Release --no-build --no-restore -o "${{ env.OUT_DIR }}/be"
@@ -269,15 +319,17 @@ jobs:
 
       - name: Upload backend build artifact
         id: backend-upload
-        uses: actions/upload-artifact@v6
-        with:
-          name: backend-${{ github.sha }}-${{ github.run_attempt }}
-          path: backend.tar.gz
-          if-no-files-found: error
-          retention-days: 3
-          compression-level: 0
+        env:
+          ARTIFACT_NEEDS_JSON: ${{ toJSON(needs) }}
+          EXPECTED_MANIFEST_SHA: ${{ steps.plan.outputs.manifest-sha }}
+          EXPECTED_SDK_VERSION: ${{ steps.plan.outputs.sdk-version }}
+        run: |
+          set -euo pipefail
+          node scripts/xsenus-artifact-store.mjs put --kind backend --source backend.tar.gz --retention-days 3
 
   backend-test:
+    env:
+      DOTNET_GCHeapHardLimit: "C0000000"
     # Do not spend four runners on integration tests when a preflight gate fails.
     needs: [backend-build, backend-format, frontend]
     runs-on: [self-hosted, Windows, X64, payplanner-xsenus]
@@ -290,6 +342,11 @@ jobs:
     defaults:
       run:
         shell: bash
+    outputs:
+      shard_0_id: ${{ steps.qualified-upload.outputs.shard_0_id }}
+      shard_1_id: ${{ steps.qualified-upload.outputs.shard_1_id }}
+      shard_2_id: ${{ steps.qualified-upload.outputs.shard_2_id }}
+      shard_3_id: ${{ steps.qualified-upload.outputs.shard_3_id }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -302,6 +359,13 @@ jobs:
           node-version: "22"
           cache: "npm"
           cache-dependency-path: package-lock.json
+
+      - name: Check private local artifact store before gates
+        env:
+          ARTIFACT_SHARD: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          node scripts/xsenus-artifact-store.mjs check
 
       - name: Prepare Windows .NET installer
         env:
@@ -338,13 +402,18 @@ jobs:
           set -euo pipefail
           actual_sdk="$(dotnet --version)"
           test "$actual_sdk" = "$EXPECTED_SDK_VERSION"
-          [[ "$RUNTIME_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$RUNTIME_ARTIFACT_ID" =~ ^xsenus-local-v1:[a-f0-9]{64}$ ]]
 
       - name: Download compiled test runtime
-        uses: actions/download-artifact@v7
-        with:
-          artifact-ids: ${{ needs.backend-build.outputs.runtime-artifact-id }}
-          path: test-artifacts
+        env:
+          ARTIFACT_NEEDS_JSON: ${{ toJSON(needs) }}
+          EXPECTED_ARTIFACT_ID: ${{ needs.backend-build.outputs.runtime-artifact-id }}
+          EXPECTED_MANIFEST_SHA: ${{ needs.backend-build.outputs.manifest-sha }}
+          EXPECTED_SDK_VERSION: ${{ needs.backend-build.outputs.sdk-version }}
+          ARTIFACT_SHARD: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          node scripts/xsenus-artifact-store.mjs get --kind test-runtime --producer-job backend-build --destination test-artifacts
 
       - name: Unpack compiled test runtime
         run: tar -xzf test-artifacts/test-runtime.tar.gz
@@ -363,25 +432,35 @@ jobs:
           dotnet tools/PayPlanner.TestShards/bin/Release/net9.0/PayPlanner.TestShards.dll run --manifest test-plan.json --manifest-sha "$EXPECTED_MANIFEST_SHA" --shard ${{ matrix.shard }} --results test-results/shard-${{ matrix.shard }} --workers auto --suite all 2>&1 | tee test-results/shard-${{ matrix.shard }}.log
 
       - name: Preserve exact shard results
+        id: shard-diagnostics
         if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: backend-shard-${{ matrix.shard }}-${{ github.sha }}-${{ github.run_attempt }}
-          path: test-results/
-          if-no-files-found: error
-          retention-days: 14
-      - name: Publish qualified shard alias
-        if: success()
-        uses: actions/upload-artifact@v6
-        with:
-          name: qualified-backend-shard-${{ matrix.shard }}-${{ github.sha }}-${{ needs.backend-build.outputs.manifest-sha }}-${{ needs.backend-build.outputs.sdk-version }}
-          path: test-results/
-          if-no-files-found: error
-          retention-days: 14
-          overwrite: true
+        env:
+          ARTIFACT_NEEDS_JSON: ${{ toJSON(needs) }}
+          EXPECTED_MANIFEST_SHA: ${{ needs.backend-build.outputs.manifest-sha }}
+          EXPECTED_SDK_VERSION: ${{ needs.backend-build.outputs.sdk-version }}
+          EXPECTED_RUNTIME_ARTIFACT_ID: ${{ needs.backend-build.outputs.runtime-artifact-id }}
+          ARTIFACT_SHARD: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          node scripts/xsenus-artifact-store.mjs put --kind shard-diagnostics --source test-results/ --retention-days 14
 
+      - name: Publish qualified shard alias
+        id: qualified-upload
+        if: success()
+        env:
+          ARTIFACT_NEEDS_JSON: ${{ toJSON(needs) }}
+          EXPECTED_MANIFEST_SHA: ${{ needs.backend-build.outputs.manifest-sha }}
+          EXPECTED_SDK_VERSION: ${{ needs.backend-build.outputs.sdk-version }}
+          EXPECTED_RUNTIME_ARTIFACT_ID: ${{ needs.backend-build.outputs.runtime-artifact-id }}
+          ARTIFACT_SHARD: ${{ matrix.shard }}
+          EXPECTED_DIAGNOSTIC_ARTIFACT_ID: ${{ steps.shard-diagnostics.outputs.artifact-id }}
+        run: |
+          set -euo pipefail
+          node scripts/xsenus-artifact-store.mjs put --kind qualified-shard --source test-results/ --retention-days 14
 
   backend-browser:
+    env:
+      DOTNET_GCHeapHardLimit: "C0000000"
     needs: [backend-build, backend-format, frontend, backend-test]
     runs-on: [self-hosted, Windows, X64, payplanner-xsenus]
     timeout-minutes: 15
@@ -401,6 +480,11 @@ jobs:
           cache: "npm"
           cache-dependency-path: package-lock.json
 
+      - name: Check private local artifact store before gates
+        run: |
+          set -euo pipefail
+          node scripts/xsenus-artifact-store.mjs check
+
       - name: Prepare Windows .NET installer
         env:
           DOTNET_INSTALL_DIR: ${{ runner.tool_cache }}/payplanner-dotnet
@@ -436,13 +520,17 @@ jobs:
           set -euo pipefail
           actual_sdk="$(dotnet --version)"
           test "$actual_sdk" = "$EXPECTED_SDK_VERSION"
-          [[ "$RUNTIME_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$RUNTIME_ARTIFACT_ID" =~ ^xsenus-local-v1:[a-f0-9]{64}$ ]]
 
       - name: Download compiled test runtime
-        uses: actions/download-artifact@v7
-        with:
-          artifact-ids: ${{ needs.backend-build.outputs.runtime-artifact-id }}
-          path: test-artifacts
+        env:
+          ARTIFACT_NEEDS_JSON: ${{ toJSON(needs) }}
+          EXPECTED_ARTIFACT_ID: ${{ needs.backend-build.outputs.runtime-artifact-id }}
+          EXPECTED_MANIFEST_SHA: ${{ needs.backend-build.outputs.manifest-sha }}
+          EXPECTED_SDK_VERSION: ${{ needs.backend-build.outputs.sdk-version }}
+        run: |
+          set -euo pipefail
+          node scripts/xsenus-artifact-store.mjs get --kind test-runtime --producer-job backend-build --destination test-artifacts
 
       - name: Unpack compiled test runtime
         run: tar -xzf test-artifacts/test-runtime.tar.gz
@@ -460,26 +548,34 @@ jobs:
           set -euo pipefail
           mkdir -p test-results/restored-browser
           printf '%s\n' '<RunSettings><RunConfiguration><TreatNoTestsAsError>true</TreatNoTestsAsError></RunConfiguration></RunSettings>' > test-results/restored-browser/gate.runsettings
+          vstest_console="$(node --input-type=module --eval "import { captureVstestEntryPoint } from './scripts/run-backend-gate.mjs'; process.stdout.write(captureVstestEntryPoint('test-plan.summary.json').path)")"
           native_exit=0
-          dotnet vstest backend/PayPlanner.Api.Tests/bin/Release/net9.0/PayPlanner.Api.Tests.dll --Settings:test-results/restored-browser/gate.runsettings --Logger:'trx;LogFileName=results.trx' --ResultsDirectory:test-results/restored-browser --TestCaseFilter:'FullyQualifiedName~RestoredFullModelQualifiesProtectedSettingsWithCopiedKeysWithoutSourceRing|FullyQualifiedName~FullModelBackupRestoresReadableManagedGenerationsWithoutSource' > test-results/restored-browser/test.log 2>&1 || native_exit=$?
+          dotnet exec "$vstest_console" backend/PayPlanner.Api.Tests/bin/Release/net9.0/PayPlanner.Api.Tests.dll --Settings:test-results/restored-browser/gate.runsettings --Logger:'trx;LogFileName=results.trx' --ResultsDirectory:test-results/restored-browser --TestCaseFilter:'FullyQualifiedName~RestoredFullModelQualifiesProtectedSettingsWithCopiedKeysWithoutSourceRing|FullyQualifiedName~FullModelBackupRestoresReadableManagedGenerationsWithoutSource' > test-results/restored-browser/test.log 2>&1 || native_exit=$?
           cat test-results/restored-browser/test.log
           dotnet tools/PayPlanner.TestShards/bin/Release/net9.0/PayPlanner.TestShards.dll verify-restored --manifest test-plan.json --manifest-sha "$EXPECTED_MANIFEST_SHA" --results test-results/restored-browser --exit-code "$native_exit"
 
       - name: Preserve restored browser results
+        id: restored-diagnostics
         if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: restored-browser-${{ github.sha }}-${{ github.run_attempt }}
-          path: test-results/restored-browser/
-          if-no-files-found: error
-          retention-days: 14
+        env:
+          ARTIFACT_NEEDS_JSON: ${{ toJSON(needs) }}
+          EXPECTED_MANIFEST_SHA: ${{ needs.backend-build.outputs.manifest-sha }}
+          EXPECTED_SDK_VERSION: ${{ needs.backend-build.outputs.sdk-version }}
+          EXPECTED_RUNTIME_ARTIFACT_ID: ${{ needs.backend-build.outputs.runtime-artifact-id }}
+        run: |
+          set -euo pipefail
+          node scripts/xsenus-artifact-store.mjs put --kind restored-diagnostics --source test-results/restored-browser/ --retention-days 14
 
   backend:
+    env:
+      DOTNET_GCHeapHardLimit: "C0000000"
     needs: [backend-build, backend-test, backend-browser]
     runs-on: [self-hosted, Windows, X64, payplanner-xsenus]
     timeout-minutes: 10
     outputs:
       backend-artifact-id: ${{ needs.backend-build.outputs.backend-artifact-id }}
+      manifest-sha: ${{ needs.backend-build.outputs.manifest-sha }}
+      sdk-version: ${{ needs.backend-build.outputs.sdk-version }}
     defaults:
       run:
         shell: bash
@@ -493,6 +589,11 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: "22"
+
+      - name: Check private local artifact store before gates
+        run: |
+          set -euo pipefail
+          node scripts/xsenus-artifact-store.mjs check
 
       - name: Prepare Windows .NET installer
         env:
@@ -512,40 +613,64 @@ jobs:
           set -euo pipefail
           actual_sdk="$(dotnet --version)"
           test "$actual_sdk" = "$EXPECTED_SDK_VERSION"
-          [[ "$RUNTIME_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$RUNTIME_ARTIFACT_ID" =~ ^xsenus-local-v1:[a-f0-9]{64}$ ]]
 
       - name: Download compiled test runtime
-        uses: actions/download-artifact@v7
-        with:
-          artifact-ids: ${{ needs.backend-build.outputs.runtime-artifact-id }}
-          path: test-artifacts
+        env:
+          ARTIFACT_NEEDS_JSON: ${{ toJSON(needs) }}
+          EXPECTED_ARTIFACT_ID: ${{ needs.backend-build.outputs.runtime-artifact-id }}
+          EXPECTED_MANIFEST_SHA: ${{ needs.backend-build.outputs.manifest-sha }}
+          EXPECTED_SDK_VERSION: ${{ needs.backend-build.outputs.sdk-version }}
+        run: |
+          set -euo pipefail
+          node scripts/xsenus-artifact-store.mjs get --kind test-runtime --producer-job backend-build --destination test-artifacts
 
       - name: Unpack compiled test runtime
         run: tar -xzf test-artifacts/test-runtime.tar.gz
 
       - name: Download shard 0 results
-        uses: actions/download-artifact@v7
-        with:
-          name: qualified-backend-shard-0-${{ github.sha }}-${{ needs.backend-build.outputs.manifest-sha }}-${{ needs.backend-build.outputs.sdk-version }}
-          path: test-results
+        env:
+          ARTIFACT_NEEDS_JSON: ${{ toJSON(needs) }}
+          EXPECTED_ARTIFACT_ID: ${{ needs.backend-test.outputs.shard_0_id }}
+          EXPECTED_MANIFEST_SHA: ${{ needs.backend-build.outputs.manifest-sha }}
+          EXPECTED_SDK_VERSION: ${{ needs.backend-build.outputs.sdk-version }}
+          EXPECTED_RUNTIME_ARTIFACT_ID: ${{ needs.backend-build.outputs.runtime-artifact-id }}
+        run: |
+          set -euo pipefail
+          node scripts/xsenus-artifact-store.mjs get --kind qualified-shard --producer-job backend-test-0 --destination test-results --shard 0 --merge-disjoint
 
       - name: Download shard 1 results
-        uses: actions/download-artifact@v7
-        with:
-          name: qualified-backend-shard-1-${{ github.sha }}-${{ needs.backend-build.outputs.manifest-sha }}-${{ needs.backend-build.outputs.sdk-version }}
-          path: test-results
+        env:
+          ARTIFACT_NEEDS_JSON: ${{ toJSON(needs) }}
+          EXPECTED_ARTIFACT_ID: ${{ needs.backend-test.outputs.shard_1_id }}
+          EXPECTED_MANIFEST_SHA: ${{ needs.backend-build.outputs.manifest-sha }}
+          EXPECTED_SDK_VERSION: ${{ needs.backend-build.outputs.sdk-version }}
+          EXPECTED_RUNTIME_ARTIFACT_ID: ${{ needs.backend-build.outputs.runtime-artifact-id }}
+        run: |
+          set -euo pipefail
+          node scripts/xsenus-artifact-store.mjs get --kind qualified-shard --producer-job backend-test-1 --destination test-results --shard 1 --merge-disjoint
 
       - name: Download shard 2 results
-        uses: actions/download-artifact@v7
-        with:
-          name: qualified-backend-shard-2-${{ github.sha }}-${{ needs.backend-build.outputs.manifest-sha }}-${{ needs.backend-build.outputs.sdk-version }}
-          path: test-results
+        env:
+          ARTIFACT_NEEDS_JSON: ${{ toJSON(needs) }}
+          EXPECTED_ARTIFACT_ID: ${{ needs.backend-test.outputs.shard_2_id }}
+          EXPECTED_MANIFEST_SHA: ${{ needs.backend-build.outputs.manifest-sha }}
+          EXPECTED_SDK_VERSION: ${{ needs.backend-build.outputs.sdk-version }}
+          EXPECTED_RUNTIME_ARTIFACT_ID: ${{ needs.backend-build.outputs.runtime-artifact-id }}
+        run: |
+          set -euo pipefail
+          node scripts/xsenus-artifact-store.mjs get --kind qualified-shard --producer-job backend-test-2 --destination test-results --shard 2 --merge-disjoint
 
       - name: Download shard 3 results
-        uses: actions/download-artifact@v7
-        with:
-          name: qualified-backend-shard-3-${{ github.sha }}-${{ needs.backend-build.outputs.manifest-sha }}-${{ needs.backend-build.outputs.sdk-version }}
-          path: test-results
+        env:
+          ARTIFACT_NEEDS_JSON: ${{ toJSON(needs) }}
+          EXPECTED_ARTIFACT_ID: ${{ needs.backend-test.outputs.shard_3_id }}
+          EXPECTED_MANIFEST_SHA: ${{ needs.backend-build.outputs.manifest-sha }}
+          EXPECTED_SDK_VERSION: ${{ needs.backend-build.outputs.sdk-version }}
+          EXPECTED_RUNTIME_ARTIFACT_ID: ${{ needs.backend-build.outputs.runtime-artifact-id }}
+        run: |
+          set -euo pipefail
+          node scripts/xsenus-artifact-store.mjs get --kind qualified-shard --producer-job backend-test-3 --destination test-results --shard 3 --merge-disjoint
 
       - name: Verify complete backend case union
         env:
@@ -587,6 +712,11 @@ jobs:
           cache: "npm"
           cache-dependency-path: package-lock.json
 
+      - name: Check private local artifact store before gates
+        run: |
+          set -euo pipefail
+          node scripts/xsenus-artifact-store.mjs check
+
       - name: Verify trusted Windows deployment host
         run: node scripts/verify-xsenus-runner.mjs build
 
@@ -599,21 +729,27 @@ jobs:
           FRONTEND_ARTIFACT_ID: ${{ needs.frontend.outputs.frontend-artifact-id }}
         run: |
           set -euo pipefail
-          [[ "$BACKEND_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
-          [[ "$FRONTEND_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$BACKEND_ARTIFACT_ID" =~ ^xsenus-local-v1:[a-f0-9]{64}$ ]]
+          [[ "$FRONTEND_ARTIFACT_ID" =~ ^xsenus-local-v1:[a-f0-9]{64}$ ]]
           [[ "$BACKEND_ARTIFACT_ID" != "$FRONTEND_ARTIFACT_ID" ]]
 
       - name: Download backend artifact
-        uses: actions/download-artifact@v7
-        with:
-          artifact-ids: ${{ needs.backend.outputs.backend-artifact-id }}
-          path: deploy-artifacts
+        env:
+          ARTIFACT_NEEDS_JSON: ${{ toJSON(needs) }}
+          EXPECTED_ARTIFACT_ID: ${{ needs.backend.outputs.backend-artifact-id }}
+          EXPECTED_MANIFEST_SHA: ${{ needs.backend.outputs.manifest-sha }}
+          EXPECTED_SDK_VERSION: ${{ needs.backend.outputs.sdk-version }}
+        run: |
+          set -euo pipefail
+          node scripts/xsenus-artifact-store.mjs get --kind backend --producer-job backend-build --destination deploy-artifacts
 
       - name: Download frontend artifact
-        uses: actions/download-artifact@v7
-        with:
-          artifact-ids: ${{ needs.frontend.outputs.frontend-artifact-id }}
-          path: deploy-artifacts
+        env:
+          ARTIFACT_NEEDS_JSON: ${{ toJSON(needs) }}
+          EXPECTED_ARTIFACT_ID: ${{ needs.frontend.outputs.frontend-artifact-id }}
+        run: |
+          set -euo pipefail
+          node scripts/xsenus-artifact-store.mjs get --kind frontend --producer-job frontend --destination deploy-artifacts --merge-disjoint
 
       - name: Unpack qualified artifacts
         run: |

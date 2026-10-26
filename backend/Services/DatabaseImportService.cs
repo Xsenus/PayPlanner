@@ -16,6 +16,7 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
     private sealed class ImportMaps
     {
         public Dictionary<int, int> Roles { get; } = [];
+        public Dictionary<(string Table, int Id), string?> SellerPolicies { get; } = [];
         public Dictionary<int, int> Users { get; } = [];
         public Dictionary<int, int> DealTypes { get; } = [];
         public Dictionary<int, int> IncomeTypes { get; } = [];
@@ -87,11 +88,12 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
                 DataSource = sqliteFilePath,
                 Mode = SqliteOpenMode.ReadOnly,
                 Cache = SqliteCacheMode.Private,
+                Pooling = false,
                 ForeignKeys = true
             }.ToString())
             .Options;
 
-        await using var source = new PaymentContext(sourceOptions, useObjectAuditModel: false);
+        await using var source = new SellerPolicyImportSourceContext(sourceOptions);
         await using var target = await _contextFactory.CreateDbContextAsync(cancellationToken);
         var maps = new ImportMaps();
 
@@ -106,10 +108,18 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
             _databaseProvider.DisplayName);
 
         // Keep the inspected source and destination stable until the import commits.
-        await using var sourceTransaction = await source.Database.BeginTransactionAsync(cancellationToken);
+        await source.Database.OpenConnectionAsync(cancellationToken);
+        // The source is genuinely read-only: acquire its read snapshot lazily,
+        // rather than the provider's default immediate writer admission.
+        await using var sourceNativeTransaction = ((SqliteConnection)source.Database.GetDbConnection())
+            .BeginTransaction(System.Data.IsolationLevel.Serializable, deferred: true);
+        await using var sourceTransaction = await source.Database.UseTransactionAsync(sourceNativeTransaction, cancellationToken)
+            ?? throw new InvalidOperationException("Не удалось открыть снимок исходного файла импорта.");
         await using var importTransaction = await target.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
         // Inspect both sides before the first write. Ambiguous historical links need a separate repair.
+        await InspectSourceSellerStateAsync(source, maps, cancellationToken);
         var invoiceKeys = await BuildSafeInvoiceImportKeysAsync(source, target, cancellationToken);
+        await InspectTargetSellerStateAsync(source, target, invoiceKeys, cancellationToken);
         await ImportReferenceDataAsync(source, target, result, maps, cancellationToken);
         await ImportBusinessDataAsync(source, target, result, maps, invoiceKeys, cancellationToken);
         await RunTableAsync(result, target, "DerivedClientContracts", "Restore client-contract links", table =>
@@ -255,7 +265,10 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
 
         await RunTableAsync(result, target, "SystemSettings", "Системные настройки", table =>
             ImportEntitiesAsync(source, target, table, ctx => ctx.SystemSettings.AsNoTracking(), ctx => ctx.SystemSettings,
-                x => x.Id, x => x.Id, x => Key(x.Key), x => Key(x.Key), CopySystemSetting, new Dictionary<int, int>(), cancellationToken));
+                x => x.Id, x => x.Id, x => Key(x.Key), x => Key(x.Key), CopySystemSetting, new Dictionary<int, int>(), cancellationToken,
+                // Source-local company IDs and the target's future-document policy must not cross a database merge.
+                new[] { "legalEntities.mainCompanyId", "legalEntities.mainCompanyIds", "legalEntities.defaultMainCompanyId",
+                    DocumentSellerSnapshotPolicy.SettingKey }.Select(NormalizeText).ToHashSet(StringComparer.Ordinal)));
     }
 
     private async Task ImportBusinessDataAsync(
@@ -292,7 +305,8 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
 
         await RunTableAsync(result, target, "Contracts", "Договоры", table =>
             ImportEntitiesAsync(source, target, table, ctx => ctx.Contracts.AsNoTracking(), ctx => ctx.Contracts,
-                x => x.Id, x => x.Id, BuildContractKey, BuildContractKey, CopyContract, maps.Contracts, cancellationToken));
+                x => x.Id, x => x.Id, BuildContractKey, BuildContractKey,
+                (sourceItem, targetItem) => CopyContract(sourceItem, targetItem, maps), maps.Contracts, cancellationToken));
 
         await RunTableAsync(result, target, "Invoices", "Канонические счета", table =>
             ImportEntitiesAsync(source, target, table, ctx => ctx.Invoices.AsNoTracking(), ctx => ctx.Invoices,
@@ -722,7 +736,8 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
         Func<T, string> targetKeySelector,
         Action<T, T> copyAction,
         Dictionary<int, int> importedIdMap,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlySet<string>? preservedTargetKeys = null)
         where T : class, new()
     {
         var sourceItems = await sourceQuery(source).ToListAsync(cancellationToken);
@@ -741,6 +756,11 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
         foreach (var sourceItem in sourceItems.OrderBy(sourceIdSelector))
         {
             var key = sourceKeySelector(sourceItem);
+            if (preservedTargetKeys?.Contains(key) == true)
+            {
+                table.Skipped += 1;
+                continue;
+            }
             if (string.IsNullOrWhiteSpace(key))
             {
                 table.Conflicts += 1;

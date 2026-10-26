@@ -11,6 +11,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PayPlanner.TestShards", "..
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PayPlanner.Api.Migrations", "PayPlanner.Api.Migrations\PayPlanner.Api.Migrations.csproj", "{9408495B-D542-4856-8A32-2E7DC6EB12DC}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PayPlanner.StorageStageWriterProbe", "..\tests\PayPlanner.StorageStageWriterProbe\PayPlanner.StorageStageWriterProbe.csproj", "{5CDE2DAA-5C09-457A-B827-DAAD13CE107D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -69,6 +71,18 @@ Global
 		{9408495B-D542-4856-8A32-2E7DC6EB12DC}.Release|x64.Build.0 = Release|Any CPU
 		{9408495B-D542-4856-8A32-2E7DC6EB12DC}.Release|x86.ActiveCfg = Release|Any CPU
 		{9408495B-D542-4856-8A32-2E7DC6EB12DC}.Release|x86.Build.0 = Release|Any CPU
+		{5CDE2DAA-5C09-457A-B827-DAAD13CE107D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5CDE2DAA-5C09-457A-B827-DAAD13CE107D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5CDE2DAA-5C09-457A-B827-DAAD13CE107D}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{5CDE2DAA-5C09-457A-B827-DAAD13CE107D}.Debug|x64.Build.0 = Debug|Any CPU
+		{5CDE2DAA-5C09-457A-B827-DAAD13CE107D}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{5CDE2DAA-5C09-457A-B827-DAAD13CE107D}.Debug|x86.Build.0 = Debug|Any CPU
+		{5CDE2DAA-5C09-457A-B827-DAAD13CE107D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5CDE2DAA-5C09-457A-B827-DAAD13CE107D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5CDE2DAA-5C09-457A-B827-DAAD13CE107D}.Release|x64.ActiveCfg = Release|Any CPU
+		{5CDE2DAA-5C09-457A-B827-DAAD13CE107D}.Release|x64.Build.0 = Release|Any CPU
+		{5CDE2DAA-5C09-457A-B827-DAAD13CE107D}.Release|x86.ActiveCfg = Release|Any CPU
+		{5CDE2DAA-5C09-457A-B827-DAAD13CE107D}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

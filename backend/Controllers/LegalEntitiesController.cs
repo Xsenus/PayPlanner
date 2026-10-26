@@ -1293,6 +1293,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             DefaultCompanyId = state.DefaultCompanyId is int defaultId && access.CompanyIds.Contains(defaultId)
                 ? defaultId : companies.FirstOrDefault()?.Id,
             Companies = companies,
+            SellerSnapshotTiming = await new DocumentSellerService(_db).ReadCreationPolicyAsync(ct),
         });
     }
 
@@ -1302,6 +1303,8 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         [FromBody] UpdateMainCompanySettingsRequest request,
         CancellationToken ct)
     {
+        if (request.SellerSnapshotTiming is not null && !DocumentSellerSnapshotPolicy.IsValid(request.SellerSnapshotTiming))
+            return BadRequest(new { message = "Выберите фиксацию реквизитов при первой подготовке файла или при создании документа." });
         var normalizedIds = (request.CompanyIds ?? [])
             .Where(id => id > 0)
             .Distinct()
@@ -1351,6 +1354,17 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             ? request.DefaultCompanyId
             : (normalizedIds.Count > 0 ? normalizedIds[0] : null);
 
+        if (request.SellerSnapshotTiming is not null)
+        {
+            var policy = await _db.SystemSettings.SingleOrDefaultAsync(item => item.Key == DocumentSellerSnapshotPolicy.SettingKey, ct);
+            if (policy is null)
+                _db.SystemSettings.Add(new SystemSetting { Key = DocumentSellerSnapshotPolicy.SettingKey, Value = request.SellerSnapshotTiming });
+            else
+            {
+                policy.Value = request.SellerSnapshotTiming;
+                policy.UpdatedAt = DateTime.UtcNow;
+            }
+        }
         await SaveMainCompanySettingsStateAsync(normalizedIds, normalizedDefaultId, ct);
         return await GetMainCompanySettings(ct);
     }

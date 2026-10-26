@@ -30,6 +30,7 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
     private bool _started;
     private readonly int _browserPort;
     private readonly System.Net.Sockets.TcpListener _browserPortReservation;
+    private readonly CaseRetirementBrowserBundle.Lease? _retirementBundle;
     public string Root { get; }
     public string DatabasePath => Path.Combine(Root, "synthetic.db");
     public string Email { get; } = "synthetic-admin@payplanner.local";
@@ -38,8 +39,10 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
     public IConfiguration Configuration { get; }
 
     private SyntheticWritableBackendProcess(bool workerEnabled, LoopbackS3Endpoint? secondCopy, bool capacityChecks, bool uploadCapacityChecks,
-        LoopbackYandexDiskEndpoint? yandexCopy, bool courtEnabled, bool localAckFault, bool chatAttachments)
+        LoopbackYandexDiskEndpoint? yandexCopy, bool courtEnabled, bool localAckFault, bool chatAttachments,
+        CaseRetirementBrowserBundle.Lease? retirementBundle)
     {
+        _retirementBundle = retirementBundle;
         Root = Path.Combine(Path.GetTempPath(), Prefix + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Root);
         _browserPortReservation = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
@@ -81,7 +84,7 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
             ["Logging__LogLevel__System.Net.Http.HttpClient"] = "Warning",
             ["ASPNETCORE_ENVIRONMENT"] = "Production",
             ["ASPNETCORE_CONTENTROOT"] = Root,
-            ["ASPNETCORE_URLS"] = "http://127.0.0.1:0",
+            ["ASPNETCORE_URLS"] = retirementBundle?.ApiAddress.GetLeftPart(UriPartial.Authority) ?? "http://127.0.0.1:0",
             ["ASPNETCORE_HOSTINGSTARTUPASSEMBLIES"] = typeof(RestoredConnectionDiagnosticsHostingStartup).Assembly.GetName().Name!,
             [RestoredConnectionDiagnosticsHostingStartup.SyntheticEnabledKey] = "true",
             ["Cors__AllowedOrigins__0"] = $"http://127.0.0.1:{_browserPort}",
@@ -120,6 +123,8 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
             ["StorageOrchestration__ProductWriteEnabledClasses__0"] = "task-file",
             ["StorageOrchestration__ProductWriteEnabledClasses__1"] = "case-document",
         };
+        if (retirementBundle is not null)
+            settings[RestoredConnectionDiagnosticsHostingStartup.SyntheticRestartUrlKey] = retirementBundle.ApiAddress.GetLeftPart(UriPartial.Authority);
         if (chatAttachments)
         {
             settings["StorageOrchestration__ProductReadEnabledClasses__2"] = "chat-attachment";
@@ -236,12 +241,15 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
     public static async Task<SyntheticWritableBackendProcess> StartAsync(string cardMode = "legacy", bool workerEnabled = false,
         LoopbackS3Endpoint? secondCopy = null, bool capacityChecks = false, bool uploadCapacityChecks = false,
         LoopbackYandexDiskEndpoint? yandexCopy = null, SudrfCourtCaseData? courtSource = null, bool localAckFault = false,
-        bool chatAttachments = false, SqliteMigratedTemplate? template = null)
+        bool chatAttachments = false, SqliteMigratedTemplate? template = null, CaseRetirementBrowserBundle? retirementBundle = null)
     {
         Assert.Contains(cardMode, new[] { "legacy", "modern" });
-        var result = new SyntheticWritableBackendProcess(workerEnabled, secondCopy, capacityChecks, uploadCapacityChecks, yandexCopy, courtSource is not null, localAckFault, chatAttachments);
+        var bundleLease = retirementBundle?.Acquire();
+        SyntheticWritableBackendProcess? result = null;
         try
         {
+            result = new SyntheticWritableBackendProcess(workerEnabled, secondCopy, capacityChecks, uploadCapacityChecks,
+                yandexCopy, courtSource is not null, localAckFault, chatAttachments, bundleLease);
             if (courtSource is not null) await result.SetCourtSourceAsync(courtSource);
             if (template is not null)
             {
@@ -287,6 +295,7 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
                     });
                 }
             }
+            bundleLease?.ReleaseReservationForStart();
             result._started = result._process.Start();
             Assert.True(result._started);
             result._process.BeginOutputReadLine();
@@ -301,9 +310,15 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
                 BaseAddress = await result._listening.Task,
                 Timeout = TimeSpan.FromSeconds(20),
             };
+            if (bundleLease is not null) Assert.Equal(bundleLease.ApiAddress, result.Client.BaseAddress);
             return result;
         }
-        catch { await result.DisposeAsync(); throw; }
+        catch
+        {
+            if (result is not null) await result.DisposeAsync();
+            else bundleLease?.Dispose();
+            throw;
+        }
     }
 
     public Task SetCourtSourceAsync(SudrfCourtCaseData source)
@@ -340,7 +355,7 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
     private string ServerFailureDiagnostic()
         => _errors.FailureSummary();
 
-    private static DirectoryInfo FindRepositoryDirectory([System.Runtime.CompilerServices.CallerFilePath] string sourceFile = "")
+    internal static DirectoryInfo FindRepositoryDirectory([System.Runtime.CompilerServices.CallerFilePath] string sourceFile = "")
     {
         // Testhost may start beside relocated artifacts. Prefer the compiled
         // source location, retaining invocation and assembly ancestry fallbacks.
@@ -374,6 +389,7 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
             if (new[] { "PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", "LOCALAPPDATA", "APPDATA", "ProgramFiles", "ProgramFiles(x86)", "USERPROFILE" }
                 .Contains(key, StringComparer.OrdinalIgnoreCase)) start.Environment[key] = value;
         start.ArgumentList.Add(Path.Combine(repository.FullName, "scripts", "check-storage-capacity-visual.mjs"));
+        start.Environment["STORAGE_CAPACITY_ROOT"] = Root;
         start.Environment["STORAGE_CAPACITY_API"] = Client.BaseAddress!.AbsoluteUri;
         start.Environment["STORAGE_CAPACITY_BROWSER_PORT"] = _browserPort.ToString(System.Globalization.CultureInfo.InvariantCulture);
         start.Environment["STORAGE_CAPACITY_TOKEN"] = token;
@@ -567,6 +583,15 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
         // These scenarios qualify the release UI against the production-mode API.
         // Keep development-only StrictMode mount repetitions out of this profile.
         start.Environment["NODE_ENV"] = "production";
+        if (_retirementBundle is not null)
+        {
+            Assert.False(generatedDocuments || courtDocuments || financialDocuments || chatAttachments,
+                "The production-bundle pilot is limited to retirement scenarios.");
+            start.Environment["CASE_RETIREMENT_BUNDLE_ROOT"] = _retirementBundle.Root;
+            start.Environment["CASE_RETIREMENT_BUNDLE_OWNER"] = _retirementBundle.OwnerId;
+            start.Environment["CI"] = "true";
+            start.Environment["NO_UPDATE_NOTIFIER"] = "true";
+        }
         if (Environment.GetEnvironmentVariable("PAYPLANNER_TEST_PLAYWRIGHT_CLI") is { } cliPath)
             start.Environment["CASE_RETIREMENT_CLI"] = cliPath;
         if (Environment.GetEnvironmentVariable("PAYPLANNER_TEST_BROWSER") is { } browser)
@@ -608,6 +633,8 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
                 while (await process.StandardOutput.ReadLineAsync(ct) is { } line)
                 {
                     output.AppendLine(line);
+                    if (_retirementBundle is not null && line.StartsWith("CASE_RETIREMENT_BUNDLE_PHASE ", StringComparison.Ordinal))
+                        Console.WriteLine(line);
                     if (financialDocuments && Regex.IsMatch(line,
                         @"\APP_FINANCIAL_BROWSER_PHASE (?:vite-create|vite-listen|entry-transform|requests-idle|cli-open|cli-goto|cli-snapshot|scenario|browser-close|vite-close|control-close|stdin-close|done)\z",
                         RegexOptions.CultureInvariant))
@@ -664,6 +691,7 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
             await _process.WaitForExitAsync(timeout.Token);
         }
         _process.Dispose();
+        _retirementBundle?.Dispose();
         var fullRoot = Path.GetFullPath(Root);
         var name = Path.GetFileName(fullRoot);
         Assert.Equal(Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar),

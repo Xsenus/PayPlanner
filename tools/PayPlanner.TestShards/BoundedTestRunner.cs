@@ -6,7 +6,7 @@ namespace PayPlanner.TestShards;
 
 internal static class BoundedTestRunner
 {
-    public static async Task<int> RunAsync(TestPlan plan, string manifest, string hash, int shard, string directory, string workers, string suite)
+    public static async Task<int> RunAsync(TestPlan plan, string manifest, string hash, int shard, string directory, string workers, string suite, string vstestConsolePath)
     {
         ShardPlan.Require(!Directory.Exists(directory) && !File.Exists(directory), "Preserve existing shard results.");
         var partitionCount = 1;
@@ -51,7 +51,7 @@ internal static class BoundedTestRunner
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
             };
-            foreach (var argument in new[] { "vstest", ShardPlan.Resolve(manifest, plan.AssemblyPath), "/Settings:" + settings,
+            foreach (var argument in new[] { "exec", vstestConsolePath, ShardPlan.Resolve(manifest, plan.AssemblyPath), "/Settings:" + settings,
                          "/Logger:console;verbosity=normal", "/Logger:trx;LogFileName=results.trx", "/ResultsDirectory:" + root }) start.ArgumentList.Add(argument);
             ExecutionScheduling.ConfigureWorkerEnvironment(start.Environment, batch.Lane);
             var batchStarted = DateTime.UtcNow;

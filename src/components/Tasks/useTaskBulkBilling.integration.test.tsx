@@ -5,7 +5,8 @@ import type { TaskJournalItem } from '../../utils/taskJournalStore';
 import { useTaskBulkBilling } from './useTaskBulkBilling';
 
 const bulk = vi.hoisted(() => vi.fn());
-vi.mock('../../services/api', () => ({ apiService: { bulkUpdateTaskJournalItems: bulk, getTaskJournalItem: vi.fn() } }));
+const settings = vi.hoisted(() => vi.fn(async () => ({ contractTaskBillingMode: 'retainContractTasks' })));
+vi.mock('../../services/api', () => ({ apiService: { bulkUpdateTaskJournalItems: bulk, getTaskJournalItem: vi.fn(), getTaskJournalSettings: settings } }));
 // Deliberate raw legacy DTO: bulk accepts a nullable token while the older store declaration requires string.
 const first = [{ id: 1, title: 'Исходная задача', status: 'new', updatedAt: null }] as unknown as TaskJournalItem[];
 function Harness({ tasks = first }) {
@@ -21,6 +22,7 @@ describe('bulk billing with the real confirmation provider', () => {
     try {
       render(<DialogProvider><Harness /></DialogProvider>);
       fireEvent.click(screen.getByRole('button', { name: 'Открыть учёт' }));
+      await waitFor(() => expect(screen.queryByText('Проверяем настройку учёта договорных задач…')).toBeNull());
       let caller = screen.getByRole('dialog', { name: 'Массовая смена учёта задач' });
       fireEvent.click(within(caller).getByRole('button', { name: 'Изменить учёт' }));
       let confirmation = await screen.findByRole('dialog', { name: 'Изменить учёт выбранных задач (1)?' });

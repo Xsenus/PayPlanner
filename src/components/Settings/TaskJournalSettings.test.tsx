@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { TaskJournalSettingsDto } from '../../services/api';
@@ -149,6 +149,104 @@ describe('TaskJournalSettings', () => {
     await waitFor(() => expect(apiMock.updateTaskJournalSettings).toHaveBeenCalledWith(
       expect.objectContaining({ financialDocumentsResponsibleUserId: 8 }),
     ));
+  });
+
+  it.each([undefined, 'unknown-contract-policy'])('retains contractual tasks when the server mode is %s', async mode => {
+    apiMock.getTaskJournalSettings.mockResolvedValueOnce({ ...settings, contractTaskBillingMode: mode });
+    render(<TaskJournalSettings />);
+
+    const control = await screen.findByRole('combobox', { name: /^Изменение учёта договорных задач\. Выбрано:/u });
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Сохранить' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(control.textContent).toContain('Не менять учёт договорных задач');
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ contractTaskBillingMode: 'retainContractTasks', financialDocumentsResponsibleUserId: null }),
+    ));
+  });
+
+  it('saves an explicit contract-preserving opt-in with the other task settings', async () => {
+    render(<TaskJournalSettings />);
+    const control = await screen.findByRole('combobox', { name: /^Изменение учёта договорных задач\. Выбрано:/u });
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Сохранить' }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(control);
+    const listbox = screen.getByRole('listbox', { name: 'Изменение учёта договорных задач' });
+    fireEvent.click(within(listbox).getByRole('option', { name: 'Разрешить менять учёт без изменения договора' }));
+    expect(screen.getByText(/договор, его сумма, режим оплаты и прошлые начисления сохранятся/u)).toBeTruthy();
+    expect(screen.getByText(/Задачи со счётом, оплатой или выплатой исполнителю сохраняются без изменений/u)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ contractTaskBillingMode: 'allowFutureClassification', taskCardWindowMode: 'modern', executorCompletionAllowedUserIds: [7] }),
+    ));
+  });
+
+  it('loads the enabled contract mode and lets an administrator return to retaining tasks', async () => {
+    apiMock.getTaskJournalSettings.mockResolvedValueOnce({ ...settings, contractTaskBillingMode: 'allowFutureClassification' });
+    render(<TaskJournalSettings />);
+    const control = await screen.findByRole('combobox', { name: /^Изменение учёта договорных задач\. Выбрано:/u });
+    await waitFor(() => expect(control.textContent).toContain('Разрешить менять учёт без изменения договора'));
+    fireEvent.click(control);
+    const listbox = screen.getByRole('listbox', { name: 'Изменение учёта договорных задач' });
+    fireEvent.click(within(listbox).getByRole('option', { name: 'Не менять учёт договорных задач' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ contractTaskBillingMode: 'retainContractTasks' }),
+    ));
+  });
+
+  it('preserves the chosen mode and reports a denied settings save without claiming success', async () => {
+    apiMock.updateTaskJournalSettings.mockRejectedValueOnce(new Error('HTTP 403: Настройки доступны администратору.'));
+    render(<TaskJournalSettings />);
+    const control = await screen.findByRole('combobox', { name: /^Изменение учёта договорных задач\. Выбрано:/u });
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Сохранить' }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(control);
+    const listbox = screen.getByRole('listbox', { name: 'Изменение учёта договорных задач' });
+    fireEvent.click(within(listbox).getByRole('option', { name: 'Разрешить менять учёт без изменения договора' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalled());
+    expect(control.textContent).toContain('Разрешить менять учёт без изменения договора');
+    expect(toastMock.success).not.toHaveBeenCalled();
+    expect(apiMock.updateTaskJournalSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the retaining mode if an unrecognised mode is returned after saving', async () => {
+    apiMock.updateTaskJournalSettings.mockResolvedValueOnce({ ...settings, contractTaskBillingMode: 'unknown-after-save' });
+    render(<TaskJournalSettings />);
+    const control = await screen.findByRole('combobox', { name: /^Изменение учёта договорных задач\. Выбрано:/u });
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Сохранить' }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(control);
+    const listbox = screen.getByRole('listbox', { name: 'Изменение учёта договорных задач' });
+    fireEvent.click(within(listbox).getByRole('option', { name: 'Разрешить менять учёт без изменения договора' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(toastMock.success).toHaveBeenCalled());
+    expect(control.textContent).toContain('Не менять учёт договорных задач');
+  });
+
+  it('keeps the contract mode disabled until the settings load completes', async () => {
+    let finishLoad!: (value: TaskJournalSettingsDto) => void;
+    apiMock.getTaskJournalSettings.mockReturnValueOnce(new Promise<TaskJournalSettingsDto>(resolve => { finishLoad = resolve; }));
+    render(<TaskJournalSettings />);
+    const control = screen.getByRole('combobox', { name: /^Изменение учёта договорных задач\. Выбрано:/u });
+    expect(control.hasAttribute('disabled')).toBe(true);
+    await act(async () => { finishLoad(settings); });
+    await waitFor(() => expect(control.hasAttribute('disabled')).toBe(false));
+  });
+
+  it('does not allow changing the contract mode while its save is pending', async () => {
+    let finishSave!: (value: TaskJournalSettingsDto) => void;
+    apiMock.updateTaskJournalSettings.mockReturnValueOnce(new Promise<TaskJournalSettingsDto>(resolve => { finishSave = resolve; }));
+    render(<TaskJournalSettings />);
+    const control = await screen.findByRole('combobox', { name: /^Изменение учёта договорных задач\. Выбрано:/u });
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Сохранить' }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+    expect(control.hasAttribute('disabled')).toBe(true);
+    await act(async () => { finishSave({ ...settings, contractTaskBillingMode: 'retainContractTasks' }); });
+    await waitFor(() => expect(control.hasAttribute('disabled')).toBe(false));
+    expect(apiMock.updateTaskJournalSettings).toHaveBeenCalledTimes(1);
   });
 
   it('lets an administrator enable birthday greeting tasks', async () => {

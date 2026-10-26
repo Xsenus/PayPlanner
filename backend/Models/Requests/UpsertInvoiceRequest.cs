@@ -5,6 +5,12 @@ namespace PayPlanner.Api.Models.Requests;
 
 public class UpsertInvoiceRequest
 {
+    /// <summary>Used only when creating a new invoice; existing seller selection has its own guarded endpoint.</summary>
+    [Range(1, int.MaxValue)]
+    public int? SellerCompanyId { get; set; }
+    [Range(1, int.MaxValue)]
+    public int? SellerBranchId { get; set; }
+
     [Required]
     [MaxLength(120)]
     public string Number { get; set; } = string.Empty;

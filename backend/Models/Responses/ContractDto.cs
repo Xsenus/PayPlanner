@@ -10,6 +10,8 @@ public class ContractDto
     public int? SellerBranchId { get; set; }
     /// <summary>Реквизиты продавца зафиксированы при выдаче документа и больше не меняются.</summary>
     public bool SellerFrozen { get; set; }
+    public string? SellerSnapshotPolicy { get; set; }
+    public PayPlanner.Api.Services.Companies.SellerSnapshotMetadata? SellerSnapshotInfo { get; set; }
     public string Number { get; set; } = string.Empty;
     public string? Title { get; set; }
     public DateTime Date { get; set; }

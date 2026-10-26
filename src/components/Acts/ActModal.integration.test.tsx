@@ -12,6 +12,7 @@ const {
   getClientsV2Mock,
   getLegalEntitiesMock,
   getLegalEntitiesPagedMock,
+  getOwnCompanyOptionsMock,
   modalAuthState,
 } = vi.hoisted(() => ({
   getActMock: vi.fn(),
@@ -21,10 +22,15 @@ const {
   getClientsV2Mock: vi.fn(),
   getLegalEntitiesMock: vi.fn(),
   getLegalEntitiesPagedMock: vi.fn(),
+  getOwnCompanyOptionsMock: vi.fn(),
   modalAuthState: { user: { id: 1, role: { id: 1 } } },
 }));
 
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => modalAuthState }));
+
+vi.mock('../../hooks/useToast', () => ({
+  useToast: () => ({ error: vi.fn(), success: vi.fn(), info: vi.fn() }),
+}));
 
 vi.mock('../../hooks/useTranslation', () => ({
   useTranslation: () => ({ t: () => undefined }),
@@ -76,6 +82,7 @@ vi.mock('../../services/api', () => ({
     getInvoices: getInvoicesMock,
     getLegalEntities: getLegalEntitiesMock,
     getLegalEntitiesPaged: getLegalEntitiesPagedMock,
+    getOwnCompanyOptions: getOwnCompanyOptionsMock,
   },
 }));
 
@@ -144,6 +151,7 @@ describe('ActModal integration', () => {
     vi.clearAllMocks();
     modalAuthState.user = { id: 1, role: { id: 1 } };
     getActMock.mockResolvedValue(null);
+    getOwnCompanyOptionsMock.mockResolvedValue([]);
     const clientLookups = [
       createClient(1, 'Базовый клиент'),
       createClient(2, 'ООО Поставщик'),
@@ -224,6 +232,24 @@ describe('ActModal integration', () => {
       status: 'Signed',
       workflowStatus: 'Signed',
     });
+  });
+
+  it('sends the chosen seller only in the new act creation payload', async () => {
+    getOwnCompanyOptionsMock.mockResolvedValue([
+      { id: 41, shortName: 'Своя компания', isDefault: true, branches: [{ id: 42, name: 'Офис', kind: 'Office' }] },
+    ]);
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<ActModal open mode="create" act={null} onClose={vi.fn()} onSubmit={onSubmit} submitting={false}
+      clients={[createClient(1, 'Базовый клиент')]} responsibles={[]} lookupsLoading={false} defaultClientId={1} presentation="page" />);
+
+    fireEvent.change(await screen.findByLabelText('Подразделение-продавец'), { target: { value: '42' } });
+    fireEvent.change(screen.getByLabelText('Номер акта'), { target: { value: 'ACT-SELLER' } });
+    fireEvent.change(screen.getByLabelText('Сумма'), { target: { value: '25000' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Создать' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({ sellerCompanyId: 41, sellerBranchId: 42, number: 'ACT-SELLER', amount: 25000 });
+    expect(getActMock).not.toHaveBeenCalled();
   });
 
   it('uses the invoice type, hides inn fields and submits only the selected invoice positions', async () => {
