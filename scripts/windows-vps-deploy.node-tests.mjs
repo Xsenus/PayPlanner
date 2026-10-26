@@ -23,14 +23,19 @@ function fixture(t) {
   mkdirSync(join(root, 'recovery'));
   const systemRoot = join(root, 'windows');
   mkdirSync(join(systemRoot, 'System32/OpenSSH'), { recursive: true });
-  for (const name of ['ssh', 'scp', 'ssh-keyscan']) writeFileSync(join(systemRoot, 'System32/OpenSSH', name + '.exe'), 'synthetic');
+  for (const name of ['ssh', 'scp']) writeFileSync(join(systemRoot, 'System32/OpenSSH', name + '.exe'), 'synthetic');
+  const keyscanExecutable = join(root, 'git/usr/bin/ssh-keyscan.exe');
+  mkdirSync(dirname(keyscanExecutable), { recursive: true });
+  writeFileSync(keyscanExecutable, 'synthetic compatible scanner');
   writeFileSync(join(root, `payplanner_${sha}.tar.gz`), 'qualified archive placeholder');
   const env = { VPS_HOST: '185.46.10.202', VPS_USER: 'root', VPS_PORT: '22', DEPLOY_SHA: sha,
     DEPLOY_ARCHIVE_NAME: `payplanner_${sha}.tar.gz`, VPS_SSH_HOST_FINGERPRINT: fingerprint, VPS_SSH_KEY: key,
     PUBLIC_API_HEALTH_URL: 'https://api.elitpravo.com/api/health', PUBLIC_FRONTEND_URL: 'https://crm.elitpravo.com/',
     PAYPLANNER_WEBPUSH_PRIVATE_KEY: 'synthetic-vapid-private-value', PAYPLANNER_WEBPUSH_SUBJECT: "mailto:quote'example@example.invalid",
     RUNNER_TEMP: root, SystemRoot: systemRoot };
-  return { root, env, config: configuration(env, root) };
+  const config = configuration(env, root);
+  config.keyscanExecutable = keyscanExecutable;
+  return { root, env, config };
 }
 
 function harness(config, fail) {
@@ -52,7 +57,7 @@ function harness(config, fail) {
       },
       workspace: () => { directory = mkdtempSync(join(config.temporaryRoot, 'payplanner-deploy-')); return directory; },
       run: (executable, args, options) => {
-        const call = { tool: basename(executable), args, options }; calls.push(call);
+        const call = { executable, tool: basename(executable), args, options }; calls.push(call);
         if (fail?.(call)) throw Object.assign(new Error('synthetic failure'), { status: 23, stderr: config.remoteEnv.PAYPLANNER_WEBPUSH_PRIVATE_KEY });
         if (call.tool === 'ssh-keyscan.exe') return scan;
         if (call.tool === 'python') {
@@ -92,6 +97,16 @@ test('a host-key mismatch creates no credential directory and never authenticate
   await assert.rejects(deploy(config, state.options), /fingerprint mismatch/);
   assert.equal(state.directory(), undefined);
   assert.deepEqual(state.calls.map(call => call.tool), ['ssh-keyscan.exe']);
+  assert.equal(state.calls[0].executable, config.keyscanExecutable);
+});
+
+test('missing compatible scanner fails before materialising a credential without an unpinned fallback', async t => {
+  const { config } = fixture(t);
+  rmSync(config.keyscanExecutable);
+  const state = harness(config);
+  await assert.rejects(deploy(config, state.options), /OpenSSH client is required/);
+  assert.equal(state.calls.length, 0);
+  assert.equal(state.directory(), undefined);
 });
 
 test('schedules both Linux scripts and exact transferred-byte checks before package upload', async t => {

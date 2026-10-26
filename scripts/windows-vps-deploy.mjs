@@ -46,6 +46,7 @@ export function configuration(env = process.env, root = process.cwd()) {
     archive: resolve(root, env.DEPLOY_ARCHIVE_NAME), fingerprint: env.VPS_SSH_HOST_FINGERPRINT,
     key: env.VPS_SSH_KEY.replaceAll('\r\n', '\n').trim() + '\n', remoteEnv, childEnv,
     secrets: sensitiveNames.map(name => env[name] ?? ''), temporaryRoot: resolve(env.RUNNER_TEMP || tmpdir()),
+    keyscanExecutable: 'C:/Program Files/Git/usr/bin/ssh-keyscan.exe',
     systemRoot: env.SystemRoot || env.WINDIR || 'C:/Windows' };
 }
 
@@ -178,7 +179,11 @@ export function connectionArguments(config, directory, copy = false) {
 async function withConnection(config, callback, { run = nativeRun, workspace = createPrivateDirectory, log = console.log, platform = process.platform } = {}) {
   assert.equal(platform, 'win32', 'This bridge requires the existing Windows runner');
   const openssh = join(config.systemRoot, 'System32/OpenSSH');
-  const tools = Object.fromEntries(['ssh', 'scp', 'ssh-keyscan'].map(name => [name, join(openssh, name + '.exe')]));
+  const tools = Object.fromEntries(['ssh', 'scp'].map(name => [name, join(openssh, name + '.exe')]));
+  // Windows 9.5 keyscan cannot negotiate this VPS's preferred hybrid KEX.
+  // Git's existing scanner supports it. Keep Windows ssh/scp and their NUL
+  // config semantics; the exact pinned host key remains mandatory for both.
+  tools['ssh-keyscan'] = config.keyscanExecutable;
   for (const path of Object.values(tools)) assert.ok(existsSync(path), 'The existing Windows OpenSSH client is required: ' + basename(path));
   const execute = (tool, args, options = {}) => {
     try {
