@@ -1,4 +1,4 @@
-name: XSENUS read-only ACL diagnostics
+name: XSENUS artifact store probe — not release
 
 on:
   workflow_dispatch: {}
@@ -11,8 +11,54 @@ concurrency:
   queue: max
   cancel-in-progress: false
 
+env:
+  PAYPLANNER_CI_ARTIFACT_ROOT: 'D:\PayPlannerCIArtifacts\store'
+
 jobs:
-  runner-diagnostics:
+  frontend:
+    name: Local fixture producer — no release
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/claude/practical-bardeen-pglcf3'
+    runs-on: [self-hosted, Windows, X64, payplanner-xsenus]
+    timeout-minutes: 5
+    outputs:
+      frontend-artifact-id: ${{ steps.fixture-upload.outputs.artifact-id }}
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - name: Check exact trusted host, SID and frozen helper
+        run: |
+          & node scripts/xsenus-artifact-probe.mjs preflight
+          exit $LASTEXITCODE
+      - name: Create only the two absent private project directories
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\scripts\xsenus-artifact-store-init.ps1
+          exit $LASTEXITCODE
+      - name: Exercise real native artifact-store check
+        run: |
+          & node scripts/xsenus-artifact-store.mjs check
+          exit $LASTEXITCODE
+      - name: Create a bounded tar.gz containing only known fixture bytes
+        run: |
+          & node scripts/xsenus-artifact-probe.mjs create
+          exit $LASTEXITCODE
+      - name: Put fixture through actual CLI and actual GITHUB_OUTPUT
+        id: fixture-upload
+        run: |
+          & node scripts/xsenus-artifact-store.mjs put --kind frontend --source frontend.tar.gz --retention-days 3
+          exit $LASTEXITCODE
+
+  deploy:
+    name: Local fixture consumer — no VPS
+    needs: frontend
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/claude/practical-bardeen-pglcf3'
     runs-on: [self-hosted, Windows, X64, payplanner-xsenus]
     timeout-minutes: 5
@@ -20,25 +66,25 @@ jobs:
       run:
         shell: powershell
     steps:
-      - name: Checkout diagnostic commit
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
           fetch-depth: 1
-
-      - name: Set up Node for this diagnostic job
-        uses: actions/setup-node@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
-
-      - name: Require the existing trusted XSENUS context
+      - name: Check exact trusted host, SID and frozen helper
         run: |
-          $ErrorActionPreference = 'Stop'
-          & node scripts/verify-xsenus-runner.mjs build
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Read fixed artifact-store candidate ACL metadata only
+          & node scripts/xsenus-artifact-probe.mjs preflight
+          exit $LASTEXITCODE
+      - name: Exercise real native artifact-store check
         run: |
-          $ErrorActionPreference = 'Stop'
-          & .\scripts\xsenus-ci-acl-diagnostic.ps1
+          & node scripts/xsenus-artifact-store.mjs check
+          exit $LASTEXITCODE
+      - name: Get via real CLI and needs output, verify exact tar members and bytes
+        env:
+          EXPECTED_ARTIFACT_ID: ${{ needs.frontend.outputs.frontend-artifact-id }}
+          ARTIFACT_NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          & node scripts/xsenus-artifact-probe.mjs consume
           exit $LASTEXITCODE
