@@ -15,7 +15,7 @@ permissions:
 
 concurrency:
   group: payplanner-deploy
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   PAYPLANNER_CI_ARTIFACT_ROOT: 'D:\PayPlannerCIArtifacts\main-store'
@@ -721,7 +721,9 @@ jobs:
         run: node scripts/verify-xsenus-runner.mjs build
 
       - name: Test Windows SSH deployment bridge
-        run: node --test scripts/windows-vps-deploy.node-tests.mjs
+        run: |
+          node --test scripts/windows-vps-deploy.node-tests.mjs
+          node --test scripts/prepare-deployment-package.node-tests.mjs scripts/prepare-deployment-plan.node-tests.mjs
 
       - name: Verify qualified deployment artifact IDs
         env:
@@ -764,15 +766,15 @@ jobs:
 
       - name: Prepare deploy scripts
         run: |
-          mkdir -p "${{ env.OUT_DIR }}/deploy"
-          cp scripts/prune-deploy-backups.sh "${{ env.OUT_DIR }}/deploy/"
-          cp scripts/preserve-data-protection-keys.sh "${{ env.OUT_DIR }}/deploy/"
+          node scripts/prepare-deployment-package.mjs "${{ env.OUT_DIR }}" "${{ github.sha }}"
 
       - name: Create tarball
-        run: tar -czf "${{ env.TAR_NAME }}" -C "${{ env.OUT_DIR }}" .
+        run: tar --null --verbatim-files-from --no-recursion -czf "${{ env.TAR_NAME }}" -C "${{ env.OUT_DIR }}" -T "${{ env.OUT_DIR }}/deployment-files.nul"
 
       - name: Verify Linux filesystem gates and deploy qualified package
+        id: vps-install
         env:
+          ARTIFACT_NEEDS_JSON: ${{ toJSON(needs) }}
           DEPLOY_SHA: ${{ github.sha }}
           DEPLOY_ARCHIVE_NAME: ${{ env.TAR_NAME }}
           VPS_SSH_HOST_FINGERPRINT: ${{ vars.VPS_SSH_HOST_FINGERPRINT }}
@@ -784,6 +786,7 @@ jobs:
         run: node scripts/windows-vps-deploy.mjs
 
       - name: Check production deploy readiness
+        id: production-readiness
         run: |
           node scripts/run-production-deploy-readiness.mjs \
             --api-url="${{ env.PUBLIC_API_URL }}" \
@@ -793,3 +796,13 @@ jobs:
             --require-websocket=true \
             --allow-websocket-auth-challenge=true \
             --timeout-ms=20000
+
+      - name: Halt this revision when production readiness fails
+        if: always() && steps.vps-install.outcome == 'success' && steps.production-readiness.outcome != 'success'
+        env:
+          ARTIFACT_NEEDS_JSON: ${{ toJSON(needs) }}
+          DEPLOY_SHA: ${{ github.sha }}
+          DEPLOY_ARCHIVE_NAME: ${{ env.TAR_NAME }}
+          VPS_SSH_HOST_FINGERPRINT: ${{ vars.VPS_SSH_HOST_FINGERPRINT }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: node scripts/windows-vps-deploy.mjs --halt

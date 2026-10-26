@@ -3,10 +3,10 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import test from 'node:test';
-import { configuration, connectionArguments, createPrivateDirectory, deploy, linuxFiles, nativeRun, redact, shellQuote, trustedHostLine } from './windows-vps-deploy.mjs';
+import { configuration, connectionArguments, createPrivateDirectory, deploy, haltCommand, linuxFiles, nativeRun, nativeStream, redact, shellQuote, trustedHostLine, validatePrivateRecovery } from './windows-vps-deploy.mjs';
 
 const sha = 'a'.repeat(40);
 const hostBlob = Buffer.from('synthetic host key for orchestration tests');
@@ -18,7 +18,9 @@ function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'payplanner-bridge-test-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, 'scripts'));
-  for (const name of [...linuxFiles, 'deploy-vps.sh']) writeFileSync(join(root, 'scripts', name), readFileSync(resolve('scripts', name)));
+  for (const name of [...linuxFiles, 'deploy-vps.sh', 'windows-vps-deploy.mjs', 'prepare-deployment-plan.mjs', 'prepare-deployment-package.mjs']) writeFileSync(join(root, 'scripts', name), readFileSync(resolve('scripts', name)));
+  mkdirSync(join(root, 'out'));
+  mkdirSync(join(root, 'recovery'));
   const systemRoot = join(root, 'windows');
   mkdirSync(join(systemRoot, 'System32/OpenSSH'), { recursive: true });
   for (const name of ['ssh', 'scp', 'ssh-keyscan']) writeFileSync(join(systemRoot, 'System32/OpenSSH', name + '.exe'), 'synthetic');
@@ -37,12 +39,33 @@ function harness(config, fail) {
   let directory;
   return { calls, logs, directory: () => directory,
     options: { platform: 'win32', log: value => logs.push(value),
+      prepare: () => ({ plan: { releaseSha: sha, previousRevision: 'b'.repeat(40), expectedApiSha256: 'c'.repeat(64),
+        expectedPreviousApiSha256: 'd'.repeat(64), backupUtc: '20261026T120000Z', historyManifest: { sha256: 'e'.repeat(64) },
+        offsiteHistoryReceipt: { sha256: 'f'.repeat(64) } },
+        qualificationRaw: Buffer.from('{"runId":"123","runAttempt":"1"}'), historyRaw: Buffer.from('{}'), historyManifestRaw: Buffer.from('{}'),
+        offsiteRoot: join(config.root, 'recovery') }),
+      recoveryWorkspace: recovery => mkdtempSync(join(recovery.temporaryRoot, 'payplanner-deploy-')),
+      stream: async (executable, args, destination, options) => {
+        const call = { tool: 'stream', args, options }; calls.push(call);
+        if (fail?.(call)) throw Object.assign(new Error('synthetic stream failure'), { status: 24 });
+        writeFileSync(destination, 'synthetic stopped backup');
+      },
       workspace: () => { directory = mkdtempSync(join(config.temporaryRoot, 'payplanner-deploy-')); return directory; },
       run: (executable, args, options) => {
         const call = { tool: basename(executable), args, options }; calls.push(call);
         if (fail?.(call)) throw Object.assign(new Error('synthetic failure'), { status: 23, stderr: config.remoteEnv.PAYPLANNER_WEBPUSH_PRIVATE_KEY });
         if (call.tool === 'ssh-keyscan.exe') return scan;
-        if (args.at(-1).startsWith('umask 077;')) return `/tmp/payplanner-preflight-${sha}-A1b2C3d4\n`;
+        if (call.tool === 'python') {
+          const list = Buffer.from('synthetic native listing');
+          writeFileSync(join(dirname(args.at(-1)), 'database.list'), list);
+          writeFileSync(args.at(-1), JSON.stringify({ schemaVersion: 1, rootAccepted: false, verifiedOutsideVps: false,
+            backupServerPath: `/opt/payplanner/deploy-backups/manual-${sha}-20261026T120000Z`, backupManifestSha256: '1'.repeat(64),
+            allListedFilesCopied: true, allCopiedHashesMatched: true, allEntryMetadataMatched: true, sourceBeforeAfterExact: true,
+            offsitePgRestoreListExitCode: 0, offsitePgRestoreListSha256: createHash('sha256').update(list).digest('hex'),
+            archive: { bytes: Buffer.byteLength('synthetic stopped backup') } })); return '';
+        }
+        if (args.at(-1).startsWith('umask 077;')) return `/tmp/payplanner-${args.at(-1).includes('control-') ? 'control' : 'preflight'}-${sha}-A1b2C3d4\n`;
+        if (args.at(-1).startsWith('python3 -B')) return JSON.stringify({ entries: [{ path: 'BACKUP-SHA256SUMS', sha256: '1'.repeat(64) }] }) + '\n';
         return '';
       },
     } };
@@ -77,14 +100,21 @@ test('schedules both Linux scripts and exact transferred-byte checks before pack
   await deploy(config, state.options);
   const preflight = state.calls.findIndex(call => call.options.input?.includes('test "$(uname -s)" = Linux'));
   const upload = state.calls.findIndex(call => call.tool === 'scp.exe' && call.args.includes(config.archive));
-  const installation = state.calls.findIndex(call => call.options.input?.includes('[11/14] Restart service'));
+  const installation = state.calls.findIndex(call => call.args.at(-1).includes('--execute install '));
   assert.ok(preflight > 0 && upload > preflight && installation > upload);
   const script = state.calls[preflight].options.input;
   assert.match(script, /bash prune-deploy-backups\.test\.sh\nbash preserve-data-protection-keys\.test\.sh/);
   assert.match(script, /python3 -B deploy-history-archive\.test\.py\n/);
   assert.match(script, /export TMPDIR="\$PWD\/fixtures"/);
   assert.match(script, /sha256sum -c -/);
-  assert.equal(state.calls.filter(call => call.tool === 'scp.exe').length, 2);
+  const backup = state.calls.findIndex(call => call.args.at(-1).includes('--execute backup '));
+  const copy = state.calls.findIndex(call => call.tool === 'stream');
+  const verified = state.calls.findIndex(call => call.tool === 'python');
+  assert.ok(upload < backup && backup < copy && copy < verified && verified < installation);
+  assert.match(state.calls[verified].args.join(' '), /pg_restore\.exe/);
+  const evidence = state.logs.find(line => line.startsWith('Private recovery evidence: ')).slice('Private recovery evidence: '.length);
+  assert.ok(existsSync(join(evidence, 'stopped.tar')));
+  assert.ok(existsSync(join(evidence, 'offsite-verified.json')));
   assert.ok(state.calls.some(call => call.args.at(-1).startsWith('rm -rf -- ') && state.calls.indexOf(call) < upload));
   assert.ok(!existsSync(state.directory()));
 });
@@ -94,7 +124,7 @@ test('a failed Linux gate blocks archive transfer and installation, preserves na
   const state = harness(config, call => call.options.input?.includes('test "$(uname -s)" = Linux'));
   await assert.rejects(deploy(config, state.options), /native exit 23/);
   assert.ok(!state.calls.some(call => call.args.includes(config.archive)));
-  assert.ok(!state.calls.some(call => call.options.input?.includes('[11/14] Restart service')));
+  assert.ok(!state.calls.some(call => call.args.at(-1).includes('--execute install ')));
   assert.ok(state.calls.some(call => call.args.at(-1).startsWith('rm -rf -- ')));
   assert.ok(!existsSync(state.directory()));
 });
@@ -110,7 +140,7 @@ test('changing a local checked script during Linux preflight blocks the release 
   assert.ok(!existsSync(state.directory()));
 });
 
-test('secrets never enter command arguments or child environment; remote values use quoted stdin', async t => {
+test('secrets never enter command arguments, child environment or remote stdin', async t => {
   const { config } = fixture(t);
   const state = harness(config);
   await deploy(config, state.options);
@@ -120,10 +150,90 @@ test('secrets never enter command arguments or child environment; remote values 
     assert.equal(call.options.env.VPS_SSH_KEY, undefined);
     assert.equal(call.options.env.PAYPLANNER_WEBPUSH_PRIVATE_KEY, undefined);
   }
-  const payload = state.calls.find(call => call.options.input?.includes('[11/14] Restart service')).options.input;
-  assert.ok(payload.includes('export PAYPLANNER_WEBPUSH_SUBJECT=' + shellQuote(config.remoteEnv.PAYPLANNER_WEBPUSH_SUBJECT)));
-  assert.ok(payload.indexOf('set +x') < payload.indexOf('export PAYPLANNER_WEBPUSH_PRIVATE_KEY='));
-  assert.ok(!payload.includes(config.key));
+  for (const call of state.calls) {
+    for (const secret of config.secrets.filter(Boolean)) assert.ok(!(call.options.input ?? '').includes(secret));
+  }
+  assert.equal(shellQuote("value'quoted"), "'value'\\''quoted'");
+});
+
+test('a failed stopped-backup stream aborts before installation and retains the recovery point', async t => {
+  const { config } = fixture(t);
+  const state = harness(config, call => call.tool === 'stream');
+  await assert.rejects(deploy(config, state.options), /native exit 24/);
+  assert.ok(state.calls.some(call => call.args.at(-1).includes('--execute abort ')));
+  assert.ok(!state.calls.some(call => call.args.at(-1).includes('--execute install ')));
+  assert.ok(!state.calls.some(call => call.options.input?.includes('HALT_AFTER_READINESS_FAILURE')));
+  assert.ok(!existsSync(state.directory()));
+  const evidence = state.logs.find(line => line.startsWith('Private recovery evidence: ')).slice('Private recovery evidence: '.length);
+  assert.ok(existsSync(join(evidence, 'stopped-before.json')));
+});
+
+test('native dump-list or local archive verification failure cannot authorise installation', async t => {
+  const { config } = fixture(t);
+  const state = harness(config, call => call.tool === 'python');
+  await assert.rejects(deploy(config, state.options), /synthetic failure/);
+  assert.ok(state.calls.some(call => call.args.at(-1).includes('--execute abort ')));
+  assert.ok(!state.calls.some(call => call.args.at(-1).includes('--execute install ')));
+  assert.ok(!existsSync(state.directory()));
+});
+
+test('an unbound verifier adoption cannot substitute for the trusted offsite caller', async t => {
+  const { config } = fixture(t);
+  const state = harness(config);
+  const original = state.options.run;
+  state.options.run = (executable, args, options) => {
+    const output = original(executable, args, options);
+    if (executable === 'python') {
+      const result = JSON.parse(readFileSync(args.at(-1), 'utf8'));
+      result.rootAccepted = true;
+      writeFileSync(args.at(-1), JSON.stringify(result));
+    }
+    return output;
+  };
+  await assert.rejects(deploy(config, state.options));
+  assert.ok(state.calls.some(call => call.args.at(-1).includes('--execute abort ')));
+  assert.ok(!state.calls.some(call => call.args.at(-1).includes('--execute install ')));
+});
+
+test('after an attempted installation, failure halts the exact new revision instead of starting old code', async t => {
+  const { config } = fixture(t);
+  const state = harness(config, call => call.args.at(-1).includes('--execute install '));
+  await assert.rejects(deploy(config, state.options));
+  const halt = state.calls.find(call => call.options.input?.includes('HALT_AFTER_READINESS_FAILURE'));
+  assert.ok(halt);
+  assert.match(halt.options.input, /systemctl stop payplanner\.service/);
+  assert.ok(!halt.options.input.includes('systemctl start'));
+  assert.ok(!halt.options.input.includes('pg_restore'));
+  assert.ok(!state.calls.some(call => call.args.at(-1).includes('--execute abort ')));
+});
+
+test('guarded halt refuses invalid revision or digest identities', () => {
+  const record = { releaseSha: sha, previousRevision: 'b'.repeat(40), expectedApiSha256: 'c'.repeat(64), expectedPreviousApiSha256: 'd'.repeat(64) };
+  assert.match(haltCommand(record), /flock -n 9/);
+  assert.match(haltCommand(record), /Unexpected deployment identity/);
+  for (const name of Object.keys(record)) assert.throws(() => haltCommand({ ...record, [name]: 'main;exit 0' }));
+});
+
+test('offsite recovery data denies broad read access as well as broad write access', () => {
+  const path = resolve('D:/PayPlannerOffsiteBackups');
+  const sid = 'S-1-5-21-123-456-789-1001';
+  const report = { sid, items: [{ path, owner: sid, reparse: false, directory: true, fixed: true, format: 'NTFS', streams: [],
+    rules: [{ sid, rights: 2032127, allow: true, inheritOnly: false }] }] };
+  validatePrivateRecovery(report, [path], path);
+  report.items[0].rules.push({ sid: 'S-1-1-0', rights: 1, allow: true, inheritOnly: false });
+  assert.throws(() => validatePrivateRecovery(report, [path], path), /another Windows account/);
+});
+
+test('native backup streaming writes exact bytes with bounded memory and propagates failure', async t => {
+  const { root } = fixture(t);
+  const path = join(root, 'native-stream.bin');
+  await nativeStream(process.execPath, ['-e', 'process.stdout.write(Buffer.alloc(2*1024*1024, 42))'], path);
+  assert.deepEqual(readFileSync(path), Buffer.alloc(2*1024*1024, 42));
+  const partial = join(root, 'native-partial.bin');
+  await assert.rejects(nativeStream(process.execPath, ['-e', 'process.stdout.write("partial");process.stderr.write("private failure");process.exit(7)'], partial),
+    error => error.status === 7 && error.stderr === 'private failure');
+  assert.equal(readFileSync(partial, 'utf8'), 'partial');
+  await assert.rejects(nativeStream(process.execPath, ['-e', 'process.exit(0)'], partial), { code: 'EEXIST' });
 });
 
 test('changed history proof or its tests after Linux preflight cannot reach archive upload', async t => {
@@ -143,7 +253,7 @@ test('changed history proof or its tests after Linux preflight cannot reach arch
 
 test('native failures redact secret output and still remove private credentials', async t => {
   const { config } = fixture(t);
-  const state = harness(config, call => call.options.input?.includes('[11/14] Restart service'));
+  const state = harness(config, call => call.args.at(-1).includes('--execute install '));
   await assert.rejects(deploy(config, state.options), error => error.message.includes('[redacted]') && !error.message.includes(config.remoteEnv.PAYPLANNER_WEBPUSH_PRIVATE_KEY));
   assert.ok(!existsSync(state.directory()));
   assert.ok(!state.logs.join('\n').includes(config.remoteEnv.PAYPLANNER_WEBPUSH_PRIVATE_KEY));

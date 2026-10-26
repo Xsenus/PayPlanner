@@ -23,6 +23,14 @@ function replaceInJob(id: string, change: (job: string) => string) {
 }
 
 describe('parallel deploy workflow release contract', () => {
+  it.each([
+    ['automatic deployment cancellation', '  cancel-in-progress: false', '  cancel-in-progress: true'],
+    ['unsafe recursive tar', 'tar --null --verbatim-files-from --no-recursion -czf', 'tar -czf'],
+    ['missing guarded HALT', 'run: node scripts/windows-vps-deploy.mjs --halt', 'run: echo skipped-halt'],
+    ['halt after successful readiness', "steps.production-readiness.outcome != 'success'", "steps.production-readiness.outcome == 'success'"],
+  ])('rejects delivery regression: %s', (_name, before, after) => {
+    expect(() => validateDeployWorkflow(replaceOnce(before, after))).toThrow();
+  });
   it.each(['frontend', 'backend-format', 'backend-build', 'backend-test', 'backend-browser', 'backend', 'deploy'])(
     'pins %s to the trusted Windows host and safe checkout', id => {
       for (const [before, after] of [

@@ -139,6 +139,8 @@ export function validateDeployWorkflow(source) {
   };
   requireValue(jobs && Object.keys(jobs).sort().join(',') === Object.keys(dependencies).sort().join(','), 'Expected exactly seven release jobs');
   requireValue(workflow.defaults === undefined, 'Custom workflow shell/defaults require explicit gate review');
+  requireValue(workflow.concurrency?.group === 'payplanner-deploy' && workflow.concurrency?.['cancel-in-progress'] === false,
+    'A newer release must queue instead of interrupting an in-progress stopped-backup installation');
   requireValue(workflow.on?.push?.branches?.join(',') === 'main' && Object.hasOwn(workflow.on, 'workflow_dispatch'), 'Keep main push and manual release triggers');
   const documentationPaths = ['README.md', 'AGENTS.md', 'docs/**/*.md', 'docs/yougile-sources/**'];
   requireValue(Object.keys(workflow.on).sort().join(',') === 'push,workflow_dispatch'
@@ -192,7 +194,10 @@ export function validateDeployWorkflow(source) {
       const diagnostic = (id === 'backend-test' && step.run === `set -euo pipefail\n${localPut('shard-diagnostics', 'test-results/', 14)}`)
         || (id === 'backend-browser' && step.run === `set -euo pipefail\n${localPut('restored-diagnostics', 'test-results/restored-browser/', 14)}`);
       const qualifiedAlias = id === 'backend-test' && step.run === `set -euo pipefail\n${localPut('qualified-shard', 'test-results/', 14)}`;
-      requireValue(step.if === undefined || (diagnostic && step.if === 'always()') || (qualifiedAlias && step.if === 'success()'), `${id}: conditional step can skip a release gate`);
+      const deploymentHalt = id === 'deploy' && step.run === 'node scripts/windows-vps-deploy.mjs --halt';
+      const haltCondition = "always() && steps.vps-install.outcome == 'success' && steps.production-readiness.outcome != 'success'";
+      requireValue(step.if === undefined || (deploymentHalt && step.if === haltCondition) || (diagnostic && step.if === 'always()') || (qualifiedAlias && step.if === 'success()'), `${id}: conditional step can skip a release gate`);
+      if (deploymentHalt) requireValue(step.if === haltCondition, 'Readiness failure must halt only the installed revision');
       if (diagnostic) requireValue(step.if === 'always()', `${id}: preserve immutable attempt evidence unconditionally`);
       if (qualifiedAlias) requireValue(step.if === 'success()', `${id}: only a successful native result may publish qualified evidence`);
     }
@@ -436,7 +441,8 @@ export function validateDeployWorkflow(source) {
   requireValue(deployIds.step.env?.BACKEND_ARTIFACT_ID === backendArtifactId && deployIds.step.env?.FRONTEND_ARTIFACT_ID === frontendArtifactId
     && deployIds.lines.join('\n') === 'set -euo pipefail\n[[ "$BACKEND_ARTIFACT_ID" =~ ^xsenus-local-v1:[a-f0-9]{64}$ ]]\n[[ "$FRONTEND_ARTIFACT_ID" =~ ^xsenus-local-v1:[a-f0-9]{64}$ ]]\n[[ "$BACKEND_ARTIFACT_ID" != "$FRONTEND_ARTIFACT_ID" ]]'
     && downloads.every(({ index }) => deployIds.index < index), 'Deploy must reject empty, multiple or substituted artifact IDs before downloading');
-  const tar = command('deploy', 'tar -czf "${{ env.TAR_NAME }}" -C "${{ env.OUT_DIR }}" .');
+  const tar = command('deploy', 'tar --null --verbatim-files-from --no-recursion -czf "${{ env.TAR_NAME }}" -C "${{ env.OUT_DIR }}" -T "${{ env.OUT_DIR }}/deployment-files.nul"');
+  const packageManifest = command('deploy', 'node scripts/prepare-deployment-package.mjs "${{ env.OUT_DIR }}" "${{ github.sha }}"');
   const unpackBackend = command('deploy', 'tar -xzf deploy-artifacts/backend.tar.gz -C "${{ env.OUT_DIR }}"');
   const unpackFrontend = command('deploy', 'tar -xzf deploy-artifacts/frontend.tar.gz -C "${{ env.OUT_DIR }}"');
   const bridge = command('deploy', 'node scripts/windows-vps-deploy.mjs');
@@ -444,6 +450,7 @@ export function validateDeployWorkflow(source) {
   const trustedDeploy = command('deploy', 'node scripts/verify-xsenus-runner.mjs build');
   const readiness = command('deploy', 'node scripts/run-production-deploy-readiness.mjs', true);
   const requiredBridgeEnv = {
+    ARTIFACT_NEEDS_JSON: '${{ toJSON(needs) }}',
     DEPLOY_SHA: sha, DEPLOY_ARCHIVE_NAME: '${{ env.TAR_NAME }}',
     VPS_SSH_HOST_FINGERPRINT: '${{ vars.VPS_SSH_HOST_FINGERPRINT }}', VPS_SSH_KEY: '${{ secrets.VPS_SSH_KEY }}',
     PAYPLANNER_WEBPUSH_ENABLED: "${{ vars.PAYPLANNER_WEBPUSH_ENABLED || 'false' }}",
@@ -453,6 +460,13 @@ export function validateDeployWorkflow(source) {
   };
   requireValue(bridge.lines.join('\n') === 'node scripts/windows-vps-deploy.mjs'
     && JSON.stringify(bridge.step.env) === JSON.stringify(requiredBridgeEnv), 'Deploy requires the pinned native SSH bridge and structured secret environment');
+  requireValue(bridge.step.id === 'vps-install' && readiness.step.id === 'production-readiness', 'Exact install/readiness outcomes must bind failure handling');
+  const halt = command('deploy', 'node scripts/windows-vps-deploy.mjs --halt');
+  requireValue(halt.index > readiness.index && halt.step.if === "always() && steps.vps-install.outcome == 'success' && steps.production-readiness.outcome != 'success'",
+    'After unsuccessful readiness, preserve the guarded HALT barrier');
+  const haltEnv = Object.fromEntries(Object.entries(requiredBridgeEnv).filter(([name]) => !name.startsWith('PAYPLANNER_WEBPUSH')));
+  requireValue(JSON.stringify(halt.step.env) === JSON.stringify(haltEnv), 'Guarded HALT must use the same pinned SSH target and actual CI needs');
+  requireValue(bridgeTests.lines.includes('node --test scripts/prepare-deployment-package.node-tests.mjs scripts/prepare-deployment-plan.node-tests.mjs'), 'Package and CI admission regressions are mandatory');
   requireValue(!deploy.some(step => step.uses?.startsWith('appleboy/')), 'Windows deployment must use native OpenSSH with Linux filesystem gates');
   requireValue(trustedDeploy.index < bridgeTests.index && bridgeTests.index < bridge.index,
     'Trusted host and bridge regression tests must precede Linux filesystem gates and deployment');
@@ -460,7 +474,7 @@ export function validateDeployWorkflow(source) {
     && readiness.lines.includes('--token="" \\') && readiness.lines.includes('--require-websocket=true \\')
     && readiness.lines.includes('--allow-websocket-auth-challenge=true \\'), 'Preserve exact-revision public production readiness without a stored JWT');
   requireValue(downloads.every(({ index }) => index < unpackBackend.index && index < unpackFrontend.index)
-    && unpackBackend.index < tar.index && unpackFrontend.index < tar.index
+    && unpackBackend.index < packageManifest.index && unpackFrontend.index < packageManifest.index && packageManifest.index < tar.index
     && tar.index < bridge.index && bridge.index < readiness.index, 'Deploy download/unpack/tar/Linux-gates/SSH/readiness order');
   requireValue(!deploy.some(step => /(?:dotnet (?:test|build|publish)|npm (?:ci|run build))/.test(step.run ?? '')), 'Deploy must use qualified artifacts without rebuilding');
   const transportCounts = { frontend: [1, 0], 'backend-format': [0, 0], 'backend-build': [2, 0],

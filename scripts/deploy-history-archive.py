@@ -107,7 +107,10 @@ class HashingReader:
         return block
 
 
-def verify_archive(archive, expected):
+def verify_archive(archive, expected, *, archive_root='backups'):
+    require(isinstance(archive_root, str) and archive_root and '/' not in archive_root
+            and '\\' not in archive_root and archive_root not in ('.', '..')
+            and not any(ord(c) < 32 for c in archive_root), 'Unsafe archive root')
     path, before = ordinary(archive)
     seen, end = set(), 0
     with path.open('rb') as source:
@@ -115,8 +118,8 @@ def verify_archive(archive, expected):
         with tarfile.open(fileobj=reader, mode='r|', encoding='utf-8', errors='surrogateescape') as stream:
             for member in stream:
                 name = member.name.rstrip('/')
-                require(name == 'backups' or name.startswith('backups/'), 'TAR path escapes history')
-                key = '.' if name == 'backups' else name[len('backups/'):]
+                require(name == archive_root or name.startswith(archive_root + '/'), 'TAR path escapes history')
+                key = '.' if name == archive_root else name[len(archive_root) + 1:]
                 require(key in expected and key not in seen and not member.linkname and member.sparse is None, 'Unexpected/duplicate/linked TAR member')
                 entry = expected[key]
                 require((member.isdir() and entry['kind'] == 'directory') or (member.isreg() and entry['kind'] == 'file'), 'TAR kind')
