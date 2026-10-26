@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import test from 'node:test';
-import { configuration, connectionArguments, createPrivateDirectory, deploy, haltCommand, linuxFiles, nativeRun, nativeStream, redact, shellQuote, trustedHostLine, validatePrivateRecovery } from './windows-vps-deploy.mjs';
+import { configuration, connectionArguments, createPrivateDirectory, deploy, haltCommand, haltDeployment, linuxFiles, nativeRun, nativeStream, redact, shellQuote, trustedHostLine, validatePrivateRecovery } from './windows-vps-deploy.mjs';
 
 const sha = 'a'.repeat(40);
 const hostBlob = Buffer.from('synthetic host key for orchestration tests');
@@ -212,6 +212,59 @@ test('guarded halt refuses invalid revision or digest identities', () => {
   assert.match(haltCommand(record), /flock -n 9/);
   assert.match(haltCommand(record), /Unexpected deployment identity/);
   for (const name of Object.keys(record)) assert.throws(() => haltCommand({ ...record, [name]: 'main;exit 0' }));
+});
+
+function haltFixture(t) {
+  const { config } = fixture(t);
+  mkdirSync(join(config.root, 'out/be'));
+  const api = Buffer.from('qualified api fixture');
+  writeFileSync(join(config.root, 'out/be/PayPlanner.Api.dll'), api);
+  // Explicit synthetic function input, never a locally forged CLI/runner context.
+  config.childEnv = { ...config.childEnv, COMPUTERNAME: 'XSENUS', GITHUB_ACTIONS: 'true',
+    GITHUB_REPOSITORY: 'Xsenus/PayPlanner', GITHUB_REF: 'refs/heads/main', GITHUB_EVENT_NAME: 'push',
+    GITHUB_WORKFLOW_REF: 'Xsenus/PayPlanner/.github/workflows/deploy.yml@refs/heads/main',
+    GITHUB_JOB: 'deploy', GITHUB_SHA: sha, GITHUB_WORKFLOW_SHA: sha, GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1', OUT_DIR: 'out',
+    ARTIFACT_NEEDS_JSON: JSON.stringify({ frontend: { result: 'success', outputs: { 'frontend-artifact-id': 'xsenus-local-v1:'+'1'.repeat(64) } },
+      'backend-format': { result: 'success', outputs: {} },
+      backend: { result: 'success', outputs: { 'backend-artifact-id': 'xsenus-local-v1:'+'2'.repeat(64), 'manifest-sha': '3'.repeat(64) } } }) };
+  const record = { releaseSha: sha, previousRevision: 'b'.repeat(40), runId: '123', runAttempt: '1',
+    expectedApiSha256: createHash('sha256').update(api).digest('hex'), expectedPreviousApiSha256: 'd'.repeat(64) };
+  const path = join(config.root, 'out/deployment-installed.json');
+  writeFileSync(path, JSON.stringify(record));
+  return { config, record, path };
+}
+
+test('readiness HALT rejects another run, attempt, revision or API before authentication', async t => {
+  for (const [name, value] of [['runId', '999'], ['runAttempt', '2'], ['releaseSha', 'b'.repeat(40)], ['expectedApiSha256', 'e'.repeat(64)]]) {
+    await t.test(name, async child => {
+      const { config, record, path } = haltFixture(child);
+      writeFileSync(path, JSON.stringify({ ...record, [name]: value }));
+      const state = harness(config);
+      await assert.rejects(haltDeployment(config, state.options));
+      assert.equal(state.calls.length, 0);
+      assert.equal(state.directory(), undefined);
+    });
+  }
+});
+
+test('readiness HALT requires a matching pinned host and cleans its temporary credential', async t => {
+  const { config } = haltFixture(t);
+  const state = harness(config);
+  await haltDeployment(config, state.options);
+  const halt = state.calls.find(call => call.options.input?.includes('HALT_AFTER_READINESS_FAILURE'));
+  assert.ok(halt);
+  assert.equal(state.calls[0].tool, 'ssh-keyscan.exe');
+  assert.ok(!state.calls.some(call => call.tool === 'scp.exe'));
+  assert.ok(!halt.options.input.includes('systemctl start'));
+  assert.ok(!halt.options.input.includes('pg_restore'));
+  assert.ok(!existsSync(state.directory()));
+});
+
+test('readiness HALT propagates a native SSH failure without retaining the credential', async t => {
+  const { config } = haltFixture(t);
+  const state = harness(config, call => call.options.input?.includes('HALT_AFTER_READINESS_FAILURE'));
+  await assert.rejects(haltDeployment(config, state.options), /native exit 23/);
+  assert.ok(!existsSync(state.directory()));
 });
 
 test('offsite recovery data denies broad read access as well as broad write access', () => {
