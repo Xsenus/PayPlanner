@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createPlan, fileHash, qualifiedContext } from './prepare-deployment-plan.mjs';
-import { validateInspection, windowsAdapter } from './xsenus-artifact-store.mjs';
+import { contextFromEnvironment, validateInspection, windowsAdapter } from './xsenus-artifact-store.mjs';
 
 export const linuxFiles = Object.freeze([
   'prune-deploy-backups.sh', 'prune-deploy-backups.test.sh',
@@ -222,6 +222,17 @@ export async function haltDeployment(config, options = {}) {
   }, options);
 }
 
+export async function checkDeploymentAccess(config, options = {}) {
+  const context = contextFromEnvironment(config.childEnv, options.platform ?? process.platform);
+  assert.equal(context.producerJob, 'frontend', 'Read-only access is checked before release gates');
+  assert.equal(context.headSha, config.sha);
+  assert.equal(context.workflowSha, config.sha);
+  await withConnection(config, ({ execute, sshArgs, destination }) => {
+    // No archive transfer, backup, application inspection, restart or DB access.
+    execute('ssh', [...sshArgs, destination, 'true'], { timeout: 60000 });
+  }, options);
+}
+
 export async function deploy(config, options = {}) {
   const { run = nativeRun, stream = nativeStream, prepare = prepareDelivery,
     recoveryWorkspace = createPrivateDirectory, log = console.log } = options;
@@ -359,9 +370,10 @@ export async function deploy(config, options = {}) {
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   let config;
   try {
-    assert.ok(process.argv.length === 2 || (process.argv.length === 3 && process.argv[2] === '--halt'), 'Only the structured deployment or guarded halt is supported');
+    assert.ok(process.argv.length === 2 || (process.argv.length === 3 && ['--halt', '--check-access'].includes(process.argv[2])), 'Only structured deployment, access preflight or guarded halt is supported');
     config = configuration();
     if (process.argv[2] === '--halt') await haltDeployment(config);
+    else if (process.argv[2] === '--check-access') await checkDeploymentAccess(config);
     else await deploy(config);
   } catch (error) {
     console.error(redact(error.message, config?.secrets ?? sensitiveNames.map(name => process.env[name] ?? '')));

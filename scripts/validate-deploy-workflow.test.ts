@@ -28,6 +28,10 @@ describe('parallel deploy workflow release contract', () => {
     ['unsafe recursive tar', 'tar --null --verbatim-files-from --no-recursion -czf', 'tar -czf'],
     ['missing guarded HALT', 'run: node scripts/windows-vps-deploy.mjs --halt', 'run: echo skipped-halt'],
     ['halt after successful readiness', "steps.production-readiness.outcome != 'success'", "steps.production-readiness.outcome == 'success'"],
+    ['missing early access gate', 'run: node scripts/windows-vps-deploy.mjs --check-access', 'run: echo skipped-access'],
+    ['early access can install', 'run: node scripts/windows-vps-deploy.mjs --check-access', 'run: node scripts/windows-vps-deploy.mjs'],
+    ['early access failure ignored', 'run: node scripts/windows-vps-deploy.mjs --check-access', 'run: node scripts/windows-vps-deploy.mjs --check-access || true'],
+    ['conditional early access', '      - name: Verify deployment SSH access before long gates\n', '      - name: Verify deployment SSH access before long gates\n        if: false\n'],
   ])('rejects delivery regression: %s', (_name, before, after) => {
     expect(() => validateDeployWorkflow(replaceOnce(before, after))).toThrow();
   });

@@ -66,6 +66,17 @@ jobs:
       - name: Verify trusted Windows frontend host
         run: node scripts/verify-xsenus-runner.mjs build
 
+      - name: Test read-only deployment access preflight
+        run: node --test scripts/windows-vps-access.node-tests.mjs
+
+      - name: Verify deployment SSH access before long gates
+        env:
+          DEPLOY_SHA: ${{ github.sha }}
+          DEPLOY_ARCHIVE_NAME: ${{ env.TAR_NAME }}
+          VPS_SSH_HOST_FINGERPRINT: ${{ vars.VPS_SSH_HOST_FINGERPRINT }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: node scripts/windows-vps-deploy.mjs --check-access
+
       - name: Install FE deps
         run: npm ci
 

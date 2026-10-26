@@ -321,6 +321,15 @@ export function validateDeployWorkflow(source) {
   }
   requireValue(command('frontend', 'node scripts/verify-xsenus-runner.mjs build').index < fe[0].index,
     'Trusted host preflight must precede frontend tools');
+  const accessTests = command('frontend', 'node --test scripts/windows-vps-access.node-tests.mjs');
+  const access = command('frontend', 'node scripts/windows-vps-deploy.mjs --check-access');
+  requireValue(command('frontend', 'node scripts/verify-xsenus-runner.mjs build').index < accessTests.index
+    && accessTests.index < access.index && access.index < fe[0].index,
+  'Read-only authenticated access and its regressions must fail before long release gates');
+  requireValue(access.lines.join('\n') === 'node scripts/windows-vps-deploy.mjs --check-access'
+    && JSON.stringify(access.step.env) === JSON.stringify({ DEPLOY_SHA: sha, DEPLOY_ARCHIVE_NAME: '${{ env.TAR_NAME }}',
+      VPS_SSH_HOST_FINGERPRINT: '${{ vars.VPS_SSH_HOST_FINGERPRINT }}', VPS_SSH_KEY: '${{ secrets.VPS_SSH_KEY }}' }),
+  'Early access must use the pinned SSH identity with no deployment command or custom context');
 
   for (const id of ['backend-format', 'backend-build', 'backend-test', 'backend-browser', 'backend']) {
     const job = jobs[id];
