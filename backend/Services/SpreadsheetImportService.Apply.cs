@@ -342,6 +342,7 @@ public sealed partial class SpreadsheetImportService
         InvoiceDraft draft,
         ImportState state,
         DateTime localToday,
+        string sellerSnapshotPolicy,
         CancellationToken cancellationToken)
     {
         var sourceKeys = BuildInvoiceMatchKeys(draft.ExternalId, draft.Number, draft.Date, draft.Type);
@@ -357,6 +358,7 @@ public sealed partial class SpreadsheetImportService
             return;
         }
 
+        var atomicSellerCreation = false;
         try
         {
             var clientId = FindInvoiceClientId(state, draft.CounterpartyName, draft.CounterpartyInn, out var clientError);
@@ -387,6 +389,14 @@ public sealed partial class SpreadsheetImportService
             ApplyInvoiceValues(payment, draft, clientId.Value, responsibleId, invoiceEntity, localToday);
             SyncInvoiceLineItems(db, payment, BuildEffectiveLineItems(draft.ParsedLineItems, draft.Amount.Value, draft.Nomenclature, sourceTitle));
             SyncPaymentResponsibles(payment, responsibleId);
+
+            if (beforeJson is null && payment.Type != PaymentType.Expense)
+            {
+                payment.SellerSnapshotPolicy = sellerSnapshotPolicy;
+                atomicSellerCreation = sellerSnapshotPolicy == DocumentSellerSnapshotPolicy.OnCreate;
+                await new Companies.DocumentSellerService(db).InitializeForCreationAsync(payment,
+                    await Companies.OwnCompanyRegistry.LoadDefaultAsync(db, cancellationToken), cancellationToken);
+            }
 
             var provisionalAfterJson = SerializeSnapshot(CaptureInvoiceSnapshot(payment));
             if (beforeJson is not null && string.Equals(beforeJson, provisionalAfterJson, StringComparison.Ordinal))
@@ -444,7 +454,10 @@ public sealed partial class SpreadsheetImportService
                 JsonSerializer.Serialize(new { draft.ParseWarnings }, JsonOptions)));
             await db.SaveChangesAsync(cancellationToken);
         }
-        catch (Exception ex)
+        // In on-create mode a failed row may already own immutable image rows.
+        // Let the existing outer transaction roll back the entire batch; never
+        // commit an error operation alongside a partially captured document.
+        catch (Exception ex) when (!atomicSellerCreation)
         {
             _logger.LogError(ex, "Spreadsheet invoice import failed for {FileName}:{RowNumber}", draft.FileName, draft.RowNumber);
             db.ChangeTracker.Clear();

@@ -3132,6 +3132,22 @@ describe('InvoiceModal integration', () => {
     });
   });
 
+  it('submits the chosen own company and branch atomically with a new income invoice', async () => {
+    vi.mocked(apiService.getOwnCompanyOptions).mockResolvedValueOnce([
+      { id: 41, shortName: 'Своя компания', isDefault: true, branches: [{ id: 42, name: 'Офис', kind: 'Office' }] },
+    ]);
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<InvoiceModal open mode="create" invoice={null} onClose={vi.fn()} onSubmit={onSubmit} submitting={false}
+      clients={[createTestClient(1, 'Контрагент')]} responsibles={[]} lookupsLoading={false} defaultClientId={1} relatedPayments={[]} />);
+
+    fireEvent.change(await screen.findByLabelText('Подразделение-продавец'), { target: { value: '42' } });
+    fireEvent.change(screen.getByLabelText(/Номер сч[её]та/i), { target: { value: 'INV-SELLER-1' } });
+    fireEvent.submit(document.getElementById('invoice-edit-form') as HTMLFormElement);
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ number: 'INV-SELLER-1', type: 'Income', sellerCompanyId: 41, sellerBranchId: 42 });
+  });
+
   it('submits an expense invoice without an expense counterparty', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
 
@@ -3170,6 +3186,8 @@ describe('InvoiceModal integration', () => {
         clientCaseIds: [],
       }));
     });
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty('sellerCompanyId');
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty('sellerBranchId');
   });
 
   it('opens the client case modal above the invoice overlay', async () => {

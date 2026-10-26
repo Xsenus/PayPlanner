@@ -189,6 +189,144 @@ public sealed class TaskBulkBillingConcurrencyTests(PostgreSqlMigratedTemplate t
         Assert.Empty(await db.TaskJournalComments.ToArrayAsync());
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ContractPolicyRevocationSerializesWithTheDecisionAndPreservesCommittedContext(bool revokeFirst)
+    {
+        await using var fixture = await CreateAsync(); if (fixture is null) return;
+        var contractId = await fixture.EnableContractModeAsync();
+        var (first, second) = await fixture.RaceAsync(revokeFirst ? "policyOff" : "contractBulk", revokeFirst ? "contractBulk" : "policyOff");
+        Assert.IsType<OkObjectResult>(first); Assert.IsType<OkObjectResult>(second);
+        await using var db = fixture.Open();
+        var task = await db.TaskJournalItems.AsNoTracking().SingleAsync();
+        Assert.Equal(revokeFirst ? "billable" : "internal", task.ClientBillingClassification);
+        Assert.Equal(contractId, task.BillingContractId); Assert.Equal(ContractBillingMode.Actual, task.BillingModeSnapshot);
+        Assert.Equal("retainContractTasks", (await db.SystemSettings.AsNoTracking().SingleAsync(row => row.Key == "tasks.contractTaskBillingMode")).Value);
+        Assert.Equal(revokeFirst ? 0 : 1, await db.TaskJournalComments.CountAsync());
+        if (revokeFirst) Assert.Equal("contractual", Assert.Single(Assert.IsType<TaskBulkBillingResultDto>(Assert.IsType<OkObjectResult>(second).Value).Items).Reason);
+        Assert.Equal(1234.56m, (await db.Contracts.AsNoTracking().SingleAsync()).Amount);
+    }
+
+    [Fact]
+    public async Task ContractOptInFailsFastAgainstLegacyTaskFirstFinancialWriterWithoutDeadlockOrPartialDecision()
+    {
+        await using var fixture = await CreateAsync(); if (fixture is null) return;
+        var contractId = await fixture.EnableContractModeAsync();
+        var id = Assert.Single(fixture.TaskIds);
+        await using var legacy = fixture.Open();
+        await legacy.Database.OpenConnectionAsync();
+        await using var legacyTransaction = await legacy.Database.BeginTransactionAsync();
+        await legacy.Database.SqlQuery<int>($"SELECT \"Id\" FROM \"TaskJournalItems\" WHERE \"Id\" = {id} FOR UPDATE").ToListAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        Task<int>? legacySave = null;
+        var legacyPid = ((NpgsqlConnection)legacy.Database.GetDbConnection()).ProcessID;
+        var afterContractLock = new AfterContractLock(async targetPid =>
+        {
+            legacy.Payments.Add(new Payment { ContractId = contractId, Amount = 10m, Date = DateTime.UtcNow.Date });
+            legacySave = legacy.SaveChangesAsync(timeout.Token);
+            await fixture.WaitForBlockedByAsync(legacyPid, targetPid, timeout.Token);
+        });
+        await using var current = fixture.Open(afterContractLock);
+        try
+        {
+            var response = await fixture.Tasks(current).BulkUpdateTasks(fixture.ContractRequest(), timeout.Token).WaitAsync(TimeSpan.FromSeconds(20));
+            Assert.True(afterContractLock.Invoked);
+            Assert.IsType<ConflictObjectResult>(response.Result);
+            Assert.Equal(PostgresErrorCodes.LockNotAvailable, Assert.IsType<PostgresException>(afterContractLock.CommandFailure).SqlState);
+            Assert.Contains("FROM \"TaskJournalItems\"", afterContractLock.FailedCommandText, StringComparison.Ordinal);
+            Assert.Contains("FOR UPDATE NOWAIT", afterContractLock.FailedCommandText, StringComparison.Ordinal);
+            Assert.NotNull(legacySave);
+            await legacySave.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        finally
+        {
+            timeout.Cancel();
+            await legacyTransaction.RollbackAsync();
+        }
+        await using var verify = fixture.Open();
+        var task = await verify.TaskJournalItems.AsNoTracking().SingleAsync();
+        Assert.Equal("billable", task.ClientBillingClassification);
+        Assert.Equal(contractId, task.BillingContractId);
+        Assert.Empty(await verify.TaskJournalComments.ToArrayAsync());
+        Assert.Equal(1, await verify.Payments.CountAsync()); // Only the fixture's original unrelated invoice remains.
+    }
+
+    [Fact]
+    public async Task ChangedContractBindingAfterPreliminaryReadIsAConflictWithoutTakingAnUnorderedNewRoot()
+    {
+        await using var fixture = await CreateAsync(); if (fixture is null) return;
+        await fixture.EnableContractModeAsync();
+        var newContractId = 0;
+        var change = new AfterContractLock(async _ =>
+        {
+            await using var writer = fixture.Open();
+            var replacement = new Contract { Number = "SYNTHETIC-REPLACEMENT", BillingMode = ContractBillingMode.Fixed, Date = DateTime.UtcNow.Date.AddDays(-1) };
+            replacement.ClientContracts.Add(new ClientContract { ClientId = fixture.ClientId });
+            writer.Contracts.Add(replacement);
+            var task = await writer.TaskJournalItems.SingleAsync();
+            task.BillingContract = replacement; task.BillingModeSnapshot = ContractBillingMode.Fixed;
+            await writer.SaveChangesAsync(); newContractId = replacement.Id;
+        });
+        await using var current = fixture.Open(change);
+        var result = Assert.IsType<TaskBulkBillingResultDto>(Assert.IsType<OkObjectResult>((await fixture.Tasks(current).BulkUpdateTasks(fixture.ContractRequest(), CancellationToken.None)).Result).Value);
+        Assert.Equal("versionConflict", Assert.Single(result.Items).Reason);
+        Assert.Equal("conflict", Assert.Single(result.Items).Outcome);
+        await using var verify = fixture.Open();
+        var after = await verify.TaskJournalItems.AsNoTracking().SingleAsync();
+        Assert.Equal(newContractId, after.BillingContractId); Assert.Equal(ContractBillingMode.Fixed, after.BillingModeSnapshot);
+        Assert.Equal("billable", after.ClientBillingClassification);
+        Assert.Empty(await verify.TaskJournalComments.ToArrayAsync());
+    }
+
+    [Fact]
+    public async Task ContractViewRevokedAfterTaskLocksSkipsTheRowWithoutDisclosingOrChangingItsFinancialContext()
+    {
+        await using var fixture = await CreateAsync(restricted: true); if (fixture is null) return;
+        await fixture.EnableContractModeAsync();
+        var revoke = new AfterTaskLock(async () =>
+        {
+            await using var authority = fixture.Open();
+            var roleId = (await authority.Users.AsNoTracking().SingleAsync(user => user.Id == fixture.UserId)).RoleId;
+            var permission = await authority.RolePermissions.SingleAsync(row => row.RoleId == roleId && row.Section == RolePermissionCatalog.Contracts);
+            permission.CanView = false; await authority.SaveChangesAsync();
+        });
+        await using var current = fixture.Open(revoke);
+        var response = await fixture.Tasks(current).BulkUpdateTasks(fixture.ContractRequest(), CancellationToken.None);
+        Assert.True(revoke.Invoked);
+        var result = Assert.IsType<TaskBulkBillingResultDto>(Assert.IsType<OkObjectResult>(response.Result).Value);
+        Assert.Equal("contractual", Assert.Single(result.Items).Reason);
+        Assert.Equal(0, result.Updated);
+        await using var verify = fixture.Open();
+        Assert.Equal("billable", (await verify.TaskJournalItems.AsNoTracking().SingleAsync()).ClientBillingClassification);
+        Assert.Empty(await verify.TaskJournalComments.ToArrayAsync());
+    }
+
+    [Fact]
+    public async Task ConcurrentFirstEnableCannotAuthorizeAnOperationThatDidNotLeaseThePolicyRow()
+    {
+        await using var fixture = await CreateAsync(); if (fixture is null) return;
+        await fixture.EnableContractModeAsync();
+        await using (var setup = fixture.Open())
+        {
+            setup.SystemSettings.Remove(await setup.SystemSettings.SingleAsync(row => row.Key == "tasks.contractTaskBillingMode"));
+            await setup.SaveChangesAsync();
+        }
+        var enable = new AfterPolicyRead(async () =>
+        {
+            await using var authority = fixture.Open();
+            Assert.IsType<OkObjectResult>((await fixture.Tasks(authority).UpdateSettings(new TaskJournalSettingsRequest { ContractTaskBillingMode = "allowFutureClassification" }, CancellationToken.None)).Result);
+        });
+        await using var current = fixture.Open(enable);
+        var result = Assert.IsType<TaskBulkBillingResultDto>(Assert.IsType<OkObjectResult>((await fixture.Tasks(current).BulkUpdateTasks(fixture.ContractRequest(), CancellationToken.None)).Result).Value);
+        Assert.True(enable.Invoked);
+        Assert.Equal("contractual", Assert.Single(result.Items).Reason);
+        await using var verify = fixture.Open();
+        Assert.Equal("allowFutureClassification", (await verify.SystemSettings.AsNoTracking().SingleAsync(row => row.Key == "tasks.contractTaskBillingMode")).Value);
+        Assert.Equal("billable", (await verify.TaskJournalItems.AsNoTracking().SingleAsync()).ClientBillingClassification);
+        Assert.Empty(await verify.TaskJournalComments.ToArrayAsync());
+    }
+
     private async Task<Fixture?> CreateAsync(string classification = TaskClientBillingClassification.Billable, int taskCount = 1, bool restricted = false)
     {
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES")))
@@ -264,6 +402,41 @@ public sealed class TaskBulkBillingConcurrencyTests(PostgreSqlMigratedTemplate t
             ExpectedUpdatedAtById = Versions.ToDictionary(pair => pair.Key, pair => Token(pair.Value)),
         };
 
+        public BulkUpdateTaskJournalItemsRequest ContractRequest()
+        {
+            var request = Request(); request.AllowContractClassification = true; return request;
+        }
+
+        public async Task<int> EnableContractModeAsync()
+        {
+            await using var db = Open();
+            var contract = new Contract { Number = "SYNTHETIC-POLICY", BillingMode = ContractBillingMode.Actual, Amount = 1234.56m, Date = DateTime.UtcNow.Date.AddDays(-1) };
+            contract.ClientContracts.Add(new ClientContract { ClientId = ClientId });
+            db.Contracts.Add(contract);
+            var actor = await db.Users.Include(user => user.Role).SingleAsync(user => user.Id == UserId);
+            if (actor.Role?.Name != "admin")
+                db.RolePermissions.Add(new RolePermission { RoleId = actor.RoleId, Section = RolePermissionCatalog.Contracts, CanView = true, CanEdit = false, ViewScope = DataVisibilityScope.All });
+            foreach (var task in await db.TaskJournalItems.ToArrayAsync()) { task.BillingContract = contract; task.BillingModeSnapshot = ContractBillingMode.Actual; }
+            db.SystemSettings.Add(new SystemSetting { Key = "tasks.contractTaskBillingMode", Value = "allowFutureClassification" });
+            await db.SaveChangesAsync();
+            Versions = await db.TaskJournalItems.AsNoTracking().ToDictionaryAsync(task => task.Id, task => task.UpdatedAt);
+            return contract.Id;
+        }
+
+        public async Task WaitForBlockedByAsync(int waiter, int blocker, CancellationToken ct)
+        {
+            // Open the owned lease connection; an already-open Npgsql connection omits its password in ConnectionString.
+            await using var observer = new NpgsqlConnection(lease.ConnectionString);
+            await observer.OpenAsync(ct);
+            while (true)
+            {
+                await using var query = new NpgsqlCommand("SELECT @blocker = ANY(pg_blocking_pids(@waiter))", observer);
+                query.Parameters.AddWithValue("blocker", blocker); query.Parameters.AddWithValue("waiter", waiter);
+                if (await query.ExecuteScalarAsync(ct) is true) return;
+                await Task.Delay(10, ct);
+            }
+        }
+
         private ControllerContext Context() => new()
         {
             HttpContext = new DefaultHttpContext
@@ -282,6 +455,8 @@ public sealed class TaskBulkBillingConcurrencyTests(PostgreSqlMigratedTemplate t
             return name switch
             {
                 "bulk" => (await controller.BulkUpdateTasks(Request(), CancellationToken.None)).Result!,
+                "contractBulk" => (await controller.BulkUpdateTasks(ContractRequest(), CancellationToken.None)).Result!,
+                "policyOff" => (await controller.UpdateSettings(new TaskJournalSettingsRequest { ContractTaskBillingMode = "retainContractTasks" }, CancellationToken.None)).Result!,
                 "bulkReverse" => (await controller.BulkUpdateTasks(Request(TaskClientBillingClassification.Billable, reverse: true), CancellationToken.None)).Result!,
                 "single" => (await controller.UpdateTaskBillingClassification(TaskIds[0], new UpdateTaskBillingClassificationRequest { Classification = TaskClientBillingClassification.Billable }, CancellationToken.None)).Result!,
                 "link" => (await controller.LinkTaskBillingInvoice(TaskIds[0], new LinkTaskBillingInvoiceRequest { InvoiceId = InvoiceId, ConfirmedIncludedInInvoice = true }, CancellationToken.None)).Result!,
@@ -352,6 +527,45 @@ public sealed class TaskBulkBillingConcurrencyTests(PostgreSqlMigratedTemplate t
         {
             Arrived.TrySetResult();
             await Release.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+            return result;
+        }
+    }
+
+    private sealed class AfterPolicyRead(Func<Task> action) : DbCommandInterceptor
+    {
+        public bool Invoked { get; private set; }
+        public override async ValueTask<DbDataReader> ReaderExecutedAsync(DbCommand command, CommandExecutedEventData eventData,
+            DbDataReader result, CancellationToken cancellationToken = default)
+        {
+            if (!Invoked && command.CommandText.Contains("FROM \"SystemSettings\"", StringComparison.Ordinal)
+                && command.CommandText.Contains("FOR SHARE", StringComparison.Ordinal))
+            {
+                Invoked = true; await action();
+            }
+            return result;
+        }
+    }
+
+    private sealed class AfterContractLock(Func<int, Task> action) : DbCommandInterceptor
+    {
+        public bool Invoked { get; private set; }
+        public Exception? CommandFailure { get; private set; }
+        public string? FailedCommandText { get; private set; }
+        public override Task CommandFailedAsync(DbCommand command, CommandErrorEventData eventData, CancellationToken cancellationToken = default)
+        {
+            CommandFailure ??= eventData.Exception;
+            FailedCommandText ??= command.CommandText;
+            return Task.CompletedTask;
+        }
+        public override async ValueTask<DbDataReader> ReaderExecutedAsync(DbCommand command, CommandExecutedEventData eventData,
+            DbDataReader result, CancellationToken cancellationToken = default)
+        {
+            if (!Invoked && command.CommandText.Contains("FROM \"Contracts\"", StringComparison.Ordinal)
+                && command.CommandText.Contains("FOR UPDATE NOWAIT", StringComparison.Ordinal))
+            {
+                Invoked = true;
+                await action(((NpgsqlConnection)command.Connection!).ProcessID);
+            }
             return result;
         }
     }

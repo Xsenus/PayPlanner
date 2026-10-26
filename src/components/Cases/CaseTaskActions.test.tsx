@@ -10,7 +10,7 @@ const confirm = vi.hoisted(() => vi.fn());
 const actor = vi.hoisted(() => ({ user: { id: 7 } }));
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => actor }));
 vi.mock('../../hooks/useDialog', () => ({ useDialog: () => ({ confirm }) }));
-vi.mock('../../services/api', () => ({ apiService: { bulkUpdateTaskJournalItems: vi.fn(), getTaskJournalAssignees: vi.fn(), getTaskJournalItem: vi.fn() } }));
+vi.mock('../../services/api', () => ({ apiService: { bulkUpdateTaskJournalItems: vi.fn(), getTaskJournalAssignees: vi.fn(), getTaskJournalItem: vi.fn(), getTaskJournalSettings: vi.fn() } }));
 vi.mock('../../utils/caseTaskCsv', async (original) => ({ ...await original<typeof import('../../utils/caseTaskCsv')>(), downloadCaseTaskCsv: vi.fn() }));
 
 const rows = [{ id: 10, title: 'Первая', status: 'new' }, { id: 11, title: 'Вторая', status: 'new' }] as TaskJournalItem[];
@@ -33,7 +33,7 @@ const selectPage = () => fireEvent.click(screen.getByRole('button', { name: 'В�
 const apply = () => fireEvent.click(screen.getByRole('button', { name: 'Применить к выбранным' }));
 const changeSelect = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label, { selector: 'select' }), { target: { value } });
 
-beforeEach(() => { vi.clearAllMocks(); confirm.mockResolvedValue(true); vi.mocked(apiService.bulkUpdateTaskJournalItems).mockResolvedValue({ requested: 2, updated: 2, skipped: 0 }); });
+beforeEach(() => { vi.clearAllMocks(); confirm.mockResolvedValue(true); vi.mocked(apiService.getTaskJournalSettings).mockResolvedValue({ contractTaskBillingMode: 'retainContractTasks' } as Awaited<ReturnType<typeof apiService.getTaskJournalSettings>>); vi.mocked(apiService.bulkUpdateTaskJournalItems).mockResolvedValue({ requested: 2, updated: 2, skipped: 0 }); });
 
 describe('case task page actions', () => {
   it('supports a separate billing-only permission without granting old status/assignee writes', async () => {
@@ -43,6 +43,7 @@ describe('case task page actions', () => {
     expect(screen.queryByRole('button', { name: 'Применить к выбранным' })).toBeNull();
     expect(screen.queryByLabelText('Массовое действие')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Изменить учёт выбранных' }));
+    await waitFor(() => expect(screen.queryByText('Проверяем настройку учёта договорных задач…')).toBeNull());
     fireEvent.click(screen.getByRole('button', { name: 'Изменить учёт' }));
     await waitFor(() => expect(changed).toHaveBeenCalledOnce());
     expect(apiService.bulkUpdateTaskJournalItems).toHaveBeenCalledWith(expect.objectContaining({ billingClassification: 'internal' }));
@@ -54,6 +55,7 @@ describe('case task page actions', () => {
         { id: 11, outcome: 'skipped', reason: 'contractual', updatedAt: null }] });
     render(<View remount={false} />); selectPage();
     fireEvent.click(screen.getByRole('button', { name: 'Изменить учёт выбранных' }));
+    await waitFor(() => expect(screen.queryByText('Проверяем настройку учёта договорных задач…')).toBeNull());
     fireEvent.click(screen.getByRole('button', { name: 'Изменить учёт' }));
     await waitFor(() => expect(changed).toHaveBeenCalledOnce());
     expect(apiService.bulkUpdateTaskJournalItems).toHaveBeenCalledExactlyOnceWith({ ids: [10, 11], billingClassification: 'internal', includeCompleted: false, expectedUpdatedAtById: { '10': null, '11': null } });
@@ -65,6 +67,7 @@ describe('case task page actions', () => {
     vi.mocked(apiService.bulkUpdateTaskJournalItems).mockImplementation(() => new Promise((done) => { resolve = done; }));
     const { rerender } = render(<View remount={false} />); selectPage();
     fireEvent.click(screen.getByRole('button', { name: 'Изменить учёт выбранных' }));
+    await waitFor(() => expect(screen.queryByText('Проверяем настройку учёта договорных задач…')).toBeNull());
     fireEvent.click(screen.getByRole('button', { name: 'Изменить учёт' }));
     await waitFor(() => expect(apiService.bulkUpdateTaskJournalItems).toHaveBeenCalledOnce());
     rerender(<View remount={false} scope="3:all:2" tasks={[{ ...rows[0], id: 99 }]} />);

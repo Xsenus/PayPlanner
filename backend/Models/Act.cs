@@ -40,6 +40,9 @@ public class Act : PayPlanner.Api.Services.Companies.IDocumentSeller
     /// (см. <c>DocumentSellerService</c>). После этого правки профиля компании документ не меняют.
     /// </summary>
     public string? SellerSnapshotJson { get; set; }
+
+    /// <summary>Правило новых документов; null сохраняет поведение старых записей.</summary>
+    public string? SellerSnapshotPolicy { get; set; }
     public ICollection<ActLineItem> LineItems { get; set; } = new List<ActLineItem>();
     public ICollection<ContractAct> ContractActs { get; set; } = new List<ContractAct>();
     public ICollection<Act> CorrectionActs { get; set; } = new List<Act>();

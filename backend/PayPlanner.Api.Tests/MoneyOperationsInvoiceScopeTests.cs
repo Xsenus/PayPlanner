@@ -185,6 +185,48 @@ public partial class MoneyOperationsControllerTests
     }
 
     [Theory]
+    [InlineData(false, "link")]
+    [InlineData(true, "link")]
+    [InlineData(false, "create")]
+    [InlineData(true, "create")]
+    [InlineData(false, "update")]
+    [InlineData(true, "update")]
+    public async Task InvoiceScope_ReadOnlyAccountsCannotAllocateExpense(bool postgres, string endpoint)
+    {
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin: false);
+        await using var db = fixture.Open();
+        var invoice = await PrepareInvoiceScopeAsync(db, fixture.Seed, "no-edit", PaymentType.Expense);
+        var before = await CaptureInvoiceScopeAsync(db);
+        var candidateResult = await InvokeInvoiceScopeAsync(db, fixture.Seed, invoice, "candidates");
+        Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<MoneyOperationInvoiceCandidateDto>>(Assert.IsType<OkObjectResult>(candidateResult).Value));
+        var linkResult = await InvokeInvoiceScopeAsync(db, fixture.Seed, invoice, endpoint);
+        Assert.True(linkResult is ForbidResult or BadRequestObjectResult or NotFoundResult);
+        await using var verify = fixture.Open();
+        Assert.Equal(before, await CaptureInvoiceScopeAsync(verify));
+    }
+
+    public static IEnumerable<object[]> InvoiceScopeNoPaymentEditCases =>
+        from postgres in new[] { false, true }
+        from endpoint in new[] { "link", "update" }
+        from direction in new[] { PaymentType.Income, PaymentType.Expense }
+        select new object[] { postgres, endpoint, direction };
+
+    [Theory]
+    [MemberData(nameof(InvoiceScopeNoPaymentEditCases))]
+    public async Task InvoiceScope_WithoutPaymentsEditCannotApplyManualChoice(bool postgres, string endpoint, PaymentType direction)
+    {
+        await using var fixture = await CreateAccountSessionsAsync(postgres, admin: false);
+        await using var db = fixture.Open();
+        var invoice = await PrepareInvoiceScopeAsync(db, fixture.Seed, direction: direction);
+        await db.RolePermissions.Where(item => item.RoleId == fixture.Seed.Actor.RoleId
+            && item.Section == RolePermissionCatalog.Payments).ExecuteUpdateAsync(setters => setters.SetProperty(item => item.CanEdit, false));
+        var before = await CaptureInvoiceScopeAsync(db);
+        Assert.IsType<ForbidResult>(await InvokeInvoiceScopeAsync(db, fixture.Seed, invoice, endpoint));
+        await using var verify = fixture.Open();
+        Assert.Equal(before, await CaptureInvoiceScopeAsync(verify));
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task InvoiceScope_BestOlderMatchIsNotLostBeyondFirstReadBatch(bool postgres)

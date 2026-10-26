@@ -94,6 +94,9 @@ public class TasksController : ControllerBase
     private const string ApprovalDueDaysSettingKey = "tasks.approvalDueDays";
     private const int DefaultApprovalDueDays = 5;
     private const string TaskCardWindowModeSettingKey = "tasks.taskCardWindowMode";
+    private const string ContractTaskBillingModeSettingKey = "tasks.contractTaskBillingMode";
+    private const string RetainContractTasks = "retainContractTasks";
+    private const string AllowFutureContractClassification = "allowFutureClassification";
     private const string TaskCardWindowModeLegacy = "legacy";
     private const string TaskCardWindowModeModern = "modern";
     private const string ApprovalQuickActionModeSettingKey = "tasks.approvalQuickActionMode";
@@ -455,6 +458,11 @@ public class TasksController : ControllerBase
             return Forbid();
         }
 
+        if (request.ContractTaskBillingMode is not null
+            && request.ContractTaskBillingMode is not (RetainContractTasks or AllowFutureContractClassification))
+        {
+            return BadRequest(new { message = "Выберите допустимый режим учёта договорных задач." });
+        }
         var now = DateTime.UtcNow;
         var inactivityDays = Math.Clamp(request.CaseInactivityDays, 1, 365);
         var inactivityLimit = Math.Clamp(request.CaseInactivityLimit, 1, 100);
@@ -563,6 +571,13 @@ public class TasksController : ControllerBase
             }
         }
 
+        await using var settingsTransaction = await _db.Database.BeginTransactionAsync(ct);
+        await LockTaskContractBillingPolicyAsync(ct);
+        var freshAccess = await GetTaskAccessAsync(ct);
+        if (freshAccess is null) return Unauthorized();
+        if (!freshAccess.IsAdmin) return Forbid();
+        if (request.ContractTaskBillingMode is not null)
+            await UpsertSystemSettingAsync(ContractTaskBillingModeSettingKey, request.ContractTaskBillingMode, now, ct);
         await UpsertSystemSettingAsync(RestrictExecutorEditingSettingKey, request.RestrictExecutorEditing ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(AllowExecutorDeadlineChangeRequestsSettingKey, request.AllowExecutorDeadlineChangeRequests ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(ExecutorCompletionAllowedUserIdsSettingKey, JsonSerializer.Serialize(executorCompletionAllowedUserIds, JsonOptions), now, ct);
@@ -593,6 +608,7 @@ public class TasksController : ControllerBase
             await UpsertSystemSettingAsync(TaskStickerStylesSettingKey, JsonSerializer.Serialize(normalizedStickerStyles, JsonOptions), now, ct);
         }
         await _db.SaveChangesAsync(ct);
+        await settingsTransaction.CommitAsync(ct);
         await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
 
         return Ok(await GetTaskJournalSettingsAsync(ct));
@@ -3470,13 +3486,50 @@ public class TasksController : ControllerBase
             return Unauthorized();
         }
 
+        var existingBilling = await BuildVisibleTaskBaseQuery(access).AsNoTracking()
+            .Where(item => item.Id == id)
+            .Select(item => new { item.BillingContractId, item.BillingModeSnapshot }).FirstOrDefaultAsync(ct);
+        if (existingBilling is null) return NotFound();
+        var preservesContract = existingBilling.BillingContractId.HasValue || !string.IsNullOrEmpty(existingBilling.BillingModeSnapshot);
+        if (preservesContract || request.HasExpectedUpdatedAt && request.BillingContractId == existingBilling.BillingContractId)
+        {
+            if (!request.HasExpectedUpdatedAt)
+                return BadRequest(new { message = "Обновите задачу перед сменой договорного учёта." });
+            if (request.BillingContractId != existingBilling.BillingContractId)
+                return BadRequest(new { message = "Смена типа учёта сохраняет договор. Изменение договорной связи требует отдельной проверки." });
+            var operation = await BulkUpdateTaskBillingAsync(new BulkUpdateTaskJournalItemsRequest
+            {
+                Ids = [id],
+                BillingClassification = request.Classification,
+                IncludeCompleted = true,
+                AllowContractClassification = request.AllowContractClassification,
+                ExpectedUpdatedAtById = new Dictionary<int, string?> { [id] = request.ExpectedUpdatedAt },
+            }, access, ct);
+            if (operation.Result is not OkObjectResult { Value: TaskBulkBillingResultDto result })
+                return operation.Result!;
+            var row = result.Items.Single();
+            if (row.Outcome == "conflict") return Conflict(new { message = "Задача изменилась. Обновите сведения и подтвердите решение заново." });
+            if (row.Outcome == "skipped")
+            {
+                if (row.Reason == "notAvailable") return NotFound();
+                if (row.Reason == "forbidden") return Forbid();
+                return BadRequest(new { message = DescribeTaskBillingProtection(row.Reason) });
+            }
+            var freshAccess = await GetTaskAccessAsync(ct);
+            if (freshAccess is null) return Unauthorized();
+            var updated = await BuildVisibleTasksQuery(freshAccess).AsNoTracking().FirstOrDefaultAsync(item => item.Id == id, ct);
+            return updated is null ? NotFound() : Ok(Map(updated));
+        }
+
         await using var transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
         if (_db.Database.IsNpgsql())
         {
             await _db.Database.SqlQuery<int>($"SELECT 1 FROM \"TaskJournalItems\" WHERE \"Id\" = {id} FOR UPDATE")
                 .ToListAsync(ct);
         }
-
+        var currentAccess = await GetTaskAccessAsync(ct);
+        if (currentAccess is null) return Unauthorized();
+        access = currentAccess;
         var entity = await BuildVisibleTasksQuery(access).FirstOrDefaultAsync(item => item.Id == id, ct);
         if (entity is null)
         {
@@ -3491,6 +3544,12 @@ public class TasksController : ControllerBase
             return Forbid();
         }
 
+        // The binding may have changed after the preliminary read. Never clear a newly attached contract.
+        if (entity.BillingContractId.HasValue || !string.IsNullOrEmpty(entity.BillingModeSnapshot))
+            return Conflict(new { message = "Договорная связь задачи изменилась. Обновите сведения перед сменой учёта." });
+        if (request.HasExpectedUpdatedAt && (!TryReadTaskBillingVersion(request.ExpectedUpdatedAt, out var expectedVersion)
+                || entity.UpdatedAt?.Ticks != expectedVersion?.Ticks))
+            return Conflict(new { message = "Задача изменилась. Обновите сведения перед сменой учёта." });
         if (!TaskClientBillingClassification.IsDecision(request.Classification))
         {
             return BadRequest(new { message = "Выберите платную или неоплачиваемую задачу." });
@@ -3770,6 +3829,11 @@ public class TasksController : ControllerBase
         {
             return BadRequest(new { message = "Задача уже включена в счёт. Сначала исправьте счёт, затем меняйте контрагента или дело задачи." });
         }
+
+        if ((entity.BillingContractId.HasValue || !string.IsNullOrEmpty(entity.BillingModeSnapshot))
+            && (binding.ClientId != entity.ClientId || binding.LegalEntityId != entity.LegalEntityId
+                || binding.ClientCaseId != entity.ClientCaseId))
+            return BadRequest(new { message = "Задача сохраняет договорной учёт. Изменение клиента или дела требует отдельной проверки договорной связи." });
 
         TaskBillingDecision? newBindingBilling = null;
         if (!entity.ClientId.HasValue && !entity.LegalEntityId.HasValue
@@ -4605,11 +4669,41 @@ public class TasksController : ControllerBase
             await using var transaction = _db.Database.IsNpgsql()
                 ? await _db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct)
                 : await _db.Database.BeginTransactionAsync(ct);
-            var visibleIds = await BuildVisibleTaskBaseQuery(access)
-                .Where(task => ids.Contains(task.Id)).Select(task => task.Id).ToArrayAsync(ct);
+            var allowContractClassification = false;
+            if (request.AllowContractClassification)
+            {
+                var lockedPolicyRows = await LockTaskContractBillingPolicyAsync(ct, shared: true);
+                allowContractClassification = lockedPolicyRows == 1 && await _db.SystemSettings.AsNoTracking()
+                    .Where(item => item.Key == ContractTaskBillingModeSettingKey)
+                    .Select(item => item.Value).FirstOrDefaultAsync(ct) == AllowFutureContractClassification;
+            }
+            var preliminary = await BuildVisibleTaskBaseQuery(access).AsNoTracking()
+                .Where(task => ids.Contains(task.Id))
+                .Select(task => new { task.Id, task.BillingContractId, task.BillingModeSnapshot }).ToArrayAsync(ct);
+            var visibleIds = preliminary.Select(task => task.Id).ToArray();
+            var preliminaryContractIds = preliminary.Where(task => task.BillingContractId.HasValue)
+                .Select(task => task.BillingContractId!.Value).Distinct().OrderBy(id => id).ToArray();
+            var contractAccess = allowContractClassification
+                ? await _db.ResolveSectionAccessAsync(User, RolePermissionCatalog.Contracts, ct) : null;
+            HashSet<int> preliminaryEligible = allowContractClassification
+                ? await GetEligibleContractTaskIdsAsync(visibleIds, preliminaryContractIds, contractAccess?.Visibility, ct) : [];
+            // A historical foreign or hidden contract must never grant a raw financial root lease.
+            var contractRoots = preliminary.Where(task => preliminaryEligible.Contains(task.Id))
+                .Select(task => task.BillingContractId!.Value).Distinct().OrderBy(id => id).ToArray();
+            if (_db.Database.IsNpgsql() && contractRoots.Length > 0)
+            {
+                // New opt-in path never waits while holding a root needed by a legacy task-first writer.
+                await _db.Database.SqlQuery<int>($"SELECT \"Id\" FROM \"Contracts\" WHERE \"Id\" = ANY({contractRoots}) ORDER BY \"Id\" FOR UPDATE NOWAIT")
+                    .ToListAsync(ct);
+            }
             if (visibleIds.Length > 0)
             {
-                if (_db.Database.IsNpgsql())
+                if (_db.Database.IsNpgsql() && contractRoots.Length > 0)
+                {
+                    await _db.Database.SqlQuery<int>($"SELECT \"Id\" FROM \"TaskJournalItems\" WHERE \"Id\" = ANY({visibleIds}) ORDER BY \"Id\" FOR UPDATE NOWAIT")
+                        .ToListAsync(ct);
+                }
+                else if (_db.Database.IsNpgsql())
                 {
                     await _db.Database.SqlQuery<int>($"SELECT \"Id\" FROM \"TaskJournalItems\" WHERE \"Id\" = ANY({visibleIds}) ORDER BY \"Id\" FOR UPDATE")
                         .ToListAsync(ct);
@@ -4646,6 +4740,14 @@ public class TasksController : ControllerBase
                         && _db.ClientCases.Any(clientCase => clientCase.Id == task.ClientCaseId.Value && clientCase.LegalEntityId == task.LegalEntityId.Value)))
                     .Select(task => task.Id).ToArrayAsync(ct)).ToHashSet()
                 : [];
+            var originalContracts = preliminary.ToDictionary(task => task.Id);
+            var changedContractIds = entities.Where(task => originalContracts[task.Id].BillingContractId != task.BillingContractId
+                    || originalContracts[task.Id].BillingModeSnapshot != task.BillingModeSnapshot)
+                .Select(task => task.Id).ToHashSet();
+            var freshContractAccess = allowContractClassification
+                ? await _db.ResolveSectionAccessAsync(User, RolePermissionCatalog.Contracts, ct) : null;
+            HashSet<int> eligibleContractIds = allowContractClassification
+                ? await GetEligibleContractTaskIdsAsync(freshVisibleIds, contractRoots, freshContractAccess?.Visibility, ct) : [];
             var payoutTaskIds = entities.Where(task => task.ContractorPaymentId.HasValue)
                 .GroupBy(task => task.ContractorPaymentId!.Value)
                 .ToDictionary(group => group.Key, group => group.Select(task => task.Id).ToArray());
@@ -4701,7 +4803,13 @@ public class TasksController : ControllerBase
                 else if (entity.ContractorPaymentId.HasValue || protectedContractorTasks.Contains(entity.Id)) reason = "contractorPaymentProtected";
                 else if (string.Equals(entity.Status, "done", StringComparison.OrdinalIgnoreCase)
                          && entity.ContractorPaymentEnabled && entity.ContractorPaymentOnResult) reason = "contractorPaymentProtected";
-                else if (entity.BillingContractId.HasValue || !string.IsNullOrEmpty(entity.BillingModeSnapshot)) reason = "contractual";
+                else if (changedContractIds.Contains(entity.Id)) reason = "versionConflict";
+                else if ((entity.BillingContractId.HasValue || !string.IsNullOrEmpty(entity.BillingModeSnapshot))
+                         && (entity.ContractorPaymentEnabled || entity.ContractorPaymentAmount.HasValue && entity.ContractorPaymentAmount != 0m
+                             || entity.ContractorPaymentDueDate.HasValue || entity.ContractorPaymentOnResult
+                             || entity.ContractorPaymentResultDelayDays.HasValue && entity.ContractorPaymentResultDelayDays != 0)) reason = "contractorPaymentProtected";
+                else if ((entity.BillingContractId.HasValue || !string.IsNullOrEmpty(entity.BillingModeSnapshot))
+                         && !eligibleContractIds.Contains(entity.Id)) reason = "contractual";
                 else if (!AllowedStatuses.Contains(entity.Status)) reason = "unsupportedStatus";
                 else if (string.Equals(entity.Status, "cancelled", StringComparison.OrdinalIgnoreCase)) reason = "cancelled";
                 else if (!request.IncludeCompleted && string.Equals(entity.Status, "done", StringComparison.OrdinalIgnoreCase)) reason = "completedExcluded";
@@ -4712,6 +4820,7 @@ public class TasksController : ControllerBase
                 if (reason is not null)
                 {
                     result.Reason = reason;
+                    if (reason == "versionConflict") result.Outcome = "conflict";
                     continue;
                 }
                 if (entity.ClientBillingClassification == classification)
@@ -4729,6 +4838,7 @@ public class TasksController : ControllerBase
                 }
 
                 var previousClassification = entity.ClientBillingClassification;
+                var previousStatus = ResolveTaskBillingStatus(entity);
                 var previousDecisionAt = entity.BillingDecisionAt;
                 var mutation = entity;
                 if (tracked.TryGetValue(entity.Id, out var entry))
@@ -4744,8 +4854,8 @@ public class TasksController : ControllerBase
                 mutation.BillingDecisionAt = now;
                 mutation.UpdatedAt = now;
                 AddTaskHistory(mutation, access,
-                    $"Учёт задачи изменён: {DescribeTaskBillingStatus(previousClassification == TaskClientBillingClassification.Billable ? "unbilled" : previousClassification)} → {DescribeTaskBillingStatus(classification == TaskClientBillingClassification.Billable ? "unbilled" : classification)}.",
-                    new { previousClassification, previousDecisionAt, classification });
+                    $"Учёт задачи изменён: {DescribeTaskBillingStatus(previousStatus)} → {DescribeTaskBillingStatus(ResolveTaskBillingStatus(mutation))}.",
+                    new { previousClassification, previousDecisionAt, classification, mutation.BillingContractId, mutation.BillingModeSnapshot });
                 changedIds.Add(entity.Id);
                 result.Outcome = "updated";
                 result.Reason = null;
@@ -4796,6 +4906,77 @@ public class TasksController : ControllerBase
             offset = end;
         }
     }
+
+    private async Task<int> LockTaskContractBillingPolicyAsync(CancellationToken ct, bool shared = false)
+    {
+        if (shared && _db.Database.IsNpgsql())
+        {
+            // Readers may proceed together; any settings writer must wait until each decision commits.
+            return (await _db.Database.SqlQuery<int>($"SELECT \"Id\" FROM \"SystemSettings\" WHERE \"Key\" = {ContractTaskBillingModeSettingKey} FOR SHARE")
+                .ToListAsync(ct)).Count;
+        }
+        // SQLite takes its write lease; a settings writer takes the existing policy row exclusively.
+        return await _db.SystemSettings.Where(item => item.Key == ContractTaskBillingModeSettingKey)
+            .ExecuteUpdateAsync(update => update.SetProperty(item => item.Value, item => item.Value), ct);
+    }
+
+    private async Task<HashSet<int>> GetEligibleContractTaskIdsAsync(int[] taskIds, int[] lockedContractIds,
+        DataVisibilityAccess? contractVisibility, CancellationToken ct)
+    {
+        if (contractVisibility is null || taskIds.Length == 0 || lockedContractIds.Length == 0) return [];
+        // Raw historical existence is a separate query: IgnoreQueryFilters is query-wide metadata.
+        // Each source is bounded by the at-most-500 selected contract roots and returns only their IDs.
+        var protectedContractIds = await _db.ContractInvoices.IgnoreQueryFilters()
+            .Where(link => lockedContractIds.Contains(link.ContractId)).Select(link => link.ContractId)
+            .Union(_db.ContractPayments.IgnoreQueryFilters()
+                .Where(link => lockedContractIds.Contains(link.ContractId)).Select(link => link.ContractId))
+            .Union(_db.ContractActs.IgnoreQueryFilters()
+                .Where(link => lockedContractIds.Contains(link.ContractId)).Select(link => link.ContractId))
+            .Union(_db.Payments.IgnoreQueryFilters()
+                .Where(payment => payment.ContractId.HasValue && lockedContractIds.Contains(payment.ContractId.Value))
+                .Select(payment => payment.ContractId!.Value))
+            .ToArrayAsync(ct);
+        var today = DateTime.UtcNow.Date;
+        var eligibleStatuses = ContractStatus.All.Where(status => status != ContractStatus.Cancelled && status != ContractStatus.Terminated).ToArray();
+        var visibleContracts = _db.Contracts.AsNoTracking().ApplyContractVisibility(contractVisibility);
+        return (await _db.TaskJournalItems.AsNoTracking().Where(task => taskIds.Contains(task.Id)
+            && task.BillingContractId.HasValue && lockedContractIds.Contains(task.BillingContractId.Value)
+            && (task.BillingModeSnapshot == ContractBillingMode.Fixed || task.BillingModeSnapshot == ContractBillingMode.Actual)
+            && (task.ClientBillingClassification == TaskClientBillingClassification.Billable || task.ClientBillingClassification == TaskClientBillingClassification.Internal)
+            && task.ClientCaseId.HasValue
+            && _db.ClientCases.Any(clientCase => clientCase.Id == task.ClientCaseId.Value
+                && (task.ClientId.HasValue && !task.LegalEntityId.HasValue && clientCase.ClientId == task.ClientId
+                    || task.LegalEntityId.HasValue && !task.ClientId.HasValue && clientCase.LegalEntityId == task.LegalEntityId))
+            && visibleContracts.Any(contract => contract.Id == task.BillingContractId.Value
+                && contract.BillingMode == task.BillingModeSnapshot
+                && eligibleStatuses.Contains(contract.Status) && !contract.CancelledAt.HasValue && !contract.TerminationDate.HasValue
+                && contract.Date.Date <= today && (!contract.StartDate.HasValue || contract.StartDate.Value.Date <= today)
+                && (!contract.ValidUntil.HasValue || contract.ValidUntil.Value.Date >= today)
+                && (task.ClientId.HasValue && contract.ClientContracts.Any(link => link.ClientId == task.ClientId.Value)
+                    || task.LegalEntityId.HasValue && contract.LegalEntityContracts.Any(link => link.LegalEntityId == task.LegalEntityId.Value))
+                && !protectedContractIds.Contains(contract.Id)))
+            .Select(task => task.Id).ToArrayAsync(ct)).ToHashSet();
+    }
+
+    private static bool TryReadTaskBillingVersion(string? value, out DateTime? version)
+    {
+        version = null;
+        if (value is null) return true;
+        if (!DateTime.TryParseExact(value, "O", CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed)
+            || parsed.Kind != DateTimeKind.Utc) return false;
+        version = parsed;
+        return true;
+    }
+
+    private static string DescribeTaskBillingProtection(string? reason) => reason switch
+    {
+        "invoiced" => "Есть связанный счёт. Изменение выполняется в финансовом разделе.",
+        "paid" => "Есть фактическая выплата. Учёт защищён.",
+        "contractorPaymentProtected" => "Выплата исполнителю или её расчёт требуют отдельной проверки. Учёт защищён.",
+        "contractual" => "Договорной учёт защищён настройкой или требует отдельной проверки связи. Договор и его суммы не изменены.",
+        "clientCaseRequired" => "Для платной задачи нужны клиент и дело.",
+        _ => "Эту задачу нельзя изменить выбранной операцией. Обновите сведения и проверьте её состояние.",
+    };
 
     private static bool IsTaskBillingWriteConflict(Exception error)
     {
@@ -6098,6 +6279,7 @@ public class TasksController : ControllerBase
                 item.Key == FinancialDocumentsResponsibleUserSettingKey ||
                 item.Key == ApprovalDueDaysSettingKey ||
                 item.Key == TaskCardWindowModeSettingKey ||
+                item.Key == ContractTaskBillingModeSettingKey ||
                 item.Key == ApprovalQuickActionModeSettingKey ||
                 item.Key == TaskStickerStylesSettingKey ||
                 item.Key == CaseInactivityAutomationEnabledSettingKey ||
@@ -6167,6 +6349,8 @@ public class TasksController : ControllerBase
             FinancialDocumentsResponsibleUserName = financialDocumentsResponsibleUserName,
             ApprovalDueDays = Math.Clamp(ParseIntSetting(settings.GetValueOrDefault(ApprovalDueDaysSettingKey), DefaultApprovalDueDays), 1, 365),
             TaskCardWindowMode = NormalizeTaskCardWindowMode(settings.GetValueOrDefault(TaskCardWindowModeSettingKey)),
+            ContractTaskBillingMode = settings.GetValueOrDefault(ContractTaskBillingModeSettingKey) == AllowFutureContractClassification
+                ? AllowFutureContractClassification : RetainContractTasks,
             ApprovalQuickActionMode = NormalizeApprovalQuickActionMode(settings.GetValueOrDefault(ApprovalQuickActionModeSettingKey)),
             CaseInactivityAutomationEnabled = ParseBoolSetting(settings.GetValueOrDefault(CaseInactivityAutomationEnabledSettingKey), true),
             CaseInactivityDays = inactivityDays,

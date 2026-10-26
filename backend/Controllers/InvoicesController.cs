@@ -27,6 +27,7 @@ namespace PayPlanner.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
+[DocumentSellerExceptionFilter]
 public class InvoicesController : ControllerBase
 {
     private const string InvoiceNumberStartSettingKey = "invoices.numbering.startNumber";
@@ -533,6 +534,14 @@ public class InvoicesController : ControllerBase
         }
 
         var dto = MapFromRaw(raw);
+        // Detail-only metadata: list pages do not load every 16 KB seller snapshot.
+        var sellerInfo = await BuildVisibleInvoicePaymentsQuery(trackChanges: false, visibility).Where(payment => payment.Id == id)
+            .Select(payment => new { payment.SellerSnapshotPolicy, payment.SellerSnapshotJson }).SingleOrDefaultAsync(ct);
+        if (sellerInfo is not null)
+        {
+            dto.SellerSnapshotPolicy = sellerInfo.SellerSnapshotPolicy;
+            dto.SellerSnapshotInfo = SellerLegalEntityComposer.ReadMetadata(sellerInfo.SellerSnapshotJson);
+        }
         await EnrichInvoiceDtosAsync(new List<InvoiceDto> { dto }, ct);
         return Ok(dto);
     }
@@ -763,36 +772,13 @@ public class InvoicesController : ControllerBase
             return BadRequest(new { message = "У расходного счёта продавец — контрагент, выбрать собственную компанию нельзя." });
         }
 
-        var selectionError = await _documentSeller.ValidateSelectionAsync(request.CompanyId, request.BranchId, ct);
-        if (selectionError is not null)
+        try
         {
-            return BadRequest(new { message = selectionError });
+            await _documentSeller.UpdateSelectionAsync(payment, request.CompanyId, request.BranchId, ct,
+                token => CanUseInvoiceSellerAsync(id, edit: true, token));
         }
-
-        var invoiceEntityId = payment.InvoiceId ?? payment.Invoice?.Id;
-        var group = new List<Payment> { payment };
-        if (invoiceEntityId.HasValue && invoiceEntityId.Value > 0)
-        {
-            group.AddRange(await _db.Payments
-                .Where(candidate =>
-                    candidate.InvoiceId == invoiceEntityId.Value
-                    && candidate.Id != payment.Id
-                    && candidate.DocumentKind == DocumentKind.Invoice)
-                .ToListAsync(ct));
-        }
-
-        if (group.Any(item => !string.IsNullOrWhiteSpace(item.SellerSnapshotJson)))
-        {
-            return Conflict(new { message = "Реквизиты продавца уже зафиксированы в выданном документе и не меняются." });
-        }
-
-        foreach (var item in group)
-        {
-            item.SellerCompanyId = request.CompanyId;
-            item.SellerBranchId = request.CompanyId.HasValue ? request.BranchId : null;
-        }
-
-        await _db.SaveChangesAsync(ct);
+        catch (SellerSelectionException error) { return BadRequest(new { message = error.Message }); }
+        catch (SellerSnapshotConflictException error) { return Conflict(new { message = error.Message }); }
         return Ok(new DocumentSellerResponse(payment.SellerCompanyId, payment.SellerBranchId, false));
     }
 
@@ -1421,6 +1407,9 @@ public class InvoicesController : ControllerBase
             return ValidationProblem(ModelState);
         }
 
+        if (request.Type == PaymentType.Expense && (request.SellerCompanyId.HasValue || request.SellerBranchId.HasValue))
+            return BadRequest(new { message = "У расходного счёта продавец — контрагент, выбрать собственную компанию нельзя." });
+
         var workflowStatus = ResolveInvoiceWorkflowStatus(request);
         if (workflowStatus is null)
         {
@@ -1543,6 +1532,8 @@ public class InvoicesController : ControllerBase
 
         var payment = new Payment
         {
+            SellerCompanyId = request.SellerCompanyId,
+            SellerBranchId = request.SellerBranchId,
             Account = number,
             DocumentKind = DocumentKind.Invoice,
             AccountDate = invoiceDate,
@@ -1590,6 +1581,8 @@ public class InvoicesController : ControllerBase
 
         ApplyPaidFlags(payment, request.PaidDate, await ResolveInvoiceTodayAsync(ct));
 
+        if (payment.Type != PaymentType.Expense)
+            await _documentSeller.InitializeForCreationAsync(payment, await LoadMainCompanyAsync(ct), ct);
         _db.Payments.Add(payment);
         await _db.SaveChangesAsync(ct);
 
@@ -2054,6 +2047,11 @@ public class InvoicesController : ControllerBase
     {
         var clonedRepresentative = new Payment
         {
+            // This is another representative of the SAME invoice, not a newly issued document.
+            SellerCompanyId = payment.SellerCompanyId,
+            SellerBranchId = payment.SellerBranchId,
+            SellerSnapshotJson = payment.SellerSnapshotJson,
+            SellerSnapshotPolicy = payment.SellerSnapshotPolicy,
             Account = payment.Account,
             AccountDate = payment.AccountDate,
             InvoiceId = payment.InvoiceId ?? payment.Invoice?.Id,
@@ -7255,39 +7253,15 @@ public class InvoicesController : ControllerBase
             return defaultCompany;
         }
 
-        var hadSnapshot = !string.IsNullOrWhiteSpace(payment.SellerSnapshotJson);
-        var seller = await _documentSeller.ResolveAsync(payment, defaultCompany, freeze, ct);
-        if (!hadSnapshot && !string.IsNullOrWhiteSpace(payment.SellerSnapshotJson))
-        {
-            var tracked = await _db.Payments.FirstOrDefaultAsync(item => item.Id == payment.Id, ct);
-            if (tracked is not null && string.IsNullOrWhiteSpace(tracked.SellerSnapshotJson))
-            {
-                tracked.SellerCompanyId = payment.SellerCompanyId;
-                tracked.SellerBranchId = payment.SellerBranchId;
-                tracked.SellerSnapshotJson = payment.SellerSnapshotJson;
-                // Все платежи одного счёта должны печататься с одними и теми же реквизитами продавца.
-                var invoiceEntityId = tracked.InvoiceId;
-                if (invoiceEntityId.HasValue && invoiceEntityId.Value > 0)
-                {
-                    var siblings = await _db.Payments
-                        .Where(candidate => candidate.InvoiceId == invoiceEntityId.Value
-                            && candidate.Id != tracked.Id
-                            && candidate.DocumentKind == DocumentKind.Invoice
-                            && candidate.Type != PaymentType.Expense
-                            && candidate.SellerSnapshotJson == null)
-                        .ToListAsync(ct);
-                    foreach (var sibling in siblings)
-                    {
-                        sibling.SellerCompanyId = tracked.SellerCompanyId;
-                        sibling.SellerBranchId = tracked.SellerBranchId;
-                        sibling.SellerSnapshotJson = tracked.SellerSnapshotJson;
-                    }
-                }
-                await _db.SaveChangesAsync(ct);
-            }
-        }
+        return await _documentSeller.ResolveAsync(payment, defaultCompany, freeze, ct,
+            token => CanUseInvoiceSellerAsync(payment.Id, edit: false, token));
+    }
 
-        return seller;
+    private async Task<bool> CanUseInvoiceSellerAsync(int id, bool edit, CancellationToken ct)
+    {
+        if (await RequireAccountsPermissionAsync(permission => edit ? permission.CanEdit : permission.CanExport, ct) is not null) return false;
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        return visibility is not null && await BuildVisibleInvoicePaymentsQuery(trackChanges: false, visibility).AnyAsync(payment => payment.Id == id, ct);
     }
 
     private async Task<LegalEntity?> LoadMainCompanyAsync(CancellationToken ct)

@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
+using PayPlanner.Api.Filters;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
@@ -28,6 +29,7 @@ namespace PayPlanner.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
+[DocumentSellerExceptionFilter]
 public class ActsController : ControllerBase
 {
     private const string ActDocumentTemplatesSettingKey = "acts.documentTemplates";
@@ -542,6 +544,16 @@ public class ActsController : ControllerBase
             .Select(MapToDtoExpression)
             .FirstOrDefaultAsync(ct);
 
+        if (dto is not null)
+        {
+            var sellerInfo = await _db.Acts.AsNoTracking().ApplyActVisibility(visibility).Where(act => act.Id == id)
+                .Select(act => new { act.SellerSnapshotPolicy, act.SellerSnapshotJson }).SingleOrDefaultAsync(ct);
+            if (sellerInfo is not null)
+            {
+                dto.SellerSnapshotPolicy = sellerInfo.SellerSnapshotPolicy;
+                dto.SellerSnapshotInfo = SellerLegalEntityComposer.ReadMetadata(sellerInfo.SellerSnapshotJson);
+            }
+        }
         return dto is null ? NotFound() : Ok(dto);
     }
 
@@ -588,20 +600,13 @@ public class ActsController : ControllerBase
             return NotFound();
         }
 
-        var selectionError = await _documentSeller.ValidateSelectionAsync(request.CompanyId, request.BranchId, ct);
-        if (selectionError is not null)
+        try
         {
-            return BadRequest(new { message = selectionError });
+            await _documentSeller.UpdateSelectionAsync(act, request.CompanyId, request.BranchId, ct,
+                token => CanUseActSellerAsync(id, edit: true, token));
         }
-
-        if (!string.IsNullOrWhiteSpace(act.SellerSnapshotJson))
-        {
-            return Conflict(new { message = "Реквизиты продавца уже зафиксированы в выданном документе и не меняются." });
-        }
-
-        act.SellerCompanyId = request.CompanyId;
-        act.SellerBranchId = request.CompanyId.HasValue ? request.BranchId : null;
-        await _db.SaveChangesAsync(ct);
+        catch (SellerSelectionException error) { return BadRequest(new { message = error.Message }); }
+        catch (SellerSnapshotConflictException error) { return Conflict(new { message = error.Message }); }
         return Ok(new DocumentSellerResponse(act.SellerCompanyId, act.SellerBranchId, false));
     }
 
@@ -835,6 +840,7 @@ public class ActsController : ControllerBase
         var reason = Normalize(request?.Reason);
         ApplyAuditReason(reason);
 
+        await using var correctionTransaction = await DocumentSellerLease.BeginForCreationAsync(_db, ct);
         var now = DateTime.UtcNow;
         var correction = new Act
         {
@@ -875,6 +881,7 @@ public class ActsController : ControllerBase
             });
         }
 
+        await _documentSeller.InitializeForCreationAsync(correction, await LoadMainCompanyAsync(ct), ct);
         _db.Acts.Add(correction);
         await _db.SaveChangesAsync(ct);
 
@@ -893,6 +900,7 @@ public class ActsController : ControllerBase
             await _db.SaveChangesAsync(ct);
         }
 
+        await correctionTransaction.CommitAsync(ct);
         await _db.Entry(correction).Reference(act => act.Client).LoadAsync(ct);
         await _db.Entry(correction).Reference(act => act.LegalEntity).LoadAsync(ct);
         await _db.Entry(correction).Reference(act => act.Responsible).LoadAsync(ct);
@@ -1114,6 +1122,8 @@ public class ActsController : ControllerBase
 
             var act = new Act
             {
+                SellerCompanyId = request.SellerCompanyId,
+                SellerBranchId = request.SellerBranchId,
                 Number = request.Number.Trim(),
                 Title = Normalize(request.Title),
                 Date = ActDomainService.NormalizeLocalDate(request.Date),
@@ -1132,6 +1142,7 @@ public class ActsController : ControllerBase
                 UpdatedAt = DateTime.UtcNow,
             };
 
+            await _documentSeller.InitializeForCreationAsync(act, await LoadMainCompanyAsync(ct), ct);
             _db.Acts.Add(act);
             SyncActLineItems(act, resolvedLineItems.LineItems);
             SyncActContractLink(act, request.ContractId);
@@ -2225,21 +2236,15 @@ public class ActsController : ControllerBase
     /// </summary>
     private async Task<LegalEntity?> ResolveActSellerAsync(Act act, LegalEntity? defaultCompany, bool freeze, CancellationToken ct)
     {
-        var hadSnapshot = !string.IsNullOrWhiteSpace(act.SellerSnapshotJson);
-        var seller = await _documentSeller.ResolveAsync(act, defaultCompany, freeze, ct);
-        if (!hadSnapshot && !string.IsNullOrWhiteSpace(act.SellerSnapshotJson))
-        {
-            var tracked = await _db.Acts.FirstOrDefaultAsync(item => item.Id == act.Id, ct);
-            if (tracked is not null && string.IsNullOrWhiteSpace(tracked.SellerSnapshotJson))
-            {
-                tracked.SellerCompanyId = act.SellerCompanyId;
-                tracked.SellerBranchId = act.SellerBranchId;
-                tracked.SellerSnapshotJson = act.SellerSnapshotJson;
-                await _db.SaveChangesAsync(ct);
-            }
-        }
+        return await _documentSeller.ResolveAsync(act, defaultCompany, freeze, ct,
+            token => CanUseActSellerAsync(act.Id, edit: false, token));
+    }
 
-        return seller;
+    private async Task<bool> CanUseActSellerAsync(int id, bool edit, CancellationToken ct)
+    {
+        if (await RequireActsPermissionAsync(permission => edit ? permission.CanEdit : permission.CanExport, ct) is not null) return false;
+        var visibility = await ResolveActsVisibilityAsync(ct);
+        return visibility is not null && await _db.Acts.AsNoTracking().ApplyActVisibility(visibility).AnyAsync(act => act.Id == id, ct);
     }
 
     private async Task<LegalEntity?> LoadMainCompanyAsync(CancellationToken ct)
@@ -2482,6 +2487,8 @@ public class ActsController : ControllerBase
             SellerCompanyId = act.SellerCompanyId,
             SellerBranchId = act.SellerBranchId,
             SellerFrozen = act.SellerSnapshotJson != null,
+            SellerSnapshotPolicy = act.SellerSnapshotPolicy,
+            SellerSnapshotInfo = SellerLegalEntityComposer.ReadMetadata(act.SellerSnapshotJson),
             LineItems = act.LineItems
                 .OrderBy(item => item.SortOrder)
                 .ThenBy(item => item.Id)

@@ -419,6 +419,14 @@ public class DatabaseAdminController : ControllerBase, IAsyncActionFilter
             var result = await _spreadsheetImportService.ApplyAsync(uploadFiles, normalizedRequest, cancellationToken);
             return Ok(result);
         }
+        catch (PayPlanner.Api.Services.Companies.SellerSnapshotConflictException ex)
+        {
+            return Conflict(new { message = ex.Message });
+        }
+        catch (Npgsql.PostgresException ex) when (ex.SqlState is "55P03" or "40001" or "40P01")
+        {
+            return Conflict(new { message = "Данные импорта или реквизиты компании изменились либо сейчас заняты. Импорт отменён целиком; обновите данные перед повторным запуском." });
+        }
         catch (Exception ex)
         {
             return BadRequest(new { message = ex.Message });

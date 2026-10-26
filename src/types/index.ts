@@ -3661,6 +3661,8 @@ export interface Act {
   sellerBranchId?: number | null;
   /** Реквизиты продавца зафиксированы при выдаче документа и больше не меняются. */
   sellerFrozen?: boolean;
+  sellerSnapshotPolicy?: 'first-file' | 'on-create' | null;
+  sellerSnapshotInfo?: DocumentSellerSnapshotInfo | null;
   counterpartyInn?: string | null;
   status: ActStatus;
   workflowStatus?: ActWorkflowStatus;
@@ -3693,7 +3695,20 @@ export interface Act {
   auditDeletedByUserName?: string | null;
 }
 
-export interface ActInput {
+export interface DocumentSellerSnapshotInfo {
+  companyName?: string | null;
+  branchName?: string | null;
+  frozenAtUtc?: string | null;
+  freezeReason?: 'first-file' | 'on-create' | null;
+  legacyImages: boolean;
+}
+
+export interface DocumentSellerCreateSelection {
+  sellerCompanyId?: number | null;
+  sellerBranchId?: number | null;
+}
+
+export interface ActInput extends DocumentSellerCreateSelection {
   number: string;
   title?: string | null;
   date: string;
@@ -3769,6 +3784,8 @@ export interface Contract {
   sellerBranchId?: number | null;
   /** Реквизиты стороны договора зафиксированы при выдаче документа. */
   sellerFrozen?: boolean;
+  sellerSnapshotPolicy?: 'first-file' | 'on-create' | null;
+  sellerSnapshotInfo?: DocumentSellerSnapshotInfo | null;
   number: string;
   title?: string | null;
   date: string;
@@ -3815,7 +3832,7 @@ export interface ContractTerminationCheck {
 }
 
 
-export interface ContractInput {
+export interface ContractInput extends DocumentSellerCreateSelection {
   number: string;
   title?: string | null;
   date: string;
@@ -4064,6 +4081,8 @@ export interface Invoice {
   sellerBranchId?: number | null;
   /** Реквизиты продавца зафиксированы при выдаче документа и больше не меняются. */
   sellerFrozen?: boolean;
+  sellerSnapshotPolicy?: 'first-file' | 'on-create' | null;
+  sellerSnapshotInfo?: DocumentSellerSnapshotInfo | null;
   documentKind?: DocumentKind;
   clientName?: string | null;
   clientCompany?: string | null;
@@ -4123,7 +4142,7 @@ export interface InvoiceLineItem {
   vatRate?: string | null;
 }
 
-export interface InvoiceInput {
+export interface InvoiceInput extends DocumentSellerCreateSelection {
   number: string;
   date: string;
   dueDate?: string | null;

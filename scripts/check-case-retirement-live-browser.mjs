@@ -6,6 +6,7 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { createServer as createControlServer } from 'node:http';
 import { build, preview } from 'vite';
 import { createCaseReadLifecycle, createCaseRestartObserver, createCaseStartupReadTrace, isCaseBoundaryRead } from './case-retirement-browser-lifecycle.mjs';
+import { openRetirementProductionBundle, retirementBundlePhase, withRetirementBuildEnvironment } from './case-retirement-production-bundle.mjs';
 
 const api = new URL(process.env.CASE_RETIREMENT_API);
 assert.equal(api.hostname, '127.0.0.1');
@@ -70,6 +71,8 @@ let vite;
 let opened = false;
 let control;
 let controlUrl;
+let bundleLease;
+const phase = (name, action) => bundleLease ? retirementBundlePhase(name, action) : action();
 try {
   if (process.env.CASE_RETIREMENT_BOUNDARY === 'true') {
     let applied = false;
@@ -105,12 +108,21 @@ try {
   // navigation, inside the same enclosing three-minute scenario budget.
   // A second entry exposes the real upload helper, shared with the UI bundle;
   // it replaces source-module imports, not the browser's storage or API calls.
+  let uiConfig, fixtureChunk, realtimeDisconnectUrls, realtimePollingUrls;
+  if (process.env.CASE_RETIREMENT_BUNDLE_ROOT) {
+    bundleLease = await openRetirementProductionBundle({ root: process.env.CASE_RETIREMENT_BUNDLE_ROOT,
+      owner: process.env.CASE_RETIREMENT_BUNDLE_OWNER, api, build });
+    uiConfig = bundleLease.config;
+    fixtureChunk = { fileName: bundleLease.fixtureFile };
+    realtimeDisconnectUrls = bundleLease.disconnectFiles.map(file => ui + '/' + file);
+    realtimePollingUrls = bundleLease.pollingFiles.map(file => ui + '/' + file);
+  } else {
   await writeFile(fixtureEntry,
     `export { beginCaseDocumentUpload } from ${JSON.stringify(resolve('src/services/caseDocumentUploadAttempts.ts').replaceAll('\\', '/'))};\n`
     + `export { getAuthToken } from ${JSON.stringify(resolve('src/services/api.ts').replaceAll('\\', '/'))};\n`);
   const outDir = join(root, 'case-retirement-ui-dist');
   await mkdir(outDir);
-  const uiConfig = { envDir: root, cacheDir: join(root, 'vite-browser-cache'), logLevel: 'error',
+  uiConfig = { envDir: root, cacheDir: join(root, 'vite-browser-cache'), logLevel: 'error',
     build: { outDir, emptyOutDir: false, rollupOptions: {
       input: { index: resolve('index.html'), 'case-retirement-fixture': fixtureEntry },
       preserveEntrySignatures: 'strict',
@@ -122,21 +134,23 @@ try {
     'The real case-document UI entry must compile successfully.');
   const fixtureChunks = chunks.filter(chunk => chunk.isEntry && chunk.name === 'case-retirement-fixture');
   assert.equal(fixtureChunks.length, 1, 'The real upload helper must have one compiled fixture entry.');
-  const fixtureChunk = fixtureChunks[0];
+  fixtureChunk = fixtureChunks[0];
   assert.ok(['beginCaseDocumentUpload', 'getAuthToken'].every(name => fixtureChunk.exports.includes(name)),
     'The compiled fixture must preserve the real upload and authentication helpers.');
   const moduleUrls = source => chunks.filter(chunk => chunk.moduleIds.some(id => id.replaceAll('\\', '/').endsWith(source)))
     .map(chunk => ui + '/' + chunk.fileName);
-  const realtimeDisconnectUrls = moduleUrls('/src/services/realtimeNotifications.ts');
-  const realtimePollingUrls = moduleUrls('/src/components/Notifications/RealtimeNotificationToasts.tsx');
+  realtimeDisconnectUrls = moduleUrls('/src/services/realtimeNotifications.ts');
+  realtimePollingUrls = moduleUrls('/src/components/Notifications/RealtimeNotificationToasts.tsx');
   assert.ok(realtimeDisconnectUrls.length > 0 && realtimePollingUrls.length > 0,
     'The release bundle must retain the real notification modules.');
-  vite = await preview({ ...uiConfig, preview: { host: '127.0.0.1', port, strictPort: true } });
+  }
+  const startPreview = () => preview({ ...uiConfig, preview: { host: '127.0.0.1', port, strictPort: true } });
+  vite = await phase('preview-listen', () => bundleLease ? withRetirementBuildEnvironment(startPreview) : startPreview());
   // Own the browser before navigation so a failed page load still closes it.
-  await cli('open', 'about:blank', '--browser', browser);
+  await phase('browser-open', () => cli('open', 'about:blank', '--browser', browser));
   opened = true;
-  await cli('goto', ui + '/cases/' + caseId);
-  await cli('snapshot');
+  await phase('browser-goto', () => cli('goto', ui + '/cases/' + caseId));
+  await phase('browser-snapshot', () => cli('snapshot'));
   const settings = JSON.stringify({ api: api.origin, ui, caseId, key, flow, clientId, sourceDocumentId, documentKey, controlUrl,
     fixtureModule: ui + '/' + fixtureChunk.fileName, realtimeDisconnectUrls, realtimePollingUrls,
     pending: flow.includes('writ') ? { fileName: 'retirement-browser-owned.pdf', contentType: 'application/pdf',
@@ -474,7 +488,7 @@ try {
   // Windows limits command lines to 32K characters. Keep the complete scenario
   // and its synthetic credentials in the owned temporary root, not in argv.
   await writeFile(scenarioPath, scenario, { mode: 0o600 });
-  const result = await cli('run-code', '--filename', scenarioPath);
+  const result = await phase('scenario', () => cli('run-code', '--filename', scenarioPath));
   assert.ok(result.includes('CASE_RETIREMENT_BROWSER_OK'), result);
   // The test launcher deliberately clears non-allowlisted environment values.
   // Retain only bounded synthetic request metadata beside its owned temp roots.
@@ -490,6 +504,7 @@ try {
     await writeFile(join(traceDir, basename(root) + '.json'), JSON.stringify({ flow, lostAck: diagnostic.lostAck,
       readTrace: diagnostic.readTrace }, null, 2));
   }
+  if (bundleLease) await bundleLease.verify();
   console.log(result.slice(result.indexOf('CASE_RETIREMENT_BROWSER_OK'), result.indexOf('CASE_RETIREMENT_BROWSER_OK') + 220));
 } catch (error) {
   if (opened) {
@@ -499,9 +514,9 @@ try {
   // CLI errors contain synthetic login arguments; emit only the diagnostic response.
   throw new Error(error.stdout || error.message);
 } finally {
-  try { if (opened) await cli('close'); }
+  try { if (opened) await phase('browser-close', () => cli('close')); }
   finally {
-    try { if (vite) await vite.close(); }
+    try { if (vite) await phase('preview-close', () => vite.close()); }
     finally {
       try { if (control) await new Promise((resolve, reject) => control.close(error => error ? reject(error) : resolve())); }
       finally {
@@ -509,6 +524,7 @@ try {
         if (control) process.stdin.destroy();
         await rm(scenarioPath, { force: true });
         await rm(fixtureEntry, { force: true });
+        if (bundleLease) await bundleLease.close();
       }
     }
   }

@@ -77,6 +77,7 @@ vi.mock('../../services/api', () => ({
     getTaskJournalItems: vi.fn(),
     getTaskJournalSummary: vi.fn(),
     bulkUpdateTaskJournalItems: vi.fn(),
+    getTaskJournalSettings: vi.fn(),
     getTaskJournalAssignees: vi.fn(),
     getCaseRelatedParties: vi.fn(),
     getClients: vi.fn(),
@@ -3105,6 +3106,7 @@ describe('CaseDetailPage', () => {
   });
 
   it('PAY-24 billing: keeps its page mounted and blocks tabs/back/edit while the bulk response is pending', async () => {
+    vi.mocked(apiService.getTaskJournalSettings).mockResolvedValue({ contractTaskBillingMode: 'retainContractTasks' } as Awaited<ReturnType<typeof apiService.getTaskJournalSettings>>);
     const back = vi.fn();
     mockCaseTaskServer([createTask({ id: 11, title: 'Ожидающая смена учёта' })]);
     let resolve!: (value: Awaited<ReturnType<typeof apiService.bulkUpdateTaskJournalItems>>) => void;
@@ -3115,6 +3117,7 @@ describe('CaseDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Задачи' })); await screen.findByText('Ожидающая смена учёта');
     fireEvent.click(screen.getByRole('checkbox', { name: 'Выбрать все задачи на этой странице' }));
     fireEvent.click(screen.getByRole('button', { name: 'Изменить учёт выбранных' }));
+    await waitFor(() => expect(screen.queryByText('Проверяем настройку учёта договорных задач…')).toBeNull());
     fireEvent.click(screen.getByRole('button', { name: 'Изменить учёт' }));
     await waitFor(() => expect(apiService.bulkUpdateTaskJournalItems).toHaveBeenCalledOnce());
     for (const name of ['Реестр дел', 'Редактировать дело', 'Документы', 'Быстрый доступ: Документы']) {

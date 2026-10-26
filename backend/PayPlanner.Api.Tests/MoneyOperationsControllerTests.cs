@@ -3976,6 +3976,171 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
         Assert.Equal(MoneyOperationMatchStatus.ClarificationRequired, operation.MatchStatus);
     }
 
+    public static IEnumerable<object[]> BankStatementManualChoiceCases =>
+        from postgres in new[] { false, true }
+        from direction in new[] { PaymentType.Income, PaymentType.Expense }
+        from ambiguity in new[] { "exact-remaining", "unique-name" }
+        select new object[] { postgres, direction, ambiguity };
+
+    [Theory]
+    [MemberData(nameof(BankStatementManualChoiceCases))]
+    public async Task ImportBankStatement_MultipleNumberMatchesWaitForExplicitManualChoice(
+        bool postgres, PaymentType direction, string ambiguity)
+    {
+        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateFromModelTemplateAsync(postgres, bankModelTemplate);
+        var db = fixture.Db;
+        Payment Candidate(decimal amount, string name) => new()
+        {
+            Invoice = new Invoice { Number = "33", Date = new DateTime(2026, 4, 29), CreatedAt = DateTime.UtcNow },
+            Account = "33",
+            DocumentKind = DocumentKind.Invoice,
+            Type = direction,
+            Status = PaymentStatus.Pending,
+            Amount = amount,
+            Date = new DateTime(2026, 4, 29),
+            CounterpartyName = name,
+            CreatedAt = DateTime.UtcNow,
+        };
+        var first = Candidate(25_000m, "Выбранный контрагент");
+        var second = Candidate(ambiguity == "exact-remaining" ? 30_000m : 25_000m, "Поставщик оборудования");
+        db.Payments.AddRange(first, second);
+        await db.SaveChangesAsync();
+        var controller = await CreateBankImportControllerAsync(db);
+
+        async Task<Dictionary<int, string>> PaymentStateAsync()
+        {
+            var values = await db.Payments.AsNoTracking().OrderBy(payment => payment.Id).Select(payment => new
+            {
+                payment.Id,
+                payment.InvoiceId,
+                payment.SellerCompanyId,
+                payment.Type,
+                payment.DocumentKind,
+                payment.Amount,
+                payment.PaidAmount,
+                payment.Status,
+                payment.IsPaid,
+                payment.PaidDate,
+                payment.LastPaymentDate,
+                payment.PaymentDocumentDate,
+                payment.PaymentOrderNumber,
+                payment.SystemNotes,
+                payment.InvoiceWorkflowStatus,
+                UpdatedAt = EF.Property<DateTime?>(payment, "UpdatedAt"),
+            }).ToArrayAsync();
+            return values.ToDictionary(payment => payment.Id, payment => System.Text.Json.JsonSerializer.Serialize(payment));
+        }
+
+        var before = await PaymentStateAsync();
+        var amount = direction == PaymentType.Expense ? "-25000" : "25000";
+        var action = await controller.ImportBankStatement(CreateFormFile(
+            "Дата;Сумма;Контрагент;Назначение;Номер\n" +
+            $"29.04.2026;{amount};Выбранный контрагент;Оплата по счету №33;MANUAL-33\n", "statement.csv"), default);
+        var result = Assert.IsType<BankStatementImportResultDto>(Assert.IsType<OkObjectResult>(action.Result).Value);
+        Assert.Equal(MoneyOperationMatchStatus.ClarificationRequired, Assert.Single(result.Operations).MatchStatus);
+        var operation = await db.MoneyOperations.AsNoTracking().SingleAsync();
+        Assert.Equal(direction == PaymentType.Expense ? MoneyOperationDirection.Expense : MoneyOperationDirection.Income, operation.Direction);
+        Assert.Null(operation.LinkedInvoiceId);
+        Assert.Null(operation.MatchedAt);
+        Assert.Equal(MoneyOperationMatchStatus.ClarificationRequired, operation.MatchStatus);
+        Assert.Equal(before.OrderBy(item => item.Key), (await PaymentStateAsync()).OrderBy(item => item.Key));
+        Assert.Empty(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
+
+        var candidateAction = await controller.GetInvoiceCandidates(operation.Id, default);
+        var candidates = Assert.IsAssignableFrom<IReadOnlyList<MoneyOperationInvoiceCandidateDto>>(
+            Assert.IsType<OkObjectResult>(candidateAction.Result).Value);
+        Assert.Equal(new[] { first.InvoiceId!.Value, second.InvoiceId!.Value }.Order(), candidates.Select(item => item.InvoiceId).Order());
+        Assert.Equal(before.OrderBy(item => item.Key), (await PaymentStateAsync()).OrderBy(item => item.Key));
+        Assert.Null((await db.MoneyOperations.AsNoTracking().SingleAsync()).LinkedInvoiceId);
+
+        // Use the same ordinary update contract as the manual candidate form.
+        operation.LinkedInvoiceId = second.InvoiceId;
+        operation.MatchStatus = MoneyOperationMatchStatus.Matched;
+        Assert.IsType<OkObjectResult>(await controller.Update(operation.Id, operation));
+        var after = await PaymentStateAsync();
+        Assert.Equal(before[first.Id], after[first.Id]);
+        Assert.Equal(2, after.Count);
+        var selected = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == second.Id);
+        Assert.Equal(25_000m, selected.PaidAmount);
+        Assert.Equal(ambiguity == "exact-remaining" ? PaymentStatus.Processing : PaymentStatus.Completed, selected.Status);
+        var linked = await db.MoneyOperations.AsNoTracking().SingleAsync();
+        Assert.Equal(second.InvoiceId, linked.LinkedInvoiceId);
+        Assert.Equal(MoneyOperationMatchStatus.Matched, linked.MatchStatus);
+        Assert.Empty(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
+    }
+
+    public static IEnumerable<object[]> BankStatementUniqueChoiceCases =>
+        from postgres in new[] { false, true }
+        from direction in new[] { PaymentType.Income, PaymentType.Expense }
+        from matching in new[] { "number", "name" }
+        select new object[] { postgres, direction, matching };
+
+    [Theory]
+    [MemberData(nameof(BankStatementUniqueChoiceCases))]
+    public async Task ImportBankStatement_UniqueInvoiceStillMatchesAutomatically(
+        bool postgres, PaymentType direction, string matching)
+    {
+        await using var fixture = await BankImportProvenanceModelTests.ModelDatabase.CreateFromModelTemplateAsync(postgres, bankModelTemplate);
+        var db = fixture.Db;
+        Payment Candidate(string number, decimal amount, string name) => new()
+        {
+            Invoice = new Invoice { Number = number, Date = new DateTime(2026, 4, 29), CreatedAt = DateTime.UtcNow },
+            Account = number,
+            DocumentKind = DocumentKind.Invoice,
+            Type = direction,
+            Status = PaymentStatus.Pending,
+            Amount = amount,
+            Date = new DateTime(2026, 4, 29),
+            CounterpartyName = name,
+            CreatedAt = DateTime.UtcNow,
+        };
+        var wanted = Candidate("33", 25_000m, "Выбранный контрагент");
+        var unrelated = Candidate("99", 30_000m, "Поставщик оборудования");
+        db.Payments.AddRange(wanted, unrelated);
+        await db.SaveChangesAsync();
+        var controller = await CreateBankImportControllerAsync(db);
+        var before = System.Text.Json.JsonSerializer.Serialize(await db.Payments.AsNoTracking()
+            .Where(payment => payment.Id == unrelated.Id).Select(payment => new
+            {
+                payment.Amount,
+                payment.PaidAmount,
+                payment.Status,
+                payment.IsPaid,
+                payment.PaidDate,
+                payment.LastPaymentDate,
+                payment.SystemNotes,
+                UpdatedAt = EF.Property<DateTime?>(payment, "UpdatedAt"),
+                payment.InvoiceId,
+            }).SingleAsync());
+        var amount = direction == PaymentType.Expense ? "-25000" : "25000";
+        var purpose = matching == "number" ? "Оплата по счету №33" : "Оплата услуг";
+        var action = await controller.ImportBankStatement(CreateFormFile(
+            "Дата;Сумма;Контрагент;Назначение;Номер\n" +
+            $"29.04.2026;{amount};Выбранный контрагент;{purpose};UNIQUE-33\n", "statement.csv"), default);
+        var result = Assert.IsType<BankStatementImportResultDto>(Assert.IsType<OkObjectResult>(action.Result).Value);
+        Assert.Equal(MoneyOperationMatchStatus.Matched, Assert.Single(result.Operations).MatchStatus);
+        var operation = await db.MoneyOperations.AsNoTracking().SingleAsync();
+        Assert.Equal(wanted.InvoiceId, operation.LinkedInvoiceId);
+        Assert.Equal(MoneyOperationMatchStatus.Matched, operation.MatchStatus);
+        var selected = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == wanted.Id);
+        Assert.Equal(25_000m, selected.PaidAmount);
+        Assert.Equal(PaymentStatus.Completed, selected.Status);
+        Assert.Equal(before, System.Text.Json.JsonSerializer.Serialize(await db.Payments.AsNoTracking()
+            .Where(payment => payment.Id == unrelated.Id).Select(payment => new
+            {
+                payment.Amount,
+                payment.PaidAmount,
+                payment.Status,
+                payment.IsPaid,
+                payment.PaidDate,
+                payment.LastPaymentDate,
+                payment.SystemNotes,
+                UpdatedAt = EF.Property<DateTime?>(payment, "UpdatedAt"),
+                payment.InvoiceId,
+            }).SingleAsync()));
+        Assert.Empty(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
+    }
+
     [Fact]
     public async Task ImportBankStatement_LeavesAmbiguousInvoiceNumberForClarification()
     {

@@ -25,12 +25,15 @@ using PayPlanner.Api.Services.LegalIntegrations;
 using PayPlanner.Api.Services.LegalIntegrations.Models;
 using PayPlanner.Api.Services.Notifications;
 using PayPlanner.Api.Services.Storage;
+using PayPlanner.Api.Services.Companies;
+using PayPlanner.Api.Filters;
 
 namespace PayPlanner.Api.Controllers.V2;
 
 [ApiController]
 [Route("api/v2/cases")]
 [Authorize]
+[DocumentSellerExceptionFilter]
 public partial class CasesV2Controller : ControllerBase
 {
     private const long MaxCaseDocumentBytes = 25 * 1024 * 1024;
@@ -6218,6 +6221,8 @@ public partial class CasesV2Controller : ControllerBase
         CancellationToken ct,
         CourtCalendarRegistryFilters? registryFilters = null)
     {
+        // Preserve Cases-only access to ordinary task metadata; sales-linked tasks keep their separate live Requests scope.
+        var calendarTasks = _db.TaskJournalItems.ApplySalesRequestTaskPrivacy(visibility, _db);
         IQueryable<ClientCase> caseQuery = registryFilters is null
             ? _db.ClientCases.ApplyClientCaseVisibility(visibility)
             : ApplyCourtClaimAmountFilter(
@@ -6275,7 +6280,7 @@ public partial class CasesV2Controller : ControllerBase
                 (deadline.AllDay
                     ? deadline.DueAt >= range.FromDate && deadline.DueAt < range.ToDateExclusive
                     : deadline.DueAt >= range.FromInstantUtc && deadline.DueAt < range.ToInstantExclusiveUtc)) ||
-            (includeTasks && _db.TaskJournalItems.Any(task =>
+            (includeTasks && calendarTasks.Any(task =>
                 task.ClientCaseId == item.Id &&
                 task.DueAt >= range.FromInstantUtc &&
                 task.DueAt < range.ToInstantExclusiveUtc &&
@@ -6307,7 +6312,7 @@ public partial class CasesV2Controller : ControllerBase
         if (includeTasks && cases.Count > 0)
         {
             var visibleCaseIds = cases.Select(item => item.Id).ToArray();
-            var tasks = await _db.TaskJournalItems
+            var tasks = await calendarTasks
                 .AsNoTracking()
                 .Where(item => item.ClientCaseId.HasValue && visibleCaseIds.Contains(item.ClientCaseId.Value))
                 .Where(item => item.DueAt >= range.FromInstantUtc && item.DueAt < range.ToInstantExclusiveUtc)
@@ -7997,6 +8002,8 @@ public partial class CasesV2Controller : ControllerBase
         }
 
         PaymentDomainService.Normalize(payment);
+        var sellerCapture = await CaptureNewFinancialSellerAsync(ct);
+        CopyCapturedSeller(sellerCapture.Snapshot, payment);
         workOrder.Status = "invoice_created";
         StampWorkOrderUpdate(workOrder);
         _db.SetAuditReason($"По предварительному расчету дела #{id} создан счет №{number}.");
@@ -8014,7 +8021,7 @@ public partial class CasesV2Controller : ControllerBase
             "Счет",
             "Черновик",
             $"case-{id}-invoice-{payment.Id}.html",
-            BuildWorkOrderInvoiceDocumentHtml(clientCase, workOrder, payment, number, invoiceDate, dueDate, statusClock.NowLocal),
+            AppendFinancialSellerHtml(BuildWorkOrderInvoiceDocumentHtml(clientCase, workOrder, payment, number, invoiceDate, dueDate, statusClock.NowLocal), sellerCapture.Seller),
             "Generated",
             $"Сформирован документ счета №{number} из заказ-наряда «{workOrder.Title}».",
             $"Счет №{number} из заказ-наряда «{workOrder.Title}» сохранен в документы дела. Автор: {User.GetDisplayName()}.",
@@ -8136,6 +8143,8 @@ public partial class CasesV2Controller : ControllerBase
             });
         }
 
+        var sellerCapture = await CaptureNewFinancialSellerAsync(ct);
+        CopyCapturedSeller(sellerCapture.Snapshot, act);
         _db.Acts.Add(act);
         _db.SetAuditReason($"По предварительному расчету дела #{id} создан акт №{number}.");
         AppendCaseEvent(clientCase, $"По предварительному расчету «{workOrder.Title}» создан акт №{number} на сумму {amount:0.##} {workOrder.Currency}. Создал: {User.GetDisplayName()}.");
@@ -8150,7 +8159,7 @@ public partial class CasesV2Controller : ControllerBase
             "Акт",
             "Черновик",
             $"case-{id}-act-{act.Id}.html",
-            BuildWorkOrderActDocumentHtml(clientCase, workOrder, act, statusClock.NowLocal),
+            AppendFinancialSellerHtml(BuildWorkOrderActDocumentHtml(clientCase, workOrder, act, statusClock.NowLocal), sellerCapture.Seller),
             "Generated",
             $"Сформирован документ акта №{number} из заказ-наряда «{workOrder.Title}».",
             $"Акт №{number} из заказ-наряда «{workOrder.Title}» сохранен в документы дела. Автор: {User.GetDisplayName()}.",
@@ -8265,6 +8274,8 @@ public partial class CasesV2Controller : ControllerBase
             ClientCaseId = clientCase.Id,
         });
 
+        var sellerCapture = await CaptureNewFinancialSellerAsync(ct);
+        CopyCapturedSeller(sellerCapture.Snapshot, contract);
         _db.Contracts.Add(contract);
         _db.SetAuditReason($"По предварительному расчету дела #{id} создан договор №{number}.");
         AppendCaseEvent(clientCase, $"По предварительному расчету «{workOrder.Title}» создан договор №{number} на сумму {workOrder.TotalAmount:0.##} {workOrder.Currency}. Создал: {User.GetDisplayName()}.");
@@ -8279,7 +8290,7 @@ public partial class CasesV2Controller : ControllerBase
             "Договор",
             "Черновик",
             $"case-{id}-contract-{contract.Id}.html",
-            BuildWorkOrderContractDocumentHtml(clientCase, workOrder, contract, items, statusClock.NowLocal),
+            AppendFinancialSellerHtml(BuildWorkOrderContractDocumentHtml(clientCase, workOrder, contract, items, statusClock.NowLocal), sellerCapture.Seller),
             "Generated",
             $"Сформирован документ договора №{number} из заказ-наряда «{workOrder.Title}».",
             $"Договор №{number} из заказ-наряда «{workOrder.Title}» сохранен в документы дела. Автор: {User.GetDisplayName()}.",

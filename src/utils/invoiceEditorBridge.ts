@@ -68,6 +68,7 @@ export interface InvoiceEditorActDraft {
 }
 
 export interface InvoiceEditorDraftState {
+  sellerSelection?: { companyId: number | null; branchId: number | null };
   invoiceId?: number | null;
   mode: 'create' | 'edit';
   presentation: 'modal' | 'page';
@@ -200,6 +201,13 @@ function normalizeInvoiceEditorDraft(raw: unknown): InvoiceEditorDraftState | nu
     : [];
 
   return {
+    sellerSelection: isRecord(raw.sellerSelection) ? {
+      companyId: typeof raw.sellerSelection.companyId === 'number' && Number.isSafeInteger(raw.sellerSelection.companyId) && raw.sellerSelection.companyId > 0
+        ? raw.sellerSelection.companyId : null,
+      branchId: typeof raw.sellerSelection.companyId === 'number' && Number.isSafeInteger(raw.sellerSelection.companyId) && raw.sellerSelection.companyId > 0
+        && typeof raw.sellerSelection.branchId === 'number' && Number.isSafeInteger(raw.sellerSelection.branchId) && raw.sellerSelection.branchId > 0
+        ? raw.sellerSelection.branchId : null,
+    } : undefined,
     invoiceId: typeof raw.invoiceId === 'number' && Number.isFinite(raw.invoiceId) ? raw.invoiceId : null,
     mode,
     presentation,

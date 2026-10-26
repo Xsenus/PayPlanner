@@ -115,6 +115,10 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(16000)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("SellerSnapshotPolicy")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("SentForSigningAt")
                         .HasColumnType("TEXT");
 
@@ -4256,6 +4260,10 @@ namespace PayPlanner.Api.Migrations
 
                     b.Property<string>("SellerSnapshotJson")
                         .HasMaxLength(16000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SellerSnapshotPolicy")
+                        .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("SentForSigningAt")
@@ -8976,6 +8984,10 @@ namespace PayPlanner.Api.Migrations
 
                     b.Property<string>("SellerSnapshotJson")
                         .HasMaxLength(16000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SellerSnapshotPolicy")
+                        .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
                     b.Property<int?>("ServiceId")

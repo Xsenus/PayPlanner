@@ -1676,6 +1676,8 @@ function MoneyOperationModal({
     : undefined;
   const historicalReadOnly = Boolean(initialData && (!existingMoneyAccount || !canEditMoneyAccountHistory(existingMoneyAccount)));
   const matchingAccountAvailable = Boolean(existingMoneyAccount && canUseMoneyAccountForNewOperation(existingMoneyAccount));
+  const invoiceCandidatesMatchContext = !initialData || (form.direction === initialData.direction
+    && form.moneyAccountId === initialData.moneyAccountId);
   const appliedInvoiceLocked = Boolean(initialData && (isAppliedToInvoice(initialData) || initialData.isInvoiceLinkProtected));
   const financialFieldsLocked = appliedInvoiceLocked || Boolean(initialData && !matchingAccountAvailable);
   const transferTargetAccounts = useMemo(
@@ -1716,8 +1718,8 @@ function MoneyOperationModal({
   }, [initialData, open, preferredMoneyAccountId, source, sourceMoneyAccounts]);
 
   useEffect(() => {
-    if (!open || !initialData?.id || initialData.id < 0 || initialData.direction !== 'Income'
-        || initialData.isInvoiceLinkProtected || isAppliedToInvoice(initialData) || !matchingAccountAvailable) {
+    if (!open || !initialData?.id || initialData.id < 0 || !['Income', 'Expense'].includes(initialData.direction)
+        || !invoiceCandidatesMatchContext || initialData.isInvoiceLinkProtected || isAppliedToInvoice(initialData) || !matchingAccountAvailable) {
       setInvoiceCandidates([]);
       setInvoiceCandidatesLoading(false);
       return;
@@ -1746,7 +1748,7 @@ function MoneyOperationModal({
     return () => {
       cancelled = true;
     };
-  }, [initialData, matchingAccountAvailable, open, source]);
+  }, [initialData, invoiceCandidatesMatchContext, matchingAccountAvailable, open, source]);
 
   if (!open) return null;
 
@@ -1771,14 +1773,19 @@ function MoneyOperationModal({
   const handleDirectionChange = (direction: MoneyOperationDirection) => {
     setForm((prev) => {
       const selectedCategory = findCategoryOption(categoryOptions, direction, prev.categoryName);
+      const resetInvoiceSelection = direction === 'Transfer'
+        || (direction !== prev.direction && prev.linkedInvoiceId !== initialData?.linkedInvoiceId);
       return {
         ...prev,
         direction,
         incomeTypeId: direction === 'Transfer' ? null : selectedCategory?.id ?? null,
         categoryName: direction === 'Transfer' ? '' : prev.categoryName,
-        linkedInvoiceId: direction === 'Transfer' ? null : prev.linkedInvoiceId,
-        paidInvoiceNumber: direction === 'Transfer' ? '' : prev.paidInvoiceNumber,
-        paidAmount: direction === 'Transfer' ? 0 : prev.paidAmount,
+        linkedInvoiceId: resetInvoiceSelection ? null : prev.linkedInvoiceId,
+        paidInvoiceNumber: resetInvoiceSelection ? '' : prev.paidInvoiceNumber,
+        paidAccountName: resetInvoiceSelection ? '' : prev.paidAccountName,
+        paidAmount: resetInvoiceSelection ? 0 : prev.paidAmount,
+        matchStatus: resetInvoiceSelection && prev.matchStatus === 'Matched' ? 'None' : prev.matchStatus,
+        matchComment: resetInvoiceSelection ? '' : prev.matchComment,
       };
     });
   };
@@ -1817,16 +1824,26 @@ function MoneyOperationModal({
   const handleMoneyAccountChange = (value: string) => {
     const accountId = Number(value);
     const account = sourceMoneyAccounts.find((item) => item.id === accountId);
-    setForm((prev) => ({
-      ...prev,
-      moneyAccountId: account?.id ?? null,
-      moneyAccountName: account?.name ?? null,
-      accountName: account?.name ?? '',
-      source: account?.source ?? source,
-      currency: account?.currency || prev.currency || 'RUB',
-      transferTargetMoneyAccountId:
-        prev.transferTargetMoneyAccountId === account?.id ? null : prev.transferTargetMoneyAccountId,
-    }));
+    setForm((prev) => {
+      const resetInvoiceSelection = (account?.id ?? null) !== prev.moneyAccountId
+        && prev.linkedInvoiceId !== initialData?.linkedInvoiceId;
+      return {
+        ...prev,
+        moneyAccountId: account?.id ?? null,
+        moneyAccountName: account?.name ?? null,
+        accountName: account?.name ?? '',
+        source: account?.source ?? source,
+        currency: account?.currency || prev.currency || 'RUB',
+        transferTargetMoneyAccountId:
+          prev.transferTargetMoneyAccountId === account?.id ? null : prev.transferTargetMoneyAccountId,
+        linkedInvoiceId: resetInvoiceSelection ? null : prev.linkedInvoiceId,
+        paidInvoiceNumber: resetInvoiceSelection ? '' : prev.paidInvoiceNumber,
+        paidAccountName: resetInvoiceSelection ? '' : prev.paidAccountName,
+        paidAmount: resetInvoiceSelection ? 0 : prev.paidAmount,
+        matchStatus: resetInvoiceSelection && prev.matchStatus === 'Matched' ? 'None' : prev.matchStatus,
+        matchComment: resetInvoiceSelection ? '' : prev.matchComment,
+      };
+    });
   };
 
   const handleSubmit = async () => {
@@ -2157,11 +2174,11 @@ function MoneyOperationModal({
                 className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none"
               />
             </label>
-            {form.direction === 'Income' && (
+            {(form.direction === 'Income' || form.direction === 'Expense') && (
               <div className="md:col-span-2 rounded-xl border border-blue-100 bg-blue-50/60 p-4">
                 <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-blue-900">
                   <Link2 className="h-4 w-4" />
-                  Сверка с выставленным счётом
+                  {form.direction === 'Expense' ? 'Сверка с расходным счётом' : 'Сверка с выставленным счётом'}
                 </div>
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-[180px_1fr_180px]">
                   <label className="flex flex-col gap-1 text-sm text-slate-600">
@@ -2231,12 +2248,17 @@ function MoneyOperationModal({
                     </p>
                     {invoiceCandidatesLoading && <span className="text-xs text-blue-700">Ищем кандидатов...</span>}
                   </div>
-                  {!invoiceCandidatesLoading && invoiceCandidates.length === 0 && (
+                  {!invoiceCandidatesMatchContext && (
+                    <p className="text-xs text-blue-700">
+                      После смены направления или денежного счёта сохраните операцию и откройте её снова для выбора подходящего счёта.
+                    </p>
+                  )}
+                  {invoiceCandidatesMatchContext && !invoiceCandidatesLoading && invoiceCandidates.length === 0 && (
                     <p className="rounded-lg border border-dashed border-blue-200 bg-white/70 px-3 py-2 text-xs text-blue-700">
                       Подходящих счетов не найдено. Можно указать ID вручную.
                     </p>
                   )}
-                  {invoiceCandidates.map((candidate) => {
+                  {invoiceCandidatesMatchContext && invoiceCandidates.map((candidate) => {
                     const isSelected = form.linkedInvoiceId === candidate.invoiceId;
                     return (
                       <button

@@ -37,6 +37,7 @@ public sealed partial class SpreadsheetImportService
         var parsed = ParseFiles(files);
         await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
+        var sellerSnapshotPolicy = await new Companies.DocumentSellerService(db).ReadCreationPolicyAsync(cancellationToken);
         var state = await LoadStateAsync(db, cancellationToken);
         var localToday = await GetCurrentUserLocalDateAsync(db, cancellationToken);
         var preview = BuildPreview(parsed, state, localToday);
@@ -146,12 +147,12 @@ public sealed partial class SpreadsheetImportService
 
         foreach (var invoiceDraft in selectedInvoiceDrafts)
         {
-            await ApplyInvoiceAsync(db, batchId, invoiceDraft, state, localToday, cancellationToken);
+            await ApplyInvoiceAsync(db, batchId, invoiceDraft, state, localToday, sellerSnapshotPolicy, cancellationToken);
         }
 
         foreach (var actDraft in selectedActDrafts)
         {
-            await ApplyActAsync(db, batchId, actDraft, state, cancellationToken);
+            await ApplyActAsync(db, batchId, actDraft, state, sellerSnapshotPolicy, cancellationToken);
         }
 
         var appliedBatch = await db.SpreadsheetImportBatches

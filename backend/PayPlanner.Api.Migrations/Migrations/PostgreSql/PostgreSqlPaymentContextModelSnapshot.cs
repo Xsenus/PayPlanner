@@ -122,6 +122,10 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(16000)
                         .HasColumnType("character varying(16000)");
 
+                    b.Property<string>("SellerSnapshotPolicy")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
                     b.Property<DateTime?>("SentForSigningAt")
                         .HasColumnType("timestamp without time zone");
 
@@ -4350,6 +4354,10 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<string>("SellerSnapshotJson")
                         .HasMaxLength(16000)
                         .HasColumnType("character varying(16000)");
+
+                    b.Property<string>("SellerSnapshotPolicy")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
 
                     b.Property<DateTime?>("SentForSigningAt")
                         .HasColumnType("timestamp without time zone");
@@ -9170,6 +9178,10 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<string>("SellerSnapshotJson")
                         .HasMaxLength(16000)
                         .HasColumnType("character varying(16000)");
+
+                    b.Property<string>("SellerSnapshotPolicy")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
 
                     b.Property<int?>("ServiceId")
                         .HasColumnType("integer");
