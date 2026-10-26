@@ -49,6 +49,22 @@ describe('fail-closed development verification scope', () => {
     expect(plan.changedPaths.map(entry => entry.path)).toEqual(['backend/Services/Old.cs', 'src/utils/new.ts']);
   });
 
+  it.each(['scripts/xsenus-artifact-store.mjs', 'scripts/xsenus-artifact-store.node-tests.mjs'])(
+    'requires native transport regressions and both application sides for %s', path => {
+      const plan = planVerificationScope([path]);
+      expect(plan.scope).toBe('both');
+      expect(plan.development.requiredChecks).toEqual(expect.arrayContaining([
+        'workflow-contracts', 'frontend-unit', 'frontend-integration', 'backend-full', 'backend-restored-browser',
+      ]));
+      expect(plan.checkDetails['workflow-contracts'].commands)
+        .toContain('node --test scripts/xsenus-artifact-store.node-tests.mjs');
+      expect(plan.release.requiredChecks).toEqual(expect.arrayContaining([
+        'workflow-contracts', 'frontend-unit', 'backend-full', 'backend-migrations', 'backend-restored-browser',
+      ]));
+      expect(plan.release.ciSkippingAllowed).toBe(false);
+    },
+  );
+
   it('keeps deleted inputs in scope and combines frontend and backend changes', () => {
     expect(planVerificationScope([
       { status: 'D', path: 'backend/Services/Deleted.cs' }, 'src/components/Example.tsx',

@@ -1,5 +1,23 @@
 # PayPlanner deploy runbook
 
+## CI artifact storage on XSENUS
+
+The release workflow uses the existing `PayPlanner-XSENUS` Windows runner and the repository variable `PAYPLANNER_CI_ARTIFACT_ROOT`. The dedicated location is `D:\PayPlannerCIArtifacts\store`, outside both the checkout and `RUNNER_TEMP`. This is a runner-local store, so every producer and consumer must execute on the same trusted XSENUS host. GitHub artifact upload/download actions are not part of this transport. GitHub still runs and records all required jobs and their status.
+
+Before enabling the variable, verify the actual host, volume, account, permissions and a real producer/consumer round trip. The reviewed runner account is `XSENUS\ilel`, SID `S-1-5-21-944213604-1016845418-2036792573-1001`. The new parent and store directories use protected ACLs granting inheritable FullControl only to that SID, SYSTEM and local Administrators. Do not reuse an unrelated directory, inherit broad drive permissions, change shared drive ACLs, or weaken the helper's host and filesystem checks. Initialization is a separate administrative preparation, not an automatic side effect of a release job.
+
+`node scripts/xsenus-artifact-store.mjs check` verifies the configured existing store. Every operation requires a fixed local NTFS/ReFS volume, ordinary paths, appropriate owners/ACLs and at least 20 GiB free beyond the operation's estimated space. Publication writes a new immutable object under `v1/objects/<first-two-digest-characters>/<receipt-digest>/`, with `receipt.json` and `payload/`. Failed staging is retained for diagnosis. The helper never substitutes a missing object with another run, an artifact name, a directory scan or a rebuild.
+
+The producer's `artifact-id` output is `xsenus-local-v1:<SHA-256 of canonical receipt>`. Job outputs carry this exact ID through `needs`; consumers receive both the expected ID and `ARTIFACT_NEEDS_JSON`. Receipts bind repository, ref, head SHA, workflow SHA, run, producer job/attempt, complete file inventory and the applicable SDK, test-manifest and runtime IDs. Qualified shard receipts also bind the separately persisted diagnostic receipt. Copying, hashing and readback must succeed before publication or output. Consumers verify the receipt and every file before using them.
+
+For investigation, use the exact ID from the relevant job output or closed job log to locate its object on XSENUS. Preserve that receipt and its payload together. Retrieval by the workflow uses `get --kind <kind> --producer-job <job> --destination <path>`, plus `--shard <0..3>` where applicable, and the same strict GitHub context/expected metadata. There is no unauthenticated download endpoint or switch that bypasses the checks. Missing or corrupt evidence requires a failed/affected job rerun; do not manufacture success outputs.
+
+The four backend shard jobs are independent and share `concurrency.group: payplanner-xsenus-backend-tests`, `queue: max`, `cancel-in-progress: false`. This bounds execution to one shard job on XSENUS while retaining pending jobs and permitting a failed shard to be retried independently. A later attempt in the same run may consume an earlier successful producer only through the exact retained `needs` output with matching head/workflow/metadata. A new run cannot reuse those objects as its own evidence.
+
+Package receipts retain the existing three-day retention class; diagnostics and qualified results retain fourteen days. These fields record the intended retention; this version deliberately does not delete published objects automatically or expire a still-needed object during a job rerun. Monitor free space on XSENUS. Removal requires a reviewed list of expired PayPlanner objects, closed run/attempt status and preserved evidence needed for investigation; never recursively clear the store, active objects or failed staging to make a check pass. If the reserve cannot be met, the operation fails before publication. This local store is not a production database backup or an offsite recovery copy.
+
+Changing the transport does not qualify the release by itself. The complete frontend, backend, restored-browser, formatting, security, Linux filesystem and deployment readiness barriers remain mandatory. The separate Windows symlink privilege prerequisite must also be satisfied without skipping its tests. Merge/deployment approval and successful CI are still required before installing a new revision.
+
 ## Production TLS and HSTS
 
 Production TLS is owned by the public web layer, not by the ASP.NET application. The expected production topology is:

@@ -99,14 +99,15 @@ const project = 'backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj';
 const assembly = 'backend/PayPlanner.Api.Tests/bin/Release/net9.0/PayPlanner.Api.Tests.dll';
 const toolProject = 'tools/PayPlanner.TestShards/PayPlanner.TestShards.csproj';
 const tool = 'dotnet tools/PayPlanner.TestShards/bin/Release/net9.0/PayPlanner.TestShards.dll';
-const matrixShard = '${{ matrix.shard }}';
-const attempt = '${{ github.run_attempt }}';
+const shardJobs = [0, 1, 2, 3].map(index => `backend-test-${index}`);
+const store = 'node scripts/xsenus-artifact-store.mjs';
 const producerManifest = '${{ needs.backend-build.outputs.manifest-sha }}';
 const producerSdk = '${{ needs.backend-build.outputs.sdk-version }}';
 const runtimeArtifactId = '${{ needs.backend-build.outputs.runtime-artifact-id }}';
 const frontendArtifactId = '${{ needs.frontend.outputs.frontend-artifact-id }}';
 const backendArtifactId = '${{ needs.backend.outputs.backend-artifact-id }}';
-const qualifiedShardName = shard => `qualified-backend-shard-${shard}-${sha}-${producerManifest}-${producerSdk}`;
+const needsJson = '${{ toJSON(needs) }}';
+const storeRoot = '${{ vars.PAYPLANNER_CI_ARTIFACT_ROOT }}';
 const restoredFilter = 'FullyQualifiedName~RestoredFullModelQualifiesProtectedSettingsWithCopiedKeysWithoutSourceRing|FullyQualifiedName~FullModelBackupRestoresReadableManagedGenerationsWithoutSource';
 const restore = 'dotnet restore "${{ env.BE_SLN }}" --force -p:PayPlannerReleaseAudit=true';
 const format = 'dotnet format "${{ env.BE_SLN }}" --verify-no-changes --no-restore --verbosity minimal';
@@ -116,23 +117,39 @@ export function validateDeployWorkflow(source) {
   const jobs = workflow.jobs;
   const dependencies = {
     frontend: [], 'backend-format': [], 'backend-build': [],
-    'backend-test': ['backend-build', 'backend-format', 'frontend'],
-    'backend-browser': ['backend-build', 'backend-format', 'backend-test', 'frontend'],
-    backend: ['backend-browser', 'backend-build', 'backend-test'],
+    ...Object.fromEntries(shardJobs.map(id => [id, ['backend-build', 'backend-format', 'frontend']])),
+    'backend-browser': ['backend-build', 'backend-format', ...shardJobs, 'frontend'],
+    backend: ['backend-browser', 'backend-build', ...shardJobs],
     deploy: ['backend', 'backend-format', 'frontend'],
   };
-  requireValue(jobs && Object.keys(jobs).sort().join(',') === Object.keys(dependencies).sort().join(','), 'Expected exactly seven release jobs');
+  requireValue(jobs && Object.keys(jobs).sort().join(',') === Object.keys(dependencies).sort().join(','), 'Expected exactly ten release jobs including four explicit shards');
   requireValue(workflow.defaults === undefined, 'Custom workflow shell/defaults require explicit gate review');
+  requireValue(workflow.env?.PAYPLANNER_CI_ARTIFACT_ROOT === storeRoot,
+    'Artifact storage must use the reviewed repository variable without a fallback path');
+  const identityOverride = env => Object.keys(env ?? {}).some(key => /^(?:GITHUB_|RUNNER_)/.test(key));
+  requireValue(!identityOverride(workflow.env), 'Do not replace authenticated artifact producer context');
+  const resourceLimits = { DOTNET_PROCESSOR_COUNT: '2', DOTNET_gcServer: '0', DOTNET_GCConserveMemory: '9' };
+  requireValue(Object.entries(resourceLimits).every(([key, value]) => workflow.env?.[key] === value),
+    'Keep the reviewed CPU and garbage-collection resource limits');
+  const preservesResources = env => Object.entries(resourceLimits).every(([key, value]) => env?.[key] === undefined || env[key] === value);
   requireValue(workflow.on?.push?.branches?.join(',') === 'main' && Object.hasOwn(workflow.on, 'workflow_dispatch'), 'Keep main push and manual release triggers');
   const documentationPaths = ['README.md', 'AGENTS.md', 'docs/**/*.md', 'docs/yougile-sources/**'];
   requireValue(Object.keys(workflow.on).sort().join(',') === 'push,workflow_dispatch'
     && Object.keys(workflow.on.push).sort().join(',') === 'branches,paths-ignore'
     && workflow.on.push['paths-ignore']?.join(',') === documentationPaths.join(','),
   'Exclude only documentation from automatic releases; application and CI changes must still run all gates');
-  const timeouts = { frontend: 30, 'backend-format': 30, 'backend-build': 30, 'backend-test': 150, 'backend-browser': 15, backend: 10, deploy: 30 };
+  const timeouts = { frontend: 30, 'backend-format': 30, 'backend-build': 30, ...Object.fromEntries(shardJobs.map(id => [id, 150])), 'backend-browser': 15, backend: 10, deploy: 30 };
   for (const [id, job] of Object.entries(jobs)) {
     requireValue(String(job['timeout-minutes']) === String(timeouts[id]), `${id}: keep the explicit runner time budget`);
     requireValue(!Object.hasOwn(job, 'if'), `${id}: conditional job can bypass a release gate`);
+    if (shardJobs.includes(id)) requireValue(Object.keys(job.concurrency ?? {}).sort().join(',') === 'cancel-in-progress,group,queue'
+      && job.concurrency.group === 'payplanner-xsenus-backend-tests'
+      && job.concurrency.queue === 'max' && job.concurrency['cancel-in-progress'] === false,
+    `${id}: serialize all shards with the shared queue without canceling pending or running checks`);
+    else requireValue(job.concurrency === undefined, `${id}: unexpected concurrency group`);
+    requireValue(!identityOverride(job.env) && job.env?.PAYPLANNER_CI_ARTIFACT_ROOT === undefined,
+      `${id}: do not replace authenticated artifact context or storage root`);
+    requireValue(preservesResources(job.env), `${id}: do not override reviewed resource limits`);
     requireValue(Array.isArray(job['runs-on']) && job['runs-on'].join(',') === 'self-hosted,Windows,X64,payplanner-xsenus'
       && JSON.stringify(job.defaults) === JSON.stringify({ run: { shell: 'bash' } }),
     `${id}: trusted runner labels and reviewed failure-preserving shell required`);
@@ -148,23 +165,21 @@ export function validateDeployWorkflow(source) {
     requireValue(new Set(stepIds).size === stepIds.length, `${id}: duplicate step output identity`);
     const needs = job.needs ?? [];
     requireValue(Array.isArray(needs) && [...needs].sort().join(',') === dependencies[id].join(','), `${id}: exact successful dependencies required`);
-    if (id === 'backend-test') {
-      requireValue(job.strategy?.['fail-fast'] === false
-        && Object.keys(job.strategy).sort().join(',') === 'fail-fast,matrix,max-parallel'
-        && job.strategy['max-parallel'] === '1'
-        && Object.keys(job.strategy.matrix ?? {}).join(',') === 'shard'
-        && job.strategy.matrix.shard?.join(',') === '0,1,2,3', 'All four shards must run with fail-fast disabled');
-    } else requireValue(job.strategy === undefined, `${id}: unexpected matrix/strategy`);
+    requireValue(job.strategy === undefined, `${id}: explicit jobs must not add a matrix/strategy`);
     for (const step of job.steps) {
+      requireValue(!identityOverride(step.env) && step.env?.PAYPLANNER_CI_ARTIFACT_ROOT === undefined,
+        `${id}: do not replace authenticated artifact context or storage root`);
+      requireValue(preservesResources(step.env), `${id}: do not override reviewed resource limits`);
       requireValue(step['continue-on-error'] === undefined || step['continue-on-error'] === false, `${id}: step continue-on-error bypass`);
-      const diagnostic = step.uses === 'actions/upload-artifact@v6' && step.run === undefined && (
-        (id === 'backend-test' && step.with?.name === `backend-shard-${matrixShard}-${sha}-${attempt}` && step.with?.path === 'test-results/')
-        || (id === 'backend-browser' && step.with?.name === `restored-browser-${sha}-${attempt}` && step.with?.path === 'test-results/restored-browser/'));
-      const qualifiedAlias = id === 'backend-test' && step.uses === 'actions/upload-artifact@v6' && step.run === undefined
-        && step.with?.name === qualifiedShardName(matrixShard) && step.with?.path === 'test-results/';
+      const diagnostic = step.uses === undefined && (
+        (shardJobs.includes(id) && step.run === `${store} put --kind shard-diagnostics --source test-results/ --retention-days 14`)
+        || (id === 'backend-browser' && step.run === `${store} put --kind restored-diagnostics --source test-results/restored-browser/ --retention-days 14`));
+      const qualifiedAlias = shardJobs.includes(id) && step.uses === undefined
+        && step.run === `${store} put --kind qualified-shard --source test-results/ --retention-days 14`;
       requireValue(step.if === undefined || (diagnostic && step.if === 'always()') || (qualifiedAlias && step.if === 'success()'), `${id}: conditional step can skip a release gate`);
-      if (diagnostic) requireValue(step.if === 'always()' && step.with?.overwrite === undefined, `${id}: preserve immutable attempt evidence unconditionally`);
-      if (qualifiedAlias) requireValue(step.if === 'success()' && step.with?.overwrite === true, `${id}: only a successful qualified alias may be replaced`);
+      if (diagnostic) requireValue(step.if === 'always()', `${id}: preserve immutable attempt evidence unconditionally`);
+      if (qualifiedAlias) requireValue(step.if === 'success()', `${id}: only successful tests may publish a qualified receipt`);
+      requireValue(!step.uses?.match(/^actions\/(?:upload|download)-artifact@/), `${id}: no hosted artifact or fallback transport`);
     }
   }
 
@@ -180,31 +195,35 @@ export function validateDeployWorkflow(source) {
     requireValue(!result.lines.some(line => /^(?:if\b|elif\b|else\b|for\b|while\b|until\b|case\b|function\b|\w+\(\)|trap\b|exit\b|return\b|set\s+\+)|<<|&&\s*\\$/.test(line)), `${job}: conditional/wrapped gate execution is unsupported`);
     return result;
   }
-  function artifact(job, direction, name, path) {
-    const action = direction === 'upload' ? 'actions/upload-artifact@v6' : 'actions/download-artifact@v7';
-    const found = jobs[job].steps.map((step, index) => ({ step, index })).filter(({ step }) => step.uses === action && step.with?.name === name);
-    requireValue(found.length === 1, `${job}: missing unique SHA-bound ${direction} artifact ${name}`);
-    const result = found[0];
-    requireValue(result.step.with.path === path, `${job}: artifact path mismatch`);
-    if (direction === 'upload') requireValue(result.step.with['if-no-files-found'] === 'error', `${job}: artifact must exist`);
-    else requireValue(Object.keys(result.step.with).every(key => ['name', 'path'].includes(key)), `${job}: download must belong to this workflow run`);
+  const transportSteps = new Set();
+  const sameEnvironment = (actual, expected) => Object.keys(actual ?? {}).sort().join(',') === Object.keys(expected).sort().join(',')
+    && Object.entries(expected).every(([key, value]) => actual[key] === value);
+  function transport(job, expected, env = {}) {
+    const result = command(job, expected);
+    requireValue(result.lines.length === 1 && result.step.uses === undefined && result.step.with === undefined
+      && sameEnvironment(result.step.env, env), `${job}: exact typed artifact transport and trusted context required; no fallback`);
+    transportSteps.add(`${job}:${result.index}`);
     return result;
   }
-  function archiveUpload(job, name, path, id, output) {
-    const uploaded = artifact(job, 'upload', name, path);
+  const producerMetadata = { EXPECTED_MANIFEST_SHA: producerManifest, EXPECTED_SDK_VERSION: producerSdk };
+  const resultMetadata = { ...producerMetadata, EXPECTED_RUNTIME_ARTIFACT_ID: runtimeArtifactId, ARTIFACT_NEEDS_JSON: needsJson };
+  function archiveUpload(job, kind, path, id, output) {
+    const env = kind === 'frontend' ? {} : {
+      EXPECTED_MANIFEST_SHA: '${{ steps.plan.outputs.manifest-sha }}',
+      EXPECTED_SDK_VERSION: '${{ steps.plan.outputs.sdk-version }}',
+    };
+    const uploaded = transport(job, `${store} put --kind ${kind} --source ${path} --retention-days 3`, env);
     requireValue(uploaded.step.id === id && uploaded.step.if === undefined
-      && jobs[job].outputs?.[output] === `\${{ steps.${id}.outputs.artifact-id }}`
-      && Object.keys(uploaded.step.with).sort().join(',') === 'compression-level,if-no-files-found,name,path,retention-days'
-      && uploaded.step.with['retention-days'] === '3' && uploaded.step.with['compression-level'] === '0', `${job}: immutable archive attempt and exact uploader output required`);
+      && jobs[job].outputs?.[output] === `\${{ steps.${id}.outputs.artifact-id }}`,
+    `${job}: immutable typed archive ID must come from the exact producer output`);
     return uploaded;
   }
-  function downloadById(job, id, path) {
-    const found = jobs[job].steps.map((step, index) => ({ step, index })).filter(({ step }) => step.uses === 'actions/download-artifact@v7' && step.with?.['artifact-ids'] === id);
-    requireValue(found.length === 1 && found[0].step.with.path === path
-      && Object.keys(found[0].step.with).sort().join(',') === 'artifact-ids,path', `${job}: download one trusted same-run artifact ID without fallback`);
-    return found[0];
+  function downloadById(job, kind, producer, id, path, { shard, merge = false, metadata = {} } = {}) {
+    return transport(job,
+      `${store} get --kind ${kind} --producer-job ${producer}${shard === undefined ? '' : ` --shard ${shard}`} --destination ${path}${merge ? ' --merge-disjoint' : ''}`,
+      { EXPECTED_ARTIFACT_ID: id, ARTIFACT_NEEDS_JSON: needsJson, ...metadata });
   }
-  const feUpload = archiveUpload('frontend', `frontend-${sha}-${attempt}`, 'frontend.tar.gz', 'frontend-upload', 'frontend-artifact-id');
+  const feUpload = archiveUpload('frontend', 'frontend', 'frontend.tar.gz', 'frontend-upload', 'frontend-artifact-id');
   const frontendCommands = [
     'npm ci', 'node scripts/validate-deploy-workflow.mjs',
     'bash scripts/prune-deploy-backups.test.sh', 'bash scripts/preserve-data-protection-keys.test.sh',
@@ -227,8 +246,14 @@ export function validateDeployWorkflow(source) {
   requireValue(command('backend-format', restore).index < command('backend-format', format).index, 'Strict restore must precede full format');
   requireValue(command('frontend', 'node scripts/verify-xsenus-runner.mjs build').index < fe[0].index,
     'Trusted host preflight must precede frontend tools');
+  for (const check of ['node --test scripts/xsenus-artifact-store.node-tests.mjs', 'node --test scripts/task-notification-refresh-observer.node-tests.mjs']) {
+    const gate = command('frontend', check);
+    requireValue(command('frontend', 'node scripts/verify-xsenus-runner.mjs build').index < gate.index
+      && gate.index < fe[14].index && gate.index < feUpload.index,
+      'Artifact transport and notification regression gates must precede frontend packaging');
+  }
 
-  for (const id of ['backend-format', 'backend-build', 'backend-test', 'backend-browser', 'backend']) {
+  for (const id of ['backend-format', 'backend-build', ...shardJobs, 'backend-browser', 'backend']) {
     const job = jobs[id];
     const preparation = command(id, 'node scripts/prepare-windows-ci-toolchain.mjs');
     const sdkIndex = job.steps.findIndex(step => step.uses === 'actions/setup-dotnet@v5');
@@ -251,14 +276,18 @@ export function validateDeployWorkflow(source) {
   requireValue(discover.lines.includes(`printf 'manifest-sha=%s\\n' "$(node -p "require('./test-plan.summary.json').ManifestSha256")" >> "$GITHUB_OUTPUT"`)
     && discover.lines.includes(`printf 'sdk-version=%s\\n' "$(dotnet --version)" >> "$GITHUB_OUTPUT"`), 'Discovery outputs must come from the producer summary and SDK');
   const runtimePack = command('backend-build', `tar -czf test-runtime.tar.gz test-plan.json test-plan.summary.json backend/PayPlanner.Api.Tests/bin/Release/net9.0 tools/PayPlanner.TestShards/bin/Release/net9.0`);
-  const runtimeUpload = archiveUpload('backend-build', `test-runtime-${sha}-${attempt}`, 'test-runtime.tar.gz', 'runtime-upload', 'runtime-artifact-id');
+  const runtimeUpload = archiveUpload('backend-build', 'test-runtime', 'test-runtime.tar.gz', 'runtime-upload', 'runtime-artifact-id');
   const publish = command('backend-build', 'dotnet publish "${{ env.BE_CSPROJ }}" -c Release --no-build --no-restore -o "${{ env.OUT_DIR }}/be"');
   const bePack = command('backend-build', 'tar -czf backend.tar.gz -C "${{ env.OUT_DIR }}" be');
-  const beUpload = archiveUpload('backend-build', `backend-${sha}-${attempt}`, 'backend.tar.gz', 'backend-upload', 'backend-artifact-id');
+  const beUpload = archiveUpload('backend-build', 'backend', 'backend.tar.gz', 'backend-upload', 'backend-artifact-id');
   const beOrder = [beRestore, build, toolBuild, discover, runtimePack, runtimeUpload, publish, bePack, beUpload].map(item => item.index);
   requireValue(beOrder.every((value, index) => index === 0 || value > beOrder[index - 1]), 'Backend strict restore/build/discover/artifact order');
-  const shard = command('backend-test', `${tool} run --manifest test-plan.json --manifest-sha "$EXPECTED_MANIFEST_SHA" --shard ${matrixShard} --results test-results/shard-${matrixShard} --workers auto --suite all 2>&1 | tee test-results/shard-${matrixShard}.log`);
-  requireValue(shard.lines.length === 3 && shard.lines[1] === 'mkdir -p test-results', 'Shard result directory must be fresh and created by the runner');
+  const shards = shardJobs.map((id, index) => {
+    const shard = command(id, `${tool} run --manifest test-plan.json --manifest-sha "$EXPECTED_MANIFEST_SHA" --shard ${index} --results test-results/shard-${index} --workers auto --suite all 2>&1 | tee test-results/shard-${index}.log`);
+    requireValue(shard.lines.length === 3 && shard.lines[1] === 'mkdir -p test-results', 'Shard result directory must be fresh and created by the runner');
+    return shard;
+  });
+  const shardGates = shardJobs.map((id, index) => [id, shards[index]]);
   const restoredCommand = `dotnet vstest ${assembly} --Settings:test-results/restored-browser/gate.runsettings --Logger:'trx;LogFileName=results.trx' --ResultsDirectory:test-results/restored-browser --TestCaseFilter:'${restoredFilter}' > test-results/restored-browser/test.log 2>&1 || native_exit=$?`;
   const restored = command('backend-browser', restoredCommand, false, true);
   const restoredVerification = `${tool} verify-restored --manifest test-plan.json --manifest-sha "$EXPECTED_MANIFEST_SHA" --results test-results/restored-browser --exit-code "$native_exit"`;
@@ -278,24 +307,22 @@ export function validateDeployWorkflow(source) {
     && timingCache[0].step.with?.path === '${{ runner.temp }}/payplanner-test-timings.json'
     && timingCache[0].step.with?.key === 'backend-timings-v1-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}',
   'Timing cache must publish only the qualified profile after its creation');
-  for (const gate of [shard, restored, union]) requireValue(gate.step.env?.EXPECTED_MANIFEST_SHA === '${{ needs.backend-build.outputs.manifest-sha }}', 'Consumers must use the trusted producer manifest hash');
-  for (const [id, gate] of [['backend-test', shard], ['backend-browser', restored], ['backend', union]]) {
+  for (const gate of [...shards, restored, union]) requireValue(gate.step.env?.EXPECTED_MANIFEST_SHA === '${{ needs.backend-build.outputs.manifest-sha }}', 'Consumers must use the trusted producer manifest hash');
+  for (const [id, gate] of [...shardGates, ['backend-browser', restored], ['backend', union]]) {
     requireValue(gate.lines[0] === 'set -euo pipefail', `${id}: preserve failure exit status`);
     const sdk = jobs[id].steps.filter(step => step.uses === 'actions/setup-dotnet@v5');
     requireValue(sdk.length === 1 && sdk[0].with?.['dotnet-version'] === '${{ needs.backend-build.outputs.sdk-version }}', `${id}: use producer SDK version`);
     const actualSdk = command(id, 'test "$actual_sdk" = "$EXPECTED_SDK_VERSION"');
     requireValue(actualSdk.step.env?.EXPECTED_SDK_VERSION === producerSdk
       && actualSdk.step.env?.RUNTIME_ARTIFACT_ID === runtimeArtifactId
-      && actualSdk.lines.join('\n') === 'set -euo pipefail\nactual_sdk="$(dotnet --version)"\ntest "$actual_sdk" = "$EXPECTED_SDK_VERSION"\n[[ "$RUNTIME_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]', `${id}: verify actual SDK and one nonempty producer runtime ID`);
-    const downloaded = downloadById(id, runtimeArtifactId, 'test-artifacts');
+      && actualSdk.lines.join('\n') === 'set -euo pipefail\nactual_sdk="$(dotnet --version)"\ntest "$actual_sdk" = "$EXPECTED_SDK_VERSION"\n[[ "$RUNTIME_ARTIFACT_ID" =~ ^xsenus-local-v1:[a-f0-9]{64}$ ]]', `${id}: verify actual SDK and one nonempty typed producer runtime ID`);
+    const downloaded = downloadById(id, 'test-runtime', 'backend-build', runtimeArtifactId, 'test-artifacts', { metadata: producerMetadata });
     const unpack = command(id, 'tar -xzf test-artifacts/test-runtime.tar.gz');
     requireValue(jobs[id].steps.indexOf(sdk[0]) < actualSdk.index && actualSdk.index < downloaded.index
       && downloaded.index < unpack.index && unpack.index < gate.index, `${id}: SDK check and downloaded runtime must precede execution`);
     requireValue(!jobs[id].steps.some(step => /dotnet (?:build|publish|restore)|\bMSBuild\b/.test(step.run ?? '')), `${id}: test runtime must not be rebuilt`);
-    if (id !== 'backend') requireValue(jobs[id].steps.filter(step => step.uses?.startsWith('actions/download-artifact@')).length === 1,
-      `${id}: download only the exact producer runtime; no fallback artifacts`);
   }
-  for (const [id, gate] of [['backend-test', shard], ['backend-browser', restored]]) {
+  for (const [id, gate] of [...shardGates, ['backend-browser', restored]]) {
     requireValue(String(gate.step.env?.BackgroundServices__Enabled) === 'false' && String(gate.step.env?.Email__Enabled) === 'false', `${id}: test mail/background isolation missing`);
     requireValue(gate.step.env?.PAYPLANNER_TEST_POSTGRES === '${{ secrets.PAYPLANNER_XSENUS_TEST_POSTGRES }}'
       && gate.step.env?.PAYPLANNER_TEST_PG_DUMP === 'C:/Program Files/PostgreSQL/17/bin/pg_dump.exe'
@@ -313,34 +340,45 @@ export function validateDeployWorkflow(source) {
   const portable = command('backend-build', 'node scripts/verify-xsenus-runner.mjs package');
   requireValue(publish.index < portable.index && portable.index < bePack.index,
     'Verify Linux-compatible portable package before archiving');
-  const shardDiagnostic = artifact('backend-test', 'upload', `backend-shard-${matrixShard}-${sha}-${attempt}`, 'test-results/');
-  const restoredDiagnostic = artifact('backend-browser', 'upload', `restored-browser-${sha}-${attempt}`, 'test-results/restored-browser/');
-  const qualifiedAlias = artifact('backend-test', 'upload', qualifiedShardName(matrixShard), 'test-results/');
-  requireValue(shard.index < shardDiagnostic.index && shardDiagnostic.index < qualifiedAlias.index
-    && restored.index < restoredDiagnostic.index, 'Qualified aliases require successful tests and preserved attempt evidence first');
-  requireValue(shardDiagnostic.step.with['retention-days'] === '14' && restoredDiagnostic.step.with['retention-days'] === '14', 'Retain attempt diagnostics independently from qualified aliases');
-  requireValue(qualifiedAlias.step.with['retention-days'] === '14'
-    && Object.keys(qualifiedAlias.step.with).sort().join(',') === 'if-no-files-found,name,overwrite,path,retention-days', 'Qualified alias options must retain exact identity, mandatory contents and bounded retention');
+  const restoredDiagnostic = transport('backend-browser', `${store} put --kind restored-diagnostics --source test-results/restored-browser/ --retention-days 14`, resultMetadata);
+  requireValue(restored.index < restoredDiagnostic.index, 'Restored results must precede unconditional diagnostic persistence');
   for (let index = 0; index < 4; index += 1) {
-    const result = artifact('backend', 'download', qualifiedShardName(index), 'test-results');
+    const id = shardJobs[index];
+    const metadata = { ...resultMetadata, ARTIFACT_SHARD: String(index) };
+    const diagnostic = transport(id, `${store} put --kind shard-diagnostics --source test-results/ --retention-days 14`, metadata);
+    const qualified = transport(id, `${store} put --kind qualified-shard --source test-results/ --retention-days 14`, {
+      ...metadata, EXPECTED_DIAGNOSTIC_ARTIFACT_ID: '${{ steps.shard-diagnostics.outputs.artifact-id }}',
+    });
+    requireValue(diagnostic.step.id === 'shard-diagnostics' && qualified.step.id === 'qualified-upload'
+      && shards[index].index < diagnostic.index && diagnostic.index < qualified.index,
+    'Qualified receipts require successful tests and preserved attempt evidence first');
+    requireValue(Object.keys(jobs[id].outputs ?? {}).join(',') === 'qualified-artifact-id'
+      && jobs[id].outputs['qualified-artifact-id'] === `\${{ steps.qualified-upload.outputs.shard_${index}_id }}`,
+    `${id}: distinct trusted shard output must come from its qualified publication`);
+    const result = downloadById('backend', 'qualified-shard', id,
+      `\${{ needs.${id}.outputs.qualified-artifact-id }}`, 'test-results',
+      { shard: index, merge: true, metadata: { ...producerMetadata, EXPECTED_RUNTIME_ARTIFACT_ID: runtimeArtifactId } });
     requireValue(result.index < union.index, 'All four result artifacts must precede exact union verification');
   }
-  requireValue(jobs.backend.steps.filter(step => step.uses?.startsWith('actions/download-artifact@')).length === 5,
-    'Aggregate must download only the producer runtime and four exact qualified aliases; no fallback artifacts');
   for (const id of ['backend-format', 'backend-build']) {
     const sdk = jobs[id].steps.filter(step => step.uses === 'actions/setup-dotnet@v5');
     requireValue(sdk.length === 1 && sdk[0].with?.['dotnet-version'] === '9.0.x', `${id}: .NET 9 SDK required`);
   }
 
   const deploy = jobs.deploy.steps;
-  requireValue(jobs.backend.outputs?.['backend-artifact-id'] === '${{ needs.backend-build.outputs.backend-artifact-id }}', 'Aggregate must forward the same producer backend artifact ID after successful qualification');
-  const downloads = deploy.map((step, index) => ({ step, index })).filter(({ step }) => step.uses?.startsWith('actions/download-artifact@'));
-  requireValue(downloads.length === 2, 'Deploy must download exactly the two qualified artifacts');
-  downloadById('deploy', backendArtifactId, 'deploy-artifacts');
-  downloadById('deploy', frontendArtifactId, 'deploy-artifacts');
+  requireValue(sameEnvironment(jobs.backend.outputs, {
+    'backend-artifact-id': '${{ needs.backend-build.outputs.backend-artifact-id }}',
+    'manifest-sha': producerManifest, 'sdk-version': producerSdk,
+  }), 'Aggregate must forward the same producer backend artifact ID, manifest and SDK after successful qualification');
+  const downloads = [
+    downloadById('deploy', 'backend', 'backend-build', backendArtifactId, 'deploy-artifacts', {
+      metadata: { EXPECTED_MANIFEST_SHA: '${{ needs.backend.outputs.manifest-sha }}', EXPECTED_SDK_VERSION: '${{ needs.backend.outputs.sdk-version }}' },
+    }),
+    downloadById('deploy', 'frontend', 'frontend', frontendArtifactId, 'deploy-artifacts', { merge: true }),
+  ];
   const deployIds = command('deploy', '[[ "$BACKEND_ARTIFACT_ID" != "$FRONTEND_ARTIFACT_ID" ]]');
   requireValue(deployIds.step.env?.BACKEND_ARTIFACT_ID === backendArtifactId && deployIds.step.env?.FRONTEND_ARTIFACT_ID === frontendArtifactId
-    && deployIds.lines.join('\n') === 'set -euo pipefail\n[[ "$BACKEND_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]\n[[ "$FRONTEND_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]\n[[ "$BACKEND_ARTIFACT_ID" != "$FRONTEND_ARTIFACT_ID" ]]'
+    && deployIds.lines.join('\n') === 'set -euo pipefail\n[[ "$BACKEND_ARTIFACT_ID" =~ ^xsenus-local-v1:[a-f0-9]{64}$ ]]\n[[ "$FRONTEND_ARTIFACT_ID" =~ ^xsenus-local-v1:[a-f0-9]{64}$ ]]\n[[ "$BACKEND_ARTIFACT_ID" != "$FRONTEND_ARTIFACT_ID" ]]'
     && downloads.every(({ index }) => deployIds.index < index), 'Deploy must reject empty, multiple or substituted artifact IDs before downloading');
   const tar = command('deploy', 'tar -czf "${{ env.TAR_NAME }}" -C "${{ env.OUT_DIR }}" .');
   const unpackBackend = command('deploy', 'tar -xzf deploy-artifacts/backend.tar.gz -C "${{ env.OUT_DIR }}"');
@@ -369,7 +407,33 @@ export function validateDeployWorkflow(source) {
     && unpackBackend.index < tar.index && unpackFrontend.index < tar.index
     && tar.index < bridge.index && bridge.index < readiness.index, 'Deploy download/unpack/tar/Linux-gates/SSH/readiness order');
   requireValue(!deploy.some(step => /(?:dotnet (?:test|build|publish)|npm (?:ci|run build))/.test(step.run ?? '')), 'Deploy must use qualified artifacts without rebuilding');
-  return { valid: true, gates: ['frontend', 'backend-format', 'backend'], deployNeeds: jobs.deploy.needs, artifacts: downloads.map(({ step }) => step.with['artifact-ids']) };
+  for (const [id, job] of Object.entries(jobs)) {
+    const storage = job.steps.map((step, index) => ({ step, index }))
+      .filter(({ step }) => /xsenus-artifact-store\.mjs/.test(step.run ?? ''));
+    if (!storage.length) continue;
+    const check = transport(id, `${store} check`);
+    requireValue(storage.every(({ index }) => index === check.index || index > check.index),
+      `${id}: verified storage must precede every transport operation`);
+    requireValue(storage.every(({ index }) => transportSteps.has(`${id}:${index}`)),
+      `${id}: download only the exact producer IDs; no extra or fallback artifact transport`);
+  }
+  // The four independently rerunnable jobs differ only in their index. Their
+  // shared queue serializes execution without canceling pending checks.
+  const normalizedShard = (job, index) => {
+    const normalized = JSON.parse(JSON.stringify(job));
+    delete normalized.name;
+    for (const step of normalized.steps) {
+      if (step.env?.ARTIFACT_SHARD !== undefined) step.env.ARTIFACT_SHARD = '<shard>';
+    }
+    return JSON.stringify(normalized)
+      .replaceAll(`shard_${index}_id`, 'shard_INDEX_id')
+      .replaceAll(`--shard ${index}`, '--shard INDEX')
+      .replaceAll(`shard-${index}`, 'shard-INDEX');
+  };
+  const firstShard = normalizedShard(jobs[shardJobs[0]], 0);
+  for (let index = 1; index < 4; index += 1) requireValue(normalizedShard(jobs[shardJobs[index]], index) === firstShard,
+    `${shardJobs[index]}: all four explicit shards must have identical gates, resource limits and transport contracts`);
+  return { valid: true, gates: ['frontend', 'backend-format', 'backend'], deployNeeds: jobs.deploy.needs, artifacts: downloads.map(({ step }) => step.env.EXPECTED_ARTIFACT_ID) };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
