@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 export const linuxFiles = Object.freeze([
   'prune-deploy-backups.sh', 'prune-deploy-backups.test.sh',
   'preserve-data-protection-keys.sh', 'preserve-data-protection-keys.test.sh',
+  'deploy-history-archive.py', 'deploy-history-archive.test.py',
 ]);
 const sensitiveNames = ['VPS_SSH_KEY', 'PAYPLANNER_WEBPUSH_PUBLIC_KEY', 'PAYPLANNER_WEBPUSH_PRIVATE_KEY', 'PAYPLANNER_WEBPUSH_SUBJECT'];
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -118,7 +119,7 @@ export async function deploy(config, { run = nativeRun, workspace = createPrivat
     assert.match(remote, new RegExp(`^/tmp/payplanner-preflight-${config.sha}-[A-Za-z0-9]{8}$`), 'Unexpected remote temporary directory');
     execute('scp', [...scpArgs, ...sourceFiles.slice(0, linuxFiles.length), `${destination}:${remote}/`]);
     const checksums = sourceFiles.slice(0, linuxFiles.length).map(path => `${hash(content.get(path))}  ${basename(path)}`).join('\n') + '\n';
-    const preflight = `set -euo pipefail\ntest "$(uname -s)" = Linux\ncd ${shellQuote(remote)}\nmkdir -m 700 fixtures\nexport TMPDIR="$PWD/fixtures"\nprintf %s ${shellQuote(checksums)} | sha256sum -c -\nbash prune-deploy-backups.test.sh\nbash preserve-data-protection-keys.test.sh\n`;
+    const preflight = `set -euo pipefail\ntest "$(uname -s)" = Linux\ncd ${shellQuote(remote)}\nmkdir -m 700 fixtures\nexport TMPDIR="$PWD/fixtures"\nprintf %s ${shellQuote(checksums)} | sha256sum -c -\nbash prune-deploy-backups.test.sh\nbash preserve-data-protection-keys.test.sh\npython3 -B deploy-history-archive.test.py\n`;
     execute('ssh', [...sshArgs, destination, 'bash -s'], { input: preflight, timeout: 300000 });
     execute('ssh', [...sshArgs, destination, `rm -rf -- ${shellQuote(remote)}`]);
     remote = undefined;

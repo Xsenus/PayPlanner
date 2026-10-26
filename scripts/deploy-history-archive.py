@@ -63,7 +63,7 @@ def plan_history(base_raw, current_raw):
     base, current = parse_manifest(base_raw), parse_manifest(current_raw)
     # Every current directory is transferred again, including changed timestamps
     # and ACLs. Only byte- AND metadata-identical ordinary files may be reused.
-    reused = [name for name, entry in current.items() if entry['kind'] == 'file' and base.get(name) == entry]
+    reused = {name for name, entry in current.items() if entry['kind'] == 'file' and base.get(name) == entry}
     delta = [name for name in current if name not in reused]
     removed = sorted(set(base) - set(current))
     changed = sorted(name for name in set(base) & set(current) if base[name] != current[name])

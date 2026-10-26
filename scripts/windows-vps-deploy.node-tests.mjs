@@ -81,6 +81,7 @@ test('schedules both Linux scripts and exact transferred-byte checks before pack
   assert.ok(preflight > 0 && upload > preflight && installation > upload);
   const script = state.calls[preflight].options.input;
   assert.match(script, /bash prune-deploy-backups\.test\.sh\nbash preserve-data-protection-keys\.test\.sh/);
+  assert.match(script, /python3 -B deploy-history-archive\.test\.py\n/);
   assert.match(script, /export TMPDIR="\$PWD\/fixtures"/);
   assert.match(script, /sha256sum -c -/);
   assert.equal(state.calls.filter(call => call.tool === 'scp.exe').length, 2);
@@ -123,6 +124,21 @@ test('secrets never enter command arguments or child environment; remote values 
   assert.ok(payload.includes('export PAYPLANNER_WEBPUSH_SUBJECT=' + shellQuote(config.remoteEnv.PAYPLANNER_WEBPUSH_SUBJECT)));
   assert.ok(payload.indexOf('set +x') < payload.indexOf('export PAYPLANNER_WEBPUSH_PRIVATE_KEY='));
   assert.ok(!payload.includes(config.key));
+});
+
+test('changed history proof or its tests after Linux preflight cannot reach archive upload', async t => {
+  for (const name of ['deploy-history-archive.py', 'deploy-history-archive.test.py']) {
+    await t.test(name, async child => {
+      const { config } = fixture(child);
+      const state = harness(config, call => {
+        if (call.options.input?.includes('test "$(uname -s)" = Linux')) writeFileSync(join(config.root, 'scripts', name), 'changed');
+        return false;
+      });
+      await assert.rejects(deploy(config, state.options), /deployment input changed/);
+      assert.ok(!state.calls.some(call => call.args.includes(config.archive)));
+      assert.ok(!existsSync(state.directory()));
+    });
+  }
 });
 
 test('native failures redact secret output and still remove private credentials', async t => {
