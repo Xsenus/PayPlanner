@@ -1,4 +1,4 @@
-import { setupTaskJournalTests, apiMock, authState, todayAt, createTask, renderJournal, openFirstTaskForEdit, openNewTaskFormAsGlobalInternal } from './TaskJournal.test-support';
+import { setupTaskJournalTests, apiMock, authState, toastMock, todayAt, createTask, renderJournal, openFirstTaskForEdit, openNewTaskFormAsGlobalInternal } from './TaskJournal.test-support';
 import { TaskJournal } from './TaskJournal';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { StrictMode } from 'react';
@@ -87,6 +87,12 @@ describe('TaskJournal', () => {
       await waitFor(() => expect(signals).toHaveLength(2));
       return { view, signals, fail: async () => {
         await act(async () => { failItems(new Error('Synthetic obsolete list failure')); finishSummary(summary); });
+      }, failItems: async () => {
+        await act(async () => failItems(new Error('Synthetic current list failure')));
+      }, finishItems: async () => {
+        await act(async () => finishItems(obsolete));
+      }, finishSummary: async () => {
+        await act(async () => finishSummary(summary));
       }, finish: async () => {
         await act(async () => { finishItems(obsolete); finishSummary(summary); });
       } };
@@ -125,6 +131,235 @@ describe('TaskJournal', () => {
       await waitFor(() => expect(signals.every(signal => signal.aborted)).toBe(true));
       await finish();
       expect(screen.queryByText('Устаревший список задач')).toBeNull();
+    });
+
+    it.each([
+      { mode: 'legacy' as const, reason: 'created' },
+      { mode: 'modern' as const, reason: 'created' },
+      { mode: 'legacy' as const, reason: 'missed-replay' },
+      { mode: 'modern' as const, reason: 'missed-replay' },
+    ])('finishes the current list and summary before one fresh read for $reason notifications in the $mode journal', async ({ mode, reason }) => {
+      const pending = await pendingList(mode);
+      const originalItemsParams = apiMock.getTaskJournalItems.mock.calls[0][0];
+      const originalSummaryParams = apiMock.getTaskJournalSummary.mock.calls[0][0];
+      const freshTask = createTask({ title: 'Свежий список после уведомления' });
+      apiMock.getTaskJournalItems.mockResolvedValue({ items: [freshTask], total: 1, page: 1, pageSize: 100 });
+      apiMock.getTaskJournalSummary.mockResolvedValue({ active: 1, overdue: 0, today: 0, highPriority: 0 });
+      const notify = () => window.dispatchEvent(new CustomEvent(USER_NOTIFICATIONS_EVENT, {
+        detail: { source: 'realtime', reason, taskJournalItemId: 101, notificationType: 'taskFileUploaded' },
+      }));
+      vi.useFakeTimers();
+      try {
+        await act(async () => { notify(); await vi.advanceTimersByTimeAsync(199); });
+        expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(1);
+        expect(apiMock.getTaskJournalSummary).toHaveBeenCalledTimes(1);
+        await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+        expect(pending.signals.every(signal => !signal.aborted)).toBe(true);
+        expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(1);
+        expect(apiMock.getTaskJournalSummary).toHaveBeenCalledTimes(1);
+
+        // Further notifications during the same read require freshness, not another overlapping read.
+        await act(async () => { notify(); notify(); await vi.advanceTimersByTimeAsync(200); });
+        expect(pending.signals.every(signal => !signal.aborted)).toBe(true);
+        expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(1);
+        expect(apiMock.getTaskJournalSummary).toHaveBeenCalledTimes(1);
+        await pending.finishItems();
+        expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(1);
+        expect(apiMock.getTaskJournalSummary).toHaveBeenCalledTimes(1);
+        await pending.finishSummary();
+        await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+        expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(2);
+        expect(apiMock.getTaskJournalSummary).toHaveBeenCalledTimes(2);
+        expect(apiMock.getTaskJournalItems.mock.calls[1][0]).toEqual(originalItemsParams);
+        expect(apiMock.getTaskJournalSummary.mock.calls[1][0]).toEqual(originalSummaryParams);
+        expect(screen.getByText(freshTask.title)).toBeTruthy();
+        expect(screen.queryByText('Устаревший список задач')).toBeNull();
+        await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+        expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(2);
+        expect(apiMock.getTaskJournalSummary).toHaveBeenCalledTimes(2);
+      } finally {
+        pending.view.unmount();
+        await pending.finish();
+        vi.useRealTimers();
+      }
+    });
+
+    it.each(['legacy', 'modern'] as const)('covers a notification received before a fresh read starts without replaying its later debounce in the %s journal', async mode => {
+      const pending = await pendingList(mode);
+      const freshTask = createTask({ title: 'Свежий список без повторного таймера' });
+      const freshItems = { items: [freshTask], total: 1, page: 1, pageSize: 100 };
+      const freshSummary = { active: 1, overdue: 0, today: 0, highPriority: 0 };
+      const holdNextRefresh = () => {
+        let finishItems: ((value: typeof freshItems) => void) | undefined;
+        let finishSummary: ((value: typeof freshSummary) => void) | undefined;
+        const signals: AbortSignal[] = [];
+        apiMock.getTaskJournalItems.mockImplementationOnce((_params, options) => {
+          signals.push(options.signal);
+          return new Promise<typeof freshItems>(resolve => { finishItems = resolve; });
+        });
+        apiMock.getTaskJournalSummary.mockImplementationOnce((_params, options) => {
+          signals.push(options.signal);
+          return new Promise<typeof freshSummary>(resolve => { finishSummary = resolve; });
+        });
+        return { signals, finish: async () => {
+          await act(async () => { finishItems?.(freshItems); finishSummary?.(freshSummary); });
+        } };
+      };
+      const firstFresh = holdNextRefresh();
+      const nextFresh = holdNextRefresh();
+      apiMock.getTaskJournalItems.mockResolvedValue(freshItems);
+      apiMock.getTaskJournalSummary.mockResolvedValue(freshSummary);
+      const notify = () => window.dispatchEvent(new CustomEvent(USER_NOTIFICATIONS_EVENT, {
+        detail: { source: 'realtime', reason: 'missed-replay', taskJournalItemId: 101, notificationType: 'taskFileUploaded' },
+      }));
+      vi.useFakeTimers();
+      try {
+        await act(async () => { notify(); await vi.advanceTimersByTimeAsync(200); });
+        await act(async () => { await vi.advanceTimersByTimeAsync(50); notify(); });
+        await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+        await pending.finish(); // t=300: this fresh read already covers the notification from t=250.
+        expect(firstFresh.signals).toHaveLength(2);
+        expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(2);
+        expect(apiMock.getTaskJournalSummary).toHaveBeenCalledTimes(2);
+        await act(async () => { await vi.advanceTimersByTimeAsync(150); }); // t=450: the older debounce would fire.
+        expect(firstFresh.signals.every(signal => !signal.aborted)).toBe(true);
+        await firstFresh.finish();
+        expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(2);
+        expect(apiMock.getTaskJournalSummary).toHaveBeenCalledTimes(2);
+
+        // A genuinely new notification after a fresh read starts still needs a follow-up.
+        await act(async () => { await vi.advanceTimersByTimeAsync(50); notify(); await vi.advanceTimersByTimeAsync(200); });
+        expect(nextFresh.signals).toHaveLength(2);
+        expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(3);
+        expect(apiMock.getTaskJournalSummary).toHaveBeenCalledTimes(3);
+        await act(async () => { await vi.advanceTimersByTimeAsync(50); notify(); await vi.advanceTimersByTimeAsync(200); });
+        expect(nextFresh.signals.every(signal => !signal.aborted)).toBe(true);
+        expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(3);
+        expect(apiMock.getTaskJournalSummary).toHaveBeenCalledTimes(3);
+        await nextFresh.finish();
+        expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(4);
+        expect(apiMock.getTaskJournalSummary).toHaveBeenCalledTimes(4);
+        expect(screen.getByText(freshTask.title)).toBeTruthy();
+        await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+        expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(4);
+        expect(apiMock.getTaskJournalSummary).toHaveBeenCalledTimes(4);
+      } finally {
+        pending.view.unmount();
+        await pending.finish();
+        await firstFresh.finish();
+        await nextFresh.finish();
+        vi.useRealTimers();
+      }
+    });
+
+    it.each([
+      { mode: 'legacy' as const, boundary: 'fresh-read' },
+      { mode: 'modern' as const, boundary: 'fresh-read' },
+      { mode: 'legacy' as const, boundary: 'unmount' },
+      { mode: 'modern' as const, boundary: 'unmount' },
+    ])('reports a list failure promptly and keeps its pending summary owned until $boundary in the $mode journal', async ({ mode, boundary }) => {
+      const pending = await pendingList(mode);
+      const freshTask = createTask({ title: 'Свежий список после ошибки' });
+      apiMock.getTaskJournalItems.mockResolvedValue({ items: [freshTask], total: 1, page: 1, pageSize: 100 });
+      apiMock.getTaskJournalSummary.mockResolvedValue({ active: 1, overdue: 0, today: 0, highPriority: 0 });
+      const notify = () => window.dispatchEvent(new CustomEvent(USER_NOTIFICATIONS_EVENT, {
+        detail: { source: 'realtime', reason: 'missed-replay', taskJournalItemId: 101, notificationType: 'taskFileUploaded' },
+      }));
+      vi.useFakeTimers();
+      try {
+        await act(async () => { notify(); await vi.advanceTimersByTimeAsync(200); });
+        await pending.failItems();
+        // The visible error must not wait for the independently pending summary.
+        expect(toastMock.error).toHaveBeenCalledExactlyOnceWith('Не удалось загрузить журнал задач.', 'Журнал задач');
+        expect(pending.signals.every(signal => !signal.aborted)).toBe(true);
+        expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(1);
+        expect(apiMock.getTaskJournalSummary).toHaveBeenCalledTimes(1);
+        await act(async () => { notify(); await vi.advanceTimersByTimeAsync(200); });
+        expect(pending.signals.every(signal => !signal.aborted)).toBe(true);
+        expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(1);
+        expect(apiMock.getTaskJournalSummary).toHaveBeenCalledTimes(1);
+
+        if (boundary === 'unmount') {
+          pending.view.unmount();
+          expect(pending.signals[1].aborted).toBe(true);
+        }
+        await pending.finishSummary();
+        await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+        const expectedReads = boundary === 'unmount' ? 1 : 2;
+        expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(expectedReads);
+        expect(apiMock.getTaskJournalSummary).toHaveBeenCalledTimes(expectedReads);
+        if (boundary === 'fresh-read') expect(screen.getByText(freshTask.title)).toBeTruthy();
+        else expect(screen.queryByText(freshTask.title)).toBeNull();
+        expect(screen.queryByText('Устаревший список задач')).toBeNull();
+        await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+        expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(expectedReads);
+        expect(apiMock.getTaskJournalSummary).toHaveBeenCalledTimes(expectedReads);
+        expect(toastMock.error).toHaveBeenCalledTimes(1);
+      } finally {
+        pending.view.unmount();
+        await pending.finish();
+        vi.useRealTimers();
+      }
+    });
+
+    it.each([
+      { mode: 'legacy' as const, boundary: 'filter' },
+      { mode: 'modern' as const, boundary: 'filter' },
+      { mode: 'legacy' as const, boundary: 'employee' },
+      { mode: 'modern' as const, boundary: 'employee' },
+      { mode: 'legacy' as const, boundary: 'unmount' },
+      { mode: 'modern' as const, boundary: 'unmount' },
+    ])('cancels the old read and retires its queued notification refresh on $boundary in the $mode journal', async ({ mode, boundary }) => {
+      const pending = await pendingList(mode);
+      const freshReaders: number[] = [];
+      apiMock.getTaskJournalItems.mockImplementation(async () => {
+        freshReaders.push(authState.user.id);
+        return { items: [], total: 0, page: 1, pageSize: 100 };
+      });
+      apiMock.getTaskJournalSummary.mockResolvedValue({ active: 0, overdue: 0, today: 0, highPriority: 0 });
+      vi.useFakeTimers();
+      try {
+        await act(async () => {
+          window.dispatchEvent(new CustomEvent(USER_NOTIFICATIONS_EVENT, {
+            detail: { source: 'realtime', reason: 'missed-replay', taskJournalItemId: 101, notificationType: 'taskFileUploaded' },
+          }));
+          await vi.advanceTimersByTimeAsync(200);
+        });
+        const itemsBeforeBoundary = apiMock.getTaskJournalItems.mock.calls.length;
+        const summaryBeforeBoundary = apiMock.getTaskJournalSummary.mock.calls.length;
+        freshReaders.length = 0;
+        await act(async () => {
+          if (boundary === 'filter') {
+            fireEvent.change(screen.getByTestId('task-priority-filter'), { target: { value: 'urgent' } });
+          } else if (boundary === 'employee') {
+            window.localStorage.setItem('pp.task_journal.filters.v1.user:8', JSON.stringify({
+              quickFilter: 'all', viewMode: 'list', periodMode: 'all', statusFilter: 'active',
+            }));
+            authState.user = { ...authState.user, id: 8 };
+            pending.view.rerender(<TaskJournal />);
+          } else {
+            pending.view.unmount();
+          }
+        });
+        expect(pending.signals.every(signal => signal.aborted)).toBe(true);
+        const expectedNewReads = boundary === 'unmount' ? 0 : 1;
+        expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(itemsBeforeBoundary + expectedNewReads);
+        expect(apiMock.getTaskJournalSummary).toHaveBeenCalledTimes(summaryBeforeBoundary + expectedNewReads);
+        expect(freshReaders).toEqual(boundary === 'unmount' ? [] : [boundary === 'employee' ? 8 : 7]);
+        if (boundary === 'filter') {
+          expect(apiMock.getTaskJournalItems.mock.lastCall?.[0]).toEqual(expect.objectContaining({ priority: 'urgent' }));
+          expect(apiMock.getTaskJournalSummary.mock.lastCall?.[0]).toEqual(expect.objectContaining({ priority: 'urgent' }));
+        }
+        await pending.finish();
+        await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+        expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(itemsBeforeBoundary + expectedNewReads);
+        expect(apiMock.getTaskJournalSummary).toHaveBeenCalledTimes(summaryBeforeBoundary + expectedNewReads);
+        expect(screen.queryByText('Устаревший список задач')).toBeNull();
+      } finally {
+        pending.view.unmount();
+        await pending.finish();
+        vi.useRealTimers();
+      }
     });
   });
 
