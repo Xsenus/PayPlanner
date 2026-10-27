@@ -9138,6 +9138,73 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("Payments");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.PaymentCreateAttempt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ActorUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("CancelledAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("CanonicalPaymentId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("CommittedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("ExpiresAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("IdentityVersion")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Operation")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PayloadIdentity")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("PrimaryPaymentId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("SellerBranchId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("SellerCompanyId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActorUserId");
+
+                    b.ToTable("PaymentCreateAttempts", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_PaymentCreateAttempts_Operation", "(\"Operation\" = 'primary' AND \"PrimaryPaymentId\" IS NULL) OR (\"Operation\" = 'remainder' AND \"PrimaryPaymentId\" IS NOT NULL AND \"PrimaryPaymentId\" > 0)");
+
+                            t.HasCheckConstraint("CK_PaymentCreateAttempts_Outcome", "(\"State\" = 'Committed' AND \"CanonicalPaymentId\" IS NOT NULL AND \"CanonicalPaymentId\" > 0 AND \"PayloadIdentity\" IS NOT NULL AND length(\"PayloadIdentity\") = 64 AND \"CommittedAtUtc\" IS NOT NULL AND \"CancelledAtUtc\" IS NULL) OR (\"State\" = 'Draft' AND \"CanonicalPaymentId\" IS NULL AND \"PayloadIdentity\" IS NULL AND \"CommittedAtUtc\" IS NULL AND \"CancelledAtUtc\" IS NULL) OR (\"State\" = 'Cancelled' AND \"CanonicalPaymentId\" IS NULL AND \"PayloadIdentity\" IS NULL AND \"CommittedAtUtc\" IS NULL AND \"CancelledAtUtc\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_PaymentCreateAttempts_Ownership", "\"ActorUserId\" > 0 AND (\"SellerCompanyId\" IS NULL OR \"SellerCompanyId\" > 0) AND (\"SellerBranchId\" IS NULL OR (\"SellerBranchId\" > 0 AND \"SellerCompanyId\" IS NOT NULL))");
+
+                            t.HasCheckConstraint("CK_PaymentCreateAttempts_State", "\"State\" IN ('Draft','Committed','Cancelled')");
+                        });
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.PaymentRemainderTransfer", b =>
                 {
                     b.Property<int>("Id")

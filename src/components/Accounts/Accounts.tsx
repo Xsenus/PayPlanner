@@ -1,3 +1,4 @@
+import { PaymentCreateAdoptedError } from '../../services/paymentCreateAttempts';
 import { SystemSelect } from '../ui/SystemSelect';
 import {
   AlertTriangle,
@@ -2183,10 +2184,22 @@ export function Accounts({
     setPaymentModalInvoiceContext(null);
   };
 
-  const handleSubmitPayment = async (payload: PaymentPayload | ({ id: number } & PaymentPayload)) => {
+  const refreshAfterPaymentSave = async () => {
+    try {
+      await refreshAccounts();
+      if (pageEditingInvoiceId) {
+        const refreshedInvoice = await apiService.getInvoice(pageEditingInvoiceId);
+        setPageEditingInvoice(refreshedInvoice);
+      }
+    } catch {
+      toast.error('Платёж сохранён, но не удалось обновить список счетов.', 'Платежи счета');
+    }
+  };
+
+  const handleSubmitPayment = async (payload: PaymentPayload | ({ id: number } & PaymentPayload)): Promise<Payment> => {
     const isUpdate = 'id' in payload;
     if ((isUpdate && !canEditPayment) || (!isUpdate && !canCreatePayment)) {
-      return;
+      throw new Error('Недостаточно прав для сохранения платежа.');
     }
     const invoiceManagedEditingPayment =
       isUpdate
@@ -2194,54 +2207,44 @@ export function Accounts({
       && editingPayment.id === payload.id
       && isInvoiceManagedPayment(editingPayment);
 
+    let savedPayment: Payment;
     try {
       if (isUpdate) {
         if (invoiceManagedEditingPayment) {
-          await apiService.updateInvoiceManagedPayment(payload.id, payload);
+          savedPayment = await apiService.updateInvoiceManagedPayment(payload.id, payload);
         } else {
-          await apiService.updatePayment(payload.id, payload);
+          savedPayment = await apiService.updatePayment(payload.id, payload);
         }
       } else {
-        await apiService.createPayment(payload as PaymentPayload);
+        savedPayment = await apiService.createPayment(payload as PaymentPayload);
       }
-
-      await refreshAccounts();
-      if (pageEditingInvoiceId) {
-        try {
-          const refreshedInvoice = await apiService.getInvoice(pageEditingInvoiceId);
-          setPageEditingInvoice(refreshedInvoice);
-        } catch {
-          // Keep the current page state if the invoice refresh fails after a successful payment save.
-        }
-      }
-      handleClosePaymentModal();
     } catch (err) {
+      if (err instanceof PaymentCreateAdoptedError) throw err;
       toast.error(extractDisplayErrorMessage(err, 'Не удалось сохранить платёж.'), 'Платежи счета');
       throw err;
     }
+    void refreshAfterPaymentSave();
+    return savedPayment;
   };
 
   const handleTransferPaymentRemainder = async (
     payload: { id: number } & PaymentPayload,
     remainderDate: string,
-  ) => {
+  ): Promise<Payment> => {
+    if (!canEditPayment) {
+      throw new Error('Недостаточно прав для сохранения платежа.');
+    }
+    let savedPayment: Payment;
     try {
-      await apiService.transferPaymentRemainder(payload.id, payload, remainderDate);
-      await refreshAccounts();
-      if (pageEditingInvoiceId) {
-        try {
-          const refreshedInvoice = await apiService.getInvoice(pageEditingInvoiceId);
-          setPageEditingInvoice(refreshedInvoice);
-        } catch {
-          // Keep the current page state if the invoice refresh fails after a successful payment save.
-        }
-      }
-      handleClosePaymentModal();
-      toast.success('Остаток платежа перенесён.', 'Платежи счета');
+      const result = await apiService.transferPaymentRemainder(payload.id, payload, remainderDate);
+      savedPayment = result.payment;
     } catch (err) {
       toast.error(extractDisplayErrorMessage(err, 'Не удалось перенести остаток платежа.'), 'Платежи счета');
       throw err;
     }
+    void refreshAfterPaymentSave();
+    toast.success('Остаток платежа перенесён.', 'Платежи счета');
+    return savedPayment;
   };
 
   const handleRollbackPaymentRemainderTransfer = async (paymentId: number) => {
@@ -2518,6 +2521,8 @@ export function Accounts({
       isOpen={paymentModalOpen && canViewPayments}
       onClose={handleClosePaymentModal}
       onSubmit={handleSubmitPayment}
+      canCreatePayment={canCreatePayment}
+      canEditPayment={canEditPayment}
       onTransferRemainder={handleTransferPaymentRemainder}
       onRollbackRemainderTransfer={handleRollbackPaymentRemainderTransfer}
       onAdjustRemainderTransfer={handleAdjustPaymentRemainderTransfer}
@@ -2542,9 +2547,9 @@ export function Accounts({
       }
       onCreateRemainder={
         canCreatePayment && (!editingPayment || !isInvoiceManagedPayment(editingPayment))
-          ? async (payload) => {
-              const created = await apiService.createPayment(payload);
-              await refreshAccounts();
+          ? async (payload, context) => {
+              const created = await apiService.createPayment(payload, context);
+              void refreshAfterPaymentSave();
               return created;
             }
           : undefined

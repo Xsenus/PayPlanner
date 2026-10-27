@@ -1,7 +1,11 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PaymentModal } from './PaymentModal';
+import type { Payment, PaymentPayload } from '../../types';
+import { apiService } from '../../services/api';
+import { acknowledgePaymentCreate, bindPaymentCreateOwner, createPaymentGuarded, fencePaymentCreateAdoption, inspectPaymentCreate, pendingPaymentCreates,
+  openCommittedPaymentCreate, type PaymentAttemptState, type PaymentCreateContext, type PaymentCreatePorts } from '../../services/paymentCreateAttempts';
 
 const {
   confirmMock,
@@ -135,6 +139,7 @@ vi.mock('../../hooks/useUserTimeZone', () => ({
 
 vi.mock('../../services/api', () => ({
   apiService: {
+    inspectPaymentCreate: vi.fn(), openPaymentCreate: vi.fn(), acknowledgePaymentCreate: vi.fn(), fencePaymentCreateAdoption: vi.fn(),
     getInvoices: getInvoicesMock,
     getActResponsibles: getActResponsiblesMock,
     getCases: getCasesMock,
@@ -262,6 +267,57 @@ function getLastPrintHtml(): string {
   const writeMock = vi.mocked(printWindow!.document.write);
   expect(writeMock).toHaveBeenCalled();
   return String(writeMock.mock.calls[0]?.[0] ?? '');
+}
+
+function doc04Payment(overrides: Partial<Payment> = {}): Payment {
+  return {
+    id: 9901, date: '2026-04-10', plannedDate: '2026-04-10', amount: 100,
+    paidAmount: 0, outstandingAmount: 100, hasPartialPayment: false, status: 'Pending',
+    type: 'Income', description: 'Подтверждённый платёж', isPaid: false, notes: '',
+    systemNotes: '', rescheduleCount: 0, createdAt: '2026-04-10T00:00:00Z',
+    clientId: 69, documentKind: 'Payment', paymentOrderNumber: 'ПКО-2026-9901',
+    paymentDocumentDate: '2026-04-11', ...overrides,
+  };
+}
+function doc04Field(name: string, value: string) {
+  const field = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[name="${name}"]`);
+  expect(field).not.toBeNull();
+  fireEvent.change(field!, { target: { value } });
+  fireEvent.blur(field!);
+}
+function doc04NewFields() {
+  doc04Field('amount', '100');
+  doc04Field('description', 'Введённый платёж');
+}
+
+
+function doc04RealAttemptFixture(primary = doc04Payment(), rest = doc04Payment({ id: 9902, amount: 65 })) {
+  localStorage.setItem('pp_token', `header.${btoa(JSON.stringify({ sub: '1' }))}.signature`);
+  localStorage.setItem('pp.auth-session-epoch.v1', 'real-attempt-A'); bindPaymentCreateOwner(1, '/api');
+  vi.stubGlobal('navigator', { locks: { request: async (_name: string, _options: LockOptions,
+    callback: (lease: Lock | null) => Promise<unknown>) => callback({ name: 'owned', mode: 'exclusive' } as Lock) } });
+  const ids = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'];
+  const registered = new Map<string, PaymentAttemptState>();
+  const io: PaymentCreatePorts = {
+    register: vi.fn(async body => {
+      const state: PaymentAttemptState = { attemptId: ids[registered.size], state: 'Draft', ...body,
+        createdAtUtc: '2026-10-26T00:00:00Z', expiresAtUtc: '2026-10-27T00:00:00Z', canonicalPaymentId: null, identityVersion: 'payment-create-v1' };
+      registered.set(state.attemptId, state); return state;
+    }),
+    commit: vi.fn(async id => id === ids[1] ? rest : primary),
+    get: vi.fn(async id => ({ ...registered.get(id)!, state: 'Committed' as const, canonicalPaymentId: id === ids[1] ? rest.id : primary.id })),
+    cancel: vi.fn(async id => ({ attemptId: id, state: 'Cancelled' as const, canonicalPaymentId: null })),
+    payment: vi.fn(async id => id === rest.id ? rest : primary),
+  };
+  vi.mocked(apiService.inspectPaymentCreate).mockImplementation((entry, cancel) => inspectPaymentCreate(entry, io, cancel));
+  vi.mocked(apiService.openPaymentCreate).mockImplementation(entry => openCommittedPaymentCreate(entry, io));
+  vi.mocked(apiService.fencePaymentCreateAdoption).mockImplementation(fencePaymentCreateAdoption);
+  vi.mocked(apiService.acknowledgePaymentCreate).mockImplementation(acknowledgePaymentCreate);
+  return { io, ids, primary, rest,
+    onSubmit: vi.fn((payload: PaymentPayload) => createPaymentGuarded(payload, undefined, io)),
+    onCreateRemainder: vi.fn((payload: PaymentPayload, context: PaymentCreateContext) => createPaymentGuarded(payload, context, io)),
+    cleanup: () => { bindPaymentCreateOwner(null, '/api'); localStorage.clear(); vi.unstubAllGlobals(); },
+  };
 }
 
 describe('PaymentModal integration', () => {
@@ -2162,7 +2218,7 @@ describe('PaymentModal integration', () => {
   it('transfers an existing partial payment remainder through the atomic handler', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const onCreateRemainder = vi.fn().mockResolvedValue(undefined);
-    const onTransferRemainder = vi.fn().mockResolvedValue(undefined);
+    const onTransferRemainder = vi.fn().mockResolvedValue(doc04Payment({ id: 998, amount: 35_000, paidAmount: 35_000, status: 'Completed', isPaid: true, clientCaseId: 501, account: '56', accountDate: '2026-04-01' }));
     const onClose = vi.fn();
 
     render(
@@ -2238,7 +2294,9 @@ describe('PaymentModal integration', () => {
     );
     expect(onSubmit).not.toHaveBeenCalled();
     expect(onCreateRemainder).not.toHaveBeenCalled();
-    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(await screen.findByRole('status')).toHaveProperty('textContent', 'Платёж сохранён.');
+    expect(screen.getByRole('button', { name: 'save' })).toBeTruthy();
   });
 
   it('applies available client balance to an existing payment', async () => {
@@ -2669,4 +2727,489 @@ describe('PaymentModal integration', () => {
     expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ confirmLabel: 'Удалить' }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+  it.each(['Income', 'Expense'] as const)('keeps a new %s payment open with its confirmed ID and sends the next save as an update', async (type) => {
+    const saved = doc04Payment({ type, clientId: type === 'Income' ? 69 : null, expenseClientId: type === 'Expense' ? 88 : null, description: 'Ответ сервера' });
+    const onSubmit = vi.fn().mockResolvedValueOnce(saved).mockResolvedValueOnce({ ...saved, description: 'Изменено повторно' });
+    const onClose = vi.fn();
+    render(<PaymentModal isOpen type={type} defaultClientId={type === 'Income' ? 69 : undefined}
+      defaultExpenseClientId={type === 'Expense' ? 88 : undefined} onClose={onClose} onSubmit={onSubmit} />);
+    doc04NewFields();
+    fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
+    expect(await screen.findByRole('status')).toHaveProperty('textContent', 'Платёж сохранён.');
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty('id');
+    expect(document.querySelector<HTMLTextAreaElement>('[name="description"]')?.value).toBe('Ответ сервера');
+    expect(document.querySelector<HTMLInputElement>('[name="paymentOrderNumber"]')?.value).toBe(saved.paymentOrderNumber);
+    expect(document.querySelector<HTMLInputElement>('[name="paymentDocumentDate"]')?.value).toBe('2026-04-11');
+    expect(onClose).not.toHaveBeenCalled();
+    doc04Field('description', 'Изменено повторно');
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+    expect(onSubmit.mock.calls[1][0]).toEqual(expect.objectContaining({ id: saved.id, description: 'Изменено повторно', type }));
+    expect(onSubmit.mock.calls[1][0]).toEqual(expect.objectContaining(type === 'Income' ? { clientId: 69 } : { expenseClientId: 88 }));
+    expect(onClose).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'save' }).hasAttribute('disabled')).toBe(false));
+    fireEvent.click(screen.getByRole('button', { name: 'Закрыть' }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it('retains entered data and stays in create mode when the first save is rejected', async () => {
+    const onSubmit = vi.fn().mockRejectedValue(new Error('Отказ сохранения'));
+    const onClose = vi.fn();
+    render(<PaymentModal isOpen onClose={onClose} onSubmit={onSubmit} />);
+    doc04NewFields();
+    fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Отказ сохранения');
+    expect(document.querySelector<HTMLTextAreaElement>('[name="description"]')?.value).toBe('Введённый платёж');
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'addPayment' }).hasAttribute('disabled')).toBe(false);
+  });
+
+  it('allows only one create while the real confirmation is still pending', async () => {
+    let answer!: (value: boolean) => void;
+    confirmMock.mockImplementationOnce(() => new Promise<boolean>((resolve) => { answer = resolve; }));
+    const onSubmit = vi.fn().mockResolvedValue(doc04Payment());
+    render(<PaymentModal isOpen onClose={vi.fn()} onSubmit={onSubmit} />);
+    doc04NewFields();
+    const button = screen.getByRole('button', { name: 'addPayment' });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect(confirmMock).toHaveBeenCalledTimes(1);
+    expect(onSubmit).not.toHaveBeenCalled();
+    await act(async () => { answer(true); });
+    await screen.findByRole('status');
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it('resumes only the pending remainder after a confirmed primary save and then updates the same payment', async () => {
+    const primary = doc04Payment({ amount: 35_000, paidAmount: 35_000, outstandingAmount: 0, status: 'Completed', isPaid: true });
+    const onSubmit = vi.fn().mockResolvedValue(primary);
+    const onCreateRemainder = vi.fn().mockRejectedValueOnce(new Error('Остаток отклонён'))
+      .mockResolvedValueOnce(doc04Payment({ id: 9902, amount: 45_000 }));
+    const onClose = vi.fn();
+    render(<PaymentModal isOpen defaultClientId={69} onClose={onClose} onSubmit={onSubmit} onCreateRemainder={onCreateRemainder} />);
+    doc04NewFields();
+    doc04Field('amount', '80000');
+    doc04Field('paidAmount', '35000');
+    fireEvent.click(screen.getByLabelText('Перенести остаток'));
+    fireEvent.change(document.querySelector<HTMLInputElement>('#reschedule-date')!, { target: { value: '2026-05-20' } });
+    fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Остаток отклонён');
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onCreateRemainder).toHaveBeenCalledTimes(1);
+    expect(onCreateRemainder.mock.calls[0][0]).toEqual(expect.objectContaining({ amount: 45_000, paidAmount: 0, date: '2026-05-20' }));
+    expect(document.querySelector('fieldset')?.disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить создание остатка' }));
+    expect(await screen.findByRole('status')).toHaveProperty('textContent', 'Платёж и остаток сохранены.');
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onCreateRemainder).toHaveBeenCalledTimes(2);
+    expect(onCreateRemainder.mock.calls[1][0]).toEqual(onCreateRemainder.mock.calls[0][0]);
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+    expect(onSubmit.mock.calls[1][0]).toEqual(expect.objectContaining({ id: primary.id, amount: 35_000 }));
+    expect(onCreateRemainder).toHaveBeenCalledTimes(2);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unsupported new split before the first write', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(doc04Payment());
+    const onTransferRemainder = vi.fn().mockResolvedValue(doc04Payment());
+    render(<PaymentModal isOpen onClose={vi.fn()} onSubmit={onSubmit} onTransferRemainder={onTransferRemainder} />);
+    doc04NewFields();
+    doc04Field('paidAmount', '35');
+    fireEvent.click(screen.getByLabelText('Перенести остаток'));
+    fireEvent.change(document.querySelector<HTMLInputElement>('#reschedule-date')!, { target: { value: '2026-05-20' } });
+    fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('Сначала сохраните платёж целиком'));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onTransferRemainder).not.toHaveBeenCalled();
+  });
+
+  it('keeps a confirmed create visible but disables editing when edit permission is absent', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(doc04Payment());
+    render(<PaymentModal isOpen canCreatePayment canEditPayment={false} onClose={vi.fn()} onSubmit={onSubmit} />);
+    doc04NewFields();
+    fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
+    await screen.findByRole('status');
+    expect(screen.getByRole('button', { name: 'save' }).hasAttribute('disabled')).toBe(true);
+    expect(document.querySelector('fieldset')?.disabled).toBe(true);
+    fireEvent.submit(document.querySelector('form')!);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not carry a failed remainder draft into a different payment opened in the same component', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(doc04Payment({ amount: 35, paidAmount: 35, status: 'Completed', isPaid: true }));
+    const onCreateRemainder = vi.fn().mockRejectedValue(new Error('Остаток отклонён'));
+    const props = { isOpen: true, onClose: vi.fn(), onSubmit, onCreateRemainder };
+    const { rerender } = render(<PaymentModal {...props} />);
+    doc04NewFields();
+    doc04Field('paidAmount', '35');
+    fireEvent.click(screen.getByLabelText('Перенести остаток'));
+    fireEvent.change(document.querySelector<HTMLInputElement>('#reschedule-date')!, { target: { value: '2026-05-20' } });
+    fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
+    await screen.findByRole('alert');
+    const other = doc04Payment({ id: 9910, description: 'Другой платёж' });
+    onSubmit.mockResolvedValue(other);
+    rerender(<PaymentModal {...props} payment={other} />);
+    expect(screen.queryByRole('button', { name: 'Повторить создание остатка' })).toBeNull();
+    expect(document.querySelector<HTMLTextAreaElement>('[name="description"]')?.value).toBe('Другой платёж');
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+    expect(onSubmit.mock.calls[1][0]).toEqual(expect.objectContaining({ id: other.id }));
+    expect(onCreateRemainder).toHaveBeenCalledTimes(1);
+  });
+
+  it('discards a late save response after external close and allows saving the next opened card', async () => {
+    let finish!: (value: Payment) => void;
+    const first = doc04Payment();
+    const second = doc04Payment({ id: 9911, description: 'Следующая карточка' });
+    const onSubmit = vi.fn().mockImplementationOnce(() => new Promise<Payment>((resolve) => { finish = resolve; })).mockResolvedValue(second);
+    const props = { onClose: vi.fn(), onSubmit };
+    const { rerender } = render(<PaymentModal {...props} isOpen payment={first} />);
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    rerender(<PaymentModal {...props} isOpen={false} payment={first} />);
+    rerender(<PaymentModal {...props} isOpen payment={second} />);
+    await act(async () => { finish(first); });
+    expect(document.querySelector<HTMLTextAreaElement>('[name="description"]')?.value).toBe('Следующая карточка');
+    expect(screen.getByRole('button', { name: 'save' }).hasAttribute('disabled')).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+    expect(onSubmit.mock.calls[1][0]).toEqual(expect.objectContaining({ id: second.id }));
+  });
+
+  it('does not submit an old advance payload after a delayed confirmation and card change', async () => {
+    let answer!: (value: boolean) => void;
+    confirmMock.mockImplementationOnce(() => new Promise<boolean>((resolve) => { answer = resolve; }));
+    const onSubmit = vi.fn().mockResolvedValue(doc04Payment());
+    const props = { isOpen: true, onClose: vi.fn(), onSubmit };
+    const { rerender } = render(<PaymentModal {...props} payment={doc04Payment({ paidAmount: 10, hasPartialPayment: true })} />);
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1));
+    expect(onSubmit).not.toHaveBeenCalled();
+    rerender(<PaymentModal {...props} payment={doc04Payment({ id: 9920, description: 'Новая область' })} />);
+    await act(async () => { answer(true); });
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(document.querySelector<HTMLTextAreaElement>('[name="description"]')?.value).toBe('Новая область');
+  });
+
+  it('passes the confirmed new payment ID to the existing client-balance callback', async () => {
+    const saved = doc04Payment();
+    const onSubmit = vi.fn().mockResolvedValue(saved);
+    const onApplyClientBalance = vi.fn().mockResolvedValue({ appliedAmount: 25, balance: 25 });
+    getClientBalanceMock.mockResolvedValue({ clientId: 69, balance: 50 });
+    render(<PaymentModal isOpen defaultClientId={69} availableClientBalance={50} onClose={vi.fn()}
+      onSubmit={onSubmit} onApplyClientBalance={onApplyClientBalance} />);
+    doc04NewFields();
+    fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
+    await screen.findByRole('status');
+    const amount = await screen.findByRole('textbox', { name: 'Сумма зачета' });
+    fireEvent.change(amount, { target: { value: '25' } });
+    fireEvent.click(screen.getByRole('button', { name: /Зачесть/i }));
+    await waitFor(() => expect(onApplyClientBalance).toHaveBeenCalledWith(25, expect.objectContaining({ id: saved.id })));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not write after edit permission is lost while advance confirmation is pending', async () => {
+    let answer!: (value: boolean) => void;
+    confirmMock.mockImplementationOnce(() => new Promise<boolean>((resolve) => { answer = resolve; }));
+    const payment = doc04Payment({ paidAmount: 10, hasPartialPayment: true });
+    const onSubmit = vi.fn().mockResolvedValue(payment);
+    const props = { isOpen: true, payment, onClose: vi.fn(), onSubmit };
+    const { rerender } = render(<PaymentModal {...props} canEditPayment />);
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1));
+    rerender(<PaymentModal {...props} canEditPayment={false} />);
+    await act(async () => { answer(true); });
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'save' }).hasAttribute('disabled')).toBe(true);
+    expect(document.querySelector<HTMLTextAreaElement>('[name="description"]')?.value).toBe(payment.description);
+  });
+
+  it('retains a pending create lock and canonical ACK when create permission changes and returns', async () => {
+    let finish!: (value: Payment) => void;
+    const saved = doc04Payment();
+    const onSubmit = vi.fn().mockImplementationOnce(() => new Promise<Payment>((resolve) => { finish = resolve; }))
+      .mockResolvedValue(saved);
+    const props = { isOpen: true, onClose: vi.fn(), onSubmit };
+    const { rerender } = render(<PaymentModal {...props} canCreatePayment />);
+    doc04NewFields();
+    fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    rerender(<PaymentModal {...props} canCreatePayment={false} />);
+    rerender(<PaymentModal {...props} canCreatePayment />);
+    fireEvent.submit(document.querySelector('form')!);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('fieldset')?.disabled).toBe(true);
+    await act(async () => { finish(saved); });
+    await screen.findByRole('status');
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+    expect(onSubmit.mock.calls[1][0]).toEqual(expect.objectContaining({ id: saved.id }));
+    expect(onSubmit.mock.calls.filter(([payload]) => !('id' in payload))).toHaveLength(1);
+  });
+
+  it('defers an unstarted remainder after a permission change and keeps its in-flight retry locked', async () => {
+    let finishPrimary!: (value: Payment) => void;
+    let finishRemainder!: (value: Payment) => void;
+    const primary = doc04Payment({ amount: 35, paidAmount: 35, outstandingAmount: 0, status: 'Completed', isPaid: true });
+    const onSubmit = vi.fn().mockImplementationOnce(() => new Promise<Payment>((resolve) => { finishPrimary = resolve; }));
+    const onCreateRemainder = vi.fn().mockImplementationOnce(() => new Promise<Payment>((resolve) => { finishRemainder = resolve; }));
+    const props = { isOpen: true, onClose: vi.fn(), onSubmit, onCreateRemainder };
+    const { rerender } = render(<PaymentModal {...props} canCreatePayment />);
+    doc04NewFields();
+    doc04Field('paidAmount', '35');
+    fireEvent.click(screen.getByLabelText('Перенести остаток'));
+    fireEvent.change(document.querySelector<HTMLInputElement>('#reschedule-date')!, { target: { value: '2026-05-20' } });
+    fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    rerender(<PaymentModal {...props} canCreatePayment={false} />);
+    await act(async () => { finishPrimary(primary); });
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('создание остатка ещё не начато'));
+    expect(onCreateRemainder).not.toHaveBeenCalled();
+    expect(document.querySelector<HTMLInputElement>('[name="amount"]')?.value).toBe('35,00');
+    rerender(<PaymentModal {...props} canCreatePayment />);
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить создание остатка' }));
+    await waitFor(() => expect(onCreateRemainder).toHaveBeenCalledTimes(1));
+    expect(onCreateRemainder.mock.calls[0][0]).toEqual(expect.objectContaining({ amount: 65, paidAmount: 0, date: '2026-05-20' }));
+    rerender(<PaymentModal {...props} canCreatePayment={false} />);
+    rerender(<PaymentModal {...props} canCreatePayment />);
+    fireEvent.submit(document.querySelector('form')!);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onCreateRemainder).toHaveBeenCalledTimes(1);
+    await act(async () => { finishRemainder(doc04Payment({ id: 9902, amount: 65 })); });
+    expect(await screen.findByRole('status')).toHaveProperty('textContent', 'Платёж и остаток сохранены.');
+    expect(screen.queryByRole('button', { name: 'Повторить создание остатка' })).toBeNull();
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onCreateRemainder).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([false, true])('resets an existing payment into a blank new card in the same mount after saved=%s', async (saveFirst) => {
+    const existing = doc04Payment({ id: 9950, description: 'Прежний платёж' });
+    const created = doc04Payment({ id: 9951, description: 'Новая запись' });
+    const onSubmit = vi.fn().mockResolvedValueOnce(saveFirst ? existing : created).mockResolvedValue(created);
+    const props = { isOpen: true, onClose: vi.fn(), onSubmit };
+    const { rerender } = render(<PaymentModal {...props} payment={existing} />);
+    if (saveFirst) {
+      fireEvent.click(screen.getByRole('button', { name: 'save' }));
+      await screen.findByRole('status');
+    }
+    rerender(<PaymentModal {...props} />);
+    expect(document.querySelector<HTMLTextAreaElement>('[name="description"]')?.value).toBe('');
+    expect(document.querySelector<HTMLInputElement>('[name="amount"]')?.value).toBe('');
+    expect(screen.queryByRole('status')).toBeNull();
+    doc04NewFields();
+    doc04Field('description', 'Новая запись');
+    fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(saveFirst ? 2 : 1));
+    expect(onSubmit.mock.lastCall?.[0]).not.toHaveProperty('id');
+    expect(onSubmit.mock.lastCall?.[0]).toEqual(expect.objectContaining({ description: 'Новая запись', amount: 100 }));
+  });
+
+  it('passes the confirmed primary ID explicitly to a successful new remainder operation', async () => {
+    const primary = doc04Payment({ amount: 35, paidAmount: 35, outstandingAmount: 0, status: 'Completed', isPaid: true });
+    const onSubmit = vi.fn().mockResolvedValue(primary);
+    const onCreateRemainder = vi.fn().mockResolvedValue(doc04Payment({ id: 9902, amount: 65 }));
+    render(<PaymentModal isOpen onClose={vi.fn()} onSubmit={onSubmit} onCreateRemainder={onCreateRemainder} />);
+    doc04NewFields(); doc04Field('paidAmount', '35');
+    fireEvent.click(screen.getByLabelText('Перенести остаток'));
+    fireEvent.change(document.querySelector<HTMLInputElement>('#reschedule-date')!, { target: { value: '2026-05-20' } });
+    fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
+    await screen.findByText('Платёж и остаток сохранены.');
+    expect(onSubmit).toHaveBeenCalledTimes(1); expect(onCreateRemainder).toHaveBeenCalledTimes(1);
+    expect(onCreateRemainder.mock.calls[0][1]).toEqual({ operation: 'remainder', primaryPaymentId: primary.id });
+    expect(onCreateRemainder.mock.calls[0][0]).toMatchObject({ amount: 65, paidAmount: 0, date: '2026-05-20' });
+  });
+
+  it('does not adopt a stale primary ACK or start its remainder after a session A→B→A boundary', async () => {
+    localStorage.setItem('pp_token', `header.${btoa(JSON.stringify({ sub: '1' }))}.signature`);
+    localStorage.setItem('pp.auth-session-epoch.v1', 'original-A');
+    let finish!: (value: Payment) => void;
+    const onSubmit = vi.fn().mockReturnValue(new Promise<Payment>(resolve => { finish = resolve; }));
+    const onCreateRemainder = vi.fn(); const onClose = vi.fn();
+    try {
+      render(<PaymentModal isOpen onClose={onClose} onSubmit={onSubmit} onCreateRemainder={onCreateRemainder} />);
+      doc04NewFields(); doc04Field('paidAmount', '35'); fireEvent.click(screen.getByLabelText('Перенести остаток'));
+      fireEvent.change(document.querySelector<HTMLInputElement>('#reschedule-date')!, { target: { value: '2026-05-20' } });
+      fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      await act(async () => {
+        localStorage.setItem('pp.auth-session-epoch.v1', 'B'); window.dispatchEvent(new StorageEvent('storage'));
+        localStorage.setItem('pp.auth-session-epoch.v1', 'A-new'); window.dispatchEvent(new StorageEvent('storage'));
+        finish(doc04Payment({ amount: 35, paidAmount: 35, status: 'Completed', isPaid: true }));
+      });
+      expect(onClose).toHaveBeenCalled(); expect(onCreateRemainder).not.toHaveBeenCalled();
+      expect(document.querySelector<HTMLInputElement>('[name="amount"]')?.value).not.toBe('35,00');
+    } finally { localStorage.removeItem('pp_token'); localStorage.removeItem('pp.auth-session-epoch.v1'); }
+  });
+
+  it('keeps an exact unstarted remainder when primary ACK succeeded but browser receipt cleanup failed', async () => {
+    localStorage.setItem('pp_token', `header.${btoa(JSON.stringify({ sub: '1' }))}.signature`);
+    localStorage.setItem('pp.auth-session-epoch.v1', 'same-A'); bindPaymentCreateOwner(1, '/api');
+    vi.stubGlobal('navigator', { locks: { request: async (_name: string, _options: LockOptions,
+      callback: (lease: Lock | null) => Promise<unknown>) => callback({ name: 'owned', mode: 'exclusive' } as Lock) } });
+    const primary = doc04Payment({ amount: 35, paidAmount: 35, outstandingAmount: 0, status: 'Completed', isPaid: true });
+    const rest = doc04Payment({ id: 9902, amount: 65 });
+    const state: PaymentAttemptState = { attemptId: '11111111-1111-4111-8111-111111111111', state: 'Draft',
+      operation: 'primary', sellerCompanyId: null, sellerBranchId: null, primaryPaymentId: null,
+      createdAtUtc: '2026-10-26T00:00:00Z', expiresAtUtc: '2026-10-27T00:00:00Z', canonicalPaymentId: null,
+      identityVersion: 'payment-create-v1' };
+    const io: PaymentCreatePorts = {
+      register: vi.fn().mockResolvedValueOnce(state).mockResolvedValueOnce({ ...state,
+        attemptId: '22222222-2222-4222-8222-222222222222', operation: 'remainder', primaryPaymentId: primary.id }),
+      commit: vi.fn().mockResolvedValueOnce(primary).mockResolvedValueOnce(rest),
+      get: vi.fn().mockResolvedValue({ ...state, state: 'Committed', canonicalPaymentId: primary.id }),
+      cancel: vi.fn(), payment: vi.fn().mockResolvedValue(primary),
+    };
+    vi.mocked(apiService.inspectPaymentCreate).mockImplementation((entry, cancel) => inspectPaymentCreate(entry, io, cancel));
+    vi.mocked(apiService.openPaymentCreate).mockImplementation(entry => openCommittedPaymentCreate(entry, io));
+    vi.mocked(apiService.acknowledgePaymentCreate).mockImplementation(acknowledgePaymentCreate);
+    vi.mocked(apiService.fencePaymentCreateAdoption).mockImplementation(fencePaymentCreateAdoption);
+    let failCleanup = true; const originalRemove = Storage.prototype.removeItem;
+    const cleanup = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, key: string) {
+      if (key.startsWith('pp.payment-create.v1:') && failCleanup) { failCleanup = false; throw new Error('cleanup unavailable'); }
+      return originalRemove.call(this, key);
+    });
+    try {
+      const onSubmit = vi.fn((payload: PaymentPayload) => createPaymentGuarded(payload, undefined, io));
+      const onCreateRemainder = vi.fn((payload: PaymentPayload, context: PaymentCreateContext) => createPaymentGuarded(payload, context, io));
+      render(<PaymentModal isOpen onClose={vi.fn()} onSubmit={onSubmit} onCreateRemainder={onCreateRemainder} />);
+      doc04NewFields(); doc04Field('paidAmount', '35'); fireEvent.click(screen.getByLabelText('Перенести остаток'));
+      fireEvent.change(document.querySelector<HTMLInputElement>('#reschedule-date')!, { target: { value: '2026-05-20' } });
+      fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
+      await screen.findByRole('alert'); expect(io.commit).toHaveBeenCalledTimes(1);
+      expect(onCreateRemainder).not.toHaveBeenCalled();
+      fireEvent.click(await screen.findByRole('button', { name: 'Открыть платёж №9901' }));
+      await screen.findByText('Платёж подтверждён. Остаток ещё не создан; нажмите «Сохранить».');
+      fireEvent.click(screen.getByRole('button', { name: 'Повторить создание остатка' }));
+      await screen.findByText('Платёж и остаток сохранены.');
+      expect(onSubmit).toHaveBeenCalledTimes(1); expect(io.commit).toHaveBeenCalledTimes(2);
+      expect(onCreateRemainder).toHaveBeenCalledTimes(1);
+      expect(onCreateRemainder.mock.calls[0][0]).toEqual(expect.objectContaining({ amount: 65, paidAmount: 0, date: '2026-05-20' }));
+      expect(onCreateRemainder.mock.calls[0][1]).toEqual({ operation: 'remainder', primaryPaymentId: primary.id });
+    } finally {
+      cleanup.mockRestore(); bindPaymentCreateOwner(null, '/api'); localStorage.clear(); vi.unstubAllGlobals();
+    }
+  });
+
+  it('warns when the saved remainder receipt cannot be acknowledged, without creating another remainder', async () => {
+    const primary = doc04Payment({ amount: 35, paidAmount: 35, status: 'Completed', isPaid: true });
+    const f = doc04RealAttemptFixture(primary);
+    const originalRemove = Storage.prototype.removeItem;
+    let failCleanup = true;
+    const cleanup = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, key: string) {
+      if (key.includes(f.ids[1]) && failCleanup) { failCleanup = false; throw new Error('cleanup unavailable'); }
+      return originalRemove.call(this, key);
+    });
+    try {
+      render(<PaymentModal isOpen onClose={vi.fn()} onSubmit={f.onSubmit} onCreateRemainder={f.onCreateRemainder} />);
+      doc04NewFields(); doc04Field('paidAmount', '35'); fireEvent.click(screen.getByLabelText('Перенести остаток'));
+      fireEvent.change(document.querySelector<HTMLInputElement>('#reschedule-date')!, { target: { value: '2026-05-20' } });
+      fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
+      expect((await screen.findByRole('alert')).textContent).toContain('подтверждение остатка не завершено');
+      expect(f.io.commit).toHaveBeenCalledTimes(2);
+      expect(f.onCreateRemainder).toHaveBeenCalledTimes(1);
+      expect(pendingPaymentCreates()).toHaveLength(1);
+      fireEvent.click(await screen.findByRole('button', { name: 'Открыть платёж №9902' }));
+      await waitFor(() => expect(pendingPaymentCreates()).toHaveLength(0));
+      expect(f.onCreateRemainder).toHaveBeenCalledTimes(1);
+    } finally { cleanup.mockRestore(); f.cleanup(); }
+  });
+
+  it('warns about failed receipt cleanup after saving a payment without a remainder', async () => {
+    const f = doc04RealAttemptFixture();
+    const originalRemove = Storage.prototype.removeItem;
+    let failCleanup = true;
+    const cleanup = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, key: string) {
+      if (key.startsWith('pp.payment-create.v1:') && failCleanup) { failCleanup = false; throw new Error('cleanup unavailable'); }
+      return originalRemove.call(this, key);
+    });
+    try {
+      render(<PaymentModal isOpen onClose={vi.fn()} onSubmit={f.onSubmit} />);
+      doc04NewFields();
+      fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
+      expect((await screen.findByRole('alert')).textContent).toContain('Платёж сохранён, но подтверждение не завершено');
+      expect(f.io.commit).toHaveBeenCalledTimes(1);
+      expect(pendingPaymentCreates()).toHaveLength(1);
+      expect(await screen.findByRole('button', { name: 'Открыть платёж №9901' })).toBeTruthy();
+    } finally { cleanup.mockRestore(); f.cleanup(); }
+  });
+
+  it('continues normal primary to remainder with the real helper after each own receipt adoption', async () => {
+    const primary = doc04Payment({ amount: 35, paidAmount: 35, status: 'Completed', isPaid: true });
+    const f = doc04RealAttemptFixture(primary);
+    try {
+      render(<PaymentModal isOpen onClose={vi.fn()} onSubmit={f.onSubmit} onCreateRemainder={f.onCreateRemainder} />);
+      doc04NewFields(); doc04Field('paidAmount', '35'); fireEvent.click(screen.getByLabelText('Перенести остаток'));
+      fireEvent.change(document.querySelector<HTMLInputElement>('#reschedule-date')!, { target: { value: '2026-05-20' } });
+      fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
+      await screen.findByText('Платёж и остаток сохранены.');
+      expect(f.io.register).toHaveBeenCalledTimes(2); expect(f.io.commit).toHaveBeenCalledTimes(2);
+      expect(f.onCreateRemainder.mock.calls[0][1]).toEqual({ operation: 'remainder', primaryPaymentId: primary.id });
+      expect(f.io.register).toHaveBeenNthCalledWith(2, expect.objectContaining({ operation: 'remainder', primaryPaymentId: primary.id }), expect.anything(), expect.any(AbortSignal));
+      expect(pendingPaymentCreates()).toEqual([]); expect(screen.queryByRole('alert')).toBeNull();
+    } finally { f.cleanup(); }
+  });
+
+  it('retains a real committed primary receipt after external close and blocks a new mount from replacing its UUID', async () => {
+    const f = doc04RealAttemptFixture(); let finish!: (saved: Payment) => void;
+    vi.mocked(f.io.commit).mockImplementationOnce(() => new Promise<Payment>(resolve => { finish = resolve; }));
+    const props = { onClose: vi.fn(), onSubmit: f.onSubmit };
+    try {
+      const { rerender } = render(<PaymentModal {...props} isOpen />); doc04NewFields();
+      fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
+      await waitFor(() => expect(f.io.commit).toHaveBeenCalledTimes(1));
+      rerender(<PaymentModal {...props} isOpen={false} />);
+      await act(async () => { finish(f.primary); });
+      await waitFor(() => expect(pendingPaymentCreates()[0]).toMatchObject({ phase: 'committed', canonicalPaymentId: f.primary.id }));
+      rerender(<PaymentModal {...props} isOpen />);
+      await screen.findByRole('button', { name: `Открыть платёж №${f.primary.id}` }); doc04NewFields();
+      fireEvent.click(screen.getByRole('button', { name: 'addPayment' })); await screen.findByRole('alert');
+      expect(f.io.register).toHaveBeenCalledTimes(1); expect(pendingPaymentCreates()[0].attemptId).toBe(f.ids[0]);
+    } finally { f.cleanup(); }
+  });
+
+  it('retains a real committed remainder receipt after close instead of silently starting another remainder UUID', async () => {
+    const primary = doc04Payment({ amount: 35, paidAmount: 35, status: 'Completed', isPaid: true });
+    const f = doc04RealAttemptFixture(primary); let finish!: (saved: Payment) => void;
+    vi.mocked(f.io.commit).mockResolvedValueOnce(primary).mockImplementationOnce(() => new Promise<Payment>(resolve => { finish = resolve; }));
+    const props = { onClose: vi.fn(), onSubmit: f.onSubmit, onCreateRemainder: f.onCreateRemainder };
+    try {
+      const { rerender } = render(<PaymentModal {...props} isOpen />); doc04NewFields(); doc04Field('paidAmount', '35');
+      fireEvent.click(screen.getByLabelText('Перенести остаток'));
+      fireEvent.change(document.querySelector<HTMLInputElement>('#reschedule-date')!, { target: { value: '2026-05-20' } });
+      fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
+      await waitFor(() => expect(f.io.commit).toHaveBeenCalledTimes(2)); rerender(<PaymentModal {...props} isOpen={false} />);
+      await act(async () => { finish(f.rest); });
+      await waitFor(() => expect(pendingPaymentCreates()[0]).toMatchObject({ phase: 'committed', canonicalPaymentId: f.rest.id, primaryPaymentId: primary.id }));
+      rerender(<PaymentModal {...props} isOpen />); await screen.findByRole('button', { name: `Открыть платёж №${f.rest.id}` });
+      expect(f.io.register).toHaveBeenCalledTimes(2);
+      await expect(createPaymentGuarded({ ...primary }, { operation: 'remainder', primaryPaymentId: primary.id }, f.io)).rejects.toThrow('Результат создания');
+      expect(f.io.register).toHaveBeenCalledTimes(2);
+    } finally { f.cleanup(); }
+  });
+
+  it('explicit canonical open fences a real pending primary and leaves its exact remainder for a separate Save', async () => {
+    const primary = doc04Payment({ amount: 35, paidAmount: 35, status: 'Completed', isPaid: true });
+    const f = doc04RealAttemptFixture(primary); let late!: (saved: Payment) => void;
+    vi.mocked(f.io.commit).mockImplementationOnce(() => new Promise<Payment>(resolve => { late = resolve; }));
+    try {
+      render(<PaymentModal isOpen onClose={vi.fn()} onSubmit={f.onSubmit} onCreateRemainder={f.onCreateRemainder} />);
+      doc04NewFields(); doc04Field('paidAmount', '35'); fireEvent.click(screen.getByLabelText('Перенести остаток'));
+      fireEvent.change(document.querySelector<HTMLInputElement>('#reschedule-date')!, { target: { value: '2026-05-20' } });
+      fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
+      await waitFor(() => expect(f.io.commit).toHaveBeenCalledTimes(1));
+      fireEvent.click(screen.getByRole('button', { name: 'Проверить сохранение' }));
+      fireEvent.click(await screen.findByRole('button', { name: `Открыть платёж №${primary.id}` }));
+      await screen.findByRole('button', { name: 'Повторить создание остатка' });
+      expect(f.onCreateRemainder).not.toHaveBeenCalled(); expect(screen.queryByRole('alert')).toBeNull();
+      await act(async () => { late(primary); });
+      expect(f.io.commit).toHaveBeenCalledTimes(1); expect(pendingPaymentCreates()).toEqual([]);
+      fireEvent.click(screen.getByRole('button', { name: 'Повторить создание остатка' }));
+      await screen.findByText('Платёж и остаток сохранены.');
+      expect(f.onCreateRemainder).toHaveBeenCalledTimes(1); expect(f.io.commit).toHaveBeenCalledTimes(2);
+      expect(f.onCreateRemainder.mock.calls[0][1]).toEqual({ operation: 'remainder', primaryPaymentId: primary.id });
+    } finally { f.cleanup(); }
+  });
+
 });

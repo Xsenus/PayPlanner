@@ -1,3 +1,4 @@
+import { PaymentCreateAdoptedError } from '../../services/paymentCreateAttempts';
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
@@ -4798,46 +4799,38 @@ export function ClientDetail({
     accountDate: p.accountDate ?? null,
   });
 
-  const submitPayment = async (payload: PaymentUpsert) => {
-    const isEdit = "id" in payload;
-    if (isEdit && !clientPermissions.canEdit) {
-      showPermissionWarning(
-        t("permissionNoEditPayment") ??
-          "Недостаточно прав для редактирования платежей.",
-      );
-      return;
-    }
-    if (!isEdit && !clientPermissions.canCreate) {
-      showPermissionWarning(
-        t("permissionNoAddPayment") ??
-          "Недостаточно прав для добавления платежей.",
-      );
-      return;
-    }
+  const refreshAfterPaymentSave = async () => {
     try {
-      if (isEdit) {
-        const { id, ...rest } = payload;
-        if (editingPayment && isInvoiceManagedPayment(editingPayment)) {
-          await apiService.updateInvoiceManagedPayment(id, toBody(rest));
-        } else {
-          await apiService.updatePayment(id, toBody(rest));
-        }
-      } else {
-        await apiService.createPayment(toBody(payload));
-      }
       await refreshPayments();
       await refreshClientBalance();
       if (clientBalanceExpanded) await refreshClientBalanceTransactions();
       bumpStats();
-      toast.success(isEdit ? "Платёж обновлён." : "Платёж создан.", "Платежи");
+    } catch {
+      toast.error('Платёж сохранён, но связанные списки пока не удалось обновить.', 'Платежи');
+    }
+  };
+
+  const submitPayment = async (payload: PaymentUpsert): Promise<Payment> => {
+    const isEdit = 'id' in payload;
+    if (!(isEdit ? clientPermissions.canEdit : clientPermissions.canCreate)) {
+      throw new Error('Недостаточно прав для сохранения платежа.');
+    }
+    try {
+      let saved: Payment;
+      if ('id' in payload) {
+        const { id, ...rest } = payload;
+        saved = editingPayment && isInvoiceManagedPayment(editingPayment)
+          ? await apiService.updateInvoiceManagedPayment(id, toBody(rest))
+          : await apiService.updatePayment(id, toBody(rest));
+      } else {
+        saved = await apiService.createPayment(toBody(payload));
+      }
+      void refreshAfterPaymentSave();
+      toast.success(isEdit ? 'Платёж обновлён.' : 'Платёж создан.', 'Платежи');
+      return saved;
     } catch (error) {
-      toast.error(
-        extractDisplayErrorMessage(
-          error,
-          isEdit ? "Не удалось сохранить платёж" : "Не удалось создать платёж",
-        ),
-        "Платежи",
-      );
+      if (error instanceof PaymentCreateAdoptedError) throw error;
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось сохранить платёж.'), 'Платежи');
       throw error;
     }
   };
@@ -4845,27 +4838,15 @@ export function ClientDetail({
   const transferPaymentRemainder = async (
     payload: { id: number } & PaymentPayload,
     remainderDate: string,
-  ) => {
-    if (!clientPermissions.canEdit) {
-      showPermissionWarning(
-        t("permissionNoEditPayment") ??
-          "Недостаточно прав для редактирования платежей.",
-      );
-      return;
-    }
-
+  ): Promise<Payment> => {
+    if (!clientPermissions.canEdit) throw new Error('Недостаточно прав для редактирования платежа.');
     try {
-      await apiService.transferPaymentRemainder(payload.id, toBody(payload), remainderDate);
-      await refreshPayments();
-      await refreshClientBalance();
-      if (clientBalanceExpanded) await refreshClientBalanceTransactions();
-      bumpStats();
-      toast.success("Остаток платежа перенесён.", "Платежи");
+      const saved = await apiService.transferPaymentRemainder(payload.id, toBody(payload), remainderDate);
+      void refreshAfterPaymentSave();
+      toast.success('Остаток платежа перенесён.', 'Платежи');
+      return saved.payment;
     } catch (error) {
-      toast.error(
-        extractDisplayErrorMessage(error, "Не удалось перенести остаток платежа"),
-        "Платежи",
-      );
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось перенести остаток платежа'), 'Платежи');
       throw error;
     }
   };
@@ -4924,19 +4905,13 @@ export function ClientDetail({
     }
   };
 
-  const applyClientBalanceToPayment = async (amount: number) => {
-    if (!editingPayment?.id || !clientId) return;
-
-    const result = await apiService.applyClientBalance(clientId, {
-      paymentId: editingPayment.id,
-      amount,
-    });
-    const freshPayment = await apiService.getPayment(editingPayment.id);
-    setEditingPayment(freshPayment);
-    await refreshPayments();
-    await refreshClientBalance();
-    if (clientBalanceExpanded) await refreshClientBalanceTransactions();
-    bumpStats();
+  const applyClientBalanceToPayment = async (amount: number, currentPayment?: Payment) => {
+    const target = currentPayment ?? editingPayment;
+    if (!target?.id || !clientId || !clientPermissions.canEdit) {
+      throw new Error('Недостаточно прав или не выбран сохранённый платёж.');
+    }
+    const result = await apiService.applyClientBalance(clientId, { paymentId: target.id, amount });
+    void refreshAfterPaymentSave();
     return result;
   };
 
@@ -11191,6 +11166,8 @@ export function ClientDetail({
           onClose={closePayModal}
           payment={editingPayment ?? undefined}
           onSubmit={submitPayment}
+          canCreatePayment={clientPermissions.canCreate}
+          canEditPayment={clientPermissions.canEdit}
           onTransferRemainder={transferPaymentRemainder}
           onRollbackRemainderTransfer={rollbackPaymentRemainderTransfer}
           onAdjustRemainderTransfer={adjustPaymentRemainderTransfer}
@@ -11204,14 +11181,14 @@ export function ClientDetail({
             if (clientBalanceExpanded) await refreshClientBalanceTransactions();
             bumpStats();
           }}
-          onCreateRemainder={async (payload) => {
+          onCreateRemainder={async (payload, context) => {
             try {
-              await apiService.createPayment(toBody(payload));
-              await refreshPayments();
-              await refreshClientBalance();
-              if (clientBalanceExpanded) await refreshClientBalanceTransactions();
-              bumpStats();
+              if (!clientPermissions.canCreate) throw new Error('Недостаточно прав для создания остатка.');
+              const created = await apiService.createPayment(toBody(payload), context);
+              void refreshAfterPaymentSave();
+              return created;
             } catch (error) {
+              if (error instanceof PaymentCreateAdoptedError) throw error;
               toast.error(
                 extractDisplayErrorMessage(
                   error,

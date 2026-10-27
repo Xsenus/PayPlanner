@@ -1325,7 +1325,7 @@ function AppContent() {
 
       case 'calculator':
         return permissions.calculator.canView
-          ? <Calculator />
+          ? <Calculator onOpenPayment={permissions.payments.canView ? (paymentId, paymentType) => { void openPaymentPage(paymentId, paymentType); } : undefined} />
           : renderNoAccess('Калькулятор недоступен для вашей роли.');
 
       case 'legalEntities':

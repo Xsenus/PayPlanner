@@ -7,7 +7,8 @@ const mocks = vi.hoisted(() => ({
   revokeSessions: vi.fn(),
 }));
 
-vi.mock('../services/authService', () => ({
+vi.mock('../services/authService', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../services/authService')>(),
   authService: {
     isAuthenticated: () => false,
     revokeSessions: mocks.revokeSessions,

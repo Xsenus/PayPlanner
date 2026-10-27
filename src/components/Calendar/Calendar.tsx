@@ -1,3 +1,4 @@
+import { PaymentCreateAdoptedError } from '../../services/paymentCreateAttempts';
 import { SystemSelect } from '../ui/SystemSelect';
 import { lazy, Suspense, useMemo, useState, useDeferredValue, useEffect, useRef } from 'react';
 import { CalendarDays, ChevronLeft, ChevronRight, Plus, Search, SlidersHorizontal, Table, X } from 'lucide-react';
@@ -359,19 +360,30 @@ export function Calendar({ onOpenClient, onOpenUser }: CalendarProps) {
     bumpStats();
   };
 
-  const handleSubmit = async (payload: SubmitDTO) => {
-    const isUpdate = 'id' in payload;
-
+  const refreshAfterPaymentSave = async (successMessage: string) => {
     try {
-      if (isUpdate && editingPayment && isInvoiceManagedPayment(editingPayment)) {
-        await apiService.updateInvoiceManagedPayment(payload.id, payload);
-      } else if (isUpdate) await updatePayment(payload);
-      else await createPayment(payload);
-
       await refreshPayments();
       bumpStats();
-      toast.success(isUpdate ? 'Платёж обновлён.' : 'Платёж создан.', 'Платежи');
+      toast.success(successMessage, 'Платежи');
+    } catch {
+      toast.error('Платёж сохранён, но не удалось обновить список.', 'Платежи');
+    }
+  };
+
+  const handleSubmit = async (payload: SubmitDTO): Promise<Payment> => {
+    const isUpdate = 'id' in payload;
+    if (!(isUpdate ? calendarPermissions.canEdit : calendarPermissions.canCreate)) {
+      throw new Error('Недостаточно прав для сохранения платежа.');
+    }
+
+    let savedPayment: Payment;
+    try {
+      if (isUpdate && editingPayment && isInvoiceManagedPayment(editingPayment)) {
+        savedPayment = await apiService.updateInvoiceManagedPayment(payload.id, payload);
+      } else if (isUpdate) savedPayment = await updatePayment(payload);
+      else savedPayment = await createPayment(payload);
     } catch (error) {
+      if (error instanceof PaymentCreateAdoptedError) throw error;
       toast.error(
         extractDisplayErrorMessage(
           error,
@@ -381,14 +393,19 @@ export function Calendar({ onOpenClient, onOpenUser }: CalendarProps) {
       );
       throw error;
     }
+
+    void refreshAfterPaymentSave(isUpdate ? 'Платёж обновлён.' : 'Платёж создан.');
+    return savedPayment;
   };
 
-  const handleTransferRemainder = async (payload: SubmitDTO & { id: number }, remainderDate: string) => {
+  const handleTransferRemainder = async (payload: SubmitDTO & { id: number }, remainderDate: string): Promise<Payment> => {
+    if (!calendarPermissions.canEdit) {
+      throw new Error('Недостаточно прав для сохранения платежа.');
+    }
+    let savedPayment: Payment;
     try {
-      await apiService.transferPaymentRemainder(payload.id, payload, remainderDate);
-      await refreshPayments();
-      bumpStats();
-      toast.success('Остаток платежа перенесён.', 'Платежи');
+      const result = await apiService.transferPaymentRemainder(payload.id, payload, remainderDate);
+      savedPayment = result.payment;
     } catch (error) {
       toast.error(
         extractDisplayErrorMessage(error, 'Не удалось перенести остаток платежа.'),
@@ -396,6 +413,8 @@ export function Calendar({ onOpenClient, onOpenUser }: CalendarProps) {
       );
       throw error;
     }
+    void refreshAfterPaymentSave('Остаток платежа перенесён.');
+    return savedPayment;
   };
 
   const handleRollbackRemainderTransfer = async (paymentId: number) => {
@@ -953,6 +972,8 @@ export function Calendar({ onOpenClient, onOpenUser }: CalendarProps) {
           onClose={handleCloseModal}
           type={modalType}
           onSubmit={handleSubmit}
+          canCreatePayment={calendarPermissions.canCreate}
+          canEditPayment={calendarPermissions.canEdit}
           onCreateRemainder={createPayment}
           onTransferRemainder={handleTransferRemainder}
           onRollbackRemainderTransfer={handleRollbackRemainderTransfer}

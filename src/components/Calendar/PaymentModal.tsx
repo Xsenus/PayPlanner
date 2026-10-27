@@ -1,7 +1,7 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Trash2, Info, History, Search, UserRoundSearch, Ban, WalletCards, Printer, ChevronDown } from 'lucide-react';
 import { useClients } from '../../hooks/useClients';
@@ -9,6 +9,8 @@ import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { useDictionaries } from '../../hooks/useDictionaries';
 import { useTranslation } from '../../hooks/useTranslation';
 import { apiService } from '../../services/api';
+import { acknowledgeCreatedPayment, canContinueCreatedPayment, PaymentCreateAdoptedError, PAYMENT_CREATE_CHANGED, PaymentCreateRecoveryError, paymentCreateSessionVersion, type PaymentCreateContext } from '../../services/paymentCreateAttempts';
+import { PaymentCreateRecovery } from '../Payments/PaymentCreateRecovery';
 import type {
   Payment,
   PaymentStatus,
@@ -292,14 +294,16 @@ interface PaymentModalProps {
   linkedInvoice?: LinkedInvoiceContext | null;
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (payment: PaymentPayload | ({ id: number } & PaymentPayload)) => Promise<unknown>;
+  onSubmit: (payment: PaymentPayload | ({ id: number } & PaymentPayload)) => Promise<Payment>;
+  canCreatePayment?: boolean;
+  canEditPayment?: boolean;
   payment?: Payment | null;
   onDelete?: (id: number) => Promise<void>;
-  onCreateRemainder?: (payment: PaymentPayload) => Promise<unknown>;
+  onCreateRemainder?: (payment: PaymentPayload, context: PaymentCreateContext) => Promise<Payment>;
   onTransferRemainder?: (
     payment: { id: number } & PaymentPayload,
     remainderDate: string,
-  ) => Promise<unknown>;
+  ) => Promise<Payment>;
   onRollbackRemainderTransfer?: (paymentId: number) => Promise<unknown>;
   onAdjustRemainderTransfer?: (
     paymentId: number,
@@ -307,7 +311,7 @@ interface PaymentModalProps {
     remainderDate: string,
   ) => Promise<unknown>;
   availableClientBalance?: number;
-  onApplyClientBalance?: (amount: number) => Promise<ApplyClientBalanceResult | void>;
+  onApplyClientBalance?: (amount: number, currentPayment?: Payment) => Promise<ApplyClientBalanceResult>;
   onBalanceApplied?: (paymentId: number) => Promise<unknown> | unknown;
   canViewLinkedInvoices?: boolean;
   canCreateLinkedInvoices?: boolean;
@@ -317,7 +321,9 @@ export function PaymentModal({
   isOpen,
   onClose,
   onSubmit,
-  payment,
+  payment: initialPayment,
+  canCreatePayment = true,
+  canEditPayment = true,
   onDelete,
   onCreateRemainder,
   onTransferRemainder,
@@ -338,6 +344,22 @@ export function PaymentModal({
   canCreateLinkedInvoices = true,
 }: PaymentModalProps) {
   const formRef = useRef<HTMLFormElement>(null);
+  const [confirmedPayment, setConfirmedPayment] = useState<Payment | null>(null);
+  const confirmedPaymentId = confirmedPayment?.id;
+  const initialPaymentIdRef = useRef(initialPayment?.id);
+  const payment = confirmedPayment && initialPaymentIdRef.current === initialPayment?.id
+    && (!initialPayment || confirmedPayment.id === initialPayment.id)
+    ? confirmedPayment : initialPayment;
+  const recoveryContinuationRef = useRef<{ attemptId: string; accept: (saved: Payment) => Promise<boolean> } | null>(null);
+  const ownerVersionRef = useRef(paymentCreateSessionVersion());
+  const savingRef = useRef(false);
+  const scopeRef = useRef(0);
+  const permissionRevisionRef = useRef(0);
+  const pendingRemainderRef = useRef<{ payment: Payment; payload: PaymentPayload } | null>(null);
+  const [remainderPending, setRemainderPending] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
+  const canSavePayment = remainderPending ? canCreatePayment : payment ? canEditPayment : canCreatePayment;
   const autoCashOrderDraftRef = useRef<{ number: string; date: string; type: CashOrderType } | null>(null);
 
   const { clients, loading: clientsLoading } = useClients();
@@ -345,6 +367,48 @@ export function PaymentModal({
   const { dealTypes, incomeTypes, paymentSources, services = [] } = useDictionaries();
   const { t } = useTranslation();
   const { confirm } = useDialog();
+  const handleClose = useCallback(async () => {
+    if (savingRef.current) return;
+    if (pendingRemainderRef.current && !await confirm({
+      title: 'Остаток ещё не создан',
+      description: 'Сам платёж сохранён. Закрыть карточку без завершения создания остатка?',
+      confirmLabel: 'Закрыть карточку', cancelLabel: 'Продолжить работу', variant: 'danger',
+    })) return;
+    onClose();
+  }, [confirm, onClose]);
+  useEffect(() => {
+    scopeRef.current += 1;
+    savingRef.current = false;
+    setLoading(false);
+    if (!isOpen) {
+      recoveryContinuationRef.current = null;
+      setConfirmedPayment(null);
+      pendingRemainderRef.current = null;
+      setRemainderPending(false);
+      setSaveError(null);
+      setSaveNotice(null);
+    }
+    return () => { scopeRef.current += 1; };
+  }, [isOpen]);
+  useEffect(() => {
+    // A permission change cancels a pending confirmation, but cannot cancel a write already sent.
+    permissionRevisionRef.current += 1;
+  }, [canCreatePayment, canEditPayment]);
+  useEffect(() => {
+    const changed = initialPaymentIdRef.current !== initialPayment?.id;
+    initialPaymentIdRef.current = initialPayment?.id;
+    if (!changed || (confirmedPaymentId !== undefined && initialPayment?.id === confirmedPaymentId)) return;
+    scopeRef.current += 1;
+    recoveryContinuationRef.current = null;
+    setConfirmedPayment(null);
+    pendingRemainderRef.current = null;
+    setRemainderPending(false);
+    setSaveError(null);
+    setSaveNotice(null);
+    savingRef.current = false;
+    setLoading(false);
+    prevOpenRef.current = false;
+  }, [confirmedPaymentId, initialPayment?.id]);
   const toast = useToast();
   const { user, isAdmin } = useAuth();
   const paymentPermissions = useRolePermissions(user?.role?.id).payments;
@@ -358,6 +422,30 @@ export function PaymentModal({
 
   const [loading, setLoading] = useState(false);
   const [paymentPrinting, setPaymentPrinting] = useState(false);
+  useEffect(() => {
+    const ownerChanged = () => {
+      const next = paymentCreateSessionVersion();
+      if (ownerVersionRef.current === next) return;
+      ownerVersionRef.current = next;
+      scopeRef.current += 1;
+      savingRef.current = false;
+      recoveryContinuationRef.current = null;
+      pendingRemainderRef.current = null;
+      setConfirmedPayment(null);
+      setRemainderPending(false);
+      setLoading(false);
+      setSaveError(null);
+      setSaveNotice(null);
+      if (isOpen) onClose();
+    };
+    window.addEventListener(PAYMENT_CREATE_CHANGED, ownerChanged);
+    window.addEventListener('storage', ownerChanged);
+    return () => {
+      window.removeEventListener(PAYMENT_CREATE_CHANGED, ownerChanged);
+      window.removeEventListener('storage', ownerChanged);
+    };
+  }, [isOpen, onClose]);
+
   const [printMenuOpen, setPrintMenuOpen] = useState(false);
   const [balanceApplyLoading, setBalanceApplyLoading] = useState(false);
   const [balanceApplyAmount, setBalanceApplyAmount] = useState('');
@@ -847,12 +935,86 @@ export function PaymentModal({
   const paymentRef = useRef<Payment | null>(null);
 
   useEffect(() => {
-    if (paymentRef.current?.id !== payment?.id) {
-      paymentRef.current = payment ?? null;
-    }
+    paymentRef.current = payment ?? null;
   }, [payment]);
 
   const formatMoneyString = (value: number | null | undefined) => formatMoneyDisplayValue(value);
+
+  const requireSavedPayment = (saved: Payment) => {
+    if (!saved || !Number.isSafeInteger(saved.id) || saved.id <= 0) {
+      throw new Error('Сохранение не подтверждено сервером. Карточка остаётся открытой.');
+    }
+    return saved;
+  };
+  const acceptSavedPayment = (saved: Payment) => {
+    requireSavedPayment(saved);
+    paymentRef.current = saved;
+    setConfirmedPayment(saved);
+    setAppliedClientBalanceAmount(getAppliedClientBalanceAmount(saved.systemNotes));
+    setFormData({
+      date: toDateInputValue(saved.date) || defaultDate,
+      plannedDate: toDateInputValue(saved.plannedDate) || toDateInputValue(saved.date) || defaultDate,
+      amount: formatMoneyString(saved.amount), paidAmount: formatMoneyString(saved.paidAmount ?? 0),
+      status: saved.status, description: saved.description, isPaid: saved.isPaid,
+      paidDate: toDateInputValue(saved.paidDate) || '', lastPaymentDate: toDateInputValue(saved.lastPaymentDate) || '',
+      notes: saved.notes ?? '', clientId: saved.clientId?.toString() || '', legalEntityId: saved.legalEntityId?.toString() || '',
+      expenseClientId: saved.expenseClientId?.toString() || '', expenseLegalEntityId: saved.expenseLegalEntityId?.toString() || '',
+      clientCaseId: saved.clientCaseId?.toString() || '', dealTypeId: saved.dealTypeId?.toString() || '',
+      incomeTypeId: saved.incomeTypeId?.toString() || '', serviceId: saved.serviceId?.toString() || '',
+      paymentSourceId: saved.paymentSourceId?.toString() || '', paymentStatusId: saved.paymentStatusId?.toString() || '',
+      invoiceId: saved.invoiceId?.toString() || '', contractId: saved.contractId?.toString() || '',
+      type: saved.type as PaymentKind, paymentOrderNumber: saved.paymentOrderNumber ?? '',
+      paymentDocumentDate: toDateInputValue(saved.paymentDocumentDate) || '', account: saved.account ?? '',
+      accountDate: toDateInputValue(saved.accountDate) || '', systemNotes: saved.systemNotes ?? '', rescheduleCount: saved.rescheduleCount ?? 0,
+    });
+    setRescheduleRemainder(false);
+    setOverpaymentHandling('');
+    setOverpaymentTargetPaymentId(null);
+    setOverpaymentComment('');
+    autoCashOrderDraftRef.current = null;
+  };
+  const completePendingRemainder = async (scope: number) => {
+    const pending = pendingRemainderRef.current;
+    if (!pending || !onCreateRemainder) throw new Error('Не удалось восстановить данные остатка.');
+    const actorVersion = paymentCreateSessionVersion();
+    let created: Payment;
+    try {
+      created = requireSavedPayment(await onCreateRemainder(pending.payload, {
+        operation: 'remainder', primaryPaymentId: pending.payment.id,
+      }));
+    } catch (error) {
+      if (error instanceof PaymentCreateAdoptedError) {
+        if (scope === scopeRef.current && actorVersion === paymentCreateSessionVersion()) {
+          pendingRemainderRef.current = null; setRemainderPending(false); setSaveNotice('Сохранённый остаток открыт.');
+        }
+        return;
+      }
+      if (error instanceof PaymentCreateRecoveryError && error.startedHere
+        && scope === scopeRef.current && actorVersion === paymentCreateSessionVersion()) {
+        recoveryContinuationRef.current = { attemptId: error.attempt.attemptId, accept: async (saved) => {
+          if (scope !== scopeRef.current || actorVersion !== paymentCreateSessionVersion()) return false;
+          if (saved.id === pending.payment.id) throw new Error('Сервер вернул исходный платёж вместо остатка.');
+          pendingRemainderRef.current = null;
+          setRemainderPending(false);
+          setSaveNotice('Платёж и остаток сохранены.');
+          return true;
+        } };
+      }
+      throw error;
+    }
+    if (scope !== scopeRef.current || actorVersion !== paymentCreateSessionVersion()) return;
+    if (created.id === pending.payment.id) throw new Error('Создание отдельного остатка не подтверждено сервером.');
+    if (!canContinueCreatedPayment(created)) {
+      pendingRemainderRef.current = null; setRemainderPending(false); setSaveNotice('Сохранённый остаток подтверждён.'); return;
+    }
+    const receiptAcknowledged = await acknowledgeCreatedPayment(created);
+    if (scope !== scopeRef.current || actorVersion !== paymentCreateSessionVersion()) return;
+    pendingRemainderRef.current = null;
+    setRemainderPending(false);
+    if (!receiptAcknowledged) setSaveError('Платёж и остаток сохранены, но подтверждение остатка не завершено. Проверьте результат в разделе восстановления.');
+    else setSaveNotice('Платёж и остаток сохранены.');
+  };
+
 
   useEffect(() => {
     if (!isOpen) {
@@ -1010,7 +1172,7 @@ export function PaymentModal({
   // defaultDate is synchronized by the next effect while the modal stays open;
   // adding it here would reset user-entered fields on date changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defaultClientCaseId, defaultClientId, defaultExpenseClientId, defaultExpenseLegalEntityId, defaultLegalEntityId, isOpen, linkedInvoice, type]);
+  }, [defaultClientCaseId, defaultClientId, defaultExpenseClientId, defaultExpenseLegalEntityId, defaultLegalEntityId, isOpen, linkedInvoice, payment?.id, type]);
 
   useEffect(() => {
     if (!isOpen || paymentRef.current) {
@@ -1238,7 +1400,7 @@ export function PaymentModal({
           setInvoicePickerOpen(false);
           return;
         }
-        onClose();
+        void handleClose();
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'enter') {
         formRef.current?.requestSubmit();
@@ -1246,7 +1408,7 @@ export function PaymentModal({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [clientPickerOpen, invoicePickerOpen, isOpen, onClose]);
+  }, [clientPickerOpen, handleClose, invoicePickerOpen, isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -1548,7 +1710,20 @@ export function PaymentModal({
       return;
     }
 
-    if (loading) return;
+    if (loading || savingRef.current || !canSavePayment) return;
+    setSaveError(null);
+    setSaveNotice(null);
+    const scope = scopeRef.current;
+    const actorVersion = paymentCreateSessionVersion();
+    const permissionRevision = permissionRevisionRef.current;
+    if (pendingRemainderRef.current) {
+      savingRef.current = true;
+      setLoading(true);
+      try { await completePendingRemainder(scope); }
+      catch (error) { if (scope === scopeRef.current && actorVersion === paymentCreateSessionVersion()) setSaveError(error instanceof Error ? error.message : 'Не удалось создать остаток.'); }
+      finally { if (scope === scopeRef.current && actorVersion === paymentCreateSessionVersion()) { savingRef.current = false; setLoading(false); } }
+      return;
+    }
 
     const amountNum = parseDecimal(formData.amount);
     if (!Number.isFinite(amountNum) || amountNum < 0) {
@@ -1617,22 +1792,28 @@ export function PaymentModal({
       Number.isFinite(remainder) &&
       Boolean(normalizedRescheduleDate);
 
-    if (!payment) {
-      const approved = await confirm({
-        title: 'Подтверждение добавления платежа',
-        description: 'Добавить новый платеж с текущими данными?',
-        confirmLabel: 'Добавить платеж',
-        cancelLabel: 'Отмена',
-        variant: 'primary',
-      });
-      if (!approved) {
-        return;
-      }
+    if (shouldCreateRemainder && !payment && !onCreateRemainder) {
+      setSaveError('Сначала сохраните платёж целиком без переноса остатка. Затем откройте перенос остатка в сохранённой карточке.');
+      return;
     }
-
-    setLoading(true);
-
+    savingRef.current = true;
     try {
+      if (!payment) {
+        const approved = await confirm({
+          title: 'Подтверждение добавления платежа',
+          description: 'Добавить новый платеж с текущими данными?',
+          confirmLabel: 'Добавить платеж',
+          cancelLabel: 'Отмена',
+          variant: 'primary',
+        });
+        if (!approved) {
+          return;
+        }
+      }
+
+      if ((scope !== scopeRef.current || actorVersion !== paymentCreateSessionVersion()) || permissionRevision !== permissionRevisionRef.current) return;
+      setLoading(true);
+
       const baseAmount = shouldCreateRemainder ? Number(paidForRemainder.toFixed(2)) : amountNum;
       const primaryStatus = shouldCreateRemainder ? 'Completed' : formData.status;
       const primaryPaidDate = shouldCreateRemainder
@@ -1746,47 +1927,79 @@ export function PaymentModal({
         paymentData.advanceReviewReason = 'Пользователь подтвердил авансовый платеж при сохранении';
       }
 
-      if (shouldCreateRemainder && payment && onTransferRemainder && normalizedRescheduleDate) {
-        await onTransferRemainder({ id: payment.id, ...paymentData }, normalizedRescheduleDate);
-      } else if (payment) {
-        await onSubmit({ id: payment.id, ...paymentData });
-      } else {
-        await onSubmit(paymentData);
+      if ((scope !== scopeRef.current || actorVersion !== paymentCreateSessionVersion()) || permissionRevision !== permissionRevisionRef.current) return;
+      const finishSaved = async (saved: Payment, createRemainder: boolean): Promise<boolean> => {
+        if (scope !== scopeRef.current || actorVersion !== paymentCreateSessionVersion()) return false;
+        if (!canContinueCreatedPayment(saved)) createRemainder = false;
+        if (payment && saved.id !== payment.id) throw new Error('Сервер вернул другой платёж. Карточка не изменена.');
+        acceptSavedPayment(saved);
+        const receiptAcknowledged = await acknowledgeCreatedPayment(saved);
+        if (!receiptAcknowledged) createRemainder = false;
+        if (scope !== scopeRef.current || actorVersion !== paymentCreateSessionVersion()) return false;
+
+        const shouldCreateRemainderViaFallback =
+          shouldCreateRemainder
+          && normalizedRescheduleDate
+          && onCreateRemainder
+          && (!payment || !onTransferRemainder);
+
+        if (shouldCreateRemainderViaFallback) {
+          const nextPayment: PaymentPayload = {
+            ...paymentData,
+            date: normalizedRescheduleDate,
+            plannedDate: normalizedRescheduleDate,
+            amount: remainder,
+            paidAmount: 0,
+            lastPaymentDate: undefined,
+            status: normalizedRescheduleDate < normalizedDate ? 'Overdue' : 'Pending',
+            isPaid: false,
+            paidDate: undefined,
+            systemNotes: [
+              `Остаток после частичной оплаты (${toRuDate(formData.date) || formData.date})`,
+              `Источник платежа${payment?.id ? ` #${payment.id}` : ''}: ${formatMoneyDisplayValue(amountNum)} • Оплачено ${formatMoneyDisplayValue(
+                paidForRemainder,
+              )} • Остаток ${formatMoneyDisplayValue(remainder)} → ${toRuDate(rescheduleDate) || rescheduleDate}`,
+            ].join('\n'),
+            rescheduleCount: (formData.rescheduleCount ?? 0) + 1,
+          };
+          pendingRemainderRef.current = { payment: saved, payload: nextPayment };
+          setRemainderPending(true);
+          if (!createRemainder) {
+            if (!receiptAcknowledged) setSaveError('Платёж сохранён, но подтверждение не завершено. Откройте сохранённый платёж в разделе восстановления перед созданием остатка.');
+            else setSaveNotice('Платёж сохранён. Для создания остатка нажмите «Сохранить» после проверки прав.');
+            return true;
+          }
+          if (permissionRevision !== permissionRevisionRef.current) {
+            setSaveError('Платёж сохранён. Права изменились; создание остатка ещё не начато.');
+            return true;
+          }
+          await completePendingRemainder(scope);
+        } else {
+          if (!receiptAcknowledged) setSaveError('Платёж сохранён, но подтверждение не завершено. Проверьте результат в разделе восстановления.');
+          else setSaveNotice('Платёж сохранён.');
+        }
+        return true;
+      };
+      let saved: Payment;
+      try {
+        saved = requireSavedPayment(
+          shouldCreateRemainder && payment && onTransferRemainder && normalizedRescheduleDate
+            ? await onTransferRemainder({ id: payment.id, ...paymentData }, normalizedRescheduleDate)
+            : await onSubmit(payment ? { id: payment.id, ...paymentData } : paymentData),
+        );
+      } catch (error) {
+        if (error instanceof PaymentCreateAdoptedError) { await finishSaved(error.payment, false); return; }
+        if (error instanceof PaymentCreateRecoveryError && error.startedHere
+          && scope === scopeRef.current && actorVersion === paymentCreateSessionVersion()) {
+          recoveryContinuationRef.current = { attemptId: error.attempt.attemptId, accept: (value) => finishSaved(value, false) };
+        }
+        throw error;
       }
-
-      const shouldCreateRemainderViaFallback =
-        shouldCreateRemainder
-        && normalizedRescheduleDate
-        && onCreateRemainder
-        && (!payment || !onTransferRemainder);
-
-      if (shouldCreateRemainderViaFallback) {
-        const nextPayment: PaymentPayload = {
-          ...paymentData,
-          date: normalizedRescheduleDate,
-          plannedDate: normalizedRescheduleDate,
-          amount: remainder,
-          paidAmount: 0,
-          lastPaymentDate: undefined,
-          status: normalizedRescheduleDate < normalizedDate ? 'Overdue' : 'Pending',
-          isPaid: false,
-          paidDate: undefined,
-          systemNotes: [
-            `Остаток после частичной оплаты (${toRuDate(formData.date) || formData.date})`,
-            `Источник платежа${payment?.id ? ` #${payment.id}` : ''}: ${formatMoneyDisplayValue(amountNum)} • Оплачено ${formatMoneyDisplayValue(
-              paidForRemainder,
-            )} • Остаток ${formatMoneyDisplayValue(remainder)} → ${toRuDate(rescheduleDate) || rescheduleDate}`,
-          ].join('\n'),
-          rescheduleCount: (formData.rescheduleCount ?? 0) + 1,
-        };
-        await onCreateRemainder(nextPayment);
-      }
-
-      onClose();
-    } catch {
-      return;
+      await finishSaved(saved, true);
+    } catch (error) {
+      if (scope === scopeRef.current && actorVersion === paymentCreateSessionVersion()) setSaveError(error instanceof Error ? error.message : 'Не удалось сохранить платёж.');
     } finally {
-      setLoading(false);
+      if (scope === scopeRef.current && actorVersion === paymentCreateSessionVersion()) { savingRef.current = false; setLoading(false); }
     }
   };
 
@@ -2184,9 +2397,9 @@ export function PaymentModal({
     && (onRollbackRemainderTransfer || onAdjustRemainderTransfer),
   );
   const isRepresentativeInvoicePayment = payment?.documentKind === 'Invoice' && Boolean(payment.invoiceId && payment.invoiceId > 0);
-  const canDelete = !!payment && !!onDelete && !isRepresentativeInvoicePayment && !isProtectedTransferredRemainder && !isProtectedRemainderSource;
-  const canCancelPayment = !!payment && !isProtectedTransferredRemainder && !isProtectedRemainderSource && payment.status !== 'Cancelled';
-  const canMovePayment = !!payment && !isProtectedTransferredRemainder && !isProtectedRemainderSource && payment.status !== 'Cancelled';
+  const canDelete = !remainderPending && !!payment && !!onDelete && !isRepresentativeInvoicePayment && !isProtectedTransferredRemainder && !isProtectedRemainderSource;
+  const canCancelPayment = !remainderPending && canEditPayment && !!payment && !isProtectedTransferredRemainder && !isProtectedRemainderSource && payment.status !== 'Cancelled';
+  const canMovePayment = !remainderPending && canEditPayment && !!payment && !isProtectedTransferredRemainder && !isProtectedRemainderSource && payment.status !== 'Cancelled';
   const canPrintPayment = !!payment;
   const paymentPrintTitle = resolvePaymentPrintTitle(
     formData.type,
@@ -2544,9 +2757,9 @@ export function PaymentModal({
         return;
       }
 
-      let result: ApplyClientBalanceResult | void;
+      let result: ApplyClientBalanceResult;
       if (onApplyClientBalance) {
-        result = await onApplyClientBalance(requestedAmount);
+        result = await onApplyClientBalance(requestedAmount, payment);
       } else {
         if (!clientId) {
           throw new Error('Клиент не выбран.');
@@ -2918,7 +3131,8 @@ export function PaymentModal({
             </button>
 
             <button
-              onClick={onClose}
+              onClick={() => void handleClose()}
+              disabled={loading}
               type="button"
               className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
               aria-label="Закрыть">
@@ -2929,6 +3143,39 @@ export function PaymentModal({
 
         <div className="flex-1 overflow-y-auto px-6 pb-6">
           <form id={formId} ref={formRef} onSubmit={handleSubmit} autoComplete="off" className="space-y-6 py-4">
+              <PaymentCreateRecovery
+                scopeVersion={() => scopeRef.current}
+                beforeOpen={async () => await confirm({
+                  title: 'Открыть сохранённый платёж?',
+                  description: 'Текущий черновик не будет сохранён. Будет открыта карточка подтверждённого платежа.',
+                  confirmLabel: 'Открыть платёж', cancelLabel: 'Остаться в черновике', variant: 'primary',
+                })}
+                onOpen={async (saved, attempt) => {
+                  const continuation = recoveryContinuationRef.current;
+                  if (continuation?.attemptId === attempt.attemptId) {
+                    if (!await continuation.accept(saved)) return false;
+                    recoveryContinuationRef.current = null;
+                  } else if (attempt.operation === 'primary' && pendingRemainderRef.current?.payment.id === saved.id) {
+                    // The primary ACK was already adopted; browser receipt cleanup alone blocked
+                    // the unstarted remainder. Opening that primary must retain its exact pending command.
+                    acceptSavedPayment(saved);
+                    setRemainderPending(true);
+                    setSaveNotice('Платёж подтверждён. Остаток ещё не создан; нажмите «Сохранить».');
+                  } else {
+                    recoveryContinuationRef.current = null;
+                    pendingRemainderRef.current = null;
+                    setRemainderPending(false);
+                    acceptSavedPayment(saved);
+                  }
+                  setSaveError(null);
+                  return true;
+                }}
+                onCancelled={(attempt) => {
+                  if (recoveryContinuationRef.current?.attemptId === attempt.attemptId) recoveryContinuationRef.current = null;
+                  setSaveError(null);
+                }}
+              />
+            <fieldset disabled={loading || !canSavePayment || remainderPending} className="contents">
             {showProcessHelp && (
               <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900 shadow-sm">
                 <div className="flex items-center gap-2 font-semibold">
@@ -3929,6 +4176,10 @@ export function PaymentModal({
               </div>
             )}
 
+            </fieldset>
+            {saveError ? <p role="alert" className="text-sm text-red-700">{saveError}</p> : null}
+            {remainderPending ? <p className="text-sm text-amber-800">Платёж уже сохранён. Осталось создать остаток; повторное сохранение не создаст платёж заново.</p> : null}
+            {saveNotice ? <p role="status" className="text-sm text-emerald-700">{saveNotice}</p> : null}
             <div className="border-t border-gray-200 py-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center">
@@ -4037,20 +4288,21 @@ export function PaymentModal({
                 <div className="flex w-full justify-end gap-3 sm:w-auto">
                   <button
                     type="button"
-                    onClick={onClose}
+                    onClick={() => void handleClose()}
+                    disabled={loading}
                     className="rounded-lg bg-gray-200 px-4 py-2 font-medium text-gray-800 transition-colors hover:bg-gray-300 sm:min-w-40">
                     {t('cancel')}
                   </button>
 
                   <button
                     type="submit"
-                    disabled={loading}
+                    disabled={loading || !canSavePayment}
                     className={`rounded-lg px-4 py-2 font-medium transition-colors sm:min-w-40 ${
                       formData.type === 'Income'
                         ? 'bg-emerald-600 text-white hover:bg-emerald-700'
                         : 'bg-red-600 text-white hover:bg-red-700'
                     } disabled:opacity-50`}>
-                    {loading
+                    {remainderPending ? 'Повторить создание остатка' : loading
                       ? payment
                         ? t('updating')
                         : t('adding')

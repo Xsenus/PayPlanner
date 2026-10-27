@@ -1,7 +1,9 @@
+import { acknowledgePaymentCreate, fencePaymentCreateAdoption, createPaymentGuarded, inspectPaymentCreate, openCommittedPaymentCreate, paymentCreateTokenMatches,
+  type PaymentCreateContext, type PaymentCreateOwner, type PaymentCreatePorts, type PendingPaymentCreate } from './paymentCreateAttempts';
 import { createClientRequestId } from '../utils/clientRequestId';
 import { API_BASE_URL } from './apiBaseUrl';
 import { apiFetch as fetch } from './apiTransport';
-import { authService } from './authService';
+import { authService, assertAuthSessionIdentity, captureAuthSessionIdentity, AuthSessionChangedError } from './authService';
 import { TaskFileUploadAcceptedError } from './taskFileUploadReceipt';
 import { beginCaseDocumentUpload, beginCaseDocumentGeneration, confirmCaseDocumentUpload, confirmPublishedCaseDocumentUploads,
   confirmRetiredCaseDocumentUpload, confirmCompletedCaseDocumentUpload, isCaseDocumentUploadActorCurrent,
@@ -67,7 +69,7 @@ export interface StorageCasePublicationPageDto {
   items: StorageCasePublicationOperationDto[];
   nextCursor: string | null;
 }
-class ApiHttpFailure extends Error {
+export class ApiHttpFailure extends Error {
   constructor(public readonly status: number, message: string) { super(message); }
 }
 const AUTH_SESSION_EXPIRED_MESSAGE = 'Сессия истекла. Войдите снова.';
@@ -78,6 +80,7 @@ type ApiRequestOptions = RequestInit & {
   expectedStatus?: number;
   caseGenerationKey?: string;
   caseUploadActorToken?: string | null;
+  paymentCreateActor?: PaymentCreateOwner;
   taskUploadReceipt?: { taskId: number; uploadKey: string; actorToken: string | null };
 };
 
@@ -2907,10 +2910,25 @@ export class ApiService {
     options: RequestInit,
     suppressAuthSessionExpired = false,
     caseUploadActorToken?: string | null,
+    paymentCreateActor?: PaymentCreateOwner,
   ): Promise<{ response: Response; sessionRefreshed: boolean }> {
-    let token = await authService.ensureFreshSession().catch(() => getAuthToken());
+    const session = captureAuthSessionIdentity();
+    let token = await authService.ensureFreshSession().catch((error) => {
+      assertAuthSessionIdentity(session);
+      if (error instanceof AuthSessionChangedError) throw error;
+      return getAuthToken();
+    });
+    assertAuthSessionIdentity(session);
 
+    const assertPaymentActor = (authToken: string | null) => {
+      if (paymentCreateActor && (paymentCreateActor.apiScope !== API_BASE_URL || !paymentCreateTokenMatches(paymentCreateActor, authToken)
+        || !paymentCreateTokenMatches(paymentCreateActor, getAuthToken())))
+        throw new ApiHttpFailure(403, 'Пользователь изменился. Проверьте сохранение в своей учётной записи.');
+    };
     const execute = (authToken: string | null) => {
+      if (options.signal?.aborted) throw new DOMException('Запрос отменён.', 'AbortError');
+      assertAuthSessionIdentity(session);
+      assertPaymentActor(authToken);
       if (caseUploadActorToken !== undefined) {
         if (options.signal?.aborted) throw new DOMException('Запрос отменён.', 'AbortError');
         if (!isCaseDocumentUploadActorCurrent(caseUploadActorToken, authToken)
@@ -2928,6 +2946,8 @@ export class ApiService {
     };
 
     let response = await execute(token);
+    assertAuthSessionIdentity(session);
+    assertPaymentActor(getAuthToken());
     if (caseUploadActorToken !== undefined && !isCaseDocumentUploadActorCurrent(caseUploadActorToken, getAuthToken()))
       throw new ApiHttpFailure(403, 'HTTP 403: сессия изменилась. Обновите состояние загрузок.');
     let sessionRefreshed = false;
@@ -2939,18 +2959,23 @@ export class ApiService {
           sessionRefreshed = true;
           response = await execute(token);
         }
-      } catch {
-        // The common error path below expires the local session only when refresh also failed.
+      } catch (error) {
+        assertAuthSessionIdentity(session);
+        if (error instanceof AuthSessionChangedError) throw error;
+        // A same-session transport failure follows the existing error path.
       }
     }
 
     if (caseUploadActorToken !== undefined && !isCaseDocumentUploadActorCurrent(caseUploadActorToken, getAuthToken()))
       throw new ApiHttpFailure(403, 'HTTP 403: сессия изменилась. Обновите состояние загрузок.');
+    assertAuthSessionIdentity(session);
+    assertPaymentActor(getAuthToken());
     return { response, sessionRefreshed };
   }
 
   private async request<T>(endpoint: string, options?: ApiRequestOptions): Promise<T> {
-    const { suppressAuthSessionExpired = false, expectedStatus, caseGenerationKey, caseUploadActorToken, taskUploadReceipt, ...fetchOptions } = options ?? {};
+    const session = captureAuthSessionIdentity();
+    const { suppressAuthSessionExpired = false, expectedStatus, caseGenerationKey, caseUploadActorToken, paymentCreateActor, taskUploadReceipt, ...fetchOptions } = options ?? {};
     const url = `${API_BASE_URL}${endpoint}`;
     const isFormData = typeof FormData !== 'undefined' && fetchOptions.body instanceof FormData;
     const headers: Record<string, string> = {
@@ -2961,8 +2986,9 @@ export class ApiService {
     const { response, sessionRefreshed } = await this.fetchWithSessionRefresh(url, {
       ...fetchOptions,
       headers,
-    }, suppressAuthSessionExpired, caseUploadActorToken);
+    }, suppressAuthSessionExpired, caseUploadActorToken, paymentCreateActor);
 
+    assertAuthSessionIdentity(session);
     if (!response.ok) {
       if (response.status === 503 && taskUploadReceipt
         && response.headers.get('content-type')?.includes('application/json')
@@ -2970,6 +2996,7 @@ export class ApiService {
         let receipt: unknown;
         try { receipt = await response.clone().json(); }
         catch { /* An unreadable error response is not an acknowledgement. */ }
+        assertAuthSessionIdentity(session);
         if (receipt && typeof receipt === 'object' && !Array.isArray(receipt)) {
           const value = receipt as Record<string, unknown>;
           if (value.code === 'task_file_copies_pending' && value.taskId === taskUploadReceipt.taskId
@@ -2985,6 +3012,7 @@ export class ApiService {
       }
 
       const text = await extractResponseErrorMessage(response);
+      assertAuthSessionIdentity(session);
       throw new ApiHttpFailure(response.status,
         `HTTP ${response.status} ${response.statusText} at ${url} ${text ? `- ${text}` : ''}`,
       );
@@ -3003,13 +3031,17 @@ export class ApiService {
     const contentType = response.headers.get('content-type') || '';
     if (!contentType.includes('application/json')) {
       const text = await response.text();
+      assertAuthSessionIdentity(session);
       return text as unknown as T;
     }
 
-    return (await response.json()) as T;
+    const result = (await response.json()) as T;
+    assertAuthSessionIdentity(session);
+    return result;
   }
 
   private async requestStickyNote<T>(endpoint: string, options?: RequestInit): Promise<T> {
+    const session = captureAuthSessionIdentity();
     const url = `${API_BASE_URL}${endpoint}`;
     const headers: Record<string, string> = {
       ...(options?.body ? { 'Content-Type': 'application/json' } : {}),
@@ -3021,13 +3053,16 @@ export class ApiService {
       headers,
     });
 
+    assertAuthSessionIdentity(session);
     if (response.status === 409) {
       const contentType = response.headers.get('content-type') || '';
       if (contentType.includes('application/json')) {
         try {
-          throw new StickyNoteConflictError(await response.json() as StickyNoteItem);
+          const conflict = await response.json() as StickyNoteItem;
+          assertAuthSessionIdentity(session);
+          throw new StickyNoteConflictError(conflict);
         } catch (error) {
-          if (error instanceof StickyNoteConflictError) {
+          if (error instanceof AuthSessionChangedError || error instanceof StickyNoteConflictError) {
             throw error;
           }
         }
@@ -3041,6 +3076,7 @@ export class ApiService {
       }
 
       const text = await extractResponseErrorMessage(response);
+      assertAuthSessionIdentity(session);
       throw new Error(
         `HTTP ${response.status} ${response.statusText} at ${url} ${text ? `- ${text}` : ''}`,
       );
@@ -3053,10 +3089,13 @@ export class ApiService {
     const contentType = response.headers.get('content-type') || '';
     if (!contentType.includes('application/json')) {
       const text = await response.text();
+      assertAuthSessionIdentity(session);
       return text as unknown as T;
     }
 
-    return await response.json() as T;
+    const result = await response.json() as T;
+    assertAuthSessionIdentity(session);
+    return result;
   }
 
   async getFeatureFlags() {
@@ -3339,19 +3378,24 @@ export class ApiService {
     const base = connectionId
       ? `/yandex-disk/connections/${encodeURIComponent(connectionId)}/download`
       : '/yandex-disk/download';
+    const session = captureAuthSessionIdentity();
     const url = `${API_BASE_URL}${base}?path=${encodeURIComponent(path)}`;
     const { response, sessionRefreshed } = await this.fetchWithSessionRefresh(url, {});
 
+    assertAuthSessionIdentity(session);
     if (!response.ok) {
       if (response.status === 401 && !sessionRefreshed) {
         notifyAuthSessionExpired();
       }
       const text = await extractResponseErrorMessage(response);
+      assertAuthSessionIdentity(session);
       throw new Error(`HTTP ${response.status} ${response.statusText} - ${text}`);
     }
 
+    const blob = await response.blob();
+    assertAuthSessionIdentity(session);
     return {
-      blob: await response.blob(),
+      blob,
       fileName: parseContentDispositionFileName(response.headers.get('content-disposition')) || path.split('/').pop() || 'yandex-disk-file',
     };
   }
@@ -3440,19 +3484,24 @@ export class ApiService {
   }
 
   async downloadS3StorageFile(id: string, path: string) {
+    const session = captureAuthSessionIdentity();
     const url = `${API_BASE_URL}/s3-storages/${encodeURIComponent(id)}/download?path=${encodeURIComponent(path)}`;
     const { response, sessionRefreshed } = await this.fetchWithSessionRefresh(url, {});
 
+    assertAuthSessionIdentity(session);
     if (!response.ok) {
       if (response.status === 401 && !sessionRefreshed) {
         notifyAuthSessionExpired();
       }
       const text = await extractResponseErrorMessage(response);
+      assertAuthSessionIdentity(session);
       throw new Error(`HTTP ${response.status} ${response.statusText} - ${text}`);
     }
 
+    const blob = await response.blob();
+    assertAuthSessionIdentity(session);
     return {
-      blob: await response.blob(),
+      blob,
       fileName: parseContentDispositionFileName(response.headers.get('content-disposition')) || path.split('/').pop() || 's3-file',
     };
   }
@@ -5646,8 +5695,40 @@ export class ApiService {
     return this.request<Payment>(`/payments/${id}`);
   }
 
-  async createPayment(payment: PaymentPayload) {
-    return this.request<Payment>('/payments', { method: 'POST', body: JSON.stringify(payment) });
+  private paymentCreatePorts(): PaymentCreatePorts {
+    return {
+      register: (body, actor, signal) => this.request('/payments/create-attempts', {
+        method: 'POST', body: JSON.stringify(body), expectedStatus: 201, paymentCreateActor: actor, signal,
+      }),
+      commit: (id, command, actor, signal) => this.request<Payment>(`/payments/create-attempts/${id}/commit`, {
+        method: 'POST', body: command, paymentCreateActor: actor, signal,
+      }),
+      get: (id, actor, signal) => this.request(`/payments/create-attempts/${id}`, { paymentCreateActor: actor, cache: 'no-store', signal }),
+      cancel: (id, actor, signal) => this.request(`/payments/create-attempts/${id}/cancel`, {
+        method: 'POST', paymentCreateActor: actor, signal,
+      }),
+      payment: (id, actor, signal) => this.request<Payment>(`/payments/${id}`, { paymentCreateActor: actor, cache: 'no-store', signal }),
+    };
+  }
+
+  async createPayment(payment: PaymentPayload, context?: PaymentCreateContext) {
+    return createPaymentGuarded(payment, context, this.paymentCreatePorts());
+  }
+
+  async inspectPaymentCreate(entry: PendingPaymentCreate, cancel = false) {
+    return inspectPaymentCreate(entry, this.paymentCreatePorts(), cancel);
+  }
+
+  fencePaymentCreateAdoption(entry: PendingPaymentCreate, saved: Payment) {
+    return fencePaymentCreateAdoption(entry, saved);
+  }
+
+  acknowledgePaymentCreate(entry: PendingPaymentCreate, saved: Payment) {
+    return acknowledgePaymentCreate(entry, saved);
+  }
+
+  async openPaymentCreate(entry: PendingPaymentCreate) {
+    return openCommittedPaymentCreate(entry, this.paymentCreatePorts());
   }
 
   async updatePayment(id: number, payment: PaymentPayload) {

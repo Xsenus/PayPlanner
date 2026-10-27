@@ -1,3 +1,4 @@
+import { PaymentCreateAdoptedError } from '../../services/paymentCreateAttempts';
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
@@ -2604,49 +2605,59 @@ export function LegalEntityModal({
     accountDate: payload.accountDate ?? null,
   });
 
-  const submitPayment = async (
-    payload: PaymentPayload | ({ id: number } & PaymentPayload),
-  ) => {
-    if (!canMutateRelated('payments', 'id' in payload ? 'canEdit' : 'canCreate')) return;
+  const refreshAfterPaymentSave = async () => {
     try {
-      if ("id" in payload) {
-        const { id, ...rest } = payload;
-        await apiService.updatePayment(id, normalizeLegalEntityPaymentPayload(rest));
-      } else {
-        await apiService.createPayment(normalizeLegalEntityPaymentPayload(payload));
-      }
       if (canViewPayments) await legalEntityPaymentsResult.refresh();
       if (canViewAccounts) await legalEntityInvoicesResult.refresh();
       if (canViewActs) await legalEntityActsResult.refresh();
       setCaseFinanceReloadToken((value) => value + 1);
-      closePaymentModal();
+    } catch {
+      toast.error('Платёж сохранён, но не удалось обновить связанные списки.', 'Платежи');
+    }
+  };
+
+  const submitPayment = async (
+    payload: PaymentPayload | ({ id: number } & PaymentPayload),
+  ): Promise<Payment> => {
+    if (!canMutateRelated('payments', 'id' in payload ? 'canEdit' : 'canCreate')) {
+      throw new Error('Недостаточно прав для сохранения платежа.');
+    }
+    let savedPayment: Payment;
+    try {
+      if ("id" in payload) {
+        const { id, ...rest } = payload;
+        savedPayment = await apiService.updatePayment(id, normalizeLegalEntityPaymentPayload(rest));
+      } else {
+        savedPayment = await apiService.createPayment(normalizeLegalEntityPaymentPayload(payload));
+      }
     } catch (error) {
+      if (error instanceof PaymentCreateAdoptedError) throw error;
       toast.error(
         extractErrorMessage(error, "Не удалось сохранить платёж"),
         "Платежи",
       );
       throw error;
     }
+    void refreshAfterPaymentSave();
+    return savedPayment;
   };
 
   const transferPaymentRemainder = async (
     payload: { id: number } & PaymentPayload,
     remainderDate: string,
-  ) => {
-    if (!canMutateRelated('payments', 'canEdit')) return;
+  ): Promise<Payment> => {
+    if (!canMutateRelated('payments', 'canEdit')) {
+      throw new Error('Недостаточно прав для сохранения платежа.');
+    }
+    let savedPayment: Payment;
     try {
       const { id, ...rest } = payload;
-      await apiService.transferPaymentRemainder(
+      const result = await apiService.transferPaymentRemainder(
         id,
         normalizeLegalEntityPaymentPayload(rest),
         remainderDate,
       );
-      if (canViewPayments) await legalEntityPaymentsResult.refresh();
-      if (canViewAccounts) await legalEntityInvoicesResult.refresh();
-      if (canViewActs) await legalEntityActsResult.refresh();
-      setCaseFinanceReloadToken((value) => value + 1);
-      closePaymentModal();
-      toast.success("Остаток платежа перенесён.", "Платежи");
+      savedPayment = result.payment;
     } catch (error) {
       toast.error(
         extractErrorMessage(error, "Не удалось перенести остаток платежа"),
@@ -2654,6 +2665,9 @@ export function LegalEntityModal({
       );
       throw error;
     }
+    void refreshAfterPaymentSave();
+    toast.success("Остаток платежа перенесён.", "Платежи");
+    return savedPayment;
   };
 
   const rollbackPaymentRemainderTransfer = async (paymentId: number) => {
@@ -5165,6 +5179,8 @@ export function LegalEntityModal({
           onClose={closePaymentModal}
           payment={selectedPayment ?? undefined}
           onSubmit={submitPayment}
+          canCreatePayment={canMutateRelated('payments', 'canCreate')}
+          canEditPayment={canMutateRelated('payments', 'canEdit')}
           onTransferRemainder={transferPaymentRemainder}
           onRollbackRemainderTransfer={rollbackPaymentRemainderTransfer}
           onAdjustRemainderTransfer={adjustPaymentRemainderTransfer}

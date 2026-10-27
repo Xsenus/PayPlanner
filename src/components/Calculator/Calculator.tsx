@@ -1,11 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Calculator as CalculatorIcon, Info, X } from 'lucide-react';
 import { useClients } from '../../hooks/useClients';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useToast } from '../../hooks/useToast';
-import type { InstallmentPlanInput, PaymentPayload } from '../../types';
+import type { InstallmentPlanInput, Payment, PaymentPayload } from '../../types';
 import { apiService } from '../../services/api';
+import { acknowledgeCreatedPayment, canContinueCreatedPayment, PaymentCreateAdoptedError, PAYMENT_CREATE_CHANGED, PaymentCreateRecoveryError, paymentCreateSessionVersion } from '../../services/paymentCreateAttempts';
+import { PaymentCreateRecovery } from '../Payments/PaymentCreateRecovery';
+import { useDialog } from '../../hooks/useDialog';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { consumeInstallmentDraft } from '../../utils/installmentBridge';
 import { InstallmentPlanner } from '../Accounts/InstallmentPlanner';
@@ -18,7 +21,7 @@ type DraftState = {
   invoiceNumber?: string;
 };
 
-export function Calculator() {
+export function Calculator({ onOpenPayment }: { onOpenPayment?: (id: number, type: Payment['type']) => void } = {}) {
   const { user } = useAuth();
   const permissions = useRolePermissions(user?.role?.id);
   const canViewClients = permissions.clients.canView;
@@ -36,7 +39,33 @@ export function Calculator() {
   const clientsOptions = useMemo(() => ({ enabled: canViewClients }), [canViewClients]);
   const { clients } = useClients(clientsOptions);
   const toast = useToast();
+  const { confirm } = useDialog();
+  const savingRef = useRef(false);
+  const liveRef = useRef(true);
+  const ownerVersionRef = useRef(paymentCreateSessionVersion());
+  const runRef = useRef<{ actorVersion: string; completed: number; blocked: boolean; attemptId?: string } | null>(null);
+  const [partialNotice, setPartialNotice] = useState<string | null>(null);
   const [draft, setDraft] = useState<DraftState | null>(null);
+  useEffect(() => {
+    liveRef.current = true;
+    const ownerChanged = () => {
+      const next = paymentCreateSessionVersion();
+      if (ownerVersionRef.current === next) return;
+      ownerVersionRef.current = next;
+      runRef.current = null;
+      savingRef.current = false;
+      setPartialNotice(null);
+      setDraft(null);
+    };
+    window.addEventListener(PAYMENT_CREATE_CHANGED, ownerChanged);
+    window.addEventListener('storage', ownerChanged);
+    return () => {
+      liveRef.current = false;
+      window.removeEventListener(PAYMENT_CREATE_CHANGED, ownerChanged);
+      window.removeEventListener('storage', ownerChanged);
+    };
+  }, []);
+
 
   useEffect(() => {
     setDraft(consumeInstallmentDraft());
@@ -57,53 +86,90 @@ export function Calculator() {
     invoiceNumber?: string | null;
     clientName?: string | null;
   }) => {
-    const today = new Date().toISOString().slice(0, 10);
-    const totalCount = plan.items.length;
+    if (!canSavePayments) throw new Error('Недостаточно прав для создания платежей.');
+    if (savingRef.current) throw new Error('Сохранение графика уже выполняется.');
+    const actorVersion = paymentCreateSessionVersion();
+    if (runRef.current?.actorVersion !== actorVersion) runRef.current = null;
+    if (runRef.current?.blocked) throw new Error('График сохранён частично. Проверьте созданные платежи перед новым графиком.');
+    const run = { actorVersion, completed: 0, blocked: false, attemptId: undefined as string | undefined };
+    runRef.current = run;
+    savingRef.current = true;
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const totalCount = plan.items.length;
 
-    for (const item of plan.items) {
-      const paymentDate = item.date;
-      const payload: PaymentPayload = {
-        date: paymentDate,
-        plannedDate: paymentDate,
-        amount: item.payment,
-        paidAmount: 0,
-        lastPaymentDate: undefined,
-        type: 'Income',
-        status: paymentDate < today ? 'Overdue' : 'Pending',
-        description: invoiceNumber
-          ? `Рассрочка по счету №${invoiceNumber} · платеж ${item.sequence}/${totalCount}`
-          : `Платеж по рассрочке ${item.sequence}/${totalCount}`,
-        isPaid: false,
-        paidDate: undefined,
-        notes: [
-          `Основной долг: ${formatCurrencySmart(item.principal, { alwaysCents: true }).full}`,
-          `Проценты: ${formatCurrencySmart(item.interest, { alwaysCents: true }).full}`,
-          `Остаток: ${formatCurrencySmart(item.balance, { alwaysCents: true }).full}`,
-        ].join('\n'),
-        systemNotes: '',
-        rescheduleCount: 0,
-        clientId,
-        legalEntityId,
-        clientCaseId,
-        dealTypeId: undefined,
-        incomeTypeId: undefined,
-        paymentSourceId: undefined,
-        paymentStatusId: undefined,
-        invoiceId: undefined,
-        account: undefined,
-        accountDate: undefined,
-        contractId: undefined,
-        documentKind: 'Payment',
-      };
+      for (const item of plan.items) {
+        const paymentDate = item.date;
+        const payload: PaymentPayload = {
+          date: paymentDate,
+          plannedDate: paymentDate,
+          amount: item.payment,
+          paidAmount: 0,
+          lastPaymentDate: undefined,
+          type: 'Income',
+          status: paymentDate < today ? 'Overdue' : 'Pending',
+          description: invoiceNumber
+            ? `Рассрочка по счету №${invoiceNumber} · платеж ${item.sequence}/${totalCount}`
+            : `Платеж по рассрочке ${item.sequence}/${totalCount}`,
+          isPaid: false,
+          paidDate: undefined,
+          notes: [
+            `Основной долг: ${formatCurrencySmart(item.principal, { alwaysCents: true }).full}`,
+            `Проценты: ${formatCurrencySmart(item.interest, { alwaysCents: true }).full}`,
+            `Остаток: ${formatCurrencySmart(item.balance, { alwaysCents: true }).full}`,
+          ].join('\n'),
+          systemNotes: '',
+          rescheduleCount: 0,
+          clientId,
+          legalEntityId,
+          clientCaseId,
+          dealTypeId: undefined,
+          incomeTypeId: undefined,
+          paymentSourceId: undefined,
+          paymentStatusId: undefined,
+          invoiceId: undefined,
+          account: undefined,
+          accountDate: undefined,
+          contractId: undefined,
+          documentKind: 'Payment',
+        };
 
-      await apiService.createPayment(payload);
-    }
+        const saved = await apiService.createPayment(payload);
+        if (!liveRef.current || actorVersion !== paymentCreateSessionVersion()) return;
+        if (!canContinueCreatedPayment(saved)) {
+          run.completed += 1; run.blocked = true;
+          setPartialNotice(`Подтверждено платежей: ${run.completed}. Автоматическое продолжение остановлено после открытия сохранённого платежа.`); return;
+        }
+        run.completed += 1;
+        const adopted = await acknowledgeCreatedPayment(saved);
+        if (!liveRef.current || actorVersion !== paymentCreateSessionVersion()) return;
+        if (!adopted) {
+          run.blocked = true; setPartialNotice(`Подтверждено платежей: ${run.completed}. Проверьте сохранение перед продолжением.`); return;
+        }
+      }
 
-    toast.success(
-      clientName
-        ? `График платежей сохранен для клиента «${clientName}».`
-        : 'График платежей сохранен.',
-    );
+      toast.success(
+        clientName
+          ? `График платежей сохранен для клиента «${clientName}».`
+          : 'График платежей сохранен.',
+      );
+      runRef.current = null;
+      setPartialNotice(null);
+    } catch (error) {
+      if (error instanceof PaymentCreateAdoptedError) {
+        if (liveRef.current && actorVersion === paymentCreateSessionVersion()) {
+          run.completed += 1; run.blocked = true;
+          setPartialNotice(`Подтверждено платежей: ${run.completed}. Сохранённый платёж открыт; график автоматически не продолжается.`);
+        }
+        return;
+      }
+      if (actorVersion === paymentCreateSessionVersion()) {
+        if (error instanceof PaymentCreateRecoveryError && error.startedHere) run.attemptId = error.attempt.attemptId;
+        run.blocked = run.completed > 0 || Boolean(run.attemptId);
+        if (run.blocked) setPartialNotice(`Подтверждено платежей: ${run.completed}. График остановлен; повтор всего графика может создать дубликаты.`);
+      }
+      throw error;
+    } finally { if (!runRef.current || runRef.current === run) savingRef.current = false; }
   };
 
   return (
@@ -153,6 +219,42 @@ export function Calculator() {
           </div>
         ) : null}
 
+        <PaymentCreateRecovery
+          scopeVersion={paymentCreateSessionVersion}
+          onOpen={(saved, attempt) => {
+            if (!onOpenPayment) throw new Error('Открытие платежа недоступно. Перейдите в раздел «Платежи» и проверьте сохранённый номер.');
+            const run = runRef.current;
+            if (run?.actorVersion === paymentCreateSessionVersion() && run.attemptId === attempt.attemptId) {
+              run.completed += 1;
+              run.attemptId = undefined;
+              run.blocked = true;
+              setPartialNotice(`Подтверждено платежей: ${run.completed}. Проверьте их перед новым графиком.`);
+            }
+            onOpenPayment(saved.id, saved.type);
+            return true;
+          }}
+          onCancelled={(attempt) => {
+            const run = runRef.current;
+            if (run?.actorVersion === paymentCreateSessionVersion() && run.attemptId === attempt.attemptId) {
+              run.attemptId = undefined;
+              run.blocked = run.completed > 0;
+              if (!run.blocked) setPartialNotice(null);
+            }
+          }}
+        />
+        {partialNotice && <div className="my-3 space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">
+          <p>{partialNotice}</p>
+          <button type="button" className="rounded border px-2 py-1" onClick={async () => {
+            const version = paymentCreateSessionVersion();
+            const approved = await confirm({ title: 'Начать другой график?',
+              description: 'Уже созданные платежи останутся. Повтор прежнего графика может добавить их заново. Сначала проверьте список платежей.',
+              confirmLabel: 'Начать другой график', cancelLabel: 'Вернуться к проверке', variant: 'danger' });
+            if (approved && version === paymentCreateSessionVersion() && !savingRef.current) {
+              runRef.current = null;
+              setPartialNotice(null);
+            }
+          }}>Начать другой график</button>
+        </div>}
         <InstallmentPlanner
           mode="calculator"
           clients={clients}
