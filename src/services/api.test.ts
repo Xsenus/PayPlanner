@@ -430,7 +430,8 @@ describe('apiService task journal files', () => {
       const error = await apiService.uploadTaskJournalFile(10, file).catch((cause: unknown) => cause);
       expect(error).toBeInstanceOf(Error);
       expect((error as Error).name).not.toBe('TaskFileUploadAcceptedError');
-      expect((error as Error).message).toContain(mode === 'serverError' ? 'HTTP 500' : 'HTTP 503');
+      expect((error as Error).message).toContain(mode === 'changedActor'
+        ? 'Сессия изменилась' : mode === 'serverError' ? 'HTTP 500' : 'HTTP 503');
     });
 
   it('rejects an accepted receipt when the employee changes while its body is read', async () => {

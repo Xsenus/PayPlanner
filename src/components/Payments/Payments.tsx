@@ -1,3 +1,4 @@
+import { PaymentCreateAdoptedError } from '../../services/paymentCreateAttempts';
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
@@ -1617,55 +1618,45 @@ export function Payments({
   }, [defaultTo, paymentsPermissions.canEdit, refresh, statusChangePayment, statusChangeReason, statusChangeValue, t, toast]);
 
   const handleSubmit = useCallback(
-    async (payload: SubmitDTO) => {
+    async (payload: SubmitDTO): Promise<Payment> => {
       try {
-        if ('id' in payload) {
-          if (editingPayment && isInvoiceManagedPayment(editingPayment)) {
-            await apiService.updateInvoiceManagedPayment(payload.id, payload);
-          } else {
-            await apiService.updatePayment(payload.id, payload);
-          }
-          await refresh();
-          toast.success(t('paymentSaved') ?? 'Платёж обновлён.', t('payments') ?? 'Платежи');
-        } else {
-          await apiService.createPayment(payload);
-          toast.success(t('paymentSaved') ?? 'Платёж создан.', t('payments') ?? 'Платежи');
-          if (page !== 1) {
-            setPage(1);
-          } else {
-            await refresh();
-          }
+        const isUpdate = 'id' in payload;
+        if (!(isUpdate ? paymentsPermissions.canEdit : paymentsPermissions.canCreate)) {
+          throw new Error('Недостаточно прав для сохранения платежа.');
         }
-
-        setIsModalOpen(false);
-        setEditingPayment(null);
-        setPaymentCreatePrefill(null);
-        finishRoutePaymentEdit();
+        const saved = isUpdate
+          ? editingPayment && isInvoiceManagedPayment(editingPayment)
+            ? await apiService.updateInvoiceManagedPayment(payload.id, payload)
+            : await apiService.updatePayment(payload.id, payload)
+          : await apiService.createPayment(payload);
+        void refresh().catch(() => toast.error('Платёж сохранён, но список пока не удалось обновить.', 'Платежи'));
+        toast.success(t('paymentSaved') ?? 'Платёж сохранён.', t('payments') ?? 'Платежи');
+        return saved;
       } catch (error) {
+        if (error instanceof PaymentCreateAdoptedError) throw error;
         const message = extractDisplayErrorMessage(error, t('paymentsSaveError') ?? 'Не удалось сохранить платёж.');
         toast.error(message, t('payments') ?? 'Платежи');
-        throw new Error(message);
+        throw error;
       }
     },
-    [editingPayment, finishRoutePaymentEdit, page, refresh, t, toast],
+    [editingPayment, paymentsPermissions.canCreate, paymentsPermissions.canEdit, refresh, t, toast],
   );
 
   const handleTransferRemainder = useCallback(
-    async (payload: SubmitDTO & { id: number }, remainderDate: string) => {
+    async (payload: SubmitDTO & { id: number }, remainderDate: string): Promise<Payment> => {
       try {
-        await apiService.transferPaymentRemainder(payload.id, payload, remainderDate);
-        await refresh();
+        if (!paymentsPermissions.canEdit) throw new Error('Недостаточно прав для редактирования платежа.');
+        const saved = await apiService.transferPaymentRemainder(payload.id, payload, remainderDate);
+        void refresh().catch(() => toast.error('Остаток сохранён, но список пока не удалось обновить.', 'Платежи'));
         toast.success('Остаток платежа перенесён.', t('payments') ?? 'Платежи');
-        setIsModalOpen(false);
-        setEditingPayment(null);
-        finishRoutePaymentEdit();
+        return saved.payment;
       } catch (error) {
         const message = extractDisplayErrorMessage(error, 'Не удалось перенести остаток платежа.');
         toast.error(message, t('payments') ?? 'Платежи');
         throw new Error(message);
       }
     },
-    [finishRoutePaymentEdit, refresh, t, toast],
+    [paymentsPermissions.canEdit, refresh, t, toast],
   );
 
   const handleRollbackRemainderTransfer = useCallback(
@@ -3067,7 +3058,9 @@ export function Payments({
         isOpen={isModalOpen}
         onClose={handleCloseModal}
         onSubmit={handleSubmit}
-        onCreateRemainder={apiService.createPayment}
+        canCreatePayment={paymentsPermissions.canCreate}
+        canEditPayment={paymentsPermissions.canEdit}
+        onCreateRemainder={(payload, context) => apiService.createPayment(payload, context)}
         onTransferRemainder={handleTransferRemainder}
         onRollbackRemainderTransfer={handleRollbackRemainderTransfer}
         onAdjustRemainderTransfer={handleAdjustRemainderTransfer}

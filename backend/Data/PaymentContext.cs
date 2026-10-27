@@ -259,6 +259,7 @@ public class PaymentContext : DbContext
         base.OnConfiguring(optionsBuilder);
     }
 
+    public DbSet<PaymentCreateAttempt> PaymentCreateAttempts => Set<PaymentCreateAttempt>();
     public DbSet<MoneyOperation> MoneyOperations => Set<MoneyOperation>();
     public DbSet<MoneyAccount> MoneyAccounts => Set<MoneyAccount>();
     public DbSet<CashOrder> CashOrders => Set<CashOrder>();
@@ -965,6 +966,25 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.ResponsibleUserId).HasDatabaseName("IX_ExternalContacts_ResponsibleUserId");
             entity.HasIndex(e => e.IsActive).HasDatabaseName("IX_ExternalContacts_IsActive");
             entity.HasIndex(e => e.SyncToPhonebook).HasDatabaseName("IX_ExternalContacts_SyncToPhonebook");
+        });
+
+        modelBuilder.Entity<PaymentCreateAttempt>(entity =>
+        {
+            entity.ToTable("PaymentCreateAttempts", table =>
+            {
+                table.HasCheckConstraint("CK_PaymentCreateAttempts_State", "\"State\" IN ('Draft','Committed','Cancelled')");
+                table.HasCheckConstraint("CK_PaymentCreateAttempts_Operation", "(\"Operation\" = 'primary' AND \"PrimaryPaymentId\" IS NULL) OR (\"Operation\" = 'remainder' AND \"PrimaryPaymentId\" IS NOT NULL AND \"PrimaryPaymentId\" > 0)");
+                table.HasCheckConstraint("CK_PaymentCreateAttempts_Ownership", "\"ActorUserId\" > 0 AND (\"SellerCompanyId\" IS NULL OR \"SellerCompanyId\" > 0) AND (\"SellerBranchId\" IS NULL OR (\"SellerBranchId\" > 0 AND \"SellerCompanyId\" IS NOT NULL))");
+                table.HasCheckConstraint("CK_PaymentCreateAttempts_Outcome", "(\"State\" = 'Committed' AND \"CanonicalPaymentId\" IS NOT NULL AND \"CanonicalPaymentId\" > 0 AND \"PayloadIdentity\" IS NOT NULL AND length(\"PayloadIdentity\") = 64 AND \"CommittedAtUtc\" IS NOT NULL AND \"CancelledAtUtc\" IS NULL) OR (\"State\" = 'Draft' AND \"CanonicalPaymentId\" IS NULL AND \"PayloadIdentity\" IS NULL AND \"CommittedAtUtc\" IS NULL AND \"CancelledAtUtc\" IS NULL) OR (\"State\" = 'Cancelled' AND \"CanonicalPaymentId\" IS NULL AND \"PayloadIdentity\" IS NULL AND \"CommittedAtUtc\" IS NULL AND \"CancelledAtUtc\" IS NOT NULL)");
+            });
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.Id).ValueGeneratedNever();
+            entity.Property(item => item.Operation).HasMaxLength(16).IsRequired();
+            entity.Property(item => item.State).HasMaxLength(16).IsRequired();
+            entity.Property(item => item.IdentityVersion).HasMaxLength(32).IsRequired();
+            entity.Property(item => item.PayloadIdentity).HasMaxLength(64);
+            entity.HasIndex(item => item.ActorUserId);
+            // Scalar metadata IDs deliberately have no FK/cascade/restrict effects on historical payments/users.
         });
 
         // ------------------ Payment ------------------

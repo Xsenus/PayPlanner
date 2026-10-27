@@ -9,7 +9,59 @@ import { apiFetch as fetch } from './apiTransport';
 const KEY_MAIN = 'pp_token';
 const KEY_FALLBACKS = ['auth_token', 'pp.jwt'];
 const SESSION_REFRESH_WINDOW_MS = 24 * 60 * 60 * 1000;
-let sessionRefreshPromise: Promise<string | null> | null = null;
+let sessionRefreshJob: { identity: AuthSessionIdentity; promise: Promise<string | null> } | null = null;
+
+// A technical login generation, shared by tabs; no user values or credentials are stored here.
+// Refresh of this same session preserves it. Explicit replacement/logout changes it before awaits.
+const SESSION_EPOCH_KEY = 'pp.auth-session-epoch.v1';
+export function getAuthSessionEpoch(): string | null {
+  if (!readToken()) return null;
+  let epoch = localStorage.getItem(SESSION_EPOCH_KEY);
+  if (!epoch) {
+    epoch = createClientRequestId();
+    localStorage.setItem(SESSION_EPOCH_KEY, epoch);
+    if (localStorage.getItem(SESSION_EPOCH_KEY) !== epoch) throw new Error('Не удалось подтвердить текущую сессию.');
+  }
+  return epoch;
+}
+export type AuthSessionIdentity = Readonly<{ epoch: string | null; actor: string | null; authenticated: boolean }>;
+export class AuthSessionChangedError extends Error {
+  constructor() { super('Сессия изменилась. Действие предыдущего входа не выполнено.'); }
+}
+function sessionActor(token: string | null): string | null {
+  try {
+    const part = token?.split('.')[1];
+    if (!part) return null;
+    const text = part.replace(/-/g, '+').replace(/_/g, '/');
+    const value = JSON.parse(atob(text.padEnd(Math.ceil(text.length / 4) * 4, '='))) as Record<string, unknown>;
+    const id = value['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier'] ?? value.nameid ?? value.sub;
+    return typeof id === 'string' || typeof id === 'number' ? JSON.stringify([value.iss ?? '', String(id)]) : null;
+  } catch { return null; }
+}
+export function captureAuthSessionIdentity(): AuthSessionIdentity {
+  const token = readToken();
+  return Object.freeze({ epoch: getAuthSessionEpoch(), actor: sessionActor(token), authenticated: Boolean(token) });
+}
+function sameSession(a: AuthSessionIdentity, b: AuthSessionIdentity): boolean {
+  return a.epoch === b.epoch && a.actor === b.actor && a.authenticated === b.authenticated;
+}
+export function isAuthSessionIdentityCurrent(identity: AuthSessionIdentity): boolean {
+  try { return sameSession(identity, captureAuthSessionIdentity()); } catch { return false; }
+}
+export function assertAuthSessionIdentity(identity: AuthSessionIdentity): void {
+  if (!isAuthSessionIdentityCurrent(identity)) throw new AuthSessionChangedError();
+}
+
+export function getAuthOperationEpoch(): string | null {
+  try { return localStorage.getItem(SESSION_EPOCH_KEY); } catch { return null; }
+}
+function replaceAuthSessionEpoch(): string {
+  const epoch = createClientRequestId();
+  localStorage.setItem(SESSION_EPOCH_KEY, epoch);
+  if (localStorage.getItem(SESSION_EPOCH_KEY) !== epoch) throw new Error('Не удалось подтвердить текущую сессию.');
+  return epoch;
+}
+
 
 function readToken(): string | null {
   return (
@@ -370,6 +422,7 @@ class AuthApiService {
   }
 
   private async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
+    const identity = captureAuthSessionIdentity();
     const url = `${API_BASE_URL}${endpoint}`;
     const isFormDataBody = typeof FormData !== 'undefined' && options?.body instanceof FormData;
 
@@ -381,17 +434,23 @@ class AuthApiService {
 
     const res = await fetch(url, { ...options, headers });
 
+    assertAuthSessionIdentity(identity);
     if (res.ok) {
       if (res.status === 204) return undefined as T;
       const ct = res.headers.get('content-type') || '';
       if (!ct.includes('application/json')) {
-        return (await res.text()) as unknown as T;
+        const result = await res.text();
+        assertAuthSessionIdentity(identity);
+        return result as unknown as T;
       }
-      return (await res.json()) as T;
+      const result = (await res.json()) as T;
+      assertAuthSessionIdentity(identity);
+      return result;
     }
 
     // Ошибки — пробуем распарсить тело
     const raw = await res.text().catch(() => '');
+    assertAuthSessionIdentity(identity);
     let body: unknown = null;
     try {
       body = raw ? JSON.parse(raw) : null;
@@ -438,68 +497,77 @@ class AuthApiService {
 
   /** Удаляет только локальную копию токена; сетевой отзыв выполняется отдельно. */
   public logout(): void {
-    clearToken();
+    try { replaceAuthSessionEpoch(); } catch { /* Clearing the token still invalidates financial ownership. */ } finally { clearToken(); }
   }
 
   public async ensureFreshSession(force = false): Promise<string | null> {
+    const identity = captureAuthSessionIdentity();
     const currentToken = readToken();
-    if (!currentToken) {
-      return null;
-    }
-
+    if (!currentToken) return null;
     const expiresAt = readTokenExpiresAt(currentToken);
     if (!force && (expiresAt === null || expiresAt - Date.now() > SESSION_REFRESH_WINDOW_MS)) {
+      assertAuthSessionIdentity(identity);
       return currentToken;
     }
-
-    if (sessionRefreshPromise) {
-      return sessionRefreshPromise;
+    let job = sessionRefreshJob;
+    if (!job || !sameSession(job.identity, identity)) {
+      const promise = (async () => {
+        const response = await this.request<LoginResponse>('/auth/refresh', { method: 'POST' });
+        assertAuthSessionIdentity(identity);
+        if (!response.token) throw makeError('Сервер не вернул обновлённый токен сессии.');
+        const nextActor = sessionActor(response.token);
+        if (nextActor !== identity.actor) throw new AuthSessionChangedError();
+        writeToken(response.token);
+        assertAuthSessionIdentity(identity);
+        return response.token;
+      })();
+      job = { identity, promise };
+      sessionRefreshJob = job;
     }
-
-    sessionRefreshPromise = (async () => {
-      const response = await this.request<LoginResponse>('/auth/refresh', { method: 'POST' });
-      if (!response.token) {
-        throw makeError('Сервер не вернул обновлённый токен сессии.');
-      }
-
-      writeToken(response.token);
-      return response.token;
-    })();
-
     try {
-      return await sessionRefreshPromise;
+      const result = await job.promise;
+      assertAuthSessionIdentity(identity);
+      return result;
     } catch (error) {
-      if (force) {
-        throw error;
-      }
-
-      return currentToken;
+      // Neither an old pre-await token nor the replacement login may become this operation's fallback.
+      assertAuthSessionIdentity(identity);
+      if (force || error instanceof AuthSessionChangedError) throw error;
+      return readToken();
     } finally {
-      sessionRefreshPromise = null;
+      if (sessionRefreshJob === job) sessionRefreshJob = null;
     }
   }
 
   public async completeSignIn(token: string, user?: User | null): Promise<User> {
+    const epoch = replaceAuthSessionEpoch();
     writeToken(token);
     if (user) {
       return user;
     }
 
-    return this.getCurrentUser();
+    const current = await this.getCurrentUser();
+    if (getAuthOperationEpoch() !== epoch) throw new AuthSessionChangedError();
+    return current;
   }
 
   public async getCurrentUser(): Promise<User> {
+    const identity = captureAuthSessionIdentity();
     await this.ensureFreshSession();
-    return this.request<User>('/profile');
+    assertAuthSessionIdentity(identity);
+    const user = await this.request<User>('/profile');
+    assertAuthSessionIdentity(identity);
+    return user;
   }
 
   /** login: сохраняем токен и сразу пытаемся получить профиль */
   public async login(email: string, password: string): Promise<LoginResponse> {
+    const loginEpoch = replaceAuthSessionEpoch();
     const resp = await this.request<LoginResponse>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
 
+    if (localStorage.getItem(SESSION_EPOCH_KEY) !== loginEpoch) throw makeError('Сессия изменилась во время входа.');
     if (resp?.token) {
       writeToken(resp.token);
     }
@@ -507,6 +575,7 @@ class AuthApiService {
     // Если сервер не вернул user в login — дотягиваем /auth/me
     if (!resp.user) {
       const me = await this.getCurrentUser();
+      if (getAuthOperationEpoch() !== loginEpoch) throw new AuthSessionChangedError();
       return { token: resp.token, user: me };
     }
 

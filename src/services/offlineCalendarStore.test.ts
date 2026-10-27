@@ -109,4 +109,25 @@ describe('offlineCalendarStore', () => {
     await clearOfflineCalendarCache();
     expect(await loadOfflineCalendarSnapshot(8)).toBeNull();
   });
+
+  it('не начинает отложенную очистку A после переключения на B во время открытия БД', async () => {
+    await saveOfflineCalendarSnapshot(8, [task(2)], false);
+    await setOfflineCalendarTrustedDevice(8, true);
+    let current = true;
+    const oldCleanup = clearOfflineCalendarCache(() => current);
+    current = false;
+    await oldCleanup;
+    expect((await loadOfflineCalendarSnapshot(8))?.items).toHaveLength(1);
+    expect(await getOfflineCalendarTrustedDevice(8)).toBe(true);
+  });
+
+  it('прерывает старую activation A перед delete после await getAllKeys и сохраняет кеш B', async () => {
+    await saveOfflineCalendarSnapshot(8, [task(2)], false);
+    await setOfflineCalendarTrustedDevice(8, true);
+    let checks = 0;
+    await activateOfflineCalendarUser(7, () => ++checks === 1);
+    expect(checks).toBe(2);
+    expect((await loadOfflineCalendarSnapshot(8))?.items).toHaveLength(1);
+    expect(await getOfflineCalendarTrustedDevice(8)).toBe(true);
+  });
 });

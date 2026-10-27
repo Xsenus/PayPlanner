@@ -3,11 +3,15 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import type { Client, LegalEntitySummary, Payment } from '../../types';
 import { requestPaymentAdvanceReviewFilter } from '../../utils/paymentAdvanceReview';
 import { Payments } from './Payments';
+import { PaymentCreateAdoptedError } from '../../services/paymentCreateAttempts';
 
-const { confirmMock, rolePermissionsMock, usePaymentsPagedMock } = vi.hoisted(() => ({
+const { confirmMock, rolePermissionsMock, usePaymentsPagedMock, doc04SavedResults, doc04Errors, doc04ToastError } = vi.hoisted(() => ({
   confirmMock: vi.fn(),
   rolePermissionsMock: vi.fn(),
   usePaymentsPagedMock: vi.fn(),
+  doc04SavedResults: [] as Payment[],
+  doc04Errors: [] as unknown[],
+  doc04ToastError: vi.fn(),
 }));
 
 function createPersistedTableSettings(
@@ -130,7 +134,7 @@ vi.mock('../../hooks/usePersistedTableSettings', () => ({
 vi.mock('../../hooks/useToast', () => ({
   useToast: () => ({
     success: vi.fn(),
-    error: vi.fn(),
+    error: doc04ToastError,
   }),
 }));
 
@@ -139,7 +143,7 @@ vi.mock('../Calendar/PaymentModal', () => ({
     isOpen: boolean;
     payment?: Payment | null;
     onClose: () => void;
-    onSubmit: (payload: { id: number; amount: number; type: 'Expense'; status: 'Completed' }) => Promise<void>;
+    onSubmit: (payload: { id: number; amount: number; type: 'Expense'; status: 'Completed' }) => Promise<Payment>;
   }) =>
     props.isOpen ? (
       <div data-testid="payments-edit-modal">
@@ -149,7 +153,8 @@ vi.mock('../Calendar/PaymentModal', () => ({
           onClick={() => {
             void props
               .onSubmit({ id: props.payment?.id ?? 0, amount: 25_000, type: 'Expense', status: 'Completed' })
-              .catch(() => undefined);
+              .then((saved) => { doc04SavedResults.push(saved); })
+              .catch((error) => { doc04Errors.push(error); });
           }}
         >
           submit payment edit
@@ -265,6 +270,7 @@ import { apiService } from '../../services/api';
 
 describe('Payments integration', () => {
   beforeEach(() => {
+    doc04SavedResults.length = 0;
     vi.mocked(apiService.getClients).mockReset().mockResolvedValue([]);
     vi.mocked(apiService.getLegalEntities).mockReset().mockResolvedValue([]);
     confirmMock.mockReset();
@@ -1338,8 +1344,12 @@ describe('Payments integration', () => {
         expect.objectContaining({ status: 'Completed' }),
       );
       expect(refresh).toHaveBeenCalledTimes(1);
-      expect(onRoutePaymentExit).toHaveBeenCalledTimes(1);
+      expect(onRoutePaymentExit).not.toHaveBeenCalled();
+      expect(screen.getByTestId('payments-edit-modal')).toBeTruthy();
     });
+    fireEvent.click(screen.getByRole('button', { name: 'close payment edit' }));
+    expect(onRoutePaymentExit).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('payments-edit-modal')).toBeNull();
   });
 
   it('returns to the route origin when route-driven payment editing is cancelled', async () => {
@@ -1541,4 +1551,59 @@ describe('Payments integration', () => {
     expect(onRoutePaymentChange).toHaveBeenCalledWith(null);
     expect(onRoutePaymentExit).toHaveBeenCalledTimes(1);
   });
+  it('retains the confirmed payment response and open editor when the post-save journal refresh fails', async () => {
+    const saved = {
+      id: 9921, amount: 25_000, date: '2026-04-10', plannedDate: '2026-04-10', type: 'Expense',
+      status: 'Completed', description: 'Подтверждённый ответ', notes: '', systemNotes: '', isPaid: true,
+      paidAmount: 25_000, outstandingAmount: 0, hasPartialPayment: false, rescheduleCount: 0,
+      createdAt: '2026-04-10T00:00:00Z', documentKind: 'Payment',
+    } as Payment;
+    const refresh = vi.fn().mockRejectedValue(new Error('Read refresh failed'));
+    usePaymentsPagedMock.mockReturnValue({ ...paymentsPagedResult, refresh });
+    vi.mocked(apiService.getPayment).mockResolvedValue(saved);
+    vi.mocked(apiService.updatePayment).mockResolvedValue(saved);
+    const onRoutePaymentExit = vi.fn();
+    render(<Payments routePaymentId={saved.id} onRoutePaymentChange={vi.fn()} onRoutePaymentExit={onRoutePaymentExit} />);
+    await screen.findByTestId('payments-route-payment-preview');
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать' }));
+    await screen.findByTestId('payments-edit-modal');
+    fireEvent.click(screen.getByRole('button', { name: 'submit payment edit' }));
+    await waitFor(() => expect(doc04SavedResults).toEqual([saved]));
+    expect(apiService.updatePayment).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('payments-edit-modal')).toBeTruthy();
+    expect(onRoutePaymentExit).not.toHaveBeenCalled();
+  });
+
+  it('passes a typed HTTP failure unchanged through the parent save adapter', async () => {
+    doc04Errors.length = 0;
+    const saved = { id: 9922, amount: 25_000, date: '2026-04-10', plannedDate: '2026-04-10', type: 'Expense',
+      status: 'Pending', description: 'Текущая карточка', notes: '', systemNotes: '', isPaid: false,
+      paidAmount: 0, outstandingAmount: 25_000, hasPartialPayment: false, rescheduleCount: 0,
+      createdAt: '2026-04-10T00:00:00Z', documentKind: 'Payment' } as Payment;
+    const typed = Object.assign(new Error('Permission changed'), { status: 403 });
+    vi.mocked(apiService.getPayment).mockResolvedValue(saved); vi.mocked(apiService.updatePayment).mockRejectedValue(typed);
+    render(<Payments routePaymentId={saved.id} onRoutePaymentChange={vi.fn()} onRoutePaymentExit={vi.fn()} />);
+    await screen.findByTestId('payments-route-payment-preview');
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать' })); await screen.findByTestId('payments-edit-modal');
+    fireEvent.click(screen.getByRole('button', { name: 'submit payment edit' }));
+    await waitFor(() => expect(doc04Errors).toEqual([typed]));
+    expect(doc04Errors[0]).toBe(typed); expect(screen.getByTestId('payments-edit-modal')).toBeTruthy();
+  });
+
+  it('does not report an explicitly adopted canonical outcome as a save failure', async () => {
+    doc04Errors.length = 0; doc04ToastError.mockClear();
+    const saved = { id: 9923, type: 'Expense', amount: 25_000, date: '2026-04-10', plannedDate: '2026-04-10',
+      status: 'Pending', description: 'Подтверждённый платёж', notes: '', systemNotes: '', isPaid: false,
+      paidAmount: 0, outstandingAmount: 25_000, hasPartialPayment: false, rescheduleCount: 0,
+      createdAt: '2026-04-10T00:00:00Z', documentKind: 'Payment' } as Payment;
+    const adopted = new PaymentCreateAdoptedError(saved);
+    vi.mocked(apiService.getPayment).mockResolvedValue(saved); vi.mocked(apiService.updatePayment).mockRejectedValue(adopted);
+    render(<Payments routePaymentId={saved.id} onRoutePaymentChange={vi.fn()} onRoutePaymentExit={vi.fn()} />);
+    await screen.findByTestId('payments-route-payment-preview'); fireEvent.click(screen.getByRole('button', { name: 'Редактировать' }));
+    await screen.findByTestId('payments-edit-modal'); fireEvent.click(screen.getByRole('button', { name: 'submit payment edit' }));
+    await waitFor(() => expect(doc04Errors).toEqual([adopted]));
+    expect(doc04ToastError).not.toHaveBeenCalled(); expect(doc04Errors[0]).toBe(adopted);
+  });
+
 });

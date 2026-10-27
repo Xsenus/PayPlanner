@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiService } from '../services/api';
+import type { PaymentCreateContext } from '../services/paymentCreateAttempts';
 import type { Payment, PaymentPayload } from '../types';
 
 type UsePaymentsOptions = {
@@ -156,7 +157,7 @@ export function usePayments(from?: string, to?: string, opts?: UsePaymentsOption
     await fetchOnce('background');
   }, [fetchOnce]);
 
-  const createPayment = useCallback(async (p: PaymentPayload) => apiService.createPayment(p), []);
+  const createPayment = useCallback(async (p: PaymentPayload, context?: PaymentCreateContext) => apiService.createPayment(p, context), []);
   const updatePayment = useCallback(
     async (payload: { id: number } & PaymentPayload) => apiService.updatePayment(payload.id, payload),
     [],

@@ -195,15 +195,17 @@ export async function loadOfflineCalendarSnapshot(userId: number, now = new Date
   }
 }
 
-export async function activateOfflineCalendarUser(userId: number) {
+export async function activateOfflineCalendarUser(userId: number, isCurrent: () => boolean = () => true) {
   const database = await openDatabase();
   if (!database) return;
   try {
     for (const storeName of [SNAPSHOT_STORE, PREFERENCES_STORE]) {
+      if (!isCurrent()) return;
       const transaction = database.transaction(storeName, 'readwrite');
       const done = transactionDone(transaction);
       const store = transaction.objectStore(storeName);
       const keys = await requestResult(store.getAllKeys());
+      if (!isCurrent()) { transaction.abort(); await done.catch(() => undefined); return; }
       keys.filter((key) => key !== userId).forEach((key) => store.delete(key));
       await done;
     }
@@ -225,10 +227,11 @@ export async function clearOfflineCalendarSnapshot(userId: number) {
   }
 }
 
-export async function clearOfflineCalendarCache() {
+export async function clearOfflineCalendarCache(isCurrent: () => boolean = () => true) {
   const database = await openDatabase();
   if (!database) return;
   try {
+    if (!isCurrent()) return;
     const transaction = database.transaction([SNAPSHOT_STORE, PREFERENCES_STORE], 'readwrite');
     const done = transactionDone(transaction);
     transaction.objectStore(SNAPSHOT_STORE).clear();

@@ -3,15 +3,20 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Companies;
 using PayPlanner.Api.Services.Notifications;
+using PayPlanner.Api.Services.Payments;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -430,8 +435,202 @@ public class PaymentsController : ControllerBase
         return Ok(item);
     }
 
+    private TimeProvider AttemptTime => HttpContext.RequestServices.GetService<TimeProvider>() ?? TimeProvider.System;
+
+    [HttpPost("create-attempts")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<IActionResult> RegisterCreateAttempt([FromBody] JsonElement body, CancellationToken ct)
+    {
+        if (await RequireAttemptAccessAsync(ct) is { } forbidden) return forbidden;
+        if (!RegisterPaymentCreateAttemptRequest.TryRead(body, out var request) || request is null)
+            return BadRequest(new { message = "Проверьте назначение попытки и выбранную компанию." });
+        return await WithAttemptLeaseAsync(async lease =>
+        {
+            var attempt = new PaymentCreateAttempt
+            {
+                Id = Guid.NewGuid(), ActorUserId = User.GetUserId()!.Value,
+                Operation = request.Operation, SellerCompanyId = request.SellerCompanyId,
+                SellerBranchId = request.SellerBranchId, PrimaryPaymentId = request.PrimaryPaymentId,
+                CreatedAtUtc = AttemptTime.GetUtcNow(),
+            };
+            attempt.ExpiresAtUtc = attempt.CreatedAtUtc.AddHours(24);
+            if (await CheckAttemptScopeAsync(attempt, lease, invalidSelectionIsBadRequest: true, ct) is { } denied) return denied;
+            _db.PaymentCreateAttempts.Add(attempt);
+            await _db.SaveChangesAsync(ct);
+            await lease.CommitAsync(ct);
+            return Created($"/api/payments/create-attempts/{attempt.Id:D}", AttemptState(attempt));
+        }, ct);
+    }
+
+    [HttpGet("create-attempts/{attemptId:guid}")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<IActionResult> GetCreateAttempt(Guid attemptId, CancellationToken ct)
+    {
+        if (await RequireAttemptAccessAsync(ct) is { } forbidden) return forbidden;
+        var actor = User.GetUserId()!.Value;
+        var attempt = await _db.PaymentCreateAttempts.AsNoTracking()
+            .SingleOrDefaultAsync(a => a.Id == attemptId && a.ActorUserId == actor, ct);
+        if (attempt is null || attempt.State == PaymentCreateAttempt.Draft && attempt.ExpiresAtUtc <= AttemptTime.GetUtcNow())
+            return AttemptGone();
+        if (await CheckAttemptScopeAsync(attempt, null, false, ct) is { } denied) return denied;
+        // A Draft observation cannot prove that a queued commit will not run. Only Cancel locks/tombstones.
+        return Ok(AttemptState(attempt));
+    }
+
+    [HttpPost("create-attempts/{attemptId:guid}/cancel")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<IActionResult> CancelCreateAttempt(Guid attemptId, CancellationToken ct)
+    {
+        if (await RequireAttemptAccessAsync(ct) is { } forbidden) return forbidden;
+        return await WithAttemptLeaseAsync(async lease =>
+        {
+            var attempt = await lease.LockAttemptAsync(attemptId, User.GetUserId()!.Value, ct);
+            if (attempt is null) return AttemptGone();
+            if (attempt.State == PaymentCreateAttempt.Committed)
+            {
+                // Canonical ID disclosure still requires every current relation/payment permission.
+                if (await CheckAttemptScopeAsync(attempt, lease, false, ct) is { } denied) return denied;
+                return Ok(new PaymentCreateAttemptCancelOutcomeDto(attempt.Id,
+                    PaymentCreateAttempt.Committed, attempt.CanonicalPaymentId));
+            }
+            if (attempt.State == PaymentCreateAttempt.Draft)
+            {
+                // Even expired Draft can be authoritatively cancelled; never delete/recreate its UUID.
+                // Only owned operational metadata changes; no old seller/primary IDs are disclosed.
+                attempt.State = PaymentCreateAttempt.Cancelled;
+                attempt.CancelledAtUtc = AttemptTime.GetUtcNow();
+                await _db.SaveChangesAsync(ct);
+                await lease.CommitAsync(ct);
+            }
+            else if (attempt.State != PaymentCreateAttempt.Cancelled)
+                throw new InvalidOperationException("Unknown payment attempt state.");
+            return Ok(new PaymentCreateAttemptCancelOutcomeDto(attempt.Id,
+                PaymentCreateAttempt.Cancelled, null));
+        }, ct);
+    }
+
+    [HttpPost("create-attempts/{attemptId:guid}/commit")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<IActionResult> CommitCreateAttempt(Guid attemptId, [FromBody] JsonElement body, CancellationToken ct)
+    {
+        if (await RequireAttemptAccessAsync(ct) is { } forbidden) return forbidden;
+        var options = HttpContext.RequestServices.GetRequiredService<IOptions<JsonOptions>>().Value.JsonSerializerOptions;
+        if (!PaymentCreateCommand.TryRead(body, options, out var model, out var identity, out var error)
+            || model is null || identity is null)
+            return BadRequest(new { message = error ?? "Некорректная команда платежа." });
+        return await WithAttemptLeaseAsync(async lease =>
+        {
+            var attempt = await lease.LockAttemptAsync(attemptId, User.GetUserId()!.Value, ct);
+            if (attempt is null || attempt.State == PaymentCreateAttempt.Cancelled
+                || attempt.State == PaymentCreateAttempt.Draft && attempt.ExpiresAtUtc <= AttemptTime.GetUtcNow())
+                return AttemptGone();
+            if (attempt.IdentityVersion != PaymentCreateCommand.Version
+                || attempt.SellerCompanyId != model.SellerCompanyId || attempt.SellerBranchId != model.SellerBranchId)
+                return AttemptConflict();
+            if (await CheckAttemptScopeAsync(attempt, lease, false, ct) is { } denied) return denied;
+            if (attempt.State == PaymentCreateAttempt.Committed)
+            {
+                if (!string.Equals(attempt.PayloadIdentity, identity, StringComparison.Ordinal)) return AttemptConflict();
+                // Existing projection/ACL; never update the canonical payment from replay input or notify twice.
+                return await GetById(attempt.CanonicalPaymentId!.Value, ct);
+            }
+            if (attempt.State != PaymentCreateAttempt.Draft) throw new InvalidOperationException("Unknown payment attempt state.");
+            return await CreatePaymentCoreAsync(model, ct, async () =>
+            {
+                // Every pre-existing financial Save/effect completed in this SAME owned transaction.
+                if (attempt.ExpiresAtUtc <= AttemptTime.GetUtcNow()) throw new PaymentCreateAttemptExpiredException();
+                attempt.State = PaymentCreateAttempt.Committed;
+                attempt.PayloadIdentity = identity;
+                attempt.CanonicalPaymentId = model.Id;
+                attempt.CommittedAtUtc = AttemptTime.GetUtcNow();
+                await _db.SaveChangesAsync(ct);
+                await lease.CommitAsync(ct);
+                await lease.DisposeAsync();
+                if (_db.Database.CurrentTransaction is not null)
+                    throw new InvalidOperationException("Payment notifications require a disposed financial transaction.");
+                // Return to the exact unchanged legacy notification tail, once for this first winner only.
+            });
+        }, ct);
+    }
+
+    private async Task<IActionResult?> RequireAttemptAccessAsync(CancellationToken ct)
+    {
+        var actor = User.GetUserId();
+        if (User.Identity?.IsAuthenticated != true || actor is not > 0) return Unauthorized();
+        // New ownership metadata must never use legacy empty-DB or stale-claim permission fallbacks.
+        if (!await _db.Users.AsNoTracking().AnyAsync(u => u.Id == actor.Value && u.IsActive, ct)) return Forbid();
+        return await RequirePaymentsPermissionAsync(p => p.CanCreate, ct);
+    }
+
+    private async Task<IActionResult?> CheckAttemptScopeAsync(PaymentCreateAttempt attempt,
+        PaymentCreateAttemptLease? lease, bool invalidSelectionIsBadRequest, CancellationToken ct)
+    {
+        var seller = new DocumentSellerService(_db);
+        if (await seller.ValidateSelectionAsync(attempt.SellerCompanyId, attempt.SellerBranchId, ct) is { } selectionError)
+            return invalidSelectionIsBadRequest ? BadRequest(new { message = selectionError }) : Forbid();
+        if (lease is not null)
+        {
+            await lease.LockSellerSelectionAsync(attempt.SellerCompanyId, attempt.SellerBranchId, ct);
+            if (await seller.ValidateSelectionAsync(attempt.SellerCompanyId, attempt.SellerBranchId, ct) is { } changedSelection)
+                return invalidSelectionIsBadRequest ? BadRequest(new { message = changedSelection }) : Forbid();
+        }
+        if (attempt.PrimaryPaymentId.HasValue || attempt.State == PaymentCreateAttempt.Committed)
+        {
+            var visibility = await ResolvePaymentsVisibilityAsync(ct);
+            if (visibility is null) return AccessDenied();
+            if (attempt.PrimaryPaymentId is { } primary)
+            {
+                if (!await CanAccessPaymentAsync(primary, visibility, ct)) return NotFound();
+                if (lease is not null)
+                {
+                    await lease.LockPrimaryAsync(primary, ct);
+                    if (!await CanAccessPaymentAsync(primary, visibility, ct)) return NotFound();
+                }
+            }
+            if (attempt.State == PaymentCreateAttempt.Committed
+                && (attempt.CanonicalPaymentId is not > 0
+                    || !await CanAccessPaymentAsync(attempt.CanonicalPaymentId.Value, visibility, ct))) return NotFound();
+        }
+        return null;
+    }
+
+    private async Task<IActionResult> WithAttemptLeaseAsync(
+        Func<PaymentCreateAttemptLease, Task<IActionResult>> action, CancellationToken ct)
+    {
+        PaymentCreateAttemptLease? lease = null;
+        try
+        {
+            lease = await PaymentCreateAttemptLease.BeginAsync(_db, ct);
+            // Recheck current global payment permission within admission; selection is not a new company ACL.
+            if (await RequireAttemptAccessAsync(ct) is { } denied) return denied;
+            return await action(lease);
+        }
+        catch (PaymentCreateAttemptExpiredException) when (lease?.CommitStarted != true)
+        {
+            return AttemptGone();
+        }
+        catch (Exception error) when (lease?.CommitStarted != true && PaymentCreateAttemptLease.IsPrecommitConflict(error))
+        {
+            return AttemptConflict();
+        }
+        finally { if (lease is not null) await lease.DisposeAsync(); }
+    }
+
+    private ObjectResult AttemptGone() => StatusCode(StatusCodes.Status410Gone,
+        new { message = "Попытка недоступна или уже закрыта. Не повторяйте создание без подтверждённого результата." });
+    private ConflictObjectResult AttemptConflict() => Conflict(new
+        { message = "Попытка или связанные данные изменились либо заняты. Сверьте результат сохранения." });
+    private static PaymentCreateAttemptStateDto AttemptState(PaymentCreateAttempt item)
+        => new(item.Id, item.State, item.Operation, item.SellerCompanyId, item.SellerBranchId,
+            item.PrimaryPaymentId, item.CreatedAtUtc, item.ExpiresAtUtc,
+            item.State == PaymentCreateAttempt.Committed ? item.CanonicalPaymentId : null, item.IdentityVersion);
+
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] Payment model, CancellationToken ct)
+    public Task<IActionResult> Create([FromBody] Payment model, CancellationToken ct)
+        => CreatePaymentCoreAsync(model, ct);
+
+    private async Task<IActionResult> CreatePaymentCoreAsync(
+        Payment model, CancellationToken ct, Func<Task>? commitAttempt = null)
     {
         if (await RequirePaymentsPermissionAsync(permission => permission.CanCreate, ct) is { } forbidden)
         {
@@ -481,6 +680,7 @@ public class PaymentsController : ControllerBase
         await SyncPaymentCashOrderAsync(model, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, model, now, ct);
         await _db.SaveChangesAsync(ct);
+        if (commitAttempt is not null) await commitAttempt();
         await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, model, now, _notificationService, ct);
         PopulateAuditMetadata(_db, model);
         await NotifyPaymentAssignedAsync(model, ct);
