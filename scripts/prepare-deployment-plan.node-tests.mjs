@@ -74,6 +74,12 @@ test('admits only the specifically reviewed additive payment attempt migration',
   baseline.expectedMigration = '20261027005432_AddPaymentCreateAttempts';
   writeFileSync(path, JSON.stringify(baseline));
   assert.equal(createPlan(input).plan.expectedMigration, baseline.expectedMigration);
+  baseline.expectedMigration = '20261027005432_AddPaymentCreateAttempts+20261027014154_AddPersonalChatHistory';
+  writeFileSync(path, JSON.stringify(baseline));
+  assert.equal(createPlan(input).plan.expectedMigration, baseline.expectedMigration);
+  baseline.expectedMigration += '_unexpected';
+  writeFileSync(path, JSON.stringify(baseline));
+  assert.throws(() => createPlan(input), /Only the reviewed additive migration/);
   baseline.expectedMigration = 'another-migration';
   writeFileSync(path, JSON.stringify(baseline));
   assert.throws(() => createPlan(input), /Only the reviewed additive migration/);

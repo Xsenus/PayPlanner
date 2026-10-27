@@ -80,6 +80,12 @@ class DeliveryAdmissionTests(unittest.TestCase):
         self.plan['expectedMigration'] += '_unexpected'
         self.admission(1)
 
+    def test_reviewed_payment_and_history_pair_is_admitted_only_exactly(self):
+        self.plan['expectedMigration'] = '20261027005432_AddPaymentCreateAttempts+20261027014154_AddPersonalChatHistory'
+        self.assertTrue(self.admission().stdout.startswith(self.revision+'|'))
+        self.plan['expectedMigration'] += '_unexpected'
+        self.admission(1)
+
     def test_local_evidence_cannot_replace_ci_qualification(self):
         self.q['executionKind'] = 'local-passed-tests'
         self.assertIn('Actual CI qualification required', self.admission(1).stderr)

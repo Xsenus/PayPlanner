@@ -41,6 +41,7 @@ import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useToast } from '../../hooks/useToast';
 import {
   internalChatApi,
+  type InternalChatHistoryState,
   type InternalChatMessage,
   type InternalChatNotificationMode,
   type InternalChatPerson,
@@ -59,6 +60,12 @@ import { PendingChatSends } from './PendingChatSends';
 const REACTIONS = ['👍', '❤️', '👏', '✅', '👀'];
 const CHAT_DRAFT_PREFIX = 'payplanner.chatDraft.v1';
 const CHAT_SEND_PREFIX = 'payplanner.chatSend.v1';
+
+function validHistoryState(value: InternalChatHistoryState): boolean {
+  return Boolean(value) && Number.isSafeInteger(value.revision) && value.revision >= 0
+    && Number.isSafeInteger(value.latestMessageId) && value.latestMessageId >= 0
+    && (value.hiddenThroughMessageId === null || Number.isSafeInteger(value.hiddenThroughMessageId) && value.hiddenThroughMessageId >= 0);
+}
 
 type PendingChatSend = {
   id: string;
@@ -254,6 +261,7 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
     return pending?.text === readChatDraft(currentUserId, thread.id) ? pending.replyToId : null;
   });
   const [editing, setEditing] = useState<InternalChatMessage | null>(null);
+  const editingRef = useRef<InternalChatMessage | null>(null);
   const [actionsFor, setActionsFor] = useState<number | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -287,6 +295,13 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
   const editScopeRef = useRef<{ actorId: number; threadId: number } | null>(null);
   const pendingSendRef = useRef<({ threadId: number } & PendingChatSend) | null>(null);
   const [managedSendState, setManagedSendState] = useState<InternalChatSendState | null>(null);
+  const [historyState, setHistoryState] = useState<InternalChatHistoryState | null>(null);
+  const [historyPending, setHistoryPending] = useState<{ cutoff: number | null; revision: number; attempted: boolean } | null>(null);
+  const [historyBusy, setHistoryBusy] = useState(false);
+  const [historyReloadSerial, setHistoryReloadSerial] = useState(0);
+  const historyBusyRef = useRef(false);
+  const historySyncRef = useRef(false);
+  const historyRevisionRef = useRef<number | null>(null);
   const [initialSendKey, setInitialSendKey] = useState(() => readPendingChatSend(currentUserId, thread.id)?.id ?? null);
   const [sendStatusRevision, setSendStatusRevision] = useState(0);
   const loadRequestId = useRef(0);
@@ -308,6 +323,8 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
   useEffect(() => {
     lastReadMessageIdRef.current = Math.max(lastReadMessageIdRef.current, thread.lastReadMessageId ?? 0);
   }, [thread.lastReadMessageId]);
+
+  useEffect(() => { editingRef.current = editing; }, [editing]);
 
   useEffect(() => {
     if (!editing) saveChatDraft(currentUserId, thread.id, text);
@@ -351,6 +368,16 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
 
   useEffect(() => { markLatestReadIfAtBottom(); }, [markLatestReadIfAtBottom]);
 
+  const resetHistoryView = useCallback(() => {
+    loadRequestId.current += 1;
+    editRevisionRef.current += 1;
+    setReplyTo(null); setRestoredReplyId(readPendingChatSend(currentUserId, thread.id)?.replyToId ?? null); setActionsFor(null); setMessages([]);
+    hasLoadedMessagesRef.current = false;
+    initialUnreadCountRef.current = 0; firstUnreadMessageIdRef.current = undefined;
+    setHasNewer(false); setUnreadOutsidePage(false);
+    setHistoryReloadSerial(value => value + 1);
+  }, [currentUserId, thread.id]);
+
   const loadMessages = useCallback(async (beforeId?: number, appendEarlier = false, afterId?: number, replaceWithUnread = false, forceBottom = false) => {
     const requestId = ++loadRequestId.current;
     const container = messagesContainerRef.current;
@@ -368,6 +395,30 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
         mentionedMe,
       });
       if (requestId !== loadRequestId.current) return;
+      const revision = page.historyVisibilityRevision;
+      const cutoff = page.historyHiddenThroughMessageId ?? null;
+      const validRevision = Number.isSafeInteger(revision) && (revision ?? -1) >= 0
+        && (cutoff === null || Number.isSafeInteger(cutoff) && cutoff >= 0);
+      if (validRevision && revision !== undefined && historyRevisionRef.current !== null
+          && revision < historyRevisionRef.current) {
+        resetHistoryView();
+        return;
+      }
+      const historyChanged = validRevision && historyRevisionRef.current !== null && historyRevisionRef.current !== revision;
+      if (validRevision && revision !== undefined) {
+        historyRevisionRef.current = revision;
+        setHistoryState({ hiddenThroughMessageId: cutoff, revision, latestMessageId: page.items.at(-1)?.id ?? 0 });
+      }
+      if (historyChanged) {
+        editRevisionRef.current += 1;
+        setReplyTo(null); setRestoredReplyId(readPendingChatSend(currentUserId, thread.id)?.replyToId ?? null); setActionsFor(null);
+        if (appendEarlier || afterId !== undefined) {
+          setMessages([]); hasLoadedMessagesRef.current = false;
+          initialUnreadCountRef.current = 0; firstUnreadMessageIdRef.current = undefined;
+          setHistoryReloadSerial(value => value + 1);
+          return;
+        }
+      }
       const isFiltered = Boolean(appliedSearch || authorUserId || dateFrom || dateTo || mentionedMe);
       const openingUnread = !appendEarlier && afterId === undefined && !hasLoadedMessagesRef.current && !isFiltered && initialUnreadCountRef.current > 0;
       const loadedUnreadCount = openingUnread
@@ -393,12 +444,13 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
         };
       }
       setLoading(false);
-      setMessages((current) => appendEarlier || afterId !== undefined && !replaceWithUnread
+      setMessages((current) => !historyChanged && (appendEarlier || afterId !== undefined && !replaceWithUnread)
         ? mergeChatMessages(current, page.items)
         : page.items);
       hasLoadedMessagesRef.current = true;
-      if (afterId === undefined || replaceWithUnread) setHasMore(page.hasMore);
-      if (afterId !== undefined) setHasNewer(Boolean(page.hasNewer));
+      if (historyChanged || afterId === undefined || replaceWithUnread) setHasMore(page.hasMore);
+      if (historyChanged) setHasNewer(false);
+      else if (afterId !== undefined) setHasNewer(Boolean(page.hasNewer));
       else if (!appendEarlier && (isFiltered || forceBottom)) setHasNewer(false);
     } catch (error) {
       if (requestId === loadRequestId.current) toast.error(errorMessage(error));
@@ -409,7 +461,7 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
         setLoadingNewer(false);
       }
     }
-  }, [appliedSearch, authorUserId, currentUserId, dateFrom, dateTo, mentionedMe, thread.id, toast]);
+  }, [appliedSearch, authorUserId, currentUserId, dateFrom, dateTo, mentionedMe, resetHistoryView, thread.id, toast]);
 
   useEffect(() => {
     setMemberUserIds(threadMemberIdsKey.split('|')[0].split(',').filter(Boolean).map(Number));
@@ -419,15 +471,90 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
     if (!hasLoadedMessagesRef.current && firstUnreadMessageIdRef.current) {
       void loadMessages(undefined, false, firstUnreadMessageIdRef.current - 1, true);
     } else void loadMessages();
-  }, [loadMessages]);
+  }, [historyReloadSerial, loadMessages]);
+
+  const syncHistoryWhileBrowsing = useCallback(async () => {
+    if (historySyncRef.current || historyBusyRef.current) return;
+    const scope = editScopeRef.current;
+    if (!scope) return;
+    historySyncRef.current = true;
+    try {
+      const next = await internalChatApi.getHistoryVisibility(thread.id);
+      if (editScopeRef.current !== scope || !validHistoryState(next)) return;
+      if (historyRevisionRef.current !== null && next.revision < historyRevisionRef.current) return;
+      const changed = historyRevisionRef.current !== null && next.revision !== historyRevisionRef.current;
+      historyRevisionRef.current = next.revision;
+      setHistoryState(next);
+      if (changed) resetHistoryView();
+    } catch { /* Existing conversation remains available; next refresh can retry. */ }
+    finally { historySyncRef.current = false; }
+  }, [resetHistoryView, thread.id]);
 
   useEffect(() => {
     const connection = createNotificationsHubConnection();
-    connection.on(REALTIME_TASK_JOURNAL_CHANGED_EVENT, () => { if (!hasNewer) void loadMessages(); });
+    connection.on(REALTIME_TASK_JOURNAL_CHANGED_EVENT, () => {
+      if (!hasNewer) void loadMessages(); else void syncHistoryWhileBrowsing();
+    });
     connection.on(REALTIME_USER_NOTIFICATION_CREATED_EVENT, () => undefined);
     void connection.start().catch(() => undefined);
     return () => { void stopNotificationsHubConnection(connection); };
-  }, [hasNewer, loadMessages]);
+  }, [hasNewer, loadMessages, syncHistoryWhileBrowsing]);
+
+  const prepareHistoryAction = async () => {
+    if (historyBusyRef.current || sending || editInFlightRef.current
+        || editingRef.current && historyState?.hiddenThroughMessageId == null) return;
+    const scope = editScopeRef.current;
+    if (!scope) return;
+    historyBusyRef.current = true; setHistoryBusy(true);
+    try {
+      const current = await internalChatApi.getHistoryVisibility(thread.id);
+      if (editScopeRef.current !== scope) return;
+      if (!validHistoryState(current)) throw new Error('Не удалось проверить состояние истории.');
+      if (historyRevisionRef.current !== null && current.revision < historyRevisionRef.current)
+        throw new Error('История уже изменилась. Повторите проверку.');
+      const changed = historyRevisionRef.current !== null && historyRevisionRef.current !== current.revision;
+      historyRevisionRef.current = current.revision; setHistoryState(current);
+      if (changed) resetHistoryView();
+      setHistoryPending({ cutoff: current.hiddenThroughMessageId === null ? current.latestMessageId : null,
+        revision: current.revision, attempted: false });
+    } catch (error) { if (editScopeRef.current === scope) showError(error); }
+    finally { if (editScopeRef.current === scope) { historyBusyRef.current = false; setHistoryBusy(false); } }
+  };
+
+  const confirmHistoryAction = async () => {
+    const pending = historyPending;
+    const scope = editScopeRef.current;
+    if (!pending || !scope || historyBusyRef.current) return;
+    historyBusyRef.current = true; setHistoryBusy(true);
+    try {
+      const result = await internalChatApi.setHistoryVisibility(thread.id, pending.cutoff, pending.revision);
+      if (editScopeRef.current !== scope) return;
+      if (!validHistoryState(result) || result.revision !== pending.revision + 1 || result.hiddenThroughMessageId !== pending.cutoff)
+        throw new Error('Не удалось подтвердить изменение истории.');
+      historyRevisionRef.current = result.revision; setHistoryState(result); setHistoryPending(null);
+      resetHistoryView(); onThreadChanged?.();
+    } catch (error) {
+      if (editScopeRef.current === scope) { setHistoryPending({ ...pending, attempted: true }); showError(error); }
+    } finally { if (editScopeRef.current === scope) { historyBusyRef.current = false; setHistoryBusy(false); } }
+  };
+
+  const cancelHistoryAction = async () => {
+    const pending = historyPending;
+    const scope = editScopeRef.current;
+    if (!pending || !scope || historyBusyRef.current) return;
+    if (!pending.attempted) { setHistoryPending(null); return; }
+    historyBusyRef.current = true; setHistoryBusy(true);
+    try {
+      const current = await internalChatApi.getHistoryVisibility(thread.id);
+      if (editScopeRef.current !== scope) return;
+      if (!validHistoryState(current)) throw new Error('Не удалось проверить состояние истории.');
+      if (historyRevisionRef.current !== null && current.revision < historyRevisionRef.current)
+        throw new Error('История уже изменилась. Повторите проверку.');
+      historyRevisionRef.current = current.revision; setHistoryState(current); setHistoryPending(null);
+      resetHistoryView(); onThreadChanged?.();
+    } catch (error) { if (editScopeRef.current === scope) showError(error); }
+    finally { if (editScopeRef.current === scope) { historyBusyRef.current = false; setHistoryBusy(false); } }
+  };
 
   const handleMessagesScroll = () => {
     const container = messagesContainerRef.current;
@@ -501,6 +628,11 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
   const submit = async () => {
     if (editInFlightRef.current) return;
     if (editing) {
+      if (historyState?.hiddenThroughMessageId !== null && historyState?.hiddenThroughMessageId !== undefined
+          && editing.id <= historyState.hiddenThroughMessageId) {
+        toast.error('Сообщение скрыто. Восстановите историю, чтобы сохранить редактирование.');
+        return;
+      }
       const scope = editScopeRef.current;
       if (!text.trim() || sending || !scope) return;
       const revision = editRevisionRef.current;
@@ -668,12 +800,27 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
           setSearchOpen((value) => !value);
         }} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Поиск"><Search className="h-4 w-4" /></button>
         {(thread.kind === 'channel' || thread.kind === 'task') && thread.role === 'owner' ? <button type="button" onClick={() => { setMemberUserIds(thread.memberUserIds ?? []); setMembersOpen(true); }} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Участники чата" title="Участники чата"><Users className="h-4 w-4" /></button> : null}
+        <button type="button" onClick={() => void prepareHistoryAction()} disabled={loading || historyBusy || sending
+          || editing !== null && historyState?.hiddenThroughMessageId == null || historyPending !== null}
+          className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+          aria-label={historyState && historyState.hiddenThroughMessageId !== null ? 'Восстановить историю' : 'Скрыть историю у себя'}
+          title={historyState && historyState.hiddenThroughMessageId !== null ? 'Восстановить историю' : 'Скрыть историю у себя'}><EyeOff className="h-4 w-4" /></button>
         <select value={thread.notificationMode} onChange={(event) => void setMode(event.target.value as InternalChatNotificationMode)} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-600" aria-label="Уведомления чата">
           <option value="all">Все уведомления</option>
           <option value="mentions">Только упоминания</option>
           <option value="muted">Отключены</option>
         </select>
       </header>
+
+      {historyState && historyState.hiddenThroughMessageId !== null && !historyPending ? <div className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">История скрыта только у вас. Её можно восстановить.</div> : null}
+      {editing && historyState?.hiddenThroughMessageId !== null && historyState?.hiddenThroughMessageId !== undefined
+        && editing.id <= historyState.hiddenThroughMessageId ? <div role="status" className="border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-slate-700">Редактируемое сообщение скрыто. Текст сохранён; восстановите историю, чтобы продолжить редактирование.</div> : null}
+      {historyPending ? <div role="status" className="space-y-2 border-b border-amber-200 bg-amber-50 px-3 py-2 text-sm text-slate-700">
+        <p>{historyPending.attempted ? 'Не удалось подтвердить изменение. Повторите действие или проверьте состояние.'
+          : historyPending.cutoff === null ? 'Восстановить скрытую историю для вас?' : 'Скрыть историю только у вас? Другие участники сохранят доступ, историю можно восстановить.'}</p>
+        <div className="flex gap-2"><button type="button" disabled={historyBusy} onClick={() => void confirmHistoryAction()} className="rounded bg-blue-600 px-3 py-1.5 text-white disabled:opacity-50">{historyPending.attempted ? 'Повторить подтверждение' : historyPending.cutoff === null ? 'Восстановить' : 'Скрыть у меня'}</button>
+          <button type="button" disabled={historyBusy} onClick={() => void cancelHistoryAction()} className="rounded border border-slate-300 px-3 py-1.5 disabled:opacity-50">{historyPending.attempted ? 'Проверить состояние' : 'Отмена'}</button></div>
+      </div> : null}
 
       {searchOpen ? (
         <div className="grid gap-2 border-b border-slate-200 bg-slate-50 p-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_180px_145px_145px_auto_auto]">

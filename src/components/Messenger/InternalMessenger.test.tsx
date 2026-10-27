@@ -11,6 +11,8 @@ const chatApiMock = vi.hoisted(() => ({
   openTask: vi.fn(),
   updateTaskGuests: vi.fn(),
   setPersonalState: vi.fn(),
+  getHistoryVisibility: vi.fn(),
+  setHistoryVisibility: vi.fn(),
   getMessages: vi.fn(),
   markRead: vi.fn(),
   sendMessage: vi.fn(),
@@ -97,6 +99,7 @@ describe('InternalMessenger', () => {
     chatApiMock.getMessages.mockResolvedValue({ items: [message], hasMore: false, nextBeforeId: 22 });
     chatApiMock.markRead.mockResolvedValue(undefined);
     chatApiMock.setPersonalState.mockResolvedValue(undefined);
+    chatApiMock.getHistoryVisibility.mockResolvedValue({ hiddenThroughMessageId: null, revision: 0, latestMessageId: 22 });
     chatApiMock.updateTaskGuests.mockResolvedValue(undefined);
     chatApiMock.sendMessage.mockResolvedValue({ ...message, id: 23, authorUserId: 7, authorName: 'Я', text: 'Готово' });
     chatApiMock.getPendingSends.mockResolvedValue({ status: 'pending', items: [] });
@@ -226,6 +229,162 @@ describe('InternalMessenger', () => {
 
     await waitFor(() => expect(chatApiMock.sendMessage).toHaveBeenCalledWith(12, 'Готово', [], null, [], expect.any(String)));
     expect(await screen.findByText('Готово')).toBeTruthy();
+  });
+
+  it.each(['messenger', 'task'] as const)('hides and restores only personal history while preserving the draft: %s', async (host) => {
+    const threadId = host === 'task' ? 44 : thread.id;
+    if (host === 'task') chatApiMock.openTask.mockResolvedValue({ ...thread, id: threadId, kind: 'task', taskJournalItemId: 101 });
+    let hidden: number | null = null;
+    let revision = 0;
+    chatApiMock.getMessages.mockImplementation(async () => ({ items: hidden === null ? [message] : [], hasMore: false,
+      historyHiddenThroughMessageId: hidden, historyVisibilityRevision: revision }));
+    chatApiMock.getHistoryVisibility.mockImplementation(async () => ({ hiddenThroughMessageId: hidden, revision, latestMessageId: 22 }));
+    chatApiMock.setHistoryVisibility.mockImplementation(async (_id: number, cutoff: number | null, expected: number) => {
+      expect(expected).toBe(revision); hidden = cutoff; revision += 1;
+      return { hiddenThroughMessageId: hidden, revision, latestMessageId: 22 };
+    });
+    render(host === 'task' ? <TaskChatPanel taskId={101} /> : <InternalMessenger />);
+    const editor = await screen.findByPlaceholderText('Напишите сообщение…');
+    fireEvent.change(editor, { target: { value: 'Незавершённый ответ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Скрыть историю у себя' }));
+    expect(await screen.findByText(/Другие участники сохранят доступ/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Скрыть у меня' }));
+    expect(await screen.findByText('История скрыта только у вас. Её можно восстановить.')).toBeTruthy();
+    expect((editor as HTMLTextAreaElement).value).toBe('Незавершённый ответ');
+    expect(chatApiMock.setHistoryVisibility).toHaveBeenCalledWith(threadId, 22, 0);
+    fireEvent.click(screen.getByRole('button', { name: 'Восстановить историю' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Восстановить' }));
+    await waitFor(() => expect(chatApiMock.setHistoryVisibility).toHaveBeenCalledWith(threadId, null, 1));
+    expect((editor as HTMLTextAreaElement).value).toBe('Незавершённый ответ');
+  });
+
+  it('retries an uncertain history action with the original watermark and revision', async () => {
+    chatApiMock.setHistoryVisibility.mockRejectedValueOnce(new Error('Ответ потерян'))
+      .mockResolvedValueOnce({ hiddenThroughMessageId: 22, revision: 1, latestMessageId: 23 });
+    render(<InternalMessenger />);
+    await screen.findByText('документ');
+    fireEvent.click(screen.getByRole('button', { name: 'Скрыть историю у себя' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Скрыть у меня' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Повторить подтверждение' }));
+    await waitFor(() => expect(chatApiMock.setHistoryVisibility).toHaveBeenCalledTimes(2));
+    expect(chatApiMock.setHistoryVisibility).toHaveBeenNthCalledWith(1, 12, 22, 0);
+    expect(chatApiMock.setHistoryVisibility).toHaveBeenNthCalledWith(2, 12, 22, 0);
+    expect(chatApiMock.getHistoryVisibility).toHaveBeenCalledTimes(1);
+  });
+
+  it('reconciles an uncertain history action without issuing another write', async () => {
+    chatApiMock.getHistoryVisibility.mockResolvedValueOnce({ hiddenThroughMessageId: null, revision: 0, latestMessageId: 22 })
+      .mockResolvedValueOnce({ hiddenThroughMessageId: 22, revision: 1, latestMessageId: 23 });
+    chatApiMock.setHistoryVisibility.mockRejectedValueOnce(new Error('Ответ потерян'));
+    render(<InternalMessenger />);
+    await screen.findByText('документ');
+    fireEvent.click(screen.getByRole('button', { name: 'Скрыть историю у себя' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Скрыть у меня' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Проверить состояние' }));
+    expect(await screen.findByText('История скрыта только у вас. Её можно восстановить.')).toBeTruthy();
+    expect(chatApiMock.setHistoryVisibility).toHaveBeenCalledTimes(1);
+    expect(chatApiMock.getHistoryVisibility).toHaveBeenCalledTimes(2);
+  });
+
+  it('drops previously visible messages after another tab hides history and keeps the draft', async () => {
+    chatApiMock.getMessages.mockResolvedValueOnce({ items: [message], hasMore: false,
+      historyHiddenThroughMessageId: null, historyVisibilityRevision: 0 });
+    render(<InternalMessenger />);
+    const editor = await screen.findByPlaceholderText('Напишите сообщение…');
+    await screen.findByText('документ');
+    fireEvent.change(editor, { target: { value: 'Черновик остаётся' } });
+    chatApiMock.getMessages.mockResolvedValue({ items: [], hasMore: false,
+      historyHiddenThroughMessageId: 22, historyVisibilityRevision: 1 });
+    const handlers = connectionMock.on.mock.calls.filter(([name]) => name === 'taskJournalChanged').map(([, handler]) => handler);
+    await act(async () => { handlers.forEach((handler) => handler()); });
+    expect(await screen.findByText('История скрыта только у вас. Её можно восстановить.')).toBeTruthy();
+    expect(within(screen.getByLabelText('Сообщения чата')).queryByText('документ')).toBeNull();
+    expect((editor as HTMLTextAreaElement).value).toBe('Черновик остаётся');
+  });
+
+  it('does not replace newer history state with a delayed action preparation response', async () => {
+    chatApiMock.getMessages.mockResolvedValueOnce({ items: [message], hasMore: false,
+      historyHiddenThroughMessageId: null, historyVisibilityRevision: 0 });
+    let finishOldState: (state: { hiddenThroughMessageId: number | null; revision: number; latestMessageId: number }) => void = () => undefined;
+    chatApiMock.getHistoryVisibility.mockImplementationOnce(() => new Promise((resolve) => { finishOldState = resolve; }));
+    render(<InternalMessenger />);
+    await screen.findByText('документ');
+    fireEvent.click(screen.getByRole('button', { name: 'Скрыть историю у себя' }));
+    await waitFor(() => expect(chatApiMock.getHistoryVisibility).toHaveBeenCalledTimes(1));
+    chatApiMock.getMessages.mockResolvedValue({ items: [], hasMore: false,
+      historyHiddenThroughMessageId: 22, historyVisibilityRevision: 1 });
+    const handlers = connectionMock.on.mock.calls.filter(([name]) => name === 'taskJournalChanged').map(([, handler]) => handler);
+    await act(async () => { handlers.forEach((handler) => handler()); });
+    await screen.findByText('История скрыта только у вас. Её можно восстановить.');
+    await act(async () => { finishOldState({ hiddenThroughMessageId: null, revision: 0, latestMessageId: 22 }); });
+    expect(screen.queryByRole('button', { name: 'Скрыть у меня' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Восстановить историю' })).toBeTruthy();
+    expect(toastMock.error).toHaveBeenCalledWith('История уже изменилась. Повторите проверку.');
+    expect(chatApiMock.setHistoryVisibility).not.toHaveBeenCalled();
+  });
+
+  it('ignores a delayed history action after switching away and reopening the same chat', async () => {
+    const second = { ...thread, id: 44, name: 'Второй канал', lastMessagePreview: 'Второе сообщение' };
+    chatApiMock.getThreads.mockResolvedValue([thread, second]);
+    chatApiMock.getMessages.mockImplementation(async (id: number) => ({
+      items: [id === 44 ? { ...message, id: 44, threadId: 44, text: 'Второе сообщение' } : message],
+      hasMore: false, historyHiddenThroughMessageId: null, historyVisibilityRevision: 0,
+    }));
+    let finishOldState: (state: { hiddenThroughMessageId: number | null; revision: number; latestMessageId: number }) => void = () => undefined;
+    chatApiMock.getHistoryVisibility.mockImplementationOnce(() => new Promise((resolve) => { finishOldState = resolve; }));
+    render(<InternalMessenger />);
+    await screen.findByText('документ');
+    fireEvent.click(screen.getByRole('button', { name: 'Скрыть историю у себя' }));
+    await waitFor(() => expect(chatApiMock.getHistoryVisibility).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: /^Второй канал/ }));
+    await within(screen.getByLabelText('Сообщения чата')).findByText('Второе сообщение');
+    fireEvent.click(screen.getByRole('button', { name: /^Судебная команда/ }));
+    await screen.findByText('документ');
+    await act(async () => { finishOldState({ hiddenThroughMessageId: null, revision: 0, latestMessageId: 22 }); });
+    expect(screen.queryByRole('button', { name: 'Скрыть у меня' })).toBeNull();
+    expect(chatApiMock.setHistoryVisibility).not.toHaveBeenCalled();
+  });
+
+  it('preserves an unsaved edit and the separate draft when another tab hides the edited message', async () => {
+    const mine = { ...message, authorUserId: 7, authorName: 'Я', text: 'Моё сообщение' };
+    chatApiMock.getMessages.mockResolvedValueOnce({ items: [mine], hasMore: false,
+      historyHiddenThroughMessageId: null, historyVisibilityRevision: 0 });
+    render(<InternalMessenger />);
+    await screen.findByText(mine.text);
+    const editor = screen.getByPlaceholderText('Напишите сообщение…') as HTMLTextAreaElement;
+    fireEvent.change(editor, { target: { value: 'Обычный черновик' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Действия' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать' }));
+    fireEvent.change(editor, { target: { value: 'Несохранённая правка' } });
+    chatApiMock.getMessages.mockResolvedValue({ items: [], hasMore: false,
+      historyHiddenThroughMessageId: 22, historyVisibilityRevision: 1 });
+    const handlers = connectionMock.on.mock.calls.filter(([name]) => name === 'taskJournalChanged').map(([, handler]) => handler);
+    await act(async () => { handlers.forEach((handler) => handler()); });
+    expect(await screen.findByText(/Редактируемое сообщение скрыто/)).toBeTruthy();
+    expect(editor.value).toBe('Несохранённая правка');
+    expect(sessionStorage.getItem('payplanner.chatDraft.v1.7.12')).toBe('Обычный черновик');
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить' }));
+    expect(chatApiMock.editMessage).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Восстановить историю' })).not.toHaveProperty('disabled', true);
+  });
+
+  it('preserves an unresolved reply send identity when history changes in another tab', async () => {
+    const key = '9914bb8f-e85a-4cc8-a4a1-b6d8eef2cc1c';
+    sessionStorage.setItem('payplanner.chatDraft.v1.7.12', 'Ответ, ожидающий подтверждения');
+    sessionStorage.setItem('payplanner.chatSend.v1.7.12', JSON.stringify({ id: key,
+      text: 'Ответ, ожидающий подтверждения', replyToId: 22, files: [] }));
+    chatApiMock.getMessages.mockResolvedValueOnce({ items: [message], hasMore: false,
+      historyHiddenThroughMessageId: null, historyVisibilityRevision: 0 });
+    render(<InternalMessenger />);
+    await screen.findByDisplayValue('Ответ, ожидающий подтверждения');
+    chatApiMock.getMessages.mockResolvedValue({ items: [], hasMore: false,
+      historyHiddenThroughMessageId: 22, historyVisibilityRevision: 1 });
+    const handlers = connectionMock.on.mock.calls.filter(([name]) => name === 'taskJournalChanged').map(([, handler]) => handler);
+    await act(async () => { handlers.forEach((handler) => handler()); });
+    await screen.findByText('История скрыта только у вас. Её можно восстановить.');
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить' }));
+    await waitFor(() => expect(chatApiMock.sendMessage).toHaveBeenCalledWith(12,
+      'Ответ, ожидающий подтверждения', [], 22, [], key));
   });
 
   it.each(['messenger', 'task'] as const)('keeps IME confirmation in the draft and sends only ordinary Enter: %s', async (host) => {

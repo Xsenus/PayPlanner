@@ -8539,10 +8539,15 @@ public class TasksController : ControllerBase
             .ToDictionaryAsync(thread => thread.TaskJournalItemId!.Value, ct);
         if (threads.Count == 0) return;
 
+        await using var transaction = _db.Database.CurrentTransaction is null
+            ? await _db.Database.BeginTransactionAsync(ct) : null;
+        var locked = new HashSet<int>();
+        foreach (var threadId in threads.Values.Select(thread => thread.Id).Distinct().OrderBy(id => id))
+            if (await InternalChatThreadLock.AcquireAsync(_db, threadId, ct)) locked.Add(threadId);
         var now = DateTime.UtcNow;
         foreach (var item in relevant)
         {
-            if (!threads.TryGetValue(item.TaskId, out var thread)) continue;
+            if (!threads.TryGetValue(item.TaskId, out var thread) || !locked.Contains(thread.Id)) continue;
             _db.InternalChatMessages.Add(new InternalChatMessage
             {
                 ThreadId = thread.Id,
@@ -8555,6 +8560,7 @@ public class TasksController : ControllerBase
             thread.UpdatedAt = now;
         }
         await _db.SaveChangesAsync(ct);
+        if (transaction is not null) await transaction.CommitAsync(ct);
     }
 
     private async Task SynchronizeExistingTaskChatMembersAsync(

@@ -53,7 +53,7 @@ export function createPlan({ root, archive, revision, operator, env = process.en
   const baseline = JSON.parse(readFileSync(join(root, 'scripts/deployment-baseline.json'), 'utf8'));
   assert.equal(baseline.expectedProtectedTables.length, 16);
   assert.equal(baseline.expectedAddedProtectedTables.length, 0);
-  assert.ok([null, '20261027005432_AddPaymentCreateAttempts'].includes(baseline.expectedMigration), 'Only the reviewed additive migration may be admitted');
+  assert.ok([null, '20261027005432_AddPaymentCreateAttempts', '20261027005432_AddPaymentCreateAttempts+20261027014154_AddPersonalChatHistory'].includes(baseline.expectedMigration), 'Only the reviewed additive migrations may be admitted');
   const packageRoot = join(root, env.OUT_DIR || 'out');
   const manifest = JSON.parse(readFileSync(join(packageRoot, 'deployment-manifest.json'), 'utf8'));
   assert.equal(manifest.revision, revision);

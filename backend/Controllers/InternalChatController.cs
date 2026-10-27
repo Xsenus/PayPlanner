@@ -99,19 +99,28 @@ public sealed partial class InternalChatController : ControllerBase
                 UnreadCount = _db.InternalChatMessages.Count(message => message.ThreadId == member.ThreadId
                     && message.DeletedAt == null
                     && message.AuthorUserId != userId
+                    && message.Id > (member.HistoryHiddenThroughMessageId ?? 0)
                     && message.Id > (member.LastReadMessageId ?? 0)),
                 FirstUnreadMessageId = _db.InternalChatMessages
                     .Where(message => message.ThreadId == member.ThreadId
                         && message.DeletedAt == null
                         && message.AuthorUserId != userId
+                        && message.Id > (member.HistoryHiddenThroughMessageId ?? 0)
                         && message.Id > (member.LastReadMessageId ?? 0))
                     .OrderBy(message => message.Id)
                     .Select(message => (int?)message.Id)
                     .FirstOrDefault(),
-                LatestMessage = _db.InternalChatMessages
-                    .Where(message => message.ThreadId == member.ThreadId && message.DeletedAt == null)
+                LatestMessageText = _db.InternalChatMessages
+                    .Where(message => message.ThreadId == member.ThreadId && message.DeletedAt == null
+                        && message.Id > (member.HistoryHiddenThroughMessageId ?? 0))
                     .OrderByDescending(message => message.Id)
-                    .Select(message => new { message.Text, message.CreatedAt })
+                    .Select(message => message.Text)
+                    .FirstOrDefault(),
+                LatestMessageAt = _db.InternalChatMessages
+                    .Where(message => message.ThreadId == member.ThreadId && message.DeletedAt == null
+                        && message.Id > (member.HistoryHiddenThroughMessageId ?? 0))
+                    .OrderByDescending(message => message.Id)
+                    .Select(message => (DateTime?)message.CreatedAt)
                     .FirstOrDefault(),
                 DirectName = member.Thread.Kind == InternalChatThreadKinds.Direct
                     ? ActiveAuthorizedMembers()
@@ -136,8 +145,8 @@ public sealed partial class InternalChatController : ControllerBase
                 row.MemberUserIds,
                 row.GuestUserIds,
                 row.UnreadCount,
-                row.LatestMessage is null ? null : MessagePreview(row.LatestMessage.Text),
-                AsUtc(row.LatestMessage?.CreatedAt),
+                row.LatestMessageText is null ? null : MessagePreview(row.LatestMessageText),
+                AsUtc(row.LatestMessageAt),
                 AsUtc(thread.CreatedAt),
                 row.LastReadMessageId,
                 row.FirstUnreadMessageId);
@@ -291,9 +300,11 @@ public sealed partial class InternalChatController : ControllerBase
             mine.HiddenAfterMessageId = null;
             mine.IsArchived = false;
             await _db.SaveChangesAsync(ct);
-            var (unreadCount, firstUnreadMessageId) = await GetUnreadSummaryAsync(existing.Id, userId.Value, mine.LastReadMessageId, ct);
+            var (unreadCount, firstUnreadMessageId) = await GetUnreadSummaryAsync(existing.Id, userId.Value, mine.LastReadMessageId, mine.HistoryHiddenThroughMessageId, ct);
+            var visibleAt = await GetLastVisibleMessageAtAsync(existing.Id, mine.HistoryHiddenThroughMessageId, ct);
             return Ok(ToThreadDto(existing, mine.Role, mine.NotificationMode, DisplayName(other),
-                lastReadMessageId: mine.LastReadMessageId, unreadCount: unreadCount, firstUnreadMessageId: firstUnreadMessageId));
+                lastReadMessageId: mine.LastReadMessageId, unreadCount: unreadCount, firstUnreadMessageId: firstUnreadMessageId,
+                hiddenThroughMessageId: mine.HistoryHiddenThroughMessageId, lastVisibleMessageAt: visibleAt));
         }
 
         var current = await _db.Users.AsNoTracking().FirstAsync(user => user.Id == userId, ct);
@@ -326,9 +337,11 @@ public sealed partial class InternalChatController : ControllerBase
             mine.HiddenAfterMessageId = null;
             mine.IsArchived = false;
             await _db.SaveChangesAsync(ct);
-            var (unreadCount, firstUnreadMessageId) = await GetUnreadSummaryAsync(existing.Id, userId.Value, mine.LastReadMessageId, ct);
+            var (unreadCount, firstUnreadMessageId) = await GetUnreadSummaryAsync(existing.Id, userId.Value, mine.LastReadMessageId, mine.HistoryHiddenThroughMessageId, ct);
+            var visibleAt = await GetLastVisibleMessageAtAsync(existing.Id, mine.HistoryHiddenThroughMessageId, ct);
             return Ok(ToThreadDto(existing, mine.Role, mine.NotificationMode, DisplayName(other),
-                lastReadMessageId: mine.LastReadMessageId, unreadCount: unreadCount, firstUnreadMessageId: firstUnreadMessageId));
+                lastReadMessageId: mine.LastReadMessageId, unreadCount: unreadCount, firstUnreadMessageId: firstUnreadMessageId,
+                hiddenThroughMessageId: mine.HistoryHiddenThroughMessageId, lastVisibleMessageAt: visibleAt));
         }
         await _realtime.PublishTaskJournalChangedAsync(ct);
         return CreatedAtAction(nameof(GetMessages), new { threadId = thread.Id }, ToThreadDto(thread, "member", InternalChatNotificationModes.All, DisplayName(other)));
@@ -397,9 +410,11 @@ public sealed partial class InternalChatController : ControllerBase
             currentMember.HiddenAfterMessageId = null;
             await _db.SaveChangesAsync(ct);
         }
-        var (unreadCount, firstUnreadMessageId) = await GetUnreadSummaryAsync(thread.Id, userId.Value, currentMember.LastReadMessageId, ct);
+        var (unreadCount, firstUnreadMessageId) = await GetUnreadSummaryAsync(thread.Id, userId.Value, currentMember.LastReadMessageId, currentMember.HistoryHiddenThroughMessageId, ct);
+        var visibleAt = await GetLastVisibleMessageAtAsync(thread.Id, currentMember.HistoryHiddenThroughMessageId, ct);
         return Ok(ToThreadDto(thread, currentMember.Role, currentMember.NotificationMode, isArchived: currentMember.IsArchived,
-            lastReadMessageId: currentMember.LastReadMessageId, unreadCount: unreadCount, firstUnreadMessageId: firstUnreadMessageId));
+            lastReadMessageId: currentMember.LastReadMessageId, unreadCount: unreadCount, firstUnreadMessageId: firstUnreadMessageId,
+            hiddenThroughMessageId: currentMember.HistoryHiddenThroughMessageId, lastVisibleMessageAt: visibleAt));
     }
 
     [HttpGet("threads/{threadId:int}/messages")]
@@ -417,10 +432,14 @@ public sealed partial class InternalChatController : ControllerBase
     {
         var userId = CurrentUserId();
         if (userId is null) return Unauthorized();
-        if (!await IsMemberAsync(threadId, userId.Value, ct)) return Forbid();
+        var history = await ActiveAuthorizedMembers().Where(member => member.ThreadId == threadId && member.UserId == userId.Value)
+            .Select(member => new { member.HistoryHiddenThroughMessageId, member.HistoryVisibilityRevision })
+            .SingleOrDefaultAsync(ct);
+        if (history is null) return Forbid();
 
         var take = Math.Clamp(limit, 1, PageSize);
-        var query = _db.InternalChatMessages.AsNoTracking().Where(message => message.ThreadId == threadId);
+        var query = _db.InternalChatMessages.AsNoTracking().Where(message => message.ThreadId == threadId
+            && message.Id > (history.HistoryHiddenThroughMessageId ?? 0));
         if (beforeId is > 0 && afterId.HasValue) return BadRequest("Выберите одно направление загрузки сообщений.");
         if (beforeId is > 0) query = query.Where(message => message.Id < beforeId.Value);
         if (afterId.HasValue) query = query.Where(message => message.Id > Math.Max(afterId.Value, 0));
@@ -450,20 +469,26 @@ public sealed partial class InternalChatController : ControllerBase
         if (hasNextPage) rows.RemoveAt(rows.Count - 1);
         if (!afterId.HasValue) rows.Reverse();
         var hasMore = afterId.HasValue && rows.Count > 0
-            ? await _db.InternalChatMessages.AnyAsync(message => message.ThreadId == threadId && message.Id < rows[0].Id, ct)
+            ? await _db.InternalChatMessages.AnyAsync(message => message.ThreadId == threadId
+                && message.Id > (history.HistoryHiddenThroughMessageId ?? 0) && message.Id < rows[0].Id, ct)
             : hasNextPage;
         var readStates = await ActiveAuthorizedMembers()
             .Where(member => member.ThreadId == threadId && member.LastReadMessageId.HasValue)
             .Select(member => new { member.UserId, LastReadMessageId = member.LastReadMessageId!.Value })
             .ToListAsync(ct);
+        if (!await ActiveAuthorizedMembers().AnyAsync(member => member.ThreadId == threadId && member.UserId == userId.Value
+                && member.HistoryVisibilityRevision == history.HistoryVisibilityRevision, ct))
+            return Conflict(new { message = "История изменилась. Обновите переписку." });
         return Ok(new InternalChatMessagePageDto(
             rows.Select(message => MapMessage(message, readStates
                 .Where(state => state.UserId != message.AuthorUserId && state.LastReadMessageId >= message.Id)
                 .Select(state => state.UserId)
-                .ToList())).ToList(),
+                .ToList(), history.HistoryHiddenThroughMessageId)).ToList(),
             hasMore,
             rows.FirstOrDefault()?.Id,
-            afterId.HasValue && hasNextPage));
+            afterId.HasValue && hasNextPage,
+            history.HistoryHiddenThroughMessageId,
+            history.HistoryVisibilityRevision));
     }
 
     [HttpPost("threads/{threadId:int}/messages")]
@@ -493,7 +518,8 @@ public sealed partial class InternalChatController : ControllerBase
         {
             reply = await _db.InternalChatMessages
                 .FirstOrDefaultAsync(message => message.Id == request.ReplyToMessageId && message.ThreadId == threadId && message.DeletedAt == null, ct);
-            if (reply is null) return BadRequest("Сообщение для ответа не найдено.");
+            if (reply is null || !await IsHistoryMessageVisibleAsync(threadId, reply.Id, userId.Value, ct))
+                return BadRequest("Сообщение для ответа не найдено.");
         }
 
         var mentionIds = ParseMentionIds(text, request.MentionUserIds);
@@ -565,6 +591,8 @@ public sealed partial class InternalChatController : ControllerBase
             if (await _db.InternalChatThreads.Where(item => item.Id == threadId)
                     .ExecuteUpdateAsync(set => set.SetProperty(item => item.UpdatedAt, item => item.UpdatedAt), ct) != 1
                 || !await IsMemberAsync(threadId, userId.Value, ct)) throw new ChatSendAccessRevokedException();
+            if (reply is not null && !await IsHistoryMessageVisibleAsync(threadId, reply.Id, userId.Value, ct))
+                throw new ChatSendAccessRevokedException();
             if (request.ClientRequestId is { } guardedKey && await HasManagedSendAsync(threadId, userId.Value, guardedKey, ct))
                 throw new ChatSendNamespaceConflictException();
             await _db.SaveChangesAsync(ct);
@@ -639,6 +667,8 @@ public sealed partial class InternalChatController : ControllerBase
             .SingleOrDefaultAsync(ct);
         if (existing is null) return null;
         if (existing.DeletedAt is not null) return Conflict("Сообщение этой отправки уже удалено.");
+        if (!await IsHistoryMessageVisibleAsync(threadId, existing.Id, authorUserId, ct))
+            return Conflict("Сообщение уже отправлено и скрыто в вашей истории. Восстановите историю для просмотра.");
         var loaded = await LoadMessageAsync(existing.Id, ct) ?? throw new InvalidDataException("Сообщение отправки исчезло.");
         var savedFiles = loaded.Attachments.OrderBy(item => item.Id).ToArray();
         if (loaded.Text != text || loaded.ReplyToMessageId != request.ReplyToMessageId
@@ -726,6 +756,8 @@ public sealed partial class InternalChatController : ControllerBase
         var message = await _db.InternalChatMessages.Include(item => item.Mentions).FirstOrDefaultAsync(item => item.Id == messageId, ct);
         if (message is null) return NotFound();
         if (message.AuthorUserId != userId || message.DeletedAt.HasValue || message.Kind != InternalChatMessageKinds.User) return Forbid();
+        if (!await IsMemberAsync(message.ThreadId, userId.Value, ct)) return Forbid();
+        if (!await IsHistoryMessageVisibleAsync(message.ThreadId, message.Id, userId.Value, ct)) return NotFound();
         var text = (request.Text ?? string.Empty).Trim();
         if (text.Length == 0 || text.Length > 8000) return BadRequest("Введите сообщение длиной не более 8000 символов.");
         var mentionIds = ParseMentionIds(text, request.MentionUserIds);
@@ -749,6 +781,8 @@ public sealed partial class InternalChatController : ControllerBase
             .FirstOrDefaultAsync(item => item.Id == messageId, ct);
         if (message is null) return NotFound();
         if (message.AuthorUserId != userId || message.DeletedAt.HasValue || message.Kind != InternalChatMessageKinds.User) return Forbid();
+        if (!await IsMemberAsync(message.ThreadId, userId.Value, ct)) return Forbid();
+        if (!await IsHistoryMessageVisibleAsync(message.ThreadId, message.Id, userId.Value, ct)) return NotFound();
         await using var transaction = await _db.Database.BeginTransactionAsync(ct);
         // Serialize deletion against another request before resolving attachments.
         if (await _db.InternalChatMessages.Where(item => item.Id == messageId && item.DeletedAt == null)
@@ -802,6 +836,7 @@ public sealed partial class InternalChatController : ControllerBase
         if (message.AuthorUserId != userId || message.DeletedAt.HasValue || message.Kind != InternalChatMessageKinds.User)
             return Forbid();
         if (!await IsMemberAsync(message.ThreadId, userId.Value, ct)) return Forbid();
+        if (!await IsHistoryMessageVisibleAsync(message.ThreadId, message.Id, userId.Value, ct)) return NotFound();
 
         if (request.Enabled)
         {
@@ -831,6 +866,7 @@ public sealed partial class InternalChatController : ControllerBase
         var message = await _db.InternalChatMessages.AsNoTracking().FirstOrDefaultAsync(item => item.Id == messageId && item.DeletedAt == null, ct);
         if (message is null) return NotFound();
         if (!await IsMemberAsync(message.ThreadId, userId.Value, ct)) return Forbid();
+        if (!await IsHistoryMessageVisibleAsync(message.ThreadId, message.Id, userId.Value, ct)) return NotFound();
         var existing = await _db.InternalChatReactions.FirstOrDefaultAsync(item => item.MessageId == messageId && item.UserId == userId && item.Emoji == emoji, ct);
         if (existing is null) _db.InternalChatReactions.Add(new InternalChatReaction { MessageId = messageId, UserId = userId.Value, Emoji = emoji });
         else _db.InternalChatReactions.Remove(existing);
@@ -847,6 +883,7 @@ public sealed partial class InternalChatController : ControllerBase
         var message = await _db.InternalChatMessages.FirstOrDefaultAsync(item => item.Id == messageId && item.DeletedAt == null, ct);
         if (message is null) return NotFound();
         if (!await IsMemberAsync(message.ThreadId, userId.Value, ct)) return Forbid();
+        if (!await IsHistoryMessageVisibleAsync(message.ThreadId, message.Id, userId.Value, ct)) return NotFound();
         if (request.Pinned && !message.IsPinned)
         {
             var pinnedCount = await _db.InternalChatMessages.CountAsync(item => item.ThreadId == message.ThreadId && item.IsPinned && item.DeletedAt == null, ct);
@@ -867,14 +904,17 @@ public sealed partial class InternalChatController : ControllerBase
         if (userId is null) return Unauthorized();
         var member = await _db.InternalChatMembers.FirstOrDefaultAsync(item => item.ThreadId == threadId && item.UserId == userId && item.IsActive, ct);
         if (member is null) return Forbid();
+        if (!await IsMemberAsync(threadId, userId.Value, ct)) return Forbid();
         if (request.MessageId is <= 0) return BadRequest("Укажите сообщение из этого чата.");
         var latestId = request.MessageId.HasValue
             ? await _db.InternalChatMessages
-                .Where(item => item.ThreadId == threadId && item.Id == request.MessageId && item.DeletedAt == null)
+                .Where(item => item.ThreadId == threadId && item.Id == request.MessageId && item.DeletedAt == null
+                    && item.Id > (member.HistoryHiddenThroughMessageId ?? 0))
                 .Select(item => (int?)item.Id)
                 .SingleOrDefaultAsync(ct)
             : await _db.InternalChatMessages
-                .Where(item => item.ThreadId == threadId && item.DeletedAt == null)
+                .Where(item => item.ThreadId == threadId && item.DeletedAt == null
+                    && item.Id > (member.HistoryHiddenThroughMessageId ?? 0))
                 .MaxAsync(item => (int?)item.Id, ct);
         if (request.MessageId.HasValue && latestId is null) return BadRequest("Сообщение не найдено в этом чате.");
         var changed = latestId.HasValue && latestId > (member.LastReadMessageId ?? 0);
@@ -911,6 +951,7 @@ public sealed partial class InternalChatController : ControllerBase
             .FirstOrDefaultAsync(item => item.Id == attachmentId && item.Message.DeletedAt == null, ct);
         if (attachment is null) return NotFound();
         if (!await IsMemberAsync(attachment.Message.ThreadId, userId.Value, ct)) return Forbid();
+        if (!await IsHistoryMessageVisibleAsync(attachment.Message.ThreadId, attachment.Message.Id, userId.Value, ct)) return NotFound();
         if (_productStorageReader is not null)
         {
             var managed = await _productStorageReader.OpenReadAsync(LegacyStorageSources.InternalChat,
@@ -968,22 +1009,30 @@ public sealed partial class InternalChatController : ControllerBase
             ClientBillingClassification = TaskClientBillingClassification.Internal,
             CreatedAt = now
         };
-        _db.TaskJournalItems.Add(task);
-        await _db.SaveChangesAsync(ct);
-
-        var link = new InternalChatMessage
+        InternalChatMessage link;
+        await using (var transaction = await _db.Database.BeginTransactionAsync(ct))
         {
-            ThreadId = source.ThreadId,
-            AuthorUserId = userId,
-            Kind = InternalChatMessageKinds.TaskLink,
-            Text = $"Создана задача «{task.Title}»",
-            ReplyToMessageId = source.Id,
-            CreatedTaskJournalItemId = task.Id,
-            CreatedAt = now
-        };
-        _db.InternalChatMessages.Add(link);
-        source.Thread.LastMessageAt = now;
-        await _db.SaveChangesAsync(ct);
+            if (!await LockHistoryThreadAsync(source.ThreadId, userId.Value, ct)) return Forbid();
+            if (!await IsHistoryMessageVisibleAsync(source.ThreadId, source.Id, userId.Value, ct)
+                || !await _db.InternalChatMessages.AsNoTracking().AnyAsync(item => item.Id == source.Id && item.DeletedAt == null, ct)) return NotFound();
+            if (!await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Tasks, permission => permission.CanCreate, ct)) return Forbid();
+            _db.TaskJournalItems.Add(task);
+            await _db.SaveChangesAsync(ct);
+            link = new InternalChatMessage
+            {
+                ThreadId = source.ThreadId,
+                AuthorUserId = userId,
+                Kind = InternalChatMessageKinds.TaskLink,
+                Text = $"Создана задача «{task.Title}»",
+                ReplyToMessageId = source.Id,
+                CreatedTaskJournalItemId = task.Id,
+                CreatedAt = now
+            };
+            _db.InternalChatMessages.Add(link);
+            source.Thread.LastMessageAt = now;
+            await _db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        }
         if (assignee is not null && assignee.Id != userId)
             await _notifications.NotifyTaskAssignedAsync(task, DisplayName(actor), userId.Value, ct);
         await _realtime.PublishTaskJournalChangedAsync(ct);
@@ -1014,13 +1063,36 @@ public sealed partial class InternalChatController : ControllerBase
 
     private async Task<InternalChatMessageDto> MapMessageWithReadStateAsync(InternalChatMessage message, CancellationToken ct)
     {
+        var actor = CurrentUserId() ?? throw new UnauthorizedAccessException();
+        var member = await ActiveAuthorizedMembers().Where(item => item.ThreadId == message.ThreadId && item.UserId == actor)
+            .Select(item => new { item.HistoryHiddenThroughMessageId }).SingleOrDefaultAsync(ct)
+            ?? throw new UnauthorizedAccessException();
         var readBy = await ActiveAuthorizedMembers()
             .Where(member => member.ThreadId == message.ThreadId
                 && member.UserId != message.AuthorUserId
                 && member.LastReadMessageId >= message.Id)
             .Select(member => member.UserId)
             .ToListAsync(ct);
-        return MapMessage(message, readBy);
+        var dto = MapMessage(message, readBy, member.HistoryHiddenThroughMessageId);
+        if (message.Id > (member.HistoryHiddenThroughMessageId ?? 0)) return dto;
+        // A late send receipt may arrive after personal hiding. Keep its identity so
+        // the client never retries a published send, but do not return hidden content.
+        return dto with
+        {
+            AuthorUserId = null,
+            AuthorName = "История скрыта",
+            Text = string.Empty,
+            ReplyToMessageId = null,
+            ReplyPreview = null,
+            ReplyAuthorName = null,
+            CreatedTaskJournalItemId = null,
+            IsPinned = false,
+            NoReplyReminderEnabled = false,
+            Attachments = [],
+            Reactions = [],
+            MentionUserIds = [],
+            ReadByUserIds = []
+        };
     }
 
     private async Task NotifyTaskCreatedRecipientsAsync(
@@ -1099,12 +1171,13 @@ public sealed partial class InternalChatController : ControllerBase
             thread.Members.Add(new InternalChatMember { UserId = userId, Role = userId == authorId ? "owner" : "member", JoinedAt = now });
     }
 
-    private async Task<(int Count, int? FirstMessageId)> GetUnreadSummaryAsync(int threadId, int userId, int? lastReadMessageId, CancellationToken ct)
+    private async Task<(int Count, int? FirstMessageId)> GetUnreadSummaryAsync(int threadId, int userId, int? lastReadMessageId, int? hiddenThroughMessageId, CancellationToken ct)
     {
         var summary = await _db.InternalChatMessages.AsNoTracking()
             .Where(message => message.ThreadId == threadId
                 && message.DeletedAt == null
                 && message.AuthorUserId != userId
+                && message.Id > (hiddenThroughMessageId ?? 0)
                 && message.Id > (lastReadMessageId ?? 0))
             .GroupBy(message => message.ThreadId)
             .Select(group => new { Count = group.Count(), FirstMessageId = group.Min(message => message.Id) })
@@ -1112,13 +1185,18 @@ public sealed partial class InternalChatController : ControllerBase
         return summary is null ? (0, null) : (summary.Count, summary.FirstMessageId);
     }
 
-    private static InternalChatThreadDto ToThreadDto(InternalChatThread thread, string role, string mode, string? overrideName = null, bool isArchived = false, int? lastReadMessageId = null, int unreadCount = 0, int? firstUnreadMessageId = null)
+    private Task<DateTime?> GetLastVisibleMessageAtAsync(int threadId, int? hiddenThroughMessageId, CancellationToken ct)
+        => hiddenThroughMessageId is null ? Task.FromResult<DateTime?>(null) : _db.InternalChatMessages.AsNoTracking()
+            .Where(message => message.ThreadId == threadId && message.DeletedAt == null && message.Id > hiddenThroughMessageId.Value)
+            .OrderByDescending(message => message.Id).Select(message => (DateTime?)message.CreatedAt).FirstOrDefaultAsync(ct);
+
+    private static InternalChatThreadDto ToThreadDto(InternalChatThread thread, string role, string mode, string? overrideName = null, bool isArchived = false, int? lastReadMessageId = null, int unreadCount = 0, int? firstUnreadMessageId = null, int? hiddenThroughMessageId = null, DateTime? lastVisibleMessageAt = null)
         => new(thread.Id, thread.Kind, overrideName ?? thread.Name, thread.TaskJournalItemId, role, mode, isArchived,
             thread.Members.Where(member => member.IsActive).Select(member => member.UserId).ToList(),
             thread.Members.Where(member => member.IsActive && member.Role == "guest").Select(member => member.UserId).ToList(),
-            unreadCount, null, AsUtc(thread.LastMessageAt), AsUtc(thread.CreatedAt), lastReadMessageId, firstUnreadMessageId);
+            unreadCount, null, AsUtc(hiddenThroughMessageId.HasValue ? lastVisibleMessageAt : thread.LastMessageAt), AsUtc(thread.CreatedAt), lastReadMessageId, firstUnreadMessageId);
 
-    private static InternalChatMessageDto MapMessage(InternalChatMessage message, IReadOnlyList<int>? readByUserIds = null)
+    private static InternalChatMessageDto MapMessage(InternalChatMessage message, IReadOnlyList<int>? readByUserIds = null, int? hiddenThroughMessageId = null)
         => new(
             message.Id,
             message.ThreadId,
@@ -1127,8 +1205,8 @@ public sealed partial class InternalChatController : ControllerBase
             message.Kind,
             message.DeletedAt.HasValue ? string.Empty : message.Text,
             message.ReplyToMessageId,
-            message.ReplyToMessage is null ? null : MessagePreview(message.ReplyToMessage.Text),
-            message.ReplyToMessage?.AuthorUser is null ? null : DisplayName(message.ReplyToMessage.AuthorUser),
+            message.ReplyToMessage is null || message.ReplyToMessage.Id <= (hiddenThroughMessageId ?? 0) ? null : MessagePreview(message.ReplyToMessage.Text),
+            message.ReplyToMessage is null || message.ReplyToMessage.Id <= (hiddenThroughMessageId ?? 0) || message.ReplyToMessage.AuthorUser is null ? null : DisplayName(message.ReplyToMessage.AuthorUser),
             message.CreatedTaskJournalItemId,
             message.IsPinned,
             message.NextNoReplyReminderAt.HasValue,
@@ -1193,7 +1271,8 @@ public sealed partial class InternalChatController : ControllerBase
 }
 
 public sealed record InternalChatThreadDto(int Id, string Kind, string Name, int? TaskJournalItemId, string Role, string NotificationMode, bool IsArchived, IReadOnlyList<int> MemberUserIds, IReadOnlyList<int> GuestUserIds, int UnreadCount, string? LastMessagePreview, DateTime? LastMessageAt, DateTime CreatedAt, int? LastReadMessageId = null, int? FirstUnreadMessageId = null);
-public sealed record InternalChatMessagePageDto(IReadOnlyList<InternalChatMessageDto> Items, bool HasMore, int? NextBeforeId, bool HasNewer = false);
+public sealed record InternalChatMessagePageDto(IReadOnlyList<InternalChatMessageDto> Items, bool HasMore, int? NextBeforeId, bool HasNewer = false,
+    int? HistoryHiddenThroughMessageId = null, long HistoryVisibilityRevision = 0);
 public sealed record InternalChatMessageDto(int Id, int ThreadId, int? AuthorUserId, string AuthorName, string Kind, string Text, int? ReplyToMessageId, string? ReplyPreview, string? ReplyAuthorName, int? CreatedTaskJournalItemId, bool IsPinned, bool NoReplyReminderEnabled, DateTime? EditedAt, DateTime? DeletedAt, DateTime CreatedAt, IReadOnlyList<InternalChatAttachmentDto> Attachments, IReadOnlyList<InternalChatReactionDto> Reactions, IReadOnlyList<int> MentionUserIds, IReadOnlyList<int> ReadByUserIds);
 public sealed record InternalChatAttachmentDto(int Id, string FileName, string ContentType, long Size);
 public sealed record InternalChatReactionDto(string Emoji, int Count, IReadOnlyList<int> UserIds);

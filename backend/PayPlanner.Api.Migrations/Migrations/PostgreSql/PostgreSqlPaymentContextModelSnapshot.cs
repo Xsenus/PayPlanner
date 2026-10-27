@@ -6567,6 +6567,14 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<int?>("HiddenAfterMessageId")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("HistoryHiddenThroughMessageId")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("HistoryVisibilityRevision")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
                     b.Property<bool>("IsActive")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")

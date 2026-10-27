@@ -69,6 +69,8 @@ public class InternalChatMember
     public bool IsActive { get; set; } = true;
     public bool IsArchived { get; set; }
     public int? HiddenAfterMessageId { get; set; }
+    public int? HistoryHiddenThroughMessageId { get; set; }
+    public long HistoryVisibilityRevision { get; set; }
     public DateTime JoinedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }
 }
