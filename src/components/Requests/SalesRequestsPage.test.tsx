@@ -23,6 +23,9 @@ vi.mock('../../services/api', () => ({
     getSalesRequestStatuses: vi.fn(),
     getSalesRequests: vi.fn(),
     getSalesRequest: vi.fn(),
+    getSalesRequestServiceInvoice: vi.fn(),
+    getSalesRequestInvoiceCandidates: vi.fn(),
+    setSalesRequestServiceInvoice: vi.fn(),
     getTaskJournalAssignees: vi.fn(),
     searchSalesRequestClients: vi.fn(),
     getSalesRequestClientCases: vi.fn(),
@@ -95,6 +98,23 @@ describe('SalesRequestsPage', () => {
 
     expect(await screen.findByTestId('sales-request-detail')).toBeTruthy();
     expect(apiService.getSalesRequest).toHaveBeenCalledWith(7);
+  });
+
+  it.each([true, false])('shows a task link only with task access: %s', async (canOpenTasks) => {
+    vi.mocked(apiService.getSalesRequest).mockResolvedValue({
+      ...detail(),
+      tasks: [{ id: 91, title: 'Уточнить сведения', status: 'new', assigneeName: 'Аня', dueAt: '2026-10-27T09:00:00Z' }],
+    });
+    render(<SalesRequestsPage allowCreate allowEdit allowAnalytics={false} initialRequestId={7} canOpenTasks={canOpenTasks} />);
+    expect((await screen.findByTestId('sales-request-tasks')).textContent).toContain('Уточнить сведения');
+    const link = screen.queryByRole('link', { name: 'Уточнить сведения' });
+    if (canOpenTasks) {
+      expect(link?.getAttribute('href')).toBe('/tasks/91');
+      expect(link?.getAttribute('target')).toBe('_blank');
+      expect(link?.getAttribute('rel')).toContain('noopener');
+    } else {
+      expect(link).toBeNull();
+    }
   });
 
   it('does not overwrite a request changed by someone else and reloads on demand', async () => {
@@ -194,20 +214,29 @@ describe('SalesRequestsPage', () => {
     );
   });
 
-  it('requires a payment id before moving to the success status', async () => {
+  it('requests success without asking for an internal payment id', async () => {
     render(<SalesRequestsPage allowCreate allowEdit allowAnalytics={false} />);
 
     await userEvent.click(await screen.findByText('Иванов Иван'));
     const paid = await screen.findByRole('button', { name: 'Оплачено' });
-    expect((paid as HTMLButtonElement).disabled).toBe(true);
-    await userEvent.type(screen.getByLabelText('Номер платежа'), '55');
     expect((paid as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByLabelText('Номер платежа')).toBeNull();
     vi.mocked(apiService.transitionSalesRequest).mockResolvedValue(request({ statusId: 2, finalKind: 'Success', version: 1 }));
     await userEvent.click(paid);
 
     await waitFor(() =>
-      expect(apiService.transitionSalesRequest).toHaveBeenCalledWith(7, expect.objectContaining({ toStatusId: 2, paidPaymentId: 55, version: 0 })),
+      expect(apiService.transitionSalesRequest).toHaveBeenCalledWith(7, expect.objectContaining({ toStatusId: 2, version: 0 })),
     );
+    expect(vi.mocked(apiService.transitionSalesRequest).mock.calls[0][1]).not.toHaveProperty('paidPaymentId');
+  });
+
+  it('shows a refusal when the linked invoice is not fully paid', async () => {
+    vi.mocked(apiService.transitionSalesRequest).mockRejectedValue(new Error('Полная оплата связанного счёта не подтверждена.'));
+    render(<SalesRequestsPage allowCreate allowEdit allowAnalytics={false} />);
+    await userEvent.click(await screen.findByText('Иванов Иван'));
+    await userEvent.click(await screen.findByRole('button', { name: 'Оплачено' }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(vi.mocked(apiService.transitionSalesRequest).mock.calls[0][1]).not.toHaveProperty('paidPaymentId');
   });
 
   it('offers forced close when open tasks block a final status', async () => {
@@ -223,6 +252,21 @@ describe('SalesRequestsPage', () => {
     await waitFor(() =>
       expect(apiService.transitionSalesRequest).toHaveBeenLastCalledWith(7, expect.objectContaining({ toStatusId: 3, forceCloseTasks: true })),
     );
+  });
+
+  it.each([
+    'По заявке есть незакрытые задачи. Закройте их или подтвердите принудительное закрытие.',
+    'Перед успешным завершением заявки явно завершите или отмените все её открытые задачи.',
+  ])('never offers forced cancellation when open tasks block success: %s', async (message) => {
+    vi.mocked(apiService.transitionSalesRequest).mockRejectedValueOnce(
+      new Error(message),
+    );
+    render(<SalesRequestsPage allowCreate allowEdit allowAnalytics={false} />);
+    await userEvent.click(await screen.findByText('Иванов Иван'));
+    await userEvent.click(await screen.findByRole('button', { name: 'Оплачено' }));
+    await waitFor(() => expect(apiService.transitionSalesRequest).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(confirm).not.toHaveBeenCalled();
   });
 
   it('opens only the existing case tasks for a readonly request without creating or copying sales data', async () => {

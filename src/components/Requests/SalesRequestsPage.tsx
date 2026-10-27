@@ -14,6 +14,7 @@ import type {
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatLocalYMD } from '../../utils/dateUtils';
 import { SalesRequestFunnelSettings } from './SalesRequestFunnelSettings';
+import { SalesRequestInvoice } from './SalesRequestInvoice';
 import type { TaskJournalAssignee } from '../../utils/taskJournalStore';
 
 interface SalesRequestsPageProps {
@@ -23,6 +24,7 @@ interface SalesRequestsPageProps {
   allowConfigure?: boolean;
   initialRequestId?: number | null;
   currentUserId?: number | null;
+  canOpenTasks?: boolean;
   onOpenCaseTasks?: (caseId: number) => void;
 }
 
@@ -65,7 +67,7 @@ const emptyForm = () => ({
  * Раздел «Заявки»: список, создание с поиском клиента и проверкой дел, карточка с переходами по статусам.
  * Доступ задаёт серверный раздел прав «requests»; здесь только отображение и подсказки.
  */
-export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allowConfigure = false, initialRequestId = null, currentUserId = null, onOpenCaseTasks }: SalesRequestsPageProps) {
+export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allowConfigure = false, initialRequestId = null, currentUserId = null, canOpenTasks = false, onOpenCaseTasks }: SalesRequestsPageProps) {
   const toast = useToast();
   const dialog = useDialog();
   const [statuses, setStatuses] = useState<SalesRequestStatusItem[]>([]);
@@ -83,7 +85,6 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
   const [editing, setEditing] = useState<{ summary: string; type: string; source: string; amount: string; comment: string; responsibleUserId: string } | null>(null);
   const [conflict, setConflict] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [paymentId, setPaymentId] = useState('');
   const [taskForm, setTaskForm] = useState({ assigneeUserId: '', title: '' });
   const [report, setReport] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -126,7 +127,6 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
     setEditing(null);
     setConflict(false);
     setTaskForm({ assigneeUserId: '', title: '' });
-    setPaymentId('');
     return () => { sequence.current++; };
   }, [currentUserId]);
 
@@ -177,7 +177,6 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
       setEditing(null);
       setConflict(false);
       setTaskForm({ assigneeUserId: '', title: '' });
-      setPaymentId('');
     } catch (error) {
       if (sequence === detailSequence.current && actorId === caseNavigationContext.current.currentUserId) toast.error(extractDisplayErrorMessage(error, 'Не удалось открыть заявку.'), 'Заявки');
     }
@@ -201,7 +200,7 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
 
     caseNavigationPending.current = true;
     try {
-      if (editing || creating || taskForm.title.trim() || taskForm.assigneeUserId || paymentId.trim()) {
+      if (editing || creating || taskForm.title.trim() || taskForm.assigneeUserId) {
         const confirmed = await dialog.confirm({
           title: 'Перейти к задачам дела?',
           description: 'Открытые формы заявки и незавершённое поручение будут закрыты. Введённые данные не сохранятся.',
@@ -330,14 +329,13 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
         const updated = await apiService.transitionSalesRequest(detail.request.id, {
           toStatusId: target.id,
           version: detail.request.version,
-          paidPaymentId: target.finalKind === 'Success' && paymentId ? Number(paymentId) : undefined,
           forceCloseTasks: force || undefined,
         });
         await loadList();
         if (sequence === detailSequence.current) await openDetail(updated.id);
       } catch (error) {
         const message = error instanceof Error ? error.message : '';
-        if (!force && message.includes('незакрытые задачи')) {
+        if (target.finalKind !== 'Success' && !force && message.includes('незакрытые задачи')) {
           const confirmed = await dialog.confirm({
             title: 'По заявке есть незакрытые задачи',
             description: 'Принудительно закрытые задачи будут отмечены как отменённые, а не выполненные. Закрыть заявку?',
@@ -581,6 +579,10 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
           </div>
           <p className="mt-2 whitespace-pre-wrap text-sm">{detail.request.summary}</p>
           {detail.request.comment ? <p className="mt-1 text-xs text-slate-500">{detail.request.comment}</p> : null}
+          <SalesRequestInvoice key={`${detail.request.id}:${currentUserId}`} requestId={detail.request.id} version={detail.request.version}
+            canEdit={allowEdit && !finalClosed && !editing && !busy}
+            onSaved={(item, previousVersion) => setDetail((current) => current?.request.id === item.id && current.request.version === previousVersion
+              ? { ...current, request: item } : current)} />
           {onOpenCaseTasks && typeof detail.request.clientCaseId === 'number'
             && Number.isSafeInteger(detail.request.clientCaseId) && detail.request.clientCaseId > 0 ? (
               <div className="mt-2 text-sm">
@@ -631,15 +633,11 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
 
           {allowEdit && !finalClosed ? (
             <div className="mt-3 flex flex-wrap items-end gap-2 text-sm">
-              <label className="flex flex-col gap-1">
-                Платёж клиента в CRM (для «Оплачено»)
-                <input aria-label="Номер платежа" inputMode="numeric" value={paymentId} onChange={(event) => setPaymentId(event.target.value)} className="w-32 rounded-lg border border-slate-300 px-2 py-1" />
-              </label>
               {openStatuses.map((item) => (
                 <button
                   key={item.id}
                   type="button"
-                  disabled={busy || (item.finalKind === 'Success' && !paymentId)}
+                  disabled={busy}
                   onClick={() => void transition(item)}
                   className={`rounded-lg border px-2 py-1 disabled:opacity-50 ${item.finalKind === 'Failure' ? 'border-rose-300 text-rose-700' : item.finalKind === 'Success' ? 'border-emerald-300 text-emerald-700' : 'border-slate-200 text-slate-700'}`}
                 >
@@ -659,7 +657,10 @@ export function SalesRequestsPage({ allowCreate, allowEdit, allowAnalytics, allo
           <ul className="mt-1 space-y-0.5 text-sm" data-testid="sales-request-tasks">
             {detail.tasks.map((task) => (
               <li key={task.id}>
-                {task.status === 'done' ? '✅' : task.status === 'cancelled' ? '⛔' : '•'} {task.title} · {task.assigneeName} · до {task.dueAt.slice(0, 10)}
+                {task.status === 'done' ? '✅' : task.status === 'cancelled' ? '⛔' : '•'}{' '}
+                {canOpenTasks && Number.isSafeInteger(task.id) && task.id > 0 ? (
+                  <a href={`/tasks/${task.id}`} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline hover:text-blue-900">{task.title}</a>
+                ) : task.title} · {task.assigneeName} · до {task.dueAt.slice(0, 10)}
               </li>
             ))}
             {detail.tasks.length === 0 ? <li className="text-slate-500">Задач нет.</li> : null}

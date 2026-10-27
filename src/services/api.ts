@@ -11,6 +11,13 @@ import { beginCaseDocumentUpload, beginCaseDocumentGeneration, confirmCaseDocume
 import type { TaskStickerStyles } from '../utils/taskStickerStyles';
 
 export const AUTH_SESSION_EXPIRED_EVENT = 'payplanner:auth-session-expired';
+export interface SalesRequestInvoiceCandidate {
+  invoiceId: number;
+  number: string;
+  date: string;
+  sellerCompanyId: number;
+  sellerBranchId: number | null;
+}
 export interface TaskFileUploadState {
   uploadKey: string;
   fileName: string;
@@ -6297,6 +6304,20 @@ export class ApiService {
 
   async getSalesRequest(id: number) {
     return this.request<SalesRequestDetail>(`/requests/${id}`);
+  }
+
+  async getSalesRequestServiceInvoice(id: number) {
+    return this.request<{ state: 'none' | 'available' | 'unavailable'; invoice: SalesRequestInvoiceCandidate | null; allocationAmount?: number | null }>(`/requests/${id}/service-invoice`);
+  }
+
+  async getSalesRequestInvoiceCandidates(id: number, search: string, afterInvoiceId = 0) {
+    return this.request<{ items: SalesRequestInvoiceCandidate[]; hasMore: boolean }>(`/requests/${id}/invoice-candidates${buildQuery({ search, afterInvoiceId, take: 20 })}`);
+  }
+
+  async setSalesRequestServiceInvoice(id: number, version: number, invoiceId: number | null, allocationAmount: number | null = null) {
+    return this.request<SalesRequestItem>(`/requests/${id}/service-invoice`, {
+      method: 'PUT', body: JSON.stringify(invoiceId === null ? { version, remove: true } : { version, invoiceId, allocationAmount }),
+    });
   }
 
   async searchSalesRequestClients(q: string) {

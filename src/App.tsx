@@ -1355,6 +1355,7 @@ function AppContent() {
                 allowConfigure={isAdminRole}
                 initialRequestId={Number(new URLSearchParams(window.location.search).get('requestId')) || null}
                 currentUserId={user?.id ?? null}
+                canOpenTasks={Boolean(user && permissionsLoaded && permissions.tasks.canView)}
                 onOpenCaseTasks={user && permissionsLoaded && permissions.cases.canView && permissions.tasks.canView ? openRequestCaseTasks : undefined}
               />
             )
