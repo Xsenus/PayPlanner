@@ -64,8 +64,12 @@ public sealed class BoundedTestExecutionTests
         var names = new[] { "bank A", "BANK a", "bank B", "bank C", "bank D", "bank E" };
         var cases = names.Select(name => new PlannedCase(Guid.NewGuid(), method, name, 0)).ToArray();
         var profile = fixture.Plan.Execution! with { ReviewedMethods = [method] };
-        var plan = fixture.Plan with { Cases = cases, Execution = profile,
-            Timings = [new MethodTiming(method, 2 * TimeSpan.TicksPerSecond, cases.Length)] };
+        var plan = fixture.Plan with
+        {
+            Cases = cases,
+            Execution = profile,
+            Timings = [new MethodTiming(method, 2 * TimeSpan.TicksPerSecond, cases.Length)]
+        };
         var batches = ExecutionScheduling.Batches(plan, 0, batchCount: 2);
         Assert.Equal(cases.Select(row => row.Id).Order(), batches.SelectMany(batch => batch.Cases).Select(row => row.Id).Order());
         Assert.Equal(2, batches.Length);
