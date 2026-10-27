@@ -531,7 +531,7 @@ public class CashOrdersController : ControllerBase
         }
 
         var orderType = payment.Type == PaymentType.Expense ? CashOrderType.Outgoing : CashOrderType.Incoming;
-        var orderDate = (payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date).Date;
+        var orderDate = (payment.PaymentDocumentDate ?? payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date).Date;
         var order = new CashOrder
         {
             Number = await GenerateNumberAsync(orderType, orderDate, ct),
