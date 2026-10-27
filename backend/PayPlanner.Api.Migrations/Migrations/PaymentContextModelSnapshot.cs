@@ -9685,6 +9685,13 @@ namespace PayPlanner.Api.Migrations
                     b.Property<int?>("ResultClientCaseId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<decimal?>("ServiceInvoiceAllocationAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int?>("ServiceInvoiceId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Source")
                         .IsRequired()
                         .HasMaxLength(16)
@@ -9717,6 +9724,8 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("CreatedAt")
                         .HasDatabaseName("IX_SalesRequests_CreatedAt");
+
+                    b.HasIndex("ServiceInvoiceId");
 
                     b.HasIndex("ClientId", "CreatedAt")
                         .HasDatabaseName("IX_SalesRequests_Client_CreatedAt");

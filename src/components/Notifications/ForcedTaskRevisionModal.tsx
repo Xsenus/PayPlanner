@@ -333,6 +333,7 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
   const [items, setItems] = useState<ForcedTaskQueueItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [acknowledgingId, setAcknowledgingId] = useState<number | null>(null);
+  const [snoozeError, setSnoozeError] = useState<string | null>(null);
   const [timeZoneId, setTimeZoneId] = useState(() => normalizeUserTimeZoneId());
   const [deadlineChangeDueAt, setDeadlineChangeDueAt] = useState('');
   const [deadlineChangeComment, setDeadlineChangeComment] = useState('');
@@ -470,6 +471,7 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
 
   const currentItem = items[0] ?? null;
   const current = currentItem?.notification ?? null;
+  useEffect(() => { setSnoozeError(null); }, [current?.id]);
   const decisionKind = currentItem?.decisionKind ?? null;
   const decisionText = useMemo(() => current && decisionKind ? getDecisionText(current, decisionKind) : '', [current, decisionKind]);
   const approvalLatestFiles = useMemo(() => getLatestTaskFiles(approvalFiles), [approvalFiles]);
@@ -655,10 +657,14 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
   const snoozeCurrent = (minutes: number) => {
     if (!current) return;
 
-    snoozeForcedTaskActions(userId, [
+    if (!snoozeForcedTaskActions(userId, [
       getForcedTaskNotificationSnoozeKey(current.id),
       currentItem ? getQueueItemActionSnoozeKey(currentItem) : null,
-    ], minutes);
+    ], minutes)) {
+      setSnoozeError('Не удалось отложить: хранилище браузера недоступно.');
+      return;
+    }
+    setSnoozeError(null);
     setItems((previous) => previous.filter((item) => item.notification.id !== current.id));
     emitUserNotificationsChanged({
       source: 'system',
@@ -927,6 +933,7 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
                 Требует решения
               </span>
               <SnoozeMenu disabled={isSaving || approvalTaskLoading} onSnooze={snoozeCurrent} />
+              {snoozeError ? <p role="alert" className="text-sm text-red-700">{snoozeError}</p> : null}
             </div>
           </div>
 
@@ -1151,6 +1158,7 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
                 Требует решения
               </span>
               <SnoozeMenu disabled={isSaving} onSnooze={snoozeCurrent} />
+              {snoozeError ? <p role="alert" className="text-sm text-red-700">{snoozeError}</p> : null}
             </div>
           </div>
 
@@ -1295,6 +1303,7 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
           </div>
           <SnoozeMenu disabled={acknowledgingId === current.id} onSnooze={snoozeCurrent} />
         </div>
+        {snoozeError ? <p role="alert" className="mt-2 text-sm text-red-700">{snoozeError}</p> : null}
 
         <div className="mt-5 block text-sm font-semibold text-slate-700">
           {detailsTitle}

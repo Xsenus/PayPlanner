@@ -79,6 +79,9 @@ public class ProviderSpecificSqlTests
     [InlineData("seller-share-without-nowait")]
     [InlineData("seller-unbounded-addresses")]
     [InlineData("seller-unsupported-provider")]
+    [InlineData("payment-attempt-without-nowait")]
+    [InlineData("request-lock-without-nowait")]
+    [InlineData("request-access-without-nowait")]
     public void ForUpdateRegistry_RejectsUnregisteredOrUnguardedSql(string mutation)
     {
         var root = FindRepositoryRoot();
@@ -90,6 +93,8 @@ public class ProviderSpecificSqlTests
                 => "backend/Controllers/TasksController.cs",
             "seller-share-without-nowait" or "seller-unbounded-addresses" or "seller-unsupported-provider"
                 => "backend/Services/Companies/DocumentSellerLease.cs",
+            "payment-attempt-without-nowait" => "backend/Services/Payments/PaymentCreateAttemptLease.cs",
+            "request-lock-without-nowait" or "request-access-without-nowait" => "backend/Services/Requests/SalesRequestService.cs",
             _ => "backend/Services/Invoices/FinancialSourceLease.cs",
         };
         var original = relativePath == "backend/Controllers/UnexpectedLocksController.cs"
@@ -106,6 +111,8 @@ public class ProviderSpecificSqlTests
             "contract-root-unparameterized" => original.Replace("ANY({contractRoots})", "ANY(1, 2)", StringComparison.Ordinal),
             "policy-key-unparameterized" => original.Replace("{ContractTaskBillingModeSettingKey} FOR SHARE", "'tasks.contractTaskBillingMode' FOR SHARE", StringComparison.Ordinal),
             "seller-share-without-nowait" => original.Replace("FOR SHARE NOWAIT", "FOR SHARE", StringComparison.Ordinal),
+            "payment-attempt-without-nowait" or "request-lock-without-nowait" => original.Replace("FOR UPDATE NOWAIT", "FOR UPDATE", StringComparison.Ordinal),
+            "request-access-without-nowait" => original.Replace("FOR SHARE NOWAIT", "FOR SHARE", StringComparison.Ordinal),
             "seller-unbounded-addresses" => original.Replace("LIMIT 5001 FOR SHARE", "FOR SHARE", StringComparison.Ordinal),
             "seller-unsupported-provider" => original.Replace("if (!db.Database.IsNpgsql() && !db.Database.IsSqlite())", "if (false)", StringComparison.Ordinal),
             _ => throw new ArgumentOutOfRangeException(nameof(mutation)),
@@ -336,9 +343,94 @@ public class ProviderSpecificSqlTests
         Approve("backend/Services/Companies/DocumentSellerLease.cs", sellerSource, "LockRegistryAsync", registryStart, registryEnd,
             ["""await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"SystemSettings\" WHERE \"Key\" = ANY({keys}) ORDER BY \"Id\" FOR SHARE NOWAIT").ToArrayAsync(ct);"""], "FOR SHARE");
 
-        Assert.Equal(20, approved.Count(statement => statement.Contains("FOR UPDATE", StringComparison.Ordinal)));
-        Assert.Equal(4, approved.Count(statement => statement.Contains("FOR SHARE", StringComparison.Ordinal)));
-        Assert.Equal(24, approved.Count);
+        var requestSource = ReadSource("backend/Services/Requests/SalesRequestService.cs");
+        var bindStart = requestSource.IndexOf("public async Task<SalesRequestResult<SalesRequest>> SetServiceInvoiceAsync", StringComparison.Ordinal);
+        var bindEnd = requestSource.IndexOf("public async Task<SalesRequestResult<SalesRequest>> TransitionAsync", bindStart, StringComparison.Ordinal);
+        Assert.True(bindStart >= 0 && bindEnd > bindStart);
+        var bindMethod = requestSource[bindStart..bindEnd];
+        AssertOrdered(bindMethod, ".ExecuteUpdateAsync(setters => setters.SetProperty(item => item.Version, item => item.Version), ct)",
+            "await LockRequestAccessAsync(request, userId, ct)", "await LockAccountAccessAsync(userId, ct)",
+            "Distinct().OrderBy(value => value).ToArray()", "if (!await CanUseInvoiceAsync(access, candidateId))", "FROM \\\"Invoices\\\"", "Take(5001).CountAsync(ct)",
+            "FROM \\\"Payments\\\"", "LockInvoiceVisibilityAsync", "await CanUseInvoiceAsync(access, candidateId)", "IsInvoiceAllocationValidAsync", "request.ServiceInvoiceId = invoiceId", "request.ServiceInvoiceAllocationAmount = allocationAmount");
+        Approve("backend/Services/Requests/SalesRequestService.cs", requestSource, "SetServiceInvoiceAsync", bindStart, bindEnd,
+            ["""await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Invoices\" WHERE \"Id\" = {candidateId} FOR UPDATE NOWAIT", ct);""",
+             """await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Payments\" WHERE \"InvoiceId\" = {candidateId} ORDER BY \"Id\" FOR UPDATE NOWAIT", ct);"""]);
+        var transitionStart = requestSource.IndexOf("public async Task<SalesRequestResult<SalesRequest>> TransitionAsync", StringComparison.Ordinal);
+        var transitionEnd = requestSource.IndexOf("public async Task<SalesRequestResult<TaskJournalItem>> CreateManualTaskAsync", transitionStart, StringComparison.Ordinal);
+        Assert.True(transitionStart >= 0 && transitionEnd > transitionStart);
+        var transitionMethod = requestSource[transitionStart..transitionEnd];
+        AssertOrdered(transitionMethod, ".ExecuteUpdateAsync(setters => setters.SetProperty(item => item.Version, item => item.Version), ct)",
+            "target.FinalKind == SalesRequestFinalKinds.Success && _db.Database.IsNpgsql()", "ORDER BY \\\"Id\\\" FOR UPDATE NOWAIT",
+            "PostgresErrorCodes.LockNotAvailable", "_db.TaskJournalItems.AsNoTracking()", "openTasks.Count > 0");
+        Approve("backend/Services/Requests/SalesRequestService.cs", requestSource, "TransitionAsync", transitionStart, transitionEnd,
+            ["""await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"TaskJournalItems\" WHERE \"SalesRequestId\" = {id} ORDER BY \"Id\" FOR UPDATE NOWAIT", ct);"""]);
+        AssertOrdered(transitionMethod, "await LockRequestAccessAsync(request, userId, ct)", "PostgresErrorCodes.LockNotAvailable", "await CanEditRequestAsync(request.Id, userId, ct)");
+        var accessStart = requestSource.IndexOf("private async Task LockRequestAccessAsync", StringComparison.Ordinal);
+        var accessEnd = requestSource.IndexOf("private async Task LockAccountAccessAsync", accessStart, StringComparison.Ordinal);
+        Assert.True(accessStart >= 0 && accessEnd > accessStart);
+        AssertOrdered(requestSource[accessStart..accessEnd], "new[] { userId, request.ResponsibleUserId, request.CreatedByUserId }.Distinct().OrderBy(id => id).ToArray()",
+            "FROM \\\"Users\\\"", "FROM \\\"Roles\\\"", "FROM \\\"RolePermissions\\\"");
+        Approve("backend/Services/Requests/SalesRequestService.cs", requestSource, "LockRequestAccessAsync", accessStart, accessEnd,
+            ["""await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Users\" WHERE \"Id\" = ANY({userIds}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);""",
+             """await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Roles\" WHERE \"Id\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {userId}) FOR SHARE NOWAIT", ct);""",
+             """await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"RolePermissions\" WHERE \"RoleId\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {userId}) AND \"Section\" = {RolePermissionCatalog.Requests} FOR SHARE NOWAIT", ct);"""], "FOR SHARE");
+        var accountEnd = requestSource.IndexOf("private async Task<bool> IsServiceInvoiceFullyPaidAsync", accessEnd, StringComparison.Ordinal);
+        Assert.True(accountEnd > accessEnd);
+        Approve("backend/Services/Requests/SalesRequestService.cs", requestSource, "LockAccountAccessAsync", accessEnd, accountEnd,
+            ["""await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"RolePermissions\" WHERE \"RoleId\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {userId}) AND \"Section\" = {RolePermissionCatalog.Accounts} FOR SHARE NOWAIT", ct);"""], "FOR SHARE");
+        var invoiceCheckEnd = requestSource.IndexOf("private async Task<bool> LockInvoiceVisibilityAsync", accountEnd, StringComparison.Ordinal);
+        var visibilityEnd = requestSource.IndexOf("private async Task<bool> CanEditRequestAsync", invoiceCheckEnd, StringComparison.Ordinal);
+        Assert.True(invoiceCheckEnd > accountEnd);
+        Assert.True(visibilityEnd > invoiceCheckEnd);
+        AssertOrdered(requestSource[accountEnd..invoiceCheckEnd], "if (_db.Database.IsNpgsql())", "await LockAccountAccessAsync(userId, ct)",
+            "LOCK TABLE", "FROM \\\"Invoices\\\"", "Take(SalesRequestInvoiceSettlement.MaximumRows + 1).CountAsync(ct)", "FROM \\\"Payments\\\"", "FROM \\\"MoneyOperations\\\"",
+            "BankStatementImportAccess.ResolveAsync", "SalesRequestServiceInvoicePayment.IsFullyPaid");
+        Approve("backend/Services/Requests/SalesRequestService.cs", requestSource, "IsServiceInvoiceFullyPaidAsync", accountEnd, invoiceCheckEnd,
+            ["""await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Invoices\" WHERE \"Id\" = {invoiceId} FOR UPDATE NOWAIT", ct);""",
+             """await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Payments\" WHERE \"InvoiceId\" = {invoiceId} ORDER BY \"Id\" FOR UPDATE NOWAIT", ct);""",
+             """await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"MoneyOperations\" WHERE \"LinkedInvoiceId\" = {invoiceId} ORDER BY \"Id\" FOR UPDATE NOWAIT", ct);"""]);
+        Approve("backend/Services/Requests/SalesRequestService.cs", requestSource, "IsServiceInvoiceFullyPaidAsync", accountEnd, invoiceCheckEnd,
+            ["""await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"RolePermissions\" WHERE \"RoleId\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {userId}) AND \"Section\" = {RolePermissionCatalog.Payments} FOR SHARE NOWAIT", ct);""",
+             """await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"UserId\" FROM \"UserCompanyAccesses\" WHERE \"UserId\" = {userId} ORDER BY \"LegalEntityId\" FOR SHARE NOWAIT", ct);""",
+             """await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"MoneyAccounts\" WHERE \"Id\" = ANY({accountIds}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);""",
+             """await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"BankConnectionAccounts\" WHERE \"Id\" = ANY({bankIds}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);""",
+             """await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"BankConnections\" WHERE \"Id\" IN (SELECT \"BankConnectionId\" FROM \"BankConnectionAccounts\" WHERE \"Id\" = ANY({bankIds})) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);"""], "FOR SHARE");
+        Approve("backend/Services/Requests/SalesRequestService.cs", requestSource, "LockInvoiceVisibilityAsync", invoiceCheckEnd, visibilityEnd,
+            [
+             """await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"PaymentId\" FROM \"PaymentResponsibles\" WHERE \"PaymentId\" = ANY({paymentIds}) ORDER BY \"PaymentId\", \"UserId\" FOR SHARE NOWAIT", ct);""",
+             """await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"PaymentId\" FROM \"InvoiceClientCases\" WHERE \"PaymentId\" = ANY({paymentIds}) ORDER BY \"PaymentId\", \"ClientCaseId\" FOR SHARE NOWAIT", ct);""",
+             """await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"ClientCases\" WHERE \"Id\" = ANY({caseIds}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);""",
+             """await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Contracts\" WHERE \"Id\" = ANY({contractIds}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);""",
+             """await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"ContractId\" FROM \"ClientContracts\" WHERE \"ContractId\" = ANY({contractIds}) ORDER BY \"ContractId\", \"ClientId\" FOR SHARE NOWAIT", ct);""",
+             """await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"ContractId\" FROM \"LegalEntityContracts\" WHERE \"ContractId\" = ANY({contractIds}) ORDER BY \"ContractId\", \"LegalEntityId\" FOR SHARE NOWAIT", ct);""",
+             """await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Clients\" WHERE \"Id\" = ANY({clientIds}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);""",
+             """await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"LegalEntities\" WHERE \"Id\" = ANY({companyIds}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);""",
+             """await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Users\" WHERE \"Id\" = ANY({userIds}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);"""], "FOR SHARE");
+
+        var attemptSource = ReadSource("backend/Services/Payments/PaymentCreateAttemptLease.cs");
+        var attemptStart = attemptSource.IndexOf("public async Task<PaymentCreateAttempt?> LockAttemptAsync", StringComparison.Ordinal);
+        var attemptEnd = attemptSource.IndexOf("public async Task LockSellerSelectionAsync", attemptStart, StringComparison.Ordinal);
+        var sellerStart = attemptEnd;
+        var sellerEnd = attemptSource.IndexOf("public async Task LockPrimaryAsync", sellerStart, StringComparison.Ordinal);
+        var primaryStart = sellerEnd;
+        var primaryEnd = attemptSource.IndexOf("public async Task CommitAsync", primaryStart, StringComparison.Ordinal);
+        Assert.True(attemptStart >= 0 && attemptEnd > attemptStart && sellerEnd > sellerStart && primaryEnd > primaryStart);
+        AssertOrdered(attemptSource[attemptStart..attemptEnd], "if (db.Database.IsNpgsql())", "{actorId} FOR UPDATE NOWAIT", "db.PaymentCreateAttempts.SingleOrDefaultAsync");
+        Approve("backend/Services/Payments/PaymentCreateAttemptLease.cs", attemptSource, "LockAttemptAsync", attemptStart, attemptEnd,
+            ["""await db.Database.SqlQuery<Guid>($"SELECT \"Id\" AS \"Value\" FROM \"PaymentCreateAttempts\" WHERE \"Id\" = {id} AND \"ActorUserId\" = {actorId} FOR UPDATE NOWAIT").ToArrayAsync(ct);"""]);
+        AssertOrdered(attemptSource[sellerStart..sellerEnd], "if (!db.Database.IsNpgsql()) return;", "ANY({keys}) ORDER BY", "if (companyId.HasValue)", "if (branchId.HasValue)");
+        Approve("backend/Services/Payments/PaymentCreateAttemptLease.cs", attemptSource, "LockSellerSelectionAsync", sellerStart, sellerEnd,
+            ["""await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"LegalEntities\" WHERE \"Id\" = {companyId.Value} FOR UPDATE NOWAIT").ToArrayAsync(ct);"""]);
+        Approve("backend/Services/Payments/PaymentCreateAttemptLease.cs", attemptSource, "LockSellerSelectionAsync", sellerStart, sellerEnd,
+            ["""await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"SystemSettings\" WHERE \"Key\" = ANY({keys}) ORDER BY \"Id\" FOR SHARE NOWAIT").ToArrayAsync(ct);""",
+             """await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"CompanyBranches\" WHERE \"Id\" = {branchId.Value} FOR SHARE NOWAIT").ToArrayAsync(ct);"""], "FOR SHARE");
+        AssertOrdered(attemptSource[primaryStart..primaryEnd], "if (db.Database.IsNpgsql())", "{id} FOR UPDATE NOWAIT");
+        Approve("backend/Services/Payments/PaymentCreateAttemptLease.cs", attemptSource, "LockPrimaryAsync", primaryStart, primaryEnd,
+            ["""await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"Payments\" WHERE \"Id\" = {id} FOR UPDATE NOWAIT").ToArrayAsync(ct);"""]);
+
+        Assert.Equal(29, approved.Count(statement => statement.Contains("FOR UPDATE", StringComparison.Ordinal)));
+        Assert.Equal(24, approved.Count(statement => statement.Contains("FOR SHARE", StringComparison.Ordinal)));
+        Assert.Equal(53, approved.Count);
 
         // Exact identities include owner, method range, line and complete SQL call.
         // An extra statement in any other production file/method remains a failure.

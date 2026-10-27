@@ -534,7 +534,7 @@ public class ClientsV2Controller : ControllerBase
         var access = await GetCurrentAccessAsync(ct);
         if (access is null)
         {
-            return Unauthorized();
+            return MissingClientsVisibilityResult();
         }
 
         var client = await BuildVisibleClientsQuery(access)

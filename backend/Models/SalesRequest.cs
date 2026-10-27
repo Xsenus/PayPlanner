@@ -97,6 +97,12 @@ public class SalesRequest
     /// <summary>Фактический платёж в CRM, подтвердивший оплату (обязателен для успешного финала).</summary>
     public int? PaidPaymentId { get; set; }
 
+    /// <summary>Явно выбранный счёт услуги заявки; исторические заявки остаются без связи до её подтверждения.</summary>
+    public int? ServiceInvoiceId { get; set; }
+
+    /// <summary>Доля заявки в общем счёте; null означает отдельный счёт.</summary>
+    public decimal? ServiceInvoiceAllocationAmount { get; set; }
+
     /// <summary>Дело, созданное из заявки при оплате (ссылка без внешнего ключа; повторно не создаётся).</summary>
     public int? ResultClientCaseId { get; set; }
 

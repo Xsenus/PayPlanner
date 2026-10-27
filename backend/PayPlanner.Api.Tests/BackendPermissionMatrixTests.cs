@@ -22,6 +22,42 @@ namespace PayPlanner.Api.Tests;
 public class BackendPermissionMatrixTests
 {
     [Fact]
+    public async Task ClientDetails_BothApiVersionsRespectClientScopeForStructuredProfileNotes()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserWithPermissionsAsync(db, "client-profile-viewer", "employee",
+        [
+            new RolePermission { Section = RolePermissionCatalog.Clients, CanView = true, ViewScope = DataVisibilityScope.Own },
+        ]);
+        var other = await CreateUserAsync(db, "client-profile-other", roleName: "other-employee");
+        var own = new Client { Name = "Own", ResponsibleUserId = user.Id, Notes = "__PP_CLIENT_PROFILE_V2__:{\"passportNumber\":\"111111\"}" };
+        var hidden = new Client { Name = "Hidden", ResponsibleUserId = other.Id, Notes = "__PP_CLIENT_PROFILE_V2__:{\"passportNumber\":\"222222\"}" };
+        db.Clients.AddRange(own, hidden);
+        await db.SaveChangesAsync();
+        var context = new ControllerContext { HttpContext = new DefaultHttpContext { User = CreatePrincipal(user) } };
+        var v1 = new ClientsController(db, null!, null!) { ControllerContext = context };
+        var v2 = new ClientsV2Controller(db) { ControllerContext = context };
+
+        foreach (var read in new Func<int, Task<IActionResult>>[]
+        {
+            id => v1.GetById(id, default),
+            id => v2.GetById(id, default),
+        })
+        {
+            var allowed = Assert.IsType<Client>(Assert.IsType<OkObjectResult>(await read(own.Id)).Value);
+            Assert.Contains("111111", allowed.Notes);
+            Assert.IsType<NotFoundResult>(await read(hidden.Id));
+        }
+        var permission = await db.RolePermissions.SingleAsync(item => item.RoleId == user.RoleId && item.Section == RolePermissionCatalog.Clients);
+        permission.CanView = false;
+        await db.SaveChangesAsync();
+        Assert.IsType<ForbidResult>(await v1.GetById(own.Id, default));
+        Assert.IsType<ForbidResult>(await v2.GetById(own.Id, default));
+        v2.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
+        Assert.IsType<UnauthorizedResult>(await v2.GetById(own.Id, default));
+    }
+
+    [Fact]
     public async Task ClientPassport_RespectsClientVisibilityForReadAndWrite()
     {
         await using var db = await CreateContextAsync();
@@ -255,6 +291,51 @@ public class BackendPermissionMatrixTests
         Assert.Equal("partial", response.TaskSummaryVisibility);
         Assert.Equal(1, response.OpenTaskCount);
         Assert.Equal(0, response.OverdueTaskCount);
+    }
+
+    [Theory]
+    [InlineData("none", 0, 0)]
+    [InlineData("own", 1, 0)]
+    [InlineData("all", 2, 1)]
+    public async Task CaseRegistry_ReturnsOnlyPermittedTaskSummary(string scope, int expectedOpen, int expectedOverdue)
+    {
+        await using var db = await CreateContextAsync();
+        var permissions = new List<RolePermission>
+        {
+            new() { Section = RolePermissionCatalog.Cases, CanView = true, ViewScope = DataVisibilityScope.All },
+        };
+        if (scope != "none")
+        {
+            permissions.Add(new RolePermission { Section = RolePermissionCatalog.Tasks, CanView = true,
+                ViewScope = scope == "all" ? DataVisibilityScope.All : DataVisibilityScope.Own });
+        }
+        if (scope == "all") permissions.Add(new RolePermission { Section = RolePermissionCatalog.Requests, CanView = true, ViewScope = DataVisibilityScope.All });
+        var user = await CreateUserWithPermissionsAsync(db, "registry-viewer", "employee", permissions);
+        if (scope == "all") { user.IsApproved = true; await db.SaveChangesAsync(); }
+        var other = await CreateUserAsync(db, "registry-other", roleName: "other-employee");
+        var clientCase = new ClientCase { Title = "Visible case", Client = new Client { Name = "Case client" } };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        db.TaskJournalItems.AddRange(
+            new TaskJournalItem { ClientCaseId = clientCase.Id, Title = "Own", ObjectName = "Own", AuthorUserId = user.Id, DueAt = DateTime.UtcNow.AddDays(1) },
+            new TaskJournalItem { ClientCaseId = clientCase.Id, Title = "Other", ObjectName = "Other", AuthorUserId = other.Id, DueAt = DateTime.UtcNow.AddDays(-1) });
+        await db.SaveChangesAsync();
+        var controller = new CasesV2Controller(db)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = CreatePrincipal(user) } },
+        };
+
+        var result = Assert.IsType<OkObjectResult>(await controller.Get(null, null, null, null, null, null, null, null, null, null, null, null, null));
+        var items = Assert.IsAssignableFrom<IEnumerable<ClientCase>>(result.Value!.GetType().GetProperty("items")!.GetValue(result.Value));
+        var item = Assert.Single(items);
+        Assert.Equal(expectedOpen, item.OpenTaskCount);
+        Assert.Equal(expectedOverdue, item.OverdueTaskCount);
+        Assert.Equal(scope switch { "none" => "none", "own" => "partial", _ => "full" }, item.TaskSummaryVisibility);
+        if (scope != "all")
+        {
+            Assert.Null(item.NextInactivityControlAt);
+            Assert.Null(item.LastMeaningfulActivityAt);
+        }
     }
 
     [Theory]

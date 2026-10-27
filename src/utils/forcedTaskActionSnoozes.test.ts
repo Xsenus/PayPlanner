@@ -18,6 +18,35 @@ describe('forced task action snoozes', () => {
 
   beforeEach(() => window.localStorage.clear());
 
+  it('reports a failed browser storage write without announcing a saved snooze', () => {
+    const event = vi.fn();
+    window.addEventListener(FORCED_TASK_SNOOZES_EVENT, event);
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('storage unavailable'); });
+    try {
+      expect(snoozeForcedTaskActions(7, ['31'], 10, now)).toBe(false);
+      expect(event).not.toHaveBeenCalled();
+    } finally {
+      write.mockRestore();
+      window.removeEventListener(FORCED_TASK_SNOOZES_EVENT, event);
+    }
+    expect(snoozeForcedTaskActions(7, ['31'], 10, now)).toBe(true);
+  });
+
+  it('never overwrites earlier snoozes when the browser storage cannot be read', () => {
+    snoozeForcedTaskActions(7, ['31'], 30, now);
+    const storageKey = getForcedTaskSnoozeStorageKey(7)!;
+    const previous = window.localStorage.getItem(storageKey);
+    const read = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('storage read unavailable'); });
+    const write = vi.spyOn(Storage.prototype, 'setItem');
+    try {
+      expect(snoozeForcedTaskActions(7, ['32'], 10, now)).toBe(false);
+      expect(shareForcedTaskSnooze(7, '31', 'task-approval:101', now)).toBe(false);
+      expect(write).not.toHaveBeenCalled();
+    } finally { read.mockRestore(); write.mockRestore(); }
+    expect(window.localStorage.getItem(storageKey)).toBe(previous);
+    expect(readForcedTaskSnoozes(7, now)).toEqual({ '31': now + 1_800_000 });
+  });
+
   it.each(FORCED_TASK_SNOOZE_OPTIONS)('expires $label exactly at its boundary for notification and task actions', ({ minutes }) => {
     expect(FORCED_TASK_SNOOZE_OPTIONS.map(option => option.minutes)).toEqual([10, 30, 60, 1440]);
     const keys = [getForcedTaskNotificationSnoozeKey(31), getForcedTaskApprovalSnoozeKey(101), getForcedTaskDeadlineChangeSnoozeKey(101, 902)];

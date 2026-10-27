@@ -397,6 +397,26 @@ describe('TaskJournal', () => {
     expect(screen.queryByTestId('task-bulk-actions')).toBeNull();
   });
 
+  it('ignores a late page response after changing the filter', async () => {
+    const tasks = Array.from({ length: 30 }, (_, index) => createTask({
+      id: index + 1, title: `Возврат страницы ${index + 1}`,
+    }));
+    await renderJournal(tasks, { waitForTitle: 'Возврат страницы 1' });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Выбрать задачу Возврат страницы 1' }));
+    let finish!: (value: { items: typeof tasks; page: number; pageSize: number; total: number }) => void;
+    apiMock.getTaskJournalItems.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    fireEvent.click(screen.getByRole('button', { name: 'Вперёд' }));
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 2 }), expect.anything(),
+    ));
+    fireEvent.change(document.querySelector('select[aria-label="Статус"]')!, { target: { value: 'all' } });
+    expect(await screen.findByText('Возврат страницы 1')).toBeTruthy();
+    await act(async () => finish({ items: tasks.slice(25), page: 2, pageSize: 25, total: 30 }));
+    expect(screen.queryByText('Возврат страницы 26')).toBeNull();
+    expect(screen.getByText('Возврат страницы 1')).toBeTruthy();
+    expect(screen.queryByTestId('task-bulk-actions')).toBeNull();
+  });
+
   it('offers a persistent retry after a page load fails and clears the warning on success', async () => {
     const tasks = Array.from({ length: 30 }, (_, index) => createTask({
       id: index + 1, title: `Повтор страницы ${index + 1}`,

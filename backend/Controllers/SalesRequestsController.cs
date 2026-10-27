@@ -6,6 +6,7 @@ using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Requests;
+using PayPlanner.Api.Services.Invoices;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -29,6 +30,10 @@ public sealed record SalesRequestClientCaseDto(int Id, string CaseNumber, string
 public sealed record SalesRequestClientCasePageDto(IReadOnlyList<SalesRequestClientCaseDto> Items, bool HasMore);
 
 public sealed record SalesRequestClientDto(int Id, string Name, string Phone, string Email, int CasesCount);
+
+public sealed record SalesRequestInvoiceCandidateDto(int InvoiceId, string Number, DateTime Date, int SellerCompanyId, int? SellerBranchId);
+public sealed record SalesRequestInvoiceCandidatesDto(IReadOnlyList<SalesRequestInvoiceCandidateDto> Items, bool HasMore);
+public sealed record SalesRequestServiceInvoiceDto(string State, SalesRequestInvoiceCandidateDto? Invoice, decimal? AllocationAmount = null);
 
 public sealed class SalesRequestCreateRequest
 {
@@ -63,6 +68,14 @@ public sealed class SalesRequestTransitionRequest
     public int? PaidPaymentId { get; set; }
     public bool ForceCloseTasks { get; set; }
     public string? Comment { get; set; }
+}
+
+public sealed class SalesRequestServiceInvoiceRequest
+{
+    public int Version { get; set; }
+    public int? InvoiceId { get; set; }
+    public decimal? AllocationAmount { get; set; }
+    public bool Remove { get; set; }
 }
 
 public sealed class SalesRequestTaskRequest
@@ -243,6 +256,73 @@ public class SalesRequestsController : ControllerBase
         return Ok(new SalesRequestDetailDto(Map(request, await SlaLimitsAsync(ct)), tasks, events));
     }
 
+    [HttpGet("{id:int}/invoice-candidates")]
+    public async Task<ActionResult<SalesRequestInvoiceCandidatesDto>> InvoiceCandidates(
+        int id, [FromQuery] string? search, [FromQuery] int afterInvoiceId = 0, [FromQuery] int take = 20, CancellationToken ct = default)
+    {
+        if (await GuardAsync(id, p => p.CanEdit, ct) is not { } requestAccess) return Denied();
+        var queryText = search?.Trim();
+        if (queryText?.Length > 100 || afterInvoiceId < 0 || take is < 1 or > 20)
+            return BadRequest(new { message = "Уточните поиск и размер страницы счетов." });
+        var request = await _db.SalesRequests.AsNoTracking().ApplySalesRequestVisibility(requestAccess.Visibility)
+            .Where(item => item.Id == id).Select(item => new { item.ClientId, item.FinalKind }).SingleOrDefaultAsync(ct);
+        if (request is null) return Denied();
+        if (request.FinalKind != SalesRequestFinalKinds.None) return Conflict(new { message = "Заявка уже закрыта." });
+
+        var accounts = await _db.ResolveSectionAccessAsync(User, RolePermissionCatalog.Accounts, ct, requireApprovedUser: true);
+        if (accounts?.Permission?.CanView != true) return Denied();
+        IQueryable<Payment> Accessible(SectionAccessContext access) => InvoicePaymentAccess.ScopeHeaders(_db, access)
+            .Where(payment => payment.Type == PaymentType.Income && payment.ClientId == request.ClientId
+                && payment.InvoiceId > afterInvoiceId && payment.Invoice != null);
+        var initial = Accessible(accounts);
+        if (!string.IsNullOrEmpty(queryText)) initial = initial.Where(payment => payment.Invoice!.Number.Contains(queryText));
+        var ids = await initial.Select(payment => payment.InvoiceId!.Value).Distinct().OrderBy(invoiceId => invoiceId).Take(take + 1).ToArrayAsync(ct);
+
+        var freshRequestAccess = await GuardAsync(id, p => p.CanEdit, ct);
+        var freshAccounts = await _db.ResolveSectionAccessAsync(User, RolePermissionCatalog.Accounts, ct, requireApprovedUser: true);
+        if (freshRequestAccess is null || freshAccounts?.Permission?.CanView != true) return Denied();
+        var currentRequest = await _db.SalesRequests.AsNoTracking().ApplySalesRequestVisibility(freshRequestAccess.Visibility)
+            .Where(item => item.Id == id).Select(item => new { item.ClientId, item.FinalKind }).SingleOrDefaultAsync(ct);
+        if (currentRequest is null) return Denied();
+        if (currentRequest.ClientId != request.ClientId || currentRequest.FinalKind != SalesRequestFinalKinds.None)
+            return Conflict(new { message = "Заявка изменилась. Обновите карточку." });
+        if (ids.Length == 0) return Ok(new SalesRequestInvoiceCandidatesDto([], false));
+        var fresh = Accessible(freshAccounts).Where(payment => ids.Contains(payment.InvoiceId!.Value));
+        if (!string.IsNullOrEmpty(queryText)) fresh = fresh.Where(payment => payment.Invoice!.Number.Contains(queryText));
+        var rows = await fresh.Select(payment => new { InvoiceId = payment.InvoiceId!.Value, payment.Invoice!.Number, payment.Invoice.Date, SellerCompanyId = payment.SellerCompanyId!.Value, payment.SellerBranchId })
+            .Distinct().OrderBy(item => item.InvoiceId).ToArrayAsync(ct);
+        return Ok(new SalesRequestInvoiceCandidatesDto(rows.Take(take).Select(item => new SalesRequestInvoiceCandidateDto(item.InvoiceId, item.Number, item.Date, item.SellerCompanyId, item.SellerBranchId)).ToArray(), rows.Length > take));
+    }
+
+    [HttpGet("{id:int}/service-invoice")]
+    public async Task<ActionResult<SalesRequestServiceInvoiceDto>> GetServiceInvoice(int id, CancellationToken ct)
+    {
+        if (await GuardAsync(id, p => p.CanView, ct) is not { } requestAccess) return Denied();
+        var accounts = await _db.ResolveSectionAccessAsync(User, RolePermissionCatalog.Accounts, ct, requireApprovedUser: true);
+        if (accounts?.Permission?.CanView != true) return Denied();
+        var request = await _db.SalesRequests.AsNoTracking().ApplySalesRequestVisibility(requestAccess.Visibility)
+            .Where(item => item.Id == id).Select(item => new { item.ClientId, item.ServiceInvoiceId, item.ServiceInvoiceAllocationAmount, item.Version }).SingleOrDefaultAsync(ct);
+        if (request is null) return Denied();
+        var freshRequestAccess = await GuardAsync(id, p => p.CanView, ct);
+        var freshAccounts = await _db.ResolveSectionAccessAsync(User, RolePermissionCatalog.Accounts, ct, requireApprovedUser: true);
+        if (freshRequestAccess is null || freshAccounts?.Permission?.CanView != true) return Denied();
+        var freshRequest = await _db.SalesRequests.AsNoTracking().ApplySalesRequestVisibility(freshRequestAccess.Visibility)
+            .Where(item => item.Id == id).Select(item => new { item.ClientId, item.ServiceInvoiceId, item.ServiceInvoiceAllocationAmount, item.Version }).SingleOrDefaultAsync(ct);
+        if (freshRequest is null) return Denied();
+        if (freshRequest.ClientId != request.ClientId || freshRequest.ServiceInvoiceId != request.ServiceInvoiceId
+            || freshRequest.ServiceInvoiceAllocationAmount != request.ServiceInvoiceAllocationAmount || freshRequest.Version != request.Version)
+            return Conflict(new { message = "Заявка изменилась. Обновите карточку." });
+        if (!freshRequest.ServiceInvoiceId.HasValue) return Ok(new SalesRequestServiceInvoiceDto("none", null));
+        var candidate = await InvoicePaymentAccess.ScopeHeaders(_db, freshAccounts)
+            .Where(payment => payment.InvoiceId == freshRequest.ServiceInvoiceId && payment.ClientId == freshRequest.ClientId
+                && payment.Type == PaymentType.Income && payment.Invoice != null && payment.InvoiceWorkflowStatus != InvoiceWorkflowStatus.Cancelled)
+            .Select(payment => new { InvoiceId = payment.InvoiceId!.Value, payment.Invoice!.Number, payment.Invoice.Date, SellerCompanyId = payment.SellerCompanyId!.Value, payment.SellerBranchId })
+            .Distinct().FirstOrDefaultAsync(ct);
+        return candidate is null
+            ? Ok(new SalesRequestServiceInvoiceDto("unavailable", null))
+            : Ok(new SalesRequestServiceInvoiceDto("available", new SalesRequestInvoiceCandidateDto(candidate.InvoiceId, candidate.Number, candidate.Date, candidate.SellerCompanyId, candidate.SellerBranchId), freshRequest.ServiceInvoiceAllocationAmount));
+    }
+
     [HttpGet("clients/search")]
     public async Task<ActionResult<List<SalesRequestClientDto>>> SearchClients([FromQuery] string? q, CancellationToken ct)
     {
@@ -320,6 +400,14 @@ public class SalesRequestsController : ControllerBase
 
         return ToResult(await _service.UpdateAsync(id, new SalesRequestUpdateInput(request.Summary, request.Type, request.Amount,
             request.Comment, request.ResponsibleUserId, request.Version, request.Source), access.Visibility.UserId, ct));
+    }
+
+    [HttpPut("{id:int}/service-invoice")]
+    public async Task<ActionResult<SalesRequestDto>> SetServiceInvoice(int id, [FromBody] SalesRequestServiceInvoiceRequest request, CancellationToken ct)
+    {
+        if (await GuardAsync(id, p => p.CanEdit, ct) is not { } access) return Denied();
+        if (request.Remove == request.InvoiceId.HasValue) return BadRequest(new { message = "Выберите счёт или явно удалите связь." });
+        return ToResult(await _service.SetServiceInvoiceAsync(id, request.Version, request.InvoiceId, access.Visibility.UserId, ct, request.AllocationAmount));
     }
 
     [HttpPost("{id:int}/transition")]

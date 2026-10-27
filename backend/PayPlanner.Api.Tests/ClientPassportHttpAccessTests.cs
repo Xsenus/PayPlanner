@@ -22,6 +22,41 @@ namespace PayPlanner.Api.Tests;
 public sealed class ClientPassportHttpAccessTests
 {
     [Fact]
+    public async Task ClientDetails_RevokedViewReturnsForbiddenWithoutEndingSession()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection).Options);
+        await db.Database.EnsureCreatedAsync();
+        var role = new Role { Name = "client-details-viewer" };
+        var permission = new RolePermission { Role = role, Section = RolePermissionCatalog.Clients, CanView = true, ViewScope = DataVisibilityScope.Own };
+        var user = new User { Role = role, Email = "details-viewer@example.test", FullName = "Viewer", PasswordHash = "x", IsActive = true, IsApproved = true };
+        var other = new User { Role = role, Email = "details-other@example.test", FullName = "Other", PasswordHash = "x", IsActive = true, IsApproved = true };
+        db.AddRange(permission, user, other);
+        await db.SaveChangesAsync();
+        var own = new Client { Name = "Own", ResponsibleUserId = user.Id };
+        var hidden = new Client { Name = "Hidden", ResponsibleUserId = other.Id };
+        db.Clients.AddRange(own, hidden);
+        await db.SaveChangesAsync();
+        using var server = new TestServer(new WebHostBuilder().UseEnvironment("Testing")
+            .UseSetting("BackgroundServices:Enabled", "false").UseSetting("Email:Enabled", "false")
+            .ConfigureServices(services =>
+            {
+                services.AddLogging(); services.AddSingleton(db);
+                services.AddAuthentication("passport-fixture").AddScheme<AuthenticationSchemeOptions, FixtureAuth>("passport-fixture", _ => { });
+                services.AddAuthorization(); services.AddControllers().AddApplicationPart(typeof(ClientPassportController).Assembly);
+            }).Configure(app => { app.UseRouting(); app.UseAuthentication(); app.UseAuthorization(); app.UseEndpoints(endpoints => endpoints.MapControllers()); }));
+        using var client = server.CreateClient();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync($"/api/v2/clients/{own.Id}")).StatusCode);
+        client.DefaultRequestHeaders.Add("X-Fixture-User", user.Id.ToString(CultureInfo.InvariantCulture));
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/v2/clients/{own.Id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/v2/clients/{hidden.Id}")).StatusCode);
+        permission.CanView = false;
+        await db.SaveChangesAsync();
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/v2/clients/{own.Id}")).StatusCode);
+    }
+
+    [Fact]
     public async Task ExistingSession_RespectsClientScopeAndCurrentViewEditRights()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");

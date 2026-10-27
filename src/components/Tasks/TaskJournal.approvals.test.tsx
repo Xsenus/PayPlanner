@@ -1,8 +1,8 @@
 import { setupTaskJournalTests, apiMock, toastMock, authState, permissionsState, todayAt, toDatetimeLocalInputValue, createTask, renderJournal, openFirstTaskForEdit } from './TaskJournal.test-support';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { type TaskJournalItem } from '../../utils/taskJournalStore';
-import { getForcedTaskSnoozeStorageKey, getForcedTaskApprovalSnoozeKey, getForcedTaskDeadlineChangeSnoozeKey } from '../../utils/forcedTaskActionSnoozes';
+import { FORCED_TASK_SNOOZE_STORAGE_KEY, getForcedTaskApprovalSnoozeKey, getForcedTaskDeadlineChangeSnoozeKey, getForcedTaskSnoozeStorageKey, snoozeForcedTaskActions } from '../../utils/forcedTaskActionSnoozes';
 
 describe('TaskJournal', () => {
   setupTaskJournalTests();
@@ -416,6 +416,13 @@ describe('TaskJournal', () => {
 
     const prompt = await screen.findByTestId('deadline-change-decision-prompt');
     fireEvent.click(within(prompt).getByText('Отложить'));
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('storage unavailable'); });
+    try {
+      fireEvent.click(within(prompt).getByRole('button', { name: '30 мин' }));
+      expect(toastMock.error).toHaveBeenCalledWith('Не удалось отложить: хранилище браузера недоступно.', 'Журнал задач');
+      expect(screen.getByTestId('deadline-change-decision-prompt')).toBeTruthy();
+    } finally { write.mockRestore(); }
+    fireEvent.click(within(prompt).getByText('Отложить'));
     fireEvent.click(within(prompt).getByRole('button', { name: '30 мин' }));
 
     await waitFor(() => expect(screen.queryByTestId('deadline-change-decision-prompt')).toBeNull());
@@ -514,6 +521,97 @@ describe('TaskJournal', () => {
 
     expect(screen.queryByTestId('task-approval-decision-prompt')).toBeNull();
     expect(screen.getByTestId('task-view-controls')).toBeTruthy();
+  });
+
+  describe.each(['legacy', 'modern'] as const)('employee-scoped snoozes: %s', (mode) => {
+    const approvalTask = (userId: number) => createTask({
+      status: 'onApproval', authorUserId: 8, assigneeUserId: 7, result: 'Результат ожидает согласования',
+      participants: [{ id: 77, userId, role: 'approver', displayName: 'Согласующий', sortOrder: 0, approvalStatus: 'pending' }],
+    });
+
+    it.each(['read', 'write'] as const)('keeps the decision open when browser storage cannot %s the snooze', async (failure) => {
+      authState.isAdmin = false;
+      await renderJournal([approvalTask(7)], { mode: 'approvals', settings: { taskCardWindowMode: mode } });
+      const prompt = await screen.findByTestId('task-approval-decision-prompt');
+      fireEvent.click(within(prompt).getByText('Отложить'));
+      const storage = failure === 'read'
+        ? vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('storage unavailable'); })
+        : vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('storage unavailable'); });
+      try {
+        fireEvent.click(within(prompt).getByRole('button', { name: '10 мин' }));
+        expect(toastMock.error).toHaveBeenCalledWith('Не удалось отложить: хранилище браузера недоступно.', 'Журнал задач');
+        expect(screen.getByTestId('task-approval-decision-prompt')).toBeTruthy();
+      } finally { storage.mockRestore(); }
+      fireEvent.click(within(prompt).getByText('Отложить'));
+      fireEvent.click(within(prompt).getByRole('button', { name: '10 мин' }));
+      await waitFor(() => expect(screen.queryByTestId('task-approval-decision-prompt')).toBeNull());
+    });
+
+    it('isolates employee reloads and preserves the journal and an explicitly opened task draft', async () => {
+      authState.isAdmin = false;
+      const first = await renderJournal([approvalTask(7)], { mode: 'approvals', settings: { taskCardWindowMode: mode } });
+      const firstPrompt = await screen.findByTestId('task-approval-decision-prompt');
+      fireEvent.click(within(firstPrompt).getByText('Отложить'));
+      fireEvent.click(within(firstPrompt).getByRole('button', { name: '10 мин' }));
+      await waitFor(() => expect(screen.queryByTestId('task-approval-decision-prompt')).toBeNull());
+      const firstStored = window.localStorage.getItem(getForcedTaskSnoozeStorageKey(7)!);
+      first.unmount();
+
+      const legacy = JSON.stringify({ [getForcedTaskApprovalSnoozeKey(101)]: Date.now() + 86_400_000 });
+      window.localStorage.setItem(FORCED_TASK_SNOOZE_STORAGE_KEY, legacy);
+      authState.user = { id: 8, fullName: 'Следующий согласующий', email: 'next@example.local' };
+      const second = await renderJournal([approvalTask(8)], { mode: 'approvals', settings: { taskCardWindowMode: mode } });
+      const secondPrompt = await screen.findByTestId('task-approval-decision-prompt');
+      fireEvent.click(within(secondPrompt).getByText('Отложить'));
+      fireEvent.click(within(secondPrompt).getByRole('button', { name: '30 мин' }));
+      await waitFor(() => expect(screen.queryByTestId('task-approval-decision-prompt')).toBeNull());
+      expect(window.localStorage.getItem(getForcedTaskSnoozeStorageKey(7)!)).toBe(firstStored);
+      expect(window.localStorage.getItem(FORCED_TASK_SNOOZE_STORAGE_KEY)).toBe(legacy);
+      expect(JSON.parse(window.localStorage.getItem(getForcedTaskSnoozeStorageKey(8)!) || '{}')[getForcedTaskApprovalSnoozeKey(101)])
+        .toBeGreaterThan(Date.now());
+      second.unmount();
+
+      await renderJournal([approvalTask(8)], { mode: 'approvals', settings: { taskCardWindowMode: mode } });
+      expect(screen.queryByTestId('task-approval-decision-prompt')).toBeNull();
+      expect(screen.getByTestId('task-view-controls')).toBeTruthy();
+      fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+      const card = await screen.findByTestId(`task-${mode}-card-window`);
+      fireEvent.click(within(card).getAllByRole('button', { name: 'Редактировать задачу' })[0]);
+      const title = within(await screen.findByTestId(`task-${mode}-card-window`)).getByTestId('task-title-input') as HTMLInputElement;
+      await waitFor(() => expect(title.disabled).toBe(false));
+      fireEvent.change(title, { target: { value: 'Мой несохранённый заголовок' } });
+      act(() => {
+        snoozeForcedTaskActions(7, [getForcedTaskApprovalSnoozeKey(101)], 60);
+        window.dispatchEvent(new StorageEvent('storage', { key: getForcedTaskSnoozeStorageKey(7) }));
+      });
+      expect((within(screen.getByTestId(`task-${mode}-card-window`)).getByTestId('task-title-input') as HTMLInputElement).value)
+        .toBe('Мой несохранённый заголовок');
+      expect(screen.queryByTestId('task-approval-decision-prompt')).toBeNull();
+      expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+      expect(apiMock.updateTaskJournalApproval).not.toHaveBeenCalled();
+    });
+
+    it('keeps an explicit approval review draft open after scoped storage and change events', async () => {
+      authState.isAdmin = false;
+      snoozeForcedTaskActions(7, [getForcedTaskApprovalSnoozeKey(101)], 10);
+      await renderJournal([approvalTask(7)], { mode: 'approvals', settings: { taskCardWindowMode: mode } });
+      expect(screen.queryByTestId('task-approval-decision-prompt')).toBeNull();
+      fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+      const card = await screen.findByTestId(`task-${mode}-card-window`);
+      fireEvent.click(within(card).getByTestId('task-open-approval-decision'));
+      const prompt = await screen.findByTestId('task-approval-decision-prompt');
+      fireEvent.change(within(prompt).getByLabelText('Комментарий для возврата на доработку'), { target: { value: 'Не потерять решение' } });
+      act(() => {
+        snoozeForcedTaskActions(7, [getForcedTaskApprovalSnoozeKey(101)], 30);
+        snoozeForcedTaskActions(8, [getForcedTaskApprovalSnoozeKey(101)], 60);
+        window.dispatchEvent(new StorageEvent('storage', { key: getForcedTaskSnoozeStorageKey(7) }));
+        window.dispatchEvent(new StorageEvent('storage', { key: getForcedTaskSnoozeStorageKey(8) }));
+      });
+      expect((within(screen.getByTestId('task-approval-decision-prompt')).getByLabelText('Комментарий для возврата на доработку') as HTMLTextAreaElement).value)
+        .toBe('Не потерять решение');
+      expect(screen.getByTestId('task-view-controls')).toBeTruthy();
+      expect(apiMock.updateTaskJournalApproval).not.toHaveBeenCalled();
+    });
   });
 
   it('lets the approver snooze the journal decision prompt without resolving the task', async () => {

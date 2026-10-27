@@ -623,6 +623,54 @@ describe('Navigation links', () => {
     expect(screen.queryByRole('button', { name: 'Группы и порядок' })).toBeNull();
   });
 
+  it.each([false, true])('limits grouped accounting and management for a secretary, invoice access: %s', async (canViewAccounts) => {
+    authState.isAdmin = false;
+    authState.roleId = 101;
+    authState.roleName = 'Секретарь';
+    apiMock.getRolePermissions.mockResolvedValueOnce({
+      ...defaultRestrictedRolePermissions,
+      calendar: { ...defaultRestrictedRolePermissions.calendar, canView: true },
+      tasks: { ...defaultRestrictedRolePermissions.tasks, canView: true },
+      accounts: { ...defaultRestrictedRolePermissions.accounts, canView: canViewAccounts },
+    });
+    apiMock.getNavigationSettings.mockResolvedValueOnce({
+      order: ['group-accounting', 'group-management'],
+      labels: {},
+      groups: [
+        { id: 'group-accounting', name: 'Бухгалтерия', itemIds: ['accounts', 'money', 'payments', 'acts', 'contracts'] },
+        { id: 'group-management', name: 'Управление', itemIds: ['users', 'roles', 'audit', 'userActivity', 'settings'] },
+      ],
+      updatedAt: null,
+    });
+
+    renderNavigation();
+    await waitFor(() => expect(findLinkByHref(getTabHref('tasks'))).toBeTruthy());
+    if (canViewAccounts) await screen.findByRole('button', { name: /Бухгалтерия/i });
+
+    expect(Boolean(screen.queryByRole('button', { name: /Бухгалтерия/i }))).toBe(canViewAccounts);
+    expect(Boolean(findLinkByHref(getTabHref('accounts')))).toBe(canViewAccounts);
+    for (const tab of ['moneyBank', 'payments', 'acts', 'contracts', 'users', 'roles', 'audit', 'userActivity', 'settings'] as Tab[]) {
+      expect(findLinkByHref(getTabHref(tab)), `secretary menu must hide ${tab}`).toBeFalsy();
+    }
+    expect(screen.queryByRole('button', { name: /Управление/i })).toBeNull();
+    expect(apiMock.getPaymentsV2).not.toHaveBeenCalled();
+  });
+
+  it('toggles a custom group from its default expanded state', async () => {
+    apiMock.getNavigationSettings.mockResolvedValueOnce({
+      order: ['group-contacts'], labels: {},
+      groups: [{ id: 'group-contacts', name: 'Работа с клиентами', itemIds: ['contacts'] }],
+      updatedAt: null,
+    });
+    render(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+    const group = await screen.findByRole('button', { name: /Работа с клиентами/i });
+    expect(findLinkByHref(getTabHref('contacts'))).toBeTruthy();
+    fireEvent.click(group);
+    expect(findLinkByHref(getTabHref('contacts'))).toBeFalsy();
+    fireEvent.click(group);
+    expect(findLinkByHref(getTabHref('contacts'))).toBeTruthy();
+  });
+
   it('shows settings for a non-admin role that can view integrations only', async () => {
     authState.isAdmin = false;
     authState.roleId = 99;

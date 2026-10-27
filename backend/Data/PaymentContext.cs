@@ -773,6 +773,8 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.StatusId, e.ResponsibleUserId }).HasDatabaseName("IX_SalesRequests_Status_Responsible");
             entity.HasIndex(e => new { e.ClientId, e.CreatedAt }).HasDatabaseName("IX_SalesRequests_Client_CreatedAt");
             entity.HasIndex(e => e.CreatedAt).HasDatabaseName("IX_SalesRequests_CreatedAt");
+            entity.Property(e => e.ServiceInvoiceAllocationAmount).HasColumnType("decimal(18,2)");
+            entity.HasIndex(e => e.ServiceInvoiceId);
         });
 
         modelBuilder.Entity<SalesRequestStatus>(entity =>

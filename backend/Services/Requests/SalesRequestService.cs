@@ -2,10 +2,14 @@ using System.Text.Json;
 using System.Security.Claims;
 using System.Globalization;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.Sqlite;
+using Npgsql;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services.Notifications;
+using PayPlanner.Api.Services.Invoices;
+using PayPlanner.Api.Services.Banking;
 using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Services.Requests;
@@ -51,6 +55,7 @@ public interface ISalesRequestService
     Task EnsureDefaultsAsync(CancellationToken ct);
     Task<SalesRequestResult<SalesRequest>> CreateAsync(SalesRequestCreateInput input, int userId, CancellationToken ct);
     Task<SalesRequestResult<SalesRequest>> UpdateAsync(int id, SalesRequestUpdateInput input, int userId, CancellationToken ct);
+    Task<SalesRequestResult<SalesRequest>> SetServiceInvoiceAsync(int id, int expectedVersion, int? invoiceId, int userId, CancellationToken ct, decimal? allocationAmount = null);
     Task<SalesRequestResult<SalesRequest>> TransitionAsync(int id, SalesRequestTransitionInput input, int userId, CancellationToken ct);
     Task<SalesRequestResult<TaskJournalItem>> CreateManualTaskAsync(int id, int assigneeUserId, string? title, DateTime? dueAt, int userId, CancellationToken ct);
     Task<SalesRequestResult<SalesRequestStatus>> SaveStatusAsync(int? id, string? title, string? finalKind, int? sortOrder, bool? isActive, CancellationToken ct, int? autoAdvanceToStatusId = null, bool clearAutoAdvance = false);
@@ -318,11 +323,119 @@ public sealed class SalesRequestService : ISalesRequestService
         return await SaveAsync(request, ct);
     }
 
+    public async Task<SalesRequestResult<SalesRequest>> SetServiceInvoiceAsync(int id, int expectedVersion, int? invoiceId, int userId, CancellationToken ct, decimal? allocationAmount = null)
+    {
+        if (invoiceId is <= 0) return SalesRequestResult<SalesRequest>.Fail("Выберите счёт из списка доступных.");
+        if (allocationAmount.HasValue && (!invoiceId.HasValue || allocationAmount.Value <= 0m
+            || allocationAmount.Value > 9999999999999999.99m || decimal.Round(allocationAmount.Value, 2) != allocationAmount.Value))
+            return SalesRequestResult<SalesRequest>.Fail("Укажите положительную долю заявки в рублях с точностью до копеек.");
+        if (!_db.Database.IsNpgsql() && !_db.Database.IsSqlite())
+            return SalesRequestResult<SalesRequest>.Fail("Связь счёта для этой базы не поддерживается.", 409);
+        if (_db.ChangeTracker.Entries().Any(entry => entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted))
+            return SalesRequestResult<SalesRequest>.Fail("Сначала завершите другие изменения.", 409);
+        try
+        {
+            await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+            if (await _db.SalesRequests.Where(item => item.Id == id)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.Version, item => item.Version), ct) != 1)
+                return SalesRequestResult<SalesRequest>.Fail("Заявка недоступна.", 404);
+            var tracked = _db.SalesRequests.Local.FirstOrDefault(item => item.Id == id);
+            if (tracked is not null) await _db.Entry(tracked).ReloadAsync(ct);
+            var request = await _db.SalesRequests.SingleAsync(item => item.Id == id, ct);
+            if (_db.Database.IsNpgsql())
+            {
+                await LockRequestAccessAsync(request, userId, ct);
+                await LockAccountAccessAsync(userId, ct);
+            }
+            if (!await CanEditRequestAsync(id, userId, ct)) return SalesRequestResult<SalesRequest>.Fail("Нет доступа к изменению заявки.", 403);
+            var principal = new ClaimsPrincipal(new ClaimsIdentity(
+                [new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture))], "request-invoice"));
+            var access = await _db.ResolveSectionAccessAsync(principal, RolePermissionCatalog.Accounts, ct, requireApprovedUser: true);
+            if (access?.Permission?.CanView != true) return SalesRequestResult<SalesRequest>.Fail("Счёт недоступен.", 404);
+            if (request.Version != expectedVersion) return SalesRequestResult<SalesRequest>.Fail("Заявку уже изменили. Обновите карточку.", 409);
+            if (request.FinalKind != SalesRequestFinalKinds.None) return SalesRequestResult<SalesRequest>.Fail("Заявка закрыта и не меняется.", 409);
+            async Task<bool> CanUseInvoiceAsync(SectionAccessContext scope, int candidateId) => await InvoicePaymentAccess.ScopeHeaders(_db, scope)
+                .AnyAsync(payment => payment.InvoiceId == candidateId && payment.ClientId == request.ClientId
+                    && payment.Type == PaymentType.Income && payment.InvoiceWorkflowStatus != InvoiceWorkflowStatus.Cancelled, ct);
+            var invoiceIds = new[] { request.ServiceInvoiceId, invoiceId }.Where(value => value.HasValue)
+                .Select(value => value!.Value).Distinct().OrderBy(value => value).ToArray();
+            foreach (var candidateId in invoiceIds)
+            {
+                if (!await CanUseInvoiceAsync(access, candidateId)) return SalesRequestResult<SalesRequest>.Fail("Счёт недоступен.", 404);
+            }
+            if (_db.Database.IsNpgsql())
+            {
+                foreach (var candidateId in invoiceIds)
+                    await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Invoices\" WHERE \"Id\" = {candidateId} FOR UPDATE NOWAIT", ct);
+            }
+            var rowCount = 0;
+            foreach (var candidateId in invoiceIds)
+            {
+                rowCount += await _db.Payments.IgnoreQueryFilters().Where(payment => payment.InvoiceId == candidateId).Take(5001).CountAsync(ct);
+                if (rowCount > 5000) return SalesRequestResult<SalesRequest>.Fail("Слишком много строк счёта для безопасной привязки.", 409);
+                if (_db.Database.IsNpgsql())
+                    await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Payments\" WHERE \"InvoiceId\" = {candidateId} ORDER BY \"Id\" FOR UPDATE NOWAIT", ct);
+            }
+            if (_db.Database.IsNpgsql() && invoiceIds.Length > 0)
+            {
+                var linkedPayments = await _db.Payments.IgnoreQueryFilters().AsNoTracking().Where(payment => payment.InvoiceId.HasValue && invoiceIds.Contains(payment.InvoiceId.Value))
+                    .OrderBy(payment => payment.Id).Take(5001).ToListAsync(ct);
+                if (linkedPayments.Count > 5000 || !await LockInvoiceVisibilityAsync(linkedPayments, [], userId, ct))
+                    return SalesRequestResult<SalesRequest>.Fail("Связанные данные недоступны для безопасной привязки.", 409);
+            }
+            access = await _db.ResolveSectionAccessAsync(principal, RolePermissionCatalog.Accounts, ct, requireApprovedUser: true);
+            if (access?.Permission?.CanView != true || !await CanEditRequestAsync(id, userId, ct))
+                return SalesRequestResult<SalesRequest>.Fail("Счёт недоступен.", 404);
+            foreach (var candidateId in invoiceIds)
+            {
+                if (!await CanUseInvoiceAsync(access, candidateId))
+                    return SalesRequestResult<SalesRequest>.Fail("Счёт недоступен.", 404);
+            }
+            if (invoiceId.HasValue && !await IsInvoiceAllocationValidAsync(id, request.ClientId, invoiceId.Value, allocationAmount, ct))
+                return SalesRequestResult<SalesRequest>.Fail("Не удалось распределить сумму счёта. Проверьте выбранный режим и сумму.", 409);
+            if (request.ServiceInvoiceId == invoiceId && request.ServiceInvoiceAllocationAmount == allocationAmount) return new(request);
+            request.ServiceInvoiceId = invoiceId;
+            request.ServiceInvoiceAllocationAmount = allocationAmount;
+            request.Version++;
+            request.UpdatedAt = DateTime.UtcNow;
+            AddEvent(id, SalesRequestEventKinds.FieldsChanged, null, null, userId, null);
+            var result = await SaveAsync(request, ct);
+            if (result.Ok) await transaction.CommitAsync(ct);
+            return result;
+        }
+        catch (PostgresException error) when (error.SqlState is PostgresErrorCodes.LockNotAvailable or PostgresErrorCodes.DeadlockDetected or PostgresErrorCodes.SerializationFailure)
+        {
+            return SalesRequestResult<SalesRequest>.Fail("Связанные данные сейчас изменяются. Обновите карточку и повторите попытку.", 409);
+        }
+        catch (SqliteException error) when (error.SqliteErrorCode is 5 or 6)
+        {
+            return SalesRequestResult<SalesRequest>.Fail("Связанные данные сейчас изменяются. Обновите карточку и повторите попытку.", 409);
+        }
+    }
+
     public async Task<SalesRequestResult<SalesRequest>> TransitionAsync(int id, SalesRequestTransitionInput input, int userId, CancellationToken ct)
     {
-        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
-        if (await _db.SalesRequests.Where(item => item.Id == id)
-            .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.Version, item => item.Version), ct) != 1)
+        Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction;
+        try
+        {
+            transaction = await _db.Database.BeginTransactionAsync(ct);
+        }
+        catch (SqliteException error) when (error.SqliteErrorCode is 5 or 6)
+        {
+            return SalesRequestResult<SalesRequest>.Fail("Связанные данные сейчас изменяются. Обновите карточку и повторите попытку.", 409);
+        }
+        await using var transactionLease = transaction;
+        int locked;
+        try
+        {
+            locked = await _db.SalesRequests.Where(item => item.Id == id)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.Version, item => item.Version), ct);
+        }
+        catch (SqliteException error) when (error.SqliteErrorCode is 5 or 6)
+        {
+            return SalesRequestResult<SalesRequest>.Fail("Связанные данные сейчас изменяются. Обновите карточку и повторите попытку.", 409);
+        }
+        if (locked != 1)
             return SalesRequestResult<SalesRequest>.Fail("Заявка не найдена.", 404);
         var tracked = _db.SalesRequests.Local.FirstOrDefault(item => item.Id == id);
         if (tracked is not null) await _db.Entry(tracked).ReloadAsync(ct);
@@ -375,15 +488,41 @@ public sealed class SalesRequestService : ISalesRequestService
         var isFinal = target.FinalKind != SalesRequestFinalKinds.None;
         if (target.FinalKind == SalesRequestFinalKinds.Success)
         {
-            // «Оплачено» — только по фактическому платежу клиента в CRM, а не по отметке сотрудника.
-            if (input.PaidPaymentId is not int paymentId)
+            if (_db.Database.IsNpgsql())
             {
-                return SalesRequestResult<SalesRequest>.Fail("Для статуса «Оплачено» укажите платёж клиента в CRM.");
+                try
+                {
+                    await LockRequestAccessAsync(request, userId, ct);
+                }
+                catch (PostgresException error) when (error.SqlState == PostgresErrorCodes.LockNotAvailable)
+                {
+                    return SalesRequestResult<SalesRequest>.Fail("Права или сотрудники заявки сейчас изменяются. Обновите карточку и повторите попытку.", 409);
+                }
             }
+            if (!await CanEditRequestAsync(request.Id, userId, ct))
+            {
+                return SalesRequestResult<SalesRequest>.Fail("Нет доступа к изменению заявки.", 403);
+            }
+            if (request.ServiceInvoiceId is not int serviceInvoiceId)
+                return SalesRequestResult<SalesRequest>.Fail("Сначала выберите счёт услуги этой заявки.", 409);
+            try
+            {
+                if (!await IsServiceInvoiceFullyPaidAsync(request, serviceInvoiceId, userId, ct))
+                    return SalesRequestResult<SalesRequest>.Fail("Полная оплата связанного счёта не подтверждена или данные недоступны.", 409);
+            }
+            catch (PostgresException error) when (error.SqlState is PostgresErrorCodes.LockNotAvailable or PostgresErrorCodes.DeadlockDetected or PostgresErrorCodes.SerializationFailure)
+            {
+                return SalesRequestResult<SalesRequest>.Fail("Связанные финансовые данные сейчас изменяются. Обновите карточку и повторите попытку.", 409);
+            }
+            // «Оплачено» — только по фактическому платежу клиента в CRM, а не по отметке сотрудника.
+            var paymentId = input.PaidPaymentId ?? await _db.Payments.AsNoTracking()
+                .Where(item => item.InvoiceId == serviceInvoiceId && item.DocumentKind == DocumentKind.Invoice && item.Status != PaymentStatus.Cancelled)
+                .Select(item => (int?)item.Id).SingleOrDefaultAsync(ct);
+            if (!paymentId.HasValue) return SalesRequestResult<SalesRequest>.Fail("Связанный счёт недоступен.", 409);
 
             var payment = await _db.Payments.AsNoTracking().Where(item => item.Id == paymentId)
-                .Select(item => new { item.ClientId, item.PaidAmount, item.Type }).FirstOrDefaultAsync(ct);
-            if (payment is null || payment.ClientId != request.ClientId)
+                .Select(item => new { item.ClientId, item.Type, item.InvoiceId, item.Status }).FirstOrDefaultAsync(ct);
+            if (payment is null || payment.ClientId != request.ClientId || payment.InvoiceId != serviceInvoiceId)
             {
                 return SalesRequestResult<SalesRequest>.Fail("Платёж не найден у клиента заявки.", 404);
             }
@@ -393,15 +532,35 @@ public sealed class SalesRequestService : ISalesRequestService
                 return SalesRequestResult<SalesRequest>.Fail("Расход не подтверждает оплату заявки: выберите поступление от клиента.", 409);
             }
 
-            if (payment.PaidAmount <= 0)
+            if (payment.Status == PaymentStatus.Cancelled)
             {
-                return SalesRequestResult<SalesRequest>.Fail("По этому платежу оплата ещё не поступила.", 409);
+                return SalesRequestResult<SalesRequest>.Fail("Отменённый платёж нельзя использовать для завершения заявки.", 409);
             }
 
-            request.PaidPaymentId = paymentId;
+            request.PaidPaymentId = paymentId.Value;
         }
 
-        var openTasks = await LoadOpenTasksAsync(request.Id, ct);
+        if (target.FinalKind == SalesRequestFinalKinds.Success && _db.Database.IsNpgsql())
+        {
+            try
+            {
+                await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"TaskJournalItems\" WHERE \"SalesRequestId\" = {id} ORDER BY \"Id\" FOR UPDATE NOWAIT", ct);
+            }
+            catch (PostgresException error) when (error.SqlState == PostgresErrorCodes.LockNotAvailable)
+            {
+                return SalesRequestResult<SalesRequest>.Fail("Задачи заявки сейчас изменяются. Обновите карточку и повторите попытку.", 409);
+            }
+        }
+        var openTasks = target.FinalKind == SalesRequestFinalKinds.Success
+            ? await _db.TaskJournalItems.AsNoTracking().Where(task => task.SalesRequestId == request.Id && !ClosedTaskStatuses.Contains(task.Status)).ToListAsync(ct)
+            : await LoadOpenTasksAsync(request.Id, ct);
+        if (target.FinalKind == SalesRequestFinalKinds.Success && openTasks.Count > 0)
+        {
+            return SalesRequestResult<SalesRequest>.Fail(
+                "Перед успешным завершением заявки явно завершите или отмените все её открытые задачи.",
+                409,
+                new { openTasks = openTasks.Select(task => new OpenTaskInfo(task.Id, task.Title, task.AssigneeUserId, task.Status)).ToList() });
+        }
         var leavingTag = StatusTag(request.StatusId);
         var leavingTasks = openTasks.Where(task => HasTag(task, leavingTag)).ToList();
         var foreignOpen = openTasks.Except(leavingTasks).ToList();
@@ -1017,6 +1176,149 @@ public sealed class SalesRequestService : ISalesRequestService
             [new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture))], "request-assignment"));
         var access = await _db.ResolveSectionAccessAsync(principal, RolePermissionCatalog.Requests, ct, requireApprovedUser: true);
         return access is not null && (access.Visibility.IsAdmin || access.Permission?.CanView == true);
+    }
+
+    private async Task LockRequestAccessAsync(SalesRequest request, int userId, CancellationToken ct)
+    {
+        var userIds = new[] { userId, request.ResponsibleUserId, request.CreatedByUserId }.Distinct().OrderBy(id => id).ToArray();
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Users\" WHERE \"Id\" = ANY({userIds}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Roles\" WHERE \"Id\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {userId}) FOR SHARE NOWAIT", ct);
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"RolePermissions\" WHERE \"RoleId\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {userId}) AND \"Section\" = {RolePermissionCatalog.Requests} FOR SHARE NOWAIT", ct);
+    }
+
+    private async Task LockAccountAccessAsync(int userId, CancellationToken ct)
+    {
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"RolePermissions\" WHERE \"RoleId\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {userId}) AND \"Section\" = {RolePermissionCatalog.Accounts} FOR SHARE NOWAIT", ct);
+    }
+
+    // The caller holds the invoice lock (or SQLite's write transaction) before checking other allocations.
+    private async Task<bool> IsInvoiceAllocationValidAsync(int requestId, int clientId, int invoiceId, decimal? allocationAmount,
+        CancellationToken ct, IReadOnlyCollection<Payment>? invoicePayments = null)
+    {
+        var others = await _db.SalesRequests.IgnoreQueryFilters().AsNoTracking()
+            .Where(other => other.Id != requestId && other.ServiceInvoiceId == invoiceId)
+            .Select(other => other.ServiceInvoiceAllocationAmount).Take(5001).ToArrayAsync(ct);
+        if (others.Length > 5000) return false;
+        if (!allocationAmount.HasValue) return others.Length == 0;
+        if (allocationAmount.Value <= 0m || decimal.Round(allocationAmount.Value, 2) != allocationAmount.Value
+            || allocationAmount.Value > 9999999999999999.99m
+            || others.Any(value => !value.HasValue || value.Value <= 0m || decimal.Round(value.Value, 2) != value.Value)) return false;
+        invoicePayments ??= await _db.Payments.IgnoreQueryFilters().AsNoTracking().Where(payment => payment.InvoiceId == invoiceId)
+            .OrderBy(payment => payment.Id).Take(SalesRequestInvoiceSettlement.MaximumRows + 1).ToListAsync(ct);
+        var total = SalesRequestInvoiceSettlement.Evaluate(invoiceId, clientId, invoicePayments).Total;
+        return total > 0m && allocationAmount.Value + others.Sum(value => value!.Value) <= total;
+    }
+
+    private async Task<bool> IsServiceInvoiceFullyPaidAsync(SalesRequest request, int invoiceId, int userId, CancellationToken ct)
+    {
+        if (!_db.Database.IsNpgsql() && !_db.Database.IsSqlite()) return false;
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture))], "request-payment"));
+        if (_db.Database.IsNpgsql())
+        {
+            await LockAccountAccessAsync(userId, ct);
+            await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"RolePermissions\" WHERE \"RoleId\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {userId}) AND \"Section\" = {RolePermissionCatalog.Payments} FOR SHARE NOWAIT", ct);
+            await _db.Database.ExecuteSqlRawAsync("LOCK TABLE \"SystemSettings\" IN SHARE MODE NOWAIT", ct);
+            await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"UserId\" FROM \"UserCompanyAccesses\" WHERE \"UserId\" = {userId} ORDER BY \"LegalEntityId\" FOR SHARE NOWAIT", ct);
+            await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Invoices\" WHERE \"Id\" = {invoiceId} FOR UPDATE NOWAIT", ct);
+            if (await _db.Payments.IgnoreQueryFilters().Where(payment => payment.InvoiceId == invoiceId).Take(SalesRequestInvoiceSettlement.MaximumRows + 1).CountAsync(ct) > SalesRequestInvoiceSettlement.MaximumRows
+                || await _db.MoneyOperations.IgnoreQueryFilters().Where(operation => operation.LinkedInvoiceId == invoiceId).Take(SalesRequestMatchedReceipts.MaximumRows + 1).CountAsync(ct) > SalesRequestMatchedReceipts.MaximumRows) return false;
+            await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Payments\" WHERE \"InvoiceId\" = {invoiceId} ORDER BY \"Id\" FOR UPDATE NOWAIT", ct);
+            await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"MoneyOperations\" WHERE \"LinkedInvoiceId\" = {invoiceId} ORDER BY \"Id\" FOR UPDATE NOWAIT", ct);
+        }
+        var accountsAccess = await _db.ResolveSectionAccessAsync(principal, RolePermissionCatalog.Accounts, ct, requireApprovedUser: true);
+        var moneyAccess = await BankStatementImportAccess.ResolveAsync(_db, principal, ct);
+        if (accountsAccess?.Permission?.CanView != true || moneyAccess?.Permission.CanView != true
+            || !await CanEditRequestAsync(request.Id, userId, ct)) return false;
+        if (!await InvoicePaymentAccess.ScopeHeaders(_db, accountsAccess).AnyAsync(payment => payment.InvoiceId == invoiceId
+            && payment.ClientId == request.ClientId && payment.Type == PaymentType.Income, ct)) return false;
+        var payments = await _db.Payments.IgnoreQueryFilters().AsNoTracking().Where(payment => payment.InvoiceId == invoiceId)
+            .OrderBy(payment => payment.Id).Take(SalesRequestInvoiceSettlement.MaximumRows + 1).ToListAsync(ct);
+        var operations = await _db.MoneyOperations.IgnoreQueryFilters().AsNoTracking().Where(operation => operation.LinkedInvoiceId == invoiceId)
+            .OrderBy(operation => operation.Id).Take(SalesRequestMatchedReceipts.MaximumRows + 1).ToListAsync(ct);
+        if (payments.Count > SalesRequestInvoiceSettlement.MaximumRows || operations.Count > SalesRequestMatchedReceipts.MaximumRows) return false;
+        if (!await IsInvoiceAllocationValidAsync(request.Id, request.ClientId, invoiceId, request.ServiceInvoiceAllocationAmount, ct, payments)) return false;
+        if (_db.Model.FindEntityType(typeof(MoneyOperation))?.FindProperty("IsDeleted") is not null)
+        {
+            var deleted = await _db.MoneyOperations.IgnoreQueryFilters().AsNoTracking().Where(operation => operation.LinkedInvoiceId == invoiceId
+                && operation.MatchStatus == MoneyOperationMatchStatus.Matched && EF.Property<bool>(operation, "IsDeleted"))
+                .Select(operation => new { operation.Id, operation.Direction }).ToListAsync(ct);
+            // A hidden refund requires reconciliation: dropping it could turn a partial payment into a full one.
+            if (deleted.Any(operation => operation.Direction != MoneyOperationDirection.Income)) return false;
+            var deletedIds = deleted.Select(operation => operation.Id).ToHashSet();
+            operations.RemoveAll(operation => deletedIds.Contains(operation.Id));
+        }
+        var accountIds = operations.Where(operation => operation.MatchStatus == MoneyOperationMatchStatus.Matched && operation.MoneyAccountId.HasValue)
+            .Select(operation => operation.MoneyAccountId!.Value).Distinct().OrderBy(id => id).ToArray();
+        if (_db.Database.IsNpgsql())
+        {
+            var extraUserIds = operations.Where(operation => operation.ResponsibleUserId.HasValue).Select(operation => operation.ResponsibleUserId!.Value).ToArray();
+            if (!await LockInvoiceVisibilityAsync(payments, extraUserIds, userId, ct)) return false;
+            await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"MoneyAccounts\" WHERE \"Id\" = ANY({accountIds}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);
+            var bankIds = await _db.MoneyAccounts.AsNoTracking().Where(account => accountIds.Contains(account.Id) && account.BankConnectionAccountId.HasValue)
+                .Select(account => account.BankConnectionAccountId!.Value).Distinct().OrderBy(id => id).ToArrayAsync(ct);
+            await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"BankConnectionAccounts\" WHERE \"Id\" = ANY({bankIds}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);
+            await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"BankConnections\" WHERE \"Id\" IN (SELECT \"BankConnectionId\" FROM \"BankConnectionAccounts\" WHERE \"Id\" = ANY({bankIds})) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);
+        }
+        accountsAccess = await _db.ResolveSectionAccessAsync(principal, RolePermissionCatalog.Accounts, ct, requireApprovedUser: true);
+        moneyAccess = await BankStatementImportAccess.ResolveAsync(_db, principal, ct);
+        if (accountsAccess?.Permission?.CanView != true || moneyAccess?.Permission.CanView != true
+            || !await CanEditRequestAsync(request.Id, userId, ct)
+            || !await InvoicePaymentAccess.ScopeHeaders(_db, accountsAccess).AnyAsync(payment => payment.InvoiceId == invoiceId
+                && payment.ClientId == request.ClientId && payment.Type == PaymentType.Income, ct)) return false;
+        if (!moneyAccess.Visibility.SeesAll && operations.Any(operation => operation.MatchStatus == MoneyOperationMatchStatus.Matched
+            && (!operation.ResponsibleUserId.HasValue || !moneyAccess.Visibility.VisibleUserIds.Contains(operation.ResponsibleUserId.Value)))) return false;
+        var allowedAccounts = BankStatementImportAccess.CoherentAccounts(_db,
+            BankStatementImportAccess.ScopeAccounts(_db.MoneyAccounts.AsNoTracking(), moneyAccess, ignoreQueryFilters: false));
+        var accounts = await allowedAccounts.Where(account => accountIds.Contains(account.Id)).ToListAsync(ct);
+        if (accounts.Count != accountIds.Length) return false;
+        return SalesRequestServiceInvoicePayment.IsFullyPaid(invoiceId, request.ClientId, "RUB", payments, operations, accounts);
+    }
+
+    // Parent invoices and payment rows must already be locked before loading these visibility dependencies.
+    private async Task<bool> LockInvoiceVisibilityAsync(IReadOnlyCollection<Payment> payments, IReadOnlyCollection<int> extraUserIds, int userId, CancellationToken ct)
+    {
+        var paymentIds = payments.Select(payment => payment.Id).ToArray();
+        if (await _db.PaymentResponsibles.Where(link => paymentIds.Contains(link.PaymentId)).Take(5001).CountAsync(ct) > 5000
+            || await _db.InvoiceClientCases.Where(link => paymentIds.Contains(link.PaymentId)).Take(5001).CountAsync(ct) > 5000) return false;
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"PaymentId\" FROM \"PaymentResponsibles\" WHERE \"PaymentId\" = ANY({paymentIds}) ORDER BY \"PaymentId\", \"UserId\" FOR SHARE NOWAIT", ct);
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"PaymentId\" FROM \"InvoiceClientCases\" WHERE \"PaymentId\" = ANY({paymentIds}) ORDER BY \"PaymentId\", \"ClientCaseId\" FOR SHARE NOWAIT", ct);
+        var linkedCaseIds = await _db.InvoiceClientCases.AsNoTracking().Where(link => paymentIds.Contains(link.PaymentId)).Select(link => link.ClientCaseId).ToArrayAsync(ct);
+        var caseIds = payments.Where(payment => payment.ClientCaseId.HasValue).Select(payment => payment.ClientCaseId!.Value)
+            .Concat(linkedCaseIds).Distinct().OrderBy(id => id).ToArray();
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"ClientCases\" WHERE \"Id\" = ANY({caseIds}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);
+        var cases = await _db.ClientCases.AsNoTracking().Where(item => caseIds.Contains(item.Id)).Select(item => new { item.ClientId, item.LegalEntityId }).ToListAsync(ct);
+        var contractIds = payments.Where(payment => payment.ContractId.HasValue).Select(payment => payment.ContractId!.Value).Distinct().OrderBy(id => id).ToArray();
+        if (await _db.ClientContracts.Where(link => contractIds.Contains(link.ContractId)).Take(5001).CountAsync(ct) > 5000
+            || await _db.LegalEntityContracts.Where(link => contractIds.Contains(link.ContractId)).Take(5001).CountAsync(ct) > 5000) return false;
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Contracts\" WHERE \"Id\" = ANY({contractIds}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"ContractId\" FROM \"ClientContracts\" WHERE \"ContractId\" = ANY({contractIds}) ORDER BY \"ContractId\", \"ClientId\" FOR SHARE NOWAIT", ct);
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"ContractId\" FROM \"LegalEntityContracts\" WHERE \"ContractId\" = ANY({contractIds}) ORDER BY \"ContractId\", \"LegalEntityId\" FOR SHARE NOWAIT", ct);
+        var contractClients = await _db.ClientContracts.AsNoTracking().Where(link => contractIds.Contains(link.ContractId)).Select(link => (int?)link.ClientId).ToArrayAsync(ct);
+        var contractCompanies = await _db.LegalEntityContracts.AsNoTracking().Where(link => contractIds.Contains(link.ContractId)).Select(link => (int?)link.LegalEntityId).ToArrayAsync(ct);
+        var clientIds = payments.SelectMany(payment => new[] { payment.ClientId, payment.ExpenseClientId })
+            .Concat(cases.Select(item => item.ClientId)).Concat(contractClients).Where(id => id.HasValue).Select(id => id!.Value).Distinct().OrderBy(id => id).ToArray();
+        var companyIds = payments.SelectMany(payment => new[] { payment.SellerCompanyId, payment.LegalEntityId, payment.ExpenseLegalEntityId })
+            .Concat(cases.Select(item => item.LegalEntityId)).Concat(contractCompanies).Where(id => id.HasValue).Select(id => id!.Value).Distinct().OrderBy(id => id).ToArray();
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Clients\" WHERE \"Id\" = ANY({clientIds}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"LegalEntities\" WHERE \"Id\" = ANY({companyIds}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);
+        var clientUsers = await _db.Clients.AsNoTracking().Where(client => clientIds.Contains(client.Id) && client.ResponsibleUserId.HasValue).Select(client => client.ResponsibleUserId!.Value).ToArrayAsync(ct);
+        var entityUsers = await _db.LegalEntities.AsNoTracking().Where(company => companyIds.Contains(company.Id) && company.ResponsibleUserId.HasValue).Select(company => company.ResponsibleUserId!.Value).ToArrayAsync(ct);
+        var paymentUsers = await _db.PaymentResponsibles.AsNoTracking().Where(link => paymentIds.Contains(link.PaymentId)).Select(link => link.UserId).ToArrayAsync(ct);
+        var userIds = clientUsers.Concat(entityUsers).Concat(paymentUsers)
+            .Concat(extraUserIds)
+            .Append(userId).Distinct().OrderBy(id => id).ToArray();
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Users\" WHERE \"Id\" = ANY({userIds}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);
+        return true;
+    }
+
+    private async Task<bool> CanEditRequestAsync(int requestId, int userId, CancellationToken ct)
+    {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture))], "request-transition"));
+        var access = await _db.ResolveSectionAccessAsync(principal, RolePermissionCatalog.Requests, ct, requireApprovedUser: true);
+        return access is not null && (access.Visibility.IsAdmin || access.Permission?.CanEdit == true)
+            && await _db.SalesRequests.AsNoTracking().ApplySalesRequestVisibility(access.Visibility).AnyAsync(item => item.Id == requestId, ct);
     }
 
     private async Task<List<TaskJournalItem>> LoadOpenTasksAsync(int requestId, CancellationToken ct)

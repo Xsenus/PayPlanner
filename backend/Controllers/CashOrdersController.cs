@@ -531,7 +531,7 @@ public class CashOrdersController : ControllerBase
         }
 
         var orderType = payment.Type == PaymentType.Expense ? CashOrderType.Outgoing : CashOrderType.Incoming;
-        var orderDate = (payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date).Date;
+        var orderDate = (payment.PaymentDocumentDate ?? payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date).Date;
         var order = new CashOrder
         {
             Number = await GenerateNumberAsync(orderType, orderDate, ct),
@@ -1052,13 +1052,7 @@ public class CashOrdersController : ControllerBase
                 ?? payment.LegalEntity?.ShortName
                 ?? payment.LegalEntity?.FullName
                 ?? payment.CounterpartyName;
-        var action = type == CashOrderType.Outgoing ? "Выдача наличных" : "Прием наличных";
-        var basis = string.Join(". ", new[]
-        {
-            action,
-            string.IsNullOrWhiteSpace(payment.Account) ? null : $"счет №{payment.Account.Trim()}",
-            Normalize(payment.Description),
-        }.Where(part => !string.IsNullOrWhiteSpace(part)));
+        var basis = BuildBasis(payment);
 
         return new CashOrder
         {
@@ -1452,9 +1446,10 @@ public class CashOrdersController : ControllerBase
 
     private static string BuildBasis(Payment payment)
     {
-        var account = string.IsNullOrWhiteSpace(payment.Account) ? null : $"счет №{payment.Account}";
+        var account = string.IsNullOrWhiteSpace(payment.Account) ? null : $"счет №{payment.Account.Trim()}";
         var description = string.IsNullOrWhiteSpace(payment.Description) ? null : payment.Description.Trim();
-        return string.Join(". ", new[] { "Оплата от клиента", account, description }.Where(item => !string.IsNullOrWhiteSpace(item)));
+        var action = payment.Type == PaymentType.Expense ? "Выдача наличных" : "Оплата от клиента";
+        return string.Join(". ", new[] { action, account, description }.Where(item => !string.IsNullOrWhiteSpace(item)));
     }
 
     private static string BuildBasis(MoneyOperation operation)

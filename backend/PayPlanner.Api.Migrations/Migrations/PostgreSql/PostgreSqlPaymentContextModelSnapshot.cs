@@ -9894,6 +9894,13 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<int?>("ResultClientCaseId")
                         .HasColumnType("integer");
 
+                    b.Property<decimal?>("ServiceInvoiceAllocationAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int?>("ServiceInvoiceId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Source")
                         .IsRequired()
                         .HasMaxLength(16)
@@ -9926,6 +9933,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("CreatedAt")
                         .HasDatabaseName("IX_SalesRequests_CreatedAt");
+
+                    b.HasIndex("ServiceInvoiceId");
 
                     b.HasIndex("ClientId", "CreatedAt")
                         .HasDatabaseName("IX_SalesRequests_Client_CreatedAt");

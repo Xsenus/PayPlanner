@@ -5576,7 +5576,10 @@ export function TaskJournal({
     if (!deadlineChangeDecisionPrompt || deadlineChangeDecisionSaving) return;
 
     const { task, request } = deadlineChangeDecisionPrompt;
-    snoozeForcedTaskActions(currentUserId, [getForcedTaskDeadlineChangeSnoozeKey(task.id, request.id)], minutes);
+    if (!snoozeForcedTaskActions(currentUserId, [getForcedTaskDeadlineChangeSnoozeKey(task.id, request.id)], minutes)) {
+      toast.error('Не удалось отложить: хранилище браузера недоступно.', 'Журнал задач');
+      return;
+    }
     resetDeadlineChangeDecisionPrompt();
   };
 
@@ -5828,7 +5831,10 @@ export function TaskJournal({
   const snoozeApprovalDecisionPrompt = (minutes: number) => {
     if (!approvalDecisionPrompt || approvalDecisionSaving) return;
 
-    snoozeForcedTaskActions(currentUserId, [getForcedTaskApprovalSnoozeKey(approvalDecisionPrompt.task.id)], minutes);
+    if (!snoozeForcedTaskActions(currentUserId, [getForcedTaskApprovalSnoozeKey(approvalDecisionPrompt.task.id)], minutes)) {
+      toast.error('Не удалось отложить: хранилище браузера недоступно.', 'Журнал задач');
+      return;
+    }
     resetApprovalDecisionPrompt();
   };
 

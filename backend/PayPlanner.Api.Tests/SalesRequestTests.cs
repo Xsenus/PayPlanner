@@ -73,6 +73,347 @@ public class SalesRequestTests
 
     private static int StatusId(PaymentContext db, string key) => db.SalesRequestStatuses.Single(item => item.Key == key).Id;
 
+    private static async Task CloseRequestTasksAsync(PaymentContext db, params int[] requestIds)
+    {
+        var tasks = await db.TaskJournalItems.Where(task => task.SalesRequestId.HasValue && requestIds.Contains(task.SalesRequestId.Value)).ToListAsync();
+        foreach (var task in tasks)
+        {
+            task.Status = "cancelled";
+            task.Result = "Отменена сотрудником";
+        }
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task<Payment> PreparePaidInvoiceAsync(Fixture f, SalesRequest request, decimal amount = 100m)
+    {
+        f.Manager.IsEmployee = true;
+        foreach (var section in new[] { RolePermissionCatalog.Accounts, RolePermissionCatalog.Payments })
+        {
+            if (f.Manager.Role!.Permissions.All(permission => permission.Section != section))
+                f.Manager.Role.Permissions.Add(new RolePermission { Section = section, CanView = true, ViewScope = DataVisibilityScope.All });
+        }
+        var company = new LegalEntity { ShortName = "Тестовая компания" };
+        var invoice = new Invoice { Number = $"СЧ-{request.Id}", Date = new DateTime(2026, 1, 1) };
+        f.Db.AddRange(company, invoice);
+        await f.Db.SaveChangesAsync();
+        var setting = await f.Db.SystemSettings.SingleOrDefaultAsync(item => item.Key == "legalEntities.mainCompanyIds");
+        if (setting is null) f.Db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = $"[{company.Id}]" });
+        else
+        {
+            var ids = System.Text.Json.JsonSerializer.Deserialize<List<int>>(setting.Value) ?? [];
+            ids.Add(company.Id);
+            setting.Value = System.Text.Json.JsonSerializer.Serialize(ids);
+        }
+        f.Db.UserCompanyAccesses.Add(new UserCompanyAccess { UserId = f.Manager.Id, LegalEntityId = company.Id });
+        var account = new MoneyAccount { CompanyId = company.Id, Source = MoneyOperationSource.Bank, Currency = "RUB", Name = $"Счёт {request.Id}" };
+        var payment = new Payment { Invoice = invoice, ClientId = f.Client.Id, SellerCompanyId = company.Id, Type = PaymentType.Income, DocumentKind = DocumentKind.Invoice, Amount = amount, PaidAmount = amount };
+        f.Db.AddRange(account, payment);
+        await f.Db.SaveChangesAsync();
+        f.Db.MoneyOperations.Add(new MoneyOperation { LinkedInvoiceId = invoice.Id, MoneyAccountId = account.Id, Source = MoneyOperationSource.Bank, Direction = MoneyOperationDirection.Income, AccountingType = MoneyOperationAccountingType.Fact, MatchStatus = MoneyOperationMatchStatus.Matched, MatchedAt = DateTime.UtcNow, Currency = "RUB", Amount = amount, ResponsibleUserId = f.Manager.Id });
+        await f.Db.SaveChangesAsync();
+        var bound = await f.Service.SetServiceInvoiceAsync(request.Id, request.Version, invoice.Id, f.Manager.Id, default);
+        Assert.True(bound.Ok, bound.Error);
+        return payment;
+    }
+
+    [Fact]
+    public async Task SuccessfulTransition_RejectsUnlinkedPaymentEvenForSameClient()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var request = (await f.Service.CreateAsync(NewRequest(f.Client), f.Admin.Id, default)).Value!;
+        await CloseRequestTasksAsync(f.Db, request.Id);
+        var unrelated = new Payment { ClientId = f.Client.Id, Type = PaymentType.Income, Amount = 100m, PaidAmount = 100m };
+        f.Db.Payments.Add(unrelated);
+        await f.Db.SaveChangesAsync();
+        var paid = StatusId(f.Db, "paid");
+        var result = await f.Service.TransitionAsync(request.Id, new SalesRequestTransitionInput(paid, request.Version, unrelated.Id, false, null), f.Admin.Id, default);
+        Assert.False(result.Ok);
+        Assert.Null((await f.Db.SalesRequests.AsNoTracking().SingleAsync(item => item.Id == request.Id)).ResultClientCaseId);
+    }
+
+    [Fact]
+    public async Task SuccessfulTransition_RejectsAnotherInvoiceOfSameClient()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var request = (await f.Service.CreateAsync(NewRequest(f.Client), f.Admin.Id, default)).Value!;
+        await CloseRequestTasksAsync(f.Db, request.Id);
+        var company = new LegalEntity { ShortName = "Компания" };
+        var invoice = new Invoice { Number = "СЧ-1", Date = new DateTime(2026, 1, 1) };
+        var otherInvoice = new Invoice { Number = "СЧ-2", Date = new DateTime(2026, 1, 1) };
+        f.Db.AddRange(company, invoice, otherInvoice);
+        await f.Db.SaveChangesAsync();
+        f.Db.Payments.AddRange(
+            new Payment { Invoice = invoice, ClientId = f.Client.Id, SellerCompanyId = company.Id, Type = PaymentType.Income, DocumentKind = DocumentKind.Invoice, Amount = 100m },
+            new Payment { Invoice = otherInvoice, ClientId = f.Client.Id, SellerCompanyId = company.Id, Type = PaymentType.Income, DocumentKind = DocumentKind.Invoice, Amount = 100m, PaidAmount = 100m });
+        await f.Db.SaveChangesAsync();
+        var binding = await f.Service.SetServiceInvoiceAsync(request.Id, request.Version, invoice.Id, f.Admin.Id, default);
+        Assert.True(binding.Ok, binding.Error);
+        var unrelatedId = await f.Db.Payments.Where(payment => payment.InvoiceId == otherInvoice.Id).Select(payment => payment.Id).SingleAsync();
+        var result = await f.Service.TransitionAsync(request.Id, new SalesRequestTransitionInput(StatusId(f.Db, "paid"), binding.Value!.Version, unrelatedId, false, null), f.Admin.Id, default);
+        Assert.False(result.Ok);
+        Assert.Null((await f.Db.SalesRequests.AsNoTracking().SingleAsync(item => item.Id == request.Id)).ResultClientCaseId);
+    }
+
+    [Fact]
+    public async Task ServiceInvoice_CannotBeReusedForAnotherRequest()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var first = (await f.Service.CreateAsync(NewRequest(f.Client), f.Manager.Id, default)).Value!;
+        var second = (await f.Service.CreateAsync(NewRequest(f.Client), f.Manager.Id, default)).Value!;
+        var payment = await PreparePaidInvoiceAsync(f, first);
+        var result = await f.Service.SetServiceInvoiceAsync(second.Id, second.Version, payment.InvoiceId, f.Manager.Id, default);
+        Assert.Equal(409, result.Status);
+        Assert.Null((await f.Db.SalesRequests.AsNoTracking().SingleAsync(item => item.Id == second.Id)).ServiceInvoiceId);
+    }
+
+    [Fact]
+    public async Task SharedServiceInvoice_AllocatesAndCompletesEachRequestAfterFullPayment()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var first = (await f.Service.CreateAsync(NewRequest(f.Client), f.Manager.Id, default)).Value!;
+        var second = (await f.Service.CreateAsync(NewRequest(f.Client), f.Manager.Id, default)).Value!;
+        await CloseRequestTasksAsync(f.Db, first.Id, second.Id);
+        var payment = await PreparePaidInvoiceAsync(f, first);
+        var firstShared = await f.Service.SetServiceInvoiceAsync(first.Id, first.Version, payment.InvoiceId, f.Manager.Id, default, 60m);
+        Assert.True(firstShared.Ok, firstShared.Error);
+        var secondShared = await f.Service.SetServiceInvoiceAsync(second.Id, second.Version, payment.InvoiceId, f.Manager.Id, default, 40m);
+        Assert.True(secondShared.Ok, secondShared.Error);
+        var visible = await ControllerFor(f.Db, f.Manager).GetServiceInvoice(first.Id, default);
+        var link = Assert.IsType<SalesRequestServiceInvoiceDto>(Assert.IsType<OkObjectResult>(visible.Result).Value);
+        Assert.Equal(60m, link.AllocationAmount);
+        var receipt = await f.Db.MoneyOperations.SingleAsync(item => item.LinkedInvoiceId == payment.InvoiceId);
+        receipt.Amount = 99m;
+        await f.Db.SaveChangesAsync();
+        var paid = StatusId(f.Db, "paid");
+        Assert.False((await f.Service.TransitionAsync(first.Id, new SalesRequestTransitionInput(paid, firstShared.Value!.Version, null, false, null), f.Manager.Id, default)).Ok);
+        receipt.Amount = 100m;
+        await f.Db.SaveChangesAsync();
+        var doneFirst = await f.Service.TransitionAsync(first.Id, new SalesRequestTransitionInput(paid, firstShared.Value!.Version, null, false, null), f.Manager.Id, default);
+        var doneSecond = await f.Service.TransitionAsync(second.Id, new SalesRequestTransitionInput(paid, secondShared.Value!.Version, null, false, null), f.Manager.Id, default);
+        Assert.True(doneFirst.Ok, doneFirst.Error);
+        Assert.True(doneSecond.Ok, doneSecond.Error);
+        Assert.Equal(2, await f.Db.ClientCases.CountAsync());
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(40.001)]
+    [InlineData(40.01)]
+    public async Task SharedServiceInvoice_RejectsInvalidOrExcessAllocation(decimal amount)
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var first = (await f.Service.CreateAsync(NewRequest(f.Client), f.Manager.Id, default)).Value!;
+        var second = (await f.Service.CreateAsync(NewRequest(f.Client), f.Manager.Id, default)).Value!;
+        var payment = await PreparePaidInvoiceAsync(f, first);
+        Assert.True((await f.Service.SetServiceInvoiceAsync(first.Id, first.Version, payment.InvoiceId, f.Manager.Id, default, 60m)).Ok);
+        var result = await f.Service.SetServiceInvoiceAsync(second.Id, second.Version, payment.InvoiceId, f.Manager.Id, default, amount);
+        Assert.False(result.Ok);
+        Assert.Null(result.Details);
+        Assert.Null((await f.Db.SalesRequests.AsNoTracking().SingleAsync(item => item.Id == second.Id)).ServiceInvoiceId);
+        Assert.False((await f.Service.SetServiceInvoiceAsync(second.Id, second.Version, payment.InvoiceId, f.Manager.Id, default)).Ok);
+    }
+
+    [Fact]
+    public async Task SharedServiceInvoice_RechecksAllocationsWhenInvoiceAmountChanges()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var first = (await f.Service.CreateAsync(NewRequest(f.Client), f.Manager.Id, default)).Value!;
+        var second = (await f.Service.CreateAsync(NewRequest(f.Client), f.Manager.Id, default)).Value!;
+        await CloseRequestTasksAsync(f.Db, first.Id, second.Id);
+        var payment = await PreparePaidInvoiceAsync(f, first);
+        Assert.True((await f.Service.SetServiceInvoiceAsync(first.Id, first.Version, payment.InvoiceId, f.Manager.Id, default, 60m)).Ok);
+        Assert.True((await f.Service.SetServiceInvoiceAsync(second.Id, second.Version, payment.InvoiceId, f.Manager.Id, default, 40m)).Ok);
+        payment.Amount = 90m;
+        await f.Db.SaveChangesAsync();
+        var result = await f.Service.TransitionAsync(first.Id, new SalesRequestTransitionInput(StatusId(f.Db, "paid"), first.Version, null, false, null), f.Manager.Id, default);
+        Assert.Equal(409, result.Status);
+        Assert.False(await f.Db.ClientCases.AnyAsync());
+    }
+
+    [Fact]
+    public async Task SharedServiceInvoice_DoesNotExposeAnotherManagersRequestOrShare()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var first = (await f.Service.CreateAsync(NewRequest(f.Client), f.Manager.Id, default)).Value!;
+        var payment = await PreparePaidInvoiceAsync(f, first);
+        Assert.True((await f.Service.SetServiceInvoiceAsync(first.Id, first.Version, payment.InvoiceId, f.Manager.Id, default, 60m)).Ok);
+        var colleague = new User
+        {
+            Email = "other-manager@example.test",
+            FullName = "Другой",
+            PasswordHash = "x",
+            IsActive = true,
+            IsApproved = true,
+            IsEmployee = true,
+            Role = new Role
+            {
+                Name = "other-manager",
+                Permissions =
+            {
+                new RolePermission { Section = RolePermissionCatalog.Requests, CanView = true, CanCreate = true, CanEdit = true, ViewScope = DataVisibilityScope.Own },
+                new RolePermission { Section = RolePermissionCatalog.Accounts, CanView = true, ViewScope = DataVisibilityScope.All },
+                new RolePermission { Section = RolePermissionCatalog.Payments, CanView = true, ViewScope = DataVisibilityScope.All },
+            }
+            },
+        };
+        f.Db.Users.Add(colleague);
+        await f.Db.SaveChangesAsync();
+        f.Db.UserCompanyAccesses.Add(new UserCompanyAccess { UserId = colleague.Id, LegalEntityId = payment.SellerCompanyId!.Value });
+        await f.Db.SaveChangesAsync();
+        var second = (await f.Service.CreateAsync(NewRequest(f.Client), colleague.Id, default)).Value!;
+        var rejected = await f.Service.SetServiceInvoiceAsync(second.Id, second.Version, payment.InvoiceId, colleague.Id, default, 41m);
+        Assert.Equal(409, rejected.Status);
+        Assert.Null(rejected.Details);
+        Assert.DoesNotContain("60", rejected.Error);
+        Assert.IsType<NotFoundResult>((await ControllerFor(f.Db, colleague).Get(first.Id, default)).Result);
+        var accepted = await f.Service.SetServiceInvoiceAsync(second.Id, second.Version, payment.InvoiceId, colleague.Id, default, 40m);
+        Assert.True(accepted.Ok, accepted.Error);
+    }
+
+    [Theory]
+    [InlineData(99.99, false, false, 99.99)]
+    [InlineData(100, true, false, 100)]
+    [InlineData(100, true, true, 0)]
+    public async Task SuccessfulTransition_RequiresFullMatchedServiceInvoiceReceipt(decimal received, bool expected, bool omitPaymentId, decimal recordedPaid)
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var request = (await f.Service.CreateAsync(NewRequest(f.Client), f.Admin.Id, default)).Value!;
+        await CloseRequestTasksAsync(f.Db, request.Id);
+        var company = new LegalEntity { ShortName = "Компания" };
+        var invoice = new Invoice { Number = "СЧ-ПОЛНАЯ", Date = new DateTime(2026, 1, 1) };
+        f.Db.AddRange(company, invoice);
+        await f.Db.SaveChangesAsync();
+        f.Db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = $"[{company.Id}]" });
+        var account = new MoneyAccount { CompanyId = company.Id, Source = MoneyOperationSource.Bank, Currency = "RUB", Name = "Тестовый счёт" };
+        var payment = new Payment { Invoice = invoice, ClientId = f.Client.Id, SellerCompanyId = company.Id, Type = PaymentType.Income, DocumentKind = DocumentKind.Invoice, Amount = 100m, PaidAmount = recordedPaid };
+        f.Db.AddRange(account, payment);
+        await f.Db.SaveChangesAsync();
+        f.Db.MoneyOperations.Add(new MoneyOperation { LinkedInvoiceId = invoice.Id, MoneyAccountId = account.Id, Source = MoneyOperationSource.Bank, Direction = MoneyOperationDirection.Income, AccountingType = MoneyOperationAccountingType.Fact, MatchStatus = MoneyOperationMatchStatus.Matched, MatchedAt = DateTime.UtcNow, Currency = "RUB", Amount = received, ResponsibleUserId = f.Admin.Id });
+        await f.Db.SaveChangesAsync();
+        var binding = await f.Service.SetServiceInvoiceAsync(request.Id, request.Version, invoice.Id, f.Admin.Id, default);
+        Assert.True(binding.Ok, binding.Error);
+        var result = await f.Service.TransitionAsync(request.Id, new SalesRequestTransitionInput(StatusId(f.Db, "paid"), binding.Value!.Version, omitPaymentId ? null : payment.Id, false, null), f.Admin.Id, default);
+        Assert.Equal(expected, result.Ok);
+        Assert.Equal(expected, (await f.Db.SalesRequests.AsNoTracking().SingleAsync(item => item.Id == request.Id)).ResultClientCaseId.HasValue);
+    }
+
+    [Theory]
+    [InlineData(RolePermissionCatalog.Accounts)]
+    [InlineData(RolePermissionCatalog.Payments)]
+    public async Task SuccessfulTransition_RejectsRevokedFinancialView(string section)
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        f.Manager.IsEmployee = true;
+        f.Manager.Role!.Permissions.Add(new RolePermission { Section = RolePermissionCatalog.Accounts, CanView = true, ViewScope = DataVisibilityScope.All });
+        f.Manager.Role.Permissions.Add(new RolePermission { Section = RolePermissionCatalog.Payments, CanView = true, ViewScope = DataVisibilityScope.All });
+        var company = new LegalEntity { ShortName = "Компания" };
+        var invoice = new Invoice { Number = "СЧ-ПРАВА", Date = new DateTime(2026, 1, 1) };
+        f.Db.AddRange(company, invoice);
+        await f.Db.SaveChangesAsync();
+        f.Db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = $"[{company.Id}]" });
+        f.Db.UserCompanyAccesses.Add(new UserCompanyAccess { UserId = f.Manager.Id, LegalEntityId = company.Id });
+        var account = new MoneyAccount { CompanyId = company.Id, Source = MoneyOperationSource.Bank, Currency = "RUB", Name = "Счёт" };
+        var payment = new Payment { Invoice = invoice, ClientId = f.Client.Id, SellerCompanyId = company.Id, Type = PaymentType.Income, DocumentKind = DocumentKind.Invoice, Amount = 100m, PaidAmount = 100m };
+        f.Db.AddRange(account, payment);
+        await f.Db.SaveChangesAsync();
+        f.Db.MoneyOperations.Add(new MoneyOperation { LinkedInvoiceId = invoice.Id, MoneyAccountId = account.Id, Source = MoneyOperationSource.Bank, Direction = MoneyOperationDirection.Income, AccountingType = MoneyOperationAccountingType.Fact, MatchStatus = MoneyOperationMatchStatus.Matched, MatchedAt = DateTime.UtcNow, Currency = "RUB", Amount = 100m, ResponsibleUserId = f.Manager.Id });
+        await f.Db.SaveChangesAsync();
+        var request = (await f.Service.CreateAsync(NewRequest(f.Client), f.Manager.Id, default)).Value!;
+        await CloseRequestTasksAsync(f.Db, request.Id);
+        var binding = await f.Service.SetServiceInvoiceAsync(request.Id, request.Version, invoice.Id, f.Manager.Id, default);
+        Assert.True(binding.Ok, binding.Error);
+        f.Manager.Role.Permissions.Single(permission => permission.Section == section).CanView = false;
+        await f.Db.SaveChangesAsync();
+        var result = await f.Service.TransitionAsync(request.Id, new SalesRequestTransitionInput(StatusId(f.Db, "paid"), binding.Value!.Version, payment.Id, false, null), f.Manager.Id, default);
+        Assert.False(result.Ok);
+        Assert.Null(result.Details);
+        Assert.Null((await f.Db.SalesRequests.AsNoTracking().SingleAsync(item => item.Id == request.Id)).ResultClientCaseId);
+    }
+
+    [Theory]
+    [InlineData("plan")]
+    [InlineData("unmatched")]
+    [InlineData("currency")]
+    [InlineData("foreign-company")]
+    [InlineData("refund")]
+    public async Task SuccessfulTransition_RejectsUnprovenOrRefundedReceipt(string scenario)
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var request = (await f.Service.CreateAsync(NewRequest(f.Client), f.Manager.Id, default)).Value!;
+        await CloseRequestTasksAsync(f.Db, request.Id);
+        var payment = await PreparePaidInvoiceAsync(f, request);
+        var operation = await f.Db.MoneyOperations.SingleAsync(item => item.LinkedInvoiceId == payment.InvoiceId);
+        if (scenario == "plan") operation.AccountingType = MoneyOperationAccountingType.Plan;
+        if (scenario == "unmatched") operation.MatchStatus = MoneyOperationMatchStatus.Ignored;
+        if (scenario == "currency") operation.Currency = "USD";
+        if (scenario == "foreign-company")
+        {
+            var other = new LegalEntity { ShortName = "Другая компания" };
+            f.Db.LegalEntities.Add(other);
+            await f.Db.SaveChangesAsync();
+            (await f.Db.MoneyAccounts.SingleAsync(item => item.Id == operation.MoneyAccountId)).CompanyId = other.Id;
+        }
+        if (scenario == "refund")
+            f.Db.MoneyOperations.Add(new MoneyOperation { LinkedInvoiceId = payment.InvoiceId, MoneyAccountId = operation.MoneyAccountId, Source = MoneyOperationSource.Bank, Direction = MoneyOperationDirection.Expense, AccountingType = MoneyOperationAccountingType.Fact, MatchStatus = MoneyOperationMatchStatus.Matched, MatchedAt = DateTime.UtcNow, Currency = "RUB", Amount = 1m, ResponsibleUserId = f.Manager.Id });
+        await f.Db.SaveChangesAsync();
+        var result = await f.Service.TransitionAsync(request.Id, new SalesRequestTransitionInput(StatusId(f.Db, "paid"), request.Version, payment.Id, false, null), f.Manager.Id, default);
+        Assert.Equal(409, result.Status);
+        Assert.Null(result.Details);
+        Assert.Null((await f.Db.SalesRequests.AsNoTracking().SingleAsync(item => item.Id == request.Id)).ResultClientCaseId);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SuccessfulTransition_DoesNotCountCashOrderWithoutOrInAdditionToMovement(bool linkedMovement)
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var request = (await f.Service.CreateAsync(NewRequest(f.Client), f.Manager.Id, default)).Value!;
+        await CloseRequestTasksAsync(f.Db, request.Id);
+        var payment = await PreparePaidInvoiceAsync(f, request);
+        var operation = await f.Db.MoneyOperations.SingleAsync(item => item.LinkedInvoiceId == payment.InvoiceId);
+        if (linkedMovement) operation.Amount = 50m;
+        else f.Db.MoneyOperations.Remove(operation);
+        f.Db.CashOrders.Add(new CashOrder { Number = "ТЕСТ-ПКО", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted, Date = DateTime.UtcNow, Amount = linkedMovement ? 50m : 100m, Currency = "RUB", ClientId = f.Client.Id, PaymentId = payment.Id, InvoiceId = payment.InvoiceId, MoneyOperationId = linkedMovement ? operation.Id : null });
+        await f.Db.SaveChangesAsync();
+        var result = await f.Service.TransitionAsync(request.Id, new SalesRequestTransitionInput(StatusId(f.Db, "paid"), request.Version, null, false, null), f.Manager.Id, default);
+        Assert.Equal(409, result.Status);
+        Assert.Null((await f.Db.SalesRequests.AsNoTracking().SingleAsync(item => item.Id == request.Id)).ResultClientCaseId);
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public async Task SuccessfulTransition_HandlesDeletedReceiptAndRefundSafely(bool deletedRefund, bool expected)
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var request = (await f.Service.CreateAsync(NewRequest(f.Client), f.Manager.Id, default)).Value!;
+        await CloseRequestTasksAsync(f.Db, request.Id);
+        var payment = await PreparePaidInvoiceAsync(f, request);
+        var original = await f.Db.MoneyOperations.SingleAsync(item => item.LinkedInvoiceId == payment.InvoiceId);
+        var additional = new MoneyOperation { LinkedInvoiceId = payment.InvoiceId, MoneyAccountId = original.MoneyAccountId, Source = MoneyOperationSource.Bank, Direction = deletedRefund ? MoneyOperationDirection.Expense : MoneyOperationDirection.Income, AccountingType = MoneyOperationAccountingType.Fact, MatchStatus = MoneyOperationMatchStatus.Matched, MatchedAt = DateTime.UtcNow, Currency = "RUB", Amount = deletedRefund ? 1m : 100m, ResponsibleUserId = f.Manager.Id };
+        f.Db.MoneyOperations.Add(additional);
+        await f.Db.SaveChangesAsync();
+        f.Db.MoneyOperations.Remove(deletedRefund ? additional : original);
+        await f.Db.SaveChangesAsync();
+        var result = await f.Service.TransitionAsync(request.Id, new SalesRequestTransitionInput(StatusId(f.Db, "paid"), request.Version, null, false, null), f.Manager.Id, default);
+        Assert.Equal(expected, result.Ok);
+        Assert.Equal(expected, (await f.Db.SalesRequests.AsNoTracking().SingleAsync(item => item.Id == request.Id)).ResultClientCaseId.HasValue);
+    }
+
     [Fact]
     public async Task RequestTasks_StayPrivateEvenWithBroadTaskAndCalendarAccess()
     {
@@ -306,6 +647,277 @@ public class SalesRequestTests
     }
 
     [Fact]
+    public async Task InvoiceCandidates_ReturnsOnlyUnambiguousIncomeInvoicesForRequestClient()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var request = (await f.Service.CreateAsync(NewRequest(f.Client), f.Admin.Id, default)).Value!;
+        var company = new LegalEntity { ShortName = "Компания" };
+        var other = new Client { Name = "Другой", Phone = "+79000000001" };
+        f.Db.AddRange(company, other);
+        await f.Db.SaveChangesAsync();
+        var allowed = new Invoice { Number = "СЧ-100", Date = new DateTime(2026, 1, 1) };
+        var unrelated = new Invoice { Number = "СЧ-200", Date = new DateTime(2026, 1, 2) };
+        var ambiguous = new Invoice { Number = "СЧ-300", Date = new DateTime(2026, 1, 3) };
+        f.Db.Payments.AddRange(
+            new Payment { Invoice = allowed, ClientId = f.Client.Id, SellerCompanyId = company.Id, Type = PaymentType.Income, DocumentKind = DocumentKind.Invoice, Amount = 100m },
+            new Payment { Invoice = unrelated, ClientId = other.Id, SellerCompanyId = company.Id, Type = PaymentType.Income, DocumentKind = DocumentKind.Invoice, Amount = 100m },
+            new Payment { Invoice = ambiguous, ClientId = f.Client.Id, SellerCompanyId = company.Id, Type = PaymentType.Income, DocumentKind = DocumentKind.Invoice, Amount = 100m },
+            new Payment { Invoice = ambiguous, ClientId = other.Id, SellerCompanyId = company.Id, Type = PaymentType.Income, DocumentKind = DocumentKind.Invoice, Amount = 100m });
+        await f.Db.SaveChangesAsync();
+        var response = await ControllerFor(f.Db, f.Admin, admin: true).InvoiceCandidates(request.Id, "СЧ", 0, 20, default);
+        var page = Assert.IsType<SalesRequestInvoiceCandidatesDto>(Assert.IsType<OkObjectResult>(response.Result).Value);
+        var candidate = Assert.Single(page.Items);
+        Assert.Equal(allowed.Id, candidate.InvoiceId);
+        Assert.Equal("СЧ-100", candidate.Number);
+        Assert.Equal(company.Id, candidate.SellerCompanyId);
+        Assert.False(page.HasMore);
+    }
+
+    [Fact]
+    public async Task InvoiceCandidates_DistinguishesEqualNumbersByInvoiceAndCompany()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var request = (await f.Service.CreateAsync(NewRequest(f.Client), f.Admin.Id, default)).Value!;
+        var firstCompany = new LegalEntity { ShortName = "Первая" };
+        var secondCompany = new LegalEntity { ShortName = "Вторая" };
+        f.Db.AddRange(firstCompany, secondCompany);
+        await f.Db.SaveChangesAsync();
+        var first = new Invoice { Number = "СЧ-ОДИНАКОВЫЙ", Date = new DateTime(2026, 1, 1) };
+        var second = new Invoice { Number = "СЧ-ОДИНАКОВЫЙ", Date = new DateTime(2026, 1, 1) };
+        f.Db.Payments.AddRange(
+            new Payment { Invoice = first, ClientId = f.Client.Id, SellerCompanyId = firstCompany.Id, Type = PaymentType.Income, DocumentKind = DocumentKind.Invoice, Amount = 100m },
+            new Payment { Invoice = second, ClientId = f.Client.Id, SellerCompanyId = secondCompany.Id, Type = PaymentType.Income, DocumentKind = DocumentKind.Invoice, Amount = 100m });
+        await f.Db.SaveChangesAsync();
+        var result = await ControllerFor(f.Db, f.Admin, admin: true).InvoiceCandidates(request.Id, "СЧ", 0, 20, default);
+        var page = Assert.IsType<SalesRequestInvoiceCandidatesDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(2, page.Items.Count);
+        Assert.Contains(page.Items, item => item.InvoiceId == first.Id && item.SellerCompanyId == firstCompany.Id);
+        Assert.Contains(page.Items, item => item.InvoiceId == second.Id && item.SellerCompanyId == secondCompany.Id);
+    }
+
+    [Fact]
+    public async Task ServiceInvoice_RedactsUnavailableLinkAndPreventsSilentReplacement()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        f.Manager.Role!.Permissions.Add(new RolePermission { Section = RolePermissionCatalog.Accounts, CanView = true, ViewScope = DataVisibilityScope.All });
+        var company = new LegalEntity { ShortName = "Компания" };
+        f.Db.LegalEntities.Add(company);
+        await f.Db.SaveChangesAsync();
+        var request = (await f.Service.CreateAsync(NewRequest(f.Client), f.Manager.Id, default)).Value!;
+        var oldInvoice = new Invoice { Number = "ЗАКРЫТЫЙ-1", Date = new DateTime(2026, 1, 1) };
+        var newInvoice = new Invoice { Number = "НОВЫЙ-2", Date = new DateTime(2026, 1, 2) };
+        var oldHeader = new Payment { Invoice = oldInvoice, ClientId = f.Client.Id, SellerCompanyId = company.Id, Type = PaymentType.Income, DocumentKind = DocumentKind.Invoice, Amount = 100m };
+        f.Db.Payments.AddRange(oldHeader, new Payment { Invoice = newInvoice, ClientId = f.Client.Id, SellerCompanyId = company.Id, Type = PaymentType.Income, DocumentKind = DocumentKind.Invoice, Amount = 100m });
+        await f.Db.SaveChangesAsync();
+        var controller = ControllerFor(f.Db, f.Manager);
+        var bound = await controller.SetServiceInvoice(request.Id, new SalesRequestServiceInvoiceRequest { Version = request.Version, InvoiceId = oldInvoice.Id }, default);
+        Assert.IsType<OkObjectResult>(bound.Result);
+        var shown = await controller.GetServiceInvoice(request.Id, default);
+        var visible = Assert.IsType<SalesRequestServiceInvoiceDto>(Assert.IsType<OkObjectResult>(shown.Result).Value);
+        Assert.Equal("available", visible.State);
+        Assert.Equal(oldInvoice.Id, visible.Invoice!.InvoiceId);
+        Assert.Equal(company.Id, visible.Invoice.SellerCompanyId);
+        oldHeader.Status = PaymentStatus.Cancelled;
+        await f.Db.SaveChangesAsync();
+        var hidden = await controller.GetServiceInvoice(request.Id, default);
+        var protectedLink = Assert.IsType<SalesRequestServiceInvoiceDto>(Assert.IsType<OkObjectResult>(hidden.Result).Value);
+        Assert.Equal("unavailable", protectedLink.State);
+        Assert.Null(protectedLink.Invoice);
+        Assert.DoesNotContain("ЗАКРЫТЫЙ-1", System.Text.Json.JsonSerializer.Serialize(protectedLink), StringComparison.Ordinal);
+        var replace = await controller.SetServiceInvoice(request.Id, new SalesRequestServiceInvoiceRequest { Version = request.Version, InvoiceId = newInvoice.Id }, default);
+        Assert.Equal(404, Assert.IsType<ObjectResult>(replace.Result).StatusCode);
+        var remove = await controller.SetServiceInvoice(request.Id, new SalesRequestServiceInvoiceRequest { Version = request.Version, Remove = true }, default);
+        Assert.Equal(404, Assert.IsType<ObjectResult>(remove.Result).StatusCode);
+        Assert.Equal(oldInvoice.Id, (await f.Db.SalesRequests.AsNoTracking().SingleAsync(r => r.Id == request.Id)).ServiceInvoiceId);
+        f.Manager.Role.Permissions.Single(p => p.Section == RolePermissionCatalog.Accounts).CanView = false;
+        await f.Db.SaveChangesAsync();
+        Assert.IsType<ForbidResult>((await controller.GetServiceInvoice(request.Id, default)).Result);
+    }
+
+    [Fact]
+    public async Task InvoiceCandidates_RequiresBothRequestEditAndInvoiceViewWithoutRevealingDetails()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var mine = (await f.Service.CreateAsync(NewRequest(f.Client), f.Manager.Id, default)).Value!;
+        var foreign = (await f.Service.CreateAsync(NewRequest(f.Client), f.Admin.Id, default)).Value!;
+        var controller = ControllerFor(f.Db, f.Manager);
+        Assert.IsType<ForbidResult>((await controller.InvoiceCandidates(mine.Id, null, 0, 20, default)).Result);
+        f.Manager.Role!.Permissions.Add(new RolePermission { Section = RolePermissionCatalog.Accounts, CanView = true, ViewScope = DataVisibilityScope.All });
+        await f.Db.SaveChangesAsync();
+        Assert.IsType<ForbidResult>((await controller.InvoiceCandidates(foreign.Id, null, 0, 20, default)).Result);
+        f.Manager.Role.Permissions.Single(p => p.Section == RolePermissionCatalog.Requests).CanEdit = false;
+        await f.Db.SaveChangesAsync();
+        Assert.IsType<ForbidResult>((await controller.InvoiceCandidates(mine.Id, null, 0, 20, default)).Result);
+    }
+
+    [Fact]
+    public async Task ServiceInvoice_BindsOnlyVisibleClientInvoiceAndProtectsVersion()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var request = (await f.Service.CreateAsync(NewRequest(f.Client), f.Admin.Id, default)).Value!;
+        var company = new LegalEntity { ShortName = "Компания" };
+        var other = new Client { Name = "Другой", Phone = "+79000000001" };
+        f.Db.AddRange(company, other);
+        await f.Db.SaveChangesAsync();
+        var allowed = new Invoice { Number = "СЧ-1", Date = new DateTime(2026, 1, 1) };
+        var foreign = new Invoice { Number = "СЧ-2", Date = new DateTime(2026, 1, 2) };
+        f.Db.Payments.AddRange(
+            new Payment { Invoice = allowed, ClientId = f.Client.Id, SellerCompanyId = company.Id, Type = PaymentType.Income, DocumentKind = DocumentKind.Invoice, Amount = 100m },
+            new Payment { Invoice = foreign, ClientId = other.Id, SellerCompanyId = company.Id, Type = PaymentType.Income, DocumentKind = DocumentKind.Invoice, Amount = 100m });
+        await f.Db.SaveChangesAsync();
+        var controller = ControllerFor(f.Db, f.Admin, admin: true);
+        var invalid = await controller.SetServiceInvoice(request.Id, new SalesRequestServiceInvoiceRequest { Version = request.Version, InvoiceId = foreign.Id }, default);
+        Assert.Equal(404, Assert.IsType<ObjectResult>(invalid.Result).StatusCode);
+        var success = await controller.SetServiceInvoice(request.Id, new SalesRequestServiceInvoiceRequest { Version = request.Version, InvoiceId = allowed.Id }, default);
+        var dto = Assert.IsType<SalesRequestDto>(Assert.IsType<OkObjectResult>(success.Result).Value);
+        Assert.DoesNotContain("ServiceInvoiceId", System.Text.Json.JsonSerializer.Serialize(dto), StringComparison.Ordinal);
+        Assert.Equal(1, dto.Version);
+        Assert.Equal(allowed.Id, (await f.Db.SalesRequests.AsNoTracking().SingleAsync(r => r.Id == request.Id)).ServiceInvoiceId);
+        var empty = await controller.SetServiceInvoice(request.Id, new SalesRequestServiceInvoiceRequest { Version = dto.Version }, default);
+        Assert.IsType<BadRequestObjectResult>(empty.Result);
+        Assert.Equal(allowed.Id, (await f.Db.SalesRequests.AsNoTracking().SingleAsync(r => r.Id == request.Id)).ServiceInvoiceId);
+        var stale = await controller.SetServiceInvoice(request.Id, new SalesRequestServiceInvoiceRequest { Version = 0, Remove = true }, default);
+        Assert.Equal(409, Assert.IsType<ObjectResult>(stale.Result).StatusCode);
+        var eventsBefore = await f.Db.SalesRequestEvents.CountAsync();
+        var repeated = await controller.SetServiceInvoice(request.Id, new SalesRequestServiceInvoiceRequest { Version = dto.Version, InvoiceId = allowed.Id }, default);
+        Assert.IsType<OkObjectResult>(repeated.Result);
+        Assert.Equal(eventsBefore, await f.Db.SalesRequestEvents.CountAsync());
+        var removed = await controller.SetServiceInvoice(request.Id, new SalesRequestServiceInvoiceRequest { Version = dto.Version, Remove = true }, default);
+        Assert.Equal(2, Assert.IsType<SalesRequestDto>(Assert.IsType<OkObjectResult>(removed.Result).Value).Version);
+        Assert.Null((await f.Db.SalesRequests.AsNoTracking().SingleAsync(r => r.Id == request.Id)).ServiceInvoiceId);
+    }
+
+    [Fact]
+    public async Task ServiceInvoice_DeniesEmployeeWithoutInvoiceView()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var request = (await f.Service.CreateAsync(NewRequest(f.Client), f.Manager.Id, default)).Value!;
+        var result = await ControllerFor(f.Db, f.Manager).SetServiceInvoice(request.Id,
+            new SalesRequestServiceInvoiceRequest { Version = request.Version, InvoiceId = 123 }, default);
+        Assert.Equal(404, Assert.IsType<ObjectResult>(result.Result).StatusCode);
+        Assert.Null((await f.Db.SalesRequests.AsNoTracking().SingleAsync(r => r.Id == request.Id)).ServiceInvoiceId);
+        f.Manager.Role!.Permissions.Add(new RolePermission { Section = RolePermissionCatalog.Accounts, CanView = true, ViewScope = DataVisibilityScope.All });
+        f.Manager.Role.Permissions.Single(p => p.Section == RolePermissionCatalog.Requests).CanEdit = false;
+        await f.Db.SaveChangesAsync();
+        var revoked = await f.Service.SetServiceInvoiceAsync(request.Id, request.Version + 1, 123, f.Manager.Id, default);
+        Assert.Equal(403, revoked.Status);
+        Assert.Null(revoked.Details);
+    }
+
+    [Fact]
+    public async Task InvoiceCandidates_UsesBoundedStablePagesAndValidatesLimits()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var request = (await f.Service.CreateAsync(NewRequest(f.Client), f.Admin.Id, default)).Value!;
+        var company = new LegalEntity { ShortName = "Компания" };
+        f.Db.LegalEntities.Add(company);
+        await f.Db.SaveChangesAsync();
+        var first = new Invoice { Number = "ПОИСК-1", Date = new DateTime(2026, 1, 1) };
+        var second = new Invoice { Number = "ПОИСК-2", Date = new DateTime(2026, 1, 2) };
+        f.Db.Payments.AddRange(
+            new Payment { Invoice = first, ClientId = f.Client.Id, SellerCompanyId = company.Id, Type = PaymentType.Income, DocumentKind = DocumentKind.Invoice, Amount = 100m },
+            new Payment { Invoice = first, ClientId = f.Client.Id, SellerCompanyId = company.Id, Type = PaymentType.Income, DocumentKind = DocumentKind.Invoice, Amount = 100m },
+            new Payment { Invoice = second, ClientId = f.Client.Id, SellerCompanyId = company.Id, Type = PaymentType.Income, DocumentKind = DocumentKind.Invoice, Amount = 100m });
+        await f.Db.SaveChangesAsync();
+        var controller = ControllerFor(f.Db, f.Admin, admin: true);
+        var firstResult = await controller.InvoiceCandidates(request.Id, "ПОИСК", 0, 1, default);
+        var firstPage = Assert.IsType<SalesRequestInvoiceCandidatesDto>(Assert.IsType<OkObjectResult>(firstResult.Result).Value);
+        Assert.Equal(first.Id, Assert.Single(firstPage.Items).InvoiceId);
+        Assert.True(firstPage.HasMore);
+        var nextResult = await controller.InvoiceCandidates(request.Id, "ПОИСК", first.Id, 1, default);
+        var nextPage = Assert.IsType<SalesRequestInvoiceCandidatesDto>(Assert.IsType<OkObjectResult>(nextResult.Result).Value);
+        Assert.Equal(second.Id, Assert.Single(nextPage.Items).InvoiceId);
+        Assert.False(nextPage.HasMore);
+        Assert.IsType<BadRequestObjectResult>((await controller.InvoiceCandidates(request.Id, null, 0, 21, default)).Result);
+        Assert.IsType<BadRequestObjectResult>((await controller.InvoiceCandidates(request.Id, new string('x', 101), 0, 20, default)).Result);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Paid_DoesNotAutomaticallyCancelOpenRequestTasks(bool force)
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var request = (await f.Service.CreateAsync(NewRequest(f.Client), f.Manager.Id, default)).Value!;
+        var manual = (await f.Service.CreateManualTaskAsync(request.Id, f.Admin.Id, "Ручная задача", null, f.Manager.Id, default)).Value!;
+        var payment = await PreparePaidInvoiceAsync(f, request);
+        var before = await f.Db.TaskJournalItems.AsNoTracking().Where(t => t.SalesRequestId == request.Id)
+            .OrderBy(t => t.Id).Select(t => new { t.Id, t.Status, t.Result }).ToListAsync();
+        var eventCount = await f.Db.SalesRequestEvents.CountAsync();
+
+        var result = await f.Service.TransitionAsync(request.Id,
+            new SalesRequestTransitionInput(StatusId(f.Db, "paid"), request.Version, payment.Id, force, null), f.Manager.Id, default);
+
+        Assert.Equal(409, result.Status);
+        Assert.NotNull(result.Details);
+        f.Db.ChangeTracker.Clear();
+        Assert.Equal(before, await f.Db.TaskJournalItems.AsNoTracking().Where(t => t.SalesRequestId == request.Id)
+            .OrderBy(t => t.Id).Select(t => new { t.Id, t.Status, t.Result }).ToListAsync());
+        Assert.Contains(before, t => t.Id == manual.Id);
+        Assert.Equal(eventCount, await f.Db.SalesRequestEvents.CountAsync());
+        Assert.Null((await f.Db.SalesRequests.SingleAsync(t => t.Id == request.Id)).PaidPaymentId);
+        Assert.False(await f.Db.ClientCases.AnyAsync());
+    }
+
+    [Theory]
+    [InlineData("no-edit")]
+    [InlineData("foreign")]
+    [InlineData("inactive")]
+    public async Task Paid_RechecksCurrentRequestAccessBeforeReadingPaymentOrTasks(string reason)
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var owner = reason == "foreign" ? f.Admin : f.Manager;
+        var request = (await f.Service.CreateAsync(NewRequest(f.Client), owner.Id, default)).Value!;
+        var payment = new Payment { ClientId = f.Client.Id, Amount = 100m, PaidAmount = 100m };
+        f.Db.Payments.Add(payment);
+        if (reason == "no-edit") f.Manager.Role!.Permissions.Single(p => p.Section == RolePermissionCatalog.Requests).CanEdit = false;
+        if (reason == "inactive") f.Manager.IsActive = false;
+        await f.Db.SaveChangesAsync();
+        var eventsBefore = await f.Db.SalesRequestEvents.CountAsync();
+
+        var result = await f.Service.TransitionAsync(request.Id,
+            new SalesRequestTransitionInput(StatusId(f.Db, "paid"), request.Version, payment.Id, true, null), f.Manager.Id, default);
+
+        Assert.Equal(403, result.Status);
+        Assert.Null(result.Details);
+        f.Db.ChangeTracker.Clear();
+        Assert.Equal(eventsBefore, await f.Db.SalesRequestEvents.CountAsync());
+        Assert.Null((await f.Db.SalesRequests.SingleAsync(t => t.Id == request.Id)).PaidPaymentId);
+        Assert.False(await f.Db.ClientCases.AnyAsync());
+    }
+
+    [Fact]
+    public async Task Paid_RejectsTaskReopenedBeforeTransition()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Db;
+        var request = (await f.Service.CreateAsync(NewRequest(f.Client), f.Manager.Id, default)).Value!;
+        await CloseRequestTasksAsync(f.Db, request.Id);
+        var task = await f.Db.TaskJournalItems.FirstAsync(t => t.SalesRequestId == request.Id);
+        task.Status = "inProgress";
+        task.Result = null;
+        await f.Db.SaveChangesAsync();
+        var payment = await PreparePaidInvoiceAsync(f, request);
+
+        var result = await f.Service.TransitionAsync(request.Id,
+            new SalesRequestTransitionInput(StatusId(f.Db, "paid"), request.Version, payment.Id, true, null), f.Manager.Id, default);
+
+        Assert.Equal(409, result.Status);
+        f.Db.ChangeTracker.Clear();
+        Assert.Equal("inProgress", (await f.Db.TaskJournalItems.SingleAsync(t => t.Id == task.Id)).Status);
+        Assert.False(await f.Db.ClientCases.AnyAsync());
+    }
+
+    [Fact]
     public async Task Paid_RequiresRealPaymentOfSameClient()
     {
         var f = await CreateAsync();
@@ -314,16 +926,21 @@ public class SalesRequestTests
         var other = new Client { Name = "Другой", Phone = "+79000000001" };
         f.Db.Clients.Add(other);
         await f.Db.SaveChangesAsync();
-        var unpaid = new Payment { ClientId = f.Client.Id, Amount = 100m, PaidAmount = 0m, Description = "Счёт" };
         var foreign = new Payment { ClientId = other.Id, Amount = 100m, PaidAmount = 100m, Description = "Чужой" };
-        var paid = new Payment { ClientId = f.Client.Id, Amount = 100m, PaidAmount = 100m, Description = "Оплачен" };
-        f.Db.Payments.AddRange(unpaid, foreign, paid);
+        f.Db.Payments.Add(foreign);
         await f.Db.SaveChangesAsync();
         var target = StatusId(f.Db, "paid");
 
         Assert.False((await f.Service.TransitionAsync(request.Id, new SalesRequestTransitionInput(target, request.Version, null, true, null), f.Manager.Id, default)).Ok);
+        var paid = await PreparePaidInvoiceAsync(f, request);
         Assert.Equal(404, (await f.Service.TransitionAsync(request.Id, new SalesRequestTransitionInput(target, request.Version, foreign.Id, true, null), f.Manager.Id, default)).Status);
-        Assert.Equal(409, (await f.Service.TransitionAsync(request.Id, new SalesRequestTransitionInput(target, request.Version, unpaid.Id, true, null), f.Manager.Id, default)).Status);
+        var receipt = await f.Db.MoneyOperations.SingleAsync(item => item.LinkedInvoiceId == paid.InvoiceId);
+        receipt.Amount = 50m;
+        await f.Db.SaveChangesAsync();
+        Assert.Equal(409, (await f.Service.TransitionAsync(request.Id, new SalesRequestTransitionInput(target, request.Version, paid.Id, true, null), f.Manager.Id, default)).Status);
+        receipt.Amount = 100m;
+        await f.Db.SaveChangesAsync();
+        await CloseRequestTasksAsync(f.Db, request.Id);
         var done = await f.Service.TransitionAsync(request.Id, new SalesRequestTransitionInput(target, request.Version, paid.Id, true, null), f.Manager.Id, default);
 
         Assert.True(done.Ok);
@@ -369,9 +986,8 @@ public class SalesRequestTests
         var won = (await f.Service.CreateAsync(NewRequest(f.Client, "Avito") with { Amount = 500m }, f.Manager.Id, default)).Value!;
         await f.Service.CreateAsync(NewRequest(f.Client, "Avito"), f.Manager.Id, default);
         var lost = (await f.Service.CreateAsync(NewRequest(f.Client, "Call") with { Amount = 70m }, f.Manager.Id, default)).Value!;
-        var payment = new Payment { ClientId = f.Client.Id, Amount = 500m, PaidAmount = 500m, Description = "x" };
-        f.Db.Payments.Add(payment);
-        await f.Db.SaveChangesAsync();
+        var payment = await PreparePaidInvoiceAsync(f, won, 500m);
+        await CloseRequestTasksAsync(f.Db, won.Id);
         await f.Service.TransitionAsync(won.Id, new SalesRequestTransitionInput(StatusId(f.Db, "paid"), won.Version, payment.Id, true, null), f.Manager.Id, default);
         await f.Service.TransitionAsync(lost.Id, new SalesRequestTransitionInput(StatusId(f.Db, "declined"), lost.Version, null, true, null), f.Manager.Id, default);
 
@@ -457,17 +1073,19 @@ public class SalesRequestTests
     {
         var f = await CreateAsync();
         await using var _ = f.Db;
-        var payment = new Payment { ClientId = f.Client.Id, Amount = 100m, PaidAmount = 100m, Description = "x" };
         var existing = new ClientCase { ClientId = f.Client.Id, Status = ClientCaseStatus.Open, CaseNumber = "5", Title = "Текущее" };
-        f.Db.AddRange(payment, existing);
+        f.Db.Add(existing);
         await f.Db.SaveChangesAsync();
         var fresh = (await f.Service.CreateAsync(NewRequest(f.Client), f.Manager.Id, default)).Value!;
         var linked = (await f.Service.CreateAsync(NewRequest(f.Client) with { ClientCaseId = existing.Id }, f.Manager.Id, default)).Value!;
+        var payment = await PreparePaidInvoiceAsync(f, fresh);
+        var linkedPayment = await PreparePaidInvoiceAsync(f, linked);
         var paid = StatusId(f.Db, "paid");
+        await CloseRequestTasksAsync(f.Db, fresh.Id, linked.Id);
 
         var casesBefore = await f.Db.ClientCases.CountAsync();
         var done = await f.Service.TransitionAsync(fresh.Id, new SalesRequestTransitionInput(paid, fresh.Version, payment.Id, true, null), f.Manager.Id, default);
-        var linkedDone = await f.Service.TransitionAsync(linked.Id, new SalesRequestTransitionInput(paid, linked.Version, payment.Id, true, null), f.Manager.Id, default);
+        var linkedDone = await f.Service.TransitionAsync(linked.Id, new SalesRequestTransitionInput(paid, linked.Version, linkedPayment.Id, true, null), f.Manager.Id, default);
 
         Assert.True(done.Ok);
         Assert.NotNull(done.Value!.ResultClientCaseId);

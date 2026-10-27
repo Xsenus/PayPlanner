@@ -19,6 +19,29 @@ function isolated() {
 }
 
 describe('shared API transport', () => {
+  it('keeps the signed-in session when access to a client is forbidden', async () => {
+    vi.stubEnv('VITE_RESTORED_RUNTIME_ISOLATION', 'false');
+    const native = vi.fn<typeof fetch>().mockImplementation(async input =>
+      String(input).endsWith('/auth/login')
+        ? Response.json({ token: 'fixture-token', user: { id: 1 } })
+        : new Response('Forbidden', { status: 403 }));
+    vi.stubGlobal('fetch', native);
+    const { authService } = await import('./authService');
+    const { ApiService, AUTH_SESSION_EXPIRED_EVENT } = await import('./api');
+    await authService.login('fixture@fixture.invalid', 'fixture-password');
+    const refresh = vi.spyOn(authService, 'ensureFreshSession');
+    const expired = vi.fn();
+    window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, expired);
+    try {
+      await expect(new ApiService().getClient(1)).rejects.toThrow('403');
+      expect(refresh).not.toHaveBeenCalledWith(true);
+      expect(expired).not.toHaveBeenCalled();
+      expect(localStorage.getItem('pp_token')).toBe('fixture-token');
+    } finally {
+      window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, expired);
+    }
+  });
+
   it('leaves ordinary fetch arguments and response untouched', async () => {
     vi.stubEnv('VITE_RESTORED_RUNTIME_ISOLATION', 'false');
     const response = new Response('fixture');

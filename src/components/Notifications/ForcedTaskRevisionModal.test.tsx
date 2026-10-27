@@ -440,6 +440,40 @@ describe('ForcedTaskRevisionModal', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
+  it.each(['read', 'write'] as const)('keeps the mandatory modal open when snooze storage cannot %s', async (failure) => {
+    mockNotificationPages([createNotification()]);
+    render(<ForcedTaskRevisionModal />);
+    const prompt = await screen.findByRole('dialog');
+    fireEvent.click(within(prompt).getByText('Отложить'));
+    const storage = failure === 'read'
+      ? vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('storage unavailable'); })
+      : vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('storage unavailable'); });
+    try {
+      fireEvent.click(within(prompt).getByRole('button', { name: '10 мин' }));
+      expect(within(prompt).getByRole('alert').textContent).toContain('Не удалось отложить');
+      expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+    } finally { storage.mockRestore(); }
+    fireEvent.click(within(prompt).getByText('Отложить'));
+    fireEvent.click(within(prompt).getByRole('button', { name: '10 мин' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it.each(['approval', 'deadline'] as const)('keeps the %s decision open when snooze storage fails', async (kind) => {
+    if (kind === 'approval') mockNotificationPages([], [], [], [createApprovalRequestNotification()]);
+    else mockNotificationPages([], [], [createDeadlineChangeNotification()]);
+    render(<ForcedTaskRevisionModal />);
+    const prompt = await screen.findByRole('dialog');
+    const menu = await within(prompt).findByText('Отложить');
+    fireEvent.click(menu);
+    await waitFor(() => expect((within(prompt).getByRole('button', { name: '10 мин' }) as HTMLButtonElement).disabled).toBe(false));
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('storage unavailable'); });
+    try {
+      fireEvent.click(within(prompt).getByRole('button', { name: '10 мин' }));
+      expect(within(prompt).getByRole('alert').textContent).toContain('Не удалось отложить');
+      expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+    } finally { write.mockRestore(); }
+  });
+
   it('shares an approval snooze with the approvals journal', async () => {
     mockNotificationPages([], [], [], [createApprovalRequestNotification()]);
 
