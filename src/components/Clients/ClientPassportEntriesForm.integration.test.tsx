@@ -20,6 +20,23 @@ const baseEntry: ClientPassportEntryFormValue = {
 };
 
 describe('ClientPassportEntriesForm integration', () => {
+  it('shows every available passport field as text in profile view mode', () => {
+    render(<ClientPassportEntriesForm entries={[baseEntry]} canEdit={false} textReadOnly showValidityFields onUpdateEntry={vi.fn()} onRemoveEntry={vi.fn()} onAddEntry={vi.fn()} />);
+    expect(screen.getByText('36 19')).toBeTruthy();
+    expect(screen.getByText('664580')).toBeTruthy();
+    expect(screen.getAllByText('15.06.2019')).toHaveLength(2);
+    expect(screen.getByText('15.06.2045')).toBeTruthy();
+    expect(screen.getByText('ОУФМС России по Самарской области')).toBeTruthy();
+    expect(screen.getByText('Место рождения по адресному справочнику')).toBeTruthy();
+    expect(screen.getByText('Самарская обл, г Самара')).toBeTruthy();
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Удалить паспорт|Добавить паспорт/ })).toBeNull();
+  });
+  it('does not show an empty reference birthplace in profile view mode', () => {
+    render(<ClientPassportEntriesForm entries={[{ ...baseEntry, birthPlaceFias: '   ' }]} canEdit={false} textReadOnly onUpdateEntry={vi.fn()} onRemoveEntry={vi.fn()} onAddEntry={vi.fn()} />);
+    expect(screen.queryByText('Место рождения по адресному справочнику')).toBeNull();
+    expect(screen.getByText('г. Самара')).toBeTruthy();
+  });
   it('selects a historical issue date through the shared month and year picker', async () => {
     const user = userEvent.setup();
     const onUpdateEntry = vi.fn();

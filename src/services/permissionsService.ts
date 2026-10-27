@@ -14,6 +14,8 @@ type LoadingCache = Map<number, Promise<RolePermissions>>;
 
 const cache: PermissionsCache = new Map();
 const loading: LoadingCache = new Map();
+const generations = new Map<number, number>();
+const signalRefreshes = new WeakMap<Event, Map<number, Promise<RolePermissions>>>();
 
 function normalizeViewScope(value?: string | null): DataVisibilityScope {
   return value === 'department' || value === 'all' || value === 'specific' ? value : 'own';
@@ -106,6 +108,7 @@ async function fetchRolePermissions(roleId: number): Promise<RolePermissions> {
     return loading.get(roleId)!;
   }
 
+  const generation = generations.get(roleId) ?? 0;
   const promise = apiService
     .getRolePermissions(roleId)
     .then((response) => normalizePermissions(response))
@@ -114,12 +117,15 @@ async function fetchRolePermissions(roleId: number): Promise<RolePermissions> {
       return clonePermissions(defaultRestrictedRolePermissions);
     })
     .then((normalized) => {
+      if ((generations.get(roleId) ?? 0) !== generation) {
+        return clonePermissions(cache.get(roleId) ?? defaultRestrictedRolePermissions);
+      }
       cache.set(roleId, normalized);
       notify(roleId);
       return normalized;
     })
     .finally(() => {
-      loading.delete(roleId);
+      if (loading.get(roleId) === promise) loading.delete(roleId);
     });
 
   loading.set(roleId, promise);
@@ -148,15 +154,34 @@ export async function refreshRolePermissions(roleId: number) {
   await fetchRolePermissions(roleId);
 }
 
+export function refreshRolePermissionsAfterSignal(roleId: number, signal: Event) {
+  let requests = signalRefreshes.get(signal);
+  if (!requests) {
+    requests = new Map();
+    signalRefreshes.set(signal, requests);
+  }
+  const existing = requests.get(roleId);
+  if (existing) return existing;
+  generations.set(roleId, (generations.get(roleId) ?? 0) + 1);
+  loading.delete(roleId);
+  const request = fetchRolePermissions(roleId);
+  requests.set(roleId, request);
+  return request;
+}
+
 export async function setRolePermissions(roleId: number, permissions: RolePermissions) {
   const normalized = normalizePermissions(permissions);
   await apiService.updateRolePermissions(roleId, normalized);
+  generations.set(roleId, (generations.get(roleId) ?? 0) + 1);
+  loading.delete(roleId);
   cache.set(roleId, normalized);
   notify(roleId);
 }
 
 export async function resetRolePermissions(roleId: number) {
   await apiService.resetRolePermissions(roleId);
+  generations.set(roleId, (generations.get(roleId) ?? 0) + 1);
+  loading.delete(roleId);
   cache.delete(roleId);
   notify(roleId);
 }

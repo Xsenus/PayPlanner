@@ -1450,6 +1450,79 @@ public sealed partial class InternalChatControllerTests : IClassFixture<PostgreS
             return new Fixture(connection, db, role);
         }
 
+        public static async Task<Fixture> CreateSharedModelAsync()
+        {
+            var connectionString = new SqliteConnectionStringBuilder
+            {
+                DataSource = "pp_chat_history_" + Guid.NewGuid().ToString("N"),
+                Mode = SqliteOpenMode.Memory,
+                Cache = SqliteCacheMode.Shared,
+                Pooling = false
+            }.ConnectionString;
+            var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync();
+            var options = new DbContextOptionsBuilder<PaymentContext>()
+                .UseSqlite(connection, sqlite => sqlite.MigrationsAssembly(typeof(PaymentContext).Assembly.FullName)).Options;
+            var db = new PaymentContext(options);
+            try
+            {
+                await db.Database.EnsureCreatedAsync();
+                var role = new Role { Name = "employee", Description = "Сотрудник" };
+                db.Roles.Add(role);
+                await db.SaveChangesAsync();
+                return new Fixture(connection, db, role);
+            }
+            catch
+            {
+                await db.DisposeAsync();
+                await connection.DisposeAsync();
+                throw;
+            }
+        }
+
+        public static async Task<Fixture> CreatePostgresModelAsync()
+        {
+            var raw = Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES");
+            Assert.False(string.IsNullOrWhiteSpace(raw), "An isolated PostgreSQL test role is required.");
+            var settings = new NpgsqlConnectionStringBuilder(raw) { Database = "postgres", Pooling = false };
+            Assert.Contains(settings.Host, new[] { "127.0.0.1", "localhost", "::1" });
+            Assert.Equal("payplanner_ci", settings.Username);
+            var name = "pp_chat_replay_" + Guid.NewGuid().ToString("N");
+            var admin = new NpgsqlConnection(settings.ConnectionString);
+            await admin.OpenAsync();
+            var created = false;
+            PaymentContext? db = null;
+            try
+            {
+                await using (var check = new NpgsqlCommand("SELECT current_user, current_database(), current_setting('server_version_num')::int", admin))
+                await using (var reader = await check.ExecuteReaderAsync())
+                {
+                    Assert.True(await reader.ReadAsync());
+                    Assert.Equal("payplanner_ci", reader.GetString(0));
+                    Assert.Equal("postgres", reader.GetString(1));
+                    Assert.Equal(17, reader.GetInt32(2) / 10000);
+                }
+                await using (var create = new NpgsqlCommand($"CREATE DATABASE \"{name}\"", admin))
+                    await create.ExecuteNonQueryAsync();
+                created = true;
+                settings.Database = name;
+                db = new PostgreSqlPaymentContext(new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
+                    .UseNpgsql(settings.ConnectionString, pg => pg.MigrationsAssembly(typeof(PaymentContext).Assembly.FullName)).Options);
+                await db.Database.EnsureCreatedAsync();
+                var role = new Role { Name = "employee", Description = "Сотрудник" };
+                db.Roles.Add(role);
+                await db.SaveChangesAsync();
+                return new Fixture(null, db, role) { _admin = admin, _databaseName = name };
+            }
+            catch
+            {
+                if (db is not null) await db.DisposeAsync();
+                try { if (created) await DropOwnedAsync(admin, name); }
+                finally { await admin.DisposeAsync(); }
+                throw;
+            }
+        }
+
         // Upgrade/downgrade scenarios and external fixture callers retain real uncached migrations.
         public static Task<Fixture> CreateMigratedAsync(bool postgres, bool independentSqliteConnections = false, params IInterceptor[] interceptors)
             => CreateMigratedCoreAsync(null, null, postgres, independentSqliteConnections, interceptors);

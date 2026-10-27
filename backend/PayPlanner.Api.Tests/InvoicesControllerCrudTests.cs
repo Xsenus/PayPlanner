@@ -453,6 +453,50 @@ public class InvoicesControllerCrudTests
     }
 
     [Fact]
+    public async Task Cancel_ReleaseOfAnActiveLinkedTaskPreservesItsCalendarStatusAndSchedule()
+    {
+        await using var db = await CreateContextAsync();
+        var actorUserId = await CreateUserAsync(db, "Calendar Admin", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Calendar Client");
+        var caseId = await CreateClientCaseAsync(db, clientId, "Calendar Case");
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+        var request = CreateRequest("INV-CALENDAR-CANCEL", clientId, new DateTime(2026, 7, 15), 0m);
+        request.ClientCaseIds = [caseId];
+        var invoice = Assert.IsType<InvoiceDto>(Assert.IsType<CreatedResult>(
+            (await controller.Create(request, CancellationToken.None)).Result).Value);
+        var dueAt = new DateTime(2026, 7, 20, 9, 30, 0, DateTimeKind.Utc);
+        var task = new TaskJournalItem
+        {
+            ClientId = clientId,
+            ClientCaseId = caseId,
+            ObjectName = "Calendar Client",
+            Title = "Active task linked to invoice",
+            Status = "inProgress",
+            AssigneeName = "Calendar Admin",
+            AuthorUserId = actorUserId,
+            AuthorName = "Calendar Admin",
+            DueAt = dueAt,
+            BillingInvoiceId = invoice.Id,
+            ClientBillingClassification = TaskClientBillingClassification.Billable,
+            BillingModeSnapshot = ContractBillingMode.Actual,
+            BillingDecisionAt = DateTime.UtcNow,
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var result = await controller.Cancel(invoice.Id,
+            new CancelInvoiceRequest { Reason = "Ошибочный счёт" }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        db.ChangeTracker.Clear();
+        var stored = await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id);
+        Assert.Null(stored.BillingInvoiceId);
+        Assert.Equal("inProgress", stored.Status);
+        Assert.Equal(dueAt, stored.DueAt);
+        Assert.Equal(caseId, stored.ClientCaseId);
+    }
+
+    [Fact]
     public async Task Cancel_RejectsPaidInvoiceWithoutMoneyDecision_AndKeepsTaskLinked()
     {
         await using var db = await CreateContextAsync();

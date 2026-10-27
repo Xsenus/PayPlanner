@@ -1890,6 +1890,36 @@ describe('RealtimeNotificationToasts', () => {
     window.removeEventListener(TASK_JOURNAL_REALTIME_EVENT, listener);
   });
 
+  it('forwards the targeted role-permission signal without displaying a notification', async () => {
+    const events: CustomEvent<UserNotificationsChangedDetail>[] = [];
+    const listener = (event: Event) => events.push(event as CustomEvent<UserNotificationsChangedDetail>);
+    window.addEventListener(USER_NOTIFICATIONS_EVENT, listener);
+    try {
+      render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
+      await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+      act(() => connectionState.handlers.get('rolePermissionsChanged')?.({} as RealtimeUserNotification));
+      expect(events.some((event) => event.detail.source === 'realtime' && event.detail.reason === 'role-permissions-changed')).toBe(true);
+      expect(toastMock.showToast).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener(USER_NOTIFICATIONS_EVENT, listener);
+    }
+  });
+
+  it('forwards the targeted user-role signal without displaying a notification', async () => {
+    const events: CustomEvent<UserNotificationsChangedDetail>[] = [];
+    const listener = (event: Event) => events.push(event as CustomEvent<UserNotificationsChangedDetail>);
+    window.addEventListener(USER_NOTIFICATIONS_EVENT, listener);
+    try {
+      render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
+      await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+      act(() => connectionState.handlers.get('userRoleChanged')?.({} as RealtimeUserNotification));
+      expect(events.some((event) => event.detail.source === 'realtime' && event.detail.reason === 'user-role-changed')).toBe(true);
+      expect(toastMock.showToast).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener(USER_NOTIFICATIONS_EVENT, listener);
+    }
+  });
+
   it('requests notification refresh after realtime reconnect', async () => {
     const changedEvents: CustomEvent<UserNotificationsChangedDetail>[] = [];
     const handleChanged = (event: Event) => changedEvents.push(event as CustomEvent<UserNotificationsChangedDetail>);

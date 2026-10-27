@@ -69,6 +69,14 @@ export interface InternalChatMessagePage {
   hasMore: boolean;
   hasNewer?: boolean;
   nextBeforeId?: number | null;
+  historyHiddenThroughMessageId?: number | null;
+  historyVisibilityRevision?: number;
+}
+
+export interface InternalChatHistoryState {
+  hiddenThroughMessageId: number | null;
+  revision: number;
+  latestMessageId: number;
 }
 
 type RequestOptions = RequestInit & { body?: BodyInit | null };
@@ -121,6 +129,12 @@ async function chatRequest<T>(path: string, options: RequestOptions = {}): Promi
 }
 
 export const internalChatApi = {
+  getHistoryVisibility: (threadId: number, signal?: AbortSignal) =>
+    chatRequest<InternalChatHistoryState>(`/threads/${threadId}/history-visibility`, { cache: 'no-store', signal }),
+  setHistoryVisibility: (threadId: number, hiddenThroughMessageId: number | null, expectedRevision: number, signal?: AbortSignal) =>
+    chatRequest<InternalChatHistoryState>(`/threads/${threadId}/history-visibility`, {
+      method: 'PUT', body: JSON.stringify({ hiddenThroughMessageId, expectedRevision }), signal,
+    }),
   getSendStatus: (threadId: number, clientRequestId: string, signal?: AbortSignal) =>
     chatRequest<InternalChatSendState>(`/threads/${threadId}/sends/${encodeURIComponent(clientRequestId)}`, { cache: 'no-store', signal }),
   getPendingSends: (threadId: number, params: { limit?: number; afterAttemptId?: string; signal?: AbortSignal } = {}) => {

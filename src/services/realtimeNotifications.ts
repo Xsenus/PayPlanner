@@ -10,6 +10,8 @@ import { restoredRealtimeOptions, restoredResourceUrl } from './restoredRealtime
 
 export const REALTIME_USER_NOTIFICATION_CREATED_EVENT = 'userNotificationCreated';
 export const REALTIME_TASK_JOURNAL_CHANGED_EVENT = 'taskJournalChanged';
+export const REALTIME_ROLE_PERMISSIONS_CHANGED_EVENT = 'rolePermissionsChanged';
+export const REALTIME_USER_ROLE_CHANGED_EVENT = 'userRoleChanged';
 export const TASK_JOURNAL_REALTIME_EVENT = 'payplanner:task-journal-realtime-changed';
 
 export interface RealtimeUserNotification {

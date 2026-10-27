@@ -6,12 +6,129 @@ using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Filters;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services.Notifications;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
 public class DictionariesAdminServiceTests
 {
+    [Fact]
+    public async Task CreateDepartment_RefreshesLinkedUsersAndAffectedPeersAfterSave()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "department-viewer" };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+        db.RolePermissions.Add(new RolePermission { RoleId = role.Id, Section = RolePermissionCatalog.Tasks, CanView = true, ViewScope = " Department " });
+        var otherDepartment = new DepartmentDictionaryItem { Name = "Existing", IsActive = true };
+        db.Departments.Add(otherDepartment);
+        await db.SaveChangesAsync();
+        var linked = new User { Email = "linked@local", FullName = "Linked", RoleId = role.Id, IsActive = true, IsApproved = true, Department = "New department" };
+        var peer = new User { Email = "peer@local", FullName = "Peer", RoleId = role.Id, IsActive = true, IsApproved = true, Department = "New department", DepartmentId = otherDepartment.Id };
+        var unrelated = new User { Email = "other@local", FullName = "Other", RoleId = role.Id, IsActive = true, IsApproved = true, Department = "Other" };
+        db.Users.AddRange(linked, peer, unrelated);
+        await db.SaveChangesAsync();
+        var publisher = new RecordingPublisher(db);
+
+        var result = await new DictionariesAdminController(db, publisher).CreateDepartment(new DepartmentDictionaryItem { Name = "New department", IsActive = true });
+
+        Assert.IsType<CreatedResult>(result);
+        Assert.Equal(new[] { linked.Id, peer.Id }.Order(), Assert.Single(publisher.Batches).Order());
+        Assert.True(publisher.SavedBeforePublish);
+        Assert.NotNull((await db.Users.AsNoTracking().SingleAsync(user => user.Id == linked.Id)).DepartmentId);
+    }
+
+    [Fact]
+    public async Task UpdateDepartment_RefreshesOldAndNewDepartmentsAfterReassignment()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "department-viewer" };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+        db.RolePermissions.Add(new RolePermission { RoleId = role.Id, Section = RolePermissionCatalog.Tasks, CanView = true, ViewScope = DataVisibilityScope.Department });
+        var targetDepartment = new DepartmentDictionaryItem { Name = "Old name", IsActive = true };
+        var sourceDepartment = new DepartmentDictionaryItem { Name = "Source", IsActive = true };
+        db.Departments.AddRange(targetDepartment, sourceDepartment);
+        await db.SaveChangesAsync();
+        var moved = new User { Email = "moved@local", FullName = "Moved", RoleId = role.Id, IsActive = true, IsApproved = true, DepartmentId = sourceDepartment.Id, Department = "Old name" };
+        var sourcePeer = new User { Email = "source@local", FullName = "Source peer", RoleId = role.Id, IsActive = true, IsApproved = true, DepartmentId = sourceDepartment.Id, Department = "Source" };
+        var targetPeer = new User { Email = "target@local", FullName = "Target peer", RoleId = role.Id, IsActive = true, IsApproved = true, DepartmentId = targetDepartment.Id, Department = "Old name" };
+        var unrelated = new User { Email = "unrelated@local", FullName = "Unrelated", RoleId = role.Id, IsActive = true, IsApproved = true, Department = "Unrelated" };
+        db.Users.AddRange(moved, sourcePeer, targetPeer, unrelated);
+        await db.SaveChangesAsync();
+        var publisher = new RecordingPublisher(db);
+
+        var result = await new DictionariesAdminController(db, publisher).UpdateDepartment(targetDepartment.Id, new DepartmentDictionaryItem { Name = "New name", IsActive = true });
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(new[] { moved.Id, sourcePeer.Id, targetPeer.Id }.Order(), Assert.Single(publisher.Batches).Order());
+        Assert.True(publisher.SavedBeforePublish);
+        Assert.Equal(targetDepartment.Id, (await db.Users.AsNoTracking().SingleAsync(user => user.Id == moved.Id)).DepartmentId);
+    }
+
+    [Fact]
+    public async Task UpdateDepartment_MetadataOnlyDoesNotNotifyUsers()
+    {
+        await using var db = await CreateContextAsync();
+        var department = new DepartmentDictionaryItem { Name = "Department", IsActive = true };
+        db.Departments.Add(department);
+        await db.SaveChangesAsync();
+        var publisher = new RecordingPublisher(db);
+        var controller = new DictionariesAdminController(db, publisher);
+        Assert.IsType<OkObjectResult>(await controller.UpdateDepartment(department.Id, new DepartmentDictionaryItem { Name = "Department", Description = "New description", IsActive = true }));
+        Assert.Empty(publisher.Batches);
+    }
+
+    [Fact]
+    public async Task CreateDepartment_InvalidNameDoesNotPublishOrSave()
+    {
+        await using var db = await CreateContextAsync();
+        var publisher = new RecordingPublisher(db);
+        var result = await new DictionariesAdminController(db, publisher).CreateDepartment(new DepartmentDictionaryItem { Name = "   " });
+        Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Empty(publisher.Batches);
+        Assert.Empty(await db.Departments.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task UpdateDepartment_PublisherFailureDoesNotUndoSavedChanges()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "department-viewer" };
+        var department = new DepartmentDictionaryItem { Name = "Before", IsActive = true };
+        db.AddRange(role, department);
+        await db.SaveChangesAsync();
+        var user = new User { Email = "member@local", FullName = "Member", RoleId = role.Id, IsActive = true, IsApproved = true, DepartmentId = department.Id, Department = department.Name };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var result = await new DictionariesAdminController(db, new ThrowingPublisher()).UpdateDepartment(department.Id, new DepartmentDictionaryItem { Name = "After", IsActive = true });
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Equal("After", (await db.Users.AsNoTracking().SingleAsync(item => item.Id == user.Id)).Department);
+        Assert.Equal("After", (await db.Departments.AsNoTracking().SingleAsync(item => item.Id == department.Id)).Name);
+    }
+
+    private sealed class ThrowingPublisher : IUserRoleChangePublisher
+    {
+        public Task PublishUserRoleChangedAsync(int userId, CancellationToken cancellationToken = default) => throw new InvalidOperationException("Publisher unavailable");
+        public Task PublishUsersRoleChangedAsync(IReadOnlyCollection<int> userIds, CancellationToken cancellationToken = default) => throw new InvalidOperationException("Publisher unavailable");
+    }
+
+    private sealed class RecordingPublisher(PaymentContext db) : IUserRoleChangePublisher
+    {
+        public List<int[]> Batches { get; } = [];
+        public bool SavedBeforePublish { get; private set; }
+        public Task PublishUserRoleChangedAsync(int userId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task PublishUsersRoleChangedAsync(IReadOnlyCollection<int> userIds, CancellationToken cancellationToken = default)
+        {
+            Batches.Add(userIds.ToArray());
+            SavedBeforePublish = !db.ChangeTracker.HasChanges();
+            return Task.CompletedTask;
+        }
+    }
+
     [Fact]
     public void ServiceDictionaryName_MaxLength_AllowsLongCourtServiceTitles()
     {

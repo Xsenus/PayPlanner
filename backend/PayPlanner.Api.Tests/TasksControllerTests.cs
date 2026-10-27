@@ -3856,6 +3856,29 @@ public partial class TasksControllerTests : IDisposable
         Assert.Equal(currentStatus, (await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id)).Status);
     }
 
+    [Theory]
+    [InlineData("done")]
+    [InlineData("cancelled")]
+    public async Task UpdateStatus_AdminReopensClosedTaskAndQueuesCalendarSync(string currentStatus)
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "calendar-reopen-admin@example.com", "Постановщик");
+        var client = await CreateClientAsync(db, "Клиент повторного открытия календаря");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, status: currentStatus);
+        var outbox = new RecordingExternalCalendarTaskSyncOutbox();
+        var controller = CreateController(db, new RecordingNotificationService(), author,
+            externalCalendarTaskSyncOutbox: outbox);
+
+        var result = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "inProgress",
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Equal("inProgress", (await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id)).Status);
+        Assert.Equal([task.Id], outbox.TaskIds);
+    }
+
     [Fact]
     public async Task UpdateTask_ForbidsObserverWithOwnScopeEvenWhenRoleCanEdit()
     {
@@ -8203,6 +8226,38 @@ public partial class TasksControllerTests : IDisposable
         Assert.Equal(2, await db.TaskJournalItems.CountAsync());
     }
 
+    [Theory]
+    [InlineData("hide", "done")]
+    [InlineData("hide", "cancelled")]
+    [InlineData("color", "done")]
+    [InlineData("color", "cancelled")]
+    public async Task ExportCalendar_ReflectsReopenedTaskAfterStatusUpdate(string action, string closedStatus)
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "ics-reopen@example.local", "Автор");
+        var client = await CreateClientAsync(db, "Синтетический клиент");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, status: closedStatus);
+        task.Title = "Повторно открытая задача ICS";
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "calendarSync.settings",
+            Value = System.Text.Json.JsonSerializer.Serialize(new { completedTaskCalendarAction = action }),
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var before = Encoding.UTF8.GetString(Assert.IsType<FileContentResult>(
+            await controller.ExportCalendar(null, null, null, null, null, null, CancellationToken.None)).FileContents);
+        Assert.Equal(action == "color", before.Contains("Повторно открытая задача ICS", StringComparison.Ordinal));
+        var result = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest { Status = "inProgress" }, CancellationToken.None);
+        Assert.IsType<OkObjectResult>(result.Result);
+        var after = Encoding.UTF8.GetString(Assert.IsType<FileContentResult>(
+            await controller.ExportCalendar(null, null, null, null, null, null, CancellationToken.None)).FileContents);
+        Assert.Contains("SUMMARY:Повторно открытая задача ICS", after);
+        Assert.DoesNotContain("SUMMARY:[Отменена] Повторно открытая задача ICS", after);
+        Assert.Equal("inProgress", (await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id)).Status);
+    }
+
     [Fact]
     public async Task ExportCalendar_ReturnsIcsWithTaskDuration()
     {
@@ -8460,6 +8515,43 @@ public partial class TasksControllerTests : IDisposable
         Assert.Contains("Ожидает", content);
         Assert.Contains("Просрочена", content);
         Assert.Contains("На контроль", content);
+        Assert.Contains("<table><colgroup>", content);
+        Assert.Contains("<col class=\"task\">", content);
+        Assert.Contains("</thead><tbody>", content);
+        Assert.Contains("thead { display: table-header-group; }", content);
+    }
+
+    [Fact]
+    public async Task ExportPlanningReport_HtmlKeepsRepeatingHeadersWithTheCorrectCase()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "planning-html-groups@fixture.local", "Автор");
+        var client = await CreateClientAsync(db, "Клиент группировки");
+        var first = await CreateCaseAsync(db, client.Id, "Первое дело");
+        var second = await CreateCaseAsync(db, client.Id, "Второе дело");
+        var firstTask = await CreateTaskAsync(db, author.Id, client.Id, clientCaseId: first.Id);
+        var secondTask = await CreateTaskAsync(db, author.Id, client.Id, clientCaseId: second.Id);
+        firstTask.Title = "Задача первого дела";
+        secondTask.Title = "Задача второго дела";
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.ExportPlanningReport("html", null, "all", null, null, null, null);
+
+        var file = Assert.IsType<FileContentResult>(result);
+        var content = Encoding.UTF8.GetString(file.FileContents);
+        var tables = System.Text.RegularExpressions.Regex.Matches(content, "<table><colgroup>(.*?)</tbody></table>", System.Text.RegularExpressions.RegexOptions.Singleline)
+            .Select(match => match.Value).ToArray();
+        Assert.Equal(2, tables.Length);
+        var firstTable = Assert.Single(tables, table => table.Contains("Задача первого дела", StringComparison.Ordinal));
+        var secondTable = Assert.Single(tables, table => table.Contains("Задача второго дела", StringComparison.Ordinal));
+        Assert.All(tables, table => Assert.Equal(7, System.Text.RegularExpressions.Regex.Matches(table, "<col class=").Count));
+        Assert.Contains("КЛИЕНТ | Клиент группировки", firstTable);
+        Assert.Contains("ДЕЛО | Первое дело", firstTable);
+        Assert.DoesNotContain("Второе дело", firstTable);
+        Assert.Contains("КЛИЕНТ | Клиент группировки", secondTable);
+        Assert.Contains("ДЕЛО | Второе дело", secondTable);
+        Assert.DoesNotContain("Первое дело", secondTable);
     }
 
     [Fact]
@@ -8634,6 +8726,10 @@ public partial class TasksControllerTests : IDisposable
         using var reader = new StreamReader(archive.GetEntry("word/document.xml")!.Open(), Encoding.UTF8);
         var document = XDocument.Parse(reader.ReadToEnd());
         XNamespace word = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+        var firstTable = Assert.Single(document.Descendants(word + "tbl"));
+        var initialRows = firstTable.Elements(word + "tr").Take(3).ToArray();
+        Assert.Equal(3, initialRows.Length);
+        Assert.All(initialRows, row => Assert.NotNull(row.Element(word + "trPr")?.Element(word + "tblHeader")));
         var taskRow = Assert.Single(
             document.Descendants(word + "tr"),
             row => row
@@ -8642,6 +8738,46 @@ public partial class TasksControllerTests : IDisposable
 
         Assert.Null(taskRow.Element(word + "trPr")?.Element(word + "cantSplit"));
         Assert.Contains("Все доступные задачи", document.Root!.Value, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ExportPlanningReport_WordRepeatsTheMatchingCaseHeadersForEachGroup()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "planning-groups@fixture.local", "Автор");
+        var client = await CreateClientAsync(db, "Клиент группировки");
+        var first = await CreateCaseAsync(db, client.Id, "Первое дело");
+        var second = await CreateCaseAsync(db, client.Id, "Второе дело");
+        var firstTask = await CreateTaskAsync(db, author.Id, client.Id, clientCaseId: first.Id);
+        var secondTask = await CreateTaskAsync(db, author.Id, client.Id, clientCaseId: second.Id);
+        firstTask.Title = "Задача первого дела";
+        secondTask.Title = "Задача второго дела";
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.ExportPlanningReport("word", null, "all", null, null, null, null);
+
+        var file = Assert.IsType<FileContentResult>(result);
+        using var archive = new ZipArchive(new MemoryStream(file.FileContents), ZipArchiveMode.Read);
+        using var reader = new StreamReader(archive.GetEntry("word/document.xml")!.Open(), Encoding.UTF8);
+        var document = XDocument.Parse(reader.ReadToEnd());
+        XNamespace word = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+        var tables = document.Descendants(word + "tbl").ToArray();
+        Assert.Equal(2, tables.Length);
+        foreach (var table in tables)
+        {
+            var rows = table.Elements(word + "tr").ToArray();
+            Assert.All(rows.Take(3), row => Assert.NotNull(row.Element(word + "trPr")?.Element(word + "tblHeader")));
+            Assert.Equal(7, table.Element(word + "tblGrid")!.Elements(word + "gridCol").Count());
+            Assert.Contains("КЛИЕНТ | Клиент группировки", rows[0].Value);
+        }
+        var firstTable = Assert.Single(tables, table => table.Value.Contains("Задача первого дела", StringComparison.Ordinal));
+        var secondTable = Assert.Single(tables, table => table.Value.Contains("Задача второго дела", StringComparison.Ordinal));
+        Assert.Contains("Первое дело", firstTable.Value);
+        Assert.DoesNotContain("Второе дело", firstTable.Value);
+        Assert.Contains("Второе дело", secondTable.Value);
+        Assert.DoesNotContain("Первое дело", secondTable.Value);
+        Assert.Equal(word + "p", tables[0].ElementsAfterSelf().First().Name);
     }
 
     [Fact]

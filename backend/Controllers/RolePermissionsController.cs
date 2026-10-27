@@ -22,15 +22,21 @@ public class RolePermissionsController : ControllerBase
     private readonly PaymentContext _db;
     private readonly RoleManagementAccessService _roleAccess;
     private readonly INotificationService? _notificationService;
+    private readonly IRolePermissionsChangePublisher? _roleChangePublisher;
+    private readonly ILogger<RolePermissionsController>? _logger;
 
     public RolePermissionsController(
         PaymentContext db,
         RoleManagementAccessService roleAccess,
-        INotificationService? notificationService = null)
+        INotificationService? notificationService = null,
+        IRolePermissionsChangePublisher? roleChangePublisher = null,
+        ILogger<RolePermissionsController>? logger = null)
     {
         _db = db;
         _roleAccess = roleAccess;
         _notificationService = notificationService;
+        _roleChangePublisher = roleChangePublisher;
+        _logger = logger;
     }
 
     [HttpGet("audit")]
@@ -259,6 +265,7 @@ public class RolePermissionsController : ControllerBase
 
         StampPermissionsAudit(role);
         await _db.SaveChangesAsync(ct);
+        await PublishRoleChangeAsync(roleId, ct);
         if (_notificationService is not null && previousCalendarVisibleUserIds is not null)
         {
             var currentCalendarVisibleUserIds = request.Calendar.VisibleUserIds!
@@ -352,7 +359,25 @@ public class RolePermissionsController : ControllerBase
 
         StampPermissionsAudit(role);
         await _db.SaveChangesAsync(ct);
+        await PublishRoleChangeAsync(roleId, ct);
         return NoContent();
+    }
+
+    private async Task PublishRoleChangeAsync(int roleId, CancellationToken cancellationToken)
+    {
+        if (_roleChangePublisher is null) return;
+        try
+        {
+            var userIds = await _db.Users.AsNoTracking()
+                .Where(user => user.RoleId == roleId && user.IsActive && user.IsApproved)
+                .Select(user => user.Id)
+                .ToArrayAsync(cancellationToken);
+            await _roleChangePublisher.PublishRolePermissionsChangedAsync(userIds, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to publish permissions change for role {RoleId}.", roleId);
+        }
     }
 
     private static RolePermissionsDto MapToDto(

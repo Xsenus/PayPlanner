@@ -555,6 +555,10 @@ public partial class AuthService
         }
 
         var preferredPhone = ResolveMergedPhoneCandidate(request.PrimaryPhoneNumber, targetUser, sourceUsers);
+        var previousRoleId = targetUser.RoleId;
+        var previousTargetDepartment = (targetUser.DepartmentId, targetUser.Department);
+        var affectedDepartments = sourceUsers.Where(user => user.IsActive)
+            .Select(user => (user.DepartmentId, user.Department)).ToList();
         var mergedRoleId = await ResolveMergedRoleIdAsync(targetUser, sourceUsers, cancellationToken);
         if (IsProtectedSystemUser(targetUser))
         {
@@ -562,56 +566,80 @@ public partial class AuthService
             preferredEmail = NormalizeEmail(targetUser.Email);
         }
 
-        await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
-        try
+        await using (var transaction = await _context.Database.BeginTransactionAsync(cancellationToken))
         {
-            targetUser.RoleId = mergedRoleId;
-
-            foreach (var sourceUser in sourceUsers)
+            try
             {
-                MergeUserFields(targetUser, sourceUser);
-                await ReassignSimpleUserReferencesAsync(sourceUser.Id, targetUser.Id, cancellationToken);
-                await MergePaymentResponsiblesAsync(sourceUser.Id, targetUser.Id, cancellationToken);
-                await MergeUserSettingsAsync(sourceUser.Id, targetUser.Id, cancellationToken);
-                await MergeUserCompanyAccessesAsync(sourceUser.Id, targetUser.Id, cancellationToken);
-                await MergeUserExternalIdentitiesAsync(sourceUser.Id, targetUser.Id, cancellationToken);
+                targetUser.RoleId = mergedRoleId;
 
-                if (targetUser.ApprovedByUserId == sourceUser.Id)
+                foreach (var sourceUser in sourceUsers)
                 {
-                    targetUser.ApprovedByUserId = sourceUser.ApprovedByUserId == targetUser.Id
-                        ? null
-                        : sourceUser.ApprovedByUserId;
+                    MergeUserFields(targetUser, sourceUser);
+                    await ReassignSimpleUserReferencesAsync(sourceUser.Id, targetUser.Id, cancellationToken);
+                    await MergePaymentResponsiblesAsync(sourceUser.Id, targetUser.Id, cancellationToken);
+                    await MergeUserSettingsAsync(sourceUser.Id, targetUser.Id, cancellationToken);
+                    await MergeUserCompanyAccessesAsync(sourceUser.Id, targetUser.Id, cancellationToken);
+                    await MergeUserExternalIdentitiesAsync(sourceUser.Id, targetUser.Id, cancellationToken);
+
+                    if (targetUser.ApprovedByUserId == sourceUser.Id)
+                    {
+                        targetUser.ApprovedByUserId = sourceUser.ApprovedByUserId == targetUser.Id
+                            ? null
+                            : sourceUser.ApprovedByUserId;
+                    }
+
+                    _context.Users.Remove(sourceUser);
+                    await _context.SaveChangesAsync(cancellationToken);
                 }
 
-                _context.Users.Remove(sourceUser);
+                if (!string.IsNullOrWhiteSpace(preferredEmail))
+                {
+                    targetUser.Email = preferredEmail;
+                }
+
+                if (!string.IsNullOrWhiteSpace(preferredPhone))
+                {
+                    targetUser.PhoneNumber = preferredPhone;
+                }
+
+                if (string.IsNullOrWhiteSpace(targetUser.FullName))
+                {
+                    targetUser.FullName = BuildFallbackUserFullName(targetUser);
+                }
+
+                ApplyProtectedUserInvariants(targetUser);
+                targetUser.UpdatedAt = DateTime.UtcNow;
+
                 await _context.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
             }
-
-            if (!string.IsNullOrWhiteSpace(preferredEmail))
+            catch
             {
-                targetUser.Email = preferredEmail;
+                await transaction.RollbackAsync(cancellationToken);
+                throw;
             }
-
-            if (!string.IsNullOrWhiteSpace(preferredPhone))
-            {
-                targetUser.PhoneNumber = preferredPhone;
-            }
-
-            if (string.IsNullOrWhiteSpace(targetUser.FullName))
-            {
-                targetUser.FullName = BuildFallbackUserFullName(targetUser);
-            }
-
-            ApplyProtectedUserInvariants(targetUser);
-            targetUser.UpdatedAt = DateTime.UtcNow;
-
-            await _context.SaveChangesAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
         }
-        catch
+
+        if (_userRoleChangePublisher is not null)
         {
-            await transaction.RollbackAsync(cancellationToken);
-            throw;
+            try
+            {
+                var departmentChanged = previousTargetDepartment.DepartmentId != targetUser.DepartmentId
+                    || !string.Equals(previousTargetDepartment.Department?.Trim(), targetUser.Department?.Trim(), StringComparison.Ordinal);
+                if (departmentChanged)
+                {
+                    affectedDepartments.Add(previousTargetDepartment);
+                    affectedDepartments.Add((targetUser.DepartmentId, targetUser.Department));
+                }
+
+                var affectedUserIds = sourceUserIds.ToList();
+                if ((previousRoleId != targetUser.RoleId || departmentChanged) && targetUser.IsActive && targetUser.IsApproved)
+                    affectedUserIds.Add(targetUser.Id);
+                try { affectedUserIds.AddRange(await FindDepartmentVisibilityRecipientsAsync(affectedDepartments, cancellationToken)); }
+                catch (Exception ex) { _logger?.LogWarning(ex, "Failed to find affected department members after user merge."); }
+                await _userRoleChangePublisher.PublishUsersRoleChangedAsync(affectedUserIds.Distinct().ToArray(), cancellationToken);
+            }
+            catch (Exception ex) { _logger?.LogWarning(ex, "Failed to publish merged user access changes."); }
         }
 
         var mergedUser = await QueryUsersWithRelations()

@@ -3572,6 +3572,7 @@ public class PaymentContext : DbContext
             entity.Property(item => item.Role).HasMaxLength(24).HasDefaultValue("member").IsRequired();
             entity.Property(item => item.NotificationMode).HasMaxLength(24).HasDefaultValue(InternalChatNotificationModes.All).IsRequired();
             entity.Property(item => item.IsActive).HasDefaultValue(true);
+            entity.Property(item => item.HistoryVisibilityRevision).HasDefaultValue(0L);
             entity.Property(item => item.JoinedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.HasOne(item => item.Thread).WithMany(thread => thread.Members).HasForeignKey(item => item.ThreadId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(item => item.User).WithMany().HasForeignKey(item => item.UserId).OnDelete(DeleteBehavior.Cascade);

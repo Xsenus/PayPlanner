@@ -1,11 +1,64 @@
 import { setupTaskJournalTests, apiMock, toastMock, dialogMock, clientsState, casesState, authState, permissionsState, todayAt, createTask, renderJournal } from './TaskJournal.test-support';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { Client, ClientCase } from '../../types';
 import { type TaskJournalItem } from '../../utils/taskJournalStore';
+import { TaskJournal } from './TaskJournal';
 
 describe('TaskJournal', () => {
   setupTaskJournalTests();
+
+  it('restores filters for each employee without writing another employee search into their preferences', async () => {
+    const keyA = 'pp.task_journal.filters.v1.user:7';
+    const keyB = 'pp.task_journal.filters.v1.user:8';
+    window.localStorage.setItem(keyA, JSON.stringify({ search: 'альфа', quickFilter: 'all' }));
+    window.localStorage.setItem(keyB, JSON.stringify({ search: 'бета', quickFilter: 'all' }));
+    const writes = vi.spyOn(Storage.prototype, 'setItem');
+    const view = await renderJournal([createTask()], { waitForTitle: null });
+    expect((screen.getByPlaceholderText('Поиск по контрагенту, делу или наименованию задачи') as HTMLInputElement).value).toBe('альфа');
+    writes.mockClear();
+    apiMock.getTaskJournalItems.mockClear();
+    authState.user = { ...authState.user, id: 8 };
+    view.rerender(<TaskJournal />);
+    await waitFor(() => expect((screen.getByPlaceholderText('Поиск по контрагенту, делу или наименованию задачи') as HTMLInputElement).value).toBe('бета'));
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenCalledWith(expect.objectContaining({ search: 'бета' }), expect.anything()));
+    expect(apiMock.getTaskJournalItems.mock.calls.some(([params]) => params?.search === 'альфа')).toBe(false);
+    expect(writes.mock.calls.filter(([key]) => key === keyB).every(([, value]) => JSON.parse(value).search === 'бета')).toBe(true);
+    authState.user = { ...authState.user, id: 7 };
+    view.rerender(<TaskJournal />);
+    await waitFor(() => expect((screen.getByPlaceholderText('Поиск по контрагенту, делу или наименованию задачи') as HTMLInputElement).value).toBe('альфа'));
+    expect(JSON.parse(window.localStorage.getItem(keyB) ?? '{}').search).toBe('бета');
+    writes.mockRestore();
+  });
+
+  it('clears previous employee tasks while the next employee list is loading', async () => {
+    const view = await renderJournal([createTask({ title: 'Личная задача первого сотрудника' })]);
+    let finish!: (response: Awaited<ReturnType<typeof apiMock.getTaskJournalItems>>) => void;
+    apiMock.getTaskJournalItems.mockClear();
+    apiMock.getTaskJournalItems.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    authState.user = { ...authState.user, id: 8 };
+    view.rerender(<TaskJournal />);
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenCalled());
+    expect(screen.queryByText('Личная задача первого сотрудника')).toBeNull();
+    finish({ items: [], total: 0, page: 1, pageSize: 50 });
+    await waitFor(() => expect(screen.queryByText('Личная задача первого сотрудника')).toBeNull());
+  });
+
+  it('ignores the previous employee list if its response arrives after the account switch', async () => {
+    const view = await renderJournal([createTask({ id: 101, title: 'Прежняя задача' })]);
+    let finishOld!: (response: Awaited<ReturnType<typeof apiMock.getTaskJournalItems>>) => void;
+    apiMock.getTaskJournalItems.mockReset();
+    apiMock.getTaskJournalItems.mockImplementationOnce(() => new Promise((resolve) => { finishOld = resolve; }));
+    apiMock.getTaskJournalItems.mockResolvedValue({ items: [createTask({ id: 102, title: 'Задача нового сотрудника' })], total: 1, page: 1, pageSize: 50 });
+    fireEvent.click(screen.getByTestId('task-quick-filter-assignedToMe'));
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(1));
+    authState.user = { ...authState.user, id: 8 };
+    view.rerender(<TaskJournal />);
+    expect(await screen.findByText('Задача нового сотрудника')).toBeTruthy();
+    await act(async () => finishOld({ items: [createTask({ id: 103, title: 'Поздний чужой ответ' })], total: 1, page: 1, pageSize: 50 }));
+    expect(screen.getByText('Задача нового сотрудника')).toBeTruthy();
+    expect(screen.queryByText('Поздний чужой ответ')).toBeNull();
+  });
 
 
   it('opens with all tasks quick filter and remembers switching to current user tasks', async () => {

@@ -8,6 +8,7 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Notifications;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Xunit;
@@ -16,6 +17,156 @@ namespace PayPlanner.Api.Tests;
 
 public class AuthServiceUserCompanyAccessTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MergeUsersAsync_NotifiesRemovedSessionsAndChangedTargetOnlyAfterCommit(bool roleChanges)
+    {
+        await using var db = await CreateContextAsync();
+        var firstRole = await CreateRoleAsync(db, "merge-first");
+        var nextRole = roleChanges ? await CreateRoleAsync(db, "merge-strong") : firstRole;
+        if (roleChanges)
+        {
+            db.RolePermissions.Add(new RolePermission { RoleId = nextRole, Section = RolePermissionCatalog.Tasks, CanView = true, CanEdit = true });
+            await db.SaveChangesAsync();
+        }
+        var target = await CreateUserAsync(db, firstRole, "merge-target@local");
+        var source = await CreateUserAsync(db, nextRole, "merge-source@local");
+        var publisher = new RecordingUserRolePublisher(db);
+        var service = CreateService(db, publisher);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.MergeUsersAsync(
+            new MergeUsersRequest { TargetUserId = target.Id, SourceUserIds = [target.Id] }, target.Id));
+        Assert.Empty(publisher.Batches);
+        var merged = await service.MergeUsersAsync(new MergeUsersRequest { TargetUserId = target.Id, SourceUserIds = [source.Id] }, target.Id);
+        Assert.Equal(nextRole, merged.Role.Id);
+        Assert.Equal(roleChanges ? new[] { source.Id, target.Id } : new[] { source.Id }, Assert.Single(publisher.Batches));
+        Assert.True(publisher.PublishedAfterCommit);
+        Assert.False(await db.Users.AsNoTracking().AnyAsync(item => item.Id == source.Id));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MergeUsersAsync_NotifiesAffectedDepartmentPeersAfterCommit(bool inheritDepartment)
+    {
+        await using var db = await CreateContextAsync();
+        var role = await CreateRoleAsync(db, "merge-department-viewer");
+        db.RolePermissions.Add(new RolePermission { RoleId = role, Section = RolePermissionCatalog.Tasks, CanView = true, ViewScope = " Department " });
+        var sourceDepartment = new DepartmentDictionaryItem { Name = "Source", IsActive = true };
+        var otherDepartment = new DepartmentDictionaryItem { Name = "Other", IsActive = true };
+        db.Departments.AddRange(sourceDepartment, otherDepartment);
+        await db.SaveChangesAsync();
+        var target = await CreateUserAsync(db, role, "merge-department-target@local");
+        var source = await CreateUserAsync(db, role, "merge-department-source@local");
+        var peer = await CreateUserAsync(db, role, "merge-department-peer@local");
+        var other = await CreateUserAsync(db, role, "merge-department-other@local");
+        source.DepartmentId = peer.DepartmentId = sourceDepartment.Id;
+        source.Department = peer.Department = sourceDepartment.Name;
+        other.DepartmentId = otherDepartment.Id;
+        other.Department = otherDepartment.Name;
+        if (!inheritDepartment)
+        {
+            target.DepartmentId = otherDepartment.Id;
+            target.Department = otherDepartment.Name;
+        }
+        await db.SaveChangesAsync();
+
+        var publisher = new RecordingUserRolePublisher(db);
+        await CreateService(db, publisher).MergeUsersAsync(
+            new MergeUsersRequest { TargetUserId = target.Id, SourceUserIds = [source.Id] }, target.Id);
+
+        var recipients = Assert.Single(publisher.Batches);
+        var expected = inheritDepartment ? new[] { source.Id, target.Id, peer.Id } : new[] { source.Id, peer.Id };
+        Assert.Equal(expected.Order(), recipients.Order());
+        Assert.DoesNotContain(other.Id, recipients);
+        Assert.True(publisher.PublishedAfterCommit);
+        Assert.False(await db.Users.AsNoTracking().AnyAsync(user => user.Id == source.Id));
+        Assert.Equal(inheritDepartment ? sourceDepartment.Id : otherDepartment.Id,
+            (await db.Users.AsNoTracking().SingleAsync(user => user.Id == target.Id)).DepartmentId);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RemovingUser_NotifiesOnlyAffectedDepartmentAfterSave(bool reject)
+    {
+        await using var db = await CreateContextAsync();
+        var role = await CreateRoleAsync(db, "removed-department-viewer");
+        db.RolePermissions.Add(new RolePermission { RoleId = role, Section = RolePermissionCatalog.Tasks, CanView = true, ViewScope = DataVisibilityScope.Department });
+        var department = new DepartmentDictionaryItem { Name = "Removed user's department", IsActive = true };
+        var otherDepartment = new DepartmentDictionaryItem { Name = "Unrelated department", IsActive = true };
+        db.Departments.AddRange(department, otherDepartment);
+        await db.SaveChangesAsync();
+        var removed = await CreateUserAsync(db, role, "removed-department-user@local");
+        var peer = await CreateUserAsync(db, role, "removed-department-peer@local");
+        var unrelated = await CreateUserAsync(db, role, "removed-department-other@local");
+        removed.DepartmentId = peer.DepartmentId = department.Id;
+        removed.Department = peer.Department = department.Name;
+        unrelated.DepartmentId = otherDepartment.Id;
+        unrelated.Department = otherDepartment.Name;
+        await db.SaveChangesAsync();
+        var publisher = new RecordingUserRolePublisher(db);
+        var service = CreateService(db, publisher);
+
+        Assert.True(reject ? await service.RejectUserAsync(removed.Id, peer.Id) : await service.DeleteUserAsync(removed.Id, peer.Id));
+
+        var recipients = Assert.Single(publisher.Batches);
+        Assert.Equal(new[] { removed.Id, peer.Id }.Order(), recipients.Order());
+        Assert.DoesNotContain(unrelated.Id, recipients);
+        Assert.True(publisher.PublishedAfterCommit);
+        Assert.False(await db.Users.AsNoTracking().AnyAsync(user => user.Id == removed.Id));
+    }
+
+    [Fact]
+    public async Task UpdateUserAsync_PublishesOnlyActualRoleChangesAfterSaving()
+    {
+        await using var db = await CreateContextAsync();
+        var firstRole = await CreateRoleAsync(db, "first-role");
+        var nextRole = await CreateRoleAsync(db, "next-role");
+        var user = await CreateUserAsync(db, firstRole, "role-change@local");
+        var publisher = new RecordingUserRolePublisher(db);
+        var service = CreateService(db, publisher);
+        await service.UpdateUserAsync(user.Id, new UpdateUserRequest { FullName = "New name" }, actorUserId: user.Id);
+        Assert.Empty(publisher.Users);
+        await service.UpdateUserAsync(user.Id, new UpdateUserRequest { RoleId = nextRole }, actorUserId: user.Id);
+        Assert.Equal(new[] { user.Id }, publisher.Users);
+        Assert.Equal(nextRole, publisher.ObservedRole);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.UpdateUserAsync(user.Id, new UpdateUserRequest { RoleId = int.MaxValue }, actorUserId: user.Id));
+        Assert.Single(publisher.Users);
+    }
+
+    [Fact]
+    public async Task UpdateUserAsync_DepartmentMoveSignalsAffectedDepartmentsOnlyAfterSave()
+    {
+        await using var db = await CreateContextAsync();
+        var roleId = await CreateRoleAsync(db, "department-viewer");
+        var legacyRoleId = await CreateRoleAsync(db, "department-legacy-viewer");
+        db.RolePermissions.Add(new RolePermission { RoleId = roleId, Section = RolePermissionCatalog.Tasks, CanView = true, ViewScope = DataVisibilityScope.Department });
+        db.RolePermissions.Add(new RolePermission { RoleId = legacyRoleId, Section = RolePermissionCatalog.Tasks, CanView = true, ViewScope = " Department " });
+        var oldDepartment = new DepartmentDictionaryItem { Name = "Old department", IsActive = true };
+        var newDepartment = new DepartmentDictionaryItem { Name = "New department", IsActive = true };
+        var unrelatedDepartment = new DepartmentDictionaryItem { Name = "Unrelated", IsActive = true };
+        db.Departments.AddRange(oldDepartment, newDepartment, unrelatedDepartment);
+        await db.SaveChangesAsync();
+        var moved = await CreateUserAsync(db, roleId, "department-moved@local");
+        var oldPeer = await CreateUserAsync(db, legacyRoleId, "department-old@local");
+        var newPeer = await CreateUserAsync(db, roleId, "department-new@local");
+        var unrelated = await CreateUserAsync(db, roleId, "department-other@local");
+        moved.DepartmentId = oldPeer.DepartmentId = oldDepartment.Id;
+        moved.Department = oldPeer.Department = oldDepartment.Name;
+        newPeer.DepartmentId = newDepartment.Id; newPeer.Department = newDepartment.Name;
+        unrelated.DepartmentId = unrelatedDepartment.Id; unrelated.Department = unrelatedDepartment.Name;
+        await db.SaveChangesAsync();
+        var publisher = new RecordingUserRolePublisher(db);
+        var service = CreateService(db, publisher);
+        await service.UpdateUserAsync(moved.Id, new UpdateUserRequest { DepartmentId = newDepartment.Id }, actorUserId: moved.Id);
+        var recipients = Assert.Single(publisher.Batches);
+        Assert.Equal(new[] { moved.Id, oldPeer.Id, newPeer.Id }.Order(), recipients.Order());
+        Assert.DoesNotContain(unrelated.Id, recipients);
+        Assert.True(publisher.PublishedAfterCommit);
+        Assert.Equal(newDepartment.Id, (await db.Users.AsNoTracking().SingleAsync(item => item.Id == moved.Id)).DepartmentId);
+    }
+
     [Fact]
     public async Task UpdateUserAsync_SavesCompanyAssignments_ForEmployee()
     {
@@ -329,7 +480,7 @@ public class AuthServiceUserCompanyAccessTests
         Assert.True(jwt.ValidTo > DateTime.UtcNow.AddDays(6));
     }
 
-    private static AuthService CreateService(PaymentContext db)
+    private static AuthService CreateService(PaymentContext db, IUserRoleChangePublisher? publisher = null)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -345,7 +496,26 @@ public class AuthServiceUserCompanyAccessTests
             configuration,
             new NoopEmailService(),
             new FakeWebHostEnvironment(),
-            new PasswordHasher<User>());
+            new PasswordHasher<User>(), userRoleChangePublisher: publisher);
+    }
+
+    private sealed class RecordingUserRolePublisher(PaymentContext db) : IUserRoleChangePublisher
+    {
+        public List<int> Users { get; } = [];
+        public List<int[]> Batches { get; } = [];
+        public bool PublishedAfterCommit { get; private set; }
+        public int ObservedRole { get; private set; }
+        public async Task PublishUserRoleChangedAsync(int userId, CancellationToken cancellationToken = default)
+        {
+            Users.Add(userId);
+            ObservedRole = await db.Users.AsNoTracking().Where(user => user.Id == userId).Select(user => user.RoleId).SingleAsync(cancellationToken);
+        }
+        public Task PublishUsersRoleChangedAsync(IReadOnlyCollection<int> userIds, CancellationToken cancellationToken = default)
+        {
+            Batches.Add(userIds.ToArray());
+            PublishedAfterCommit = db.Database.CurrentTransaction is null;
+            return Task.CompletedTask;
+        }
     }
 
     private static async Task<PaymentContext> CreateContextAsync()

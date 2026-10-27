@@ -126,6 +126,30 @@ function normalizeNavigationRootOrder(
   return [...existing, ...missingItems, ...missingGroups];
 }
 
+function readSidebarCollapsed(storageKey: string | null): boolean {
+  if (!storageKey || typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(storageKey) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function readSidebarExpanded(storageKey: string | null): Record<string, boolean> {
+  if (!storageKey || typeof window === 'undefined') return {};
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(storageKey) ?? '{}');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const entries: Array<[string, boolean]> = [];
+    for (const [id, value] of Object.entries(parsed)) {
+      if (typeof value === 'boolean') entries.push([id, value]);
+    }
+    return Object.fromEntries(entries);
+  } catch {
+    return {};
+  }
+}
+
 export default function Navigation({ activeTab, onTabChange }: NavigationProps) {
   const { t } = useTranslation();
   const toast = useToast();
@@ -133,16 +157,16 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
   const permissions = useRolePermissions(user?.role?.id);
   const orderStorageKey = `${ORDER_KEY}.${user?.id ?? 'guest'}`;
   const hiddenStorageKey = `${HIDDEN_STORAGE_KEY}.${user?.id ?? 'guest'}`;
+  const currentUserId = user?.id;
+  const sidebarOwnerId = typeof currentUserId === 'number' && Number.isSafeInteger(currentUserId) && currentUserId > 0
+    ? currentUserId : null;
+  const collapsedStorageKey = sidebarOwnerId === null ? null : `${LS_KEY}.${sidebarOwnerId}`;
+  const expandedStorageKey = sidebarOwnerId === null ? null : `${EXPANDED_KEY}.${sidebarOwnerId}`;
+  const [sidebarPreferencesOwnerId, setSidebarPreferencesOwnerId] = useState(sidebarOwnerId);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [advanceDecisionCount, setAdvanceDecisionCount] = useState(0);
 
-  const [collapsed, setCollapsed] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(LS_KEY) === '1';
-    } catch {
-      return false;
-    }
-  });
+  const [collapsed, setCollapsed] = useState(() => readSidebarCollapsed(collapsedStorageKey));
 
   useLayoutEffect(() => {
     let styleEl = document.getElementById(STYLE_ID) as HTMLStyleElement | null;
@@ -191,12 +215,13 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
   }, [collapsed]);
 
   useEffect(() => {
+    if (!collapsedStorageKey || sidebarPreferencesOwnerId !== sidebarOwnerId) return;
     try {
-      localStorage.setItem(LS_KEY, collapsed ? '1' : '0');
+      localStorage.setItem(collapsedStorageKey, collapsed ? '1' : '0');
     } catch {
       /** */
     }
-  }, [collapsed]);
+  }, [collapsed, collapsedStorageKey, sidebarOwnerId, sidebarPreferencesOwnerId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -506,6 +531,13 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
       return [];
     }
   });
+  const [hiddenPreferencesOwnerId, setHiddenPreferencesOwnerId] = useState(sidebarOwnerId);
+  const hiddenOwnerRef = useRef({ id: sidebarOwnerId, generation: 0 });
+  if (hiddenOwnerRef.current.id !== sidebarOwnerId) {
+    hiddenOwnerRef.current = { id: sidebarOwnerId, generation: hiddenOwnerRef.current.generation + 1 };
+  }
+  const hiddenItemsRef = useRef(hiddenItemIds);
+  const hiddenSaveRef = useRef({ generation: hiddenOwnerRef.current.generation, revision: 0, confirmed: hiddenItemIds, tail: Promise.resolve() });
   const [moreSectionsOpen, setMoreSectionsOpen] = useState(false);
   const [navigationSettingsOpen, setNavigationSettingsOpen] = useState(false);
   const [navigationSettingsSaving, setNavigationSettingsSaving] = useState(false);
@@ -540,32 +572,47 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
       .filter((node): node is SidebarNode => node !== null);
   }, [availableSidebarItemIds, globalOrderIds, hiddenItemIds, navigationGroups, sidebarItems]);
 
-  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(() => {
-    if (typeof window === 'undefined') {
-      return {};
+  const [expandedSections, setExpandedSections] = useState(() => readSidebarExpanded(expandedStorageKey));
+
+  useLayoutEffect(() => {
+    if (sidebarPreferencesOwnerId === sidebarOwnerId) return;
+    setCollapsed(readSidebarCollapsed(collapsedStorageKey));
+    setExpandedSections(readSidebarExpanded(expandedStorageKey));
+    setSidebarPreferencesOwnerId(sidebarOwnerId);
+  }, [collapsedStorageKey, expandedStorageKey, sidebarOwnerId, sidebarPreferencesOwnerId]);
+
+  useLayoutEffect(() => {
+    if (hiddenPreferencesOwnerId === sidebarOwnerId) return;
+    let next: string[] = [];
+    if (sidebarOwnerId !== null) {
+      try {
+        const parsed: unknown = JSON.parse(window.localStorage.getItem(hiddenStorageKey) ?? '[]');
+        if (Array.isArray(parsed)) next = parsed.filter((item): item is string => typeof item === 'string');
+      } catch { /* Invalid local preferences fall back to visible sections. */ }
     }
-    try {
-      const raw = window.localStorage.getItem(EXPANDED_KEY);
-      if (!raw) return {};
-      const parsed = JSON.parse(raw) as Record<string, boolean>;
-      return parsed && typeof parsed === 'object' ? parsed : {};
-    } catch {
-      return {};
-    }
-  });
+    hiddenItemsRef.current = next;
+    hiddenSaveRef.current = { generation: hiddenOwnerRef.current.generation, revision: 0, confirmed: next, tail: Promise.resolve() };
+    setHiddenItemIds(next);
+    setHiddenPreferencesOwnerId(sidebarOwnerId);
+  }, [hiddenPreferencesOwnerId, hiddenStorageKey, sidebarOwnerId]);
+
+  useLayoutEffect(() => {
+    if (hiddenPreferencesOwnerId === sidebarOwnerId) hiddenItemsRef.current = hiddenItemIds;
+  }, [hiddenItemIds, hiddenPreferencesOwnerId, sidebarOwnerId]);
 
   useEffect(() => {
+    if (!expandedStorageKey || sidebarPreferencesOwnerId !== sidebarOwnerId) return;
     try {
-      localStorage.setItem(EXPANDED_KEY, JSON.stringify(expandedSections));
+      localStorage.setItem(expandedStorageKey, JSON.stringify(expandedSections));
     } catch {
       /** */
     }
-  }, [expandedSections]);
+  }, [expandedSections, expandedStorageKey, sidebarOwnerId, sidebarPreferencesOwnerId]);
 
-  const toggleSection = useCallback((id: string) => {
+  const toggleSection = useCallback((id: string, defaultExpanded = false) => {
     setExpandedSections((prev) => {
       const current = prev[id];
-      const nextValue = current === undefined ? false : !current;
+      const nextValue = !(current ?? defaultExpanded);
       return { ...prev, [id]: nextValue };
     });
   }, []);
@@ -592,6 +639,8 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
 
   useEffect(() => {
     let cancelled = false;
+    const hiddenGeneration = hiddenOwnerRef.current.generation;
+    const hiddenRevision = hiddenSaveRef.current.revision;
     const loadNavigationPreferences = async () => {
       const [navigationResult, hiddenResult] = await Promise.allSettled([
         apiService.getNavigationSettings(),
@@ -610,11 +659,15 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
         ));
       }
 
-      if (hiddenResult.status === 'fulfilled' && hiddenResult.value?.value) {
+      if (hiddenResult.status === 'fulfilled' && hiddenResult.value?.value
+        && hiddenOwnerRef.current.generation === hiddenGeneration && hiddenSaveRef.current.revision === hiddenRevision) {
         try {
           const parsed = JSON.parse(hiddenResult.value.value) as unknown;
           if (Array.isArray(parsed)) {
-            setHiddenItemIds(parsed.filter((item): item is string => typeof item === 'string'));
+            const next = parsed.filter((item): item is string => typeof item === 'string');
+            hiddenItemsRef.current = next;
+            hiddenSaveRef.current.confirmed = next;
+            setHiddenItemIds(next);
           }
         } catch {
           // Повреждённая персональная настройка не должна скрыть всё меню.
@@ -631,24 +684,37 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
   }, [user?.id]);
 
   useEffect(() => {
+    if (sidebarOwnerId === null || hiddenPreferencesOwnerId !== sidebarOwnerId) return;
     try {
       window.localStorage.setItem(hiddenStorageKey, JSON.stringify(hiddenItemIds));
     } catch {
       /** */
     }
-  }, [hiddenItemIds, hiddenStorageKey]);
+  }, [hiddenItemIds, hiddenStorageKey, hiddenPreferencesOwnerId, sidebarOwnerId]);
 
   const toggleItemVisibility = useCallback((itemId: string) => {
-    setHiddenItemIds((previous) => {
-      const next = previous.includes(itemId)
-        ? previous.filter((id) => id !== itemId)
-        : [...previous, itemId];
-      void apiService.upsertUserSetting(HIDDEN_SETTING_KEY, JSON.stringify(next)).catch(() => {
-        setHiddenItemIds(previous);
-      });
-      return next;
+    const generation = hiddenOwnerRef.current.generation;
+    const state = hiddenSaveRef.current;
+    if (hiddenOwnerRef.current.id === null || state.generation !== generation) return;
+    const previous = hiddenItemsRef.current;
+    const next = previous.includes(itemId) ? previous.filter((id) => id !== itemId) : [...previous, itemId];
+    const revision = ++state.revision;
+    hiddenItemsRef.current = next;
+    setHiddenItemIds(next);
+    state.tail = state.tail.then(async () => {
+      if (hiddenOwnerRef.current.generation !== generation) return;
+      try {
+        await apiService.upsertUserSetting(HIDDEN_SETTING_KEY, JSON.stringify(next));
+        if (hiddenOwnerRef.current.generation === generation) state.confirmed = next;
+      } catch {
+        if (hiddenOwnerRef.current.generation === generation && state.revision === revision) {
+          hiddenItemsRef.current = state.confirmed;
+          setHiddenItemIds(state.confirmed);
+          toast.error('Не удалось сохранить скрытые разделы. Настройки восстановлены.', 'Меню');
+        }
+      }
     });
-  }, []);
+  }, [toast]);
 
   const openNavigationSettings = useCallback(() => {
     setDraftOrderIds(normalizeNavigationRootOrder(globalOrderIds, availableSidebarItemIds, navigationGroups));
@@ -1126,7 +1192,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
                 <li key={node.id} className="space-y-1" data-testid={`navigation-group-${node.id}`}>
                   <button
                     type="button"
-                    onClick={() => toggleSection(node.id)}
+                    onClick={() => toggleSection(node.id, true)}
                     className={[
                       'relative flex w-full items-center rounded-xl transition-colors',
                       collapsed ? 'justify-center p-3' : 'gap-3 px-4 py-3',

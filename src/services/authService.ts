@@ -389,11 +389,13 @@ export interface MergeUsersDto {
 export type ApiErrorCode = 'PendingApproval' | 'UserInactive' | 'InvalidCredentials' | string;
 export interface ApiError extends Error {
   code?: ApiErrorCode;
+  status?: number;
 }
 
-function makeError(message: string, code?: ApiErrorCode): ApiError {
+function makeError(message: string, code?: ApiErrorCode, status?: number): ApiError {
   const e = new Error(message) as ApiError;
   e.code = code;
+  e.status = status;
   return e;
 }
 
@@ -466,19 +468,19 @@ class AuthApiService {
         (typeof body.code === 'string' ? body.code.trim() : undefined) || title;
 
       if (code === 'PendingApproval')
-        throw makeError('Ваш аккаунт ожидает одобрения администратором.', code);
+        throw makeError('Ваш аккаунт ожидает одобрения администратором.', code, res.status);
       if (code === 'UserInactive')
-        throw makeError('Ваш аккаунт отключён. Обратитесь к администратору.', code);
+        throw makeError('Ваш аккаунт отключён. Обратитесь к администратору.', code, res.status);
       if (code === 'InvalidCredentials' || res.status === 401)
-        throw makeError('Неверный email или пароль.', 'InvalidCredentials');
+        throw makeError('Неверный email или пароль.', 'InvalidCredentials', res.status);
 
-      if (detail) throw makeError(detail, code);
-      if (message) throw makeError(message, code);
-      if (code) throw makeError(code);
+      if (detail) throw makeError(detail, code, res.status);
+      if (message) throw makeError(message, code, res.status);
+      if (code) throw makeError(code, undefined, res.status);
     }
 
-    if (res.status === 401) throw makeError('Неверный email или пароль.', 'InvalidCredentials');
-    throw makeError(raw || `Ошибка ${res.status} ${res.statusText}`);
+    if (res.status === 401) throw makeError('Неверный email или пароль.', 'InvalidCredentials', res.status);
+    throw makeError(raw || `Ошибка ${res.status} ${res.statusText}`, undefined, res.status);
   }
 
   // ==== auth ====

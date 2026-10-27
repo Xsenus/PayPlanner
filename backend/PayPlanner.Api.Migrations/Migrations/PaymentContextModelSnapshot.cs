@@ -6428,6 +6428,14 @@ namespace PayPlanner.Api.Migrations
                     b.Property<int?>("HiddenAfterMessageId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int?>("HistoryHiddenThroughMessageId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("HistoryVisibilityRevision")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(0L);
+
                     b.Property<bool>("IsActive")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")

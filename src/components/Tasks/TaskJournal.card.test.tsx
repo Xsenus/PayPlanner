@@ -1,9 +1,263 @@
-import { setupTaskJournalTests, apiMock, toastMock, todayAt, createTask, renderJournal, openFirstTaskForEdit, openNewTaskFormAsGlobalInternal, continueTaskWizardForClient } from './TaskJournal.test-support';
+import { setupTaskJournalTests, apiMock, toastMock, offlineCalendarMock, authState, legalEntitiesState, todayAt, createTask, renderJournal, openFirstTaskForEdit, openNewTaskFormAsGlobalInternal, continueTaskWizardForClient } from './TaskJournal.test-support';
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import type { LegalEntitySummary } from '../../types';
+import { TaskJournal } from './TaskJournal';
 
 describe('TaskJournal', () => {
   setupTaskJournalTests();
+
+  it.each(['legacy', 'modern'] as const)('closes the %s task card when task access is revoked', async (mode) => {
+    await renderJournal([createTask({ title: 'Закрытая задача' })], { settings: { taskCardWindowMode: mode } });
+    await openFirstTaskForEdit();
+    expect(await screen.findByTestId(`task-${mode}-card-window`)).toBeTruthy();
+    apiMock.getTaskJournalItems.mockRejectedValue(Object.assign(new Error('Denied'), { status: 403 }));
+    fireEvent(window, new Event('pp.task_journal.changed'));
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith(expect.stringContaining('Нет доступа'), 'Журнал задач'));
+    expect(screen.queryByTestId(`task-${mode}-card-window`)).toBeNull();
+  });
+
+  it.each(['legacy', 'modern'] as const)('closes the %s task card when another tab revokes access', async (mode) => {
+    await renderJournal([createTask()], { settings: { taskCardWindowMode: mode } });
+    await openFirstTaskForEdit();
+    expect(await screen.findByTestId(`task-${mode}-card-window`)).toBeTruthy();
+    fireEvent(window, new StorageEvent('storage', { key: 'payplanner-offline-calendar-denied:7', newValue: 'revoked', storageArea: localStorage }));
+    expect(screen.queryByTestId(`task-${mode}-card-window`)).toBeNull();
+  });
+
+  it.each(['legacy', 'modern'] as const)('keeps the %s task card open on a temporary network failure', async (mode) => {
+    await renderJournal([createTask()], { settings: { taskCardWindowMode: mode } });
+    await openFirstTaskForEdit();
+    expect(await screen.findByTestId(`task-${mode}-card-window`)).toBeTruthy();
+    apiMock.getTaskJournalItems.mockRejectedValue(new Error('Network unavailable'));
+    fireEvent(window, new Event('pp.task_journal.changed'));
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith('Не удалось загрузить журнал задач.', 'Журнал задач'));
+    expect(screen.getByTestId(`task-${mode}-card-window`)).toBeTruthy();
+  });
+
+  it.each([
+    ['legacy', 401], ['legacy', 403], ['legacy', 404],
+    ['modern', 401], ['modern', 403], ['modern', 404],
+  ] as const)('closes routed %s task card when refresh returns %s', async (mode, status) => {
+    await renderJournal([createTask()], { settings: { taskCardWindowMode: mode }, withRoute: true });
+    await openFirstTaskForEdit();
+    expect(await screen.findByTestId(`task-${mode}-card-window`)).toBeTruthy();
+    apiMock.getTaskJournalItem.mockRejectedValue(Object.assign(new Error('Denied'), { status }));
+    fireEvent(window, new Event('pp.task_journal.changed'));
+    await waitFor(() => expect(screen.queryByTestId(`task-${mode}-card-window`)).toBeNull());
+    expect(offlineCalendarMock.revokeOfflineCalendarSnapshot).toHaveBeenCalledWith(7);
+  });
+
+  it.each(['legacy', 'modern'] as const)('keeps routed %s task card open on refresh network failure', async (mode) => {
+    await renderJournal([createTask()], { settings: { taskCardWindowMode: mode }, withRoute: true });
+    await openFirstTaskForEdit();
+    expect(await screen.findByTestId(`task-${mode}-card-window`)).toBeTruthy();
+    apiMock.getTaskJournalItem.mockClear();
+    apiMock.getTaskJournalItem.mockRejectedValue(new Error('Network unavailable'));
+    fireEvent(window, new Event('pp.task_journal.changed'));
+    await waitFor(() => expect(apiMock.getTaskJournalItem).toHaveBeenCalledWith(101));
+    expect(screen.getByTestId(`task-${mode}-card-window`)).toBeTruthy();
+  });
+
+  it('ignores a late access denial after leaving the routed task', async () => {
+    await renderJournal([createTask()], { settings: { taskCardWindowMode: 'modern' }, withRoute: true });
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId('task-modern-card-window');
+    apiMock.getTaskJournalItem.mockClear();
+    let reject!: (reason: Error) => void;
+    apiMock.getTaskJournalItem.mockReturnValueOnce(new Promise((_, fail) => { reject = fail; }));
+    fireEvent(window, new Event('pp.task_journal.changed'));
+    await waitFor(() => expect(apiMock.getTaskJournalItem).toHaveBeenCalledWith(101));
+    fireEvent.click(within(card).getByRole('button', { name: 'К журналу' }));
+    await waitFor(() => expect(screen.queryByTestId('task-modern-card-window')).toBeNull());
+    await act(async () => { reject(Object.assign(new Error('Denied'), { status: 403 })); });
+    expect(toastMock.error).not.toHaveBeenCalledWith('Задача недоступна или была удалена.', 'Журнал задач');
+  });
+
+  it('ignores a late denial for the previous task after opening another routed task', async () => {
+    await renderJournal([createTask()], { settings: { taskCardWindowMode: 'modern' }, withRoute: true, nextRouteTaskId: 102 });
+    await openFirstTaskForEdit();
+    await screen.findByTestId('task-modern-card-window');
+    let reject!: (reason: Error) => void;
+    apiMock.getTaskJournalItem.mockClear();
+    apiMock.getTaskJournalItem.mockReturnValueOnce(new Promise((_, fail) => { reject = fail; }));
+    apiMock.getTaskJournalItem.mockResolvedValue(createTask({ id: 102, title: 'Другая задача' }));
+    fireEvent(window, new Event('pp.task_journal.changed'));
+    await waitFor(() => expect(apiMock.getTaskJournalItem).toHaveBeenCalledWith(101));
+    fireEvent.click(screen.getByRole('button', { name: 'Перейти в другую задачу' }));
+    await waitFor(() => expect(apiMock.getTaskJournalItem).toHaveBeenCalledWith(102));
+    await act(async () => { reject(Object.assign(new Error('Denied'), { status: 403 })); });
+    expect(screen.getByTestId('task-modern-card-window')).toBeTruthy();
+    expect(toastMock.error).not.toHaveBeenCalledWith('Задача недоступна или была удалена.', 'Журнал задач');
+  });
+
+  it.each(['legacy', 'modern'] as const)('rechecks routed %s task when current role permissions change', async (mode) => {
+    authState.user.role = { id: 42 };
+    await renderJournal([createTask()], { settings: { taskCardWindowMode: mode }, withRoute: true });
+    await openFirstTaskForEdit();
+    expect(await screen.findByTestId(`task-${mode}-card-window`)).toBeTruthy();
+    apiMock.getTaskJournalItem.mockRejectedValue(Object.assign(new Error('Denied'), { status: 403 }));
+    fireEvent(window, new CustomEvent('pp.permissions.changed', { detail: { roleId: 42 } }));
+    await waitFor(() => expect(screen.queryByTestId(`task-${mode}-card-window`)).toBeNull());
+  });
+
+  it.each(['legacy', 'modern'] as const)('closes routed %s task after department access change', async (mode) => {
+    await renderJournal([createTask()], { settings: { taskCardWindowMode: mode }, withRoute: true });
+    await openFirstTaskForEdit();
+    expect(await screen.findByTestId(`task-${mode}-card-window`)).toBeTruthy();
+    apiMock.getTaskJournalItem.mockRejectedValue(Object.assign(new Error('Denied'), { status: 403 }));
+    fireEvent(window, new CustomEvent('payplanner:user-notifications-changed', { detail: { source: 'realtime', reason: 'user-role-changed' } }));
+    await waitFor(() => expect(screen.queryByTestId(`task-${mode}-card-window`)).toBeNull());
+  });
+
+  it.each(['legacy', 'modern'] as const)('closes journal %s task after department access change even when list refresh succeeds', async (mode) => {
+    await renderJournal([createTask()], { settings: { taskCardWindowMode: mode } });
+    await openFirstTaskForEdit();
+    expect(await screen.findByTestId(`task-${mode}-card-window`)).toBeTruthy();
+    apiMock.getTaskJournalItem.mockRejectedValue(Object.assign(new Error('Denied'), { status: 403 }));
+    fireEvent(window, new CustomEvent('payplanner:user-notifications-changed', { detail: { source: 'realtime', reason: 'user-role-changed' } }));
+    await waitFor(() => expect(screen.queryByTestId(`task-${mode}-card-window`)).toBeNull());
+    expect(offlineCalendarMock.revokeOfflineCalendarSnapshot).toHaveBeenCalledWith(7);
+  });
+
+  it.each(['legacy', 'modern'] as const)('keeps journal %s task draft on a temporary access recheck failure', async (mode) => {
+    await renderJournal([createTask()], { settings: { taskCardWindowMode: mode } });
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId(`task-${mode}-card-window`);
+    const title = within(card).getByTestId('task-title-input') as HTMLTextAreaElement;
+    fireEvent.change(title, { target: { value: 'Несохранённое название' } });
+    apiMock.getTaskJournalItem.mockClear();
+    apiMock.getTaskJournalItem.mockRejectedValue(new Error('Network unavailable'));
+    fireEvent(window, new CustomEvent('payplanner:user-notifications-changed', { detail: { source: 'realtime', reason: 'user-role-changed' } }));
+    await waitFor(() => expect(apiMock.getTaskJournalItem).toHaveBeenCalledWith(101));
+    expect(screen.getByTestId(`task-${mode}-card-window`)).toBeTruthy();
+    expect(title.value).toBe('Несохранённое название');
+  });
+
+  it.each(['legacy', 'modern'] as const)('closes journal %s task when current role permissions are revoked', async (mode) => {
+    authState.user.role = { id: 42 };
+    await renderJournal([createTask()], { settings: { taskCardWindowMode: mode } });
+    await openFirstTaskForEdit();
+    expect(await screen.findByTestId(`task-${mode}-card-window`)).toBeTruthy();
+    apiMock.getTaskJournalItem.mockRejectedValue(Object.assign(new Error('Denied'), { status: 403 }));
+    fireEvent(window, new CustomEvent('pp.permissions.changed', { detail: { roleId: 42 } }));
+    await waitFor(() => expect(screen.queryByTestId(`task-${mode}-card-window`)).toBeNull());
+  });
+
+  it('hides a journal task immediately when the user changes', async () => {
+    const rendered = await renderJournal([createTask()], { settings: { taskCardWindowMode: 'modern' } });
+    await openFirstTaskForEdit();
+    await screen.findByTestId('task-modern-card-window');
+    authState.user = { id: 8, fullName: 'Другой сотрудник', email: 'other@local' };
+    rendered.rerender(<TaskJournal />);
+    expect(screen.queryByTestId('task-modern-card-window')).toBeNull();
+  });
+
+  it('ignores a stale access denial after a newer journal recheck succeeds', async () => {
+    await renderJournal([createTask()], { settings: { taskCardWindowMode: 'modern' } });
+    await openFirstTaskForEdit();
+    await screen.findByTestId('task-modern-card-window');
+    let reject!: (reason: Error) => void;
+    apiMock.getTaskJournalItem.mockClear();
+    apiMock.getTaskJournalItem.mockReturnValueOnce(new Promise((_, fail) => { reject = fail; }));
+    apiMock.getTaskJournalItem.mockResolvedValue(createTask());
+    const signal = () => fireEvent(window, new CustomEvent('payplanner:user-notifications-changed', { detail: { source: 'realtime', reason: 'user-role-changed' } }));
+    signal();
+    await waitFor(() => expect(apiMock.getTaskJournalItem).toHaveBeenCalledTimes(1));
+    signal();
+    await waitFor(() => expect(apiMock.getTaskJournalItem).toHaveBeenCalledTimes(2));
+    await act(async () => { reject(Object.assign(new Error('Denied'), { status: 403 })); });
+    expect(screen.getByTestId('task-modern-card-window')).toBeTruthy();
+    expect(toastMock.error).not.toHaveBeenCalledWith('Задача недоступна или была удалена.', 'Журнал задач');
+  });
+
+  it('does not recheck a routed task for an unrelated role', async () => {
+    authState.user.role = { id: 42 };
+    await renderJournal([createTask()], { settings: { taskCardWindowMode: 'modern' }, withRoute: true });
+    await openFirstTaskForEdit();
+    await screen.findByTestId('task-modern-card-window');
+    apiMock.getTaskJournalItem.mockClear();
+    fireEvent(window, new CustomEvent('pp.permissions.changed', { detail: { roleId: 99 } }));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 350)); });
+    expect(apiMock.getTaskJournalItem).not.toHaveBeenCalled();
+  });
+
+  it('invalidates a previous calendar snapshot after permissions change while a routed task is open', async () => {
+    authState.user.role = { id: 42 };
+    await renderJournal([createTask()], { settings: { taskCardWindowMode: 'modern' }, withRoute: true });
+    await openFirstTaskForEdit();
+    await screen.findByTestId('task-modern-card-window');
+    offlineCalendarMock.revokeOfflineCalendarSnapshot.mockClear();
+    apiMock.getTaskJournalItem.mockResolvedValue(createTask());
+    fireEvent(window, new CustomEvent('pp.permissions.changed', { detail: { roleId: 42 } }));
+    await waitFor(() => expect(offlineCalendarMock.revokeOfflineCalendarSnapshot).toHaveBeenCalledWith(7));
+    expect(screen.getByTestId('task-modern-card-window')).toBeTruthy();
+  });
+
+  it('rechecks a routed task when the assigned role changes without a permissions event', async () => {
+    authState.user.role = { id: 42 };
+    await renderJournal([createTask()], { settings: { taskCardWindowMode: 'modern' }, withRoute: true, withRoleRerender: true });
+    await openFirstTaskForEdit();
+    await screen.findByTestId('task-modern-card-window');
+    apiMock.getTaskJournalItem.mockRejectedValue(Object.assign(new Error('Denied'), { status: 403 }));
+    authState.user.role = { id: 43 };
+    fireEvent.click(screen.getByRole('button', { name: 'Обновить роль для теста' }));
+    await waitFor(() => expect(screen.queryByTestId('task-modern-card-window')).toBeNull());
+  });
+
+  it('hides the previous user’s routed task immediately when the user changes', async () => {
+    authState.user.role = { id: 42 };
+    await renderJournal([createTask()], { settings: { taskCardWindowMode: 'modern' }, withRoute: true, withRoleRerender: true });
+    await openFirstTaskForEdit();
+    await screen.findByTestId('task-modern-card-window');
+    apiMock.getTaskJournalItem.mockReturnValue(new Promise(() => undefined));
+    authState.user = { id: 8, fullName: 'Другой сотрудник', email: 'other@local', role: { id: 42 } };
+    fireEvent.click(screen.getByRole('button', { name: 'Обновить роль для теста' }));
+    expect(screen.queryByTestId('task-modern-card-window')).toBeNull();
+    await waitFor(() => expect(apiMock.getTaskJournalItem).toHaveBeenCalledWith(101));
+  });
+
+  it('keeps a long modern task title editable and saves it as one line', async () => {
+    const title = 'Очень длинное название задачи для проверки отображения на узком экране';
+    await renderJournal([createTask({ title })], { settings: { taskCardWindowMode: 'modern' } });
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId('task-modern-card-window');
+    const field = within(card).getByTestId('task-title-input') as HTMLTextAreaElement;
+    expect(field.value).toBe(title);
+    fireEvent.change(field, { target: { value: `${title}\nпродолжение` } });
+    expect(field.value).toBe(`${title}продолжение`);
+    fireEvent.keyDown(field, { key: 'Enter' });
+    expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+    fireEvent.click(within(card).getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({ title: `${title}продолжение` })));
+  });
+
+  it('focuses the legacy task title from the actions menu', async () => {
+    await renderJournal([createTask()], { settings: { taskCardWindowMode: 'legacy' } });
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId('task-legacy-card-window');
+    fireEvent.click(within(card).getByRole('button', { name: 'Действия с задачей' }));
+    fireEvent.click(within(card).getByRole('button', { name: /^Редактировать$/ }));
+    expect(document.activeElement).toBe(within(card).getByTestId('task-title-input'));
+  });
+
+  it.each(['legacy', 'modern'] as const)('uses the shared task chat in the %s card selected by global settings', async (mode) => {
+    await renderJournal([createTask()], { settings: { taskCardWindowMode: mode } });
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId(`task-${mode}-card-window`);
+    expect(screen.queryByTestId(`task-${mode === 'legacy' ? 'modern' : 'legacy'}-card-window`)).toBeNull();
+    expect(within(card).queryByTestId('task-chat-panel')).toBeNull();
+    const openChat = () => fireEvent.click(mode === 'modern'
+      ? within(card).getByRole('tab', { name: 'Чат' })
+      : within(card).getByRole('button', { name: /Чат задачи/ }));
+    openChat();
+    expect((await within(card).findByTestId('task-chat-panel')).textContent).toBe('Чат задачи 101');
+    if (mode === 'modern') fireEvent.click(within(card).getByRole('tab', { name: /Комментарии/ }));
+    else openChat();
+    expect(within(card).queryByTestId('task-chat-panel')).toBeNull();
+    openChat();
+    expect((await within(card).findByTestId('task-chat-panel')).textContent).toBe('Чат задачи 101');
+  });
 
 
   it.each([
@@ -148,6 +402,49 @@ describe('TaskJournal', () => {
     await openFirstTaskForEdit();
     card = await screen.findByTestId('task-modern-card-window');
     expect(within(card).getByTestId('task-modern-layout').getAttribute('data-layout-mode')).toBe('expanded');
+  });
+
+  it('preserves unsaved fields when switching modern card layouts', async () => {
+    await renderJournal([createTask()], { settings: { taskCardWindowMode: 'modern' } });
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId('task-modern-card-window');
+    const title = within(card).getByTestId('task-title-input') as HTMLTextAreaElement;
+    const description = within(card).getByTestId('task-description-field') as HTMLTextAreaElement;
+    fireEvent.change(title, { target: { value: 'Несохранённое название' } });
+    fireEvent.change(description, { target: { value: 'Несохранённое описание' } });
+    fireEvent.click(within(card).getByRole('button', { name: 'Еще' }));
+    fireEvent.click(within(card).getByRole('button', { name: 'Расширенный вид' }));
+    expect(title.value).toBe('Несохранённое название');
+    expect(description.value).toBe('Несохранённое описание');
+    expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+    fireEvent.click(within(card).getByRole('button', { name: 'Еще' }));
+    fireEvent.click(within(card).getByRole('button', { name: 'Компактный вид' }));
+    expect(title.value).toBe('Несохранённое название');
+    expect(description.value).toBe('Несохранённое описание');
+    fireEvent.click(within(card).getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({
+      title: 'Несохранённое название', description: 'Несохранённое описание',
+    })));
+  });
+
+  it.each(['legacy', 'modern'] as const)('keeps the %s card draft after save failure and sends it on retry', async (taskCardWindowMode) => {
+    await renderJournal([createTask()], { settings: { taskCardWindowMode } });
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    const title = within(card).getByTestId('task-title-input') as HTMLInputElement | HTMLTextAreaElement;
+    const description = within(card).getByTestId('task-description-field') as HTMLTextAreaElement;
+    fireEvent.change(title, { target: { value: 'Название после ошибки' } });
+    fireEvent.change(description, { target: { value: 'Описание после ошибки' } });
+    apiMock.updateTaskJournalItem.mockRejectedValueOnce(new Error('Ошибка сохранения'));
+    fireEvent.click(within(card).getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalled());
+    expect(title.value).toBe('Название после ошибки');
+    expect(description.value).toBe('Описание после ошибки');
+    fireEvent.click(within(card).getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(2));
+    expect(apiMock.updateTaskJournalItem).toHaveBeenLastCalledWith(101, expect.objectContaining({
+      title: 'Название после ошибки', description: 'Описание после ошибки',
+    }));
   });
 
   it.each(['legacy', 'modern'] as const)('restores pending server uploads in the %s task card', async (taskCardWindowMode) => {
@@ -353,7 +650,7 @@ describe('TaskJournal', () => {
     expect(apiMock.createTaskJournalItem).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['legacy', 'modern'] as const)('opens linked client and case profiles from the %s task card', async (taskCardWindowMode) => {
+  it.each(['legacy', 'modern'] as const)('opens linked client and case in new tabs without discarding the %s card draft', async (taskCardWindowMode) => {
     const onOpenClient = vi.fn();
     const onOpenCase = vi.fn();
     await renderJournal([createTask()], {
@@ -362,13 +659,36 @@ describe('TaskJournal', () => {
       onOpenCase,
     });
 
-    fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+    await openFirstTaskForEdit();
     const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
-    fireEvent.click(within(card).getByRole('button', { name: 'Открыть карточку контрагента' }));
-    fireEvent.click(within(card).getByRole('button', { name: 'Открыть карточку дела' }));
+    const input = within(card).getByTestId('task-title-input') as HTMLInputElement | HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: 'Несохранённый текст' } });
+    const client = within(card).getByRole('link', { name: 'Открыть карточку контрагента' }) as HTMLAnchorElement;
+    const linkedCase = within(card).getByRole('link', { name: 'Открыть карточку дела' }) as HTMLAnchorElement;
+    expect(client.getAttribute('href')).toBe('/clients/10');
+    expect(linkedCase.getAttribute('href')).toBe('/cases/100');
+    for (const link of [client, linkedCase]) {
+      expect(link.target).toBe('_blank');
+      expect(link.rel).toContain('noopener');
+      fireEvent.click(link);
+    }
+    expect(input.value).toBe('Несохранённый текст');
+    expect(onOpenClient).not.toHaveBeenCalled();
+    expect(onOpenCase).not.toHaveBeenCalled();
+    expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+  });
 
-    expect(onOpenClient).toHaveBeenCalledWith(10, 100);
-    expect(onOpenCase).toHaveBeenCalledWith(100, 10);
+  it.each(['legacy', 'modern'] as const)('opens the linked legal entity in a new tab from the %s card', async (taskCardWindowMode) => {
+    legalEntitiesState.legalEntities = [{ id: 20, shortName: 'ООО Ромашка' } as LegalEntitySummary];
+    await renderJournal([createTask({ clientId: null, legalEntityId: 20, legalEntityName: 'ООО Ромашка' })], {
+      settings: { taskCardWindowMode }, onOpenLegalEntity: vi.fn(),
+    });
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    const link = within(card).getByRole('link', { name: 'Открыть карточку контрагента' }) as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toBe('/?ppTab=legalEntities&ppLegalEntityId=20');
+    expect(link.target).toBe('_blank');
+    expect(link.rel).toContain('noopener');
   });
 
   it.each(['legacy', 'modern'] as const)('links a task to its sales request from the %s task card', async (taskCardWindowMode) => {

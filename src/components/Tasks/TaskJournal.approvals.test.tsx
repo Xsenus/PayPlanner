@@ -2,7 +2,7 @@ import { setupTaskJournalTests, apiMock, toastMock, authState, permissionsState,
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { type TaskJournalItem } from '../../utils/taskJournalStore';
-import { FORCED_TASK_SNOOZE_STORAGE_KEY, getForcedTaskApprovalSnoozeKey, getForcedTaskDeadlineChangeSnoozeKey } from '../../utils/forcedTaskActionSnoozes';
+import { getForcedTaskSnoozeStorageKey, getForcedTaskApprovalSnoozeKey, getForcedTaskDeadlineChangeSnoozeKey } from '../../utils/forcedTaskActionSnoozes';
 
 describe('TaskJournal', () => {
   setupTaskJournalTests();
@@ -421,7 +421,7 @@ describe('TaskJournal', () => {
     await waitFor(() => expect(screen.queryByTestId('deadline-change-decision-prompt')).toBeNull());
     expect(apiMock.approveTaskJournalDeadlineChangeRequest).not.toHaveBeenCalled();
     expect(apiMock.rejectTaskJournalDeadlineChangeRequest).not.toHaveBeenCalled();
-    const snoozes = JSON.parse(window.localStorage.getItem(FORCED_TASK_SNOOZE_STORAGE_KEY) || '{}') as Record<string, number>;
+    const snoozes = JSON.parse(window.localStorage.getItem(getForcedTaskSnoozeStorageKey(8)!) || '{}') as Record<string, number>;
     expect(snoozes[getForcedTaskDeadlineChangeSnoozeKey(206, 902)]).toBeGreaterThan(Date.now());
   });
 
@@ -499,7 +499,7 @@ describe('TaskJournal', () => {
     authState.isAdmin = false;
     authState.user = { id: 7, fullName: 'Согласующий', email: 'approver@example.com' };
     permissionsState.taskCanEdit = false;
-    window.localStorage.setItem(FORCED_TASK_SNOOZE_STORAGE_KEY, JSON.stringify({
+    window.localStorage.setItem(getForcedTaskSnoozeStorageKey(7)!, JSON.stringify({
       [getForcedTaskApprovalSnoozeKey(101)]: Date.now() + 10 * 60_000,
     }));
 
@@ -536,7 +536,7 @@ describe('TaskJournal', () => {
 
     await waitFor(() => expect(screen.queryByTestId('task-approval-decision-prompt')).toBeNull());
     expect(apiMock.updateTaskJournalApproval).not.toHaveBeenCalled();
-    const snoozes = JSON.parse(window.localStorage.getItem(FORCED_TASK_SNOOZE_STORAGE_KEY) || '{}') as Record<string, number>;
+    const snoozes = JSON.parse(window.localStorage.getItem(getForcedTaskSnoozeStorageKey(7)!) || '{}') as Record<string, number>;
     expect(snoozes[getForcedTaskApprovalSnoozeKey(101)]).toBeGreaterThan(Date.now());
   });
 

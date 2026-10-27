@@ -6,18 +6,18 @@ export type CaseTaskFilter = 'active' | 'all' | 'overdue' | 'done';
 export type CaseTaskCounts = Record<CaseTaskFilter, number>;
 export const CASE_TASK_PAGE_SIZES = [10, 25, 50, 100];
 
-type Params = { caseId: number; enabled: boolean; filter: CaseTaskFilter; revision: number };
+type Params = { caseId: number; enabled: boolean; filter: CaseTaskFilter; revision: number; accessKey?: string };
 type PageState = { key: string; items: TaskJournalItem[]; total: number; loading: boolean; error: boolean };
 type SummaryState = { key: string; counts: CaseTaskCounts | null; loading: boolean; error: boolean };
 
 /** Separate table reads from document-source tasks; late responses cannot replace a newer query. */
-export function useCaseTaskPage({ caseId, enabled, filter, revision }: Params) {
-  const scope = `${caseId}:${filter}`;
+export function useCaseTaskPage({ caseId, enabled, filter, revision, accessKey = 'default' }: Params) {
+  const scope = JSON.stringify([caseId, filter, accessKey]);
   const [paging, setPaging] = useState({ scope, page: 1, pageSize: 50 });
   const [retry, setRetry] = useState(0);
   const page = paging.scope === scope ? paging.page : 1;
   const pageSize = paging.pageSize;
-  const summaryKey = `${caseId}:${revision}:${retry}`;
+  const summaryKey = JSON.stringify([caseId, revision, retry, accessKey]);
   const queryKey = `${summaryKey}:${filter}:${page}:${pageSize}`;
   const [pageState, setPageState] = useState<PageState | null>(null);
   const [summaryState, setSummaryState] = useState<SummaryState | null>(null);

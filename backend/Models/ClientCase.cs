@@ -362,6 +362,9 @@ namespace PayPlanner.Api.Models
         public int TaskProgressPercent { get; set; }
 
         [NotMapped]
+        public string TaskSummaryVisibility { get; set; } = "none";
+
+        [NotMapped]
         public DateTime? LastTaskAt { get; set; }
 
         [NotMapped]

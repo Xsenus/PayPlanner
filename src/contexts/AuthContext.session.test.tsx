@@ -5,8 +5,8 @@ import { AuthProvider, useAuth } from './AuthContext';
 import { authService, type User } from '../services/authService';
 import { webcrypto } from 'node:crypto';
 
-const cache = vi.hoisted(() => ({ activate: vi.fn(), clear: vi.fn() }));
-vi.mock('../services/offlineCalendarStore', () => ({ activateOfflineCalendarUser: cache.activate, clearOfflineCalendarCache: cache.clear }));
+const cache = vi.hoisted(() => ({ activate: vi.fn(), clear: vi.fn(), revoke: vi.fn() }));
+vi.mock('../services/offlineCalendarStore', () => ({ activateOfflineCalendarUser: cache.activate, clearOfflineCalendarCache: cache.clear, revokeOfflineCalendarSnapshot: cache.revoke }));
 vi.mock('../services/api', () => ({ AUTH_SESSION_EXPIRED_EVENT: 'owned-session-expired', apiService: { logUserActivity: vi.fn().mockResolvedValue(undefined) } }));
 let context!: ReturnType<typeof useAuth>;
 function Probe() { context = useAuth(); return <span data-testid="actor">{context.user?.id ?? 'none'}</span>; }
@@ -18,10 +18,111 @@ beforeEach(() => {
   vi.stubGlobal('crypto', webcrypto);
   localStorage.clear(); localStorage.setItem('pp_token', token(1)); localStorage.setItem('pp.auth-session-epoch.v1', 'original-A');
   cache.activate.mockReset().mockResolvedValue(undefined); cache.clear.mockReset().mockResolvedValue(undefined);
+  cache.revoke.mockReset().mockResolvedValue(undefined);
 });
 afterEach(() => { vi.restoreAllMocks(); localStorage.clear(); vi.unstubAllGlobals(); });
 
 describe('AuthProvider applies only the current shared session and operation', () => {
+  it('refreshes the user and blocks the old calendar snapshot before applying a changed role', async () => {
+    const updated = { ...user(1), role: { id: 2, name: 'lawyer' } } as User;
+    vi.spyOn(authService, 'getCurrentUser').mockResolvedValueOnce(user(1)).mockResolvedValueOnce(updated);
+    render(<AuthProvider><Probe /></AuthProvider>);
+    await waitFor(() => expect(context.user?.role.id).toBe(1));
+    act(() => window.dispatchEvent(new CustomEvent('payplanner:user-notifications-changed', {
+      detail: { source: 'realtime', reason: 'user-role-changed' },
+    })));
+    await waitFor(() => expect(context.user?.role.id).toBe(2));
+    expect(cache.revoke).toHaveBeenCalledWith(1);
+    expect(cache.revoke.mock.invocationCallOrder[0]).toBeLessThan(cache.activate.mock.invocationCallOrder[1]);
+  });
+
+  it('keeps the current session when role refresh fails due to network', async () => {
+    vi.spyOn(authService, 'getCurrentUser').mockResolvedValueOnce(user(1)).mockRejectedValueOnce(new Error('network unavailable'));
+    const logout = vi.spyOn(authService, 'logout');
+    render(<AuthProvider><Probe /></AuthProvider>);
+    await waitFor(() => expect(context.user?.id).toBe(1));
+    act(() => window.dispatchEvent(new CustomEvent('payplanner:user-notifications-changed', {
+      detail: { source: 'realtime', reason: 'user-role-changed' },
+    })));
+    await waitFor(() => expect(authService.getCurrentUser).toHaveBeenCalledTimes(2));
+    expect(context.user?.id).toBe(1);
+    expect(logout).not.toHaveBeenCalled();
+    expect(cache.clear).not.toHaveBeenCalled();
+  });
+
+  it.each([401, 403, 404])('clears the session when role refresh receives %s', async (status) => {
+    vi.spyOn(authService, 'getCurrentUser').mockResolvedValueOnce(user(1))
+      .mockRejectedValueOnce(Object.assign(new Error('Unavailable'), { status }));
+    const logout = vi.spyOn(authService, 'logout');
+    render(<AuthProvider><Probe /></AuthProvider>);
+    await waitFor(() => expect(context.user?.id).toBe(1));
+    act(() => window.dispatchEvent(new CustomEvent('payplanner:user-notifications-changed', {
+      detail: { source: 'realtime', reason: 'user-role-changed' },
+    })));
+    await waitFor(() => expect(context.user).toBeNull());
+    expect(logout).toHaveBeenCalledOnce();
+    expect(cache.clear).toHaveBeenCalledOnce();
+  });
+
+  it('rechecks the current user after reconnecting', async () => {
+    vi.spyOn(authService, 'getCurrentUser').mockResolvedValue(user(1));
+    render(<AuthProvider><Probe /></AuthProvider>);
+    await waitFor(() => expect(context.user?.id).toBe(1));
+    act(() => window.dispatchEvent(new CustomEvent('payplanner:user-notifications-changed', {
+      detail: { source: 'realtime', reason: 'reconnected' },
+    })));
+    await waitFor(() => expect(authService.getCurrentUser).toHaveBeenCalledTimes(2));
+  });
+
+  it('retries a failed role refresh when the connection returns', async () => {
+    const updated = { ...user(1), role: { id: 2, name: 'lawyer' } } as User;
+    vi.spyOn(authService, 'getCurrentUser').mockResolvedValueOnce(user(1))
+      .mockRejectedValueOnce(new Error('network unavailable')).mockResolvedValueOnce(updated);
+    render(<AuthProvider><Probe /></AuthProvider>);
+    await waitFor(() => expect(context.user?.id).toBe(1));
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('payplanner:user-notifications-changed', {
+        detail: { source: 'realtime', reason: 'user-role-changed' },
+      }));
+      await Promise.resolve();
+    });
+    expect(context.user?.role.id).toBe(1);
+    act(() => window.dispatchEvent(new Event('online')));
+    await waitFor(() => expect(context.user?.role.id).toBe(2));
+    expect(cache.revoke).toHaveBeenCalledWith(1);
+  });
+
+  it('ignores a late role refresh after another user signs in', async () => {
+    const old = deferred<User>();
+    vi.spyOn(authService, 'getCurrentUser').mockResolvedValueOnce(user(1)).mockReturnValueOnce(old.promise);
+    render(<AuthProvider><Probe /></AuthProvider>);
+    await waitFor(() => expect(context.user?.id).toBe(1));
+    act(() => window.dispatchEvent(new CustomEvent('payplanner:user-notifications-changed', {
+      detail: { source: 'realtime', reason: 'user-role-changed' },
+    })));
+    await waitFor(() => expect(authService.getCurrentUser).toHaveBeenCalledTimes(2));
+    await act(async () => { await context.signInWithToken(token(2), user(2)); });
+    await act(async () => { old.resolve({ ...user(1), role: { id: 2, name: 'lawyer' } } as User); await old.promise; });
+    expect(context.user?.id).toBe(2);
+    expect(cache.revoke).not.toHaveBeenCalled();
+  });
+
+  it('does not let a role-change signal cancel an in-progress logout', async () => {
+    vi.spyOn(authService, 'getCurrentUser').mockResolvedValue(user(1));
+    const revoke = deferred<void>();
+    vi.spyOn(authService, 'revokeSessions').mockReturnValueOnce(revoke.promise);
+    const logout = vi.spyOn(authService, 'logout');
+    render(<AuthProvider><Probe /></AuthProvider>);
+    await waitFor(() => expect(context.user?.id).toBe(1));
+    let pending!: Promise<void>;
+    act(() => { pending = context.signOut(); });
+    act(() => window.dispatchEvent(new CustomEvent('payplanner:user-notifications-changed', {
+      detail: { source: 'realtime', reason: 'user-role-changed' },
+    })));
+    await act(async () => { revoke.resolve(); await pending; });
+    expect(context.user).toBeNull();
+    expect(logout).toHaveBeenCalledOnce();
+  });
   it('ignores a stale profile response after StrictMode remount', async () => {
     const first = deferred<User>();
     const second = deferred<User>();

@@ -73,6 +73,30 @@ describe('WebPushDevicePanel', () => {
     apiMock.revokeUserPushSubscription.mockResolvedValue(undefined);
   });
 
+  it.each(['unsupported', 'server-disabled', 'permission-denied'] as const)(
+    'keeps MAX and notification help available when push status is %s',
+    async (status) => {
+      webPushMock.getWebPushStatus.mockResolvedValue(createStatus({ status, message: 'Push сейчас недоступен.' }));
+      render(<WebPushDevicePanel />);
+      await screen.findByText('Push сейчас недоступен.');
+      const help = screen.getByLabelText('Подсказка по Push-уведомлениям');
+      const details = help.querySelector('details');
+      expect(details).not.toBeNull();
+      fireEvent.click(details!.querySelector('summary')!);
+      expect(details!.open).toBe(true);
+      expect(screen.getByRole('link', { name: 'Открыть свой профиль' }).getAttribute('href')).toBe('/?ppTab=profile');
+      expect(screen.getByRole('link', { name: 'Открыть уведомления' }).getAttribute('href')).toBe('/notifications');
+    },
+  );
+
+  it('keeps notification help available if push status cannot be loaded', async () => {
+    webPushMock.getWebPushStatus.mockRejectedValue(new Error('Нет связи'));
+    render(<WebPushDevicePanel />);
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith('Нет связи'));
+    expect(screen.getByLabelText('Подсказка по Push-уведомлениям').querySelector('summary')?.textContent)
+      .toContain('MAX, типы уведомлений и тихие часы');
+  });
+
   it('loads push status and enables current device', async () => {
     webPushMock.getWebPushStatus
       .mockResolvedValueOnce(createStatus())

@@ -35,7 +35,8 @@ import {
   setRolePermissions,
   subscribeOnPermissionsChange,
 } from '../../services/permissionsService';
-import { apiService, type RoleCalendarVisibleUserOptionDto } from '../../services/api';
+import { apiService, type NavigationGroupDto, type RoleCalendarVisibleUserOptionDto } from '../../services/api';
+import { navigationGroupSections, revokeNavigationGroup } from './navigationGroupPermissions';
 import {
   MENU_PERMISSION_KEYS,
   type DataVisibilityScope,
@@ -552,6 +553,18 @@ export function RolePermissionsModal({
   const [calendarUsers, setCalendarUsers] = useState<RoleCalendarVisibleUserOptionDto[]>([]);
   const [calendarUsersLoading, setCalendarUsersLoading] = useState(false);
   const [calendarUserSearch, setCalendarUserSearch] = useState('');
+  const [navigationGroups, setNavigationGroups] = useState<NavigationGroupDto[]>([]);
+  const [navigationGroupsError, setNavigationGroupsError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiService.getNavigationSettings().then((settings) => {
+      if (!cancelled) setNavigationGroups(settings.groups ?? []);
+    }).catch(() => {
+      if (!cancelled) setNavigationGroupsError(true);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     setPermissionsState(getRolePermissions(role.id));
@@ -1050,6 +1063,28 @@ export function RolePermissionsModal({
               </div>
 
               <div className="mt-8">
+                <div className="mb-4 rounded-lg border border-slate-200 p-3">
+                  <h3 className="font-semibold text-slate-900">Закрыть группу меню</h3>
+                  <p className="mt-1 text-sm text-slate-600">Действие снимает права перечисленных разделов для всей роли, в том числе за пределами группы. Сохраните изменения внизу окна.</p>
+                  {navigationGroupsError ? <p className="mt-2 text-sm text-red-700">Не удалось загрузить группы меню. Закрывайте разделы по отдельности.</p> : null}
+                  {navigationGroups.map((group) => {
+                    const { sections, unsupported } = navigationGroupSections(group);
+                    const closed = sections.length > 0 && sections.every((key) =>
+                      MENU_PERMISSION_KEYS.every((permissionKey) => !permissions[key][permissionKey])
+                      && (key !== 'calendar' || !permissions.calendar.canViewAnalytics)
+                      && (key !== 'requests' || !permissions.requests.canViewAnalytics)
+                      && (key !== 'tasks' || !(permissions.tasks.canEditOthers || permissions.tasks.canCompleteOthers || permissions.tasks.canDeleteOthers)));
+                    return <div key={group.id} className="mt-3 flex flex-wrap items-center gap-2">
+                      <button type="button" disabled={isReadOnly || saving || resetting || unsupported.length > 0 || sections.length === 0}
+                        onClick={() => setPermissionsState((previous) => revokeNavigationGroup(previous, sections))}
+                        className="rounded-lg border border-slate-300 px-3 py-1 text-sm disabled:opacity-50">
+                        Закрыть «{group.name}»
+                      </button>
+                      <span className="text-sm text-slate-600">{sections.map((key) => SECTION_CONFIG[key].title).join(', ') || 'Нет управляемых разделов'}{unsupported.length ? ' — есть пункты без отдельного права; закройте их отдельно' : ''}</span>
+                      {closed && unsupported.length === 0 ? <span role="status" className="text-sm text-emerald-700">Права разделов сняты в форме</span> : null}
+                    </div>;
+                  })}
+                </div>
                 <h3 className="text-[28px] font-semibold text-slate-900">
                   {activeGroupConfig.title}
                 </h3>

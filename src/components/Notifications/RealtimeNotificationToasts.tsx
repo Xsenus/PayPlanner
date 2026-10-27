@@ -7,6 +7,8 @@ import {
   createNotificationsHubConnection,
   isExpectedRealtimeStartupError,
   REALTIME_TASK_JOURNAL_CHANGED_EVENT,
+  REALTIME_ROLE_PERMISSIONS_CHANGED_EVENT,
+  REALTIME_USER_ROLE_CHANGED_EVENT,
   REALTIME_USER_NOTIFICATION_CREATED_EVENT,
   stopNotificationsHubConnection,
   TASK_JOURNAL_REALTIME_EVENT,
@@ -952,6 +954,12 @@ export function RealtimeNotificationToasts({
     connection.on(REALTIME_TASK_JOURNAL_CHANGED_EVENT, () => {
       window.dispatchEvent(new CustomEvent(TASK_JOURNAL_REALTIME_EVENT));
     });
+    connection.on(REALTIME_ROLE_PERMISSIONS_CHANGED_EVENT, () => {
+      emitUserNotificationsChanged({ source: 'realtime', reason: 'role-permissions-changed' });
+    });
+    connection.on(REALTIME_USER_ROLE_CHANGED_EVENT, () => {
+      emitUserNotificationsChanged({ source: 'realtime', reason: 'user-role-changed' });
+    });
 
     const handleVisibilityChange = () => {
       if (typeof document === 'undefined') {
@@ -1087,6 +1095,8 @@ export function RealtimeNotificationToasts({
       stopFallbackPolling();
       connection.off(REALTIME_USER_NOTIFICATION_CREATED_EVENT);
       connection.off(REALTIME_TASK_JOURNAL_CHANGED_EVENT);
+      connection.off(REALTIME_ROLE_PERMISSIONS_CHANGED_EVENT);
+      connection.off(REALTIME_USER_ROLE_CHANGED_EVENT);
       if (connection.state !== HubConnectionState.Disconnected) {
         void stopNotificationsHubConnection(connection);
       }

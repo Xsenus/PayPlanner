@@ -255,6 +255,11 @@ function getLatestCaseActivityAt(item: ClientCase) {
   return new Date(Math.max(...values.map((value) => value.getTime()))).toISOString();
 }
 
+function formatTaskSummaryValue(item: ClientCase, value?: number, percent = false) {
+  if (item.taskSummaryVisibility === 'none') return 'Недоступно';
+  return `${value ?? 0}${percent ? '%' : ''}${item.taskSummaryVisibility === 'partial' ? ' (доступные)' : ''}`;
+}
+
 function getCaseActivityBadge(item: ClientCase) {
   const exclusionReason = item.inactivityControlExclusionReason?.trim();
 
@@ -271,6 +276,14 @@ function getCaseActivityBadge(item: ClientCase) {
       label: 'Контроль выключен',
       className: 'border-slate-200 bg-slate-100 text-slate-600',
       hint: item.inactivityRemindersDisabledReason?.trim() || exclusionReason || 'Индивидуальное исключение',
+    };
+  }
+
+  if (exclusionReason === 'Сведения автоконтроля недоступны из-за ограничений доступа') {
+    return {
+      label: 'Сведения недоступны',
+      className: 'border-slate-200 bg-slate-100 text-slate-600',
+      hint: exclusionReason,
     };
   }
 
@@ -446,6 +459,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
   const [status, setStatus] = useState('');
   const [caseScope, setCaseScope] = useState<CaseScope>('all');
   const [activityFilter, setActivityFilter] = useState<CaseActivityFilter>('all');
+  const [canFilterActivity, setCanFilterActivity] = useState<boolean | null>(null);
   const [caseType, setCaseType] = useState('');
   const [responsibleUserId, setResponsibleUserId] = useState('');
   const [priority, setPriority] = useState('');
@@ -599,9 +613,19 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
         if (controller.signal.aborted) return;
         setItems(casesResult.items ?? []);
         setTotal(casesResult.total ?? 0);
+        setCanFilterActivity(casesResult.canFilterActivity ?? null);
+        if (casesResult.canFilterActivity === false) setActivityFilter('all');
       })
       .catch((err) => {
         if (controller.signal.aborted) return;
+        if (activityFilter !== 'all' && typeof err === 'object' && err !== null && 'status' in err && err.status === 403) {
+          setItems([]);
+          setTotal(0);
+          setCanFilterActivity(false);
+          setActivityFilter('all');
+          setNotice('Фильтр активности сброшен: текущие права не позволяют его применять.');
+          return;
+        }
         setItems([]);
         setTotal(0);
         setError(err instanceof Error ? err.message : 'Не удалось загрузить реестр дел.');
@@ -702,7 +726,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
     setSearch(filters.search ?? '');
     setStatus(filters.status ?? '');
     setCaseScope(filters.caseScope ?? 'all');
-    setActivityFilter(filters.activityFilter ?? 'all');
+    setActivityFilter(canFilterActivity === false ? 'all' : filters.activityFilter ?? 'all');
     setCaseType(filters.caseType ?? '');
     setResponsibleUserId(filters.responsibleUserId ?? '');
     setPriority(filters.priority ?? '');
@@ -1016,9 +1040,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
       const updated = await apiService.updateCaseControl(item.id, !item.isUnderControl);
       setItems((current) => current.map((caseItem) => (caseItem.id === updated.id ? updated : caseItem)));
       setNotice(updated.isUnderControl ? 'Дело поставлено на контроль.' : 'Дело снято с контроля.');
-      if (caseScope === 'control') {
-        setReloadToken((value) => value + 1);
-      }
+      setReloadToken((value) => value + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось обновить контроль дела.');
     } finally {
@@ -1067,10 +1089,10 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
       toRuDate(item.createdAt),
       toRuDate(item.startDate),
       toRuDate(item.dueDate),
-      item.openTaskCount ?? 0,
-      item.overdueTaskCount ?? 0,
-      item.completedTaskCount ?? 0,
-      `${item.taskProgressPercent ?? 0}%`,
+      formatTaskSummaryValue(item, item.openTaskCount),
+      formatTaskSummaryValue(item, item.overdueTaskCount),
+      formatTaskSummaryValue(item, item.completedTaskCount),
+      formatTaskSummaryValue(item, item.taskProgressPercent, true),
       toRuDate(getLatestCaseActivityAt(item)),
       formatProfileDateTime(item.nextInactivityControlAt, timeZoneId),
       item.inactivityControlExclusionReason || '',
@@ -1231,13 +1253,17 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
       case 'incomeTotal':
         return <span className="font-semibold text-slate-900">{formatMoney(item.incomeTotal)}</span>;
       case 'overdueTaskCount':
-        return <span className={`font-semibold ${(item.overdueTaskCount ?? 0) > 0 ? 'text-rose-700' : 'text-slate-700'}`}>{item.overdueTaskCount ?? 0}</span>;
+        return item.taskSummaryVisibility === 'none'
+          ? <span>Недоступно</span>
+          : <span className={`font-semibold ${(item.overdueTaskCount ?? 0) > 0 ? 'text-rose-700' : 'text-slate-700'}`}>{item.overdueTaskCount ?? 0}{item.taskSummaryVisibility === 'partial' ? ' (доступные)' : ''}</span>;
       case 'progress':
+        if (item.taskSummaryVisibility === 'none') return <span>Недоступно</span>;
         return (
           <div>
             <div className="font-semibold text-slate-900">{item.taskProgressPercent ?? 0}%</div>
             <div className="text-xs text-slate-500">
               {item.completedTaskCount ?? 0} / {(item.completedTaskCount ?? 0) + (item.openTaskCount ?? 0)}
+              {item.taskSummaryVisibility === 'partial' ? ' · только доступные' : ''}
             </div>
           </div>
         );
@@ -1353,7 +1379,9 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
 
   const renderCaseMobileCard = (item: ClientCase) => {
     const overdueCount = item.overdueTaskCount ?? 0;
-    const riskLabel = overdueCount > 0 ? `${overdueCount} просроч.` : item.status === 'Closed' ? 'Закрыто' : 'Без риска';
+    const riskLabel = item.taskSummaryVisibility === 'none' ? 'Сведения недоступны'
+      : item.taskSummaryVisibility === 'partial' ? `${overdueCount} просроч. среди доступных`
+        : overdueCount > 0 ? `${overdueCount} просроч.` : item.status === 'Closed' ? 'Закрыто' : 'Без риска';
 
     return (
       <article key={item.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -1651,9 +1679,10 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
             <SystemSelect value={priority} onChange={(event) => setPriority(event.target.value)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm">
               {PRIORITY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </SystemSelect>
-            <SystemSelect value={activityFilter} onChange={(event) => setActivityFilter(event.target.value as CaseActivityFilter)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm">
-              {CASE_ACTIVITY_FILTER_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            <SystemSelect aria-label="Фильтр активности дела" value={activityFilter} onChange={(event) => setActivityFilter(event.target.value as CaseActivityFilter)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm">
+              {CASE_ACTIVITY_FILTER_OPTIONS.map((option) => <option key={option.value} value={option.value} disabled={canFilterActivity === false && option.value !== 'all'}>{option.label}</option>)}
             </SystemSelect>
+            {canFilterActivity === false ? <p className="text-xs text-slate-600">Фильтр активности доступен при полном доступе к задачам и заявкам.</p> : null}
           </div>
 
           <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-6">

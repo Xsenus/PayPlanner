@@ -135,6 +135,15 @@ describe('CourtCasesRegistry', () => {
     );
   });
 
+  it.each([
+    ['none', 'Задачи недоступны'],
+    ['partial', 'Задачи 2 / !1 (доступные)'],
+  ] as const)('labels %s task visibility on a court card', async (visibility, label) => {
+    vi.mocked(apiService.getCasesV2).mockResolvedValue({ items: [{ ...courtCase, taskSummaryVisibility: visibility }], total: 1, page: 1, pageSize: 12 });
+    render(<CourtCasesRegistry onOpenCaseCourt={vi.fn()} />);
+    expect(await screen.findByText(label)).toBeTruthy();
+  });
+
   it('shows all visible hearings for the selected period instead of only the registry page', async () => {
     const onOpenCaseCourt = vi.fn();
     const hearingAt = new Date().toISOString();

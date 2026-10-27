@@ -110,6 +110,14 @@ describe('NotificationCenter', () => {
     apiMock.markCaseActivity.mockResolvedValue({});
   });
 
+  it('lists SMS and MAX among channels affected by personal quiet hours', async () => {
+    apiMock.getUserNotifications.mockResolvedValue(createPage([]));
+    render(<NotificationCenter />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Типы' }));
+    expect(await screen.findByText(/Вне рабочего времени CRM оставит события.*Push, Email, Telegram, SMS и MAX/)).toBeTruthy();
+    expect(screen.getByText('Срочные уведомления показывать сразу')).toBeTruthy();
+  });
+
   it('selects notifications on the page and archives selected items', async () => {
     const first = createNotification({ id: 10, title: 'Первое уведомление' });
     const second = createNotification({ id: 11, title: 'Второе уведомление' });

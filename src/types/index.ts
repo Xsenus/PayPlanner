@@ -869,6 +869,7 @@ export interface ClientCase {
   completedTaskCount?: number;
   overdueTaskCount?: number;
   taskProgressPercent?: number;
+  taskSummaryVisibility?: 'full' | 'partial' | 'none';
   lastTaskAt?: string | null;
   lastMeaningfulActivityAt?: string | null;
   nextInactivityControlAt?: string | null;
@@ -1393,6 +1394,7 @@ export interface ClientCaseConversationAttachment {
 
 export interface ClientCaseSummary {
   id: number;
+  taskSummaryVisibility?: 'full' | 'partial' | 'none';
   hasCompletePaymentVisibility?: boolean | null;
   title: string;
   caseNumber: string;
@@ -1899,6 +1901,7 @@ export interface ClientCaseDocument {
   id: number;
   clientCaseId: number;
   documentKey: string;
+  versionGroupId?: number | null;
   templateKey?: string | null;
   templateLabel?: string | null;
   sourceTaskId?: number | null;

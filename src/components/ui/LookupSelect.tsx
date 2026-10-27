@@ -1,5 +1,5 @@
 import { Check, ChevronDown, Search, X } from 'lucide-react';
-import { useId, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 export interface LookupSelectOption {
@@ -26,6 +26,7 @@ interface LookupSelectProps {
   buttonClassName?: string;
   overlayClassName?: string;
   presentation?: 'dialog' | 'inline-search';
+  onSearchPendingChange?: (pending: boolean) => void;
   inlineResultLimit?: number;
   noOptionsText?: string;
 }
@@ -104,12 +105,19 @@ export function LookupSelect({
   buttonClassName = '',
   overlayClassName = 'z-[2300]',
   presentation = 'dialog',
+  onSearchPendingChange,
   inlineResultLimit = 10,
   noOptionsText = 'Ничего не найдено',
 }: LookupSelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const activeOptionRef = useRef<HTMLButtonElement | null>(null);
   const inlineListboxId = useId();
+
+  useEffect(() => {
+    if (open && activeIndex >= 0) activeOptionRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [open, activeIndex]);
 
   const selectedOption = useMemo(
     () => options.find((option) => option.value === value) ?? null,
@@ -147,6 +155,8 @@ export function LookupSelect({
   const handleClose = () => {
     setOpen(false);
     setQuery('');
+    setActiveIndex(-1);
+    onSearchPendingChange?.(false);
   };
 
   const handleSelect = (nextValue: string) => {
@@ -185,27 +195,37 @@ export function LookupSelect({
             aria-expanded={open}
             aria-controls={inlineListboxId}
             aria-autocomplete="list"
+            aria-activedescendant={open && visibleOptions[activeIndex] ? `${inlineListboxId}-option-${activeIndex}` : undefined}
             autoComplete="off"
             disabled={disabled}
             value={inputValue}
             placeholder={placeholder}
             onFocus={() => {
               setQuery('');
+              setActiveIndex(-1);
               setOpen(true);
             }}
             onChange={(event) => {
-              if (selectedOption) {
-                onChange('');
-              }
               setQuery(event.target.value);
+              setActiveIndex(-1);
+              onSearchPendingChange?.(Boolean(selectedOption && event.target.value.trim()));
               setOpen(true);
             }}
             onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing) return;
               if (event.key === 'Escape') {
+                event.stopPropagation();
                 handleClose();
-              } else if (event.key === 'Enter' && visibleOptions[0]) {
+              } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && visibleOptions.length > 0) {
                 event.preventDefault();
-                handleSelect(visibleOptions[0].value);
+                setOpen(true);
+                const down = event.key === 'ArrowDown';
+                setActiveIndex((current) => down
+                  ? (current + 1) % visibleOptions.length
+                  : (current <= 0 || current >= visibleOptions.length ? visibleOptions.length - 1 : current - 1));
+              } else if (event.key === 'Enter' && open && visibleOptions[activeIndex >= 0 ? activeIndex : 0]) {
+                event.preventDefault();
+                handleSelect(visibleOptions[activeIndex >= 0 ? activeIndex : 0].value);
               }
             }}
             className={`min-h-[42px] w-full rounded-lg border border-slate-300 bg-white py-2 pl-10 pr-9 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100 ${buttonClassName}`}
@@ -237,14 +257,16 @@ export function LookupSelect({
             {visibleOptions.length === 0 ? (
               <div className="px-3 py-6 text-center text-sm text-slate-500">{noOptionsText}</div>
             ) : (
-              visibleOptions.map((option) => (
+              visibleOptions.map((option, index) => (
                 <button
                   key={option.value}
+                  id={`${inlineListboxId}-option-${index}`}
+                  ref={index === activeIndex ? activeOptionRef : undefined}
                   type="button"
                   role="option"
                   aria-selected={option.value === value}
                   onClick={() => handleSelect(option.value)}
-                  className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left transition hover:bg-blue-50 focus:bg-blue-50 focus:outline-none"
+                  className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left transition hover:bg-blue-50 focus:bg-blue-50 focus:outline-none ${index === activeIndex ? 'bg-blue-50' : ''}`}
                 >
                   <span className="min-w-0">
                     <span className="block truncate text-sm font-semibold text-slate-900">{option.label}</span>

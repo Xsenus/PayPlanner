@@ -1374,6 +1374,20 @@ const serializeClientExtendedProfile = (
     legacyNotes: profile.legacyNotes.trim(),
   });
 
+function ProfileDocumentReadList({ title, entries }: { title: string; entries: Array<Array<{ label: string; value: string }>> }) {
+  const populatedEntries = entries.filter((entry) => entry.some((field) => typeof field.value === 'string' && field.value.trim()));
+  return (
+    <section className="min-w-0 space-y-2 md:col-span-2" aria-label={title}>
+      <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
+      {populatedEntries.length === 0 ? <p className="text-sm text-slate-500">Не указано</p> : populatedEntries.map((entry, index) => (
+        <dl key={index} className="grid min-w-0 gap-2 border-b border-slate-200 pb-3 last:border-0 last:pb-0 md:grid-cols-2 xl:grid-cols-4">
+          {entry.map(({ label, value }) => <div key={label} className="min-w-0"><dt className="text-xs text-slate-500">{label}</dt><dd className="whitespace-pre-wrap text-sm text-slate-900 [overflow-wrap:anywhere]">{value || 'Не указано'}</dd></div>)}
+        </dl>
+      ))}
+    </section>
+  );
+}
+
 export function ClientDetail({
   clientId,
   onBack,
@@ -6830,6 +6844,7 @@ export function ClientDetail({
                           <ClientAddressEntriesForm
                             entries={clientFormState.addressEntries}
                             canEdit={canEditClientProfile}
+                            textReadOnly={!clientProfileEditing}
                             addressTypeOptions={ADDRESS_TYPE_OPTIONS}
                             suggestionsByIndex={addressSuggestionsByIndex}
                             onUpdateEntry={updateAddressFormEntry}
@@ -6864,6 +6879,7 @@ export function ClientDetail({
                           <ClientPassportEntriesForm
                             entries={clientFormState.passportEntries}
                             canEdit={canEditClientProfile}
+                            textReadOnly={!clientProfileEditing}
                             dateInputClassName={DATE_INPUT_CLASS}
                             onUpdateEntry={updatePassportEntry}
                             onRemoveEntry={removePassportEntry}
@@ -6871,6 +6887,13 @@ export function ClientDetail({
                           />
                         )}
                       {clientFormState.kind === "individual" && (
+                        !clientProfileEditing ? (
+                          <ProfileDocumentReadList title="Свидетельства о рождении" entries={clientFormState.birthCertificateEntries.map((doc) => [
+                            { label: 'Серия', value: doc.series }, { label: 'Номер', value: doc.number },
+                            { label: 'Дата выдачи', value: toRuDate(doc.issueDate) }, { label: '№ актовой записи', value: doc.actRecordNumber },
+                            { label: 'ФИО ребёнка', value: doc.childFullName }, { label: 'Кем выдано', value: doc.issuedBy },
+                          ])} />
+                        ) : (
                           <div className="md:col-span-2 space-y-4">
                             <div>
                               <div className="mb-2 flex items-center justify-between">
@@ -6995,8 +7018,18 @@ export function ClientDetail({
                               </div>
                             </div>
                           </div>
+                        )
                         )}
                       {clientFormState.kind === "individual" && (
+                        !clientProfileEditing ? (
+                          <ProfileDocumentReadList title="Военные билеты" entries={clientFormState.militaryIdEntries.map((doc) => [
+                            { label: 'Серия', value: doc.series }, { label: 'Номер', value: doc.number },
+                            { label: 'Дата выдачи', value: toRuDate(doc.issueDate) }, { label: 'Воинское звание', value: doc.rank },
+                            { label: 'Категория запаса', value: doc.category }, { label: 'Категория годности', value: doc.fitnessCategory },
+                            { label: 'Код ВУС', value: doc.vusCode }, { label: 'Кем выдан', value: doc.issuedBy },
+                            { label: 'Военный комиссариат', value: doc.militaryCommissariat },
+                          ])} />
+                        ) : (
                           <div className="md:col-span-2 space-y-4">
                             <div>
                               <div className="mb-2 flex items-center justify-between">
@@ -7158,6 +7191,7 @@ export function ClientDetail({
                               </div>
                             </div>
                           </div>
+                        )
                         )}
                   </div>
                 </section>

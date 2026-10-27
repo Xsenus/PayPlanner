@@ -24,6 +24,7 @@ vi.mock('../services/api', () => ({
 vi.mock('../services/offlineCalendarStore', () => ({
   activateOfflineCalendarUser: vi.fn(),
   clearOfflineCalendarCache: mocks.clearOfflineCalendarCache,
+  revokeOfflineCalendarSnapshot: vi.fn(),
 }));
 
 import { AuthProvider, useAuth } from './AuthContext';

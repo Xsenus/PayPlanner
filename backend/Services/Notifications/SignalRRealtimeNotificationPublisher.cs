@@ -4,7 +4,7 @@ using PayPlanner.Api.Models;
 
 namespace PayPlanner.Api.Services.Notifications;
 
-public sealed class SignalRRealtimeNotificationPublisher : IRealtimeNotificationPublisher
+public sealed class SignalRRealtimeNotificationPublisher : IRealtimeNotificationPublisher, IRolePermissionsChangePublisher, IUserRoleChangePublisher
 {
     private readonly IHubContext<NotificationsHub> _hubContext;
     private readonly ILogger<SignalRRealtimeNotificationPublisher> _logger;
@@ -69,6 +69,48 @@ public sealed class SignalRRealtimeNotificationPublisher : IRealtimeNotification
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to publish task journal realtime change signal.");
+        }
+    }
+
+    public async Task PublishRolePermissionsChangedAsync(IReadOnlyCollection<int> userIds, CancellationToken cancellationToken = default)
+    {
+        var groups = userIds.Where(id => id > 0).Distinct().Select(NotificationsHub.UserGroup).ToArray();
+        if (groups.Length == 0) return;
+        try
+        {
+            await _hubContext.Clients.Groups(groups).SendAsync(NotificationsHub.RolePermissionsChangedEvent, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to publish role permissions change signal.");
+        }
+    }
+
+    public async Task PublishUserRoleChangedAsync(int userId, CancellationToken cancellationToken = default)
+    {
+        if (userId <= 0) return;
+        try
+        {
+            await _hubContext.Clients.Group(NotificationsHub.UserGroup(userId))
+                .SendAsync(NotificationsHub.UserRoleChangedEvent, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to publish user role change signal for user {UserId}.", userId);
+        }
+    }
+
+    public async Task PublishUsersRoleChangedAsync(IReadOnlyCollection<int> userIds, CancellationToken cancellationToken = default)
+    {
+        var groups = userIds.Where(id => id > 0).Distinct().Select(NotificationsHub.UserGroup).ToArray();
+        if (groups.Length == 0) return;
+        try
+        {
+            await _hubContext.Clients.Groups(groups).SendAsync(NotificationsHub.UserRoleChangedEvent, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to publish user role change signals.");
         }
     }
 }

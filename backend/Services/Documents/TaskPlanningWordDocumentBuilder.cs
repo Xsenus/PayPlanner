@@ -77,9 +77,10 @@ internal static class TaskPlanningWordDocumentBuilder
 
     private static string BuildTable(IReadOnlyList<TaskPlanningWordItem> items)
     {
-        var rows = new StringBuilder();
+        var tables = new StringBuilder();
         if (items.Count == 0)
         {
+            var rows = new StringBuilder();
             rows.Append(Row(
                 Cell(
                     TableWidthTwips,
@@ -87,6 +88,7 @@ internal static class TaskPlanningWordDocumentBuilder
                     gridSpan: ColumnCount,
                     verticalAlignment: "center"),
                 cantSplit: true));
+            tables.Append(WrapTable(rows));
         }
         else
         {
@@ -94,25 +96,27 @@ internal static class TaskPlanningWordDocumentBuilder
                 .GroupBy(item => item.ClientName)
                 .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase))
             {
-                rows.Append(Row(
-                    Cell(
-                        TableWidthTwips,
-                        Paragraph($"КЛИЕНТ | {TextOrDash(clientGroup.Key)}", 12, bold: true, keepNext: true),
-                        fill: "DBEAFE",
-                        gridSpan: ColumnCount),
-                    cantSplit: true));
-
                 foreach (var caseGroup in clientGroup
                     .GroupBy(item => item.CaseTitle)
                     .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase))
                 {
+                    var rows = new StringBuilder();
+                    rows.Append(Row(
+                        Cell(
+                            TableWidthTwips,
+                            Paragraph($"КЛИЕНТ | {TextOrDash(clientGroup.Key)}", 12, bold: true, keepNext: true),
+                            fill: "DBEAFE",
+                            gridSpan: ColumnCount),
+                        cantSplit: true,
+                        isHeader: true));
                     rows.Append(Row(
                         Cell(
                             TableWidthTwips,
                             Paragraph($"ДЕЛО | {TextOrDash(caseGroup.Key)}", 11, bold: true, keepNext: true),
                             fill: "F1F5F9",
                             gridSpan: ColumnCount),
-                        cantSplit: true));
+                        cantSplit: true,
+                        isHeader: true));
                     rows.Append(BuildHeaderRow());
 
                     var rowNumber = 1;
@@ -141,10 +145,21 @@ internal static class TaskPlanningWordDocumentBuilder
                             Cell(ColumnWidths[6], Paragraph(TextOrDash(item.Comment), 10)))));
                         rowNumber++;
                     }
+                    if (tables.Length > 0)
+                    {
+                        // Word merges adjacent tables unless an intervening paragraph separates them.
+                        tables.Append("<w:p><w:pPr><w:spacing w:before=\"0\" w:after=\"0\" w:line=\"1\" w:lineRule=\"exact\"/></w:pPr><w:r><w:rPr><w:sz w:val=\"2\"/></w:rPr><w:t xml:space=\"preserve\"> </w:t></w:r></w:p>");
+                    }
+                    tables.Append(WrapTable(rows));
                 }
             }
         }
 
+        return tables.ToString();
+    }
+
+    private static string WrapTable(StringBuilder rows)
+    {
         var grid = string.Concat(ColumnWidths.Select(width => $"<w:gridCol w:w=\"{width}\"/>"));
         return $"<w:tbl><w:tblPr><w:tblW w:w=\"{TableWidthTwips}\" w:type=\"dxa\"/><w:tblLayout w:type=\"fixed\"/><w:tblBorders><w:top w:val=\"single\" w:sz=\"4\" w:color=\"94A3B8\"/><w:left w:val=\"single\" w:sz=\"4\" w:color=\"94A3B8\"/><w:bottom w:val=\"single\" w:sz=\"4\" w:color=\"94A3B8\"/><w:right w:val=\"single\" w:sz=\"4\" w:color=\"94A3B8\"/><w:insideH w:val=\"single\" w:sz=\"4\" w:color=\"94A3B8\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:color=\"94A3B8\"/></w:tblBorders><w:tblCellMar><w:top w:w=\"85\" w:type=\"dxa\"/><w:left w:w=\"100\" w:type=\"dxa\"/><w:bottom w:w=\"85\" w:type=\"dxa\"/><w:right w:w=\"100\" w:type=\"dxa\"/></w:tblCellMar></w:tblPr><w:tblGrid>{grid}</w:tblGrid>{rows}</w:tbl>";
     }

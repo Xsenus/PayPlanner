@@ -289,6 +289,7 @@ describe('TaskJournal', () => {
     fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
     const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
     expect((within(card).getByTestId('task-result-field') as HTMLTextAreaElement).disabled).toBe(true);
+    expect(within(card).getByText('Нет прав на изменение')).toBeTruthy();
     expect(within(card).queryByRole('button', { name: 'Сохранить результат' })).toBeNull();
     expect(apiMock.updateTaskJournalStatus).not.toHaveBeenCalled();
   });

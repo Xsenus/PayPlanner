@@ -5922,6 +5922,7 @@ public class TasksController : ControllerBase
         html.AppendLine("h1 { margin: 0 0 8px; text-align: center; font-size: 20px; letter-spacing: .04em; }");
         html.AppendLine(".meta { margin: 0 0 14px; color: #475569; text-align: center; }");
         html.AppendLine("table { width: 100%; border-collapse: collapse; table-layout: fixed; }");
+        html.AppendLine("thead { display: table-header-group; }");
         html.AppendLine("th, td { border: 1px solid #94a3b8; padding: 6px 7px; vertical-align: top; word-wrap: break-word; }");
         html.AppendLine("th { background: #e2e8f0; text-transform: uppercase; font-size: 9px; letter-spacing: .08em; }");
         html.AppendLine(".client-row td { background: #dbeafe; font-weight: 700; font-size: 12px; }");
@@ -5941,11 +5942,9 @@ public class TasksController : ControllerBase
         html.AppendLine("<body>");
         html.AppendLine("<h1>ПЛАНИНГ ПО КЛИЕНТАМ</h1>");
         html.AppendLine($"<p class=\"meta\">Сформировано: {Html(FormatPlanningDate(generatedAtUtc, timeZone))}. Фильтр: {Html(filterText)}. Задач: {tasks.Count}.</p>");
-        html.AppendLine("<table>");
-
         if (tasks.Count == 0)
         {
-            html.AppendLine("<tr class=\"empty-row\"><td colspan=\"7\">По выбранным фильтрам задач нет.</td></tr>");
+            html.AppendLine("<table><tbody><tr class=\"empty-row\"><td colspan=\"7\">По выбранным фильтрам задач нет.</td></tr></tbody></table>");
         }
         else
         {
@@ -5953,14 +5952,15 @@ public class TasksController : ControllerBase
                 .GroupBy(GetPlanningClientName)
                 .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase))
             {
-                html.AppendLine($"<tr class=\"client-row\"><td colspan=\"7\">КЛИЕНТ | {Html(clientGroup.Key)}</td></tr>");
-
                 foreach (var caseGroup in clientGroup
                     .GroupBy(GetPlanningCaseTitle)
                     .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase))
                 {
+                    html.AppendLine("<table><colgroup><col class=\"num\"><col class=\"kind\"><col class=\"task\"><col class=\"due\"><col class=\"status\"><col class=\"assignee\"><col class=\"comment\"></colgroup><thead>");
+                    html.AppendLine($"<tr class=\"client-row\"><td colspan=\"7\">КЛИЕНТ | {Html(clientGroup.Key)}</td></tr>");
                     html.AppendLine($"<tr class=\"case-row\"><td colspan=\"7\">ДЕЛО | {Html(caseGroup.Key)}</td></tr>");
                     AppendTaskPlanningHeader(html);
+                    html.AppendLine("</thead><tbody>");
 
                     var rowNumber = 1;
                     foreach (var task in caseGroup.OrderBy(item => item.DueAt).ThenBy(item => item.Id))
@@ -5989,11 +5989,11 @@ public class TasksController : ControllerBase
                         html.AppendLine("</tr>");
                         rowNumber++;
                     }
+                    html.AppendLine("</tbody></table>");
                 }
             }
         }
 
-        html.AppendLine("</table>");
         html.AppendLine("</body>");
         html.AppendLine("</html>");
         return html.ToString();
@@ -8539,10 +8539,15 @@ public class TasksController : ControllerBase
             .ToDictionaryAsync(thread => thread.TaskJournalItemId!.Value, ct);
         if (threads.Count == 0) return;
 
+        await using var transaction = _db.Database.CurrentTransaction is null
+            ? await _db.Database.BeginTransactionAsync(ct) : null;
+        var locked = new HashSet<int>();
+        foreach (var threadId in threads.Values.Select(thread => thread.Id).Distinct().OrderBy(id => id))
+            if (await InternalChatThreadLock.AcquireAsync(_db, threadId, ct)) locked.Add(threadId);
         var now = DateTime.UtcNow;
         foreach (var item in relevant)
         {
-            if (!threads.TryGetValue(item.TaskId, out var thread)) continue;
+            if (!threads.TryGetValue(item.TaskId, out var thread) || !locked.Contains(thread.Id)) continue;
             _db.InternalChatMessages.Add(new InternalChatMessage
             {
                 ThreadId = thread.Id,
@@ -8555,6 +8560,7 @@ public class TasksController : ControllerBase
             thread.UpdatedAt = now;
         }
         await _db.SaveChangesAsync(ct);
+        if (transaction is not null) await transaction.CommitAsync(ct);
     }
 
     private async Task SynchronizeExistingTaskChatMembersAsync(

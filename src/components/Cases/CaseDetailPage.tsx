@@ -111,6 +111,7 @@ interface CaseDetailPageProps {
   canDelete?: boolean;
   canViewFinance?: boolean;
   canViewTasks?: boolean;
+  taskAccessKey?: string;
   canCreateTasks?: boolean;
   canEditTasks?: boolean;
   canEditTaskBilling?: boolean;
@@ -982,6 +983,10 @@ function getRiskSummary(caseItem: ClientCase, deadlines: ClientCaseProceduralDea
     return { value: `Скоро сроков: ${warningDeadlines}`, tone: 'amber' };
   }
 
+  if (caseItem.taskSummaryVisibility === 'none' || caseItem.taskSummaryVisibility === 'partial') {
+    return { value: 'Не все задачи доступны', tone: 'slate' };
+  }
+
   if (caseItem.status === 'Closed') return { value: 'Дело закрыто', tone: 'slate' };
   return { value: 'Просрочек нет', tone: 'emerald' };
 }
@@ -1095,6 +1100,9 @@ function getInactivitySummary(
 
   const exclusionReason = caseItem.inactivityControlExclusionReason?.trim();
   if (exclusionReason) {
+    if (exclusionReason === 'Сведения автоконтроля недоступны из-за ограничений доступа') {
+      return { value: 'Сведения недоступны', tone: 'slate', hint: exclusionReason };
+    }
     if (exclusionReason === 'Есть активная задача') {
       return { value: exclusionReason, tone: 'emerald', hint: 'Отдельная контрольная задача пока не требуется' };
     }
@@ -1540,6 +1548,7 @@ export function CaseDetailPage({
   canDelete = true,
   canViewFinance = true,
   canViewTasks = true,
+  taskAccessKey = 'default',
   canCreateTasks = true,
   canEditTasks = false,
   canEditTaskBilling = canEditTasks,
@@ -1549,15 +1558,28 @@ export function CaseDetailPage({
   const { confirm, prompt } = useDialog();
   const initialViewState = readCaseDetailViewState(caseId);
   const canCreateCaseTask = canViewTasks && canCreateTasks;
-  const [caseItem, setCaseItem] = useState<ClientCase | null>(null);
+  const [loadedCaseItem, setCaseItem] = useState<ClientCase | null>(null);
+  const [caseItemAccessKey, setCaseItemAccessKey] = useState(taskAccessKey);
+  const caseItem = useMemo(() => {
+    if (!loadedCaseItem || caseItemAccessKey === taskAccessKey) return loadedCaseItem;
+    return { ...loadedCaseItem, taskSummaryVisibility: 'none' as const, openTaskCount: 0, completedTaskCount: 0,
+      overdueTaskCount: 0, taskProgressPercent: 0, lastTaskAt: null, lastMeaningfulActivityAt: null,
+      nextInactivityControlAt: null, inactivityControlExclusionReason: 'Сведения автоконтроля недоступны из-за ограничений доступа' };
+  }, [loadedCaseItem, caseItemAccessKey, taskAccessKey]);
   const [caseTaskBulkBusy, setCaseTaskBulkBusy] = useState(false);
   const markedViewedCaseIdRef = useRef<number | null>(null);
   const [caseTimeZoneId, setCaseTimeZoneId] = useState(() => normalizeUserTimeZoneId());
   const [responsibles, setResponsibles] = useState<ActResponsible[]>([]);
-  const [documentSourceTasks, setDocumentSourceTasks] = useState<TaskJournalItem[]>([]);
+  const documentSourceKey = JSON.stringify([caseId, taskAccessKey]);
+  const [documentSourceTaskState, setDocumentSourceTaskState] = useState<{ key: string; items: TaskJournalItem[] }>({ key: documentSourceKey, items: [] });
+  const documentSourceTasks = useMemo(
+    () => documentSourceTaskState.key === documentSourceKey ? documentSourceTaskState.items : [],
+    [documentSourceKey, documentSourceTaskState],
+  );
   const [relatedParties, setRelatedParties] = useState<ClientCaseRelatedParty[]>([]);
   const [showArchivedParties, setShowArchivedParties] = useState(false);
-  const [documents, setDocuments] = useState<ClientCaseDocument[]>([]);
+  const [loadedDocuments, setDocuments] = useState<ClientCaseDocument[]>([]);
+  const documents = useMemo(() => loadedDocuments.filter(document => document.clientCaseId === caseId), [loadedDocuments, caseId]);
   const [courtEvents, setCourtEvents] = useState<ClientCaseCourtEvent[]>([]);
   const [eventSearch, setEventSearch] = useState('');
   const [eventTypeFilter, setEventTypeFilter] = useState('');
@@ -1611,6 +1633,7 @@ export function CaseDetailPage({
   const [loading, setLoading] = useState(true);
   const [participantsLoading, setParticipantsLoading] = useState(false);
   const [documentsLoading, setDocumentsLoading] = useState(false);
+  const [documentsLoadError, setDocumentsLoadError] = useState(false);
   const [courtEventsLoading, setCourtEventsLoading] = useState(true);
   const [courtEventsError, setCourtEventsError] = useState<string | null>(null);
   const [courtInstancesLoading, setCourtInstancesLoading] = useState(true);
@@ -1702,6 +1725,7 @@ export function CaseDetailPage({
     enabled: canViewTasks && activeTab === 'tasks' && !editPageOpen && caseItem?.id === caseId && !error,
     filter: taskFilter,
     revision: reloadToken,
+    accessKey: taskAccessKey,
   });
   const [participantSourceType, setParticipantSourceType] = useState<ParticipantSourceType>(initialViewState.participantSourceType ?? 'client');
   const [participantSourceId, setParticipantSourceId] = useState('');
@@ -1713,6 +1737,7 @@ export function CaseDetailPage({
   const [documentFile, setDocumentFile] = useState<File | null>(null);
   const [documentSourceType, setDocumentSourceType] = useState<DocumentSourceType>('case');
   const [documentSourceId, setDocumentSourceId] = useState('');
+  const documentSourceAccessRef = useRef(taskAccessKey);
   const [documentSourceStage, setDocumentSourceStage] = useState('');
   const [documentTemplates, setDocumentTemplates] = useState<ClientCaseDocumentTemplate[]>(FALLBACK_DOCUMENT_TEMPLATE_OPTIONS);
   const [documentTypeDirectoryOptions, setDocumentTypeDirectoryOptions] = useState<string[]>(FALLBACK_DOCUMENT_TYPE_OPTIONS);
@@ -1859,9 +1884,6 @@ export function CaseDetailPage({
       setFinanceLoading(false);
     }
 
-    if (!canViewTasks && activeTab === 'tasks') {
-      setDocumentSourceTasks([]);
-    }
   }, [activeTab, canViewFinance, canViewTasks]);
 
   useEffect(() => {
@@ -1870,6 +1892,13 @@ export function CaseDetailPage({
       setDocumentSourceId('');
     }
   }, [canViewTasks, documentSourceType]);
+
+  useEffect(() => {
+    if (documentSourceAccessRef.current !== taskAccessKey) {
+      documentSourceAccessRef.current = taskAccessKey;
+      if (documentSourceType === 'task') setDocumentSourceId('');
+    }
+  }, [documentSourceType, taskAccessKey]);
 
   useEffect(() => {
     setParticipantSourceId('');
@@ -1927,6 +1956,7 @@ export function CaseDetailPage({
         setActiveCaseTimeZoneId(nextTimeZoneId);
         setCaseTimeZoneId(nextTimeZoneId);
         setCaseItem(loadedCase);
+        setCaseItemAccessKey(taskAccessKey);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -1940,7 +1970,7 @@ export function CaseDetailPage({
     return () => {
       cancelled = true;
     };
-  }, [caseId, reloadToken]);
+  }, [caseId, reloadToken, taskAccessKey]);
 
   useEffect(() => {
     if (caseItem?.id !== caseId || markedViewedCaseIdRef.current === caseId) return;
@@ -2066,7 +2096,7 @@ export function CaseDetailPage({
 
   useEffect(() => {
     if (!canViewTasks) {
-      setDocumentSourceTasks([]);
+      setDocumentSourceTaskState({ key: documentSourceKey, items: [] });
       return;
     }
 
@@ -2075,14 +2105,14 @@ export function CaseDetailPage({
     const controller = new AbortController();
     apiService.getTaskJournalItems({ clientCaseId: caseId, page: 1, pageSize: 50 }, { signal: controller.signal })
       .then((result) => {
-        if (!controller.signal.aborted) setDocumentSourceTasks(result.items ?? []);
+        if (!controller.signal.aborted) setDocumentSourceTaskState({ key: documentSourceKey, items: result.items ?? [] });
       })
       .catch(() => {
-        if (!controller.signal.aborted) setDocumentSourceTasks([]);
+        if (!controller.signal.aborted) setDocumentSourceTaskState({ key: documentSourceKey, items: [] });
       });
 
     return () => controller.abort();
-  }, [activeTab, canViewTasks, caseId, reloadToken]);
+  }, [activeTab, canViewTasks, caseId, documentSourceKey, reloadToken]);
 
   useEffect(() => {
     if (activeTab !== 'participants') return;
@@ -2159,12 +2189,16 @@ export function CaseDetailPage({
 
     let cancelled = false;
     setDocumentsLoading(true);
+    setDocumentsLoadError(false);
     apiService.getCaseDocuments(caseId)
       .then((items) => {
         if (!cancelled) setDocuments(items);
       })
       .catch(() => {
-        if (!cancelled) setDocuments([]);
+        if (!cancelled) {
+          setDocuments([]);
+          setDocumentsLoadError(true);
+        }
       })
       .finally(() => {
         if (!cancelled) setDocumentsLoading(false);
@@ -3911,10 +3945,13 @@ export function CaseDetailPage({
   if (!caseItem) {
     return (
       <div className="min-h-screen bg-slate-50 px-4 py-6 sm:px-6 lg:px-8">
-        <div className="mx-auto max-w-[900px] rounded-xl border border-rose-200 bg-rose-50 p-5 text-rose-700">
+        <div role="alert" className="mx-auto max-w-[900px] rounded-xl border border-rose-200 bg-rose-50 p-5 text-rose-700">
           {error ?? 'Дело не найдено.'}
           {notice ? <div className="mt-3 rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm text-cyan-800">{notice}</div> : null}
           <div className="mt-4 flex flex-wrap gap-2">
+            <button type="button" onClick={() => setReloadToken((value) => value + 1)} className="rounded-lg border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700">
+              Повторить загрузку
+            </button>
             <button type="button" onClick={() => void requestCaseAccess()} disabled={requestingAccess} className="inline-flex items-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-50">
               {requestingAccess ? <Loader2 className="h-4 w-4 animate-spin" /> : <LockKeyhole className="h-4 w-4" />}
               Запросить доступ
@@ -3928,7 +3965,7 @@ export function CaseDetailPage({
     );
   }
 
-  const progress = caseItem.taskProgressPercent ?? 0;
+  const progress = caseItem.taskSummaryVisibility === 'none' ? null : caseItem.taskProgressPercent ?? 0;
   const riskSummary = proceduralDeadlinesLoading
     ? { value: 'Проверяем сроки', tone: 'slate' as SummaryTone }
     : proceduralDeadlinesError
@@ -4491,6 +4528,7 @@ export function CaseDetailPage({
               onOverviewChange={setCourtOverview}
               caseItem={caseItem}
               canEdit={canEdit}
+              canViewTasks={canViewTasks}
               confirmingNextHearing={confirmingNextHearing}
               onConfirmNextHearing={() => void confirmNextHearing()}
               timeZoneId={caseTimeZoneId}
@@ -4799,6 +4837,13 @@ export function CaseDetailPage({
                 }} /> : null}
               {documentsLoading ? (
                 <LoadingBlock label="Загрузка документов дела..." />
+              ) : documentsLoadError ? (
+                <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+                  Не удалось загрузить документы дела.
+                  <button type="button" onClick={() => setDocumentReloadToken((value) => value + 1)} className="font-semibold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600">
+                    Повторить загрузку документов
+                  </button>
+                </div>
               ) : (
                 <DocumentList
                   key={`documents-${caseItem.id}`}
@@ -6802,7 +6847,7 @@ function TaskList({
   onTasksChanged: (message: string) => void;
   onTaskBillingChanged: (message: string) => void;
   pageData: ReturnType<typeof useCaseTaskPage>;
-  progress: number;
+  progress: number | null;
   filter: CaseTaskFilter;
   onFilterChange: (filter: CaseTaskFilter) => void;
   filtersExpanded: boolean;
@@ -6821,12 +6866,12 @@ function TaskList({
   const hasRowActions = Boolean(onOpenTask) || canEditTasks || canEditTaskBilling || canExportTasks;
 
   return (
-    <div className="space-y-3">
-      <div className="rounded-xl border border-slate-200 p-3">
+    <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3">
+      <div>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h2 className="inline-flex items-center gap-2 text-sm font-semibold text-blue-900"><ClipboardCheck className="h-5 w-5" aria-hidden="true" />Задачи по делу ({counts?.all ?? '—'})</h2>
-            <div className="mt-1 text-sm text-slate-500">Прогресс: {progress}%</div>
+            <div className="mt-1 text-sm text-slate-500">Прогресс: {progress === null ? 'недоступен' : `${progress}%`}</div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button type="button" aria-label="Фильтры задач" title="Фильтры задач"
@@ -6855,7 +6900,7 @@ function TaskList({
                 type="button"
                 onClick={() => void onCreateTask()}
                 disabled={creatingTask}
-                className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-800 disabled:opacity-50">
                 {creatingTask ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardPlus className="h-4 w-4" />} Создать
               </button>
             ) : null}
@@ -6912,9 +6957,9 @@ function TaskList({
       <CaseTaskActions scopeKey={`${caseId}:${filter}:${pageData.page}:${pageData.pageSize}`} onBusyChange={onBusyChange}
         tasks={tasks} caseId={caseId} loading={pageData.loading || Boolean(pageData.error)}
         canEdit={canEditTasks} canEditBilling={canEditTaskBilling} canExport={canExportTasks} statusLabels={TASK_STATUS_LABELS} onChanged={onTasksChanged} onBillingChanged={onTaskBillingChanged}>
-        {(selection) => <div className="max-w-full overflow-x-auto" aria-busy={pageData.loading}>
+        {(selection) => <div className="max-w-full overflow-x-auto rounded-xl border border-slate-200 bg-white" aria-busy={pageData.loading}>
         <table aria-label="Задачи дела" className="w-full min-w-[640px] table-fixed text-left text-sm">
-          <thead className="bg-slate-50 text-xs uppercase tracking-[0.12em] text-slate-500">
+          <thead className="bg-slate-50 text-xs font-medium text-slate-500">
             <tr>
               {selection.enabled ? <th scope="col" className="w-9 px-2 py-2"><SystemCheckbox
                 aria-label="Выбрать все задачи на этой странице" checked={selection.allSelected}
@@ -7232,6 +7277,7 @@ function CourtPanel({
   onOverviewChange,
   caseItem,
   canEdit,
+  canViewTasks,
   confirmingNextHearing,
   onConfirmNextHearing,
   timeZoneId,
@@ -7334,6 +7380,7 @@ function CourtPanel({
   onOverviewChange: (value: boolean) => void;
   caseItem: ClientCase;
   canEdit: boolean;
+  canViewTasks: boolean;
   confirmingNextHearing: boolean;
   onConfirmNextHearing: () => void;
   timeZoneId: string;
@@ -7805,7 +7852,7 @@ function CourtPanel({
             <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><div className="flex items-center justify-between"><h3 className="font-bold text-slate-900">Участники</h3><span className="text-xs font-semibold text-slate-500">{courtParties.filter((party) => !party.isArchived).length}</span></div>{courtPartiesLoading ? <Loader2 className="mt-3 h-4 w-4 animate-spin text-blue-600" /> : <div className="mt-2 space-y-2">{courtParties.filter((party) => !party.isArchived).slice(0, 6).map((party) => <div key={party.id} className="rounded-lg bg-slate-50 px-2.5 py-2"><div className="text-sm font-semibold text-slate-800">{party.displayName}</div><div className="text-xs text-slate-500">{party.sideLabel || party.processRole || 'Участник'}</div></div>)}{courtParties.filter((party) => !party.isArchived).length === 0 ? <div className="text-sm text-slate-500">Участники ещё не загружены.</div> : null}</div>}</section>
             <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><div className="flex items-center justify-between"><h3 className="font-bold text-slate-900">Файлы</h3><span className="text-xs font-semibold text-slate-500">{documents.length}</span></div><div className="mt-2 space-y-2">{documents.slice(0, 5).map((document) => <div key={document.id} className="flex items-start gap-2 rounded-lg bg-slate-50 px-2.5 py-2"><FileText className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" /><div className="min-w-0"><div className="truncate text-sm font-semibold text-slate-800">{document.originalFileName || 'Документ'}</div><div className="text-xs text-slate-500">{document.status || document.documentType || 'Файл дела'}</div></div></div>)}{documents.length === 0 ? <div className="text-sm text-slate-500">Файлов пока нет.</div> : null}</div></section>
             <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><div className="flex items-center justify-between"><h3 className="font-bold text-slate-900">Процессуальные сроки</h3><span className="text-xs font-semibold text-slate-500">{activeProceduralDeadlines.length}</span></div>{proceduralDeadlinesLoading ? <Loader2 className="mt-3 h-4 w-4 animate-spin text-blue-600" /> : <div className="mt-2 space-y-2">{activeProceduralDeadlines.slice(0, 5).map((deadline) => <div key={deadline.id} className={`rounded-lg border px-2.5 py-2 ${deadline.isOverdue ? 'border-rose-200 bg-rose-50' : deadline.isWarning ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50'}`}><div className="text-sm font-semibold text-slate-800">{deadline.title}</div><div className="mt-0.5 text-xs text-slate-500">до {formatCourtSchedule(deadline.dueAt, deadline.allDay) || '—'}</div></div>)}{activeProceduralDeadlines.length === 0 ? <div className="text-sm text-slate-500">Активных сроков нет.</div> : null}</div>}</section>
-            <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><h3 className="font-bold text-slate-900">Работа по делу</h3><div className="mt-2 grid grid-cols-2 gap-2"><div className="rounded-lg bg-blue-50 p-2.5"><div className="text-[11px] text-blue-600">Активные задачи</div><div className="mt-1 text-xl font-bold text-blue-900">{caseItem.openTaskCount ?? 0}</div></div><div className="rounded-lg bg-rose-50 p-2.5"><div className="text-[11px] text-rose-600">Просрочено</div><div className="mt-1 text-xl font-bold text-rose-900">{caseItem.overdueTaskCount ?? 0}</div></div></div><p className="mt-2 text-xs text-slate-500">Файлы, задачи, участники, переписка и доступ клиента доступны в соседних вкладках карточки.</p></section>
+            {canViewTasks && caseItem.taskSummaryVisibility !== 'none' ? <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><h3 className="font-bold text-slate-900">Работа по делу{caseItem.taskSummaryVisibility === 'partial' ? ' · доступные задачи' : ''}</h3><div className="mt-2 grid grid-cols-2 gap-2"><div className="rounded-lg bg-blue-50 p-2.5"><div className="text-[11px] text-blue-600">Активные задачи</div><div className="mt-1 text-xl font-bold text-blue-900">{caseItem.openTaskCount ?? 0}</div></div><div className="rounded-lg bg-rose-50 p-2.5"><div className="text-[11px] text-rose-600">Просрочено</div><div className="mt-1 text-xl font-bold text-rose-900">{caseItem.overdueTaskCount ?? 0}</div></div></div><p className="mt-2 text-xs text-slate-500">Файлы, задачи, участники, переписка и доступ клиента доступны в соседних вкладках карточки.</p></section> : null}
           </aside>
         </div>
       </div>
@@ -8711,7 +8758,7 @@ function DocumentList({
                   key={document.id}
                   document={document}
                   uploadedAtTimestamp={timestamp}
-                  versionSummary={versionSummaries.get(document.documentKey)}
+                  versionSummary={versionSummaries.get(documentVersionGroupKey(document))}
                   downloading={downloadingDocumentId === document.id}
                   previewing={previewingDocumentId === document.id}
                   sendingToYandex={sendingYandexDocumentId === document.id}
@@ -8756,10 +8803,19 @@ type DocumentVersionSummary = {
   versions: number[];
 };
 
+function documentVersionGroupKey(document: ClientCaseDocument) {
+  if (Number.isSafeInteger(document.versionGroupId) && (document.versionGroupId ?? 0) > 0) {
+    return `group:${document.versionGroupId}`;
+  }
+  return document.documentKey && !/[^\x20-\x7e]/u.test(document.documentKey)
+    ? `key:${document.documentKey.toLowerCase()}`
+    : `id:${document.id}`;
+}
+
 function buildDocumentVersionSummaries(documents: ClientCaseDocument[]) {
   const groups = new Map<string, ClientCaseDocument[]>();
   documents.forEach((document) => {
-    const key = document.documentKey || `document-${document.id}`;
+    const key = documentVersionGroupKey(document);
     const group = groups.get(key) ?? [];
     group.push(document);
     groups.set(key, group);

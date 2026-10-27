@@ -12,6 +12,41 @@ vi.mock('./api', () => ({
 
 describe('permissionsService', () => {
   beforeEach(() => vi.clearAllMocks());
+  it('does not restore stale rights when a pending refresh completes after a role is saved', async () => {
+    vi.resetModules();
+    const { apiService } = await import('./api');
+    const { defaultRolePermissions } = await import('../types/permissions');
+    const { refreshRolePermissions, setRolePermissions, getRolePermissions } = await import('./permissionsService');
+    let resolveOld!: (value: typeof defaultRolePermissions) => void;
+    vi.mocked(apiService.getRolePermissions).mockReturnValue(new Promise((resolve) => { resolveOld = resolve; }));
+    vi.mocked(apiService.updateRolePermissions).mockResolvedValue(undefined as never);
+    const oldRefresh = refreshRolePermissions(83);
+    const restricted = structuredClone(defaultRolePermissions);
+    restricted.accounts.canView = false;
+    await setRolePermissions(83, restricted);
+    resolveOld(defaultRolePermissions);
+    await oldRefresh;
+    expect(getRolePermissions(83).accounts.canView).toBe(false);
+  });
+  it('allows a fresh request after reset while ignoring the older response', async () => {
+    vi.resetModules();
+    const { apiService } = await import('./api');
+    const { defaultRolePermissions } = await import('../types/permissions');
+    const { refreshRolePermissions, resetRolePermissions, getRolePermissions } = await import('./permissionsService');
+    let resolveOld!: (value: typeof defaultRolePermissions) => void;
+    vi.mocked(apiService.getRolePermissions).mockReturnValueOnce(new Promise((resolve) => { resolveOld = resolve; }));
+    const restricted = structuredClone(defaultRolePermissions);
+    restricted.accounts.canView = false;
+    vi.mocked(apiService.getRolePermissions).mockResolvedValueOnce(restricted);
+    vi.mocked(apiService.resetRolePermissions).mockResolvedValue(undefined as never);
+    const oldRefresh = refreshRolePermissions(84);
+    await resetRolePermissions(84);
+    await refreshRolePermissions(84);
+    resolveOld(defaultRolePermissions);
+    await oldRefresh;
+    expect(getRolePermissions(84).accounts.canView).toBe(false);
+    expect(apiService.getRolePermissions).toHaveBeenCalledTimes(2);
+  });
   it('preserves request analytics explicitly granted by the server and restricts missing grants', async () => {
     vi.resetModules();
     const { apiService } = await import('./api');

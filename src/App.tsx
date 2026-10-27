@@ -21,6 +21,7 @@ import type { Act, ActInput, ClientCase, Invoice, PaymentKind } from './types';
 import type { Tab } from './types/tabs';
 import { useAuth } from './contexts/AuthContext';
 import { useRolePermissions, useRolePermissionsLoaded } from './hooks/useRolePermissions';
+import { useTaskAccessRevision } from './hooks/useTaskAccessRevision';
 import { TabProvider } from './contexts/TabContext';
 import { useActivityLogger } from './hooks/useActivityLogger';
 import { useToast } from './hooks/useToast';
@@ -49,14 +50,16 @@ import {
   getInitialCaseDetailTab,
   getPathCaseId,
   getInitialClientId,
+  getInitialLegalEntityId,
   getInitialContractId,
   getInitialContractReturnTab,
   getInitialInvoiceId,
   getInitialPaymentId,
   getInitialTab,
+  getLastTabStorageKey,
+  getStoredLastTab,
   getInitialTaskId,
   getInitialUserId,
-  LAST_TAB_STORAGE_KEY,
   selectAccessibleFallbackTab,
 } from './appRouting';
 
@@ -93,6 +96,7 @@ const TABS_WITH_QUERY_ROUTE = new Set<Tab>([
   'workspace',
   'calendar',
   'messenger',
+  'requests',
   'accountsIncome',
   'accountsExpense',
   'actsIncome',
@@ -247,6 +251,7 @@ function AppContent() {
   const { user, loading, signOut } = useAuth();
   const permissions = useRolePermissions(user?.role?.id);
   const permissionsLoaded = useRolePermissionsLoaded(user?.role?.id);
+  const taskAccessRevision = useTaskAccessRevision();
   const logActivity = useActivityLogger();
   const toast = useToast();
   const isAdminRole = (user?.role?.name ?? '').toLowerCase() === 'admin';
@@ -318,6 +323,8 @@ function AppContent() {
   );
 
   const [activeTab, setActiveTab] = useState<Tab>(getInitialTab);
+  const [routeOwnerId, setRouteOwnerId] = useState<number | null>(null);
+  const hasEstablishedRouteOwner = useRef(false);
   const [selectedClientId, setSelectedClientId] = useState<number | null>(getInitialClientId);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(getInitialUserId);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(getInitialInvoiceId);
@@ -328,7 +335,7 @@ function AppContent() {
   const paymentTypeByIdRef = useRef<Map<number, PaymentKind>>(new Map());
   const [overdueTaskFilterSignal, setOverdueTaskFilterSignal] = useState(0);
   const [taskReturnTab, setTaskReturnTab] = useState<Tab | null>(null);
-  const [selectedLegalEntityId, setSelectedLegalEntityId] = useState<number | null>(null);
+  const [selectedLegalEntityId, setSelectedLegalEntityId] = useState<number | null>(getInitialLegalEntityId);
   const [selectedCaseId, setSelectedCaseId] = useState<number | null>(() => {
     const caseId = getPathCaseId();
     const caseTab = getInitialCaseDetailTab();
@@ -893,11 +900,54 @@ function AppContent() {
   );
 
   useEffect(() => {
+    if (loading) return;
+    if (!user) {
+      if (routeOwnerId !== null) setRouteOwnerId(null);
+      return;
+    }
+    if (!permissionsLoaded || routeOwnerId === user.id) return;
+    const switchingOwner = hasEstablishedRouteOwner.current;
+    if (switchingOwner) {
+      if (typeof window !== 'undefined') {
+        window.history.replaceState({}, document.title, '/');
+      }
+      setSelectedClientId(null);
+      setSelectedUserId(null);
+      setSelectedInvoiceId(null);
+      setSelectedPaymentId(null);
+      setSelectedTaskId(null);
+      setSelectedLegalEntityId(null);
+      setSelectedCaseId(null);
+      setSelectedContractId(null);
+      setSelectedActId(null);
+      paymentTypeByIdRef.current.clear();
+      setInitialCaseId('all');
+      setInitialClientSection(undefined);
+      setUserDetailInitialSection('main');
+      setCaseReturnTab('cases');
+      setActReturnTab('acts');
+      setActReturnContext({ tab: 'acts' });
+      setPaymentReturnContext(null);
+      setInvoiceReturnContext(null);
+      setCaseInvoiceCreateDraft(null);
+      setCasePaymentCreateDraft(null);
+      setActCreateInitialValues(null);
+      setActCreateInvoiceSeed(null);
+      setClientReturnTab(null);
+      setTaskReturnTab(null);
+      setContractReturnTab(null);
+    }
+    setActiveTab(switchingOwner ? getStoredLastTab(user.id) : getInitialTab(user.id));
+    hasEstablishedRouteOwner.current = true;
+    setRouteOwnerId(user.id);
+  }, [loading, permissionsLoaded, routeOwnerId, user]);
+
+  useEffect(() => {
     if (typeof window === 'undefined') {
       return;
     }
 
-    if (loading || !user || !permissionsLoaded) {
+    if (loading || !user || !permissionsLoaded || routeOwnerId !== user.id) {
       return;
     }
 
@@ -997,6 +1047,7 @@ function AppContent() {
     contractReturnTab,
     loading,
     permissionsLoaded,
+    routeOwnerId,
     selectedActId,
     selectedCaseId,
     selectedClientId,
@@ -1009,21 +1060,22 @@ function AppContent() {
   ]);
 
   useEffect(() => {
-    if (loading || !user || !permissionsLoaded) {
+    if (loading || !user || !permissionsLoaded || routeOwnerId !== user.id) {
       return;
     }
 
     try {
       if (activeTab !== 'notifications' && canViewTab(activeTab)) {
-        localStorage.setItem(LAST_TAB_STORAGE_KEY, activeTab);
+        const key = getLastTabStorageKey(user.id);
+        if (key) localStorage.setItem(key, activeTab);
       }
     } catch {
       // ignore storage issues
     }
-  }, [activeTab, canViewTab, loading, permissionsLoaded, user]);
+  }, [activeTab, canViewTab, loading, permissionsLoaded, routeOwnerId, user]);
 
   useEffect(() => {
-    if (loading || !user || !permissionsLoaded) {
+    if (loading || !user || !permissionsLoaded || routeOwnerId !== user.id) {
       return;
     }
 
@@ -1050,17 +1102,18 @@ function AppContent() {
     }
 
     try {
-      localStorage.removeItem(LAST_TAB_STORAGE_KEY);
+      const key = getLastTabStorageKey(user.id);
+      if (key) localStorage.removeItem(key);
     } catch {
       // ignore storage issues
     }
 
     const fallback = selectAccessibleFallbackTab(accessibleMenuTabs);
     setActiveTab(fallback);
-  }, [activeTab, accessibleMenuTabs, canViewTab, loading, permissionsLoaded, selectedCaseId, selectedClientId, user]);
+  }, [activeTab, accessibleMenuTabs, canViewTab, loading, permissionsLoaded, routeOwnerId, selectedCaseId, selectedClientId, user]);
 
   useEffect(() => {
-    if (!user) {
+    if (!user || routeOwnerId !== user.id) {
       return;
     }
 
@@ -1071,7 +1124,7 @@ function AppContent() {
       description: `Открыт раздел: ${tabNames[activeTab] ?? activeTab}`,
       status: 'Info',
     });
-  }, [activeTab, logActivity, tabNames, user]);
+  }, [activeTab, logActivity, routeOwnerId, tabNames, user]);
 
   useEffect(() => {
     if (!user) {
@@ -1156,6 +1209,8 @@ function AppContent() {
 
     return <Login onShowRegister={() => setAuthView('register')} onPendingApproval={() => setAuthView('awaiting')} />;
   }
+
+  if (hasEstablishedRouteOwner.current && routeOwnerId !== user.id) return renderPageLoader();
 
   if (!user.isApproved) {
     return <AwaitingApproval onBackToLogin={hardSignOut} />;
@@ -1333,7 +1388,12 @@ function AppContent() {
           ? (
               <LegalEntities
                 initialLegalEntityId={selectedLegalEntityId}
-                onInitialLegalEntityHandled={() => setSelectedLegalEntityId(null)}
+                onInitialLegalEntityHandled={() => {
+                  setSelectedLegalEntityId(null);
+                  const url = new URL(window.location.href);
+                  url.searchParams.delete('ppLegalEntityId');
+                  window.history.replaceState(window.history.state, '', url);
+                }}
                 onOpenCase={openRelatedCase}
                 onOpenContract={(id) => openContractDetail(id, { returnTo: 'legalEntities' })}
                 onOpenInvoice={(id, type) =>
@@ -1452,6 +1512,7 @@ function AppContent() {
             canDelete={permissions.cases.canDelete}
             canViewFinance={permissions.payments.canView}
             canViewTasks={permissions.tasks.canView}
+            taskAccessKey={JSON.stringify([user?.id, user?.role?.id, user?.departmentId, user?.department, taskAccessRevision, permissions.tasks.canView, permissions.tasks.viewScope, permissions.requests.canView, permissions.requests.viewScope])}
             canCreateTasks={permissions.tasks.canView && permissions.tasks.canCreate}
             canEditTasks={permissions.tasks.canEdit}
             canEditTaskBilling={isAdminRole || permissions.tasks.canEdit || permissions.tasks.canEditOthers}

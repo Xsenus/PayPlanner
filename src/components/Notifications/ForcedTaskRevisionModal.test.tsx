@@ -8,7 +8,13 @@ import { USER_NOTIFICATIONS_EVENT } from '../../utils/userNotifications';
 import {
   FORCED_TASK_SNOOZE_STORAGE_KEY,
   getForcedTaskApprovalSnoozeKey,
+  getForcedTaskSnoozeStorageKey,
+  snoozeForcedTaskActions,
 } from '../../utils/forcedTaskActionSnoozes';
+
+const authState = vi.hoisted((): { user: { id: number } | null } => ({ user: { id: 7 } }));
+
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => authState }));
 
 const apiMock = vi.hoisted(() => ({
   approveTaskJournalDeadlineChangeRequest: vi.fn(),
@@ -176,6 +182,7 @@ function mockNotificationPages(
 
 describe('ForcedTaskRevisionModal', () => {
   beforeEach(() => {
+    authState.user = { id: 7 };
     apiMock.approveTaskJournalDeadlineChangeRequest.mockReset();
     apiMock.downloadTaskJournalFile.mockReset();
     apiMock.getTaskJournalDeadlineChangeRequest.mockReset();
@@ -301,6 +308,7 @@ describe('ForcedTaskRevisionModal', () => {
     const view = render(<ForcedTaskRevisionModal key={7} />);
     try {
       employee = 'current';
+      authState.user = { id: 8 };
       view.rerender(<ForcedTaskRevisionModal key={8} />);
       expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(4);
       await act(async () => { previous.splice(0).forEach(finish => finish()); });
@@ -424,7 +432,7 @@ describe('ForcedTaskRevisionModal', () => {
 
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
-    const snoozes = JSON.parse(window.localStorage.getItem('pp.forcedTaskModalSnoozes.v1') || '{}') as Record<string, number>;
+    const snoozes = JSON.parse(window.localStorage.getItem(getForcedTaskSnoozeStorageKey(7)!) || '{}') as Record<string, number>;
     expect(snoozes['31']).toBeGreaterThan(Date.now());
 
     window.dispatchEvent(new Event(USER_NOTIFICATIONS_EVENT));
@@ -442,23 +450,132 @@ describe('ForcedTaskRevisionModal', () => {
     fireEvent.click(within(prompt).getByRole('button', { name: '10 мин' }));
 
     await waitFor(() => expect(screen.queryByTestId('forced-task-approval-prompt')).toBeNull());
-    const snoozes = JSON.parse(window.localStorage.getItem(FORCED_TASK_SNOOZE_STORAGE_KEY) || '{}') as Record<string, number>;
+    const snoozes = JSON.parse(window.localStorage.getItem(getForcedTaskSnoozeStorageKey(7)!) || '{}') as Record<string, number>;
     expect(snoozes['61']).toBeGreaterThan(Date.now());
     expect(snoozes[getForcedTaskApprovalSnoozeKey(404)]).toBeGreaterThan(Date.now());
   });
 
   it('migrates an active notification-only approval snooze to the shared task key', async () => {
     const snoozedUntil = Date.now() + 30 * 60_000;
-    window.localStorage.setItem(FORCED_TASK_SNOOZE_STORAGE_KEY, JSON.stringify({ '61': snoozedUntil }));
+    window.localStorage.setItem(getForcedTaskSnoozeStorageKey(7)!, JSON.stringify({ '61': snoozedUntil }));
     mockNotificationPages([], [], [], [createApprovalRequestNotification()]);
 
     render(<ForcedTaskRevisionModal />);
 
     await waitFor(() => {
-      const snoozes = JSON.parse(window.localStorage.getItem(FORCED_TASK_SNOOZE_STORAGE_KEY) || '{}') as Record<string, number>;
+      const snoozes = JSON.parse(window.localStorage.getItem(getForcedTaskSnoozeStorageKey(7)!) || '{}') as Record<string, number>;
       expect(snoozes[getForcedTaskApprovalSnoozeKey(404)]).toBe(snoozedUntil);
     });
     expect(screen.queryByTestId('forced-task-approval-prompt')).toBeNull();
+  });
+
+  it('retains a snooze on reload but shows the same pending task after logout and another employee signs in', async () => {
+    mockNotificationPages([], [], [], [createApprovalRequestNotification()]);
+    apiMock.getTaskJournalItem.mockResolvedValue(createApprovalTask({
+      participants: [{ id: 701, userId: 7, role: 'approver', sortOrder: 0, approvalStatus: 'pending' }],
+    }));
+    const view = render(<ForcedTaskRevisionModal />);
+    const prompt = await screen.findByTestId('forced-task-approval-prompt');
+    fireEvent.click(within(prompt).getByText('Отложить'));
+    fireEvent.click(within(prompt).getByRole('button', { name: '10 мин' }));
+    await waitFor(() => expect(screen.queryByTestId('forced-task-approval-prompt')).toBeNull());
+    const original = window.localStorage.getItem(getForcedTaskSnoozeStorageKey(7)!);
+    await waitFor(() => expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(10));
+
+    view.rerender(<ForcedTaskRevisionModal key="reload" />);
+    await waitFor(() => expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(15));
+    expect(screen.queryByTestId('forced-task-approval-prompt')).toBeNull();
+    authState.user = null;
+    view.rerender(<ForcedTaskRevisionModal key="reload" />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(15);
+
+    authState.user = { id: 8 };
+    mockNotificationPages([], [], [], [createApprovalRequestNotification({ id: 62, metadataJson: '{"currentApproverId":702}' })]);
+    apiMock.getTaskJournalItem.mockResolvedValue(createApprovalTask({
+      participants: [{ id: 702, userId: 8, role: 'approver', sortOrder: 0, approvalStatus: 'pending' }],
+    }));
+    view.rerender(<ForcedTaskRevisionModal key="reload" />);
+    const nextPrompt = await screen.findByTestId('forced-task-approval-prompt');
+    fireEvent.click(within(nextPrompt).getByText('Отложить'));
+    fireEvent.click(within(nextPrompt).getByRole('button', { name: '30 мин' }));
+    await waitFor(() => expect(screen.queryByTestId('forced-task-approval-prompt')).toBeNull());
+    expect(window.localStorage.getItem(getForcedTaskSnoozeStorageKey(7)!)).toBe(original);
+    const next = JSON.parse(window.localStorage.getItem(getForcedTaskSnoozeStorageKey(8)!) || '{}') as Record<string, number>;
+    expect(next[getForcedTaskApprovalSnoozeKey(404)]).toBeGreaterThan(Date.now());
+    expect(next['62']).toBeGreaterThan(Date.now());
+    expect(next['61']).toBeUndefined();
+    expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+    expect(apiMock.updateTaskJournalApproval).not.toHaveBeenCalled();
+  });
+
+  it('does not adopt ownerless v1 notification or shared task snoozes', async () => {
+    const legacy = JSON.stringify({ '61': Date.now() + 60_000, [getForcedTaskApprovalSnoozeKey(404)]: Date.now() + 60_000 });
+    window.localStorage.setItem(FORCED_TASK_SNOOZE_STORAGE_KEY, legacy);
+    mockNotificationPages([], [], [], [createApprovalRequestNotification()]);
+    render(<ForcedTaskRevisionModal />);
+
+    expect(await screen.findByTestId('forced-task-approval-prompt')).toBeTruthy();
+    expect(window.localStorage.getItem(FORCED_TASK_SNOOZE_STORAGE_KEY)).toBe(legacy);
+    expect(window.localStorage.getItem(getForcedTaskSnoozeStorageKey(7)!)).toBeNull();
+    expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+  });
+
+  it('preserves an open approval draft when another employee snoozes and the queue refreshes', async () => {
+    let notification = createApprovalRequestNotification();
+    apiMock.getUserNotifications.mockImplementation(async (params) => createPage(params.type === 'taskApprovalRequested'
+      ? [{ ...notification }] : []));
+    render(<ForcedTaskRevisionModal />);
+    const prompt = await screen.findByTestId('forced-task-approval-prompt');
+    const comment = within(prompt).getByLabelText('Комментарий для возврата на доработку');
+    await waitFor(() => expect((comment as HTMLTextAreaElement).disabled).toBe(false));
+    fireEvent.change(comment, { target: { value: 'Сохранить мой комментарий' } });
+    fireEvent.change(within(prompt).getByLabelText('Срок доработки'), { target: { value: '2099-01-10T10:30' } });
+    const calls = apiMock.getUserNotifications.mock.calls.length;
+    const taskReads = apiMock.getTaskJournalItem.mock.calls.length;
+    act(() => {
+      snoozeForcedTaskActions(8, ['61', getForcedTaskApprovalSnoozeKey(404)], 30);
+      window.dispatchEvent(new StorageEvent('storage', { key: getForcedTaskSnoozeStorageKey(8) }));
+      window.dispatchEvent(new Event(USER_NOTIFICATIONS_EVENT));
+    });
+    await waitFor(() => expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(calls + 5));
+    await waitFor(() => expect(apiMock.getTaskJournalItem).toHaveBeenCalledTimes(taskReads + 1));
+    await waitFor(() => expect((within(screen.getByTestId('forced-task-approval-prompt')).getByLabelText('Комментарий для возврата на доработку') as HTMLTextAreaElement).disabled).toBe(false));
+    expect((within(screen.getByTestId('forced-task-approval-prompt')).getByLabelText('Комментарий для возврата на доработку') as HTMLTextAreaElement).value)
+      .toBe('Сохранить мой комментарий');
+    expect((within(screen.getByTestId('forced-task-approval-prompt')).getByLabelText('Срок доработки') as HTMLInputElement).value).toBe('2099-01-10T10:30');
+
+    notification = createApprovalRequestNotification({ eventKey: 'task:404:approval-request:702:next', metadataJson: '{"currentApproverId":702}' });
+    apiMock.getTaskJournalItem.mockResolvedValue(createApprovalTask({
+      participants: [{ id: 702, userId: 7, role: 'approver', sortOrder: 0, approvalStatus: 'pending' }],
+    }));
+    act(() => window.dispatchEvent(new Event(USER_NOTIFICATIONS_EVENT)));
+    await waitFor(() => expect(apiMock.getTaskJournalItem).toHaveBeenCalledTimes(taskReads + 2));
+    await waitFor(() => expect((within(screen.getByTestId('forced-task-approval-prompt')).getByLabelText('Комментарий для возврата на доработку') as HTMLTextAreaElement).disabled).toBe(false));
+    expect((within(screen.getByTestId('forced-task-approval-prompt')).getByLabelText('Комментарий для возврата на доработку') as HTMLTextAreaElement).value).toBe('');
+    expect((within(screen.getByTestId('forced-task-approval-prompt')).getByLabelText('Срок доработки') as HTMLInputElement).value).not.toBe('2099-01-10T10:30');
+    expect(apiMock.updateTaskJournalApproval).not.toHaveBeenCalled();
+    expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+  });
+
+  it('discards an old employee load when logout and login occur without a parent key', async () => {
+    const previous: Array<() => void> = [];
+    apiMock.getUserNotifications.mockImplementation((params) => new Promise<PagedResult<UserNotificationDto>>((resolve) => {
+      previous.push(() => resolve(createPage(params.type === 'taskRevisionRequested'
+        ? [createNotification({ title: 'Задача возвращена на доработку: Прежний сотрудник' })] : [])));
+    }));
+    const view = render(<ForcedTaskRevisionModal />);
+    expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(2);
+    authState.user = null;
+    view.rerender(<ForcedTaskRevisionModal />);
+    authState.user = { id: 8 };
+    mockNotificationPages([createNotification({ title: 'Задача возвращена на доработку: Текущий сотрудник' })]);
+    view.rerender(<ForcedTaskRevisionModal />);
+    expect(await screen.findByText('Текущий сотрудник')).toBeTruthy();
+    await act(async () => { previous.forEach(finish => finish()); });
+    expect(screen.queryByText('Прежний сотрудник')).toBeNull();
+    expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(7);
+    expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
   });
 
   it('marks the message read before opening the task', async () => {
@@ -722,7 +839,7 @@ describe('ForcedTaskRevisionModal', () => {
     await waitFor(() => expect(screen.queryByTestId('forced-task-approval-prompt')).toBeNull());
     expect(onOpenTask).toHaveBeenCalledWith(404);
     expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
-    const snoozes = JSON.parse(window.localStorage.getItem(FORCED_TASK_SNOOZE_STORAGE_KEY) || '{}') as Record<string, number>;
+    const snoozes = JSON.parse(window.localStorage.getItem(getForcedTaskSnoozeStorageKey(7)!) || '{}') as Record<string, number>;
     expect(snoozes['61']).toBeGreaterThan(Date.now());
     expect(snoozes[getForcedTaskApprovalSnoozeKey(404)]).toBeGreaterThan(Date.now());
   });

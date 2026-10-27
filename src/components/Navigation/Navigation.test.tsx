@@ -1,5 +1,6 @@
+import { StrictMode } from 'react';
 import userEvent from '@testing-library/user-event';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Navigation from './Navigation';
 import { getTabHref } from '../../appRouting';
@@ -12,6 +13,7 @@ import {
 } from '../../utils/paymentAdvanceReview';
 
 const authState = vi.hoisted(() => ({
+  userId: 1 as number | null,
   isAdmin: true,
   roleId: 1,
   roleName: 'admin',
@@ -25,7 +27,7 @@ const toastMocks = vi.hoisted(() => ({
 
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({
-    user: { id: 1, role: { id: authState.roleId, name: authState.roleName } },
+    user: authState.userId === null ? null : { id: authState.userId, role: { id: authState.roleId, name: authState.roleName } },
     isAdmin: () => authState.isAdmin,
   }),
 }));
@@ -108,7 +110,7 @@ function createLawyerTemplatePermissions(): RolePermissions {
 }
 
 function renderNavigation(onTabChange = vi.fn()) {
-  window.localStorage.setItem('pp.sidebar_expanded', JSON.stringify(expandedSections));
+  window.localStorage.setItem(`pp.sidebar_expanded.${authState.userId}`, JSON.stringify(expandedSections));
   render(<Navigation activeTab="calendar" onTabChange={onTabChange} />);
   return onTabChange;
 }
@@ -132,6 +134,7 @@ describe('Navigation links', () => {
     window.localStorage.clear();
     window.sessionStorage.clear();
     vi.clearAllMocks();
+    authState.userId = 1;
     authState.isAdmin = true;
     authState.roleId = 1;
     authState.roleName = 'admin';
@@ -153,6 +156,214 @@ describe('Navigation links', () => {
         expenseCount: 0,
         total: 0,
       },
+    });
+  });
+
+  describe('employee-owned sidebar layout', () => {
+    it('does not apply a late hidden-section save failure after switching A to B and back', async () => {
+      let rejectSave!: (reason: Error) => void;
+      apiMock.upsertUserSetting.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectSave = reject; }));
+      const user = userEvent.setup();
+      const view = render(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+      await waitForNavigationPermissions();
+      await user.click(screen.getByRole('button', { name: 'Ещё разделы' }));
+      await user.click(screen.getByRole('checkbox', { name: /Отчёты/i }));
+      await waitFor(() => expect(window.localStorage.getItem('pp.sidebar_hidden.1')).toContain('reports'));
+      authState.userId = 2;
+      view.rerender(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+      await waitFor(() => expect(findLinkByHref(getTabHref('reports'))).toBeTruthy());
+      authState.userId = 1;
+      view.rerender(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+      await waitFor(() => expect(findLinkByHref(getTabHref('reports'))).toBeUndefined());
+      await act(async () => { rejectSave(new Error('late failure')); });
+      expect(findLinkByHref(getTabHref('reports'))).toBeUndefined();
+      expect(window.localStorage.getItem('pp.sidebar_hidden.1')).toContain('reports');
+    });
+
+    it('restores each employee hidden sections without writing the previous employee values to the new owner', async () => {
+      window.localStorage.setItem('pp.sidebar_hidden.1', JSON.stringify(['calendar']));
+      window.localStorage.setItem('pp.sidebar_hidden.2', JSON.stringify(['cases']));
+      const writes = vi.spyOn(Storage.prototype, 'setItem');
+      const view = render(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+      await waitFor(() => expect(findLinkByHref(getTabHref('calendar'))).toBeUndefined());
+      writes.mockClear();
+      authState.userId = 2;
+      view.rerender(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+      await waitFor(() => expect(findLinkByHref(getTabHref('calendar'))).toBeTruthy());
+      expect(findLinkByHref(getTabHref('cases'))).toBeUndefined();
+      expect(writes.mock.calls.filter(([key]) => key === 'pp.sidebar_hidden.2').every(([, value]) => value === '["cases"]')).toBe(true);
+      expect(window.localStorage.getItem('pp.sidebar_hidden.1')).toBe('["calendar"]');
+      writes.mockRestore();
+    });
+
+    function toggleTaskSubmenu() {
+      const toggle = findLinkByHref(getTabHref('tasks'))?.parentElement?.querySelector('button');
+      if (!toggle) throw new Error('The visible task section must have its real expand control.');
+      fireEvent.click(toggle);
+    }
+
+    it('restores A after B and reload without ever saving the previous layout under B', async () => {
+      window.localStorage.setItem('pp.sidebar_collapsed.1', '1');
+      window.localStorage.setItem('pp.sidebar_expanded.1', '{"tasks":false}');
+      window.localStorage.setItem('pp.sidebar_collapsed.2', '0');
+      window.localStorage.setItem('pp.sidebar_expanded.2', '{"tasks":true}');
+      const writes = vi.spyOn(Storage.prototype, 'setItem');
+      try {
+        const view = render(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+        await waitForNavigationPermissions();
+        expect(screen.getByRole('button', { name: 'Развернуть меню' })).toBeTruthy();
+
+        authState.userId = 2;
+        view.rerender(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Свернуть меню' })).toBeTruthy());
+        expect(findLinkByHref(getTabHref('tasksApprovals'))).toBeTruthy();
+        const collapsedWritesB = writes.mock.calls.filter(([key]) => key === 'pp.sidebar_collapsed.2');
+        expect(collapsedWritesB.length).toBeGreaterThan(0);
+        expect(collapsedWritesB.every(([, value]) => value === '0')).toBe(true);
+        const expandedWritesB = writes.mock.calls.filter(([key]) => key === 'pp.sidebar_expanded.2');
+        expect(expandedWritesB.length).toBeGreaterThan(0);
+        expect(expandedWritesB.every(([, value]) => JSON.parse(value).tasks === true)).toBe(true);
+        expect(window.localStorage.getItem('pp.sidebar_collapsed.1')).toBe('1');
+        expect(window.localStorage.getItem('pp.sidebar_expanded.1')).toBe('{"tasks":false}');
+
+        authState.userId = 1;
+        view.rerender(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+        expect(screen.getByRole('button', { name: 'Развернуть меню' })).toBeTruthy();
+        fireEvent.click(screen.getByRole('button', { name: 'Развернуть меню' }));
+        expect(findLinkByHref(getTabHref('tasksApprovals'))).toBeFalsy();
+        await waitFor(() => expect(window.localStorage.getItem('pp.sidebar_collapsed.1')).toBe('0'));
+        view.unmount();
+        render(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+        await waitForNavigationPermissions();
+        expect(screen.getByRole('button', { name: 'Свернуть меню' })).toBeTruthy();
+        expect(findLinkByHref(getTabHref('tasksApprovals'))).toBeFalsy();
+        expect(window.localStorage.getItem('pp.sidebar_collapsed.2')).toBe('0');
+        expect(window.localStorage.getItem('pp.sidebar_expanded.2')).toBe('{"tasks":true}');
+      } finally {
+        writes.mockRestore();
+      }
+    });
+
+    it('starts with defaults instead of adopting ownerless globals and persists employee toggles', async () => {
+      window.localStorage.setItem('pp.sidebar_collapsed', '1');
+      window.localStorage.setItem('pp.sidebar_expanded', '{"tasks":true}');
+      render(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+      await waitForNavigationPermissions();
+      expect(screen.getByRole('button', { name: 'Свернуть меню' })).toBeTruthy();
+      expect(findLinkByHref(getTabHref('tasksApprovals'))).toBeFalsy();
+      toggleTaskSubmenu();
+      expect(findLinkByHref(getTabHref('tasksApprovals'))).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'Свернуть меню' }));
+      await waitFor(() => expect(window.localStorage.getItem('pp.sidebar_collapsed.1')).toBe('1'));
+      expect(JSON.parse(window.localStorage.getItem('pp.sidebar_expanded.1') ?? '{}').tasks).toBe(true);
+      expect(window.localStorage.getItem('pp.sidebar_collapsed')).toBe('1');
+      expect(window.localStorage.getItem('pp.sidebar_expanded')).toBe('{"tasks":true}');
+    });
+
+    it('keeps StrictMode logout and the next employee separate from guest and previous layout', async () => {
+      window.localStorage.setItem('pp.sidebar_collapsed.1', '1');
+      window.localStorage.setItem('pp.sidebar_expanded.1', '{"tasks":false}');
+      window.localStorage.setItem('pp.sidebar_collapsed.2', '0');
+      window.localStorage.setItem('pp.sidebar_expanded.2', '{"tasks":true}');
+      window.localStorage.setItem('pp.sidebar_collapsed.guest', '1');
+      window.localStorage.setItem('pp.sidebar_expanded.guest', '{"tasks":true}');
+      const writes = vi.spyOn(Storage.prototype, 'setItem');
+      try {
+        const view = render(<StrictMode><Navigation activeTab="calendar" onTabChange={vi.fn()} /></StrictMode>);
+        await waitForNavigationPermissions();
+        expect(screen.getByRole('button', { name: 'Развернуть меню' })).toBeTruthy();
+        authState.userId = null;
+        view.rerender(<StrictMode><Navigation activeTab="calendar" onTabChange={vi.fn()} /></StrictMode>);
+        expect(screen.getByRole('button', { name: 'Свернуть меню' })).toBeTruthy();
+        authState.userId = 2;
+        view.rerender(<StrictMode><Navigation activeTab="calendar" onTabChange={vi.fn()} /></StrictMode>);
+        await waitFor(() => expect(findLinkByHref(getTabHref('tasksApprovals'))).toBeTruthy());
+        expect(screen.getByRole('button', { name: 'Свернуть меню' })).toBeTruthy();
+        expect(writes.mock.calls.filter(([key]) => key === 'pp.sidebar_collapsed.2').every(([, value]) => value === '0')).toBe(true);
+        expect(writes.mock.calls.filter(([key]) => key === 'pp.sidebar_expanded.2').every(([, value]) => JSON.parse(value).tasks === true)).toBe(true);
+        expect(writes.mock.calls.filter(([key]) => key === 'pp.sidebar_collapsed.guest' || key === 'pp.sidebar_expanded.guest')).toHaveLength(0);
+        expect(window.localStorage.getItem('pp.sidebar_collapsed.guest')).toBe('1');
+        expect(window.localStorage.getItem('pp.sidebar_expanded.guest')).toBe('{"tasks":true}');
+      } finally {
+        writes.mockRestore();
+      }
+    });
+
+    it.each([null, 0, -1, Number.NaN, Number.POSITIVE_INFINITY, 1.5, Number.MAX_SAFE_INTEGER + 1])('does not read or persist employee layout for invalid actor %s', async (userId) => {
+      authState.userId = userId;
+      window.localStorage.setItem('pp.sidebar_collapsed', '1');
+      window.localStorage.setItem('pp.sidebar_expanded', '{"tasks":true}');
+      const writes = vi.spyOn(Storage.prototype, 'setItem');
+      try {
+        render(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+        expect(screen.getByRole('button', { name: 'Свернуть меню' })).toBeTruthy();
+        fireEvent.click(screen.getByRole('button', { name: 'Свернуть меню' }));
+        expect(screen.getByRole('button', { name: 'Развернуть меню' })).toBeTruthy();
+        expect(writes.mock.calls.filter(([key]) => key.startsWith('pp.sidebar_collapsed.') || key.startsWith('pp.sidebar_expanded.'))).toHaveLength(0);
+        expect(window.localStorage.getItem('pp.sidebar_collapsed')).toBe('1');
+        expect(window.localStorage.getItem('pp.sidebar_expanded')).toBe('{"tasks":true}');
+      } finally {
+        writes.mockRestore();
+      }
+    });
+
+    it.each(['null', '[]', '{"tasks":"false"}', '{', '42'])('ignores malformed expanded layout %s without hiding navigation', async (stored) => {
+      window.localStorage.setItem('pp.sidebar_collapsed.1', 'invalid');
+      window.localStorage.setItem('pp.sidebar_expanded.1', stored);
+      render(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+      await waitForNavigationPermissions();
+      expect(screen.getByRole('button', { name: 'Свернуть меню' })).toBeTruthy();
+      expect(findLinkByHref(getTabHref('tasks'))).toBeTruthy();
+      expect(findLinkByHref(getTabHref('tasksApprovals'))).toBeFalsy();
+      toggleTaskSubmenu();
+      expect(findLinkByHref(getTabHref('tasksApprovals'))).toBeTruthy();
+      expect(JSON.parse(window.localStorage.getItem('pp.sidebar_expanded.1') ?? '{}').tasks).toBe(true);
+    });
+
+    it('keeps layout controls usable when only their local storage reads and writes throw', async () => {
+      const originalGet = Storage.prototype.getItem;
+      const originalSet = Storage.prototype.setItem;
+      const isLayoutKey = (key: string) => key.startsWith('pp.sidebar_collapsed.') || key.startsWith('pp.sidebar_expanded.');
+      const reads = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+        if (isLayoutKey(key)) throw new Error('Synthetic layout storage unavailable');
+        return originalGet.call(this, key);
+      });
+      const writes = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+        if (isLayoutKey(key)) throw new Error('Synthetic layout storage unavailable');
+        return originalSet.call(this, key, value);
+      });
+      try {
+        render(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+        await waitForNavigationPermissions();
+        expect(screen.getByRole('button', { name: 'Свернуть меню' })).toBeTruthy();
+        toggleTaskSubmenu();
+        expect(findLinkByHref(getTabHref('tasksApprovals'))).toBeTruthy();
+        fireEvent.click(screen.getByRole('button', { name: 'Свернуть меню' }));
+        expect(screen.getByRole('button', { name: 'Развернуть меню' })).toBeTruthy();
+      } finally {
+        reads.mockRestore();
+        writes.mockRestore();
+      }
+    });
+
+    it('does not reload a manually changed layout when the same employee permissions refresh', async () => {
+      const view = render(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+      await waitForNavigationPermissions();
+      toggleTaskSubmenu();
+      fireEvent.click(screen.getByRole('button', { name: 'Свернуть меню' }));
+      expect(screen.getByRole('button', { name: 'Развернуть меню' })).toBeTruthy();
+      window.localStorage.setItem('pp.sidebar_collapsed.1', '0');
+      window.localStorage.setItem('pp.sidebar_expanded.1', '{"tasks":false}');
+      const reads = vi.spyOn(Storage.prototype, 'getItem');
+      try {
+        authState.roleId = 147001;
+        authState.roleName = 'employee';
+        view.rerender(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+        expect(screen.getByRole('button', { name: 'Развернуть меню' })).toBeTruthy();
+        expect(reads.mock.calls.filter(([key]) => key === 'pp.sidebar_collapsed.1' || key === 'pp.sidebar_expanded.1')).toHaveLength(0);
+      } finally {
+        reads.mockRestore();
+      }
     });
   });
 
@@ -243,6 +454,71 @@ describe('Navigation links', () => {
     });
 
     await user.click(reportsCheckbox);
+    expect(findLinkByHref(getTabHref('reports'))).toBeTruthy();
+  });
+
+  it('saves rapid visibility changes in order even if the first request is slow', async () => {
+    let finishFirst!: (value: { key: string; value: string }) => void;
+    apiMock.upsertUserSetting.mockImplementationOnce(() => new Promise((resolve) => { finishFirst = resolve; }));
+    apiMock.upsertUserSetting.mockResolvedValueOnce({ key: 'navigation.sidebar.hidden-items.v1', value: '[]' });
+    const user = userEvent.setup();
+    renderNavigation();
+    await waitForNavigationPermissions();
+    await user.click(screen.getByRole('button', { name: 'Ещё разделы' }));
+    const checkbox = screen.getByRole('checkbox', { name: /Отчёты/i });
+    await user.click(checkbox);
+    await user.click(checkbox);
+    expect(findLinkByHref(getTabHref('reports'))).toBeTruthy();
+    expect(apiMock.upsertUserSetting).toHaveBeenCalledTimes(1);
+    await act(async () => finishFirst({ key: 'navigation.sidebar.hidden-items.v1', value: '["reports"]' }));
+    await waitFor(() => expect(apiMock.upsertUserSetting).toHaveBeenCalledTimes(2));
+    expect(apiMock.upsertUserSetting).toHaveBeenLastCalledWith('navigation.sidebar.hidden-items.v1', '[]');
+  });
+
+  it('does not replace a newly changed hidden section with a late settings read', async () => {
+    let finishRead!: (value: { key: string; value: string }) => void;
+    apiMock.getUserSetting.mockImplementationOnce(() => new Promise((resolve) => { finishRead = resolve; }));
+    const user = userEvent.setup();
+    renderNavigation();
+    await waitForNavigationPermissions();
+    await user.click(screen.getByRole('button', { name: 'Ещё разделы' }));
+    await user.click(screen.getByRole('checkbox', { name: /Отчёты/i }));
+    await act(async () => finishRead({ key: 'navigation.sidebar.hidden-items.v1', value: '[]' }));
+    expect(findLinkByHref(getTabHref('reports'))).toBeUndefined();
+  });
+
+  it('restores the last confirmed hidden sections when queued saves fail', async () => {
+    let failFirst!: (reason: Error) => void;
+    apiMock.upsertUserSetting.mockImplementationOnce(() => new Promise((_resolve, reject) => { failFirst = reject; }));
+    apiMock.upsertUserSetting.mockRejectedValueOnce(new Error('failed second save'));
+    const user = userEvent.setup();
+    renderNavigation();
+    await waitForNavigationPermissions();
+    await user.click(screen.getByRole('button', { name: 'Ещё разделы' }));
+    const checkbox = screen.getByRole('checkbox', { name: /Отчёты/i });
+    await user.click(checkbox);
+    await user.click(checkbox);
+    await act(async () => failFirst(new Error('failed first save')));
+    await waitFor(() => expect(toastMocks.error).toHaveBeenCalled());
+    expect(findLinkByHref(getTabHref('reports'))).toBeTruthy();
+    expect(JSON.parse(window.localStorage.getItem('pp.sidebar_hidden.1') ?? '[]')).toEqual([]);
+  });
+
+  it('does not send queued visibility changes after switching employees', async () => {
+    let finishFirst!: (value: { key: string; value: string }) => void;
+    apiMock.upsertUserSetting.mockImplementationOnce(() => new Promise((resolve) => { finishFirst = resolve; }));
+    const user = userEvent.setup();
+    const view = render(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+    await waitForNavigationPermissions();
+    await user.click(screen.getByRole('button', { name: 'Ещё разделы' }));
+    const checkbox = screen.getByRole('checkbox', { name: /Отчёты/i });
+    await user.click(checkbox);
+    await user.click(checkbox);
+    authState.userId = 2;
+    view.rerender(<Navigation activeTab="calendar" onTabChange={vi.fn()} />);
+    await waitFor(() => expect(findLinkByHref(getTabHref('reports'))).toBeTruthy());
+    await act(async () => finishFirst({ key: 'navigation.sidebar.hidden-items.v1', value: '["reports"]' }));
+    expect(apiMock.upsertUserSetting).toHaveBeenCalledTimes(1);
     expect(findLinkByHref(getTabHref('reports'))).toBeTruthy();
   });
 

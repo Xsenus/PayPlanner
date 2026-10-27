@@ -1,6 +1,6 @@
 import { setupTaskJournalTests, apiMock, toastMock, offlineCalendarMock, authState, permissionsState, dateAt, createTask, renderJournal, openFirstTaskForEdit } from './TaskJournal.test-support';
 import { TaskJournal } from './TaskJournal';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { cloneDefaultTaskStickerStyles } from '../../utils/taskStickerStyles';
 import { TASK_JOURNAL_TABLE_COLUMNS } from '../../utils/taskJournalColumns';
@@ -145,6 +145,151 @@ describe('TaskJournal', () => {
       expect.stringContaining('Изменения недоступны'),
       'Офлайн-календарь',
     );
+  });
+
+  it('hides an already open offline calendar when another tab revokes this user', async () => {
+    apiMock.getFeatureFlags.mockResolvedValue({ legal: { offlineCalendarReadOnly: true } });
+    apiMock.getTaskJournalItems.mockRejectedValue(new Error('offline'));
+    offlineCalendarMock.loadOfflineCalendarSnapshot.mockResolvedValue({
+      schemaVersion: 1, userId: 7, trustedDevice: true,
+      syncedAt: '2026-07-31T08:00:00.000Z', expiresAt: '2026-08-07T08:00:00.000Z',
+      items: [createTask({ title: 'Данные отозванной задачи' })],
+    });
+    render(<TaskJournal initialView="calendar" />);
+    expect(await screen.findByText('Офлайн-календарь · только просмотр')).toBeTruthy();
+    expect(screen.getByTestId('task-calendar-task-101')).toBeTruthy();
+    fireEvent(window, new StorageEvent('storage', { key: 'payplanner-offline-calendar-denied:7', newValue: 'revoked', storageArea: localStorage }));
+    await waitFor(() => expect(screen.queryByTestId('task-calendar-task-101')).toBeNull());
+    expect(screen.queryByText('Офлайн-календарь · только просмотр')).toBeNull();
+  });
+
+  it('keeps the visible calendar when another user is revoked or a denial is removed', async () => {
+    await renderJournal([createTask()], { initialView: 'calendar', waitForTitle: null });
+    await screen.findByTestId('task-calendar-task-101');
+    fireEvent(window, new StorageEvent('storage', { key: 'payplanner-offline-calendar-denied:8', newValue: 'revoked', storageArea: localStorage }));
+    fireEvent(window, new StorageEvent('storage', { key: 'payplanner-offline-calendar-denied:7', oldValue: 'revoked', newValue: null, storageArea: localStorage }));
+    expect(screen.getByTestId('task-calendar-task-101')).toBeTruthy();
+    expect(toastMock.error).not.toHaveBeenCalledWith(expect.stringContaining('Доступ к сохранённому календарю изменился'), 'Журнал задач');
+  });
+
+  it('ignores a late calendar response after access is revoked in another tab', async () => {
+    await renderJournal([createTask()], { initialView: 'calendar', waitForTitle: null });
+    await screen.findByTestId('task-calendar-task-101');
+    let resolve!: (response: { items: ReturnType<typeof createTask>[]; page: number; pageSize: number; total: number }) => void;
+    apiMock.getTaskJournalItems.mockClear();
+    apiMock.getTaskJournalItems.mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+    fireEvent(window, new Event('pp.task_journal.changed'));
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenCalled());
+    fireEvent(window, new StorageEvent('storage', { key: 'payplanner-offline-calendar-denied:7', newValue: 'revoked', storageArea: localStorage }));
+    expect(screen.queryByTestId('task-calendar-task-101')).toBeNull();
+    await act(async () => { resolve({ items: [createTask()], page: 1, pageSize: 200, total: 1 }); });
+    expect(screen.queryByTestId('task-calendar-task-101')).toBeNull();
+  });
+
+  it.each([null, '8'])('hides an open calendar when another tab changes its owner to %s', async (newOwner) => {
+    await renderJournal([createTask()], { initialView: 'calendar', waitForTitle: null });
+    await screen.findByTestId('task-calendar-task-101');
+    fireEvent(window, new StorageEvent('storage', { key: 'payplanner-offline-calendar-owner', oldValue: '7', newValue: '7', storageArea: localStorage }));
+    expect(screen.getByTestId('task-calendar-task-101')).toBeTruthy();
+    fireEvent(window, new StorageEvent('storage', { key: 'payplanner-offline-calendar-owner', oldValue: '7', newValue: newOwner, storageArea: localStorage }));
+    expect(screen.queryByTestId('task-calendar-task-101')).toBeNull();
+  });
+
+  it.each([401, 403])('does not expose cached calendar after access denial %s', async (status) => {
+    apiMock.getFeatureFlags.mockResolvedValue({ legal: { offlineCalendarReadOnly: true } });
+    apiMock.getTaskJournalItems.mockRejectedValue(Object.assign(new Error('Denied'), { status }));
+    offlineCalendarMock.loadOfflineCalendarSnapshot.mockResolvedValue({
+      schemaVersion: 1, userId: 7, trustedDevice: true,
+      syncedAt: '2026-07-31T08:00:00.000Z', expiresAt: '2026-08-07T08:00:00.000Z',
+      items: [createTask({ title: 'Закрытые сведения' })],
+    });
+    render(<TaskJournal initialView="calendar" />);
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalled());
+    expect(offlineCalendarMock.loadOfflineCalendarSnapshot).not.toHaveBeenCalled();
+    expect(offlineCalendarMock.revokeOfflineCalendarSnapshot).toHaveBeenCalledWith(7);
+    expect(screen.queryByText('Закрытые сведения')).toBeNull();
+    expect(screen.queryByText('Офлайн-календарь · только просмотр')).toBeNull();
+  });
+
+  it('removes previously visible calendar tasks when access is revoked during refresh', async () => {
+    await renderJournal([createTask({ title: 'Прежде доступная задача' })], { initialView: 'calendar', waitForTitle: null });
+    expect(await screen.findByTestId('task-calendar-task-101')).toBeTruthy();
+    apiMock.getTaskJournalItems.mockRejectedValue(Object.assign(new Error('Denied'), { status: 403 }));
+    fireEvent.click(screen.getByRole('button', { name: /Нагрузка/i }));
+    await waitFor(() => expect(offlineCalendarMock.revokeOfflineCalendarSnapshot).toHaveBeenCalledWith(7));
+    expect(screen.queryByText('Прежде доступная задача')).toBeNull();
+    expect(screen.queryByTestId('task-timeline-task-101')).toBeNull();
+  });
+
+  it('rechecks the task list when the current role permissions change', async () => {
+    authState.user.role = { id: 42 };
+    await renderJournal([createTask()], { initialView: 'calendar', waitForTitle: null });
+    await screen.findByTestId('task-calendar-task-101');
+    apiMock.getTaskJournalItems.mockRejectedValue(Object.assign(new Error('Denied'), { status: 403 }));
+    fireEvent(window, new CustomEvent('pp.permissions.changed', { detail: { roleId: 42 } }));
+    await waitFor(() => expect(offlineCalendarMock.revokeOfflineCalendarSnapshot).toHaveBeenCalledWith(7));
+    expect(screen.queryByTestId('task-calendar-task-101')).toBeNull();
+  });
+
+  it('replaces the old offline snapshot when a permission refresh returns an empty calendar', async () => {
+    authState.user.role = { id: 42 };
+    apiMock.getFeatureFlags.mockResolvedValue({ legal: { offlineCalendarReadOnly: true } });
+    await renderJournal([createTask()], { initialView: 'calendar', waitForTitle: null });
+    await waitFor(() => expect(offlineCalendarMock.saveOfflineCalendarSnapshot).toHaveBeenCalled());
+    offlineCalendarMock.saveOfflineCalendarSnapshot.mockClear();
+    offlineCalendarMock.revokeOfflineCalendarSnapshot.mockClear();
+    apiMock.getTaskJournalItems.mockResolvedValue({ items: [], page: 1, pageSize: 200, total: 0 });
+    fireEvent(window, new CustomEvent('pp.permissions.changed', { detail: { roleId: 42 } }));
+    await waitFor(() => expect(offlineCalendarMock.revokeOfflineCalendarSnapshot).toHaveBeenCalledWith(7));
+    await waitFor(() => expect(offlineCalendarMock.saveOfflineCalendarSnapshot).toHaveBeenCalledWith(7, [], false));
+  });
+
+  it('keeps the offline snapshot on a network failure while permissions are being refreshed', async () => {
+    authState.user.role = { id: 42 };
+    apiMock.getFeatureFlags.mockResolvedValue({ legal: { offlineCalendarReadOnly: true } });
+    offlineCalendarMock.loadOfflineCalendarSnapshot.mockResolvedValue({
+      schemaVersion: 1, userId: 7, trustedDevice: false,
+      syncedAt: '2026-07-31T08:00:00.000Z', expiresAt: '2026-08-07T08:00:00.000Z',
+      items: [createTask({ title: 'Сохранённая задача' })],
+    });
+    await renderJournal([createTask()], { initialView: 'calendar', waitForTitle: null });
+    await screen.findByTestId('task-calendar-task-101');
+    offlineCalendarMock.revokeOfflineCalendarSnapshot.mockClear();
+    apiMock.getTaskJournalItems.mockRejectedValue(new Error('Network unavailable'));
+    fireEvent(window, new CustomEvent('pp.permissions.changed', { detail: { roleId: 42 } }));
+    expect(await screen.findByText('Офлайн-календарь · только просмотр')).toBeTruthy();
+    expect(offlineCalendarMock.revokeOfflineCalendarSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('replaces the old snapshot before changing trusted-device disclosure', async () => {
+    apiMock.getFeatureFlags.mockResolvedValue({ legal: { offlineCalendarReadOnly: true } });
+    await renderJournal([createTask()], { initialView: 'calendar', waitForTitle: null });
+    await waitFor(() => expect(offlineCalendarMock.saveOfflineCalendarSnapshot).toHaveBeenCalled());
+    offlineCalendarMock.revokeOfflineCalendarSnapshot.mockClear();
+    offlineCalendarMock.restoreOfflineCalendarAccess.mockClear();
+    fireEvent.click(screen.getByRole('switch', { name: 'Сохранять названия задач на доверенном устройстве' }));
+    await waitFor(() => expect(offlineCalendarMock.setOfflineCalendarTrustedDevice).toHaveBeenCalledWith(7, true));
+    await waitFor(() => expect(offlineCalendarMock.revokeOfflineCalendarSnapshot).toHaveBeenCalledWith(7));
+    await waitFor(() => expect(offlineCalendarMock.restoreOfflineCalendarAccess).toHaveBeenCalledWith(7));
+    await waitFor(() => expect(offlineCalendarMock.saveOfflineCalendarSnapshot).toHaveBeenCalledWith(7, expect.any(Array), true));
+  });
+
+  it('does not save the old snapshot if trusted-device settings change during a permissions refresh', async () => {
+    authState.user.role = { id: 42 };
+    apiMock.getFeatureFlags.mockResolvedValue({ legal: { offlineCalendarReadOnly: true } });
+    await renderJournal([createTask()], { initialView: 'calendar', waitForTitle: null });
+    await waitFor(() => expect(offlineCalendarMock.saveOfflineCalendarSnapshot).toHaveBeenCalled());
+    offlineCalendarMock.saveOfflineCalendarSnapshot.mockClear();
+    apiMock.getTaskJournalItems.mockClear();
+    let resolve!: (value: { items: []; page: number; pageSize: number; total: number }) => void;
+    apiMock.getTaskJournalItems.mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+    fireEvent(window, new CustomEvent('pp.permissions.changed', { detail: { roleId: 42 } }));
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('switch', { name: 'Сохранять названия задач на доверенном устройстве' }));
+    await waitFor(() => expect(offlineCalendarMock.setOfflineCalendarTrustedDevice).toHaveBeenCalledWith(7, true));
+    expect(offlineCalendarMock.saveOfflineCalendarSnapshot).not.toHaveBeenCalled();
+    resolve({ items: [], page: 1, pageSize: 200, total: 0 });
+    await waitFor(() => expect(offlineCalendarMock.saveOfflineCalendarSnapshot).toHaveBeenCalledWith(7, [], true));
   });
 
   it('opens a task from the list title and exposes full hover text for clipped fields', async () => {

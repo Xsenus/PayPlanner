@@ -1188,7 +1188,7 @@ export function NotificationCenter({
                     Не беспокоить
                   </span>
                   <span className="mt-1 block max-w-2xl text-xs leading-5 text-slate-500">
-                    Вне рабочего времени CRM оставит события в центре уведомлений, но не будет показывать всплывающие сообщения, Push, Email и Telegram.
+                    Вне рабочего времени CRM оставит события в центре уведомлений и ограничит всплывающие сообщения, Push, Email, Telegram, SMS и MAX с учётом настройки срочных уведомлений ниже.
                   </span>
                 </span>
               </label>

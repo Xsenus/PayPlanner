@@ -2,10 +2,12 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Filters;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -30,8 +32,11 @@ public class ClientPassportController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> Get(int clientId, CancellationToken ct)
     {
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Clients, ct);
+        if (visibility is null) return Forbid();
         var lookup = await _db.Clients
             .AsNoTracking()
+            .ApplyClientVisibility(visibility)
             .Where(client => client.Id == clientId)
             .Select(client => new
             {
@@ -71,7 +76,10 @@ public class ClientPassportController : ControllerBase
     [RequireSectionPermission(RolePermissionCatalog.Clients, RequireSectionPermissionOperations.Edit)]
     public async Task<IActionResult> Upsert(int clientId, [FromBody] UpsertClientPassportRequest model, CancellationToken ct)
     {
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Clients, ct);
+        if (visibility is null) return Forbid();
         var lookup = await _db.Clients
+            .ApplyClientVisibility(visibility)
             .Where(client => client.Id == clientId)
             .Select(client => new
             {

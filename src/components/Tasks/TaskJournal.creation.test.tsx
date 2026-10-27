@@ -1,4 +1,4 @@
-import { setupTaskJournalTests, apiMock, dialogMock, casesState, legalEntitiesState, todayAt, toDatetimeLocalInputValue, dateKey, createTask, renderJournal, openFirstTaskForEdit, openNewTaskFormAsGlobalInternal, continueTaskWizardForClient } from './TaskJournal.test-support';
+import { setupTaskJournalTests, apiMock, dialogMock, casesState, legalEntitiesState, authState, permissionsState, todayAt, toDatetimeLocalInputValue, dateKey, createTask, renderJournal, openFirstTaskForEdit, openNewTaskFormAsGlobalInternal, continueTaskWizardForClient } from './TaskJournal.test-support';
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ClientCase, LegalEntitySummary } from '../../types';
@@ -33,6 +33,90 @@ describe('TaskJournal', () => {
 
     expect((search as HTMLInputElement).value).toBe('Иванов Иван Иванович');
     expect(screen.queryByRole('listbox', { name: 'Клиент' })).toBeNull();
+  });
+
+  it('keeps the chosen client and case when a replacement search is cancelled', async () => {
+    await renderJournal();
+    fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
+    await screen.findByRole('heading', { name: 'Выберите клиента и дело' });
+    const search = screen.getByRole('combobox', { name: 'Клиент' }) as HTMLInputElement;
+    fireEvent.focus(search);
+    fireEvent.click(within(await screen.findByRole('listbox', { name: 'Клиент' })).getByRole('option', { name: /Иванов Иван Иванович/ }));
+    const caseSelect = screen.getByTestId('task-billing-wizard-case') as HTMLSelectElement;
+    fireEvent.change(caseSelect, { target: { value: '100' } });
+    fireEvent.focus(search);
+    fireEvent.change(search, { target: { value: 'Другой' } });
+    expect(caseSelect.value).toBe('100');
+    expect((screen.getByRole('button', { name: 'Проверить договор' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Неоплачиваемая задача' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.keyDown(search, { key: 'Escape' });
+    expect(search.value).toContain('Иванов Иван Иванович');
+    expect(caseSelect.value).toBe('100');
+    expect(screen.queryByRole('listbox', { name: 'Клиент' })).toBeNull();
+    expect((screen.getByRole('button', { name: 'Проверить договор' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(apiMock.getTaskBillingContext).not.toHaveBeenCalled();
+  });
+
+  it('clears the previous case only after a different client is selected', async () => {
+    legalEntitiesState.legalEntities = [{ id: 20, shortName: 'ООО Ромашка', inn: '5400000000' } as LegalEntitySummary];
+    await renderJournal();
+    fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
+    await screen.findByRole('heading', { name: 'Выберите клиента и дело' });
+    const search = screen.getByRole('combobox', { name: 'Клиент' }) as HTMLInputElement;
+    fireEvent.focus(search);
+    fireEvent.click(within(await screen.findByRole('listbox', { name: 'Клиент' })).getByRole('option', { name: /Иванов Иван Иванович/ }));
+    const caseSelect = screen.getByTestId('task-billing-wizard-case') as HTMLSelectElement;
+    fireEvent.change(caseSelect, { target: { value: '100' } });
+    fireEvent.focus(search);
+    fireEvent.change(search, { target: { value: 'Ромашка' } });
+    expect(caseSelect.value).toBe('100');
+    fireEvent.click(within(screen.getByRole('listbox', { name: 'Клиент' })).getByRole('option', { name: /ООО Ромашка/ }));
+    expect(search.value).toContain('ООО Ромашка');
+    expect(caseSelect.value).toBe('');
+    expect((screen.getByRole('button', { name: 'Проверить договор' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('selects a searched client with arrow keys and Enter', async () => {
+    legalEntitiesState.legalEntities = [
+      { id: 20, shortName: 'ООО Ромашка', inn: '5400000000' } as LegalEntitySummary,
+      { id: 21, shortName: 'ООО Василек', inn: '7700000000' } as LegalEntitySummary,
+    ];
+    await renderJournal();
+    fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
+    await screen.findByRole('heading', { name: 'Выберите клиента и дело' });
+    const search = screen.getByRole('combobox', { name: 'Клиент' }) as HTMLInputElement;
+    fireEvent.focus(search);
+    fireEvent.change(search, { target: { value: 'ООО' } });
+    const options = within(screen.getByRole('listbox', { name: 'Клиент' })).getAllByRole('option');
+    expect(options).toHaveLength(2);
+    fireEvent.keyDown(search, { key: 'ArrowDown' });
+    expect(search.getAttribute('aria-activedescendant')).toBe(options[0].id);
+    fireEvent.keyDown(search, { key: 'ArrowDown' });
+    expect(search.getAttribute('aria-activedescendant')).toBe(options[1].id);
+    fireEvent.keyDown(search, { key: 'ArrowUp' });
+    expect(search.getAttribute('aria-activedescendant')).toBe(options[0].id);
+    fireEvent.keyDown(search, { key: 'ArrowUp' });
+    expect(search.getAttribute('aria-activedescendant')).toBe(options[1].id);
+    fireEvent.keyDown(search, { key: 'Enter' });
+    expect(options[1].textContent).toContain(search.value);
+    expect(search.value).toMatch(/^ООО /);
+    expect(screen.queryByRole('listbox', { name: 'Клиент' })).toBeNull();
+  });
+
+  it('clears the highlighted option when the client search changes', async () => {
+    legalEntitiesState.legalEntities = [{ id: 20, shortName: 'ООО Ромашка', inn: '5400000000' } as LegalEntitySummary];
+    await renderJournal();
+    fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
+    await screen.findByRole('heading', { name: 'Выберите клиента и дело' });
+    const search = screen.getByRole('combobox', { name: 'Клиент' });
+    fireEvent.focus(search);
+    fireEvent.keyDown(search, { key: 'ArrowDown' });
+    expect(search.getAttribute('aria-activedescendant')).toBeTruthy();
+    fireEvent.change(search, { target: { value: 'отсутствующий клиент' } });
+    expect(search.getAttribute('aria-activedescendant')).toBeNull();
+    fireEvent.keyDown(search, { key: 'Enter' });
+    expect((search as HTMLInputElement).value).toBe('отсутствующий клиент');
+    expect(apiMock.getTaskBillingContext).not.toHaveBeenCalled();
   });
 
   it('creates an internal task without a counterparty', async () => {
@@ -635,7 +719,7 @@ describe('TaskJournal', () => {
     expect(within(approverList).getByText('first-approver@example.com')).toBeTruthy();
     expect(within(approverList).getByText('Второй согласующий')).toBeTruthy();
 
-    fireEvent.click(within(approverList).getByRole('button', { name: 'Удалить участника Первый согласующий' }));
+    fireEvent.click(within(approverList).getByRole('button', { name: 'Удалить согласующего Первый согласующий' }));
 
     expect(within(approverList).queryByText('Первый согласующий')).toBeNull();
     expect(within(approverList).getByText('Второй согласующий')).toBeTruthy();
@@ -714,7 +798,7 @@ describe('TaskJournal', () => {
     expect(within(observerList).getByText('first-observer@example.com')).toBeTruthy();
     expect(within(observerList).getByText('Второй наблюдатель')).toBeTruthy();
 
-    fireEvent.click(within(observerList).getByRole('button', { name: 'Удалить участника Первый наблюдатель' }));
+    fireEvent.click(within(observerList).getByRole('button', { name: 'Удалить наблюдателя Первый наблюдатель' }));
 
     expect(within(observerList).queryByText('Первый наблюдатель')).toBeNull();
     expect(within(observerList).getByText('Второй наблюдатель')).toBeTruthy();
@@ -766,10 +850,10 @@ describe('TaskJournal', () => {
     } else {
       const approverGroup = await within(card).findByTestId('task-legacy-approver-group');
       const observerGroup = await within(card).findByTestId('task-legacy-observer-group');
-      expect(within(approverGroup).getByRole('button', { name: 'Удалить участника Текущий согласующий' })).toBeTruthy();
+      expect(within(approverGroup).getByRole('button', { name: 'Удалить согласующего Текущий согласующий' })).toBeTruthy();
       expect(within(approverGroup).getByText('Принимают решение по задаче по очереди.')).toBeTruthy();
       expect(within(approverGroup).queryByText('Текущий наблюдатель')).toBeNull();
-      expect(within(observerGroup).getByRole('button', { name: 'Удалить участника Текущий наблюдатель' })).toBeTruthy();
+      expect(within(observerGroup).getByRole('button', { name: 'Удалить наблюдателя Текущий наблюдатель' })).toBeTruthy();
       expect(within(observerGroup).getByText('Следят за задачей, но не принимают решение.')).toBeTruthy();
       expect(within(observerGroup).queryByText('Текущий согласующий')).toBeNull();
     }
@@ -807,7 +891,7 @@ describe('TaskJournal', () => {
     await openFirstTaskForEdit();
     const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
 
-    fireEvent.click(within(card).getByRole('button', { name: 'Удалить участника Ошибочный согласующий' }));
+    fireEvent.click(within(card).getByRole('button', { name: 'Удалить согласующего Ошибочный согласующий' }));
 
     expect((within(card).getByTestId('task-editor-status-select') as HTMLSelectElement).value).toBe('inProgress');
     expect(within(card).queryByTitle('Задача находится на согласовании')).toBeNull();
@@ -878,12 +962,12 @@ describe('TaskJournal', () => {
       expect(within(await within(editCard).findByTestId('task-modern-approver-list')).getByText('Первый согласующий')).toBeTruthy();
       expect(within(await within(editCard).findByTestId('task-modern-observer-list')).getByText('Первый наблюдатель')).toBeTruthy();
     } else {
-      expect(within(editCard).getByRole('button', { name: 'Удалить участника Первый согласующий' })).toBeTruthy();
-      expect(within(editCard).getByRole('button', { name: 'Удалить участника Первый наблюдатель' })).toBeTruthy();
+      expect(within(editCard).getByRole('button', { name: 'Удалить согласующего Первый согласующий' })).toBeTruthy();
+      expect(within(editCard).getByRole('button', { name: 'Удалить наблюдателя Первый наблюдатель' })).toBeTruthy();
     }
-    fireEvent.click(within(editCard).getByRole('button', { name: 'Удалить участника Первый согласующий' }));
-    expect(within(editCard).queryByRole('button', { name: 'Удалить участника Первый согласующий' })).toBeNull();
-    expect(within(editCard).getByRole('button', { name: 'Удалить участника Первый наблюдатель' })).toBeTruthy();
+    fireEvent.click(within(editCard).getByRole('button', { name: 'Удалить согласующего Первый согласующий' }));
+    expect(within(editCard).queryByRole('button', { name: 'Удалить согласующего Первый согласующий' })).toBeNull();
+    expect(within(editCard).getByRole('button', { name: 'Удалить наблюдателя Первый наблюдатель' })).toBeTruthy();
     fireEvent.click(within(editCard).getByRole('button', { name: 'Сохранить' }));
 
     await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
@@ -906,9 +990,27 @@ describe('TaskJournal', () => {
     await openFirstTaskForEdit();
     const reopenedCard = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
 
-    expect(within(reopenedCard).queryByRole('button', { name: 'Удалить участника Первый согласующий' })).toBeNull();
-    expect(within(reopenedCard).getByRole('button', { name: 'Удалить участника Первый наблюдатель' })).toBeTruthy();
+    expect(within(reopenedCard).queryByRole('button', { name: 'Удалить согласующего Первый согласующий' })).toBeNull();
+    expect(within(reopenedCard).getByRole('button', { name: 'Удалить наблюдателя Первый наблюдатель' })).toBeTruthy();
   }, 30_000);
+
+  it.each(['legacy', 'modern'] as const)('identifies the role when removing the same participant in the %s card', async (taskCardWindowMode) => {
+    const participants = [
+      { userId: 8, displayName: 'Один сотрудник', role: 'approver' as const },
+      { userId: 8, displayName: 'Один сотрудник', role: 'observer' as const },
+    ];
+    await renderJournal([createTask({ participants })], { settings: { taskCardWindowMode } });
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    fireEvent.click(within(card).getByRole('button', { name: 'Удалить согласующего Один сотрудник' }));
+    expect(within(card).queryByRole('button', { name: 'Удалить согласующего Один сотрудник' })).toBeNull();
+    expect(within(card).getByRole('button', { name: 'Удалить наблюдателя Один сотрудник' })).toBeTruthy();
+    fireEvent.click(within(card).getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
+    const payload = apiMock.updateTaskJournalItem.mock.calls[0][1];
+    expect(payload.participants).toEqual(expect.arrayContaining([expect.objectContaining({ userId: 8, role: 'observer' })]));
+    expect(payload.participants.some((participant: { userId?: number | null; role: string }) => participant.userId === 8 && participant.role === 'approver')).toBe(false);
+  });
 
   it('sends a change comment with task edits', async () => {
     await renderJournal();
@@ -1000,6 +1102,50 @@ describe('TaskJournal', () => {
       status: 'cancelled',
     })));
     expect(apiMock.deleteTaskJournalItem).not.toHaveBeenCalled();
+  });
+
+  it.each(['legacy', 'modern'] as const)('duplicates a task from the %s card without opening the menu', async (taskCardWindowMode) => {
+    await renderJournal([createTask({ status: 'new' })], { settings: { taskCardWindowMode } });
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    const button = within(card).getByRole('button', { name: 'Быстро дублировать задачу' });
+    expect(button.getAttribute('title')).toContain('Создать отдельную копию');
+    fireEvent.click(button);
+    await screen.findByRole('heading', { name: 'Выберите клиента и дело' });
+    expect(apiMock.createTaskJournalItem).not.toHaveBeenCalled();
+  });
+
+  it.each(['legacy', 'modern'] as const)('confirms cancellation from the %s card without opening the menu', async (taskCardWindowMode) => {
+    await renderJournal([createTask({ status: 'new' })], { settings: { taskCardWindowMode } });
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    const button = within(card).getByRole('button', { name: 'Быстро отменить задачу' });
+    expect(button.getAttribute('title')).toContain('статусом «Отменена»');
+    fireEvent.click(button);
+    expect(dialogMock.confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Отменить задачу?' }));
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({ status: 'cancelled' })));
+    expect(apiMock.deleteTaskJournalItem).not.toHaveBeenCalled();
+  });
+
+  it.each(['legacy', 'modern'] as const)('hides unavailable quick actions in the %s card', async (taskCardWindowMode) => {
+    authState.isAdmin = false;
+    permissionsState.taskCanCreate = false;
+    await renderJournal([createTask({ status: 'new', authorUserId: 7 })], { settings: { taskCardWindowMode } });
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    expect(within(card).queryByRole('button', { name: 'Быстро дублировать задачу' })).toBeNull();
+    expect(within(card).getByRole('button', { name: 'Быстро отменить задачу' })).toBeTruthy();
+  });
+
+  it.each(['legacy', 'modern'] as const)('hides quick actions in read-only %s cards', async (taskCardWindowMode) => {
+    authState.isAdmin = false;
+    permissionsState.taskCanEdit = false;
+    permissionsState.taskCanEditOthers = false;
+    await renderJournal([createTask({ status: 'new' })], { settings: { taskCardWindowMode } });
+    fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    expect(within(card).queryByRole('button', { name: 'Быстро дублировать задачу' })).toBeNull();
+    expect(within(card).queryByRole('button', { name: 'Быстро отменить задачу' })).toBeNull();
   });
 
   it('keeps duplicate and cancel actions in the compact modern card menu', async () => {

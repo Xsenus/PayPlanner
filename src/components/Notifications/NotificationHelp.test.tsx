@@ -51,6 +51,7 @@ describe('NotificationHelp', () => {
     expect(help.getByText(/Отключённое событие не создаёт новых уведомлений/)).toBeTruthy();
     expect(help.getByText(/выключенный канал исключает только этот способ доставки/)).toBeTruthy();
     expect(help.getByText(/Личные настройки имеют приоритет над правилами роли/)).toBeTruthy();
+    expect(help.getByText(/Ранее полученные уведомления этого типа не удаляются, но скрыты в центре/)).toBeTruthy();
     expect(help.getByText(/не подключает бота или устройство автоматически/)).toBeTruthy();
     expect(help.getByText(/«Включить на этом устройстве»/)).toBeTruthy();
   });

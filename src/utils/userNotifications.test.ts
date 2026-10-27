@@ -22,6 +22,7 @@ describe('isTaskJournalRealtimeChange', () => {
       source: 'realtime',
       reason: 'reconnected',
     })).toBe(true);
+    expect(isTaskJournalRealtimeChange({ source: 'realtime', reason: 'user-role-changed' })).toBe(true);
   });
 
   it('ignores inbox actions and unrelated realtime notifications', () => {

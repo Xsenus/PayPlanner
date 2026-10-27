@@ -24,6 +24,8 @@ public partial class AuthService
     private readonly IWebHostEnvironment _environment;
     private readonly IExternalCalendarSyncCoordinator? _externalCalendarSyncCoordinator;
     private readonly INotificationService? _notificationService;
+    private readonly IUserRoleChangePublisher? _userRoleChangePublisher;
+    private readonly ILogger<AuthService>? _logger;
     private readonly IPasswordHasher<User> _passwordHasher;
     private static readonly User InvalidPasswordUser = new();
     private static readonly string InvalidPasswordHash = new PasswordHasher<User>()
@@ -38,7 +40,9 @@ public partial class AuthService
         IWebHostEnvironment environment,
         IPasswordHasher<User> passwordHasher,
         INotificationService? notificationService = null,
-        IExternalCalendarSyncCoordinator? externalCalendarSyncCoordinator = null)
+        IExternalCalendarSyncCoordinator? externalCalendarSyncCoordinator = null,
+        IUserRoleChangePublisher? userRoleChangePublisher = null,
+        ILogger<AuthService>? logger = null)
     {
         _context = context;
         _configuration = configuration;
@@ -47,6 +51,8 @@ public partial class AuthService
         _passwordHasher = passwordHasher;
         _notificationService = notificationService;
         _externalCalendarSyncCoordinator = externalCalendarSyncCoordinator;
+        _userRoleChangePublisher = userRoleChangePublisher;
+        _logger = logger;
     }
 
     private static string NormalizeEmail(string email)
@@ -391,6 +397,7 @@ public partial class AuthService
 
         _context.Users.Remove(user);
         await _context.SaveChangesAsync();
+        await PublishDeletedUserVisibilityAsync(user);
         return true;
     }
 
@@ -524,8 +531,30 @@ public partial class AuthService
 
         var previousRoleId = user.RoleId;
         var wasActive = user.IsActive;
+        var previousDepartmentId = user.DepartmentId;
+        var previousDepartment = user.Department?.Trim() ?? string.Empty;
         await ApplyUserChangesAsync(user, request, allowAdministrativeFields: true);
         await _context.SaveChangesAsync();
+
+        var departmentChanged = previousDepartmentId != user.DepartmentId
+            || !string.Equals(previousDepartment, user.Department?.Trim() ?? string.Empty, StringComparison.Ordinal)
+            || wasActive != user.IsActive;
+        if (departmentChanged && _userRoleChangePublisher is not null)
+        {
+            try
+            {
+                var affectedIds = await FindDepartmentVisibilityRecipientsAsync(
+                    [(previousDepartmentId, previousDepartment), (user.DepartmentId, user.Department)]);
+                if (user.IsActive && user.IsApproved) affectedIds.Add(user.Id);
+                await _userRoleChangePublisher.PublishUsersRoleChangedAsync(affectedIds.Distinct().ToArray());
+            }
+            catch (Exception ex) { _logger?.LogWarning(ex, "Failed to publish department visibility changes for user {UserId}.", user.Id); }
+        }
+        else if (previousRoleId != user.RoleId && user.IsActive && user.IsApproved && _userRoleChangePublisher is not null)
+        {
+            try { await _userRoleChangePublisher.PublishUserRoleChangedAsync(user.Id); }
+            catch (Exception ex) { _logger?.LogWarning(ex, "Failed to publish role assignment change for user {UserId}.", user.Id); }
+        }
 
         if (wasActive && !user.IsActive && _externalCalendarSyncCoordinator is not null)
         {
@@ -536,6 +565,26 @@ public partial class AuthService
             .FirstAsync(u => u.Id == user.Id);
 
         return MapToDto(refreshedUser);
+    }
+
+    private async Task<List<int>> FindDepartmentVisibilityRecipientsAsync(
+        IEnumerable<(int? Id, string? Name)> departments,
+        CancellationToken cancellationToken = default)
+    {
+        return await DepartmentVisibilityRecipients.FindAsync(_context, departments, cancellationToken);
+    }
+
+    private async Task PublishDeletedUserVisibilityAsync(User user)
+    {
+        if (_userRoleChangePublisher is null) return;
+        var recipients = new List<int> { user.Id };
+        if (user.IsActive)
+        {
+            try { recipients.AddRange(await FindDepartmentVisibilityRecipientsAsync([(user.DepartmentId, user.Department)])); }
+            catch (Exception ex) { _logger?.LogWarning(ex, "Failed to find affected department members after user {UserId} deletion.", user.Id); }
+        }
+        try { await _userRoleChangePublisher.PublishUsersRoleChangedAsync(recipients.Distinct().ToArray()); }
+        catch (Exception ex) { _logger?.LogWarning(ex, "Failed to publish deleted user access changes for user {UserId}.", user.Id); }
     }
 
     public async Task<bool> DeleteUserAsync(int id, int actorUserId)
@@ -568,6 +617,7 @@ public partial class AuthService
 
         _context.Users.Remove(user);
         await _context.SaveChangesAsync();
+        await PublishDeletedUserVisibilityAsync(user);
         return true;
     }
 

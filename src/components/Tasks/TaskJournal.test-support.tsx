@@ -71,6 +71,8 @@ const offlineCalendarMock = vi.hoisted(() => ({
   clearOfflineCalendarSnapshot: vi.fn(),
   getOfflineCalendarTrustedDevice: vi.fn(),
   loadOfflineCalendarSnapshot: vi.fn(),
+  revokeOfflineCalendarSnapshot: vi.fn(),
+  restoreOfflineCalendarAccess: vi.fn(),
   saveOfflineCalendarSnapshot: vi.fn(),
   setOfflineCalendarTrustedDevice: vi.fn(),
 }));
@@ -87,7 +89,7 @@ const legalEntitiesState = vi.hoisted(() => ({
   legalEntities: [] as LegalEntitySummary[],
 }));
 
-const authState = vi.hoisted((): { user: { id: number; fullName: string; email: string; departmentId?: number | null; department?: string | null }; isAdmin: boolean } => ({
+const authState = vi.hoisted((): { user: { id: number; fullName: string; email: string; role?: { id: number }; departmentId?: number | null; department?: string | null }; isAdmin: boolean } => ({
   user: { id: 7, fullName: 'Администратор', email: 'admin@example.com' },
   isAdmin: true,
 }));
@@ -114,7 +116,7 @@ vi.mock('../../services/api', () => ({
   apiService: apiMock,
 }));
 
-vi.mock('../../services/offlineCalendarStore', () => offlineCalendarMock);
+vi.mock('../../services/offlineCalendarStore', () => ({ ...offlineCalendarMock, OFFLINE_CALENDAR_DENIED_KEY_PREFIX: 'payplanner-offline-calendar-denied:', OFFLINE_CALENDAR_OWNER_KEY: 'payplanner-offline-calendar-owner' }));
 
 vi.mock('../Messenger/InternalMessenger', () => ({
   TaskChatPanel: ({ taskId }: { taskId: number }) => <div data-testid="task-chat-panel">Чат задачи {taskId}</div>,
@@ -357,6 +359,7 @@ async function renderJournal(
     mode?: 'journal' | 'approvals' | 'untriaged';
     assignees?: TaskJournalAssignee[];
     withRoute?: boolean;
+    withRoleRerender?: boolean;
     unmountOnTaskClose?: boolean;
     nextRouteTaskId?: number;
     waitForTitle?: string | null;
@@ -451,8 +454,10 @@ async function renderJournal(
   function RoutedJournal() {
     const [routeTaskId, setRouteTaskId] = useState<number | null>(null);
     const [returned, setReturned] = useState(false);
+    const [, setRoleRevision] = useState(0);
     if (returned) return <div data-testid="returned-to-case">Возврат в дело</div>;
     return (<>
+      {options.withRoleRerender ? <button onClick={() => setRoleRevision((value) => value + 1)}>Обновить роль для теста</button> : null}
       {options.nextRouteTaskId ? <button onClick={() => setRouteTaskId(options.nextRouteTaskId!)}>Перейти в другую задачу</button> : null}
       <TaskJournal
         initialView={options.initialView}
@@ -597,6 +602,8 @@ export function setupTaskJournalTests() {
     offlineCalendarMock.clearOfflineCalendarSnapshot.mockResolvedValue(undefined);
     offlineCalendarMock.getOfflineCalendarTrustedDevice.mockResolvedValue(false);
     offlineCalendarMock.loadOfflineCalendarSnapshot.mockResolvedValue(null);
+    offlineCalendarMock.revokeOfflineCalendarSnapshot.mockResolvedValue(undefined);
+    offlineCalendarMock.restoreOfflineCalendarAccess.mockResolvedValue(true);
     offlineCalendarMock.saveOfflineCalendarSnapshot.mockResolvedValue(null);
     offlineCalendarMock.setOfflineCalendarTrustedDevice.mockResolvedValue(undefined);
     apiMock.getTaskBillingContext.mockResolvedValue({

@@ -4,6 +4,8 @@ using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Filters;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Notifications;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -19,7 +21,25 @@ public class DictionariesAdminController : ControllerBase
     private const string DefaultServiceColorHex = "#0EA5E9";
 
     private readonly PaymentContext _db;
-    public DictionariesAdminController(PaymentContext db) => _db = db;
+    private readonly IUserRoleChangePublisher? _userRoleChangePublisher;
+    private readonly ILogger<DictionariesAdminController>? _logger;
+    public DictionariesAdminController(PaymentContext db, IUserRoleChangePublisher? userRoleChangePublisher = null, ILogger<DictionariesAdminController>? logger = null)
+    {
+        _db = db;
+        _userRoleChangePublisher = userRoleChangePublisher;
+        _logger = logger;
+    }
+
+    private async Task PublishDepartmentChangesAsync(List<User> changedUsers, List<(int? Id, string? Name)> affectedDepartments)
+    {
+        if (_userRoleChangePublisher is null || changedUsers.Count == 0) return;
+        var recipients = changedUsers.Where(user => user.IsActive && user.IsApproved).Select(user => user.Id).ToList();
+        try { recipients.AddRange(await DepartmentVisibilityRecipients.FindAsync(_db, affectedDepartments)); }
+        catch (Exception ex) { _logger?.LogWarning(ex, "Failed to find users affected by department dictionary changes."); }
+        if (recipients.Count == 0) return;
+        try { await _userRoleChangePublisher.PublishUsersRoleChangedAsync(recipients.Distinct().ToArray()); }
+        catch (Exception ex) { _logger?.LogWarning(ex, "Failed to publish department dictionary changes."); }
+    }
 
     private IActionResult InUseError(string title)
         => BadRequest($"Нельзя удалить элемент справочника \"{title}\", так как он используется в данных.");
@@ -453,6 +473,7 @@ public class DictionariesAdminController : ControllerBase
         var users = await _db.Users
             .Where(user => !user.DepartmentId.HasValue && user.Department == m.Name)
             .ToListAsync();
+        var affectedDepartments = users.Where(user => user.IsActive).Select(user => (user.DepartmentId, user.Department)).ToList();
         foreach (var user in users)
         {
             user.DepartmentId = m.Id;
@@ -463,6 +484,8 @@ public class DictionariesAdminController : ControllerBase
         if (users.Count > 0)
         {
             await _db.SaveChangesAsync();
+            affectedDepartments.Add((m.Id, m.Name));
+            await PublishDepartmentChangesAsync(users, affectedDepartments);
         }
 
         return Created($"/api/dictionaries/departments/{m.Id}", m);
@@ -487,6 +510,8 @@ public class DictionariesAdminController : ControllerBase
         var users = await _db.Users
             .Where(user => user.DepartmentId == id || user.Department == previousName)
             .ToListAsync();
+        var changedUsers = users.Where(user => user.DepartmentId != id || user.Department != e.Name).ToList();
+        var affectedDepartments = changedUsers.Where(user => user.IsActive).Select(user => (user.DepartmentId, user.Department)).ToList();
         foreach (var user in users)
         {
             user.DepartmentId = id;
@@ -495,6 +520,11 @@ public class DictionariesAdminController : ControllerBase
         }
 
         await _db.SaveChangesAsync();
+        if (changedUsers.Count > 0)
+        {
+            affectedDepartments.Add((id, e.Name));
+            await PublishDepartmentChangesAsync(changedUsers, affectedDepartments);
+        }
         return Ok(e);
     }
 

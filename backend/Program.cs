@@ -213,7 +213,10 @@ builder.Services.AddScoped<IExternalWorkOrderApprovalService, ExternalWorkOrderA
 builder.Services.AddScoped<IExternalWorkOrderApprovalNotifier, ExternalWorkOrderApprovalNotifier>();
 builder.Services.AddScoped<IClientPortalService, ClientPortalService>();
 builder.Services.AddScoped<ITelegramBotUpdateService, TelegramBotUpdateService>();
-builder.Services.AddScoped<IRealtimeNotificationPublisher, SignalRRealtimeNotificationPublisher>();
+builder.Services.AddScoped<SignalRRealtimeNotificationPublisher>();
+builder.Services.AddScoped<IRealtimeNotificationPublisher>(sp => sp.GetRequiredService<SignalRRealtimeNotificationPublisher>());
+builder.Services.AddScoped<IRolePermissionsChangePublisher>(sp => sp.GetRequiredService<SignalRRealtimeNotificationPublisher>());
+builder.Services.AddScoped<IUserRoleChangePublisher>(sp => sp.GetRequiredService<SignalRRealtimeNotificationPublisher>());
 builder.Services.AddScoped<IWebPushNotificationService, WebPushNotificationService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<ICaseDocumentNotificationLiveDispatcher>(sp => (ICaseDocumentNotificationLiveDispatcher)sp.GetRequiredService<INotificationService>());

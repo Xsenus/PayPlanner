@@ -398,6 +398,53 @@ describe('CasesRegistry', () => {
     expect(screen.getByText('Отдельная контрольная задача пока не требуется')).toBeTruthy();
   });
 
+  it('does not say control is paused when access to its summary is restricted', async () => {
+    vi.mocked(apiService.getCasesV2).mockResolvedValue({
+      items: [createCase({ inactivityControlExclusionReason: 'Сведения автоконтроля недоступны из-за ограничений доступа' })],
+      total: 1, page: 1, pageSize: 25,
+    });
+    render(<CasesRegistry />);
+    expect(await screen.findByText('Сведения недоступны')).toBeTruthy();
+    expect(screen.queryByText('Контроль приостановлен')).toBeNull();
+  });
+
+  it('explains and disables activity filtering without complete access', async () => {
+    vi.mocked(apiService.getCasesV2).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 25, canFilterActivity: false });
+    render(<CasesRegistry />);
+    expect(await screen.findByText('Фильтр активности доступен при полном доступе к задачам и заявкам.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('combobox', { name: /Фильтр активности дела/u }));
+    expect((screen.getByRole('option', { name: 'Есть движение или контроль не нужен' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('option', { name: 'Без движения по сроку' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('clears an active activity filter after access is revoked and reloads the registry', async () => {
+    vi.mocked(apiService.getCasesV2)
+      .mockResolvedValueOnce({ items: [createCase()], total: 1, page: 1, pageSize: 25, canFilterActivity: true })
+      .mockRejectedValueOnce(Object.assign(new Error('Forbidden'), { status: 403 }))
+      .mockResolvedValue({ items: [createCase()], total: 1, page: 1, pageSize: 25, canFilterActivity: false });
+    render(<CasesRegistry />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.change(screen.getByDisplayValue('Любая активность'), { target: { value: 'inactive' } });
+    expect(await screen.findByText('Фильтр активности сброшен: текущие права не позволяют его применять.')).toBeTruthy();
+    await waitFor(() => expect(apiService.getCasesV2).toHaveBeenLastCalledWith(
+      expect.objectContaining({ activity: undefined }), expect.any(Object),
+    ));
+    expect(await screen.findByText('Фильтр активности доступен при полном доступе к задачам и заявкам.')).toBeTruthy();
+  });
+
+  it('marks unavailable and partial task counts instead of presenting them as complete', async () => {
+    vi.mocked(apiService.getCasesV2).mockResolvedValue({
+      items: [
+        createCase({ id: 1, taskSummaryVisibility: 'none', overdueTaskCount: 0 }),
+        createCase({ id: 2, caseNumber: '2026-002', taskSummaryVisibility: 'partial', overdueTaskCount: 0 }),
+      ],
+      total: 2, page: 1, pageSize: 25,
+    });
+    render(<CasesRegistry />);
+    expect((await screen.findAllByText(/Недоступно|Сведения недоступны/u)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/доступные/u).length).toBeGreaterThan(0);
+  });
+
   it('lets the server use the configured inactivity period instead of sending a fixed threshold', async () => {
     render(<CasesRegistry />);
     await screen.findByText('ЗЕМЦОВ - банкротство');
@@ -575,6 +622,7 @@ describe('CasesRegistry', () => {
       expect(apiService.updateCaseControl).toHaveBeenCalledWith(1, true);
     });
     expect(await screen.findByText('Дело поставлено на контроль.')).toBeTruthy();
+    await waitFor(() => expect(apiService.getCasesV2).toHaveBeenCalledTimes(2));
   });
 
   it('exports the filtered registry through the backend export endpoint', async () => {

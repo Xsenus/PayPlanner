@@ -1223,6 +1223,31 @@ describe('CaseDetailPage', () => {
     expect(screen.queryByRole('button', { name: 'Зафиксировать результат' })).toBeNull();
   });
 
+  it('retries a failed case load without navigating away', async () => {
+    vi.mocked(apiService.getCaseV2).mockRejectedValueOnce(new Error('Временно не удалось загрузить дело'));
+    const onBack = vi.fn();
+    render(<CaseDetailPage caseId={15} onBack={onBack} />);
+    expect((await screen.findByRole('alert')).textContent).toContain('Временно не удалось загрузить дело');
+    expect(apiService.getCaseV2).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку' }));
+    expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
+    expect(apiService.getCaseV2).toHaveBeenCalledTimes(2);
+    expect(onBack).not.toHaveBeenCalled();
+  });
+
+  it('keeps the error and lets the user return when a case remains unavailable', async () => {
+    vi.mocked(apiService.getCaseV2).mockRejectedValue(new Error('Дело недоступно'));
+    const onBack = vi.fn();
+    render(<CaseDetailPage caseId={15} onBack={onBack} />);
+    await screen.findByText('Дело недоступно');
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку' }));
+    await waitFor(() => expect(apiService.getCaseV2).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('Дело недоступно')).toBeTruthy();
+    expect(onBack).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Вернуться к реестру' }));
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
   it('shows saved judicial amounts as currency without mixing them with the fee', async () => {
     vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
       courtClaimAmount: 100000.5,
@@ -1616,6 +1641,118 @@ describe('CaseDetailPage', () => {
     expect(screen.getByText('Заявление.docx')).toBeTruthy();
   });
 
+  it('shows a document loading error and retries without treating it as an empty list', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    vi.mocked(apiService.getCaseDocuments)
+      .mockRejectedValueOnce(new Error('Network unavailable'))
+      .mockRejectedValueOnce(new Error('Still unavailable'));
+    fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('Не удалось загрузить документы дела');
+    expect(screen.queryByText('Заявление.docx')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку документов' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('Не удалось загрузить документы дела');
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку документов' }));
+    expect(await screen.findByText('Заявление.docx')).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('ignores a late document error after leaving and reopening the documents tab', async () => {
+    let reject!: (error: Error) => void;
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    vi.mocked(apiService.getCaseDocuments).mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; }));
+    fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    await waitFor(() => expect(apiService.getCaseDocuments).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: 'Обзор' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    expect(await screen.findByText('Заявление.docx')).toBeTruthy();
+    await act(async () => { reject(new Error('Late failure')); });
+    expect(screen.getByText('Заявление.docx')).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('shows one version history when document keys differ only in letter case', async () => {
+    vi.mocked(apiService.getCaseDocuments).mockResolvedValue([
+      createCaseDocument({ id: 11, documentKey: 'Claim', version: 1, originalFileName: 'Версия 1.pdf', isLatestVersion: false }),
+      createCaseDocument({ id: 12, documentKey: 'claim', version: 2, originalFileName: 'Версия 2.pdf', isLatestVersion: false }),
+      createCaseDocument({ id: 13, documentKey: 'CLAIM', version: 3, originalFileName: 'Версия 3.pdf', isLatestVersion: true }),
+    ]);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    const details = await openDocumentDetails('Версия 3.pdf');
+    expect(within(details).getByText('История версий: v1, v2, v3 · последняя v3')).toBeTruthy();
+  });
+
+  it('does not combine a missing document key with a real key resembling its fallback', async () => {
+    vi.mocked(apiService.getCaseDocuments).mockResolvedValue([
+      createCaseDocument({ id: 11, documentKey: '', version: 1, originalFileName: 'Без ключа.pdf' }),
+      createCaseDocument({ id: 12, documentKey: 'document-11', version: 2, originalFileName: 'Другой.pdf' }),
+      createCaseDocument({ id: 13, documentKey: 'DOCUMENT-11', version: 3, originalFileName: 'Другой v3.pdf' }),
+    ]);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    const missing = await openDocumentDetails('Без ключа.pdf');
+    expect(within(missing).queryByText(/История версий/)).toBeNull();
+    const other = await openDocumentDetails('Другой v3.pdf');
+    expect(within(other).getByText('История версий: v2, v3 · последняя v3')).toBeTruthy();
+  });
+
+  it('does not merge distinct document keys merely because of a multi-letter uppercase expansion', async () => {
+    vi.mocked(apiService.getCaseDocuments).mockResolvedValue([
+      createCaseDocument({ id: 21, documentKey: 'Straße', version: 1, originalFileName: 'Первая v1.pdf', versionGroupId: 21 }),
+      createCaseDocument({ id: 22, documentKey: 'straße', version: 2, originalFileName: 'Первая v2.pdf', versionGroupId: 21 }),
+      createCaseDocument({ id: 23, documentKey: 'STRASSE', version: 4, originalFileName: 'Вторая v4.pdf', versionGroupId: 23 }),
+      createCaseDocument({ id: 24, documentKey: 'strasse', version: 5, originalFileName: 'Вторая v5.pdf', versionGroupId: 23 }),
+    ]);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    expect(within(await openDocumentDetails('Первая v2.pdf')).getByText('История версий: v1, v2 · последняя v2')).toBeTruthy();
+    expect(within(await openDocumentDetails('Вторая v5.pdf')).getByText('История версий: v4, v5 · последняя v5')).toBeTruthy();
+  });
+
+  it('uses server version groups when Unicode case rules differ', async () => {
+    vi.mocked(apiService.getCaseDocuments).mockResolvedValue([
+      createCaseDocument({ id: 31, documentKey: 'ß', version: 1, originalFileName: 'Первая v1.pdf', versionGroupId: 31 } as Partial<ClientCaseDocument>),
+      createCaseDocument({ id: 32, documentKey: 'ß', version: 2, originalFileName: 'Первая v2.pdf', versionGroupId: 31 } as Partial<ClientCaseDocument>),
+      createCaseDocument({ id: 33, documentKey: 'ẞ', version: 4, originalFileName: 'Вторая v4.pdf', versionGroupId: 33 } as Partial<ClientCaseDocument>),
+      createCaseDocument({ id: 34, documentKey: 'ẞ', version: 5, originalFileName: 'Вторая v5.pdf', versionGroupId: 33 } as Partial<ClientCaseDocument>),
+      createCaseDocument({ id: 41, documentKey: 'ς', version: 1, originalFileName: 'Третья v1.pdf', versionGroupId: 41 } as Partial<ClientCaseDocument>),
+      createCaseDocument({ id: 42, documentKey: 'σ', version: 2, originalFileName: 'Третья v2.pdf', versionGroupId: 41 } as Partial<ClientCaseDocument>),
+    ]);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    expect(within(await openDocumentDetails('Первая v2.pdf')).getByText('История версий: v1, v2 · последняя v2')).toBeTruthy();
+    expect(within(await openDocumentDetails('Вторая v5.pdf')).getByText('История версий: v4, v5 · последняя v5')).toBeTruthy();
+    expect(within(await openDocumentDetails('Третья v2.pdf')).getByText('История версий: v1, v2 · последняя v2')).toBeTruthy();
+  });
+
+  it('does not merge non-ASCII keys when the server does not provide groups', async () => {
+    vi.mocked(apiService.getCaseDocuments).mockResolvedValue([
+      createCaseDocument({ id: 51, documentKey: 'ß', version: 1, originalFileName: 'Первая.pdf' }),
+      createCaseDocument({ id: 52, documentKey: 'ẞ', version: 2, originalFileName: 'Вторая.pdf' }),
+    ]);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    expect(within(await openDocumentDetails('Первая.pdf')).queryByText(/История версий/)).toBeNull();
+    expect(within(await openDocumentDetails('Вторая.pdf')).queryByText(/История версий/)).toBeNull();
+  });
+
+  it('finds and opens a synthetic document beyond the first 50 in the current complete list', async () => {
+    const documents = Array.from({ length: 60 }, (_, index) => createCaseDocument({
+      id: index + 1,
+      documentKey: `doc-${index + 1}`,
+      originalFileName: index === 59 ? 'Искомый договор.pdf' : `Документ ${index + 1}.pdf`,
+    }));
+    vi.mocked(apiService.getCaseDocuments).mockResolvedValue(documents);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    await screen.findByRole('table', { name: 'Документы дела' });
+    fireEvent.change(screen.getByLabelText('Поиск документов дела'), { target: { value: 'искомый договор' } });
+    expect(screen.getByText('Показано 1 из 60')).toBeTruthy();
+    expect((await openDocumentDetails('Искомый договор.pdf')).textContent).toContain('Искомый договор.pdf');
+  });
+
   it('PAY-23 table: sorts instants with stable ID ties and invalid dates last without changing data or fetching files', async () => {
     const documents = [
       createCaseDocument({ id: 90, documentKey: 'invalid', originalFileName: 'Некорректная.pdf', uploadedAt: 'not-a-date' }),
@@ -1910,6 +2047,40 @@ describe('CaseDetailPage', () => {
     expect(within(menu).getByRole('button', { name: 'Быстрый доступ: История' }).getAttribute('aria-current')).toBeNull();
   });
 
+  it('PAY-21: every available quick link selects the matching case section', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    const menu = screen.getByRole('navigation', { name: 'Быстрый доступ к разделам дела' });
+    const sections = ['Участники', 'Задачи', 'Суд', 'События', 'Финансы', 'Заказ-наряд', 'Документы', 'Переписка', 'История'];
+    for (const section of sections) {
+      const link = within(menu).getByRole('button', { name: `Быстрый доступ: ${section}` });
+      fireEvent.click(link);
+      expect(link.getAttribute('aria-current')).toBe('page');
+      expect(screen.getAllByRole('button', { name: section }).some(button => button.className.includes('bg-blue-600'))).toBe(true);
+      expect(within(menu).getAllByRole('button', { current: 'page' })).toHaveLength(1);
+    }
+  });
+
+  it('does not show documents from the previous case while the new case documents load', async () => {
+    window.sessionStorage.setItem('pp.case-detail.15.view.v1', JSON.stringify({ activeTab: 'court', courtOverview: true }));
+    window.sessionStorage.setItem('pp.case-detail.16.view.v1', JSON.stringify({ activeTab: 'court', courtOverview: true }));
+    let finishNew!: (documents: ClientCaseDocument[]) => void;
+    const pending = new Promise<ClientCaseDocument[]>(resolve => { finishNew = resolve; });
+    vi.mocked(apiService.getCaseV2).mockImplementation(async id => createCase({ id, title: `Дело ${id}` }));
+    vi.mocked(apiService.getCaseDocuments).mockImplementation(id => id === 15
+      ? Promise.resolve([createCaseDocument({ id: 501, clientCaseId: 15, originalFileName: 'Документ первого дела.pdf' })])
+      : pending);
+    const view = render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('Дело 15');
+    await screen.findByText('Документ первого дела.pdf');
+
+    view.rerender(<CaseDetailPage caseId={16} onBack={vi.fn()} />);
+    await screen.findByText('Дело 16');
+    expect(screen.queryByText('Документ первого дела.pdf')).toBeNull();
+    await act(async () => finishNew([createCaseDocument({ id: 502, clientCaseId: 16, originalFileName: 'Документ второго дела.pdf' })]));
+    expect(await screen.findByText('Документ второго дела.pdf')).toBeTruthy();
+  });
+
   it('shows imported court data that moved to the archive as inactive', async () => {
     vi.mocked(apiService.getCaseCourtEvents).mockResolvedValue([
       {
@@ -1992,6 +2163,20 @@ describe('CaseDetailPage', () => {
     expect(await screen.findByText('Заявление.docx')).toBeTruthy();
     expect(screen.queryByRole('option', { name: 'Задача' })).toBeNull();
     expect(apiService.getTaskJournalItems).not.toHaveBeenCalled();
+  });
+
+  it('does not expose task counts in the court overview without task access', async () => {
+    window.sessionStorage.setItem('pp.case-detail.15.view.v1', JSON.stringify({ activeTab: 'court', courtOverview: true }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canViewTasks={false} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    expect(screen.queryByText('Активные задачи')).toBeNull();
+    expect(screen.queryByText('Просрочено')).toBeNull();
+  });
+
+  it('does not say there are no overdue tasks when task visibility is partial', async () => {
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({ taskSummaryVisibility: 'partial', overdueTaskCount: 0 }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    expect(await screen.findByLabelText('Контроль сроков: Не все задачи доступны')).toBeTruthy();
   });
 
   it('keeps case tasks read-only when task creation is closed', async () => {
@@ -2388,6 +2573,20 @@ describe('CaseDetailPage', () => {
     expect(screen.getByText('Отдельная контрольная задача пока не требуется')).toBeTruthy();
   });
 
+  it('does not describe restricted control information as paused control', async () => {
+    const reason = 'Сведения автоконтроля недоступны из-за ограничений доступа';
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({ inactivityControlExclusionReason: reason }));
+    vi.mocked(apiService.markCaseActivity).mockResolvedValue({
+      lastViewedAt: null, lastViewedByUserId: null, lastViewedByUserName: null,
+      activityConfirmedAt: null, activityConfirmedByUserId: null, activityConfirmedByUserName: null,
+      inactivityRemindersEnabled: true, lastMeaningfulActivityAt: null, nextInactivityControlAt: null,
+      inactivityControlExclusionReason: reason, eventHistory: '',
+    });
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    expect(await screen.findByLabelText(/Автоконтроль: Сведения недоступны/u)).toBeTruthy();
+    expect(screen.queryByText('Контроль приостановлен')).toBeNull();
+  });
+
   it('highlights an inactivity control whose server deadline has arrived', async () => {
     const latestActivityAt = '2026-01-01T10:00:00Z';
     const nextControlAt = '2026-01-15T10:00:00Z';
@@ -2559,6 +2758,20 @@ describe('CaseDetailPage', () => {
 
     expect(screen.queryByRole('button', { name: 'Финансы' })).toBeNull();
     expect(apiService.getCaseFinance).not.toHaveBeenCalled();
+  });
+
+  it('PAY-21: hides task and finance summaries and shortcuts after access is revoked', async () => {
+    const view = render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    expect(screen.getByText('Оплачено / долг')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Быстрый доступ: Задачи' }));
+    expect(await screen.findByText(/Задачи по делу \(/u)).toBeTruthy();
+
+    view.rerender(<CaseDetailPage caseId={15} onBack={vi.fn()} canViewTasks={false} canViewFinance={false} />);
+    await waitFor(() => expect(screen.queryByText(/Задачи по делу \(/u)).toBeNull());
+    expect(screen.queryByText('Оплачено / долг')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Быстрый доступ: Задачи' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Быстрый доступ: Финансы' })).toBeNull();
   });
 
   it('hides case sidebar finance shortcuts without finance permission', async () => {
@@ -3244,6 +3457,41 @@ describe('CaseDetailPage', () => {
     await act(async () => finish({ items: [createTask({ id: 601, title: 'Строка прежнего дела' })], total: 1, page: 1, pageSize: 50 }));
     expect(screen.queryByText('Строка прежнего дела')).toBeNull();
     expect(apiService.getTaskJournalItems).toHaveBeenLastCalledWith(expect.objectContaining({ clientCaseId: 16 }), expect.anything());
+  });
+
+  it('PAY-24 pages: hides the previous task scope immediately when access narrows', async () => {
+    let finish!: (value: Awaited<ReturnType<typeof apiService.getTaskJournalItems>>) => void;
+    const pending = new Promise<Awaited<ReturnType<typeof apiService.getTaskJournalItems>>>(resolve => { finish = resolve; });
+    vi.mocked(apiService.getTaskJournalItems)
+      .mockResolvedValueOnce({ items: [createTask({ id: 701, title: 'Задача прежней области' })], total: 1, page: 1, pageSize: 50 })
+      .mockReturnValueOnce(pending);
+    const view = render(<CaseDetailPage caseId={15} onBack={vi.fn()} taskAccessKey="all" />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Задачи' }));
+    await screen.findByText('Задача прежней области');
+    view.rerender(<CaseDetailPage caseId={15} onBack={vi.fn()} taskAccessKey="own" />);
+    expect(screen.queryByText('Задача прежней области')).toBeNull();
+    await act(async () => finish({ items: [createTask({ id: 702, title: 'Разрешённая задача' })], total: 1, page: 1, pageSize: 50 }));
+    expect(await screen.findByText('Разрешённая задача')).toBeTruthy();
+  });
+
+  it('hides task sources from the old access scope in document uploads', async () => {
+    let finish!: (value: Awaited<ReturnType<typeof apiService.getTaskJournalItems>>) => void;
+    const pending = new Promise<Awaited<ReturnType<typeof apiService.getTaskJournalItems>>>(resolve => { finish = resolve; });
+    vi.mocked(apiService.getTaskJournalItems)
+      .mockResolvedValueOnce({ items: [createTask({ id: 711, title: 'Старый источник' })], total: 1, page: 1, pageSize: 50 })
+      .mockReturnValueOnce(pending);
+    const view = render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit taskAccessKey="all" />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    fireEvent.change(await screen.findByLabelText('Источник документа'), { target: { value: 'task' } });
+    await screen.findByRole('option', { name: 'Старый источник', hidden: true });
+    fireEvent.change(screen.getByLabelText('Объект документа'), { target: { value: '711' } });
+    view.rerender(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit taskAccessKey="own" />);
+    expect(screen.queryByRole('option', { name: 'Старый источник', hidden: true })).toBeNull();
+    await act(async () => finish({ items: [createTask({ id: 712, title: 'Доступный источник' })], total: 1, page: 1, pageSize: 50 }));
+    expect(await screen.findByRole('option', { name: 'Доступный источник', hidden: true })).toBeTruthy();
+    expect((screen.getByLabelText('Объект документа') as HTMLSelectElement).value).not.toBe('711');
   });
 
   it('PAY-24 pages: preserves a selected document source and upload draft across task pages', async () => {

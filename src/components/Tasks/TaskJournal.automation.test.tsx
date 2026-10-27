@@ -98,6 +98,30 @@ describe('TaskJournal', () => {
     expect(window.localStorage.getItem('pp.task_journal.automation_panel.v1.user:7')).toBe('expanded');
   });
 
+  it.each(['all', 'critical'] as const)('keeps the critical total visible when the automation panel is collapsed with %s selected', async (state) => {
+    apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([]);
+    apiMock.getTaskJournalCaseAutomationSummary.mockResolvedValue({
+      totalCount: 7, readyCount: 3, criticalCount: 2, waitingCount: 4, pausedCount: 0,
+    });
+    await renderJournal();
+    const critical = await screen.findByRole('button', { name: 'Критические: 2' });
+    if (state === 'critical') fireEvent.click(critical);
+    fireEvent.click(screen.getByRole('button', { name: 'Свернуть' }));
+    expect(screen.getByLabelText('Критических дел: 2').textContent).toContain('2');
+    expect(screen.getByRole('button', { name: 'Развернуть' }).getAttribute('aria-expanded')).toBe('false');
+    expect(apiMock.createTaskJournalCaseAutomationTask).not.toHaveBeenCalled();
+  });
+
+  it('shows a stale-summary warning when the automation panel is collapsed', async () => {
+    apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([]);
+    apiMock.getTaskJournalCaseAutomationSummary.mockRejectedValue(new Error('Нет связи'));
+    await renderJournal();
+    await screen.findByText('Уточняем общие счётчики');
+    fireEvent.click(screen.getByRole('button', { name: 'Свернуть' }));
+    expect(screen.getByLabelText('Критических дел: данные не обновлены')).toBeTruthy();
+    expect(screen.getByRole('status').textContent).toContain('требуют обновления');
+  });
+
   it('refreshes the automation queue when another user creates the task first', async () => {
     const candidate = {
       clientId: 10,

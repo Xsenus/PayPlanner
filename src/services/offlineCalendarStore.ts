@@ -1,4 +1,5 @@
 import type { TaskJournalItem } from '../utils/taskJournalStore';
+import { captureAuthSessionIdentity, isAuthSessionIdentityCurrent, type AuthSessionIdentity } from './authService';
 
 const DATABASE_NAME = 'payplanner-offline-calendar';
 const DATABASE_VERSION = 1;
@@ -8,6 +9,56 @@ const SNAPSHOT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_ITEMS = 1000;
 const MAX_BYTES = 10 * 1024 * 1024;
 const TEXT_ENCODER = typeof TextEncoder === 'undefined' ? null : new TextEncoder();
+const WRITE_GENERATION_KEY = 'payplanner-offline-calendar-write-generation';
+export const OFFLINE_CALENDAR_OWNER_KEY = 'payplanner-offline-calendar-owner';
+export const OFFLINE_CALENDAR_DENIED_KEY_PREFIX = 'payplanner-offline-calendar-denied:';
+let writeEpoch = 0;
+let activeSession: AuthSessionIdentity | null = null;
+const deniedUsers = new Set<number>();
+const denialEpochs = new Map<number, number>();
+type WriteGeneration = { value: string; epoch: number };
+
+// localStorage is shared by same-origin tabs; the value contains no user data.
+function invalidateWrites() {
+  writeEpoch += 1;
+  try {
+    const generation = `${Date.now()}-${Math.random()}-${Math.random()}`;
+    localStorage.setItem(WRITE_GENERATION_KEY, generation);
+    return { value: generation, epoch: writeEpoch };
+  } catch {
+    return null;
+  }
+}
+
+function captureWriteGeneration() {
+  try {
+    const value = localStorage.getItem(WRITE_GENERATION_KEY);
+    return value ? { value, epoch: writeEpoch } : invalidateWrites();
+  } catch {
+    return null;
+  }
+}
+
+function isWriteGenerationCurrent(generation: WriteGeneration | null) {
+  if (!generation || generation.epoch !== writeEpoch) return false;
+  try { return localStorage.getItem(WRITE_GENERATION_KEY) === generation.value; }
+  catch { return false; }
+}
+
+function isActiveOwner(userId: number) {
+  try {
+    return activeSession?.authenticated === true
+      && isAuthSessionIdentityCurrent(activeSession)
+      && localStorage.getItem(OFFLINE_CALENDAR_OWNER_KEY) === String(userId);
+  }
+  catch { return false; }
+}
+
+function isAccessDenied(userId: number) {
+  if (deniedUsers.has(userId)) return true;
+  try { return localStorage.getItem(`${OFFLINE_CALENDAR_DENIED_KEY_PREFIX}${userId}`) !== null; }
+  catch { return true; }
+}
 
 export interface OfflineCalendarSnapshot {
   schemaVersion: 1;
@@ -141,9 +192,13 @@ export async function getOfflineCalendarTrustedDevice(userId: number) {
 }
 
 export async function setOfflineCalendarTrustedDevice(userId: number, trustedDevice: boolean) {
+  if (!isActiveOwner(userId)) return;
+  const generation = invalidateWrites();
+  if (!generation) throw new Error('Не удалось безопасно сохранить настройку офлайн-календаря.');
   const database = await openDatabase();
   if (!database) return;
   try {
+    if (!isWriteGenerationCurrent(generation) || !isActiveOwner(userId)) return;
     const transaction = database.transaction(PREFERENCES_STORE, 'readwrite');
     const done = transactionDone(transaction);
     transaction.objectStore(PREFERENCES_STORE).put({ userId, trustedDevice } satisfies OfflineCalendarPreference);
@@ -159,10 +214,14 @@ export async function saveOfflineCalendarSnapshot(
   trustedDevice: boolean,
   now = new Date(),
 ) {
+  const generation = captureWriteGeneration();
+  if (!generation) throw new Error('Не удалось безопасно сохранить офлайн-календарь.');
+  if (!isActiveOwner(userId) || isAccessDenied(userId)) return null;
   const database = await openDatabase();
   if (!database) return null;
-  const snapshot = createOfflineCalendarSnapshot(userId, sourceItems, trustedDevice, now);
   try {
+    if (!isWriteGenerationCurrent(generation) || !isActiveOwner(userId) || isAccessDenied(userId)) return null;
+    const snapshot = createOfflineCalendarSnapshot(userId, sourceItems, trustedDevice, now);
     const transaction = database.transaction(SNAPSHOT_STORE, 'readwrite');
     const done = transactionDone(transaction);
     transaction.objectStore(SNAPSHOT_STORE).put(snapshot);
@@ -174,6 +233,7 @@ export async function saveOfflineCalendarSnapshot(
 }
 
 export async function loadOfflineCalendarSnapshot(userId: number, now = new Date()) {
+  if (isAccessDenied(userId)) return null;
   const database = await openDatabase();
   if (!database) return null;
   try {
@@ -189,6 +249,7 @@ export async function loadOfflineCalendarSnapshot(userId: number, now = new Date
       return null;
     }
     await done;
+    if (isAccessDenied(userId)) return null;
     return snapshot;
   } finally {
     database.close();
@@ -196,6 +257,10 @@ export async function loadOfflineCalendarSnapshot(userId: number, now = new Date
 }
 
 export async function activateOfflineCalendarUser(userId: number, isCurrent: () => boolean = () => true) {
+  if (!isCurrent()) return;
+  let session: AuthSessionIdentity;
+  try { session = captureAuthSessionIdentity(); } catch { return; }
+  invalidateWrites();
   const database = await openDatabase();
   if (!database) return;
   try {
@@ -209,25 +274,57 @@ export async function activateOfflineCalendarUser(userId: number, isCurrent: () 
       keys.filter((key) => key !== userId).forEach((key) => store.delete(key));
       await done;
     }
+    if (isCurrent() && session.authenticated && isAuthSessionIdentityCurrent(session)) {
+      try {
+        localStorage.setItem(OFFLINE_CALENDAR_OWNER_KEY, String(userId));
+        activeSession = session;
+      } catch { /* Offline writes remain disabled. */ }
+    }
   } finally {
     database.close();
   }
 }
 
 export async function clearOfflineCalendarSnapshot(userId: number) {
+  invalidateWrites();
   const database = await openDatabase();
-  if (!database) return;
+  if (!database) return false;
   try {
     const transaction = database.transaction(SNAPSHOT_STORE, 'readwrite');
     const done = transactionDone(transaction);
     transaction.objectStore(SNAPSHOT_STORE).delete(userId);
     await done;
+    return true;
   } finally {
     database.close();
   }
 }
 
+export async function revokeOfflineCalendarSnapshot(userId: number) {
+  deniedUsers.add(userId);
+  denialEpochs.set(userId, (denialEpochs.get(userId) ?? 0) + 1);
+  invalidateWrites();
+  try { localStorage.setItem(`${OFFLINE_CALENDAR_DENIED_KEY_PREFIX}${userId}`, `${Date.now()}-${Math.random()}-${Math.random()}`); } catch { /* Current tab remains blocked. */ }
+  try { await clearOfflineCalendarSnapshot(userId); } catch { /* Keep denial until the old snapshot can be removed. */ }
+}
+
+export async function restoreOfflineCalendarAccess(userId: number, isCurrent: () => boolean = () => true) {
+  if (!isCurrent() || !isActiveOwner(userId)) return false;
+  if (!isAccessDenied(userId)) return true;
+  try {
+    const epoch = denialEpochs.get(userId) ?? 0;
+    const denial = localStorage.getItem(`${OFFLINE_CALENDAR_DENIED_KEY_PREFIX}${userId}`);
+    if (!await clearOfflineCalendarSnapshot(userId) || !isCurrent() || !isActiveOwner(userId)) return false;
+    if ((denialEpochs.get(userId) ?? 0) !== epoch || localStorage.getItem(`${OFFLINE_CALENDAR_DENIED_KEY_PREFIX}${userId}`) !== denial) return false;
+    localStorage.removeItem(`${OFFLINE_CALENDAR_DENIED_KEY_PREFIX}${userId}`);
+    deniedUsers.delete(userId);
+    return true;
+  } catch { return false; }
+}
+
 export async function clearOfflineCalendarCache(isCurrent: () => boolean = () => true) {
+  if (!isCurrent()) return;
+  invalidateWrites();
   const database = await openDatabase();
   if (!database) return;
   try {
@@ -237,6 +334,10 @@ export async function clearOfflineCalendarCache(isCurrent: () => boolean = () =>
     transaction.objectStore(SNAPSHOT_STORE).clear();
     transaction.objectStore(PREFERENCES_STORE).clear();
     await done;
+    if (isCurrent()) {
+      activeSession = null;
+      try { localStorage.removeItem(OFFLINE_CALENDAR_OWNER_KEY); } catch { /* Offline writes remain guarded by generation. */ }
+    }
   } finally {
     database.close();
   }

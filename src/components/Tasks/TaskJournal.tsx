@@ -1,3 +1,5 @@
+import { loadAllTaskJournalItems } from './loadAllTaskJournalItems';
+import { subscribeOnPermissionsChange } from '../../services/permissionsService';
 import { taskStatusClass as statusClass } from '../../utils/taskStatusClass';
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { CALENDAR_TASK_VISIBILITY_SETTINGS_HREF } from '../../utils/calendarSettingsNavigation';
@@ -79,6 +81,10 @@ import {
   clearOfflineCalendarSnapshot,
   getOfflineCalendarTrustedDevice,
   loadOfflineCalendarSnapshot,
+  revokeOfflineCalendarSnapshot,
+  OFFLINE_CALENDAR_DENIED_KEY_PREFIX,
+  OFFLINE_CALENDAR_OWNER_KEY,
+  restoreOfflineCalendarAccess,
   saveOfflineCalendarSnapshot,
   setOfflineCalendarTrustedDevice,
   type OfflineCalendarSnapshot,
@@ -147,8 +153,8 @@ import {
 import { applyTaskTemplateDefaults, type TaskTemplateField } from '../../utils/taskTemplateApplication';
 import {
   FORCED_TASK_SNOOZE_OPTIONS,
-  FORCED_TASK_SNOOZE_STORAGE_KEY,
   FORCED_TASK_SNOOZES_EVENT,
+  getForcedTaskSnoozeStorageKey,
   getForcedTaskApprovalSnoozeKey,
   getForcedTaskDeadlineChangeSnoozeKey,
   readForcedTaskSnoozes,
@@ -1093,44 +1099,6 @@ function downloadBlob(fileName: string, blob: Blob) {
   link.download = fileName;
   link.click();
   URL.revokeObjectURL(url);
-}
-
-async function loadAllTaskJournalItems(
-  contextFilter?: TaskJournalContextFilter,
-  underControlOnly = false,
-  calendarView = false,
-  sortBy: TaskJournalSortKey = 'dueAt',
-  sortDir: 'asc' | 'desc' = 'asc',
-  includeDeadlineChangeRequests = false,
-) {
-  const pageSize = 200;
-  let page = 1;
-  let total = Number.POSITIVE_INFINITY;
-  const items: TaskJournalItem[] = [];
-
-  while (items.length < total) {
-    const response = await apiService.getTaskJournalItems({
-      page,
-      pageSize,
-      underControl: underControlOnly || undefined,
-      clientId: contextFilter?.clientId ?? undefined,
-      legalEntityId: contextFilter?.legalEntityId ?? undefined,
-      calendarView,
-      includeDeadlineChangeRequests,
-      sortBy,
-      sortDir,
-    });
-    items.push(...response.items);
-    total = response.total;
-
-    if (response.items.length === 0) {
-      break;
-    }
-
-    page += 1;
-  }
-
-  return items;
 }
 
 function isSameDay(a: Date, b: Date) {
@@ -2516,6 +2484,8 @@ export function TaskJournal({
   const currentUserId = user?.id ?? null;
   const [offlineCalendarEnabled, setOfflineCalendarEnabled] = useState(false);
   const [offlineCalendarSnapshot, setOfflineCalendarSnapshot] = useState<OfflineCalendarSnapshot | null>(null);
+  const [calendarLoadError, setCalendarLoadError] = useState(false);
+  const [taskListLoadError, setTaskListLoadError] = useState(false);
   const [offlineCalendarTrustedDevice, setOfflineCalendarTrustedDeviceState] = useState(false);
   const [currentTimeZoneId, setCurrentTimeZoneId] = useState(() => normalizeUserTimeZoneId());
   const isAdminUser = isAdmin();
@@ -2586,6 +2556,13 @@ export function TaskJournal({
       }
     : initialPreferencesRef.current;
   const [tasks, setTasks] = useState<TaskJournalItem[]>([]);
+  const [offlineSnapshotSource, setOfflineSnapshotSource] = useState<{ userId: number; items: TaskJournalItem[] } | null>(null);
+  const offlineSnapshotSourceRef = useRef(offlineSnapshotSource);
+  offlineSnapshotSourceRef.current = offlineSnapshotSource;
+  const permissionSnapshotRef = useRef({ userId: currentUserId, revision: 0, applied: 0 });
+  if (permissionSnapshotRef.current.userId !== currentUserId) {
+    permissionSnapshotRef.current = { userId: currentUserId, revision: 0, applied: 0 };
+  }
   const [taskListTotal, setTaskListTotal] = useState(0);
   const [taskListSummary, setTaskListSummary] = useState<TaskJournalListSummary | null>(null);
   const [caseCalendarEvents, setCaseCalendarEvents] = useState<CaseCalendarEvent[]>([]);
@@ -2737,8 +2714,8 @@ export function TaskJournal({
   const [forcedDecisionSnoozeRevision, setForcedDecisionSnoozeRevision] = useState(0);
   const forcedDecisionSnoozes = useMemo(() => ({
     revision: forcedDecisionSnoozeRevision,
-    values: readForcedTaskSnoozes(),
-  }), [forcedDecisionSnoozeRevision]);
+    values: readForcedTaskSnoozes(currentUserId),
+  }), [currentUserId, forcedDecisionSnoozeRevision]);
   const [highlightedTaskId, setHighlightedTaskId] = useState<number | null>(routeTaskId);
   const [calendarAnchorDate, setCalendarAnchorDate] = useState(() => getCurrentCalendarDate());
   const [calendarSelectedDate, setCalendarSelectedDate] = useState(() => getCurrentCalendarDate());
@@ -2763,6 +2740,57 @@ export function TaskJournal({
   const taskMetadataRequestRef = useRef(0);
   const taskListLoadedRef = useRef(false);
   const lastOpenedRouteTaskIdRef = useRef<number | null>(null);
+  const routeOwnerRef = useRef(currentUserId);
+  useLayoutEffect(() => {
+    const previousUserId = routeOwnerRef.current;
+    routeOwnerRef.current = currentUserId;
+    if (previousUserId === currentUserId) return;
+    routeTaskRequestRef.current += 1;
+    pendingRouteTaskReadRef.current = null;
+    lastOpenedRouteTaskIdRef.current = null;
+    setModal(null);
+    setTasks([]);
+    setHighlightedTaskId(null);
+    setCompletionPromptTask(null);
+    setQuickApprovalPromptTask(null);
+    setDeadlineChangeDecisionPrompt(null);
+    setApprovalDecisionPrompt(null);
+    offlineSnapshotSourceRef.current = null;
+    setOfflineSnapshotSource(null);
+  }, [currentUserId, isRouteTaskPage]);
+  useEffect(() => {
+    if (!currentUserId) return;
+    const onStorage = (event: StorageEvent) => {
+      const denied = event.key === `${OFFLINE_CALENDAR_DENIED_KEY_PREFIX}${currentUserId}` && event.newValue !== null;
+      const ownerChanged = event.key === OFFLINE_CALENDAR_OWNER_KEY && event.newValue !== String(currentUserId);
+      if (!denied && !ownerChanged) return;
+      taskListRequestRef.current?.abort();
+      taskListRequestRef.current = null;
+      routeTaskRequestRef.current += 1;
+      pendingRouteTaskReadRef.current = null;
+      lastOpenedRouteTaskIdRef.current = null;
+      taskListLoadedRef.current = false;
+      offlineSnapshotSourceRef.current = null;
+      setOfflineSnapshotSource(null);
+      setOfflineCalendarSnapshot(null);
+      setTasks([]);
+      setTaskListTotal(0);
+      setTaskListSummary(null);
+      setSelectedTaskIds(new Set());
+      setModal((current) => current?.task ? null : current);
+      setHighlightedTaskId(null);
+      setCompletionPromptTask(null);
+      setQuickApprovalPromptTask(null);
+      setDeadlineChangeDecisionPrompt(null);
+      setApprovalDecisionPrompt(null);
+      setCalendarLoadError(viewMode !== 'list');
+      setLoading(false);
+      if (isRouteTaskPage) onRouteTaskChange?.(null);
+      toast.error('Доступ к сохранённому календарю изменился. Обновите данные.', 'Журнал задач');
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [currentUserId, isRouteTaskPage, onRouteTaskChange, toast, viewMode]);
   const processedDeadlineChangeRequestIdsRef = useRef<Set<number>>(new Set());
   const previousCalendarTimeZoneRef = useRef(currentTimeZoneId);
   const skipNextFilterSaveRef = useRef(false);
@@ -2804,13 +2832,22 @@ export function TaskJournal({
     setSortDir('asc');
   }, [mode, overdueFilterSignal]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const nextOwnerKey = getTaskJournalFilterStorageKey(currentUserId, mode);
     if (nextOwnerKey === filterOwnerKey) {
       return;
     }
 
     const nextPreferences = readTaskJournalFilterPreferences(currentUserId, mode, initialView);
+    if (!isRouteTaskPage) {
+      taskListRequestRef.current?.abort();
+      taskListLoadedRef.current = false;
+      setTasks([]);
+      setTaskListTotal(0);
+      setTaskListSummary(null);
+      setOfflineCalendarSnapshot(null);
+      setLoading(true);
+    }
     skipNextFilterSaveRef.current = true;
     setFilterOwnerKey(nextOwnerKey);
     setViewMode(nextPreferences.viewMode);
@@ -2832,7 +2869,7 @@ export function TaskJournal({
     setPeriodMode(nextPreferences.periodMode);
     setSortBy(nextPreferences.sortBy);
     setSortDir(nextPreferences.sortDir);
-  }, [currentUserId, filterOwnerKey, initialView, mode]);
+  }, [currentUserId, filterOwnerKey, initialView, isRouteTaskPage, mode]);
 
   useEffect(() => {
     const nextOwnerKey = getTaskJournalSavedViewsStorageKey(currentUserId, mode);
@@ -2988,6 +3025,7 @@ export function TaskJournal({
   );
 
   useEffect(() => {
+    if (filterOwnerKey !== getTaskJournalFilterStorageKey(currentUserId, mode)) return;
     if (!(routeTaskId && routeTaskId > 0)) {
       routeTaskRequestRef.current += 1;
       pendingRouteTaskReadRef.current = null;
@@ -3049,7 +3087,7 @@ export function TaskJournal({
         }
       }
     })();
-  }, [currentUserId, onRouteTaskChange, openTaskEditor, routeTaskId, tasks, toast]);
+  }, [currentUserId, filterOwnerKey, mode, onRouteTaskChange, openTaskEditor, routeTaskId, tasks, toast]);
 
   const taskTableLayoutSettings = usePersistedTableSettings<TaskTableColumnKey>({
     storageKey: `pp.task_journal.table_settings.v1.user:${currentUserId ?? 'guest'}`,
@@ -3278,9 +3316,14 @@ export function TaskJournal({
 
   useEffect(() => {
     if (taskPageState.filterKey !== listFilterKey) {
+      if (viewMode === 'list') {
+        setSelectedTaskIds(new Set());
+        setTasks([]);
+        setLoading(true);
+      }
       setTaskPageState({ filterKey: listFilterKey, page: 1 });
     }
-  }, [listFilterKey, taskPageState.filterKey]);
+  }, [listFilterKey, taskPageState.filterKey, viewMode]);
 
   // Загружает редко меняющиеся справочники и настройки отдельно от списка задач,
   // чтобы создание или редактирование задачи не повторяло эти запросы.
@@ -3346,10 +3389,25 @@ export function TaskJournal({
   const refreshTasks = useCallback(async () => {
     taskListRequestRef.current?.abort();
     if (isRouteTaskPage) return;
+    if (filterOwnerKey !== getTaskJournalFilterStorageKey(currentUserId, mode) || debouncedSearch !== search) return;
     const controller = new AbortController();
     taskListRequestRef.current = controller;
+    offlineSnapshotSourceRef.current = null;
+    setOfflineSnapshotSource(null);
     if (viewMode === 'list') pendingTaskListReadsRef.current.add(controller);
     const isCurrent = () => !controller.signal.aborted && taskListRequestRef.current === controller;
+    const prepareOfflineAccess = async () => {
+      if (!currentUserId) return isCurrent();
+      const version = permissionSnapshotRef.current.revision;
+      if (version !== permissionSnapshotRef.current.applied) {
+        await revokeOfflineCalendarSnapshot(currentUserId);
+        if (!isCurrent() || permissionSnapshotRef.current.revision !== version) return false;
+      }
+      await restoreOfflineCalendarAccess(currentUserId, isCurrent);
+      if (!isCurrent() || permissionSnapshotRef.current.revision !== version) return false;
+      permissionSnapshotRef.current.applied = version;
+      return true;
+    };
     if (!taskListLoadedRef.current) {
       setLoading(true);
     }
@@ -3368,12 +3426,14 @@ export function TaskJournal({
           apiService.getTaskJournalSummary(summaryParams, { signal: controller.signal }),
         ]);
         if (!isCurrent()) return;
+        if (!await prepareOfflineAccess()) return;
         const lastPage = Math.max(1, Math.ceil(response.total / (response.pageSize || taskTableLayoutSettings.pageSize)));
         if (taskPage > lastPage) {
           setTaskPageState({ filterKey: listFilterKey, page: lastPage });
           return;
         }
         setTasks(response.items);
+        setTaskListLoadError(false);
         taskListLoadedRef.current = true;
         setTaskListTotal(response.total);
         setTaskListSummary(summary);
@@ -3386,9 +3446,13 @@ export function TaskJournal({
           sortBy,
           sortDir,
           true,
+          controller.signal,
         );
         if (!isCurrent()) return;
+        if (!await prepareOfflineAccess()) return;
         setTasks(taskItems);
+        if (currentUserId) setOfflineSnapshotSource({ userId: currentUserId, items: taskItems });
+        setCalendarLoadError(false);
         taskListLoadedRef.current = true;
         setTaskListTotal(taskItems.length);
         setTaskListSummary(null);
@@ -3396,11 +3460,31 @@ export function TaskJournal({
       }
     } catch (error) {
       if (!isCurrent()) return;
+      const status = typeof error === 'object' && error !== null && 'status' in error ? error.status : null;
+      if (status === 401 || status === 403) {
+        setTaskListLoadError(false);
+        setTasks([]);
+        setModal((current) => current?.task ? null : current);
+        setHighlightedTaskId(null);
+        setCompletionPromptTask(null);
+        setQuickApprovalPromptTask(null);
+        setDeadlineChangeDecisionPrompt(null);
+        setApprovalDecisionPrompt(null);
+        setTaskListTotal(0);
+        setTaskListSummary(null);
+        setOfflineCalendarSnapshot(null);
+        setCalendarLoadError(viewMode !== 'list');
+        taskListLoadedRef.current = false;
+        if (currentUserId) await revokeOfflineCalendarSnapshot(currentUserId);
+        if (isCurrent()) toast.error('Нет доступа к задачам. Сохранённый календарь недоступен.', 'Журнал задач');
+        return;
+      }
       const snapshot = viewMode !== 'list' && currentUserId && shouldUseOfflineCalendarRef.current
         ? await loadOfflineCalendarSnapshot(currentUserId).catch(() => null)
         : null;
       if (!isCurrent()) return;
       if (snapshot) {
+        setCalendarLoadError(false);
         setTasks(snapshot.items);
         taskListLoadedRef.current = true;
         setTaskListTotal(snapshot.items.length);
@@ -3412,6 +3496,8 @@ export function TaskJournal({
         setOfflineCalendarTrustedDeviceState(snapshot.trustedDevice);
         toast.info('Показан сохранённый календарь. Изменения недоступны до восстановления связи.', 'Офлайн-календарь');
       } else if (!(error instanceof DOMException && error.name === 'AbortError')) {
+        if (viewMode !== 'list') setCalendarLoadError(true);
+        else setTaskListLoadError(true);
         toast.error('Не удалось загрузить журнал задач.', 'Журнал задач');
       }
     } finally {
@@ -3424,9 +3510,13 @@ export function TaskJournal({
   }, [
     contextFilter,
     currentUserId,
+    debouncedSearch,
+    filterOwnerKey,
     isRouteTaskPage,
     listFilterParams,
     listFilterKey,
+    mode,
+    search,
     shouldUseCalendarVisibility,
     sortBy,
     sortDir,
@@ -3468,11 +3558,26 @@ export function TaskJournal({
         return;
       }
 
+      if (detail?.reason === 'user-role-changed') {
+        permissionSnapshotRef.current.revision += 1;
+        offlineSnapshotSourceRef.current = null;
+        setOfflineSnapshotSource(null);
+        if (currentUserId) void revokeOfflineCalendarSnapshot(currentUserId).catch(() => undefined);
+      }
+
       scheduleRealtimeRefresh();
     };
     window.addEventListener(TASK_JOURNAL_EVENT, refresh);
     window.addEventListener(USER_NOTIFICATIONS_EVENT, refreshFromRealtime);
     window.addEventListener(TASK_JOURNAL_REALTIME_EVENT, scheduleRealtimeRefresh);
+    const unsubscribePermissions = subscribeOnPermissionsChange((roleId) => {
+      if (roleId === undefined || roleId === user?.role?.id) {
+        permissionSnapshotRef.current.revision += 1;
+        offlineSnapshotSourceRef.current = null;
+        setOfflineSnapshotSource(null);
+        scheduleRealtimeRefresh();
+      }
+    });
     return () => {
       const controller = taskListRequestRef.current;
       taskListRequestRef.current = null;
@@ -3486,49 +3591,180 @@ export function TaskJournal({
       window.removeEventListener(TASK_JOURNAL_EVENT, refresh);
       window.removeEventListener(USER_NOTIFICATIONS_EVENT, refreshFromRealtime);
       window.removeEventListener(TASK_JOURNAL_REALTIME_EVENT, scheduleRealtimeRefresh);
+      unsubscribePermissions();
     };
-  }, [currentUserId, isRouteTaskPage, refreshTasks, viewMode]);
+  }, [currentUserId, isRouteTaskPage, refreshTasks, user?.role?.id, viewMode]);
+
+  // A successful filtered list refresh cannot prove that an already open task remains visible.
+  useEffect(() => {
+    const taskId = modal?.task?.id;
+    if (isRouteTaskPage || !taskId || !currentUserId) return;
+    let active = true;
+    let revision = 0;
+    let timer: number | null = null;
+    const schedule = () => {
+      const request = ++revision;
+      if (timer !== null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        timer = null;
+        void apiService.getTaskJournalItem(taskId).catch((error: unknown) => {
+          if (!active || request !== revision || decisionOwnerRef.current.userId !== currentUserId) return;
+          const status = typeof error === 'object' && error !== null && 'status' in error ? error.status : null;
+          if (status !== 401 && status !== 403 && status !== 404) return;
+          setModal((current) => current?.task?.id === taskId ? null : current);
+          setTasks((current) => current.filter((task) => task.id !== taskId));
+          setHighlightedTaskId(null);
+          setCompletionPromptTask(null);
+          setQuickApprovalPromptTask(null);
+          setDeadlineChangeDecisionPrompt(null);
+          setApprovalDecisionPrompt(null);
+          toast.error('Задача недоступна или была удалена.', 'Журнал задач');
+        });
+      }, REALTIME_TASK_REFRESH_DEBOUNCE_MS);
+    };
+    const fromNotifications = (event: Event) => {
+      const detail = event instanceof CustomEvent ? event.detail as UserNotificationsChangedDetail | null : null;
+      if (detail?.source === 'realtime' && (detail.reason === 'user-role-changed' || detail.reason === 'reconnected')) schedule();
+    };
+    const unsubscribePermissions = subscribeOnPermissionsChange((roleId) => {
+      if (roleId === undefined || roleId === user?.role?.id) schedule();
+    });
+    window.addEventListener(USER_NOTIFICATIONS_EVENT, fromNotifications);
+    return () => {
+      active = false;
+      revision += 1;
+      if (timer !== null) window.clearTimeout(timer);
+      window.removeEventListener(USER_NOTIFICATIONS_EVENT, fromNotifications);
+      unsubscribePermissions();
+    };
+  }, [currentUserId, isRouteTaskPage, modal?.task?.id, toast, user?.role?.id]);
+
+  const routeAccessChangeRef = useRef(onRouteTaskChange);
+  routeAccessChangeRef.current = onRouteTaskChange;
+  const routeRoleRef = useRef({ userId: currentUserId, roleId: user?.role?.id });
+  useEffect(() => {
+    const previousRole = routeRoleRef.current;
+    routeRoleRef.current = { userId: currentUserId, roleId: user?.role?.id };
+    if (!isRouteTaskPage || !routeTaskId || !currentUserId) return;
+    let cancelled = false;
+    let revision = 0;
+    let timer: number | null = null;
+    const schedule = () => {
+      const requestRevision = ++revision;
+      const snapshotRevision = permissionSnapshotRef.current.revision;
+      if (timer !== null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        timer = null;
+        void apiService.getTaskJournalItem(routeTaskId).then(() => {
+          const owner = decisionOwnerRef.current;
+          if (cancelled || requestRevision !== revision || !owner.mounted
+            || owner.taskId !== routeTaskId || owner.userId !== currentUserId) return;
+          if (snapshotRevision === permissionSnapshotRef.current.revision
+            && snapshotRevision !== permissionSnapshotRef.current.applied) {
+            return revokeOfflineCalendarSnapshot(currentUserId);
+          }
+        }).catch((error: unknown) => {
+          const owner = decisionOwnerRef.current;
+          if (cancelled || requestRevision !== revision || !owner.mounted
+            || owner.taskId !== routeTaskId || owner.userId !== currentUserId) return;
+          const status = typeof error === 'object' && error !== null && 'status' in error ? error.status : null;
+          if (status !== 401 && status !== 403 && status !== 404) return;
+          void revokeOfflineCalendarSnapshot(currentUserId).catch(() => undefined);
+          setModal((current) => current?.task?.id === routeTaskId ? null : current);
+          setTasks((current) => current.filter((task) => task.id !== routeTaskId));
+          setHighlightedTaskId(null);
+          setCompletionPromptTask(null);
+          setQuickApprovalPromptTask(null);
+          setDeadlineChangeDecisionPrompt(null);
+          setApprovalDecisionPrompt(null);
+          routeAccessChangeRef.current?.(null);
+          toast.error('Задача недоступна или была удалена.', 'Журнал задач');
+        });
+      }, REALTIME_TASK_REFRESH_DEBOUNCE_MS);
+    };
+    const fromJournal = (event: Event) => {
+      const source = event instanceof CustomEvent ? (event.detail as { source?: object } | null)?.source : null;
+      if (source !== taskJournalEventSourceRef.current) schedule();
+    };
+    const fromNotifications = (event: Event) => {
+      const detail = event instanceof CustomEvent ? event.detail as UserNotificationsChangedDetail | null : null;
+      if (isTaskJournalRealtimeChange(detail)) schedule();
+    };
+    window.addEventListener(TASK_JOURNAL_EVENT, fromJournal);
+    window.addEventListener(USER_NOTIFICATIONS_EVENT, fromNotifications);
+    window.addEventListener(TASK_JOURNAL_REALTIME_EVENT, schedule);
+    const unsubscribePermissions = subscribeOnPermissionsChange((roleId) => {
+      if (roleId === undefined || roleId === user?.role?.id) {
+        permissionSnapshotRef.current.revision += 1;
+        offlineSnapshotSourceRef.current = null;
+        setOfflineSnapshotSource(null);
+        schedule();
+      }
+    });
+    if (previousRole.userId === currentUserId && previousRole.roleId !== user?.role?.id) {
+      permissionSnapshotRef.current.revision += 1;
+      offlineSnapshotSourceRef.current = null;
+      setOfflineSnapshotSource(null);
+      schedule();
+    }
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+      window.removeEventListener(TASK_JOURNAL_EVENT, fromJournal);
+      window.removeEventListener(USER_NOTIFICATIONS_EVENT, fromNotifications);
+      window.removeEventListener(TASK_JOURNAL_REALTIME_EVENT, schedule);
+      unsubscribePermissions();
+    };
+  }, [currentUserId, isRouteTaskPage, routeTaskId, toast, user?.role?.id]);
 
   useEffect(() => {
     if (!offlineCalendarEnabled
       || offlineCalendarSnapshot
       || !currentUserId
       || !shouldUseOfflineCalendar
-      || tasks.length === 0) {
+      || !offlineSnapshotSource
+      || offlineSnapshotSource.userId !== currentUserId
+      || permissionSnapshotRef.current.revision !== permissionSnapshotRef.current.applied) {
       return;
     }
 
-    void saveOfflineCalendarSnapshot(currentUserId, tasks, offlineCalendarTrustedDevice).catch(() => null);
+    void saveOfflineCalendarSnapshot(currentUserId, offlineSnapshotSource.items, offlineCalendarTrustedDevice).catch(() => null);
   }, [
     currentUserId,
     offlineCalendarEnabled,
     offlineCalendarSnapshot,
     offlineCalendarTrustedDevice,
+    offlineSnapshotSource,
     shouldUseOfflineCalendar,
-    tasks,
   ]);
 
   useEffect(() => {
-    if (!isApprovalsMode) {
+    const storageKey = getForcedTaskSnoozeStorageKey(currentUserId);
+    if (!isApprovalsMode || !storageKey) {
       return;
     }
 
-    const refreshSnoozes = () => setForcedDecisionSnoozeRevision(Date.now());
+    const refreshSnoozes = () => setForcedDecisionSnoozeRevision(value => value + 1);
+    const handleSnoozesChanged = (event: Event) => {
+      if ((event as CustomEvent<{ userId?: number }>).detail?.userId === currentUserId) {
+        refreshSnoozes();
+      }
+    };
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === FORCED_TASK_SNOOZE_STORAGE_KEY) {
+      if (event.key === storageKey || event.key === null) {
         refreshSnoozes();
       }
     };
     const intervalId = window.setInterval(refreshSnoozes, 30_000);
-    window.addEventListener(FORCED_TASK_SNOOZES_EVENT, refreshSnoozes);
+    window.addEventListener(FORCED_TASK_SNOOZES_EVENT, handleSnoozesChanged);
     window.addEventListener('storage', handleStorage);
 
     return () => {
       window.clearInterval(intervalId);
-      window.removeEventListener(FORCED_TASK_SNOOZES_EVENT, refreshSnoozes);
+      window.removeEventListener(FORCED_TASK_SNOOZES_EVENT, handleSnoozesChanged);
       window.removeEventListener('storage', handleStorage);
     };
-  }, [isApprovalsMode]);
+  }, [currentUserId, isApprovalsMode]);
 
   useEffect(() => {
     if (isRouteTaskPage) {
@@ -5340,7 +5576,7 @@ export function TaskJournal({
     if (!deadlineChangeDecisionPrompt || deadlineChangeDecisionSaving) return;
 
     const { task, request } = deadlineChangeDecisionPrompt;
-    snoozeForcedTaskActions([getForcedTaskDeadlineChangeSnoozeKey(task.id, request.id)], minutes);
+    snoozeForcedTaskActions(currentUserId, [getForcedTaskDeadlineChangeSnoozeKey(task.id, request.id)], minutes);
     resetDeadlineChangeDecisionPrompt();
   };
 
@@ -5592,7 +5828,7 @@ export function TaskJournal({
   const snoozeApprovalDecisionPrompt = (minutes: number) => {
     if (!approvalDecisionPrompt || approvalDecisionSaving) return;
 
-    snoozeForcedTaskActions([getForcedTaskApprovalSnoozeKey(approvalDecisionPrompt.task.id)], minutes);
+    snoozeForcedTaskActions(currentUserId, [getForcedTaskApprovalSnoozeKey(approvalDecisionPrompt.task.id)], minutes);
     resetApprovalDecisionPrompt();
   };
 
@@ -5909,9 +6145,21 @@ export function TaskJournal({
     setOfflineCalendarTrustedDeviceState(trustedDevice);
     try {
       await setOfflineCalendarTrustedDevice(currentUserId, trustedDevice);
-      await saveOfflineCalendarSnapshot(currentUserId, tasks, trustedDevice);
+      await revokeOfflineCalendarSnapshot(currentUserId);
+      const currentSource = offlineSnapshotSourceRef.current;
+      const source = currentSource?.userId === currentUserId
+        && permissionSnapshotRef.current.revision === permissionSnapshotRef.current.applied
+        ? currentSource : null;
+      if (source) {
+        if (!await restoreOfflineCalendarAccess(currentUserId)) throw new Error('Не удалось обновить сохранённый календарь.');
+        if (offlineSnapshotSourceRef.current !== source
+          || permissionSnapshotRef.current.revision !== permissionSnapshotRef.current.applied) return;
+        await saveOfflineCalendarSnapshot(currentUserId, source.items, trustedDevice);
+      }
       toast.success(
-        trustedDevice
+        !source
+          ? 'Настройка сохранена. Офлайн-календарь обновится после загрузки задач.'
+          : trustedDevice
           ? 'В офлайн-снимке будут видны названия задач и исполнителей.'
           : 'Офлайн-снимок заменён на обезличенный.',
         'Офлайн-календарь',
@@ -6179,6 +6427,20 @@ export function TaskJournal({
             </div>
           </div>
         </section>
+
+        {viewMode !== 'list' && calendarLoadError ? (
+          <div role="alert" className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+            Не удалось полностью обновить задачи. Показанные данные могут быть неполными или устаревшими.
+            <button type="button" onClick={() => void refreshTasks()} className="font-semibold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">Повторить загрузку</button>
+          </div>
+        ) : null}
+
+        {viewMode === 'list' && taskListLoadError ? (
+          <div role="alert" className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+            Не удалось обновить журнал задач. Показанные данные могут быть неполными или устаревшими.
+            <button type="button" onClick={() => void refreshTasks()} disabled={loading || search !== debouncedSearch} className="font-semibold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50">Повторить загрузку</button>
+          </div>
+        ) : null}
 
         {offlineCalendarEnabled && shouldUseOfflineCalendar ? (
           <section className={`mb-3 flex flex-col gap-3 rounded-xl border px-3 py-3 sm:flex-row sm:items-center sm:justify-between ${
@@ -6824,7 +7086,13 @@ export function TaskJournal({
               totalItems={taskListTotal}
               pageSize={taskTableLayoutSettings.pageSize}
               pageSizeOptions={[10, 25, 50, 100]}
-              onPageChange={(page) => setTaskPageState({ filterKey: listFilterKey, page })}
+              onPageChange={(page) => {
+                if (page === taskPage || bulkBilling.busy) return;
+                setSelectedTaskIds(new Set());
+                setTasks([]);
+                setLoading(true);
+                setTaskPageState({ filterKey: listFilterKey, page });
+              }}
               onPageSizeChange={taskTableLayoutSettings.setPageSize}
               className="mt-2 rounded-xl border border-slate-200"
               recordsLabel="Задач найдено"
@@ -7702,6 +7970,14 @@ function TaskAutomationPanel({
             <ClipboardList className="h-4 w-4" />
             {stateTotal}
           </div>
+          {collapsed && activeState !== 'critical' ? (
+            <div aria-label={summaryLoadError ? 'Критических дел: данные не обновлены' : `Критических дел: ${effectiveSummary.criticalCount ?? 0}`} className="inline-flex w-fit items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-sm font-semibold text-rose-700">
+              Критические: {summaryLoadError ? 'данные не обновлены' : effectiveSummary.criticalCount ?? 0}
+            </div>
+          ) : null}
+          {collapsed && (loadError || summaryLoadError) ? (
+            <span role="status" className="text-xs font-medium text-amber-900">Данные автоконтроля требуют обновления</span>
+          ) : null}
           {!collapsed ? (
             <>
               <button
@@ -8304,6 +8580,8 @@ function TaskTable({
   } = layoutSettings;
   const columnCount = orderedVisibleColumns.length + 1;
   const actionsPinned = orderedVisibleColumns.at(-1) === 'actions';
+  // Reserve the pinned actions, selection column and surrounding page/cell padding on narrow screens.
+  const counterpartyViewportReserve = getColumnWidth('actions') + 112;
 
   const getColumnStyle = (columnKey: TaskTableColumnKey) => {
     const width = getColumnWidth(columnKey);
@@ -8365,6 +8643,7 @@ function TaskTable({
                 <SystemCheckbox
                   type="checkbox"
                   checked={allVisibleSelected}
+                  indeterminate={!allVisibleSelected && tasks.some((task) => selectableTaskIds.has(task.id) && selectedTaskIds.has(task.id))}
                   disabled={selectableTaskIds.size === 0}
                   onChange={(event) => onToggleAllVisibleSelection(event.target.checked)}
                   aria-label="Выбрать все задачи на странице"
@@ -8468,6 +8747,7 @@ function TaskTable({
                   </td>
                   <TaskTableColumns columns={orderedVisibleColumns}>
                   <td data-task-column="counterparty" className="px-2 py-4 sm:px-3 xl:px-4" style={getColumnStyle('counterparty')}>
+                    <div className="min-w-0 [overflow-wrap:anywhere]" style={{ maxWidth: actionsPinned ? `min(100%, max(24px, calc(100vw - ${counterpartyViewportReserve}px)))` : '100%' }}>
                     {canOpenCounterparty ? (
                       <button
                         type="button"
@@ -8513,6 +8793,7 @@ function TaskTable({
                       {task.tags.map((tag) => (
                         <span key={tag} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">{tag}</span>
                       ))}
+                    </div>
                     </div>
                   </td>
                   <td data-task-column="title" className="px-2 py-4 sm:px-3 xl:px-4" style={getColumnStyle('title')}>
@@ -9292,6 +9573,7 @@ function TaskTimelineCalendar({
   movingTaskId: number | null;
   readOnly?: boolean;
 }) {
+  const [showAllWorkload, setShowAllWorkload] = useState(false);
   const visibleDays = useMemo(() => {
     const start = startOfWeek(anchorDate);
     return Array.from({ length: 7 }, (_, index) => addDays(start, index));
@@ -9326,11 +9608,19 @@ function TaskTimelineCalendar({
   );
 
   const weekWorkload = useMemo(() => {
-    const byAssignee = new Map<string, { name: string; count: number; duration: number; done: number }>();
+    const byAssignee = new Map<string, { key: string; userId: number | null; name: string; count: number; duration: number; done: number }>();
     weekTasks.forEach((task) => {
-      const names = getTaskAssigneeNames(task);
-      names.forEach((name) => {
-        const item = byAssignee.get(name) ?? { name, count: 0, duration: 0, done: 0 };
+      const participants = getTaskParticipants(task, 'assignee').filter((participant) => getParticipantDisplayName(participant).trim());
+      const assignees = participants.length > 0
+        ? participants.map((participant) => ({ userId: participant.userId || null, name: getParticipantDisplayName(participant).trim() }))
+        : [{ userId: task.assigneeUserId || null, name: task.assigneeName?.trim() || 'Без исполнителя' }];
+      const seen = new Set<string>();
+      assignees.forEach(({ userId, name }) => {
+        if (!name) return;
+        const key = userId ? `user:${userId}` : `name:${name.toLocaleLowerCase('ru')}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        const item = byAssignee.get(key) ?? { key, userId, name, count: 0, duration: 0, done: 0 };
         if (isTaskJournalActive(task.status)) {
           item.count += 1;
           item.duration += normalizeTaskDuration(task.plannedDurationMinutes);
@@ -9338,14 +9628,19 @@ function TaskTimelineCalendar({
         if (task.status.trim().toLowerCase() === 'done') {
           item.done += 1;
         }
-        byAssignee.set(name, item);
+        byAssignee.set(key, item);
       });
     });
 
-    return Array.from(byAssignee.values())
+    const values = Array.from(byAssignee.values())
       .filter((item) => item.count > 0 || item.done > 0)
-      .sort((a, b) => b.duration - a.duration || b.count - a.count || a.name.localeCompare(b.name, 'ru'))
-      .slice(0, 8);
+      .sort((a, b) => b.duration - a.duration || b.count - a.count || a.name.localeCompare(b.name, 'ru'));
+    const nameCounts = new Map<string, number>();
+    values.forEach((item) => {
+      const name = item.name.toLocaleLowerCase('ru');
+      nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1);
+    });
+    return values.map((item) => ({ ...item, duplicateName: (nameCounts.get(item.name.toLocaleLowerCase('ru')) ?? 0) > 1 }));
   }, [weekTasks]);
 
   const timelineDayLayouts = useMemo(() => {
@@ -9469,12 +9764,16 @@ function TaskTimelineCalendar({
         <div className="p-4">
           {weekWorkload.length > 0 ? (
             <div className="mb-4 flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-              {weekWorkload.map((item) => (
-                <span key={item.name} className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">
-                  {item.name}: активных {item.count} · {formatTotalDuration(item.duration)}
+              {(showAllWorkload ? weekWorkload : weekWorkload.slice(0, 8)).map((item) => (
+                <span key={item.key} className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">
+                  {item.name}{item.duplicateName ? ` (${item.userId ? `№${item.userId}` : 'без учётной записи'})` : ''}: активных {item.count} · {formatTotalDuration(item.duration)}
                   {item.done > 0 ? ` · готово ${item.done}` : ''}
                 </span>
               ))}
+              {weekWorkload.length > 8 ? <button type="button" aria-expanded={showAllWorkload}
+                onClick={() => setShowAllWorkload((value) => !value)} className="rounded-full px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                {showAllWorkload ? 'Показать меньше' : `Ещё исполнителей: ${weekWorkload.length - 8}`}
+              </button> : null}
             </div>
           ) : null}
 
@@ -10793,6 +11092,7 @@ function TaskBillingCreateWizard({
       ? `legal:${initialDefaults.legalEntityId}`
       : '';
   const [counterparty, setCounterparty] = useState(initialCounterparty);
+  const [counterpartySearchPending, setCounterpartySearchPending] = useState(false);
   const [clientCaseId, setClientCaseId] = useState(initialDefaults.clientCaseId ? String(initialDefaults.clientCaseId) : '');
   const [step, setStep] = useState<'binding' | 'billing'>('binding');
   const [billingContext, setBillingContext] = useState<TaskBillingContext | null>(null);
@@ -10926,16 +11226,18 @@ function TaskBillingCreateWizard({
               value={counterparty}
               options={counterpartyOptions}
               onChange={(value) => {
+                if (value !== counterparty) setClientCaseId('');
                 setCounterparty(value);
-                setClientCaseId('');
                 setError(null);
               }}
+              onSearchPendingChange={setCounterpartySearchPending}
               placeholder="Выберите клиента или юридическое лицо"
               searchPlaceholder="Поиск по ФИО, названию, ИНН, телефону или email"
               helperText="Начните вводить ФИО, название, ИНН, телефон или email."
               presentation="inline-search"
               required
             />
+            {counterpartySearchPending ? <p role="status" className="text-xs text-slate-600">Выберите клиента из списка или нажмите Esc, чтобы оставить прежний выбор.</p> : null}
             <label className="block text-sm font-semibold text-slate-700">
               Дело
               <SystemSelect
@@ -10974,12 +11276,12 @@ function TaskBillingCreateWizard({
                 <button
                   type="button"
                   onClick={() => complete('internal')}
-                  disabled={!ownerId}
+                  disabled={!ownerId || counterpartySearchPending}
                   className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
                 >
                   <ShieldAlert className="h-4 w-4" /> Неоплачиваемая задача
                 </button>
-                <button type="button" onClick={() => void loadBilling()} disabled={loading || !ownerId || !clientCaseId} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
+                <button type="button" onClick={() => void loadBilling()} disabled={loading || counterpartySearchPending || !ownerId || !clientCaseId} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
                   {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Проверить договор
                 </button>
               </div>
@@ -11151,7 +11453,7 @@ function TaskModal({
   const isModernChrome = chrome === 'modern';
   const taskId = state?.task?.id ?? null;
   const requireCompletionResult = taskSettings.requireCompletionResult !== false;
-  const titleInputRef = useRef<HTMLInputElement | null>(null);
+  const titleInputRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
   const newFileInputRef = useRef<HTMLInputElement | null>(null);
   const versionInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const [form, setForm] = useState<TaskForm>(() => {
@@ -11495,22 +11797,6 @@ function TaskModal({
         ? `${selectedOwnerName || prev.objectName} - ${clientCase.title}`
         : selectedOwnerName || prev.objectName,
     }));
-  };
-
-  const openSelectedCounterparty = () => {
-    if (form.clientId && onOpenClient) {
-      void onOpenClient(form.clientId, form.clientCaseId ?? null);
-      return;
-    }
-    if (form.legalEntityId && onOpenLegalEntity) {
-      void onOpenLegalEntity(form.legalEntityId);
-    }
-  };
-
-  const openSelectedCase = () => {
-    if (form.clientCaseId && onOpenCase) {
-      void onOpenCase(form.clientCaseId, form.clientId ?? null);
-    }
   };
 
   const toggleArray = <T extends string>(key: 'reminders' | 'channels', value: T) => {
@@ -12528,8 +12814,8 @@ function TaskModal({
                   type="button"
                   onClick={() => removeParticipant(role, participant)}
                   className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-white hover:text-rose-600"
-                  aria-label={`Удалить участника ${participantName}`}
-                  title="Удалить"
+                  aria-label={`${role === 'approver' ? 'Удалить согласующего' : 'Удалить наблюдателя'} ${participantName}`}
+                  title={role === 'approver' ? 'Удалить согласующего' : 'Удалить наблюдателя'}
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -12925,6 +13211,27 @@ function TaskModal({
     }
   };
 
+  const quickTaskActions = state?.task && !isReadOnly ? (
+    <>
+      {canDuplicateTask ? (
+        <button type="button" onClick={() => void handleDuplicateTask()}
+          className="inline-flex h-9 items-center gap-1 rounded-lg px-2 text-sm font-medium text-blue-700 hover:bg-blue-50"
+          title="Создать отдельную копию задачи" aria-label="Быстро дублировать задачу">
+          <Copy className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>Копия</span>
+        </button>
+      ) : null}
+      {canCancelTask ? (
+        <button type="button" onClick={() => void handleCancelTask()}
+          className="inline-flex h-9 items-center gap-1 rounded-lg px-2 text-sm font-medium text-rose-700 hover:bg-rose-50"
+          title="Оставить задачу в журнале со статусом «Отменена»" aria-label="Быстро отменить задачу">
+          <XCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>Отменить</span>
+        </button>
+      ) : null}
+    </>
+  ) : null;
+
   if (isModernChrome) {
     const TypeIcon = typeOption.icon;
     const titleText = state?.mode === 'view'
@@ -12937,7 +13244,7 @@ function TaskModal({
       <div className={shellClassName} data-testid="task-modern-card-window">
         {weekScheduleDialog}
         <div className={panelClassName}>
-          <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3">
             <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm text-slate-500">
               <span className="truncate font-semibold text-slate-700">{form.objectName || 'Выберите проект'}</span>
               <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
@@ -12949,7 +13256,7 @@ function TaskModal({
                 </>
               ) : null}
             </div>
-            <div className="relative flex shrink-0 items-center gap-1">
+            <div className="relative flex min-w-0 flex-wrap items-center justify-end gap-1">
               {state?.task
                 && (state.task.status === 'new' || state.task.status === 'waiting' || state.task.status === 'revision') ? (
                 <button
@@ -12962,6 +13269,7 @@ function TaskModal({
                   {state.task.status === 'revision' ? 'Продолжить работу' : 'Принять в работу'}
                 </button>
               ) : null}
+              {quickTaskActions}
               {isLockedViewWithEditAccess ? (
                 <button
                   type="button"
@@ -13134,15 +13442,20 @@ function TaskModal({
                   ) : null}
                 </div>
                 <h2 className="sr-only">{titleText}</h2>
-                <input
-                  ref={titleInputRef}
-                  value={form.title}
-                  onChange={(event) => update('title', event.target.value)}
-                  disabled={isReadOnly}
-                  data-testid="task-title-input"
-                  className="w-full border-0 border-b border-slate-200 bg-transparent px-0 py-2 text-2xl font-semibold text-slate-950 outline-none transition placeholder:text-slate-300 focus:border-blue-400 focus:ring-0"
-                  placeholder="Введите название задачи"
-                />
+                <div className="grid min-w-0">
+                  <span aria-hidden="true" className="invisible col-start-1 row-start-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere] border-b border-transparent py-2 text-2xl font-semibold">{form.title || 'Введите название задачи'} </span>
+                  <textarea
+                    ref={(node) => { titleInputRef.current = node; }}
+                    value={form.title}
+                    onChange={(event) => update('title', event.target.value.replace(/[\r\n]/g, ''))}
+                    onKeyDown={(event) => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) event.preventDefault(); }}
+                    disabled={isReadOnly}
+                    rows={1}
+                    data-testid="task-title-input"
+                    className="col-start-1 row-start-1 h-full w-full min-w-0 resize-none overflow-hidden border-0 border-b border-slate-200 bg-transparent px-0 py-2 text-2xl font-semibold text-slate-950 outline-none transition placeholder:text-slate-300 focus:border-blue-400 focus:ring-0"
+                    placeholder="Введите название задачи"
+                  />
+                </div>
               </section>
 
               <section className="rounded-xl border border-slate-200 bg-white p-3">
@@ -13649,9 +13962,9 @@ function TaskModal({
                     />
                   </div>
                   {selectedCounterpartyValue && ((form.clientId && onOpenClient) || (form.legalEntityId && onOpenLegalEntity)) ? (
-                    <button type="button" onClick={openSelectedCounterparty} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-amber-200 bg-white text-amber-700 transition hover:bg-amber-100" aria-label="Открыть карточку контрагента" title="Открыть карточку контрагента">
+                    <a href={form.clientId ? `/clients/${form.clientId}` : `/?ppTab=legalEntities&ppLegalEntityId=${form.legalEntityId}`} target="_blank" rel="noopener noreferrer" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-amber-200 bg-white text-amber-700 transition hover:bg-amber-100" aria-label="Открыть карточку контрагента" title="Открыть карточку контрагента в новой вкладке">
                       <ExternalLink className="h-4 w-4" />
-                    </button>
+                    </a>
                   ) : null}
                 </div>
                 <div className="mt-2 flex items-center gap-2">
@@ -13668,9 +13981,9 @@ function TaskModal({
                     ))}
                   </SystemSelect>
                   {form.clientCaseId && onOpenCase ? (
-                    <button type="button" onClick={openSelectedCase} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-amber-200 bg-white text-amber-700 transition hover:bg-amber-100" aria-label="Открыть карточку дела" title="Открыть карточку дела">
+                    <a href={`/cases/${form.clientCaseId}`} target="_blank" rel="noopener noreferrer" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-amber-200 bg-white text-amber-700 transition hover:bg-amber-100" aria-label="Открыть карточку дела" title="Открыть карточку дела в новой вкладке">
                       <ExternalLink className="h-4 w-4" />
-                    </button>
+                    </a>
                   ) : null}
                   {state?.task?.salesRequestId ? (
                     <a href={`/?ppTab=requests&requestId=${state.task.salesRequestId}`} target="_blank" rel="noopener noreferrer" className="inline-flex h-10 shrink-0 items-center justify-center rounded-lg border border-blue-200 bg-white px-2 text-sm text-blue-700 transition hover:bg-blue-50" aria-label="Открыть заявку" title="Открыть заявку в новой вкладке">
@@ -13897,6 +14210,7 @@ function TaskModal({
           <div className="flex shrink-0 flex-wrap items-start justify-end gap-2">
             {state?.task ? (
               <>
+                {quickTaskActions}
                 {(state.task.status === 'new' || state.task.status === 'waiting' || state.task.status === 'revision') ? (
                   <button
                     type="button"
@@ -14126,9 +14440,9 @@ function TaskModal({
                   />
                 </div>
                 {selectedCounterpartyValue && ((form.clientId && onOpenClient) || (form.legalEntityId && onOpenLegalEntity)) ? (
-                  <button type="button" onClick={openSelectedCounterparty} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-amber-200 bg-amber-50 text-amber-700 transition hover:bg-amber-100" aria-label="Открыть карточку контрагента" title="Открыть карточку контрагента">
+                  <a href={form.clientId ? `/clients/${form.clientId}` : `/?ppTab=legalEntities&ppLegalEntityId=${form.legalEntityId}`} target="_blank" rel="noopener noreferrer" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-amber-200 bg-amber-50 text-amber-700 transition hover:bg-amber-100" aria-label="Открыть карточку контрагента" title="Открыть карточку контрагента в новой вкладке">
                     <ExternalLink className="h-4 w-4" />
-                  </button>
+                  </a>
                 ) : null}
               </div>
             </Field>
@@ -14169,7 +14483,7 @@ function TaskModal({
               />
             </Field>
             <Field label="Наименование задачи">
-              <input ref={titleInputRef} value={form.title} onChange={(event) => update('title', event.target.value)} disabled={isReadOnly} data-testid="task-title-input" className="form-input" placeholder="Что нужно сделать" />
+              <input ref={(node) => { titleInputRef.current = node; }} value={form.title} onChange={(event) => update('title', event.target.value)} disabled={isReadOnly} data-testid="task-title-input" className="form-input" placeholder="Что нужно сделать" />
             </Field>
             <Field label="Дело">
               <div className="flex items-center gap-2">
@@ -14186,9 +14500,9 @@ function TaskModal({
                   ))}
                 </SystemSelect>
                 {form.clientCaseId && onOpenCase ? (
-                  <button type="button" onClick={openSelectedCase} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-amber-200 bg-amber-50 text-amber-700 transition hover:bg-amber-100" aria-label="Открыть карточку дела" title="Открыть карточку дела">
+                  <a href={`/cases/${form.clientCaseId}`} target="_blank" rel="noopener noreferrer" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-amber-200 bg-amber-50 text-amber-700 transition hover:bg-amber-100" aria-label="Открыть карточку дела" title="Открыть карточку дела в новой вкладке">
                     <ExternalLink className="h-4 w-4" />
-                  </button>
+                  </a>
                 ) : null}
                 {state?.task?.salesRequestId ? (
                   <a href={`/?ppTab=requests&requestId=${state.task.salesRequestId}`} target="_blank" rel="noopener noreferrer" className="inline-flex h-11 shrink-0 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-3 text-sm text-blue-700 transition hover:bg-blue-100" aria-label="Открыть заявку" title="Открыть заявку в новой вкладке">
@@ -14411,8 +14725,8 @@ function TaskModal({
                                   type="button"
                                   onClick={() => removeParticipant(role, participant)}
                                   className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-white hover:text-rose-600"
-                                  aria-label={`Удалить участника ${participantName}`}
-                                  title="Удалить"
+                                  aria-label={`${role === 'approver' ? 'Удалить согласующего' : 'Удалить наблюдателя'} ${participantName}`}
+                                  title={role === 'approver' ? 'Удалить согласующего' : 'Удалить наблюдателя'}
                                 >
                                   <X className="h-4 w-4" />
                                 </button>
@@ -14515,9 +14829,9 @@ function TaskModal({
               <textarea value={form.description} onChange={(event) => update('description', event.target.value)} disabled={isReadOnly} data-testid="task-description-field" className="form-textarea min-h-[140px] resize-y" rows={6} placeholder="Контекст, телефоны, комментарии, откуда пришла задача" />
             </Field>
             <Field label="Результат">
-              <textarea value={form.result} onChange={(event) => update('result', event.target.value)} disabled={!canEditResult || taskSaving} data-testid="task-result-field" className="form-textarea min-h-[120px] resize-y" rows={5} placeholder={canEditResult ? TASK_COMPLETION_RESULT_HINT : 'Результат доступен при завершении задачи'} />
+              <textarea value={form.result} onChange={(event) => update('result', event.target.value)} disabled={!canEditResult || taskSaving} data-testid="task-result-field" className="form-textarea min-h-[120px] resize-y" rows={5} placeholder={canEditResult ? TASK_COMPLETION_RESULT_HINT : form.status === 'done' ? 'Нет прав на изменение' : 'Результат доступен при завершении задачи'} />
               {resultCorrectionButton}
-              <p className="mt-1 text-xs text-slate-500">{canEditResult ? TASK_COMPLETION_RESULT_HINT : 'Поле станет доступным после выбора завершенного статуса или нажатия кнопки завершения.'}</p>
+              <p className="mt-1 text-xs text-slate-500">{canEditResult ? TASK_COMPLETION_RESULT_HINT : form.status === 'done' ? 'Нет прав на изменение' : 'Поле станет доступным после выбора завершенного статуса или нажатия кнопки завершения.'}</p>
               {resultError ? <p className="mt-1 text-xs font-semibold text-rose-600">{resultError}</p> : null}
             </Field>
           </div>

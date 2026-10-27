@@ -13,12 +13,138 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
 public partial class MoneyOperationsControllerTests
 {
+    [Fact]
+    public async Task ManagementSections_HttpExistingSessionLosesAccessWhenRolePermissionsAreRevoked()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "management-group-http@example.test", "Секретарь");
+        var permissions = new[] { RolePermissionCatalog.Roles, RolePermissionCatalog.Dictionaries }
+            .Select(section => new RolePermission { RoleId = user.RoleId, Section = section, CanView = true, ViewScope = DataVisibilityScope.All }).ToArray();
+        db.RolePermissions.AddRange(permissions);
+        await db.SaveChangesAsync();
+        using var server = new TestServer(new WebHostBuilder().UseEnvironment("Testing")
+            .UseSetting("BackgroundServices:Enabled", "false").UseSetting("Email:Enabled", "false")
+            .ConfigureServices(services =>
+            {
+                services.AddLogging(); services.AddSingleton(db); services.AddScoped<RoleManagementAccessService>();
+                services.AddAuthentication("bank-import-fixture").AddScheme<AuthenticationSchemeOptions, BankImportFixtureAuthentication>("bank-import-fixture", _ => { });
+                services.AddAuthorization();
+                services.AddControllers().AddApplicationPart(typeof(RolesController).Assembly);
+            })
+            .Configure(app => { app.UseRouting(); app.UseAuthentication(); app.UseAuthorization(); app.UseEndpoints(endpoints => endpoints.MapControllers()); }));
+        using var client = server.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Fixture-User", user.Id.ToString(CultureInfo.InvariantCulture));
+        var paths = new[] { "/api/roles", "/api/dictionaries/deal-types" };
+        foreach (var path in paths)
+        {
+            using var response = await client.GetAsync(path);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+        foreach (var permission in permissions) permission.CanView = false;
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        foreach (var path in paths)
+        {
+            using var response = await client.GetAsync(path);
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        }
+    }
+
+    [Fact]
+    public async Task DocumentSections_HttpExistingSessionLosesAccessWhenRolePermissionsAreRevoked()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "documents-group-http@example.test", "Секретарь");
+        var sections = new[] { RolePermissionCatalog.Accounts, RolePermissionCatalog.Acts, RolePermissionCatalog.Contracts };
+        var permissions = sections.Select(section => new RolePermission
+        {
+            RoleId = user.RoleId, Section = section, CanView = true, ViewScope = DataVisibilityScope.All,
+        }).ToArray();
+        db.RolePermissions.AddRange(permissions);
+        await db.SaveChangesAsync();
+        using var server = new TestServer(new WebHostBuilder().UseEnvironment("Testing")
+            .UseSetting("BackgroundServices:Enabled", "false").UseSetting("Email:Enabled", "false")
+            .ConfigureServices(services =>
+            {
+                services.AddLogging(); services.AddSingleton(db);
+                services.AddSingleton<IEmailService, GroupFixtureEmailService>();
+                services.AddSingleton<IFormRequirementsService, GroupFixtureFormRequirements>();
+                services.AddAuthentication("bank-import-fixture").AddScheme<AuthenticationSchemeOptions, BankImportFixtureAuthentication>("bank-import-fixture", _ => { });
+                services.AddAuthorization();
+                services.AddControllers().AddApplicationPart(typeof(InvoicesController).Assembly);
+            })
+            .Configure(app => { app.UseRouting(); app.UseAuthentication(); app.UseAuthorization(); app.UseEndpoints(endpoints => endpoints.MapControllers()); }));
+        using var client = server.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Fixture-User", user.Id.ToString(CultureInfo.InvariantCulture));
+        var paths = new[] { "/api/invoices", "/api/acts", "/api/contracts" };
+        foreach (var path in paths)
+        {
+            using var response = await client.GetAsync(path);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+        foreach (var permission in permissions) permission.CanView = false;
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        foreach (var path in paths)
+        {
+            using var response = await client.GetAsync(path);
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        }
+    }
+
+    private sealed class GroupFixtureEmailService : IEmailService
+    {
+        public Task SendRegistrationPendingEmailAsync(string toEmail, string fullName) => throw new InvalidOperationException("Email must not be sent");
+        public Task SendRegistrationApprovedEmailAsync(string toEmail, string fullName) => throw new InvalidOperationException("Email must not be sent");
+        public Task SendRegistrationRejectedEmailAsync(string toEmail, string fullName, string? reason) => throw new InvalidOperationException("Email must not be sent");
+        public Task SendAdminNewRegistrationNotificationAsync(string adminEmail, string newUserFullName, string newUserEmail) => throw new InvalidOperationException("Email must not be sent");
+        public Task SendEmailWithAttachmentAsync(string toEmail, string subject, string body, string attachmentFileName, byte[] attachmentBytes, string attachmentContentType) => throw new InvalidOperationException("Email must not be sent");
+    }
+
+    private sealed class GroupFixtureFormRequirements : IFormRequirementsService
+    {
+        public Task<List<string>> GetRequiredFieldsAsync(string section, CancellationToken ct = default) => Task.FromResult(new List<string>());
+        public Task<List<string>> GetMissingFieldsAsync(string section, object model, CancellationToken ct = default) => Task.FromResult(new List<string>());
+    }
+
+    [Fact]
+    public async Task MoneyJournal_HttpExistingSessionLosesAccessWhenRolePermissionIsRevoked()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "group-revoke-http@example.test", "Секретарь");
+        var permission = new RolePermission { RoleId = user.RoleId, Section = RolePermissionCatalog.Payments, CanView = true, ViewScope = DataVisibilityScope.All };
+        db.RolePermissions.Add(permission);
+        await db.SaveChangesAsync();
+
+        using var server = new TestServer(new WebHostBuilder().UseEnvironment("Testing")
+            .UseSetting("BackgroundServices:Enabled", "false").UseSetting("Email:Enabled", "false")
+            .ConfigureServices(services =>
+            {
+                services.AddLogging(); services.AddSingleton(db);
+                services.AddAuthentication("bank-import-fixture").AddScheme<AuthenticationSchemeOptions, BankImportFixtureAuthentication>("bank-import-fixture", _ => { });
+                services.AddAuthorization();
+                services.AddControllers().AddApplicationPart(typeof(MoneyOperationsController).Assembly);
+            })
+            .Configure(app => { app.UseRouting(); app.UseAuthentication(); app.UseAuthorization(); app.UseEndpoints(endpoints => endpoints.MapControllers()); }));
+        using var client = server.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Fixture-User", user.Id.ToString(CultureInfo.InvariantCulture));
+        using var before = await client.GetAsync("/api/money-operations/accounts");
+        Assert.Equal(HttpStatusCode.OK, before.StatusCode);
+
+        permission.CanView = false;
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        using var after = await client.GetAsync("/api/money-operations/accounts");
+        Assert.Equal(HttpStatusCode.Unauthorized, after.StatusCode);
+    }
+
     [Theory]
     [InlineData("missing-company", HttpStatusCode.BadRequest)]
     [InlineData("missing-account", HttpStatusCode.BadRequest)]

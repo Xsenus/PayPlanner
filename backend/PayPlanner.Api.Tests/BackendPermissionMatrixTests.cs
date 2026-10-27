@@ -8,10 +8,12 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Controllers;
+using PayPlanner.Api.Controllers.V2;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Filters;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Services;
 using Xunit;
 
@@ -19,6 +21,300 @@ namespace PayPlanner.Api.Tests;
 
 public class BackendPermissionMatrixTests
 {
+    [Fact]
+    public async Task ClientPassport_RespectsClientVisibilityForReadAndWrite()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "passport-owner", new RolePermission
+        {
+            Section = RolePermissionCatalog.Clients, CanView = true, CanEdit = true, ViewScope = DataVisibilityScope.Own,
+        });
+        var other = await CreateUserAsync(db, "passport-other", roleName: "other-employee");
+        var own = new Client { Name = "Own", ResponsibleUserId = user.Id };
+        var hidden = new Client { Name = "Hidden", ResponsibleUserId = other.Id };
+        db.Clients.AddRange(own, hidden);
+        await db.SaveChangesAsync();
+        db.ClientPassports.AddRange(
+            new ClientPassport { ClientId = own.Id, Number = "111111", IsPrimary = true },
+            new ClientPassport { ClientId = hidden.Id, Number = "222222", IsPrimary = true });
+        await db.SaveChangesAsync();
+        var controller = new ClientPassportController(db)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = CreatePrincipal(user) } },
+        };
+        Assert.IsType<OkObjectResult>(await controller.Get(own.Id, CancellationToken.None));
+        Assert.IsType<NotFoundResult>(await controller.Get(hidden.Id, CancellationToken.None));
+        Assert.IsType<NotFoundResult>(await controller.Upsert(hidden.Id, new UpsertClientPassportRequest { Number = "333333" }, CancellationToken.None));
+        Assert.Equal("222222", await db.ClientPassports.Where(item => item.ClientId == hidden.Id).Select(item => item.Number).SingleAsync());
+        Assert.IsType<OkObjectResult>(await controller.Upsert(own.Id, new UpsertClientPassportRequest { Number = "444444" }, CancellationToken.None));
+        Assert.Equal("444444", await db.ClientPassports.Where(item => item.ClientId == own.Id).Select(item => item.Number).SingleAsync());
+    }
+
+    [Fact]
+    public async Task ClientPassport_RejectsReadAndWriteWithoutClientView()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "passport-no-access", new RolePermission
+        {
+            Section = RolePermissionCatalog.Clients, CanView = false, ViewScope = DataVisibilityScope.Own,
+        });
+        var client = new Client { Name = "Restricted", ResponsibleUserId = user.Id };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+        var controller = new ClientPassportController(db)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = CreatePrincipal(user) } },
+        };
+        Assert.IsType<ForbidResult>(await controller.Get(client.Id, CancellationToken.None));
+        Assert.IsType<ForbidResult>(await controller.Upsert(client.Id, new UpsertClientPassportRequest { Number = "333333" }, CancellationToken.None));
+        Assert.False(await db.ClientPassports.AnyAsync(item => item.ClientId == client.Id));
+    }
+
+    [Fact]
+    public void UncalculatedCaseTaskSummary_IsNotAdvertisedAsComplete()
+        => Assert.Equal("none", new ClientCase().TaskSummaryVisibility);
+
+    [Theory]
+    [InlineData("none", "Недоступно")]
+    [InlineData("partial", "2 (доступные)")]
+    [InlineData("full", "2")]
+    public void CaseTaskSummaryExport_LabelsVisibility(string visibility, string expected)
+    {
+        var method = typeof(CasesV2Controller).GetMethod("FormatTaskSummaryValue", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(method);
+        Assert.Equal(expected, method.Invoke(null, [new ClientCase { TaskSummaryVisibility = visibility }, 2, false]));
+    }
+
+    [Fact]
+    public async Task CaseDetail_DoesNotDiscloseTaskCountsWithoutTaskViewPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserWithPermissionsAsync(db, "case-without-tasks", "employee",
+        [
+            new RolePermission { Section = RolePermissionCatalog.Cases, CanView = true, ViewScope = DataVisibilityScope.All },
+            new RolePermission { Section = RolePermissionCatalog.Tasks, CanView = false, ViewScope = DataVisibilityScope.Own },
+        ]);
+        var clientCase = new ClientCase { Title = "Visible case", Client = new Client { Name = "Case client" } };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        db.TaskJournalItems.Add(new TaskJournalItem
+        {
+            ClientCaseId = clientCase.Id,
+            Title = "Hidden task",
+            ObjectName = "Hidden task",
+            AuthorUserId = user.Id,
+            DueAt = DateTime.UtcNow.AddDays(-1),
+        });
+        await db.SaveChangesAsync();
+
+        var controller = new CasesV2Controller(db)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = CreatePrincipal(user) } },
+        };
+        var result = Assert.IsType<OkObjectResult>(await controller.GetById(clientCase.Id, CancellationToken.None));
+        var response = Assert.IsType<ClientCase>(result.Value);
+        Assert.Equal(0, response.OpenTaskCount);
+        Assert.Equal("none", response.TaskSummaryVisibility);
+        Assert.Equal(0, response.OverdueTaskCount);
+        Assert.Null(response.LastTaskAt);
+        Assert.Null(response.LastMeaningfulActivityAt);
+        Assert.Null(response.NextInactivityControlAt);
+        Assert.Equal("Сведения автоконтроля недоступны из-за ограничений доступа", response.InactivityControlExclusionReason);
+    }
+
+    [Fact]
+    public async Task CaseDetail_CountsOnlyTasksVisibleToTheEmployee()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserWithPermissionsAsync(db, "case-own-tasks", "employee",
+        [
+            new RolePermission { Section = RolePermissionCatalog.Cases, CanView = true, ViewScope = DataVisibilityScope.All },
+            new RolePermission { Section = RolePermissionCatalog.Tasks, CanView = true, ViewScope = DataVisibilityScope.Own },
+        ]);
+        var other = await CreateUserAsync(db, "other-case-task", roleName: "other-employee");
+        var clientCase = new ClientCase { Title = "Visible case", Client = new Client { Name = "Case client" } };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        db.TaskJournalItems.AddRange(
+            new TaskJournalItem { ClientCaseId = clientCase.Id, Title = "Own", ObjectName = "Own", AuthorUserId = user.Id, DueAt = DateTime.UtcNow.AddDays(1) },
+            new TaskJournalItem { ClientCaseId = clientCase.Id, Title = "Other", ObjectName = "Other", AuthorUserId = other.Id, DueAt = DateTime.UtcNow.AddDays(-1) });
+        await db.SaveChangesAsync();
+        var controller = new CasesV2Controller(db)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = CreatePrincipal(user) } },
+        };
+        var result = Assert.IsType<OkObjectResult>(await controller.GetById(clientCase.Id, CancellationToken.None));
+        var response = Assert.IsType<ClientCase>(result.Value);
+        Assert.Equal(1, response.OpenTaskCount);
+        Assert.Equal("partial", response.TaskSummaryVisibility);
+        Assert.Equal(0, response.OverdueTaskCount);
+        Assert.Null(response.NextInactivityControlAt);
+    }
+
+    [Fact]
+    public async Task CaseDetail_PreservesFullSummaryAndControlForFullVisibility()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserWithPermissionsAsync(db, "case-all-tasks", "employee",
+        [
+            new RolePermission { Section = RolePermissionCatalog.Cases, CanView = true, ViewScope = DataVisibilityScope.All },
+            new RolePermission { Section = RolePermissionCatalog.Tasks, CanView = true, ViewScope = DataVisibilityScope.All },
+            new RolePermission { Section = RolePermissionCatalog.Requests, CanView = true, ViewScope = DataVisibilityScope.All },
+        ]);
+        user.IsApproved = true;
+        await db.SaveChangesAsync();
+        var clientCase = new ClientCase { Title = "Visible case", Client = new Client { Name = "Case client" } };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        db.TaskJournalItems.Add(new TaskJournalItem
+        {
+            ClientCaseId = clientCase.Id, Title = "Open task", ObjectName = "Open task", AuthorUserId = user.Id,
+            Status = "inProgress", DueAt = DateTime.UtcNow.AddDays(-1),
+        });
+        await db.SaveChangesAsync();
+        var controller = new CasesV2Controller(db)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = CreatePrincipal(user) } },
+        };
+        var result = Assert.IsType<OkObjectResult>(await controller.GetById(clientCase.Id, CancellationToken.None));
+        var response = Assert.IsType<ClientCase>(result.Value);
+        Assert.Equal(1, response.OpenTaskCount);
+        Assert.Equal("full", response.TaskSummaryVisibility);
+        Assert.Equal(1, response.OverdueTaskCount);
+        Assert.Equal("Есть активная задача", response.InactivityControlExclusionReason);
+        Assert.NotNull(response.LastMeaningfulActivityAt);
+    }
+
+    [Fact]
+    public async Task CaseDetail_DoesNotCountRequestTaskForUnapprovedEmployee()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserWithPermissionsAsync(db, "unapproved-case-tasks", "employee",
+        [
+            new RolePermission { Section = RolePermissionCatalog.Cases, CanView = true, ViewScope = DataVisibilityScope.All },
+            new RolePermission { Section = RolePermissionCatalog.Tasks, CanView = true, ViewScope = DataVisibilityScope.All },
+            new RolePermission { Section = RolePermissionCatalog.Requests, CanView = true, ViewScope = DataVisibilityScope.All },
+        ]);
+        var client = new Client { Name = "Case client" };
+        var clientCase = new ClientCase { Title = "Visible case", Client = client };
+        var status = new SalesRequestStatus { Key = "new", Title = "New" };
+        db.ClientCases.Add(clientCase);
+        db.SalesRequestStatuses.Add(status);
+        await db.SaveChangesAsync();
+        var request = new SalesRequest { ClientId = client.Id, StatusId = status.Id, ResponsibleUserId = user.Id, CreatedByUserId = user.Id, Summary = "Private" };
+        db.SalesRequests.Add(request);
+        await db.SaveChangesAsync();
+        db.TaskJournalItems.Add(new TaskJournalItem
+        {
+            ClientCaseId = clientCase.Id, SalesRequestId = request.Id, Title = "Request task", ObjectName = "Request task",
+            AuthorUserId = user.Id, DueAt = DateTime.UtcNow.AddDays(1),
+        });
+        await db.SaveChangesAsync();
+        var controller = new CasesV2Controller(db)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = CreatePrincipal(user) } },
+        };
+        var result = Assert.IsType<OkObjectResult>(await controller.GetById(clientCase.Id, CancellationToken.None));
+        var response = Assert.IsType<ClientCase>(result.Value);
+        Assert.Equal("partial", response.TaskSummaryVisibility);
+        Assert.Equal(0, response.OpenTaskCount);
+    }
+
+    [Fact]
+    public async Task CaseDetail_CountsOnlyRequestTasksVisibleToApprovedEmployee()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserWithPermissionsAsync(db, "own-request-tasks", "employee",
+        [
+            new RolePermission { Section = RolePermissionCatalog.Cases, CanView = true, ViewScope = DataVisibilityScope.All },
+            new RolePermission { Section = RolePermissionCatalog.Tasks, CanView = true, ViewScope = DataVisibilityScope.All },
+            new RolePermission { Section = RolePermissionCatalog.Requests, CanView = true, ViewScope = DataVisibilityScope.Own },
+        ]);
+        user.IsApproved = true;
+        var other = await CreateUserAsync(db, "other-request-task", roleName: "other-employee");
+        var client = new Client { Name = "Case client" };
+        var clientCase = new ClientCase { Title = "Visible case", Client = client };
+        var status = new SalesRequestStatus { Key = "new", Title = "New" };
+        db.ClientCases.Add(clientCase);
+        db.SalesRequestStatuses.Add(status);
+        await db.SaveChangesAsync();
+        var own = new SalesRequest { ClientId = client.Id, StatusId = status.Id, ResponsibleUserId = user.Id, CreatedByUserId = user.Id, Summary = "Own" };
+        var hidden = new SalesRequest { ClientId = client.Id, StatusId = status.Id, ResponsibleUserId = other.Id, CreatedByUserId = other.Id, Summary = "Hidden" };
+        db.SalesRequests.AddRange(own, hidden);
+        await db.SaveChangesAsync();
+        db.TaskJournalItems.AddRange(
+            new TaskJournalItem { ClientCaseId = clientCase.Id, SalesRequestId = own.Id, Title = "Own", ObjectName = "Own", AuthorUserId = user.Id, DueAt = DateTime.UtcNow.AddDays(1) },
+            new TaskJournalItem { ClientCaseId = clientCase.Id, SalesRequestId = hidden.Id, Title = "Hidden", ObjectName = "Hidden", AuthorUserId = other.Id, DueAt = DateTime.UtcNow.AddDays(-1) });
+        await db.SaveChangesAsync();
+        var controller = new CasesV2Controller(db)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = CreatePrincipal(user) } },
+        };
+        var result = Assert.IsType<OkObjectResult>(await controller.GetById(clientCase.Id, CancellationToken.None));
+        var response = Assert.IsType<ClientCase>(result.Value);
+        Assert.Equal("partial", response.TaskSummaryVisibility);
+        Assert.Equal(1, response.OpenTaskCount);
+        Assert.Equal(0, response.OverdueTaskCount);
+    }
+
+    [Theory]
+    [InlineData("active")]
+    [InlineData("inactive")]
+    public async Task CaseRegistry_RejectsActivityFilterWithoutFullTaskVisibility(string activity)
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserWithPermissionsAsync(db, "case-filter", "employee",
+        [
+            new RolePermission { Section = RolePermissionCatalog.Cases, CanView = true, ViewScope = DataVisibilityScope.All },
+            new RolePermission { Section = RolePermissionCatalog.Tasks, CanView = true, ViewScope = DataVisibilityScope.Own },
+        ]);
+        var controller = new CasesV2Controller(db)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = CreatePrincipal(user) } },
+        };
+        var result = await controller.Get(null, null, null, null, null, null, null, null, null, null, null, null, null,
+            activity: activity);
+        Assert.IsType<ForbidResult>(result);
+    }
+
+    [Fact]
+    public async Task CaseRegistry_ReportsActivityFilterAccessWhenEmpty()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserWithPermissionsAsync(db, "empty-case-registry", "employee",
+        [
+            new RolePermission { Section = RolePermissionCatalog.Cases, CanView = true, ViewScope = DataVisibilityScope.All },
+        ]);
+        var controller = new CasesV2Controller(db)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = CreatePrincipal(user) } },
+        };
+        var result = Assert.IsType<OkObjectResult>(await controller.Get(null, null, null, null, null, null, null, null, null, null, null, null, null));
+        var property = result.Value!.GetType().GetProperty("canFilterActivity");
+        Assert.NotNull(property);
+        Assert.Equal(false, property.GetValue(result.Value));
+    }
+
+    [Theory]
+    [InlineData("active")]
+    [InlineData("inactive")]
+    public async Task CaseExport_RejectsActivityFilterWithoutFullTaskVisibility(string activity)
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserWithPermissionsAsync(db, "case-export-filter", "employee",
+        [
+            new RolePermission { Section = RolePermissionCatalog.Cases, CanView = true, CanExport = true, ViewScope = DataVisibilityScope.All },
+            new RolePermission { Section = RolePermissionCatalog.Tasks, CanView = true, ViewScope = DataVisibilityScope.Own },
+        ]);
+        var controller = new CasesV2Controller(db)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = CreatePrincipal(user) } },
+        };
+        var result = await controller.ExportRegistryCsv(null, null, null, null, null, null, null, null, null, null, null, null, null,
+            activity: activity);
+        Assert.IsType<ForbidResult>(result);
+    }
+
     public static IEnumerable<object[]> CriticalSections()
     {
         yield return [RolePermissionCatalog.Payments];

@@ -5,6 +5,7 @@ import {
   getInitialCaseDetailTab,
   getInitialActId,
   getInitialClientId,
+  getInitialLegalEntityId,
   getInitialContractId,
   getInitialContractReturnTab,
   getInitialPaymentId,
@@ -265,6 +266,18 @@ describe('App client routing helpers', () => {
     expect(getInitialTab()).toBe('clientDetail');
   });
 
+  it('opens a legal entity only for a valid id on its own section', () => {
+    window.history.replaceState({}, '', '/?ppTab=legalEntities&ppLegalEntityId=42');
+    expect(getInitialTab()).toBe('legalEntities');
+    expect(getInitialLegalEntityId()).toBe(42);
+    for (const value of ['0', '-1', '1e3', '9007199254740992', 'abc']) {
+      window.history.replaceState({}, '', `/?ppTab=legalEntities&ppLegalEntityId=${value}`);
+      expect(getInitialLegalEntityId()).toBeNull();
+    }
+    window.history.replaceState({}, '', '/?ppTab=tasks&ppLegalEntityId=42');
+    expect(getInitialLegalEntityId()).toBeNull();
+  });
+
   it('detects the clients list pathname', () => {
     window.history.replaceState({}, '', '/clients');
 
@@ -308,10 +321,19 @@ describe('App client routing helpers', () => {
   });
 
   it('does not restore clientDetail from storage without a client id', () => {
-    window.localStorage.setItem('pp.last_active_tab', 'clientDetail');
+    window.localStorage.setItem('pp.last_active_tab.1', 'clientDetail');
     window.history.replaceState({}, '', '/');
 
-    expect(getInitialTab()).toBe('clients');
+    expect(getInitialTab(1)).toBe('clients');
+  });
+
+  it.each([
+    ['caseDetail', 'cases'], ['userDetail', 'users'], ['contractDetail', 'contracts'],
+    ['contractCreate', 'contracts'], ['actDetail', 'acts'], ['actCreate', 'acts'],
+  ] as const)('restores stored %s to %s without an object from another session', (stored, expected) => {
+    window.localStorage.setItem('pp.last_active_tab.1', stored);
+    window.history.replaceState({}, '', '/');
+    expect(getInitialTab(1)).toBe(expected);
   });
 });
 

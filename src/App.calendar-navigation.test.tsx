@@ -4,24 +4,27 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import App from './App';
 import { LAST_TAB_STORAGE_KEY } from './appRouting';
+const userLastTabKey = `${LAST_TAB_STORAGE_KEY}.1`;
 import { apiService } from './services/api';
 
 const permissionsState = vi.hoisted(() => ({
   paymentsCanView: true,
   casesCanView: true,
   tasksCanView: true,
+  legalEntitiesCanView: true,
   loaded: true,
 }));
 
 const authState = vi.hoisted(() => ({
   loading: false,
+  userId: 1,
 }));
 
 vi.mock('./contexts/AuthContext', () => ({
   AuthProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
   useAuth: () => ({
     user: authState.loading ? null : {
-      id: 1,
+      id: authState.userId,
       email: 'admin@example.test',
       fullName: 'Admin',
       role: { id: 1, name: 'admin' },
@@ -67,7 +70,7 @@ vi.mock('./hooks/useRolePermissions', () => {
         notes: currentSection,
         reports: currentSection,
         calculator: currentSection,
-        legalEntities: currentSection,
+        legalEntities: { ...currentSection, canView: permissionsState.loaded && permissionsState.legalEntitiesCanView },
         clients: currentSection,
         cases: { ...currentSection, canView: permissionsState.loaded && permissionsState.casesCanView },
         requests: currentSection,
@@ -269,8 +272,92 @@ describe('App calendar client navigation', () => {
     permissionsState.paymentsCanView = true;
     permissionsState.casesCanView = true;
     permissionsState.tasksCanView = true;
+    permissionsState.legalEntitiesCanView = true;
     permissionsState.loaded = true;
     authState.loading = false;
+    authState.userId = 1;
+  });
+
+  it('restores the signed-in employee tab after authentication without using the shared legacy key', async () => {
+    window.history.replaceState({}, '', '/');
+    window.localStorage.setItem(LAST_TAB_STORAGE_KEY, 'payments');
+    window.localStorage.setItem(userLastTabKey, 'reports');
+    authState.loading = true;
+    const view = render(<App />);
+    authState.loading = false;
+    view.rerender(<App />);
+    await waitFor(() => expect(screen.getByTestId('navigation').textContent).toBe('reports'));
+    expect(window.localStorage.getItem(LAST_TAB_STORAGE_KEY)).toBe('payments');
+    expect(window.localStorage.getItem(userLastTabKey)).toBe('reports');
+  });
+
+  it('switches personal tabs A to B and back without overwriting the other employee', async () => {
+    window.history.replaceState({}, '', '/');
+    window.localStorage.setItem(userLastTabKey, 'reports');
+    window.localStorage.setItem(`${LAST_TAB_STORAGE_KEY}.2`, 'calendar');
+    const view = render(<App />);
+    await waitFor(() => expect(screen.getByTestId('navigation').textContent).toBe('reports'));
+    authState.userId = 2;
+    view.rerender(<App />);
+    await waitFor(() => expect(screen.getByTestId('navigation').textContent).toBe('calendar'));
+    expect(window.localStorage.getItem(`${LAST_TAB_STORAGE_KEY}.2`)).toBe('calendar');
+    expect(window.localStorage.getItem(userLastTabKey)).toBe('reports');
+    authState.userId = 1;
+    view.rerender(<App />);
+    await waitFor(() => expect(screen.getByTestId('navigation').textContent).toBe('reports'));
+    expect(window.localStorage.getItem(`${LAST_TAB_STORAGE_KEY}.2`)).toBe('calendar');
+  });
+
+  it('clears a previous employee client detail when switching account', async () => {
+    window.history.replaceState({}, '', '/clients/42');
+    window.localStorage.setItem(`${LAST_TAB_STORAGE_KEY}.2`, 'calendar');
+    const view = render(<App />);
+    expect(await screen.findByTestId('client-detail')).toBeTruthy();
+    authState.userId = 2;
+    view.rerender(<App />);
+    await waitFor(() => expect(screen.getByTestId('navigation').textContent).toBe('calendar'));
+    expect(screen.queryByTestId('client-detail')).toBeNull();
+    expect(window.location.pathname).not.toContain('/clients/42');
+  });
+
+  it('does not carry the previous employee request query into the next account', async () => {
+    window.history.replaceState({}, '', '/?ppTab=requests&requestId=7&summary=private-sales');
+    window.localStorage.setItem(`${LAST_TAB_STORAGE_KEY}.2`, 'requests');
+    const view = render(<App />);
+    await waitFor(() => expect(screen.getByTestId('navigation').textContent).toBe('requests'));
+    authState.userId = 2;
+    view.rerender(<App />);
+    await waitFor(() => expect(screen.getByTestId('navigation').textContent).toBe('requests'));
+    await waitFor(() => expect(new URL(window.location.href).searchParams.has('requestId')).toBe(false));
+    expect(new URL(window.location.href).searchParams.has('summary')).toBe(false);
+    await waitFor(() => expect(new URL(window.location.href).searchParams.get('ppTab')).toBe('requests'));
+  });
+
+  it('preserves the requests section and request link across a refresh', async () => {
+    window.history.replaceState({}, '', '/?ppTab=requests&requestId=7');
+    const view = render(<App />);
+    await screen.findByTestId('requests-view');
+    await waitFor(() => expect(new URL(window.location.href).searchParams.get('ppTab')).toBe('requests'));
+    expect(new URL(window.location.href).searchParams.get('requestId')).toBe('7');
+    view.unmount();
+    render(<App />);
+    expect(await screen.findByTestId('requests-view')).toBeTruthy();
+    expect(new URL(window.location.href).searchParams.get('requestId')).toBe('7');
+  });
+
+  it('opens the legal entity from a direct task link', async () => {
+    window.history.replaceState({}, '', '/?ppTab=legalEntities&ppLegalEntityId=42');
+    render(<App />);
+    expect((await screen.findByTestId('legal-entities-view')).textContent).toContain('legal entity 42');
+  });
+
+  it('does not open a direct legal entity link without section access', async () => {
+    permissionsState.legalEntitiesCanView = false;
+    window.history.replaceState({}, '', '/?ppTab=legalEntities&ppLegalEntityId=42');
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId('navigation').textContent).not.toBe('legalEntities'));
+    expect(screen.queryByTestId('legal-entities-view')).toBeNull();
+    expect(screen.queryByText('legal entity 42')).toBeNull();
   });
 
   it('returns to calendar after opening a client from calendar', async () => {
@@ -353,7 +440,7 @@ describe('App calendar client navigation', () => {
 
   it('opens an invoice from the client card even when notifications were the last saved tab', async () => {
     window.history.replaceState({}, '', '/clients/42');
-    window.localStorage.setItem(LAST_TAB_STORAGE_KEY, 'notifications');
+    window.localStorage.setItem(userLastTabKey, 'notifications');
 
     render(<App />);
 
@@ -365,7 +452,7 @@ describe('App calendar client navigation', () => {
       expect(screen.queryByTestId('notification-center')).toBeNull();
       expect(screen.getByTestId('accounts-view').textContent).toBe('invoice 528');
       expect(`${window.location.pathname}${window.location.search}`).toBe('/invoices/528');
-      expect(window.localStorage.getItem(LAST_TAB_STORAGE_KEY)).toBe('accounts');
+      expect(window.localStorage.getItem(userLastTabKey)).toBe('accounts');
     });
   });
 
@@ -382,7 +469,7 @@ describe('App calendar client navigation', () => {
   });
   it('keeps a routed invoice page while role permissions are loading', async () => {
     window.history.replaceState({}, '', '/invoices/528');
-    window.localStorage.setItem(LAST_TAB_STORAGE_KEY, 'notifications');
+    window.localStorage.setItem(userLastTabKey, 'notifications');
     permissionsState.loaded = false;
 
     const rendered = render(<App />);
@@ -390,7 +477,7 @@ describe('App calendar client navigation', () => {
     await waitFor(() => {
       expect(screen.getByTestId('navigation').textContent).toBe('accounts');
       expect(`${window.location.pathname}${window.location.search}`).toBe('/invoices/528');
-      expect(window.localStorage.getItem(LAST_TAB_STORAGE_KEY)).toBe('notifications');
+      expect(window.localStorage.getItem(userLastTabKey)).toBe('notifications');
     });
 
     permissionsState.loaded = true;
@@ -400,7 +487,7 @@ describe('App calendar client navigation', () => {
       expect(screen.queryByTestId('notification-center')).toBeNull();
       expect(screen.getByTestId('accounts-view').textContent).toBe('invoice 528');
       expect(`${window.location.pathname}${window.location.search}`).toBe('/invoices/528');
-      expect(window.localStorage.getItem(LAST_TAB_STORAGE_KEY)).toBe('accounts');
+      expect(window.localStorage.getItem(userLastTabKey)).toBe('accounts');
     });
   });
 
@@ -434,14 +521,14 @@ describe('App calendar client navigation', () => {
 
   it('does not overwrite a deep-linked user page with notifications while auth is loading', async () => {
     window.history.replaceState({}, '', '/?ppTab=userDetail&userId=10');
-    window.localStorage.setItem(LAST_TAB_STORAGE_KEY, 'notifications');
+    window.localStorage.setItem(userLastTabKey, 'notifications');
     authState.loading = true;
 
     const rendered = render(<App />);
 
     await waitFor(() => {
       expect(`${window.location.pathname}${window.location.search}`).toBe('/?ppTab=userDetail&userId=10');
-      expect(window.localStorage.getItem(LAST_TAB_STORAGE_KEY)).toBe('notifications');
+      expect(window.localStorage.getItem(userLastTabKey)).toBe('notifications');
     });
 
     authState.loading = false;
@@ -453,12 +540,12 @@ describe('App calendar client navigation', () => {
       expect(`${window.location.pathname}${window.location.search}`).toBe('/?ppTab=userDetail&userId=10');
     });
 
-    expect(window.localStorage.getItem(LAST_TAB_STORAGE_KEY)).toBe('userDetail');
+    expect(window.localStorage.getItem(userLastTabKey)).toBe('userDetail');
   });
 
   it('does not restore notifications as the last working tab on plain refresh', async () => {
     window.history.replaceState({}, '', '/');
-    window.localStorage.setItem(LAST_TAB_STORAGE_KEY, 'notifications');
+    window.localStorage.setItem(userLastTabKey, 'notifications');
 
     render(<App />);
 
@@ -467,7 +554,7 @@ describe('App calendar client navigation', () => {
       expect(screen.getByTestId('calendar-view')).toBeTruthy();
     });
 
-    expect(window.localStorage.getItem(LAST_TAB_STORAGE_KEY)).toBe('calendar');
+    expect(window.localStorage.getItem(userLastTabKey)).toBe('calendar');
   });
 
   it('keeps calendar in the route so F5 returns to calendar without stored state', async () => {
@@ -527,7 +614,7 @@ describe('App calendar client navigation', () => {
 
   it('clears stale settings section when opening the profile page', async () => {
     window.history.replaceState({}, '', '/?settingsSection=notifications&ppTab=profile');
-    window.localStorage.setItem(LAST_TAB_STORAGE_KEY, 'notifications');
+    window.localStorage.setItem(userLastTabKey, 'notifications');
 
     render(<App />);
 
@@ -537,12 +624,12 @@ describe('App calendar client navigation', () => {
       expect(`${window.location.pathname}${window.location.search}`).toBe('/?ppTab=profile');
     });
 
-    expect(window.localStorage.getItem(LAST_TAB_STORAGE_KEY)).toBe('profile');
+    expect(window.localStorage.getItem(userLastTabKey)).toBe('profile');
   });
 
   it('opens notifications and clears a forbidden last tab after role permissions change', async () => {
     window.history.replaceState({}, '', '/');
-    window.localStorage.setItem(LAST_TAB_STORAGE_KEY, 'payments');
+    window.localStorage.setItem(userLastTabKey, 'payments');
     permissionsState.paymentsCanView = false;
 
     render(<App />);
@@ -553,6 +640,6 @@ describe('App calendar client navigation', () => {
       expect(`${window.location.pathname}${window.location.search}`).toBe('/notifications');
     });
 
-    expect(window.localStorage.getItem(LAST_TAB_STORAGE_KEY)).toBeNull();
+    expect(window.localStorage.getItem(userLastTabKey)).toBeNull();
   });
 });

@@ -37,6 +37,25 @@ const addressTypeOptions = [
 ];
 
 describe("ClientAddressEntriesForm integration", () => {
+  it("shows all address details as text in read mode and keeps the edit form available", () => {
+    const props = {
+      entries: [{ ...baseEntry, additionalTypes: ["actual"], validFrom: "2026-01-02" }],
+      addressTypeOptions, suggestionsByIndex: {}, onUpdateEntry: vi.fn(), onSetPrimary: vi.fn(),
+      onRemoveEntry: vi.fn(), onAddEntry: vi.fn(), onToggleAdditionalType: vi.fn(),
+      onScheduleSuggestions: vi.fn(), onFindAddress: vi.fn(), onApplySuggestion: vi.fn(),
+    };
+    const { rerender } = render(<ClientAddressEntriesForm {...props} canEdit={false} textReadOnly showValidityFields />);
+    expect(screen.getByText(initialFullAddress)).toBeTruthy();
+    expect(screen.getByText("Юридический адрес")).toBeTruthy();
+    expect(screen.getByText("Фактический адрес")).toBeTruthy();
+    expect(screen.getByText("2026-01-02")).toBeTruthy();
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Удалить адрес" })).toBeNull();
+    rerender(<ClientAddressEntriesForm {...props} canEdit textReadOnly showValidityFields />);
+    expect(screen.getByDisplayValue(initialFullAddress)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Удалить адрес" })).toBeTruthy();
+  });
+
   it("shows full address suggestions and applies the selected suggestion", async () => {
     const user = userEvent.setup();
     const onApplySuggestion = vi.fn().mockResolvedValue(undefined);

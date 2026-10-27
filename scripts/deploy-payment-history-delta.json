@@ -1,0 +1,361 @@
+{
+  "columns": {
+    "added": [
+      {
+        "name": "IdentityVersion",
+        "type": "character varying(32)",
+        "table": "PaymentCreateAttempts",
+        "default": null,
+        "identity": "",
+        "nullable": false,
+        "position": 8,
+        "collation": "pg_catalog.\"default\"",
+        "generated": ""
+      },
+      {
+        "name": "Operation",
+        "type": "character varying(16)",
+        "table": "PaymentCreateAttempts",
+        "default": null,
+        "identity": "",
+        "nullable": false,
+        "position": 3,
+        "collation": "pg_catalog.\"default\"",
+        "generated": ""
+      },
+      {
+        "name": "PayloadIdentity",
+        "type": "character varying(64)",
+        "table": "PaymentCreateAttempts",
+        "default": null,
+        "identity": "",
+        "nullable": true,
+        "position": 9,
+        "collation": "pg_catalog.\"default\"",
+        "generated": ""
+      },
+      {
+        "name": "State",
+        "type": "character varying(16)",
+        "table": "PaymentCreateAttempts",
+        "default": null,
+        "identity": "",
+        "nullable": false,
+        "position": 7,
+        "collation": "pg_catalog.\"default\"",
+        "generated": ""
+      },
+      {
+        "name": "HistoryVisibilityRevision",
+        "type": "bigint",
+        "table": "InternalChatMembers",
+        "default": "0",
+        "identity": "",
+        "nullable": false,
+        "position": 13,
+        "collation": null,
+        "generated": ""
+      },
+      {
+        "name": "ActorUserId",
+        "type": "integer",
+        "table": "PaymentCreateAttempts",
+        "default": null,
+        "identity": "",
+        "nullable": false,
+        "position": 2,
+        "collation": null,
+        "generated": ""
+      },
+      {
+        "name": "ActorUserId",
+        "type": "integer",
+        "table": "IX_PaymentCreateAttempts_ActorUserId",
+        "default": null,
+        "identity": "",
+        "nullable": true,
+        "position": 1,
+        "collation": null,
+        "generated": ""
+      },
+      {
+        "name": "CancelledAtUtc",
+        "type": "timestamp with time zone",
+        "table": "PaymentCreateAttempts",
+        "default": null,
+        "identity": "",
+        "nullable": true,
+        "position": 14,
+        "collation": null,
+        "generated": ""
+      },
+      {
+        "name": "CanonicalPaymentId",
+        "type": "integer",
+        "table": "PaymentCreateAttempts",
+        "default": null,
+        "identity": "",
+        "nullable": true,
+        "position": 10,
+        "collation": null,
+        "generated": ""
+      },
+      {
+        "name": "CommittedAtUtc",
+        "type": "timestamp with time zone",
+        "table": "PaymentCreateAttempts",
+        "default": null,
+        "identity": "",
+        "nullable": true,
+        "position": 13,
+        "collation": null,
+        "generated": ""
+      },
+      {
+        "name": "CreatedAtUtc",
+        "type": "timestamp with time zone",
+        "table": "PaymentCreateAttempts",
+        "default": null,
+        "identity": "",
+        "nullable": false,
+        "position": 11,
+        "collation": null,
+        "generated": ""
+      },
+      {
+        "name": "ExpiresAtUtc",
+        "type": "timestamp with time zone",
+        "table": "PaymentCreateAttempts",
+        "default": null,
+        "identity": "",
+        "nullable": false,
+        "position": 12,
+        "collation": null,
+        "generated": ""
+      },
+      {
+        "name": "HistoryHiddenThroughMessageId",
+        "type": "integer",
+        "table": "InternalChatMembers",
+        "default": null,
+        "identity": "",
+        "nullable": true,
+        "position": 12,
+        "collation": null,
+        "generated": ""
+      },
+      {
+        "name": "Id",
+        "type": "uuid",
+        "table": "PaymentCreateAttempts",
+        "default": null,
+        "identity": "",
+        "nullable": false,
+        "position": 1,
+        "collation": null,
+        "generated": ""
+      },
+      {
+        "name": "Id",
+        "type": "uuid",
+        "table": "PK_PaymentCreateAttempts",
+        "default": null,
+        "identity": "",
+        "nullable": true,
+        "position": 1,
+        "collation": null,
+        "generated": ""
+      },
+      {
+        "name": "PrimaryPaymentId",
+        "type": "integer",
+        "table": "PaymentCreateAttempts",
+        "default": null,
+        "identity": "",
+        "nullable": true,
+        "position": 6,
+        "collation": null,
+        "generated": ""
+      },
+      {
+        "name": "SellerBranchId",
+        "type": "integer",
+        "table": "PaymentCreateAttempts",
+        "default": null,
+        "identity": "",
+        "nullable": true,
+        "position": 5,
+        "collation": null,
+        "generated": ""
+      },
+      {
+        "name": "SellerCompanyId",
+        "type": "integer",
+        "table": "PaymentCreateAttempts",
+        "default": null,
+        "identity": "",
+        "nullable": true,
+        "position": 4,
+        "collation": null,
+        "generated": ""
+      }
+    ],
+    "removed": []
+  },
+  "relations": {
+    "added": [
+      {
+        "kind": "i",
+        "name": "IX_PaymentCreateAttempts_ActorUserId",
+        "view": null,
+        "owner": "__migration_owner__",
+        "options": null,
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "forceRowSecurity": false
+      },
+      {
+        "kind": "i",
+        "name": "PK_PaymentCreateAttempts",
+        "view": null,
+        "owner": "__migration_owner__",
+        "options": null,
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "forceRowSecurity": false
+      },
+      {
+        "kind": "r",
+        "name": "PaymentCreateAttempts",
+        "view": null,
+        "owner": "__migration_owner__",
+        "options": null,
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "forceRowSecurity": false
+      }
+    ],
+    "removed": []
+  },
+  "constraints": {
+    "added": [
+      {
+        "name": "CK_PaymentCreateAttempts_Ownership",
+        "table": "PaymentCreateAttempts",
+        "deferred": false,
+        "validated": true,
+        "deferrable": false,
+        "definition": "CHECK (\"ActorUserId\" > 0 AND (\"SellerCompanyId\" IS NULL OR \"SellerCompanyId\" > 0) AND (\"SellerBranchId\" IS NULL OR \"SellerBranchId\" > 0 AND \"SellerCompanyId\" IS NOT NULL))"
+      },
+      {
+        "name": "CK_PaymentCreateAttempts_Operation",
+        "table": "PaymentCreateAttempts",
+        "deferred": false,
+        "validated": true,
+        "deferrable": false,
+        "definition": "CHECK (\"Operation\"::text = 'primary'::text AND \"PrimaryPaymentId\" IS NULL OR \"Operation\"::text = 'remainder'::text AND \"PrimaryPaymentId\" IS NOT NULL AND \"PrimaryPaymentId\" > 0)"
+      },
+      {
+        "name": "CK_PaymentCreateAttempts_Outcome",
+        "table": "PaymentCreateAttempts",
+        "deferred": false,
+        "validated": true,
+        "deferrable": false,
+        "definition": "CHECK (\"State\"::text = 'Committed'::text AND \"CanonicalPaymentId\" IS NOT NULL AND \"CanonicalPaymentId\" > 0 AND \"PayloadIdentity\" IS NOT NULL AND length(\"PayloadIdentity\"::text) = 64 AND \"CommittedAtUtc\" IS NOT NULL AND \"CancelledAtUtc\" IS NULL OR \"State\"::text = 'Draft'::text AND \"CanonicalPaymentId\" IS NULL AND \"PayloadIdentity\" IS NULL AND \"CommittedAtUtc\" IS NULL AND \"CancelledAtUtc\" IS NULL OR \"State\"::text = 'Cancelled'::text AND \"CanonicalPaymentId\" IS NULL AND \"PayloadIdentity\" IS NULL AND \"CommittedAtUtc\" IS NULL AND \"CancelledAtUtc\" IS NOT NULL)"
+      },
+      {
+        "name": "CK_PaymentCreateAttempts_State",
+        "table": "PaymentCreateAttempts",
+        "deferred": false,
+        "validated": true,
+        "deferrable": false,
+        "definition": "CHECK (\"State\"::text = ANY (ARRAY['Draft'::character varying, 'Committed'::character varying, 'Cancelled'::character varying]::text[]))"
+      },
+      {
+        "name": "PK_PaymentCreateAttempts",
+        "table": "PaymentCreateAttempts",
+        "deferred": false,
+        "validated": true,
+        "deferrable": false,
+        "definition": "PRIMARY KEY (\"Id\")"
+      }
+    ],
+    "removed": []
+  },
+  "indexes": {
+    "added": [
+      {
+        "live": true,
+        "name": "IX_PaymentCreateAttempts_ActorUserId",
+        "ready": true,
+        "table": "PaymentCreateAttempts",
+        "valid": true,
+        "definition": "CREATE INDEX \"IX_PaymentCreateAttempts_ActorUserId\" ON public.\"PaymentCreateAttempts\" USING btree (\"ActorUserId\")"
+      },
+      {
+        "live": true,
+        "name": "PK_PaymentCreateAttempts",
+        "ready": true,
+        "table": "PaymentCreateAttempts",
+        "valid": true,
+        "definition": "CREATE UNIQUE INDEX \"PK_PaymentCreateAttempts\" ON public.\"PaymentCreateAttempts\" USING btree (\"Id\")"
+      }
+    ],
+    "removed": []
+  },
+  "triggers": {
+    "added": [],
+    "removed": []
+  },
+  "routines": {
+    "added": [],
+    "removed": []
+  },
+  "sequences": {
+    "added": [],
+    "removed": []
+  },
+  "policies": {
+    "added": [],
+    "removed": []
+  },
+  "types": {
+    "added": [
+      {
+        "kind": "b",
+        "name": "_PaymentCreateAttempts",
+        "owner": "__migration_owner__",
+        "default": null,
+        "notNull": false,
+        "baseType": "-",
+        "enumLabels": null
+      },
+      {
+        "kind": "c",
+        "name": "PaymentCreateAttempts",
+        "owner": "__migration_owner__",
+        "default": null,
+        "notNull": false,
+        "baseType": "-",
+        "enumLabels": null
+      }
+    ],
+    "removed": []
+  },
+  "migrations": {
+    "added": [
+      {
+        "MigrationId": "20261027005432_AddPaymentCreateAttempts",
+        "ProductVersion": "9.0.9"
+      },
+      {
+        "MigrationId": "20261027014154_AddPersonalChatHistory",
+        "ProductVersion": "9.0.9"
+      }
+    ],
+    "removed": []
+  }
+}

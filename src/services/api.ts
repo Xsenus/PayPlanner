@@ -6660,7 +6660,7 @@ export class ApiService {
       page: params?.page ?? 1,
       pageSize: params?.pageSize ?? 50,
     });
-    return this.request<PagedResult<ClientCase>>(`/v2/cases${q}`, {
+    return this.request<PagedResult<ClientCase> & { canFilterActivity?: boolean }>(`/v2/cases${q}`, {
       signal: options?.signal,
     });
   }

@@ -135,6 +135,8 @@ public partial class CasesV2Controller : ControllerBase
     private readonly GeneratedFinancialDocumentPublication? _financialDocumentPublication;
     private Task<SectionAccessContext?>? _casesAccessTask;
     private Task<bool>? _canViewCaseFinanceTask;
+    private Task<DataVisibilityAccess?>? _taskVisibilityTask;
+    private Task<SectionAccessContext?>? _requestAccessTask;
     private CaseStatusClock? _caseStatusClock;
 
     public CasesV2Controller(
@@ -236,6 +238,18 @@ public partial class CasesV2Controller : ControllerBase
             static permission => permission.CanView,
             ct);
 
+    private Task<DataVisibilityAccess?> ResolveTaskVisibilityAsync(CancellationToken ct)
+        => _taskVisibilityTask ??= _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
+
+    private async Task<bool> CanViewAllCaseTasksAsync(CancellationToken ct)
+    {
+        var access = await ResolveTaskVisibilityAsync(ct);
+        if (access?.IsAdmin == true) return true;
+        if (access?.SeesAll != true) return false;
+        var requestAccess = await (_requestAccessTask ??= _db.ResolveSectionAccessAsync(User, RolePermissionCatalog.Requests, ct, requireApprovedUser: true));
+        return requestAccess?.Visibility.SeesAll == true;
+    }
+
     private async Task<bool> CanRevealCaseSensitiveDataAsync(CancellationToken ct)
     {
         // Право Cases уже подтверждено и закэшировано перед загрузкой карточки.
@@ -315,6 +329,12 @@ public partial class CasesV2Controller : ControllerBase
             return BadRequest("Укажите корректный диапазон суммы иска в рублях и копейках.");
         }
 
+        var canFilterActivity = await CanViewAllCaseTasksAsync(ct);
+        if (activity?.Trim().ToLowerInvariant() is "active" or "inactive" && !canFilterActivity)
+        {
+            return Forbid();
+        }
+
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, MaxRegistryPageSize);
 
@@ -366,7 +386,7 @@ public partial class CasesV2Controller : ControllerBase
         await ApplyTaskSummaryAsync(items, ct, includeInactivityControlSummary: true);
         PopulateResponsibleViewAliases(items);
 
-        return Ok(new { items, total, page, pageSize });
+        return Ok(new { items, total, page, pageSize, canFilterActivity });
     }
 
     [HttpGet("court-registry-summary")]
@@ -1267,6 +1287,11 @@ public partial class CasesV2Controller : ControllerBase
         if (visibility is null)
         {
             return (null, false, Unauthorized());
+        }
+
+        if (activity?.Trim().ToLowerInvariant() is "active" or "inactive" && !await CanViewAllCaseTasksAsync(ct))
+        {
+            return (null, false, Forbid());
         }
 
         var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
@@ -2261,10 +2286,10 @@ public partial class CasesV2Controller : ControllerBase
                 FormatRuDate(item.CreatedAt),
                 FormatRuDate(item.StartDate),
                 FormatRuDate(item.DueDate),
-                item.OpenTaskCount.ToString(CultureInfo.InvariantCulture),
-                item.OverdueTaskCount.ToString(CultureInfo.InvariantCulture),
-                item.CompletedTaskCount.ToString(CultureInfo.InvariantCulture),
-                $"{item.TaskProgressPercent}%",
+                FormatTaskSummaryValue(item, item.OpenTaskCount),
+                FormatTaskSummaryValue(item, item.OverdueTaskCount),
+                FormatTaskSummaryValue(item, item.CompletedTaskCount),
+                FormatTaskSummaryValue(item, item.TaskProgressPercent, true),
                 FormatRuDateTime(GetLatestCaseActivityAt(item), timeZone),
                 FormatRuDateTime(item.NextInactivityControlAt, timeZone),
                 item.InactivityControlExclusionReason,
@@ -2377,10 +2402,10 @@ public partial class CasesV2Controller : ControllerBase
                 FormatRuDate(item.CreatedAt),
                 FormatRuDate(item.StartDate),
                 FormatRuDate(item.DueDate),
-                item.OpenTaskCount.ToString(CultureInfo.InvariantCulture),
-                item.OverdueTaskCount.ToString(CultureInfo.InvariantCulture),
-                item.CompletedTaskCount.ToString(CultureInfo.InvariantCulture),
-                $"{item.TaskProgressPercent}%",
+                FormatTaskSummaryValue(item, item.OpenTaskCount),
+                FormatTaskSummaryValue(item, item.OverdueTaskCount),
+                FormatTaskSummaryValue(item, item.CompletedTaskCount),
+                FormatTaskSummaryValue(item, item.TaskProgressPercent, true),
                 FormatRuDateTime(GetLatestCaseActivityAt(item), timeZone),
                 FormatRuDateTime(item.NextInactivityControlAt, timeZone),
                 item.InactivityControlExclusionReason,
@@ -2459,7 +2484,7 @@ public partial class CasesV2Controller : ControllerBase
               <td class="num">{Html(FormatMoney(item.IncomePaid))}</td>
               <td class="num">{Html(FormatMoney(item.IncomeOutstanding))}</td>
               """ : string.Empty)}
-              <td>{item.OpenTaskCount} / {item.OverdueTaskCount}</td>
+              <td>{Html(FormatTaskSummaryValue(item, item.OpenTaskCount))} / {Html(FormatTaskSummaryValue(item, item.OverdueTaskCount))}</td>
               <td>{Html(FormatRuDateTime(GetLatestCaseActivityAt(item), timeZone))}</td>
               <td>{Html(FormatRuDateTime(item.NextInactivityControlAt, timeZone))}</td>
               <td>{Html(item.InactivityControlExclusionReason)}</td>
@@ -11634,6 +11659,7 @@ public partial class CasesV2Controller : ControllerBase
 
         if (!includeInactivityControlSummary)
         {
+            await RestrictTaskSummaryAsync(cases, caseIds, now, false, ct);
             return;
         }
 
@@ -11782,6 +11808,61 @@ public partial class CasesV2Controller : ControllerBase
                     ? cycleEndedAt
                     : meaningfulActivity.At;
             clientCase.NextInactivityControlAt = nextCycleBase.AddDays(inactivityDays);
+        }
+
+        await RestrictTaskSummaryAsync(cases, caseIds, now, true, ct);
+    }
+
+    private static string FormatTaskSummaryValue(ClientCase item, int value, bool percent = false)
+    {
+        if (item.TaskSummaryVisibility == "none") return "Недоступно";
+        var formatted = value.ToString(CultureInfo.InvariantCulture) + (percent ? "%" : string.Empty);
+        return item.TaskSummaryVisibility == "partial" ? $"{formatted} (доступные)" : formatted;
+    }
+
+    private async Task RestrictTaskSummaryAsync(
+        IReadOnlyCollection<ClientCase> cases, int[] caseIds, DateTime now, bool includesInactivity, CancellationToken ct)
+    {
+        var access = await ResolveTaskVisibilityAsync(ct);
+        if (await CanViewAllCaseTasksAsync(ct))
+        {
+            foreach (var clientCase in cases) clientCase.TaskSummaryVisibility = "full";
+            return;
+        }
+
+        var visible = access is null
+            ? null
+            : await _db.TaskJournalItems.AsNoTracking()
+                .ApplyTaskVisibility(access, _db)
+                .Where(task => task.ClientCaseId.HasValue && caseIds.Contains(task.ClientCaseId.Value))
+                .GroupBy(task => task.ClientCaseId!.Value)
+                .Select(group => new
+                {
+                    CaseId = group.Key,
+                    Total = group.Count(),
+                    Open = group.Count(task => task.Status != "done" && task.Status != "cancelled"),
+                    Completed = group.Count(task => task.Status == "done" || task.Status == "cancelled"),
+                    Overdue = group.Count(task => task.Status != "done" && task.Status != "cancelled" && task.DueAt < now),
+                    Last = group.Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)),
+                })
+                .ToDictionaryAsync(item => item.CaseId, ct);
+
+        foreach (var clientCase in cases)
+        {
+            var summary = visible?.GetValueOrDefault(clientCase.Id);
+            clientCase.TaskSummaryVisibility = access is null ? "none" : "partial";
+            clientCase.OpenTaskCount = summary?.Open ?? 0;
+            clientCase.CompletedTaskCount = summary?.Completed ?? 0;
+            clientCase.OverdueTaskCount = summary?.Overdue ?? 0;
+            clientCase.LastTaskAt = summary?.Last;
+            clientCase.TaskProgressPercent = summary is null || summary.Total == 0
+                ? 0 : (int)Math.Round(summary.Completed * 100m / summary.Total, MidpointRounding.AwayFromZero);
+            if (includesInactivity)
+            {
+                clientCase.LastMeaningfulActivityAt = null;
+                clientCase.NextInactivityControlAt = null;
+                clientCase.InactivityControlExclusionReason = "Сведения автоконтроля недоступны из-за ограничений доступа";
+            }
         }
     }
 
@@ -12514,15 +12595,21 @@ public partial class CasesV2Controller : ControllerBase
         IReadOnlyCollection<ClientCaseDocument> documents,
         IReadOnlyCollection<CaseDocumentTemplateDefinition>? templates = null)
     {
-        var latestVersions = documents
+        var versionGroups = documents
             .GroupBy(item => item.DocumentKey, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.Max(item => item.Version), StringComparer.OrdinalIgnoreCase);
+            .ToDictionary(
+                group => group.Key,
+                group => new { LatestVersion = group.Max(item => item.Version), GroupId = group.Min(item => item.Id) },
+                StringComparer.OrdinalIgnoreCase);
 
         return documents
-            .Select(item => MapDocument(
-                item,
-                latestVersions.TryGetValue(item.DocumentKey, out var latest) && item.Version == latest,
-                templates))
+            .Select(item =>
+            {
+                var group = versionGroups[item.DocumentKey];
+                var dto = MapDocument(item, item.Version == group.LatestVersion, templates);
+                dto.VersionGroupId = string.IsNullOrEmpty(item.DocumentKey) ? null : group.GroupId;
+                return dto;
+            })
             .ToList();
     }
 
@@ -12714,6 +12801,7 @@ public partial class CasesV2Controller : ControllerBase
                 OverdueTaskCount = clientCase.OverdueTaskCount,
                 CompletedTaskCount = clientCase.CompletedTaskCount,
                 TaskProgressPercent = clientCase.TaskProgressPercent,
+                TaskSummaryVisibility = clientCase.TaskSummaryVisibility,
                 FeeAmount = null,
                 PaidAmount = 0m,
                 DebtAmount = 0m,
@@ -12754,6 +12842,7 @@ public partial class CasesV2Controller : ControllerBase
             OverdueTaskCount = clientCase.OverdueTaskCount,
             CompletedTaskCount = clientCase.CompletedTaskCount,
             TaskProgressPercent = clientCase.TaskProgressPercent,
+            TaskSummaryVisibility = clientCase.TaskSummaryVisibility,
             FeeAmount = clientCase.FeeAmount,
             PaidAmount = paidAmount,
             DebtAmount = debtAmount,
@@ -15978,6 +16067,7 @@ public partial class CasesV2Controller : ControllerBase
         public int OverdueTaskCount { get; set; }
         public int CompletedTaskCount { get; set; }
         public int TaskProgressPercent { get; set; }
+        public string TaskSummaryVisibility { get; set; } = "full";
         public decimal? FeeAmount { get; set; }
         public decimal PaidAmount { get; set; }
         public decimal DebtAmount { get; set; }

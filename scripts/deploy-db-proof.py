@@ -1,5 +1,12 @@
 import subprocess,json,sys,datetime,hashlib,pathlib,os
+from collections import Counter
 EXPECTED_MIGRATION=None
+PAYMENT_ATTEMPT_MIGRATION='20261027005432_AddPaymentCreateAttempts'
+PAYMENT_ATTEMPT_DELTA_SHA256='e9a204366b5fd6df332dec56e96ca98c2f6b31778197c36c7547c9223f6e4da7'
+CHAT_HISTORY_MIGRATION='20261027014154_AddPersonalChatHistory'
+PAYMENT_AND_HISTORY_MIGRATIONS=PAYMENT_ATTEMPT_MIGRATION+'+'+CHAT_HISTORY_MIGRATION
+PAYMENT_AND_HISTORY_DELTA_SHA256='1d53d5c0f92ce1c36fa84d49d0f257328ec7b30d8310db3d5af7b8ff310c2327'
+CHAT_TABLES=['InternalChatAttachments','InternalChatMembers','InternalChatMentions','InternalChatMessages','InternalChatReactions','InternalChatThreads']
 POLICY_TABLES=['Acts','Contracts','Payments']
 POLICY_COLUMN='SellerSnapshotPolicy'
 
@@ -16,6 +23,28 @@ def read_json(path):
 def instant(value):
  parsed=datetime.datetime.fromisoformat(value.replace('Z','+00:00'))
  return parsed.replace(tzinfo=datetime.timezone.utc) if parsed.tzinfo is None else parsed.astimezone(datetime.timezone.utc)
+
+def canonical(value):return json.dumps(value,sort_keys=True,separators=(',',':'))
+
+def exact_delta(before,after):
+ old=Counter(canonical(x) for x in before);new=Counter(canonical(x) for x in after)
+ return {'added':[json.loads(row) for row in sorted((new-old).elements())],
+         'removed':[json.loads(row) for row in sorted((old-new).elements())]}
+
+def compare_payment_attempt_schema(a,b,expected=PAYMENT_ATTEMPT_DELTA_SHA256):
+ need(set(a['schemaObjects'])==set(b['schemaObjects']),'Schema object categories changed')
+ owners=[r['owner'] for r in a['schemaObjects']['relations'] if r['name']=='__EFMigrationsHistory']
+ need(len(owners)==1 and isinstance(owners[0],str) and owners[0],'Migration history owner unavailable')
+ delta={'columns':exact_delta(a['schemaColumns'],b['schemaColumns']),
+        'migrations':exact_delta(a['migrationRows'],b['migrationRows'])}
+ delta.update({name:exact_delta(a['schemaObjects'][name],b['schemaObjects'][name]) for name in a['schemaObjects']})
+ for change in delta.values():
+  for row in change['added']:
+   if 'owner' in row:
+    need(row['owner']==owners[0],'Unexpected migration object owner')
+    row['owner']='__migration_owner__'
+  change['added'].sort(key=canonical)
+ need(hashlib.sha256(canonical(delta).encode()).hexdigest()==expected,'Unexpected migration schema or history delta')
 
 def compare_releases(a,b,plan,phase):
  need(a['releaseSeen']==b['releaseSeen'],'Release read markers changed during read-only delivery')
@@ -45,17 +74,29 @@ def compare_releases(a,b,plan,phase):
 def compare(plan_path,a_path,b_path,phase):
  need(phase in ['unchanged','startup'],'Unknown comparison boundary')
  plan,a,b=map(read_json,[plan_path,a_path,b_path])
- need(plan['expectedMigration'] is None,'No migration is authorised')
+ need(plan['expectedMigration'] in [None,PAYMENT_ATTEMPT_MIGRATION,PAYMENT_AND_HISTORY_MIGRATIONS],'Unreviewed migration is not authorised')
  need(a['schemaVersion']==b['schemaVersion']==2 and a['baselineSha256'] is None,'Immutable stopped baseline required')
  need(b['baselineSha256']==digest(a_path),'Later proof not bound to exact baseline bytes')
  need(a['fingerprints']==b['fingerprints'],'Protected rows/counts/all-column contents changed')
  need(a['projectionColumns']==b['projectionColumns'],'Pinned all-column projection changed')
- need(a['schemaColumns']==b['schemaColumns'] and a['schemaObjects']==b['schemaObjects'],'Unexpected schema mutation')
- need(a['controls']==b['controls'],'Protected financial/integrity controls or migration IDs changed')
+ migrated=phase=='startup' and plan['expectedMigration'] in [PAYMENT_ATTEMPT_MIGRATION,PAYMENT_AND_HISTORY_MIGRATIONS]
+ history=plan['expectedMigration']==PAYMENT_AND_HISTORY_MIGRATIONS
+ if history:
+  need(set(a['chatProjectionColumns'])==set(CHAT_TABLES) and a['chatProjectionColumns']==b['chatProjectionColumns'],'Chat projection scope changed')
+  for table in CHAT_TABLES:
+   need(a['chatProjectionColumns'][table]==[c['name'] for c in a['schemaColumns'] if c['table']==table],'Chat baseline projection must include every existing column')
+  need(len(a['chatFingerprints'])==len(CHAT_TABLES) and {row['table'] for row in a['chatFingerprints']}==set(CHAT_TABLES) and a['chatFingerprints']==b['chatFingerprints'],'Existing chat rows or read states changed')
+  need(a['chatHistoryNonDefaults'] is None,'Unexpected pre-existing history columns')
+  need(b['chatHistoryNonDefaults']==(0 if migrated else None),'Existing personal history state changed')
+ if migrated:compare_payment_attempt_schema(a,b,PAYMENT_AND_HISTORY_DELTA_SHA256 if history else PAYMENT_ATTEMPT_DELTA_SHA256)
+ else:need(a['schemaColumns']==b['schemaColumns'] and a['schemaObjects']==b['schemaObjects'],'Unexpected schema mutation')
+ need({k:v for k,v in a['controls'].items() if k!='migrations'}=={k:v for k,v in b['controls'].items() if k!='migrations'},'Protected financial/integrity controls changed')
  am=a['controls']['migrations']
  need(len(am)==209 and am==plan['expectedBaselineMigrations'],'Baseline is not the accepted installed142 migration catalog')
  need(hashlib.sha256(json.dumps(am,sort_keys=True,separators=(',',':')).encode()).hexdigest()==plan['expectedBaselineMigrationIdsSha256'],'Baseline migration catalog pin differs')
- need(len(a['migrationRows'])==209 and a['migrationRows']==b['migrationRows']==plan['expectedBaselineMigrationRows'],'All209 full migration rows/ProductVersion must remain exact')
+ need(len(a['migrationRows'])==209 and a['migrationRows']==plan['expectedBaselineMigrationRows'],'All209 full baseline migration rows/ProductVersion must remain exact')
+ if migrated:need(b['controls']['migrations']==sorted(am+[PAYMENT_ATTEMPT_MIGRATION]+([CHAT_HISTORY_MIGRATION] if history else [])),'Unexpected migration IDs after startup')
+ else:need(a['controls']==b['controls'] and a['migrationRows']==b['migrationRows'],'Migration history or ProductVersion changed before authorised startup')
  need(all(a['controls'][n]==0 for n in ['legacyActive','pendingContractor','invalidIndexes','invalidConstraints']),'Unsafe baseline control')
  need(set(a['projectionColumns'])==set(plan['expectedProtectedTables']) and len(a['fingerprints'])==16,'Exact protected16 table scope required')
  for table in POLICY_TABLES:
@@ -67,7 +108,7 @@ def compare(plan_path,a_path,b_path,phase):
   need(c['type']=='character varying(32)' and c['nullable'] is True and c['default'] is None and c['identity']=='' and c['generated']=='' and c['collation'] in ['pg_catalog.default','pg_catalog."default"'],'Installed Seller policy shape changed')
  need(a['newPolicyNonNullCounts']==b['newPolicyNonNullCounts'] and set(a['newPolicyNonNullCounts'])==set(POLICY_TABLES) and all(type(v) is int and v>=0 for v in a['newPolicyNonNullCounts'].values()),'Existing policy values/counts changed')
  compare_releases(a,b,plan,'unchanged' if phase=='unchanged' or not plan['expectedReleaseSeeds'] else 'startup')
- print(json.dumps({'status':'passed','phase':phase,'protectedTables':16,'allColumnsAndRowsExact':True,'migrationHistory209Exact':True,'releaseCatalogUnchanged':a['releaseRows']==b['releaseRows'] and a['releaseItems']==b['releaseItems'],'reviewedReleaseSeeds':len(plan['expectedReleaseSeeds']) if phase=='startup' else 0,'baselineSha256':digest(a_path)}))
+ print(json.dumps({'status':'passed','phase':phase,'protectedTables':16,'protectedChatTables':len(CHAT_TABLES) if history else 0,'allColumnsAndRowsExact':True,'migrationHistory209Exact':True,'releaseCatalogUnchanged':a['releaseRows']==b['releaseRows'] and a['releaseItems']==b['releaseItems'],'reviewedReleaseSeeds':len(plan['expectedReleaseSeeds']) if phase=='startup' else 0,'baselineSha256':digest(a_path)}))
 
 def main():
  if len(sys.argv)>1 and sys.argv[1]=='--compare':
@@ -104,6 +145,12 @@ def main():
  migration_rows=query('''SELECT to_jsonb(h) FROM "__EFMigrationsHistory" h ORDER BY "MigrationId";''')
  projection_columns={t:[c['name'] for c in schema_columns if c['table']==t] for t in tables} if baseline is None else baseline['projectionColumns']
  need(set(projection_columns)==set(tables),'Pinned protected table set differs')
+ chat_columns={t:[c['name'] for c in schema_columns if c['table']==t] for t in CHAT_TABLES} if baseline is None else baseline['chatProjectionColumns']
+ need(set(chat_columns)==set(CHAT_TABLES) and all(chat_columns[t] for t in CHAT_TABLES),'Pinned chat table scope differs')
+ history_columns={c['name'] for c in schema_columns if c['table']=='InternalChatMembers'}
+ new_history_columns={'HistoryHiddenThroughMessageId','HistoryVisibilityRevision'}
+ need(not (history_columns & new_history_columns) or new_history_columns.issubset(history_columns),'Incomplete personal history schema')
+ history_non_defaults=query('SELECT to_json(count(*)) FROM "InternalChatMembers" WHERE "HistoryHiddenThroughMessageId" IS NOT NULL OR "HistoryVisibilityRevision"<>0;')[0] if new_history_columns.issubset(history_columns) else None
  policy_non_null={}
  for table in POLICY_TABLES:
   exists=any(c['table']==table and c['name']==POLICY_COLUMN for c in schema_columns)
@@ -112,16 +159,20 @@ def main():
  release_items=query('''SELECT to_jsonb(r) FROM "AppReleaseItems" r ORDER BY "Id";''')
  release_seen=query('''SELECT jsonb_build_object('count',count(*),'hash',md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' ORDER BY to_jsonb(t)->>'Id',to_jsonb(t)::text),''))) FROM "AppReleaseSeen" t;''')[0]
 
- checks=[]
- for table in tables:
-  assert table.replace('_','').isalnum()
-  columns=projection_columns[table]
-  assert columns and len(columns)==len(set(columns))
-  selected=','.join('t.'+sql_ident(n) for n in columns)
-  checks.append(query("SELECT jsonb_build_object('table',"+sql_literal(table)+",'count',count(*),'hash',md5(coalesce(string_agg(md5(rowdata::text),'' ORDER BY rowdata->>'Id',rowdata::text),'')))::text FROM (SELECT to_jsonb(original) AS rowdata FROM (SELECT "+selected+" FROM public."+sql_ident(table)+" t) original) projected;")[0])
+ def fingerprints(targets,projections):
+  checks=[]
+  for table in targets:
+   assert table.replace('_','').isalnum()
+   columns=projections[table]
+   assert columns and len(columns)==len(set(columns))
+   selected=','.join('t.'+sql_ident(n) for n in columns)
+   checks.append(query("SELECT jsonb_build_object('table',"+sql_literal(table)+",'count',count(*),'hash',md5(coalesce(string_agg(md5(rowdata::text),'' ORDER BY rowdata->>'Id',rowdata::text),'')))::text FROM (SELECT to_jsonb(original) AS rowdata FROM (SELECT "+selected+" FROM public."+sql_ident(table)+" t) original) projected;")[0])
+  return checks
+ checks=fingerprints(tables,projection_columns)
+ chat_checks=fingerprints(CHAT_TABLES,chat_columns)
  controls=query('''SELECT jsonb_build_object('legacyActive',(SELECT count(*) FROM "TaskJournalItems" WHERE "ClientBillingClassification"='legacy' AND NOT "IsDeleted"),'pendingContractor',(SELECT count(*) FROM "TaskJournalItems" t JOIN "Users" u ON u."Id"=t."AssigneeUserId" WHERE NOT t."IsDeleted" AND t."ContractorPaymentEnabled" AND t."ContractorPaymentId" IS NULL AND u."IsExternalContractor" AND round(t."ContractorPaymentAmount",2)>0 AND ((NOT t."ContractorPaymentOnResult" AND t."ContractorPaymentDueDate" IS NOT NULL) OR (t."ContractorPaymentOnResult" AND lower(t."Status")='done' AND t."ContractorPaymentResultDelayDays" BETWEEN 0 AND 365))),'invalidIndexes',(SELECT count(*) FROM pg_index WHERE NOT indisvalid),'invalidConstraints',(SELECT count(*) FROM pg_constraint WHERE NOT convalidated),'migrations',(SELECT jsonb_agg("MigrationId" ORDER BY "MigrationId") FROM "__EFMigrationsHistory"));''')[0]
  assert controls['legacyActive']==controls['pendingContractor']==controls['invalidIndexes']==controls['invalidConstraints']==0
- out=dict(schemaVersion=2,utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),fingerprints=checks,controls=controls,baselineSha256=baseline_sha,projectionColumns=projection_columns,schemaColumns=schema_columns,schemaObjects=schema_objects,migrationRows=migration_rows,newPolicyNonNullCounts=policy_non_null,releaseRows=release_rows,releaseItems=release_items,releaseSeen=release_seen)
+ out=dict(schemaVersion=2,utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),fingerprints=checks,controls=controls,baselineSha256=baseline_sha,projectionColumns=projection_columns,chatProjectionColumns=chat_columns,chatFingerprints=chat_checks,chatHistoryNonDefaults=history_non_defaults,schemaColumns=schema_columns,schemaObjects=schema_objects,migrationRows=migration_rows,newPolicyNonNullCounts=policy_non_null,releaseRows=release_rows,releaseItems=release_items,releaseSeen=release_seen)
  target=pathlib.Path(sys.argv[1]);target.write_text(json.dumps(out,indent=2));os.chmod(target,0o600)
  print(json.dumps(dict(tables=len(checks),tasks=next(t['count'] for t in checks if t['table']=='TaskJournalItems'),calendarLinks=sum(t['count'] for t in checks if t['table'] in ('GoogleCalendarTaskLinks','YandexCalendarTaskLinks')),pendingTaskBackfills=0)))
 

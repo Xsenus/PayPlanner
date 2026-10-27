@@ -26,7 +26,7 @@ export function isTaskJournalRealtimeChange(detail?: UserNotificationsChangedDet
     return false;
   }
 
-  if (detail.reason === 'reconnected') {
+  if (detail.reason === 'reconnected' || detail.reason === 'user-role-changed') {
     return true;
   }
 

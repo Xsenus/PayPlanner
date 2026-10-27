@@ -2,6 +2,7 @@ import { SystemDateInput } from '../ui/SystemDateInput';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock3, Download, ExternalLink, FileText, Loader2, TimerReset, XCircle } from 'lucide-react';
 import { apiService, type PagedResult, type UserNotificationDto } from '../../services/api';
+import { useAuth } from '../../contexts/AuthContext';
 import { isExpectedRealtimeStartupError } from '../../services/realtimeNotifications';
 import { emitUserNotificationsChanged, USER_NOTIFICATIONS_EVENT } from '../../utils/userNotifications';
 import { parseUserNotificationMetadata } from '../../utils/userNotificationMetadata';
@@ -323,7 +324,12 @@ function sortQueueItems(left: ForcedTaskQueueItem, right: ForcedTaskQueueItem): 
   return leftTime - rightTime || left.notification.id - right.notification.id;
 }
 
-export function ForcedTaskRevisionModal({ onOpenTask, onOpenCaseTasks }: ForcedTaskRevisionModalProps) {
+export function ForcedTaskRevisionModal(props: ForcedTaskRevisionModalProps) {
+  const { user } = useAuth();
+  return user ? <UserForcedTaskRevisionModal key={user.id} userId={user.id} {...props} /> : null;
+}
+
+function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: ForcedTaskRevisionModalProps & { userId: number }) {
   const [items, setItems] = useState<ForcedTaskQueueItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [acknowledgingId, setAcknowledgingId] = useState<number | null>(null);
@@ -344,6 +350,7 @@ export function ForcedTaskRevisionModal({ onOpenTask, onOpenCaseTasks }: ForcedT
   const [approvalRevisionDueAt, setApprovalRevisionDueAt] = useState('');
   const [approvalError, setApprovalError] = useState<string | null>(null);
   const [approvalSaving, setApprovalSaving] = useState<'approve' | 'approveComplete' | 'approveReturn' | 'revision' | null>(null);
+  const approvalDraftRef = useRef<{ key: string; dueAtEdited: boolean } | null>(null);
   const acknowledgedIdsRef = useRef<Set<number>>(new Set());
   const loadStateRef = useRef({ mounted: false, running: false, refreshRequested: false });
 
@@ -397,11 +404,11 @@ export function ForcedTaskRevisionModal({ onOpenTask, onOpenCaseTasks }: ForcedT
 
               const notificationKey = getForcedTaskNotificationSnoozeKey(notification.id);
               const actionKey = getQueueItemActionSnoozeKey(queueItem);
-              const notificationSnoozed = isForcedTaskActionSnoozed(notificationKey);
+              const notificationSnoozed = isForcedTaskActionSnoozed(userId, notificationKey);
               if (notificationSnoozed) {
-                shareForcedTaskSnooze(notificationKey, actionKey);
+                shareForcedTaskSnooze(userId, notificationKey, actionKey);
               }
-              if (notificationSnoozed || (actionKey && isForcedTaskActionSnoozed(actionKey))) {
+              if (notificationSnoozed || (actionKey && isForcedTaskActionSnoozed(userId, actionKey))) {
                 return;
               }
 
@@ -423,7 +430,7 @@ export function ForcedTaskRevisionModal({ onOpenTask, onOpenCaseTasks }: ForcedT
       state.running = false;
       if (state.mounted) setLoading(false);
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -467,6 +474,7 @@ export function ForcedTaskRevisionModal({ onOpenTask, onOpenCaseTasks }: ForcedT
   const decisionText = useMemo(() => current && decisionKind ? getDecisionText(current, decisionKind) : '', [current, decisionKind]);
   const approvalLatestFiles = useMemo(() => getLatestTaskFiles(approvalFiles), [approvalFiles]);
   const currentMetadata = useMemo(() => current ? getNotificationMetadata(current) : {}, [current]);
+  const currentApprovalParticipantId = readPositiveInteger(currentMetadata.currentApproverId);
   const currentDeadlineChangeRequestId = readPositiveInteger(currentMetadata.deadlineChangeRequestId);
   const currentDeadlineChangeTaskId = current?.taskId ?? null;
   const notificationRequestedDueAt = readString(currentMetadata.requestedDueAt);
@@ -556,6 +564,7 @@ export function ForcedTaskRevisionModal({ onOpenTask, onOpenCaseTasks }: ForcedT
 
   useEffect(() => {
     if (!current || decisionKind !== 'approvalRequest' || !current.taskId) {
+      approvalDraftRef.current = null;
       setApprovalTask(null);
       setApprovalTaskLoading(false);
       setApprovalFiles([]);
@@ -570,16 +579,21 @@ export function ForcedTaskRevisionModal({ onOpenTask, onOpenCaseTasks }: ForcedT
     }
 
     let cancelled = false;
+    const draftKey = `${current.id}:${current.taskId}:${current.eventKey}:${currentApprovalParticipantId ?? ''}`;
+    if (approvalDraftRef.current?.key !== draftKey) {
+      approvalDraftRef.current = { key: draftKey, dueAtEdited: false };
+      setApprovalRevisionText('');
+      setApprovalRevisionDueAt('');
+      setApprovalSaving(null);
+    }
+    const draft = approvalDraftRef.current;
     setApprovalTaskLoading(true);
     setApprovalFilesLoading(true);
     setApprovalTask(null);
     setApprovalFiles([]);
     setApprovalFilesError(null);
     setApprovalFileDownloadingId(null);
-    setApprovalRevisionText('');
-    setApprovalRevisionDueAt('');
     setApprovalError(null);
-    setApprovalSaving(null);
 
     Promise.allSettled([
       apiService.getTaskJournalItem(current.taskId),
@@ -592,7 +606,9 @@ export function ForcedTaskRevisionModal({ onOpenTask, onOpenCaseTasks }: ForcedT
 
         if (taskResult.status === 'fulfilled') {
           setApprovalTask(taskResult.value);
-          setApprovalRevisionDueAt(getDefaultRevisionDueAtInput(taskResult.value, timeZoneId));
+          if (!draft.dueAtEdited) {
+            setApprovalRevisionDueAt(getDefaultRevisionDueAtInput(taskResult.value, timeZoneId));
+          }
         } else {
           setApprovalError(extractDisplayErrorMessage(taskResult.reason, 'Не удалось загрузить задачу для согласования.'));
         }
@@ -613,7 +629,7 @@ export function ForcedTaskRevisionModal({ onOpenTask, onOpenCaseTasks }: ForcedT
     return () => {
       cancelled = true;
     };
-  }, [current?.id, current?.taskId, current, decisionKind, timeZoneId]);
+  }, [current?.id, current?.taskId, current, currentApprovalParticipantId, decisionKind, timeZoneId]);
 
   const finishCurrentNotification = async (reason: string) => {
     if (!current) return;
@@ -639,7 +655,7 @@ export function ForcedTaskRevisionModal({ onOpenTask, onOpenCaseTasks }: ForcedT
   const snoozeCurrent = (minutes: number) => {
     if (!current) return;
 
-    snoozeForcedTaskActions([
+    snoozeForcedTaskActions(userId, [
       getForcedTaskNotificationSnoozeKey(current.id),
       currentItem ? getQueueItemActionSnoozeKey(currentItem) : null,
     ], minutes);
@@ -1011,6 +1027,7 @@ export function ForcedTaskRevisionModal({ onOpenTask, onOpenCaseTasks }: ForcedT
             type="datetime-local"
             value={approvalRevisionDueAt}
             onChange={(event) => {
+              if (approvalDraftRef.current) approvalDraftRef.current.dueAtEdited = true;
               setApprovalRevisionDueAt(event.target.value);
               if (approvalError) setApprovalError(null);
             }}

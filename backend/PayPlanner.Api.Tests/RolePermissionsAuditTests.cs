@@ -6,6 +6,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
@@ -16,6 +17,71 @@ namespace PayPlanner.Api.Tests;
 
 public class RolePermissionsAuditTests
 {
+    [Fact]
+    public async Task UpdateAndReset_PublishOnlyActiveApprovedUsersOfChangedRole_AfterSuccessfulWrite()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "realtime-role" };
+        var otherRole = new Role { Name = "other-role" };
+        db.Roles.AddRange(role, otherRole);
+        await db.SaveChangesAsync();
+        var allowed = new User { Email = "allowed@local", PasswordHash = "hash", FullName = "Allowed", RoleId = role.Id, IsActive = true, IsApproved = true };
+        db.Users.AddRange(allowed,
+            new User { Email = "inactive@local", PasswordHash = "hash", FullName = "Inactive", RoleId = role.Id, IsActive = false, IsApproved = true },
+            new User { Email = "pending@local", PasswordHash = "hash", FullName = "Pending", RoleId = role.Id, IsActive = true, IsApproved = false },
+            new User { Email = "other@local", PasswordHash = "hash", FullName = "Other", RoleId = otherRole.Id, IsActive = true, IsApproved = true });
+        await db.SaveChangesAsync();
+        var admin = await CreateAdminUserAsync(db);
+        var publisher = new RecordingRoleChangePublisher();
+        var controller = CreateController(db, CreateAdminPrincipal(admin.Id), roleChangePublisher: publisher);
+        Assert.IsType<NoContentResult>(await controller.Update(role.Id, RolePermissionCatalog.CreateDto(allowRoleManagement: false), CancellationToken.None));
+        Assert.IsType<NoContentResult>(await controller.Reset(role.Id, CancellationToken.None));
+        Assert.Equal(2, publisher.Calls.Count);
+        Assert.All(publisher.Calls, ids => Assert.Equal(new[] { allowed.Id }, ids));
+        var unauthorized = CreateController(db, CreateUserPrincipal(allowed.Id), roleChangePublisher: publisher);
+        Assert.IsType<ForbidResult>(await unauthorized.Reset(role.Id, CancellationToken.None));
+        Assert.IsType<NotFoundResult>(await controller.Reset(int.MaxValue, CancellationToken.None));
+        Assert.IsType<BadRequestObjectResult>(await controller.Reset(admin.RoleId, CancellationToken.None));
+        Assert.Equal(2, publisher.Calls.Count);
+    }
+
+    [Fact]
+    public async Task Update_RevokesAccountingGroupForExistingSessionWithoutRemovingClientAccess()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "group-secretary" };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+        var user = new User
+        {
+            Email = "group-secretary@example.com", PasswordHash = "hash", FullName = "Secretary",
+            RoleId = role.Id, IsActive = true, IsApproved = true,
+        };
+        db.Users.Add(user);
+        db.RolePermissions.AddRange(RolePermissionCatalog.CreateEntities(role.Id, allowRoleManagement: false));
+        await db.SaveChangesAsync();
+
+        var principal = CreateUserPrincipal(user.Id);
+        Assert.True(await db.HasUserSectionPermissionAsync(principal, RolePermissionCatalog.Accounts, p => p.CanView));
+        var admin = await CreateAdminUserAsync(db);
+        var controller = CreateController(db, CreateAdminPrincipal(admin.Id));
+        var request = RolePermissionCatalog.CreateDto(allowRoleManagement: false);
+        request.Accounts = new MenuSectionPermissionsDto();
+        request.Acts = new MenuSectionPermissionsDto();
+        request.Payments = new MenuSectionPermissionsDto();
+        request.Contracts = new MenuSectionPermissionsDto();
+
+        Assert.IsType<NoContentResult>(await controller.Update(role.Id, request, CancellationToken.None));
+        db.ChangeTracker.Clear();
+        foreach (var section in new[] { RolePermissionCatalog.Accounts, RolePermissionCatalog.Acts, RolePermissionCatalog.Payments, RolePermissionCatalog.Contracts })
+        {
+            Assert.False(await db.HasUserSectionPermissionAsync(principal, section, p => p.CanView));
+            Assert.False(await db.HasUserSectionPermissionAsync(principal, section, p => p.CanEdit));
+            Assert.False(await db.HasUserSectionPermissionAsync(principal, section, p => p.CanExport));
+        }
+        Assert.True(await db.HasUserSectionPermissionAsync(principal, RolePermissionCatalog.Clients, p => p.CanView));
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -540,14 +606,25 @@ public class RolePermissionsAuditTests
     private static RolePermissionsController CreateController(
         PaymentContext db,
         ClaimsPrincipal user,
-        INotificationService? notificationService = null)
-        => new(db, new RoleManagementAccessService(db), notificationService)
+        INotificationService? notificationService = null,
+        IRolePermissionsChangePublisher? roleChangePublisher = null)
+        => new(db, new RoleManagementAccessService(db), notificationService, roleChangePublisher)
         {
             ControllerContext = new ControllerContext
             {
                 HttpContext = new DefaultHttpContext { User = user }
             }
         };
+
+    private sealed class RecordingRoleChangePublisher : IRolePermissionsChangePublisher
+    {
+        public List<int[]> Calls { get; } = [];
+        public Task PublishRolePermissionsChangedAsync(IReadOnlyCollection<int> userIds, CancellationToken cancellationToken = default)
+        {
+            Calls.Add(userIds.ToArray());
+            return Task.CompletedTask;
+        }
+    }
 
     private static ClaimsPrincipal CreateAdminPrincipal(int userId)
         => new(new ClaimsIdentity(

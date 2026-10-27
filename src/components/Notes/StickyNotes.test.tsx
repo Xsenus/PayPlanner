@@ -433,6 +433,20 @@ describe('StickyNotes', () => {
     expect(screen.getByDisplayValue('Личная доска открыта')).toBeTruthy();
   });
 
+  it('ignores a previously created note response after switching users on the same board', async () => {
+    const response = createDeferred<StickyNoteItem>();
+    apiMock.createStickyNote.mockImplementationOnce(() => response.promise);
+    const rendered = renderStickyNotes();
+    await screen.findAllByText('Рабочая доска');
+    fireEvent.click(screen.getByRole('button', { name: /Заметка/i }));
+    await waitFor(() => expect(apiMock.createStickyNote).toHaveBeenCalledTimes(1));
+    authMock.userId = 2;
+    rendered.rerender(<DialogProvider><ToastProvider><StickyNotes /></ToastProvider></DialogProvider>);
+    await waitFor(() => expect(apiMock.getStickyNotes).toHaveBeenCalledTimes(2));
+    await act(async () => response.resolve({ ...createdNote, text: 'Заметка прежнего сотрудника' }));
+    expect(screen.queryByDisplayValue('Заметка прежнего сотрудника')).toBeNull();
+  });
+
   it('does not show a stale create note error after switching boards', async () => {
     const createdNoteResponse = createDeferred<StickyNoteItem>();
     apiMock.getStickyNoteBoards.mockResolvedValue([board, personalBoard]);
@@ -549,6 +563,21 @@ describe('StickyNotes', () => {
     expect(apiMock.getStickyNotes).not.toHaveBeenCalledWith(13);
   });
 
+  it('does not add a previous user board after switching users while creation is pending', async () => {
+    const response = createDeferred<StickyNoteBoard>();
+    apiMock.createStickyNoteBoard.mockImplementationOnce(() => response.promise);
+    const rendered = renderStickyNotes();
+    await screen.findAllByText('Рабочая доска');
+    fireEvent.change(screen.getByPlaceholderText('Новая доска'), { target: { value: 'Личная старая доска' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Личная' }));
+    await waitFor(() => expect(apiMock.createStickyNoteBoard).toHaveBeenCalledTimes(1));
+    authMock.userId = 2;
+    rendered.rerender(<DialogProvider><ToastProvider><StickyNotes /></ToastProvider></DialogProvider>);
+    await waitFor(() => expect(apiMock.getStickyNoteBoards).toHaveBeenCalledTimes(2));
+    await act(async () => response.resolve({ ...personalBoard, id: 13, title: 'Личная старая доска' }));
+    expect(screen.queryByRole('button', { name: /Личная старая доска/ })).toBeNull();
+  });
+
   it('does not show a stale board creation error after switching boards and typing a new draft', async () => {
     const createBoardResponse = createDeferred<StickyNoteBoard>();
     apiMock.getStickyNoteBoards.mockResolvedValue([board, personalBoard]);
@@ -644,6 +673,24 @@ describe('StickyNotes', () => {
 
     await screen.findAllByText('Мои заметки');
     expect(screen.queryByRole('button', { name: 'Настройки доски' })).toBeNull();
+  });
+
+  it('ignores previous user board settings response after switching users', async () => {
+    const response = createDeferred<StickyNoteBoard>();
+    apiMock.updateStickyNoteBoard.mockImplementationOnce(() => response.promise);
+    const user = userEvent.setup();
+    const rendered = renderStickyNotes();
+    await screen.findAllByText('Рабочая доска');
+    await user.click(screen.getByRole('button', { name: 'Настройки доски' }));
+    fireEvent.change(screen.getByPlaceholderText('Название доски'), { target: { value: 'Название первого сотрудника' } });
+    await user.click(screen.getByRole('button', { name: /Сохранить/i }));
+    await waitFor(() => expect(apiMock.updateStickyNoteBoard).toHaveBeenCalledTimes(1));
+    authMock.userId = 2;
+    rendered.rerender(<DialogProvider><ToastProvider><StickyNotes /></ToastProvider></DialogProvider>);
+    await waitFor(() => expect(apiMock.getStickyNoteBoards).toHaveBeenCalledTimes(2));
+    await act(async () => response.resolve({ ...board, title: 'Название первого сотрудника' }));
+    expect(screen.queryByRole('button', { name: /Название первого сотрудника/ })).toBeNull();
+    expect(screen.queryByText('Настройки доски сохранены.')).toBeNull();
   });
 
   it('does not show stale board settings toast after switching boards', async () => {
@@ -769,6 +816,58 @@ describe('StickyNotes', () => {
 
     expect(screen.queryByDisplayValue('Позднее восстановление')).toBeNull();
     expect(screen.getByDisplayValue('Личная заметка')).toBeTruthy();
+  });
+
+  it.each(['note', 'board'] as const)('does not delete a %s after the user changes while confirmation is open', async (kind) => {
+    const user = userEvent.setup();
+    if (kind === 'board') apiMock.getStickyNoteBoards.mockResolvedValue([{ ...board, canDelete: true }]);
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Заметка для удаления' }]);
+    const rendered = renderStickyNotes();
+    await screen.findByDisplayValue('Заметка для удаления');
+    await user.click(screen.getByTitle(kind === 'note' ? 'Удалить' : 'Удалить доску'));
+    await screen.findByRole('heading', { name: kind === 'note' ? 'Удалить заметку?' : 'Удалить доску?' });
+    authMock.userId = 2;
+    rendered.rerender(<DialogProvider><ToastProvider><StickyNotes /></ToastProvider></DialogProvider>);
+    await waitFor(() => expect(apiMock.getStickyNoteBoards).toHaveBeenCalledTimes(2));
+    const buttons = screen.getAllByRole('button', { name: 'Удалить' });
+    await user.click(buttons[buttons.length - 1]);
+    expect(apiMock.deleteStickyNote).not.toHaveBeenCalled();
+    expect(apiMock.deleteStickyNoteBoard).not.toHaveBeenCalled();
+  });
+
+  it.each(['note', 'board'] as const)('does not delete a %s if permission is revoked while confirmation is open', async (kind) => {
+    realtimeMock.canStart = true;
+    apiMock.getStickyNoteBoards.mockResolvedValue([{ ...board, canDelete: true }]);
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Заметка для удаления' }]);
+    const user = userEvent.setup();
+    renderStickyNotes();
+    await screen.findByDisplayValue('Заметка для удаления');
+    await user.click(screen.getByTitle(kind === 'note' ? 'Удалить' : 'Удалить доску'));
+    await screen.findByRole('heading', { name: kind === 'note' ? 'Удалить заметку?' : 'Удалить доску?' });
+    apiMock.getStickyNoteBoards.mockResolvedValue([{ ...board, canDelete: false, canDeleteNotes: false }]);
+    await act(() => realtimeMock.handlers.get('stickyNoteBoardChanged')?.({ type: 'boardUpdated', boardId: 7 }));
+    if (kind === 'note') await waitFor(() => expect(screen.getByTitle('Удалить')).toHaveProperty('disabled', true));
+    else await waitFor(() => expect(screen.queryByTitle('Удалить доску')).toBeNull());
+    const buttons = screen.getAllByRole('button', { name: 'Удалить' });
+    await user.click(buttons[buttons.length - 1]);
+    expect(apiMock.deleteStickyNote).not.toHaveBeenCalled();
+    expect(apiMock.deleteStickyNoteBoard).not.toHaveBeenCalled();
+  });
+
+  it('does not restore a previous user note from an old deletion toast after switching users', async () => {
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Заметка первого сотрудника' }]);
+    const user = userEvent.setup();
+    const rendered = renderStickyNotes();
+    await screen.findByDisplayValue('Заметка первого сотрудника');
+    await user.click(screen.getByTitle('Удалить'));
+    await approveDeleteDialog(user, 'Удалить заметку?');
+    await screen.findAllByText('Заметка удалена');
+    const boardReadsBeforeSwitch = apiMock.getStickyNoteBoards.mock.calls.length;
+    authMock.userId = 2;
+    rendered.rerender(<DialogProvider><ToastProvider><StickyNotes /></ToastProvider></DialogProvider>);
+    await waitFor(() => expect(apiMock.getStickyNoteBoards.mock.calls.length).toBeGreaterThan(boardReadsBeforeSwitch));
+    await user.click(screen.getAllByRole('button', { name: /Восстановить/i })[0]);
+    expect(apiMock.restoreStickyNote).not.toHaveBeenCalled();
   });
 
   it('does not show a stale restore note error after switching boards', async () => {
@@ -1387,7 +1486,6 @@ describe('StickyNotes', () => {
     fireEvent.change(textarea, { target: { value: 'Первая строка\nВторая строка' } });
     fireEvent.blur(textarea);
     await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledTimes(1));
-
     fireEvent.change(textarea, { target: { value: 'Первая строка\nВторая строка\nТретья строка' } });
     fireEvent.blur(textarea);
 
@@ -1503,6 +1601,286 @@ describe('StickyNotes', () => {
     expect(screen.queryByText('Заметка изменена другим пользователем')).toBeNull();
   });
 
+  it.each(['success', 'stale-conflict'] as const)('keeps a newer remote conflict when a pending text save ends with %s', async (outcome) => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    realtimeMock.canStart = true;
+    const response = createDeferred<StickyNoteItem>();
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Исходный текст' }]);
+    apiMock.updateStickyNote.mockReset().mockImplementationOnce(() => response.promise);
+    renderStickyNotes();
+    const textarea = await screen.findByDisplayValue('Исходный текст') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'Мой текст' } });
+    fireEvent.blur(textarea);
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledTimes(1));
+    fireEvent.change(textarea, { target: { value: 'Мой текст с дополнением' } });
+    fireEvent.blur(textarea);
+    await act(() => realtimeMock.handlers.get('stickyNoteBoardChanged')?.({
+      type: 'noteUpdated', boardId: 7, actorUserId: 2,
+      note: { ...createdNote, text: 'Новая версия другого сотрудника', version: 3 },
+    }));
+    expect(await screen.findByText('Заметка изменена другим пользователем')).toBeTruthy();
+    await act(async () => outcome === 'success'
+      ? response.resolve({ ...createdNote, text: 'Мой текст', version: 2 })
+      : response.reject(new StickyNoteConflictError({ ...createdNote, text: 'Старая версия сервера', version: 2 })));
+    expect(screen.getByText('Заметка изменена другим пользователем')).toBeTruthy();
+    expect(screen.getByText('Новая версия другого сотрудника')).toBeTruthy();
+    expect(textarea.value).toBe('Мой текст с дополнением');
+    expect(apiMock.updateStickyNote).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['success', 'conflict', 'network'] as const)('keeps the accepted server version when an older text save ends with %s', async (outcome) => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    realtimeMock.canStart = true;
+    const response = createDeferred<StickyNoteItem>();
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Исходная версия' }]);
+    apiMock.updateStickyNote.mockReset().mockImplementationOnce(() => response.promise);
+    renderStickyNotes();
+    const textarea = await screen.findByDisplayValue('Исходная версия') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'Локальный текст' } });
+    fireEvent.blur(textarea);
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledTimes(1));
+    await act(() => realtimeMock.handlers.get('stickyNoteBoardChanged')?.({
+      type: 'noteUpdated', boardId: 7, actorUserId: 2,
+      note: { ...createdNote, text: 'Принятая версия', version: 3 },
+    }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Обновить с сервера' }));
+    expect(textarea.value).toBe('Принятая версия');
+    await act(async () => outcome === 'success'
+      ? response.resolve({ ...createdNote, text: 'Локальный текст', version: 2 })
+      : response.reject(outcome === 'conflict'
+        ? new StickyNoteConflictError({ ...createdNote, text: 'Старая версия', version: 2 })
+        : new Error('Сеть недоступна')));
+    expect(textarea.value).toBe('Принятая версия');
+    expect(screen.queryByText('Заметка изменена другим пользователем')).toBeNull();
+  });
+
+  it.each(['success', 'conflict', 'network'] as const)('saves the chosen local version after an older text request ends with %s', async (outcome) => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    realtimeMock.canStart = true;
+    const response = createDeferred<StickyNoteItem>();
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Исходная версия' }]);
+    apiMock.updateStickyNote.mockReset().mockImplementationOnce(() => response.promise)
+      .mockImplementationOnce(async (_id, payload) => ({ ...createdNote, ...payload, version: 4 }));
+    renderStickyNotes();
+    const textarea = await screen.findByDisplayValue('Исходная версия') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'Мой выбранный текст' } });
+    fireEvent.blur(textarea);
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledTimes(1));
+    await act(() => realtimeMock.handlers.get('stickyNoteBoardChanged')?.({
+      type: 'noteUpdated', boardId: 7, actorUserId: 2,
+      note: { ...createdNote, text: 'Версия другого сотрудника', x: 300, version: 3 },
+    }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Перезаписать' }));
+    await act(async () => outcome === 'success'
+      ? response.resolve({ ...createdNote, text: 'Мой выбранный текст', version: 2 })
+      : response.reject(outcome === 'conflict'
+        ? new StickyNoteConflictError({ ...createdNote, text: 'Старая версия', version: 2 })
+        : new Error('Старый запрос не прошёл')));
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenNthCalledWith(2, 11,
+      expect.objectContaining({ text: 'Мой выбранный текст', version: 3, x: 300 })));
+    expect(screen.queryByText('Заметка изменена другим пользователем')).toBeNull();
+  });
+
+  it('requires a new conflict decision if another version arrives before the chosen overwrite starts', async () => {
+    realtimeMock.canStart = true;
+    const response = createDeferred<StickyNoteItem>();
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Исходная версия' }]);
+    apiMock.updateStickyNote.mockReset().mockImplementationOnce(() => response.promise);
+    renderStickyNotes();
+    const textarea = await screen.findByDisplayValue('Исходная версия');
+    fireEvent.change(textarea, { target: { value: 'Мой текст' } });
+    fireEvent.blur(textarea);
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledTimes(1));
+    await act(() => realtimeMock.handlers.get('stickyNoteBoardChanged')?.({
+      type: 'noteUpdated', boardId: 7, actorUserId: 2,
+      note: { ...createdNote, text: 'Первая чужая версия', version: 3 },
+    }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Перезаписать' }));
+    await act(() => realtimeMock.handlers.get('stickyNoteBoardChanged')?.({
+      type: 'noteUpdated', boardId: 7, actorUserId: 2,
+      note: { ...createdNote, text: 'Ещё более новая версия', version: 4 },
+    }));
+    await act(async () => response.resolve({ ...createdNote, text: 'Мой текст', version: 2 }));
+    expect(screen.getByText('Ещё более новая версия')).toBeTruthy();
+    expect(apiMock.updateStickyNote).toHaveBeenCalledTimes(1);
+  });
+
+  it('saves new edits after accepting the server version even if the old request fails', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    realtimeMock.canStart = true;
+    const response = createDeferred<StickyNoteItem>();
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Исходная версия' }]);
+    apiMock.updateStickyNote.mockReset().mockImplementationOnce(() => response.promise)
+      .mockImplementationOnce(async (_id, payload) => ({ ...createdNote, ...payload, version: 4 }));
+    renderStickyNotes();
+    const textarea = await screen.findByDisplayValue('Исходная версия') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'Старый черновик' } });
+    fireEvent.blur(textarea);
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledTimes(1));
+    await act(() => realtimeMock.handlers.get('stickyNoteBoardChanged')?.({
+      type: 'noteUpdated', boardId: 7, actorUserId: 2,
+      note: { ...createdNote, text: 'Принятая версия', version: 3 },
+    }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Обновить с сервера' }));
+    fireEvent.change(textarea, { target: { value: 'Новая правка после выбора' } });
+    fireEvent.blur(textarea);
+    await act(async () => response.reject(new Error('Старый запрос не прошёл')));
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenNthCalledWith(2, 11,
+      expect.objectContaining({ text: 'Новая правка после выбора', version: 3 })));
+  });
+
+  it.each(['success', 'conflict'] as const)('keeps the accepted server version when an older layout save ends with %s', async (outcome) => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    realtimeMock.canStart = true;
+    const response = createDeferred<StickyNoteItem>();
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Исходная версия' }]);
+    apiMock.updateStickyNoteLayout.mockImplementationOnce(() => response.promise);
+    renderStickyNotes();
+    const textarea = await screen.findByDisplayValue('Исходная версия') as HTMLTextAreaElement;
+    fireEvent.pointerDown(textarea.parentElement!, { pointerId: 1, clientX: 120, clientY: 120 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 180, clientY: 170 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 180, clientY: 170 });
+    await waitFor(() => expect(apiMock.updateStickyNoteLayout).toHaveBeenCalledTimes(1));
+    await act(() => realtimeMock.handlers.get('stickyNoteBoardChanged')?.({
+      type: 'noteUpdated', boardId: 7, actorUserId: 2,
+      note: { ...createdNote, text: 'Принятая версия', version: 3 },
+    }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Обновить с сервера' }));
+    await act(async () => outcome === 'success'
+      ? response.resolve({ ...createdNote, text: 'Исходная версия', version: 2 })
+      : response.reject(new StickyNoteConflictError({ ...createdNote, text: 'Старая версия', version: 2 })));
+    expect(textarea.value).toBe('Принятая версия');
+    expect(screen.queryByText('Заметка изменена другим пользователем')).toBeNull();
+  });
+
+  it.each(['text-success', 'text-conflict', 'layout-success', 'layout-conflict'] as const)('ignores an old %s response after leaving and returning to a board', async (outcome) => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const response = createDeferred<StickyNoteItem>();
+    let boardLoads = 0;
+    apiMock.getStickyNoteBoards.mockResolvedValue([board, personalBoard]);
+    apiMock.getStickyNotes.mockImplementation(async (boardId) => boardId === 9 ? [] : [{
+      ...createdNote, text: ++boardLoads === 1 ? 'До ухода' : 'Актуально после возврата', version: boardLoads === 1 ? 1 : 4,
+    }]);
+    const layout = outcome.startsWith('layout');
+    if (layout) apiMock.updateStickyNoteLayout.mockImplementationOnce(() => response.promise);
+    else apiMock.updateStickyNote.mockReset().mockImplementationOnce(() => response.promise);
+    renderStickyNotes();
+    const textarea = await screen.findByDisplayValue('До ухода') as HTMLTextAreaElement;
+    if (layout) {
+      fireEvent.pointerDown(textarea.parentElement!, { pointerId: 1, clientX: 120, clientY: 120 });
+      fireEvent.pointerMove(window, { pointerId: 1, clientX: 180, clientY: 170 });
+      fireEvent.pointerUp(window, { pointerId: 1, clientX: 180, clientY: 170 });
+    } else {
+      fireEvent.change(textarea, { target: { value: 'Старый черновик' } });
+      fireEvent.blur(textarea);
+    }
+    await waitFor(() => expect(layout ? apiMock.updateStickyNoteLayout : apiMock.updateStickyNote).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: /Мои заметки/i }));
+    await waitFor(() => expect(apiMock.getStickyNotes).toHaveBeenCalledWith(9));
+    fireEvent.click(screen.getByRole('button', { name: /Рабочая доска/i }));
+    await screen.findByDisplayValue('Актуально после возврата');
+    await act(async () => outcome.endsWith('success')
+      ? response.resolve({ ...createdNote, text: 'Устаревший ответ', version: 2 })
+      : response.reject(new StickyNoteConflictError({ ...createdNote, text: 'Устаревший конфликт', version: 2 })));
+    expect(screen.getByDisplayValue('Актуально после возврата')).toBeTruthy();
+    expect(screen.queryByText('Заметка изменена другим пользователем')).toBeNull();
+  });
+
+  it('does not release a new board session save when an old session request finishes', async () => {
+    const oldResponse = createDeferred<StickyNoteItem>();
+    const newResponse = createDeferred<StickyNoteItem>();
+    let boardLoads = 0;
+    apiMock.getStickyNoteBoards.mockResolvedValue([board, personalBoard]);
+    apiMock.getStickyNotes.mockImplementation(async (boardId) => boardId === 9 ? [] : [{
+      ...createdNote, text: ++boardLoads === 1 ? 'До ухода' : 'После возврата', version: boardLoads === 1 ? 1 : 4,
+    }]);
+    apiMock.updateStickyNote.mockReset().mockImplementationOnce(() => oldResponse.promise)
+      .mockImplementationOnce(() => newResponse.promise)
+      .mockImplementationOnce(async (_id, payload) => ({ ...createdNote, ...payload, version: 6 }));
+    renderStickyNotes();
+    const oldTextarea = await screen.findByDisplayValue('До ухода');
+    fireEvent.change(oldTextarea, { target: { value: 'Старый текст' } });
+    fireEvent.blur(oldTextarea);
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: /Мои заметки/i }));
+    await waitFor(() => expect(apiMock.getStickyNotes).toHaveBeenCalledWith(9));
+    fireEvent.click(screen.getByRole('button', { name: /Рабочая доска/i }));
+    const current = await screen.findByDisplayValue('После возврата');
+    fireEvent.change(current, { target: { value: 'Первый новый текст' } });
+    fireEvent.blur(current);
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledTimes(2));
+    await act(async () => oldResponse.resolve({ ...createdNote, text: 'Старый текст', version: 2 }));
+    fireEvent.change(current, { target: { value: 'Второй новый текст' } });
+    fireEvent.blur(current);
+    expect(apiMock.updateStickyNote).toHaveBeenCalledTimes(2);
+    await act(async () => newResponse.resolve({ ...createdNote, text: 'Первый новый текст', version: 5 }));
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenNthCalledWith(3, 11,
+      expect.objectContaining({ text: 'Второй новый текст', version: 5 })));
+  });
+
+  it('keeps later typed text when a pending layout save returns', async () => {
+    const layoutResponse = createDeferred<StickyNoteItem>();
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'До перемещения' }]);
+    apiMock.updateStickyNoteLayout.mockImplementationOnce(() => layoutResponse.promise);
+    renderStickyNotes();
+    const textarea = await screen.findByDisplayValue('До перемещения') as HTMLTextAreaElement;
+    const noteElement = textarea.parentElement!;
+    fireEvent.pointerDown(noteElement, { pointerId: 1, clientX: 120, clientY: 120 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 180, clientY: 170 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 180, clientY: 170 });
+    await waitFor(() => expect(apiMock.updateStickyNoteLayout).toHaveBeenCalledTimes(1));
+    fireEvent.change(textarea, { target: { value: 'Новый несохранённый текст' } });
+    await act(async () => layoutResponse.resolve({ ...createdNote, text: 'До перемещения', x: 116, y: 106, version: 2 }));
+    expect(textarea.value).toBe('Новый несохранённый текст');
+    fireEvent.blur(textarea);
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledWith(11, expect.objectContaining({ text: 'Новый несохранённый текст', version: 2 })));
+  });
+
+  it.each(['success', 'stale-conflict'] as const)('keeps a remote change as a conflict when a pending layout save ends with %s', async (outcome) => {
+    realtimeMock.canStart = true;
+    const layoutResponse = createDeferred<StickyNoteItem>();
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Локальная заметка' }]);
+    apiMock.updateStickyNoteLayout.mockImplementationOnce(() => layoutResponse.promise);
+    renderStickyNotes();
+    const textarea = await screen.findByDisplayValue('Локальная заметка') as HTMLTextAreaElement;
+    const noteElement = textarea.parentElement!;
+    fireEvent.pointerDown(noteElement, { pointerId: 1, clientX: 120, clientY: 120 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 180, clientY: 170 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 180, clientY: 170 });
+    await waitFor(() => expect(apiMock.updateStickyNoteLayout).toHaveBeenCalledTimes(1));
+    await act(() => realtimeMock.handlers.get('stickyNoteBoardChanged')?.({
+      type: 'noteUpdated', boardId: 7, actorUserId: 2,
+      note: { ...createdNote, text: 'Текст другого сотрудника', version: 3 },
+    }));
+    expect(await screen.findByText('Заметка изменена другим пользователем')).toBeTruthy();
+    expect(textarea.value).toBe('Локальная заметка');
+    await act(async () => outcome === 'success'
+      ? layoutResponse.resolve({ ...createdNote, text: 'Локальная заметка', x: 116, y: 106, version: 2 })
+      : layoutResponse.reject(new StickyNoteConflictError({ ...createdNote, text: 'Старая серверная версия', version: 2 })));
+    expect(screen.getByText('Заметка изменена другим пользователем')).toBeTruthy();
+    expect(screen.getByText('Текст другого сотрудника')).toBeTruthy();
+  });
+
+  it.each(['network', 'conflict'] as const)('keeps later typed text when a pending layout save fails with %s', async (failure) => {
+    const layoutResponse = createDeferred<StickyNoteItem>();
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'До перемещения' }]);
+    apiMock.updateStickyNoteLayout.mockImplementationOnce(() => layoutResponse.promise);
+    renderStickyNotes();
+    const textarea = await screen.findByDisplayValue('До перемещения') as HTMLTextAreaElement;
+    const noteElement = textarea.parentElement!;
+    fireEvent.pointerDown(noteElement, { pointerId: 1, clientX: 120, clientY: 120 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 180, clientY: 170 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 180, clientY: 170 });
+    await waitFor(() => expect(apiMock.updateStickyNoteLayout).toHaveBeenCalledTimes(1));
+    fireEvent.change(textarea, { target: { value: 'Текст после перемещения' } });
+    await act(async () => layoutResponse.reject(failure === 'conflict'
+      ? new StickyNoteConflictError({ ...createdNote, text: 'Другая версия', version: 2 })
+      : new Error('Сеть недоступна')));
+    expect(textarea.value).toBe('Текст после перемещения');
+    if (failure === 'conflict') expect(await screen.findByText('Заметка изменена другим пользователем')).toBeTruthy();
+    else expect(await screen.findByText(/Изменения остались на экране/)).toBeTruthy();
+  });
+
   it('realtime draft guard clears a deleted draft before the same note is restored', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     realtimeMock.canStart = true;
@@ -1549,6 +1927,33 @@ describe('StickyNotes', () => {
     }));
     expect(screen.getByDisplayValue('Чистое обновление после возврата')).toBeTruthy();
     expect(screen.queryByText('Заметка изменена другим пользователем')).toBeNull();
+  });
+
+  it('clears the previous user draft and reloads boards when the user changes without unmounting', async () => {
+    const oldResponse = createDeferred<StickyNoteItem>();
+    const newNotes = createDeferred<StickyNoteItem[]>();
+    apiMock.getStickyNotes.mockImplementation(async () => authMock.userId === 1
+      ? [{ ...createdNote, text: 'Заметка первого сотрудника' }] : newNotes.promise);
+    apiMock.updateStickyNote.mockReset().mockImplementationOnce(() => oldResponse.promise);
+    const rendered = renderStickyNotes();
+    const textarea = await screen.findByDisplayValue('Заметка первого сотрудника');
+    fireEvent.change(textarea, { target: { value: 'Личный черновик первого' } });
+    fireEvent.blur(textarea);
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledTimes(1));
+    const search = screen.getByPlaceholderText('Поиск') as HTMLInputElement;
+    fireEvent.change(search, { target: { value: 'Личный черновик' } });
+    const filter = document.querySelector('select[aria-label="Фильтр заметок"]') as HTMLSelectElement;
+    fireEvent.change(filter, { target: { value: 'mine' } });
+    authMock.userId = 2;
+    rendered.rerender(<DialogProvider><ToastProvider><StickyNotes /></ToastProvider></DialogProvider>);
+    await waitFor(() => expect(apiMock.getStickyNotes).toHaveBeenCalledTimes(2));
+    expect(search.value).toBe('');
+    expect(filter.value).toBe('all');
+    expect(screen.queryByDisplayValue('Личный черновик первого')).toBeNull();
+    await act(async () => oldResponse.resolve({ ...createdNote, text: 'Старый ответ', version: 2 }));
+    expect(screen.queryByDisplayValue('Старый ответ')).toBeNull();
+    await act(async () => newNotes.resolve([{ ...createdNote, text: 'Доступ второго сотрудника', version: 3 }]));
+    expect(await screen.findByDisplayValue('Доступ второго сотрудника')).toBeTruthy();
   });
 
   it('realtime draft guard isolates failed drafts from a newly mounted user session', async () => {
@@ -1997,6 +2402,27 @@ describe('StickyNotes', () => {
       version: 2,
     })));
     expect(screen.queryByText('Заметка изменена другим пользователем')).toBeNull();
+  });
+
+  it('does not send a queued note save after edit access is revoked', async () => {
+    realtimeMock.canStart = true;
+    const response = createDeferred<StickyNoteItem>();
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Исходная версия' }]);
+    apiMock.updateStickyNote.mockReset().mockImplementationOnce(() => response.promise);
+    renderStickyNotes();
+    const textarea = await screen.findByDisplayValue('Исходная версия') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'Первый текст' } });
+    fireEvent.blur(textarea);
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledTimes(1));
+    fireEvent.change(textarea, { target: { value: 'Несохранённый текст' } });
+    fireEvent.blur(textarea);
+    apiMock.getStickyNoteBoards.mockResolvedValue([{ ...board, canEdit: false }]);
+    await act(() => realtimeMock.handlers.get('stickyNoteBoardChanged')?.({ type: 'boardUpdated', boardId: 7 }));
+    await waitFor(() => expect(textarea).toHaveProperty('readOnly', true));
+    await act(async () => response.resolve({ ...createdNote, text: 'Первый текст', version: 2 }));
+    expect(apiMock.updateStickyNote).toHaveBeenCalledTimes(1);
+    expect(textarea.value).toBe('Несохранённый текст');
+    expect(await screen.findByText('Нет права редактировать доску. Несохранённый текст остался на экране.')).toBeTruthy();
   });
 
   it('disables conflict overwrite when edit access is revoked', async () => {

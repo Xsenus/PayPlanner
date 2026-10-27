@@ -37,6 +37,7 @@ interface ClientAddressEntriesFormProps {
   entries: ClientAddressEntryFormValue[];
   canEdit: boolean;
   compactReadOnly?: boolean;
+  textReadOnly?: boolean;
   showValidityFields?: boolean;
   validityDateInputClassName?: string;
   addressTypeOptions: AddressTypeOption[];
@@ -69,6 +70,7 @@ export function ClientAddressEntriesForm({
   entries,
   canEdit,
   compactReadOnly = false,
+  textReadOnly = false,
   showValidityFields,
   validityDateInputClassName = ADDRESS_ENTRY_VALIDITY_DATE_INPUT_CLASS,
   addressTypeOptions,
@@ -85,6 +87,32 @@ export function ClientAddressEntriesForm({
   const showReadonlyControls = !compactReadOnly;
   const shouldShowValidityFields =
     showValidityFields ?? ADDRESS_ENTRY_VALIDITY_FIELDS_VISIBLE;
+
+  if (textReadOnly && !canEdit) {
+    const typeLabel = (value: string) => addressTypeOptions.find((option) => option.value === value)?.label || value;
+    return (
+      <div className="space-y-3 md:col-span-2" aria-label="Адреса">
+        {entries.length === 0 ? <p className="text-sm text-gray-500">Адреса не указаны</p> : entries.map((entry, index) => {
+          const fields = [
+            ["Основной тип", typeLabel(entry.type)],
+            ["Дополнительно относится к", entry.additionalTypes.map(typeLabel).join(", ")],
+            ["Полный адрес", entry.fullAddress], ["Индекс", entry.postalCode],
+            ["Область", entry.region], ["Район", entry.district], ["Город", entry.city],
+            ["Населённый пункт", entry.settlement], ["Улица", entry.street], ["Дом", entry.house], ["Квартира", entry.flat],
+            ...(shouldShowValidityFields ? [["Действует с", entry.validFrom], ["Действует по", entry.validTo]] : []),
+          ];
+          return (
+            <section key={`address-entry-${index}`} aria-label={`Адрес #${index + 1}`} className="border-t border-slate-200 pt-3">
+              <h4 className="mb-2 text-sm font-semibold text-slate-800">Адрес #{index + 1} · {entry.isPrimary ? "По умолчанию" : "Дополнительный"}</h4>
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-2 xl:grid-cols-4">
+                {fields.map(([label, value]) => <div key={label} className={`min-w-0 ${label === "Полный адрес" ? "col-span-2" : ""}`}><dt className="text-xs text-slate-500">{label}</dt><dd className="text-sm text-slate-900 [overflow-wrap:anywhere]">{value || "Не указано"}</dd></div>)}
+              </dl>
+            </section>
+          );
+        })}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4 md:col-span-2">

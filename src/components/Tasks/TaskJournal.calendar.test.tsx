@@ -2,9 +2,70 @@ import { setupTaskJournalTests, apiMock, toastMock, authState, permissionsState,
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { fromTimeZoneDateTimeInput, getZonedParts, toTimeZoneDateKey } from '../../utils/timeZoneDate';
+import { loadAllTaskJournalItems } from './loadAllTaskJournalItems';
+import { TASK_JOURNAL_EVENT } from '../../utils/taskJournalStore';
 
 describe('TaskJournal', () => {
   setupTaskJournalTests();
+
+  it('rejects a calendar load when an empty page arrives before the reported total', async () => {
+    apiMock.getTaskJournalItems.mockResolvedValueOnce({ items: [createTask()], page: 1, pageSize: 200, total: 2 });
+    apiMock.getTaskJournalItems.mockResolvedValueOnce({ items: [], page: 2, pageSize: 200, total: 2 });
+    await expect(loadAllTaskJournalItems()).rejects.toThrow('неполную выборку');
+  });
+
+  it('rejects a changing total and stops paging an aborted calendar request', async () => {
+    apiMock.getTaskJournalItems.mockResolvedValueOnce({ items: [createTask()], page: 1, pageSize: 200, total: 2 });
+    apiMock.getTaskJournalItems.mockResolvedValueOnce({ items: [], page: 2, pageSize: 200, total: 1 });
+    await expect(loadAllTaskJournalItems()).rejects.toThrow('изменилась');
+    apiMock.getTaskJournalItems.mockReset();
+    const controller = new AbortController();
+    apiMock.getTaskJournalItems.mockImplementationOnce(async () => {
+      controller.abort();
+      return { items: [createTask()], page: 1, pageSize: 200, total: 2 };
+    });
+    await expect(loadAllTaskJournalItems(undefined, false, true, 'dueAt', 'asc', false, controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects repeated task IDs across calendar pages instead of counting them twice', async () => {
+    const first = createTask({ id: 101 });
+    apiMock.getTaskJournalItems.mockResolvedValueOnce({ items: [first], page: 1, pageSize: 200, total: 2 });
+    apiMock.getTaskJournalItems.mockResolvedValueOnce({ items: [first], page: 2, pageSize: 200, total: 2 });
+    await expect(loadAllTaskJournalItems()).rejects.toThrow('повторилась');
+  });
+
+  it('rejects a growing total and duplicate IDs on a single calendar page', async () => {
+    apiMock.getTaskJournalItems.mockResolvedValueOnce({ items: [createTask({ id: 101 })], page: 1, pageSize: 200, total: 2 });
+    apiMock.getTaskJournalItems.mockResolvedValueOnce({ items: [createTask({ id: 102 })], page: 2, pageSize: 200, total: 3 });
+    await expect(loadAllTaskJournalItems()).rejects.toThrow('изменилась');
+    apiMock.getTaskJournalItems.mockReset();
+    const task = createTask({ id: 101 });
+    apiMock.getTaskJournalItems.mockResolvedValueOnce({ items: [task, task], page: 1, pageSize: 200, total: 2 });
+    await expect(loadAllTaskJournalItems()).rejects.toThrow('повторилась');
+  });
+
+  it('loads distinct tasks across all calendar pages in order', async () => {
+    apiMock.getTaskJournalItems.mockResolvedValueOnce({ items: [createTask({ id: 101 })], page: 1, pageSize: 200, total: 2 });
+    apiMock.getTaskJournalItems.mockResolvedValueOnce({ items: [createTask({ id: 102 })], page: 2, pageSize: 200, total: 2 });
+    const result = await loadAllTaskJournalItems();
+    expect(result.map((task) => task.id)).toEqual([101, 102]);
+  });
+
+  it('warns when a calendar refresh returns an incomplete page and clears the warning on retry', async () => {
+    await renderJournal([createTask({ id: 101, title: 'Прежняя задача' })], { initialView: 'calendar', waitForTitle: null });
+    await screen.findByTestId('task-calendar-task-101');
+    apiMock.getTaskJournalItems.mockReset();
+    apiMock.getTaskJournalItems.mockResolvedValueOnce({ items: [createTask({ id: 102, title: 'Частичная задача' })], page: 1, pageSize: 200, total: 2 });
+    apiMock.getTaskJournalItems.mockResolvedValueOnce({ items: [], page: 2, pageSize: 200, total: 2 });
+    fireEvent.click(screen.getByRole('button', { name: /Нагрузка/i }));
+    expect((await screen.findByRole('alert')).textContent).toContain('могут быть неполными или устаревшими');
+    expect(screen.queryByTestId('task-timeline-task-102')).toBeNull();
+    apiMock.getTaskJournalItems.mockResolvedValueOnce({ items: [createTask({ id: 103, title: 'Полная задача' })], page: 1, pageSize: 200, total: 1 });
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку' }));
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    expect(await screen.findByTestId('task-timeline-task-103')).toBeTruthy();
+  });
 
 
   it('renders task calendar as a journal subgroup', async () => {
@@ -357,7 +418,7 @@ describe('TaskJournal', () => {
     expect(screen.queryByRole('link', { name: 'Выполненные и отменённые задачи в календарях' })).toBeNull();
   });
 
-  it('hides completed tasks from the task calendar when the calendar setting says to hide them', async () => {
+  it('hides completed and cancelled tasks without hiding active tasks when the calendar setting says to hide them', async () => {
     window.localStorage.setItem('pp.task_journal.filters.v1.user:7', JSON.stringify({
       quickFilter: 'all',
       viewMode: 'calendar',
@@ -385,10 +446,36 @@ describe('TaskJournal', () => {
     });
 
     await renderJournal([
-      createTask({ status: 'done', result: 'Готово', dueAt: todayAt(11) }),
+      createTask({ id: 101, status: 'done', result: 'Готово', dueAt: todayAt(11) }),
+      createTask({ id: 102, status: 'cancelled', dueAt: todayAt(12) }),
+      createTask({ id: 103, status: 'new', dueAt: todayAt(13) }),
     ], { initialView: 'calendar', waitForTitle: null });
 
-    await waitFor(() => expect(screen.queryByTestId('task-calendar-task-101')).toBeNull());
+    expect(await screen.findByTestId('task-calendar-task-103')).toBeTruthy();
+    expect(screen.queryByTestId('task-calendar-task-101')).toBeNull();
+    expect(screen.queryByTestId('task-calendar-task-102')).toBeNull();
+  });
+
+  it.each(['done', 'cancelled'] as const)('shows a reopened %s task after the calendar refresh when completed tasks are hidden', async (status) => {
+    window.localStorage.setItem('pp.task_journal.filters.v1.user:7', JSON.stringify({
+      quickFilter: 'all', viewMode: 'calendar', periodMode: 'week', statusFilter: 'all',
+    }));
+    apiMock.getCalendarSyncSettings.mockResolvedValueOnce({
+      completedTaskCalendarAction: 'hide',
+    });
+    const tasks = [
+      createTask({ id: 101, status, dueAt: todayAt(11) }),
+      createTask({ id: 102, status: 'new', dueAt: todayAt(12) }),
+    ];
+    await renderJournal(tasks, { initialView: 'calendar', waitForTitle: null });
+    await screen.findByTestId('task-calendar-task-102');
+    expect(screen.queryByTestId('task-calendar-task-101')).toBeNull();
+
+    tasks[0] = createTask({ id: 101, status: 'inProgress', dueAt: todayAt(11) });
+    fireEvent(window, new CustomEvent(TASK_JOURNAL_EVENT));
+    const reopened = await screen.findByTestId('task-calendar-task-101');
+    expect(reopened.getAttribute('title')).toContain('В работе');
+    expect(reopened.className).not.toContain('bg-slate-200');
   });
 
   it('colors completed tasks in the task calendar when the calendar setting says to color them', async () => {
@@ -406,6 +493,21 @@ describe('TaskJournal', () => {
     const taskCard = await screen.findByTestId('task-calendar-task-101');
     expect(taskCard.className).toContain('border-slate-300');
     expect(taskCard.className).toContain('bg-slate-200');
+  });
+
+  it('colors cancelled tasks while keeping active tasks distinguishable', async () => {
+    window.localStorage.setItem('pp.task_journal.filters.v1.user:7', JSON.stringify({
+      quickFilter: 'all', viewMode: 'calendar', periodMode: 'week', statusFilter: 'all',
+    }));
+    await renderJournal([
+      createTask({ id: 101, status: 'cancelled', dueAt: todayAt(11) }),
+      createTask({ id: 102, status: 'inProgress', dueAt: todayAt(12) }),
+    ], { initialView: 'calendar', waitForTitle: null });
+
+    const cancelled = await screen.findByTestId('task-calendar-task-101');
+    const active = await screen.findByTestId('task-calendar-task-102');
+    expect(cancelled.className).toContain('bg-slate-200');
+    expect(active.className).not.toContain('bg-slate-200');
   });
 
   it('restores the active-only filter after switching from the completed-task calendar to the list', async () => {
@@ -562,6 +664,33 @@ describe('TaskJournal', () => {
     expect(screen.getByText('Выполненные/отмененные')).toBeTruthy();
     expect(await screen.findByTestId('task-timeline-task-101')).toBeTruthy();
     expect(await screen.findByTestId('task-timeline-task-102')).toBeTruthy();
+  });
+
+  it('keeps weekly workload separate for different employees with identical names', async () => {
+    await renderJournal([
+      createTask({ id: 101, title: 'Первая задача', assigneeUserId: 7, assigneeName: 'Иван Иванов', dueAt: todayAt(10), plannedDurationMinutes: 60, participants: [{ userId: 7, role: 'assignee', displayName: 'Иван Иванов', approvalStatus: 'pending' }] }),
+      createTask({ id: 102, title: 'Вторая задача', assigneeUserId: 8, assigneeName: 'Иван Иванов', dueAt: todayAt(11), plannedDurationMinutes: 120, participants: [{ userId: 8, role: 'assignee', displayName: 'Иван Иванов', approvalStatus: 'pending' }] }),
+    ], { initialView: 'timeline', waitForTitle: null });
+    expect(await screen.findByText(/Иван Иванов \(№7\): активных 1/)).toBeTruthy();
+    expect(screen.getByText(/Иван Иванов \(№8\): активных 1/)).toBeTruthy();
+    expect(screen.queryByText(/Иван Иванов: активных 2/)).toBeNull();
+  });
+
+  it('reveals remaining employee workloads on demand', async () => {
+    const tasks = Array.from({ length: 9 }, (_, index) => createTask({
+      id: 201 + index, title: `Задача ${index + 1}`, dueAt: todayAt(10),
+      assigneeUserId: 101 + index, assigneeName: `Исполнитель ${index + 1}`,
+      participants: [{ userId: 101 + index, role: 'assignee', displayName: `Исполнитель ${index + 1}`, approvalStatus: 'pending' }],
+    }));
+    await renderJournal(tasks, { initialView: 'timeline', waitForTitle: null });
+    const showMore = await screen.findByRole('button', { name: 'Ещё исполнителей: 1' });
+    expect(showMore.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(showMore);
+    expect(screen.getByText(/Исполнитель 9: активных 1/)).toBeTruthy();
+    const showLess = screen.getByRole('button', { name: 'Показать меньше' });
+    expect(showLess.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(showLess);
+    expect(screen.queryByText(/Исполнитель 9: активных 1/)).toBeNull();
   });
 
   it('keeps overlapping workload timeline tasks wide enough to show text', async () => {

@@ -7,7 +7,9 @@ import { bindPaymentCreateOwner } from '../services/paymentCreateAttempts';
 import {
   activateOfflineCalendarUser,
   clearOfflineCalendarCache,
+  revokeOfflineCalendarSnapshot,
 } from '../services/offlineCalendarStore';
+import { USER_NOTIFICATIONS_EVENT, type UserNotificationsChangedDetail } from '../utils/userNotifications';
 import type { UserActivityStatus } from '../types/userActivity';
 
 interface AuthContextType {
@@ -34,11 +36,16 @@ export const useAuth = () => {
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
+  const userRef = useRef<User | null>(null);
+  const roleRefreshPendingRef = useRef(false);
+  const signingOutRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const operation = useRef(0);
   const mounted = useRef(true);
   const assignUser = useCallback((next: User | null) => {
     bindPaymentCreateOwner(next?.id ?? null, API_BASE_URL);
+    userRef.current = next;
+    roleRefreshPendingRef.current = false;
     setUser(next);
   }, []);
 
@@ -58,7 +65,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       });
   };
 
-  const fetchUser = useCallback(async () => {
+  const fetchUser = useCallback(async (preserveOnTransientFailure = false) => {
     const version = ++operation.current;
     let session: AuthSessionIdentity;
     try { session = captureAuthSessionIdentity(); }
@@ -68,10 +75,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (!authService.isAuthenticated()) { if (current()) assignUser(null); return; }
       const me = await authService.getCurrentUser();
       if (!current()) return;
+      const previous = userRef.current;
+      if (previous?.id === me.id && previous.role?.id !== me.role?.id) {
+        await revokeOfflineCalendarSnapshot(me.id);
+        if (!current()) return;
+      }
       await activateOfflineCalendarUser(me.id, current);
-      if (current()) assignUser(me);
+      if (current()) {
+        assignUser(me);
+      }
     } catch (error) {
       if (!current()) return;
+      const status = typeof error === 'object' && error !== null && 'status' in error ? error.status : undefined;
+      const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
+      if (preserveOnTransientFailure && status !== 401 && status !== 403 && status !== 404
+        && code !== 'UserInactive' && code !== 'PendingApproval' && code !== 'InvalidCredentials') return;
       console.error('Ошибка загрузки профиля:', error);
       await clearOfflineCalendarCache(current);
       if (!current()) return;
@@ -93,6 +111,28 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, [fetchUser]);
 
   useEffect(() => {
+    const onUserRoleChanged = (event: Event) => {
+      const detail = event instanceof CustomEvent ? event.detail as UserNotificationsChangedDetail | null : null;
+      if (detail?.source === 'realtime'
+        && (detail.reason === 'user-role-changed' || detail.reason === 'reconnected') && userRef.current && !signingOutRef.current) {
+        roleRefreshPendingRef.current = true;
+        void fetchUser(true);
+      }
+    };
+    const retryPendingRoleRefresh = () => {
+      if (roleRefreshPendingRef.current && userRef.current && !signingOutRef.current) void fetchUser(true);
+    };
+    window.addEventListener(USER_NOTIFICATIONS_EVENT, onUserRoleChanged);
+    window.addEventListener('online', retryPendingRoleRefresh);
+    window.addEventListener('focus', retryPendingRoleRefresh);
+    return () => {
+      window.removeEventListener(USER_NOTIFICATIONS_EVENT, onUserRoleChanged);
+      window.removeEventListener('online', retryPendingRoleRefresh);
+      window.removeEventListener('focus', retryPendingRoleRefresh);
+    };
+  }, [fetchUser]);
+
+  useEffect(() => {
     const handleSessionExpired = () => {
       const version = ++operation.current;
       bindPaymentCreateOwner(null, API_BASE_URL);
@@ -107,6 +147,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, [assignUser]);
 
   const signIn = async (email: string, password: string) => {
+    signingOutRef.current = false;
     const version = ++operation.current;
     bindPaymentCreateOwner(null, API_BASE_URL);
     const pending = authService.login(email, password);
@@ -128,6 +169,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const signInWithToken = async (token: string, nextUser?: User | null, provider?: string) => {
+    signingOutRef.current = false;
     const version = ++operation.current;
     bindPaymentCreateOwner(null, API_BASE_URL);
     const pending = authService.completeSignIn(token, nextUser);
@@ -145,6 +187,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const signOut = async () => {
+    signingOutRef.current = true;
     const version = ++operation.current;
     const session = captureAuthSessionIdentity();
     const current = () => mounted.current && operation.current === version && isAuthSessionIdentityCurrent(session);

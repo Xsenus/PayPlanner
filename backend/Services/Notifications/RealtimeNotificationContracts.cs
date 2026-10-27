@@ -24,6 +24,17 @@ public interface IRealtimeNotificationPublisher
     Task PublishTaskJournalChangedAsync(CancellationToken cancellationToken = default);
 }
 
+public interface IRolePermissionsChangePublisher
+{
+    Task PublishRolePermissionsChangedAsync(IReadOnlyCollection<int> userIds, CancellationToken cancellationToken = default);
+}
+
+public interface IUserRoleChangePublisher
+{
+    Task PublishUserRoleChangedAsync(int userId, CancellationToken cancellationToken = default);
+    Task PublishUsersRoleChangedAsync(IReadOnlyCollection<int> userIds, CancellationToken cancellationToken = default);
+}
+
 public sealed class NoOpRealtimeNotificationPublisher : IRealtimeNotificationPublisher
 {
     public static NoOpRealtimeNotificationPublisher Instance { get; } = new();

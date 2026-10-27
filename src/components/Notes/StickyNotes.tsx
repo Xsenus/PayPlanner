@@ -192,9 +192,16 @@ export function StickyNotes() {
   const notesRef = useRef<StickyNoteItem[]>([]);
   const newBoardTitleRef = useRef('');
   const activeBoardIdRef = useRef<number | null>(null);
+  const activeBoardEpochRef = useRef(0);
+  const userEpochRef = useRef(0);
+  const canEditActiveBoardRef = useRef(false);
+  const activeBoardPermissionsRef = useRef({ deleteNote: false, deleteBoard: false });
   const autosaveTimersRef = useRef<Map<number, number>>(new Map());
   const noteEditRevisionsRef = useRef<Map<number, number>>(new Map());
-  const noteSavesInFlightRef = useRef<Set<number>>(new Set());
+  const noteSavesInFlightRef = useRef<Map<number, symbol>>(new Map());
+  const layoutSavesInFlightRef = useRef<Map<number, Set<symbol>>>(new Map());
+  const remoteConflictVersionsRef = useRef<Map<number, number>>(new Map());
+  const acceptedServerEpochRef = useRef<Map<number, number>>(new Map());
   const pendingNoteSavesRef = useRef<Map<number, StickyNoteItem>>(new Map());
   const composingNoteIdsRef = useRef<Set<number>>(new Set());
   const unsavedNoteIdsRef = useRef<Set<number>>(new Set());
@@ -234,9 +241,11 @@ export function StickyNotes() {
   );
 
   const canEditActiveBoard = Boolean(activeBoard?.canEdit);
+  canEditActiveBoardRef.current = canEditActiveBoard;
   const canCreateNotesOnActiveBoard = Boolean(activeBoard?.canCreateNotes);
   const canUpdateActiveBoardSettings = Boolean(activeBoard?.canUpdateSettings);
   const canDeleteNotesOnActiveBoard = Boolean(activeBoard?.canDeleteNotes);
+  activeBoardPermissionsRef.current = { deleteNote: canDeleteNotesOnActiveBoard, deleteBoard: Boolean(activeBoard?.canDelete) };
   const effectiveActiveBoardNotesCount = activeBoard ? getEffectiveBoardNotesCount(activeBoard.notesCount, notes.length) : notes.length;
   const isActiveBoardAtNoteLimit = effectiveActiveBoardNotesCount >= MAX_NOTES_PER_BOARD;
   const canAddNoteToActiveBoard = canCreateNotesOnActiveBoard && !isActiveBoardAtNoteLimit;
@@ -262,6 +271,8 @@ export function StickyNotes() {
     clearAutosaveTimer(noteId);
     noteEditRevisionsRef.current.delete(noteId);
     noteSavesInFlightRef.current.delete(noteId);
+    layoutSavesInFlightRef.current.delete(noteId);
+    remoteConflictVersionsRef.current.delete(noteId);
     pendingNoteSavesRef.current.delete(noteId);
     composingNoteIdsRef.current.delete(noteId);
     unsavedNoteIdsRef.current.delete(noteId);
@@ -291,6 +302,8 @@ export function StickyNotes() {
     autosaveTimersRef.current.clear();
     noteEditRevisionsRef.current.clear();
     noteSavesInFlightRef.current.clear();
+    layoutSavesInFlightRef.current.clear();
+    remoteConflictVersionsRef.current.clear();
     pendingNoteSavesRef.current.clear();
     composingNoteIdsRef.current.clear();
     unsavedNoteIdsRef.current.clear();
@@ -444,8 +457,24 @@ export function StickyNotes() {
   }, []);
 
   useEffect(() => {
-    void loadBoards();
-  }, [loadBoards]);
+    userEpochRef.current += 1;
+    activeBoardEpochRef.current += 1;
+    activeBoardIdRef.current = null;
+    boardLoadRequestIdRef.current += 1;
+    notesLoadRequestIdRef.current += 1;
+    membersLoadRequestIdRef.current += 1;
+    clearActiveBoardState();
+    notesRef.current = [];
+    setBoards([]);
+    setActiveBoardId(null);
+    setNewBoardTitle('');
+    setCreatingBoard(false);
+    setSavingBoardSettings(false);
+    setSearch('');
+    setFilter('all');
+    if (currentUserId) void loadBoards();
+    else setLoading(false);
+  }, [clearActiveBoardState, currentUserId, loadBoards]);
 
   useEffect(() => {
     notesRef.current = notes;
@@ -474,6 +503,7 @@ export function StickyNotes() {
   }, [activeBoardId, loading]);
 
   useEffect(() => {
+    activeBoardEpochRef.current += 1;
     activeBoardIdRef.current = activeBoardId;
   }, [activeBoardId]);
 
@@ -555,12 +585,14 @@ export function StickyNotes() {
           return;
         }
 
-        if (event.type === 'noteUpdated' && (autosaveTimersRef.current.has(event.note.id) || noteSavesInFlightRef.current.has(event.note.id) || composingNoteIdsRef.current.has(event.note.id) || unsavedNoteIdsRef.current.has(event.note.id))) {
+        if (event.type === 'noteUpdated' && (autosaveTimersRef.current.has(event.note.id) || noteSavesInFlightRef.current.has(event.note.id) || layoutSavesInFlightRef.current.has(event.note.id) || composingNoteIdsRef.current.has(event.note.id) || unsavedNoteIdsRef.current.has(event.note.id))) {
           const localNote = notesRef.current.find((note) => note.id === event.note!.id);
           if (localNote) {
             clearAutosaveTimer(event.note.id);
             unsavedNoteIdsRef.current.add(event.note.id);
-            setNoteConflict({ local: localNote, server: event.note });
+            const remoteNote = event.note;
+            remoteConflictVersionsRef.current.set(remoteNote.id, Math.max(remoteConflictVersionsRef.current.get(remoteNote.id) ?? 0, remoteNote.version));
+            setNoteConflict((current) => ({ local: localNote, server: current?.server.id === remoteNote.id && current.server.version > remoteNote.version ? current.server : remoteNote }));
             toast.error('Заметка уже изменена другим пользователем. Проверьте конфликт перед сохранением.');
             return;
           }
@@ -653,6 +685,7 @@ export function StickyNotes() {
     }
 
     const requestedActiveBoardId = activeBoardIdRef.current;
+    const requestedUserEpoch = userEpochRef.current;
 
     setCreatingBoard(true);
     try {
@@ -661,6 +694,7 @@ export function StickyNotes() {
         visibility,
         background: visibility === 'shared' ? 'cork' : 'gray',
       });
+      if (userEpochRef.current !== requestedUserEpoch) return;
       setBoards((current) => (
         current.some((item) => item.id === board.id)
           ? current.map((item) => (item.id === board.id ? board : item))
@@ -671,12 +705,13 @@ export function StickyNotes() {
       }
       setNewBoardTitle((current) => (current.trim() === title ? '' : current));
     } catch (error) {
+      if (userEpochRef.current !== requestedUserEpoch) return;
       console.error(error);
       if (activeBoardIdRef.current === requestedActiveBoardId && newBoardTitleRef.current.trim() === title) {
         toast.error('Не удалось создать доску.');
       }
     } finally {
-      setCreatingBoard(false);
+      if (userEpochRef.current === requestedUserEpoch) setCreatingBoard(false);
     }
   };
 
@@ -686,6 +721,7 @@ export function StickyNotes() {
     }
 
     const requestedBoardId = activeBoardId;
+    const requestedUserEpoch = userEpochRef.current;
 
     if (isActiveBoardAtNoteLimit) {
       toast.error(`На одной доске можно хранить до ${MAX_NOTES_PER_BOARD} заметок.`);
@@ -708,6 +744,7 @@ export function StickyNotes() {
         assignedUserId: null,
         reminderAt: null,
       });
+      if (userEpochRef.current !== requestedUserEpoch) return;
       if (activeBoardIdRef.current !== requestedBoardId) {
         await refreshBoardCounts();
         return;
@@ -722,6 +759,7 @@ export function StickyNotes() {
       setSelectedNoteId(note.id);
       await refreshBoardCounts();
     } catch (error) {
+      if (userEpochRef.current !== requestedUserEpoch) return;
       console.error(error);
       if (activeBoardIdRef.current === requestedBoardId) {
         toast.error('Не удалось создать заметку.');
@@ -730,12 +768,14 @@ export function StickyNotes() {
   };
 
   const saveNote = async (note: StickyNoteItem, resolveConflict = false) => {
-    if (!canEditActiveBoard || composingNoteIdsRef.current.has(note.id)
+    if (!canEditActiveBoardRef.current || composingNoteIdsRef.current.has(note.id)
       || (!resolveConflict && noteConflict?.local.id === note.id)) {
       return;
     }
 
     const requestedBoardId = note.boardId;
+    const requestedBoardEpoch = activeBoardEpochRef.current;
+    const acceptedEpoch = acceptedServerEpochRef.current.get(note.id) ?? 0;
 
     const timer = autosaveTimersRef.current.get(note.id);
     if (timer) {
@@ -748,7 +788,8 @@ export function StickyNotes() {
       return;
     }
 
-    noteSavesInFlightRef.current.add(note.id);
+    const saveToken = Symbol('note-save');
+    noteSavesInFlightRef.current.set(note.id, saveToken);
     const savedRevision = noteEditRevisionsRef.current.get(note.id) ?? 0;
     let canSavePending = true;
 
@@ -772,13 +813,16 @@ export function StickyNotes() {
         reminderAt: note.reminderAt ?? null,
         version: note.version,
       });
-      if (activeBoardIdRef.current !== requestedBoardId || saved.boardId !== requestedBoardId) {
+      if (activeBoardIdRef.current !== requestedBoardId || activeBoardEpochRef.current !== requestedBoardEpoch || saved.boardId !== requestedBoardId || (acceptedServerEpochRef.current.get(note.id) ?? 0) !== acceptedEpoch) {
         return;
       }
 
       const currentNote = notesRef.current.find((item) => item.id === saved.id);
       const currentRevision = noteEditRevisionsRef.current.get(saved.id) ?? 0;
-      if (currentRevision === savedRevision) unsavedNoteIdsRef.current.delete(saved.id);
+      const hasNewerRemoteConflict = (remoteConflictVersionsRef.current.get(saved.id) ?? 0) > saved.version;
+      if (hasNewerRemoteConflict) canSavePending = false;
+      else remoteConflictVersionsRef.current.delete(saved.id);
+      if (currentRevision === savedRevision && !hasNewerRemoteConflict) unsavedNoteIdsRef.current.delete(saved.id);
       const nextNote = currentNote && currentRevision !== savedRevision
         ? {
           ...saved,
@@ -804,8 +848,9 @@ export function StickyNotes() {
       const nextNotes = sortNotes(notesRef.current.map((item) => (item.id === saved.id ? nextNote : item)));
       notesRef.current = nextNotes;
       setNotes(nextNotes);
-      setNoteConflict((current) => current?.local.id === saved.id ? null : current);
+      setNoteConflict((current) => current?.local.id === saved.id && current.server.version <= saved.version ? null : current);
     } catch (error) {
+      if (activeBoardEpochRef.current !== requestedBoardEpoch || (acceptedServerEpochRef.current.get(note.id) ?? 0) !== acceptedEpoch) return;
       console.error(error);
       canSavePending = false;
       if (activeBoardIdRef.current !== requestedBoardId) {
@@ -818,24 +863,33 @@ export function StickyNotes() {
           return;
         }
         const latest = notesRef.current.find((item) => item.id === note.id) ?? note;
-        setNoteConflict({ local: latest, server: error.serverNote });
+        const remoteNote = error.serverNote;
+        remoteConflictVersionsRef.current.set(note.id, Math.max(remoteConflictVersionsRef.current.get(note.id) ?? 0, remoteNote.version));
+        setNoteConflict((current) => ({ local: latest, server: current?.server.id === note.id && current.server.version > remoteNote.version ? current.server : remoteNote }));
         toast.error('Заметка уже изменена другим пользователем. Проверьте конфликт перед сохранением.');
       } else {
         toast.error('Не удалось сохранить заметку. Текст остался в открытой заметке. Повторите сохранение.');
       }
     } finally {
-      noteSavesInFlightRef.current.delete(note.id);
-      setSavingNoteIds((current) => {
-        const next = new Set(current);
-        next.delete(note.id);
-        return next;
-      });
+      if (noteSavesInFlightRef.current.get(note.id) === saveToken) {
+        noteSavesInFlightRef.current.delete(note.id);
+        setSavingNoteIds((current) => {
+          const next = new Set(current);
+          next.delete(note.id);
+          return next;
+        });
 
-      const pendingNote = pendingNoteSavesRef.current.get(note.id);
-      pendingNoteSavesRef.current.delete(note.id);
-      if (canSavePending && pendingNote && activeBoardIdRef.current === requestedBoardId) {
-        const latest = notesRef.current.find((item) => item.id === note.id) ?? pendingNote;
-        void saveNote(latest);
+        const pendingNote = pendingNoteSavesRef.current.get(note.id);
+        pendingNoteSavesRef.current.delete(note.id);
+        if (canSavePending && pendingNote && activeBoardIdRef.current === requestedBoardId) {
+          const latest = notesRef.current.find((item) => item.id === note.id) ?? pendingNote;
+          if (!canEditActiveBoardRef.current) {
+            unsavedNoteIdsRef.current.add(note.id);
+            toast.error('Нет права редактировать доску. Несохранённый текст остался на экране.');
+          } else if ((remoteConflictVersionsRef.current.get(note.id) ?? 0) <= latest.version) {
+            void saveNote(latest);
+          }
+        }
       }
     }
   };
@@ -866,6 +920,13 @@ export function StickyNotes() {
     }
 
     const requestedBoardId = note.boardId;
+    const requestedBoardEpoch = activeBoardEpochRef.current;
+    const acceptedEpoch = acceptedServerEpochRef.current.get(note.id) ?? 0;
+    const requestedRevision = noteEditRevisionsRef.current.get(note.id) ?? 0;
+    const token = Symbol('layout-save');
+    const pending = layoutSavesInFlightRef.current.get(note.id) ?? new Set<symbol>();
+    pending.add(token);
+    layoutSavesInFlightRef.current.set(note.id, pending);
 
     try {
       const saved = await apiService.updateStickyNoteLayout(note.id, {
@@ -876,13 +937,23 @@ export function StickyNotes() {
         zIndex: note.zIndex,
         version: note.version,
       });
-      if (activeBoardIdRef.current !== requestedBoardId || saved.boardId !== requestedBoardId) {
+      if (activeBoardIdRef.current !== requestedBoardId || activeBoardEpochRef.current !== requestedBoardEpoch || saved.boardId !== requestedBoardId || (acceptedServerEpochRef.current.get(note.id) ?? 0) !== acceptedEpoch) {
         return;
       }
-      setNotes((current) => sortNotes(current.map((item) => (item.id === saved.id ? saved : item))));
+      const currentNote = notesRef.current.find((item) => item.id === saved.id);
+      if (!currentNote) return;
+      const currentRevision = noteEditRevisionsRef.current.get(saved.id) ?? 0;
+      const nextNote = currentNote.version > saved.version
+        ? currentNote
+        : currentRevision !== requestedRevision
+          ? { ...saved, ...currentNote, version: saved.version }
+          : saved;
+      const nextNotes = sortNotes(notesRef.current.map((item) => (item.id === saved.id ? nextNote : item)));
+      notesRef.current = nextNotes;
+      setNotes(nextNotes);
     } catch (error) {
       console.error(error);
-      if (activeBoardIdRef.current !== requestedBoardId) {
+      if (activeBoardIdRef.current !== requestedBoardId || activeBoardEpochRef.current !== requestedBoardEpoch || (acceptedServerEpochRef.current.get(note.id) ?? 0) !== acceptedEpoch) {
         return;
       }
       if (error instanceof StickyNoteConflictError) {
@@ -890,11 +961,23 @@ export function StickyNotes() {
           return;
         }
         unsavedNoteIdsRef.current.add(note.id);
-        setNoteConflict({ local: note, server: error.serverNote });
-        setNotes((current) => sortNotes(current.map((item) => (item.id === note.id ? note : item))));
+        const latest = notesRef.current.find((item) => item.id === note.id) ?? note;
+        remoteConflictVersionsRef.current.set(note.id, Math.max(remoteConflictVersionsRef.current.get(note.id) ?? 0, error.serverNote.version));
+        setNoteConflict((current) => ({
+          local: latest,
+          server: current?.server.id === note.id && current.server.version > error.serverNote.version
+            ? current.server : error.serverNote,
+        }));
         toast.error('Расположение заметки уже изменено другим пользователем. Проверьте конфликт перед сохранением.');
-      } else if (activeBoardId) {
-        await loadNotes(activeBoardId);
+      } else {
+        unsavedNoteIdsRef.current.add(note.id);
+        toast.error('Не удалось сохранить расположение заметки. Изменения остались на экране; повторите сохранение.');
+      }
+    } finally {
+      const current = layoutSavesInFlightRef.current.get(note.id);
+      if (current === pending) {
+        current.delete(token);
+        if (current.size === 0) layoutSavesInFlightRef.current.delete(note.id);
       }
     }
   };
@@ -905,9 +988,11 @@ export function StickyNotes() {
     }
 
     const noteId = noteConflict.server.id;
+    acceptedServerEpochRef.current.set(noteId, (acceptedServerEpochRef.current.get(noteId) ?? 0) + 1);
     clearAutosaveTimer(noteId);
     pendingNoteSavesRef.current.delete(noteId);
     unsavedNoteIdsRef.current.delete(noteId);
+    remoteConflictVersionsRef.current.delete(noteId);
     const nextNotes = sortNotes(notesRef.current.map((note) => (note.id === noteId ? noteConflict.server : note)));
     notesRef.current = nextNotes;
     setNotes(nextNotes);
@@ -949,6 +1034,11 @@ export function StickyNotes() {
       zIndex: noteConflict.server.zIndex,
     };
 
+    acceptedServerEpochRef.current.set(note.id, (acceptedServerEpochRef.current.get(note.id) ?? 0) + 1);
+    remoteConflictVersionsRef.current.delete(note.id);
+    const nextNotes = sortNotes(notesRef.current.map((item) => item.id === note.id ? note : item));
+    notesRef.current = nextNotes;
+    setNotes(nextNotes);
     setNoteConflict(null);
     await saveNote(note, true);
   };
@@ -1068,9 +1158,11 @@ export function StickyNotes() {
 
   const restoreDeletedNote = useCallback(async (noteId: number) => {
     const requestedBoardId = activeBoardId;
+    const requestedUserEpoch = userEpochRef.current;
 
     try {
       const restored = await apiService.restoreStickyNote(noteId);
+      if (userEpochRef.current !== requestedUserEpoch) return;
       if (!requestedBoardId || activeBoardIdRef.current !== requestedBoardId || restored.boardId !== requestedBoardId) {
         await refreshBoardCounts();
         return;
@@ -1080,6 +1172,7 @@ export function StickyNotes() {
       await refreshBoardCounts();
       toast.success('Заметка восстановлена.');
     } catch (error) {
+      if (userEpochRef.current !== requestedUserEpoch) return;
       console.error(error);
       if (!requestedBoardId || activeBoardIdRef.current === requestedBoardId) {
         toast.error('Не удалось восстановить заметку.');
@@ -1092,6 +1185,9 @@ export function StickyNotes() {
       return;
     }
 
+    const requestedUserEpoch = userEpochRef.current;
+    const requestedBoardEpoch = activeBoardEpochRef.current;
+    const requestedBoardId = activeBoardId;
     const approved = await confirm({
       title: 'Удалить заметку?',
       description: 'Заметка будет удалена с текущей доски. После удаления ее можно будет быстро восстановить через уведомление.',
@@ -1100,14 +1196,14 @@ export function StickyNotes() {
       variant: 'danger',
     });
 
-    if (!approved) {
+    if (!approved || userEpochRef.current !== requestedUserEpoch || activeBoardEpochRef.current !== requestedBoardEpoch
+      || activeBoardIdRef.current !== requestedBoardId || !activeBoardPermissionsRef.current.deleteNote) {
       return;
     }
 
-    const requestedBoardId = activeBoardId;
-
     try {
       await apiService.deleteStickyNote(noteId);
+      if (userEpochRef.current !== requestedUserEpoch) return;
       if (!requestedBoardId || activeBoardIdRef.current !== requestedBoardId) {
         await refreshBoardCounts();
         return;
@@ -1121,12 +1217,13 @@ export function StickyNotes() {
         variant: 'info',
         actionLabel: 'Восстановить',
         onAction: () => {
-          void restoreDeletedNote(noteId);
+          if (userEpochRef.current === requestedUserEpoch && activeBoardEpochRef.current === requestedBoardEpoch) void restoreDeletedNote(noteId);
         },
         durationMs: 8000,
       });
       await refreshBoardCounts();
     } catch (error) {
+      if (userEpochRef.current !== requestedUserEpoch) return;
       console.error(error);
       if (!requestedBoardId || activeBoardIdRef.current === requestedBoardId) {
         toast.error('Не удалось удалить заметку.');
@@ -1139,6 +1236,9 @@ export function StickyNotes() {
       return;
     }
 
+    const requestedUserEpoch = userEpochRef.current;
+    const requestedBoardEpoch = activeBoardEpochRef.current;
+    const requestedBoardId = activeBoard.id;
     const approved = await confirm({
       title: 'Удалить доску?',
       description: 'Доска будет удалена вместе со всеми заметками на ней. Это действие нельзя отменить.',
@@ -1147,15 +1247,15 @@ export function StickyNotes() {
       variant: 'danger',
     });
 
-    if (!approved) {
+    if (!approved || userEpochRef.current !== requestedUserEpoch || activeBoardEpochRef.current !== requestedBoardEpoch
+      || activeBoardIdRef.current !== requestedBoardId || !activeBoardPermissionsRef.current.deleteBoard) {
       return;
     }
-
-    const requestedBoardId = activeBoard.id;
     const fallbackBoardId = boards.filter((board) => board.id !== requestedBoardId)[0]?.id ?? null;
 
     try {
       await apiService.deleteStickyNoteBoard(requestedBoardId);
+      if (userEpochRef.current !== requestedUserEpoch) return;
       setBoards((current) => current.filter((board) => board.id !== requestedBoardId));
       if (activeBoardIdRef.current === requestedBoardId) {
         clearActiveBoardState();
@@ -1163,6 +1263,7 @@ export function StickyNotes() {
         toast.success('Доска заметок удалена.');
       }
     } catch (error) {
+      if (userEpochRef.current !== requestedUserEpoch) return;
       console.error(error);
       if (activeBoardIdRef.current === requestedBoardId) {
         toast.error('Не удалось удалить доску.');
@@ -1182,6 +1283,8 @@ export function StickyNotes() {
     }
 
     const requestedBoardId = activeBoard.id;
+    const requestedUserEpoch = userEpochRef.current;
+    const requestedBoardEpoch = activeBoardEpochRef.current;
 
     setSavingBoardSettings(true);
     try {
@@ -1190,19 +1293,21 @@ export function StickyNotes() {
         description: boardDescription.trim() || null,
         background: boardBackground,
       });
+      if (userEpochRef.current !== requestedUserEpoch) return;
       setBoards((current) => current.map((board) => (board.id === updated.id ? updated : board)));
-      if (activeBoardIdRef.current !== requestedBoardId) {
+      if (activeBoardIdRef.current !== requestedBoardId || activeBoardEpochRef.current !== requestedBoardEpoch) {
         return;
       }
       setBoardSettingsOpen(false);
       toast.success('Настройки доски сохранены.');
     } catch (error) {
+      if (userEpochRef.current !== requestedUserEpoch) return;
       console.error(error);
-      if (activeBoardIdRef.current === requestedBoardId) {
+      if (activeBoardIdRef.current === requestedBoardId && activeBoardEpochRef.current === requestedBoardEpoch) {
         toast.error('Не удалось сохранить настройки доски.');
       }
     } finally {
-      setSavingBoardSettings(false);
+      if (userEpochRef.current === requestedUserEpoch) setSavingBoardSettings(false);
     }
   };
 

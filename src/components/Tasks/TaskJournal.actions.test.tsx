@@ -311,6 +311,127 @@ describe('TaskJournal', () => {
     expect(toastMock.success).toHaveBeenCalledWith(expect.stringContaining('Обновлено задач: 1'), 'Журнал задач');
   });
 
+  it('shows partial page selection in the header and selects only the displayed tasks', async () => {
+    const first = createTask({ id: 101, title: 'Первая выбранная' });
+    const second = createTask({ id: 102, title: 'Вторая выбранная' });
+    await renderJournal([first, second], { waitForTitle: first.title });
+    const header = screen.getByRole('checkbox', { name: 'Выбрать все задачи на странице' }) as HTMLInputElement;
+    expect(header.checked).toBe(false);
+    expect(header.indeterminate).toBe(false);
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Выбрать задачу Первая выбранная' }));
+    expect(header.checked).toBe(false);
+    expect(header.indeterminate).toBe(true);
+    fireEvent.click(header);
+    expect(header.checked).toBe(true);
+    expect(header.indeterminate).toBe(false);
+    expect((screen.getByRole('checkbox', { name: 'Выбрать задачу Вторая выбранная' }) as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(header);
+    expect(header.checked).toBe(false);
+    expect(header.indeterminate).toBe(false);
+    expect(screen.queryByTestId('task-bulk-actions')).toBeNull();
+  });
+
+  it('applies a page selection only to rows visible after filtering', async () => {
+    const first = createTask({ id: 101, title: 'Первая строка' });
+    const second = createTask({ id: 102, title: 'Вторая строка' });
+    await renderJournal([first, second], { waitForTitle: first.title });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Выбрать задачу Первая строка' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Поиск по контрагенту, делу или наименованию задачи' }), { target: { value: 'Вторая строка' } });
+    await waitFor(() => expect(screen.queryByRole('checkbox', { name: 'Выбрать задачу Первая строка' })).toBeNull());
+    const header = await screen.findByRole('checkbox', { name: 'Выбрать все задачи на странице' }) as HTMLInputElement;
+    expect(header.checked).toBe(false);
+    expect(header.indeterminate).toBe(false);
+    fireEvent.click(header);
+    fireEvent.change(screen.getByLabelText('Массово изменить приоритет'), { target: { value: 'urgent' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Применить' }));
+    await waitFor(() => expect(apiMock.bulkUpdateTaskJournalItems).toHaveBeenCalledWith(expect.objectContaining({ ids: [102], priority: 'urgent' })));
+  });
+
+  it('does not apply a previous page selection after moving to another page', async () => {
+    const tasks = Array.from({ length: 30 }, (_, index) => createTask({
+      id: index + 1, title: `Задача страницы ${index + 1}`,
+    }));
+    await renderJournal(tasks, { waitForTitle: 'Задача страницы 1' });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Выбрать задачу Задача страницы 1' }));
+    expect(screen.getByTestId('task-bulk-actions')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Вперёд' }));
+    await screen.findByText('Задача страницы 26');
+    expect(screen.queryByTestId('task-bulk-actions')).toBeNull();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Выбрать задачу Задача страницы 26' }));
+    fireEvent.change(screen.getByLabelText('Массово изменить приоритет'), { target: { value: 'urgent' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Применить' }));
+    await waitFor(() => expect(apiMock.bulkUpdateTaskJournalItems).toHaveBeenCalledWith(expect.objectContaining({ ids: [26], priority: 'urgent' })));
+  });
+
+  it('does not leave old rows or bulk actions usable while the next page is loading', async () => {
+    const tasks = Array.from({ length: 30 }, (_, index) => createTask({
+      id: index + 1, title: `Медленная страница ${index + 1}`,
+    }));
+    await renderJournal(tasks, { waitForTitle: 'Медленная страница 1' });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Выбрать задачу Медленная страница 1' }));
+    let finishPage!: (value: { items: typeof tasks; page: number; pageSize: number; total: number }) => void;
+    apiMock.getTaskJournalItems.mockImplementationOnce(() => new Promise((resolve) => { finishPage = resolve; }));
+    fireEvent.click(screen.getByRole('button', { name: 'Вперёд' }));
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 2 }), expect.anything(),
+    ));
+    expect(screen.queryByTestId('task-bulk-actions')).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: 'Выбрать задачу Медленная страница 1' })).toBeNull();
+    await act(async () => finishPage({ items: tasks.slice(25), page: 2, pageSize: 25, total: 30 }));
+    expect(await screen.findByText('Медленная страница 26')).toBeTruthy();
+  });
+
+  it('does not restore the previous page selection when the next page fails to load', async () => {
+    const tasks = Array.from({ length: 30 }, (_, index) => createTask({
+      id: index + 1, title: `Ошибка страницы ${index + 1}`,
+    }));
+    await renderJournal(tasks, { waitForTitle: 'Ошибка страницы 1' });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Выбрать задачу Ошибка страницы 1' }));
+    apiMock.getTaskJournalItems.mockRejectedValueOnce(new Error('Сеть недоступна'));
+    fireEvent.click(screen.getByRole('button', { name: 'Вперёд' }));
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith('Не удалось загрузить журнал задач.', 'Журнал задач'));
+    expect(screen.queryByTestId('task-bulk-actions')).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: 'Выбрать задачу Ошибка страницы 1' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Назад' }));
+    expect(await screen.findByText('Ошибка страницы 1')).toBeTruthy();
+    expect(screen.queryByTestId('task-bulk-actions')).toBeNull();
+  });
+
+  it('offers a persistent retry after a page load fails and clears the warning on success', async () => {
+    const tasks = Array.from({ length: 30 }, (_, index) => createTask({
+      id: index + 1, title: `Повтор страницы ${index + 1}`,
+    }));
+    await renderJournal(tasks, { waitForTitle: 'Повтор страницы 1' });
+    apiMock.getTaskJournalItems.mockRejectedValueOnce(new Error('Сеть недоступна'))
+      .mockRejectedValueOnce(new Error('Сеть по-прежнему недоступна'));
+    fireEvent.click(screen.getByRole('button', { name: 'Вперёд' }));
+    const warning = await screen.findByRole('alert');
+    expect(warning.textContent).toContain('неполными или устаревшими');
+    fireEvent.click(within(warning).getByRole('button', { name: 'Повторить загрузку' }));
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole('alert')).toBeTruthy();
+    fireEvent.click(within(warning).getByRole('button', { name: 'Повторить загрузку' }));
+    expect(await screen.findByText('Повтор страницы 26')).toBeTruthy();
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+  });
+
+  it('disables the old selection while a changed status filter is loading', async () => {
+    const task = createTask({ id: 101, title: 'Задача при смене фильтра', status: 'inProgress' });
+    await renderJournal([task], { waitForTitle: task.title });
+    fireEvent.click(screen.getByRole('checkbox', { name: `Выбрать задачу ${task.title}` }));
+    let finish!: (value: { items: TaskJournalItem[]; page: number; pageSize: number; total: number }) => void;
+    apiMock.getTaskJournalItems.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    fireEvent.change(document.querySelector('select[aria-label="Статус"]')!, { target: { value: 'all' } });
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: 'all' }), expect.anything(),
+    ));
+    expect(screen.queryByTestId('task-bulk-actions')).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: `Выбрать задачу ${task.title}` })).toBeNull();
+    await act(async () => finish({ items: [task], page: 1, pageSize: 25, total: 1 }));
+    expect(await screen.findByText(task.title)).toBeTruthy();
+    expect(screen.queryByTestId('task-bulk-actions')).toBeNull();
+  });
+
   it('opens shared billing for editable selected page rows with exact tokens and no unrelated bulk fields', async () => {
     const task = createTask({ id: 101, title: 'Изменить только учёт', updatedAt: '2026-10-24T01:02:03.1234567Z' });
     await renderJournal([task], { waitForTitle: task.title });

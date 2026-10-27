@@ -792,6 +792,51 @@ describe('ClientDetail integration', () => {
     expect(vi.mocked(apiService.updateClient).mock.calls.length).toBe(updateCallsBefore);
   });
 
+  it('shows passport fields as text and restores them after cancelling an edit', async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiService.getClient).mockResolvedValue(createClient({
+      passportEntries: [{ series: '36 19', number: '664580', issuedBy: 'Отдел выдачи', issueDate: '2019-06-15', departmentCode: '630-001', birthPlacePassport: 'Самара', birthPlaceFias: 'Самарская область, Самара', validFrom: '', validTo: '' }],
+    }));
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+    const passports = await screen.findByLabelText('Паспорта');
+    expect(await within(passports).findByText('664580')).toBeTruthy();
+    expect(within(passports).getByText('Самарская область, Самара')).toBeTruthy();
+    expect(within(passports).getByText('15.06.2019')).toBeTruthy();
+    expect(within(passports).queryByRole('textbox')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Редактировать' }));
+    const number = screen.getByDisplayValue('664580');
+    await user.clear(number);
+    await user.type(number, '123456');
+    await user.click(screen.getByRole('button', { name: 'Отмена' }));
+    expect(within(await screen.findByLabelText('Паспорта')).getByText('664580')).toBeTruthy();
+    expect(within(screen.getByLabelText('Паспорта')).getByText('Самарская область, Самара')).toBeTruthy();
+    expect(screen.queryByDisplayValue('123456')).toBeNull();
+  });
+
+  it('shows birth certificates and military records as text and preserves them on cancel', async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiService.getClient).mockResolvedValue(createClient({
+      birthCertificateEntries: [{ series: 'АБ', number: '123456', issueDate: '2018-04-03', actRecordNumber: 'Р-42', childFullName: 'Иванов Сын', issuedBy: 'Отдел ЗАГС' }],
+      militaryIdEntries: [{ series: 'ВБ', number: '654321', issueDate: '2015-02-12', rank: 'Рядовой', category: 'Первая', fitnessCategory: 'А', vusCode: '123456', issuedBy: 'Комиссариат', militaryCommissariat: 'Самара' }],
+    }));
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+    const birth = await screen.findByRole('region', { name: 'Свидетельства о рождении' });
+    const military = screen.getByRole('region', { name: 'Военные билеты' });
+    expect(await within(birth).findByText('Р-42')).toBeTruthy();
+    expect(within(birth).getByText('03.04.2018')).toBeTruthy();
+    expect(within(military).getByText('Рядовой')).toBeTruthy();
+    expect(within(military).getByText('12.02.2015')).toBeTruthy();
+    expect(within(birth).queryByRole('textbox')).toBeNull();
+    expect(within(military).queryByRole('textbox')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Редактировать' }));
+    const record = screen.getByDisplayValue('Р-42');
+    await user.clear(record);
+    await user.type(record, 'Р-99');
+    await user.click(screen.getByRole('button', { name: 'Отмена' }));
+    expect(within(await screen.findByRole('region', { name: 'Свидетельства о рождении' })).getByText('Р-42')).toBeTruthy();
+    expect(screen.queryByDisplayValue('Р-99')).toBeNull();
+  });
+
   it('shows complete notes as readonly text and preserves their explicit edit payload', async () => {
     const user = userEvent.setup();
     const updateCallsBefore = vi.mocked(apiService.updateClient).mock.calls.length;

@@ -2,6 +2,26 @@ import { ALL_TABS, type Tab } from './types/tabs';
 import type { RolePermissions } from './types/permissions';
 
 export const LAST_TAB_STORAGE_KEY = 'pp.last_active_tab';
+export function getLastTabStorageKey(userId: number | null | undefined): string | null {
+  return typeof userId === 'number' && Number.isSafeInteger(userId) && userId > 0 ? `${LAST_TAB_STORAGE_KEY}.${userId}` : null;
+}
+
+export function getStoredLastTab(userId: number | null | undefined): Tab {
+  const key = getLastTabStorageKey(userId);
+  if (!key) return 'calendar';
+  try {
+    const stored = localStorage.getItem(key);
+    if (isValidTab(stored) && stored !== 'notifications') {
+      if (stored === 'clientDetail') return 'clients';
+      if (stored === 'caseDetail') return 'cases';
+      if (stored === 'userDetail') return 'users';
+      if (stored === 'contractDetail' || stored === 'contractCreate') return 'contracts';
+      if (stored === 'actDetail' || stored === 'actCreate') return 'acts';
+      return stored;
+    }
+  } catch { /* Storage can be unavailable in private browsing. */ }
+  return 'calendar';
+}
 export const CASE_DETAIL_TAB_QUERY_PARAM = 'ppCaseTab';
 
 const CASE_DETAIL_TABS = [
@@ -359,7 +379,7 @@ export function getInitialCaseDetailTab(): CaseDetailRouteTab | null {
   return isCaseDetailRouteTab(tab) ? tab : null;
 }
 
-export function getInitialTab(): Tab {
+export function getInitialTab(userId?: number | null): Tab {
   if (typeof window === 'undefined') {
     return 'calendar';
   }
@@ -453,20 +473,7 @@ export function getInitialTab(): Tab {
     return urlTab;
   }
 
-  try {
-    const stored = localStorage.getItem(LAST_TAB_STORAGE_KEY);
-    if (isValidTab(stored) && stored !== 'notifications') {
-      if (stored === 'clientDetail') {
-        return 'clients';
-      }
-
-      return stored;
-    }
-  } catch {
-    // ignore storage issues
-  }
-
-  return 'calendar';
+  return getStoredLastTab(userId);
 }
 
 export function getTabHref(tab: Tab): string {
@@ -558,6 +565,15 @@ export function getInitialTaskId(): number | null {
 
 export function getInitialClientId(): number | null {
   return getPathClientId();
+}
+
+export function getInitialLegalEntityId(): number | null {
+  if (typeof window === 'undefined') return null;
+  const params = new URLSearchParams(window.location.search);
+  const value = params.get('ppLegalEntityId');
+  if (params.get('ppTab') !== 'legalEntities' || !value || !/^[1-9]\d*$/.test(value)) return null;
+  const id = Number(value);
+  return Number.isSafeInteger(id) ? id : null;
 }
 
 export function getInitialContractId(): number | null {

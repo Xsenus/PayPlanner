@@ -5,6 +5,7 @@ public class ClientCaseDocumentDto
     public int Id { get; set; }
     public int ClientCaseId { get; set; }
     public string DocumentKey { get; set; } = string.Empty;
+    public int? VersionGroupId { get; set; }
     public string? TemplateKey { get; set; }
     public string? TemplateLabel { get; set; }
     public int? SourceTaskId { get; set; }
