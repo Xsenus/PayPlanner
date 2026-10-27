@@ -110,6 +110,7 @@ public class MainCompanySettingsDto
 {
     public int? DefaultCompanyId { get; set; }
     public List<LegalEntityListItemDto> Companies { get; set; } = new();
+    public string SellerSnapshotTiming { get; set; } = DocumentSellerSnapshotPolicy.FirstFile;
 }
 
 public class LegalEntitySuggestionDto

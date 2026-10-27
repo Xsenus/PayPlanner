@@ -10,9 +10,12 @@ public sealed record SchedulingEvent(string Kind, string Lane, int Workers, ulon
 public static class BoundedBatchScheduler
 {
     public static async Task RunAsync(IReadOnlyCollection<ExecutionBatch> batches, string requestedWorkers, int initialBudget,
-        Func<ExecutionResources> readResources, Func<ExecutionBatch, Task> executeBatch, Action<SchedulingEvent>? observe = null)
+        Func<ExecutionResources> readResources, Func<ExecutionBatch, Task> executeBatch, Action<SchedulingEvent>? observe = null,
+        TimeSpan? recheckInterval = null)
     {
         ShardPlan.Require(initialBudget is 1 or 2 or 4, "Invalid initial worker budget.");
+        var interval = recheckInterval ?? TimeSpan.FromSeconds(1);
+        ShardPlan.Require(interval >= TimeSpan.FromMilliseconds(10) && interval <= TimeSpan.FromSeconds(30), "Invalid resource recheck interval.");
         ShardPlan.Require(batches.All(batch => batch.Lane is "fast" or "heavy" or "exclusive")
             && batches.Select(batch => batch.Id).Distinct(StringComparer.Ordinal).Count() == batches.Count,
             "Execution batches have invalid lanes or duplicate identities.");
@@ -38,6 +41,16 @@ public static class BoundedBatchScheduler
                         failures.Add(new InvalidDataException("Available RAM fell below 1 GiB; pending batches were not started."));
                         observe?.Invoke(new("memory-floor", lane, budget, resource.AvailableBytes, resource.Processors, active.Count));
                     }
+                    if (!resourceFailure)
+                    {
+                        var updatedBudget = lane == "exclusive" ? 1
+                            : Math.Min(initialBudget, ExecutionScheduling.WorkerBudget(requestedWorkers, resource.AvailableBytes, resource.Processors));
+                        if (updatedBudget != budget)
+                        {
+                            budget = updatedBudget;
+                            observe?.Invoke(new("budget-change", lane, budget, resource.AvailableBytes, resource.Processors, active.Count));
+                        }
+                    }
                     while (!resourceFailure && queue.Count > 0 && ExecutionScheduling.CanLaunchAdditional(active.Count, budget, resource.AvailableBytes))
                     {
                         observe?.Invoke(new("launch-budget", lane, budget, resource.AvailableBytes, resource.Processors, active.Count));
@@ -47,7 +60,11 @@ public static class BoundedBatchScheduler
                         resource = readResources();
                     }
                     if (active.Count == 0) break;
-                    var completed = await Task.WhenAny(active);
+                    // When a queued batch is waiting for memory, recheck while its
+                    // sibling runs rather than fixing concurrency until that sibling exits.
+                    var delay = queue.Count > 0 && !resourceFailure ? Task.Delay(interval) : null;
+                    var completed = await Task.WhenAny(delay is null ? active : active.Append(delay));
+                    if (completed == delay) continue;
                     active.Remove(completed);
                     try { await completed; }
                     catch (Exception error) { failures.Add(error); }

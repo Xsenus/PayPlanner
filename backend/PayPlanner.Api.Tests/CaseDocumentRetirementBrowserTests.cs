@@ -15,13 +15,15 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public sealed class CaseDocumentRetirementBrowserTests : IClassFixture<SqliteMigratedTemplate>
+public sealed class CaseDocumentRetirementBrowserTests : IClassFixture<SqliteMigratedTemplate>, IClassFixture<CaseRetirementBrowserBundle>
 {
     private readonly SqliteMigratedTemplate sqliteTemplate;
+    private readonly CaseRetirementBrowserBundle? browserBundle;
 
-    public CaseDocumentRetirementBrowserTests(SqliteMigratedTemplate sqliteTemplate)
+    public CaseDocumentRetirementBrowserTests(SqliteMigratedTemplate sqliteTemplate, CaseRetirementBrowserBundle? browserBundle)
     {
         this.sqliteTemplate = sqliteTemplate;
+        this.browserBundle = browserBundle;
     }
 
     [Theory]
@@ -43,7 +45,8 @@ public sealed class CaseDocumentRetirementBrowserTests : IClassFixture<SqliteMig
     [InlineData(true, "restart-slow-modal")]
     public async Task RealBrowserRetiresOwnedAttemptAndSeparatelyUploadsDocumentAndVersion(bool lostAcknowledgement, string flow)
     {
-        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(uploadCapacityChecks: true, template: sqliteTemplate);
+        await using var runtime = await SyntheticWritableBackendProcess.StartAsync(uploadCapacityChecks: true, template: sqliteTemplate,
+            retirementBundle: browserBundle);
         using var login = await runtime.Client.PostAsJsonAsync("/api/auth/login", new { email = runtime.Email, password = runtime.Password });
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
         var authentication = (await login.Content.ReadFromJsonAsync<LoginResponse>())!;
@@ -237,4 +240,16 @@ public sealed class CaseDocumentRetirementBrowserTests : IClassFixture<SqliteMig
         public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
         public IFileProvider WebRootFileProvider { get; set; } = new NullFileProvider();
     }
+}
+
+public sealed class CaseDocumentRetirementSharedBrowserTests : IClassFixture<SqliteMigratedTemplate>
+{
+    private readonly SqliteMigratedTemplate sqliteTemplate;
+
+    public CaseDocumentRetirementSharedBrowserTests(SqliteMigratedTemplate sqliteTemplate) => this.sqliteTemplate = sqliteTemplate;
+
+    [Fact]
+    public Task RealBrowserRetirementUsesSharedProductionArtifact()
+        => new CaseDocumentRetirementBrowserTests(sqliteTemplate, null)
+            .RealBrowserRetiresOwnedAttemptAndSeparatelyUploadsDocumentAndVersion(false, "documents");
 }

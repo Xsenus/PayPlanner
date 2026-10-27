@@ -119,6 +119,9 @@ namespace PayPlanner.Api.Models
         /// </summary>
         public string? SellerSnapshotJson { get; set; }
 
+        /// <summary>Правило новых документов; null сохраняет поведение старых записей.</summary>
+        public string? SellerSnapshotPolicy { get; set; }
+
         /// <summary>
         /// Навигация на юридическое лицо, к которому относится расходный счет.
         /// </summary>

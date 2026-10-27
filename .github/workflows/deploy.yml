@@ -8,7 +8,13 @@ on:
       - "AGENTS.md"
       - "docs/**/*.md"
       - "docs/yougile-sources/**"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      release_to_vps:
+        description: "Deploy after all checks (main only)"
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: read
@@ -942,6 +948,7 @@ jobs:
           key: backend-timings-v1-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
 
   deploy:
+    if: ${{ success() && github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.release_to_vps == true)) }}
     needs: [frontend, backend-format, backend]
     runs-on: [self-hosted, Windows, X64, payplanner-xsenus]
     timeout-minutes: 30

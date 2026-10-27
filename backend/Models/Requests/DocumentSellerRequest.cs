@@ -8,3 +8,5 @@ public class DocumentSellerRequest
 }
 
 public sealed record DocumentSellerResponse(int? CompanyId, int? BranchId, bool Frozen);
+
+public sealed record DocumentSellerSnapshotPolicyResponse(string Timing);

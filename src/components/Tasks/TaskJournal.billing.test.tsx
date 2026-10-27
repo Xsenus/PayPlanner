@@ -1,5 +1,7 @@
-import { setupTaskJournalTests, apiMock, authState, permissionsState, todayAt, createTask, renderJournal, openFirstTaskForEdit, openNewTaskFormAsGlobalInternal } from './TaskJournal.test-support';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { setupTaskJournalTests, apiMock, toastMock, authState, permissionsState, todayAt, createTask, renderJournal, openFirstTaskForEdit, openNewTaskFormAsGlobalInternal } from './TaskJournal.test-support';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { TaskJournal } from './TaskJournal';
+import type { TaskJournalItem } from '../../utils/taskJournalStore';
 import { describe, expect, it, vi } from 'vitest';
 
 describe('TaskJournal', () => {
@@ -18,8 +20,92 @@ describe('TaskJournal', () => {
     fireEvent.click(screen.getByRole('option', { name: 'Неоплачиваемая / внутренняя' }));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Сохранить тип оплаты' }));
 
-    await waitFor(() => expect(apiMock.updateTaskBillingClassification).toHaveBeenCalledWith(task.id, 'internal', null));
+    await waitFor(() => expect(apiMock.updateTaskBillingClassification).toHaveBeenCalledWith(task.id, 'internal', null, { expectedUpdatedAt: task.updatedAt ?? null }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Учёт задачи и счёт' })).toBeNull());
+  });
+
+  it.each((['legacy', 'modern'] as const).flatMap((cardMode) => (['Fixed', 'Actual'] as const).map((billingMode) => [cardMode, billingMode] as const)))('preserves the %s card contract snapshot for explicit future-only %s classification and retains an unsaved title', async (taskCardWindowMode, billingMode) => {
+    const task = createTask({ clientBillingClassification: 'billable', billingStatus: billingMode === 'Fixed' ? 'fixed' : 'unbilled',
+      billingContractId: 301, billingContractNumber: 'SYNTHETIC-301', billingMode, updatedAt: '2026-10-24T01:02:03.1234567Z' });
+    apiMock.updateTaskBillingClassification.mockResolvedValueOnce({ ...task, clientBillingClassification: 'internal', billingStatus: 'internal' });
+    await renderJournal([task], { settings: { taskCardWindowMode, contractTaskBillingMode: 'allowFutureClassification' } });
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    fireEvent.change(within(card).getByTestId('task-title-input'), { target: { value: 'Несохранённое название договорной задачи' } });
+    apiMock.getTaskBillingContext.mockClear();
+    fireEvent.click(within(card).getByRole('button', { name: 'Учёт и счёт' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Учёт задачи и счёт' });
+    expect(apiMock.getTaskBillingContext).not.toHaveBeenCalled();
+    expect(within(dialog).queryByRole('combobox', { name: 'Договор для оплаты задачи' })).toBeNull();
+    expect(within(dialog).getByText(/Договор №SYNTHETIC-301/)).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('combobox', { name: /^Тип оплаты задачи/ }));
+    fireEvent.click(screen.getByRole('option', { name: 'Неоплачиваемая / внутренняя' }));
+    const save = within(dialog).getByRole('button', { name: 'Сохранить тип оплаты' });
+    expect((save as HTMLButtonElement).disabled).toBe(true);
+    expect(apiMock.updateTaskBillingClassification).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: /Подтверждаю смену только будущего учёта/ }));
+    fireEvent.click(save);
+    await waitFor(() => expect(apiMock.updateTaskBillingClassification).toHaveBeenCalledExactlyOnceWith(task.id, 'internal', 301,
+      { expectedUpdatedAt: '2026-10-24T01:02:03.1234567Z', allowContractClassification: true }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Учёт задачи и счёт' })).toBeNull());
+    expect((within(card).getByTestId('task-title-input') as HTMLInputElement).value).toBe('Несохранённое название договорной задачи');
+    expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+    expect(apiMock.linkTaskBillingInvoice).not.toHaveBeenCalled();
+  });
+
+  it.each(['legacy', 'modern'] as const)('keeps a grandfathered contract intact when future-only editing is disabled in the %s card', async (taskCardWindowMode) => {
+    const task = createTask({ clientBillingClassification: 'internal', billingStatus: 'internal', billingContractId: 301, billingContractNumber: 'SYNTHETIC-301', billingMode: 'Fixed' });
+    await renderJournal([task], { settings: { taskCardWindowMode, contractTaskBillingMode: 'retainContractTasks' } });
+    fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    fireEvent.click(within(card).getByRole('button', { name: 'Учёт и счёт' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Учёт задачи и счёт' });
+    expect(within(dialog).getByText(/Изменение договорных задач запрещено настройкой/)).toBeTruthy();
+    expect(within(dialog).queryByRole('checkbox', { name: /Подтверждаю смену только будущего учёта/ })).toBeNull();
+    fireEvent.click(within(dialog).getByRole('combobox', { name: /^Тип оплаты задачи/ }));
+    fireEvent.click(screen.getByRole('option', { name: 'Платная' }));
+    expect((within(dialog).getByRole('button', { name: 'Сохранить тип оплаты' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(apiMock.updateTaskBillingClassification).not.toHaveBeenCalled();
+    expect(within(dialog).getByText(/Договор №SYNTHETIC-301/)).toBeTruthy();
+  });
+
+  it.each(['legacy', 'modern'] as const)('rechecks admin policy before the %s card submits a contract decision', async (taskCardWindowMode) => {
+    const task = createTask({ clientBillingClassification: 'billable', billingStatus: 'fixed', billingContractId: 301, billingMode: 'Fixed' });
+    await renderJournal([task], { settings: { taskCardWindowMode, contractTaskBillingMode: 'allowFutureClassification' } });
+    fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    fireEvent.click(within(card).getByRole('button', { name: 'Учёт и счёт' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Учёт задачи и счёт' });
+    fireEvent.click(within(dialog).getByRole('combobox', { name: /^Тип оплаты задачи/ }));
+    fireEvent.click(screen.getByRole('option', { name: 'Неоплачиваемая / внутренняя' }));
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: /Подтверждаю смену только будущего учёта/ }));
+    apiMock.getTaskJournalSettings.mockResolvedValueOnce({ contractTaskBillingMode: 'retainContractTasks' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Сохранить тип оплаты' }));
+    await within(dialog).findByText(/Изменение договорных задач отключено в настройках/);
+    expect(apiMock.updateTaskBillingClassification).not.toHaveBeenCalled();
+    expect(within(dialog).getByRole('checkbox', { name: /Подтверждаю смену только будущего учёта/ })).toBeTruthy();
+  });
+
+  it.each(['legacy', 'modern'] as const)('does not apply a pending contract decision to another actor in the %s card', async (taskCardWindowMode) => {
+    const task = createTask({ clientBillingClassification: 'billable', billingStatus: 'fixed', billingContractId: 301, billingMode: 'Fixed' });
+    const view = await renderJournal([task], { settings: { taskCardWindowMode, contractTaskBillingMode: 'allowFutureClassification' } });
+    fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    fireEvent.click(within(card).getByRole('button', { name: 'Учёт и счёт' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Учёт задачи и счёт' });
+    fireEvent.click(within(dialog).getByRole('combobox', { name: /^Тип оплаты задачи/ }));
+    fireEvent.click(screen.getByRole('option', { name: 'Неоплачиваемая / внутренняя' }));
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: /Подтверждаю смену только будущего учёта/ }));
+    let finish!: (value: TaskJournalItem) => void;
+    apiMock.updateTaskBillingClassification.mockImplementationOnce(() => new Promise<TaskJournalItem>((resolve) => { finish = resolve; }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Сохранить тип оплаты' }));
+    await waitFor(() => expect(apiMock.updateTaskBillingClassification).toHaveBeenCalledTimes(1));
+    toastMock.success.mockClear();
+    authState.user = { ...authState.user, id: 8 };
+    view.rerender(<TaskJournal />);
+    await act(async () => { finish({ ...task, clientBillingClassification: 'internal', billingStatus: 'internal' }); });
+    expect(toastMock.success).not.toHaveBeenCalledWith('Учёт задачи обновлён.', 'Журнал задач');
+    expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
   });
 
   it.each(['legacy', 'modern'] as const)('links an earlier invoice from the %s task card only after confirmation', async (taskCardWindowMode) => {

@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services.Companies;
 
 namespace PayPlanner.Api.Services.Storage;
 
@@ -17,7 +18,8 @@ public sealed record GeneratedFinancialDomainSnapshot(int Version, int CaseId, i
     string Number, DateTime Date, DateTime? DueDate, DateTime? StartDate, DateTime? ValidUntil, bool IsOpenEnded,
     string? Title, string? Description, decimal Amount, int? ClientId, int? LegalEntityId,
     string CaseReference, string CaseTitle, string WorkOrderTitle, string Currency, DateTime CreatedAt,
-    GeneratedFinancialLine[] Lines);
+    GeneratedFinancialLine[] Lines, int? SellerCompanyId = null, int? SellerBranchId = null,
+    string? SellerSnapshotJson = null, string? SellerSnapshotPolicy = null);
 public sealed record GeneratedFinancialDocumentCapture(GeneratedFinancialDomainSnapshot Domain, string Html);
 public sealed record GeneratedFinancialDocumentProof(int Version, Guid AttemptId, Guid UploadKey,
     int CaseId, int WorkOrderId, int ActorId, string Kind, int EntityId, int? InvoiceEntityId,
@@ -316,7 +318,26 @@ public sealed class GeneratedFinancialDocumentRegistry(PaymentContext db)
             && (value.Kind != GeneratedFinancialDocumentKind.Invoice || value.DueDate.HasValue)
             && (value.Kind != GeneratedFinancialDocumentKind.Contract || value.StartDate.HasValue && (value.ClientId.HasValue || value.LegalEntityId.HasValue))
             && value.Lines.All(l => l is { WorkOrderItemId: > 0, Name.Length: <= 2000 } && l.ExecutorUserId is not <= 0)
-            && value.Lines.Select(l => l.WorkOrderItemId).Distinct().Count() == value.Lines.Length;
+            && value.Lines.Select(l => l.WorkOrderItemId).Distinct().Count() == value.Lines.Length
+            && ValidSellerSnapshot(value);
+
+    private static bool ValidSellerSnapshot(GeneratedFinancialDomainSnapshot value)
+    {
+        // Accepted historical captures remain replayable byte-for-byte. A new
+        // profile/setting must never be used to backfill their missing fields.
+        if (value.SellerSnapshotPolicy is null)
+            return value.SellerCompanyId is null && value.SellerBranchId is null && value.SellerSnapshotJson is null;
+        if (!DocumentSellerSnapshotPolicy.IsValid(value.SellerSnapshotPolicy)) return false;
+        if (value.SellerSnapshotJson is null)
+            return value.SellerSnapshotPolicy == DocumentSellerSnapshotPolicy.FirstFile
+                && value.SellerCompanyId is null && value.SellerBranchId is null;
+        if (value.SellerSnapshotJson.Length > DocumentSellerService.MaxSnapshotLength || value.SellerCompanyId is not > 0
+            || value.SellerBranchId is <= 0) return false;
+        var metadata = SellerLegalEntityComposer.ReadMetadata(value.SellerSnapshotJson);
+        return metadata is { LegacyImages: false } && metadata.FrozenAtUtc is { Kind: DateTimeKind.Utc }
+            && metadata.FreezeReason == value.SellerSnapshotPolicy
+            && SellerLegalEntityComposer.FromSnapshot(value.SellerSnapshotJson, null)?.Id == value.SellerCompanyId;
+    }
 
     internal static string DocumentKey(GeneratedFinancialDocumentProof proof) => $"{proof.Kind}-{proof.EntityId}";
     internal static string FileName(GeneratedFinancialDocumentProof proof) => $"case-{proof.CaseId}-{proof.Kind}-{proof.EntityId}.html";

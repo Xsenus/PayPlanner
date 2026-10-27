@@ -103,7 +103,8 @@ public sealed class BankImportProvenanceMigrationTests
         var migrations = db.Database.GetMigrations().ToArray();
         var provenanceIndex = Array.IndexOf(migrations, provenance);
         Assert.True(provenanceIndex > 0);
-        Assert.Equal(current, migrations[^1]);
+        var policy = postgres ? "20261024110001_AddDocumentSellerSnapshotPolicyPostgres" : "20261024110000_AddDocumentSellerSnapshotPolicy";
+        Assert.Equal(new[] { current, policy }, migrations[(provenanceIndex + 1)..]);
         var upgrade = previousStage > 0;
         string? before = null;
         if (upgrade)

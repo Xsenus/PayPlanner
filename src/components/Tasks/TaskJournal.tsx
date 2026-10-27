@@ -8776,21 +8776,38 @@ function TaskBillingBadge({
 }
 
 function TaskBillingEditDialog({
-  task,
+  task: initialTask,
+  taskSettings,
+  canEdit,
+  scopeKey,
   onClose,
   onUpdated,
 }: {
   task: TaskJournalItem;
+  taskSettings: TaskJournalSettingsDto;
+  canEdit: boolean;
+  scopeKey: string;
   onClose: () => void;
   onUpdated: (updated: TaskJournalItem) => void | Promise<void>;
 }) {
   const toast = useToast();
+  // The decision uses the version explicitly opened by the user, never a silently refreshed card token.
+  const [task] = useState(() => ({ ...initialTask }));
+  const hasContractContext = task.billingContractId != null || Boolean(task.billingMode);
+  const [preserveContractConfirmed, setPreserveContractConfirmed] = useState(false);
+  const contractModeAllowed = taskSettings.contractTaskBillingMode === 'allowFutureClassification';
+  const mounted = useRef(false);
+  const savingRef = useRef(false);
+  const live = useRef({ scopeKey, canEdit });
+  live.current = { scopeKey, canEdit };
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const currentScope = () => mounted.current && live.current.scopeKey === scopeKey && live.current.canEdit;
   const [classification, setClassification] = useState<'billable' | 'internal'>(
     task.clientBillingClassification === 'billable' ? 'billable' : 'internal',
   );
   const [contractId, setContractId] = useState(task.billingContractId ? String(task.billingContractId) : '');
   const [context, setContext] = useState<TaskBillingContext | null>(null);
-  const [contextLoading, setContextLoading] = useState(Boolean(task.clientCaseId));
+  const [contextLoading, setContextLoading] = useState(Boolean(task.clientCaseId) && !hasContractContext);
   const [invoiceOptions, setInvoiceOptions] = useState<TaskBillingInvoiceOption[]>([]);
   const [invoiceLoading, setInvoiceLoading] = useState(task.billingStatus === 'unbilled');
   const [invoiceSearch, setInvoiceSearch] = useState('');
@@ -8802,7 +8819,7 @@ function TaskBillingEditDialog({
   const isInvoiced = task.billingStatus === 'invoiced';
 
   useEffect(() => {
-    if (!task.clientCaseId) return;
+    if (!task.clientCaseId || hasContractContext) return;
     let active = true;
     apiService.getTaskBillingContext({
       clientId: task.clientId ?? undefined,
@@ -8816,7 +8833,7 @@ function TaskBillingEditDialog({
       if (active) setContextLoading(false);
     });
     return () => { active = false; };
-  }, [task.clientId, task.clientCaseId, task.legalEntityId]);
+  }, [hasContractContext, task.clientId, task.clientCaseId, task.legalEntityId]);
 
   useEffect(() => {
     if (task.billingStatus !== 'unbilled') return;
@@ -8845,19 +8862,36 @@ function TaskBillingEditDialog({
   };
 
   const saveClassification = async () => {
+    if (savingRef.current || !currentScope() || isInvoiced
+      || (hasContractContext && (!contractModeAllowed || !preserveContractConfirmed))) return;
+    savingRef.current = true;
     setSaving(true);
     setError('');
     try {
+      if (hasContractContext) {
+        const freshSettings = await apiService.getTaskJournalSettings();
+        if (!currentScope()) return;
+        if (freshSettings.contractTaskBillingMode !== 'allowFutureClassification') {
+          setError('Изменение договорных задач отключено в настройках. Договор и суммы сохранены.');
+          return;
+        }
+      }
+      if (!currentScope()) return;
       const updated = await apiService.updateTaskBillingClassification(
-        task.id, classification, classification === 'billable' && contractId ? Number(contractId) : null,
+        task.id, classification, hasContractContext ? task.billingContractId ?? null
+          : classification === 'billable' && contractId ? Number(contractId) : null,
+        { expectedUpdatedAt: task.updatedAt ?? null, ...(hasContractContext ? { allowContractClassification: true } : {}) },
       );
+      if (!currentScope()) return;
       await onUpdated(updated);
+      if (!currentScope()) return;
       toast.success('Учёт задачи обновлён.', 'Журнал задач');
       onClose();
     } catch (saveError) {
-      setError(extractDisplayErrorMessage(saveError, 'Не удалось изменить учёт задачи.'));
+      if (currentScope()) setError(extractDisplayErrorMessage(saveError, 'Не удалось изменить учёт задачи.'));
     } finally {
-      setSaving(false);
+      savingRef.current = false;
+      if (mounted.current && live.current.scopeKey === scopeKey) setSaving(false);
     }
   };
 
@@ -8877,7 +8911,8 @@ function TaskBillingEditDialog({
     }
   };
 
-  const nextContractId = classification === 'billable' && contractId ? Number(contractId) : null;
+  const nextContractId = hasContractContext ? task.billingContractId ?? null
+    : classification === 'billable' && contractId ? Number(contractId) : null;
   const classificationChanged = classification !== task.clientBillingClassification
     || nextContractId !== (task.billingContractId ?? null);
 
@@ -8902,14 +8937,19 @@ function TaskBillingEditDialog({
               <option value="internal">Неоплачиваемая / внутренняя</option>
               <option value="billable" disabled={!task.clientCaseId}>Платная</option>
             </SystemSelect>
-            {classification === 'billable' && task.clientCaseId ? (
+            {hasContractContext ? <div className="space-y-2 text-xs text-slate-700">
+              <p>Договор №{task.billingContractNumber || task.billingContractId || 'не определён'} · {task.billingMode === 'Fixed' ? 'фиксированная оплата' : task.billingMode === 'Actual' ? 'по факту' : 'режим требует проверки'}. Договор, его сумма и прошлые начисления сохраняются. Фиксированная оплата не становится отдельным счётом.</p>
+              {contractModeAllowed ? <label className="flex items-start gap-2"><input type="checkbox" checked={preserveContractConfirmed} disabled={saving || !canEdit} onChange={(event) => setPreserveContractConfirmed(event.target.checked)} />Подтверждаю смену только будущего учёта без изменения договора и его суммы</label>
+                : <p className="text-amber-800">Изменение договорных задач запрещено настройкой журнала. Сохранённые договор и учёт остаются без изменений.</p>}
+            </div> : null}
+            {!hasContractContext && classification === 'billable' && task.clientCaseId ? (
               <SystemSelect aria-label="Договор для оплаты задачи" value={contractId} onChange={(event) => setContractId(event.target.value)} disabled={contextLoading || !context} className="form-input w-full">
                 <option value="">Без договора — выставить счёт по факту</option>
                 {context?.contracts.map((contract) => <option key={contract.id} value={contract.id}>№{contract.number} · {contract.billingMode === 'Fixed' ? 'фиксированная оплата' : 'по факту'}</option>)}
               </SystemSelect>
             ) : null}
             {!task.clientCaseId ? <p className="text-xs text-amber-700">Чтобы сделать задачу платной, сначала привяжите её к клиенту и делу.</p> : null}
-            <button type="button" onClick={() => void saveClassification()} disabled={!classificationChanged || saving || (classification === 'billable' && (contextLoading || !context))} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">Сохранить тип оплаты</button>
+            <button type="button" onClick={() => void saveClassification()} disabled={!canEdit || !classificationChanged || saving || (hasContractContext && (!contractModeAllowed || !preserveContractConfirmed)) || (!hasContractContext && classification === 'billable' && (contextLoading || !context))} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">Сохранить тип оплаты</button>
           </section>
         )}
         {task.billingStatus === 'unbilled' ? (
@@ -11813,7 +11853,11 @@ function TaskModal({
 
   const billingEditDialog = billingEditOpen && state?.task ? (
     <TaskBillingEditDialog
+      key={`${currentUserId}:${state.task.id}:${chrome}`}
       task={state.task}
+      taskSettings={taskSettings}
+      canEdit={canSwitchToEdit}
+      scopeKey={`${currentUserId}:${state.task.id}:${chrome}`}
       onClose={() => setBillingEditOpen(false)}
       onUpdated={onBillingUpdated}
     />

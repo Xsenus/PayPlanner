@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
+using PayPlanner.Api.Filters;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
@@ -24,6 +25,7 @@ namespace PayPlanner.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
+[DocumentSellerExceptionFilter]
 public class ContractsController : ControllerBase
 {
     private const string ContractNumberStartSettingKey = "contracts.numbering.startNumber";
@@ -359,6 +361,13 @@ public class ContractsController : ControllerBase
             .FirstOrDefaultAsync(ct);
         if (dto is not null)
         {
+            var sellerInfo = await _db.Contracts.AsNoTracking().ApplyContractVisibility(visibility).Where(contract => contract.Id == id)
+                .Select(contract => new { contract.SellerSnapshotPolicy, contract.SellerSnapshotJson }).SingleOrDefaultAsync(ct);
+            if (sellerInfo is not null)
+            {
+                dto.SellerSnapshotPolicy = sellerInfo.SellerSnapshotPolicy;
+                dto.SellerSnapshotInfo = SellerLegalEntityComposer.ReadMetadata(sellerInfo.SellerSnapshotJson);
+            }
             await ApplyFinancialSummariesAsync([dto], ct);
         }
         return dto is null ? NotFound() : Ok(dto);
@@ -1175,6 +1184,8 @@ public class ContractsController : ControllerBase
 
             var contract = new Contract
             {
+                SellerCompanyId = request.SellerCompanyId,
+                SellerBranchId = request.SellerBranchId,
                 Number = normalized.Number!,
                 Title = Normalize(request.Title),
                 Description = Normalize(request.Description),
@@ -1194,6 +1205,7 @@ public class ContractsController : ControllerBase
                 CreatedAt = DateTime.UtcNow,
             };
 
+            await _documentSeller.InitializeForCreationAsync(contract, await LoadMainCompanyAsync(ct), ct);
             ApplyLinks(contract, normalized.Clients, normalized.LegalEntities, normalized.ActIds, normalized.InvoiceIds, normalized.PaymentIds);
             _db.Contracts.Add(contract);
             await _db.SaveChangesAsync(ct);
@@ -1578,14 +1590,8 @@ public class ContractsController : ControllerBase
     /// </summary>
     private async Task<LegalEntity?> ResolveContractSellerAsync(Contract contract, LegalEntity? defaultCompany, bool freeze, CancellationToken ct)
     {
-        var hadSnapshot = !string.IsNullOrWhiteSpace(contract.SellerSnapshotJson);
-        var seller = await _documentSeller.ResolveAsync(contract, defaultCompany, freeze, ct);
-        if (!hadSnapshot && !string.IsNullOrWhiteSpace(contract.SellerSnapshotJson))
-        {
-            await _db.SaveChangesAsync(ct);
-        }
-
-        return seller;
+        return await _documentSeller.ResolveAsync(contract, defaultCompany, freeze, ct,
+            token => CanUseContractSellerAsync(contract.Id, edit: false, token));
     }
 
     /// <summary>
@@ -1601,21 +1607,21 @@ public class ContractsController : ControllerBase
             return forbidden;
         }
 
-        var selectionError = await _documentSeller.ValidateSelectionAsync(request.CompanyId, request.BranchId, ct);
-        if (selectionError is not null)
+        try
         {
-            return BadRequest(new { message = selectionError });
+            await _documentSeller.UpdateSelectionAsync(contract, request.CompanyId, request.BranchId, ct,
+                token => CanUseContractSellerAsync(id, edit: true, token));
         }
-
-        if (!string.IsNullOrWhiteSpace(contract.SellerSnapshotJson))
-        {
-            return Conflict(new { message = "Реквизиты стороны договора уже зафиксированы в выданном документе и не меняются." });
-        }
-
-        contract.SellerCompanyId = request.CompanyId;
-        contract.SellerBranchId = request.CompanyId.HasValue ? request.BranchId : null;
-        await _db.SaveChangesAsync(ct);
+        catch (SellerSelectionException error) { return BadRequest(new { message = error.Message }); }
+        catch (SellerSnapshotConflictException error) { return Conflict(new { message = error.Message }); }
         return Ok(new DocumentSellerResponse(contract.SellerCompanyId, contract.SellerBranchId, false));
+    }
+
+    private async Task<bool> CanUseContractSellerAsync(int id, bool edit, CancellationToken ct)
+    {
+        if (await RequireSectionPermissionAsync(RolePermissionCatalog.Contracts, permission => edit ? permission.CanEdit : permission.CanExport, ct) is not null) return false;
+        var visibility = await ResolveContractsVisibilityAsync(ct);
+        return visibility is not null && await _db.Contracts.AsNoTracking().ApplyContractVisibility(visibility).AnyAsync(contract => contract.Id == id, ct);
     }
 
     private async Task<LegalEntity?> LoadMainCompanyAsync(CancellationToken ct)
@@ -2020,6 +2026,8 @@ public class ContractsController : ControllerBase
             SellerCompanyId = contract.SellerCompanyId,
             SellerBranchId = contract.SellerBranchId,
             SellerFrozen = contract.SellerSnapshotJson != null,
+            SellerSnapshotPolicy = contract.SellerSnapshotPolicy,
+            SellerSnapshotInfo = SellerLegalEntityComposer.ReadMetadata(contract.SellerSnapshotJson),
             Number = contract.Number,
             Title = contract.Title,
             Description = contract.Description,

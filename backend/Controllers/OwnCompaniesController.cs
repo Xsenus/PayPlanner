@@ -4,6 +4,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Requests;
+using PayPlanner.Api.Services.Companies;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -31,6 +33,11 @@ public partial class OwnCompaniesController : ControllerBase
     {
         _db = db;
     }
+
+    // Как options: доступно авторизованному создателю документа без права менять профиль компании.
+    [HttpGet("snapshot-policy")]
+    public async Task<ActionResult<DocumentSellerSnapshotPolicyResponse>> GetSnapshotPolicy(CancellationToken ct)
+        => Ok(new DocumentSellerSnapshotPolicyResponse(await new DocumentSellerService(_db).ReadCreationPolicyAsync(ct)));
 
     [HttpGet("options")]
     public async Task<ActionResult<List<OwnCompanyOption>>> GetOptions(CancellationToken ct)

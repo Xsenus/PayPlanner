@@ -2622,6 +2622,11 @@ public class ActsControllerTests
 
         db.SystemSettings.Add(new SystemSetting
         {
+            Key = "legalEntities.mainCompanyIds",
+            Value = $"[{company.Id}]",
+        });
+        db.SystemSettings.Add(new SystemSetting
+        {
             Key = "legalEntities.defaultMainCompanyId",
             Value = company.Id.ToString(),
         });

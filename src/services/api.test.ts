@@ -295,6 +295,7 @@ describe('apiService task journal settings', () => {
     const responseBody = {
       restrictExecutorEditing: true,
       stickerStyles: {},
+      contractTaskBillingMode: 'retainContractTasks',
     };
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(responseBody), {
       headers: { 'content-type': 'application/json' },

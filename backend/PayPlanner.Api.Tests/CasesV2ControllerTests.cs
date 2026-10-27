@@ -30,7 +30,7 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplate) : IClassFixture<PostgreSqlModelTemplate>
+public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplate) : IClassFixture<PostgreSqlModelTemplate>
 {
     [Fact]
     public async Task ResolveCaseNotificationRecipientIdsAsync_UsesFixedQueryCountForSeveralRecipients()

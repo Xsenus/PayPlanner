@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services.Companies;
 using PayPlanner.Api.Services.Storage;
 
 namespace PayPlanner.Api.Controllers.V2;
@@ -72,6 +73,14 @@ public partial class CasesV2Controller
             clientCase.ClientId, clientCase.LegalEntityId, NormalizeOptional(clientCase.CaseNumber) ?? clientCase.Title,
             clientCase.Title, order.Title, order.Currency, now,
             items.Select(i => new GeneratedFinancialLine(i.Id, i.ServiceName, i.Quantity, i.UnitPrice, i.SortOrder, i.ExecutorUserId)).ToArray());
+        var sellerCapture = await CaptureNewFinancialSellerAsync(ct);
+        domain = domain with
+        {
+            SellerCompanyId = sellerCapture.Snapshot.SellerCompanyId,
+            SellerBranchId = sellerCapture.Snapshot.SellerBranchId,
+            SellerSnapshotJson = sellerCapture.Snapshot.SellerSnapshotJson,
+            SellerSnapshotPolicy = sellerCapture.Snapshot.SellerSnapshotPolicy,
+        };
         string html;
         if (kind == GeneratedFinancialDocumentKind.Invoice)
         {
@@ -161,7 +170,53 @@ public partial class CasesV2Controller
             };
             html = BuildWorkOrderContractDocumentHtml(clientCase, order, contract, items, clock.NowLocal);
         }
-        return new(domain, html);
+        return new(domain, AppendFinancialSellerHtml(html, sellerCapture.Seller));
+    }
+
+    private async Task<(Act Snapshot, LegalEntity? Seller)> CaptureNewFinancialSellerAsync(CancellationToken ct)
+    {
+        if (_db.Database.CurrentTransaction is null)
+            throw new InvalidOperationException("Фиксация реквизитов файла требует транзакцию создания.");
+        // The detached seller carrier is never a ledger record. Both policy modes
+        // freeze here because capture is already producing the first actual file.
+        var snapshot = new Act();
+        var service = new DocumentSellerService(_db);
+        var defaultCompany = await OwnCompanyRegistry.LoadDefaultAsync(_db, ct);
+        await service.InitializeForCreationAsync(snapshot, defaultCompany, ct);
+        var seller = await service.ResolveAsync(snapshot, defaultCompany, freeze: true, ct);
+        return (snapshot, seller);
+    }
+
+    private static void CopyCapturedSeller(IDocumentSeller source, IDocumentSeller target)
+    {
+        target.SellerCompanyId = source.SellerCompanyId;
+        target.SellerBranchId = source.SellerBranchId;
+        target.SellerSnapshotJson = source.SellerSnapshotJson;
+        target.SellerSnapshotPolicy = source.SellerSnapshotPolicy;
+    }
+
+    private static string AppendFinancialSellerHtml(string html, LegalEntity? seller)
+    {
+        if (seller is null) return html;
+        var requisites = CompanyRequisitesResolver.Resolve(seller, null, DateTime.UtcNow);
+        var fields = new[]
+        {
+            requisites.FullName ?? requisites.Name,
+            string.IsNullOrWhiteSpace(requisites.Inn) ? null : $"ИНН {requisites.Inn}",
+            string.IsNullOrWhiteSpace(requisites.Kpp) ? null : $"КПП {requisites.Kpp}",
+            requisites.Address, requisites.BankName,
+            string.IsNullOrWhiteSpace(requisites.Bik) ? null : $"БИК {requisites.Bik}",
+            string.IsNullOrWhiteSpace(requisites.AccountNumber) ? null : $"Расчётный счёт {requisites.AccountNumber}",
+            string.IsNullOrWhiteSpace(requisites.CorrAccountNumber) ? null : $"Корр. счёт {requisites.CorrAccountNumber}",
+        };
+        var lines = string.Join("<br>", fields.Where(value => !string.IsNullOrWhiteSpace(value)).Select(System.Net.WebUtility.HtmlEncode));
+        var images = new[] { (seller.LogoDataUrl, "Логотип"), (seller.SealDataUrl, "Печать"), (seller.DirectorSignatureDataUrl, "Подпись") }
+            .Where(image => !string.IsNullOrWhiteSpace(image.Item1) && InlineImageDataUrlValidator.Validate(image.Item1) is null)
+            .Select(image => $"<img src=\"{System.Net.WebUtility.HtmlEncode(image.Item1)}\" alt=\"{image.Item2}\" style=\"max-width:160px;max-height:100px;object-fit:contain\" />");
+        var section = $"<section aria-label=\"Реквизиты исполнителя\" style=\"margin-top:18px;border-top:1px solid #e2e8f0;padding-top:12px\"><h2>Реквизиты исполнителя</h2><div>{lines}</div><div>{string.Join(" ", images)}</div></section>";
+        var marker = html.LastIndexOf("</main>", StringComparison.Ordinal);
+        if (marker < 0) throw new InvalidOperationException("Печатная форма документа не содержит область реквизитов.");
+        return html.Insert(marker, section);
     }
 
     private sealed class FinancialCaptureRejectedException : Exception;

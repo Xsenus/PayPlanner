@@ -167,7 +167,7 @@ internal static class Program
         ShardPlan.WriteRunSettings(settings, plan, shard);
         var assembly = ShardPlan.Resolve(manifest, plan.AssemblyPath);
         var start = new ProcessStartInfo("dotnet") { UseShellExecute = false };
-        foreach (var argument in new[] { "vstest", assembly, "/Settings:" + settings, "/Logger:console;verbosity=normal", "/Logger:trx;LogFileName=results.trx", "/ResultsDirectory:" + results })
+        foreach (var argument in new[] { "exec", Path.Combine(await LocateSdkAsync(), "vstest.console.dll"), assembly, "/Settings:" + settings, "/Logger:console;verbosity=normal", "/Logger:trx;LogFileName=results.trx", "/ResultsDirectory:" + results })
             start.ArgumentList.Add(argument);
         start.Environment["Email__Enabled"] = "false";
         start.Environment["BackgroundServices__Enabled"] = "false";

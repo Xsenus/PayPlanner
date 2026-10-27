@@ -77,7 +77,7 @@ public static class DataVisibilityQueryExtensions
                 && visibleUserIds.Contains(clientCase.LegalEntity.ResponsibleUserId.Value))));
     }
 
-    public static IQueryable<TaskJournalItem> ApplyTaskVisibility(
+    public static IQueryable<TaskJournalItem> ApplySalesRequestTaskPrivacy(
         this IQueryable<TaskJournalItem> query,
         DataVisibilityAccess? access,
         PaymentContext db)
@@ -95,6 +95,16 @@ public static class DataVisibilityQueryExtensions
                                     || (user.Department != null && user.Department.Trim() != "" && member.Department == user.Department.Trim()))
                                 && (member.Id == request.ResponsibleUserId || member.Id == request.CreatedByUserId)))))))));
         }
+        return query;
+    }
+
+    public static IQueryable<TaskJournalItem> ApplyTaskVisibility(
+        this IQueryable<TaskJournalItem> query,
+        DataVisibilityAccess? access,
+        PaymentContext db)
+    {
+        if (access is null) return query.Where(_ => false);
+        query = query.ApplySalesRequestTaskPrivacy(access, db);
         if (access.SeesAll) return query;
 
         var visibleUserIds = access.VisibleUserIds.ToArray();

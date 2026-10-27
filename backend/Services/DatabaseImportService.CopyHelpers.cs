@@ -340,8 +340,9 @@ public sealed partial class DatabaseImportService
         target.CreatedAt = source.CreatedAt;
     }
 
-    private static void CopyContract(Contract source, Contract target)
+    private static void CopyContract(Contract source, Contract target, ImportMaps maps)
     {
+        CopySellerState(source, target, "Contracts", source.Id, target.Id, maps);
         target.Number = source.Number;
         target.Title = source.Title;
         target.Date = source.Date;
@@ -375,8 +376,7 @@ public sealed partial class DatabaseImportService
         target.ClientId = MapId(maps.Clients, source.ClientId);
         target.ClientCaseId = MapId(maps.ClientCases, source.ClientCaseId);
         target.LegalEntityId = MapId(maps.LegalEntities, source.LegalEntityId);
-        target.SellerCompanyId = MapId(maps.LegalEntities, source.SellerCompanyId);
-        target.SellerSnapshotJson = source.SellerSnapshotJson;
+        CopySellerState(source, target, "Payments", source.Id, target.Id, maps);
         target.ContractId = MapId(maps.Contracts, source.ContractId);
         target.DocumentKind = source.DocumentKind;
         target.CreatedAt = source.CreatedAt;
@@ -413,8 +413,7 @@ public sealed partial class DatabaseImportService
         target.Status = source.Status;
         target.ClientId = MapId(maps.Clients, source.ClientId);
         target.LegalEntityId = MapId(maps.LegalEntities, source.LegalEntityId);
-        target.SellerCompanyId = MapId(maps.LegalEntities, source.SellerCompanyId);
-        target.SellerSnapshotJson = source.SellerSnapshotJson;
+        CopySellerState(source, target, "Acts", source.Id, target.Id, maps);
         target.ResponsibleId = MapId(maps.Users, source.ResponsibleId);
         target.Comment = source.Comment;
         target.CreatedAt = source.CreatedAt;

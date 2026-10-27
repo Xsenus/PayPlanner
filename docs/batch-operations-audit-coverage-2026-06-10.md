@@ -1,10 +1,12 @@
-## Актуальная инвентаризация — 23 октября 2026
+## Актуальная инвентаризация — 25 октября 2026
 
-Всего **131** место ExecuteUpdateAsync/ExecuteDeleteAsync по неизменному предикату BatchOperationAuditCoverageTests. Предыдущие описания ниже сохранены как история решений по аудиту; после форматирования их номера строк могут отличаться. Текущие номера приведены в полном перечне здесь. Перечень обновлён по фактическим исходникам; наличие записи здесь не подменяет результаты проверок текущего кандидата.
+Всего **132** места ExecuteUpdateAsync/ExecuteDeleteAsync по неизменному предикату BatchOperationAuditCoverageTests. Предыдущие описания ниже сохранены как история решений по аудиту; после форматирования их номера строк могут отличаться. Текущие номера приведены в полном перечне здесь. Перечень обновлён по фактическим исходникам; наличие записи здесь не подменяет результаты проверок текущего кандидата.
 
-Для прямого сохранения актов и создания/изменения/аннулирования договоров добавлен `backend/Services/Invoices/FinancialSourceLease.cs`: PostgreSQL получает ограниченный набор строк через параметризованные `SELECT … FOR UPDATE NOWAIT`, SQLite допускает запрос в настоящую немедленную транзакцию с ограниченным ожиданием провайдера в одну секунду. Эти операции не меняют предметные данные и не создают фиктивного объектного события. Изменения акта, договора, позиций и связей сохраняются через ChangeTracker вместе с существующим аудитом в одной транзакции; отказ до commit откатывает весь запрос. Dirty tracker отклоняется без сохранения или удаления чужой ожидающей работы. Новых `ExecuteUpdateAsync`/`ExecuteDeleteAsync` нет, поэтому инвентаризация остаётся **131**. PostgreSQL NOWAIT относится к строкам, а ожидания DDL/табличных блокировок и административный импорт остаются отдельной границей. Адресные регрессии нового кандидата пока не запускались; эта запись не объявляет их успешными.
+Для прямого сохранения актов и создания/изменения/аннулирования договоров добавлен `backend/Services/Invoices/FinancialSourceLease.cs`: PostgreSQL получает ограниченный набор строк через параметризованные `SELECT … FOR UPDATE NOWAIT`, SQLite допускает запрос в настоящую немедленную транзакцию с ограниченным ожиданием провайдера в одну секунду. Эти операции не меняют предметные данные и не создают фиктивного объектного события. Изменения акта, договора, позиций и связей сохраняются через ChangeTracker вместе с существующим аудитом в одной транзакции; отказ до commit откатывает весь запрос. Dirty tracker отклоняется без сохранения или удаления чужой ожидающей работы. Сам `FinancialSourceLease` не добавляет `ExecuteUpdateAsync`/`ExecuteDeleteAsync`; общий текущий перечень включает **132** места с отдельным техническим UPDATE настройки договорных задач, описанным ниже. PostgreSQL NOWAIT относится к строкам, а ожидания DDL/табличных блокировок и административный импорт остаются отдельной границей. Адресные регрессии нового кандидата пока не запускались; эта запись не объявляет их успешными.
 
-Подготовлен один технический UPDATE массового учёта задач: `backend/Controllers/TasksController.cs:4621`. Только SQLite, внутри транзакции он присваивает UpdatedAt прежнее значение для получения write lock до свежего чтения. Сам UPDATE не меняет класс, связи, сумму или дату и не создаёт отдельного объектного события. Последующее разрешённое изменение класса и запись истории сохраняются обычным ChangeTracker в той же транзакции. PostgreSQL использует упорядоченный FOR UPDATE. Это ещё не проверенное внедрение: адресные и выпускные проверки отдельного DOC-11/TSK-10 пакета остаются обязательными; старый срочный кандидат этим изменением не расширяется.
+Подготовлен один технический UPDATE массового учёта задач: `backend/Controllers/TasksController.cs:4715`. Только SQLite, внутри транзакции он присваивает UpdatedAt прежнее значение для получения write lock до свежего чтения. Сам UPDATE не меняет класс, связи, сумму или дату и не создаёт отдельного объектного события. Последующее разрешённое изменение класса и запись истории сохраняются обычным ChangeTracker в той же транзакции. PostgreSQL использует упорядоченный FOR UPDATE. Это ещё не проверенное внедрение: адресные и выпускные проверки отдельного DOC-11/TSK-10 пакета остаются обязательными; старый срочный кандидат этим изменением не расширяется.
+
+Один новый технический UPDATE настройки договорных задач: `backend/Controllers/TasksController.cs:4920`, метод `LockTaskContractBillingPolicyAsync`. Он присваивает `SystemSettings.Value` прежнее значение только у существующей строки с точным ключом `tasks.contractTaskBillingMode`; само присваивание не меняет policy, `UpdatedAt`, суммы, связи или историю финансовых документов и не создаёт объектного события. Вызовы идут внутри транзакции вызывающего кода: запись настроек удерживает существующую строку эксклюзивно, а SQLite использует этот UPDATE и для допуска явного массового решения; читающая ветка PostgreSQL вместо UPDATE берёт `FOR SHARE`. Массовое разрешение учитывается только после одной заблокированной строки и свежего чтения разрешающего значения; UPDATE с нулём строк не создаёт настройку и не включает режим. Реальная запись настройки выполняется администратором через `UpsertSystemSettingAsync` и `SaveChangesAsync` в той же транзакции; `SystemSetting` не входит в `PaymentContext.AuditedEntityTypes`, поэтому отдельный автоматический `ObjectAudit` изменения настройки не заявляется. Изменения учёта самих задач сохраняются через ChangeTracker вместе с `AddTaskHistory`; `TaskJournalItem` входит в объектный аудит. Это описание существующего покрытия и его границ по исходникам, а не подтверждение ещё не выполненных конкурентных или выпускных проверок.
 
 Добавлен технический UPDATE календарной сводки: `backend/Services/CalendarSyncConnectionFailureLog.cs:107`. Он меняет только сообщение и JSON диагностики одной общей ошибки подключения при точном совпадении прежнего JSON, сигнатуры причины, подключения и суток. Счётчик, первое и последнее время сохраняются в самом журнале; отдельное построчное объектное событие на каждый повтор не создаётся, чтобы не переносить разрастание в общий аудит. Конфликт обновления ограниченно повторяется, а при невозможности сохранить счётчик добавляется новая диагностическая запись. Задачи, календарные связи, успешные отметки синхронизации и предметная история не изменяются этим UPDATE. Конкурентные обновления и очистка проверены на SQLite/PostgreSQL.
 
@@ -60,15 +62,16 @@
 | backend/Controllers/MoneyOperationsController.CompanyAccess.cs:63 | ExecuteUpdateAsync |
 | backend/Controllers/MoneyOperationsController.CompanyAccess.cs:94 | ExecuteUpdateAsync |
 | backend/Controllers/StorageAdminController.cs:145 | ExecuteUpdateAsync |
-| backend/Controllers/TasksController.cs:3234 | ExecuteUpdateAsync |
-| backend/Controllers/TasksController.cs:4621 | ExecuteUpdateAsync |
-| backend/Controllers/TasksController.cs:4842 | ExecuteUpdateAsync |
-| backend/Controllers/TasksController.cs:5088 | ExecuteUpdateAsync |
+| backend/Controllers/TasksController.cs:3250 | ExecuteUpdateAsync |
+| backend/Controllers/TasksController.cs:4715 | ExecuteUpdateAsync |
+| backend/Controllers/TasksController.cs:4920 | ExecuteUpdateAsync |
+| backend/Controllers/TasksController.cs:5023 | ExecuteUpdateAsync |
+| backend/Controllers/TasksController.cs:5269 | ExecuteUpdateAsync |
 | backend/Controllers/UserActivityController.cs:418 | ExecuteUpdateAsync |
 | backend/Controllers/UserActivityController.cs:540 | ExecuteDeleteAsync |
-| backend/Controllers/V2/CasesV2Controller.cs:10871 | ExecuteUpdateAsync |
-| backend/Controllers/V2/CasesV2Controller.cs:5737 | ExecuteUpdateAsync |
-| backend/Controllers/V2/CasesV2Controller.cs:6074 | ExecuteUpdateAsync |
+| backend/Controllers/V2/CasesV2Controller.cs:10882 | ExecuteUpdateAsync |
+| backend/Controllers/V2/CasesV2Controller.cs:5740 | ExecuteUpdateAsync |
+| backend/Controllers/V2/CasesV2Controller.cs:6077 | ExecuteUpdateAsync |
 | backend/Services/AuthService.cs:261 | ExecuteUpdateAsync |
 | backend/Services/AuthService.cs:743 | ExecuteUpdateAsync |
 | backend/Services/Banking/BankStatementImportService.Native.cs:74 | ExecuteUpdateAsync |
@@ -119,8 +122,8 @@
 | backend/Services/Storage/GeneratedFinancialClaims.cs:23 | ExecuteUpdateAsync |
 | backend/Services/Storage/GeneratedFinancialClaims.cs:69 | ExecuteDeleteAsync |
 | backend/Services/Storage/GeneratedFinancialDocumentPublication.cs:77 | ExecuteUpdateAsync |
-| backend/Services/Storage/GeneratedFinancialDocumentRegistry.cs:165 | ExecuteUpdateAsync |
 | backend/Services/Storage/GeneratedFinancialDocumentRegistry.cs:167 | ExecuteUpdateAsync |
+| backend/Services/Storage/GeneratedFinancialDocumentRegistry.cs:169 | ExecuteUpdateAsync |
 | backend/Services/Storage/InternalChatOriginalRecovery.cs:105 | ExecuteUpdateAsync |
 | backend/Services/Storage/InternalChatOriginalRecovery.cs:112 | ExecuteUpdateAsync |
 | backend/Services/Storage/InternalChatOriginalWriter.cs:154 | ExecuteUpdateAsync |

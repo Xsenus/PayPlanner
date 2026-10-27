@@ -44,6 +44,7 @@ const DEFAULT_SETTINGS: TaskJournalSettingsDto = {
   approvalDueDays: 5,
   taskCardWindowMode: 'legacy',
   approvalQuickActionMode: 'completionButton',
+  contractTaskBillingMode: 'retainContractTasks',
   caseInactivityAutomationEnabled: true,
   caseInactivityDays: 14,
   caseInactivityLimit: 25,
@@ -255,7 +256,13 @@ export function TaskJournalSettings({
     ])
       .then(([response, nextAssignees, nextDiagnostics]) => {
         if (active) {
-          setSettings({ ...response, stickerStyles: normalizeTaskStickerStyles(response.stickerStyles) });
+          setSettings({
+            ...response,
+            contractTaskBillingMode: response.contractTaskBillingMode === 'allowFutureClassification'
+              ? 'allowFutureClassification'
+              : 'retainContractTasks',
+            stickerStyles: normalizeTaskStickerStyles(response.stickerStyles),
+          });
           setAssignees(nextAssignees);
           setDiagnostics(nextDiagnostics);
         }
@@ -281,7 +288,13 @@ export function TaskJournalSettings({
     setMessage(null);
     try {
       const response = await apiService.updateTaskJournalSettings(settings);
-      setSettings({ ...response, stickerStyles: normalizeTaskStickerStyles(response.stickerStyles) });
+      setSettings({
+        ...response,
+        contractTaskBillingMode: response.contractTaskBillingMode === 'allowFutureClassification'
+          ? 'allowFutureClassification'
+          : 'retainContractTasks',
+        stickerStyles: normalizeTaskStickerStyles(response.stickerStyles),
+      });
       void refreshDiagnostics();
       setMessage('Настройки сохранены.');
       toast.success('Настройки журнала задач сохранены.', 'Журнал задач');
@@ -437,6 +450,30 @@ export function TaskJournalSettings({
               ))}
             </SystemSelect>
           </label>
+        </section>
+
+        <section className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-gray-700">
+          <h5 className="font-semibold text-gray-900">Учёт задач по договору</h5>
+          <label className="mt-3 block max-w-xl">
+            <span className="text-sm font-medium text-gray-700">Изменение учёта договорных задач</span>
+            <SystemSelect
+              aria-label="Изменение учёта договорных задач"
+              value={settings.contractTaskBillingMode ?? 'retainContractTasks'}
+              onChange={(event) => setSettings((prev) => ({
+                ...prev,
+                contractTaskBillingMode: event.target.value === 'allowFutureClassification'
+                  ? 'allowFutureClassification'
+                  : 'retainContractTasks',
+              }))}
+              disabled={loading || saving}
+              className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+            >
+              <option value="retainContractTasks">Не менять учёт договорных задач</option>
+              <option value="allowFutureClassification">Разрешить менять учёт без изменения договора</option>
+            </SystemSelect>
+          </label>
+          <p className="mt-2 text-xs text-gray-600">По умолчанию задачи по существующему договору пропускаются при смене учёта. Если разрешить изменение, договор, его сумма, режим оплаты и прошлые начисления сохранятся. Задачи фиксированного договора не попадут в очередь отдельных счетов.</p>
+          <p className="mt-1 text-xs text-gray-600">Задачи со счётом, оплатой или выплатой исполнителю сохраняются без изменений при любом режиме.</p>
         </section>
 
         <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-3 text-sm text-gray-700">

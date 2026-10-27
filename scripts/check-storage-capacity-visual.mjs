@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import { mkdir, lstat, open } from 'node:fs/promises';
+import { mkdir, mkdtemp, lstat, open, rm } from 'node:fs/promises';
 import { writeSync } from 'node:fs';
-import { resolve, basename, join } from 'node:path';
+import { resolve, basename, dirname, isAbsolute, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { chromium, expect } from '@playwright/test';
 import { createServer } from 'vite';
 
@@ -12,6 +13,11 @@ const liveApi = process.env.STORAGE_CAPACITY_API ? new URL(process.env.STORAGE_C
 const liveToken = process.env.STORAGE_CAPACITY_TOKEN;
 const writerRoot = process.env.STORAGE_CAPACITY_WRITER_ROOT;
 const releasedMarkers = process.env.STORAGE_CAPACITY_MARKERS === 'true';
+const configuredRoot = process.env.STORAGE_CAPACITY_ROOT;
+if (configuredRoot !== undefined) {
+  assert.ok(isAbsolute(configuredRoot), 'The browser root must be an owned absolute path.');
+  assert.match(basename(configuredRoot), /^pp_task_upload_browser_[0-9a-f]{32}$/);
+}
 if (releasedMarkers) { assert.ok(liveApi); assert.equal(writerRoot, undefined); }
 if (writerRoot) {
   assert.ok(liveApi, 'Writer recovery requires an owned backend.');
@@ -26,6 +32,11 @@ if (liveApi) {
   assert.equal(liveApi.hostname, '127.0.0.1');
   assert.ok(liveToken, 'An owned-runtime token is required for the live browser check.');
 }
+const browserRoot = resolve(configuredRoot ?? await mkdtemp(join(tmpdir(), 'pp_storage_capacity_browser_')));
+const rootAttributes = await lstat(browserRoot);
+assert.ok(rootAttributes.isDirectory() && !rootAttributes.isSymbolicLink());
+// Keep screenshots after the backend removes its owned temporary runtime.
+const screenshotsDirectory = resolve('.codex-build', `storage-capacity-${basename(browserRoot)}`);
 process.env.VITE_API_URL = liveApi ? new URL('/api', liveApi).href : `${origin}/api`;
 process.env.VITE_RESTORED_RUNTIME_ISOLATION = 'false';
 let vite;
@@ -67,6 +78,9 @@ try {
   enterPhase('create-server');
   vite = await createServer({
     envDir: resolve('scripts'),
+    cacheDir: join(browserRoot, 'vite-storage-capacity-cache'),
+    // The default bundled config loader writes outside cacheDir to node_modules/.vite-temp.
+    configLoader: 'runner',
     server: { host: '127.0.0.1', port, strictPort: true },
     logLevel: 'error',
   });
@@ -153,7 +167,7 @@ try {
     await expect(page.getByText('Полный файл — можно подтвердить')).toBeVisible();
   }
   enterPhase('screenshots-directory');
-  await mkdir('.codex-build', { recursive: true });
+  await mkdir(screenshotsDirectory, { recursive: true });
   for (const width of [1280, 390]) {
     enterPhase(`viewport-${width}`);
     await page.setViewportSize({ width, height: 900 });
@@ -162,7 +176,7 @@ try {
     const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
     assert.equal(horizontalOverflow, false, `Horizontal overflow at ${width}px.`);
     enterPhase(`screenshot-${width}`);
-    await page.screenshot({ path: `.codex-build/storage-capacity-${releasedMarkers ? 'released-markers-' : writerRoot ? 'writer-' : ''}${width}.png`, fullPage: true });
+    await page.screenshot({ path: join(screenshotsDirectory, `storage-capacity-${releasedMarkers ? 'released-markers-' : writerRoot ? 'writer-' : ''}${width}.png`), fullPage: true });
     screenshots++;
   }
   if (liveApi) {
@@ -213,12 +227,29 @@ try {
   enterPhase('final-assertions');
   assert.deepEqual(browserErrors, []);
   assert.deepEqual(externalRequests, []);
+  console.log(`Storage capacity screenshots: ${screenshotsDirectory}`);
   console.log(`Storage capacity ${liveApi ? 'owned backend' : 'visual'} browser check passed at 1280px and 390px; no console errors or external requests.`);
 } catch (error) {
   recordPhase('failed', error);
   throw error;
 } finally {
-  if (browser) { enterPhase('browser-close'); await browser.close(); }
-  if (vite) { enterPhase('vite-close'); await vite.close(); }
+  try {
+    if (browser) { enterPhase('browser-close'); await browser.close(); }
+  } finally {
+    try {
+      if (vite) { enterPhase('vite-close'); await vite.close(); }
+    } finally {
+      if (configuredRoot === undefined) {
+        assert.ok(isAbsolute(browserRoot));
+        assert.equal(dirname(browserRoot), resolve(tmpdir()));
+        assert.match(basename(browserRoot), /^pp_storage_capacity_browser_[A-Za-z0-9]{6}$/);
+        const currentRoot = await lstat(browserRoot);
+        assert.ok(currentRoot.isDirectory() && !currentRoot.isSymbolicLink());
+        assert.equal(currentRoot.dev, rootAttributes.dev);
+        assert.equal(currentRoot.ino, rootAttributes.ino);
+        await rm(browserRoot, { recursive: true });
+      }
+    }
+  }
 }
 enterPhase('done');

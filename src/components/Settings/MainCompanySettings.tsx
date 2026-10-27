@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { useTabNavigation } from '../../contexts/TabContext';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
-import { apiService, type MainCompanySettingsDto } from '../../services/api';
+import { apiService, type DocumentSellerSnapshotTiming, type MainCompanySettingsDto } from '../../services/api';
 import type { LegalEntitySummary } from '../../types';
 import { setStoredCompanyProfileCompanyId, setStoredCompanyProfileMode } from '../../utils/companyProfileBridge';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
@@ -37,6 +37,7 @@ function buildSnapshot(settings: MainCompanySettingsDto | null) {
   return JSON.stringify({
     defaultCompanyId: settings?.defaultCompanyId ?? null,
     companyIds: (settings?.companies ?? []).map((company) => company.id).sort((left, right) => left - right),
+    sellerSnapshotTiming: settings?.sellerSnapshotTiming ?? 'first-file',
   });
 }
 
@@ -139,6 +140,7 @@ export function MainCompanySettings() {
       );
 
       return {
+        ...prev,
         companies: nextCompanies,
         defaultCompanyId: prev?.defaultCompanyId ?? companyId,
       };
@@ -159,6 +161,7 @@ export function MainCompanySettings() {
         : prev.defaultCompanyId;
 
       return {
+        ...prev,
         companies: nextCompanies,
         defaultCompanyId: nextDefaultCompanyId,
       };
@@ -181,6 +184,7 @@ export function MainCompanySettings() {
       const payload = {
         companyIds: (settings?.companies ?? []).map((company) => company.id),
         defaultCompanyId: settings?.defaultCompanyId ?? null,
+        sellerSnapshotTiming: settings?.sellerSnapshotTiming ?? 'first-file',
       };
 
       const response = await apiService.updateMainCompanySettings(payload);
@@ -219,6 +223,29 @@ export function MainCompanySettings() {
       </div>
 
       <div className="mt-6 space-y-4">
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+          <label htmlFor="seller-snapshot-timing" className="text-sm font-medium text-slate-800">
+            Когда фиксировать реквизиты и изображения компании в новом документе
+          </label>
+          <select
+            id="seller-snapshot-timing"
+            value={settings?.sellerSnapshotTiming ?? 'first-file'}
+            onChange={(event) => {
+              const timing = event.target.value as DocumentSellerSnapshotTiming;
+              setSettings((previous) => previous ? { ...previous, sellerSnapshotTiming: timing } : previous);
+              setMessage(null);
+            }}
+            disabled={loading || saving || !settings}
+            className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+          >
+            <option value="first-file">При первой подготовке файла</option>
+            <option value="on-create">При создании документа</option>
+          </select>
+          <p className="mt-2 text-xs text-slate-600">
+            Правило применяется к новым счетам, актам и договорам. Уже созданные документы и их снимки не меняются.
+            При фиксации сохраняются реквизиты, логотип, печать и подпись. Для режима «при создании» продавец выбирается до сохранения документа.
+          </p>
+        </div>
         <div className="space-y-4">
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
             <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">

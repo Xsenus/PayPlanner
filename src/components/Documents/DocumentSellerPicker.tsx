@@ -2,17 +2,22 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { useToast } from '../../hooks/useToast';
 import { apiService } from '../../services/api';
-import type { OwnCompanyOption } from '../../types';
+import type { DocumentSellerSnapshotInfo, OwnCompanyOption } from '../../types';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { SystemSelect } from '../ui/SystemSelect';
+import { formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
 
 interface DocumentSellerPickerProps {
   kind: 'invoice' | 'act' | 'contract';
   documentId: number;
+  /** New document: keep selection in the form; never send a seller PUT before creation. */
+  draft?: boolean;
   companyId?: number | null;
   branchId?: number | null;
   /** Реквизиты уже зафиксированы в выданном документе — выбор недоступен. */
   frozen?: boolean;
+  snapshotInfo?: DocumentSellerSnapshotInfo | null;
+  timeZoneId?: string | null;
   canEdit: boolean;
   onChanged?: (selection: { companyId: number | null; branchId: number | null }) => void;
 }
@@ -28,9 +33,12 @@ const SELECT_CLASS =
 export function DocumentSellerPicker({
   kind,
   documentId,
+  draft = false,
   companyId = null,
   branchId = null,
   frozen = false,
+  snapshotInfo,
+  timeZoneId,
   canEdit,
   onChanged,
 }: DocumentSellerPickerProps) {
@@ -44,6 +52,10 @@ export function DocumentSellerPicker({
   }, [companyId, branchId, documentId]);
 
   useEffect(() => {
+    if (frozen && snapshotInfo?.companyName) {
+      setOptions([]);
+      return;
+    }
     let cancelled = false;
     apiService
       .getOwnCompanyOptions()
@@ -56,7 +68,7 @@ export function DocumentSellerPicker({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [frozen, snapshotInfo?.companyName]);
 
   const defaultCompany = useMemo(() => options?.find((item) => item.isDefault) ?? null, [options]);
   const effectiveCompany = useMemo(
@@ -64,13 +76,17 @@ export function DocumentSellerPicker({
     [options, selection.companyId, defaultCompany],
   );
 
-  if (!options || (options.length < 2 && !options.some((item) => item.branches.length > 0))) {
+  if (!options || (!frozen && options.length < 2 && !options.some((item) => item.branches.length > 0))) {
     return null;
   }
 
   const save = async (next: { companyId: number | null; branchId: number | null }) => {
     const previous = selection;
     setSelection(next);
+    if (draft) {
+      onChanged?.(next);
+      return;
+    }
     setSaving(true);
     try {
       if (kind === 'invoice') {
@@ -89,15 +105,26 @@ export function DocumentSellerPicker({
     }
   };
 
-  const branchName = effectiveCompany?.branches.find((item) => item.id === selection.branchId)?.name;
+  const branchName = frozen && snapshotInfo
+    ? snapshotInfo.branchName
+    : effectiveCompany?.branches.find((item) => item.id === selection.branchId)?.name;
 
   if (frozen || !canEdit) {
     return (
       <p data-testid="document-seller-readonly">
         <span className="text-slate-500">Продавец:</span>{' '}
-        {effectiveCompany?.shortName ?? '—'}
+        {(frozen ? snapshotInfo?.companyName : null) ?? effectiveCompany?.shortName ?? '—'}
         {branchName ? ` · ${branchName}` : ''}
-        {frozen ? <span className="ml-1 text-xs text-slate-500">(реквизиты зафиксированы в выданном документе)</span> : null}
+        {frozen ? (
+          <span className="ml-1 text-xs text-slate-500">
+            {snapshotInfo?.legacyImages
+              ? '(сохранён старый снимок реквизитов; изображения могут браться из профиля)'
+              : snapshotInfo?.freezeReason === 'on-create'
+                ? '(реквизиты и изображения зафиксированы при создании)'
+                : '(реквизиты зафиксированы в документе)'}
+            {snapshotInfo?.frozenAtUtc ? <time dateTime={snapshotInfo.frozenAtUtc}> · {formatDateTimeInTimeZone(snapshotInfo.frozenAtUtc, timeZoneId)}</time> : ' · дата фиксации неизвестна'}
+          </span>
+        ) : null}
       </p>
     );
   }
@@ -116,7 +143,7 @@ export function DocumentSellerPicker({
         className={SELECT_CLASS}
       >
         <option value="">{defaultCompany ? `По умолчанию (${defaultCompany.shortName})` : 'По умолчанию'}</option>
-        {options.map((item) => (
+        {options?.map((item) => (
           <option key={item.id} value={item.id}>
             {item.shortName}
           </option>

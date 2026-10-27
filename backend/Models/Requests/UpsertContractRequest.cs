@@ -9,6 +9,11 @@ namespace PayPlanner.Api.Models.Requests;
 /// </summary>
 public class UpsertContractRequest
 {
+    [Range(1, int.MaxValue)]
+    public int? SellerCompanyId { get; set; }
+    [Range(1, int.MaxValue)]
+    public int? SellerBranchId { get; set; }
+
     [Required]
     [StringLength(100)]
     public string Number { get; set; } = string.Empty;

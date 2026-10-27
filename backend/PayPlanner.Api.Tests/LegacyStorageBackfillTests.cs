@@ -17,7 +17,8 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public sealed class LegacyStorageBackfillTests(ITestOutputHelper output)
+public sealed class LegacyStorageBackfillTests(ITestOutputHelper output, PostgreSqlMigratedTemplate template)
+    : IClassFixture<PostgreSqlMigratedTemplate>
 {
     [Fact]
     public async Task LegacyReplicaMigrationPlansWithoutWritesAndResumesTwoVerifiedCopiesWithoutDuplicates()
@@ -134,35 +135,19 @@ public sealed class LegacyStorageBackfillTests(ITestOutputHelper output)
                 "PAYPLANNER_TEST_POSTGRES must be configured in CI.");
             return;
         }
-        var name = "pp_capacity_" + Guid.NewGuid().ToString("N");
-        var settings = new NpgsqlConnectionStringBuilder(raw) { Database = "postgres", Pooling = false };
-        Assert.Contains(settings.Host, new[] { "127.0.0.1", "localhost", "::1" });
-        await using var admin = new NpgsqlConnection(settings.ConnectionString);
-        await admin.OpenAsync(); var created = false;
-        try
+        // The class fixture applies and verifies all real migrations once. Each
+        // case receives its own owned clone and releases it after its connections.
+        await using var lease = await template.CreateDatabaseAsync("pp_capacity_");
+        var options = new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(lease.ConnectionString).Options;
+        if (scenario == "concurrent") await VerifyConcurrentCapacityAsync(lease.ConnectionString);
+        else
         {
-            await using (var command = new NpgsqlCommand($"CREATE DATABASE \"{name}\"", admin))
-            { await command.ExecuteNonQueryAsync(); created = true; }
-            settings.Database = name;
-            var options = new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(settings.ConnectionString).Options;
-            await using (var migrate = new PostgreSqlPaymentContext(options)) await migrate.Database.MigrateAsync();
-            if (scenario == "concurrent") await VerifyConcurrentCapacityAsync(settings.ConnectionString);
-            else
-            {
-                var database = new PostgreSqlPaymentContext(options);
-                if (scenario == "native") await VerifyNativeCapacityAsync(database);
-                else if (scenario is "largeQueue" or "overflow" or "missingGeneration" or "negativeSize" or "terminalDebt") await VerifyAggregatedDebtAsync(scenario, database);
-                else await VerifyCapacityRefusalAsync(scenario, database);
-            }
-            output.WriteLine($"Owned migrated PostgreSQL capacity case executed: {scenario}.");
+            var database = new PostgreSqlPaymentContext(options);
+            if (scenario == "native") await VerifyNativeCapacityAsync(database);
+            else if (scenario is "largeQueue" or "overflow" or "missingGeneration" or "negativeSize" or "terminalDebt") await VerifyAggregatedDebtAsync(scenario, database);
+            else await VerifyCapacityRefusalAsync(scenario, database);
         }
-        finally
-        {
-            if (created)
-            {
-                await PostgreSqlMigratedTemplate.DropOwnedDatabaseAsync(admin, name);
-            }
-        }
+        output.WriteLine($"Owned migrated PostgreSQL capacity case executed: {scenario}.");
     }
 
     [Theory]

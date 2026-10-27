@@ -319,6 +319,7 @@ describe('TaskJournal', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: `Выбрать задачу ${task.title}` }));
     fireEvent.change(screen.getByLabelText('Массово изменить приоритет'), { target: { value: 'urgent' } });
     fireEvent.click(screen.getByRole('button', { name: 'Изменить учёт выбранных' }));
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Изменить учёт' }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole('button', { name: 'Изменить учёт' }));
     await screen.findByText(/Изменено: 1.*Уже установлен нужный учёт/);
     expect(apiMock.bulkUpdateTaskJournalItems).toHaveBeenCalledExactlyOnceWith({ ids: [101], billingClassification: 'internal', includeCompleted: false,
@@ -335,6 +336,7 @@ describe('TaskJournal', () => {
       items: [{ id: task.id, outcome: 'updated', reason: null, updatedAt: '2026-10-24T02:03:04.7654321Z' }] });
     fireEvent.click(screen.getByRole('checkbox', { name: `Выбрать задачу ${task.title}` }));
     fireEvent.click(screen.getByRole('button', { name: 'Изменить учёт выбранных' }));
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Изменить учёт' }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole('button', { name: 'Изменить учёт' }));
     await waitFor(() => expect(apiMock.bulkUpdateTaskJournalItems).toHaveBeenCalledOnce());
     expect(apiMock.bulkUpdateTaskJournalItems.mock.calls[0][0]).toEqual(expect.objectContaining({ ids: [task.id], billingClassification: 'internal' }));

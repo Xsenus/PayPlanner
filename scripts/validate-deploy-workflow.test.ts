@@ -2,6 +2,7 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 import { parseWorkflow, validateDeployWorkflow } from './validate-deploy-workflow.mjs';
 
@@ -30,6 +31,37 @@ function replaceInJob(id: string, change: (job: string) => string) {
 }
 
 describe('parallel deploy workflow release contract', () => {
+  it.each([
+    ['push', 'refs/heads/main', false, true, true],
+    ['push', 'refs/heads/feature', true, true, false],
+    ['workflow_dispatch', 'refs/heads/main', false, true, false],
+    ['workflow_dispatch', 'refs/heads/main', true, true, true],
+    ['workflow_dispatch', 'refs/heads/claude/practical-bardeen-pglcf3', true, true, false],
+    ['workflow_dispatch', 'refs/heads/main', true, false, false],
+    ['push', 'refs/heads/main', false, false, false],
+  ])('gates deployment for %s on %s with explicit choice %s and success %s', (event, ref, choice, success, expected) => {
+    const expression = parseWorkflow(workflow).jobs.deploy.if;
+    expect(expression).toMatch(/^\$\{\{ .* \}\}$/);
+    expect(runInNewContext(expression.slice(3, -2), {
+      success: () => success,
+      github: { event_name: event, ref },
+      inputs: { release_to_vps: choice },
+    })).toBe(expected);
+  });
+
+  it('requires explicit manual deployment on main after successful verification', () => {
+    expect(() => validateDeployWorkflow(workflow)).not.toThrow();
+    for (const [before, after] of [
+      ['        default: false', '        default: true'],
+      ['        type: boolean', '        type: string'],
+      ['        required: true', '        required: false'],
+      ["github.ref == 'refs/heads/main'", "github.ref != 'refs/heads/main'"],
+      ['success() && ', ''],
+      ['inputs.release_to_vps == true', 'inputs.release_to_vps != true'],
+      ["github.event_name == 'workflow_dispatch' && inputs.release_to_vps == true", "github.event_name == 'workflow_dispatch'"],
+    ]) expect(() => validateDeployWorkflow(replaceOnce(before, after))).toThrow();
+  });
+
   it.each(allJobs)(
     'pins %s to the trusted Windows host and safe checkout', id => {
       for (const [before, after] of [
@@ -163,7 +195,7 @@ describe('parallel deploy workflow release contract', () => {
     ['ignore application code', '      - "README.md"', '      - "backend/**"'],
     ['ignore release infrastructure', '      - "README.md"', '      - ".github/**"'],
     ['ignore arbitrary documents used by tools', '      - "docs/**/*.md"', '      - "docs/**"'],
-    ['remove manual release', '  workflow_dispatch: {}\n', ''],
+    ['remove manual release', '  workflow_dispatch:\n', '  disabled_dispatch:\n'],
     ['remove main trigger', 'branches: ["main"]', 'branches: ["other"]'],
   ])('rejects trigger changes that %s', (_name, before, after) => {
     expect(() => validateDeployWorkflow(replaceOnce(before, after))).toThrow();
@@ -181,7 +213,7 @@ describe('parallel deploy workflow release contract', () => {
   it.each([
     ['missing dependency', 'needs: [frontend, backend-format, backend]', 'needs: [frontend, backend]'],
     ['duplicate dependency', 'needs: [frontend, backend-format, backend]', 'needs: [frontend, backend, backend]'],
-    ['deploy always', '  deploy:\n', '  deploy:\n    if: always()\n'],
+    ['deploy always', "    if: ${{ success() && github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.release_to_vps == true)) }}", '    if: always()'],
     ['skipped frontend', '  frontend:\n', '  frontend:\n    if: false\n'],
     ['job error bypass', '  backend:\n', '  backend:\n    continue-on-error: true\n'],
     ['step error bypass', '        run: npm run lint', '        continue-on-error: true\n        run: npm run lint'],

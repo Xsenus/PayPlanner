@@ -31,6 +31,8 @@ public class InvoiceDto
     public int? SellerBranchId { get; set; }
     /// <summary>Реквизиты продавца уже зафиксированы в документе и больше не меняются.</summary>
     public bool SellerFrozen { get; set; }
+    public string? SellerSnapshotPolicy { get; set; }
+    public PayPlanner.Api.Services.Companies.SellerSnapshotMetadata? SellerSnapshotInfo { get; set; }
     public string? ClientName { get; set; }
     public string? LegalEntityName { get; set; }
     public string? LegalEntityInn { get; set; }

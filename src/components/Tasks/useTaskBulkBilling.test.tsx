@@ -3,15 +3,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TaskJournalBulkUpdatePayload, TaskJournalItem } from '../../utils/taskJournalStore';
 import { useTaskBulkBilling } from './useTaskBulkBilling';
 
-const mocks = vi.hoisted(() => ({ confirm: vi.fn(), bulk: vi.fn(), get: vi.fn(), applied: vi.fn() }));
+const mocks = vi.hoisted(() => ({ confirm: vi.fn(), bulk: vi.fn(), get: vi.fn(), settings: vi.fn(), applied: vi.fn() }));
 vi.mock('../../hooks/useDialog', () => ({ useDialog: () => ({ confirm: mocks.confirm }) }));
-vi.mock('../../services/api', () => ({ apiService: { bulkUpdateTaskJournalItems: mocks.bulk, getTaskJournalItem: mocks.get } }));
+vi.mock('../../services/api', () => ({ apiService: { bulkUpdateTaskJournalItems: mocks.bulk, getTaskJournalItem: mocks.get, getTaskJournalSettings: mocks.settings } }));
 const rows = [1, 2].map((id) => ({ id, title: `Выбранная ${id}`, status: 'new', updatedAt: id === 1 ? '2026-10-24T01:02:03.1234567Z' : null })) as TaskJournalItem[];
 function Harness({ tasks = rows, scope = 'company1:page1', actor = '7', canEdit = true, loading = false }) {
   const action = useTaskBulkBilling({ tasks, scopeKey: scope, scopeLabel: scope, identityKey: actor, canEdit, loading, onApplied: mocks.applied });
   return <><button onClick={action.begin}>Открыть учёт</button><span>{action.busy ? 'busy' : 'idle'}</span>{action.dialog}{action.error ? <p role="alert">{action.error}</p> : null}</>;
 }
-const open = () => fireEvent.click(screen.getByRole('button', { name: 'Открыть учёт' }));
+const open = async () => {
+  fireEvent.click(screen.getByRole('button', { name: 'Открыть учёт' }));
+  await waitFor(() => expect(screen.queryByText('Проверяем настройку учёта договорных задач…')).toBeNull());
+};
 const submit = () => fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^(Изменить учёт|Подтвердить повтор оставшихся)$/ }));
 const result = (ids: number[], outcome: 'updated' | 'unchanged' | 'skipped' | 'conflict' = 'updated') => ({
   requested: ids.length, updated: outcome === 'updated' ? ids.length : 0, unchanged: outcome === 'unchanged' ? ids.length : 0,
@@ -21,13 +24,14 @@ const result = (ids: number[], outcome: 'updated' | 'unchanged' | 'skipped' | 'c
 
 beforeEach(() => {
   vi.clearAllMocks(); mocks.confirm.mockResolvedValue(true);
+  mocks.settings.mockReset(); mocks.settings.mockResolvedValue({ contractTaskBillingMode: 'retainContractTasks' });
   mocks.bulk.mockImplementation(async (payload: TaskJournalBulkUpdatePayload) => result(payload.ids));
   mocks.get.mockImplementation(async (id: number) => ({ ...rows.find((task) => task.id === id), id, updatedAt: '2026-10-24T03:04:05.1111111Z' }));
 });
 
 describe('shared safe bulk billing dialog', () => {
   it('sends one isolated bulk request, including explicit null/raw tokens and the completed opt-in', async () => {
-    render(<Harness />); open();
+    render(<Harness />); await open();
     fireEvent.change(screen.getByLabelText('Новый тип учёта выбранных задач'), { target: { value: 'billable' } });
     fireEvent.click(screen.getByRole('checkbox', { name: /Также включить выбранные завершённые/ }));
     submit(); await waitFor(() => expect(mocks.applied).toHaveBeenCalledOnce());
@@ -37,11 +41,11 @@ describe('shared safe bulk billing dialog', () => {
   });
   it('keeps parameters and the frozen selection after cancelled confirmation, close/reopen and UI selection changes', async () => {
     mocks.confirm.mockResolvedValueOnce(false);
-    const { rerender } = render(<Harness />); open();
+    const { rerender } = render(<Harness />); await open();
     fireEvent.change(screen.getByLabelText('Новый тип учёта выбранных задач'), { target: { value: 'billable' } });
     submit(); await waitFor(() => expect(screen.getByText('idle')).toBeTruthy());
     fireEvent.click(screen.getByRole('button', { name: 'Закрыть' }));
-    rerender(<Harness tasks={[{ ...rows[0], id: 99, title: 'Новая строка' }]} />); open();
+    rerender(<Harness tasks={[{ ...rows[0], id: 99, title: 'Новая строка' }]} />); await open();
     expect((screen.getByLabelText('Новый тип учёта выбранных задач', { selector: 'select' }) as HTMLSelectElement).value).toBe('billable');
     expect(screen.getByLabelText('Построчный итог смены учёта').textContent).toContain('Выбранная 2');
     submit(); await waitFor(() => expect(mocks.bulk).toHaveBeenCalledOnce());
@@ -50,7 +54,7 @@ describe('shared safe bulk billing dialog', () => {
   it('blocks duplicate clicks and closing while a response is pending', async () => {
     let resolve!: (value: ReturnType<typeof result>) => void;
     mocks.bulk.mockImplementation(() => new Promise((done) => { resolve = done; }));
-    render(<Harness />); open(); submit();
+    render(<Harness />); await open(); submit();
     await waitFor(() => expect(mocks.bulk).toHaveBeenCalledOnce());
     fireEvent.click(screen.getByRole('button', { name: 'Ожидание операции…' }));
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
@@ -62,7 +66,7 @@ describe('shared safe bulk billing dialog', () => {
   it('retries only the frozen failures after a fresh read and new confirmation, retaining earlier success', async () => {
     mocks.bulk.mockResolvedValueOnce({ requested: 2, updated: 1, unchanged: 0, skipped: 0, conflicted: 1,
       items: [result([1]).items[0], result([2], 'conflict').items[0]] }).mockResolvedValueOnce(result([2], 'unchanged'));
-    render(<Harness />); open(); submit();
+    render(<Harness />); await open(); submit();
     await screen.findByText(/Изменено: 1.*Конфликтов: 1/);
     expect((screen.getByRole('button', { name: 'Подтвердить повтор оставшихся' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Обновить оставшиеся задачи' }));
@@ -75,21 +79,21 @@ describe('shared safe bulk billing dialog', () => {
   });
   it.each([403, 409, 500])('preserves the operation on HTTP %i and never reports partial success', async (code) => {
     mocks.bulk.mockRejectedValueOnce(new Error(`HTTP ${code} - {"message":"Отказ операции"}`));
-    render(<Harness />); open(); submit(); await screen.findByText(/Выбор и параметры сохранены|Весь запрос отменён/);
+    render(<Harness />); await open(); submit(); await screen.findByText(/Выбор и параметры сохранены|Весь запрос отменён/);
     expect(mocks.applied).not.toHaveBeenCalled(); expect(screen.queryByRole('status')).toBeNull();
     expect(screen.getByLabelText('Построчный итог смены учёта').children).toHaveLength(2);
     expect((screen.getByRole('button', { name: 'Подтвердить повтор оставшихся' }) as HTMLButtonElement).disabled).toBe(true);
   });
   it('treats a malformed HTTP 200 as unknown, retaining IDs until a fresh read', async () => {
     mocks.bulk.mockResolvedValueOnce({ requested: 2, updated: 2, skipped: 0 });
-    render(<Harness />); open(); submit(); await screen.findByText(/неподтверждённый итог/);
+    render(<Harness />); await open(); submit(); await screen.findByText(/неподтверждённый итог/);
     expect(mocks.applied).not.toHaveBeenCalled(); expect(screen.queryByRole('status')).toBeNull();
     expect(screen.getByRole('button', { name: 'Обновить оставшиеся задачи' })).toBeTruthy();
   });
   it.each(['scope', 'permission', 'actor'])('rechecks %s after confirmation and never sends an outdated decision', async (change) => {
     let resolve!: (answer: boolean) => void;
     mocks.confirm.mockImplementation(() => new Promise((done) => { resolve = done; }));
-    const { rerender } = render(<Harness />); open(); submit();
+    const { rerender } = render(<Harness />); await open(); submit();
     rerender(<Harness scope={change === 'scope' ? 'company2:page2' : undefined} canEdit={change !== 'permission'} actor={change === 'actor' ? '8' : '7'} />);
     await act(async () => resolve(true)); expect(mocks.bulk).not.toHaveBeenCalled();
     if (change === 'actor') expect(screen.queryByText(/Выбранная 1/)).toBeNull();
@@ -97,7 +101,7 @@ describe('shared safe bulk billing dialog', () => {
   it('retains the fixed result but does not refresh a new company/page after an old response', async () => {
     let resolve!: (value: ReturnType<typeof result>) => void;
     mocks.bulk.mockImplementation(() => new Promise((done) => { resolve = done; }));
-    const { rerender } = render(<Harness />); open(); submit(); await waitFor(() => expect(mocks.bulk).toHaveBeenCalledOnce());
+    const { rerender } = render(<Harness />); await open(); submit(); await waitFor(() => expect(mocks.bulk).toHaveBeenCalledOnce());
     rerender(<Harness scope="company2:page2" tasks={[{ ...rows[0], id: 99 }]} />);
     await act(async () => resolve(result([1, 2])));
     expect(mocks.applied).not.toHaveBeenCalled(); expect(screen.getByRole('status').textContent).toContain('Изменено: 2');
@@ -105,7 +109,7 @@ describe('shared safe bulk billing dialog', () => {
   });
   it('keeps refresh-required state on a failed fresh read and sends nothing automatically', async () => {
     mocks.bulk.mockResolvedValueOnce(result([1, 2], 'conflict')); mocks.get.mockRejectedValue(new Error('HTTP 403 - Forbidden'));
-    render(<Harness />); open(); submit(); await screen.findByText(/Конфликтов: 2/);
+    render(<Harness />); await open(); submit(); await screen.findByText(/Конфликтов: 2/);
     fireEvent.click(screen.getByRole('button', { name: 'Обновить оставшиеся задачи' }));
     await screen.findByText(/Обновлены сведения 0 из 2/);
     expect((screen.getByRole('button', { name: 'Подтвердить повтор оставшихся' }) as HTMLButtonElement).disabled).toBe(true);
@@ -117,7 +121,7 @@ describe('shared safe bulk billing dialog', () => {
       if (id === 1) throw new Error('HTTP 403 - Forbidden');
       return { ...rows[1], updatedAt: '2026-10-24T03:04:05.1111111Z' };
     });
-    const { rerender } = render(<Harness />); open(); submit(); await screen.findByText(/Конфликтов: 2/);
+    const { rerender } = render(<Harness />); await open(); submit(); await screen.findByText(/Конфликтов: 2/);
     rerender(<Harness tasks={[rows[1]]} />);
     fireEvent.click(screen.getByRole('button', { name: 'Обновить оставшиеся задачи' }));
     await screen.findByText(/Готово к повтору после свежего чтения: 1/);
@@ -129,7 +133,7 @@ describe('shared safe bulk billing dialog', () => {
     expect(screen.getByLabelText('Построчный итог смены учёта').textContent).toContain('#1');
   });
   it('requires explicit confirmation before replacing the fixed operation with a new selection', async () => {
-    const { rerender } = render(<Harness />); open();
+    const { rerender } = render(<Harness />); await open();
     rerender(<Harness tasks={[{ ...rows[0], id: 99, title: 'Новая строка' }]} />);
     fireEvent.click(screen.getByRole('button', { name: 'Новый выбор с текущей страницы' }));
     await screen.findByText('#99 · Новая строка');
@@ -137,4 +141,139 @@ describe('shared safe bulk billing dialog', () => {
     expect(mocks.confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Заменить зафиксированный выбор?' }));
     expect(mocks.bulk).not.toHaveBeenCalled();
   });
+  it('waits for a fresh policy before enabling submission and never opts in automatically', async () => {
+    let resolve!: (value: { contractTaskBillingMode: string }) => void;
+    mocks.settings.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    render(<Harness />); fireEvent.click(screen.getByRole('button', { name: 'Открыть учёт' }));
+    const contract = screen.getByRole('checkbox', { name: /Также включить договорные задачи/ }) as HTMLInputElement;
+    expect(contract.checked).toBe(false); expect(contract.disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Изменить учёт' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(mocks.bulk).not.toHaveBeenCalled();
+    await act(async () => resolve({ contractTaskBillingMode: 'allowFutureClassification' }));
+    expect(contract.checked).toBe(false); expect(contract.disabled).toBe(false);
+    submit(); await waitFor(() => expect(mocks.bulk).toHaveBeenCalledOnce());
+    expect(mocks.bulk.mock.calls[0][0]).not.toHaveProperty('allowContractClassification');
+  });
+  it('sends contract permission only after an explicit checkbox and confirms preservation', async () => {
+    mocks.settings.mockResolvedValue({ contractTaskBillingMode: 'allowFutureClassification' });
+    render(<Harness />); await open();
+    fireEvent.click(screen.getByRole('checkbox', { name: /Также включить договорные задачи/ }));
+    submit(); await waitFor(() => expect(mocks.bulk).toHaveBeenCalledOnce());
+    expect(mocks.bulk.mock.calls[0][0]).toMatchObject({ ids: [1, 2], allowContractClassification: true });
+    expect(mocks.confirm).toHaveBeenCalledWith(expect.objectContaining({ description: expect.stringContaining('договор, его сумма и способ расчёта сохраняются') }));
+    expect(mocks.settings).toHaveBeenCalledTimes(2);
+  });
+  it.each([undefined, null, 'unknown', 'AllowFutureClassification'])('does not enable contractual tasks for mode %s', async mode => {
+    mocks.settings.mockResolvedValue({ contractTaskBillingMode: mode });
+    render(<Harness />); await open();
+    const contract = screen.getByRole('checkbox', { name: /Также включить договорные задачи/ }) as HTMLInputElement;
+    expect(contract.disabled).toBe(true); expect(contract.checked).toBe(false);
+    submit(); await waitFor(() => expect(mocks.bulk).toHaveBeenCalledOnce());
+    expect(mocks.bulk.mock.calls[0][0]).not.toHaveProperty('allowContractClassification');
+  });
+  it('fails closed on a settings read error and retries that read without sending task writes', async () => {
+    mocks.settings.mockRejectedValueOnce(new Error('Нет сети'));
+    render(<Harness />); await open();
+    expect((screen.getByRole('button', { name: 'Изменить учёт' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(mocks.bulk).not.toHaveBeenCalled(); expect(mocks.get).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить проверку настройки' }));
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Изменить учёт' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(mocks.bulk).not.toHaveBeenCalled();
+    submit(); await waitFor(() => expect(mocks.bulk).toHaveBeenCalledOnce());
+  });
+  it('rechecks revoked policy after confirmation without POST or changing the frozen choice', async () => {
+    mocks.settings.mockResolvedValueOnce({ contractTaskBillingMode: 'allowFutureClassification' }).mockResolvedValue({ contractTaskBillingMode: 'retainContractTasks' });
+    render(<Harness />); await open();
+    fireEvent.click(screen.getByRole('checkbox', { name: /Также включить договорные задачи/ }));
+    submit(); await screen.findByText(/Запрос не отправлен; выбор и параметры сохранены/);
+    expect(mocks.bulk).not.toHaveBeenCalled();
+    expect((screen.getByRole('checkbox', { name: /Также включить договорные задачи/ }) as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByLabelText('Построчный итог смены учёта').children).toHaveLength(2);
+  });
+  it.each(['actor', 'scope', 'permission'])('ignores a settings response after an intervening %s change, including return to the original authority', async change => {
+    let resolve!: (value: { contractTaskBillingMode: string }) => void;
+    mocks.settings.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    const { rerender } = render(<Harness />); fireEvent.click(screen.getByRole('button', { name: 'Открыть учёт' }));
+    rerender(<Harness actor={change === 'actor' ? '8' : '7'} scope={change === 'scope' ? 'elsewhere' : undefined} canEdit={change !== 'permission'} />);
+    rerender(<Harness />);
+    await waitFor(() => expect(mocks.settings).toHaveBeenCalledTimes(2));
+    await act(async () => resolve({ contractTaskBillingMode: 'allowFutureClassification' }));
+    expect((screen.getByRole('checkbox', { name: /Также включить договорные задачи/ }) as HTMLInputElement).disabled).toBe(true);
+    expect(mocks.bulk).not.toHaveBeenCalled();
+  });
+  it('reloads policy for an explicitly replaced selection and discards the older pending response', async () => {
+    let resolve!: (value: { contractTaskBillingMode: string }) => void;
+    mocks.settings.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    const { rerender } = render(<Harness />); fireEvent.click(screen.getByRole('button', { name: 'Открыть учёт' }));
+    rerender(<Harness tasks={[{ ...rows[0], id: 99 }]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Новый выбор с текущей страницы' }));
+    await screen.findByText('#99 · Выбранная 1');
+    await waitFor(() => expect(mocks.settings).toHaveBeenCalledTimes(2));
+    await act(async () => resolve({ contractTaskBillingMode: 'allowFutureClassification' }));
+    expect((screen.getByRole('checkbox', { name: /Также включить договорные задачи/ }) as HTMLInputElement).disabled).toBe(true);
+    submit(); await waitFor(() => expect(mocks.bulk).toHaveBeenCalledOnce());
+    expect(mocks.bulk.mock.calls[0][0].ids).toEqual([99]);
+    expect(mocks.bulk.mock.calls[0][0]).not.toHaveProperty('allowContractClassification');
+  });
+  it('keeps contract parameters fixed on retry and never resends a successful row after policy revocation', async () => {
+    mocks.settings.mockResolvedValue({ contractTaskBillingMode: 'allowFutureClassification' });
+    mocks.bulk.mockResolvedValueOnce({ requested: 2, updated: 1, unchanged: 0, skipped: 0, conflicted: 1,
+      items: [result([1]).items[0], result([2], 'conflict').items[0]] }).mockResolvedValueOnce(result([2]));
+    render(<Harness />); await open();
+    fireEvent.click(screen.getByRole('checkbox', { name: /Также включить договорные задачи/ }));
+    submit(); await screen.findByText(/Изменено: 1.*Конфликтов: 1/);
+    expect((screen.getByRole('checkbox', { name: /Также включить договорные задачи/ }) as HTMLInputElement).disabled).toBe(true);
+    mocks.settings.mockResolvedValue({ contractTaskBillingMode: 'retainContractTasks' });
+    fireEvent.click(screen.getByRole('button', { name: 'Обновить оставшиеся задачи' }));
+    await screen.findByText(/Повтор не отправлен; параметры сохранены/);
+    expect(mocks.get).not.toHaveBeenCalled(); expect(mocks.bulk).toHaveBeenCalledOnce();
+    mocks.settings.mockResolvedValue({ contractTaskBillingMode: 'allowFutureClassification' });
+    fireEvent.click(screen.getByRole('button', { name: 'Обновить оставшиеся задачи' }));
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Подтвердить повтор оставшихся' }) as HTMLButtonElement).disabled).toBe(false));
+    submit(); await waitFor(() => expect(mocks.bulk).toHaveBeenCalledTimes(2));
+    expect(mocks.get).toHaveBeenCalledExactlyOnceWith(2);
+    expect(mocks.bulk.mock.calls[1][0]).toEqual({ ids: [2], billingClassification: 'internal', includeCompleted: false,
+      expectedUpdatedAtById: { '2': '2026-10-24T03:04:05.1111111Z' }, allowContractClassification: true });
+  });
+
+  it('does not POST when the post-confirmation policy read fails', async () => {
+    mocks.settings.mockResolvedValueOnce({ contractTaskBillingMode: 'allowFutureClassification' }).mockRejectedValueOnce(new Error('HTTP 503 - Нет связи'));
+    render(<Harness />); await open();
+    fireEvent.click(screen.getByRole('checkbox', { name: /Также включить договорные задачи/ }));
+    submit(); await screen.findByText(/Нет связи/);
+    expect(mocks.bulk).not.toHaveBeenCalled(); expect(mocks.get).not.toHaveBeenCalled();
+    expect((screen.getByRole('button', { name: 'Изменить учёт' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+  it('resets the contract checkbox only for an explicitly confirmed replacement and reloads its policy', async () => {
+    mocks.settings.mockResolvedValue({ contractTaskBillingMode: 'allowFutureClassification' });
+    const { rerender } = render(<Harness />); await open();
+    fireEvent.click(screen.getByRole('checkbox', { name: /Также включить договорные задачи/ }));
+    rerender(<Harness tasks={[{ ...rows[0], id: 99 }]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Новый выбор с текущей страницы' }));
+    await screen.findByText('#99 · Выбранная 1');
+    await waitFor(() => expect(mocks.settings).toHaveBeenCalledTimes(2));
+    expect((screen.getByRole('checkbox', { name: /Также включить договорные задачи/ }) as HTMLInputElement).checked).toBe(false);
+    expect(mocks.bulk).not.toHaveBeenCalled();
+  });
+
+  it('allows explicitly removing a revoked contract opt-in before any attempted POST and requires a new confirmation', async () => {
+    mocks.settings.mockResolvedValueOnce({ contractTaskBillingMode: 'allowFutureClassification' }).mockResolvedValue({ contractTaskBillingMode: 'retainContractTasks' });
+    render(<Harness />); await open();
+    const contract = screen.getByRole('checkbox', { name: /Также включить договорные задачи/ }) as HTMLInputElement;
+    fireEvent.click(contract); submit(); await screen.findByText(/Запрос не отправлен; выбор и параметры сохранены/);
+    expect(contract.checked).toBe(true); expect(contract.disabled).toBe(false); expect(mocks.bulk).not.toHaveBeenCalled();
+    fireEvent.click(contract);
+    expect(contract.checked).toBe(false); expect(contract.disabled).toBe(true); expect(mocks.bulk).not.toHaveBeenCalled();
+    submit(); await waitFor(() => expect(mocks.bulk).toHaveBeenCalledOnce());
+    expect(mocks.bulk.mock.calls[0][0]).not.toHaveProperty('allowContractClassification');
+    expect(mocks.confirm).toHaveBeenCalledTimes(2);
+  });
+  it('does not clear an already loaded policy when begin is repeated for the same open draft', async () => {
+    render(<Harness />); await open();
+    fireEvent.click(screen.getByRole('button', { name: 'Открыть учёт' }));
+    expect(mocks.settings).toHaveBeenCalledOnce();
+    expect((screen.getByRole('button', { name: 'Изменить учёт' }) as HTMLButtonElement).disabled).toBe(false);
+    submit(); await waitFor(() => expect(mocks.bulk).toHaveBeenCalledOnce());
+  });
+
 });

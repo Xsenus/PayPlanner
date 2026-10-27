@@ -11,15 +11,59 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public sealed partial class StorageStageCapacityServiceTests : IClassFixture<PostgreSqlMigratedTemplate>
+public sealed partial class StorageStageCapacityServiceTests : IClassFixture<PostgreSqlMigratedTemplate>, IClassFixture<CurrentModelDatabaseTemplates>
 {
     private readonly PostgreSqlMigratedTemplate writerPostgresTemplate;
+    private readonly SqliteMigratedTemplate writerSqliteModelTemplate;
 
-    public StorageStageCapacityServiceTests(PostgreSqlMigratedTemplate writerPostgresTemplate)
-        => this.writerPostgresTemplate = writerPostgresTemplate;
+    public StorageStageCapacityServiceTests(PostgreSqlMigratedTemplate writerPostgresTemplate, CurrentModelDatabaseTemplates currentModel)
+        => (this.writerPostgresTemplate, writerSqliteModelTemplate) = (writerPostgresTemplate, currentModel.Sqlite);
 
     private Task<WriterProcessFixture> CreateWriterFixtureAsync(bool postgres, params IInterceptor[] interceptors)
-        => WriterProcessFixture.CreateFromTemplateAsync(writerPostgresTemplate, postgres, interceptors);
+        => WriterProcessFixture.CreateFromTemplateAsync(writerPostgresTemplate, writerSqliteModelTemplate, postgres, interceptors);
+
+    [Fact]
+    public async Task SqliteWriterTemplateMatchesFreshSchemaAndKeepsFixturesIndependent()
+    {
+        await using var fresh = await WriterProcessFixture.CreateAsync(false);
+        await using var first = await CreateWriterFixtureAsync(false);
+        await using var second = await CreateWriterFixtureAsync(false);
+        Assert.NotEqual(fresh.Root, first.Root);
+        Assert.NotEqual(first.Root, second.Root);
+
+        static async Task<string[]> SchemaAsync(PaymentContext db)
+        {
+            await using var command = db.Database.GetDbConnection().CreateCommand();
+            command.CommandText = "SELECT type, name, coalesce(sql, '') FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name";
+            await using var reader = await command.ExecuteReaderAsync();
+            var rows = new List<string>();
+            while (await reader.ReadAsync()) rows.Add($"{reader.GetString(0)}|{reader.GetString(1)}|{reader.GetString(2)}");
+            return rows.ToArray();
+        }
+
+        static async Task<string> PragmaAsync(PaymentContext db, string name)
+        {
+            await using var command = db.Database.GetDbConnection().CreateCommand();
+            command.CommandText = $"PRAGMA {name}";
+            return Convert.ToString(await command.ExecuteScalarAsync())!;
+        }
+
+        var expectedSchema = await SchemaAsync(fresh.Db);
+        Assert.Equal(expectedSchema, await SchemaAsync(first.Db));
+        Assert.Equal(expectedSchema, await SchemaAsync(second.Db));
+        foreach (var name in new[] { "foreign_keys", "recursive_triggers", "defer_foreign_keys", "journal_mode", "query_only" })
+        {
+            var expected = await PragmaAsync(fresh.Db, name);
+            Assert.Equal(expected, await PragmaAsync(first.Db, name));
+            Assert.Equal(expected, await PragmaAsync(second.Db, name));
+        }
+        first.Db.SystemSettings.Add(new() { Key = "synthetic.sqlite.template.isolation", Value = "first" });
+        await first.Db.SaveChangesAsync();
+        Assert.False(await fresh.Db.SystemSettings.AnyAsync(s => s.Key == "synthetic.sqlite.template.isolation"));
+        Assert.False(await second.Db.SystemSettings.AnyAsync(s => s.Key == "synthetic.sqlite.template.isolation"));
+        await using var independentReader = second.NewContext();
+        Assert.False(await independentReader.SystemSettings.AnyAsync(s => s.Key == "synthetic.sqlite.template.isolation"));
+    }
 
     [Theory]
     [InlineData(false, "live")]
@@ -197,14 +241,14 @@ public sealed partial class StorageStageCapacityServiceTests : IClassFixture<Pos
 
         // Explicit migration tests retain their fresh, uncached database path.
         public static Task<WriterProcessFixture> CreateAsync(bool postgres, params IInterceptor[] interceptors)
-            => CreateCoreAsync(null, postgres, interceptors);
+            => CreateCoreAsync(null, null, postgres, interceptors);
 
         public static Task<WriterProcessFixture> CreateFromTemplateAsync(PostgreSqlMigratedTemplate template,
-            bool postgres, params IInterceptor[] interceptors)
-            => CreateCoreAsync(template, postgres, interceptors);
+            SqliteMigratedTemplate sqliteTemplate, bool postgres, params IInterceptor[] interceptors)
+            => CreateCoreAsync(template, sqliteTemplate, postgres, interceptors);
 
         private static async Task<WriterProcessFixture> CreateCoreAsync(PostgreSqlMigratedTemplate? template,
-            bool postgres, IInterceptor[] interceptors)
+            SqliteMigratedTemplate? sqliteTemplate, bool postgres, IInterceptor[] interceptors)
         {
             PaymentContext? db = null;
             NpgsqlConnection? admin = null;
@@ -252,12 +296,25 @@ public sealed partial class StorageStageCapacityServiceTests : IClassFixture<Pos
                 }
                 else
                 {
+                    var sqlitePath = Path.Combine(root, "fixture.sqlite");
+                    if (sqliteTemplate is not null)
+                    {
+                        await using var clone = await sqliteTemplate.CreateFileDatabaseAsync(sqlitePath);
+                    }
                     db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>()
-                        .UseSqlite($"Data Source={Path.Combine(root, "fixture.sqlite")};Pooling=False").AddInterceptors(interceptors).Options);
-                    await db.Database.EnsureCreatedAsync();
+                        .UseSqlite($"Data Source={sqlitePath};Pooling=False").AddInterceptors(interceptors).Options);
+                    if (sqliteTemplate is null) await db.Database.EnsureCreatedAsync();
                     // Keep this fixture's unpooled connection alive while independent readers and the child writer run.
                     // Disposing Db closes only this owned connection before strict directory cleanup.
                     await db.Database.OpenConnectionAsync();
+                    if (sqliteTemplate is not null)
+                    {
+                        // EnsureCreated enables WAL for file databases. Preserve that behaviour
+                        // for independent readers and child writers after copying the schema.
+                        await using var journal = db.Database.GetDbConnection().CreateCommand();
+                        journal.CommandText = "PRAGMA journal_mode=WAL";
+                        Assert.Equal("wal", Convert.ToString(await journal.ExecuteScalarAsync()));
+                    }
                 }
                 var emailSetting = await db.SystemSettings.SingleOrDefaultAsync(row => row.Key == "notifications.email.enabled");
                 if (emailSetting is null) db.SystemSettings.Add(new() { Key = "notifications.email.enabled", Value = "false" });

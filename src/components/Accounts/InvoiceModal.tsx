@@ -961,6 +961,7 @@ export function InvoiceModal({
   const [lineItemLookupState, setLineItemLookupState] = useState<LineItemLookupState>(null);
   const [lineItemLookupQuery, setLineItemLookupQuery] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
+  const [sellerSelection, setSellerSelection] = useState<{ companyId: number | null; branchId: number | null }>({ companyId: null, branchId: null });
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
   const [clientPickerMode, setClientPickerMode] = useState<InvoiceCounterpartyPickerMode>('main');
   const canSelectCounterparty = allowedCounterpartyScopes === undefined || allowedCounterpartyScopes.length > 0;
@@ -1857,6 +1858,7 @@ export function InvoiceModal({
         profileTimeZoneIdRef.current,
       );
       setForm(nextForm);
+      setSellerSelection(resumeDraft?.sellerSelection ?? { companyId: null, branchId: null });
       setLineItems(resumeDraft?.lineItems ?? normalizeLineItems(invoice?.lineItems, invoice?.amount));
       setSelectedActs(resumeDraft?.selectedActs ?? normalizeInvoiceActs(invoice));
       setActOptions(normalizeInvoiceActs(invoice));
@@ -2737,6 +2739,8 @@ export function InvoiceModal({
         : installmentPlanTouched);
 
     return {
+      ...(mode === 'create' && form.type !== 'Expense'
+        ? { sellerCompanyId: sellerSelection.companyId, sellerBranchId: sellerSelection.branchId } : {}),
       number: form.number.trim() || String(invoice?.number ?? ''),
       date: fromInputToApiDate(form.date) ?? form.date,
       dueDate: effectiveDueDate ? fromInputToApiDate(effectiveDueDate) ?? effectiveDueDate : undefined,
@@ -2787,6 +2791,7 @@ export function InvoiceModal({
     mode,
     selectedActs,
     selectedClientCaseIds,
+    sellerSelection,
     resumeDraft?.billingTaskIds,
   ]);
 
@@ -2825,6 +2830,7 @@ export function InvoiceModal({
   }, [confirm, form.dueDate, installmentPlan]);
 
   const buildInvoiceEditorDraft = useCallback((): InvoiceEditorDraftState => ({
+    sellerSelection,
     invoiceId: invoice?.id ?? null,
     mode,
     presentation: isPageMode ? 'page' : 'modal',
@@ -2835,7 +2841,7 @@ export function InvoiceModal({
     selectedClientCaseIds,
     billingTaskIds: resumeDraft?.billingTaskIds,
     installmentPlan,
-  }), [form, installmentPlan, invoice?.id, isPageMode, lineItems, mode, pageViewMode, resumeDraft?.billingTaskIds, selectedActs, selectedClientCaseIds]);
+  }), [form, installmentPlan, invoice?.id, isPageMode, lineItems, mode, pageViewMode, resumeDraft?.billingTaskIds, selectedActs, selectedClientCaseIds, sellerSelection]);
 
   const openActCreatePage = useCallback(() => {
     if (!onCreateActPage) {
@@ -4566,8 +4572,17 @@ export function InvoiceModal({
                                   companyId={invoice.sellerCompanyId}
                                   branchId={invoice.sellerBranchId}
                                   frozen={invoice.sellerFrozen}
+                                  snapshotInfo={invoice.sellerSnapshotInfo}
+                                  timeZoneId={profileTimeZoneId}
                                   canEdit
                                 />
+                              </div>
+                            ) : null}
+
+                            {mode === 'create' && isIncome ? (
+                              <div className="text-sm">
+                                <DocumentSellerPicker kind="invoice" documentId={0} draft canEdit={!submitting}
+                                  companyId={sellerSelection.companyId} branchId={sellerSelection.branchId} onChanged={setSellerSelection} />
                               </div>
                             ) : null}
 

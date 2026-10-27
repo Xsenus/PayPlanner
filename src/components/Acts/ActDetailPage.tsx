@@ -1085,6 +1085,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
                       companyId={act.sellerCompanyId}
                       branchId={act.sellerBranchId}
                       frozen={act.sellerFrozen}
+                      snapshotInfo={act.sellerSnapshotInfo}
                       canEdit={canEdit}
                     />
                     {act.cancelledAt || act.cancelledReason ? (

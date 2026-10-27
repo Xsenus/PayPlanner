@@ -114,9 +114,14 @@ public static partial class ShardPlan
 
     public static void WriteRunSettings(string path, IEnumerable<PlannedCase> cases)
     {
-        var methods = cases.Select(row => row.FullyQualifiedName).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
-        Require(methods.Length > 0, "An execution batch must not be empty.");
-        WriteRunSettings(path, string.Join('|', methods.Select(method => $"FullyQualifiedName={method}")));
+        var groups = cases.GroupBy(row => row.FullyQualifiedName, StringComparer.Ordinal).OrderBy(group => group.Key, StringComparer.Ordinal).ToArray();
+        Require(groups.Length > 0, "An execution batch must not be empty.");
+        static string Escape(string value) => Regex.Replace(value, @"[\\()&|=!~]", match => "\\" + match.Value);
+        var filters = groups.SelectMany(group => group.Key == ExecutionScheduling.SplitBankScopeTheory
+            ? group.Select(row => row.DisplayName).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.Ordinal)
+                .Select(name => $"(FullyQualifiedName={group.Key}&DisplayName={Escape(name)})")
+            : new[] { $"FullyQualifiedName={group.Key}" });
+        WriteRunSettings(path, string.Join('|', filters));
     }
 
     private static void WriteRunSettings(string path, string filter)

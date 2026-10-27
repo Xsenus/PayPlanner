@@ -9,6 +9,128 @@ public sealed class BoundedBatchSchedulerTests
     private const ulong Gib = 1024UL * 1024 * 1024;
     private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(10);
 
+    [Fact]
+    public async Task MemoryRecoveryStartsAnotherBatchBeforeTheFirstBatchFinishes()
+    {
+        var available = 7 * Gib;
+        var firstStarted = Signal();
+        var secondStarted = Signal();
+        var release = Signal();
+        var active = 0;
+        var maxActive = 0;
+        var observationGate = new object();
+        var completed = new ConcurrentBag<string>();
+        var run = BoundedBatchScheduler.RunAsync(Batches("heavy", 2), "auto", 2,
+            () => new ExecutionResources(Volatile.Read(ref available), 6), async batch =>
+            {
+                var count = Interlocked.Increment(ref active);
+                lock (observationGate) maxActive = Math.Max(maxActive, count);
+                if (count == 1) firstStarted.TrySetResult();
+                if (count == 2) secondStarted.TrySetResult();
+                try { await release.Task; }
+                finally { Interlocked.Decrement(ref active); completed.Add(batch.Id); }
+            }, recheckInterval: TimeSpan.FromMilliseconds(20));
+        try
+        {
+            await firstStarted.Task.WaitAsync(Deadline);
+            Assert.Equal(1, Volatile.Read(ref active));
+            Volatile.Write(ref available, 12 * Gib);
+            await secondStarted.Task.WaitAsync(Deadline);
+            Assert.False(run.IsCompleted);
+            Assert.Equal(2, Volatile.Read(ref active));
+        }
+        finally { release.TrySetResult(); }
+        await run.WaitAsync(Deadline);
+        Assert.Equal(2, maxActive);
+        Assert.Equal(new[] { "heavy-0", "heavy-1" }, completed.Order());
+    }
+
+    [Fact]
+    public async Task MemoryRecoveryDoesNotExceedTheExplicitSingleWorkerLimit()
+    {
+        var available = 7 * Gib;
+        var firstStarted = Signal();
+        var observedRecovery = Signal();
+        var release = Signal();
+        var active = 0;
+        var maxActive = 0;
+        var observationGate = new object();
+        var recoveryProbes = 0;
+        ExecutionResources Probe()
+        {
+            var current = Volatile.Read(ref available);
+            if (current >= 12 * Gib && Interlocked.Increment(ref recoveryProbes) == 3) observedRecovery.TrySetResult();
+            return new(current, 6);
+        }
+        var run = BoundedBatchScheduler.RunAsync(Batches("heavy", 2), "1", 2, Probe, async _ =>
+        {
+            var count = Interlocked.Increment(ref active);
+            lock (observationGate) maxActive = Math.Max(maxActive, count);
+            firstStarted.TrySetResult();
+            try { await release.Task; }
+            finally { Interlocked.Decrement(ref active); }
+        }, recheckInterval: TimeSpan.FromMilliseconds(20));
+        try
+        {
+            await firstStarted.Task.WaitAsync(Deadline);
+            Volatile.Write(ref available, 12 * Gib);
+            await observedRecovery.Task.WaitAsync(Deadline);
+            Assert.Equal(1, Volatile.Read(ref active));
+        }
+        finally { release.TrySetResult(); }
+        await run.WaitAsync(Deadline);
+        Assert.Equal(1, maxActive);
+    }
+
+    [Fact]
+    public async Task ReducedMemoryDelaysPendingWorkWithoutStoppingAnActiveSibling()
+    {
+        var available = 12 * Gib;
+        var firstTwoStarted = Signal();
+        var budgetReduced = Signal();
+        var thirdStarted = Signal();
+        var releaseFirst = Signal();
+        var releaseSecond = Signal();
+        var releaseThird = Signal();
+        var starts = 0;
+        var completions = new ConcurrentBag<string>();
+        var run = BoundedBatchScheduler.RunAsync(Batches("heavy", 3), "auto", 2,
+            () => new ExecutionResources(Volatile.Read(ref available), 6), async batch =>
+            {
+                if (Interlocked.Increment(ref starts) == 2) firstTwoStarted.TrySetResult();
+                try
+                {
+                    if (batch.Id == "heavy-0") await releaseFirst.Task;
+                    else if (batch.Id == "heavy-1") await releaseSecond.Task;
+                    else { thirdStarted.TrySetResult(); await releaseThird.Task; }
+                }
+                finally { completions.Add(batch.Id); }
+            }, value =>
+            {
+                if (value.Kind == "budget-change" && value.Workers == 1 && value.Active == 1) budgetReduced.TrySetResult();
+            }, TimeSpan.FromMilliseconds(20));
+        try
+        {
+            await firstTwoStarted.Task.WaitAsync(Deadline);
+            Volatile.Write(ref available, 7 * Gib);
+            releaseSecond.TrySetResult();
+            await budgetReduced.Task.WaitAsync(Deadline);
+            Assert.Equal(2, Volatile.Read(ref starts));
+            Assert.False(thirdStarted.Task.IsCompleted);
+            Assert.False(run.IsCompleted);
+            releaseFirst.TrySetResult();
+            await thirdStarted.Task.WaitAsync(Deadline);
+        }
+        finally
+        {
+            releaseFirst.TrySetResult();
+            releaseSecond.TrySetResult();
+            releaseThird.TrySetResult();
+        }
+        await run.WaitAsync(Deadline);
+        Assert.Equal(new[] { "heavy-0", "heavy-1", "heavy-2" }, completions.Order());
+    }
+
     [Theory]
     [InlineData(2)]
     [InlineData(4)]

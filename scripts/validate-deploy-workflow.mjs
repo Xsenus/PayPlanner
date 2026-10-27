@@ -133,6 +133,14 @@ export function validateDeployWorkflow(source) {
     'Keep the reviewed CPU and garbage-collection resource limits');
   const preservesResources = env => Object.entries(resourceLimits).every(([key, value]) => env?.[key] === undefined || env[key] === value);
   requireValue(workflow.on?.push?.branches?.join(',') === 'main' && Object.hasOwn(workflow.on, 'workflow_dispatch'), 'Keep main push and manual release triggers');
+  const manual = workflow.on.workflow_dispatch;
+  const deployInput = manual?.inputs?.release_to_vps;
+  requireValue(Object.keys(manual ?? {}).join(',') === 'inputs'
+    && Object.keys(manual.inputs ?? {}).join(',') === 'release_to_vps'
+    && deployInput?.type === 'boolean' && deployInput.required === true && deployInput.default === false
+    && typeof deployInput.description === 'string' && deployInput.description.length > 0
+    && Object.keys(deployInput).sort().join(',') === 'default,description,required,type',
+  'Manual runs must default to verification only and require an explicit deployment choice');
   const documentationPaths = ['README.md', 'AGENTS.md', 'docs/**/*.md', 'docs/yougile-sources/**'];
   requireValue(Object.keys(workflow.on).sort().join(',') === 'push,workflow_dispatch'
     && Object.keys(workflow.on.push).sort().join(',') === 'branches,paths-ignore'
@@ -141,7 +149,9 @@ export function validateDeployWorkflow(source) {
   const timeouts = { frontend: 30, 'backend-format': 30, 'backend-build': 30, ...Object.fromEntries(shardJobs.map(id => [id, 150])), 'backend-browser': 15, backend: 10, deploy: 30 };
   for (const [id, job] of Object.entries(jobs)) {
     requireValue(String(job['timeout-minutes']) === String(timeouts[id]), `${id}: keep the explicit runner time budget`);
-    requireValue(!Object.hasOwn(job, 'if'), `${id}: conditional job can bypass a release gate`);
+    const deployCondition = "${{ success() && github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.release_to_vps == true)) }}";
+    requireValue(id === 'deploy' ? job.if === deployCondition : !Object.hasOwn(job, 'if'),
+      `${id}: only the reviewed deployment condition is allowed; verification gates cannot be conditional`);
     if (shardJobs.includes(id)) requireValue(Object.keys(job.concurrency ?? {}).sort().join(',') === 'cancel-in-progress,group,queue'
       && job.concurrency.group === 'payplanner-xsenus-backend-tests'
       && job.concurrency.queue === 'max' && job.concurrency['cancel-in-progress'] === false,
