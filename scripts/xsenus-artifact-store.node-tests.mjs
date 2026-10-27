@@ -93,6 +93,19 @@ test('publishes exact output only after readback; package output is artifact-id'
   assert.equal(readFileSync(f.output, 'utf8'), `artifact-id=${result.id}\n`);
 });
 
+test('runtime artifact preserves the uppercase manifest produced by test discovery', t => {
+  const f = fixture(t), upper = manifest.toUpperCase();
+  const runtime = f.publish('test-runtime', { EXPECTED_MANIFEST_SHA: upper });
+  assert.equal(runtime.receipt.manifestSha, upper);
+  const needs = { 'backend-build': success({ 'runtime-artifact-id': runtime.id, 'manifest-sha': upper, 'sdk-version': sdk }) };
+  const env = { GITHUB_JOB: 'backend-test-0', EXPECTED_ARTIFACT_ID: runtime.id, EXPECTED_MANIFEST_SHA: upper,
+    ARTIFACT_NEEDS_JSON: JSON.stringify(needs) };
+  f.store(env).get({ kind: 'test-runtime', producerJob: 'backend-build', destination: 'runtime-readback' });
+  assert.ok(existsSync(join(f.workspace, 'runtime-readback/test-runtime.tar.gz')));
+  assert.throws(() => f.store({ ...env, EXPECTED_MANIFEST_SHA: 'C'.repeat(64) })
+    .get({ kind: 'test-runtime', producerJob: 'backend-build', destination: 'wrong-manifest' }));
+});
+
 test('qualified shards bind runtime, manifest, SDK, diagnostics, job and only their one output key', t => {
   const f = fixture(t), runtime = f.publish('test-runtime'), shard = f.shard(runtime, 2);
   const result = runCommand(['put', '--kind', 'qualified-shard', '--source', shard.source, '--retention-days', '14'], f.options(shard.env));

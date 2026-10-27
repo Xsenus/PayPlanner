@@ -188,7 +188,7 @@ function need(context, job, output, expected) {
 function metadata(kind, env, shard) {
   const result = { manifestSha: null, sdkVersion: null, runtimeArtifactId: null, diagnosticArtifactId: null };
   if (kind !== 'frontend') {
-    assert.match(env.EXPECTED_MANIFEST_SHA ?? '', shaPattern, 'Missing expected manifest SHA');
+    assert.match(env.EXPECTED_MANIFEST_SHA ?? '', /^[a-fA-F0-9]{64}$/, 'Missing expected manifest SHA');
     assert.match(env.EXPECTED_SDK_VERSION ?? '', /^9\.0\.[1-9][0-9]*$/, 'Missing exact .NET9 SDK version');
     result.manifestSha = env.EXPECTED_MANIFEST_SHA; result.sdkVersion = env.EXPECTED_SDK_VERSION;
   }
