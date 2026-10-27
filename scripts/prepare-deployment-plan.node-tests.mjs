@@ -67,6 +67,18 @@ test('binds qualified needs, exact package maps, current history, source pins an
   assert.equal(plan.rollbackAfterStartup, 'halt-for-manual-review');
 });
 
+test('admits only the specifically reviewed additive payment attempt migration', t => {
+  const input = fixture(t);
+  const path = join(input.root, 'scripts/deployment-baseline.json');
+  const baseline = JSON.parse(readFileSync(path, 'utf8'));
+  baseline.expectedMigration = '20261027005432_AddPaymentCreateAttempts';
+  writeFileSync(path, JSON.stringify(baseline));
+  assert.equal(createPlan(input).plan.expectedMigration, baseline.expectedMigration);
+  baseline.expectedMigration = 'another-migration';
+  writeFileSync(path, JSON.stringify(baseline));
+  assert.throws(() => createPlan(input), /Only the reviewed additive migration/);
+});
+
 test('rejects local context, wrong workflow identity, untrusted host, non-main and invalid run', () => {
   for (const [key, value] of [['GITHUB_ACTIONS', 'false'], ['COMPUTERNAME', 'OTHER'], ['GITHUB_SHA', 'b'.repeat(40)],
     ['GITHUB_WORKFLOW_SHA', 'b'.repeat(40)], ['GITHUB_JOB', 'backend'], ['GITHUB_REF', 'refs/heads/feature'], ['GITHUB_RUN_ID', '0'], ['OUT_DIR', '../other']]) {

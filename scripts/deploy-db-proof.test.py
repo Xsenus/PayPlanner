@@ -120,12 +120,63 @@ class DatabaseProofTests(unittest.TestCase):
 
     def test_no_migration_permission_or_unbound_baseline(self):
         self.plan['expectedMigration'] = 'unapproved'
-        with self.assertRaisesRegex(AssertionError, 'No migration'):
+        with self.assertRaisesRegex(AssertionError, 'Unreviewed migration'):
             self.compare()
         self.plan['expectedMigration'] = None
         self.after['baselineSha256'] = '0'*64
         with self.assertRaisesRegex(AssertionError, 'baseline bytes'):
             self.compare()
+
+    def add_payment_attempt_migration(self):
+        delta = json.loads(Path(__file__).with_name('deploy-payment-attempt-delta.json').read_text(encoding='utf-8'))
+        owner = 'existing_owner'
+        for key in delta:
+            if key not in ('columns', 'migrations'):
+                self.before['schemaObjects'].setdefault(key, [])
+        self.before['schemaObjects']['relations'].append(dict(name='__EFMigrationsHistory', owner=owner))
+        self.a_path.write_text(json.dumps(self.before))
+        self.after = copy.deepcopy(self.before)
+        self.after['utc'] = '2026-10-26T00:01:00+00:00'
+        self.after['baselineSha256'] = proof.digest(self.a_path)
+        for key, change in delta.items():
+            self.assertEqual(change['removed'], [])
+            rows = copy.deepcopy(change['added'])
+            for row in rows:
+                if row.get('owner') == '__migration_owner__':
+                    row['owner'] = owner
+            if key == 'columns': self.after['schemaColumns'].extend(rows)
+            elif key == 'migrations': self.after['migrationRows'].extend(rows)
+            else: self.after['schemaObjects'][key].extend(rows)
+        self.plan['expectedMigration'] = proof.PAYMENT_ATTEMPT_MIGRATION
+        self.after['controls']['migrations'] = sorted(self.before['controls']['migrations'] + [proof.PAYMENT_ATTEMPT_MIGRATION])
+
+    def test_reviewed_additive_migration_is_exact_and_preserves_legacy_history(self):
+        self.add_payment_attempt_migration()
+        result = self.compare('startup')
+        self.assertTrue(result['migrationHistory209Exact'])
+        self.assertEqual(len(self.after['migrationRows']), 210)
+        self.assertIn('20260521190030_AddTaskContractorPaymentsPostgres', self.after['controls']['migrations'])
+        with self.assertRaises(AssertionError):
+            self.compare('unchanged')
+
+    def test_reviewed_migration_rejects_unexpected_changes(self):
+        self.add_payment_attempt_migration()
+        original = copy.deepcopy(self.after)
+        mutations = [
+            lambda a: a['schemaColumns'][-1].update(type='text'),
+            lambda a: a['schemaObjects']['indexes'].pop(),
+            lambda a: a['schemaObjects']['relations'][-1].update(owner='other_owner'),
+            lambda a: a['migrationRows'][0].update(ProductVersion='tampered'),
+            lambda a: a['migrationRows'][-1].update(ProductVersion='tampered'),
+            lambda a: a['controls']['migrations'].append('unexpected'),
+            lambda a: a['fingerprints'].pop(),
+        ]
+        for mutate in mutations:
+            with self.subTest(mutation=mutate):
+                self.after = copy.deepcopy(original)
+                mutate(self.after)
+                with self.assertRaises(AssertionError):
+                    self.compare('startup')
 
 
 if __name__ == '__main__':

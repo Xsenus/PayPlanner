@@ -1,5 +1,8 @@
 import subprocess,json,sys,datetime,hashlib,pathlib,os
+from collections import Counter
 EXPECTED_MIGRATION=None
+PAYMENT_ATTEMPT_MIGRATION='20261027005432_AddPaymentCreateAttempts'
+PAYMENT_ATTEMPT_DELTA_SHA256='e9a204366b5fd6df332dec56e96ca98c2f6b31778197c36c7547c9223f6e4da7'
 POLICY_TABLES=['Acts','Contracts','Payments']
 POLICY_COLUMN='SellerSnapshotPolicy'
 
@@ -16,6 +19,28 @@ def read_json(path):
 def instant(value):
  parsed=datetime.datetime.fromisoformat(value.replace('Z','+00:00'))
  return parsed.replace(tzinfo=datetime.timezone.utc) if parsed.tzinfo is None else parsed.astimezone(datetime.timezone.utc)
+
+def canonical(value):return json.dumps(value,sort_keys=True,separators=(',',':'))
+
+def exact_delta(before,after):
+ old=Counter(canonical(x) for x in before);new=Counter(canonical(x) for x in after)
+ return {'added':[json.loads(row) for row in sorted((new-old).elements())],
+         'removed':[json.loads(row) for row in sorted((old-new).elements())]}
+
+def compare_payment_attempt_schema(a,b):
+ need(set(a['schemaObjects'])==set(b['schemaObjects']),'Schema object categories changed')
+ owners=[r['owner'] for r in a['schemaObjects']['relations'] if r['name']=='__EFMigrationsHistory']
+ need(len(owners)==1 and isinstance(owners[0],str) and owners[0],'Migration history owner unavailable')
+ delta={'columns':exact_delta(a['schemaColumns'],b['schemaColumns']),
+        'migrations':exact_delta(a['migrationRows'],b['migrationRows'])}
+ delta.update({name:exact_delta(a['schemaObjects'][name],b['schemaObjects'][name]) for name in a['schemaObjects']})
+ for change in delta.values():
+  for row in change['added']:
+   if 'owner' in row:
+    need(row['owner']==owners[0],'Unexpected migration object owner')
+    row['owner']='__migration_owner__'
+  change['added'].sort(key=canonical)
+ need(hashlib.sha256(canonical(delta).encode()).hexdigest()==PAYMENT_ATTEMPT_DELTA_SHA256,'Unexpected migration schema or history delta')
 
 def compare_releases(a,b,plan,phase):
  need(a['releaseSeen']==b['releaseSeen'],'Release read markers changed during read-only delivery')
@@ -45,17 +70,21 @@ def compare_releases(a,b,plan,phase):
 def compare(plan_path,a_path,b_path,phase):
  need(phase in ['unchanged','startup'],'Unknown comparison boundary')
  plan,a,b=map(read_json,[plan_path,a_path,b_path])
- need(plan['expectedMigration'] is None,'No migration is authorised')
+ need(plan['expectedMigration'] in [None,PAYMENT_ATTEMPT_MIGRATION],'Unreviewed migration is not authorised')
  need(a['schemaVersion']==b['schemaVersion']==2 and a['baselineSha256'] is None,'Immutable stopped baseline required')
  need(b['baselineSha256']==digest(a_path),'Later proof not bound to exact baseline bytes')
  need(a['fingerprints']==b['fingerprints'],'Protected rows/counts/all-column contents changed')
  need(a['projectionColumns']==b['projectionColumns'],'Pinned all-column projection changed')
- need(a['schemaColumns']==b['schemaColumns'] and a['schemaObjects']==b['schemaObjects'],'Unexpected schema mutation')
- need(a['controls']==b['controls'],'Protected financial/integrity controls or migration IDs changed')
+ migrated=phase=='startup' and plan['expectedMigration']==PAYMENT_ATTEMPT_MIGRATION
+ if migrated:compare_payment_attempt_schema(a,b)
+ else:need(a['schemaColumns']==b['schemaColumns'] and a['schemaObjects']==b['schemaObjects'],'Unexpected schema mutation')
+ need({k:v for k,v in a['controls'].items() if k!='migrations'}=={k:v for k,v in b['controls'].items() if k!='migrations'},'Protected financial/integrity controls changed')
  am=a['controls']['migrations']
  need(len(am)==209 and am==plan['expectedBaselineMigrations'],'Baseline is not the accepted installed142 migration catalog')
  need(hashlib.sha256(json.dumps(am,sort_keys=True,separators=(',',':')).encode()).hexdigest()==plan['expectedBaselineMigrationIdsSha256'],'Baseline migration catalog pin differs')
- need(len(a['migrationRows'])==209 and a['migrationRows']==b['migrationRows']==plan['expectedBaselineMigrationRows'],'All209 full migration rows/ProductVersion must remain exact')
+ need(len(a['migrationRows'])==209 and a['migrationRows']==plan['expectedBaselineMigrationRows'],'All209 full baseline migration rows/ProductVersion must remain exact')
+ if migrated:need(b['controls']['migrations']==sorted(am+[PAYMENT_ATTEMPT_MIGRATION]),'Unexpected migration IDs after startup')
+ else:need(a['controls']==b['controls'] and a['migrationRows']==b['migrationRows'],'Migration history or ProductVersion changed before authorised startup')
  need(all(a['controls'][n]==0 for n in ['legacyActive','pendingContractor','invalidIndexes','invalidConstraints']),'Unsafe baseline control')
  need(set(a['projectionColumns'])==set(plan['expectedProtectedTables']) and len(a['fingerprints'])==16,'Exact protected16 table scope required')
  for table in POLICY_TABLES:
