@@ -57,6 +57,46 @@ public sealed class BoundedTestExecutionTests
     }
 
     [Fact]
+    public void ReviewedBankTheorySplitsWithoutSeparatingCaseInsensitiveNames()
+    {
+        using var fixture = new Fixture();
+        var method = ExecutionScheduling.SplitBankScopeTheory;
+        var names = new[] { "bank A", "BANK a", "bank B", "bank C", "bank D", "bank E" };
+        var cases = names.Select(name => new PlannedCase(Guid.NewGuid(), method, name, 0)).ToArray();
+        var profile = fixture.Plan.Execution! with { ReviewedMethods = [method] };
+        var plan = fixture.Plan with
+        {
+            Cases = cases,
+            Execution = profile,
+            Timings = [new MethodTiming(method, 2 * TimeSpan.TicksPerSecond, cases.Length)]
+        };
+        var batches = ExecutionScheduling.Batches(plan, 0, batchCount: 2);
+        Assert.Equal(cases.Select(row => row.Id).Order(), batches.SelectMany(batch => batch.Cases).Select(row => row.Id).Order());
+        Assert.Equal(2, batches.Length);
+        Assert.Single(batches, batch => batch.Cases.Any(row => row.DisplayName == "bank A")
+            && batch.Cases.Any(row => row.DisplayName == "BANK a"));
+        var excluded = plan with { Execution = profile with { ExclusiveMethods = [method] } };
+        Assert.Single(ExecutionScheduling.Batches(excluded, 0));
+        Assert.Equal("exclusive", ExecutionScheduling.Batches(excluded, 0)[0].Lane);
+        var unreviewed = plan with { Execution = profile with { ReviewedMethods = [] } };
+        Assert.Single(ExecutionScheduling.Batches(unreviewed, 0));
+    }
+
+    [Fact]
+    public void BankRowFilterEscapesOperatorsAndKeepsOtherMethodsWhole()
+    {
+        using var fixture = new Fixture();
+        var method = ExecutionScheduling.SplitBankScopeTheory;
+        var name = @"row (a)&b|c=d!e~f\g";
+        var path = Path.Combine(fixture.Root, "bank.runsettings");
+        ShardPlan.WriteRunSettings(path, [new(Guid.NewGuid(), method, name, 0),
+            new(Guid.NewGuid(), "Tests.Case.Other", "ignored", 0)]);
+        var filter = XDocument.Load(path).Root!.Element("RunConfiguration")!.Element("TestCaseFilter")!.Value;
+        Assert.Contains(@"DisplayName=row \(a\)\&b\|c\=d\!e\~f\\g", filter);
+        Assert.Contains("FullyQualifiedName=Tests.Case.Other", filter);
+    }
+
+    [Fact]
     public void UnknownMethodsRemainExclusiveEvenWhenCachedTimingsCallThemFast()
     {
         using var fixture = new Fixture();
@@ -123,12 +163,24 @@ public sealed class BoundedTestExecutionTests
     public void WorkerBudgetUsesAvailableMemoryAndActualHostProcessors(string requested, int gib, int processors, int expected)
         => Assert.Equal(expected, ExecutionScheduling.WorkerBudget(requested, (ulong)gib * Fixture.Gib, processors));
 
+    [Theory]
+    [InlineData("auto", 6, 2)]
+    [InlineData("auto", 8, 4)]
+    [InlineData("auto", 2, 1)]
+    [InlineData("1", 8, 1)]
+    [InlineData("2", 8, 2)]
+    [InlineData("4", 6, 2)]
+    public void PartitionCapacityRespectsUserAndProcessorLimitsWithoutReservingMemory(string requested, int processors, int expected)
+        => Assert.Equal(expected, ExecutionScheduling.PartitionCapacity(requested, processors));
+
     [Fact]
     public void MemoryAndConcurrencyBoundariesDoNotStartUnbudgetedWorkers()
     {
         Assert.Throws<InvalidDataException>(() => ExecutionScheduling.WorkerBudget("auto", Fixture.Gib - 1, 8));
         Assert.Throws<InvalidDataException>(() => ExecutionScheduling.WorkerBudget("3", 20 * Fixture.Gib, 8));
         Assert.Throws<InvalidDataException>(() => ExecutionScheduling.WorkerBudget("auto", 20 * Fixture.Gib, 0));
+        Assert.Throws<InvalidDataException>(() => ExecutionScheduling.PartitionCapacity("3", 8));
+        Assert.Throws<InvalidDataException>(() => ExecutionScheduling.PartitionCapacity("auto", 0));
         Assert.Equal(2, ExecutionScheduling.WorkerBudget("auto", 12 * Fixture.Gib - 1, 8));
         Assert.Equal(1, ExecutionScheduling.WorkerBudget("auto", 8 * Fixture.Gib - 1, 8));
         Assert.True(ExecutionScheduling.CanLaunchAdditional(0, 4, Fixture.Gib));

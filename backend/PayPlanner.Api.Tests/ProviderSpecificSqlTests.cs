@@ -82,6 +82,12 @@ public class ProviderSpecificSqlTests
     [InlineData("payment-attempt-without-nowait")]
     [InlineData("request-lock-without-nowait")]
     [InlineData("request-access-without-nowait")]
+    [InlineData("upload-share-without-nowait")]
+    [InlineData("upload-wrong-provider")]
+    [InlineData("deadline-lease-without-nowait")]
+    [InlineData("deadline-lease-wrong-provider")]
+    [InlineData("note-lease-without-nowait")]
+    [InlineData("note-lease-wrong-provider")]
     public void ForUpdateRegistry_RejectsUnregisteredOrUnguardedSql(string mutation)
     {
         var root = FindRepositoryRoot();
@@ -95,6 +101,9 @@ public class ProviderSpecificSqlTests
                 => "backend/Services/Companies/DocumentSellerLease.cs",
             "payment-attempt-without-nowait" => "backend/Services/Payments/PaymentCreateAttemptLease.cs",
             "request-lock-without-nowait" or "request-access-without-nowait" => "backend/Services/Requests/SalesRequestService.cs",
+            "note-lease-without-nowait" or "note-lease-wrong-provider" => "backend/Services/Notes/StickyNoteAccessLease.cs",
+            "deadline-lease-without-nowait" or "deadline-lease-wrong-provider" => "backend/Services/Tasks/TaskDeadlineRequestLease.cs",
+            "upload-share-without-nowait" or "upload-wrong-provider" => "backend/Services/Storage/ManagedTaskFileUploadService.cs",
             _ => "backend/Services/Invoices/FinancialSourceLease.cs",
         };
         var original = relativePath == "backend/Controllers/UnexpectedLocksController.cs"
@@ -112,6 +121,10 @@ public class ProviderSpecificSqlTests
             "policy-key-unparameterized" => original.Replace("{ContractTaskBillingModeSettingKey} FOR SHARE", "'tasks.contractTaskBillingMode' FOR SHARE", StringComparison.Ordinal),
             "seller-share-without-nowait" => original.Replace("FOR SHARE NOWAIT", "FOR SHARE", StringComparison.Ordinal),
             "payment-attempt-without-nowait" or "request-lock-without-nowait" => original.Replace("FOR UPDATE NOWAIT", "FOR UPDATE", StringComparison.Ordinal),
+            "note-lease-without-nowait" or "deadline-lease-without-nowait" => original.Replace("FOR SHARE NOWAIT", "FOR SHARE", StringComparison.Ordinal),
+            "note-lease-wrong-provider" or "deadline-lease-wrong-provider" => original.Replace("if (db.Database.IsNpgsql())", "if (true)", StringComparison.Ordinal),
+            "upload-share-without-nowait" => original.Replace("FOR SHARE NOWAIT", "FOR SHARE", StringComparison.Ordinal),
+            "upload-wrong-provider" => original.Replace("if (db.Database.IsNpgsql())", "if (true)", StringComparison.Ordinal),
             "request-access-without-nowait" => original.Replace("FOR SHARE NOWAIT", "FOR SHARE", StringComparison.Ordinal),
             "seller-unbounded-addresses" => original.Replace("LIMIT 5001 FOR SHARE", "FOR SHARE", StringComparison.Ordinal),
             "seller-unsupported-provider" => original.Replace("if (!db.Database.IsNpgsql() && !db.Database.IsSqlite())", "if (false)", StringComparison.Ordinal),
@@ -428,9 +441,69 @@ public class ProviderSpecificSqlTests
         Approve("backend/Services/Payments/PaymentCreateAttemptLease.cs", attemptSource, "LockPrimaryAsync", primaryStart, primaryEnd,
             ["""await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"Payments\" WHERE \"Id\" = {id} FOR UPDATE NOWAIT").ToArrayAsync(ct);"""]);
 
-        Assert.Equal(29, approved.Count(statement => statement.Contains("FOR UPDATE", StringComparison.Ordinal)));
-        Assert.Equal(24, approved.Count(statement => statement.Contains("FOR SHARE", StringComparison.Ordinal)));
-        Assert.Equal(53, approved.Count);
+        var noteSource = ReadSource("backend/Services/Notes/StickyNoteAccessLease.cs");
+        var noteStart = noteSource.IndexOf("public static async Task<StickyNoteAccessLease?> TryAcquireAsync", StringComparison.Ordinal);
+        var noteEnd = noteSource.IndexOf("private static bool IsLockConflict", noteStart, StringComparison.Ordinal);
+        Assert.True(noteStart >= 0 && noteEnd > noteStart);
+        AssertOrdered(noteSource[noteStart..noteEnd],
+            "db.Database.CurrentTransaction is not null || db.ChangeTracker.HasChanges()",
+            "if (db.Database.IsNpgsql())", "IsolationLevel.ReadCommitted",
+            "else if (db.Database.IsSqlite())", "IsolationLevel.Serializable, deferred: false",
+            "else throw new InvalidOperationException(\"Unsupported provider",
+            "if (!await db.Users.AsNoTracking().AnyAsync", "await lease!.DisposeAsync()",
+            "catch (Exception error) when (IsLockConflict(error))");
+        Approve("backend/Services/Notes/StickyNoteAccessLease.cs", noteSource, "TryAcquireAsync", noteStart, noteEnd,
+            ["""await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Roles\" WHERE \"Id\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {userId}) FOR UPDATE NOWAIT", ct);"""]);
+        Approve("backend/Services/Notes/StickyNoteAccessLease.cs", noteSource, "TryAcquireAsync", noteStart, noteEnd,
+            ["""await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Users\" WHERE \"Id\" = {userId} FOR SHARE NOWAIT", ct);""",
+             """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Roles\" WHERE \"Id\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {userId}) FOR SHARE NOWAIT", ct);""",
+             """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"RolePermissions\" WHERE \"RoleId\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {userId}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);""",
+             """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"StickyNoteBoards\" WHERE \"Id\" = (SELECT \"BoardId\" FROM \"StickyNotes\" WHERE \"Id\" = {noteId}) FOR SHARE NOWAIT", ct);""",
+             """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"StickyNoteBoardMembers\" WHERE \"BoardId\" = (SELECT \"BoardId\" FROM \"StickyNotes\" WHERE \"Id\" = {noteId}) AND \"UserId\" = {userId} FOR SHARE NOWAIT", ct);"""], "FOR SHARE");
+
+        var deadlineSource = ReadSource("backend/Services/Tasks/TaskDeadlineRequestLease.cs");
+        var deadlineStart = deadlineSource.IndexOf("public static async Task<TaskDeadlineRequestLease?> TryAcquireAsync", StringComparison.Ordinal);
+        var deadlineEnd = deadlineSource.IndexOf("private static bool IsLockConflict", deadlineStart, StringComparison.Ordinal);
+        Assert.True(deadlineStart >= 0 && deadlineEnd > deadlineStart);
+        AssertOrdered(deadlineSource[deadlineStart..deadlineEnd],
+            "db.Database.CurrentTransaction is not null || db.ChangeTracker.HasChanges()",
+            "if (db.Database.IsNpgsql())", "IsolationLevel.ReadCommitted",
+            "else if (db.Database.IsSqlite())", "IsolationLevel.Serializable, deferred: false",
+            "else throw new InvalidOperationException(\"Unsupported provider",
+            "if (!await db.Users.AsNoTracking().AnyAsync", "await lease!.DisposeAsync()",
+            "catch (Exception error) when (IsLockConflict(error))");
+        Approve("backend/Services/Tasks/TaskDeadlineRequestLease.cs", deadlineSource, "TryAcquireAsync", deadlineStart, deadlineEnd,
+            ["""await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"TaskJournalItems\" WHERE \"Id\" = {taskId} FOR UPDATE NOWAIT", ct);"""]);
+        Approve("backend/Services/Tasks/TaskDeadlineRequestLease.cs", deadlineSource, "TryAcquireAsync", deadlineStart, deadlineEnd,
+            ["""await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Users\" WHERE \"Id\" = {userId} FOR SHARE NOWAIT", ct);""",
+             """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Roles\" WHERE \"Id\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {userId}) FOR SHARE NOWAIT", ct);""",
+             """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"RolePermissions\" WHERE \"RoleId\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {userId}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);""",
+             """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"TaskJournalParticipants\" WHERE \"TaskJournalItemId\" = {taskId} ORDER BY \"Id\" FOR SHARE NOWAIT", ct);""",
+             """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"SalesRequests\" WHERE \"Id\" = {salesRequestId.Value} FOR SHARE NOWAIT", ct);""",
+             """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Users\" WHERE \"Id\" IN (SELECT \"ResponsibleUserId\" FROM \"SalesRequests\" WHERE \"Id\" = {salesRequestId.Value} UNION SELECT \"CreatedByUserId\" FROM \"SalesRequests\" WHERE \"Id\" = {salesRequestId.Value}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);"""], "FOR SHARE");
+
+        var uploadSource = ReadSource("backend/Services/Storage/ManagedTaskFileUploadService.cs");
+        var uploadStart = uploadSource.IndexOf("private async Task<ManagedTaskFileUploadResult> UploadCoreAsync", StringComparison.Ordinal);
+        var uploadEnd = uploadSource.IndexOf("private async Task<ProductStorageBindingResult> PublishObjectAsync", uploadStart, StringComparison.Ordinal);
+        Assert.True(uploadStart >= 0 && uploadEnd > uploadStart);
+        AssertOrdered(uploadSource[uploadStart..uploadEnd],
+            "await db.Database.BeginTransactionAsync(ct)", "if (db.Database.IsNpgsql())",
+            "FROM \\\"Users\\\"", "FROM \\\"Roles\\\"", "FROM \\\"RolePermissions\\\"",
+            "PostgresErrorCodes.LockNotAvailable", "var locked = await db.TaskJournalItems",
+            "if (db.Database.IsNpgsql())", "FROM \\\"TaskJournalParticipants\\\"",
+            "if (salesRequestId.HasValue)", "FROM \\\"SalesRequests\\\"",
+            "request.AuthorizePublication is not null && !await request.AuthorizePublication(ct)");
+        Approve("backend/Services/Storage/ManagedTaskFileUploadService.cs", uploadSource, "UploadCoreAsync", uploadStart, uploadEnd,
+            ["""await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Users\" WHERE \"Id\" = {intent.ActorId} FOR SHARE NOWAIT", ct);""",
+             """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Roles\" WHERE \"Id\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {intent.ActorId}) FOR SHARE NOWAIT", ct);""",
+             """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"RolePermissions\" WHERE \"RoleId\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {intent.ActorId}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);""",
+             """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"TaskJournalParticipants\" WHERE \"TaskJournalItemId\" = {intent.TaskId} ORDER BY \"Id\" FOR SHARE NOWAIT", ct);""",
+             """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"SalesRequests\" WHERE \"Id\" = {salesRequestId.Value} FOR SHARE NOWAIT", ct);""",
+             """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Users\" WHERE \"Id\" IN (SELECT \"ResponsibleUserId\" FROM \"SalesRequests\" WHERE \"Id\" = {salesRequestId.Value} UNION SELECT \"CreatedByUserId\" FROM \"SalesRequests\" WHERE \"Id\" = {salesRequestId.Value}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);"""], "FOR SHARE");
+
+        Assert.Equal(31, approved.Count(statement => statement.Contains("FOR UPDATE", StringComparison.Ordinal)));
+        Assert.Equal(41, approved.Count(statement => statement.Contains("FOR SHARE", StringComparison.Ordinal)));
+        Assert.Equal(72, approved.Count);
 
         // Exact identities include owner, method range, line and complete SQL call.
         // An extra statement in any other production file/method remains a failure.

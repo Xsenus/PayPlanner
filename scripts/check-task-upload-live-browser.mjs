@@ -60,6 +60,8 @@ let automationReadSequence = 0;
 let automationReadDiagnosticCount = 0;
 const automationReadDiagnostics = new Map();
 const taskReadTrace = [];
+const taskReadBoundaries = [];
+const notificationEventTrace = [];
 const completionTransfers = new Map();
 let completionTransferSequence = 0;
 const automationReadPaths = new Set([
@@ -98,6 +100,7 @@ function recordTaskReadBoundary(phase) {
       elapsedMs: Date.now() - transfer.started, status: transfer.status ?? null, exactKeyRead: transfer.exactKeyRead,
     })),
   };
+  if (taskReadBoundaries.length < 32) taskReadBoundaries.push(entry);
   if (taskReadTrace.length < 96) taskReadTrace.push({ boundary: entry });
   console.log('TASK_UPLOAD_READ_BOUNDARY ' + JSON.stringify(entry));
 }
@@ -223,6 +226,25 @@ try {
   console.log(`TASK_UPLOAD_STAGE_BROWSER_VERSION_${browser.version()}`);
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, timezoneId: 'Asia/Novosibirsk' });
   await context.addInitScript(installTaskNotificationRefreshObserver, api.origin);
+  await context.addInitScript(() => {
+    let observed = 0;
+    // Same USER_NOTIFICATIONS_EVENT as the existing refresh observer; read only.
+    window.addEventListener('payplanner:user-notifications-changed', event => {
+      if (observed >= 24) return;
+      const detail = event.detail ?? {};
+      const source = ['inbox', 'realtime', 'system'].includes(detail.source) ? detail.source : null;
+      const reason = ['created', 'fallback-poll', 'missed-replay', 'visibility-resume', 'reconnected']
+        .includes(detail.reason) ? detail.reason : null;
+      const objectType = typeof detail.objectType === 'string' ? detail.objectType.trim().toLowerCase() : null;
+      console.log('TASK_UPLOAD_NOTIFICATION_EVENT ' + JSON.stringify({
+        sequence: ++observed, atUtc: new Date().toISOString(), source, reason,
+        objectType: ['task', 'case', 'client-case'].includes(objectType) ? objectType : null,
+        hasTaskId: Number.isSafeInteger(detail.taskJournalItemId) && detail.taskJournalItemId > 0,
+        hasCaseId: Number.isSafeInteger(detail.clientCaseId) && detail.clientCaseId > 0,
+        taskNotificationType: typeof detail.notificationType === 'string' && detail.notificationType.startsWith('task'),
+      }));
+    });
+  });
   if (completionFlow) {
     const completionUserId = Number(process.env.TASK_UPLOAD_COMPLETION_USER_ID);
     assert.ok(Number.isSafeInteger(completionUserId) && completionUserId > 0);
@@ -324,6 +346,25 @@ try {
   });
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => {
+    const notificationPrefix = 'TASK_UPLOAD_NOTIFICATION_EVENT ';
+    if (message.type() === 'log' && message.text().startsWith(notificationPrefix) && notificationEventTrace.length < 24) {
+      try {
+        const event = JSON.parse(message.text().slice(notificationPrefix.length));
+        if (Number.isInteger(event.sequence) && event.sequence >= 1 && event.sequence <= 24
+          && typeof event.atUtc === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(event.atUtc)
+          && [null, 'inbox', 'realtime', 'system'].includes(event.source)
+          && [null, 'created', 'fallback-poll', 'missed-replay', 'visibility-resume', 'reconnected'].includes(event.reason)
+          && [null, 'task', 'case', 'client-case'].includes(event.objectType)
+          && ['hasTaskId', 'hasCaseId', 'taskNotificationType'].every(key => typeof event[key] === 'boolean')) {
+          notificationEventTrace.push({
+            sequence: notificationEventTrace.length + 1, browserSequence: event.sequence,
+            atUtc: event.atUtc, receivedAtUtc: new Date().toISOString(), phase: taskReadBoundary,
+            source: event.source, reason: event.reason, objectType: event.objectType,
+            hasTaskId: event.hasTaskId, hasCaseId: event.hasCaseId, taskNotificationType: event.taskNotificationType,
+          });
+        }
+      } catch { /* Diagnostic parsing must not alter the original browser scenario. */ }
+    }
     if (message.type() === 'log' && message.text() === 'TASK_UPLOAD_COMPLETION_NOTICE_OBSERVED') {
       recordTaskReadBoundary('completion-first-notice-observed');
     }
@@ -539,7 +580,9 @@ try {
     if (queueReplay) {
       // Use the real back button: close the card without reloading the entire application.
       await waitForCardReadsBeforeLeaving();
+      recordTaskReadBoundary('before-journal-back');
       await card.getByRole('button', { name: mode === 'modern' ? 'К журналу' : 'Журнал задач', exact: true }).click();
+      recordTaskReadBoundary('after-journal-back');
       await expect(card).toHaveCount(0);
       await completeOwnedQueue();
       queueCompletedAt = new Date().toISOString();
@@ -548,10 +591,13 @@ try {
       if (!liveFlow) {
         // This deliberate reload is outside the file publication being exercised.
         await waitForCardReadsBeforeLeaving();
+        recordTaskReadBoundary('before-replay-reload');
         await page.reload({ waitUntil: 'domcontentloaded' });
+        recordTaskReadBoundary('after-replay-reload');
       }
       const notice = page.getByTestId('toast-card').filter({ hasText: 'Файл прикреплён к задаче' });
       await expect(notice).toHaveCount(1);
+      recordTaskReadBoundary('replay-notice-visible');
       if (liveFlow) {
         assert.equal(liveFrames.length, 1);
         assert.equal(liveFrames[0].taskJournalItemId, taskId);
@@ -561,6 +607,7 @@ try {
       console.log('TASK_UPLOAD_STAGE_NOTICE_VISIBLE');
       await expect(card).toHaveCount(0);
       queueNoticeActions = await notice.getByRole('button').allTextContents();
+      recordTaskReadBoundary('before-toast-open-click');
       await Promise.all([
         page.waitForResponse(response => new URL(response.url()).pathname === `/api/tasks/${taskId}/files`
           && response.request().method() === 'GET').then(async response => {
@@ -571,7 +618,8 @@ try {
         }),
         page.waitForResponse(response => /\/api\/notifications\/inbox\/\d+\/read$/.test(new URL(response.url()).pathname)
           && response.request().method() === 'PATCH' && response.status() === 200),
-        notice.getByRole('button', { name: 'Открыть задачу', exact: true }).click(),
+        notice.getByRole('button', { name: 'Открыть задачу', exact: true }).click()
+          .then(() => recordTaskReadBoundary('after-toast-open-click')),
       ]);
       await expect(card).toBeVisible();
       console.log('TASK_UPLOAD_STAGE_RESULT_CARD');
@@ -653,6 +701,7 @@ try {
   if (vite) await vite.close();
   await mkdir('.playwright-cli', { recursive: true });
   await writeFile(join('.playwright-cli', `task-read-boundaries-${basename(process.env.TASK_UPLOAD_ROOT)}.json`),
-    JSON.stringify({ cardMode: mode, flow: process.env.TASK_UPLOAD_FLOW ?? 'replay', routeDisposalsDuringClose, trace: taskReadTrace }, null, 2),
+    JSON.stringify({ cardMode: mode, flow: process.env.TASK_UPLOAD_FLOW ?? 'replay', routeDisposalsDuringClose,
+      trace: taskReadTrace, boundaries: taskReadBoundaries, notificationEvents: notificationEventTrace }, null, 2),
     { flag: 'wx' });
 }

@@ -18,9 +18,9 @@ namespace PayPlanner.Api.Tests;
 public sealed class CaseDocumentRetirementBrowserTests : IClassFixture<SqliteMigratedTemplate>, IClassFixture<CaseRetirementBrowserBundle>
 {
     private readonly SqliteMigratedTemplate sqliteTemplate;
-    private readonly CaseRetirementBrowserBundle browserBundle;
+    private readonly CaseRetirementBrowserBundle? browserBundle;
 
-    public CaseDocumentRetirementBrowserTests(SqliteMigratedTemplate sqliteTemplate, CaseRetirementBrowserBundle browserBundle)
+    public CaseDocumentRetirementBrowserTests(SqliteMigratedTemplate sqliteTemplate, CaseRetirementBrowserBundle? browserBundle)
     {
         this.sqliteTemplate = sqliteTemplate;
         this.browserBundle = browserBundle;
@@ -240,4 +240,16 @@ public sealed class CaseDocumentRetirementBrowserTests : IClassFixture<SqliteMig
         public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
         public IFileProvider WebRootFileProvider { get; set; } = new NullFileProvider();
     }
+}
+
+public sealed class CaseDocumentRetirementSharedBrowserTests : IClassFixture<SqliteMigratedTemplate>
+{
+    private readonly SqliteMigratedTemplate sqliteTemplate;
+
+    public CaseDocumentRetirementSharedBrowserTests(SqliteMigratedTemplate sqliteTemplate) => this.sqliteTemplate = sqliteTemplate;
+
+    [Fact]
+    public Task RealBrowserRetirementUsesSharedProductionArtifact()
+        => new CaseDocumentRetirementBrowserTests(sqliteTemplate, null)
+            .RealBrowserRetiresOwnedAttemptAndSeparatelyUploadsDocumentAndVersion(false, "documents");
 }

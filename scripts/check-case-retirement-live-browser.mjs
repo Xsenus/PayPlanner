@@ -104,39 +104,34 @@ try {
     });
     controlUrl = `http://127.0.0.1:${control.address().port}/apply`;
   }
-  // Match the existing managed-chat gate: compile the real release UI before
-  // navigation, inside the same enclosing three-minute scenario budget.
-  // A second entry exposes the real upload helper, shared with the UI bundle;
-  // it replaces source-module imports, not the browser's storage or API calls.
-  let uiConfig, fixtureChunk, realtimeDisconnectUrls, realtimePollingUrls, startPreview;
+  // Both paths use the real production bundle and upload/auth fixture entry.
+  let fixtureChunk, realtimeDisconnectUrls, realtimePollingUrls;
   if (process.env.CASE_RETIREMENT_BUNDLE_ROOT) {
     bundleLease = await openRetirementProductionBundle({ root: process.env.CASE_RETIREMENT_BUNDLE_ROOT,
       owner: process.env.CASE_RETIREMENT_BUNDLE_OWNER, api, build });
-    uiConfig = bundleLease.config;
     fixtureChunk = { fileName: bundleLease.fixtureFile };
     realtimeDisconnectUrls = bundleLease.disconnectFiles.map(file => ui + '/' + file);
     realtimePollingUrls = bundleLease.pollingFiles.map(file => ui + '/' + file);
-    startPreview = () => withRetirementBuildEnvironment(() => preview({ ...uiConfig, preview: { host: '127.0.0.1', port, strictPort: true } }));
+    const startPreview = () => preview({ ...bundleLease.config, preview: { host: '127.0.0.1', port, strictPort: true } });
+    vite = await phase('preview-listen', () => withRetirementBuildEnvironment(startPreview));
   } else {
-  // The shared second entry still exposes the actual production upload/auth helpers.
-  const browserUi = await prepareSyntheticBrowserUi({ api, port });
-  const { chunks } = browserUi;
-  assert.ok(chunks.some(chunk => chunk.isEntry && chunk.name === 'index' && chunk.codeLength > 0),
-    'The real case-document UI entry must compile successfully.');
-  const fixtureChunks = chunks.filter(chunk => chunk.isEntry && chunk.name === 'case-retirement-fixture');
-  assert.equal(fixtureChunks.length, 1, 'The real upload helper must have one compiled fixture entry.');
-  fixtureChunk = fixtureChunks[0];
-  assert.ok(['beginCaseDocumentUpload', 'getAuthToken'].every(name => fixtureChunk.exports.includes(name)),
-    'The compiled fixture must preserve the real upload and authentication helpers.');
-  const moduleUrls = source => chunks.filter(chunk => chunk.moduleIds.some(id => id.replaceAll('\\', '/').endsWith(source)))
-    .map(chunk => ui + '/' + chunk.fileName);
-  realtimeDisconnectUrls = moduleUrls('/src/services/realtimeNotifications.ts');
-  realtimePollingUrls = moduleUrls('/src/components/Notifications/RealtimeNotificationToasts.tsx');
-  assert.ok(realtimeDisconnectUrls.length > 0 && realtimePollingUrls.length > 0,
-    'The release bundle must retain the real notification modules.');
-  startPreview = () => browserUi.startPreview();
+    const browserUi = await prepareSyntheticBrowserUi({ api, port });
+    const { chunks } = browserUi;
+    assert.ok(chunks.some(chunk => chunk.isEntry && chunk.name === 'index' && chunk.codeLength > 0),
+      'The real case-document UI entry must compile successfully.');
+    const fixtureChunks = chunks.filter(chunk => chunk.isEntry && chunk.name === 'case-retirement-fixture');
+    assert.equal(fixtureChunks.length, 1, 'The real upload helper must have one compiled fixture entry.');
+    fixtureChunk = fixtureChunks[0];
+    assert.ok(['beginCaseDocumentUpload', 'getAuthToken'].every(name => fixtureChunk.exports.includes(name)),
+      'The compiled fixture must preserve the real upload and authentication helpers.');
+    const moduleUrls = source => chunks.filter(chunk => chunk.moduleIds.some(id => id.replaceAll('\\', '/').endsWith(source)))
+      .map(chunk => ui + '/' + chunk.fileName);
+    realtimeDisconnectUrls = moduleUrls('/src/services/realtimeNotifications.ts');
+    realtimePollingUrls = moduleUrls('/src/components/Notifications/RealtimeNotificationToasts.tsx');
+    assert.ok(realtimeDisconnectUrls.length > 0 && realtimePollingUrls.length > 0,
+      'The release bundle must retain the real notification modules.');
+    vite = await browserUi.startPreview();
   }
-  vite = await phase('preview-listen', startPreview);
   // Own the browser before navigation so a failed page load still closes it.
   await phase('browser-open', () => cli('open', 'about:blank', '--browser', browser));
   opened = true;

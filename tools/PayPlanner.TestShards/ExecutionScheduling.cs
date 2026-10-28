@@ -49,6 +49,9 @@ public sealed record SubsetQualification(bool Qualified, bool SubsetPassed, stri
 /// <summary>Scheduling changes execution order only; every discovered case remains in its outer shard.</summary>
 public static class ExecutionScheduling
 {
+    // This theory uses independent databases per row. Its four 50-case groups
+    // were checked against the exact catalog and exercised with two workers.
+    public const string SplitBankScopeTheory = "PayPlanner.Api.Tests.MoneyOperationsControllerTests.BankPackageScope_RejectsWholeForbiddenPackageBeforeReadOrMutation";
     private const ulong Gib = 1024UL * 1024 * 1024;
     private const ulong OrdinaryHeapBytes = 2 * Gib;
     private const ulong ExclusiveHeapBytes = 3 * Gib;
@@ -100,21 +103,25 @@ public static class ExecutionScheduling
         var reviewed = profile.ReviewedMethods.ToHashSet(StringComparer.Ordinal);
         string GroupLane(string method) => !reviewed.Contains(method) || classes.Contains(method[..method.LastIndexOf('.')]) || methods.Contains(method) ? "exclusive"
             : estimates.TryGetValue(method, out var duration) && duration < profile.FastThresholdTicks ? "fast" : "heavy";
-        var groups = plan.Cases.Where(row => row.Shard == shard).GroupBy(row => row.FullyQualifiedName, StringComparer.Ordinal).ToArray();
+        var groups = plan.Cases.Where(row => row.Shard == shard).GroupBy(row => row.FullyQualifiedName, StringComparer.Ordinal)
+            .SelectMany(group => group.Key == SplitBankScopeTheory && GroupLane(group.Key) != "exclusive"
+                ? group.GroupBy(row => row.DisplayName, StringComparer.OrdinalIgnoreCase)
+                    .Select(part => (Method: group.Key, Identity: part.Key, Cases: part.ToArray()))
+                : new[] { (Method: group.Key, Identity: "", Cases: group.ToArray()) }).ToArray();
         var result = new List<ExecutionBatch>();
         foreach (var lane in new[] { "fast", "heavy", "exclusive" })
         {
             if (suite == "fast" && lane != "fast" || suite == "heavy" && lane == "fast") continue;
-            decimal Weight(IGrouping<string, PlannedCase> group) => (decimal)estimates.GetValueOrDefault(group.Key, fallback) * group.Count();
-            var selected = groups.Where(group => GroupLane(group.Key) == lane).OrderByDescending(Weight)
-                .ThenBy(group => group.Key, StringComparer.Ordinal).ToArray();
+            decimal Weight((string Method, string Identity, PlannedCase[] Cases) group) => (decimal)estimates.GetValueOrDefault(group.Method, fallback) * group.Cases.Length;
+            var selected = groups.Where(group => GroupLane(group.Method) == lane).OrderByDescending(Weight)
+                .ThenBy(group => group.Method, StringComparer.Ordinal).ThenBy(group => group.Identity, StringComparer.Ordinal).ToArray();
             var count = Math.Min(selected.Length, lane == "exclusive" ? 1 : partitions);
             var loads = new decimal[count];
             var rows = Enumerable.Range(0, count).Select(_ => new List<PlannedCase>()).ToArray();
             foreach (var group in selected)
             {
                 var index = Enumerable.Range(0, count).OrderBy(index => loads[index]).ThenBy(index => index).First();
-                rows[index].AddRange(group);
+                rows[index].AddRange(group.Cases);
                 loads[index] += Weight(group);
             }
             for (var index = 0; index < count; index++) result.Add(new($"{lane}-{index}", lane,
@@ -131,6 +138,16 @@ public static class ExecutionScheduling
         var safe = availableBytes >= ReservedBytes + 4 * OrdinaryHeapBytes && processors >= 8 ? 4
             : availableBytes >= ReservedBytes + 2 * OrdinaryHeapBytes && processors >= 4 ? 2 : 1;
         return requested == "auto" ? safe : Math.Min(safe, int.Parse(requested, System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    // Partitioning does not launch processes. Keep enough independent batches for a
+    // later memory increase while retaining the requested and processor limits.
+    public static int PartitionCapacity(string requested, int processors)
+    {
+        ShardPlan.Require(requested is "auto" or "1" or "2" or "4", "Workers must be auto, 1, 2 or 4.");
+        ShardPlan.Require(processors > 0, "The host processor count is unavailable.");
+        var processorLimit = processors >= 8 ? 4 : processors >= 4 ? 2 : 1;
+        return requested == "auto" ? processorLimit : Math.Min(processorLimit, int.Parse(requested, System.Globalization.CultureInfo.InvariantCulture));
     }
 
     public static bool CanLaunchAdditional(int active, int initialBudget, ulong availableBytes)

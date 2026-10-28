@@ -16,7 +16,7 @@ const maxEntries = 100_000;
 const maxReceiptBytes = 64 * 1024 ** 2;
 const packages = { frontend: 'frontend.tar.gz', backend: 'backend.tar.gz', 'test-runtime': 'test-runtime.tar.gz' };
 const kinds = [...Object.keys(packages), 'shard-diagnostics', 'qualified-shard', 'restored-diagnostics'];
-const jobs = ['frontend', 'backend-build', 'backend-format', 'backend-browser', 'backend', 'deploy', 'backend-test'];
+const jobs = ['frontend', 'backend-build', 'backend-format', 'backend-browser', 'backend', 'deploy', 'backend-test', ...[0, 1, 2, 3].map(n => `backend-test-${n}`)];
 const receiptKeys = ['schema', 'repository', 'workflowRef', 'workflowSha', 'runId', 'producerAttempt', 'headSha', 'ref', 'event',
   'producerJob', 'runnerName', 'host', 'kind', 'shard', 'manifestSha', 'sdkVersion', 'runtimeArtifactId', 'diagnosticArtifactId',
   'retentionDays', 'publishedUtc', 'directories', 'files', 'totalBytes'];
@@ -160,10 +160,12 @@ export function validateInspection(report, paths, storeRoot) {
   }
 }
 
-export function contextFromEnvironment(env, platform = process.platform) {
+// The CLI always uses the production default. A programmatic root is injectable
+// alongside the filesystem adapter for isolated contract tests, never via argv/env.
+export function contextFromEnvironment(env, platform = process.platform, trustedStoreRoot = productionStoreRoot) {
   requireTrustedHost(env, platform);
   assert.equal(env.GITHUB_REF, 'refs/heads/main', 'The production artifact store accepts main only');
-  assert.equal(env.PAYPLANNER_CI_ARTIFACT_ROOT, productionStoreRoot, 'Exact production artifact root required');
+  assert.equal(env.PAYPLANNER_CI_ARTIFACT_ROOT, trustedStoreRoot, 'Exact production artifact root required');
   assert.equal(env.GITHUB_ACTIONS, 'true', 'A GitHub Actions context is required');
   assert.equal(env.RUNNER_NAME, 'PayPlanner-XSENUS', 'Unexpected runner identity');
   assert.equal(env.RUNNER_OS, 'Windows'); assert.equal(env.RUNNER_ARCH, 'X64');
@@ -172,11 +174,10 @@ export function contextFromEnvironment(env, platform = process.platform) {
   assert.match(env.GITHUB_SHA ?? '', /^[a-f0-9]{40}$/);
   assert.match(env.GITHUB_WORKFLOW_SHA ?? '', /^[a-f0-9]{40}$/);
   assert.ok(jobs.includes(env.GITHUB_JOB), 'Unknown actual producer/consumer job');
-  let producerJob = env.GITHUB_JOB;
-  if (producerJob === 'backend-test') {
-    assert.match(env.ARTIFACT_SHARD ?? '', /^[0-3]$/, 'Actual matrix shard is required');
-    producerJob = `backend-test-${env.ARTIFACT_SHARD}`;
-  } else assert.equal(env.ARTIFACT_SHARD, undefined, 'A nonmatrix caller cannot declare a shard');
+  const producerJob = env.GITHUB_JOB;
+  const actualShard = /^backend-test-([0-3])$/.exec(producerJob);
+  if (actualShard && env.ARTIFACT_SHARD !== undefined) assert.equal(env.ARTIFACT_SHARD, actualShard[1], 'Actual worker shard must match');
+  if (!actualShard) assert.equal(env.ARTIFACT_SHARD, undefined, 'Only an actual shard worker may declare a shard');
   const rawNeeds = env.ARTIFACT_NEEDS_JSON || '{}';
   assert.ok(Buffer.byteLength(rawNeeds) <= 256 * 1024, 'Oversized needs context');
   const needs = JSON.parse(rawNeeds);
@@ -189,8 +190,8 @@ export function contextFromEnvironment(env, platform = process.platform) {
 
 export function need(context, job, output, expected) {
   const matrix = /^backend-test-([0-3])$/.exec(job);
-  if (matrix) {
-    assert.equal(output, 'qualified-artifact-id', 'Only qualified matrix outputs are exported to consumers');
+  if (matrix && !context.needs[job]) {
+    assert.equal(output, 'qualified-artifact-id', 'Only qualified shard outputs are exported to consumers');
     job = 'backend-test';
     output = `shard_${matrix[1]}_id`;
   }
@@ -202,7 +203,7 @@ export function need(context, job, output, expected) {
 function metadata(kind, env, shard) {
   const result = { manifestSha: null, sdkVersion: null, runtimeArtifactId: null, diagnosticArtifactId: null };
   if (kind !== 'frontend') {
-    assert.match(env.EXPECTED_MANIFEST_SHA ?? '', shaPattern, 'Missing expected manifest SHA');
+    assert.match(env.EXPECTED_MANIFEST_SHA ?? '', /^[a-fA-F0-9]{64}$/, 'Missing expected manifest SHA');
     assert.match(env.EXPECTED_SDK_VERSION ?? '', /^9\.0\.[1-9][0-9]*$/, 'Missing exact .NET9 SDK version');
     result.manifestSha = env.EXPECTED_MANIFEST_SHA; result.sdkVersion = env.EXPECTED_SDK_VERSION;
   }
@@ -258,8 +259,8 @@ function validateInventory(receipt) {
   }
 }
 
-export function createArtifactStore({ env = process.env, platform = process.platform, adapter = windowsAdapter(env) } = {}) {
-  const context = contextFromEnvironment(env, platform);
+export function createArtifactStore({ env = process.env, platform = process.platform, adapter = windowsAdapter(env), trustedStoreRoot = productionStoreRoot } = {}) {
+  const context = contextFromEnvironment(env, platform, trustedStoreRoot);
   const root = plainPath(env.PAYPLANNER_CI_ARTIFACT_ROOT);
   const workspace = plainPath(env.GITHUB_WORKSPACE);
   const runnerTemp = plainPath(env.RUNNER_TEMP);

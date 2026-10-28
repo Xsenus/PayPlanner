@@ -2742,6 +2742,7 @@ export function TaskJournal({
   const routeTaskRequestRef = useRef(0);
   const pendingRouteTaskReadRef = useRef<{ taskId: number; userId: number | null; requestId: number } | null>(null);
   const taskListRequestRef = useRef<AbortController | null>(null);
+  const taskListReadCompletionRef = useRef<Promise<void> | null>(null);
   const taskMetadataRequestRef = useRef(0);
   const taskListLoadedRef = useRef(false);
   const lastOpenedRouteTaskIdRef = useRef<number | null>(null);
@@ -3400,6 +3401,8 @@ export function TaskJournal({
     offlineSnapshotSourceRef.current = null;
     setOfflineSnapshotSource(null);
     if (viewMode === 'list') pendingTaskListReadsRef.current.add(controller);
+    let tracksListCompletion = false;
+    let finishListProcessing: (() => void) | undefined;
     const isCurrent = () => !controller.signal.aborted && taskListRequestRef.current === controller;
     const prepareOfflineAccess = async () => {
       if (!currentUserId) return isCurrent();
@@ -3426,10 +3429,20 @@ export function TaskJournal({
         delete summaryParams.sortDir;
         delete summaryParams.includeDeadlineChangeRequests;
         delete summaryParams.calendarView;
-        const [response, summary] = await Promise.all([
-          apiService.getTaskJournalItems(pageParams, { signal: controller.signal }),
-          apiService.getTaskJournalSummary(summaryParams, { signal: controller.signal }),
-        ]);
+        const itemsRequest = apiService.getTaskJournalItems(pageParams, { signal: controller.signal });
+        const summaryRequest = apiService.getTaskJournalSummary(summaryParams, { signal: controller.signal });
+        // A failed response must not hide an error while its sibling is still loading.
+        // Realtime refreshes, however, wait for both actual reads to settle.
+        const processing = new Promise<void>((resolve) => { finishListProcessing = resolve; });
+        const completion = Promise.allSettled([itemsRequest, summaryRequest, processing]).then(() => undefined);
+        taskListReadCompletionRef.current = completion;
+        tracksListCompletion = true;
+        void completion.then(() => {
+          pendingTaskListReadsRef.current.delete(controller);
+          if (taskListRequestRef.current === controller) taskListRequestRef.current = null;
+          if (taskListReadCompletionRef.current === completion) taskListReadCompletionRef.current = null;
+        });
+        const [response, summary] = await Promise.all([itemsRequest, summaryRequest]);
         if (!isCurrent()) return;
         if (!await prepareOfflineAccess()) return;
         const lastPage = Math.max(1, Math.ceil(response.total / (response.pageSize || taskTableLayoutSettings.pageSize)));
@@ -3506,11 +3519,12 @@ export function TaskJournal({
         toast.error('Не удалось загрузить журнал задач.', 'Журнал задач');
       }
     } finally {
-      pendingTaskListReadsRef.current.delete(controller);
+      if (!tracksListCompletion) pendingTaskListReadsRef.current.delete(controller);
       if (taskListRequestRef.current === controller) {
-        taskListRequestRef.current = null;
+        if (!tracksListCompletion) taskListRequestRef.current = null;
         setLoading(false);
       }
+      finishListProcessing?.();
     }
   }, [
     contextFilter,
@@ -3536,6 +3550,31 @@ export function TaskJournal({
     if (isRouteTaskPage) return;
     void refreshTasks();
     let realtimeRefreshTimer: number | null = null;
+    let disposed = false;
+    let refreshQueued = false;
+    let refreshing = false;
+    const refreshFromSettledList = async () => {
+      refreshQueued = true;
+      if (refreshing) return;
+      refreshing = true;
+      try {
+        while (!disposed && refreshQueued) {
+          while (!disposed && taskListReadCompletionRef.current) {
+            await taskListReadCompletionRef.current;
+          }
+          if (disposed) return;
+          // Notifications received while waiting are covered by this fresh read.
+          if (realtimeRefreshTimer !== null) {
+            window.clearTimeout(realtimeRefreshTimer);
+            realtimeRefreshTimer = null;
+          }
+          refreshQueued = false;
+          await refreshTasks();
+        }
+      } finally {
+        refreshing = false;
+      }
+    };
     const refresh = (event: Event) => {
       const source = event instanceof CustomEvent
         ? (event.detail as { source?: object } | null)?.source
@@ -3552,7 +3591,8 @@ export function TaskJournal({
       }
       realtimeRefreshTimer = window.setTimeout(() => {
         realtimeRefreshTimer = null;
-        void refreshTasks();
+        if (viewMode === 'list') void refreshFromSettledList();
+        else void refreshTasks();
       }, REALTIME_TASK_REFRESH_DEBOUNCE_MS);
     };
     const refreshFromRealtime = (event: Event) => {
@@ -3584,6 +3624,8 @@ export function TaskJournal({
       }
     });
     return () => {
+      disposed = true;
+      refreshQueued = false;
       const controller = taskListRequestRef.current;
       taskListRequestRef.current = null;
       const scope = automationReadScopeRef.current;

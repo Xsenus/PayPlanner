@@ -126,13 +126,15 @@ internal static class BoundedTestRunner
         try
         {
             var admitted = HostResources.Read();
-            partitionCount = ExecutionScheduling.WorkerBudget(workers, admitted.AvailableBytes, admitted.Processors);
+            var admittedWorkers = ExecutionScheduling.WorkerBudget(workers, admitted.AvailableBytes, admitted.Processors);
+            partitionCount = ExecutionScheduling.PartitionCapacity(workers, admitted.Processors);
             batches = ExecutionScheduling.Batches(plan, shard, suite, partitionCount);
             Record(new
             {
                 Kind = "initial-budget",
                 Utc = DateTime.UtcNow,
                 BatchCount = partitionCount,
+                AdmittedWorkers = admittedWorkers,
                 admitted.AvailableBytes,
                 admitted.Processors
             });

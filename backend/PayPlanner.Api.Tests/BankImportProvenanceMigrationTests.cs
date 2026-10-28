@@ -106,7 +106,22 @@ public sealed class BankImportProvenanceMigrationTests
         var policy = postgres ? "20261024110001_AddDocumentSellerSnapshotPolicyPostgres" : "20261024110000_AddDocumentSellerSnapshotPolicy";
         var paymentAttempts = postgres ? "20261027005432_AddPaymentCreateAttempts" : "20261027005425_AddPaymentCreateAttempts";
         var chatHistory = postgres ? "20261027014154_AddPersonalChatHistory" : "20261027014147_AddPersonalChatHistory";
-        Assert.Equal(new[] { current, policy, paymentAttempts, chatHistory }, migrations[(provenanceIndex + 1)..]);
+        var remaining = postgres ? new[]
+        {
+            "20261027031752_AddTaskTimeTracking", "20261027130010_AddSalesRequestServiceInvoice",
+            "20261028020010_ProtectStickyNoteVersion", "20261028030010_ProtectDeadlineDecision",
+            "20261028040010_AddDeadlineReviewerDispatch", "20261028050010_AddTaskStatusNotificationOutbox",
+            "20261028060010_AddTaskStatusTransitionToken", "20261028070010_BindApprovalNotificationStage",
+            "20261028080010_CashInventoryAccountIdentityPostgreSql",
+        } : new[]
+        {
+            "20261027031742_AddTaskTimeTracking", "20261027130000_AddSalesRequestServiceInvoice",
+            "20261028020000_ProtectStickyNoteVersion", "20261028030000_ProtectDeadlineDecision",
+            "20261028040000_AddDeadlineReviewerDispatch", "20261028050000_AddTaskStatusNotificationOutbox",
+            "20261028060000_AddTaskStatusTransitionToken", "20261028070000_BindApprovalNotificationStage",
+            "20261028080000_CashInventoryAccountIdentity",
+        };
+        Assert.Equal(new[] { current, policy, paymentAttempts, chatHistory }.Concat(remaining), migrations[(provenanceIndex + 1)..]);
         var upgrade = previousStage > 0;
         string? before = null;
         if (upgrade)
