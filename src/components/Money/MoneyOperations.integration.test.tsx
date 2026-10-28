@@ -2307,7 +2307,7 @@ describe('MoneyOperations integration', () => {
       ),
     );
     expect(await screen.findByText('Поставщик Б')).toBeTruthy();
-    expect(document.body.textContent).toContain('Расход: 1 500,00 ₽');
+    expect(screen.getByText('Расход Факт').parentElement?.textContent).toContain('1 500,00 ₽');
     expect(screen.queryByText('Поставщик А')).toBeNull();
 
     await user.selectOptions(screen.getByLabelText('Банковский счёт'), '');
@@ -3490,6 +3490,16 @@ describe('MoneyOperations integration', () => {
 
   it('passes the selected cash account to cash orders and cash book requests', async () => {
     const user = userEvent.setup();
+    getCashOrderRegisterMock.mockImplementation(async (params: { moneyAccountId?: number }) => ({
+      moneyAccountId: params.moneyAccountId, items: [], total: 0, page: 1, pageSize: 10,
+      incomingCount: 0, outgoingCount: 0, draftCount: 0, postedCount: 0, cancelledCount: 0,
+      amountsAvailable: true, currencyStatus: 'empty', currency: null, incomingAmount: 0, outgoingAmount: 0,
+    }));
+    getCashBookMock.mockImplementation(async (params: { moneyAccountId?: number; accountName?: string }) => ({
+      moneyAccountId: params.moneyAccountId, accountName: params.accountName,
+      from: '2026-04-01', to: '2026-04-30', currencyStatus: 'single', currency: 'RUB',
+      openingBalance: 0, income: 0, expense: 0, closingBalance: 0, incomingCount: 0, outgoingCount: 0, days: [],
+    }));
     operations = [
       createOperation({
         id: 401,
@@ -3516,6 +3526,7 @@ describe('MoneyOperations integration', () => {
       expect(getCashOrderRegisterMock).toHaveBeenLastCalledWith(
         expect.objectContaining({
           accountName: 'Резервная касса',
+          moneyAccountId: 104,
           page: 1,
           pageSize: 10,
         }),
@@ -3523,7 +3534,7 @@ describe('MoneyOperations integration', () => {
       ),
     );
     expect(getCashBookMock).toHaveBeenLastCalledWith(
-      expect.objectContaining({ accountName: 'Резервная касса' }),
+      expect.objectContaining({ accountName: 'Резервная касса', moneyAccountId: 104 }),
       expectAbortOptions(),
     );
     await screen.findByText('Касса: Резервная касса');
