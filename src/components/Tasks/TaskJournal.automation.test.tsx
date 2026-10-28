@@ -185,7 +185,7 @@ describe('TaskJournal', () => {
     await renderJournal([], { waitForTitle: null });
     apiMock.getTaskJournalCaseAutomationCandidates.mockClear();
 
-    const searchInput = screen.getByRole('textbox') as HTMLInputElement;
+    const searchInput = screen.getByRole('textbox', { name: 'Поиск по контрагенту, делу или наименованию задачи' }) as HTMLInputElement;
     fireEvent.change(searchInput, { target: { value: 'ДРУГОЙ КЛИЕНТ' } });
 
     expect(apiMock.getTaskJournalCaseAutomationCandidates).not.toHaveBeenCalled();

@@ -3,6 +3,7 @@ import { webcrypto } from 'node:crypto';
 import { apiService, type CaseDocumentUploadState } from './api';
 import { API_BASE_URL } from './apiBaseUrl';
 import { beginCaseDocumentGeneration, getUnconfirmedCaseDocumentUploadKeys } from './caseDocumentUploadAttempts';
+import { AuthSessionChangedError } from './authService';
 
 const token = (id = 1, iat = 1) => `header.${btoa(JSON.stringify({ sub: String(id), iss: 'owned-fixture', iat }))}.signature`;
 const scope = (kind = 'invoice', caseId = 7, api = API_BASE_URL, hash = 'b'.repeat(64)) => JSON.stringify(['financial', api, caseId, kind, hash]);
@@ -82,7 +83,7 @@ describe('published local case attempt recovery', () => {
       return response([ready(own.key)]);
     }); vi.stubGlobal('fetch', fetchMock);
     const result = apiService.getPendingCaseDocumentUploads(7, undefined, controller.signal);
-    if (change === 'different-actor') await expect(result).rejects.toThrow('403');
+    if (change === 'different-actor') await expect(result).rejects.toBeInstanceOf(AuthSessionChangedError);
     else if (change === 'abort') await result.catch(() => null);
     else expect(await result).toEqual({ ...empty, localPublicationConfirmed: true });
     if (change !== 'same-actor-refresh') expect(beginCaseDocumentGeneration(scope(), token())).toEqual(own);
@@ -106,9 +107,10 @@ describe('published local case attempt recovery', () => {
     const pendingKey = crypto.randomUUID();
     const page = { items: [{ ...ready(pendingKey), status: 'waiting', documentId: null, version: null }], nextCursor: null };
     sessionStorage.setItem('pp.case-document-upload-attempts.v1', '{broken');
+    const getItem = Storage.prototype.getItem;
     if (change === 'denied') vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key) {
       if (this === sessionStorage) throw new Error('storage denied');
-      return key === 'pp_token' ? token() : null;
+      return getItem.call(this, key);
     });
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(response(page)); vi.stubGlobal('fetch', fetchMock);
     expect(getUnconfirmedCaseDocumentUploadKeys(7, API_BASE_URL, token())).toEqual([]);

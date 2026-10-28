@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { beginCaseDocumentGeneration, beginCaseDocumentUpload, confirmCaseDocumentUpload, confirmPublishedCaseDocumentUploads, confirmRetiredCaseDocumentUpload } from './caseDocumentUploadAttempts';
 import { API_BASE_URL } from './apiBaseUrl';
 import { ApiService } from './api';
-import { authService } from './authService';
+import { AuthSessionChangedError, authService } from './authService';
 import { createHash, webcrypto } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 
@@ -609,7 +609,7 @@ describe('background publication attempt acknowledgement', () => {
     }));
     const api = new ApiService();
     await expect(mode === 'discovery' ? api.getPendingCaseDocumentUploads(15) : api.getCaseDocumentUploadStates(15, [own.key]))
-      .rejects.toThrow('HTTP 403');
+      .rejects.toBeInstanceOf(AuthSessionChangedError);
     expect(sessionStorage.getItem('pp.case-document-upload-attempts.v1')).toBe(before);
   });
 

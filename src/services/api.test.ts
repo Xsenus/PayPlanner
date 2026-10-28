@@ -299,7 +299,7 @@ describe('apiService object audit', () => {
     expect(String(url)).toContain('searchAliases=PhoneNumber');
     expect(String(url)).toContain('page=2');
     expect(options?.signal).toBe(controller.signal);
-    expect(new Headers(options?.headers).get('X-PayPlanner-Currency-Contract')).toBe('1');
+    expect(new Headers(options?.headers).has('X-PayPlanner-Currency-Contract')).toBe(false);
   });
 });
 
