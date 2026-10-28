@@ -66,8 +66,15 @@ public class MoneySummaryCurrencyTests
         await using (var setup = new PaymentContext(baseOptions))
         {
             await setup.Database.EnsureCreatedAsync();
-            var admin = new User { Email = "concurrent@fixture.local", FullName = "Admin", PasswordHash = "hash",
-                Role = new Role { Name = "admin", Description = "Synthetic" }, IsActive = true, IsApproved = true };
+            var admin = new User
+            {
+                Email = "concurrent@fixture.local",
+                FullName = "Admin",
+                PasswordHash = "hash",
+                Role = new Role { Name = "admin", Description = "Synthetic" },
+                IsActive = true,
+                IsApproved = true
+            };
             var company = new LegalEntity { ShortName = "Synthetic" };
             setup.Users.Add(admin);
             setup.LegalEntities.Add(company);
@@ -75,10 +82,26 @@ public class MoneySummaryCurrencyTests
             setup.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = System.Text.Json.JsonSerializer.Serialize(new[] { company.Id }) });
             var own = new MoneyAccount { Name = "Selected", Source = MoneyOperationSource.Bank, CompanyId = company.Id, Currency = "RUB", IsActive = true };
             var other = new MoneyAccount { Name = "Other", Source = MoneyOperationSource.Bank, CompanyId = company.Id, Currency = "RUB", IsActive = true };
-            setup.MoneyOperations.AddRange(new MoneyOperation { MoneyAccount = own, Source = MoneyOperationSource.Bank, Direction = MoneyOperationDirection.Income,
-                    AccountingType = MoneyOperationAccountingType.Fact, Currency = "RUB", Date = day, Amount = 10m },
-                new MoneyOperation { MoneyAccount = other, Source = MoneyOperationSource.Bank, Direction = MoneyOperationDirection.Income,
-                    AccountingType = MoneyOperationAccountingType.Fact, Currency = "RUB", Date = day, Amount = 20m });
+            setup.MoneyOperations.AddRange(new MoneyOperation
+            {
+                MoneyAccount = own,
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                Currency = "RUB",
+                Date = day,
+                Amount = 10m
+            },
+                new MoneyOperation
+                {
+                    MoneyAccount = other,
+                    Source = MoneyOperationSource.Bank,
+                    Direction = MoneyOperationDirection.Income,
+                    AccountingType = MoneyOperationAccountingType.Fact,
+                    Currency = "RUB",
+                    Date = day,
+                    Amount = 20m
+                });
             await setup.SaveChangesAsync();
             adminId = admin.Id; accountId = own.Id; otherId = other.Id;
         }
@@ -90,9 +113,17 @@ public class MoneySummaryCurrencyTests
         await using var secondDb = new PaymentContext(secondOptions);
         MoneyOperationsController Controller(PaymentContext db)
         {
-            var controller = new MoneyOperationsController(db, NullLogger<MoneyOperationsController>.Instance) {
-                ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(
-                    [new Claim(ClaimTypes.NameIdentifier, adminId.ToString())], "Test")) } } };
+            var controller = new MoneyOperationsController(db, NullLogger<MoneyOperationsController>.Instance)
+            {
+                ControllerContext = new ControllerContext
+                {
+                    HttpContext = new DefaultHttpContext
+                    {
+                        User = new ClaimsPrincipal(new ClaimsIdentity(
+                    [new Claim(ClaimTypes.NameIdentifier, adminId.ToString())], "Test"))
+                    }
+                }
+            };
             controller.Request.Headers["X-PayPlanner-Currency-Contract"] = "1";
             return controller;
         }
@@ -136,11 +167,26 @@ public class MoneySummaryCurrencyTests
         await connection.OpenAsync();
         await using var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection).Options);
         await db.Database.EnsureCreatedAsync();
-        var admin = new User { Email = "http-admin@fixture.local", FullName = "Admin", PasswordHash = "hash",
-            Role = new Role { Name = "admin", Description = "Synthetic" }, IsActive = true, IsApproved = true };
+        var admin = new User
+        {
+            Email = "http-admin@fixture.local",
+            FullName = "Admin",
+            PasswordHash = "hash",
+            Role = new Role { Name = "admin", Description = "Synthetic" },
+            IsActive = true,
+            IsApproved = true
+        };
         var role = new Role { Name = "http-employee", Description = "Synthetic" };
-        var employee = new User { Email = "http-employee@fixture.local", FullName = "Employee", PasswordHash = "hash",
-            Role = role, IsEmployee = true, IsActive = true, IsApproved = true };
+        var employee = new User
+        {
+            Email = "http-employee@fixture.local",
+            FullName = "Employee",
+            PasswordHash = "hash",
+            Role = role,
+            IsEmployee = true,
+            IsActive = true,
+            IsApproved = true
+        };
         var first = new LegalEntity { ShortName = "First" };
         var second = new LegalEntity { ShortName = "Second" };
         db.Users.AddRange(admin, employee);
@@ -152,14 +198,33 @@ public class MoneySummaryCurrencyTests
         var a = new MoneyAccount { Name = "Same", Source = MoneyOperationSource.Bank, CompanyId = first.Id, Currency = "RUB", IsActive = true };
         var b = new MoneyAccount { Name = "Same", Source = MoneyOperationSource.Bank, CompanyId = second.Id, Currency = "RUB", IsActive = true };
         var day = new DateTime(2026, 10, 20);
-        db.MoneyOperations.AddRange(new MoneyOperation { MoneyAccount = a, AccountName = "Old", Source = MoneyOperationSource.Bank,
-                Direction = MoneyOperationDirection.Income, AccountingType = MoneyOperationAccountingType.Fact, Currency = "RUB", Date = day, Amount = 10m },
-            new MoneyOperation { MoneyAccount = b, AccountName = "Old", Source = MoneyOperationSource.Bank,
-                Direction = MoneyOperationDirection.Income, AccountingType = MoneyOperationAccountingType.Fact, Currency = "RUB", Date = day, Amount = 20m });
+        db.MoneyOperations.AddRange(new MoneyOperation
+        {
+            MoneyAccount = a,
+            AccountName = "Old",
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Currency = "RUB",
+            Date = day,
+            Amount = 10m
+        },
+            new MoneyOperation
+            {
+                MoneyAccount = b,
+                AccountName = "Old",
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                Currency = "RUB",
+                Date = day,
+                Amount = 20m
+            });
         await db.SaveChangesAsync();
         using var server = new TestServer(new WebHostBuilder().UseEnvironment("Testing")
             .UseSetting("BackgroundServices:Enabled", "false").UseSetting("Email:Enabled", "false")
-            .ConfigureServices(services => {
+            .ConfigureServices(services =>
+            {
                 services.AddLogging(); services.AddSingleton(db);
                 services.AddAuthentication("fixture").AddScheme<AuthenticationSchemeOptions, FixtureAuthentication>("fixture", _ => { });
                 services.AddAuthorization();
@@ -209,11 +274,26 @@ public class MoneySummaryCurrencyTests
         await connection.OpenAsync();
         await using var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection).Options);
         await db.Database.EnsureCreatedAsync();
-        var admin = new User { Email = "identity-admin@fixture.local", FullName = "Admin", PasswordHash = "hash",
-            Role = new Role { Name = "admin", Description = "Synthetic" }, IsActive = true, IsApproved = true };
+        var admin = new User
+        {
+            Email = "identity-admin@fixture.local",
+            FullName = "Admin",
+            PasswordHash = "hash",
+            Role = new Role { Name = "admin", Description = "Synthetic" },
+            IsActive = true,
+            IsApproved = true
+        };
         var role = new Role { Name = "identity-employee", Description = "Synthetic" };
-        var employee = new User { Email = "identity-employee@fixture.local", FullName = "Employee", PasswordHash = "hash",
-            Role = role, IsEmployee = true, IsActive = true, IsApproved = true };
+        var employee = new User
+        {
+            Email = "identity-employee@fixture.local",
+            FullName = "Employee",
+            PasswordHash = "hash",
+            Role = role,
+            IsEmployee = true,
+            IsActive = true,
+            IsApproved = true
+        };
         var first = new LegalEntity { ShortName = "First" };
         var second = new LegalEntity { ShortName = "Second" };
         db.Users.AddRange(admin, employee);
@@ -225,16 +305,42 @@ public class MoneySummaryCurrencyTests
         var a = new MoneyAccount { Name = "Same", Source = MoneyOperationSource.Bank, CompanyId = first.Id, Currency = "RUB", IsActive = true };
         var b = new MoneyAccount { Name = "Same", Source = MoneyOperationSource.Bank, CompanyId = second.Id, Currency = "RUB", IsActive = true };
         var day = new DateTime(2026, 10, 20);
-        db.MoneyOperations.AddRange(new MoneyOperation { MoneyAccount = a, AccountName = "Old", Source = MoneyOperationSource.Bank,
-                Direction = MoneyOperationDirection.Income, AccountingType = MoneyOperationAccountingType.Fact, Currency = "RUB", Date = day, Amount = 10m },
-            new MoneyOperation { MoneyAccount = b, AccountName = "Old", Source = MoneyOperationSource.Bank,
-                Direction = MoneyOperationDirection.Income, AccountingType = MoneyOperationAccountingType.Fact, Currency = "RUB", Date = day, Amount = 20m });
+        db.MoneyOperations.AddRange(new MoneyOperation
+        {
+            MoneyAccount = a,
+            AccountName = "Old",
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Currency = "RUB",
+            Date = day,
+            Amount = 10m
+        },
+            new MoneyOperation
+            {
+                MoneyAccount = b,
+                AccountName = "Old",
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                Currency = "RUB",
+                Date = day,
+                Amount = 20m
+            });
         await db.SaveChangesAsync();
         MoneyOperationsController Controller(User user)
         {
-            var controller = new MoneyOperationsController(db, NullLogger<MoneyOperationsController>.Instance) {
-                ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(
-                    [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "Test")) } } };
+            var controller = new MoneyOperationsController(db, NullLogger<MoneyOperationsController>.Instance)
+            {
+                ControllerContext = new ControllerContext
+                {
+                    HttpContext = new DefaultHttpContext
+                    {
+                        User = new ClaimsPrincipal(new ClaimsIdentity(
+                    [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "Test"))
+                    }
+                }
+            };
             controller.Request.Headers["X-PayPlanner-Currency-Contract"] = "1";
             return controller;
         }
@@ -265,8 +371,15 @@ public class MoneySummaryCurrencyTests
         await connection.OpenAsync();
         await using var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection).Options);
         await db.Database.EnsureCreatedAsync();
-        var user = new User { Email = "saved@fixture.local", FullName = "Synthetic", PasswordHash = "hash",
-            Role = new Role { Name = "admin", Description = "Synthetic" }, IsActive = true, IsApproved = true };
+        var user = new User
+        {
+            Email = "saved@fixture.local",
+            FullName = "Synthetic",
+            PasswordHash = "hash",
+            Role = new Role { Name = "admin", Description = "Synthetic" },
+            IsActive = true,
+            IsApproved = true
+        };
         var first = new LegalEntity { ShortName = "First" };
         var second = new LegalEntity { ShortName = "Second" };
         db.Users.Add(user);
@@ -278,20 +391,52 @@ public class MoneySummaryCurrencyTests
         db.MoneyAccounts.AddRange(account, another);
         await db.SaveChangesAsync();
         var day = new DateTime(2026, 10, 20);
-        db.MoneyBalanceReconciliationResults.Add(new MoneyBalanceReconciliationResult {
-            Date = day, Source = MoneyOperationSource.Bank, AccountName = "Same", CompanyId = first.Id, MoneyAccountId = account.Id,
-            Currency = scenario == "foreign" ? "USD" : scenario == "unknown" ? null : "RUB", ScopeKey = "first", Income = 10m, ClosingBalance = 10m });
+        db.MoneyBalanceReconciliationResults.Add(new MoneyBalanceReconciliationResult
+        {
+            Date = day,
+            Source = MoneyOperationSource.Bank,
+            AccountName = "Same",
+            CompanyId = first.Id,
+            MoneyAccountId = account.Id,
+            Currency = scenario == "foreign" ? "USD" : scenario == "unknown" ? null : "RUB",
+            ScopeKey = "first",
+            Income = 10m,
+            ClosingBalance = 10m
+        });
         if (scenario == "duplicate-name")
-            db.MoneyBalanceReconciliationResults.Add(new MoneyBalanceReconciliationResult { Date = day, Source = MoneyOperationSource.Bank,
-                AccountName = "Same", CompanyId = second.Id, MoneyAccountId = another.Id, Currency = "RUB", ScopeKey = "second", Income = 20m, ClosingBalance = 20m });
+            db.MoneyBalanceReconciliationResults.Add(new MoneyBalanceReconciliationResult
+            {
+                Date = day,
+                Source = MoneyOperationSource.Bank,
+                AccountName = "Same",
+                CompanyId = second.Id,
+                MoneyAccountId = another.Id,
+                Currency = "RUB",
+                ScopeKey = "second",
+                Income = 20m,
+                ClosingBalance = 20m
+            });
         if (scenario == "unattributed")
-            db.MoneyBalanceReconciliationResults.Add(new MoneyBalanceReconciliationResult { Date = day, Source = MoneyOperationSource.Bank,
-                AccountName = "Legacy", Currency = "RUB", Income = 20m, ClosingBalance = 20m });
+            db.MoneyBalanceReconciliationResults.Add(new MoneyBalanceReconciliationResult
+            {
+                Date = day,
+                Source = MoneyOperationSource.Bank,
+                AccountName = "Legacy",
+                Currency = "RUB",
+                Income = 20m,
+                ClosingBalance = 20m
+            });
         await db.SaveChangesAsync();
         var controller = new MoneyOperationsController(db, NullLogger<MoneyOperationsController>.Instance)
         {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(
-                [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "Test")) } },
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "Test"))
+                }
+            },
         };
         var old = await controller.GetBalanceReconciliationResults(day, day, MoneyOperationSource.Bank, null);
         if (blocked) Assert.IsType<ConflictObjectResult>(old.Result);
@@ -318,8 +463,15 @@ public class MoneySummaryCurrencyTests
         await connection.OpenAsync();
         await using var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection).Options);
         await db.Database.EnsureCreatedAsync();
-        var user = new User { Email = "daily@fixture.local", FullName = "Synthetic", PasswordHash = "hash",
-            Role = new Role { Name = "admin", Description = "Synthetic" }, IsActive = true, IsApproved = true };
+        var user = new User
+        {
+            Email = "daily@fixture.local",
+            FullName = "Synthetic",
+            PasswordHash = "hash",
+            Role = new Role { Name = "admin", Description = "Synthetic" },
+            IsActive = true,
+            IsApproved = true
+        };
         var first = new LegalEntity { ShortName = "First" };
         var second = new LegalEntity { ShortName = "Second" };
         db.Users.Add(user);
@@ -329,22 +481,49 @@ public class MoneySummaryCurrencyTests
         var account = new MoneyAccount { Name = "Same", Source = MoneyOperationSource.Bank, CompanyId = first.Id, Currency = "RUB", IsActive = true };
         db.MoneyAccounts.Add(account);
         var day = new DateTime(2026, 10, 20);
-        db.MoneyOperations.Add(new MoneyOperation { MoneyAccount = account, Source = MoneyOperationSource.Bank,
-            Direction = MoneyOperationDirection.Income, AccountingType = MoneyOperationAccountingType.Fact,
-            Currency = scenario == "foreign" ? "USD" : scenario == "unknown" ? null : "RUB", Date = day, Amount = 10m });
+        db.MoneyOperations.Add(new MoneyOperation
+        {
+            MoneyAccount = account,
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Currency = scenario == "foreign" ? "USD" : scenario == "unknown" ? null : "RUB",
+            Date = day,
+            Amount = 10m
+        });
         if (scenario == "duplicate-name")
-            db.MoneyOperations.Add(new MoneyOperation { MoneyAccount = new MoneyAccount { Name = "Same", Source = MoneyOperationSource.Bank, CompanyId = second.Id, Currency = "RUB", IsActive = true },
-                Source = MoneyOperationSource.Bank, Direction = MoneyOperationDirection.Income, AccountingType = MoneyOperationAccountingType.Fact,
-                Currency = "RUB", Date = day, Amount = 20m });
+            db.MoneyOperations.Add(new MoneyOperation
+            {
+                MoneyAccount = new MoneyAccount { Name = "Same", Source = MoneyOperationSource.Bank, CompanyId = second.Id, Currency = "RUB", IsActive = true },
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                Currency = "RUB",
+                Date = day,
+                Amount = 20m
+            });
         if (scenario == "unattributed")
-            db.MoneyOperations.Add(new MoneyOperation { AccountName = "Legacy", Source = MoneyOperationSource.Bank,
-                Direction = MoneyOperationDirection.Income, AccountingType = MoneyOperationAccountingType.Fact,
-                Currency = "RUB", Date = day, Amount = 20m });
+            db.MoneyOperations.Add(new MoneyOperation
+            {
+                AccountName = "Legacy",
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                Currency = "RUB",
+                Date = day,
+                Amount = 20m
+            });
         await db.SaveChangesAsync();
         var controller = new MoneyOperationsController(db, NullLogger<MoneyOperationsController>.Instance)
         {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(
-                [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "Test")) } },
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "Test"))
+                }
+            },
         };
         var old = await controller.GetDailyBalances(day, day, MoneyOperationSource.Bank, null);
         if (blocked) Assert.IsType<ConflictObjectResult>(old.Result);
@@ -394,8 +573,13 @@ public class MoneySummaryCurrencyTests
         db.MoneyAccounts.Add(account);
         MoneyOperation Movement(string? currency, DateTime date, decimal amount) => new()
         {
-            MoneyAccount = account, Source = MoneyOperationSource.Bank, Direction = MoneyOperationDirection.Income,
-            AccountingType = MoneyOperationAccountingType.Fact, Currency = currency, Date = date, Amount = amount,
+            MoneyAccount = account,
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Currency = currency,
+            Date = date,
+            Amount = amount,
         };
         if (scenario != "empty") db.MoneyOperations.Add(Movement(scenario == "unknown" ? null : "USD", new DateTime(2026, 10, 20), 125m));
         if (scenario == "mixed") db.MoneyOperations.Add(Movement("RUB", new DateTime(2026, 10, 21), 30m));
@@ -403,8 +587,14 @@ public class MoneySummaryCurrencyTests
         await db.SaveChangesAsync();
         var controller = new MoneyOperationsController(db, NullLogger<MoneyOperationsController>.Instance)
         {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(
-                [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin")], "Test")) } },
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin")], "Test"))
+                }
+            },
         };
         controller.Request.Headers["X-PayPlanner-Currency-Contract"] = "1";
         var response = await controller.GetPaged(new DateTime(2026, 10, 1), new DateTime(2026, 10, 31), null, null, null, ct: CancellationToken.None);
@@ -435,8 +625,15 @@ public class MoneySummaryCurrencyTests
         await connection.OpenAsync();
         await using var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection).Options);
         await db.Database.EnsureCreatedAsync();
-        var user = new User { Email = "legacy@fixture.local", FullName = "Synthetic", PasswordHash = "hash",
-            Role = new Role { Name = "admin", Description = "Synthetic" }, IsActive = true, IsApproved = true };
+        var user = new User
+        {
+            Email = "legacy@fixture.local",
+            FullName = "Synthetic",
+            PasswordHash = "hash",
+            Role = new Role { Name = "admin", Description = "Synthetic" },
+            IsActive = true,
+            IsApproved = true
+        };
         var company = new LegalEntity { ShortName = "Synthetic company" };
         db.Users.Add(user);
         db.LegalEntities.Add(company);
@@ -445,20 +642,39 @@ public class MoneySummaryCurrencyTests
         var account = new MoneyAccount { Name = "Synthetic", Source = MoneyOperationSource.Bank, CompanyId = company.Id, Currency = "RUB", IsActive = true };
         db.MoneyAccounts.Add(account);
         for (var index = 0; index < 5; index++)
-            db.MoneyOperations.Add(new MoneyOperation { MoneyAccount = account, Source = MoneyOperationSource.Bank,
-                Direction = MoneyOperationDirection.Income, AccountingType = MoneyOperationAccountingType.Fact,
-                Currency = "RUB", Date = new DateTime(2026, 10, 20), Amount = 10m });
+            db.MoneyOperations.Add(new MoneyOperation
+            {
+                MoneyAccount = account,
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                Currency = "RUB",
+                Date = new DateTime(2026, 10, 20),
+                Amount = 10m
+            });
         if (scenario != "rub")
-            db.MoneyOperations.Add(new MoneyOperation { MoneyAccount = account, Source = MoneyOperationSource.Bank,
+            db.MoneyOperations.Add(new MoneyOperation
+            {
+                MoneyAccount = account,
+                Source = MoneyOperationSource.Bank,
                 Direction = MoneyOperationDirection.Income,
                 AccountingType = scenario == "foreign-plan-other-page" ? MoneyOperationAccountingType.Plan : MoneyOperationAccountingType.Fact,
-                Currency = scenario == "unknown" ? null : "USD", Date = scenario == "foreign-opening" ? new DateTime(2026, 9, 20)
-                    : scenario == "foreign-plan-other-page" ? new DateTime(2026, 10, 2) : new DateTime(2026, 10, 21), Amount = 20m });
+                Currency = scenario == "unknown" ? null : "USD",
+                Date = scenario == "foreign-opening" ? new DateTime(2026, 9, 20)
+                    : scenario == "foreign-plan-other-page" ? new DateTime(2026, 10, 2) : new DateTime(2026, 10, 21),
+                Amount = 20m
+            });
         await db.SaveChangesAsync();
         var controller = new MoneyOperationsController(db, NullLogger<MoneyOperationsController>.Instance)
         {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(
-                [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "Test")) } },
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "Test"))
+                }
+            },
         };
         async Task<ActionResult<MoneyOperationsPageResponse>> Read() => await controller.GetPaged(new DateTime(2026, 10, 1),
             new DateTime(2026, 10, 31), null, null, null, page: 1, pageSize: 5, ct: CancellationToken.None);
@@ -485,8 +701,16 @@ public class MoneySummaryCurrencyTests
         await using var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection).Options);
         await db.Database.EnsureCreatedAsync();
         var role = new Role { Name = "synthetic-employee", Description = "Synthetic" };
-        var user = new User { Email = "legacy-employee@fixture.local", FullName = "Synthetic", PasswordHash = "hash",
-            Role = role, IsEmployee = true, IsActive = true, IsApproved = true };
+        var user = new User
+        {
+            Email = "legacy-employee@fixture.local",
+            FullName = "Synthetic",
+            PasswordHash = "hash",
+            Role = role,
+            IsEmployee = true,
+            IsActive = true,
+            IsApproved = true
+        };
         var own = new LegalEntity { ShortName = "Своя" };
         var foreign = new LegalEntity { ShortName = "Другая" };
         db.Users.Add(user);
@@ -496,17 +720,37 @@ public class MoneySummaryCurrencyTests
         db.UserCompanyAccesses.Add(new UserCompanyAccess { UserId = user.Id, LegalEntityId = own.Id });
         db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = System.Text.Json.JsonSerializer.Serialize(new[] { own.Id, foreign.Id }) });
         db.MoneyOperations.AddRange(
-            new MoneyOperation { MoneyAccount = new MoneyAccount { Name = "Своя", Source = MoneyOperationSource.Bank, CompanyId = own.Id },
-                Source = MoneyOperationSource.Bank, Direction = MoneyOperationDirection.Income, AccountingType = MoneyOperationAccountingType.Fact,
-                Date = new DateTime(2026, 10, 20), Amount = 10m, Currency = "RUB" },
-            new MoneyOperation { MoneyAccount = new MoneyAccount { Name = "Чужая", Source = MoneyOperationSource.Bank, CompanyId = foreign.Id },
-                Source = MoneyOperationSource.Bank, Direction = MoneyOperationDirection.Income, AccountingType = MoneyOperationAccountingType.Fact,
-                Date = new DateTime(2026, 10, 20), Amount = 20m, Currency = "USD" });
+            new MoneyOperation
+            {
+                MoneyAccount = new MoneyAccount { Name = "Своя", Source = MoneyOperationSource.Bank, CompanyId = own.Id },
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                Date = new DateTime(2026, 10, 20),
+                Amount = 10m,
+                Currency = "RUB"
+            },
+            new MoneyOperation
+            {
+                MoneyAccount = new MoneyAccount { Name = "Чужая", Source = MoneyOperationSource.Bank, CompanyId = foreign.Id },
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                Date = new DateTime(2026, 10, 20),
+                Amount = 20m,
+                Currency = "USD"
+            });
         await db.SaveChangesAsync();
         var controller = new MoneyOperationsController(db, NullLogger<MoneyOperationsController>.Instance)
         {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(
-                [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "Test")) } },
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "Test"))
+                }
+            },
         };
 
         var result = await controller.GetPaged(new DateTime(2026, 10, 1), new DateTime(2026, 10, 31), null, null, null, ct: CancellationToken.None);
@@ -525,10 +769,28 @@ public class MoneySummaryCurrencyTests
         Assert.Equal(10m, daily.Income);
         var accountsByCompany = await db.MoneyAccounts.ToDictionaryAsync(item => item.CompanyId!.Value);
         db.MoneyBalanceReconciliationResults.AddRange(
-            new MoneyBalanceReconciliationResult { Date = new DateTime(2026, 10, 20), Source = MoneyOperationSource.Bank,
-                AccountName = "Своя", CompanyId = own.Id, MoneyAccountId = accountsByCompany[own.Id].Id, Currency = "RUB", ScopeKey = "own", Income = 10m },
-            new MoneyBalanceReconciliationResult { Date = new DateTime(2026, 10, 20), Source = MoneyOperationSource.Bank,
-                AccountName = "Чужая", CompanyId = foreign.Id, MoneyAccountId = accountsByCompany[foreign.Id].Id, Currency = "USD", ScopeKey = "foreign", Income = 20m });
+            new MoneyBalanceReconciliationResult
+            {
+                Date = new DateTime(2026, 10, 20),
+                Source = MoneyOperationSource.Bank,
+                AccountName = "Своя",
+                CompanyId = own.Id,
+                MoneyAccountId = accountsByCompany[own.Id].Id,
+                Currency = "RUB",
+                ScopeKey = "own",
+                Income = 10m
+            },
+            new MoneyBalanceReconciliationResult
+            {
+                Date = new DateTime(2026, 10, 20),
+                Source = MoneyOperationSource.Bank,
+                AccountName = "Чужая",
+                CompanyId = foreign.Id,
+                MoneyAccountId = accountsByCompany[foreign.Id].Id,
+                Currency = "USD",
+                ScopeKey = "foreign",
+                Income = 20m
+            });
         await db.SaveChangesAsync();
         var savedResult = await controller.GetBalanceReconciliationResults(new DateTime(2026, 10, 20), new DateTime(2026, 10, 20), MoneyOperationSource.Bank, null);
         Assert.IsType<ConflictObjectResult>(savedResult.Result);
@@ -547,8 +809,15 @@ public class MoneySummaryCurrencyTests
         await connection.OpenAsync();
         await using var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection).Options);
         await db.Database.EnsureCreatedAsync();
-        var user = new User { Email = "summary-identities@fixture.local", FullName = "Synthetic", PasswordHash = "hash",
-            Role = new Role { Name = "admin", Description = "Synthetic" }, IsActive = true, IsApproved = true };
+        var user = new User
+        {
+            Email = "summary-identities@fixture.local",
+            FullName = "Synthetic",
+            PasswordHash = "hash",
+            Role = new Role { Name = "admin", Description = "Synthetic" },
+            IsActive = true,
+            IsApproved = true
+        };
         var company1 = new LegalEntity { ShortName = "Первая" };
         var company2 = new LegalEntity { ShortName = "Вторая" };
         db.Users.Add(user);
@@ -560,9 +829,14 @@ public class MoneySummaryCurrencyTests
         db.MoneyAccounts.AddRange(first, second);
         MoneyOperation Movement(MoneyAccount? account, string? currency, DateTime date, decimal amount) => new()
         {
-            MoneyAccount = account, Source = MoneyOperationSource.Bank, Direction = MoneyOperationDirection.Income,
-            AccountingType = MoneyOperationAccountingType.Fact, AccountName = account == first ? "Старое имя" : "Одинаковый",
-            Currency = currency, Date = date, Amount = amount,
+            MoneyAccount = account,
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            AccountName = account == first ? "Старое имя" : "Одинаковый",
+            Currency = currency,
+            Date = date,
+            Amount = amount,
         };
         db.MoneyOperations.AddRange(
             Movement(first, "RUB", new DateTime(2026, 9, 20), 100m),
@@ -574,8 +848,14 @@ public class MoneySummaryCurrencyTests
         await db.SaveChangesAsync();
         var controller = new MoneyOperationsController(db, NullLogger<MoneyOperationsController>.Instance)
         {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(
-                [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "Test")) } },
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "Test"))
+                }
+            },
         };
         var from = new DateTime(2026, 10, 1);
         var to = new DateTime(2026, 10, 31);

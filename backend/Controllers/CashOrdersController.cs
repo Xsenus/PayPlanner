@@ -520,8 +520,11 @@ public class CashOrdersController : ControllerBase
         for (Exception? current = error; current is not null; current = current.InnerException)
             if (current is DbUpdateConcurrencyException
                 || current is Microsoft.Data.Sqlite.SqliteException { SqliteErrorCode: 5 or 6 }
-                || current is Npgsql.PostgresException { SqlState: Npgsql.PostgresErrorCodes.SerializationFailure
-                    or Npgsql.PostgresErrorCodes.DeadlockDetected or Npgsql.PostgresErrorCodes.LockNotAvailable }) return true;
+                || current is Npgsql.PostgresException
+                {
+                    SqlState: Npgsql.PostgresErrorCodes.SerializationFailure
+                    or Npgsql.PostgresErrorCodes.DeadlockDetected or Npgsql.PostgresErrorCodes.LockNotAvailable
+                }) return true;
         return false;
     }
 

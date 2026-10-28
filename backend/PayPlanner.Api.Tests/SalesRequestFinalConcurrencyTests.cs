@@ -590,10 +590,17 @@ public sealed class SalesRequestFinalConcurrencyTests(PostgreSqlModelTemplate da
         };
         var update = tasks.UpdateTask(original.Id, new UpsertTaskJournalItemRequest
         {
-            ClientId = original.ClientId, ClientCaseId = original.ClientCaseId, ObjectName = original.ObjectName,
-            Title = original.Title, Description = original.Description, DueAt = original.DueAt,
-            AssigneeUserId = original.AssigneeUserId, AuthorUserId = original.AuthorUserId,
-            Type = original.Type, Priority = original.Priority, Status = "inProgress",
+            ClientId = original.ClientId,
+            ClientCaseId = original.ClientCaseId,
+            ObjectName = original.ObjectName,
+            Title = original.Title,
+            Description = original.Description,
+            DueAt = original.DueAt,
+            AssigneeUserId = original.AssigneeUserId,
+            AuthorUserId = original.AuthorUserId,
+            Type = original.Type,
+            Priority = original.Priority,
+            Status = "inProgress",
         }, default);
         try
         {

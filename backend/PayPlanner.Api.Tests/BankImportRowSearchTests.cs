@@ -45,8 +45,13 @@ public class BankImportRowSearchTests
     {
         var configured = Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES");
         var builder = !string.IsNullOrWhiteSpace(configured) ? new NpgsqlConnectionStringBuilder(configured)
-            : new NpgsqlConnectionStringBuilder { Host = "127.0.0.1", Port = 5433, Username = "payplanner_ci",
-                Password = Environment.GetEnvironmentVariable("PAYPLANNER_LOCAL_TEST_PG_PASSWORD") };
+            : new NpgsqlConnectionStringBuilder
+            {
+                Host = "127.0.0.1",
+                Port = 5433,
+                Username = "payplanner_ci",
+                Password = Environment.GetEnvironmentVariable("PAYPLANNER_LOCAL_TEST_PG_PASSWORD")
+            };
         if (builder.Host is not ("127.0.0.1" or "localhost" or "::1") || builder.Username != "payplanner_ci"
             || string.IsNullOrWhiteSpace(builder.Password))
             throw new InvalidOperationException("A loopback PostgreSQL endpoint with the isolated payplanner_ci role is required.");
@@ -83,9 +88,16 @@ public class BankImportRowSearchTests
     private static async Task VerifyAsync(PaymentContext db, Recorder recorder, bool postgres)
     {
         await db.Database.EnsureCreatedAsync();
-        var user = new User { Email = "bank-search@fixture.local", FullName = "Synthetic employee", PasswordHash = "hash",
+        var user = new User
+        {
+            Email = "bank-search@fixture.local",
+            FullName = "Synthetic employee",
+            PasswordHash = "hash",
             Role = new Role { Name = "bank-search", Description = "Synthetic read-only employee" },
-            IsActive = true, IsApproved = true, IsEmployee = true };
+            IsActive = true,
+            IsApproved = true,
+            IsEmployee = true
+        };
         var own = new LegalEntity { ShortName = "Своя компания" };
         var foreign = new LegalEntity { ShortName = "Чужая компания" };
         var account = new MoneyAccount { Name = "Общий счёт", Source = MoneyOperationSource.Bank, Currency = "RUB", Company = own };
@@ -100,13 +112,19 @@ public class BankImportRowSearchTests
             new SystemSetting { Key = "notifications.email.enabled", Value = "false" });
         var batch = Batch(account, user.Id, "own");
         for (var number = 1; number <= 130; number++)
-            batch.Rows.Add(new BankStatementImportRow { RowNumber = number, ImportKey = "own-" + number,
+            batch.Rows.Add(new BankStatementImportRow
+            {
+                RowNumber = number,
+                ImportKey = "own-" + number,
                 Status = number == 130 ? BankStatementImportRowStatus.Error : BankStatementImportRowStatus.Created,
-                Currency = number == 2 ? "USD" : number == 3 ? null : "RUB", Amount = number + 0.25m,
+                Currency = number == 2 ? "USD" : number == 3 ? null : "RUB",
+                Amount = number + 0.25m,
                 Date = new DateTime(2026, 10, 28, 0, 0, 0, DateTimeKind.Utc),
                 CounterpartyName = number <= 65 ? "ООО Ёжик" : "Другая организация",
                 Purpose = number == 128 ? "Плата %_\\строка' &?" : number % 20 == 0 ? "Оплата услуг ёжИк" : "Оплата по договору",
-                Message = number == 129 ? "Ошибка ЁЖИК" : null, PaymentOrderNumber = number == 130 ? "ёжик-130" : number.ToString() });
+                Message = number == 129 ? "Ошибка ЁЖИК" : null,
+                PaymentOrderNumber = number == 130 ? "ёжик-130" : number.ToString()
+            });
         var foreignBatch = Batch(otherAccount, user.Id, "foreign");
         foreignBatch.Rows.Add(new BankStatementImportRow { RowNumber = 1, ImportKey = "foreign", CounterpartyName = "Ёжик", Amount = 999m });
         db.BankStatementImportBatches.AddRange(batch, foreignBatch);
@@ -115,10 +133,13 @@ public class BankImportRowSearchTests
         var before = await SnapshotAsync(db);
         var controller = new MoneyOperationsController(db, NullLogger<MoneyOperationsController>.Instance)
         {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext
+            ControllerContext = new ControllerContext
             {
-                User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()) }, "Test")),
-            } },
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()) }, "Test")),
+                }
+            },
         };
         async Task<BankStatementImportBatchDetailDto> ReadAsync(string search, int page = 1, int pageSize = 50)
         {
@@ -173,12 +194,26 @@ public class BankImportRowSearchTests
     }
 
     private static BankStatementImportBatch Batch(MoneyAccount account, int userId, string key)
-        => new() { CompanyId = account.CompanyId, MoneyAccountId = account.Id, ImportedByUserId = userId, ResponsibleUserId = userId,
-            Source = BankStatementImportSources.File, FileName = key + ".csv", FileHash = key, RowsRead = 130, CreatedRows = 129, ErrorRows = 1 };
+        => new()
+        {
+            CompanyId = account.CompanyId,
+            MoneyAccountId = account.Id,
+            ImportedByUserId = userId,
+            ResponsibleUserId = userId,
+            Source = BankStatementImportSources.File,
+            FileName = key + ".csv",
+            FileHash = key,
+            RowsRead = 130,
+            CreatedRows = 129,
+            ErrorRows = 1
+        };
 
     private static async Task<string> SnapshotAsync(PaymentContext db)
-        => JsonSerializer.Serialize(new { Batches = await db.BankStatementImportBatches.IgnoreQueryFilters().AsNoTracking().OrderBy(item => item.Id).ToListAsync(),
+        => JsonSerializer.Serialize(new
+        {
+            Batches = await db.BankStatementImportBatches.IgnoreQueryFilters().AsNoTracking().OrderBy(item => item.Id).ToListAsync(),
             Rows = await db.BankStatementImportRows.IgnoreQueryFilters().AsNoTracking().OrderBy(item => item.Id).ToListAsync(),
             Operations = await db.MoneyOperations.IgnoreQueryFilters().AsNoTracking().OrderBy(item => item.Id).ToListAsync(),
-            Accounts = await db.MoneyAccounts.IgnoreQueryFilters().AsNoTracking().OrderBy(item => item.Id).ToListAsync() });
+            Accounts = await db.MoneyAccounts.IgnoreQueryFilters().AsNoTracking().OrderBy(item => item.Id).ToListAsync()
+        });
 }

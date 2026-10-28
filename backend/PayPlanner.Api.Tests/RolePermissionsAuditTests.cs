@@ -54,8 +54,12 @@ public class RolePermissionsAuditTests
         await db.SaveChangesAsync();
         var user = new User
         {
-            Email = "group-secretary@example.com", PasswordHash = "hash", FullName = "Secretary",
-            RoleId = role.Id, IsActive = true, IsApproved = true,
+            Email = "group-secretary@example.com",
+            PasswordHash = "hash",
+            FullName = "Secretary",
+            RoleId = role.Id,
+            IsActive = true,
+            IsApproved = true,
         };
         db.Users.Add(user);
         db.RolePermissions.AddRange(RolePermissionCatalog.CreateEntities(role.Id, allowRoleManagement: false));

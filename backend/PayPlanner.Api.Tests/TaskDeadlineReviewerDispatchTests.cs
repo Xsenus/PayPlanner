@@ -154,8 +154,12 @@ public sealed class TaskDeadlineReviewerDispatchTests
         await using var h = await Harness.CreateAsync(postgres); var id = await h.SeedAsync(); await using var db = h.Context();
         var request = await db.TaskJournalDeadlineChangeRequests.Include(item => item.TaskJournalItem).SingleAsync(item => item.Id == id);
         request.TaskJournalItem.ChannelsJson = "[\"inApp\"]";
-        db.UserSettings.Add(new UserSetting { UserId = request.ReviewerUserId!.Value, Key = UserNotificationPreferenceSettings.SettingKey,
-            Value = UserNotificationPreferenceSettings.Serialize(new UserNotificationPreferenceSnapshot([], new Dictionary<string, IReadOnlyList<string>> { [UserNotificationTypes.TaskDeadlineChangeRequested] = [NotificationChannels.InApp] })) });
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = request.ReviewerUserId!.Value,
+            Key = UserNotificationPreferenceSettings.SettingKey,
+            Value = UserNotificationPreferenceSettings.Serialize(new UserNotificationPreferenceSnapshot([], new Dictionary<string, IReadOnlyList<string>> { [UserNotificationTypes.TaskDeadlineChangeRequested] = [NotificationChannels.InApp] }))
+        });
         await db.SaveChangesAsync(); db.ChangeTracker.Clear();
         var publisher = DispatchProxy.Create<IRealtimeNotificationPublisher, PublisherProbe>(); ((PublisherProbe)(object)publisher).ThrowOnPublish = true;
         var service = new NotificationService(db, new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
@@ -199,8 +203,12 @@ public sealed class TaskDeadlineReviewerDispatchTests
             .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.ReviewerDispatchLeaseUntil, (DateTime?)expired));
         if (disableMaxBeforeRetry)
         {
-            firstDb.UserSettings.Add(new UserSetting { UserId = reviewerId, Key = UserNotificationPreferenceSettings.SettingKey,
-                Value = UserNotificationPreferenceSettings.Serialize(new UserNotificationPreferenceSnapshot([], new Dictionary<string, IReadOnlyList<string>> { [UserNotificationTypes.TaskDeadlineChangeRequested] = [NotificationChannels.Max] })) });
+            firstDb.UserSettings.Add(new UserSetting
+            {
+                UserId = reviewerId,
+                Key = UserNotificationPreferenceSettings.SettingKey,
+                Value = UserNotificationPreferenceSettings.Serialize(new UserNotificationPreferenceSnapshot([], new Dictionary<string, IReadOnlyList<string>> { [UserNotificationTypes.TaskDeadlineChangeRequested] = [NotificationChannels.Max] }))
+            });
             await firstDb.SaveChangesAsync();
         }
         outbox.Fail = false;

@@ -25,8 +25,15 @@ public sealed partial class ManagedTaskFileUploadServiceTests
         await using var lease = await template.CreateDatabaseAsync();
         PostgreSqlPaymentContext Context() => new(new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(lease.ConnectionString).Options);
         await using var db = Context();
-        var actor = new User { FullName = "Синтетический", Email = "managed-revoke@example.test", PasswordHash = "test", IsActive = true, IsApproved = true,
-            Role = new Role { Name = "synthetic-worker", Permissions = [new RolePermission { Section = RolePermissionCatalog.Tasks, CanView = true, ViewScope = DataVisibilityScope.Own }] } };
+        var actor = new User
+        {
+            FullName = "Синтетический",
+            Email = "managed-revoke@example.test",
+            PasswordHash = "test",
+            IsActive = true,
+            IsApproved = true,
+            Role = new Role { Name = "synthetic-worker", Permissions = [new RolePermission { Section = RolePermissionCatalog.Tasks, CanView = true, ViewScope = DataVisibilityScope.Own }] }
+        };
         if (target is "request" or "department")
             actor.Role!.Permissions.Add(new RolePermission { Section = RolePermissionCatalog.Requests, CanView = true, ViewScope = target == "department" ? DataVisibilityScope.Department : DataVisibilityScope.Own });
         if (target == "department") actor.Department = "Отдел А";
@@ -69,7 +76,7 @@ public sealed partial class ManagedTaskFileUploadServiceTests
         try
         {
             var environment = new TestEnvironment(root);
-            var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["FileStorage:RootPath"] = Path.Combine(root,"files"), ["StorageOrchestration:LocalRoot"] = Path.Combine(root,"objects") }).Build();
+            var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["FileStorage:RootPath"] = Path.Combine(root, "files"), ["StorageOrchestration:LocalRoot"] = Path.Combine(root, "objects") }).Build();
             var legacy = new LegacyLocalStorageProvider(environment, config);
             var registry = new StorageProviderRegistry([new LocalStorageProvider(environment, config), legacy, new ManagedCompatibilityStorageProvider(db, legacy)]);
             var monitor = new StaticOptions(new() { Enabled = true, ProductWriteEnabledClasses = ["task-file", "case-document"], ProductReadEnabledClasses = ["task-file", "case-document"], DefaultPolicy = new() { RequiredCopies = 1, WriteProviders = ["local"], ReadProviders = ["local"] } });
@@ -79,7 +86,7 @@ public sealed partial class ManagedTaskFileUploadServiceTests
             var checkedAccess = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             async Task<bool> Authorize(CancellationToken ct) { var allowed = await authority.CanPublishAsync(actor.Id, task.Id, ct); checkedAccess.TrySetResult(); await release.Task.WaitAsync(ct); return allowed; }
-            using var bytes = new MemoryStream([1,2,3,4]);
+            using var bytes = new MemoryStream([1, 2, 3, 4]);
             var form = new FormFile(bytes, 0, 4, "file", "synthetic.txt") { Headers = new HeaderDictionary(), ContentType = "text/plain" };
             var pending = service.UploadAsync(new(task.Id, actor.Id, actor.FullName, Guid.NewGuid(), form, "synthetic.txt", null, Authorize), CancellationToken.None);
             await checkedAccess.Task.WaitAsync(TimeSpan.FromSeconds(30));

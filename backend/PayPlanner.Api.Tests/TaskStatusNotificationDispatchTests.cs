@@ -535,8 +535,12 @@ public sealed class TaskStatusNotificationDispatchTests
         var processor = new TaskStatusNotificationDispatchProcessor(db, service);
         Assert.False(await processor.ProcessAsync(id, CancellationToken.None));
         db.ChangeTracker.Clear();
-        db.UserSettings.Add(new UserSetting { UserId = authorId, Key = UserNotificationPreferenceSettings.SettingKey,
-            Value = UserNotificationPreferenceSettings.Serialize(new UserNotificationPreferenceSnapshot([], new Dictionary<string, IReadOnlyList<string>> { [UserNotificationTypes.TaskCompleted] = [NotificationChannels.Toast] })) });
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = authorId,
+            Key = UserNotificationPreferenceSettings.SettingKey,
+            Value = UserNotificationPreferenceSettings.Serialize(new UserNotificationPreferenceSnapshot([], new Dictionary<string, IReadOnlyList<string>> { [UserNotificationTypes.TaskCompleted] = [NotificationChannels.Toast] }))
+        });
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
         var expired = DateTime.UtcNow.AddSeconds(-1);
@@ -570,8 +574,12 @@ public sealed class TaskStatusNotificationDispatchTests
         db.ChangeTracker.Clear();
         if (disableBeforeRetry)
         {
-            db.UserSettings.Add(new UserSetting { UserId = authorId, Key = UserNotificationPreferenceSettings.SettingKey,
-                Value = UserNotificationPreferenceSettings.Serialize(new UserNotificationPreferenceSnapshot([UserNotificationTypes.TaskCompleted], new Dictionary<string, IReadOnlyList<string>>())) });
+            db.UserSettings.Add(new UserSetting
+            {
+                UserId = authorId,
+                Key = UserNotificationPreferenceSettings.SettingKey,
+                Value = UserNotificationPreferenceSettings.Serialize(new UserNotificationPreferenceSnapshot([UserNotificationTypes.TaskCompleted], new Dictionary<string, IReadOnlyList<string>>()))
+            });
             await db.SaveChangesAsync();
             db.ChangeTracker.Clear();
         }

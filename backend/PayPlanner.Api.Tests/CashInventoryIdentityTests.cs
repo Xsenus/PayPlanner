@@ -28,8 +28,15 @@ public class CashInventoryIdentityTests
         await connection.OpenAsync();
         await using var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection).Options);
         await db.Database.EnsureCreatedAsync();
-        var user = new User { Email = "synthetic-admin@fixture.local", FullName = "Synthetic administrator", PasswordHash = "hash",
-            Role = new Role { Name = "admin", Description = "Synthetic administrator" }, IsActive = true, IsApproved = true };
+        var user = new User
+        {
+            Email = "synthetic-admin@fixture.local",
+            FullName = "Synthetic administrator",
+            PasswordHash = "hash",
+            Role = new Role { Name = "admin", Description = "Synthetic administrator" },
+            IsActive = true,
+            IsApproved = true
+        };
         var first = new LegalEntity { ShortName = "Компания 1" };
         var second = new LegalEntity { ShortName = "Компания 2" };
         var cash = new MoneyAccount { Name = "Касса", Source = MoneyOperationSource.Cash, Currency = "RUB", Company = first, IsActive = true };
@@ -39,17 +46,57 @@ public class CashInventoryIdentityTests
         await db.SaveChangesAsync();
         db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = System.Text.Json.JsonSerializer.Serialize(new[] { first.Id, second.Id }) });
         db.CashOrders.AddRange(
-            new CashOrder { Number = "SYN-FIRST", Status = CashOrderStatus.Posted, Type = CashOrderType.Incoming, Date = new DateTime(2026, 10, 27),
-                Amount = 100m, Currency = "RUB", Account = "Касса", MoneyAccountId = cash.Id, CompanyId = first.Id },
-            new CashOrder { Number = "SYN-OTHER", Status = CashOrderStatus.Posted, Type = CashOrderType.Incoming, Date = new DateTime(2026, 10, 27),
-                Amount = 900m, Currency = "RUB", Account = "Касса", MoneyAccountId = other.Id, CompanyId = second.Id });
-        if (scenario == "unassigned") db.CashOrders.Add(new CashOrder { Number = "SYN-UNKNOWN", Status = CashOrderStatus.Posted,
-            Type = CashOrderType.Incoming, Date = new DateTime(2026, 10, 27), Amount = 40m, Currency = "RUB", Account = "Касса" });
+            new CashOrder
+            {
+                Number = "SYN-FIRST",
+                Status = CashOrderStatus.Posted,
+                Type = CashOrderType.Incoming,
+                Date = new DateTime(2026, 10, 27),
+                Amount = 100m,
+                Currency = "RUB",
+                Account = "Касса",
+                MoneyAccountId = cash.Id,
+                CompanyId = first.Id
+            },
+            new CashOrder
+            {
+                Number = "SYN-OTHER",
+                Status = CashOrderStatus.Posted,
+                Type = CashOrderType.Incoming,
+                Date = new DateTime(2026, 10, 27),
+                Amount = 900m,
+                Currency = "RUB",
+                Account = "Касса",
+                MoneyAccountId = other.Id,
+                CompanyId = second.Id
+            });
+        if (scenario == "unassigned") db.CashOrders.Add(new CashOrder
+        {
+            Number = "SYN-UNKNOWN",
+            Status = CashOrderStatus.Posted,
+            Type = CashOrderType.Incoming,
+            Date = new DateTime(2026, 10, 27),
+            Amount = 40m,
+            Currency = "RUB",
+            Account = "Касса"
+        });
         await db.SaveChangesAsync();
-        var controller = new CashOrdersController(db) { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext
-        { User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test")) } } };
-        var result = await controller.CreateInventory(new CashInventoryCreateRequest { AccountName = scenario == "wrong-name" ? "Другая" : "Касса",
-            MoneyAccountId = scenario == "no-id" ? null : cash.Id, Date = new DateTime(2026, 10, 28), ActualBalance = 120m, CreateCorrection = correction }, CancellationToken.None);
+        var controller = new CashOrdersController(db)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                { User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test")) }
+            }
+        };
+        var result = await controller.CreateInventory(new CashInventoryCreateRequest
+        {
+            AccountName = scenario == "wrong-name" ? "Другая" : "Касса",
+            MoneyAccountId = scenario == "no-id" ? null : cash.Id,
+            Date = new DateTime(2026, 10, 28),
+            ActualBalance = 120m,
+            CreateCorrection = correction
+        }, CancellationToken.None);
         if (scenario == "confirmed")
         {
             var inventory = Assert.IsType<CashInventoryDto>(Assert.IsType<CreatedResult>(result).Value);
@@ -87,26 +134,54 @@ public class CashInventoryIdentityTests
         await connection.OpenAsync();
         await using var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection).Options);
         await db.Database.EnsureCreatedAsync();
-        var user = new User { Email = "synthetic-admin@fixture.local", FullName = "Synthetic administrator", PasswordHash = "hash",
-            Role = new Role { Name = "admin", Description = "Synthetic administrator" }, IsActive = true, IsApproved = true };
+        var user = new User
+        {
+            Email = "synthetic-admin@fixture.local",
+            FullName = "Synthetic administrator",
+            PasswordHash = "hash",
+            Role = new Role { Name = "admin", Description = "Synthetic administrator" },
+            IsActive = true,
+            IsApproved = true
+        };
         var company = new LegalEntity { ShortName = "Синтетическая компания" };
         var account = new MoneyAccount { Name = "Касса", Source = MoneyOperationSource.Cash, Currency = "RUB", Company = company, IsActive = scenario != "post-inactive" };
         db.Users.Add(user);
         db.MoneyAccounts.Add(account);
         await db.SaveChangesAsync();
         db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = System.Text.Json.JsonSerializer.Serialize(new[] { company.Id }) });
-        var order = new CashOrder { Number = "SYN-ORDER", Type = CashOrderType.Incoming,
+        var order = new CashOrder
+        {
+            Number = "SYN-ORDER",
+            Type = CashOrderType.Incoming,
             Status = scenario == "already-posted" ? CashOrderStatus.Posted : CashOrderStatus.Draft,
-            Date = new DateTime(2026, 10, 28), Amount = 100m, Currency = scenario is "post-mismatch" or "already-posted" ? "USD" : "RUB",
-            Account = account.Name, MoneyAccountId = account.Id, CompanyId = company.Id };
+            Date = new DateTime(2026, 10, 28),
+            Amount = 100m,
+            Currency = scenario is "post-mismatch" or "already-posted" ? "USD" : "RUB",
+            Account = account.Name,
+            MoneyAccountId = account.Id,
+            CompanyId = company.Id
+        };
         db.CashOrders.Add(order);
         await db.SaveChangesAsync();
-        var controller = new CashOrdersController(db) { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext
-        { User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test")) } } };
+        var controller = new CashOrdersController(db)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                { User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test")) }
+            }
+        };
         IActionResult result;
         if (scenario is "change-currency" or "same-currency")
-            result = await controller.Update(order.Id, new CashOrder { Type = order.Type, Amount = order.Amount, Date = order.Date,
-                Account = order.Account, Currency = scenario == "change-currency" ? "USD" : "RUB", Comment = "Примечание" }, CancellationToken.None);
+            result = await controller.Update(order.Id, new CashOrder
+            {
+                Type = order.Type,
+                Amount = order.Amount,
+                Date = order.Date,
+                Account = order.Account,
+                Currency = scenario == "change-currency" ? "USD" : "RUB",
+                Comment = "Примечание"
+            }, CancellationToken.None);
         else
             result = await controller.Post(order.Id, CancellationToken.None);
         if (scenario is "change-currency" or "post-mismatch" or "post-inactive") Assert.IsType<BadRequestObjectResult>(result);
@@ -130,21 +205,43 @@ public class CashInventoryIdentityTests
         await connection.OpenAsync();
         await using var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection).Options);
         await db.Database.EnsureCreatedAsync();
-        var user = new User { Email = "synthetic-admin@fixture.local", FullName = "Synthetic administrator", PasswordHash = "hash",
-            Role = new Role { Name = "admin", Description = "Synthetic administrator" }, IsActive = true, IsApproved = true };
+        var user = new User
+        {
+            Email = "synthetic-admin@fixture.local",
+            FullName = "Synthetic administrator",
+            PasswordHash = "hash",
+            Role = new Role { Name = "admin", Description = "Synthetic administrator" },
+            IsActive = true,
+            IsApproved = true
+        };
         var company = new LegalEntity { ShortName = "Синтетическая компания" };
         var account = new MoneyAccount { Name = "Касса", Source = MoneyOperationSource.Cash, Currency = "RUB", Company = company, IsActive = scenario != "inactive" };
         db.Users.Add(user);
         db.MoneyAccounts.Add(account);
         await db.SaveChangesAsync();
         db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = System.Text.Json.JsonSerializer.Serialize(new[] { company.Id }) });
-        var source = new CashOrder { Number = "SYN-SOURCE", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
-            Date = new DateTime(2026, 10, 27), Amount = 100m, Currency = scenario == "currency" ? "USD" : "RUB", Account = scenario == "renamed" ? "Прежнее название" : account.Name,
-            MoneyAccountId = scenario == "unbound" ? null : account.Id, CompanyId = scenario == "unbound" ? null : company.Id };
+        var source = new CashOrder
+        {
+            Number = "SYN-SOURCE",
+            Type = CashOrderType.Incoming,
+            Status = CashOrderStatus.Posted,
+            Date = new DateTime(2026, 10, 27),
+            Amount = 100m,
+            Currency = scenario == "currency" ? "USD" : "RUB",
+            Account = scenario == "renamed" ? "Прежнее название" : account.Name,
+            MoneyAccountId = scenario == "unbound" ? null : account.Id,
+            CompanyId = scenario == "unbound" ? null : company.Id
+        };
         db.CashOrders.Add(source);
         await db.SaveChangesAsync();
-        var controller = new CashOrdersController(db) { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext
-        { User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test")) } } };
+        var controller = new CashOrdersController(db)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                { User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test")) }
+            }
+        };
         var result = await controller.Copy(source.Id, CancellationToken.None);
         if (scenario is "inactive" or "currency")
         {
@@ -191,23 +288,51 @@ public class CashInventoryIdentityTests
         await connection.OpenAsync();
         await using var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection).Options);
         await db.Database.EnsureCreatedAsync();
-        var user = new User { Email = "synthetic-admin@fixture.local", FullName = "Synthetic administrator", PasswordHash = "hash",
-            Role = new Role { Name = "admin", Description = "Synthetic administrator" }, IsActive = true, IsApproved = true };
+        var user = new User
+        {
+            Email = "synthetic-admin@fixture.local",
+            FullName = "Synthetic administrator",
+            PasswordHash = "hash",
+            Role = new Role { Name = "admin", Description = "Synthetic administrator" },
+            IsActive = true,
+            IsApproved = true
+        };
         var company = new LegalEntity { ShortName = "Синтетическая компания" };
         var other = new LegalEntity { ShortName = "Чужая компания" };
-        var account = new MoneyAccount { Name = "Подтверждённая касса", Source = MoneyOperationSource.Cash, Currency = "RUB",
-            Company = scenario == "foreign" ? other : company, IsActive = scenario != "inactive" };
+        var account = new MoneyAccount
+        {
+            Name = "Подтверждённая касса",
+            Source = MoneyOperationSource.Cash,
+            Currency = "RUB",
+            Company = scenario == "foreign" ? other : company,
+            IsActive = scenario != "inactive"
+        };
         db.Users.Add(user);
         db.LegalEntities.Add(company);
         db.MoneyAccounts.Add(account);
         await db.SaveChangesAsync();
         db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = System.Text.Json.JsonSerializer.Serialize(new[] { company.Id }) });
         await db.SaveChangesAsync();
-        var controller = new CashOrdersController(db) { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext
-        { User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test")) } } };
-        var result = await controller.Create(new CashOrder { Number = "SYN-MANUAL", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
-            Date = new DateTime(2026, 10, 28), Amount = 100m, Currency = scenario == "currency" ? "USD" : "RUB", Account = "Подменённое название",
-            SelectedMoneyAccountId = account.Id, PaymentId = scenario == "linked" ? 1 : null }, CancellationToken.None);
+        var controller = new CashOrdersController(db)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                { User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test")) }
+            }
+        };
+        var result = await controller.Create(new CashOrder
+        {
+            Number = "SYN-MANUAL",
+            Type = CashOrderType.Incoming,
+            Status = CashOrderStatus.Posted,
+            Date = new DateTime(2026, 10, 28),
+            Amount = 100m,
+            Currency = scenario == "currency" ? "USD" : "RUB",
+            Account = "Подменённое название",
+            SelectedMoneyAccountId = account.Id,
+            PaymentId = scenario == "linked" ? 1 : null
+        }, CancellationToken.None);
         if (scenario == "valid")
         {
             Assert.True(Assert.IsType<CashOrderDto>(Assert.IsType<CreatedResult>(result).Value).HasLinkedCashAccount);
@@ -215,8 +340,14 @@ public class CashInventoryIdentityTests
             Assert.Equal(account.Id, saved.MoneyAccountId);
             Assert.Equal(company.Id, saved.CompanyId);
             Assert.Equal(account.Name, saved.Account);
-            var inventory = await controller.CreateInventory(new CashInventoryCreateRequest { AccountName = account.Name, MoneyAccountId = account.Id,
-                Date = new DateTime(2026, 10, 28), ActualBalance = 100m, CreateCorrection = false }, CancellationToken.None);
+            var inventory = await controller.CreateInventory(new CashInventoryCreateRequest
+            {
+                AccountName = account.Name,
+                MoneyAccountId = account.Id,
+                Date = new DateTime(2026, 10, 28),
+                ActualBalance = 100m,
+                CreateCorrection = false
+            }, CancellationToken.None);
             var inventoryDto = Assert.IsType<CashInventoryDto>(Assert.IsType<CreatedResult>(inventory).Value);
             Assert.Equal(100m, inventoryDto.AccountingBalance);
         }
@@ -236,21 +367,48 @@ public class CashInventoryIdentityTests
         await connection.OpenAsync();
         await using var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection).Options);
         await db.Database.EnsureCreatedAsync();
-        var user = new User { Email = "synthetic-admin@fixture.local", FullName = "Synthetic administrator", PasswordHash = "hash",
-            Role = new Role { Name = "admin", Description = "Synthetic administrator" }, IsActive = true, IsApproved = true };
+        var user = new User
+        {
+            Email = "synthetic-admin@fixture.local",
+            FullName = "Synthetic administrator",
+            PasswordHash = "hash",
+            Role = new Role { Name = "admin", Description = "Synthetic administrator" },
+            IsActive = true,
+            IsApproved = true
+        };
         var company = new LegalEntity { ShortName = "Синтетическая компания" };
         var account = new MoneyAccount { Name = "Касса", Source = MoneyOperationSource.Cash, Currency = "RUB", Company = company, IsActive = true };
         db.Users.Add(user);
         db.MoneyAccounts.Add(account);
         await db.SaveChangesAsync();
         db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = System.Text.Json.JsonSerializer.Serialize(new[] { company.Id }) });
-        db.CashOrders.Add(new CashOrder { Number = "SYN-OLD", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
-            Date = new DateTime(2026, 10, 27), Amount = 100m, Currency = "RUB", Account = account.Name });
+        db.CashOrders.Add(new CashOrder
+        {
+            Number = "SYN-OLD",
+            Type = CashOrderType.Incoming,
+            Status = CashOrderStatus.Posted,
+            Date = new DateTime(2026, 10, 27),
+            Amount = 100m,
+            Currency = "RUB",
+            Account = account.Name
+        });
         await db.SaveChangesAsync();
-        var controller = new CashOrdersController(db) { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext
-        { User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test")) } } };
-        var result = await controller.CreateInventory(new CashInventoryCreateRequest { AccountName = account.Name, MoneyAccountId = account.Id,
-            Date = new DateTime(2026, 10, 28), ActualBalance = 0m, CreateCorrection = createCorrection }, CancellationToken.None);
+        var controller = new CashOrdersController(db)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                { User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test")) }
+            }
+        };
+        var result = await controller.CreateInventory(new CashInventoryCreateRequest
+        {
+            AccountName = account.Name,
+            MoneyAccountId = account.Id,
+            Date = new DateTime(2026, 10, 28),
+            ActualBalance = 0m,
+            CreateCorrection = createCorrection
+        }, CancellationToken.None);
         Assert.IsType<BadRequestObjectResult>(result);
         Assert.Empty(await db.CashInventories.ToListAsync());
         var order = Assert.Single(await db.CashOrders.ToListAsync());
@@ -268,8 +426,15 @@ public class CashInventoryIdentityTests
         await connection.OpenAsync();
         await using var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection).Options);
         await db.Database.EnsureCreatedAsync();
-        var user = new User { Email = "synthetic-admin@fixture.local", FullName = "Synthetic administrator", PasswordHash = "hash",
-            Role = new Role { Name = "admin", Description = "Synthetic administrator" }, IsActive = true, IsApproved = true };
+        var user = new User
+        {
+            Email = "synthetic-admin@fixture.local",
+            FullName = "Synthetic administrator",
+            PasswordHash = "hash",
+            Role = new Role { Name = "admin", Description = "Synthetic administrator" },
+            IsActive = true,
+            IsApproved = true
+        };
         var company = new LegalEntity { ShortName = "Синтетическая компания" };
         var account = new MoneyAccount { Name = "Касса", Source = MoneyOperationSource.Cash, Currency = "RUB", Company = company, IsActive = true };
         db.Users.Add(user);
@@ -281,8 +446,11 @@ public class CashInventoryIdentityTests
         else
             db.CashOrders.Add(new CashOrder { Number = "SYN-ORDER", Account = account.Name, Amount = 100m, Currency = "RUB", Date = new DateTime(2026, 10, 27) });
         await db.SaveChangesAsync();
-        var http = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(
-            new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test")) };
+        var http = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+            new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test"))
+        };
         var controller = new MoneyAccountsController(db) { ControllerContext = new ControllerContext { HttpContext = http } };
         Assert.IsType<NoContentResult>(await controller.Delete(account.Id, CancellationToken.None));
         db.ChangeTracker.Clear();
@@ -309,8 +477,15 @@ public class CashInventoryIdentityTests
         await connection.OpenAsync();
         await using var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection).Options);
         await db.Database.EnsureCreatedAsync();
-        var user = new User { Email = "synthetic-admin@fixture.local", FullName = "Synthetic administrator", PasswordHash = "hash",
-            Role = new Role { Name = "admin", Description = "Synthetic administrator" }, IsActive = true, IsApproved = true };
+        var user = new User
+        {
+            Email = "synthetic-admin@fixture.local",
+            FullName = "Synthetic administrator",
+            PasswordHash = "hash",
+            Role = new Role { Name = "admin", Description = "Synthetic administrator" },
+            IsActive = true,
+            IsApproved = true
+        };
         var company = new LegalEntity { ShortName = "Синтетическая компания" };
         var account = new MoneyAccount { Name = "Касса", Source = scenario.StartsWith("bank-to-cash") ? MoneyOperationSource.Bank : MoneyOperationSource.Cash, Currency = "RUB", Company = company, IsActive = true };
         db.Users.Add(user);
@@ -321,21 +496,36 @@ public class CashInventoryIdentityTests
             db.CashInventories.Add(new CashInventory { Number = "SYN-INV", AccountName = scenario == "new-inventory" ? "Новая касса" : "Касса", Date = new DateTime(2026, 10, 27) });
         else
         {
-            var order = new CashOrder { Number = "SYN-ORDER", Account = scenario == "new-order" ? "Новая касса" : scenario == "other-history" ? "Постороннее название" : "Касса",
-                Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted, Amount = 100m, Currency = "RUB", Date = new DateTime(2026, 10, 27),
-                MoneyAccountId = scenario == "bound-order" || scenario == "partial-order" ? account.Id : null, CompanyId = scenario == "bound-order" ? company.Id : null };
+            var order = new CashOrder
+            {
+                Number = "SYN-ORDER",
+                Account = scenario == "new-order" ? "Новая касса" : scenario == "other-history" ? "Постороннее название" : "Касса",
+                Type = CashOrderType.Incoming,
+                Status = CashOrderStatus.Posted,
+                Amount = 100m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 10, 27),
+                MoneyAccountId = scenario == "bound-order" || scenario == "partial-order" ? account.Id : null,
+                CompanyId = scenario == "bound-order" ? company.Id : null
+            };
             db.CashOrders.Add(order);
             await db.SaveChangesAsync();
             if (scenario == "deleted-order") db.Entry(order).Property<bool>("IsDeleted").CurrentValue = true;
         }
         await db.SaveChangesAsync();
-        var http = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(
-            new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test")) };
+        var http = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+            new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test"))
+        };
         var controller = new MoneyAccountsController(db) { ControllerContext = new ControllerContext { HttpContext = http } };
         var result = await controller.Update(account.Id, new MoneyAccount
         {
-            Name = scenario == "unchanged" || scenario == "bank-to-cash-same-name" ? "Касса" : "Новая касса", Source = scenario.StartsWith("bank-to-cash") ? MoneyOperationSource.Cash : account.Source,
-            CompanyId = company.Id, Currency = "RUB", IsActive = true,
+            Name = scenario == "unchanged" || scenario == "bank-to-cash-same-name" ? "Касса" : "Новая касса",
+            Source = scenario.StartsWith("bank-to-cash") ? MoneyOperationSource.Cash : account.Source,
+            CompanyId = company.Id,
+            Currency = "RUB",
+            IsActive = true,
         }, CancellationToken.None);
         if (allowed) Assert.IsType<OkObjectResult>(result.Result);
         else Assert.IsType<ConflictObjectResult>(result.Result);
@@ -354,8 +544,15 @@ public class CashInventoryIdentityTests
         await connection.OpenAsync();
         await using var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection).Options);
         await db.Database.EnsureCreatedAsync();
-        var user = new User { Email = "synthetic-admin@fixture.local", FullName = "Synthetic administrator", PasswordHash = "hash",
-            Role = new Role { Name = "admin", Description = "Synthetic administrator" }, IsActive = true, IsApproved = true };
+        var user = new User
+        {
+            Email = "synthetic-admin@fixture.local",
+            FullName = "Synthetic administrator",
+            PasswordHash = "hash",
+            Role = new Role { Name = "admin", Description = "Synthetic administrator" },
+            IsActive = true,
+            IsApproved = true
+        };
         var company = new LegalEntity { ShortName = "Синтетическая компания" };
         var account = new MoneyAccount { Name = "Касса", Source = MoneyOperationSource.Cash, Currency = currency, Company = company, IsActive = true };
         db.Users.Add(user);
@@ -363,12 +560,21 @@ public class CashInventoryIdentityTests
         await db.SaveChangesAsync();
         db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = System.Text.Json.JsonSerializer.Serialize(new[] { company.Id }) });
         await db.SaveChangesAsync();
-        var controller = new CashOrdersController(db) { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext
-        { User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test")) } } };
+        var controller = new CashOrdersController(db)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                { User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test")) }
+            }
+        };
         var result = await controller.CreateInventory(new CashInventoryCreateRequest
         {
-            AccountName = account.Name, MoneyAccountId = account.Id, Date = new DateTime(2026, 10, 28),
-            ActualBalance = 100m, CreateCorrection = createCorrection,
+            AccountName = account.Name,
+            MoneyAccountId = account.Id,
+            Date = new DateTime(2026, 10, 28),
+            ActualBalance = 100m,
+            CreateCorrection = createCorrection,
         }, CancellationToken.None);
         Assert.IsType<BadRequestObjectResult>(result);
         Assert.Empty(await db.CashInventories.ToListAsync());
@@ -386,8 +592,15 @@ public class CashInventoryIdentityTests
         await connection.OpenAsync();
         await using var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection).Options);
         await db.Database.EnsureCreatedAsync();
-        var user = new User { Email = "synthetic-admin@fixture.local", FullName = "Synthetic administrator", PasswordHash = "hash",
-            Role = new Role { Name = "admin", Description = "Synthetic administrator" }, IsActive = true, IsApproved = true };
+        var user = new User
+        {
+            Email = "synthetic-admin@fixture.local",
+            FullName = "Synthetic administrator",
+            PasswordHash = "hash",
+            Role = new Role { Name = "admin", Description = "Synthetic administrator" },
+            IsActive = true,
+            IsApproved = true
+        };
         var company = new LegalEntity { ShortName = "Компания кассы" };
         var otherCompany = new LegalEntity { ShortName = "Другая компания" };
         var cash = new MoneyAccount { Name = "Текущее название", Source = MoneyOperationSource.Cash, Company = company, IsActive = true };
@@ -396,19 +609,35 @@ public class CashInventoryIdentityTests
         db.MoneyAccounts.AddRange(cash, other);
         await db.SaveChangesAsync();
         db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = System.Text.Json.JsonSerializer.Serialize(new[] { company.Id, otherCompany.Id }) });
-        var oldOrder = new CashOrder { Number = "SYN-OLD", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
-            Date = new DateTime(2026, 10, 27), Amount = 100m, Currency = "RUB",
+        var oldOrder = new CashOrder
+        {
+            Number = "SYN-OLD",
+            Type = CashOrderType.Incoming,
+            Status = CashOrderStatus.Posted,
+            Date = new DateTime(2026, 10, 27),
+            Amount = 100m,
+            Currency = "RUB",
             Account = scenario == "renamed" || scenario == "wrong-company" ? "Прежнее название" : cash.Name,
             MoneyAccountId = scenario == "partial-company" ? null : scenario == "other-account" ? other.Id : cash.Id,
-            CompanyId = scenario == "renamed" ? company.Id : otherCompany.Id };
+            CompanyId = scenario == "renamed" ? company.Id : otherCompany.Id
+        };
         db.CashOrders.Add(oldOrder);
         await db.SaveChangesAsync();
-        var controller = new CashOrdersController(db) { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext
-        { User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test")) } } };
+        var controller = new CashOrdersController(db)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                { User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test")) }
+            }
+        };
         var result = await controller.CreateInventory(new CashInventoryCreateRequest
         {
-            AccountName = cash.Name, MoneyAccountId = cash.Id, Date = new DateTime(2026, 10, 28),
-            ActualBalance = scenario == "renamed" ? 100m : 0m, CreateCorrection = true,
+            AccountName = cash.Name,
+            MoneyAccountId = cash.Id,
+            Date = new DateTime(2026, 10, 28),
+            ActualBalance = scenario == "renamed" ? 100m : 0m,
+            CreateCorrection = true,
         }, CancellationToken.None);
         if (scenario is "wrong-company" or "partial-company")
         {
@@ -434,8 +663,15 @@ public class CashInventoryIdentityTests
         await connection.OpenAsync();
         await using var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection).Options);
         await db.Database.EnsureCreatedAsync();
-        var user = new User { Email = "synthetic-admin@fixture.local", FullName = "Synthetic administrator", PasswordHash = "hash",
-            Role = new Role { Name = "admin", Description = "Synthetic administrator" }, IsActive = true, IsApproved = true };
+        var user = new User
+        {
+            Email = "synthetic-admin@fixture.local",
+            FullName = "Synthetic administrator",
+            PasswordHash = "hash",
+            Role = new Role { Name = "admin", Description = "Synthetic administrator" },
+            IsActive = true,
+            IsApproved = true
+        };
         var company = new LegalEntity { ShortName = "Синтетическая компания" };
         var cash = new MoneyAccount { Name = "Касса", Source = MoneyOperationSource.Cash, Company = company, IsActive = true, Currency = "RUB" };
         var bank = new MoneyAccount { Name = "Банк", Source = MoneyOperationSource.Bank, Company = company, IsActive = true, Currency = "RUB" };
@@ -444,14 +680,20 @@ public class CashInventoryIdentityTests
         await db.SaveChangesAsync();
         db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = System.Text.Json.JsonSerializer.Serialize(new[] { company.Id }) });
         await db.SaveChangesAsync();
-        var http = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(
-            new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test")) };
+        var http = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+            new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test"))
+        };
         var controller = new MoneyOperationsController(db, NullLogger<MoneyOperationsController>.Instance)
         { ControllerContext = new ControllerContext { HttpContext = http } };
         var result = await controller.CreateTransfer(new MoneyOperationTransferRequest
         {
-            SourceMoneyAccountId = intoCash ? bank.Id : cash.Id, TargetMoneyAccountId = intoCash ? cash.Id : bank.Id,
-            Amount = 100m, Currency = "RUB", Date = new DateTime(2026, 10, 28),
+            SourceMoneyAccountId = intoCash ? bank.Id : cash.Id,
+            TargetMoneyAccountId = intoCash ? cash.Id : bank.Id,
+            Amount = 100m,
+            Currency = "RUB",
+            Date = new DateTime(2026, 10, 28),
         });
         Assert.IsType<CreatedResult>(result.Result);
         var order = Assert.Single(await db.CashOrders.ToListAsync());
@@ -470,8 +712,15 @@ public class CashInventoryIdentityTests
         await connection.OpenAsync();
         await using var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection).Options);
         await db.Database.EnsureCreatedAsync();
-        var user = new User { Email = "synthetic-admin@fixture.local", FullName = "Synthetic administrator", PasswordHash = "hash",
-            Role = new Role { Name = "admin", Description = "Synthetic administrator" }, IsActive = true, IsApproved = true };
+        var user = new User
+        {
+            Email = "synthetic-admin@fixture.local",
+            FullName = "Synthetic administrator",
+            PasswordHash = "hash",
+            Role = new Role { Name = "admin", Description = "Synthetic administrator" },
+            IsActive = true,
+            IsApproved = true
+        };
         var company = new LegalEntity { ShortName = "Синтетическая компания" };
         var first = new MoneyAccount { Name = "Касса 1", Source = MoneyOperationSource.Cash, Company = company, IsActive = true, Currency = "RUB" };
         var second = new MoneyAccount { Name = "Касса 2", Source = MoneyOperationSource.Cash, Company = company, IsActive = true, Currency = "RUB" };
@@ -480,14 +729,22 @@ public class CashInventoryIdentityTests
         await db.SaveChangesAsync();
         db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = System.Text.Json.JsonSerializer.Serialize(new[] { company.Id }) });
         await db.SaveChangesAsync();
-        var http = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(
-            new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test")) };
+        var http = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+            new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test"))
+        };
         var controller = new MoneyOperationsController(db, NullLogger<MoneyOperationsController>.Instance)
         { ControllerContext = new ControllerContext { HttpContext = http } };
         var created = Assert.IsType<CreatedResult>(await controller.Create(new MoneyOperation
         {
-            MoneyAccountId = first.Id, Source = MoneyOperationSource.Cash, Direction = MoneyOperationDirection.Income,
-            AccountingType = MoneyOperationAccountingType.Fact, Amount = 100m, Currency = "RUB", Date = new DateTime(2026, 10, 28),
+            MoneyAccountId = first.Id,
+            Source = MoneyOperationSource.Cash,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 100m,
+            Currency = "RUB",
+            Date = new DateTime(2026, 10, 28),
         }));
         var operation = Assert.IsType<MoneyOperation>(created.Value);
         var cashOrder = await db.CashOrders.SingleAsync();
@@ -501,8 +758,13 @@ public class CashInventoryIdentityTests
         }
         Assert.IsType<OkObjectResult>(await controller.Update(operation.Id, new MoneyOperation
         {
-            MoneyAccountId = second.Id, Source = MoneyOperationSource.Cash, Direction = MoneyOperationDirection.Income,
-            AccountingType = MoneyOperationAccountingType.Fact, Amount = 100m, Currency = "RUB", Date = new DateTime(2026, 10, 28),
+            MoneyAccountId = second.Id,
+            Source = MoneyOperationSource.Cash,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 100m,
+            Currency = "RUB",
+            Date = new DateTime(2026, 10, 28),
         }));
         db.ChangeTracker.Clear();
         var updated = await db.CashOrders.SingleAsync();
@@ -515,8 +777,13 @@ public class CashInventoryIdentityTests
             await db.SaveChangesAsync();
             var rejected = await controller.Update(operation.Id, new MoneyOperation
             {
-                MoneyAccountId = second.Id, Source = MoneyOperationSource.Cash, Direction = MoneyOperationDirection.Income,
-                AccountingType = MoneyOperationAccountingType.Fact, Amount = 150m, Currency = "RUB", Date = new DateTime(2026, 10, 28),
+                MoneyAccountId = second.Id,
+                Source = MoneyOperationSource.Cash,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                Amount = 150m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 10, 28),
             });
             Assert.IsType<ConflictObjectResult>(rejected);
             db.ChangeTracker.Clear();
@@ -536,8 +803,12 @@ public class CashInventoryIdentityTests
         await db.Database.EnsureCreatedAsync();
         var user = new User
         {
-            Email = "synthetic-admin@fixture.local", FullName = "Synthetic administrator", PasswordHash = "hash",
-            Role = new Role { Name = "admin", Description = "Synthetic administrator" }, IsActive = true, IsApproved = true,
+            Email = "synthetic-admin@fixture.local",
+            FullName = "Synthetic administrator",
+            PasswordHash = "hash",
+            Role = new Role { Name = "admin", Description = "Synthetic administrator" },
+            IsActive = true,
+            IsApproved = true,
         };
         var company = new LegalEntity { ShortName = "Синтетическая компания" };
         var cash = new MoneyAccount { Name = "Касса", Source = MoneyOperationSource.Cash, IsActive = true, Company = company };
@@ -546,12 +817,19 @@ public class CashInventoryIdentityTests
         await db.SaveChangesAsync();
         db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = System.Text.Json.JsonSerializer.Serialize(new[] { company.Id }) });
         await db.SaveChangesAsync();
-        var httpContext = new DefaultHttpContext { User = new ClaimsPrincipal(
-            new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test")) };
+        var httpContext = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(
+            new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test"))
+        };
         var cashController = new CashOrdersController(db) { ControllerContext = new ControllerContext { HttpContext = httpContext } };
         var result = await cashController.CreateInventory(new CashInventoryCreateRequest
         {
-            AccountName = cash.Name, MoneyAccountId = cash.Id, Date = new DateTime(2026, 10, 28), ActualBalance = 100m, CreateCorrection = createCorrection,
+            AccountName = cash.Name,
+            MoneyAccountId = cash.Id,
+            Date = new DateTime(2026, 10, 28),
+            ActualBalance = 100m,
+            CreateCorrection = createCorrection,
         }, CancellationToken.None);
         Assert.IsType<CreatedResult>(result);
         var accountController = new MoneyAccountsController(db) { ControllerContext = new ControllerContext { HttpContext = httpContext } };
@@ -574,8 +852,12 @@ public class CashInventoryIdentityTests
         await db.Database.EnsureCreatedAsync();
         var user = new User
         {
-            Email = "synthetic-admin@fixture.local", FullName = "Synthetic administrator", PasswordHash = "hash",
-            Role = new Role { Name = "admin", Description = "Synthetic administrator" }, IsActive = true, IsApproved = true,
+            Email = "synthetic-admin@fixture.local",
+            FullName = "Synthetic administrator",
+            PasswordHash = "hash",
+            Role = new Role { Name = "admin", Description = "Synthetic administrator" },
+            IsActive = true,
+            IsApproved = true,
         };
         var company = new LegalEntity { ShortName = "Компания кассы" };
         var other = new LegalEntity { ShortName = "Другая компания" };
@@ -587,18 +869,38 @@ public class CashInventoryIdentityTests
         db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = System.Text.Json.JsonSerializer.Serialize(new[] { company.Id, other.Id }) });
         var payment = new Payment { Amount = 50m, SellerCompanyId = sameCompany ? company.Id : other.Id, Date = new DateTime(2026, 10, 27), PlannedDate = new DateTime(2026, 10, 27) };
         var movement = withMovement ? new MoneyOperation { Source = MoneyOperationSource.Cash, MoneyAccountId = cash.Id, Amount = 50m, Currency = "RUB", Date = payment.Date } : null;
-        db.CashOrders.Add(new CashOrder { Number = "SYN-2", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
-            Date = payment.Date, Account = cash.Name, Amount = 50m, Currency = "RUB", Payment = payment, MoneyOperation = movement,
-            MoneyAccountId = cash.Id, CompanyId = company.Id });
+        db.CashOrders.Add(new CashOrder
+        {
+            Number = "SYN-2",
+            Type = CashOrderType.Incoming,
+            Status = CashOrderStatus.Posted,
+            Date = payment.Date,
+            Account = cash.Name,
+            Amount = 50m,
+            Currency = "RUB",
+            Payment = payment,
+            MoneyOperation = movement,
+            MoneyAccountId = cash.Id,
+            CompanyId = company.Id
+        });
         await db.SaveChangesAsync();
         var controller = new CashOrdersController(db)
         {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(
-                new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test")) } },
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(
+                new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test"))
+                }
+            },
         };
         var result = await controller.CreateInventory(new CashInventoryCreateRequest
         {
-            AccountName = cash.Name, Date = new DateTime(2026, 10, 28), ActualBalance = 100m, CreateCorrection = true,
+            AccountName = cash.Name,
+            Date = new DateTime(2026, 10, 28),
+            ActualBalance = 100m,
+            CreateCorrection = true,
         }, CancellationToken.None);
         if (!sameCompany && !withMovement)
         {
@@ -631,8 +933,12 @@ public class CashInventoryIdentityTests
         await db.Database.EnsureCreatedAsync();
         var user = new User
         {
-            Email = "synthetic-admin@fixture.local", FullName = "Synthetic administrator", PasswordHash = "hash",
-            Role = new Role { Name = "admin", Description = "Synthetic administrator" }, IsActive = true, IsApproved = true,
+            Email = "synthetic-admin@fixture.local",
+            FullName = "Synthetic administrator",
+            PasswordHash = "hash",
+            Role = new Role { Name = "admin", Description = "Synthetic administrator" },
+            IsActive = true,
+            IsApproved = true,
         };
         var company = new LegalEntity { ShortName = "Синтетическая компания" };
         var ownCash = new MoneyAccount { Name = "Основная касса", Source = MoneyOperationSource.Cash, IsActive = true, Company = company };
@@ -642,18 +948,37 @@ public class CashInventoryIdentityTests
         await db.SaveChangesAsync();
         db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = System.Text.Json.JsonSerializer.Serialize(new[] { company.Id }) });
         var movement = new MoneyOperation { Source = MoneyOperationSource.Cash, MoneyAccountId = matches ? ownCash.Id : otherCash.Id, Amount = 50m, Currency = "RUB", Date = new DateTime(2026, 10, included ? 27 : 29) };
-        db.CashOrders.Add(new CashOrder { Number = "SYN-1", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
-            Date = movement.Date, Account = ownCash.Name, Amount = 50m, Currency = "RUB", MoneyOperation = movement,
-            MoneyAccountId = ownCash.Id, CompanyId = company.Id });
+        db.CashOrders.Add(new CashOrder
+        {
+            Number = "SYN-1",
+            Type = CashOrderType.Incoming,
+            Status = CashOrderStatus.Posted,
+            Date = movement.Date,
+            Account = ownCash.Name,
+            Amount = 50m,
+            Currency = "RUB",
+            MoneyOperation = movement,
+            MoneyAccountId = ownCash.Id,
+            CompanyId = company.Id
+        });
         await db.SaveChangesAsync();
         var controller = new CashOrdersController(db)
         {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(
-                new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test")) } },
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(
+                new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test"))
+                }
+            },
         };
         var result = await controller.CreateInventory(new CashInventoryCreateRequest
         {
-            AccountName = ownCash.Name, Date = new DateTime(2026, 10, 28), ActualBalance = 100m, CreateCorrection = createCorrection,
+            AccountName = ownCash.Name,
+            Date = new DateTime(2026, 10, 28),
+            ActualBalance = 100m,
+            CreateCorrection = createCorrection,
         }, CancellationToken.None);
         if (matches || !included)
         {
@@ -683,8 +1008,12 @@ public class CashInventoryIdentityTests
         await db.Database.EnsureCreatedAsync();
         var user = new User
         {
-            Email = "synthetic-admin@fixture.local", FullName = "Synthetic administrator", PasswordHash = "hash",
-            Role = new Role { Name = "admin", Description = "Synthetic administrator" }, IsActive = true, IsApproved = true,
+            Email = "synthetic-admin@fixture.local",
+            FullName = "Synthetic administrator",
+            PasswordHash = "hash",
+            Role = new Role { Name = "admin", Description = "Synthetic administrator" },
+            IsActive = true,
+            IsApproved = true,
         };
         var company = new LegalEntity { ShortName = "Синтетическая компания", ProfileStatus = scenario == "archived-company" ? CompanyProfileStatuses.Archived : CompanyProfileStatuses.Active };
         var other = new LegalEntity { ShortName = "Не собственная компания" };
@@ -694,18 +1023,29 @@ public class CashInventoryIdentityTests
         db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = System.Text.Json.JsonSerializer.Serialize(new[] { company.Id }) });
         db.MoneyAccounts.Add(new MoneyAccount
         {
-            Name = "Касса", Source = MoneyOperationSource.Cash, IsActive = scenario != "inactive-account",
+            Name = "Касса",
+            Source = MoneyOperationSource.Cash,
+            IsActive = scenario != "inactive-account",
             CompanyId = scenario == "unknown-company" ? null : scenario == "foreign-company" ? other.Id : company.Id,
         });
         await db.SaveChangesAsync();
         var controller = new CashOrdersController(db)
         {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(
-                new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test")) } },
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(
+                new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test"))
+                }
+            },
         };
         var result = await controller.CreateInventory(new CashInventoryCreateRequest
         {
-            AccountName = "Касса", Date = new DateTime(2026, 10, 28), ActualBalance = 100m, CreateCorrection = createCorrection,
+            AccountName = "Касса",
+            Date = new DateTime(2026, 10, 28),
+            ActualBalance = 100m,
+            CreateCorrection = createCorrection,
         }, CancellationToken.None);
         Assert.IsType<BadRequestObjectResult>(result);
         Assert.Empty(await db.CashInventories.ToListAsync());
@@ -727,14 +1067,20 @@ public class CashInventoryIdentityTests
         await db.Database.EnsureCreatedAsync();
         var user = new User
         {
-            Email = "synthetic-admin@fixture.local", FullName = "Synthetic administrator", PasswordHash = "hash",
-            Role = new Role { Name = "admin", Description = "Synthetic administrator" }, IsActive = true, IsApproved = true,
+            Email = "synthetic-admin@fixture.local",
+            FullName = "Synthetic administrator",
+            PasswordHash = "hash",
+            Role = new Role { Name = "admin", Description = "Synthetic administrator" },
+            IsActive = true,
+            IsApproved = true,
         };
         db.Users.Add(user);
         var company = new LegalEntity { ShortName = "Синтетическая компания" };
         var cash = new MoneyAccount
         {
-            Name = "Касса", Source = MoneyOperationSource.Cash, IsActive = true,
+            Name = "Касса",
+            Source = MoneyOperationSource.Cash,
+            IsActive = true,
             Company = company,
         };
         db.MoneyAccounts.Add(cash);
@@ -743,13 +1089,22 @@ public class CashInventoryIdentityTests
         await db.SaveChangesAsync();
         var controller = new CashOrdersController(db)
         {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(
-                new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test")) } },
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(
+                new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test"))
+                }
+            },
         };
         var result = await controller.CreateInventory(new CashInventoryCreateRequest
         {
-            AccountName = "Касса", MoneyAccountId = identity == "omitted" ? null : identity == "matching" ? cash.Id : identity == "invalid" ? 0 : cash.Id + 1000,
-            Date = new DateTime(2026, 10, 28), ActualBalance = 100m, CreateCorrection = createCorrection,
+            AccountName = "Касса",
+            MoneyAccountId = identity == "omitted" ? null : identity == "matching" ? cash.Id : identity == "invalid" ? 0 : cash.Id + 1000,
+            Date = new DateTime(2026, 10, 28),
+            ActualBalance = 100m,
+            CreateCorrection = createCorrection,
         }, CancellationToken.None);
 
         if (identity is "matching" or "omitted")
@@ -789,20 +1144,33 @@ public class CashInventoryIdentityTests
         await db.Database.EnsureCreatedAsync();
         var user = new User
         {
-            Email = "synthetic-admin@fixture.local", FullName = "Synthetic administrator", PasswordHash = "hash",
-            Role = new Role { Name = "admin", Description = "Synthetic administrator" }, IsActive = true, IsApproved = true,
+            Email = "synthetic-admin@fixture.local",
+            FullName = "Synthetic administrator",
+            PasswordHash = "hash",
+            Role = new Role { Name = "admin", Description = "Synthetic administrator" },
+            IsActive = true,
+            IsApproved = true,
         };
         db.Users.Add(user);
         await db.SaveChangesAsync();
         var controller = new CashOrdersController(db)
         {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(
-                new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test")) } },
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(
+                new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test"))
+                }
+            },
         };
 
         var result = await controller.CreateInventory(new CashInventoryCreateRequest
         {
-            AccountName = "Несуществующая касса", Date = new DateTime(2026, 10, 28), ActualBalance = 100m, CreateCorrection = createCorrection,
+            AccountName = "Несуществующая касса",
+            Date = new DateTime(2026, 10, 28),
+            ActualBalance = 100m,
+            CreateCorrection = createCorrection,
         }, CancellationToken.None);
 
         Assert.IsType<BadRequestObjectResult>(result);

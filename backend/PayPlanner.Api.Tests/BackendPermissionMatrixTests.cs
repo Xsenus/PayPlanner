@@ -63,7 +63,10 @@ public class BackendPermissionMatrixTests
         await using var db = await CreateContextAsync();
         var user = await CreateUserAsync(db, "passport-owner", new RolePermission
         {
-            Section = RolePermissionCatalog.Clients, CanView = true, CanEdit = true, ViewScope = DataVisibilityScope.Own,
+            Section = RolePermissionCatalog.Clients,
+            CanView = true,
+            CanEdit = true,
+            ViewScope = DataVisibilityScope.Own,
         });
         var other = await CreateUserAsync(db, "passport-other", roleName: "other-employee");
         var own = new Client { Name = "Own", ResponsibleUserId = user.Id };
@@ -92,7 +95,9 @@ public class BackendPermissionMatrixTests
         await using var db = await CreateContextAsync();
         var user = await CreateUserAsync(db, "passport-no-access", new RolePermission
         {
-            Section = RolePermissionCatalog.Clients, CanView = false, ViewScope = DataVisibilityScope.Own,
+            Section = RolePermissionCatalog.Clients,
+            CanView = false,
+            ViewScope = DataVisibilityScope.Own,
         });
         var client = new Client { Name = "Restricted", ResponsibleUserId = user.Id };
         db.Clients.Add(client);
@@ -204,8 +209,12 @@ public class BackendPermissionMatrixTests
         await db.SaveChangesAsync();
         db.TaskJournalItems.Add(new TaskJournalItem
         {
-            ClientCaseId = clientCase.Id, Title = "Open task", ObjectName = "Open task", AuthorUserId = user.Id,
-            Status = "inProgress", DueAt = DateTime.UtcNow.AddDays(-1),
+            ClientCaseId = clientCase.Id,
+            Title = "Open task",
+            ObjectName = "Open task",
+            AuthorUserId = user.Id,
+            Status = "inProgress",
+            DueAt = DateTime.UtcNow.AddDays(-1),
         });
         await db.SaveChangesAsync();
         var controller = new CasesV2Controller(db)
@@ -242,8 +251,12 @@ public class BackendPermissionMatrixTests
         await db.SaveChangesAsync();
         db.TaskJournalItems.Add(new TaskJournalItem
         {
-            ClientCaseId = clientCase.Id, SalesRequestId = request.Id, Title = "Request task", ObjectName = "Request task",
-            AuthorUserId = user.Id, DueAt = DateTime.UtcNow.AddDays(1),
+            ClientCaseId = clientCase.Id,
+            SalesRequestId = request.Id,
+            Title = "Request task",
+            ObjectName = "Request task",
+            AuthorUserId = user.Id,
+            DueAt = DateTime.UtcNow.AddDays(1),
         });
         await db.SaveChangesAsync();
         var controller = new CasesV2Controller(db)
@@ -306,8 +319,12 @@ public class BackendPermissionMatrixTests
         };
         if (scope != "none")
         {
-            permissions.Add(new RolePermission { Section = RolePermissionCatalog.Tasks, CanView = true,
-                ViewScope = scope == "all" ? DataVisibilityScope.All : DataVisibilityScope.Own });
+            permissions.Add(new RolePermission
+            {
+                Section = RolePermissionCatalog.Tasks,
+                CanView = true,
+                ViewScope = scope == "all" ? DataVisibilityScope.All : DataVisibilityScope.Own
+            });
         }
         if (scope == "all") permissions.Add(new RolePermission { Section = RolePermissionCatalog.Requests, CanView = true, ViewScope = DataVisibilityScope.All });
         var user = await CreateUserWithPermissionsAsync(db, "registry-viewer", "employee", permissions);
