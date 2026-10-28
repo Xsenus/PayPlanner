@@ -1256,6 +1256,7 @@ describe('ClientDetail integration', () => {
   });
 
   it('shows whitespace-only additional profile values as unspecified without changing stored values', async () => {
+    const updateCallsBefore = vi.mocked(apiService.updateClient).mock.calls.length;
     vi.mocked(apiService.getClient).mockResolvedValue(createClient({
       education: [{ institution: 'НГУ', specialty: '   ', diplomaNumber: '', oksoCode: '' }],
     }));
@@ -1271,7 +1272,7 @@ describe('ClientDetail integration', () => {
     await user.click(screen.getByRole('button', { name: 'Редактировать' }));
     expect(Array.from(document.querySelectorAll('input')).some((input) => input.value === '   ')).toBe(true);
     await user.click(screen.getByRole('button', { name: 'Отмена' }));
-    expect(apiService.updateClient).not.toHaveBeenCalled();
+    expect(apiService.updateClient).toHaveBeenCalledTimes(updateCallsBefore);
   });
 
   it('shows additional profile groups as readable text and preserves editing on cancel', async () => {
