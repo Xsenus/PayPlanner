@@ -7763,10 +7763,10 @@ function CourtPanel({
           )}
         </section>
 
-        <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_280px]">
+        <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_280px]">
           <div className="min-w-0 space-y-3">
             <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
                 {[
                   ['Владелец', ownerName],
                   ['Номер дела', overviewCourtCaseNumber || '—'],
