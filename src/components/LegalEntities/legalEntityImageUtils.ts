@@ -60,3 +60,38 @@ export function isLegalEntityInlineAssetPayloadSafe(
 ): boolean {
   return sumLegalEntityInlineAssetLengths(payload) <= LEGAL_ENTITY_SAFE_INLINE_ASSETS_TOTAL_MAX_LENGTH;
 }
+
+export function encodeLegalEntityImageCanvas(
+  canvas: Pick<HTMLCanvasElement, 'toDataURL' | 'width' | 'height'>,
+  context: Pick<CanvasRenderingContext2D, 'save' | 'restore' | 'globalCompositeOperation' | 'fillStyle' | 'fillRect'>,
+  profile: LegalEntityImageUploadProfile,
+): string {
+  const pngCandidate = canvas.toDataURL('image/png');
+  if (pngCandidate.length <= profile.maxDataUrlLength) {
+    return pngCandidate;
+  }
+
+  if (profile.kind !== 'logo') {
+    throw new Error(
+      `${profile.label}: PNG слишком большой для сохранения. Выберите PNG меньшего размера с прозрачным фоном.`,
+    );
+  }
+
+  const qualities = [0.9, 0.82, 0.74, 0.66, 0.58, 0.5, 0.42];
+  for (const quality of qualities) {
+    context.save();
+    context.globalCompositeOperation = 'destination-over';
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.restore();
+
+    const jpegCandidate = canvas.toDataURL('image/jpeg', quality);
+    if (jpegCandidate.length <= profile.maxDataUrlLength) {
+      return jpegCandidate;
+    }
+  }
+
+  throw new Error(
+    `${profile.label}: изображение слишком большое даже после сжатия. Выберите файл поменьше.`,
+  );
+}

@@ -86,6 +86,7 @@ import {
 } from "./legalEntityDadataUtils";
 import {
   getLegalEntityImageProfile,
+  encodeLegalEntityImageCanvas,
   isLegalEntityInlineAssetPayloadSafe,
   isLegalEntityRequestBodyLengthSafe,
   type LegalEntityImageKind,
@@ -442,9 +443,10 @@ function LegalEntityImageField({
               accept="image/png,image/jpeg"
               className="hidden"
               onChange={(event) => {
-                const file = event.target.files?.[0] ?? null;
+                const input = event.currentTarget;
+                const file = input.files?.[0] ?? null;
                 void onUpload(file).finally(() => {
-                  event.currentTarget.value = "";
+                  input.value = "";
                 });
               }}
             />
@@ -663,28 +665,7 @@ async function convertImageToUploadProfileDataUrl(
   context.clearRect(0, 0, canvas.width, canvas.height);
   context.drawImage(image, 0, 0, canvas.width, canvas.height);
 
-  const pngCandidate = canvas.toDataURL("image/png");
-  if (pngCandidate.length <= profile.maxDataUrlLength) {
-    return pngCandidate;
-  }
-
-  const qualities = [0.9, 0.82, 0.74, 0.66, 0.58, 0.5, 0.42];
-  for (const quality of qualities) {
-    context.save();
-    context.globalCompositeOperation = "destination-over";
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.restore();
-
-    const jpegCandidate = canvas.toDataURL("image/jpeg", quality);
-    if (jpegCandidate.length <= profile.maxDataUrlLength) {
-      return jpegCandidate;
-    }
-  }
-
-  throw new Error(
-    `${profile.label}: изображение слишком большое даже после сжатия. Выберите файл поменьше.`,
-  );
+  return encodeLegalEntityImageCanvas(canvas, context, profile);
 }
 
 const DEFAULT_STATE: FormState = {
