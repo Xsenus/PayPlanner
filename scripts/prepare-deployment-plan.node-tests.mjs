@@ -74,7 +74,7 @@ test('qualifies exactly the reviewed eleven-migration candidate and all 245 rele
   const review = reviewedCandidate(input.root);
   assert.equal(plan.expectedMigration, review.migrationIds.join('+'));
   assert.equal(plan.expectedReleaseSeeds.length, 245);
-  assert.deepEqual(plan.expectedReleaseSeeds.slice(0, 3).map(entry => entry.version), ['1.14.391', '1.14.390', '1.14.389']);
+  assert.deepEqual(plan.expectedReleaseSeeds.slice(0, 3).map(entry => entry.version), ['1.14.387', '1.14.386', '1.14.385']);
   assert.ok(plan.expectedReleaseSeeds.slice(0, 3).every(entry => entry.isActive === false));
   assert.deepEqual(plan.expectedReleaseSeeds, JSON.parse(readFileSync(resolve('backend/AppReleases/releases.json'), 'utf8')).slice(0, 245));
   assert.equal(plan.expectedReleaseCatalogSha256, review.releaseCatalogSha256);

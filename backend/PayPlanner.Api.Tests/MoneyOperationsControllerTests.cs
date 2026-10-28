@@ -2715,8 +2715,12 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
         Assert.Equal(CashOrderStatus.Cancelled, order.Status);
     }
 
-    [Fact]
-    public async Task CashOrder_Create_GeneratesNumberAndNormalizesDraft()
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("", null)]
+    [InlineData(" rub ", "rub")]
+    [InlineData(" usd ", "usd")]
+    public async Task CashOrder_Create_GeneratesNumberAndNormalizesDraft(string? inputCurrency, string? expectedCurrency)
     {
         await using var db = await CreateContextAsync();
         var controller = await CreateCashOrderAdminControllerAsync(db);
@@ -2727,7 +2731,7 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
             Status = CashOrderStatus.Draft,
             Date = new DateTime(2026, 4, 29),
             Amount = 25_000m,
-            Currency = "",
+            Currency = inputCurrency,
             Account = "  Основная касса  ",
             PayerName = "  Ахмедова Айтан Рафик Кызы  ",
             ReceiverName = "  Касса  ",
@@ -2740,7 +2744,7 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
         var created = Assert.IsType<CashOrderDto>(createdResult.Value);
         Assert.StartsWith("ПКО-2026-", created.Number);
         Assert.Equal(CashOrderStatus.Draft, created.Status);
-        Assert.Equal("RUB", created.Currency);
+        Assert.Equal(expectedCurrency, created.Currency);
         Assert.Equal("Основная касса", created.Account);
         Assert.Equal("Ахмедова Айтан Рафик Кызы", created.PayerName);
         Assert.Equal("Касса", created.ReceiverName);
@@ -2750,6 +2754,7 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
 
         var saved = await db.CashOrders.SingleAsync();
         Assert.Equal(created.Id, saved.Id);
+        Assert.Equal(expectedCurrency, saved.Currency);
         Assert.Equal(CashOrderStatus.Draft, saved.Status);
     }
 
@@ -4936,6 +4941,7 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
             Direction = MoneyOperationDirection.Income,
             AccountingType = MoneyOperationAccountingType.Fact,
             Amount = 17_000m,
+            Currency = "RUB",
             Date = new DateTime(2026, 4, 29),
             MatchStatus = MoneyOperationMatchStatus.ClarificationRequired,
             CreatedAt = DateTime.UtcNow,

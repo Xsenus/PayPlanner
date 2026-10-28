@@ -88,7 +88,7 @@ class DeliveryAdmissionTests(unittest.TestCase):
         self.use_current_candidate()
         self.assertEqual(len(self.plan['expectedMigration'].split('+')), 11)
         self.assertEqual(len(self.plan['expectedReleaseSeeds']), 245)
-        self.assertEqual([seed['version'] for seed in self.plan['expectedReleaseSeeds'][:3]], ['1.14.391', '1.14.390', '1.14.389'])
+        self.assertEqual([seed['version'] for seed in self.plan['expectedReleaseSeeds'][:3]], ['1.14.387', '1.14.386', '1.14.385'])
         self.assertTrue(all(seed['isActive'] is False for seed in self.plan['expectedReleaseSeeds'][:3]))
         self.assertTrue(self.admission().stdout.startswith(self.revision+'|'))
 

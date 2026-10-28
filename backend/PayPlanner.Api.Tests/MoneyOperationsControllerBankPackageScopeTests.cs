@@ -105,8 +105,12 @@ public partial class MoneyOperationsControllerTests
         await using var fixture = await CreateModelDatabaseAsync(false);
         var db = fixture.Db;
         var seed = await SeedBankScopeAsync(db, "own");
-        Assert.Single(seed.Batch.Rows).Currency = currency;
+        var rowId = Assert.Single(seed.Batch.Rows).Id;
+        var storedRow = await db.BankStatementImportRows.SingleAsync(row => row.Id == rowId);
+        storedRow.Currency = currency;
         await db.SaveChangesAsync();
+        Assert.Equal(currency, await db.BankStatementImportRows.AsNoTracking()
+            .Where(row => row.Id == rowId).Select(row => row.Currency).SingleAsync());
         var before = await CaptureBankScopeStateAsync(db);
         var response = await CreateController(db, seed.ActorId, isAdminClaim: true)
             .GetBankStatementImport(seed.Batch.Id, CancellationToken.None);

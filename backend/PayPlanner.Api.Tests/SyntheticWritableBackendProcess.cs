@@ -619,7 +619,8 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
         var financialPhase = "starting";
         try
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+            using var timeout = new CancellationTokenSource();
+            var phaseBudget = new SyntheticBrowserPhaseBudget(financialDocuments, timeout.CancelAfter);
             var stdout = ReadOutputAsync(timeout.Token);
             await Task.WhenAll(stdout, process.WaitForExitAsync(timeout.Token));
             Assert.True(process.ExitCode == 0, process.ExitCode == 0 ? null
@@ -640,6 +641,7 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
                         RegexOptions.CultureInvariant))
                     {
                         financialPhase = line;
+                        phaseBudget.ObserveLine(line);
                         Console.WriteLine(line);
                     }
                     if (chatAttachments && Regex.IsMatch(line,
