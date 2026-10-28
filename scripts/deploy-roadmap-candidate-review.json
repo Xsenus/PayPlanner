@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "previousRevision": "e85d1f22d795b78ca8c3543eb3b14410c3a75747",
+  "migrationIds": [
+    "20261027005432_AddPaymentCreateAttempts",
+    "20261027014154_AddPersonalChatHistory",
+    "20261027031752_AddTaskTimeTracking",
+    "20261027130010_AddSalesRequestServiceInvoice",
+    "20261028020010_ProtectStickyNoteVersion",
+    "20261028030010_ProtectDeadlineDecision",
+    "20261028040010_AddDeadlineReviewerDispatch",
+    "20261028050010_AddTaskStatusNotificationOutbox",
+    "20261028060010_AddTaskStatusTransitionToken",
+    "20261028070010_BindApprovalNotificationStage",
+    "20261028080010_CashInventoryAccountIdentityPostgreSql"
+  ],
+  "schemaDeltaSha256": "c85888f1459247224ec6be1f9eb81d28ed92b87600f1dc86c414433c3956b790",
+  "releaseCatalogSha256": "d618a6cf608d94c0dab68e5d77fd74554eab1dcb20566fba641e84ac5254a328",
+  "releaseSeedsCount": 242,
+  "releaseSeedsSha256": "bd4dc1a89d01abab460e99bd210c89fe165e05b54a38af31fba6a3494eb2c791"
+}

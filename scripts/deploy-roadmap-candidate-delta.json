@@ -1,0 +1,2176 @@
+{
+  "columns": {
+    "added": [
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": "''::character varying",
+        "generated": "",
+        "identity": "",
+        "name": "StatusTransitionToken",
+        "nullable": false,
+        "position": 12,
+        "table": "TaskStatusNotificationOutboxes",
+        "type": "character varying(32)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": "''::character varying",
+        "generated": "",
+        "identity": "",
+        "name": "StatusTransitionToken",
+        "nullable": false,
+        "position": 63,
+        "table": "TaskJournalItems",
+        "type": "character varying(32)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "ActorName",
+        "nullable": false,
+        "position": 6,
+        "table": "TaskStatusNotificationOutboxes",
+        "type": "character varying(256)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "EventKey",
+        "nullable": false,
+        "position": 3,
+        "table": "TaskStatusNotificationOutboxes",
+        "type": "character varying(160)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "EventKey",
+        "nullable": true,
+        "position": 1,
+        "table": "IX_TaskStatusNotificationOutboxes_EventKey",
+        "type": "character varying(160)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "EventType",
+        "nullable": false,
+        "position": 4,
+        "table": "TaskStatusNotificationOutboxes",
+        "type": "character varying(24)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "IdentityVersion",
+        "nullable": false,
+        "position": 8,
+        "table": "PaymentCreateAttempts",
+        "type": "character varying(32)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "LeaseToken",
+        "nullable": true,
+        "position": 11,
+        "table": "TaskStatusNotificationOutboxes",
+        "type": "character varying(64)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Operation",
+        "nullable": false,
+        "position": 3,
+        "table": "PaymentCreateAttempts",
+        "type": "character varying(16)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "PayloadIdentity",
+        "nullable": true,
+        "position": 9,
+        "table": "PaymentCreateAttempts",
+        "type": "character varying(64)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Reason",
+        "nullable": false,
+        "position": 5,
+        "table": "TaskTimeCorrections",
+        "type": "character varying(500)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "ReviewerDispatchLeaseToken",
+        "nullable": true,
+        "position": 21,
+        "table": "TaskJournalDeadlineChangeRequests",
+        "type": "character varying(64)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "State",
+        "nullable": false,
+        "position": 7,
+        "table": "PaymentCreateAttempts",
+        "type": "character varying(16)"
+      },
+      {
+        "collation": "pg_catalog.\"default\"",
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "UserNameSnapshot",
+        "nullable": false,
+        "position": 4,
+        "table": "TaskTimeEntries",
+        "type": "character varying(256)"
+      },
+      {
+        "collation": null,
+        "default": "0",
+        "generated": "",
+        "identity": "",
+        "name": "HistoryVisibilityRevision",
+        "nullable": false,
+        "position": 13,
+        "table": "InternalChatMembers",
+        "type": "bigint"
+      },
+      {
+        "collation": null,
+        "default": "0",
+        "generated": "",
+        "identity": "",
+        "name": "ReviewerDispatchAttempts",
+        "nullable": false,
+        "position": 20,
+        "table": "TaskJournalDeadlineChangeRequests",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": "false",
+        "generated": "",
+        "identity": "",
+        "name": "ReviewerDispatchPending",
+        "nullable": false,
+        "position": 23,
+        "table": "TaskJournalDeadlineChangeRequests",
+        "type": "boolean"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "ActorUserId",
+        "nullable": false,
+        "position": 2,
+        "table": "PaymentCreateAttempts",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "ActorUserId",
+        "nullable": false,
+        "position": 5,
+        "table": "TaskStatusNotificationOutboxes",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "ActorUserId",
+        "nullable": true,
+        "position": 1,
+        "table": "IX_PaymentCreateAttempts_ActorUserId",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "ApprovalParticipantId",
+        "nullable": true,
+        "position": 1,
+        "table": "IX_TaskStatusNotificationOutboxes_ApprovalParticipantId",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "ApprovalParticipantId",
+        "nullable": true,
+        "position": 13,
+        "table": "TaskStatusNotificationOutboxes",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Attempts",
+        "nullable": false,
+        "position": 9,
+        "table": "TaskStatusNotificationOutboxes",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "CancelledAtUtc",
+        "nullable": true,
+        "position": 14,
+        "table": "PaymentCreateAttempts",
+        "type": "timestamp with time zone"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "CanonicalPaymentId",
+        "nullable": true,
+        "position": 10,
+        "table": "PaymentCreateAttempts",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "CommittedAtUtc",
+        "nullable": true,
+        "position": 13,
+        "table": "PaymentCreateAttempts",
+        "type": "timestamp with time zone"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "CompanyId",
+        "nullable": true,
+        "position": 1,
+        "table": "IX_CashInventories_Company_Account_Date",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "CompanyId",
+        "nullable": true,
+        "position": 1,
+        "table": "IX_CashOrders_CompanyId",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "CompanyId",
+        "nullable": true,
+        "position": 20,
+        "table": "CashInventories",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "CompanyId",
+        "nullable": true,
+        "position": 30,
+        "table": "CashOrders",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "CompletedAt",
+        "nullable": true,
+        "position": 1,
+        "table": "IX_TaskStatusNotificationOutboxes_CompletedAt_LeaseUntil_Id",
+        "type": "timestamp without time zone"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "CompletedAt",
+        "nullable": true,
+        "position": 8,
+        "table": "TaskStatusNotificationOutboxes",
+        "type": "timestamp without time zone"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "CorrectedSeconds",
+        "nullable": true,
+        "position": 7,
+        "table": "TaskTimeEntries",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "CreatedAt",
+        "nullable": false,
+        "position": 7,
+        "table": "TaskStatusNotificationOutboxes",
+        "type": "timestamp without time zone"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "CreatedAtUtc",
+        "nullable": false,
+        "position": 11,
+        "table": "PaymentCreateAttempts",
+        "type": "timestamp with time zone"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "CreatedAtUtc",
+        "nullable": false,
+        "position": 6,
+        "table": "TaskTimeCorrections",
+        "type": "timestamp without time zone"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Date",
+        "nullable": true,
+        "position": 2,
+        "table": "IX_CashOrders_MoneyAccount_Date",
+        "type": "date"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Date",
+        "nullable": true,
+        "position": 3,
+        "table": "IX_CashInventories_Company_Account_Date",
+        "type": "date"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "EntryId",
+        "nullable": false,
+        "position": 2,
+        "table": "TaskTimeCorrections",
+        "type": "uuid"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "EntryId",
+        "nullable": true,
+        "position": 1,
+        "table": "IX_TaskTimeCorrections_EntryId_Id",
+        "type": "uuid"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "ExpiresAtUtc",
+        "nullable": false,
+        "position": 12,
+        "table": "PaymentCreateAttempts",
+        "type": "timestamp with time zone"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "HistoryHiddenThroughMessageId",
+        "nullable": true,
+        "position": 12,
+        "table": "InternalChatMembers",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Id",
+        "nullable": false,
+        "position": 1,
+        "table": "PaymentCreateAttempts",
+        "type": "uuid"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Id",
+        "nullable": false,
+        "position": 1,
+        "table": "TaskTimeEntries",
+        "type": "uuid"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Id",
+        "nullable": true,
+        "position": 1,
+        "table": "PK_PaymentCreateAttempts",
+        "type": "uuid"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Id",
+        "nullable": true,
+        "position": 1,
+        "table": "PK_TaskStatusNotificationOutboxes",
+        "type": "bigint"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Id",
+        "nullable": true,
+        "position": 1,
+        "table": "PK_TaskTimeCorrections",
+        "type": "bigint"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Id",
+        "nullable": true,
+        "position": 1,
+        "table": "PK_TaskTimeEntries",
+        "type": "uuid"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Id",
+        "nullable": true,
+        "position": 2,
+        "table": "IX_TaskStatusNotificationOutboxes_TaskJournalItemId_Id",
+        "type": "bigint"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Id",
+        "nullable": true,
+        "position": 2,
+        "table": "IX_TaskTimeCorrections_EntryId_Id",
+        "type": "bigint"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Id",
+        "nullable": true,
+        "position": 3,
+        "table": "IX_TaskDeadlineChangeRequests_ReviewerDispatch",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Id",
+        "nullable": true,
+        "position": 3,
+        "table": "IX_TaskStatusNotificationOutboxes_CompletedAt_LeaseUntil_Id",
+        "type": "bigint"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Id",
+        "nullable": true,
+        "position": 4,
+        "table": "IX_TaskTimeEntries_TaskId_UserId_StartedAtUtc_Id",
+        "type": "uuid"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "LeaseUntil",
+        "nullable": true,
+        "position": 10,
+        "table": "TaskStatusNotificationOutboxes",
+        "type": "timestamp without time zone"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "LeaseUntil",
+        "nullable": true,
+        "position": 2,
+        "table": "IX_TaskStatusNotificationOutboxes_CompletedAt_LeaseUntil_Id",
+        "type": "timestamp without time zone"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "MoneyAccountId",
+        "nullable": true,
+        "position": 1,
+        "table": "IX_CashInventories_MoneyAccountId",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "MoneyAccountId",
+        "nullable": true,
+        "position": 1,
+        "table": "IX_CashOrders_MoneyAccount_Date",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "MoneyAccountId",
+        "nullable": true,
+        "position": 2,
+        "table": "IX_CashInventories_Company_Account_Date",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "MoneyAccountId",
+        "nullable": true,
+        "position": 21,
+        "table": "CashInventories",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "MoneyAccountId",
+        "nullable": true,
+        "position": 31,
+        "table": "CashOrders",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "NewSeconds",
+        "nullable": false,
+        "position": 4,
+        "table": "TaskTimeCorrections",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "PreviousSeconds",
+        "nullable": true,
+        "position": 3,
+        "table": "TaskTimeCorrections",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "PrimaryPaymentId",
+        "nullable": true,
+        "position": 6,
+        "table": "PaymentCreateAttempts",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "ReviewerDispatchLeaseUntil",
+        "nullable": true,
+        "position": 2,
+        "table": "IX_TaskDeadlineChangeRequests_ReviewerDispatch",
+        "type": "timestamp without time zone"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "ReviewerDispatchLeaseUntil",
+        "nullable": true,
+        "position": 22,
+        "table": "TaskJournalDeadlineChangeRequests",
+        "type": "timestamp without time zone"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "ReviewerDispatchPending",
+        "nullable": true,
+        "position": 1,
+        "table": "IX_TaskDeadlineChangeRequests_ReviewerDispatch",
+        "type": "boolean"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "Revision",
+        "nullable": false,
+        "position": 8,
+        "table": "TaskTimeEntries",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "SellerBranchId",
+        "nullable": true,
+        "position": 5,
+        "table": "PaymentCreateAttempts",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "SellerCompanyId",
+        "nullable": true,
+        "position": 4,
+        "table": "PaymentCreateAttempts",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "ServiceInvoiceAllocationAmount",
+        "nullable": true,
+        "position": 25,
+        "table": "SalesRequests",
+        "type": "numeric(18,2)"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "ServiceInvoiceId",
+        "nullable": true,
+        "position": 1,
+        "table": "IX_SalesRequests_ServiceInvoiceId",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "ServiceInvoiceId",
+        "nullable": true,
+        "position": 24,
+        "table": "SalesRequests",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "StartedAtUtc",
+        "nullable": false,
+        "position": 5,
+        "table": "TaskTimeEntries",
+        "type": "timestamp without time zone"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "StartedAtUtc",
+        "nullable": true,
+        "position": 3,
+        "table": "IX_TaskTimeEntries_TaskId_UserId_StartedAtUtc_Id",
+        "type": "timestamp without time zone"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "StoppedAtUtc",
+        "nullable": true,
+        "position": 6,
+        "table": "TaskTimeEntries",
+        "type": "timestamp without time zone"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "TaskId",
+        "nullable": false,
+        "position": 2,
+        "table": "TaskTimeEntries",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "TaskId",
+        "nullable": true,
+        "position": 1,
+        "table": "IX_TaskTimeEntries_TaskId_UserId_StartedAtUtc_Id",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "TaskJournalItemId",
+        "nullable": false,
+        "position": 2,
+        "table": "TaskStatusNotificationOutboxes",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "TaskJournalItemId",
+        "nullable": true,
+        "position": 1,
+        "table": "IX_TaskStatusNotificationOutboxes_TaskJournalItemId_Id",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "UserId",
+        "nullable": true,
+        "position": 1,
+        "table": "IX_TaskTimeEntries_OneRunningPerUser",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "UserId",
+        "nullable": true,
+        "position": 2,
+        "table": "IX_TaskTimeEntries_TaskId_UserId_StartedAtUtc_Id",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "UserId",
+        "nullable": true,
+        "position": 3,
+        "table": "TaskTimeEntries",
+        "type": "integer"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "is_called",
+        "nullable": false,
+        "position": 3,
+        "table": "TaskStatusNotificationOutboxes_Id_seq",
+        "type": "boolean"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "is_called",
+        "nullable": false,
+        "position": 3,
+        "table": "TaskTimeCorrections_Id_seq",
+        "type": "boolean"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "last_value",
+        "nullable": false,
+        "position": 1,
+        "table": "TaskStatusNotificationOutboxes_Id_seq",
+        "type": "bigint"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "last_value",
+        "nullable": false,
+        "position": 1,
+        "table": "TaskTimeCorrections_Id_seq",
+        "type": "bigint"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "log_cnt",
+        "nullable": false,
+        "position": 2,
+        "table": "TaskStatusNotificationOutboxes_Id_seq",
+        "type": "bigint"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "log_cnt",
+        "nullable": false,
+        "position": 2,
+        "table": "TaskTimeCorrections_Id_seq",
+        "type": "bigint"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "d",
+        "name": "Id",
+        "nullable": false,
+        "position": 1,
+        "table": "TaskStatusNotificationOutboxes",
+        "type": "bigint"
+      },
+      {
+        "collation": null,
+        "default": null,
+        "generated": "",
+        "identity": "d",
+        "name": "Id",
+        "nullable": false,
+        "position": 1,
+        "table": "TaskTimeCorrections",
+        "type": "bigint"
+      }
+    ],
+    "removed": []
+  },
+  "migrations": {
+    "added": [
+      {
+        "MigrationId": "20261027005432_AddPaymentCreateAttempts",
+        "ProductVersion": "9.0.9"
+      },
+      {
+        "MigrationId": "20261027014154_AddPersonalChatHistory",
+        "ProductVersion": "9.0.9"
+      },
+      {
+        "MigrationId": "20261027031752_AddTaskTimeTracking",
+        "ProductVersion": "9.0.9"
+      },
+      {
+        "MigrationId": "20261027130010_AddSalesRequestServiceInvoice",
+        "ProductVersion": "9.0.9"
+      },
+      {
+        "MigrationId": "20261028020010_ProtectStickyNoteVersion",
+        "ProductVersion": "9.0.9"
+      },
+      {
+        "MigrationId": "20261028030010_ProtectDeadlineDecision",
+        "ProductVersion": "9.0.9"
+      },
+      {
+        "MigrationId": "20261028040010_AddDeadlineReviewerDispatch",
+        "ProductVersion": "9.0.9"
+      },
+      {
+        "MigrationId": "20261028050010_AddTaskStatusNotificationOutbox",
+        "ProductVersion": "9.0.9"
+      },
+      {
+        "MigrationId": "20261028060010_AddTaskStatusTransitionToken",
+        "ProductVersion": "9.0.9"
+      },
+      {
+        "MigrationId": "20261028070010_BindApprovalNotificationStage",
+        "ProductVersion": "9.0.9"
+      },
+      {
+        "MigrationId": "20261028080010_CashInventoryAccountIdentityPostgreSql",
+        "ProductVersion": "9.0.9"
+      }
+    ],
+    "removed": []
+  },
+  "relations": {
+    "added": [
+      {
+        "forceRowSecurity": false,
+        "kind": "S",
+        "name": "TaskStatusNotificationOutboxes_Id_seq",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "S",
+        "name": "TaskTimeCorrections_Id_seq",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "IX_CashInventories_Company_Account_Date",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "IX_CashInventories_MoneyAccountId",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "IX_CashOrders_CompanyId",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "IX_CashOrders_MoneyAccount_Date",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "IX_PaymentCreateAttempts_ActorUserId",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "IX_SalesRequests_ServiceInvoiceId",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "IX_TaskDeadlineChangeRequests_ReviewerDispatch",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "IX_TaskStatusNotificationOutboxes_ApprovalParticipantId",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "IX_TaskStatusNotificationOutboxes_CompletedAt_LeaseUntil_Id",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "IX_TaskStatusNotificationOutboxes_EventKey",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "IX_TaskStatusNotificationOutboxes_TaskJournalItemId_Id",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "IX_TaskTimeCorrections_EntryId_Id",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "IX_TaskTimeEntries_OneRunningPerUser",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "IX_TaskTimeEntries_TaskId_UserId_StartedAtUtc_Id",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "PK_PaymentCreateAttempts",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "PK_TaskStatusNotificationOutboxes",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "PK_TaskTimeCorrections",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "i",
+        "name": "PK_TaskTimeEntries",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "r",
+        "name": "PaymentCreateAttempts",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "r",
+        "name": "TaskStatusNotificationOutboxes",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "r",
+        "name": "TaskTimeCorrections",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      },
+      {
+        "forceRowSecurity": false,
+        "kind": "r",
+        "name": "TaskTimeEntries",
+        "options": null,
+        "owner": "__migration_owner__",
+        "partition": null,
+        "persistence": "p",
+        "rowSecurity": false,
+        "view": null
+      }
+    ],
+    "removed": []
+  },
+  "constraints": {
+    "added": [
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "CHECK ((\"CorrectedSeconds\" IS NULL OR \"CorrectedSeconds\" >= 0) AND \"Revision\" >= 0)",
+        "name": "CK_TaskTimeEntries_Correction",
+        "table": "TaskTimeEntries",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "CHECK (\"ActorUserId\" > 0 AND (\"SellerCompanyId\" IS NULL OR \"SellerCompanyId\" > 0) AND (\"SellerBranchId\" IS NULL OR \"SellerBranchId\" > 0 AND \"SellerCompanyId\" IS NOT NULL))",
+        "name": "CK_PaymentCreateAttempts_Ownership",
+        "table": "PaymentCreateAttempts",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "CHECK (\"NewSeconds\" >= 0 AND (\"PreviousSeconds\" IS NULL OR \"PreviousSeconds\" >= 0))",
+        "name": "CK_TaskTimeCorrections_NonNegative",
+        "table": "TaskTimeCorrections",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "CHECK (\"Operation\"::text = 'primary'::text AND \"PrimaryPaymentId\" IS NULL OR \"Operation\"::text = 'remainder'::text AND \"PrimaryPaymentId\" IS NOT NULL AND \"PrimaryPaymentId\" > 0)",
+        "name": "CK_PaymentCreateAttempts_Operation",
+        "table": "PaymentCreateAttempts",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "CHECK (\"State\"::text = 'Committed'::text AND \"CanonicalPaymentId\" IS NOT NULL AND \"CanonicalPaymentId\" > 0 AND \"PayloadIdentity\" IS NOT NULL AND length(\"PayloadIdentity\"::text) = 64 AND \"CommittedAtUtc\" IS NOT NULL AND \"CancelledAtUtc\" IS NULL OR \"State\"::text = 'Draft'::text AND \"CanonicalPaymentId\" IS NULL AND \"PayloadIdentity\" IS NULL AND \"CommittedAtUtc\" IS NULL AND \"CancelledAtUtc\" IS NULL OR \"State\"::text = 'Cancelled'::text AND \"CanonicalPaymentId\" IS NULL AND \"PayloadIdentity\" IS NULL AND \"CommittedAtUtc\" IS NULL AND \"CancelledAtUtc\" IS NOT NULL)",
+        "name": "CK_PaymentCreateAttempts_Outcome",
+        "table": "PaymentCreateAttempts",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "CHECK (\"State\"::text = ANY (ARRAY['Draft'::character varying, 'Committed'::character varying, 'Cancelled'::character varying]::text[]))",
+        "name": "CK_PaymentCreateAttempts_State",
+        "table": "PaymentCreateAttempts",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "CHECK (\"StoppedAtUtc\" IS NULL OR \"StoppedAtUtc\" >= \"StartedAtUtc\")",
+        "name": "CK_TaskTimeEntries_OrderedInterval",
+        "table": "TaskTimeEntries",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "FOREIGN KEY (\"ApprovalParticipantId\") REFERENCES \"TaskJournalParticipants\"(\"Id\") ON DELETE SET NULL",
+        "name": "FK_TaskStatusNotificationOutboxes_TaskJournalParticipants_Appro",
+        "table": "TaskStatusNotificationOutboxes",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "FOREIGN KEY (\"CompanyId\") REFERENCES \"LegalEntities\"(\"Id\")",
+        "name": "FK_CashInventories_LegalEntities_CompanyId",
+        "table": "CashInventories",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "FOREIGN KEY (\"CompanyId\") REFERENCES \"LegalEntities\"(\"Id\")",
+        "name": "FK_CashOrders_LegalEntities_CompanyId",
+        "table": "CashOrders",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "FOREIGN KEY (\"EntryId\") REFERENCES \"TaskTimeEntries\"(\"Id\") ON DELETE RESTRICT",
+        "name": "FK_TaskTimeCorrections_TaskTimeEntries_EntryId",
+        "table": "TaskTimeCorrections",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "FOREIGN KEY (\"MoneyAccountId\") REFERENCES \"MoneyAccounts\"(\"Id\")",
+        "name": "FK_CashInventories_MoneyAccounts_MoneyAccountId",
+        "table": "CashInventories",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "FOREIGN KEY (\"MoneyAccountId\") REFERENCES \"MoneyAccounts\"(\"Id\")",
+        "name": "FK_CashOrders_MoneyAccounts_MoneyAccountId",
+        "table": "CashOrders",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "FOREIGN KEY (\"TaskId\") REFERENCES \"TaskJournalItems\"(\"Id\") ON DELETE RESTRICT",
+        "name": "FK_TaskTimeEntries_TaskJournalItems_TaskId",
+        "table": "TaskTimeEntries",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "FOREIGN KEY (\"TaskJournalItemId\") REFERENCES \"TaskJournalItems\"(\"Id\") ON DELETE CASCADE",
+        "name": "FK_TaskStatusNotificationOutboxes_TaskJournalItems_TaskJournal~",
+        "table": "TaskStatusNotificationOutboxes",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "FOREIGN KEY (\"UserId\") REFERENCES \"Users\"(\"Id\") ON DELETE SET NULL",
+        "name": "FK_TaskTimeEntries_Users_UserId",
+        "table": "TaskTimeEntries",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "PRIMARY KEY (\"Id\")",
+        "name": "PK_PaymentCreateAttempts",
+        "table": "PaymentCreateAttempts",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "PRIMARY KEY (\"Id\")",
+        "name": "PK_TaskStatusNotificationOutboxes",
+        "table": "TaskStatusNotificationOutboxes",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "PRIMARY KEY (\"Id\")",
+        "name": "PK_TaskTimeCorrections",
+        "table": "TaskTimeCorrections",
+        "validated": true
+      },
+      {
+        "deferrable": false,
+        "deferred": false,
+        "definition": "PRIMARY KEY (\"Id\")",
+        "name": "PK_TaskTimeEntries",
+        "table": "TaskTimeEntries",
+        "validated": true
+      }
+    ],
+    "removed": []
+  },
+  "indexes": {
+    "added": [
+      {
+        "definition": "CREATE INDEX \"IX_CashInventories_Company_Account_Date\" ON public.\"CashInventories\" USING btree (\"CompanyId\", \"MoneyAccountId\", \"Date\")",
+        "live": true,
+        "name": "IX_CashInventories_Company_Account_Date",
+        "ready": true,
+        "table": "CashInventories",
+        "valid": true
+      },
+      {
+        "definition": "CREATE INDEX \"IX_CashInventories_MoneyAccountId\" ON public.\"CashInventories\" USING btree (\"MoneyAccountId\")",
+        "live": true,
+        "name": "IX_CashInventories_MoneyAccountId",
+        "ready": true,
+        "table": "CashInventories",
+        "valid": true
+      },
+      {
+        "definition": "CREATE INDEX \"IX_CashOrders_CompanyId\" ON public.\"CashOrders\" USING btree (\"CompanyId\")",
+        "live": true,
+        "name": "IX_CashOrders_CompanyId",
+        "ready": true,
+        "table": "CashOrders",
+        "valid": true
+      },
+      {
+        "definition": "CREATE INDEX \"IX_CashOrders_MoneyAccount_Date\" ON public.\"CashOrders\" USING btree (\"MoneyAccountId\", \"Date\")",
+        "live": true,
+        "name": "IX_CashOrders_MoneyAccount_Date",
+        "ready": true,
+        "table": "CashOrders",
+        "valid": true
+      },
+      {
+        "definition": "CREATE INDEX \"IX_PaymentCreateAttempts_ActorUserId\" ON public.\"PaymentCreateAttempts\" USING btree (\"ActorUserId\")",
+        "live": true,
+        "name": "IX_PaymentCreateAttempts_ActorUserId",
+        "ready": true,
+        "table": "PaymentCreateAttempts",
+        "valid": true
+      },
+      {
+        "definition": "CREATE INDEX \"IX_SalesRequests_ServiceInvoiceId\" ON public.\"SalesRequests\" USING btree (\"ServiceInvoiceId\")",
+        "live": true,
+        "name": "IX_SalesRequests_ServiceInvoiceId",
+        "ready": true,
+        "table": "SalesRequests",
+        "valid": true
+      },
+      {
+        "definition": "CREATE INDEX \"IX_TaskDeadlineChangeRequests_ReviewerDispatch\" ON public.\"TaskJournalDeadlineChangeRequests\" USING btree (\"ReviewerDispatchPending\", \"ReviewerDispatchLeaseUntil\", \"Id\")",
+        "live": true,
+        "name": "IX_TaskDeadlineChangeRequests_ReviewerDispatch",
+        "ready": true,
+        "table": "TaskJournalDeadlineChangeRequests",
+        "valid": true
+      },
+      {
+        "definition": "CREATE INDEX \"IX_TaskStatusNotificationOutboxes_ApprovalParticipantId\" ON public.\"TaskStatusNotificationOutboxes\" USING btree (\"ApprovalParticipantId\")",
+        "live": true,
+        "name": "IX_TaskStatusNotificationOutboxes_ApprovalParticipantId",
+        "ready": true,
+        "table": "TaskStatusNotificationOutboxes",
+        "valid": true
+      },
+      {
+        "definition": "CREATE INDEX \"IX_TaskStatusNotificationOutboxes_CompletedAt_LeaseUntil_Id\" ON public.\"TaskStatusNotificationOutboxes\" USING btree (\"CompletedAt\", \"LeaseUntil\", \"Id\")",
+        "live": true,
+        "name": "IX_TaskStatusNotificationOutboxes_CompletedAt_LeaseUntil_Id",
+        "ready": true,
+        "table": "TaskStatusNotificationOutboxes",
+        "valid": true
+      },
+      {
+        "definition": "CREATE INDEX \"IX_TaskStatusNotificationOutboxes_TaskJournalItemId_Id\" ON public.\"TaskStatusNotificationOutboxes\" USING btree (\"TaskJournalItemId\", \"Id\")",
+        "live": true,
+        "name": "IX_TaskStatusNotificationOutboxes_TaskJournalItemId_Id",
+        "ready": true,
+        "table": "TaskStatusNotificationOutboxes",
+        "valid": true
+      },
+      {
+        "definition": "CREATE INDEX \"IX_TaskTimeCorrections_EntryId_Id\" ON public.\"TaskTimeCorrections\" USING btree (\"EntryId\", \"Id\")",
+        "live": true,
+        "name": "IX_TaskTimeCorrections_EntryId_Id",
+        "ready": true,
+        "table": "TaskTimeCorrections",
+        "valid": true
+      },
+      {
+        "definition": "CREATE INDEX \"IX_TaskTimeEntries_TaskId_UserId_StartedAtUtc_Id\" ON public.\"TaskTimeEntries\" USING btree (\"TaskId\", \"UserId\", \"StartedAtUtc\", \"Id\")",
+        "live": true,
+        "name": "IX_TaskTimeEntries_TaskId_UserId_StartedAtUtc_Id",
+        "ready": true,
+        "table": "TaskTimeEntries",
+        "valid": true
+      },
+      {
+        "definition": "CREATE UNIQUE INDEX \"IX_TaskStatusNotificationOutboxes_EventKey\" ON public.\"TaskStatusNotificationOutboxes\" USING btree (\"EventKey\")",
+        "live": true,
+        "name": "IX_TaskStatusNotificationOutboxes_EventKey",
+        "ready": true,
+        "table": "TaskStatusNotificationOutboxes",
+        "valid": true
+      },
+      {
+        "definition": "CREATE UNIQUE INDEX \"IX_TaskTimeEntries_OneRunningPerUser\" ON public.\"TaskTimeEntries\" USING btree (\"UserId\") WHERE ((\"StoppedAtUtc\" IS NULL) AND (\"UserId\" IS NOT NULL))",
+        "live": true,
+        "name": "IX_TaskTimeEntries_OneRunningPerUser",
+        "ready": true,
+        "table": "TaskTimeEntries",
+        "valid": true
+      },
+      {
+        "definition": "CREATE UNIQUE INDEX \"PK_PaymentCreateAttempts\" ON public.\"PaymentCreateAttempts\" USING btree (\"Id\")",
+        "live": true,
+        "name": "PK_PaymentCreateAttempts",
+        "ready": true,
+        "table": "PaymentCreateAttempts",
+        "valid": true
+      },
+      {
+        "definition": "CREATE UNIQUE INDEX \"PK_TaskStatusNotificationOutboxes\" ON public.\"TaskStatusNotificationOutboxes\" USING btree (\"Id\")",
+        "live": true,
+        "name": "PK_TaskStatusNotificationOutboxes",
+        "ready": true,
+        "table": "TaskStatusNotificationOutboxes",
+        "valid": true
+      },
+      {
+        "definition": "CREATE UNIQUE INDEX \"PK_TaskTimeCorrections\" ON public.\"TaskTimeCorrections\" USING btree (\"Id\")",
+        "live": true,
+        "name": "PK_TaskTimeCorrections",
+        "ready": true,
+        "table": "TaskTimeCorrections",
+        "valid": true
+      },
+      {
+        "definition": "CREATE UNIQUE INDEX \"PK_TaskTimeEntries\" ON public.\"TaskTimeEntries\" USING btree (\"Id\")",
+        "live": true,
+        "name": "PK_TaskTimeEntries",
+        "ready": true,
+        "table": "TaskTimeEntries",
+        "valid": true
+      }
+    ],
+    "removed": []
+  },
+  "triggers": {
+    "added": [
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER DELETE ON \"TaskJournalParticipants\" FROM \"TaskStatusNotificationOutboxes\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_setnull_del\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_a__",
+        "table": "TaskJournalParticipants",
+        "internal": true,
+        "constraintName": "FK_TaskStatusNotificationOutboxes_TaskJournalParticipants_Appro",
+        "constraintType": "f",
+        "constraintTable": "TaskStatusNotificationOutboxes",
+        "constraintReferencedTable": "TaskJournalParticipants",
+        "constraintDefinition": "FOREIGN KEY (\"ApprovalParticipantId\") REFERENCES \"TaskJournalParticipants\"(\"Id\") ON DELETE SET NULL"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER UPDATE ON \"TaskJournalParticipants\" FROM \"TaskStatusNotificationOutboxes\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_upd\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_a__",
+        "table": "TaskJournalParticipants",
+        "internal": true,
+        "constraintName": "FK_TaskStatusNotificationOutboxes_TaskJournalParticipants_Appro",
+        "constraintType": "f",
+        "constraintTable": "TaskStatusNotificationOutboxes",
+        "constraintReferencedTable": "TaskJournalParticipants",
+        "constraintDefinition": "FOREIGN KEY (\"ApprovalParticipantId\") REFERENCES \"TaskJournalParticipants\"(\"Id\") ON DELETE SET NULL"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER INSERT ON \"TaskStatusNotificationOutboxes\" FROM \"TaskJournalParticipants\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_ins\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_c__",
+        "table": "TaskStatusNotificationOutboxes",
+        "internal": true,
+        "constraintName": "FK_TaskStatusNotificationOutboxes_TaskJournalParticipants_Appro",
+        "constraintType": "f",
+        "constraintTable": "TaskStatusNotificationOutboxes",
+        "constraintReferencedTable": "TaskJournalParticipants",
+        "constraintDefinition": "FOREIGN KEY (\"ApprovalParticipantId\") REFERENCES \"TaskJournalParticipants\"(\"Id\") ON DELETE SET NULL"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER UPDATE ON \"TaskStatusNotificationOutboxes\" FROM \"TaskJournalParticipants\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_upd\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_c__",
+        "table": "TaskStatusNotificationOutboxes",
+        "internal": true,
+        "constraintName": "FK_TaskStatusNotificationOutboxes_TaskJournalParticipants_Appro",
+        "constraintType": "f",
+        "constraintTable": "TaskStatusNotificationOutboxes",
+        "constraintReferencedTable": "TaskJournalParticipants",
+        "constraintDefinition": "FOREIGN KEY (\"ApprovalParticipantId\") REFERENCES \"TaskJournalParticipants\"(\"Id\") ON DELETE SET NULL"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER DELETE ON \"LegalEntities\" FROM \"CashInventories\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_del\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_a__",
+        "table": "LegalEntities",
+        "internal": true,
+        "constraintName": "FK_CashInventories_LegalEntities_CompanyId",
+        "constraintType": "f",
+        "constraintTable": "CashInventories",
+        "constraintReferencedTable": "LegalEntities",
+        "constraintDefinition": "FOREIGN KEY (\"CompanyId\") REFERENCES \"LegalEntities\"(\"Id\")"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER UPDATE ON \"LegalEntities\" FROM \"CashInventories\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_upd\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_a__",
+        "table": "LegalEntities",
+        "internal": true,
+        "constraintName": "FK_CashInventories_LegalEntities_CompanyId",
+        "constraintType": "f",
+        "constraintTable": "CashInventories",
+        "constraintReferencedTable": "LegalEntities",
+        "constraintDefinition": "FOREIGN KEY (\"CompanyId\") REFERENCES \"LegalEntities\"(\"Id\")"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER INSERT ON \"CashInventories\" FROM \"LegalEntities\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_ins\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_c__",
+        "table": "CashInventories",
+        "internal": true,
+        "constraintName": "FK_CashInventories_LegalEntities_CompanyId",
+        "constraintType": "f",
+        "constraintTable": "CashInventories",
+        "constraintReferencedTable": "LegalEntities",
+        "constraintDefinition": "FOREIGN KEY (\"CompanyId\") REFERENCES \"LegalEntities\"(\"Id\")"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER UPDATE ON \"CashInventories\" FROM \"LegalEntities\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_upd\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_c__",
+        "table": "CashInventories",
+        "internal": true,
+        "constraintName": "FK_CashInventories_LegalEntities_CompanyId",
+        "constraintType": "f",
+        "constraintTable": "CashInventories",
+        "constraintReferencedTable": "LegalEntities",
+        "constraintDefinition": "FOREIGN KEY (\"CompanyId\") REFERENCES \"LegalEntities\"(\"Id\")"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER DELETE ON \"LegalEntities\" FROM \"CashOrders\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_del\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_a__",
+        "table": "LegalEntities",
+        "internal": true,
+        "constraintName": "FK_CashOrders_LegalEntities_CompanyId",
+        "constraintType": "f",
+        "constraintTable": "CashOrders",
+        "constraintReferencedTable": "LegalEntities",
+        "constraintDefinition": "FOREIGN KEY (\"CompanyId\") REFERENCES \"LegalEntities\"(\"Id\")"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER UPDATE ON \"LegalEntities\" FROM \"CashOrders\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_upd\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_a__",
+        "table": "LegalEntities",
+        "internal": true,
+        "constraintName": "FK_CashOrders_LegalEntities_CompanyId",
+        "constraintType": "f",
+        "constraintTable": "CashOrders",
+        "constraintReferencedTable": "LegalEntities",
+        "constraintDefinition": "FOREIGN KEY (\"CompanyId\") REFERENCES \"LegalEntities\"(\"Id\")"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER INSERT ON \"CashOrders\" FROM \"LegalEntities\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_ins\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_c__",
+        "table": "CashOrders",
+        "internal": true,
+        "constraintName": "FK_CashOrders_LegalEntities_CompanyId",
+        "constraintType": "f",
+        "constraintTable": "CashOrders",
+        "constraintReferencedTable": "LegalEntities",
+        "constraintDefinition": "FOREIGN KEY (\"CompanyId\") REFERENCES \"LegalEntities\"(\"Id\")"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER UPDATE ON \"CashOrders\" FROM \"LegalEntities\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_upd\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_c__",
+        "table": "CashOrders",
+        "internal": true,
+        "constraintName": "FK_CashOrders_LegalEntities_CompanyId",
+        "constraintType": "f",
+        "constraintTable": "CashOrders",
+        "constraintReferencedTable": "LegalEntities",
+        "constraintDefinition": "FOREIGN KEY (\"CompanyId\") REFERENCES \"LegalEntities\"(\"Id\")"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER DELETE ON \"TaskTimeEntries\" FROM \"TaskTimeCorrections\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_restrict_del\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_a__",
+        "table": "TaskTimeEntries",
+        "internal": true,
+        "constraintName": "FK_TaskTimeCorrections_TaskTimeEntries_EntryId",
+        "constraintType": "f",
+        "constraintTable": "TaskTimeCorrections",
+        "constraintReferencedTable": "TaskTimeEntries",
+        "constraintDefinition": "FOREIGN KEY (\"EntryId\") REFERENCES \"TaskTimeEntries\"(\"Id\") ON DELETE RESTRICT"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER UPDATE ON \"TaskTimeEntries\" FROM \"TaskTimeCorrections\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_upd\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_a__",
+        "table": "TaskTimeEntries",
+        "internal": true,
+        "constraintName": "FK_TaskTimeCorrections_TaskTimeEntries_EntryId",
+        "constraintType": "f",
+        "constraintTable": "TaskTimeCorrections",
+        "constraintReferencedTable": "TaskTimeEntries",
+        "constraintDefinition": "FOREIGN KEY (\"EntryId\") REFERENCES \"TaskTimeEntries\"(\"Id\") ON DELETE RESTRICT"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER INSERT ON \"TaskTimeCorrections\" FROM \"TaskTimeEntries\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_ins\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_c__",
+        "table": "TaskTimeCorrections",
+        "internal": true,
+        "constraintName": "FK_TaskTimeCorrections_TaskTimeEntries_EntryId",
+        "constraintType": "f",
+        "constraintTable": "TaskTimeCorrections",
+        "constraintReferencedTable": "TaskTimeEntries",
+        "constraintDefinition": "FOREIGN KEY (\"EntryId\") REFERENCES \"TaskTimeEntries\"(\"Id\") ON DELETE RESTRICT"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER UPDATE ON \"TaskTimeCorrections\" FROM \"TaskTimeEntries\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_upd\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_c__",
+        "table": "TaskTimeCorrections",
+        "internal": true,
+        "constraintName": "FK_TaskTimeCorrections_TaskTimeEntries_EntryId",
+        "constraintType": "f",
+        "constraintTable": "TaskTimeCorrections",
+        "constraintReferencedTable": "TaskTimeEntries",
+        "constraintDefinition": "FOREIGN KEY (\"EntryId\") REFERENCES \"TaskTimeEntries\"(\"Id\") ON DELETE RESTRICT"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER DELETE ON \"MoneyAccounts\" FROM \"CashInventories\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_del\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_a__",
+        "table": "MoneyAccounts",
+        "internal": true,
+        "constraintName": "FK_CashInventories_MoneyAccounts_MoneyAccountId",
+        "constraintType": "f",
+        "constraintTable": "CashInventories",
+        "constraintReferencedTable": "MoneyAccounts",
+        "constraintDefinition": "FOREIGN KEY (\"MoneyAccountId\") REFERENCES \"MoneyAccounts\"(\"Id\")"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER UPDATE ON \"MoneyAccounts\" FROM \"CashInventories\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_upd\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_a__",
+        "table": "MoneyAccounts",
+        "internal": true,
+        "constraintName": "FK_CashInventories_MoneyAccounts_MoneyAccountId",
+        "constraintType": "f",
+        "constraintTable": "CashInventories",
+        "constraintReferencedTable": "MoneyAccounts",
+        "constraintDefinition": "FOREIGN KEY (\"MoneyAccountId\") REFERENCES \"MoneyAccounts\"(\"Id\")"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER INSERT ON \"CashInventories\" FROM \"MoneyAccounts\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_ins\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_c__",
+        "table": "CashInventories",
+        "internal": true,
+        "constraintName": "FK_CashInventories_MoneyAccounts_MoneyAccountId",
+        "constraintType": "f",
+        "constraintTable": "CashInventories",
+        "constraintReferencedTable": "MoneyAccounts",
+        "constraintDefinition": "FOREIGN KEY (\"MoneyAccountId\") REFERENCES \"MoneyAccounts\"(\"Id\")"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER UPDATE ON \"CashInventories\" FROM \"MoneyAccounts\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_upd\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_c__",
+        "table": "CashInventories",
+        "internal": true,
+        "constraintName": "FK_CashInventories_MoneyAccounts_MoneyAccountId",
+        "constraintType": "f",
+        "constraintTable": "CashInventories",
+        "constraintReferencedTable": "MoneyAccounts",
+        "constraintDefinition": "FOREIGN KEY (\"MoneyAccountId\") REFERENCES \"MoneyAccounts\"(\"Id\")"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER DELETE ON \"MoneyAccounts\" FROM \"CashOrders\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_del\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_a__",
+        "table": "MoneyAccounts",
+        "internal": true,
+        "constraintName": "FK_CashOrders_MoneyAccounts_MoneyAccountId",
+        "constraintType": "f",
+        "constraintTable": "CashOrders",
+        "constraintReferencedTable": "MoneyAccounts",
+        "constraintDefinition": "FOREIGN KEY (\"MoneyAccountId\") REFERENCES \"MoneyAccounts\"(\"Id\")"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER UPDATE ON \"MoneyAccounts\" FROM \"CashOrders\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_upd\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_a__",
+        "table": "MoneyAccounts",
+        "internal": true,
+        "constraintName": "FK_CashOrders_MoneyAccounts_MoneyAccountId",
+        "constraintType": "f",
+        "constraintTable": "CashOrders",
+        "constraintReferencedTable": "MoneyAccounts",
+        "constraintDefinition": "FOREIGN KEY (\"MoneyAccountId\") REFERENCES \"MoneyAccounts\"(\"Id\")"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER INSERT ON \"CashOrders\" FROM \"MoneyAccounts\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_ins\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_c__",
+        "table": "CashOrders",
+        "internal": true,
+        "constraintName": "FK_CashOrders_MoneyAccounts_MoneyAccountId",
+        "constraintType": "f",
+        "constraintTable": "CashOrders",
+        "constraintReferencedTable": "MoneyAccounts",
+        "constraintDefinition": "FOREIGN KEY (\"MoneyAccountId\") REFERENCES \"MoneyAccounts\"(\"Id\")"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER UPDATE ON \"CashOrders\" FROM \"MoneyAccounts\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_upd\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_c__",
+        "table": "CashOrders",
+        "internal": true,
+        "constraintName": "FK_CashOrders_MoneyAccounts_MoneyAccountId",
+        "constraintType": "f",
+        "constraintTable": "CashOrders",
+        "constraintReferencedTable": "MoneyAccounts",
+        "constraintDefinition": "FOREIGN KEY (\"MoneyAccountId\") REFERENCES \"MoneyAccounts\"(\"Id\")"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER DELETE ON \"TaskJournalItems\" FROM \"TaskTimeEntries\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_restrict_del\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_a__",
+        "table": "TaskJournalItems",
+        "internal": true,
+        "constraintName": "FK_TaskTimeEntries_TaskJournalItems_TaskId",
+        "constraintType": "f",
+        "constraintTable": "TaskTimeEntries",
+        "constraintReferencedTable": "TaskJournalItems",
+        "constraintDefinition": "FOREIGN KEY (\"TaskId\") REFERENCES \"TaskJournalItems\"(\"Id\") ON DELETE RESTRICT"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER UPDATE ON \"TaskJournalItems\" FROM \"TaskTimeEntries\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_upd\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_a__",
+        "table": "TaskJournalItems",
+        "internal": true,
+        "constraintName": "FK_TaskTimeEntries_TaskJournalItems_TaskId",
+        "constraintType": "f",
+        "constraintTable": "TaskTimeEntries",
+        "constraintReferencedTable": "TaskJournalItems",
+        "constraintDefinition": "FOREIGN KEY (\"TaskId\") REFERENCES \"TaskJournalItems\"(\"Id\") ON DELETE RESTRICT"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER INSERT ON \"TaskTimeEntries\" FROM \"TaskJournalItems\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_ins\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_c__",
+        "table": "TaskTimeEntries",
+        "internal": true,
+        "constraintName": "FK_TaskTimeEntries_TaskJournalItems_TaskId",
+        "constraintType": "f",
+        "constraintTable": "TaskTimeEntries",
+        "constraintReferencedTable": "TaskJournalItems",
+        "constraintDefinition": "FOREIGN KEY (\"TaskId\") REFERENCES \"TaskJournalItems\"(\"Id\") ON DELETE RESTRICT"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER UPDATE ON \"TaskTimeEntries\" FROM \"TaskJournalItems\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_upd\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_c__",
+        "table": "TaskTimeEntries",
+        "internal": true,
+        "constraintName": "FK_TaskTimeEntries_TaskJournalItems_TaskId",
+        "constraintType": "f",
+        "constraintTable": "TaskTimeEntries",
+        "constraintReferencedTable": "TaskJournalItems",
+        "constraintDefinition": "FOREIGN KEY (\"TaskId\") REFERENCES \"TaskJournalItems\"(\"Id\") ON DELETE RESTRICT"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER DELETE ON \"TaskJournalItems\" FROM \"TaskStatusNotificationOutboxes\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_cascade_del\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_a__",
+        "table": "TaskJournalItems",
+        "internal": true,
+        "constraintName": "FK_TaskStatusNotificationOutboxes_TaskJournalItems_TaskJournal~",
+        "constraintType": "f",
+        "constraintTable": "TaskStatusNotificationOutboxes",
+        "constraintReferencedTable": "TaskJournalItems",
+        "constraintDefinition": "FOREIGN KEY (\"TaskJournalItemId\") REFERENCES \"TaskJournalItems\"(\"Id\") ON DELETE CASCADE"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER UPDATE ON \"TaskJournalItems\" FROM \"TaskStatusNotificationOutboxes\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_upd\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_a__",
+        "table": "TaskJournalItems",
+        "internal": true,
+        "constraintName": "FK_TaskStatusNotificationOutboxes_TaskJournalItems_TaskJournal~",
+        "constraintType": "f",
+        "constraintTable": "TaskStatusNotificationOutboxes",
+        "constraintReferencedTable": "TaskJournalItems",
+        "constraintDefinition": "FOREIGN KEY (\"TaskJournalItemId\") REFERENCES \"TaskJournalItems\"(\"Id\") ON DELETE CASCADE"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER INSERT ON \"TaskStatusNotificationOutboxes\" FROM \"TaskJournalItems\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_ins\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_c__",
+        "table": "TaskStatusNotificationOutboxes",
+        "internal": true,
+        "constraintName": "FK_TaskStatusNotificationOutboxes_TaskJournalItems_TaskJournal~",
+        "constraintType": "f",
+        "constraintTable": "TaskStatusNotificationOutboxes",
+        "constraintReferencedTable": "TaskJournalItems",
+        "constraintDefinition": "FOREIGN KEY (\"TaskJournalItemId\") REFERENCES \"TaskJournalItems\"(\"Id\") ON DELETE CASCADE"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER UPDATE ON \"TaskStatusNotificationOutboxes\" FROM \"TaskJournalItems\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_upd\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_c__",
+        "table": "TaskStatusNotificationOutboxes",
+        "internal": true,
+        "constraintName": "FK_TaskStatusNotificationOutboxes_TaskJournalItems_TaskJournal~",
+        "constraintType": "f",
+        "constraintTable": "TaskStatusNotificationOutboxes",
+        "constraintReferencedTable": "TaskJournalItems",
+        "constraintDefinition": "FOREIGN KEY (\"TaskJournalItemId\") REFERENCES \"TaskJournalItems\"(\"Id\") ON DELETE CASCADE"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER DELETE ON \"Users\" FROM \"TaskTimeEntries\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_setnull_del\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_a__",
+        "table": "Users",
+        "internal": true,
+        "constraintName": "FK_TaskTimeEntries_Users_UserId",
+        "constraintType": "f",
+        "constraintTable": "TaskTimeEntries",
+        "constraintReferencedTable": "Users",
+        "constraintDefinition": "FOREIGN KEY (\"UserId\") REFERENCES \"Users\"(\"Id\") ON DELETE SET NULL"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_a__\" AFTER UPDATE ON \"Users\" FROM \"TaskTimeEntries\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_noaction_upd\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_a__",
+        "table": "Users",
+        "internal": true,
+        "constraintName": "FK_TaskTimeEntries_Users_UserId",
+        "constraintType": "f",
+        "constraintTable": "TaskTimeEntries",
+        "constraintReferencedTable": "Users",
+        "constraintDefinition": "FOREIGN KEY (\"UserId\") REFERENCES \"Users\"(\"Id\") ON DELETE SET NULL"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER INSERT ON \"TaskTimeEntries\" FROM \"Users\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_ins\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_c__",
+        "table": "TaskTimeEntries",
+        "internal": true,
+        "constraintName": "FK_TaskTimeEntries_Users_UserId",
+        "constraintType": "f",
+        "constraintTable": "TaskTimeEntries",
+        "constraintReferencedTable": "Users",
+        "constraintDefinition": "FOREIGN KEY (\"UserId\") REFERENCES \"Users\"(\"Id\") ON DELETE SET NULL"
+      },
+      {
+        "definition": "CREATE CONSTRAINT TRIGGER \"__internal_fk_trigger_c__\" AFTER UPDATE ON \"TaskTimeEntries\" FROM \"Users\" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_upd\"()",
+        "enabled": "O",
+        "name": "__internal_fk_trigger_c__",
+        "table": "TaskTimeEntries",
+        "internal": true,
+        "constraintName": "FK_TaskTimeEntries_Users_UserId",
+        "constraintType": "f",
+        "constraintTable": "TaskTimeEntries",
+        "constraintReferencedTable": "Users",
+        "constraintDefinition": "FOREIGN KEY (\"UserId\") REFERENCES \"Users\"(\"Id\") ON DELETE SET NULL"
+      }
+    ],
+    "removed": []
+  },
+  "routines": {
+    "added": [],
+    "removed": []
+  },
+  "sequences": {
+    "added": [
+      {
+        "cache": 1,
+        "cycle": false,
+        "increment": 1,
+        "max": 9223372036854775807,
+        "min": 1,
+        "name": "TaskStatusNotificationOutboxes_Id_seq",
+        "start": 1,
+        "type": "bigint"
+      },
+      {
+        "cache": 1,
+        "cycle": false,
+        "increment": 1,
+        "max": 9223372036854775807,
+        "min": 1,
+        "name": "TaskTimeCorrections_Id_seq",
+        "start": 1,
+        "type": "bigint"
+      }
+    ],
+    "removed": []
+  },
+  "policies": {
+    "added": [],
+    "removed": []
+  },
+  "types": {
+    "added": [
+      {
+        "baseType": "-",
+        "default": null,
+        "enumLabels": null,
+        "kind": "b",
+        "name": "_PaymentCreateAttempts",
+        "notNull": false,
+        "owner": "__migration_owner__"
+      },
+      {
+        "baseType": "-",
+        "default": null,
+        "enumLabels": null,
+        "kind": "b",
+        "name": "_TaskStatusNotificationOutboxes",
+        "notNull": false,
+        "owner": "__migration_owner__"
+      },
+      {
+        "baseType": "-",
+        "default": null,
+        "enumLabels": null,
+        "kind": "b",
+        "name": "_TaskTimeCorrections",
+        "notNull": false,
+        "owner": "__migration_owner__"
+      },
+      {
+        "baseType": "-",
+        "default": null,
+        "enumLabels": null,
+        "kind": "b",
+        "name": "_TaskTimeEntries",
+        "notNull": false,
+        "owner": "__migration_owner__"
+      },
+      {
+        "baseType": "-",
+        "default": null,
+        "enumLabels": null,
+        "kind": "c",
+        "name": "PaymentCreateAttempts",
+        "notNull": false,
+        "owner": "__migration_owner__"
+      },
+      {
+        "baseType": "-",
+        "default": null,
+        "enumLabels": null,
+        "kind": "c",
+        "name": "TaskStatusNotificationOutboxes",
+        "notNull": false,
+        "owner": "__migration_owner__"
+      },
+      {
+        "baseType": "-",
+        "default": null,
+        "enumLabels": null,
+        "kind": "c",
+        "name": "TaskTimeCorrections",
+        "notNull": false,
+        "owner": "__migration_owner__"
+      },
+      {
+        "baseType": "-",
+        "default": null,
+        "enumLabels": null,
+        "kind": "c",
+        "name": "TaskTimeEntries",
+        "notNull": false,
+        "owner": "__migration_owner__"
+      }
+    ],
+    "removed": []
+  }
+}

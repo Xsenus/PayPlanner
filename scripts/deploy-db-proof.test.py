@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.dont_write_bytecode = True
 spec = importlib.util.spec_from_file_location('database_proof', Path(__file__).with_name('deploy-db-proof.py'))
@@ -241,6 +242,185 @@ class DatabaseProofTests(unittest.TestCase):
                 mutate(self.after)
                 with self.assertRaises(AssertionError):
                     self.compare('startup')
+
+
+class CandidateRowProtectionTests(unittest.TestCase):
+    def states(self, migrated=True):
+        before = dict(schemaColumns=[dict(table=t, name=n) for t in ['Payments']+proof.SUPPLEMENTAL_TABLES for n in ['Id', 'ExistingValue']],
+            projectionColumns={'Payments': ['Id', 'ExistingValue']},
+            supplementalProjectionColumns={t: ['Id', 'ExistingValue'] for t in proof.SUPPLEMENTAL_TABLES},
+            supplementalFingerprints=[dict(table=t, count=2, hash='a'*32) for t in proof.SUPPLEMENTAL_TABLES],
+            candidateDefaultCounts={t: None for t in proof.CANDIDATE_DEFAULTS},
+            candidateNewTableCounts={t: None for t in proof.CANDIDATE_NEW_TABLES})
+        after = copy.deepcopy(before)
+        if migrated:
+            after['candidateDefaultCounts'] = {t: 0 for t in proof.CANDIDATE_DEFAULTS}
+            after['candidateNewTableCounts'] = {t: 0 for t in proof.CANDIDATE_NEW_TABLES}
+        return before, after
+
+    def test_preserves_existing_cash_and_request_rows_and_checks_empty_additions(self):
+        proof.compare_candidate_rows(*self.states(), True)
+        proof.compare_candidate_rows(*self.states(False), False)
+
+    def test_rejects_changed_cash_or_request_content_count_and_identity(self):
+        for index in range(3):
+            for field, value in [('hash', 'altered'), ('count', 3), ('table', 'Other')]:
+                with self.subTest(index=index, field=field):
+                    before, after = self.states()
+                    after['supplementalFingerprints'][index][field] = value
+                    with self.assertRaisesRegex(AssertionError, 'cash and request rows'):
+                        proof.compare_candidate_rows(before, after, True)
+
+    def test_rejects_omitted_baseline_columns_even_if_both_projections_match(self):
+        for key in ['projectionColumns', 'supplementalProjectionColumns']:
+            before, after = self.states()
+            table = next(iter(before[key]))
+            before[key][table].pop()
+            after[key][table].pop()
+            with self.assertRaisesRegex(AssertionError, 'every baseline column'):
+                proof.compare_candidate_rows(before, after, True)
+
+    def test_rejects_hidden_scope_changes_and_incomplete_fingerprints(self):
+        for mutate in [lambda a: a['supplementalProjectionColumns'].pop('CashOrders'),
+                       lambda a: a['supplementalFingerprints'].pop(),
+                       lambda a: a['candidateDefaultCounts'].pop('SalesRequests'),
+                       lambda a: a['candidateNewTableCounts'].update(UnreviewedTable=0)]:
+            before, after = self.states()
+            mutate(after)
+            with self.assertRaises(AssertionError):
+                proof.compare_candidate_rows(before, after, True)
+
+    def test_rejects_unexpected_assignments_and_preexisting_new_state(self):
+        for key in ['candidateDefaultCounts', 'candidateNewTableCounts']:
+            for table in self.states()[0][key]:
+                for value in [1, -1, None, False]:
+                    before, after = self.states()
+                    after[key][table] = value
+                    with self.assertRaisesRegex(AssertionError, 'unexpected data'):
+                        proof.compare_candidate_rows(before, after, True)
+                before, after = self.states()
+                before[key][table] = 0
+                with self.assertRaisesRegex(AssertionError, 'pre-migration state'):
+                    proof.compare_candidate_rows(before, after, True)
+
+    def test_collector_uses_bounded_readonly_counts_and_detects_partial_schema(self):
+        columns = [dict(table=t, name=n) for t, (names, _) in proof.CANDIDATE_DEFAULTS.items() for n in names]
+        objects = {'relations': [dict(name=t, kind='r') for t in proof.CANDIDATE_NEW_TABLES]}
+        calls = []
+        def query(sql):
+            self.assertTrue(sql.startswith('SELECT to_json(count(*)) FROM "'))
+            self.assertNotIn('UPDATE', sql)
+            calls.append(sql)
+            return [0]
+        defaults, counts = proof.candidate_row_controls(columns, objects, query)
+        self.assertEqual(set(defaults), {'CashInventories', 'CashOrders', 'SalesRequests', 'TaskJournalDeadlineChangeRequests', 'TaskJournalItems'})
+        self.assertEqual(set(counts), {'PaymentCreateAttempts', 'TaskStatusNotificationOutboxes', 'TaskTimeCorrections', 'TaskTimeEntries'})
+        self.assertEqual(len(calls), 9)
+        self.assertTrue(all(value == 0 for value in [*defaults.values(), *counts.values()]))
+        columns = [c for c in columns if not (c['table'] == 'SalesRequests' and c['name'] == 'ServiceInvoiceId')]
+        with self.assertRaisesRegex(AssertionError, 'Incomplete reviewed candidate columns'):
+            proof.candidate_row_controls(columns, objects, query)
+
+    def test_collector_does_not_query_absent_new_columns_or_tables(self):
+        def query(_):
+            self.fail('The unchanged baseline must not query absent additions')
+        defaults, counts = proof.candidate_row_controls([], {'relations': []}, query)
+        self.assertTrue(all(value is None for value in [*defaults.values(), *counts.values()]))
+
+
+class ForeignKeyTriggerIdentityTests(unittest.TestCase):
+    def trigger(self, oid=123):
+        name = 'RI_ConstraintTrigger_a_'+str(oid)
+        return dict(table='Parent', name=name, definition='CREATE CONSTRAINT TRIGGER "'+name+'" AFTER DELETE ON "Parent" FROM "Child" NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION "RI_FKey_noaction_del"()',
+            enabled='O', internal=True, constraintName='FK_Child_Parent_ParentId', constraintType='f', constraintTable='Child',
+            constraintReferencedTable='Parent', constraintDefinition='FOREIGN KEY ("ParentId") REFERENCES "Parent"("Id")')
+
+    def test_only_cluster_local_oid_is_normalized(self):
+        before = self.trigger()
+        result = proof.stable_added_trigger(before)
+        self.assertEqual(result, proof.stable_added_trigger(self.trigger(987654321)))
+        self.assertEqual(before, self.trigger(), 'Normalization must not mutate the immutable observation')
+        self.assertEqual(set(result), set(before))
+        self.assertEqual({k: v for k, v in result.items() if k not in ['name', 'definition']},
+                         {k: v for k, v in before.items() if k not in ['name', 'definition']})
+
+    def test_different_binding_action_direction_or_enabled_state_never_compares_equal(self):
+        original = self.trigger()
+        expected = proof.stable_added_trigger(original)
+        for key, value in [('table', 'OtherParent'), ('enabled', 'D'), ('internal', False), ('constraintName', 'OtherFK'),
+                           ('constraintType', 'c'), ('constraintTable', 'OtherChild'), ('constraintReferencedTable', 'OtherParent'),
+                           ('constraintDefinition', 'FOREIGN KEY ("OtherParentId") REFERENCES "Parent"("Id")'),
+                           ('definition', original['definition'].replace('RI_FKey_noaction_del', 'RI_FKey_cascade_del'))]:
+            with self.subTest(key=key):
+                changed = {**original, key: value}
+                self.assertNotEqual(expected, proof.stable_added_trigger(changed))
+
+    def test_user_trigger_with_system_looking_name_is_not_normalized(self):
+        user = {**self.trigger(), 'internal': False}
+        self.assertEqual(proof.stable_added_trigger(user), user)
+        self.assertNotEqual(proof.stable_added_trigger(user), proof.stable_added_trigger({**self.trigger(999), 'internal': False}))
+
+    def test_missing_binding_malformed_name_or_mismatched_body_is_rejected(self):
+        original = self.trigger()
+        mutations = [('name', 'UserTrigger'), ('name', 'RI_ConstraintTrigger_a_0'),
+                     ('definition', original['definition'].replace('123', '124'))]
+        mutations += [(key, None) for key in ['constraintName', 'constraintTable', 'constraintReferencedTable', 'constraintDefinition']]
+        for key, value in mutations:
+            with self.subTest(key=key, value=value):
+                with self.assertRaises(AssertionError):
+                    proof.stable_added_trigger({**original, key: value})
+
+
+class ReviewedCandidateAdmissionTests(unittest.TestCase):
+    def test_review_pins_contents_across_line_endings_and_rejects_changed_approval(self):
+        review = proof.reviewed_candidate()
+        with tempfile.TemporaryDirectory(prefix='pp-candidate-review-') as directory:
+            path = Path(directory)/'deploy-roadmap-candidate-review.json'
+            path.write_bytes((json.dumps(review, indent=2)+'\n').replace('\n', '\r\n').encode())
+            with patch.object(proof, '__file__', str(Path(directory)/'deploy-db-proof.py')):
+                self.assertEqual(proof.reviewed_candidate(), review)
+                review['releaseSeedsCount'] += 1
+                path.write_text(json.dumps(review), encoding='utf-8')
+                with self.assertRaisesRegex(AssertionError, 'admission changed'):
+                    proof.reviewed_candidate()
+
+    def test_only_the_complete_ordered_reviewed_chain_is_admitted(self):
+        ids = proof.reviewed_candidate()['migrationIds']
+        self.assertEqual(proof.reviewed_migration_ids('+'.join(ids)), ids)
+        self.assertEqual(len(ids), 11)
+        for changed in [ids[:-1], ids+['unexpected'], list(reversed(ids)), [ids[0]+'_unexpected', *ids[1:]]]:
+            with self.subTest(changed=changed):
+                with self.assertRaisesRegex(AssertionError, 'Unreviewed migration'):
+                    proof.reviewed_migration_ids('+'.join(changed))
+
+    def test_reviewed_schema_is_exact_and_portable_across_generated_fk_oids(self):
+        review = proof.reviewed_candidate()
+        delta = json.loads(Path(__file__).with_name('deploy-roadmap-candidate-delta.json').read_text(encoding='utf-8'))
+        self.assertEqual(hashlib.sha256(proof.canonical(delta).encode()).hexdigest(), review['schemaDeltaSha256'])
+        self.assertTrue(all(not change['removed'] for change in delta.values()))
+        self.assertEqual(sorted(row['MigrationId'] for row in delta['migrations']['added']), review['migrationIds'])
+        before = dict(schemaColumns=[], migrationRows=[], schemaObjects={key: [] for key in delta if key not in ['columns', 'migrations']})
+        before['schemaObjects']['relations'].append(dict(name='__EFMigrationsHistory', owner='fixture_owner'))
+        after = copy.deepcopy(before)
+        for key, change in delta.items():
+            rows = copy.deepcopy(change['added'])
+            for index, row in enumerate(rows):
+                if 'owner' in row:
+                    self.assertEqual(row['owner'], '__migration_owner__')
+                    row['owner'] = 'fixture_owner'
+                if key == 'triggers':
+                    name = row['name']
+                    direction = name.removeprefix('__internal_fk_trigger_').removesuffix('__')
+                    row['name'] = 'RI_ConstraintTrigger_'+direction+'_'+str(1000+index)
+                    row['definition'] = row['definition'].replace('"'+name+'"', '"'+row['name']+'"', 1)
+            if key == 'columns': after['schemaColumns'] = rows
+            elif key == 'migrations': after['migrationRows'] = rows
+            else: after['schemaObjects'][key].extend(rows)
+        proof.compare_payment_attempt_schema(before, after, review['schemaDeltaSha256'])
+        bad = copy.deepcopy(after)
+        bad['schemaObjects']['triggers'][0]['constraintName'] = 'unreviewed'
+        with self.assertRaisesRegex(AssertionError, 'schema or history delta'):
+            proof.compare_payment_attempt_schema(before, bad, review['schemaDeltaSha256'])
 
 
 if __name__ == '__main__':
