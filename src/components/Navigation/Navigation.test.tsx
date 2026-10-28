@@ -48,6 +48,13 @@ vi.mock('../../hooks/useToast', () => ({
 }));
 
 const apiMock = vi.mocked(apiService);
+let permissionRoleSequence = 1000;
+
+function setFreshNonAdminRole(name: string) {
+  authState.isAdmin = false;
+  authState.roleId = ++permissionRoleSequence;
+  authState.roleName = name;
+}
 
 const expandedSections = {
   tasks: true,
@@ -134,6 +141,9 @@ describe('Navigation links', () => {
     window.localStorage.clear();
     window.sessionStorage.clear();
     vi.clearAllMocks();
+    for (const mock of Object.values(apiMock)) {
+      if (vi.isMockFunction(mock)) mock.mockReset();
+    }
     authState.userId = 1;
     authState.isAdmin = true;
     authState.roleId = 1;
@@ -405,8 +415,7 @@ describe('Navigation links', () => {
   });
 
   it('keeps court work visible to a cases-only role', async () => {
-    authState.isAdmin = false;
-    authState.roleId = 101;
+    setFreshNonAdminRole('Сотрудник с доступом к делам');
     apiMock.getRolePermissions.mockResolvedValueOnce({
       ...defaultRestrictedRolePermissions,
       cases: { ...lawyerWorkSection },
@@ -603,9 +612,7 @@ describe('Navigation links', () => {
   });
 
   it('shows grouped sections only when they are allowed for the current role', async () => {
-    authState.isAdmin = false;
-    authState.roleId = 100;
-    authState.roleName = 'Юрист';
+    setFreshNonAdminRole('Юрист');
     apiMock.getRolePermissions.mockResolvedValueOnce(createLawyerTemplatePermissions());
     apiMock.getNavigationSettings.mockResolvedValueOnce({
       order: ['group-contacts', 'reports'],
@@ -624,9 +631,7 @@ describe('Navigation links', () => {
   });
 
   it.each([false, true])('limits grouped accounting and management for a secretary, invoice access: %s', async (canViewAccounts) => {
-    authState.isAdmin = false;
-    authState.roleId = 101;
-    authState.roleName = 'Секретарь';
+    setFreshNonAdminRole('Секретарь');
     apiMock.getRolePermissions.mockResolvedValueOnce({
       ...defaultRestrictedRolePermissions,
       calendar: { ...defaultRestrictedRolePermissions.calendar, canView: true },
@@ -645,6 +650,7 @@ describe('Navigation links', () => {
 
     renderNavigation();
     await waitFor(() => expect(findLinkByHref(getTabHref('tasks'))).toBeTruthy());
+    expect(apiMock.getRolePermissions).toHaveBeenCalledWith(authState.roleId);
     if (canViewAccounts) await screen.findByRole('button', { name: /Бухгалтерия/i });
 
     expect(Boolean(screen.queryByRole('button', { name: /Бухгалтерия/i }))).toBe(canViewAccounts);
@@ -672,9 +678,7 @@ describe('Navigation links', () => {
   });
 
   it('shows settings for a non-admin role that can view integrations only', async () => {
-    authState.isAdmin = false;
-    authState.roleId = 99;
-    authState.roleName = 'lawyer';
+    setFreshNonAdminRole('lawyer');
     apiMock.getRolePermissions.mockResolvedValueOnce({
       ...defaultRolePermissions,
       integrations: { ...defaultRolePermissions.integrations, canView: true },
@@ -685,6 +689,7 @@ describe('Navigation links', () => {
     await waitFor(() => {
       expect(findLinkByHref(getTabHref('settings'))).toBeTruthy();
     });
+    expect(apiMock.getRolePermissions).toHaveBeenCalledWith(authState.roleId);
     expect(findLinkByHref(getTabHref('roles'))).toBeFalsy();
     expect(findLinkByHref(getTabHref('audit'))).toBeFalsy();
     expect(findLinkByHref(getTabHref('yandexDisk'))).toBeFalsy();
@@ -692,9 +697,7 @@ describe('Navigation links', () => {
   });
 
   it('shows only safe lawyer template sections in the left menu', async () => {
-    authState.isAdmin = false;
-    authState.roleId = 100;
-    authState.roleName = 'Юрист';
+    setFreshNonAdminRole('Юрист');
     apiMock.getRolePermissions.mockResolvedValueOnce(createLawyerTemplatePermissions());
 
     renderNavigation();
