@@ -13,6 +13,7 @@ import { CasePreHearingActions } from './CasePreHearingActions';
 import { CaseHearingPreparationChecklist } from './CaseHearingPreparationChecklist';
 import { CasePositionTemplatePicker } from './CasePositionTemplatePicker';
 import { CourtRecoveryPanel } from './CourtRecoveryPanel';
+import { CourtPartiesReadError, CourtPartiesSummary } from './CourtPartiesSummary';
 import { ExecutiveWritDocumentUpload } from './ExecutiveWritDocumentUpload';
 import { CaseDocumentUploadStatusPanel } from './CaseDocumentUploadStatusPanel';
 import { MessengerDocumentDeliveryModal } from './MessengerDocumentDeliveryModal';
@@ -1641,7 +1642,9 @@ export function CaseDetailPage({
   const [courtInstancesLoading, setCourtInstancesLoading] = useState(true);
   const [courtInstancesError, setCourtInstancesError] = useState<string | null>(null);
   const [courtDirectoryLoading, setCourtDirectoryLoading] = useState(false);
-  const [courtPartiesLoading, setCourtPartiesLoading] = useState(false);
+  const [courtPartiesLoading, setCourtPartiesLoading] = useState(true);
+  const [courtPartiesError, setCourtPartiesError] = useState<string | null>(null);
+  const [courtPartiesReloadToken, setCourtPartiesReloadToken] = useState(0);
   const [proceduralDeadlinesLoading, setProceduralDeadlinesLoading] = useState(true);
   const [proceduralDeadlinesError, setProceduralDeadlinesError] = useState<string | null>(null);
   const [courtSyncLogsLoading, setCourtSyncLogsLoading] = useState(true);
@@ -1836,6 +1839,8 @@ export function CaseDetailPage({
     setCourtEventsError(null);
     setCourtDirectory([]);
     setCourtParties([]);
+    setCourtPartiesLoading(true);
+    setCourtPartiesError(null);
     setProceduralDeadlines([]);
     setWorkOrderDraft(buildWorkOrderHeaderDraft(null));
     setNewWorkOrderItemDraft(buildWorkOrderItemDraft(null));
@@ -2226,12 +2231,16 @@ export function CaseDetailPage({
 
     let cancelled = false;
     setCourtPartiesLoading(true);
+    setCourtPartiesError(null);
     apiService.getCaseCourtParties(caseId)
       .then((items) => {
         if (!cancelled) setCourtParties(items ?? []);
       })
-      .catch(() => {
-        if (!cancelled) setCourtParties([]);
+      .catch((error) => {
+        if (!cancelled) {
+          setCourtParties([]);
+          setCourtPartiesError(extractDisplayErrorMessage(error, 'Не удалось загрузить участников процесса.'));
+        }
       })
       .finally(() => {
         if (!cancelled) setCourtPartiesLoading(false);
@@ -2240,7 +2249,7 @@ export function CaseDetailPage({
     return () => {
       cancelled = true;
     };
-  }, [activeTab, caseId, reloadToken]);
+  }, [activeTab, caseId, courtPartiesReloadToken, reloadToken]);
 
   useEffect(() => {
     if (activeTab !== 'court' && activeTab !== 'documents') return;
@@ -4549,6 +4558,8 @@ export function CaseDetailPage({
               documents={documents}
               courtParties={courtParties}
               courtPartiesLoading={courtPartiesLoading}
+              courtPartiesError={courtPartiesError}
+              onReloadCourtParties={() => setCourtPartiesReloadToken(value => value + 1)}
               courtEventTypeDraft={courtEventTypeDraft}
               courtEventTitleDraft={courtEventTitleDraft}
               courtEventScheduledAtDraft={courtEventScheduledAtDraft}
@@ -7298,6 +7309,8 @@ function CourtPanel({
   documents,
   courtParties,
   courtPartiesLoading,
+  courtPartiesError,
+  onReloadCourtParties,
   courtEventTypeDraft,
   courtEventTitleDraft,
   courtEventScheduledAtDraft,
@@ -7401,6 +7414,8 @@ function CourtPanel({
   documents: ClientCaseDocument[];
   courtParties: ClientCaseCourtParty[];
   courtPartiesLoading: boolean;
+  courtPartiesError: string | null;
+  onReloadCourtParties: () => void;
   courtEventTypeDraft: string;
   courtEventTitleDraft: string;
   courtEventScheduledAtDraft: string;
@@ -7850,8 +7865,8 @@ function CourtPanel({
             </section>
           </div>
 
-          <aside className="space-y-3">
-            <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><div className="flex items-center justify-between"><h3 className="font-bold text-slate-900">Участники</h3><span className="text-xs font-semibold text-slate-500">{courtParties.filter((party) => !party.isArchived).length}</span></div>{courtPartiesLoading ? <Loader2 className="mt-3 h-4 w-4 animate-spin text-blue-600" /> : <div className="mt-2 space-y-2">{courtParties.filter((party) => !party.isArchived).slice(0, 6).map((party) => <div key={party.id} className="rounded-lg bg-slate-50 px-2.5 py-2"><div className="text-sm font-semibold text-slate-800">{party.displayName}</div><div className="text-xs text-slate-500">{party.sideLabel || party.processRole || 'Участник'}</div></div>)}{courtParties.filter((party) => !party.isArchived).length === 0 ? <div className="text-sm text-slate-500">Участники ещё не загружены.</div> : null}</div>}</section>
+          <aside className="min-w-0 space-y-3">
+            <CourtPartiesSummary key={caseItem.id} parties={courtParties} loading={courtPartiesLoading} error={courtPartiesError} onRetry={onReloadCourtParties} />
             <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><div className="flex items-center justify-between"><h3 className="font-bold text-slate-900">Файлы</h3><span className="text-xs font-semibold text-slate-500">{documents.length}</span></div><div className="mt-2 space-y-2">{documents.slice(0, 5).map((document) => <div key={document.id} className="flex items-start gap-2 rounded-lg bg-slate-50 px-2.5 py-2"><FileText className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" /><div className="min-w-0"><div className="truncate text-sm font-semibold text-slate-800">{document.originalFileName || 'Документ'}</div><div className="text-xs text-slate-500">{document.status || document.documentType || 'Файл дела'}</div></div></div>)}{documents.length === 0 ? <div className="text-sm text-slate-500">Файлов пока нет.</div> : null}</div></section>
             <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><div className="flex items-center justify-between"><h3 className="font-bold text-slate-900">Процессуальные сроки</h3><span className="text-xs font-semibold text-slate-500">{activeProceduralDeadlines.length}</span></div>{proceduralDeadlinesLoading ? <Loader2 className="mt-3 h-4 w-4 animate-spin text-blue-600" /> : <div className="mt-2 space-y-2">{activeProceduralDeadlines.slice(0, 5).map((deadline) => <div key={deadline.id} className={`rounded-lg border px-2.5 py-2 ${deadline.isOverdue ? 'border-rose-200 bg-rose-50' : deadline.isWarning ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50'}`}><div className="text-sm font-semibold text-slate-800">{deadline.title}</div><div className="mt-0.5 text-xs text-slate-500">до {formatCourtSchedule(deadline.dueAt, deadline.allDay) || '—'}</div></div>)}{activeProceduralDeadlines.length === 0 ? <div className="text-sm text-slate-500">Активных сроков нет.</div> : null}</div>}</section>
             {canViewTasks && caseItem.taskSummaryVisibility !== 'none' ? <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><h3 className="font-bold text-slate-900">Работа по делу{caseItem.taskSummaryVisibility === 'partial' ? ' · доступные задачи' : ''}</h3><div className="mt-2 grid grid-cols-2 gap-2"><div className="rounded-lg bg-blue-50 p-2.5"><div className="text-[11px] text-blue-600">Активные задачи</div><div className="mt-1 text-xl font-bold text-blue-900">{caseItem.openTaskCount ?? 0}</div></div><div className="rounded-lg bg-rose-50 p-2.5"><div className="text-[11px] text-rose-600">Просрочено</div><div className="mt-1 text-xl font-bold text-rose-900">{caseItem.overdueTaskCount ?? 0}</div></div></div><p className="mt-2 text-xs text-slate-500">Файлы, задачи, участники, переписка и доступ клиента доступны в соседних вкладках карточки.</p></section> : null}
@@ -8264,6 +8279,8 @@ function CourtPanel({
           </div>
           {courtPartiesLoading ? (
             <LoadingBlock label="Загрузка сторон процесса..." />
+          ) : courtPartiesError ? (
+            <CourtPartiesReadError message={courtPartiesError} onRetry={onReloadCourtParties} />
           ) : courtParties.length === 0 ? (
             <div className="mt-3 rounded-lg border border-dashed border-slate-200 bg-white p-3 text-sm text-slate-500">
               Стороны процесса пока не добавлены.
