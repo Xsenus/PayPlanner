@@ -361,6 +361,99 @@ public sealed class BoundedBatchSchedulerTests
         Assert.True(floorRecorded);
     }
 
+    [Theory]
+    [InlineData("fast", 6)]
+    [InlineData("heavy", 6)]
+    [InlineData("exclusive", 7)]
+    public async Task IdleSchedulerWaitsForTheTestHostReserveThenRunsEveryPendingBatch(string lane, int requiredGib)
+    {
+        var available = 3 * Gib;
+        var waiting = Signal();
+        var started = new ConcurrentBag<string>();
+        var observations = new ConcurrentBag<string>();
+        var batches = Batches(lane, 2);
+        var run = BoundedBatchScheduler.RunAsync(batches, "1", 1,
+            () => new(Volatile.Read(ref available), 8), batch =>
+            {
+                started.Add(batch.Id);
+                return Task.CompletedTask;
+            }, value =>
+            {
+                observations.Add(value.Kind);
+                if (value.Kind == "admission-wait") waiting.TrySetResult();
+            }, TimeSpan.FromMilliseconds(20));
+        try
+        {
+            await waiting.Task.WaitAsync(Deadline);
+            Assert.Empty(started);
+            Assert.False(run.IsCompleted);
+        }
+        finally { Volatile.Write(ref available, (ulong)requiredGib * Gib); }
+        await run.WaitAsync(Deadline);
+        Assert.Equal(batches.Select(batch => batch.Id).Order(), started.Order());
+        Assert.Single(observations, kind => kind == "admission-wait");
+        Assert.Single(observations, kind => kind == "admission-ready");
+        Assert.DoesNotContain("memory-floor", observations);
+    }
+
+    [Fact]
+    public async Task UnrecoveredAdmissionReserveFailsWithoutStartingOrQualifyingPendingWork()
+    {
+        var clock = new AdmissionClock();
+        var starts = 0;
+        var observations = new List<string>();
+        var batches = Batches("heavy", 2).Concat(Batches("exclusive", 1)).ToArray();
+        await Assert.ThrowsAsync<InvalidDataException>(() => BoundedBatchScheduler.RunAsync(batches, "1", 1,
+            () =>
+            {
+                clock.Advance();
+                return new(3 * Gib, 8);
+            }, _ =>
+            {
+                starts++;
+                return Task.CompletedTask;
+            }, value => observations.Add(value.Kind), TimeSpan.FromMilliseconds(10), TimeSpan.FromSeconds(1), clock).WaitAsync(Deadline));
+        Assert.Equal(0, starts);
+        Assert.Single(observations, kind => kind == "admission-wait");
+        Assert.Single(observations, kind => kind == "admission-timeout");
+        Assert.DoesNotContain("launch-budget", observations);
+        Assert.DoesNotContain("admission-ready", observations);
+    }
+
+    [Fact]
+    public async Task AFailedProbeDuringAdmissionPreservesTheErrorAndStartsNoChild()
+    {
+        var failure = new IOException("The host memory probe is unavailable.");
+        var probes = 0;
+        var starts = 0;
+        var run = BoundedBatchScheduler.RunAsync(Batches("heavy", 2), "1", 1,
+            () => ++probes == 3 ? throw failure : new(3 * Gib, 8), _ =>
+            {
+                starts++;
+                return Task.CompletedTask;
+            }, recheckInterval: TimeSpan.FromMilliseconds(10));
+        Assert.Same(failure, await Assert.ThrowsAsync<IOException>(() => run.WaitAsync(Deadline)));
+        Assert.Equal(0, starts);
+    }
+
+    [Fact]
+    public async Task InvalidAdmissionTimeoutsFailBeforeProbingOrDispatching()
+    {
+        foreach (var timeout in new[] { TimeSpan.Zero, TimeSpan.FromMilliseconds(9), TimeSpan.FromMinutes(31) })
+            await Assert.ThrowsAsync<InvalidDataException>(() => BoundedBatchScheduler.RunAsync(Batches("heavy", 1), "1", 1,
+                () => throw new Xunit.Sdk.XunitException("Invalid options must fail before probing."),
+                _ => throw new Xunit.Sdk.XunitException("Invalid options must fail before dispatching."),
+                recheckInterval: TimeSpan.FromMilliseconds(10), admissionTimeout: timeout));
+    }
+
+    private sealed class AdmissionClock : TimeProvider
+    {
+        private long timestamp;
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long GetTimestamp() => timestamp;
+        public void Advance() => timestamp += TimeSpan.TicksPerSecond;
+    }
+
     private static TaskCompletionSource Signal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
     private static ExecutionResources AmpleResources() => new(20 * Gib, 8);
     private static ExecutionBatch[] Batches(string lane, int count) => Enumerable.Range(0, count)

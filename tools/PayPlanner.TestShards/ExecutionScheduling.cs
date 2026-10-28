@@ -150,10 +150,15 @@ public static class ExecutionScheduling
         return requested == "auto" ? processorLimit : Math.Min(processorLimit, int.Parse(requested, System.Globalization.CultureInfo.InvariantCulture));
     }
 
-    public static bool CanLaunchAdditional(int active, int initialBudget, ulong availableBytes)
+    public static bool CanLaunchAdditional(int active, int initialBudget, ulong availableBytes, string lane = "heavy")
     {
         ShardPlan.Require(active >= 0 && initialBudget is 1 or 2 or 4, "Invalid execution worker state.");
-        return active < initialBudget && availableBytes >= (active == 0 ? Gib : ReservedBytes + OrdinaryHeapBytes);
+        ShardPlan.Require(lane is "fast" or "heavy" or "exclusive", "Unsupported execution lane.");
+        // The first process needs the same reserve as its siblings. The 1 GiB
+        // floor is an emergency stop, not enough headroom to admit a test host.
+        var heap = lane == "exclusive" ? ExclusiveHeapBytes : OrdinaryHeapBytes;
+        return active < initialBudget && (lane != "exclusive" || active == 0)
+            && availableBytes >= ReservedBytes + heap;
     }
 
     public static void ConfigureWorkerEnvironment(IDictionary<string, string?> environment, string lane)

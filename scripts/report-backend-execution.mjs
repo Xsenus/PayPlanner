@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const batchPattern = /^(fast|heavy|exclusive)-[0-9]+$/;
-const eventKinds = new Set(['initial-budget', 'lane-budget', 'launch-budget', 'budget-change', 'memory-floor', 'started', 'native-exit']);
+const eventKinds = new Set(['initial-budget', 'lane-budget', 'launch-budget', 'budget-change', 'memory-floor', 'admission-wait', 'admission-ready', 'admission-timeout', 'started', 'native-exit']);
 const errorKinds = new Set(['InvalidDataException', 'IOException', 'Win32Exception', 'InvalidOperationException',
   'UnauthorizedAccessException', 'OutOfMemoryException', 'TaskCanceledException', 'OperationCanceledException', 'JsonException']);
 const numberFields = ['BatchCount', 'AdmittedWorkers', 'AvailableBytes', 'Processors', 'Workers', 'Active', 'Cases', 'ExitCode', 'VstestPeakWorkingSetBytes'];
