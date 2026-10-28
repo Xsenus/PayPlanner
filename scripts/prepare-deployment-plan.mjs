@@ -6,7 +6,7 @@ import { requireTrustedHost } from './verify-xsenus-runner.mjs';
 import { sha256 } from './prepare-deployment-package.mjs';
 import { canonicalBytes, safeRelativePath } from './xsenus-artifact-store.mjs';
 
-const candidateReviewSha = '708ea25dc5eb9f8f92644c9591e2d344c484e6595d100e5db11ffc41775f5f8d';
+const candidateReviewSha = 'bf0355ff35b7412022e691cab52be1b08ece42daf3c2e10c5b17b589e5b794df';
 const candidateDeltaFileSha = '6863eb6d5b21a0ca299567eab04b7ea8a54c641e2af921572844883e0ac331df';
 const canonicalHash = value => sha256(canonicalBytes(value).subarray(0, -1));
 

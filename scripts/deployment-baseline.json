@@ -1081,8 +1081,38 @@
     }
   ],
   "expectedBaselineMigrationIdsSha256": "ebc0e5a0067a56264043c62d5def45e8513710b8ada9fb6be213f6115b9c8121",
-  "expectedReleaseCatalogSha256": "9600a56900e7f524f2bb1fd1dde3ff6deda5fa6d3f2143cdaf6610e5d287e402",
+  "expectedReleaseCatalogSha256": "99ab97ffb3613ab219805cebe13f92ec105f579909a22e489ec600ddb37cf1b5",
   "expectedReleaseSeeds": [
+    {
+      "releaseId": "2026-10-29-company-image-input-reset",
+      "version": "1.14.389",
+      "releasedAt": "2026-10-28T21:25:00Z",
+      "title": "Повторный выбор изображения компании",
+      "summary": "После обработки изображения поле выбора файла корректно сбрасывается.",
+      "isActive": false,
+      "source": "agent",
+      "items": [
+        {
+          "type": "fixed",
+          "text": "В полной и всплывающей карточках компании исправлена ошибка после выбора изображения. После успешной загрузки или отказа можно снова выбрать тот же файл; остальные введённые сведения сохраняются."
+        }
+      ]
+    },
+    {
+      "releaseId": "2026-10-29-company-seal-signature-png-preservation",
+      "version": "1.14.388",
+      "releasedAt": "2026-10-28T21:25:00Z",
+      "title": "Сохранение прозрачности печати и подписи",
+      "summary": "При сжатии слишком большой печати или подписи прозрачный фон больше не заменяется белым.",
+      "isActive": false,
+      "source": "agent",
+      "items": [
+        {
+          "type": "fixed",
+          "text": "При загрузке печати или подписи в карточку компании изображение сохраняется в PNG. Если после уменьшения оно превышает допустимый размер, форма предлагает выбрать PNG меньшего размера вместо преобразования в JPEG с белым фоном. Для логотипа прежнее сжатие сохранено."
+        }
+      ]
+    },
     {
       "releaseId": "2026-10-29-court-overview-desktop-columns",
       "version": "1.14.387",
