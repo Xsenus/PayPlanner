@@ -71,8 +71,15 @@ public class CashInventoryPostgresTests
             await using (var seed = new PostgreSqlPaymentContext(options))
             {
                 await seed.Database.EnsureCreatedAsync();
-                var user = new User { Email = "cash-postgres@fixture.local", FullName = "Synthetic", PasswordHash = "hash",
-                    Role = new Role { Name = "admin", Description = "Synthetic" }, IsActive = true, IsApproved = true };
+                var user = new User
+                {
+                    Email = "cash-postgres@fixture.local",
+                    FullName = "Synthetic",
+                    PasswordHash = "hash",
+                    Role = new Role { Name = "admin", Description = "Synthetic" },
+                    IsActive = true,
+                    IsApproved = true
+                };
                 var company = new LegalEntity { ShortName = "Синтетическая компания" };
                 var cash = new MoneyAccount { Name = "Касса", Source = MoneyOperationSource.Cash, Currency = "RUB", Company = company, IsActive = true };
                 seed.Users.Add(user);
@@ -85,10 +92,22 @@ public class CashInventoryPostgresTests
                 cashId = cash.Id;
             }
             var gate = new Gate();
-            CashOrdersController Controller(PostgreSqlPaymentContext db) => new(db) { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext
-                { User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test")) } } };
-            CashInventoryCreateRequest Request() => new() { AccountName = "Касса", MoneyAccountId = cashId, Date = new DateTime(2026, 10, 28),
-                ActualBalance = 100m, CreateCorrection = true };
+            CashOrdersController Controller(PostgreSqlPaymentContext db) => new(db)
+            {
+                ControllerContext = new ControllerContext
+                {
+                    HttpContext = new DefaultHttpContext
+                    { User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString()), new Claim(ClaimTypes.Role, "admin") }, "Test")) }
+                }
+            };
+            CashInventoryCreateRequest Request() => new()
+            {
+                AccountName = "Касса",
+                MoneyAccountId = cashId,
+                Date = new DateTime(2026, 10, 28),
+                ActualBalance = 100m,
+                CreateCorrection = true
+            };
             async Task<IActionResult> InvokeAsync()
             {
                 var requestOptions = new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(connectionString)

@@ -334,9 +334,17 @@ public sealed class PaymentCreateAttemptTests(PostgreSqlModelTemplate template) 
         await using var db = fixture.Open();
         var actor = await SeedActorAsync(db);
         var invoice = new Invoice { Number = "ATTEMPT-INVOICE", Date = DateTime.Today };
-        var invoicePayment = new Payment { DocumentKind = DocumentKind.Invoice, Invoice = invoice,
-            Date = DateTime.Today, PlannedDate = DateTime.Today, Amount = 100m, Type = PaymentType.Income,
-            Status = PaymentStatus.Pending, Responsibles = [new PaymentResponsible { UserId = actor }] };
+        var invoicePayment = new Payment
+        {
+            DocumentKind = DocumentKind.Invoice,
+            Invoice = invoice,
+            Date = DateTime.Today,
+            PlannedDate = DateTime.Today,
+            Amount = 100m,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Responsibles = [new PaymentResponsible { UserId = actor }]
+        };
         db.Payments.Add(invoicePayment);
         await db.SaveChangesAsync();
         var api = CheckedNotificationProxy.Create();
@@ -414,8 +422,13 @@ public sealed class PaymentCreateAttemptTests(PostgreSqlModelTemplate template) 
         await using var fixture = await CreateFixtureAsync(postgres);
         await using var db = fixture.Open();
         var actor = await SeedActorAsync(db);
-        var item = new PaymentCreateAttempt { Id = Guid.NewGuid(), ActorUserId = actor,
-            CreatedAtUtc = DateTimeOffset.UtcNow, ExpiresAtUtc = DateTimeOffset.UtcNow.AddHours(24) };
+        var item = new PaymentCreateAttempt
+        {
+            Id = Guid.NewGuid(),
+            ActorUserId = actor,
+            CreatedAtUtc = DateTimeOffset.UtcNow,
+            ExpiresAtUtc = DateTimeOffset.UtcNow.AddHours(24)
+        };
         if (committed)
         {
             item.State = PaymentCreateAttempt.Committed;
@@ -433,8 +446,13 @@ public sealed class PaymentCreateAttemptTests(PostgreSqlModelTemplate template) 
     {
         await using var db = await SqliteTestContextFactory.CreateAsync(useObjectAuditModel: audit);
         var count = audit ? await db.ObjectAuditEvents.CountAsync() : 0;
-        var item = new PaymentCreateAttempt { Id = Guid.NewGuid(), ActorUserId = 1,
-            CreatedAtUtc = DateTimeOffset.UtcNow, ExpiresAtUtc = DateTimeOffset.UtcNow.AddHours(24) };
+        var item = new PaymentCreateAttempt
+        {
+            Id = Guid.NewGuid(),
+            ActorUserId = 1,
+            CreatedAtUtc = DateTimeOffset.UtcNow,
+            ExpiresAtUtc = DateTimeOffset.UtcNow.AddHours(24)
+        };
         db.PaymentCreateAttempts.Add(item);
         await db.SaveChangesAsync();
         item.State = PaymentCreateAttempt.Cancelled;
@@ -499,9 +517,15 @@ public sealed class PaymentCreateAttemptTests(PostgreSqlModelTemplate template) 
             Assert.Single(await observer.Payments.ToArrayAsync());
             Assert.Empty(await observer.PaymentCreateAttempts.ToArrayAsync());
         };
-        var payment = new Payment { Amount = 100m, Date = DateTime.Today, PlannedDate = DateTime.Today,
-            Type = PaymentType.Income, Status = PaymentStatus.Pending,
-            Responsibles = [new PaymentResponsible { UserId = actor }] };
+        var payment = new Payment
+        {
+            Amount = 100m,
+            Date = DateTime.Today,
+            PlannedDate = DateTime.Today,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Responsibles = [new PaymentResponsible { UserId = actor }]
+        };
         Assert.IsType<CreatedResult>(await Controller(db, actor, api).Create(payment, default));
         Assert.Equal(new[] { nameof(INotificationService.NotifyPaymentAssignedAsync) }, check.Calls);
         Assert.Empty(await db.PaymentCreateAttempts.ToArrayAsync());
@@ -846,13 +870,28 @@ public sealed class PaymentCreateAttemptTests(PostgreSqlModelTemplate template) 
     {
         var role = new Role { Name = "attempt-fixture-" + Guid.NewGuid().ToString("N"), Description = "Fixture" };
         db.Roles.Add(role);
-        var user = new User { Email = $"attempt-{Guid.NewGuid():N}@fixture.local", FullName = "Пользователь",
-            PasswordHash = "unused", IsActive = true, IsApproved = true, Role = role };
+        var user = new User
+        {
+            Email = $"attempt-{Guid.NewGuid():N}@fixture.local",
+            FullName = "Пользователь",
+            PasswordHash = "unused",
+            IsActive = true,
+            IsApproved = true,
+            Role = role
+        };
         db.Users.Add(user);
         foreach (var section in new[] { RolePermissionCatalog.Payments, RolePermissionCatalog.Clients,
                      RolePermissionCatalog.LegalEntities, RolePermissionCatalog.Accounts, RolePermissionCatalog.Cases })
-            db.RolePermissions.Add(new RolePermission { Role = role, Section = section,
-                CanView = true, CanCreate = true, CanEdit = true, CanDelete = true, ViewScope = DataVisibilityScope.All });
+            db.RolePermissions.Add(new RolePermission
+            {
+                Role = role,
+                Section = section,
+                CanView = true,
+                CanCreate = true,
+                CanEdit = true,
+                CanDelete = true,
+                ViewScope = DataVisibilityScope.All
+            });
         await db.SaveChangesAsync();
         return user.Id;
     }
@@ -864,12 +903,15 @@ public sealed class PaymentCreateAttemptTests(PostgreSqlModelTemplate template) 
         if (time is not null) services.AddSingleton(time);
         return new PaymentsController(db, new NoopFormRequirements(), notification)
         {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext
+            ControllerContext = new ControllerContext
             {
-                RequestServices = services.BuildServiceProvider(),
-                User = new ClaimsPrincipal(new ClaimsIdentity(new[]
+                HttpContext = new DefaultHttpContext
+                {
+                    RequestServices = services.BuildServiceProvider(),
+                    User = new ClaimsPrincipal(new ClaimsIdentity(new[]
                 { new Claim(ClaimTypes.NameIdentifier, actor.ToString()), new Claim(ClaimTypes.Name, "Fixture") }, "Fixture")),
-            } },
+                }
+            },
         };
     }
 
@@ -886,9 +928,17 @@ public sealed class PaymentCreateAttemptTests(PostgreSqlModelTemplate template) 
     {
         var command = new JsonObject
         {
-            ["date"] = "2026-10-26", ["plannedDate"] = "2026-10-26", ["amount"] = 100m,
-            ["paidAmount"] = paid ? 100m : 0m, ["type"] = "Income", ["status"] = paid ? "Completed" : "Pending",
-            ["description"] = description, ["isPaid"] = paid, ["notes"] = "", ["systemNotes"] = "", ["rescheduleCount"] = 0,
+            ["date"] = "2026-10-26",
+            ["plannedDate"] = "2026-10-26",
+            ["amount"] = 100m,
+            ["paidAmount"] = paid ? 100m : 0m,
+            ["type"] = "Income",
+            ["status"] = paid ? "Completed" : "Pending",
+            ["description"] = description,
+            ["isPaid"] = paid,
+            ["notes"] = "",
+            ["systemNotes"] = "",
+            ["rescheduleCount"] = 0,
         };
         if (client.HasValue) command["clientId"] = client;
         if (source.HasValue) command["paymentSourceId"] = source;

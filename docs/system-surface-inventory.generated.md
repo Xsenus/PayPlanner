@@ -610,19 +610,19 @@
 | GET | api/cash-orders/register/print | CashOrdersController | PrintRegister | backend/Controllers/CashOrdersController.cs:321 | [Authorize] | да | нет |
 | GET | api/cash-orders/inventories | CashOrdersController | GetInventories | backend/Controllers/CashOrdersController.cs:420 | [Authorize] | да | нет |
 | POST | api/cash-orders/inventories | CashOrdersController | CreateInventory | backend/Controllers/CashOrdersController.cs:505 | [Authorize] | да | нет |
-| GET | api/cash-orders/{id:int} | CashOrdersController | GetById | backend/Controllers/CashOrdersController.cs:668 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
-| POST | api/cash-orders/from-payment/{paymentId:int} | CashOrdersController | CreateFromPayment | backend/Controllers/CashOrdersController.cs:693 | [Authorize] | да | нет |
-| POST | api/cash-orders/from-money-operation/{operationId:int} | CashOrdersController | CreateFromMoneyOperation | backend/Controllers/CashOrdersController.cs:765 | [Authorize] | да | нет |
-| POST | api/cash-orders | CashOrdersController | Create | backend/Controllers/CashOrdersController.cs:885 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md, docs/full-project-audit-2026-06-10.md, docs/report-inventory-2026-08-09.md |
-| PUT | api/cash-orders/{id:int} | CashOrdersController | Update | backend/Controllers/CashOrdersController.cs:961 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
-| DELETE | api/cash-orders/{id:int} | CashOrdersController | Delete | backend/Controllers/CashOrdersController.cs:1025 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
-| POST | api/cash-orders/{id:int}/post | CashOrdersController | Post | backend/Controllers/CashOrdersController.cs:1059 | [Authorize] | да | нет |
-| POST | api/cash-orders/{id:int}/cancel | CashOrdersController | Cancel | backend/Controllers/CashOrdersController.cs:1144 | [Authorize] | да | нет |
-| POST | api/cash-orders/{id:int}/copy | CashOrdersController | Copy | backend/Controllers/CashOrdersController.cs:1181 | [Authorize] | да | нет |
-| GET | api/cash-orders/{id:int}/print | CashOrdersController | Print | backend/Controllers/CashOrdersController.cs:1272 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
-| GET | api/cash-orders/payment/{paymentId:int}/print | CashOrdersController | PrintForPayment | backend/Controllers/CashOrdersController.cs:1302 | [Authorize] | да | нет |
-| GET | api/cash-orders/{id:int}/pdf | CashOrdersController | DownloadPdf | backend/Controllers/CashOrdersController.cs:1344 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
-| GET | api/cash-orders/{id:int}/word | CashOrdersController | DownloadWord | backend/Controllers/CashOrdersController.cs:1382 | [Authorize] | да | нет |
+| GET | api/cash-orders/{id:int} | CashOrdersController | GetById | backend/Controllers/CashOrdersController.cs:671 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
+| POST | api/cash-orders/from-payment/{paymentId:int} | CashOrdersController | CreateFromPayment | backend/Controllers/CashOrdersController.cs:696 | [Authorize] | да | нет |
+| POST | api/cash-orders/from-money-operation/{operationId:int} | CashOrdersController | CreateFromMoneyOperation | backend/Controllers/CashOrdersController.cs:768 | [Authorize] | да | нет |
+| POST | api/cash-orders | CashOrdersController | Create | backend/Controllers/CashOrdersController.cs:888 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md, docs/full-project-audit-2026-06-10.md, docs/report-inventory-2026-08-09.md |
+| PUT | api/cash-orders/{id:int} | CashOrdersController | Update | backend/Controllers/CashOrdersController.cs:964 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
+| DELETE | api/cash-orders/{id:int} | CashOrdersController | Delete | backend/Controllers/CashOrdersController.cs:1028 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
+| POST | api/cash-orders/{id:int}/post | CashOrdersController | Post | backend/Controllers/CashOrdersController.cs:1062 | [Authorize] | да | нет |
+| POST | api/cash-orders/{id:int}/cancel | CashOrdersController | Cancel | backend/Controllers/CashOrdersController.cs:1147 | [Authorize] | да | нет |
+| POST | api/cash-orders/{id:int}/copy | CashOrdersController | Copy | backend/Controllers/CashOrdersController.cs:1184 | [Authorize] | да | нет |
+| GET | api/cash-orders/{id:int}/print | CashOrdersController | Print | backend/Controllers/CashOrdersController.cs:1275 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
+| GET | api/cash-orders/payment/{paymentId:int}/print | CashOrdersController | PrintForPayment | backend/Controllers/CashOrdersController.cs:1305 | [Authorize] | да | нет |
+| GET | api/cash-orders/{id:int}/pdf | CashOrdersController | DownloadPdf | backend/Controllers/CashOrdersController.cs:1347 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
+| GET | api/cash-orders/{id:int}/word | CashOrdersController | DownloadWord | backend/Controllers/CashOrdersController.cs:1385 | [Authorize] | да | нет |
 | GET |  | ClientBalancesController | GetSummary | backend/Controllers/ClientBalancesController.cs:57 | не задано | да | нет |
 | GET | transactions | ClientBalancesController | GetTransactions | backend/Controllers/ClientBalancesController.cs:78 | не задано | да | docs/bank-integrations-api-verification-2026-10-09.md, docs/delete-behavior-contract-2026-06-10.md |
 | POST | apply | ClientBalancesController | ApplyCredit | backend/Controllers/ClientBalancesController.cs:116 | не задано | да | docs/development-bank-import-verification-2026-10-16.md, docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/payplanner-handoff-2026-10-21.md, docs/payplanner-release-roadmap-2026-10-14.md, docs/payplanner-storage-roadmap-2026-10-14.md, docs/quality-gates.md, docs/release-verification-history-2026-10-06.md, docs/storage-resilience-runbook.md, docs/unpushed-changes-map-2026-10-03.md |
@@ -966,19 +966,19 @@
 | GET | api/money-operations/{id:int} | MoneyOperationsController | GetById | backend/Controllers/MoneyOperationsController.cs:831 | [Authorize] | да | docs/payplanner-bank-roadmap-2026-10-14.md, docs/payplanner-release-roadmap-2026-10-14.md |
 | GET | api/money-operations/{id:int}/invoice-candidates | MoneyOperationsController | GetInvoiceCandidates | backend/Controllers/MoneyOperationsController.cs:937 | [Authorize] | да | docs/payplanner-bank-roadmap-2026-10-14.md, docs/payplanner-release-roadmap-2026-10-14.md |
 | GET | api/money-operations/{id:int}/invoice-candidates/pages | MoneyOperationsController | GetInvoiceCandidatePage | backend/Controllers/MoneyOperationsController.cs:948 | [Authorize] | да | docs/payplanner-bank-roadmap-2026-10-14.md, docs/payplanner-release-roadmap-2026-10-14.md |
-| GET | api/money-operations/{id:int}/invoice-candidates/search | MoneyOperationsController | SearchInvoiceCandidates | backend/Controllers/MoneyOperationsController.cs:1161 | [Authorize] | да | docs/payplanner-bank-roadmap-2026-10-14.md |
-| POST | api/money-operations/{id:int}/ignore | MoneyOperationsController | Ignore | backend/Controllers/MoneyOperationsController.cs:1166 | [Authorize] | да | нет |
-| POST | api/money-operations/{id:int}/link-invoice | MoneyOperationsController | LinkInvoice | backend/Controllers/MoneyOperationsController.cs:1209 | [Authorize] | да | нет |
-| POST | api/money-operations | MoneyOperationsController | Create | backend/Controllers/MoneyOperationsController.cs:1275 | [Authorize] | да | docs/deployment-manual-2026-10-21.md, docs/full-project-audit-2026-06-10.md, docs/payplanner-bank-roadmap-2026-10-14.md, docs/payplanner-release-roadmap-2026-10-14.md |
-| POST | api/money-operations/transfer | MoneyOperationsController | CreateTransfer | backend/Controllers/MoneyOperationsController.cs:1374 | [Authorize] | да | нет |
-| POST | api/money-operations/bank-statement/import | MoneyOperationsController | ImportBankStatement | backend/Controllers/MoneyOperationsController.cs:1517 | [Authorize] | да | нет |
-| POST | api/money-operations/bank-statement/auto-import/run | MoneyOperationsController | RunBankStatementAutoImport | backend/Controllers/MoneyOperationsController.cs:1607 | [Authorize] | да | нет |
-| GET | api/money-operations/bank-statement/imports | MoneyOperationsController | GetBankStatementImports | backend/Controllers/MoneyOperationsController.cs:1712 | [Authorize] | да | нет |
-| GET | api/money-operations/bank-statement/imports/{batchId:int} | MoneyOperationsController | GetBankStatementImport | backend/Controllers/MoneyOperationsController.cs:1765 | [Authorize] | да | нет |
-| POST | api/money-operations/bank-statement/imports/{batchId:int}/rollback | MoneyOperationsController | RollbackBankStatementImport | backend/Controllers/MoneyOperationsController.cs:1897 | [Authorize] | да | нет |
-| POST | api/money-operations/bank-statement/imports/{batchId:int}/reprocess | MoneyOperationsController | ReprocessBankStatementImport | backend/Controllers/MoneyOperationsController.cs:2000 | [Authorize] | да | нет |
-| PUT | api/money-operations/{id:int} | MoneyOperationsController | Update | backend/Controllers/MoneyOperationsController.cs:2062 | [Authorize] | да | docs/payplanner-bank-roadmap-2026-10-14.md, docs/payplanner-release-roadmap-2026-10-14.md |
-| DELETE | api/money-operations/{id:int} | MoneyOperationsController | Delete | backend/Controllers/MoneyOperationsController.cs:2244 | [Authorize] | да | docs/payplanner-bank-roadmap-2026-10-14.md, docs/payplanner-release-roadmap-2026-10-14.md |
+| GET | api/money-operations/{id:int}/invoice-candidates/search | MoneyOperationsController | SearchInvoiceCandidates | backend/Controllers/MoneyOperationsController.cs:1164 | [Authorize] | да | docs/payplanner-bank-roadmap-2026-10-14.md |
+| POST | api/money-operations/{id:int}/ignore | MoneyOperationsController | Ignore | backend/Controllers/MoneyOperationsController.cs:1169 | [Authorize] | да | нет |
+| POST | api/money-operations/{id:int}/link-invoice | MoneyOperationsController | LinkInvoice | backend/Controllers/MoneyOperationsController.cs:1212 | [Authorize] | да | нет |
+| POST | api/money-operations | MoneyOperationsController | Create | backend/Controllers/MoneyOperationsController.cs:1278 | [Authorize] | да | docs/deployment-manual-2026-10-21.md, docs/full-project-audit-2026-06-10.md, docs/payplanner-bank-roadmap-2026-10-14.md, docs/payplanner-release-roadmap-2026-10-14.md |
+| POST | api/money-operations/transfer | MoneyOperationsController | CreateTransfer | backend/Controllers/MoneyOperationsController.cs:1377 | [Authorize] | да | нет |
+| POST | api/money-operations/bank-statement/import | MoneyOperationsController | ImportBankStatement | backend/Controllers/MoneyOperationsController.cs:1520 | [Authorize] | да | нет |
+| POST | api/money-operations/bank-statement/auto-import/run | MoneyOperationsController | RunBankStatementAutoImport | backend/Controllers/MoneyOperationsController.cs:1610 | [Authorize] | да | нет |
+| GET | api/money-operations/bank-statement/imports | MoneyOperationsController | GetBankStatementImports | backend/Controllers/MoneyOperationsController.cs:1715 | [Authorize] | да | нет |
+| GET | api/money-operations/bank-statement/imports/{batchId:int} | MoneyOperationsController | GetBankStatementImport | backend/Controllers/MoneyOperationsController.cs:1768 | [Authorize] | да | нет |
+| POST | api/money-operations/bank-statement/imports/{batchId:int}/rollback | MoneyOperationsController | RollbackBankStatementImport | backend/Controllers/MoneyOperationsController.cs:1900 | [Authorize] | да | нет |
+| POST | api/money-operations/bank-statement/imports/{batchId:int}/reprocess | MoneyOperationsController | ReprocessBankStatementImport | backend/Controllers/MoneyOperationsController.cs:2003 | [Authorize] | да | нет |
+| PUT | api/money-operations/{id:int} | MoneyOperationsController | Update | backend/Controllers/MoneyOperationsController.cs:2065 | [Authorize] | да | docs/payplanner-bank-roadmap-2026-10-14.md, docs/payplanner-release-roadmap-2026-10-14.md |
+| DELETE | api/money-operations/{id:int} | MoneyOperationsController | Delete | backend/Controllers/MoneyOperationsController.cs:2247 | [Authorize] | да | docs/payplanner-bank-roadmap-2026-10-14.md, docs/payplanner-release-roadmap-2026-10-14.md |
 | GET | api/navigation-settings | NavigationSettingsController | Get | backend/Controllers/NavigationSettingsController.cs:35 | [Authorize] | да | нет |
 | PUT | api/navigation-settings | NavigationSettingsController | Update | backend/Controllers/NavigationSettingsController.cs:52 | [Authorize] | да | нет |
 | GET | api/notifications/inbox/types | NotificationInboxController | GetTypes | backend/Controllers/NotificationInboxController.cs:36 | [Authorize] | да | нет |
@@ -1028,27 +1028,27 @@
 | GET | api/[controller] | PaymentsController | Get | backend/Controllers/PaymentsController.cs:382 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
 | GET | api/[controller]/{id:int} | PaymentsController | GetById | backend/Controllers/PaymentsController.cs:415 | [Authorize] | да | нет |
 | POST | api/[controller]/create-attempts | PaymentsController | RegisterCreateAttempt | backend/Controllers/PaymentsController.cs:440 | [Authorize] | да | нет |
-| GET | api/[controller]/create-attempts/{attemptId:guid} | PaymentsController | GetCreateAttempt | backend/Controllers/PaymentsController.cs:465 | [Authorize] | да | нет |
-| POST | api/[controller]/create-attempts/{attemptId:guid}/cancel | PaymentsController | CancelCreateAttempt | backend/Controllers/PaymentsController.cs:480 | [Authorize] | да | нет |
-| POST | api/[controller]/create-attempts/{attemptId:guid}/commit | PaymentsController | CommitCreateAttempt | backend/Controllers/PaymentsController.cs:512 | [Authorize] | да | нет |
-| POST | api/[controller] | PaymentsController | Create | backend/Controllers/PaymentsController.cs:628 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
-| PUT | api/[controller]/{id:int} | PaymentsController | Update | backend/Controllers/PaymentsController.cs:691 | [Authorize] | да | нет |
-| POST | api/[controller]/{id:int}/status | PaymentsController | UpdateStatus | backend/Controllers/PaymentsController.cs:901 | [Authorize] | да | нет |
-| POST | api/[controller]/{id:int}/advance-review/accept | PaymentsController | AcceptAdvance | backend/Controllers/PaymentsController.cs:1005 | [Authorize] | да | нет |
-| POST | api/[controller]/{id:int}/advance-review/ignore | PaymentsController | IgnoreAdvance | backend/Controllers/PaymentsController.cs:1044 | [Authorize] | да | нет |
-| POST | api/[controller]/{id:int}/advance-review/refund | PaymentsController | RefundAdvance | backend/Controllers/PaymentsController.cs:1083 | [Authorize] | да | нет |
-| GET | api/[controller]/advance-review/candidates | PaymentsController | GetAdvanceReviewCandidates | backend/Controllers/PaymentsController.cs:1144 | [Authorize] | да | нет |
-| GET | api/[controller]/advance-review/diagnostics | PaymentsController | GetAdvanceReviewDiagnostics | backend/Controllers/PaymentsController.cs:1203 | [Authorize] | да | нет |
-| POST | api/[controller]/advance-review/backfill | PaymentsController | BackfillAdvanceReviewCandidates | backend/Controllers/PaymentsController.cs:1344 | [Authorize] | да | нет |
-| POST | api/[controller]/advance-review/backfill/rollback | PaymentsController | RollbackAdvanceReviewBackfill | backend/Controllers/PaymentsController.cs:1433 | [Authorize] | да | нет |
-| PUT | api/[controller]/{id:int}/invoice-managed | PaymentsController | UpdateInvoiceManaged | backend/Controllers/PaymentsController.cs:1532 | [Authorize] | да | нет |
-| GET | api/[controller]/partial-remainder-candidates | PaymentsController | GetPartialRemainderCandidates | backend/Controllers/PaymentsController.cs:1723 | [Authorize] | да | нет |
-| POST | api/[controller]/{id:int}/partial-remainder/from-existing | PaymentsController | TransferExistingPartialRemainder | backend/Controllers/PaymentsController.cs:1848 | [Authorize] | да | нет |
-| PUT | api/[controller]/{id:int}/partial-remainder | PaymentsController | TransferPartialRemainder | backend/Controllers/PaymentsController.cs:1890 | [Authorize] | да | нет |
-| POST | api/[controller]/{id:int}/partial-remainder/rollback | PaymentsController | RollbackPartialRemainderTransfer | backend/Controllers/PaymentsController.cs:2176 | [Authorize] | да | нет |
-| PUT | api/[controller]/{id:int}/partial-remainder/adjust | PaymentsController | AdjustPartialRemainderTransfer | backend/Controllers/PaymentsController.cs:2230 | [Authorize] | да | нет |
-| POST | api/[controller]/repair-invoice-links | PaymentsController | RepairInvoiceLinks | backend/Controllers/PaymentsController.cs:3722 | [Authorize] | да | нет |
-| DELETE | api/[controller]/{id:int} | PaymentsController | Delete | backend/Controllers/PaymentsController.cs:4690 | [Authorize] | да | нет |
+| GET | api/[controller]/create-attempts/{attemptId:guid} | PaymentsController | GetCreateAttempt | backend/Controllers/PaymentsController.cs:468 | [Authorize] | да | нет |
+| POST | api/[controller]/create-attempts/{attemptId:guid}/cancel | PaymentsController | CancelCreateAttempt | backend/Controllers/PaymentsController.cs:483 | [Authorize] | да | нет |
+| POST | api/[controller]/create-attempts/{attemptId:guid}/commit | PaymentsController | CommitCreateAttempt | backend/Controllers/PaymentsController.cs:515 | [Authorize] | да | нет |
+| POST | api/[controller] | PaymentsController | Create | backend/Controllers/PaymentsController.cs:631 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
+| PUT | api/[controller]/{id:int} | PaymentsController | Update | backend/Controllers/PaymentsController.cs:694 | [Authorize] | да | нет |
+| POST | api/[controller]/{id:int}/status | PaymentsController | UpdateStatus | backend/Controllers/PaymentsController.cs:904 | [Authorize] | да | нет |
+| POST | api/[controller]/{id:int}/advance-review/accept | PaymentsController | AcceptAdvance | backend/Controllers/PaymentsController.cs:1008 | [Authorize] | да | нет |
+| POST | api/[controller]/{id:int}/advance-review/ignore | PaymentsController | IgnoreAdvance | backend/Controllers/PaymentsController.cs:1047 | [Authorize] | да | нет |
+| POST | api/[controller]/{id:int}/advance-review/refund | PaymentsController | RefundAdvance | backend/Controllers/PaymentsController.cs:1086 | [Authorize] | да | нет |
+| GET | api/[controller]/advance-review/candidates | PaymentsController | GetAdvanceReviewCandidates | backend/Controllers/PaymentsController.cs:1147 | [Authorize] | да | нет |
+| GET | api/[controller]/advance-review/diagnostics | PaymentsController | GetAdvanceReviewDiagnostics | backend/Controllers/PaymentsController.cs:1206 | [Authorize] | да | нет |
+| POST | api/[controller]/advance-review/backfill | PaymentsController | BackfillAdvanceReviewCandidates | backend/Controllers/PaymentsController.cs:1347 | [Authorize] | да | нет |
+| POST | api/[controller]/advance-review/backfill/rollback | PaymentsController | RollbackAdvanceReviewBackfill | backend/Controllers/PaymentsController.cs:1436 | [Authorize] | да | нет |
+| PUT | api/[controller]/{id:int}/invoice-managed | PaymentsController | UpdateInvoiceManaged | backend/Controllers/PaymentsController.cs:1535 | [Authorize] | да | нет |
+| GET | api/[controller]/partial-remainder-candidates | PaymentsController | GetPartialRemainderCandidates | backend/Controllers/PaymentsController.cs:1726 | [Authorize] | да | нет |
+| POST | api/[controller]/{id:int}/partial-remainder/from-existing | PaymentsController | TransferExistingPartialRemainder | backend/Controllers/PaymentsController.cs:1851 | [Authorize] | да | нет |
+| PUT | api/[controller]/{id:int}/partial-remainder | PaymentsController | TransferPartialRemainder | backend/Controllers/PaymentsController.cs:1893 | [Authorize] | да | нет |
+| POST | api/[controller]/{id:int}/partial-remainder/rollback | PaymentsController | RollbackPartialRemainderTransfer | backend/Controllers/PaymentsController.cs:2179 | [Authorize] | да | нет |
+| PUT | api/[controller]/{id:int}/partial-remainder/adjust | PaymentsController | AdjustPartialRemainderTransfer | backend/Controllers/PaymentsController.cs:2233 | [Authorize] | да | нет |
+| POST | api/[controller]/repair-invoice-links | PaymentsController | RepairInvoiceLinks | backend/Controllers/PaymentsController.cs:3725 | [Authorize] | да | нет |
+| DELETE | api/[controller]/{id:int} | PaymentsController | Delete | backend/Controllers/PaymentsController.cs:4693 | [Authorize] | да | нет |
 | GET |  | PowerOfAttorneyController | Get | backend/Controllers/PowerOfAttorneyController.cs:24 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | нет | нет |
 | POST |  | PowerOfAttorneyController | Create | backend/Controllers/PowerOfAttorneyController.cs:32 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)]; [RequireSectionPermission(RolePermissionCatalog.Clients, RequireSectionPermissionOperations.Create)] | нет | нет |
 | PUT | {id:int} | PowerOfAttorneyController | Update | backend/Controllers/PowerOfAttorneyController.cs:55 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)]; [RequireSectionPermission(RolePermissionCatalog.Clients, RequireSectionPermissionOperations.Edit)] | нет | docs/bank-integrations-api-verification-2026-10-09.md, docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/case-publication-queue-release-note-draft-2026-10-01.md, docs/crm-legal-module-gap-report-2026-05-25.md, docs/development-act-source-access-2026-10-24.md, docs/development-max-task-notifications-2026-10-23.md, docs/development-pause-plan-2026-09-30.md, docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md, docs/financial-invoice-cancellation-current-state-2026-07-08.md, docs/full-project-audit-2026-06-10.md, docs/pay-33-36-implementation-log-2026-10-09.md, docs/payplanner-access-security-roadmap-2026-10-14.md, docs/payplanner-bank-roadmap-2026-10-14.md, docs/payplanner-release-roadmap-2026-10-14.md, docs/payplanner-task-workflow-roadmap-2026-10-14.md, docs/storage-resilience-runbook.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/task-critical-events-matrix-2026-07-09.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md |

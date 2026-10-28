@@ -14,9 +14,21 @@ public partial class MoneyOperationsController
     private static string InvoiceCandidateFingerprint(MoneyOperation operation, string? search)
         => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new
         {
-            Version = 1, operation.Id, operation.MoneyAccountId, operation.Source, operation.Direction,
-            operation.AccountingType, operation.Date, operation.Amount, operation.Currency, operation.Purpose,
-            operation.CounterpartyName, operation.ResponsibleUserId, operation.LinkedInvoiceId, operation.MatchStatus, Search = search,
+            Version = 1,
+            operation.Id,
+            operation.MoneyAccountId,
+            operation.Source,
+            operation.Direction,
+            operation.AccountingType,
+            operation.Date,
+            operation.Amount,
+            operation.Currency,
+            operation.Purpose,
+            operation.CounterpartyName,
+            operation.ResponsibleUserId,
+            operation.LinkedInvoiceId,
+            operation.MatchStatus,
+            Search = search,
         }))));
 
     private static bool TryReadInvoiceCandidateCursor(string token, out InvoiceCandidateCursor? cursor)

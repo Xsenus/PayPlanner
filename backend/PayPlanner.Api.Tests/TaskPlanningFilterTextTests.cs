@@ -17,12 +17,24 @@ public sealed class TaskPlanningFilterTextTests
         var method = typeof(TasksController).GetMethod("BuildTaskPlanningReportFilterText", BindingFlags.Static | BindingFlags.NonPublic)!;
         var values = new Dictionary<string, object?>
         {
-            ["status"] = status, ["type"] = null, ["priority"] = null, ["from"] = from, ["to"] = to,
-            ["search"] = search, ["assigneeUserId"] = assigneeUserId, ["clientCaseId"] = clientCaseId,
-            ["clientId"] = clientId, ["legalEntityId"] = legalEntityId,
+            ["status"] = status,
+            ["type"] = null,
+            ["priority"] = null,
+            ["from"] = from,
+            ["to"] = to,
+            ["search"] = search,
+            ["assigneeUserId"] = assigneeUserId,
+            ["clientCaseId"] = clientCaseId,
+            ["clientId"] = clientId,
+            ["legalEntityId"] = legalEntityId,
             ["timeZone"] = TimeZoneInfo.FindSystemTimeZoneById("Asia/Yakutsk"),
-            ["underControl"] = null, ["authorUserId"] = null, ["participantRole"] = null,
-            ["approvalScope"] = false, ["metric"] = null, ["billingStatus"] = null, ["untriaged"] = false
+            ["underControl"] = null,
+            ["authorUserId"] = null,
+            ["participantRole"] = null,
+            ["approvalScope"] = false,
+            ["metric"] = null,
+            ["billingStatus"] = null,
+            ["untriaged"] = false
         };
         if (extra is not null) foreach (var (key, value) in extra) values[key] = value;
         return (string)method.Invoke(null, method.GetParameters().Select(parameter => values[parameter.Name!]).ToArray())!;
@@ -41,8 +53,13 @@ public sealed class TaskPlanningFilterTextTests
     {
         var value = Render("all", assigneeUserId: -1, clientId: -1, legalEntityId: -1, extra: new()
         {
-            ["underControl"] = true, ["authorUserId"] = 7, ["participantRole"] = "observer",
-            ["approvalScope"] = true, ["metric"] = "today", ["billingStatus"] = "unbilled", ["untriaged"] = true,
+            ["underControl"] = true,
+            ["authorUserId"] = 7,
+            ["participantRole"] = "observer",
+            ["approvalScope"] = true,
+            ["metric"] = "today",
+            ["billingStatus"] = "unbilled",
+            ["untriaged"] = true,
         });
         foreach (var part in new[] { "исполнитель: условия несовместимы", "клиент: условия несовместимы", "организация: условия несовместимы",
             "на контроле", "автор: №7", "участие: наблюдатель", "согласования", "показатель: на сегодня", "учёт: платные задачи без счёта", "неразобранные" })

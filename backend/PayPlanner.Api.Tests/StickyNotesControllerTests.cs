@@ -572,10 +572,12 @@ public sealed class StickyNotesControllerTests
         var service = new StickyNoteReminderNotificationService(provider.GetRequiredService<IServiceScopeFactory>(), provider.GetRequiredService<IConfiguration>(), NullLogger<StickyNoteReminderNotificationService>.Instance);
         var pending = service.RunOnceAsync();
         await gate.Reached.Task.WaitAsync(TimeSpan.FromSeconds(15));
-        try {
+        try
+        {
             var request = new UpdateStickyNoteRequest { Text = "Уточнённый текст", Color = "yellow", Width = 220, Height = 180, ZIndex = 1, Version = 1, AssignedUserId = user.Id, ReminderAt = when };
             Assert.IsType<OkObjectResult>((await CreateController(editorDb, user).UpdateNote(note.Id, request, CancellationToken.None)).Result);
-        } finally { gate.Release.TrySetResult(); }
+        }
+        finally { gate.Release.TrySetResult(); }
         Assert.Equal(1, await pending.WaitAsync(TimeSpan.FromSeconds(15)));
         reminderDb.ChangeTracker.Clear();
         Assert.Equal(0, await service.RunOnceAsync());
@@ -610,10 +612,12 @@ public sealed class StickyNotesControllerTests
         var service = new StickyNoteReminderNotificationService(provider.GetRequiredService<IServiceScopeFactory>(), provider.GetRequiredService<IConfiguration>(), NullLogger<StickyNoteReminderNotificationService>.Instance);
         var pending = service.RunOnceAsync();
         await gate.Reached.Task.WaitAsync(TimeSpan.FromSeconds(15));
-        try {
+        try
+        {
             var request = new UpdateStickyNoteRequest { Text = "Уточнённый текст", Color = "yellow", Width = 220, Height = 180, ZIndex = 1, Version = 1, AssignedUserId = user.Id, ReminderAt = when.AddDays(2) };
             Assert.IsType<OkObjectResult>((await CreateController(editorDb, user).UpdateNote(note.Id, request, CancellationToken.None)).Result);
-        } finally { gate.Release.TrySetResult(); }
+        }
+        finally { gate.Release.TrySetResult(); }
         Assert.Equal(1, await pending.WaitAsync(TimeSpan.FromSeconds(15)));
         reminderDb.ChangeTracker.Clear();
         Assert.Equal(0, await service.RunOnceAsync());

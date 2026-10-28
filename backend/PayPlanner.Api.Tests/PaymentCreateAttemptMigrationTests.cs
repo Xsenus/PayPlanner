@@ -54,8 +54,13 @@ public sealed class PaymentCreateAttemptMigrationTests
         if (upgrade)
         {
             await db.Database.MigrateAsync(previous);
-            db.Payments.Add(new Payment { Account = "SYNTHETIC-OLD", Type = PaymentType.Income,
-                DocumentKind = DocumentKind.Invoice, Amount = 123.45m });
+            db.Payments.Add(new Payment
+            {
+                Account = "SYNTHETIC-OLD",
+                Type = PaymentType.Income,
+                DocumentKind = DocumentKind.Invoice,
+                Amount = 123.45m
+            });
             await db.SaveChangesAsync();
             db.ChangeTracker.Clear();
             Assert.DoesNotContain(current, await db.Database.GetAppliedMigrationsAsync());
@@ -72,8 +77,13 @@ public sealed class PaymentCreateAttemptMigrationTests
             Assert.Equal(DocumentKind.Invoice, payment.DocumentKind);
         }
         var now = DateTimeOffset.UtcNow;
-        db.PaymentCreateAttempts.Add(new PaymentCreateAttempt { Id = Guid.NewGuid(), ActorUserId = 99,
-            CreatedAtUtc = now, ExpiresAtUtc = now.AddHours(24) });
+        db.PaymentCreateAttempts.Add(new PaymentCreateAttempt
+        {
+            Id = Guid.NewGuid(),
+            ActorUserId = 99,
+            CreatedAtUtc = now,
+            ExpiresAtUtc = now.AddHours(24)
+        });
         await db.SaveChangesAsync();
         Assert.Single(await db.PaymentCreateAttempts.AsNoTracking().ToListAsync());
     }

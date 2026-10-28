@@ -266,10 +266,14 @@ public sealed class DeadlineChangeConcurrencyTests
             return new PostgreSqlPaymentContext(builder.Options);
         }
         await using var setup = CreateContext();
-        var role = new Role { Name = "sales-deadline-worker", Permissions = {
+        var role = new Role
+        {
+            Name = "sales-deadline-worker",
+            Permissions = {
             new RolePermission { Section = RolePermissionCatalog.Tasks, CanView = true, ViewScope = DataVisibilityScope.All },
             new RolePermission { Section = RolePermissionCatalog.Requests, CanView = true, ViewScope = DataVisibilityScope.Department },
-        } };
+        }
+        };
         User Person(string email, string name) => new() { Email = email, FullName = name, PasswordHash = "x", IsActive = true, IsApproved = true, Department = "Отдел A", Role = role };
         var worker = Person("sales-worker@example.test", "Исполнитель");
         var responsible = Person("sales-responsible@example.test", "Ответственный");
@@ -311,10 +315,14 @@ public sealed class DeadlineChangeConcurrencyTests
         await using var lease = await template.CreateDatabaseAsync();
         PostgreSqlPaymentContext CreateContext() => new(new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(lease.ConnectionString).Options);
         await using var setup = CreateContext();
-        var role = new Role { Name = "sales-deadline-revoked", Permissions = {
+        var role = new Role
+        {
+            Name = "sales-deadline-revoked",
+            Permissions = {
             new RolePermission { Section = RolePermissionCatalog.Tasks, CanView = true, ViewScope = DataVisibilityScope.All },
             new RolePermission { Section = RolePermissionCatalog.Requests, CanView = true, ViewScope = DataVisibilityScope.Department },
-        } };
+        }
+        };
         User Person(string email, string name) => new() { Email = email, FullName = name, PasswordHash = "x", IsActive = true, IsApproved = true, Department = "Отдел A", Role = role };
         var worker = Person("dept-worker@example.test", "Исполнитель"); var responsible = Person("dept-responsible@example.test", "Ответственный"); var creator = Person("dept-creator@example.test", "Создатель");
         setup.Users.AddRange(worker, responsible, creator); await setup.SaveChangesAsync();

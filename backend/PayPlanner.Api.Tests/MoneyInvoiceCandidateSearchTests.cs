@@ -68,8 +68,13 @@ public class MoneyInvoiceCandidateSearchTests
     {
         var configured = Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES");
         var builder = !string.IsNullOrWhiteSpace(configured) ? new NpgsqlConnectionStringBuilder(configured)
-            : new NpgsqlConnectionStringBuilder { Host = "127.0.0.1", Port = 5433, Username = "payplanner_ci",
-                Password = Environment.GetEnvironmentVariable("PAYPLANNER_LOCAL_TEST_PG_PASSWORD") };
+            : new NpgsqlConnectionStringBuilder
+            {
+                Host = "127.0.0.1",
+                Port = 5433,
+                Username = "payplanner_ci",
+                Password = Environment.GetEnvironmentVariable("PAYPLANNER_LOCAL_TEST_PG_PASSWORD")
+            };
         if (builder.Host is not ("127.0.0.1" or "localhost" or "::1") || builder.Username != "payplanner_ci"
             || string.IsNullOrWhiteSpace(builder.Password))
             throw new InvalidOperationException("An existing loopback PostgreSQL server and isolated payplanner_ci role are required.");
@@ -107,8 +112,16 @@ public class MoneyInvoiceCandidateSearchTests
     {
         await db.Database.EnsureCreatedAsync();
         var role = new Role { Name = "invoice-search", Description = "Synthetic employee" };
-        var user = new User { Role = role, Email = "invoice-search@fixture.local", FullName = "Synthetic", PasswordHash = "hash",
-            IsEmployee = true, IsActive = true, IsApproved = true };
+        var user = new User
+        {
+            Role = role,
+            Email = "invoice-search@fixture.local",
+            FullName = "Synthetic",
+            PasswordHash = "hash",
+            IsEmployee = true,
+            IsActive = true,
+            IsApproved = true
+        };
         var own = new LegalEntity { ShortName = "Own" };
         var foreign = new LegalEntity { ShortName = "Other" };
         var account = new MoneyAccount { Company = own, Name = "Synthetic bank", Source = MoneyOperationSource.Bank, Currency = "RUB", IsActive = true };
@@ -123,13 +136,29 @@ public class MoneyInvoiceCandidateSearchTests
         db.SystemSettings.AddRange(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = JsonSerializer.Serialize(new[] { own.Id, foreign.Id }) },
             new SystemSetting { Key = "notifications.email.enabled", Value = "false" });
         var date = new DateTime(2026, 10, 28, 0, 0, 0, DateTimeKind.Utc);
-        var operation = new MoneyOperation { MoneyAccountId = account.Id, Source = MoneyOperationSource.Bank, Direction = MoneyOperationDirection.Income,
-            AccountingType = MoneyOperationAccountingType.Fact, Amount = 10m, Currency = "RUB", Date = date, Purpose = "Без номера документа", ResponsibleUserId = user.Id };
+        var operation = new MoneyOperation
+        {
+            MoneyAccountId = account.Id,
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 10m,
+            Currency = "RUB",
+            Date = date,
+            Purpose = "Без номера документа",
+            ResponsibleUserId = user.Id
+        };
         db.MoneyOperations.Add(operation);
         Payment Header(string number, int companyId, bool visible = true, decimal amount = 100m) => new()
         {
-            Invoice = new Invoice { Number = number, Date = date }, Account = number, SellerCompanyId = companyId,
-            Date = date, DocumentKind = DocumentKind.Invoice, Type = PaymentType.Income, Status = PaymentStatus.Pending, Amount = amount,
+            Invoice = new Invoice { Number = number, Date = date },
+            Account = number,
+            SellerCompanyId = companyId,
+            Date = date,
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = amount,
             Responsibles = visible ? new List<PaymentResponsible> { new() { UserId = user.Id } } : new List<PaymentResponsible>(),
         };
         var headers = Enumerable.Range(1, 220).Select(i => Header($"СЧ-{i:D3}", own.Id)).ToArray();
@@ -156,8 +185,14 @@ public class MoneyInvoiceCandidateSearchTests
         var before = await SnapshotAsync(db);
         MoneyOperationsController Controller() => new(db, NullLogger<MoneyOperationsController>.Instance)
         {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(
-                new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, actorId.ToString()) }, "Test")) } },
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(
+                new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, actorId.ToString()) }, "Test"))
+                }
+            },
         };
         async Task<IReadOnlyList<MoneyOperationInvoiceCandidateDto>> ReadAsync(string? search, int? expectedAggregateReads = null)
         {

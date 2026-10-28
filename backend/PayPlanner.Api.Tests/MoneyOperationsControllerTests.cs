@@ -43,8 +43,13 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
 
         var result = await controller.Create(new MoneyOperation
         {
-            MoneyAccountId = account.Id, Source = MoneyOperationSource.Cash, Direction = MoneyOperationDirection.Income,
-            AccountingType = MoneyOperationAccountingType.Fact, Date = new DateTime(2026, 5, 1), Amount = 100m, Currency = null,
+            MoneyAccountId = account.Id,
+            Source = MoneyOperationSource.Cash,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Date = new DateTime(2026, 5, 1),
+            Amount = 100m,
+            Currency = null,
         });
 
         Assert.IsType<BadRequestObjectResult>(result);
@@ -63,7 +68,11 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
 
         var result = await controller.CreateTransfer(new MoneyOperationTransferRequest
         {
-            SourceMoneyAccountId = bank.Id, TargetMoneyAccountId = cash.Id, Amount = 100m, Currency = "", Date = new DateTime(2026, 5, 1),
+            SourceMoneyAccountId = bank.Id,
+            TargetMoneyAccountId = cash.Id,
+            Amount = 100m,
+            Currency = "",
+            Date = new DateTime(2026, 5, 1),
         });
 
         Assert.IsType<BadRequestObjectResult>(result.Result);
@@ -77,19 +86,43 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
         await using var db = await CreateContextAsync();
         var companyId = await RegisterAccountCompanyAsync(db);
         var account = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Cash, "Тестовая касса", "");
-        var operation = new MoneyOperation { MoneyAccountId = account.Id, Source = MoneyOperationSource.Cash,
-            Direction = MoneyOperationDirection.Income, AccountingType = MoneyOperationAccountingType.Fact,
-            Date = new DateTime(2026, 5, 1), Amount = 100m, Currency = null, Purpose = "Прежнее" };
+        var operation = new MoneyOperation
+        {
+            MoneyAccountId = account.Id,
+            Source = MoneyOperationSource.Cash,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Date = new DateTime(2026, 5, 1),
+            Amount = 100m,
+            Currency = null,
+            Purpose = "Прежнее"
+        };
         db.MoneyOperations.Add(operation);
         await db.SaveChangesAsync();
-        db.CashOrders.Add(new CashOrder { Number = "ПКО-2026-9990", Type = CashOrderType.Incoming,
-            Status = CashOrderStatus.Posted, Date = operation.Date, Amount = operation.Amount, Currency = null, MoneyOperationId = operation.Id });
+        db.CashOrders.Add(new CashOrder
+        {
+            Number = "ПКО-2026-9990",
+            Type = CashOrderType.Incoming,
+            Status = CashOrderStatus.Posted,
+            Date = operation.Date,
+            Amount = operation.Amount,
+            Currency = null,
+            MoneyOperationId = operation.Id
+        });
         await db.SaveChangesAsync();
         var controller = await CreateAuthorizedJournalControllerAsync(db);
 
-        var result = await controller.Update(operation.Id, new MoneyOperation { MoneyAccountId = account.Id,
-            Source = MoneyOperationSource.Cash, Direction = MoneyOperationDirection.Income, AccountingType = MoneyOperationAccountingType.Fact,
-            Date = operation.Date, Amount = operation.Amount, Currency = null, Purpose = "Новое" });
+        var result = await controller.Update(operation.Id, new MoneyOperation
+        {
+            MoneyAccountId = account.Id,
+            Source = MoneyOperationSource.Cash,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Date = operation.Date,
+            Amount = operation.Amount,
+            Currency = null,
+            Purpose = "Новое"
+        });
 
         Assert.IsType<BadRequestObjectResult>(result);
         db.ChangeTracker.Clear();

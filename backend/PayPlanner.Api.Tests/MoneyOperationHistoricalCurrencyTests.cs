@@ -30,8 +30,13 @@ public class MoneyOperationHistoricalCurrencyTests
     {
         var configured = Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES");
         var builder = !string.IsNullOrWhiteSpace(configured) ? new NpgsqlConnectionStringBuilder(configured)
-            : new NpgsqlConnectionStringBuilder { Host = "127.0.0.1", Port = 5433, Username = "payplanner_ci",
-                Password = Environment.GetEnvironmentVariable("PAYPLANNER_LOCAL_TEST_PG_PASSWORD") };
+            : new NpgsqlConnectionStringBuilder
+            {
+                Host = "127.0.0.1",
+                Port = 5433,
+                Username = "payplanner_ci",
+                Password = Environment.GetEnvironmentVariable("PAYPLANNER_LOCAL_TEST_PG_PASSWORD")
+            };
         if (builder.Host is not ("127.0.0.1" or "localhost" or "::1") || builder.Username != "payplanner_ci"
             || string.IsNullOrWhiteSpace(builder.Password))
             throw new InvalidOperationException("An existing loopback PostgreSQL server and isolated payplanner_ci role are required.");
@@ -98,8 +103,16 @@ public class MoneyOperationHistoricalCurrencyTests
         foreach (var scenario in scenarios)
         {
             var role = new Role { Name = scenario.Name, Description = "Synthetic currency regression" };
-            var user = new User { Email = scenario.Name + "@fixture.local", FullName = "Synthetic employee", PasswordHash = "hash",
-                Role = role, IsEmployee = true, IsActive = true, IsApproved = true };
+            var user = new User
+            {
+                Email = scenario.Name + "@fixture.local",
+                FullName = "Synthetic employee",
+                PasswordHash = "hash",
+                Role = role,
+                IsEmployee = true,
+                IsActive = true,
+                IsApproved = true
+            };
             var company = new LegalEntity { ShortName = scenario.Name };
             var account = new MoneyAccount { Name = "Synthetic account", Source = scenario.Source, Currency = scenario.AccountCurrency, Company = company, IsActive = true };
             var invoice = new Invoice { Number = scenario.Name, Date = new DateTime(2026, 10, 28, 0, 0, 0, DateTimeKind.Utc) };
@@ -113,35 +126,78 @@ public class MoneyOperationHistoricalCurrencyTests
                 new RolePermission { RoleId = role.Id, Section = RolePermissionCatalog.Payments, CanView = true, CanEdit = scenario.CanEdit, ViewScope = DataVisibilityScope.All },
                 new RolePermission { RoleId = role.Id, Section = RolePermissionCatalog.Accounts, CanView = true, CanEdit = true, ViewScope = DataVisibilityScope.All });
             db.UserCompanyAccesses.Add(new UserCompanyAccess { UserId = user.Id, LegalEntityId = company.Id });
-            var payment = new Payment { InvoiceId = invoice.Id, SellerCompanyId = company.Id, Account = invoice.Number,
-                DocumentKind = DocumentKind.Invoice, Type = PaymentType.Income, Status = PaymentStatus.Pending, Amount = 100m, Date = invoice.Date };
-            var operation = new MoneyOperation { MoneyAccountId = account.Id, Source = scenario.Source,
-                Direction = MoneyOperationDirection.Income, AccountingType = MoneyOperationAccountingType.Fact, Amount = 10m,
-                Currency = scenario.Stored, Date = invoice.Date.AddHours(3), Purpose = "Original", ResponsibleUserId = user.Id,
-                SourceMovementKey = scenario.Imported ? scenario.Name : null };
+            var payment = new Payment
+            {
+                InvoiceId = invoice.Id,
+                SellerCompanyId = company.Id,
+                Account = invoice.Number,
+                DocumentKind = DocumentKind.Invoice,
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Pending,
+                Amount = 100m,
+                Date = invoice.Date
+            };
+            var operation = new MoneyOperation
+            {
+                MoneyAccountId = account.Id,
+                Source = scenario.Source,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                Amount = 10m,
+                Currency = scenario.Stored,
+                Date = invoice.Date.AddHours(3),
+                Purpose = "Original",
+                ResponsibleUserId = user.Id,
+                SourceMovementKey = scenario.Imported ? scenario.Name : null
+            };
             db.MoneyOperations.Add(operation);
             db.Payments.Add(payment);
             await db.SaveChangesAsync();
             if (scenario.Source == MoneyOperationSource.Cash)
             {
-                db.CashOrders.Add(new CashOrder { Number = scenario.Name, Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
-                    MoneyOperationId = operation.Id, MoneyAccountId = account.Id, CompanyId = company.Id,
-                    Currency = scenario.Stored, Amount = operation.Amount, Date = operation.Date, Basis = "Original" });
+                db.CashOrders.Add(new CashOrder
+                {
+                    Number = scenario.Name,
+                    Type = CashOrderType.Incoming,
+                    Status = CashOrderStatus.Posted,
+                    MoneyOperationId = operation.Id,
+                    MoneyAccountId = account.Id,
+                    CompanyId = company.Id,
+                    Currency = scenario.Stored,
+                    Amount = operation.Amount,
+                    Date = operation.Date,
+                    Basis = "Original"
+                });
                 await db.SaveChangesAsync();
             }
             var operationId = operation.Id;
             var storedDate = await db.MoneyOperations.AsNoTracking().Where(item => item.Id == operationId).Select(item => item.Date).SingleAsync();
-            var request = new MoneyOperation { Id = operationId, MoneyAccountId = account.Id, Source = scenario.Source,
-                Direction = operation.Direction, AccountingType = operation.AccountingType,
-                Amount = scenario.ChangeAmount ? 20m : 10m, Currency = scenario.Supplied,
-                Date = invoice.Date, Purpose = "Updated", ResponsibleUserId = user.Id,
+            var request = new MoneyOperation
+            {
+                Id = operationId,
+                MoneyAccountId = account.Id,
+                Source = scenario.Source,
+                Direction = operation.Direction,
+                AccountingType = operation.AccountingType,
+                Amount = scenario.ChangeAmount ? 20m : 10m,
+                Currency = scenario.Supplied,
+                Date = invoice.Date,
+                Purpose = "Updated",
+                ResponsibleUserId = user.Id,
                 LinkedInvoiceId = scenario.Link ? invoice.Id : null,
-                MatchStatus = scenario.Link ? MoneyOperationMatchStatus.Matched : MoneyOperationMatchStatus.None };
+                MatchStatus = scenario.Link ? MoneyOperationMatchStatus.Matched : MoneyOperationMatchStatus.None
+            };
             db.ChangeTracker.Clear();
             var controller = new MoneyOperationsController(db, NullLogger<MoneyOperationsController>.Instance)
             {
-                ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(
-                    new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()) }, "Test")) } },
+                ControllerContext = new ControllerContext
+                {
+                    HttpContext = new DefaultHttpContext
+                    {
+                        User = new ClaimsPrincipal(
+                    new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()) }, "Test"))
+                    }
+                },
             };
             var result = await controller.Update(operationId, request);
             Assert.True(scenario.Allowed ? result is OkObjectResult : result is BadRequestObjectResult or ForbidResult,

@@ -222,8 +222,12 @@ public partial class NotificationServiceTests
             task.Status = "done";
             db.TaskStatusNotificationOutboxes.Add(new TaskStatusNotificationOutbox
             {
-                TaskJournalItemId = task.Id, EventKey = "task:outbox:rollback", EventType = "completion",
-                ActorUserId = author.Id, ActorName = "Автор", CreatedAt = DateTime.UtcNow,
+                TaskJournalItemId = task.Id,
+                EventKey = "task:outbox:rollback",
+                EventType = "completion",
+                ActorUserId = author.Id,
+                ActorName = "Автор",
+                CreatedAt = DateTime.UtcNow,
             });
             await db.SaveChangesAsync();
             await transaction.RollbackAsync();
@@ -243,8 +247,12 @@ public partial class NotificationServiceTests
         await db.SaveChangesAsync();
         TaskStatusNotificationOutbox MakeEntry() => new()
         {
-            TaskJournalItemId = task.Id, EventKey = "task:outbox:unique", EventType = "completion",
-            ActorUserId = author.Id, ActorName = "Автор", CreatedAt = DateTime.UtcNow,
+            TaskJournalItemId = task.Id,
+            EventKey = "task:outbox:unique",
+            EventType = "completion",
+            ActorUserId = author.Id,
+            ActorName = "Автор",
+            CreatedAt = DateTime.UtcNow,
         };
         db.TaskStatusNotificationOutboxes.Add(MakeEntry());
         await db.SaveChangesAsync();
@@ -267,8 +275,12 @@ public partial class NotificationServiceTests
         await db.SaveChangesAsync();
         var task = new TaskJournalItem
         {
-            ObjectName = "Дело", Title = "Задача", AuthorUserId = author.Id, DueAt = DateTime.UtcNow.AddHours(1),
-            ChannelsJson = "[\"inApp\"]", Status = "onApproval",
+            ObjectName = "Дело",
+            Title = "Задача",
+            AuthorUserId = author.Id,
+            DueAt = DateTime.UtcNow.AddHours(1),
+            ChannelsJson = "[\"inApp\"]",
+            Status = "onApproval",
             Participants = [new TaskJournalParticipant { UserId = reviewer.Id, Role = "approver", ApprovalStatus = "pending" }],
         };
         db.TaskJournalItems.Add(task);
@@ -297,9 +309,14 @@ public partial class NotificationServiceTests
         await db.SaveChangesAsync();
         var task = new TaskJournalItem
         {
-            ObjectName = "Синтетическое дело", Title = "Синтетическая задача", AuthorUserId = author.Id,
-            AssigneeUserId = assignee.Id, DueAt = DateTime.UtcNow.AddHours(1), ChannelsJson = "[\"inApp\"]",
-            Status = "onApproval", Participants = [new TaskJournalParticipant { UserId = approver.Id, Role = "approver", ApprovalStatus = "pending" }],
+            ObjectName = "Синтетическое дело",
+            Title = "Синтетическая задача",
+            AuthorUserId = author.Id,
+            AssigneeUserId = assignee.Id,
+            DueAt = DateTime.UtcNow.AddHours(1),
+            ChannelsJson = "[\"inApp\"]",
+            Status = "onApproval",
+            Participants = [new TaskJournalParticipant { UserId = approver.Id, Role = "approver", ApprovalStatus = "pending" }],
         };
         db.TaskJournalItems.Add(task);
         await db.SaveChangesAsync();
@@ -322,9 +339,14 @@ public partial class NotificationServiceTests
         db.Users.AddRange(assignee, approver); await db.SaveChangesAsync();
         var task = new TaskJournalItem
         {
-            ObjectName = "Синтетическое дело", Title = "Синтетическая задача", AuthorUserId = author.Id,
-            AssigneeUserId = assignee.Id, DueAt = DateTime.UtcNow.AddHours(1), ChannelsJson = "[\"inApp\"]",
-            Status = "onApproval", Participants = [new TaskJournalParticipant { UserId = approver.Id, Role = "approver", ApprovalStatus = "pending" }],
+            ObjectName = "Синтетическое дело",
+            Title = "Синтетическая задача",
+            AuthorUserId = author.Id,
+            AssigneeUserId = assignee.Id,
+            DueAt = DateTime.UtcNow.AddHours(1),
+            ChannelsJson = "[\"inApp\"]",
+            Status = "onApproval",
+            Participants = [new TaskJournalParticipant { UserId = approver.Id, Role = "approver", ApprovalStatus = "pending" }],
         };
         db.TaskJournalItems.Add(task); await db.SaveChangesAsync();
         var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());

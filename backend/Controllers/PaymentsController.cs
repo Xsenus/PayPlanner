@@ -448,9 +448,12 @@ public class PaymentsController : ControllerBase
         {
             var attempt = new PaymentCreateAttempt
             {
-                Id = Guid.NewGuid(), ActorUserId = User.GetUserId()!.Value,
-                Operation = request.Operation, SellerCompanyId = request.SellerCompanyId,
-                SellerBranchId = request.SellerBranchId, PrimaryPaymentId = request.PrimaryPaymentId,
+                Id = Guid.NewGuid(),
+                ActorUserId = User.GetUserId()!.Value,
+                Operation = request.Operation,
+                SellerCompanyId = request.SellerCompanyId,
+                SellerBranchId = request.SellerBranchId,
+                PrimaryPaymentId = request.PrimaryPaymentId,
                 CreatedAtUtc = AttemptTime.GetUtcNow(),
             };
             attempt.ExpiresAtUtc = attempt.CreatedAtUtc.AddHours(24);
@@ -619,7 +622,7 @@ public class PaymentsController : ControllerBase
     private ObjectResult AttemptGone() => StatusCode(StatusCodes.Status410Gone,
         new { message = "Попытка недоступна или уже закрыта. Не повторяйте создание без подтверждённого результата." });
     private ConflictObjectResult AttemptConflict() => Conflict(new
-        { message = "Попытка или связанные данные изменились либо заняты. Сверьте результат сохранения." });
+    { message = "Попытка или связанные данные изменились либо заняты. Сверьте результат сохранения." });
     private static PaymentCreateAttemptStateDto AttemptState(PaymentCreateAttempt item)
         => new(item.Id, item.State, item.Operation, item.SellerCompanyId, item.SellerBranchId,
             item.PrimaryPaymentId, item.CreatedAtUtc, item.ExpiresAtUtc,

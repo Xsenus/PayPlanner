@@ -1151,7 +1151,10 @@ public partial class MoneyOperationsController : ControllerBase
         var hasMore = candidates.Count > 10;
         return Ok(new MoneyOperationInvoiceCandidatePageDto
         {
-            Items = items, Search = search, Cursor = cursor, HasMore = hasMore,
+            Items = items,
+            Search = search,
+            Cursor = cursor,
+            HasMore = hasMore,
             NextCursor = hasMore ? WriteInvoiceCandidateCursor(items[^1], fingerprint) : null,
         });
     }

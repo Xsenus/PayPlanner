@@ -50,7 +50,8 @@ public partial class TasksControllerTests : IDisposable
         var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id);
         var controller = CreateController(db, new RecordingNotificationService(), assignee, configuration: storage.Configuration);
         var bytes = Encoding.UTF8.GetBytes("synthetic file");
-        using var stream = new RevokingReadStream(bytes, async () => {
+        using var stream = new RevokingReadStream(bytes, async () =>
+        {
             await db.Users.Where(x => x.Id == assignee.Id).ExecuteUpdateAsync(s => s.SetProperty(x => x.IsActive, false));
         });
         var file = new FormFile(stream, 0, bytes.Length, "file", "probe.txt") { Headers = new HeaderDictionary(), ContentType = "text/plain" };

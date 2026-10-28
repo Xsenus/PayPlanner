@@ -22,7 +22,9 @@ public class BankImportDetailPostgresTests
         var builder = !string.IsNullOrWhiteSpace(configured) ? new NpgsqlConnectionStringBuilder(configured)
             : new NpgsqlConnectionStringBuilder
             {
-                Host = "127.0.0.1", Port = 5433, Username = "payplanner_ci",
+                Host = "127.0.0.1",
+                Port = 5433,
+                Username = "payplanner_ci",
                 Password = Environment.GetEnvironmentVariable("PAYPLANNER_LOCAL_TEST_PG_PASSWORD"),
             };
         if (builder.Host is not ("127.0.0.1" or "localhost" or "::1") || builder.Username != "payplanner_ci"
@@ -64,9 +66,13 @@ public class BankImportDetailPostgresTests
         await db.Database.EnsureCreatedAsync();
         var actor = new User
         {
-            Email = "bank-detail@fixture.local", FullName = "Synthetic employee", PasswordHash = "hash",
+            Email = "bank-detail@fixture.local",
+            FullName = "Synthetic employee",
+            PasswordHash = "hash",
             Role = new Role { Name = "bank-detail", Description = "Synthetic read-only employee" },
-            IsActive = true, IsApproved = true, IsEmployee = true,
+            IsActive = true,
+            IsApproved = true,
+            IsEmployee = true,
         };
         var own = new LegalEntity { ShortName = "Своя компания" };
         var foreign = new LegalEntity { ShortName = "Чужая компания" };
@@ -75,8 +81,13 @@ public class BankImportDetailPostgresTests
         db.Users.Add(actor);
         db.MoneyAccounts.AddRange(account, foreignAccount);
         await db.SaveChangesAsync();
-        var permission = new RolePermission { RoleId = actor.RoleId, Section = RolePermissionCatalog.Payments,
-            CanView = true, ViewScope = DataVisibilityScope.Own };
+        var permission = new RolePermission
+        {
+            RoleId = actor.RoleId,
+            Section = RolePermissionCatalog.Payments,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Own
+        };
         db.RolePermissions.Add(permission);
         db.UserCompanyAccesses.Add(new UserCompanyAccess { UserId = actor.Id, LegalEntityId = own.Id });
         db.SystemSettings.AddRange(
@@ -89,10 +100,13 @@ public class BankImportDetailPostgresTests
         db.ChangeTracker.Clear();
         var controller = new MoneyOperationsController(db, NullLogger<MoneyOperationsController>.Instance)
         {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext
+            ControllerContext = new ControllerContext
             {
-                User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, actor.Id.ToString()) }, "Test")),
-            } },
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, actor.Id.ToString()) }, "Test")),
+                }
+            },
         };
         var before = await CaptureHistoryAsync(connectionString);
         async Task<BankStatementImportBatchDetailDto> ReadAsync(int page, int pageSize = 50)
@@ -132,15 +146,31 @@ public class BankImportDetailPostgresTests
 
     private static BankStatementImportBatch BuildBatch(MoneyAccount account, int actorId, string key, int count)
     {
-        var batch = new BankStatementImportBatch { CompanyId = account.CompanyId, MoneyAccountId = account.Id,
-            ImportedByUserId = actorId, ResponsibleUserId = actorId, Source = BankStatementImportSources.File,
-            FileName = key + ".csv", FileHash = key, RowsRead = count, CreatedRows = count - 1, ErrorRows = 1 };
+        var batch = new BankStatementImportBatch
+        {
+            CompanyId = account.CompanyId,
+            MoneyAccountId = account.Id,
+            ImportedByUserId = actorId,
+            ResponsibleUserId = actorId,
+            Source = BankStatementImportSources.File,
+            FileName = key + ".csv",
+            FileHash = key,
+            RowsRead = count,
+            CreatedRows = count - 1,
+            ErrorRows = 1
+        };
         string?[] currencies = ["RUB", "USD", null, ""];
         for (var number = 1; number <= count; number++)
-            batch.Rows.Add(new BankStatementImportRow { RowNumber = number, ImportKey = key + number,
+            batch.Rows.Add(new BankStatementImportRow
+            {
+                RowNumber = number,
+                ImportKey = key + number,
                 Status = number == count ? BankStatementImportRowStatus.Error : BankStatementImportRowStatus.Created,
-                Currency = currencies[(number - 1) % currencies.Length], Amount = number + 0.25m,
-                Date = new DateTime(2026, 10, 28, 0, 0, 0, DateTimeKind.Utc), AccountName = account.Name });
+                Currency = currencies[(number - 1) % currencies.Length],
+                Amount = number + 0.25m,
+                Date = new DateTime(2026, 10, 28, 0, 0, 0, DateTimeKind.Utc),
+                AccountName = account.Name
+            });
         return batch;
     }
 

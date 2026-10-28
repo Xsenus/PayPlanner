@@ -65,7 +65,10 @@ public partial class MoneyOperationsControllerTests
         var sections = new[] { RolePermissionCatalog.Accounts, RolePermissionCatalog.Acts, RolePermissionCatalog.Contracts };
         var permissions = sections.Select(section => new RolePermission
         {
-            RoleId = user.RoleId, Section = section, CanView = true, ViewScope = DataVisibilityScope.All,
+            RoleId = user.RoleId,
+            Section = section,
+            CanView = true,
+            ViewScope = DataVisibilityScope.All,
         }).ToArray();
         db.RolePermissions.AddRange(permissions);
         await db.SaveChangesAsync();

@@ -41,8 +41,14 @@ public sealed class TaskPlanningFilterParityTests
         var now = DateTime.UtcNow;
         TaskJournalItem Item(string title, User author, bool control, Client? target, string status) => new()
         {
-            Title = title, ObjectName = "Синтетический объект", AuthorUserId = author.Id, AuthorName = author.FullName,
-            IsUnderControl = control, ClientId = target?.Id, DueAt = now, Status = status,
+            Title = title,
+            ObjectName = "Синтетический объект",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            IsUnderControl = control,
+            ClientId = target?.Id,
+            DueAt = now,
+            Status = status,
         };
         var first = Item("Видимая контролируемая", user, true, client, "onApproval");
         first.ClientBillingClassification = TaskClientBillingClassification.Billable;
