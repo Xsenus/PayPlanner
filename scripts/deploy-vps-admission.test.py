@@ -87,7 +87,9 @@ class DeliveryAdmissionTests(unittest.TestCase):
     def test_exact_candidate_is_admitted_before_any_shell_phase(self):
         self.use_current_candidate()
         self.assertEqual(len(self.plan['expectedMigration'].split('+')), 11)
-        self.assertEqual(len(self.plan['expectedReleaseSeeds']), 242)
+        self.assertEqual(len(self.plan['expectedReleaseSeeds']), 245)
+        self.assertEqual([seed['version'] for seed in self.plan['expectedReleaseSeeds'][:3]], ['1.14.391', '1.14.390', '1.14.389'])
+        self.assertTrue(all(seed['isActive'] is False for seed in self.plan['expectedReleaseSeeds'][:3]))
         self.assertTrue(self.admission().stdout.startswith(self.revision+'|'))
 
     def test_candidate_rejects_migration_and_release_substitutions(self):
