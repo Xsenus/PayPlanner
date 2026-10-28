@@ -122,15 +122,18 @@ public partial class MoneyOperationsControllerTests
         var db = fixture.Db;
         var seed = await SeedBankScopeAsync(db, "own");
         for (var i = 2; i <= 106; i++)
-            seed.Batch.Rows.Add(new BankStatementImportRow
+            db.BankStatementImportRows.Add(new BankStatementImportRow
             {
+                BatchId = seed.Batch.Id,
                 RowNumber = i,
                 ImportKey = $"synthetic-page-{i}",
                 Status = i == 106 ? BankStatementImportRowStatus.Error : BankStatementImportRowStatus.Created,
                 Date = BankScopeDate,
                 Amount = i,
+                Currency = "RUB",
             });
         await db.SaveChangesAsync();
+        Assert.Equal(106, await db.BankStatementImportRows.CountAsync(row => row.BatchId == seed.Batch.Id));
         var before = await CaptureBankScopeStateAsync(db);
         var controller = CreateController(db, seed.ActorId, isAdminClaim: true);
         var first = Assert.IsType<BankStatementImportBatchDetailDto>(Assert.IsType<OkObjectResult>(

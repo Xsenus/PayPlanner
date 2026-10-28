@@ -77,6 +77,7 @@ public class SqliteMigrationSmokeTests
                     Role = adminRole,
                     IsActive = true,
                     IsApproved = true,
+                    IsEmployee = true,
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow,
                 };
@@ -137,6 +138,25 @@ public class SqliteMigrationSmokeTests
                 var bank = Assert.IsType<BankDto>(bankCreated.Value);
                 Assert.Equal("Локальный банк", bank.Name);
 
+                var company = new LegalEntity { ShortName = "Компания SQLite-проверки" };
+                context.LegalEntities.Add(company);
+                await context.SaveChangesAsync();
+                context.UserCompanyAccesses.Add(new UserCompanyAccess { UserId = user.Id, LegalEntityId = company.Id });
+                context.SystemSettings.Add(new SystemSetting
+                {
+                    Key = "legalEntities.mainCompanyIds",
+                    Value = System.Text.Json.JsonSerializer.Serialize(new[] { company.Id }),
+                });
+                var cashAccount = new MoneyAccount
+                {
+                    Name = "Основная касса",
+                    Source = MoneyOperationSource.Cash,
+                    CompanyId = company.Id,
+                    Currency = "RUB",
+                    IsActive = true,
+                };
+                context.MoneyAccounts.Add(cashAccount);
+                await context.SaveChangesAsync();
                 var cashController = CreateCashOrdersController(context, user.Id);
                 var orderAction = await cashController.Create(new CashOrder
                 {
@@ -146,12 +166,16 @@ public class SqliteMigrationSmokeTests
                     Amount = 2_500m,
                     Currency = "RUB",
                     Account = "Основная касса",
+                    SelectedMoneyAccountId = cashAccount.Id,
                     PayerName = "Тестовый клиент",
                     Basis = "Локальная проверка кассы",
                 }, CancellationToken.None);
                 var orderCreated = Assert.IsType<CreatedResult>(orderAction);
                 var order = Assert.IsType<CashOrderDto>(orderCreated.Value);
                 Assert.StartsWith("ПКО-2026-", order.Number);
+                var storedOrder = await context.CashOrders.AsNoTracking().SingleAsync(item => item.Id == order.Id);
+                Assert.Equal(cashAccount.Id, storedOrder.MoneyAccountId);
+                Assert.Equal(company.Id, storedOrder.CompanyId);
 
                 var cashBookAction = await cashController.GetCashBook(
                     new DateTime(2026, 6, 24),
@@ -168,6 +192,7 @@ public class SqliteMigrationSmokeTests
                     {
                         Date = new DateTime(2026, 6, 24),
                         AccountName = "Основная касса",
+                        MoneyAccountId = cashAccount.Id,
                         ActualBalance = 2_500m,
                         CreateCorrection = false,
                         Comment = "Локальная SQLite-проверка",

@@ -54,17 +54,18 @@ public sealed class LegalFeatureFlagCiGateTests
 
         Assert.Contains("PAYPLANNER_WEBPUSH_ENABLED", workflow, StringComparison.Ordinal);
         Assert.Contains("PAYPLANNER_WEBPUSH_ENABLED: ${{ vars.PAYPLANNER_WEBPUSH_ENABLED || 'false' }}", workflow, StringComparison.Ordinal);
-        Assert.Contains("local webpush_enabled=\"${PAYPLANNER_WEBPUSH_ENABLED:-false}\"", workflow, StringComparison.Ordinal);
         Assert.Contains("PAYPLANNER_WEBPUSH_PUBLIC_KEY", workflow, StringComparison.Ordinal);
         Assert.Contains("PAYPLANNER_WEBPUSH_PRIVATE_KEY", workflow, StringComparison.Ordinal);
         Assert.Contains("PAYPLANNER_WEBPUSH_SUBJECT", workflow, StringComparison.Ordinal);
-        Assert.Contains("WebPush__Enabled", workflow, StringComparison.Ordinal);
-        Assert.Contains("WebPush__PublicKey", workflow, StringComparison.Ordinal);
-        Assert.Contains("WebPush__PrivateKey", workflow, StringComparison.Ordinal);
-        Assert.Contains("WebPush__Subject", workflow, StringComparison.Ordinal);
-        Assert.Contains("/opt/payplanner/shared/payplanner.env", workflow, StringComparison.Ordinal);
-        Assert.Contains("EnvironmentFile=-%s", workflow, StringComparison.Ordinal);
-        Assert.DoesNotContain("-p Environment", workflow, StringComparison.Ordinal);
+        // The reviewed installer preserves effective configuration instead of regenerating production secrets.
+        Assert.Contains("ENV_FILE=/opt/payplanner/shared/payplanner.env", workflow, StringComparison.Ordinal);
+        Assert.Contains("systemctl show \"$SERVICE\" -p FragmentPath -p DropInPaths -p EnvironmentFiles", workflow, StringComparison.Ordinal);
+        Assert.Contains("python3 - \"$ENV_FILE\" \"$KEYS\" \"$FILES\" \"$BE/appsettings.json\" \"$BE/appsettings.Production.json\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("for name in appsettings.json appsettings.Production.json; do", workflow, StringComparison.Ordinal);
+        Assert.Contains("cp -a \"$BACKUP/backend.previous/$name\" \"$BE/$name\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("cmp -s \"$BACKUP/preserved-before.private.json\" \"$BACKUP/preserved-started.private.json\"", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("-p Environment ", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("printf 'WebPush__", workflow, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -84,13 +85,16 @@ public sealed class LegalFeatureFlagCiGateTests
 
         Assert.Contains("VITE_API_URL: ${{ env.FE_API_URL }}", workflow, StringComparison.Ordinal);
         Assert.Contains("cp -r dist/* \"${{ env.OUT_DIR }}/fe/\"", workflow, StringComparison.Ordinal);
-        Assert.Contains("sudo rsync -a --delete \"$STAGE/fe/\" \"$FE_PUBLIC_DIR/\"", workflow, StringComparison.Ordinal);
-        Assert.Contains("PUBLIC_API_HEALTH_URL", workflow, StringComparison.Ordinal);
-        Assert.Contains("PUBLIC_FRONTEND_URL", workflow, StringComparison.Ordinal);
-        Assert.Contains("sudo tee \"$APP_DIR/.deploy-revision\"", workflow, StringComparison.Ordinal);
-        Assert.Contains("curl -fsS \"$PRIMARY_HEALTH_URL\" | grep -Eq", workflow, StringComparison.Ordinal);
-        Assert.Contains("curl -fsS \"$PUBLIC_API_HEALTH_URL\" | grep -Eq", workflow, StringComparison.Ordinal);
-        Assert.Contains("curl -fsS -o /dev/null \"$PUBLIC_FRONTEND_URL\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("rsync -a --checksum --delete \"$STAGE/fe/\" \"$PUBLIC/\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("printf '%s\\n' \"$REV\" > \"$APP/.deploy-revision\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("'http://127.0.0.1:5080/api/health','https://api.elitpravo.com/api/health'", workflow, StringComparison.Ordinal);
+        Assert.Contains("body,_=get(url);assert json.loads(body)['status']=='ok'", workflow, StringComparison.Ordinal);
+        Assert.Contains("body,headers=get('https://crm.elitpravo.com/')", workflow, StringComparison.Ordinal);
+        Assert.Contains("hashlib.sha256(body).hexdigest()==expected['index.html']", workflow, StringComparison.Ordinal);
+        Assert.Contains("headers.get('Strict-Transport-Security')", workflow, StringComparison.Ordinal);
+        Assert.Contains("get('https://crm.elitpravo.com/deploy-revision.txt?deployment='+rev);assert body==(rev+'\\n').encode()", workflow, StringComparison.Ordinal);
+        Assert.Contains("['payplanner-app-cache.js','payplanner-push-worker.js','payplanner-worker.js']", workflow, StringComparison.Ordinal);
+        Assert.Contains("assert hashlib.sha256(body).hexdigest()==digest", workflow, StringComparison.Ordinal);
 
         var pushWorker = Path.Combine(root, "public", "payplanner-push-worker.js");
         Assert.True(File.Exists(pushWorker), "public/payplanner-push-worker.js must exist so Vite copies it to dist during npm run build.");
@@ -126,18 +130,23 @@ public sealed class LegalFeatureFlagCiGateTests
         var workflow = ReadWorkflowAndDeployment(root)
             .Replace("\r\n", "\n", StringComparison.Ordinal);
 
-        Assert.Contains("bash scripts/preserve-data-protection-keys.test.sh", workflow, StringComparison.Ordinal);
-        Assert.Contains("cp scripts/preserve-data-protection-keys.sh", workflow, StringComparison.Ordinal);
-        Assert.Contains("\"$previous_keys_path\" \"$previous_keys_directory\"", workflow, StringComparison.Ordinal);
-        Assert.Contains("\"$service_home/.aspnet/DataProtection-Keys\"", workflow, StringComparison.Ordinal);
-        Assert.Contains("\"$BACKUP_DIR/data-protection-keys.previous\" existing", workflow, StringComparison.Ordinal);
+        var bridge = File.ReadAllText(Path.Combine(root, "scripts", "windows-vps-deploy.mjs"));
+        Assert.Contains("bash preserve-data-protection-keys.test.sh", bridge, StringComparison.Ordinal);
+        Assert.Contains("KEYS=/opt/payplanner/shared/data-protection-keys", workflow, StringComparison.Ordinal);
+        Assert.Contains("\"$ENV_FILE\" \"$KEYS\" \"$FILES\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("r={'mode':stat.S_IMODE(s.st_mode),'uid':s.st_uid,'gid':s.st_gid}", workflow, StringComparison.Ordinal);
+        Assert.Contains("r['sha256']=hashlib.file_digest(f,'sha256').hexdigest()", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("printf 'DataProtection__ApplicationName=", workflow, StringComparison.Ordinal);
         AssertInOrder(workflow,
         [
-            "\npreserve_data_protection_keys\n",
-            "\nconfigure_runtime_env\n",
-            "sudo rsync -a --delete \"$STAGE/be/\"",
-            "sudo systemctl restart payplanner.service",
+            "  systemctl stop \"$SERVICE\"",
+            "  preserved_tree \"$BACKUP/preserved-before.private.json\"",
+            "tar --acls --xattrs --anchored --no-wildcards --exclude=opt/payplanner/shared/backups",
+            "r['allListedFilesCopied'] is True and r['allCopiedHashesMatched'] is True",
+            "rsync -a --checksum --delete \"$STAGE/be/\"",
+            "preserved_tree \"$BACKUP/preserved-installed-stopped.private.json\"",
+            "STARTUP_ATTEMPTED=true",
+            "preserved_tree \"$BACKUP/preserved-started.private.json\"",
         ]);
     }
 
@@ -145,19 +154,33 @@ public sealed class LegalFeatureFlagCiGateTests
     public void DeployWorkflow_RestartsBackendOnlyOnceAfterFilesAreSynced()
     {
         var root = FindRepositoryRoot();
-        var workflow = ReadWorkflowAndDeployment(root);
+        var workflow = ReadWorkflowAndDeployment(root).Replace("\r\n", "\n", StringComparison.Ordinal);
 
-        Assert.DoesNotContain("sudo systemctl stop payplanner.service", workflow, StringComparison.Ordinal);
+        AssertInOrder(workflow,
+        [
+            "  systemctl stop \"$SERVICE\"",
+            "pg_dump --format=custom --no-owner --no-acl payplanner",
+            "BACKUP_READY_SERVICE_STOPPED",
+            "r['allListedFilesCopied'] is True and r['allCopiedHashesMatched'] is True",
+            "rsync -a --checksum --delete \"$STAGE/be/\" \"$BE/\"",
+        ]);
+        var switchIndex = workflow.IndexOf("\nSWITCHED=true\n", StringComparison.Ordinal);
+        Assert.True(switchIndex >= 0, "The reviewed live-switch boundary must exist.");
+        var installation = workflow[switchIndex..];
+        Assert.Equal(1, installation.Split("\nsystemctl start \"$SERVICE\"\n", StringSplitOptions.None).Length - 1);
+        Assert.DoesNotContain("systemctl restart", installation, StringComparison.Ordinal);
         Assert.DoesNotContain("sudo systemctl enable --now payplanner.service", workflow, StringComparison.Ordinal);
         AssertInOrder(
-            workflow,
+            installation,
             [
-                "sudo rsync -a --delete \"$STAGE/be/\" \"$BE_DIR/\"",
-                "sudo rsync -a --delete \"$STAGE/fe/\" \"$FE_APP_DIR/\"",
-                "sudo rsync -a --delete \"$STAGE/fe/\" \"$FE_PUBLIC_DIR/\"",
-                "sudo systemctl enable payplanner.service",
-                "sudo systemctl restart payplanner.service",
-                "curl -fsS \"$PRIMARY_HEALTH_URL\"",
+                "rsync -a --checksum --delete \"$STAGE/be/\" \"$BE/\"",
+                "rsync -a --checksum --delete \"$STAGE/fe/\" \"$FE/\"",
+                "rsync -a --checksum --delete \"$STAGE/fe/\" \"$PUBLIC/\"",
+                "db_proof \"$BACKUP/database-installed-stopped.json\"",
+                "systemctl start \"$SERVICE\"",
+                "curl -fsS --max-time 5 http://127.0.0.1:5080/api/health",
+                "revision_is \"$REV\"",
+                "\npublic_check\n",
             ]);
     }
 
@@ -167,20 +190,22 @@ public sealed class LegalFeatureFlagCiGateTests
         var root = FindRepositoryRoot();
         var workflow = ReadWorkflowAndDeployment(root);
 
-        Assert.Contains("PERSISTENT_FILE_ROOT=\"/opt/payplanner/shared/files\"", workflow, StringComparison.Ordinal);
-        Assert.Contains("FileStorage__RootPath=%s", workflow, StringComparison.Ordinal);
-        Assert.Contains("migrate_legacy_file_storage()", workflow, StringComparison.Ordinal);
-        Assert.Contains("\"$BE_DIR/App_Data/\" \"$PERSISTENT_FILE_ROOT/\"", workflow, StringComparison.Ordinal);
-        Assert.Contains("-path '*/backend.previous/App_Data'", workflow, StringComparison.Ordinal);
-        Assert.Contains("rsync -a --ignore-existing", workflow, StringComparison.Ordinal);
-        Assert.Contains("Persistent file storage restored:", workflow, StringComparison.Ordinal);
+        Assert.Contains("FILES=/opt/payplanner/shared/files", workflow, StringComparison.Ordinal);
+        Assert.Contains("\"$ENV_FILE\" \"$KEYS\" \"$FILES\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("Backend-local App_Data needs explicit preservation review.", workflow, StringComparison.Ordinal);
+        Assert.Contains("cp -a \"$BE\" \"$BACKUP/backend.previous\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("tar --acls --xattrs --anchored --no-wildcards --exclude=opt/payplanner/shared/backups", workflow, StringComparison.Ordinal);
+        Assert.Contains("-C / opt/payplanner/shared", workflow, StringComparison.Ordinal);
+        Assert.Contains("cmp -s \"$BACKUP/preserved-before.private.json\" \"$BACKUP/preserved-started.private.json\"", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("--exclude=opt/payplanner/shared/files", workflow, StringComparison.Ordinal);
         AssertInOrder(
             workflow,
             [
-                "Backup current release",
-                "echo \"[6/14] Restore persistent file storage\"",
-                "sudo rsync -a --delete \"$STAGE/be/\" \"$BE_DIR/\"",
-                "sudo systemctl restart payplanner.service",
+                "  preserved_tree \"$BACKUP/preserved-before.private.json\"",
+                "  cp -a \"$BE\" \"$BACKUP/backend.previous\"",
+                "rsync -a --checksum --delete \"$STAGE/be/\" \"$BE/\"",
+                "cmp -s \"$BACKUP/preserved-before.private.json\" \"$BACKUP/preserved-installed-stopped.private.json\"",
+                "STARTUP_ATTEMPTED=true",
             ]);
     }
 
@@ -201,9 +226,12 @@ public sealed class LegalFeatureFlagCiGateTests
             "writeFileSync(join(directory, 'identity')",
             "bash prune-deploy-backups.test.sh",
             "bash preserve-data-protection-keys.test.sh",
-            "{ input: preflight, timeout: 300000 }",
+            "{ input: checks, timeout: 300000 }",
             "execute('scp', [...scpArgs, config.archive",
-            "{ input: payload, timeout: 1200000 }",
+            "phase('backup')",
+            "join(config.root, 'scripts/deploy-stopped-archive.py')",
+            "assert.equal(verified.offsitePgRestoreListExitCode, 0)",
+            "phase('install', { serverRelativePath: 'offsite-verified.json', sha256: hash(receiptRaw) })",
         ]);
     }
 
@@ -258,7 +286,10 @@ public sealed class LegalFeatureFlagCiGateTests
         var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "deploy.yml"));
         var bridge = File.ReadAllText(Path.Combine(root, "scripts", "windows-vps-deploy.mjs"));
         Assert.Contains("node scripts/windows-vps-deploy.mjs", workflow, StringComparison.Ordinal);
-        Assert.Contains("content.get(join(config.root, 'scripts/deploy-vps.sh')).toString('utf8')", bridge, StringComparison.Ordinal);
+        Assert.Contains("const controlFiles = ['deploy-vps.sh',", bridge, StringComparison.Ordinal);
+        Assert.Contains("writeFileSync(join(directory, name), content.get(join(config.root, 'scripts', name)), { flag: 'wx' })", bridge, StringComparison.Ordinal);
+        Assert.Contains("...controlFiles.map(name => join(directory, name))", bridge, StringComparison.Ordinal);
+        Assert.Contains("bash ${shellQuote(control + '/deploy-vps.sh')} --execute ${name} ${digest}", bridge, StringComparison.Ordinal);
         return workflow + "\n" + File.ReadAllText(Path.Combine(root, "scripts", "deploy-vps.sh"));
     }
 

@@ -97,6 +97,8 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
             "case-read-query-budget@example.com",
             "Владелец карточки",
             DataVisibilityScope.All);
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Tasks, viewScope: DataVisibilityScope.All);
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Requests, viewScope: DataVisibilityScope.All);
         await GrantSectionPermissionAsync(
             db,
             owner,
@@ -146,13 +148,14 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         Assert.Equal(clientCase.ActivityConfirmedAt, detailsItem.LastMeaningfulActivityAt);
         Assert.Equal(clientCase.ActivityConfirmedAt.Value.AddDays(14), detailsItem.NextInactivityControlAt);
         Assert.Empty(detailsItem.InactivityControlExclusionReason);
-        // The case card now resolves payment visibility before loading its finance section.
-        Assert.Equal(9, interceptor.Commands.Count);
+        // Full summaries also resolve task/request visibility and employee approval.
+        // These fixed authorization queries are required even when the case has no tasks.
+        Assert.Equal(12, interceptor.Commands.Count);
 
         interceptor.Commands.Clear();
         var summary = await CreateController(db, owner).GetSummary(clientCase.Id, CancellationToken.None);
         Assert.IsType<OkObjectResult>(summary.Result);
-        Assert.Equal(6, interceptor.Commands.Count);
+        Assert.Equal(9, interceptor.Commands.Count);
         Assert.DoesNotContain(
             interceptor.Commands,
             command => command.Contains("Description", StringComparison.OrdinalIgnoreCase));
@@ -311,6 +314,8 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
     {
         await using var db = await CreateContextAsync();
         var owner = await CreateUserAsync(db, "activity-owner@example.com", "Владелец");
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Tasks, viewScope: DataVisibilityScope.All);
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Requests, viewScope: DataVisibilityScope.All);
         var client = new Client
         {
             Name = "Клиент активности",
@@ -376,6 +381,8 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         var interceptor = new RecordingCommandInterceptor();
         await using var db = await CreateContextAsync(interceptor);
         var owner = await CreateUserAsync(db, "configured-activity-owner@example.com", "Владелец");
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Tasks, viewScope: DataVisibilityScope.All);
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Requests, viewScope: DataVisibilityScope.All);
         var now = DateTime.UtcNow;
         var client = new Client
         {
@@ -1442,6 +1449,8 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         var interceptor = new RecordingCommandInterceptor();
         await using var db = await CreateContextAsync(interceptor);
         var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Tasks, viewScope: DataVisibilityScope.All);
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Requests, viewScope: DataVisibilityScope.All);
         await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Payments, viewScope: DataVisibilityScope.All);
         var client = new Client
         {
@@ -1602,9 +1611,9 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
             && command.Contains("ClientCaseDocuments", StringComparison.Ordinal)
             && command.Contains("ClientCaseCourtEvents", StringComparison.Ordinal));
         Assert.Contains("UNION ALL", activityCommand, StringComparison.OrdinalIgnoreCase);
-        // Проверка области видимости платежей требует один дополнительный запрос к роли;
-        // остальные запросы реестра по-прежнему выполняются пакетно, без N+1.
-        Assert.Equal(11, interceptor.Commands.Count);
+        // Полная сводка проверяет права на платежи, задачи и заявки, включая подтверждение сотрудника.
+        // Число запросов остаётся фиксированным; загрузка реестра по-прежнему пакетная, без N+1.
+        Assert.Equal(14, interceptor.Commands.Count);
     }
 
     [Fact]
@@ -1612,6 +1621,8 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
     {
         await using var db = await CreateContextAsync();
         var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Tasks, viewScope: DataVisibilityScope.All);
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Requests, viewScope: DataVisibilityScope.All);
         var client = new Client
         {
             Name = "Клиент",
@@ -9789,6 +9800,8 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
     {
         await using var db = await CreateContextAsync();
         var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Tasks, viewScope: DataVisibilityScope.All);
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Requests, viewScope: DataVisibilityScope.All);
         var client = new Client
         {
             Name = "Земцов Виктор Александрович",

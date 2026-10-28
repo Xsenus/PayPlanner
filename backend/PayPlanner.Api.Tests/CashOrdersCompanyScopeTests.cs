@@ -219,6 +219,12 @@ public partial class MoneyOperationsControllerTests
         await db.RolePermissions.Where(item => item.RoleId == seed.Actor.RoleId).ExecuteUpdateAsync(setters => setters
             .SetProperty(item => item.CanCreate, true).SetProperty(item => item.CanEdit, true).SetProperty(item => item.CanDelete, true));
         var own = await SeedCompanyCashOrderAsync(db, seed, foreign: false, paymentSource, CashOrderStatus.Draft);
+        if (!paymentSource)
+        {
+            // A valid source operation has an explicit currency; unknown historical currency must remain rejected.
+            own.MoneyOperation!.Currency = "RUB";
+            await db.SaveChangesAsync();
+        }
         var controller = CompanyCashController(db, seed.Actor.Id);
         var model = new CashOrder
         {
@@ -259,6 +265,7 @@ public partial class MoneyOperationsControllerTests
         else
         {
             Assert.Equal(100m, await db.MoneyOperations.Where(item => item.Id == own.MoneyOperationId).Select(item => item.Amount).SingleAsync());
+            Assert.Equal("RUB", await db.MoneyOperations.Where(item => item.Id == own.MoneyOperationId).Select(item => item.Currency).SingleAsync());
             Assert.Equal(1, await db.MoneyOperations.CountAsync());
             Assert.Empty(await db.Payments.ToArrayAsync());
         }

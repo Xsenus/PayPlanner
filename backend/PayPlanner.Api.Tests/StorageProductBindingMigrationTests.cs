@@ -111,13 +111,23 @@ public sealed class StorageProductBindingMigrationTests
     {
         var client = new Client { Name = "Миграция связей" };
         var clientCase = new ClientCase { Client = client, Title = "Дело" };
-        var task = new TaskJournalItem { ClientCase = clientCase, Title = "Задача", DueAt = DateTime.UtcNow };
-        // Схема ещё старая, а модель знает SalesRequestId: колонка нужна только на время вставки, её добавит настоящая миграция.
-        await db.Database.ExecuteSqlRawAsync("ALTER TABLE \"TaskJournalItems\" ADD COLUMN \"SalesRequestId\" INTEGER NULL");
-        db.TaskJournalItems.Add(task);
+        db.ClientCases.Add(clientCase);
         await db.SaveChangesAsync();
-        await db.Database.ExecuteSqlRawAsync("ALTER TABLE \"TaskJournalItems\" DROP COLUMN \"SalesRequestId\"");
         var uploadedAt = new DateTime(2026, 9, 29, 12, 0, 0, DateTimeKind.Utc);
+        object dueAt = db.Database.IsNpgsql()
+            ? new NpgsqlParameter("dueAt", NpgsqlTypes.NpgsqlDbType.Timestamp)
+            { Value = DateTime.SpecifyKind(uploadedAt, DateTimeKind.Unspecified) }
+            : uploadedAt;
+        // Insert the legacy row using only the columns present at the migration baseline.
+        // Current EF entities include later status/request fields, which must be added by real migrations.
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "TaskJournalItems" ("ClientCaseId", "Title", "ObjectName", "DueAt",
+                "AssigneeName", "AuthorName", "ControlMarkedByUserName")
+            VALUES ({clientCase.Id}, {"Задача"}, {""}, {dueAt}, {""}, {""}, {""})
+            """);
+        var taskId = await db.Database.SqlQuery<int>($"""
+            SELECT "Id" AS "Value" FROM "TaskJournalItems" WHERE "ClientCaseId" = {clientCase.Id}
+            """).SingleAsync();
         var keys = new[] { new string('a', 64), "ambiguous", "mismatch", "inverse", "inverse" };
         for (var i = 0; i < keys.Length; i++)
         {
@@ -130,11 +140,11 @@ public sealed class StorageProductBindingMigrationTests
             await db.Database.ExecuteSqlInterpolatedAsync($"""
                 INSERT INTO "TaskJournalFiles" ("TaskJournalItemId", "DocumentKey", "Version", "OriginalFileName",
                     "StoredFileName", "StoragePath", "ContentType", "SizeBytes", "UploadedByName", "UploadedAt")
-                VALUES ({task.Id}, {key}, {version}, {"документ.txt"}, {"retained.txt"}, {"retained/path"},
+                VALUES ({taskId}, {key}, {version}, {"документ.txt"}, {"retained.txt"}, {"retained/path"},
                     {"text/plain"}, {4L}, {"Автор"}, {timestamp})
                 """);
             if (i == 4) continue;
-            var prefix = $"task-{task.Id}-";
+            var prefix = $"task-{taskId}-";
             var caseKey = prefix + key[..Math.Min(key.Length, 64 - prefix.Length)];
             for (var caseVersion = 1; caseVersion <= (key == "ambiguous" ? 2 : 1); caseVersion++)
                 db.ClientCaseDocuments.Add(new()

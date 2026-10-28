@@ -5,19 +5,19 @@
 
 Тринадцать технических UPDATE в CashOrdersController повторно подтверждают компанию, кассу и исходную операцию/ордер в одной Serializable-транзакции. Присваиваются прежние значения; предикат проверяет принадлежность, активность, валюту и известную версию/реквизиты. Порядок блокировки — компания → касса → операция или ордер. После блокировки заново проверяются права и видимость. Нулевой результат запрещает изменение; фактическое создание, проведение и копирование сохраняются штатным ChangeTracker с аудитом. Эти блокировки не создают фиктивные предметные события. Остальные изменения перечня — актуальные номера строк уже описанных операций.
 
-- `backend/Controllers/CashOrdersController.cs:1114`
 - `backend/Controllers/CashOrdersController.cs:1117`
-- `backend/Controllers/CashOrdersController.cs:1122`
-- `backend/Controllers/CashOrdersController.cs:1220`
-- `backend/Controllers/CashOrdersController.cs:1224`
-- `backend/Controllers/CashOrdersController.cs:1229`
-- `backend/Controllers/CashOrdersController.cs:576`
-- `backend/Controllers/CashOrdersController.cs:580`
-- `backend/Controllers/CashOrdersController.cs:825`
-- `backend/Controllers/CashOrdersController.cs:829`
-- `backend/Controllers/CashOrdersController.cs:838`
-- `backend/Controllers/CashOrdersController.cs:920`
+- `backend/Controllers/CashOrdersController.cs:1120`
+- `backend/Controllers/CashOrdersController.cs:1125`
+- `backend/Controllers/CashOrdersController.cs:1223`
+- `backend/Controllers/CashOrdersController.cs:1227`
+- `backend/Controllers/CashOrdersController.cs:1232`
+- `backend/Controllers/CashOrdersController.cs:579`
+- `backend/Controllers/CashOrdersController.cs:583`
+- `backend/Controllers/CashOrdersController.cs:828`
+- `backend/Controllers/CashOrdersController.cs:832`
+- `backend/Controllers/CashOrdersController.cs:841`
 - `backend/Controllers/CashOrdersController.cs:923`
+- `backend/Controllers/CashOrdersController.cs:926`
 - `backend/Controllers/InternalChatController.cs:592`
 - `backend/Controllers/InternalChatController.cs:789`
 - `backend/Controllers/InternalChatHistoryController.cs:75`
