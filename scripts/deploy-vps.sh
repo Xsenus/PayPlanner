@@ -23,7 +23,8 @@ STOPPED_PROOF="$HERE/deploy-stopped-source-proof.py"
 
 # Only nonsecret, pinned data is read. Never source a shell config/production env.
 CONFIG_VALUES="$(python3 - "$PLAN" "$PLAN_SHA" "$SELF" "$DB_PROOF" "$HISTORY_PROOF" "$PHASE" <<'PY'
-import hashlib,json,pathlib,re,sys
+import hashlib,importlib.util,json,pathlib,re,sys
+sys.dont_write_bytecode=True
 p,expected,self_path,db_path,history_path,phase=sys.argv[1:]
 def need(ok,msg):
     if not ok:raise SystemExit(msg)
@@ -52,7 +53,10 @@ for v in [c['archive']['sha256'],c['expectedApiSha256'],c['expectedPreviousApiSh
 need(type(c['archive']['bytes']) is int and c['archive']['bytes']>0,'Actual archive size missing')
 need(type(c['minimumRemainingBytes']) is int and c['minimumRemainingBytes']>=3*1024**3,'Reserve below reviewed floor')
 need(c['policy']==dict(localEvidenceIsCI=False,automaticDatabaseRestore=False,productionDataRepair=False,sendRealNotificationsForSmoke=False,sourceOrArtifactRebuild=False,credentialInThisPlan=False),'Policy changed')
-need(c['expectedMigration'] in [None,'20261027005432_AddPaymentCreateAttempts','20261027005432_AddPaymentCreateAttempts+20261027014154_AddPersonalChatHistory'],'Only reviewed additive migrations are permitted')
+spec=importlib.util.spec_from_file_location('deployment_database_proof',db_path)
+proof=importlib.util.module_from_spec(spec);spec.loader.exec_module(proof)
+try:admitted_ids=proof.validate_candidate_plan(c)
+except AssertionError as error:need(False,'Only reviewed additive migrations are permitted: '+str(error))
 need(c['expectedAddedProtectedTables']==[] and len(c['expectedProtectedTables'])==16 and all(t in c['expectedProtectedTables'] for t in ['Acts','Contracts','Payments','TaskJournalItems']),'All16 installed protected tables remain in scope')
 need(c['rollbackAfterStartup']=='halt-for-manual-review','Unqualified backward restart forbidden')
 need(c['offsiteHistoryReceipt']['serverRelativePath']=='history-offsite-verified.json' and c['historyManifest']['serverRelativePath']=='history-manifest.json','Only fixed reviewed history evidence paths are allowed')
@@ -76,8 +80,10 @@ need(q['needs']['backend']['outputs']['backend-artifact-id']==q['backendArtifact
 need(q['needs']['backend']['outputs']['manifest-sha']==q['backendManifestSha256'] and re.fullmatch('[a-fA-F0-9]{64}',q['backendManifestSha256']),'Backend strict manifest union required')
 need(q['backendPackageFiles'] and len(q['frontendRawFiles'])==c['expectedFrontendRawFileCount'] and all(n in q['frontendRawFiles'] for n in ['index.html','payplanner-app-cache.js','payplanner-push-worker.js','payplanner-worker.js']),'Complete qualified package maps required')
 need('deploy-revision.txt' not in q['frontendRawFiles'],'Revision is bound separately')
-need(c['expectedMigration'] in [None,'20261027005432_AddPaymentCreateAttempts','20261027005432_AddPaymentCreateAttempts+20261027014154_AddPersonalChatHistory'] and c['expectedAddedProtectedTables']==[],'Unreviewed database migration or protected table rejected')
+need(admitted_ids==proof.reviewed_migration_ids(c['expectedMigration']) and c['expectedAddedProtectedTables']==[],'Unreviewed database migration or protected table rejected')
 need(q['expectedReleaseSeeds']==c['expectedReleaseSeeds'],'Only the reviewed new release entries may be inserted')
+if len(admitted_ids)==11:
+    need(q.get('activeReleaseJsonSha256')==c['expectedReleaseCatalogSha256'] and q['backendPackageFiles'].get('AppReleases/releases.json')==c['expectedReleaseCatalogSha256'],'Qualified candidate catalog binding differs')
 if phase=='install':pin(c['offsiteReceipt'])
 print('|'.join([rev,old,c['backupUtc'],c['archive']['sha256'],str(c['archive']['bytes']),c['expectedApiSha256'],c['expectedPreviousApiSha256'],c['expectedMigrationsSha256'],str(c['minimumRemainingBytes']),c['expectedPreviousMigrationsSha256']]))
 PY
@@ -310,7 +316,7 @@ if [[ "$PHASE" == backup ]]; then
   space_at_least "$RESERVE"
   mkdir -m 700 "$BACKUP"
   cp -a "$PLAN" "$BACKUP/backup-phase-plan.json"
-  cp -a "$SELF" "$DB_PROOF" "$HISTORY_PROOF" "$STOPPED_PROOF" "$HERE/history-manifest.json" "$HERE/history-offsite-verified.json" "$HERE/ci-qualification.json" "$BACKUP/"
+  cp -a "$SELF" "$DB_PROOF" "$HISTORY_PROOF" "$STOPPED_PROOF" "$HERE/deploy-roadmap-candidate-review.json" "$HERE/deploy-roadmap-candidate-delta.json" "$HERE/history-manifest.json" "$HERE/history-offsite-verified.json" "$HERE/ci-qualification.json" "$BACKUP/"
   systemctl show "$SERVICE" -p FragmentPath -p DropInPaths -p EnvironmentFiles > "$BACKUP/unit-inputs.private.txt"
   python3 - "$BACKUP/unit-inputs.private.txt" <<'PY'
 import sys

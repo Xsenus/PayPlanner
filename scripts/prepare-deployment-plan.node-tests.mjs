@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
 import { preparePackage, sha256 } from './prepare-deployment-package.mjs';
-import { createPlan, qualifiedContext } from './prepare-deployment-plan.mjs';
+import { createPlan, qualifiedContext, reviewedCandidate, validateReviewedBaseline } from './prepare-deployment-plan.mjs';
 
 const revision = 'a'.repeat(40);
 const env = { COMPUTERNAME: 'XSENUS', GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'Xsenus/PayPlanner',
@@ -16,17 +16,18 @@ const env = { COMPUTERNAME: 'XSENUS', GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY:
     backend: { result: 'success', outputs: { 'backend-artifact-id': 'xsenus-local-v1:' + 'c'.repeat(64), 'manifest-sha': 'd'.repeat(64) } },
   }) };
 
-function fixture(t) {
+function fixture(t, candidate = false) {
   const root = mkdtempSync(join(tmpdir(), 'pp-ci-plan-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, 'scripts'));
-  for (const name of ['deploy-vps.sh', 'deploy-db-proof.py', 'deploy-history-source-proof.py', 'deploy-stopped-source-proof.py']) {
+  for (const name of ['deploy-vps.sh', 'deploy-db-proof.py', 'deploy-history-source-proof.py', 'deploy-stopped-source-proof.py', 'deploy-roadmap-candidate-review.json', 'deploy-roadmap-candidate-delta.json']) {
     writeFileSync(join(root, 'scripts', name), readFileSync(resolve('scripts', name)));
   }
   mkdirSync(join(root, 'out/be/AppReleases'), { recursive: true });
   mkdirSync(join(root, 'out/fe'), { recursive: true });
-  const releases = Buffer.from('[{"releaseId":"published"}]');
+  const releases = candidate ? readFileSync(resolve('backend/AppReleases/releases.json')) : Buffer.from('[{"releaseId":"published"}]');
   const baseline = JSON.parse(readFileSync(resolve('scripts/deployment-baseline.json'), 'utf8'));
+  if (!candidate) { baseline.expectedMigration = null; baseline.expectedReleaseSeeds = []; }
   baseline.expectedReleaseCatalogSha256 = sha256(releases);
   writeFileSync(join(root, 'scripts/deployment-baseline.json'), JSON.stringify(baseline));
   for (const name of ['PayPlanner.Api.dll', 'PayPlanner.Api.Migrations.dll']) writeFileSync(join(root, 'out/be', name), name);
@@ -65,6 +66,64 @@ test('binds qualified needs, exact package maps, current history, source pins an
   assert.equal(plan.qualificationReceipt.sha256, sha256(qualificationRaw));
   assert.deepEqual(plan.expectedReleaseSeeds, []);
   assert.equal(plan.rollbackAfterStartup, 'halt-for-manual-review');
+});
+
+test('qualifies exactly the reviewed eleven-migration candidate and all 242 release insertions', t => {
+  const input = fixture(t, true);
+  const { plan, qualificationRaw } = createPlan(input);
+  const review = reviewedCandidate(input.root);
+  assert.equal(plan.expectedMigration, review.migrationIds.join('+'));
+  assert.equal(plan.expectedReleaseSeeds.length, 242);
+  assert.equal(plan.expectedReleaseCatalogSha256, review.releaseCatalogSha256);
+  assert.deepEqual(JSON.parse(qualificationRaw).expectedReleaseSeeds, plan.expectedReleaseSeeds);
+});
+
+test('candidate admission rejects partial/reordered migrations, catalog or seed substitutions', t => {
+  const input = fixture(t, true);
+  const original = JSON.parse(readFileSync(join(input.root, 'scripts/deployment-baseline.json'), 'utf8'));
+  const ids = reviewedCandidate(input.root).migrationIds;
+  for (const mutate of [
+    value => { value.expectedMigration = ids.slice(0, -1).join('+'); },
+    value => { value.expectedMigration = [...ids].reverse().join('+'); },
+    value => { value.expectedMigration += '+unreviewed'; },
+    value => { value.previousRevision = 'b'.repeat(40); },
+    value => { value.expectedReleaseCatalogSha256 = 'c'.repeat(64); },
+    value => { value.expectedReleaseSeeds.pop(); },
+    value => { value.expectedReleaseSeeds.reverse(); },
+    value => { value.expectedReleaseSeeds[0].items[0].text += ' changed'; },
+    value => { value.expectedReleaseSeeds[0].isActive = !value.expectedReleaseSeeds[0].isActive; },
+  ]) {
+    const changed = structuredClone(original); mutate(changed);
+    assert.throws(() => validateReviewedBaseline(changed, input.root));
+  }
+});
+
+test('review and schema fixtures are immutable while LF and CRLF preserve approval', t => {
+  const input = fixture(t, true);
+  const baseline = JSON.parse(readFileSync(join(input.root, 'scripts/deployment-baseline.json'), 'utf8'));
+  const reviewPath = join(input.root, 'scripts/deploy-roadmap-candidate-review.json');
+  const raw = readFileSync(reviewPath, 'utf8');
+  writeFileSync(reviewPath, raw.replaceAll('\n', '\r\n'));
+  validateReviewedBaseline(baseline, input.root);
+  const changed = JSON.parse(raw); changed.releaseSeedsCount++;
+  writeFileSync(reviewPath, JSON.stringify(changed));
+  assert.throws(() => validateReviewedBaseline(baseline, input.root), /admission changed/);
+  writeFileSync(reviewPath, raw);
+  const path = join(input.root, 'scripts/deploy-roadmap-candidate-delta.json');
+  const delta = JSON.parse(readFileSync(path, 'utf8')); delta.columns.added[0].type = 'unreviewed';
+  writeFileSync(path, JSON.stringify(delta));
+  assert.throws(() => validateReviewedBaseline(baseline, input.root), /schema fixture changed/);
+});
+
+test('schema int64 boundaries are checked without JavaScript precision loss', t => {
+  const input = fixture(t, true);
+  const baseline = JSON.parse(readFileSync(join(input.root, 'scripts/deployment-baseline.json'), 'utf8'));
+  const path = join(input.root, 'scripts/deploy-roadmap-candidate-delta.json');
+  const original = readFileSync(path, 'utf8');
+  assert.ok(original.includes('9223372036854775807'));
+  assert.equal(Number('9223372036854775807'), Number('9223372036854775806'));
+  writeFileSync(path, original.replace('9223372036854775807', '9223372036854775806'));
+  assert.throws(() => validateReviewedBaseline(baseline, input.root), /schema fixture changed/);
 });
 
 test('admits only the specifically reviewed additive payment attempt migration', t => {

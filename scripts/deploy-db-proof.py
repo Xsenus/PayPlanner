@@ -47,6 +47,18 @@ def reviewed_migration_ids(value):
  need(value=='+'.join(ids),'Unreviewed migration is not authorised')
  return ids
 
+def validate_candidate_plan(plan):
+ ids=reviewed_migration_ids(plan['expectedMigration'])
+ if len(ids)==11:
+  review=reviewed_candidate()
+  need(plan['previousRevision']==review['previousRevision'],'Reviewed candidate previous revision differs')
+  need(plan['expectedReleaseCatalogSha256']==review['releaseCatalogSha256'],'Reviewed candidate catalog differs')
+  seeds=plan['expectedReleaseSeeds']
+  need(isinstance(seeds,list) and len(seeds)==review['releaseSeedsCount'] and hashlib.sha256(json.dumps(seeds,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()==review['releaseSeedsSha256'],'Exact reviewed candidate release seeds required')
+  delta=read_json(pathlib.Path(__file__).with_name('deploy-roadmap-candidate-delta.json'))
+  need(hashlib.sha256(canonical(delta).encode()).hexdigest()==review['schemaDeltaSha256'],'Reviewed candidate schema fixture changed')
+ return ids
+
 def instant(value):
  parsed=datetime.datetime.fromisoformat(value.replace('Z','+00:00'))
  return parsed.replace(tzinfo=datetime.timezone.utc) if parsed.tzinfo is None else parsed.astimezone(datetime.timezone.utc)
@@ -143,7 +155,7 @@ def compare_releases(a,b,plan,phase):
 def compare(plan_path,a_path,b_path,phase):
  need(phase in ['unchanged','startup'],'Unknown comparison boundary')
  plan,a,b=map(read_json,[plan_path,a_path,b_path])
- admitted_ids=reviewed_migration_ids(plan['expectedMigration'])
+ admitted_ids=validate_candidate_plan(plan)
  candidate=len(admitted_ids)==11
  need(a['schemaVersion']==b['schemaVersion']==2 and a['baselineSha256'] is None,'Immutable stopped baseline required')
  need(b['baselineSha256']==digest(a_path),'Later proof not bound to exact baseline bytes')

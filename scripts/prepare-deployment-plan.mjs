@@ -4,7 +4,11 @@ import { closeSync, fstatSync, lstatSync, openSync, readFileSync, readSync } fro
 import { join } from 'node:path';
 import { requireTrustedHost } from './verify-xsenus-runner.mjs';
 import { sha256 } from './prepare-deployment-package.mjs';
-import { safeRelativePath } from './xsenus-artifact-store.mjs';
+import { canonicalBytes, safeRelativePath } from './xsenus-artifact-store.mjs';
+
+const candidateReviewSha = '0e0df6573f9b755e94718b5cfb7d870d6554543d8b0e4b0212702e1b5fde5706';
+const candidateDeltaFileSha = '6863eb6d5b21a0ca299567eab04b7ea8a54c641e2af921572844883e0ac331df';
+const canonicalHash = value => sha256(canonicalBytes(value).subarray(0, -1));
 
 export function fileHash(path) {
   const before = lstatSync(path);
@@ -20,6 +24,32 @@ export function fileHash(path) {
   } finally { closeSync(fd); }
   assert.deepEqual(signature(lstatSync(path)), signature(before), 'Evidence path changed while hashing');
   return digest.digest('hex');
+}
+
+export function reviewedCandidate(root) {
+  const path = join(root, 'scripts/deploy-roadmap-candidate-review.json');
+  const raw = readFileSync(path);
+  assert.equal(sha256(raw), fileHash(path), 'Reviewed candidate file changed while reading');
+  const review = JSON.parse(raw.toString('utf8'));
+  assert.equal(canonicalHash(review), candidateReviewSha, 'Reviewed candidate admission changed');
+  return review;
+}
+
+export function validateReviewedBaseline(baseline, root) {
+  const review = reviewedCandidate(root);
+  const candidateId = review.migrationIds.join('+');
+  assert.ok([null, '20261027005432_AddPaymentCreateAttempts', '20261027005432_AddPaymentCreateAttempts+20261027014154_AddPersonalChatHistory', candidateId].includes(baseline.expectedMigration), 'Only the reviewed additive migrations may be admitted');
+  if (baseline.expectedMigration !== candidateId) return;
+  assert.equal(baseline.previousRevision, review.previousRevision, 'Reviewed candidate previous revision differs');
+  assert.equal(baseline.expectedReleaseCatalogSha256, review.releaseCatalogSha256, 'Reviewed candidate catalog differs');
+  assert.ok(Array.isArray(baseline.expectedReleaseSeeds) && baseline.expectedReleaseSeeds.length === review.releaseSeedsCount, 'Exact reviewed candidate release seeds required');
+  assert.equal(canonicalHash(baseline.expectedReleaseSeeds), review.releaseSeedsSha256, 'Exact reviewed candidate release seeds required');
+  const path = join(root, 'scripts/deploy-roadmap-candidate-delta.json');
+  const raw = readFileSync(path);
+  assert.equal(sha256(raw), fileHash(path), 'Reviewed schema file changed while reading');
+  // Schema JSON contains PostgreSQL int64 bounds; JSON.parse would round them.
+  // Pin its exact LF-normalized bytes here; Python checks the canonical schema.
+  assert.equal(sha256(Buffer.from(raw.toString('utf8').replaceAll('\r\n', '\n'))), candidateDeltaFileSha, 'Reviewed candidate schema fixture changed');
 }
 
 export function qualifiedContext(env, revision, platform = process.platform) {
@@ -53,7 +83,7 @@ export function createPlan({ root, archive, revision, operator, env = process.en
   const baseline = JSON.parse(readFileSync(join(root, 'scripts/deployment-baseline.json'), 'utf8'));
   assert.equal(baseline.expectedProtectedTables.length, 16);
   assert.equal(baseline.expectedAddedProtectedTables.length, 0);
-  assert.ok([null, '20261027005432_AddPaymentCreateAttempts', '20261027005432_AddPaymentCreateAttempts+20261027014154_AddPersonalChatHistory'].includes(baseline.expectedMigration), 'Only the reviewed additive migrations may be admitted');
+  validateReviewedBaseline(baseline, root);
   const packageRoot = join(root, env.OUT_DIR || 'out');
   const manifest = JSON.parse(readFileSync(join(packageRoot, 'deployment-manifest.json'), 'utf8'));
   assert.equal(manifest.revision, revision);

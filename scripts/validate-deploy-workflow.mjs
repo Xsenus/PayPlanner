@@ -293,6 +293,9 @@ export function validateDeployWorkflow(source) {
   requireValue(command('frontend', 'node scripts/verify-xsenus-runner.mjs build').index < fe[0].index,
     'Trusted host preflight must precede frontend tools');
   const accessTests = command('frontend', 'node --test scripts/windows-vps-access.node-tests.mjs');
+  const planTests = command('frontend', 'node --test scripts/prepare-deployment-plan.node-tests.mjs');
+  requireValue(command('frontend', 'node scripts/verify-xsenus-runner.mjs build').index < planTests.index && planTests.index < fe[0].index,
+    'Reviewed deployment plan regressions must fail before long release gates');
   const access = command('frontend', 'node scripts/windows-vps-deploy.mjs --check-access');
   requireValue(command('frontend', 'node scripts/verify-xsenus-runner.mjs build').index < accessTests.index
     && accessTests.index < access.index && access.index < fe[0].index,

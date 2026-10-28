@@ -144,6 +144,16 @@ describe('parallel deploy workflow release contract', () => {
     expect(() => validateDeployWorkflow(replaceInJob('deploy', job => job.replace(before, after)))).toThrow();
   });
 
+  it('requires reviewed deployment plan tests before frontend dependency installation', () => {
+    const step = '      - name: Test reviewed deployment plan\n        run: node --test scripts/prepare-deployment-plan.node-tests.mjs\n\n';
+    expect(workflow).toContain(step);
+    const missing = workflow.replace(step, '');
+    expect(() => validateDeployWorkflow(missing)).toThrow();
+    const late = missing.replace('      - name: Build FE\n', step + '      - name: Build FE\n');
+    expect(late).not.toBe(missing);
+    expect(() => validateDeployWorkflow(late)).toThrow(/before long release gates/);
+  });
+
   it('rejects a new database server and parallel memory-heavy shards', () => {
     expect(() => validateDeployWorkflow(replaceInJob('backend-test-0', job => job.replace(
       '    steps:', '    services:\n      postgres:\n        image: postgres:17-alpine\n    steps:',

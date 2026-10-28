@@ -76,6 +76,9 @@ jobs:
       - name: Test bounded execution diagnostics
         run: node --test scripts/report-backend-execution.node-tests.mjs
 
+      - name: Test reviewed deployment plan
+        run: node --test scripts/prepare-deployment-plan.node-tests.mjs
+
       - name: Test read-only deployment access preflight
         run: node --test scripts/windows-vps-access.node-tests.mjs
 

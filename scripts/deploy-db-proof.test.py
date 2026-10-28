@@ -22,7 +22,8 @@ class DatabaseProofTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory(prefix='pp-database-proof-')
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
-        self.plan = json.loads(Path(__file__).with_name('deployment-baseline.json').read_text())
+        self.plan = json.loads(Path(__file__).with_name('deployment-baseline.json').read_text(encoding='utf-8'))
+        self.plan['expectedMigration'] = None
         self.plan['expectedReleaseSeeds'] = []
         tables = self.plan['expectedProtectedTables']
         self.assertEqual(len(tables), 16)
@@ -372,6 +373,21 @@ class ForeignKeyTriggerIdentityTests(unittest.TestCase):
 
 
 class ReviewedCandidateAdmissionTests(unittest.TestCase):
+    def test_complete_candidate_plan_is_pinned_before_database_proofs(self):
+        plan = json.loads(Path(__file__).with_name('deployment-baseline.json').read_text(encoding='utf-8'))
+        expected = proof.reviewed_candidate()['migrationIds']
+        self.assertEqual(proof.validate_candidate_plan(plan), expected)
+        for mutate in [lambda p: p.update(previousRevision='b'*40),
+                       lambda p: p.update(expectedReleaseCatalogSha256='c'*64),
+                       lambda p: p['expectedReleaseSeeds'].pop(),
+                       lambda p: p['expectedReleaseSeeds'].reverse(),
+                       lambda p: p['expectedReleaseSeeds'][0].update(isActive=True),
+                       lambda p: p['expectedReleaseSeeds'][0]['items'][0].update(text='unreviewed')]:
+            changed = copy.deepcopy(plan)
+            mutate(changed)
+            with self.assertRaises(AssertionError):
+                proof.validate_candidate_plan(changed)
+
     def test_review_pins_contents_across_line_endings_and_rejects_changed_approval(self):
         review = proof.reviewed_candidate()
         with tempfile.TemporaryDirectory(prefix='pp-candidate-review-') as directory:
