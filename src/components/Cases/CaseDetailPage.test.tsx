@@ -1454,6 +1454,50 @@ describe('CaseDetailPage', () => {
     expect(screen.queryByRole('button', { name: 'Быстрый доступ: Задачи' })).toBeNull();
   });
 
+  it.each([false, true])('court parties read: retries only the failed list in edit mode %s', async editMode => {
+    vi.mocked(apiService.getCaseCourtParties).mockRejectedValueOnce(new Error('Failed to fetch'));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
+    await screen.findByText('Не удалось загрузить участников процесса.');
+    if (!editMode) {
+      fireEvent.click(screen.getByRole('button', { name: 'Вернуться к обзору' }));
+      expect(screen.getByRole('region', { name: 'Участники процесса' })).toBeTruthy();
+    } else {
+      expect(screen.getByText('Режим редактирования судебных данных')).toBeTruthy();
+    }
+    expect(screen.queryByText('Активные участники процесса не добавлены.')).toBeNull();
+    expect(screen.queryByText('Стороны процесса пока не добавлены.')).toBeNull();
+    const eventReads = vi.mocked(apiService.getCaseCourtEvents).mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку участников' }));
+    expect(await screen.findByText('ООО Ответчик')).toBeTruthy();
+    expect(apiService.getCaseCourtParties).toHaveBeenCalledTimes(2);
+    expect(apiService.getCaseCourtEvents).toHaveBeenCalledTimes(eventReads);
+    expect(apiService.createCaseCourtParty).not.toHaveBeenCalled();
+    expect(apiService.updateCaseV2).not.toHaveBeenCalled();
+  });
+
+  it('court parties read: ignores the previous case failure after switching cases', async () => {
+    type Parties = Awaited<ReturnType<typeof apiService.getCaseCourtParties>>;
+    let failOld!: (error: Error) => void;
+    const previous = new Promise<Parties>((_, reject) => { failOld = reject; });
+    const currentParty = { id: 81, clientCaseId: 16, displayName: 'Сторона текущего дела', side: 'respondent',
+      sideLabel: 'Ответчик', processRole: 'Ответчик', isArchived: false, createdAt: '2026-10-28T09:00:00Z' };
+    vi.mocked(apiService.getCaseCourtParties).mockImplementation(id => id === 15 ? previous : Promise.resolve([currentParty]));
+    vi.mocked(apiService.getCaseV2).mockImplementation(async id => createCase({ id, title: `Дело ${id}` }));
+    const view = render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('Дело 15');
+    fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
+    await waitFor(() => expect(apiService.getCaseCourtParties).toHaveBeenCalledWith(15));
+    view.rerender(<CaseDetailPage caseId={16} onBack={vi.fn()} />);
+    await screen.findByText('Дело 16');
+    fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
+    expect(await screen.findByText('Сторона текущего дела')).toBeTruthy();
+    await act(async () => { failOld(new Error('Ошибка прежнего дела')); });
+    expect(screen.queryByText('Ошибка прежнего дела')).toBeNull();
+    expect(screen.getByText('Сторона текущего дела')).toBeTruthy();
+  });
+
   it('PAY-25 review: ignores delayed court events after switching cases', async () => {
     type Events = Awaited<ReturnType<typeof apiService.getCaseCourtEvents>>;
     let finishOld!: (events: Events) => void;
