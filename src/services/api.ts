@@ -2908,6 +2908,20 @@ export async function extractResponseErrorMessage(response: Response): Promise<s
   return text.trim();
 }
 
+export interface TaskTimerState {
+  id: string;
+  taskId: number | null;
+  startedAtUtc: string;
+  stoppedAtUtc: string | null;
+  correctedSeconds: number | null;
+  revision: number;
+}
+
+export interface TaskTimerCursor { beforeStartedAtUtc: string; beforeId: string }
+export interface TaskTimerHistory { items: TaskTimerState[]; hasMore: boolean; nextCursor: TaskTimerCursor | null }
+export interface TaskTimerCorrection { id: string; previousSeconds: number | null; newSeconds: number; reason: string; createdAtUtc: string }
+export interface TaskTimerCorrections { items: TaskTimerCorrection[]; nextBeforeId: string | null }
+
 export class ApiService {
   private readonly taskUploadKeys = new WeakMap<File, Map<string, string>>();
   private taskJournalSettingsRequest: Promise<TaskJournalSettingsDto> | null = null;
@@ -5210,28 +5224,29 @@ export class ApiService {
     };
   }
 
-  async downloadTaskPlanningReport(params?: {
-    format?: 'html' | 'word' | 'pdf';
-    search?: string;
-    status?: string;
-    type?: string;
-    priority?: string;
-    assigneeUserId?: number;
-    from?: string;
-    to?: string;
-    clientCaseId?: number;
-    clientId?: number;
-    legalEntityId?: number;
-  }) {
+  async downloadTaskPlanningReport(params?: Pick<TaskJournalListParams,
+    'search' | 'status' | 'type' | 'priority' | 'underControl' | 'assigneeUserId' | 'authorUserId'
+    | 'participantRole' | 'approvalScope' | 'metric' | 'billingStatus' | 'untriaged'
+    | 'from' | 'to' | 'todayFrom' | 'todayTo' | 'clientCaseId' | 'clientId' | 'legalEntityId'
+  > & { format?: 'html' | 'word' | 'pdf' }) {
     const format = params?.format ?? 'html';
     const q = buildQuery({
       search: params?.search,
       status: params?.status,
       type: params?.type,
       priority: params?.priority,
+      underControl: params?.underControl,
       assigneeUserId: params?.assigneeUserId,
+      authorUserId: params?.authorUserId,
+      participantRole: params?.participantRole,
+      approvalScope: params?.approvalScope,
+      metric: params?.metric,
+      billingStatus: params?.billingStatus,
+      untriaged: params?.untriaged,
       from: params?.from,
       to: params?.to,
+      todayFrom: params?.todayFrom,
+      todayTo: params?.todayTo,
       clientCaseId: params?.clientCaseId,
       clientId: params?.clientId,
       legalEntityId: params?.legalEntityId,
@@ -5528,6 +5543,37 @@ export class ApiService {
     return this.request<TaskJournalItem>(`/tasks/${id}/approval`, {
       method: 'PATCH',
       body: JSON.stringify({ decision, resolution, participantId, finalAction, revisionDueAt }),
+    });
+  }
+
+  async getCurrentTaskTimer() {
+    return this.request<TaskTimerState | null>('/task-time/current');
+  }
+
+  async getTaskTimerHistory(taskId: number, cursor?: TaskTimerCursor) {
+    const query = cursor ? `?${new URLSearchParams({ beforeStartedAtUtc: cursor.beforeStartedAtUtc, beforeId: cursor.beforeId })}` : '';
+    return this.request<TaskTimerHistory>(`/task-time/task/${taskId}/history${query}`);
+  }
+
+  async getTaskTimerCorrections(taskId: number, id: string, beforeId?: string) {
+    const query = beforeId === undefined ? '' : `?beforeId=${encodeURIComponent(beforeId)}`;
+    return this.request<TaskTimerCorrections>(`/task-time/task/${taskId}/${encodeURIComponent(id)}/corrections${query}`);
+  }
+
+  async startTaskTimer(taskId: number, requestId: string) {
+    return this.request<TaskTimerState>('/task-time/start', {
+      method: 'POST',
+      body: JSON.stringify({ taskId, requestId }),
+    });
+  }
+
+  async stopTaskTimer(id: string) {
+    return this.request<TaskTimerState>(`/task-time/${encodeURIComponent(id)}/stop`, { method: 'POST' });
+  }
+
+  async correctTaskTimer(taskId: number, id: string, expectedRevision: number, seconds: number, reason: string) {
+    return this.request<TaskTimerState>(`/task-time/task/${taskId}/${encodeURIComponent(id)}/correction`, {
+      method: 'POST', body: JSON.stringify({ expectedRevision, seconds, reason }),
     });
   }
 
@@ -9019,7 +9065,7 @@ export class ApiService {
     const q = buildQuery(params ?? {});
     return this.request<PagedResult<MoneyOperation> & { summary: MoneyOperationsSummary }>(
       `/money-operations/paged${q}`,
-      { signal: options?.signal },
+      { signal: options?.signal, headers: { 'X-PayPlanner-Currency-Contract': '1' } },
     );
   }
 
@@ -9175,7 +9221,9 @@ export class ApiService {
     source?: MoneyOperationSource;
   }) {
     const q = buildQuery(params ?? {});
-    return this.request<MoneyOperationAccountSummary[]>(`/money-operations/account-summaries${q}`);
+    return this.request<MoneyOperationAccountSummary[]>(`/money-operations/account-summaries${q}`, {
+      headers: { 'X-PayPlanner-Currency-Contract': '1' },
+    });
   }
 
   async getMoneyOperationDailyBalances(params?: {
@@ -9185,7 +9233,9 @@ export class ApiService {
     accountName?: string;
   }) {
     const q = buildQuery(params ?? {});
-    return this.request<MoneyOperationDailyBalance[]>(`/money-operations/daily-balances${q}`);
+    return this.request<MoneyOperationDailyBalance[]>(`/money-operations/daily-balances${q}`, {
+      headers: { 'X-PayPlanner-Currency-Contract': '1' },
+    });
   }
 
   async getMoneyBalanceReconciliationResults(params?: {
@@ -9195,7 +9245,9 @@ export class ApiService {
     accountName?: string;
   }) {
     const q = buildQuery(params ?? {});
-    return this.request<MoneyBalanceReconciliationResult[]>(`/money-operations/balance-reconciliation${q}`);
+    return this.request<MoneyBalanceReconciliationResult[]>(`/money-operations/balance-reconciliation${q}`, {
+      headers: { 'X-PayPlanner-Currency-Contract': '1' },
+    });
   }
 
   async runMoneyBalanceReconciliation(params?: {
@@ -9203,19 +9255,31 @@ export class ApiService {
     to?: string;
     source?: MoneyOperationSource;
     accountName?: string;
+    moneyAccountId?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<MoneyBalanceReconciliationRunResult>(`/money-operations/balance-reconciliation/run${q}`, {
       method: 'POST',
+      headers: { 'X-PayPlanner-Currency-Contract': '1' },
     });
   }
 
-  async getMoneyOperation(id: number) {
-    return this.request<MoneyOperation>(`/money-operations/${id}`);
+  async getMoneyOperation(id: number, signal?: AbortSignal) {
+    return this.request<MoneyOperation>(`/money-operations/${id}`, { signal, cache: 'no-store' });
   }
 
-  async getMoneyOperationInvoiceCandidates(id: number) {
-    return this.request<MoneyOperationInvoiceCandidate[]>(`/money-operations/${id}/invoice-candidates`);
+  async getMoneyOperationInvoiceCandidates(id: number, search?: string, signal?: AbortSignal) {
+    const term = search?.trim();
+    const suffix = term ? `/search?${new URLSearchParams({ search: term })}` : '';
+    return this.request<MoneyOperationInvoiceCandidate[]>(`/money-operations/${id}/invoice-candidates${suffix}`, { signal, cache: 'no-store' });
+  }
+
+  async getMoneyOperationInvoiceCandidatePage(id: number, search?: string, cursor?: string, signal?: AbortSignal) {
+    const query = new URLSearchParams();
+    if (search?.trim()) query.set('search', search.trim());
+    if (cursor) query.set('cursor', cursor);
+    const suffix = query.size ? `?${query}` : '';
+    return this.request<MoneyOperationInvoiceCandidatePage>(`/money-operations/${id}/invoice-candidates/pages${suffix}`, { signal, cache: 'no-store' });
   }
 
   async createMoneyOperation(payload: MoneyOperation) {
@@ -9276,8 +9340,12 @@ export class ApiService {
     return this.request<PagedResult<BankStatementImportBatch>>(`/money-operations/bank-statement/imports${q}`);
   }
 
-  async getBankStatementImport(id: number) {
-    return this.request<BankStatementImportBatchDetail>(`/money-operations/bank-statement/imports/${id}`);
+  async getBankStatementImport(id: number, page?: number, search?: string, signal?: AbortSignal) {
+    const parameters = new URLSearchParams();
+    if (page !== undefined) parameters.set('page', String(page));
+    if (search?.trim()) parameters.set('search', search.trim());
+    const query = parameters.size ? `?${parameters}` : '';
+    return this.request<BankStatementImportBatchDetail>(`/money-operations/bank-statement/imports/${id}${query}`, signal ? { signal } : undefined);
   }
 
   async rollbackBankStatementImport(id: number) {
@@ -9319,6 +9387,7 @@ export class ApiService {
     status?: 'Draft' | 'Posted' | 'Cancelled';
     search?: string;
     accountName?: string;
+    moneyAccountId?: number;
     page?: number;
     pageSize?: number;
   }) {
@@ -9335,6 +9404,7 @@ export class ApiService {
       from?: string;
       to?: string;
       accountName?: string;
+      moneyAccountId?: number;
       counterpartyName?: string;
       clientId?: number;
       caseId?: number;
@@ -9344,10 +9414,13 @@ export class ApiService {
     options?: { signal?: AbortSignal },
   ) {
     const q = buildQuery(params ?? {});
-    return this.request<CashBookSummary>(`/cash-orders/cashbook${q}`, { signal: options?.signal });
+    return this.request<CashBookSummary>(`/cash-orders/cashbook${q}`, {
+      signal: options?.signal,
+      headers: { 'X-PayPlanner-Currency-Contract': '1' },
+    });
   }
 
-  async getCashBookPrintHtml(params?: { from?: string; to?: string; accountName?: string }) {
+  async getCashBookPrintHtml(params?: { from?: string; to?: string; accountName?: string; moneyAccountId?: number }) {
     const q = buildQuery(params ?? {});
     return this.request<string>(`/cash-orders/cashbook/print${q}`);
   }
@@ -9360,6 +9433,7 @@ export class ApiService {
       status?: 'Draft' | 'Posted' | 'Cancelled';
       search?: string;
       accountName?: string;
+      moneyAccountId?: number;
       page?: number;
       pageSize?: number;
     },
@@ -9370,7 +9444,10 @@ export class ApiService {
       page: params?.page ?? 1,
       pageSize: params?.pageSize ?? 25,
     });
-    return this.request<CashOrderRegister>(`/cash-orders/register${q}`, { signal: options?.signal });
+    return this.request<CashOrderRegister>(`/cash-orders/register${q}`, {
+      signal: options?.signal,
+      headers: { 'X-PayPlanner-Currency-Contract': '1' },
+    });
   }
 
   async getCashOrderRegisterPrintHtml(params?: {
@@ -9380,6 +9457,7 @@ export class ApiService {
     status?: 'Draft' | 'Posted' | 'Cancelled';
     search?: string;
     accountName?: string;
+    moneyAccountId?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<string>(`/cash-orders/register/print${q}`);
@@ -9389,6 +9467,7 @@ export class ApiService {
     from?: string;
     to?: string;
     accountName?: string;
+    moneyAccountId?: number;
     page?: number;
     pageSize?: number;
   }) {
@@ -9397,7 +9476,7 @@ export class ApiService {
       page: params?.page ?? 1,
       pageSize: params?.pageSize ?? 10,
     });
-    return this.request<PagedResult<CashInventory>>(`/cash-orders/inventories${q}`);
+    return this.request<PagedResult<CashInventory> & { moneyAccountId?: number | null }>(`/cash-orders/inventories${q}`);
   }
 
   async createCashInventory(payload: CashInventoryCreateRequest) {
@@ -9748,6 +9827,7 @@ import type {
   MoneyBalanceReconciliationRunResult,
   MoneyOperationDailyBalance,
   MoneyOperationInvoiceCandidate,
+  MoneyOperationInvoiceCandidatePage,
   MoneyOperationsSummary,
   PaymentsListSummary,
   PaymentAdvanceReviewDiagnosticsResponse,

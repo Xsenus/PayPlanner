@@ -325,6 +325,7 @@ public sealed partial class BankStatementImportService(PaymentContext db)
                     Date = operation.Date,
                     Direction = operation.Direction,
                     Amount = operation.Amount,
+                    Currency = operation.Currency,
                     CounterpartyName = operation.CounterpartyName,
                     PaymentOrderNumber = operation.PaymentOrderNumber,
                     MatchStatus = operation.MatchStatus,

@@ -574,6 +574,23 @@ public partial class AuthService
 
                 foreach (var sourceUser in sourceUsers)
                 {
+                    // Stop and transfer personal time while holding the same source-user lock used by timer starts.
+                    await _context.Users.Where(user => user.Id == sourceUser.Id)
+                        .ExecuteUpdateAsync(set => set.SetProperty(user => user.UpdatedAt, user => user.UpdatedAt), cancellationToken);
+                    var stoppedAt = DateTime.UtcNow;
+                    await _context.TaskTimeEntries.Where(entry => entry.UserId == sourceUser.Id && entry.StoppedAtUtc == null)
+                        .ExecuteUpdateAsync(set => set.SetProperty(entry => entry.StoppedAtUtc,
+                            entry => entry.StartedAtUtc > stoppedAt ? entry.StartedAtUtc : stoppedAt), cancellationToken);
+                    await _context.TaskTimeEntries.Where(entry => entry.UserId == sourceUser.Id)
+                        .ExecuteUpdateAsync(set => set.SetProperty(entry => entry.UserId, targetUser.Id), cancellationToken);
+                    foreach (var tracked in _context.ChangeTracker.Entries<TaskTimeEntry>().Where(entry => entry.Entity.UserId == sourceUser.Id))
+                    {
+                        tracked.Entity.User = targetUser;
+                        tracked.Entity.UserId = targetUser.Id;
+                        if (tracked.Entity.StoppedAtUtc is null)
+                            tracked.Entity.StoppedAtUtc = tracked.Entity.StartedAtUtc > stoppedAt ? tracked.Entity.StartedAtUtc : stoppedAt;
+                    }
+                    _context.ChangeTracker.DetectChanges();
                     MergeUserFields(targetUser, sourceUser);
                     await ReassignSimpleUserReferencesAsync(sourceUser.Id, targetUser.Id, cancellationToken);
                     await MergePaymentResponsiblesAsync(sourceUser.Id, targetUser.Id, cancellationToken);

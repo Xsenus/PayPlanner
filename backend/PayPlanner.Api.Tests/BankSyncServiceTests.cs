@@ -117,6 +117,169 @@ public partial class BankSyncServiceTests : IClassFixture<PostgreSqlModelTemplat
         Assert.DoesNotContain("refresh-secret", connection.RefreshTokenProtected);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("TOO-LONG-CURRENCY")]
+    public async Task SyncAccounts_MissingCurrencyQuarantinesExistingAccountAndDoesNotInventRubles(string? invalidCurrency)
+    {
+        var (db, service, bank, connection) = await CreateAsync();
+        await using var _ = db;
+        bank.Accounts = [Account("existing") with { Currency = "USD" }];
+        await service.SyncAccountsAsync(connection.Id, default);
+        var account = await db.BankConnectionAccounts.SingleAsync();
+        account.IsDefault = true;
+        await db.SaveChangesAsync();
+        bank.Accounts = [Account("existing") with { Currency = invalidCurrency! }, Account("new") with { Currency = invalidCurrency! }];
+
+        var result = await service.SyncAccountsAsync(connection.Id, default);
+        Assert.Equal(2, result.Skipped);
+        var retained = await db.BankConnectionAccounts.SingleAsync();
+        Assert.Equal("USD", retained.Currency);
+        Assert.Equal(BankAccountStatuses.Unavailable, retained.Status);
+        Assert.False(retained.IsDefault);
+        Assert.Contains("валют", retained.LastError!, StringComparison.OrdinalIgnoreCase);
+        var statement = await service.SyncStatementAsync(retained.Id, DateTime.UtcNow.AddDays(-1), DateTime.UtcNow,
+            BankSyncInvocation.Scheduled(Guid.NewGuid().ToString("N")), default);
+        Assert.NotNull(statement.Error);
+        Assert.Equal(0, bank.StatementCalls);
+        Assert.Empty(await db.BankStatementOperations.ToListAsync());
+
+        bank.Accounts = [Account("existing") with { Currency = "USD" }];
+        await service.SyncAccountsAsync(connection.Id, default);
+        Assert.Equal(BankAccountStatuses.Open, retained.Status);
+        Assert.Null(retained.LastError);
+        Assert.Equal("USD", retained.Currency);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SyncAccounts_DuplicateIdWithMissingCurrencyCannotReactivateAccount(bool invalidFirst)
+    {
+        var (db, service, bank, connection) = await CreateAsync();
+        await using var _ = db;
+        bank.Accounts = [Account("existing") with { Currency = "USD" }];
+        await service.SyncAccountsAsync(connection.Id, default);
+        var good = Account("existing") with { Currency = "USD" };
+        var bad = good with { Currency = "" };
+        bank.Accounts = invalidFirst ? [bad, good] : [good, bad];
+        await service.SyncAccountsAsync(connection.Id, default);
+        var account = await db.BankConnectionAccounts.SingleAsync();
+        Assert.Equal("USD", account.Currency);
+        Assert.Equal(BankAccountStatuses.Unavailable, account.Status);
+        Assert.Contains("валют", account.LastError!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SyncAccounts_MissingCurrencyQuarantinesEvenWhenAccountNumberIsMissing()
+    {
+        var (db, service, bank, connection) = await CreateAsync();
+        await using var _ = db;
+        bank.Accounts = [Account("existing") with { Currency = "USD" }];
+        await service.SyncAccountsAsync(connection.Id, default);
+        bank.Accounts = [Account("existing") with { Currency = "", AccountNumber = "" }];
+        await service.SyncAccountsAsync(connection.Id, default);
+        var account = await db.BankConnectionAccounts.SingleAsync();
+        Assert.Equal("USD", account.Currency);
+        Assert.Equal(BankAccountStatuses.Unavailable, account.Status);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SyncAccounts_ConflictingDuplicateCurrenciesCannotChangeOrCreateAnAccount(bool usdFirst)
+    {
+        var (db, service, bank, connection) = await CreateAsync();
+        await using var _ = db;
+        bank.Accounts = [Account("existing") with { Currency = "USD" }];
+        await service.SyncAccountsAsync(connection.Id, default);
+        var usd = Account("existing") with { Currency = "USD" };
+        var rub = usd with { Currency = "RUB" };
+        var newUsd = Account("new") with { Currency = "USD" };
+        var newRub = newUsd with { Currency = "RUB" };
+        bank.Accounts = usdFirst ? [usd, rub, newUsd, newRub] : [rub, usd, newRub, newUsd];
+        await service.SyncAccountsAsync(connection.Id, default);
+        var account = await db.BankConnectionAccounts.SingleAsync();
+        Assert.Equal("USD", account.Currency);
+        Assert.Equal(BankAccountStatuses.Unavailable, account.Status);
+        Assert.Contains("валют", account.LastError!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SyncStatement_StopsBeforeWritingWhenCurrencyBecomesUnknownDuringBankRequest()
+    {
+        var (db, service, bank, connection) = await CreateAsync();
+        await using var _ = db;
+        bank.Accounts = [Account("existing")];
+        await service.SyncAccountsAsync(connection.Id, default);
+        var account = await db.BankConnectionAccounts.SingleAsync();
+        bank.Pages["existing"] = [[Op("synthetic-op", 2)]];
+        bank.BeforeStatementPage = async _ =>
+        {
+            bank.Accounts = [Account("existing") with { Currency = "" }];
+            await service.SyncAccountsAsync(connection.Id, default);
+        };
+        var result = await service.SyncStatementAsync(account.Id, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9),
+            BankSyncInvocation.Scheduled(Guid.NewGuid().ToString("N")), default);
+        Assert.NotNull(result.Error);
+        Assert.Equal(BankAccountStatuses.Unavailable, account.Status);
+        Assert.Empty(await db.BankStatementOperations.ToListAsync());
+        Assert.Empty(await db.MoneyOperations.ToListAsync());
+    }
+
+    [Fact]
+    public async Task SyncStatement_IndependentConnectionObservesCurrencyRevocationBeforeWriting()
+    {
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = $"bank_currency_{Guid.NewGuid():N}",
+            Mode = SqliteOpenMode.Memory,
+            Cache = SqliteCacheMode.Shared,
+            Pooling = false,
+        }.ToString();
+        await using var keeper = new SqliteConnection(connectionString);
+        await keeper.OpenAsync();
+        await using var first = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connectionString).Options);
+        await using var second = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connectionString).Options);
+        await first.Database.EnsureCreatedAsync();
+        var company = new LegalEntity { ShortName = "Синтетическая компания", Inn = "7707083893" };
+        first.LegalEntities.Add(company);
+        await first.SaveChangesAsync();
+        first.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = System.Text.Json.JsonSerializer.Serialize(new[] { company.Id }) });
+        await first.SaveChangesAsync();
+        var bank = new FakeBank { Accounts = [Account("shared")] };
+        var protection = new EphemeralDataProtectionProvider();
+        var statementService = new BankSyncService(first, [bank], protection);
+        var updateService = new BankSyncService(second, [bank], protection);
+        var connection = new BankConnection { LegalEntityId = company.Id, Provider = BankProviderKeys.Tochka };
+        statementService.StoreTokens(connection, "synthetic-token", null, DateTime.UtcNow.AddHours(1));
+        first.BankConnections.Add(connection);
+        await first.SaveChangesAsync();
+        await statementService.SyncAccountsAsync(connection.Id, default);
+        var account = await first.BankConnectionAccounts.SingleAsync();
+        bank.Pages["shared"] = [[Op("synthetic-op", 2)]];
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        bank.BeforeStatementPage = async _ => { entered.TrySetResult(); await release.Task.WaitAsync(TimeSpan.FromSeconds(15)); };
+        var running = statementService.SyncStatementAsync(account.Id, new DateTime(2026, 10, 1), new DateTime(2026, 10, 9),
+            BankSyncInvocation.Scheduled(Guid.NewGuid().ToString("N")), default);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        try
+        {
+            bank.Accounts = [Account("shared") with { Currency = "" }];
+            var updated = await updateService.SyncAccountsAsync(connection.Id, default);
+            Assert.Equal(1, updated.Skipped);
+        }
+        finally { release.TrySetResult(); }
+        var result = await running.WaitAsync(TimeSpan.FromSeconds(15));
+        Assert.NotNull(result.Error);
+        Assert.Equal(BankAccountStatuses.Unavailable, (await second.BankConnectionAccounts.AsNoTracking().SingleAsync()).Status);
+        Assert.Empty(await second.BankStatementOperations.AsNoTracking().ToListAsync());
+        Assert.Empty(await second.MoneyOperations.AsNoTracking().ToListAsync());
+    }
+
     [Fact]
     public async Task SyncAccounts_IsIdempotent_UpdatesStatus_AndNeverDeletesMissingAccounts()
     {

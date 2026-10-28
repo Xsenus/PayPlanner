@@ -132,6 +132,10 @@ public class MoneyAccountsController(PaymentContext db) : ControllerBase
             var entity = await db.MoneyAccounts.SingleAsync(item => item.Id == id, ct);
             if (IdentityChanged(entity, account) && await IsReferencedAsync(entity, ct))
                 return Conflict("У используемого счёта нельзя менять компанию, источник, валюту или банковские реквизиты. Создайте отдельный счёт; прежний можно перенести в архив.");
+            if ((entity.Source == MoneyOperationSource.Cash || account.Source == MoneyOperationSource.Cash)
+                && (!string.Equals(entity.Name, account.Name, StringComparison.Ordinal) || entity.Source != account.Source)
+                && await HasUnassignedCashHistoryAsync(entity.Name, account.Name, ct))
+                return Conflict("Нельзя переименовать кассу: с прежним или новым названием есть документы без подтверждённой принадлежности. Сначала уточните их связи.");
             if (await ValidateOriginAsync(account, fresh, id, ct) is { } invalid) return invalid;
             if (await HasDuplicateNameAsync(account, id, ct)) return Conflict("Счёт с таким названием уже существует у выбранной компании и источника.");
             var oldCompany = entity.CompanyId!.Value;
@@ -254,9 +258,18 @@ public class MoneyAccountsController(PaymentContext db) : ControllerBase
 
     private async Task<bool> IsReferencedAsync(MoneyAccount account, CancellationToken ct)
         => await db.MoneyOperations.IgnoreQueryFilters().AnyAsync(item => item.MoneyAccountId == account.Id, ct)
+            || await db.CashOrders.IgnoreQueryFilters().AnyAsync(item => item.MoneyAccountId == account.Id, ct)
+            || await db.CashInventories.IgnoreQueryFilters().AnyAsync(item => item.MoneyAccountId == account.Id, ct)
+            || account.Source == MoneyOperationSource.Cash && await HasUnassignedCashHistoryAsync(account.Name, account.Name, ct)
             || await db.MoneyBalanceReconciliationResults.IgnoreQueryFilters().AnyAsync(item => item.MoneyAccountId == account.Id, ct)
             || await db.BankStatementImportBatches.IgnoreQueryFilters().AnyAsync(item => item.MoneyAccountId == account.Id, ct)
             || account.BankConnectionAccountId.HasValue && await db.BankStatementOperations.AnyAsync(item => item.BankConnectionAccountId == account.BankConnectionAccountId, ct);
+
+    private async Task<bool> HasUnassignedCashHistoryAsync(string oldName, string newName, CancellationToken ct)
+        => await db.CashOrders.IgnoreQueryFilters().AnyAsync(order => (!order.MoneyAccountId.HasValue || !order.CompanyId.HasValue)
+                && (order.Account == oldName || order.Account == newName), ct)
+            || await db.CashInventories.IgnoreQueryFilters().AnyAsync(inventory => (!inventory.MoneyAccountId.HasValue || !inventory.CompanyId.HasValue)
+                && (inventory.AccountName == oldName || inventory.AccountName == newName), ct);
 
     private static bool IdentityChanged(MoneyAccount old, MoneyAccount next)
         => old.CompanyId != next.CompanyId || old.Source != next.Source || old.Currency != next.Currency

@@ -134,6 +134,26 @@ describe('TaskJournal', () => {
       expect(decision === 'approve' ? apiMock.approveTaskJournalDeadlineChangeRequest : apiMock.rejectTaskJournalDeadlineChangeRequest)
         .toHaveBeenCalledWith(101, 902, expect.objectContaining({ comment: 'Синтетическое решение' }));
     });
+    it('retains the selected deadline and decision comment after a network failure and sends them on retry', async () => {
+      apiMock.approveTaskJournalDeadlineChangeRequest.mockRejectedValueOnce(new Error('Синтетический отказ сети'));
+      const prompt = await openDeadline();
+      const date = new Date(deadlineRequest().requestedDueAt);
+      date.setHours(date.getHours() + 2);
+      const input = within(prompt).getByLabelText('Новый срок задачи') as HTMLInputElement;
+      const selected = toDatetimeLocalInputValue(date);
+      fireEvent.change(input, { target: { value: selected } });
+      fireEvent.change(within(prompt).getByLabelText('Комментарий к решению'), { target: { value: 'Новый срок согласован' } });
+      fireEvent.click(within(prompt).getByRole('button', { name: 'Согласовать перенос' }));
+      await within(prompt).findByText('Синтетический отказ сети');
+      expect(input.value).toBe(selected);
+      expect((within(prompt).getByLabelText('Комментарий к решению') as HTMLTextAreaElement).value).toBe('Новый срок согласован');
+      fireEvent.click(within(prompt).getByRole('button', { name: 'Согласовать перенос' }));
+      await waitFor(() => expect(apiMock.approveTaskJournalDeadlineChangeRequest).toHaveBeenCalledTimes(2));
+      expect(apiMock.approveTaskJournalDeadlineChangeRequest).toHaveBeenNthCalledWith(2, 101, 902, {
+        approvedDueAt: date.toISOString(), comment: 'Новый срок согласован',
+      });
+    });
+
     it('keeps the card on error and after snoozing the decision', async () => {
       apiMock.approveTaskJournalDeadlineChangeRequest.mockRejectedValueOnce(new Error('Синтетический отказ сети'));
       const prompt = await openDeadline();
@@ -285,7 +305,7 @@ describe('TaskJournal', () => {
     fireEvent.click(within(prompt).getByRole('button', { name: 'Согласовать перенос' }));
 
     await waitFor(() => expect(apiMock.approveTaskJournalDeadlineChangeRequest).toHaveBeenCalledWith(206, 902, {
-      approvedDueAt: expect.not.stringMatching(requestedDueAt),
+      approvedDueAt: changedDueAt.toISOString(),
       comment: null,
     }));
   });

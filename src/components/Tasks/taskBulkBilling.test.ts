@@ -16,6 +16,10 @@ describe('fixed bulk billing contract', () => {
       expectedUpdatedAtById: { '2': '2026-10-24T01:02:03.1234567Z', '1': null },
     });
   });
+  it('rejects duplicate IDs with contradictory version tokens instead of choosing one', () => {
+    expect(() => freezeBillingSelection([task(1), task(1, { updatedAt: null as unknown as string })], 'scope', 'page')).toThrow(/разные версии/i);
+    expect(() => billingPayload([task(1), task(1, { updatedAt: '2026-10-24T03:04:05.0000000Z' })], 'internal', false)).toThrow(/разные версии/i);
+  });
   it('does not truncate raw over-limit selections or accept invalid IDs', () => {
     for (const tasks of [[], [task(0)], [task(-1)], [task(1.2)], Array.from({ length: 501 }, () => task(1))]) {
       expect(() => freezeBillingSelection(tasks, 'scope', 'page')).toThrow();

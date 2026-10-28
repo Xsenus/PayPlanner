@@ -6,6 +6,8 @@ public class CashInventory
     public string Number { get; set; } = string.Empty;
     public DateTime Date { get; set; }
     public string AccountName { get; set; } = string.Empty;
+    public int? MoneyAccountId { get; set; }
+    public int? CompanyId { get; set; }
     public decimal AccountingBalance { get; set; }
     public decimal ActualBalance { get; set; }
     public decimal Difference { get; set; }

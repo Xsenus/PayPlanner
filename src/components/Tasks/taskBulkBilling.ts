@@ -23,7 +23,15 @@ export function freezeBillingSelection(tasks: TaskJournalItem[], scopeKey: strin
     || (task.updatedAt != null && typeof task.updatedAt !== 'string'))) {
     throw new Error('Выберите от 1 до 500 задач на текущей странице.');
   }
-  return { scopeKey, scopeLabel, tasks: [...new Map(tasks.map((task) => [task.id, { ...task, updatedAt: task.updatedAt ?? null }])).values()] };
+  const unique = new Map<number, TaskJournalItem>();
+  for (const task of tasks) {
+    const previous = unique.get(task.id);
+    if (previous && (previous.updatedAt ?? null) !== (task.updatedAt ?? null)) {
+      throw new Error('В выбранных строках обнаружены разные версии одной задачи. Обновите список и повторите выбор.');
+    }
+    unique.set(task.id, { ...task, updatedAt: task.updatedAt ?? null });
+  }
+  return { scopeKey, scopeLabel, tasks: [...unique.values()] };
 }
 
 export function billingPayload(tasks: TaskJournalItem[], target: BillingTarget, includeCompleted: boolean, allowContractClassification = false) {

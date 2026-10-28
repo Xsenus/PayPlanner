@@ -28,16 +28,21 @@ public static class BankStatementImportAccess
         if (access.Visibility.IsAdmin) return query;
         var money = ScopeMoneyOperations(db, db.MoneyOperations.AsNoTracking(), access);
         var payments = ScopePaymentCompanies(db, db.Payments.AsNoTracking(), access.AllowedCompanyIds);
+        var accounts = CoherentAccounts(db, ScopeAccounts(db.MoneyAccounts.AsNoTracking(), access, ignoreQueryFilters: false));
         // The actual money source is authoritative. A document reference cannot
         // reassign an existing movement to another company or hide its own history.
         // Without a movement, use the payment's company policy; never infer ownership
         // from an account label or the current employee's company.
-        return query.Where(order => order.MoneyOperationId.HasValue
-            ? money.Any(operation => operation.Id == order.MoneyOperationId.Value)
-            : order.PaymentId.HasValue
-                ? payments.Any(payment => payment.Id == order.PaymentId.Value)
-                : !order.InvoiceId.HasValue || !db.Payments.Any(payment => payment.InvoiceId == order.InvoiceId
-                    && !payments.Any(permitted => permitted.Id == payment.Id)));
+        return query.Where(order =>
+            ((!order.MoneyAccountId.HasValue && !order.CompanyId.HasValue)
+                || (order.MoneyAccountId.HasValue && order.CompanyId.HasValue
+                    && accounts.Any(account => account.Id == order.MoneyAccountId && account.CompanyId == order.CompanyId)))
+            && (order.MoneyOperationId.HasValue
+                ? money.Any(operation => operation.Id == order.MoneyOperationId.Value)
+                : order.PaymentId.HasValue
+                    ? payments.Any(payment => payment.Id == order.PaymentId.Value)
+                    : !order.InvoiceId.HasValue || !db.Payments.Any(payment => payment.InvoiceId == order.InvoiceId
+                        && !payments.Any(permitted => permitted.Id == payment.Id))));
     }
 
     public static IQueryable<MoneyOperation> ScopeMoneyOperations(PaymentContext db,

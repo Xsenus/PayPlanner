@@ -347,6 +347,18 @@ describe('TaskJournal', () => {
     await waitFor(() => expect(apiMock.bulkUpdateTaskJournalItems).toHaveBeenCalledWith(expect.objectContaining({ ids: [102], priority: 'urgent' })));
   });
 
+  it('does not restore a hidden selection when a quick search is cleared', async () => {
+    const first = createTask({ id: 101, title: 'Первая строка поиска' });
+    const second = createTask({ id: 102, title: 'Вторая строка поиска' });
+    await renderJournal([first, second], { waitForTitle: first.title });
+    fireEvent.click(screen.getByRole('checkbox', { name: `Выбрать задачу ${first.title}` }));
+    const search = screen.getByRole('textbox', { name: 'Поиск по контрагенту, делу или наименованию задачи' });
+    fireEvent.change(search, { target: { value: second.title } });
+    fireEvent.change(search, { target: { value: '' } });
+    expect((screen.getByRole('checkbox', { name: `Выбрать задачу ${first.title}` }) as HTMLInputElement).checked).toBe(false);
+    expect(screen.queryByTestId('task-bulk-actions')).toBeNull();
+  });
+
   it('does not apply a previous page selection after moving to another page', async () => {
     const tasks = Array.from({ length: 30 }, (_, index) => createTask({
       id: index + 1, title: `Задача страницы ${index + 1}`,

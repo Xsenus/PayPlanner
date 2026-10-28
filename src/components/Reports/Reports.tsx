@@ -67,6 +67,7 @@ import { useSpreadsheetImportReport } from '../../hooks/useSpreadsheetImportRepo
 import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicker';
 import { apiService } from '../../services/api';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { formatConfirmedMoney, isCashBookCurrencyConfirmed } from '../../utils/moneyBalanceIdentity';
 import { toManagementReportApiFilters } from '../../utils/managementReportExportFilters';
 import { buildReportMonthPresetRange, currentReportMonthInTimeZone, type ReportMonthPreset } from '../../utils/reportPeriod';
 import {
@@ -656,7 +657,7 @@ function CashFlowForecastReportSection({
   );
 }
 
-function CashReportSection({
+export function CashReportSection({
   report,
   loading,
   error,
@@ -673,6 +674,7 @@ function CashReportSection({
   canExportPaymentReports: boolean;
 }) {
   const recentDays = (report?.days ?? []).slice(-8);
+  const formatCashBookAmount = (value: number) => formatConfirmedMoney(value, report?.currencyStatus, report?.currency);
 
   return (
     <section className="mt-8 rounded-[32px] border border-white/70 bg-white/92 p-6 shadow-[0_18px_45px_-24px_rgba(15,23,42,0.35)] backdrop-blur">
@@ -688,7 +690,7 @@ function CashReportSection({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <ManagementReportExportButtons reportKind="cash" filters={filters} disabled={!report || loading || !canExportPaymentReports} />
+          <ManagementReportExportButtons reportKind="cash" filters={filters} disabled={!report || loading || !canExportPaymentReports || !isCashBookCurrencyConfirmed(report.currencyStatus, report.currency)} />
           <button
             type="button"
             onClick={onReload}
@@ -714,28 +716,28 @@ function CashReportSection({
           <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-4">
             <MetricCard
               title="Остаток на начало"
-              value={formatCurrency(report.openingBalance)}
+              value={formatCashBookAmount(report.openingBalance)}
               icon={Wallet}
               tone="rate"
               subtitle={report.accountName ? `Касса: ${report.accountName}` : 'Все кассы'}
             />
             <MetricCard
               title="Приход по кассе"
-              value={formatCurrency(report.income)}
+              value={formatCashBookAmount(report.income)}
               icon={TrendingUp}
               tone="income"
               subtitle={`ПКО за период: ${report.incomingCount}`}
             />
             <MetricCard
               title="Расход по кассе"
-              value={formatCurrency(report.expense)}
+              value={formatCashBookAmount(report.expense)}
               icon={TrendingDown}
               tone="expense"
               subtitle={`РКО за период: ${report.outgoingCount}`}
             />
             <MetricCard
               title="Остаток на конец"
-              value={formatCurrency(report.closingBalance)}
+              value={formatCashBookAmount(report.closingBalance)}
               icon={Banknote}
               tone="profit"
               subtitle="Контроль закрытия кассового периода"
@@ -759,19 +761,19 @@ function CashReportSection({
                       <div className="font-semibold text-slate-900">{formatDate(day.date)}</div>
                       <div>
                         <div className="text-xs text-slate-500">Открытие</div>
-                        <div className="font-medium text-slate-900">{formatCurrency(day.openingBalance)}</div>
+                        <div className="font-medium text-slate-900">{formatCashBookAmount(day.openingBalance)}</div>
                       </div>
                       <div>
                         <div className="text-xs text-slate-500">Приход</div>
-                        <div className="font-medium text-emerald-700">{formatCurrency(day.income)}</div>
+                        <div className="font-medium text-emerald-700">{formatCashBookAmount(day.income)}</div>
                       </div>
                       <div>
                         <div className="text-xs text-slate-500">Расход</div>
-                        <div className="font-medium text-rose-700">{formatCurrency(day.expense)}</div>
+                        <div className="font-medium text-rose-700">{formatCashBookAmount(day.expense)}</div>
                       </div>
                       <div>
                         <div className="text-xs text-slate-500">Закрытие</div>
-                        <div className="font-semibold text-slate-950">{formatCurrency(day.closingBalance)}</div>
+                        <div className="font-semibold text-slate-950">{formatCashBookAmount(day.closingBalance)}</div>
                       </div>
                     </div>
                   ))}

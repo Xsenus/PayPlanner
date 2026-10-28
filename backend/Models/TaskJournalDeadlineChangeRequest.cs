@@ -57,4 +57,10 @@ public class TaskJournalDeadlineChangeRequest
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public DateTime? UpdatedAt { get; set; }
+
+    // Pending reassignment notifications survive a crash after the task transaction commits.
+    public bool ReviewerDispatchPending { get; set; }
+    public string? ReviewerDispatchLeaseToken { get; set; }
+    public DateTime? ReviewerDispatchLeaseUntil { get; set; }
+    public int ReviewerDispatchAttempts { get; set; }
 }

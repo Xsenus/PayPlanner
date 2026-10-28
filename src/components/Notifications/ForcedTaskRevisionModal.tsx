@@ -3,12 +3,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock3, Download, ExternalLink, FileText, Loader2, TimerReset, XCircle } from 'lucide-react';
 import { apiService, type PagedResult, type UserNotificationDto } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
-import { isExpectedRealtimeStartupError } from '../../services/realtimeNotifications';
-import { emitUserNotificationsChanged, USER_NOTIFICATIONS_EVENT } from '../../utils/userNotifications';
+import { isExpectedRealtimeStartupError, TASK_JOURNAL_REALTIME_EVENT } from '../../services/realtimeNotifications';
+import { emitUserNotificationsChanged, isTaskJournalRealtimeChange, USER_NOTIFICATIONS_EVENT, type UserNotificationsChangedDetail } from '../../utils/userNotifications';
 import { parseUserNotificationMetadata } from '../../utils/userNotificationMetadata';
 import { extractDisplayErrorMessage, isHttpErrorStatus } from '../../utils/errorUtils';
 import { formatDateTimeInTimeZone, fromTimeZoneDateTimeInput, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
 import { normalizeUserTimeZoneId, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
+import { TASK_JOURNAL_EVENT } from '../../utils/taskJournalStore';
 import type {
   TaskJournalDeadlineChangeRequest,
   TaskJournalFile,
@@ -136,6 +137,13 @@ function readString(value: unknown): string {
 function getDeadlineChangeRequestId(notification: UserNotificationDto): number | null {
   const metadata = getNotificationMetadata(notification);
   return readPositiveInteger(metadata.deadlineChangeRequestId);
+}
+
+function isFormerDeadlineReviewer(notifiedReviewerId: number | null, request: TaskJournalDeadlineChangeRequest, userId: number): boolean {
+  return notifiedReviewerId === userId
+    && typeof request.reviewerUserId === 'number'
+    && request.reviewerUserId > 0
+    && request.reviewerUserId !== userId;
 }
 
 function getApprovalParticipantId(notification: UserNotificationDto): number | null {
@@ -275,6 +283,10 @@ function getTaskTitle(notification: UserNotificationDto): string {
     .trim() || title;
 }
 
+function isResolvedApprovalTask(task: TaskJournalItem): boolean {
+  return ['new', 'inProgress', 'waiting', 'approved', 'revision', 'done', 'cancelled'].includes(task.status);
+}
+
 function getOrderedApprovers(task: TaskJournalItem): TaskJournalParticipant[] {
   return (task.participants ?? [])
     .filter((participant) => participant.role === 'approver')
@@ -343,6 +355,8 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
   const [deadlineChangeSaving, setDeadlineChangeSaving] = useState<'approve' | 'reject' | null>(null);
   const [approvalTask, setApprovalTask] = useState<TaskJournalItem | null>(null);
   const [approvalTaskLoading, setApprovalTaskLoading] = useState(false);
+  const approvalReadVersionRef = useRef(0);
+  const [approvalUnavailable, setApprovalUnavailable] = useState(false);
   const [approvalFiles, setApprovalFiles] = useState<TaskJournalFile[]>([]);
   const [approvalFilesLoading, setApprovalFilesLoading] = useState(false);
   const [approvalFilesError, setApprovalFilesError] = useState<string | null>(null);
@@ -478,6 +492,7 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
   const currentMetadata = useMemo(() => current ? getNotificationMetadata(current) : {}, [current]);
   const currentApprovalParticipantId = readPositiveInteger(currentMetadata.currentApproverId);
   const currentDeadlineChangeRequestId = readPositiveInteger(currentMetadata.deadlineChangeRequestId);
+  const currentDeadlineReviewerId = readPositiveInteger(currentMetadata.reviewerUserId);
   const currentDeadlineChangeTaskId = current?.taskId ?? null;
   const notificationRequestedDueAt = readString(currentMetadata.requestedDueAt);
 
@@ -524,6 +539,11 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
           return;
         }
 
+        if (current?.id && isFormerDeadlineReviewer(currentDeadlineReviewerId, persistedRequest, userId)) {
+          await finishNotificationById(current.id, 'forced-task-deadline-reviewer-changed');
+          return;
+        }
+
         setDeadlineChangeRequest(persistedRequest);
         if (persistedRequest?.requestedDueAt) {
           setDeadlineChangeDueAt(toTimeZoneDateTimeInput(persistedRequest.requestedDueAt, timeZoneId));
@@ -557,18 +577,69 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
   }, [
     current?.id,
     currentDeadlineChangeRequestId,
+    currentDeadlineReviewerId,
     currentDeadlineChangeTaskId,
     decisionKind,
     finishNotificationById,
     notificationRequestedDueAt,
     timeZoneId,
+    userId,
   ]);
+
+  useEffect(() => {
+    const notificationId = current?.id;
+    if (decisionKind !== 'deadlineChangeRequest' || !notificationId || !currentDeadlineChangeTaskId || !currentDeadlineChangeRequestId || deadlineChangeSaving) return;
+
+    let disposed = false;
+    let running = false;
+    let requested = false;
+    let timer: number | undefined;
+    const refresh = async () => {
+      if (disposed) return;
+      if (running) { requested = true; return; }
+      running = true;
+      requested = false;
+      try {
+        const latest = await apiService.getTaskJournalDeadlineChangeRequest(currentDeadlineChangeTaskId, currentDeadlineChangeRequestId);
+        if (disposed) return;
+        if (!latest || latest.status.toLowerCase() !== 'pending' || isFormerDeadlineReviewer(currentDeadlineReviewerId, latest, userId)) {
+          await finishNotificationById(notificationId, 'forced-task-deadline-refresh-closed');
+        }
+      } catch (error) {
+        if (!disposed && isHttpErrorStatus(error, 404)) {
+          try { await finishNotificationById(notificationId, 'forced-task-deadline-change-unavailable'); } catch { /* Keep the draft if the notification cannot be closed. */ }
+        }
+      } finally {
+        running = false;
+        if (!disposed && requested) schedule();
+      }
+    };
+    const schedule = () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = window.setTimeout(() => { timer = undefined; void refresh(); }, 100);
+    };
+    const handleReconnect = (event: Event) => {
+      const detail = (event as CustomEvent<UserNotificationsChangedDetail>).detail;
+      if (isTaskJournalRealtimeChange(detail)) schedule();
+    };
+    window.addEventListener(TASK_JOURNAL_REALTIME_EVENT, schedule);
+    window.addEventListener(TASK_JOURNAL_EVENT, schedule);
+    window.addEventListener(USER_NOTIFICATIONS_EVENT, handleReconnect);
+    return () => {
+      disposed = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+      window.removeEventListener(TASK_JOURNAL_REALTIME_EVENT, schedule);
+      window.removeEventListener(TASK_JOURNAL_EVENT, schedule);
+      window.removeEventListener(USER_NOTIFICATIONS_EVENT, handleReconnect);
+    };
+  }, [current?.id, currentDeadlineChangeRequestId, currentDeadlineChangeTaskId, currentDeadlineReviewerId, deadlineChangeSaving, decisionKind, finishNotificationById, userId]);
 
   useEffect(() => {
     if (!current || decisionKind !== 'approvalRequest' || !current.taskId) {
       approvalDraftRef.current = null;
       setApprovalTask(null);
       setApprovalTaskLoading(false);
+      setApprovalUnavailable(false);
       setApprovalFiles([]);
       setApprovalFilesLoading(false);
       setApprovalFilesError(null);
@@ -590,6 +661,7 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
     }
     const draft = approvalDraftRef.current;
     setApprovalTaskLoading(true);
+    setApprovalUnavailable(false);
     setApprovalFilesLoading(true);
     setApprovalTask(null);
     setApprovalFiles([]);
@@ -597,41 +669,104 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
     setApprovalFileDownloadingId(null);
     setApprovalError(null);
 
-    Promise.allSettled([
-      apiService.getTaskJournalItem(current.taskId),
-      apiService.getTaskJournalFiles(current.taskId, { latestOnly: true }),
-    ])
-      .then(([taskResult, filesResult]) => {
-        if (cancelled) {
+    const notificationId = current.id;
+    const readVersion = ++approvalReadVersionRef.current;
+    const closeStaleApproval = async (reason: string) => {
+      setApprovalUnavailable(true);
+      try {
+        await finishNotificationById(notificationId, reason);
+      } catch {
+        if (!cancelled) setApprovalError('Не удалось закрыть уведомление о неактуальной задаче. Повторите попытку.');
+      }
+    };
+    apiService.getTaskJournalItem(current.taskId)
+      .then(async (task) => {
+        if (cancelled || readVersion !== approvalReadVersionRef.current) return;
+        // Only recognized inactive states are conclusive; unknown or missing states retain the prompt.
+        if (isResolvedApprovalTask(task)) {
+          await closeStaleApproval('forced-task-approval-processed');
           return;
         }
-
-        if (taskResult.status === 'fulfilled') {
-          setApprovalTask(taskResult.value);
-          if (!draft.dueAtEdited) {
-            setApprovalRevisionDueAt(getDefaultRevisionDueAtInput(taskResult.value, timeZoneId));
-          }
+        setApprovalTask(task);
+        if (!draft.dueAtEdited) setApprovalRevisionDueAt(getDefaultRevisionDueAtInput(task, timeZoneId));
+      })
+      .catch(async (error) => {
+        if (cancelled || readVersion !== approvalReadVersionRef.current) return;
+        if (isHttpErrorStatus(error, 404)) {
+          await closeStaleApproval('forced-task-approval-unavailable');
         } else {
-          setApprovalError(extractDisplayErrorMessage(taskResult.reason, 'Не удалось загрузить задачу для согласования.'));
-        }
-
-        if (filesResult.status === 'fulfilled') {
-          setApprovalFiles(filesResult.value);
-        } else {
-          setApprovalFilesError(extractDisplayErrorMessage(filesResult.reason, 'Не удалось загрузить вложения задачи.'));
+          setApprovalError(extractDisplayErrorMessage(error, 'Не удалось загрузить задачу для согласования.'));
         }
       })
-      .finally(() => {
-        if (!cancelled) {
-          setApprovalTaskLoading(false);
-          setApprovalFilesLoading(false);
-        }
-      });
+      .finally(() => { if (!cancelled && readVersion === approvalReadVersionRef.current) setApprovalTaskLoading(false); });
+
+    apiService.getTaskJournalFiles(current.taskId, { latestOnly: true })
+      .then((files) => { if (!cancelled) setApprovalFiles(files); })
+      .catch((error) => { if (!cancelled) setApprovalFilesError(extractDisplayErrorMessage(error, 'Не удалось загрузить вложения задачи.')); })
+      .finally(() => { if (!cancelled) setApprovalFilesLoading(false); });
 
     return () => {
       cancelled = true;
     };
-  }, [current?.id, current?.taskId, current, currentApprovalParticipantId, decisionKind, timeZoneId]);
+  }, [current?.id, current?.taskId, current, currentApprovalParticipantId, decisionKind, finishNotificationById, timeZoneId]);
+
+  useEffect(() => {
+    const notificationId = current?.id;
+    const taskId = current?.taskId;
+    if (decisionKind !== 'approvalRequest' || !notificationId || !taskId || approvalSaving) return;
+    let disposed = false;
+    let running = false;
+    let requested = false;
+    let timer: number | undefined;
+    const refresh = async () => {
+      if (disposed) return;
+      if (running) { requested = true; return; }
+      running = true;
+      requested = false;
+      const readVersion = ++approvalReadVersionRef.current;
+      try {
+        const task = await apiService.getTaskJournalItem(taskId);
+        if (disposed || readVersion !== approvalReadVersionRef.current) return;
+        if (isResolvedApprovalTask(task)) {
+          setApprovalUnavailable(true);
+          try { await finishNotificationById(notificationId, 'forced-task-approval-processed'); }
+          catch { if (!disposed) setApprovalError('Не удалось закрыть уведомление о неактуальной задаче. Повторите попытку.'); }
+        } else {
+          setApprovalUnavailable(false);
+          setApprovalTask(task);
+        }
+      } catch (error) {
+        if (disposed || readVersion !== approvalReadVersionRef.current) return;
+        if (isHttpErrorStatus(error, 404)) {
+          setApprovalUnavailable(true);
+          try { await finishNotificationById(notificationId, 'forced-task-approval-unavailable'); }
+          catch { if (!disposed) setApprovalError('Не удалось закрыть уведомление о неактуальной задаче. Повторите попытку.'); }
+        } else if (!disposed) {
+          setApprovalTask(null);
+          setApprovalError(extractDisplayErrorMessage(error, 'Не удалось обновить задачу для согласования.'));
+        }
+      } finally {
+        running = false;
+        if (!disposed && readVersion === approvalReadVersionRef.current) setApprovalTaskLoading(false);
+        if (!disposed && requested) schedule();
+      }
+    };
+    const schedule = () => {
+      // A change invalidates an older read immediately, before the debounce expires.
+      approvalReadVersionRef.current += 1;
+      setApprovalTaskLoading(true);
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = window.setTimeout(() => { timer = undefined; void refresh(); }, 100);
+    };
+    window.addEventListener(TASK_JOURNAL_REALTIME_EVENT, schedule);
+    window.addEventListener(TASK_JOURNAL_EVENT, schedule);
+    return () => {
+      disposed = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+      window.removeEventListener(TASK_JOURNAL_REALTIME_EVENT, schedule);
+      window.removeEventListener(TASK_JOURNAL_EVENT, schedule);
+    };
+  }, [current?.id, current?.taskId, decisionKind, approvalSaving, finishNotificationById]);
 
   const finishCurrentNotification = async (reason: string) => {
     if (!current) return;
@@ -705,6 +840,20 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
     }
   };
 
+  const finishReassignedDeadlineOnForbidden = async (error: unknown, taskId: number, requestId: number): Promise<boolean> => {
+    if (!current || !isHttpErrorStatus(error, 403)) return false;
+    try {
+      const latestRequest = await apiService.getTaskJournalDeadlineChangeRequest(taskId, requestId);
+      if (latestRequest && isFormerDeadlineReviewer(currentDeadlineReviewerId, latestRequest, userId)) {
+        await finishCurrentNotification('forced-task-deadline-reviewer-changed');
+        return true;
+      }
+    } catch {
+      // Keep the original error and the user's input if the status cannot be confirmed.
+    }
+    return false;
+  };
+
   const approveDeadlineChange = async () => {
     if (!current || deadlineChangeSaving) return;
 
@@ -729,7 +878,9 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
       });
       await finishCurrentNotification('forced-task-deadline-change-approved');
     } catch (error) {
-      setDeadlineChangeError(extractDisplayErrorMessage(error, 'Не удалось согласовать перенос срока.'));
+      if (!await finishReassignedDeadlineOnForbidden(error, taskId, requestId)) {
+        setDeadlineChangeError(extractDisplayErrorMessage(error, 'Не удалось согласовать перенос срока.'));
+      }
     } finally {
       setDeadlineChangeSaving(null);
     }
@@ -757,7 +908,9 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
       await apiService.rejectTaskJournalDeadlineChangeRequest(taskId, requestId, { comment });
       await finishCurrentNotification('forced-task-deadline-change-rejected');
     } catch (error) {
-      setDeadlineChangeError(extractDisplayErrorMessage(error, 'Не удалось отклонить перенос срока.'));
+      if (!await finishReassignedDeadlineOnForbidden(error, taskId, requestId)) {
+        setDeadlineChangeError(extractDisplayErrorMessage(error, 'Не удалось отклонить перенос срока.'));
+      }
     } finally {
       setDeadlineChangeSaving(null);
     }
@@ -1062,6 +1215,7 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
             disabled={isSaving || approvalTaskLoading}
           />
           {approvalError ? <p className="mt-2 text-sm font-semibold text-rose-600">{approvalError}</p> : null}
+          {approvalUnavailable && approvalError ? <button type="button" disabled={Boolean(acknowledgingId)} onClick={() => void acknowledge()} className="mt-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60">Повторить закрытие уведомления</button> : null}
 
           <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end">
             {current.taskId && onOpenTask ? (
@@ -1078,7 +1232,7 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
             <button
               type="button"
               onClick={() => void returnTaskApprovalToRevision()}
-              disabled={isSaving || approvalTaskLoading}
+              disabled={isSaving || approvalTaskLoading || approvalFilesLoading || approvalUnavailable || !approvalTask}
               className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-orange-200 bg-white px-4 py-2.5 text-sm font-semibold text-orange-700 transition hover:bg-orange-50 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
             >
               {approvalSaving === 'revision' ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
@@ -1089,7 +1243,7 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
                 <button
                   type="button"
                   onClick={() => void approveTaskApprovalRequest('returnToAssignee')}
-                  disabled={isSaving || approvalTaskLoading}
+                  disabled={isSaving || approvalTaskLoading || approvalFilesLoading || approvalUnavailable || !approvalTask}
                   className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700 transition hover:bg-blue-100 disabled:cursor-wait disabled:opacity-60 sm:w-auto"
                 >
                   {approvalSaving === 'approveReturn' ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
@@ -1098,7 +1252,7 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
                 <button
                   type="button"
                   onClick={() => void approveTaskApprovalRequest('complete')}
-                  disabled={isSaving || approvalTaskLoading}
+                  disabled={isSaving || approvalTaskLoading || approvalFilesLoading || approvalUnavailable || !approvalTask}
                   className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60 sm:w-auto"
                 >
                   {approvalSaving === 'approveComplete' ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
@@ -1109,7 +1263,7 @@ function UserForcedTaskRevisionModal({ userId, onOpenTask, onOpenCaseTasks }: Fo
               <button
                 type="button"
                 onClick={() => void approveTaskApprovalRequest()}
-                disabled={isSaving || approvalTaskLoading}
+                disabled={isSaving || approvalTaskLoading || approvalFilesLoading || approvalUnavailable || !approvalTask}
                 className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60 sm:w-auto"
               >
                 {approvalSaving === 'approve' ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}

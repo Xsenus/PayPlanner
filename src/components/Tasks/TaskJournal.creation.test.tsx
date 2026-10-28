@@ -1034,7 +1034,7 @@ describe('TaskJournal', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Действия с задачей' }));
     expect(screen.getByTestId('task-duplicate-icon')).toBeTruthy();
-    expect(screen.getByText('Создать отдельную копию с теми же данными')).toBeTruthy();
+    expect(screen.getByText('Создать новую задачу с основными данными')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Дублировать задачу' }));
 
     await screen.findByRole('heading', { name: 'Выберите клиента и дело' });
@@ -1165,6 +1165,8 @@ describe('TaskJournal', () => {
     expect(cancelButton.getAttribute('title')).toContain('статусом «Отменена»');
     expect(within(duplicateButton).getByTestId('task-duplicate-icon')).toBeTruthy();
     expect(within(cancelButton).getByTestId('task-cancel-icon')).toBeTruthy();
+    expect(within(duplicateButton).getByText('Создать новую задачу с основными данными')).toBeTruthy();
+    expect(within(cancelButton).getByText('Оставить в журнале со статусом «Отменена»')).toBeTruthy();
 
     fireEvent.click(cancelButton);
     await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({

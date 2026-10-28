@@ -1197,6 +1197,15 @@ describe('CaseDetailPage', () => {
     vi.mocked(apiService.deleteCaseRelatedParty).mockResolvedValue(undefined);
   });
 
+  it('uses the supplied return label and keeps the case registry label by default', async () => {
+    const onBack = vi.fn();
+    const view = render(<CaseDetailPage caseId={15} onBack={onBack} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Реестр дел' }));
+    view.rerender(<CaseDetailPage caseId={15} onBack={onBack} backLabel="К анализу оплаты задач" />);
+    fireEvent.click(screen.getByRole('button', { name: 'К анализу оплаты задач' }));
+    expect(onBack).toHaveBeenCalledTimes(2);
+  });
+
   it('does not offer a result action for a hearing that has not occurred or was cancelled', async () => {
     vi.mocked(apiService.getCaseCourtEvents).mockResolvedValue([
       {
@@ -1670,6 +1679,27 @@ describe('CaseDetailPage', () => {
     await act(async () => { reject(new Error('Late failure')); });
     expect(screen.getByText('Заявление.docx')).toBeTruthy();
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('finds canonically equivalent document names without changing their stored names', async () => {
+    vi.mocked(apiService.getCaseDocuments).mockResolvedValue([
+      createCaseDocument({ id: 71, documentKey: 'one', originalFileName: 'Ёлка.pdf' }),
+      createCaseDocument({ id: 72, documentKey: 'two', originalFileName: 'Е\u0308лка.docx' }),
+      createCaseDocument({ id: 73, documentKey: 'three', originalFileName: 'Другой.pdf' }),
+    ]);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Документы' }));
+    await screen.findByRole('button', { name: 'Открыть предпросмотр документа Ёлка.pdf' });
+    fireEvent.change(screen.getByLabelText('Поиск документов дела'), { target: { value: 'Е\u0308ЛКА' } });
+    expect(screen.getByRole('button', { name: 'Открыть предпросмотр документа Ёлка.pdf' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Открыть предпросмотр документа Е\u0308лка.docx' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Открыть предпросмотр документа Другой.pdf' })).toBeNull();
+    expect(screen.getByText('Показано 2 из 3')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Поиск документов дела'), { target: { value: 'Ёлка' } });
+    expect(screen.getByRole('button', { name: 'Открыть предпросмотр документа Ёлка.pdf' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Открыть предпросмотр документа Е\u0308лка.docx' })).toBeTruthy();
+    expect(screen.getByText('Показано 2 из 3')).toBeTruthy();
+    expect(apiService.getCaseDocuments).toHaveBeenCalledTimes(1);
   });
 
   it('shows one version history when document keys differ only in letter case', async () => {

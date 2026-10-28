@@ -175,6 +175,56 @@ describe('NotificationCenter', () => {
     expect(screen.getAllByText('7 июня 2026 года')).toHaveLength(1);
   });
 
+  it('groups by the saved time zone and starts a date heading on every page', async () => {
+    let zone = 'Asia/Yakutsk';
+    apiMock.getUserSetting.mockImplementation(async (key: string) => key === 'profile.timeZoneId' ? { key, value: zone } : null);
+    const first = createNotification({ id: 30, title: 'После полуночи', createdAt: '2026-06-07T18:00:00Z' });
+    const second = createNotification({ id: 31, title: 'До полуночи', createdAt: '2026-06-07T14:00:00Z' });
+    const third = createNotification({ id: 32, title: 'Продолжение дня', createdAt: '2026-06-07T13:00:00Z' });
+    const remainingFirstPage = Array.from({ length: 23 }, (_, index) => createNotification({
+      id: 100 + index, title: `Сообщение ${index}`, createdAt: '2026-06-07T13:30:00Z',
+    }));
+    apiMock.getUserNotifications.mockImplementation(async ({ page }: { page: number }) => ({
+      items: page === 1 ? [first, second, ...remainingFirstPage] : [third], total: 26, page, pageSize: 25,
+    }));
+    const delayedSearchTimers: Array<() => void> = [];
+    const originalTimeout = window.setTimeout.bind(window);
+    const timerSpy = vi.spyOn(window, 'setTimeout').mockImplementation(((handler: TimerHandler, delay?: number) => {
+      if (delay === 300 && typeof handler === 'function') {
+        delayedSearchTimers.push(() => handler());
+        return 0;
+      }
+      return originalTimeout(handler, delay);
+    }) as typeof globalThis.setTimeout);
+    const view = render(<NotificationCenter />);
+    await waitFor(() => {
+      expect(screen.getByRole('separator', { name: 'Уведомления за 8 июня 2026 года' })).toBeTruthy();
+      expect(screen.getByRole('separator', { name: 'Уведомления за 7 июня 2026 года' })).toBeTruthy();
+      expect(screen.getAllByRole('separator')).toHaveLength(2);
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Вперед' }));
+    await screen.findByText('Продолжение дня');
+    act(() => delayedSearchTimers.forEach((callback) => callback()));
+    timerSpy.mockRestore();
+    await waitFor(() => expect(screen.getByText('Продолжение дня')).toBeTruthy());
+    expect(screen.getByRole('separator', { name: 'Уведомления за 7 июня 2026 года' })).toBeTruthy();
+    expect(screen.queryByRole('separator', { name: 'Уведомления за 8 июня 2026 года' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Назад' }));
+    await screen.findByText('После полуночи');
+    expect(screen.getAllByRole('separator')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Вперед' }));
+    await screen.findByText('Продолжение дня');
+    fireEvent.change(screen.getByPlaceholderText('Поиск по уведомлению, задаче или событию'), { target: { value: 'важное' } });
+    await waitFor(() => expect(apiMock.getUserNotifications).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, search: 'важное' })));
+    view.unmount();
+
+    zone = 'UTC';
+    render(<NotificationCenter />);
+    await screen.findByText('После полуночи');
+    await waitFor(() => expect(screen.getAllByRole('separator')).toHaveLength(1));
+    expect(screen.getByRole('separator', { name: 'Уведомления за 7 июня 2026 года' })).toBeTruthy();
+  });
+
   it('confirms case activity and snoozes inactivity notifications', async () => {
     const confirmNotification = createNotification({
       id: 12,

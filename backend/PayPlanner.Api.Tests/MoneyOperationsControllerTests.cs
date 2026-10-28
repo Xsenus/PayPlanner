@@ -31,6 +31,74 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
     private Task<AccountSessionsFixture> CreateAccountSessionsFixtureAsync(bool postgres, bool admin = true)
         => AccountSessionsFixture.CreateAsync(postgres, bankModelTemplate, admin);
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task CreateCashOperation_RejectsAccountWithUnknownCurrencyWithoutCreatingOrder(string currency)
+    {
+        await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var account = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Cash, "Тестовая касса", currency);
+        var controller = await CreateAuthorizedJournalControllerAsync(db);
+
+        var result = await controller.Create(new MoneyOperation
+        {
+            MoneyAccountId = account.Id, Source = MoneyOperationSource.Cash, Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact, Date = new DateTime(2026, 5, 1), Amount = 100m, Currency = null,
+        });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Empty(await db.MoneyOperations.ToListAsync());
+        Assert.Empty(await db.CashOrders.ToListAsync());
+    }
+
+    [Fact]
+    public async Task CreateTransfer_RejectsAccountsWithUnknownCurrencyWithoutCreatingMovements()
+    {
+        await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var bank = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Bank, "Тестовый банк", "");
+        var cash = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Cash, "Тестовая касса", "");
+        var controller = await CreateAuthorizedJournalControllerAsync(db);
+
+        var result = await controller.CreateTransfer(new MoneyOperationTransferRequest
+        {
+            SourceMoneyAccountId = bank.Id, TargetMoneyAccountId = cash.Id, Amount = 100m, Currency = "", Date = new DateTime(2026, 5, 1),
+        });
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Empty(await db.MoneyOperations.ToListAsync());
+        Assert.Empty(await db.CashOrders.ToListAsync());
+    }
+
+    [Fact]
+    public async Task UpdateCashOperation_UnknownAccountCurrencyPreservesHistoricalOrder()
+    {
+        await using var db = await CreateContextAsync();
+        var companyId = await RegisterAccountCompanyAsync(db);
+        var account = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Cash, "Тестовая касса", "");
+        var operation = new MoneyOperation { MoneyAccountId = account.Id, Source = MoneyOperationSource.Cash,
+            Direction = MoneyOperationDirection.Income, AccountingType = MoneyOperationAccountingType.Fact,
+            Date = new DateTime(2026, 5, 1), Amount = 100m, Currency = null, Purpose = "Прежнее" };
+        db.MoneyOperations.Add(operation);
+        await db.SaveChangesAsync();
+        db.CashOrders.Add(new CashOrder { Number = "ПКО-2026-9990", Type = CashOrderType.Incoming,
+            Status = CashOrderStatus.Posted, Date = operation.Date, Amount = operation.Amount, Currency = null, MoneyOperationId = operation.Id });
+        await db.SaveChangesAsync();
+        var controller = await CreateAuthorizedJournalControllerAsync(db);
+
+        var result = await controller.Update(operation.Id, new MoneyOperation { MoneyAccountId = account.Id,
+            Source = MoneyOperationSource.Cash, Direction = MoneyOperationDirection.Income, AccountingType = MoneyOperationAccountingType.Fact,
+            Date = operation.Date, Amount = operation.Amount, Currency = null, Purpose = "Новое" });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        db.ChangeTracker.Clear();
+        Assert.Equal("Прежнее", (await db.MoneyOperations.SingleAsync()).Purpose);
+        var order = await db.CashOrders.SingleAsync();
+        Assert.Equal(CashOrderStatus.Posted, order.Status);
+        Assert.Null(order.Currency);
+    }
+
     [Fact]
     public async Task CreateTransfer_CreatesPairedOperations_AndCashOrderForCashSide()
     {
@@ -1472,9 +1540,10 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
         var accountSummariesOk = Assert.IsType<OkObjectResult>(accountSummariesAction.Result);
         var accountSummaries = Assert.IsAssignableFrom<IReadOnlyList<MoneyOperationAccountSummaryDto>>(accountSummariesOk.Value);
         var mainAccountSummary = Assert.Single(accountSummaries, item => item.AccountName == "Основной банк");
-        Assert.Equal(10_000m, mainAccountSummary.StartBalance);
-        Assert.Equal(5_000m, mainAccountSummary.Income);
-        Assert.Equal(15_000m, mainAccountSummary.EndBalance);
+        Assert.Equal("unattributed", mainAccountSummary.CurrencyStatus);
+        Assert.Null(mainAccountSummary.StartBalance);
+        Assert.Null(mainAccountSummary.Income);
+        Assert.Null(mainAccountSummary.EndBalance);
 
         var action = await controller.GetPaged(
             from: new DateTime(2026, 4, 1),
@@ -2484,6 +2553,8 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
         var operation = Assert.IsType<MoneyOperation>(created.Value);
         var createdOrder = await db.CashOrders.SingleAsync();
         Assert.Equal(operation.Id, createdOrder.MoneyOperationId);
+        Assert.Equal(moneyAccount.Id, createdOrder.MoneyAccountId);
+        Assert.Equal(companyId, createdOrder.CompanyId);
         Assert.Equal(CashOrderType.Incoming, createdOrder.Type);
         Assert.Equal(CashOrderStatus.Posted, createdOrder.Status);
         Assert.Equal(25_000m, createdOrder.Amount);
@@ -2523,6 +2594,8 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
         Assert.Equal(30_000m, syncedOrder.Amount);
         Assert.Equal(new DateTime(2026, 4, 30), syncedOrder.Date);
         Assert.Equal("Основная касса", syncedOrder.Account);
+        Assert.Equal(nextMoneyAccount.Id, syncedOrder.MoneyAccountId);
+        Assert.Equal(companyId, syncedOrder.CompanyId);
     }
 
     [Fact]
@@ -3380,6 +3453,8 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
         Assert.Equal(2, result.Created);
         Assert.Equal(1, result.Skipped);
         Assert.NotNull(result.BatchId);
+        Assert.Equal(2, result.Operations.Count);
+        Assert.All(result.Operations, operation => Assert.Equal("RUB", operation.Currency));
 
         var operations = await db.MoneyOperations.OrderBy(item => item.Date).ToListAsync();
         Assert.Collection(
@@ -3423,6 +3498,36 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
         var duplicateResult = Assert.IsType<BankStatementImportResultDto>(duplicateOk.Value);
         Assert.Equal(0, duplicateResult.Created);
         Assert.Equal(1, duplicateResult.Skipped);
+    }
+
+    [Fact]
+    public async Task ImportBankStatement_ReturnsCurrencyOfForeignAccountWithoutAutoMatchingInvoice()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = await CreateBankImportControllerAsync(db);
+        var account = await db.MoneyAccounts.SingleAsync();
+        account.Currency = "USD";
+        var invoice = new Invoice { Number = "33", Date = new DateTime(2026, 4, 20) };
+        db.Payments.Add(new Payment
+        {
+            Invoice = invoice,
+            SellerCompanyId = account.CompanyId,
+            Account = "33",
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = 123m,
+            PaidAmount = 0m,
+            Date = invoice.Date
+        });
+        await db.SaveChangesAsync();
+        var action = await controller.ImportBankStatement(CreateFormFile(
+            "Дата;Сумма;Контрагент;Назначение;Номер\n29.04.2026;123;Синтетический клиент;Оплата по счёту №33;101\n", "statement.csv"), CancellationToken.None);
+        var result = Assert.IsType<BankStatementImportResultDto>(Assert.IsType<OkObjectResult>(action.Result).Value);
+        var created = Assert.Single(result.Operations);
+        Assert.Equal("USD", created.Currency);
+        Assert.Null((await db.MoneyOperations.SingleAsync()).LinkedInvoiceId);
+        Assert.Equal(0m, (await db.Payments.SingleAsync()).PaidAmount);
     }
 
     [Fact]
@@ -4212,6 +4317,7 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
         };
         var operation = new MoneyOperation
         {
+            Currency = "RUB",
             MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
@@ -4267,6 +4373,7 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
         var moneyAccount = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Bank, "Синтетический счёт разнесения");
         var operation = new MoneyOperation
         {
+            Currency = "RUB",
             MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
@@ -4334,6 +4441,7 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
         };
         var operation = new MoneyOperation
         {
+            Currency = "RUB",
             MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Expense,
@@ -4390,6 +4498,7 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
         var moneyAccount = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.EMoney, "Синтетический счёт разнесения");
         var operation = new MoneyOperation
         {
+            Currency = "RUB",
             MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.EMoney,
             Direction = MoneyOperationDirection.Income,
@@ -4435,6 +4544,7 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
         var moneyAccount = await CreateRegisteredMoneyAccountAsync(db, companyId, MoneyOperationSource.Bank, "Синтетический счёт разнесения");
         var operation = new MoneyOperation
         {
+            Currency = "RUB",
             MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
@@ -4567,6 +4677,7 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
         };
         var operation = new MoneyOperation
         {
+            Currency = "RUB",
             MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
@@ -4625,6 +4736,7 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
         };
         var operation = new MoneyOperation
         {
+            Currency = "RUB",
             MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
@@ -4691,6 +4803,7 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
         };
         var operation = new MoneyOperation
         {
+            Currency = "RUB",
             MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
@@ -4849,6 +4962,7 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
         };
         var operation = new MoneyOperation
         {
+            Currency = "RUB",
             MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
@@ -4911,6 +5025,7 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
         };
         var operation = new MoneyOperation
         {
+            Currency = "RUB",
             MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
@@ -4966,6 +5081,7 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
         };
         var operation = new MoneyOperation
         {
+            Currency = "RUB",
             MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.EMoney,
             Direction = MoneyOperationDirection.Income,
@@ -6059,6 +6175,7 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
         });
         var operation = new MoneyOperation
         {
+            Currency = "RUB",
             MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
@@ -6131,6 +6248,7 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
         };
         var operation = new MoneyOperation
         {
+            Currency = "RUB",
             MoneyAccountId = moneyAccount.Id,
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
@@ -6261,6 +6379,8 @@ public partial class MoneyOperationsControllerTests : IClassFixture<PostgreSqlMo
                     User = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth")),
                 },
             };
+            // Existing journal behavior tests represent the current client contract.
+            controller.Request.Headers["X-PayPlanner-Currency-Contract"] = "1";
         }
 
         return controller;

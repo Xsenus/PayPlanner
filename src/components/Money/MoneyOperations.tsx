@@ -36,6 +36,7 @@ import { useDialog } from '../../hooks/useDialog';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useMoneyOperations } from '../../hooks/useMoneyOperations';
+import { useModalFocusTrap } from '../../hooks/useModalFocusTrap';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { useToast } from '../../hooks/useToast';
 import { apiService } from '../../services/api';
@@ -75,7 +76,7 @@ import type {
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { requestPaymentAdvanceReviewFilter } from '../../utils/paymentAdvanceReview';
 import { canEditMoneyAccountHistory, canUseMoneyAccountForNewOperation, initialMoneyAccount, moneyAccountLabel } from '../../utils/moneyAccountSelection';
-import { moneyBalanceComparisonKey, moneyBalanceCurrencyLabel } from '../../utils/moneyBalanceIdentity';
+import { formatConfirmedMoney, isCashBookCurrencyConfirmed, moneyBalanceComparisonKey, moneyBalanceCurrencyLabel } from '../../utils/moneyBalanceIdentity';
 
 type MoneyTab = MoneyOperationSource | 'Total';
 
@@ -83,6 +84,14 @@ type BankStatementImportScope = {
   key: string;
   canImport: boolean;
   target: { companyId: number; moneyAccountId: number } | null;
+};
+
+type BankImportOperationEditor = {
+  scope: BankStatementImportScope;
+  operationId: number;
+  batchId: number | null;
+  page: number;
+  search: string;
 };
 
 type BankStatementAutoImportSettings = {
@@ -277,6 +286,7 @@ function mapMoneyOperationToForm(source: MoneyOperationSource, initialData?: Mon
     ...createDefaultForm(source),
     ...initialData,
     source: initialData.source ?? source,
+    currency: initialData.currency ?? null,
     date: toDateInputValue(initialData.date) || todayYMD(),
     recognitionDate: toDateInputValue(initialData.recognitionDate) || '',
     createdAt: initialData.createdAt ?? new Date().toISOString(),
@@ -454,6 +464,16 @@ function isUnallocatedAdvanceMoneyOperation(item: MoneyOperation) {
 }
 
 type BalanceCheckSource = Pick<MoneyOperationsSummary | MoneyOperationAccountSummary, 'startBalance' | 'income' | 'expense' | 'endBalance'>;
+function hasConfirmedDailyBalance(item: MoneyOperationDailyBalance | MoneyBalanceReconciliationResult) {
+  return Number.isInteger(item.companyId) && (item.companyId ?? 0) > 0
+    && Number.isInteger(item.moneyAccountId) && (item.moneyAccountId ?? 0) > 0
+    && Boolean(item.balanceKey?.trim()) && Boolean(item.currency?.trim());
+}
+function sameConfirmedBalanceIdentity(current: MoneyOperationDailyBalance, saved: MoneyBalanceReconciliationResult) {
+  return hasConfirmedDailyBalance(current) && hasConfirmedDailyBalance(saved)
+    && current.companyId === saved.companyId && current.moneyAccountId === saved.moneyAccountId
+    && current.source === saved.source && current.currency?.trim().toUpperCase() === saved.currency?.trim().toUpperCase();
+}
 type DailyBalanceCheckSource = Pick<
   MoneyOperationDailyBalance,
   'openingBalance' | 'income' | 'expense' | 'closingBalance' | 'incomeCount' | 'expenseCount' | 'isBalanced' | 'currency'
@@ -466,6 +486,7 @@ type ReconciliationNotification = {
 };
 
 function getBalanceCheck(source: BalanceCheckSource) {
+  if (source.startBalance === null || source.income === null || source.expense === null || source.endBalance === null) return null;
   const expectedEndBalance = Math.round((source.startBalance + source.income - source.expense) * 100) / 100;
   const difference = Math.round((source.endBalance - expectedEndBalance) * 100) / 100;
 
@@ -476,16 +497,17 @@ function getBalanceCheck(source: BalanceCheckSource) {
   };
 }
 
-function renderBalanceCheckBadge(source: BalanceCheckSource) {
+function renderBalanceCheckBadge(source: BalanceCheckSource, currency = '₽') {
   const check = getBalanceCheck(source);
+  if (!check) return null;
 
   return (
     <div
       className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-medium ${
         check.isBalanced ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
       }`}
-      title={`Расчетный остаток: ${formatMoney(check.expectedEndBalance)} ₽`}>
-      <span>{check.isBalanced ? 'Сверка сходится' : `Расхождение: ${formatMoney(check.difference)} ₽`}</span>
+      title={`Расчетный остаток: ${formatMoney(check.expectedEndBalance)} ${currency}`}>
+      <span>{check.isBalanced ? 'Сверка сходится' : `Расхождение: ${formatMoney(check.difference)} ${currency}`}</span>
     </div>
   );
 }
@@ -732,7 +754,7 @@ function mapCashOrderToForm(order: CashOrder): CashOrder {
   return {
     ...order,
     date: toDateInputValue(order.date) || todayYMD(),
-    currency: order.currency || 'RUB',
+    currency: order.currency ?? '',
     account: order.account || '',
     payerName: order.payerName || '',
     receiverName: order.receiverName || '',
@@ -761,6 +783,7 @@ function formatCashOrderOrigin(order: CashOrder) {
 
 function CashOrderModal({
   order,
+  moneyAccounts,
   open,
   timeZoneId,
   isSaving,
@@ -779,6 +802,7 @@ function CashOrderModal({
   canViewAudit,
 }: {
   order: CashOrder | null;
+  moneyAccounts: MoneyAccount[];
   open: boolean;
   timeZoneId?: string | null;
   isSaving: boolean;
@@ -853,6 +877,11 @@ function CashOrderModal({
       return;
     }
 
+    if (!isPersisted && !form.selectedMoneyAccountId) {
+      setError('Выберите кассу для нового ордера.');
+      return;
+    }
+
     try {
       await onSave({
         ...form,
@@ -873,7 +902,7 @@ function CashOrderModal({
             <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
               <span>{formatDate(form.date)}</span>
               <span>•</span>
-              <span>{formatMoney(form.amount)} ₽</span>
+              <span>{formatMoney(form.amount)} {moneyBalanceCurrencyLabel(form.currency ?? null)}</span>
               <span
                 className={['rounded-full px-2 py-0.5 text-xs font-medium', statusClassName].join(' ')}>
                 {statusLabel}
@@ -932,20 +961,33 @@ function CashOrderModal({
               Валюта
               <input
                 value={form.currency ?? ''}
-                disabled={isCancelled}
+                disabled={isCancelled || Boolean(form.hasLinkedCashAccount)}
                 onChange={(event) => setField('currency', event.target.value)}
                 className="rounded-lg border border-slate-200 px-3 py-2 disabled:bg-slate-100"
               />
             </label>
             <label className="flex flex-col gap-1 text-sm text-slate-600">
               Счёт / касса
-              <input
-                value={form.account ?? ''}
-                disabled={isCancelled}
-                onChange={(event) => setField('account', event.target.value)}
-                className="rounded-lg border border-slate-200 px-3 py-2 disabled:bg-slate-100"
-              />
+              {isPersisted ? (
+                <input value={form.account ?? ''} disabled={isCancelled || Boolean(form.hasLinkedCashAccount)}
+                  onChange={(event) => setField('account', event.target.value)}
+                  className="rounded-lg border border-slate-200 px-3 py-2 disabled:bg-slate-100" />
+              ) : (
+                <SystemSelect value={form.selectedMoneyAccountId ?? ''} disabled={isCancelled}
+                  onChange={(event) => {
+                    const selected = moneyAccounts.find(account => account.id === Number(event.target.value));
+                    setForm(prev => prev ? { ...prev, selectedMoneyAccountId: selected?.id ?? null,
+                      account: selected?.name ?? '', currency: selected?.currency?.trim() ?? '' } : prev);
+                  }} className="rounded-lg border border-slate-200 px-3 py-2 disabled:bg-slate-100">
+                  <option value="">Выберите кассу</option>
+                  {moneyAccounts.filter(account => account.source === 'Cash' && canUseMoneyAccountForNewOperation(account))
+                    .map(account => <option key={account.id} value={account.id}>{moneyAccountLabel(account)}</option>)}
+                </SystemSelect>
+              )}
             </label>
+            {isPersisted && form.hasLinkedCashAccount && (
+              <p className="text-xs text-slate-500 md:col-span-3">Касса и валюта закреплены за ордером.</p>
+            )}
             <label className="flex flex-col gap-1 text-sm text-slate-600">
               Плательщик
               <input
@@ -1230,6 +1272,7 @@ function CashOrdersPanel({
   to,
   search,
   accountName,
+  moneyAccountId,
   refreshKey,
   onCreate,
   onOpen,
@@ -1241,6 +1284,7 @@ function CashOrdersPanel({
   to: string;
   search: string;
   accountName: string;
+  moneyAccountId?: number;
   refreshKey: number;
   onCreate: () => void;
   onOpen: (cashOrderId: number) => void;
@@ -1257,8 +1301,9 @@ function CashOrdersPanel({
   const [statusFilter, setStatusFilter] = useState<'all' | 'Draft' | 'Posted' | 'Cancelled'>('all');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cashBookError, setCashBookError] = useState<string | null>(null);
   const pageSize = 10;
-  const queryScopeKey = JSON.stringify([accountName, from, search, statusFilter, to, typeFilter]);
+  const queryScopeKey = JSON.stringify([accountName, moneyAccountId, from, search, statusFilter, to, typeFilter]);
   const queryScopeKeyRef = useRef(queryScopeKey);
 
   const openPrintHtml = (html: string) => {
@@ -1270,23 +1315,28 @@ function CashOrdersPanel({
 
   const handlePrintCashBook = async () => {
     try {
-      const html = await apiService.getCashBookPrintHtml({ from, to, accountName: accountName || undefined });
+      if (moneyAccountId != null && cashBook?.moneyAccountId !== moneyAccountId) throw new Error('Обновите сервер для печати выбранной кассы.');
+      const html = await apiService.getCashBookPrintHtml({ from, to, accountName: accountName || undefined, moneyAccountId });
+      if (moneyAccountId != null && !html.includes(`<meta name="payplanner-account-id" content="${moneyAccountId}">`)) throw new Error('Сервер не подтвердил выбранную кассу для печати.');
       openPrintHtml(html);
     } catch (err) {
-      setError(extractDisplayErrorMessage(err, 'Не удалось открыть печатную форму кассовой книги.'));
+      setCashBookError(extractDisplayErrorMessage(err, 'Не удалось открыть печатную форму кассовой книги.'));
     }
   };
 
   const handlePrintRegister = async () => {
     try {
+      if (moneyAccountId != null && registerSummary?.moneyAccountId !== moneyAccountId) throw new Error('Обновите сервер для печати выбранной кассы.');
       const html = await apiService.getCashOrderRegisterPrintHtml({
         from,
         to,
         accountName: accountName || undefined,
+        moneyAccountId,
         type: typeFilter === 'all' ? undefined : typeFilter,
         status: statusFilter === 'all' ? undefined : statusFilter,
         search,
       });
+      if (moneyAccountId != null && !html.includes(`<meta name="payplanner-account-id" content="${moneyAccountId}">`)) throw new Error('Сервер не подтвердил выбранную кассу для печати.');
       openPrintHtml(html);
     } catch (err) {
       setError(extractDisplayErrorMessage(err, 'Не удалось открыть печатную форму журнала регистрации.'));
@@ -1305,8 +1355,11 @@ function CashOrdersPanel({
     const controller = new AbortController();
     setLoading(true);
     setError(null);
+    setCashBookError(null);
+    setCashBook(null);
+    setRegisterSummary(null);
 
-    Promise.all([
+    Promise.allSettled([
       apiService.getCashOrderRegister({
         from,
         to,
@@ -1314,28 +1367,33 @@ function CashOrdersPanel({
         status: statusFilter === 'all' ? undefined : statusFilter,
         search,
         accountName: accountName || undefined,
+        moneyAccountId,
         page,
         pageSize,
       }, { signal: controller.signal }),
       apiService.getCashBook(
-        { from, to, accountName: accountName || undefined },
+        { from, to, accountName: accountName || undefined, moneyAccountId },
         { signal: controller.signal },
       ),
     ])
-      .then(([data, book]) => {
+      .then(([registerResult, bookResult]) => {
         if (controller.signal.aborted) return;
-        setOrders(data.items);
-        setTotal(data.total);
-        setRegisterSummary(data);
-        setCashBook(book);
-      })
-      .catch((err) => {
-        if (controller.signal.aborted) return;
-        setOrders([]);
-        setTotal(0);
-        setRegisterSummary(null);
-        setCashBook(null);
-        setError(extractDisplayErrorMessage(err, 'Не удалось загрузить кассовые ордера.'));
+        if (registerResult.status === 'fulfilled' && (moneyAccountId == null || registerResult.value.moneyAccountId === moneyAccountId)) {
+          setOrders(registerResult.value.items);
+          setTotal(registerResult.value.total);
+          setRegisterSummary(registerResult.value);
+        } else {
+          setOrders([]);
+          setTotal(0);
+          setError(registerResult.status === 'fulfilled' ? 'Обновите сервер для просмотра выбранной кассы.'
+            : extractDisplayErrorMessage(registerResult.reason, 'Не удалось загрузить кассовые ордера.'));
+        }
+        if (bookResult.status === 'fulfilled' && (moneyAccountId == null || bookResult.value.moneyAccountId === moneyAccountId)) {
+          setCashBook(bookResult.value);
+        } else {
+          setCashBookError(bookResult.status === 'fulfilled' ? 'Обновите сервер для просмотра выбранной кассы.'
+            : extractDisplayErrorMessage(bookResult.reason, 'Не удалось загрузить кассовую книгу.'));
+        }
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
@@ -1344,9 +1402,16 @@ function CashOrdersPanel({
     return () => {
       controller.abort();
     };
-  }, [accountName, from, page, queryScopeKey, refreshKey, search, statusFilter, to, typeFilter]);
+  }, [accountName, from, moneyAccountId, page, queryScopeKey, refreshKey, search, statusFilter, to, typeFilter]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const formatCashBookAmount = (amount: number) => formatConfirmedMoney(amount, cashBook?.currencyStatus, cashBook?.currency);
+  const formatRegisterSummaryAmount = (amount: number | null) => {
+    if (registerSummary?.amountsAvailable !== true || typeof amount !== 'number' || !Number.isFinite(amount)) return '—';
+    if (registerSummary.currencyStatus === 'empty' && amount === 0) return formatMoney(amount);
+    if (registerSummary.currencyStatus !== 'single' || !registerSummary.currency?.trim()) return '—';
+    return `${formatMoney(amount)} ${moneyBalanceCurrencyLabel(registerSummary.currency)}`;
+  };
 
   return (
     <div className="mt-6 min-w-0 rounded-xl border border-slate-200 bg-white">
@@ -1368,7 +1433,7 @@ function CashOrdersPanel({
           <button
             type="button"
             onClick={() => void handlePrintCashBook()}
-            disabled={!canExport}
+            disabled={!canExport || !cashBook || !isCashBookCurrencyConfirmed(cashBook.currencyStatus, cashBook.currency)}
             className="inline-flex items-center gap-2 rounded-lg border border-amber-200 px-3 py-1.5 text-sm font-medium text-amber-700 hover:bg-amber-50">
             <Printer className="h-4 w-4" />
             Кассовая книга
@@ -1376,7 +1441,7 @@ function CashOrdersPanel({
           <button
             type="button"
             onClick={() => void handlePrintRegister()}
-            disabled={!canExport}
+            disabled={!canExport || (moneyAccountId != null && registerSummary?.moneyAccountId !== moneyAccountId)}
             className="inline-flex items-center gap-2 rounded-lg border border-blue-200 px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-50">
             <Printer className="h-4 w-4" />
             Журнал
@@ -1422,19 +1487,22 @@ function CashOrdersPanel({
           <div className="ml-2 text-sm text-slate-500">Всего: {total}</div>
         </div>
       </div>
+      {moneyAccountId != null && (
+        <p className="px-4 py-2 text-xs text-amber-700">Показаны только ордера с подтверждённой принадлежностью к выбранной кассе. Ордера без подтверждённой кассы в остатки не входят.</p>
+      )}
 
       {registerSummary && (
         <div className="grid gap-3 border-b border-slate-200 px-4 py-3 md:grid-cols-5">
           <div className="rounded-lg bg-emerald-50 px-3 py-2">
             <div className="text-xs uppercase text-emerald-700/70">Приходные ордера</div>
             <div className="mt-1 text-base font-semibold text-emerald-700">
-              {registerSummary.incomingCount} на {formatMoney(registerSummary.incomingAmount)} ₽
+              {registerSummary.incomingCount} на {formatRegisterSummaryAmount(registerSummary.incomingAmount)}
             </div>
           </div>
           <div className="rounded-lg bg-rose-50 px-3 py-2">
             <div className="text-xs uppercase text-rose-700/70">Расходные ордера</div>
             <div className="mt-1 text-base font-semibold text-rose-700">
-              {registerSummary.outgoingCount} на {formatMoney(registerSummary.outgoingAmount)} ₽
+              {registerSummary.outgoingCount} на {formatRegisterSummaryAmount(registerSummary.outgoingAmount)}
             </div>
           </div>
           <div className="rounded-lg bg-slate-50 px-3 py-2">
@@ -1452,6 +1520,7 @@ function CashOrdersPanel({
         </div>
       )}
 
+      {cashBookError && <p role="status" className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{cashBookError}</p>}
       {cashBook && (
         <div
           data-testid="cash-book-summary"
@@ -1463,22 +1532,22 @@ function CashOrdersPanel({
           </div>
           <div className="min-w-0 rounded-lg border border-slate-200 bg-white p-3">
             <div className="text-xs uppercase text-slate-400">Остаток на начало</div>
-            <div className="mt-1 text-lg font-semibold text-amber-600">{formatMoney(cashBook.openingBalance)} ₽</div>
+            <div className="mt-1 text-lg font-semibold text-amber-600">{formatCashBookAmount(cashBook.openingBalance)}</div>
             <div className="mt-1 text-xs text-slate-400">{formatDate(cashBook.from)}</div>
           </div>
           <div className="min-w-0 rounded-lg border border-slate-200 bg-white p-3">
             <div className="text-xs uppercase text-slate-400">Приход</div>
-            <div className="mt-1 text-lg font-semibold text-emerald-600">{formatMoney(cashBook.income)} ₽</div>
+            <div className="mt-1 text-lg font-semibold text-emerald-600">{formatCashBookAmount(cashBook.income)}</div>
             <div className="mt-1 text-xs text-slate-400">Приходных ордеров: {cashBook.incomingCount}</div>
           </div>
           <div className="min-w-0 rounded-lg border border-slate-200 bg-white p-3">
             <div className="text-xs uppercase text-slate-400">Расход</div>
-            <div className="mt-1 text-lg font-semibold text-rose-600">{formatMoney(cashBook.expense)} ₽</div>
+            <div className="mt-1 text-lg font-semibold text-rose-600">{formatCashBookAmount(cashBook.expense)}</div>
             <div className="mt-1 text-xs text-slate-400">Расходных ордеров: {cashBook.outgoingCount}</div>
           </div>
           <div className="min-w-0 rounded-lg border border-slate-200 bg-white p-3">
             <div className="text-xs uppercase text-slate-400">Остаток на конец</div>
-            <div className="mt-1 text-lg font-semibold text-amber-600">{formatMoney(cashBook.closingBalance)} ₽</div>
+            <div className="mt-1 text-lg font-semibold text-amber-600">{formatCashBookAmount(cashBook.closingBalance)}</div>
             <div className="mt-1 text-xs text-slate-400">{formatDate(cashBook.to)}</div>
           </div>
           {cashBook.days.length > 0 && (
@@ -1501,10 +1570,10 @@ function CashOrdersPanel({
                     {cashBook.days.map((day) => (
                       <tr key={day.date}>
                         <td className="px-3 py-2 font-medium text-slate-800">{formatDate(day.date)}</td>
-                        <td className="px-3 py-2 text-right">{formatMoney(day.openingBalance)} ₽</td>
-                        <td className="px-3 py-2 text-right text-emerald-600">{formatMoney(day.income)} ₽</td>
-                        <td className="px-3 py-2 text-right text-rose-600">{formatMoney(day.expense)} ₽</td>
-                        <td className="px-3 py-2 text-right font-medium">{formatMoney(day.closingBalance)} ₽</td>
+                        <td className="px-3 py-2 text-right">{formatCashBookAmount(day.openingBalance)}</td>
+                        <td className="px-3 py-2 text-right text-emerald-600">{formatCashBookAmount(day.income)}</td>
+                        <td className="px-3 py-2 text-right text-rose-600">{formatCashBookAmount(day.expense)}</td>
+                        <td className="px-3 py-2 text-right font-medium">{formatCashBookAmount(day.closingBalance)}</td>
                         <td className="px-3 py-2 text-right text-slate-500">
                           Приходных ордеров: {day.incomingCount}, расходных: {day.outgoingCount}
                         </td>
@@ -1584,7 +1653,7 @@ function CashOrdersPanel({
                       {order.type === 'Incoming' ? 'Приходный кассовый ордер' : 'Расходный кассовый ордер'}
                     </span>
                   </td>
-                  <td className="px-3 py-2 font-medium">{formatMoney(order.amount)} ₽</td>
+                  <td className="px-3 py-2 font-medium">{formatMoney(order.amount)} {moneyBalanceCurrencyLabel(order.currency ?? null)}</td>
                   <td className="px-3 py-2 text-slate-700">{order.payerName ?? order.clientName ?? '—'}</td>
                   <td className="px-3 py-2 text-slate-700">{formatCashOrderOrigin(order)}</td>
                   <td className="px-3 py-2">
@@ -1634,6 +1703,8 @@ function CashOrdersPanel({
   );
 }
 
+type InvoiceCandidatePagePosition = { operation: MoneyOperation | null; cursor: string | null; previousCursors: (string | null)[] };
+
 function MoneyOperationModal({
   source,
   initialData,
@@ -1645,6 +1716,7 @@ function MoneyOperationModal({
   onClose,
   onSave,
   isSaving,
+  preserveBankFact = false,
 }: {
   source: MoneyOperationSource;
   initialData?: MoneyOperation | null;
@@ -1656,11 +1728,21 @@ function MoneyOperationModal({
   onClose: () => void;
   onSave: (payload: MoneyOperation) => Promise<void>;
   isSaving: boolean;
+  preserveBankFact?: boolean;
 }) {
   const [form, setForm] = useState<MoneyOperation>(() => mapMoneyOperationToForm(source, initialData));
   const [error, setError] = useState<string | null>(null);
   const [invoiceCandidates, setInvoiceCandidates] = useState<MoneyOperationInvoiceCandidate[]>([]);
   const [invoiceCandidatesLoading, setInvoiceCandidatesLoading] = useState(false);
+  const [invoiceCandidateSearch, setInvoiceCandidateSearch] = useState('');
+  const [appliedInvoiceCandidateSearch, setAppliedInvoiceCandidateSearch] = useState('');
+  const [invoiceCandidateSearchVersion, setInvoiceCandidateSearchVersion] = useState(0);
+  const [invoiceCandidatesError, setInvoiceCandidatesError] = useState<string | null>(null);
+  const [invoiceCandidatePageRequest, setInvoiceCandidatePageRequest] = useState<InvoiceCandidatePagePosition>({ operation: initialData ?? null, cursor: null, previousCursors: [] });
+  const [invoiceCandidatePageShown, setInvoiceCandidatePageShown] = useState<(InvoiceCandidatePagePosition & { hasMore: boolean; nextCursor: string | null }) | null>(null);
+  const operationDialogRef = useRef<HTMLDivElement>(null);
+  const operationCloseRef = useRef<HTMLButtonElement>(null);
+  const handleOperationKeyDown = useModalFocusTrap(operationDialogRef, open, onClose, operationCloseRef);
   const editorSession = useRef<{ source: MoneyOperationSource; initialData?: MoneyOperation | null } | null>(null);
   const activeMoneyAccounts = useMemo(
     () => (moneyAccounts ?? []).filter(canUseMoneyAccountForNewOperation),
@@ -1680,6 +1762,10 @@ function MoneyOperationModal({
     && form.moneyAccountId === initialData.moneyAccountId);
   const appliedInvoiceLocked = Boolean(initialData && (isAppliedToInvoice(initialData) || initialData.isInvoiceLinkProtected));
   const financialFieldsLocked = appliedInvoiceLocked || Boolean(initialData && !matchingAccountAvailable);
+  const bankFactFieldsLocked = financialFieldsLocked || preserveBankFact;
+  const operationCurrency = form.currency?.trim().toUpperCase() || null;
+  const invoiceCurrencyConfirmed = operationCurrency === 'RUB';
+  const invoiceMatchingLocked = financialFieldsLocked || !invoiceCurrencyConfirmed;
   const transferTargetAccounts = useMemo(
     () => activeMoneyAccounts.filter((account) => account.id !== form.moneyAccountId),
     [activeMoneyAccounts, form.moneyAccountId],
@@ -1709,34 +1795,51 @@ function MoneyOperationModal({
               moneyAccountName: defaultAccount.name,
               accountName: defaultAccount.name,
               source: defaultAccount.source,
-              currency: defaultAccount.currency || nextForm.currency || 'RUB',
+              currency: defaultAccount.currency ?? null,
             }
           : nextForm,
       );
       setError(null);
+      setInvoiceCandidateSearch('');
+      setAppliedInvoiceCandidateSearch('');
+      setInvoiceCandidatesError(null);
+      setInvoiceCandidates([]);
+      setInvoiceCandidatePageRequest(previous => previous.operation === initialData && previous.cursor === null && previous.previousCursors.length === 0
+        ? previous : { operation: initialData ?? null, cursor: null, previousCursors: [] });
+      setInvoiceCandidatePageShown(null);
     }
   }, [initialData, open, preferredMoneyAccountId, source, sourceMoneyAccounts]);
 
   useEffect(() => {
-    if (!open || !initialData?.id || initialData.id < 0 || !['Income', 'Expense'].includes(initialData.direction)
-        || !invoiceCandidatesMatchContext || initialData.isInvoiceLinkProtected || isAppliedToInvoice(initialData) || !matchingAccountAvailable) {
+    if (!open || !initialData?.id || initialData.id < 0 || invoiceCandidatePageRequest.operation !== initialData || !['Income', 'Expense'].includes(initialData.direction)
+        || !invoiceCurrencyConfirmed || !invoiceCandidatesMatchContext || initialData.isInvoiceLinkProtected || isAppliedToInvoice(initialData) || !matchingAccountAvailable) {
       setInvoiceCandidates([]);
       setInvoiceCandidatesLoading(false);
+      setInvoiceCandidatesError(null);
+      setInvoiceCandidatePageShown(null);
       return;
     }
 
     let cancelled = false;
+    const cancellation = new AbortController();
+    setInvoiceCandidatesError(null);
     setInvoiceCandidatesLoading(true);
     apiService
-      .getMoneyOperationInvoiceCandidates(initialData.id)
-      .then((items) => {
-        if (!cancelled) {
-          setInvoiceCandidates(items);
+      .getMoneyOperationInvoiceCandidatePage(initialData.id, appliedInvoiceCandidateSearch || undefined, invoiceCandidatePageRequest.cursor || undefined, cancellation.signal)
+      .then((page) => {
+        if (cancelled) return;
+        if (!page || !Array.isArray(page.items) || page.items.length > 10 || typeof page.hasMore !== 'boolean'
+            || (page.search ?? null) !== (appliedInvoiceCandidateSearch || null)
+            || (page.cursor ?? null) !== invoiceCandidatePageRequest.cursor
+            || (page.hasMore && (!page.nextCursor || page.nextCursor === page.cursor))) {
+          throw new Error('Unsupported invoice candidate page response');
         }
+        setInvoiceCandidates(page.items);
+        setInvoiceCandidatePageShown({ ...invoiceCandidatePageRequest, hasMore: page.hasMore, nextCursor: page.nextCursor });
       })
       .catch(() => {
         if (!cancelled) {
-          setInvoiceCandidates([]);
+          setInvoiceCandidatesError('Не удалось загрузить страницу счетов. Повторите переход или начните поиск сначала.');
         }
       })
       .finally(() => {
@@ -1747,10 +1850,19 @@ function MoneyOperationModal({
 
     return () => {
       cancelled = true;
+      cancellation.abort();
     };
-  }, [initialData, invoiceCandidatesMatchContext, matchingAccountAvailable, open, source]);
+  }, [appliedInvoiceCandidateSearch, invoiceCandidatePageRequest, invoiceCandidateSearchVersion, initialData, invoiceCandidatesMatchContext, invoiceCurrencyConfirmed, matchingAccountAvailable, open, source]);
 
   if (!open) return null;
+
+  const searchInvoiceCandidates = (term = invoiceCandidateSearch) => {
+    setInvoiceCandidates([]);
+    setInvoiceCandidatePageShown(null);
+    setInvoiceCandidatePageRequest({ operation: initialData ?? null, cursor: null, previousCursors: [] });
+    setAppliedInvoiceCandidateSearch(term.trim());
+    setInvoiceCandidateSearchVersion(version => version + 1);
+  };
 
   const setField = <K extends keyof MoneyOperation>(key: K, value: MoneyOperation[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -1833,7 +1945,7 @@ function MoneyOperationModal({
         moneyAccountName: account?.name ?? null,
         accountName: account?.name ?? '',
         source: account?.source ?? source,
-        currency: account?.currency || prev.currency || 'RUB',
+        currency: account?.id === prev.moneyAccountId ? prev.currency : account?.currency ?? null,
         transferTargetMoneyAccountId:
           prev.transferTargetMoneyAccountId === account?.id ? null : prev.transferTargetMoneyAccountId,
         linkedInvoiceId: resetInvoiceSelection ? null : prev.linkedInvoiceId,
@@ -1913,8 +2025,9 @@ function MoneyOperationModal({
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-      <div className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+      <div ref={operationDialogRef} role="dialog" aria-modal="true" aria-label={title} onKeyDown={handleOperationKeyDown}
+        className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-200 p-3">
           <div>
             <h2 className="text-xl font-semibold text-slate-900">{title}</h2>
             <p className="text-sm text-slate-500">Заполните основные параметры операции.</p>
@@ -1922,13 +2035,18 @@ function MoneyOperationModal({
           <button
             type="button"
             onClick={onClose}
+            ref={operationCloseRef}
             className="text-slate-400 hover:text-slate-600"
             aria-label="Закрыть форму денежной операции">
             ✕
           </button>
         </div>
 
-        <fieldset disabled={historicalReadOnly} className="m-0 min-w-0 flex-1 space-y-6 overflow-y-auto border-0 p-6">
+        <div className="min-h-0 flex-1 overflow-y-auto">
+        <fieldset disabled={historicalReadOnly} className="m-0 min-w-0 space-y-3 border-0 p-3">
+          {preserveBankFact && <p className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-800">
+            Сумма, дата, направление и денежный счёт взяты из выписки. Здесь можно уточнить описание, категорию или выбрать счёт для сверки.
+          </p>}
           {historicalReadOnly && (
             <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
               Историческая операция доступна только для просмотра. Её счёт и принадлежность сохраняются.
@@ -1937,7 +2055,8 @@ function MoneyOperationModal({
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2">
               <span className="text-sm text-slate-500">Операция</span>
-              <SystemSelect className="border-none bg-transparent text-sm font-medium text-slate-700 focus:outline-none">
+              <SystemSelect aria-label="Количество денежных операций" disabled={preserveBankFact}
+                className="border-none bg-transparent text-sm font-medium text-slate-700 focus:outline-none">
                 <option>1 операция</option>
                 <option>2 операции</option>
               </SystemSelect>
@@ -1946,7 +2065,8 @@ function MoneyOperationModal({
               <span className="text-sm text-slate-500">Учёт</span>
               <SystemSelect
                 value={form.accountingType}
-                disabled={financialFieldsLocked}
+                aria-label="Тип учёта денежной операции"
+                disabled={bankFactFieldsLocked}
                 onChange={(event) => setField('accountingType', event.target.value as MoneyOperationAccountingType)}
                 className="border-none bg-transparent text-sm font-medium text-slate-700 focus:outline-none">
                 <option value="Fact">Факт</option>
@@ -1961,7 +2081,7 @@ function MoneyOperationModal({
                 <input
                   type="radio"
                   name="direction"
-                  disabled={financialFieldsLocked}
+                  disabled={bankFactFieldsLocked}
                   checked={form.direction === direction}
                   onChange={() => handleDirectionChange(direction)}
                 />
@@ -1975,7 +2095,7 @@ function MoneyOperationModal({
               <button
                 type="button"
                 data-testid="money-accountable-advance-preset"
-                disabled={financialFieldsLocked}
+                disabled={financialFieldsLocked || (preserveBankFact && form.direction !== 'Expense')}
                 aria-pressed={isAccountableAdvance}
                 onClick={applyAccountableAdvancePreset}
                 className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
@@ -1994,7 +2114,7 @@ function MoneyOperationModal({
                 <SystemSelect
                   aria-label={SOURCE_ACCOUNT_FILTER_LABELS[source]}
                   value={form.moneyAccountId ?? ''}
-                  disabled={financialFieldsLocked || sourceMoneyAccounts.length === 0}
+                  disabled={bankFactFieldsLocked || sourceMoneyAccounts.length === 0}
                   onChange={(event) => handleMoneyAccountChange(event.target.value)}
                   className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none">
                   <option value="">Выберите денежный счёт</option>
@@ -2076,18 +2196,19 @@ function MoneyOperationModal({
               Номер ПП
               <input
                 value={form.paymentOrderNumber ?? ''}
+                disabled={preserveBankFact}
                 onChange={(event) => setField('paymentOrderNumber', event.target.value)}
                 className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none"
                 placeholder="Например 873864"
               />
             </label>
             <label className="flex flex-col gap-1 text-sm text-slate-600">
-              Сумма, RUB
+              Сумма, {operationCurrency ?? 'валюта не указана'}
               <input
                 type="number"
                 value={form.amount}
                 onChange={(event) => setAmount(Number(event.target.value))}
-                disabled={financialFieldsLocked}
+                disabled={bankFactFieldsLocked}
                 className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none"
               />
             </label>
@@ -2119,7 +2240,7 @@ function MoneyOperationModal({
               <SystemDateInput
                 type="date"
                 value={form.date}
-                disabled={financialFieldsLocked}
+                disabled={bankFactFieldsLocked}
                 onChange={(event) => setField('date', event.target.value)}
                 className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none"
               />
@@ -2192,7 +2313,7 @@ function MoneyOperationModal({
                         setForm(prev => ({ ...prev, linkedInvoiceId: invoiceId,
                           matchStatus: invoiceId ? 'Matched' : prev.matchStatus === 'Matched' ? 'None' : prev.matchStatus }));
                       }}
-                      disabled={financialFieldsLocked}
+                      disabled={invoiceMatchingLocked}
                       className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none"
                       placeholder="Например 33"
                     />
@@ -2221,7 +2342,7 @@ function MoneyOperationModal({
                       className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none">
                       <option value="None">Не сверено</option>
                       <option value="ClarificationRequired">Уточнить</option>
-                      <option value="Matched" disabled={!form.linkedInvoiceId}>
+                      <option value="Matched" disabled={!form.linkedInvoiceId || !invoiceCurrencyConfirmed}>
                         Сверено
                       </option>
                       <option value="Ignored">Не учитывать</option>
@@ -2241,6 +2362,9 @@ function MoneyOperationModal({
                       : 'Операция уже зачтена в счёте. Чтобы изменить сумму или связь со счётом, нужна отдельная операция сторно.'}
                   </p>
                 )}
+                {!invoiceCurrencyConfirmed && <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  Для новой сверки с рублёвым счётом нужна подтверждённая валюта RUB. Текущая валюта операции: {operationCurrency ?? 'не указана'}.
+                </p>}
                 <div className="mt-4 space-y-2">
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-xs font-semibold uppercase tracking-wide text-blue-900/70">
@@ -2248,14 +2372,48 @@ function MoneyOperationModal({
                     </p>
                     {invoiceCandidatesLoading && <span className="text-xs text-blue-700">Ищем кандидатов...</span>}
                   </div>
+                  {Boolean(initialData?.id && initialData.id > 0) && (
+                    <div role="search" aria-label="Поиск счетов для сверки" className="flex flex-wrap gap-2">
+                      <input type="search" aria-label="Поиск счёта по номеру, договору или контрагенту"
+                        placeholder="Номер счёта, договор или контрагент" maxLength={200}
+                        value={invoiceCandidateSearch} disabled={invoiceMatchingLocked || !invoiceCandidatesMatchContext}
+                        onChange={event => setInvoiceCandidateSearch(event.target.value)}
+                        onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); searchInvoiceCandidates(); } }}
+                        className="min-w-0 flex-[1_1_16rem] rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm" />
+                      <button type="button" disabled={invoiceMatchingLocked || !invoiceCandidatesMatchContext}
+                        onClick={() => searchInvoiceCandidates()} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm disabled:opacity-50">Найти счёт</button>
+                      {appliedInvoiceCandidateSearch && <button type="button" disabled={invoiceMatchingLocked || !invoiceCandidatesMatchContext}
+                        onClick={() => { setInvoiceCandidateSearch(''); searchInvoiceCandidates(''); }}
+                        className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm disabled:opacity-50">Сбросить поиск счетов</button>}
+                    </div>
+                  )}
+                  <p className="text-xs text-blue-700">На странице до 10 счетов. Используйте страницы или уточните поисковый запрос. Выберите счёт вручную.</p>
+                  {invoiceCandidatesError && <p role="alert" className="text-xs text-red-700">{invoiceCandidatesError}</p>}
+                  {(invoiceCandidatePageShown || invoiceCandidatesError) && invoiceCandidatesMatchContext && (
+                    <div role="group" aria-label="Страницы счетов для сверки" className="flex flex-wrap items-center gap-2 text-xs text-blue-800">
+                      <span>Страница {invoiceCandidatePageShown ? invoiceCandidatePageShown.previousCursors.length + 1 : 1}</span>
+                      <button type="button" disabled={invoiceCandidatesLoading || !invoiceCandidatePageShown?.previousCursors.length}
+                        onClick={() => { if (!invoiceCandidatePageShown) return; const history = invoiceCandidatePageShown.previousCursors;
+                          setInvoiceCandidatePageRequest({ operation: invoiceCandidatePageShown.operation, cursor: history[history.length - 1], previousCursors: history.slice(0, -1) }); }}
+                        className="rounded-lg border border-blue-200 bg-white px-3 py-2 disabled:opacity-50">Назад к счетам</button>
+                      <button type="button" disabled={invoiceCandidatesLoading || !invoiceCandidatePageShown?.hasMore}
+                        onClick={() => { if (!invoiceCandidatePageShown?.nextCursor) return;
+                          setInvoiceCandidatePageRequest({ operation: invoiceCandidatePageShown.operation, cursor: invoiceCandidatePageShown.nextCursor,
+                            previousCursors: [...invoiceCandidatePageShown.previousCursors, invoiceCandidatePageShown.cursor] }); }}
+                        className="rounded-lg border border-blue-200 bg-white px-3 py-2 disabled:opacity-50">Далее по счетам</button>
+                      {(Boolean(invoiceCandidatePageShown?.previousCursors.length) || invoiceCandidatesError) && <button type="button"
+                        disabled={invoiceCandidatesLoading} onClick={() => searchInvoiceCandidates(appliedInvoiceCandidateSearch)}
+                        className="rounded-lg border border-blue-200 bg-white px-3 py-2 disabled:opacity-50">Сначала по счетам</button>}
+                    </div>
+                  )}
                   {!invoiceCandidatesMatchContext && (
                     <p className="text-xs text-blue-700">
                       После смены направления или денежного счёта сохраните операцию и откройте её снова для выбора подходящего счёта.
                     </p>
                   )}
-                  {invoiceCandidatesMatchContext && !invoiceCandidatesLoading && invoiceCandidates.length === 0 && (
+                  {invoiceCurrencyConfirmed && invoiceCandidatesMatchContext && !invoiceCandidatesLoading && !invoiceCandidatesError && invoiceCandidates.length === 0 && (
                     <p className="rounded-lg border border-dashed border-blue-200 bg-white/70 px-3 py-2 text-xs text-blue-700">
-                      Подходящих счетов не найдено. Можно указать ID вручную.
+                      {appliedInvoiceCandidateSearch ? 'По запросу счета не найдены. Уточните поиск или укажите ID вручную.' : 'Подходящих счетов не найдено. Можно указать ID вручную.'}
                     </p>
                   )}
                   {invoiceCandidatesMatchContext && invoiceCandidates.map((candidate) => {
@@ -2265,7 +2423,7 @@ function MoneyOperationModal({
                         type="button"
                         key={`${candidate.invoiceId}-${candidate.paymentId}`}
                         onClick={() => handleSelectInvoiceCandidate(candidate)}
-                        disabled={financialFieldsLocked}
+                        disabled={invoiceMatchingLocked || invoiceCandidatesLoading}
                         className={`w-full rounded-lg border bg-white px-3 py-2 text-left transition hover:border-blue-400 ${
                           isSelected ? 'border-blue-500 ring-2 ring-blue-100' : 'border-blue-100'
                         } disabled:cursor-not-allowed disabled:opacity-60`}>
@@ -2317,8 +2475,9 @@ function MoneyOperationModal({
             </label>
           </div>
         </fieldset>
+        </div>
 
-        <div className="flex items-center justify-between border-t border-slate-200 px-6 py-4">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-slate-200 p-3">
           {error ? <div className="text-sm text-red-500">{error}</div> : <span />}
           <button
             type="button"
@@ -2354,7 +2513,7 @@ export function MoneyOperations({
   const canCreateMoneyOperations = permissions.payments.canCreate;
   const canEditMoneyOperations = permissions.payments.canEdit;
   const canDeleteMoneyOperations = permissions.payments.canDelete;
-  const canViewFullMoneyBalance = permissions.payments.viewScope === 'all';
+  const canViewFullMoneyBalance = permissions.payments.canView && permissions.payments.viewScope === 'all';
   const canOpenLinkedAccounts = permissions.accounts?.canView === true;
   const canOpenLinkedClients = permissions.clients?.canView === true;
   const canViewAudit = permissions.audit?.canView === true;
@@ -2378,7 +2537,10 @@ export function MoneyOperations({
   const [categoryDictionaryOptions, setCategoryDictionaryOptions] = useState<MoneyOperationCategoryOption[]>([]);
   const [accountSummaries, setAccountSummaries] = useState<MoneyOperationAccountSummary[]>([]);
   const [dailyBalances, setDailyBalances] = useState<MoneyOperationDailyBalance[]>([]);
+  const [balanceDataStatus, setBalanceDataStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [balanceReconciliationResults, setBalanceReconciliationResults] = useState<MoneyBalanceReconciliationResult[]>([]);
+  const [reconciliationLoadStatus, setReconciliationLoadStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [reconciliationReloadVersion, setReconciliationReloadVersion] = useState(0);
   const [balanceReconciliationRunning, setBalanceReconciliationRunning] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -2413,7 +2575,10 @@ export function MoneyOperations({
   const [bankImportBatches, setBankImportBatches] = useState<BankStatementImportBatch[]>([]);
   const [bankImportBatchesLoading, setBankImportBatchesLoading] = useState(false);
   const [selectedBankImport, setSelectedBankImport] = useState<BankStatementImportBatchDetail | null>(null);
+  const [bankImportRowSearch, setBankImportRowSearch] = useState('');
+  const bankImportVisibleRowsTotal = selectedBankImport?.rowsMatched ?? selectedBankImport?.rowsTotal;
   const [bankImportDetailsLoading, setBankImportDetailsLoading] = useState(false);
+  const [bankImportOpeningOperationId, setBankImportOpeningOperationId] = useState<number | null>(null);
   const [bankImportRollbackLoading, setBankImportRollbackLoading] = useState(false);
   const [bankImportReprocessLoading, setBankImportReprocessLoading] = useState(false);
   const [bankAutoImportSettings, setBankAutoImportSettings] = useState<BankStatementAutoImportSettings>(
@@ -2435,6 +2600,7 @@ export function MoneyOperations({
   const [cashInventories, setCashInventories] = useState<CashInventory[]>([]);
   const [cashInventoryTotal, setCashInventoryTotal] = useState(0);
   const [cashInventoryLoading, setCashInventoryLoading] = useState(false);
+  const [cashInventoryLoadFailed, setCashInventoryLoadFailed] = useState(false);
   const [cashInventorySaving, setCashInventorySaving] = useState(false);
   const [cashInventoryActualBalance, setCashInventoryActualBalance] = useState('');
   const [cashInventoryComment, setCashInventoryComment] = useState('');
@@ -2448,6 +2614,11 @@ export function MoneyOperations({
   const bankStatementInputRef = useRef<HTMLInputElement | null>(null);
   const moneyAccountFilterRef = useRef<HTMLDivElement | null>(null);
   const bankImportInFlightRef = useRef(false);
+  const bankImportDetailRequestRef = useRef(0);
+  const bankImportDetailAbortRef = useRef<AbortController | null>(null);
+  const bankImportOperationEditorRef = useRef<BankImportOperationEditor | null>(null);
+  const bankImportDialogRef = useRef<HTMLDivElement>(null);
+  const bankImportCloseRef = useRef<HTMLButtonElement>(null);
   const bankStatementPickerScopeRef = useRef<BankStatementImportScope | null>(null);
   const bankImportScopeRef = useRef<BankStatementImportScope>({ key: '', canImport: false, target: null });
   const bankImportMountedRef = useRef(true);
@@ -2457,6 +2628,8 @@ export function MoneyOperations({
     bankImportMountedRef.current = true;
     return () => {
       bankImportMountedRef.current = false;
+      bankImportDetailRequestRef.current += 1;
+      bankImportDetailAbortRef.current?.abort();
       bankStatementPickerScopeRef.current = null;
     };
   }, []);
@@ -2464,6 +2637,11 @@ export function MoneyOperations({
   const currentYear = new Date().getFullYear();
   const [from, setFrom] = useState(`${currentYear}-01-01`);
   const [to, setTo] = useState(`${currentYear}-12-31`);
+  const reconciliationScopeRef = useRef({ key: '' });
+  const reconciliationScopeKey = JSON.stringify([user?.id, source, from, to, moneyAccountId, accountName, canViewFullMoneyBalance, canEditMoneyOperations]);
+  if (reconciliationScopeRef.current.key !== reconciliationScopeKey) {
+    reconciliationScopeRef.current = { key: reconciliationScopeKey };
+  }
 
   const handleCurrentYear = () => {
     const year = new Date().getFullYear();
@@ -2621,47 +2799,52 @@ export function MoneyOperations({
     const availableIds = new Set(selectableOperationIds);
     setSelectedOperationIds((current) => current.filter((id) => availableIds.has(id)));
   }, [canDeleteMoneyOperations, selectableOperationIds, selectionEnabled]);
-  const selectedAccountSummary = useMemo(
-    () => accountSummaries.find((account) => account.accountName === accountName) ?? null,
-    [accountName, accountSummaries],
+  const selectedAccountSummaries = useMemo(
+    () => moneyAccountId === '' ? [] : accountSummaries.filter((account) => account.moneyAccountId === moneyAccountId),
+    [moneyAccountId, accountSummaries],
   );
   const visibleDailyBalances = useMemo(
-    () => (accountName ? dailyBalances.filter((item) => item.accountName === accountName) : dailyBalances),
-    [accountName, dailyBalances],
+    () => moneyAccountId !== ''
+      ? dailyBalances.filter((item) => item.moneyAccountId === moneyAccountId)
+      : accountName
+        ? dailyBalances.filter((item) => item.moneyAccountId == null && item.accountName === accountName)
+        : dailyBalances,
+    [accountName, dailyBalances, moneyAccountId],
   );
-  const cashLimitExceedances = useMemo(() => {
-    if (source !== 'Cash' || !cashLimitSettings.enabled || !cashLimitSettings.amount) {
-      return [];
+  const cashLimitCheck = useMemo(() => {
+    if (source !== 'Cash' || !cashLimitSettings.enabled || !cashLimitSettings.amount || !canViewFullMoneyBalance || balanceDataStatus !== 'ready') {
+      return { exceedances: [], checked: 0, unchecked: 0 };
     }
 
-    return visibleDailyBalances
-      .filter((item) => item.closingBalance > cashLimitSettings.amount!)
-      .map((item) => ({
-        ...item,
-        excess: item.closingBalance - cashLimitSettings.amount!,
-      }));
-  }, [cashLimitSettings.amount, cashLimitSettings.enabled, source, visibleDailyBalances]);
-  const cashInventoryAccountingBalance = useMemo(() => {
-    if (source !== 'Cash') {
-      return 0;
+    const exceedances: Array<MoneyOperationDailyBalance & { excess: number }> = [];
+    let checked = 0;
+    let unchecked = 0;
+    for (const item of visibleDailyBalances) {
+      if (!hasConfirmedDailyBalance(item) || item.currency?.trim().toUpperCase() !== 'RUB') {
+        unchecked++;
+        continue;
+      }
+      checked++;
+      if (item.closingBalance > cashLimitSettings.amount) {
+        exceedances.push({ ...item, excess: item.closingBalance - cashLimitSettings.amount });
+      }
     }
-
-    if (selectedAccountSummary) {
-      return selectedAccountSummary.endBalance;
-    }
-
-    return accountSummaries
-      .filter((item) => item.source === 'Cash')
-      .reduce((sum, item) => sum + item.endBalance, 0);
-  }, [accountSummaries, selectedAccountSummary, source]);
+    return { exceedances, checked, unchecked };
+  }, [balanceDataStatus, canViewFullMoneyBalance, cashLimitSettings.amount, cashLimitSettings.enabled, source, visibleDailyBalances]);
+  const cashLimitExceedances = cashLimitCheck.exceedances;
   const visibleBalanceReconciliationResults = useMemo(
-    () => (accountName ? balanceReconciliationResults.filter((item) => item.accountName === accountName) : balanceReconciliationResults),
-    [accountName, balanceReconciliationResults],
+    () => moneyAccountId !== ''
+      ? balanceReconciliationResults.filter((item) => item.moneyAccountId === moneyAccountId)
+      : accountName
+        ? balanceReconciliationResults.filter((item) => item.moneyAccountId == null && item.accountName === accountName)
+        : balanceReconciliationResults,
+    [accountName, balanceReconciliationResults, moneyAccountId],
   );
   const balanceReconciliationByKey = useMemo(
     () =>
       new Map(
         visibleBalanceReconciliationResults.flatMap((item) => {
+          if (!hasConfirmedDailyBalance(item)) return [];
           const key = moneyBalanceComparisonKey(item);
           return key === null ? [] : [[key, item] as const];
         }),
@@ -2671,7 +2854,7 @@ export function MoneyOperations({
   const latestBalanceReconciliation = useMemo(
     () =>
       visibleBalanceReconciliationResults
-        .slice()
+        .filter(hasConfirmedDailyBalance)
         .sort((left, right) => new Date(right.checkedAt).getTime() - new Date(left.checkedAt).getTime())[0] ?? null,
     [visibleBalanceReconciliationResults],
   );
@@ -2682,9 +2865,10 @@ export function MoneyOperations({
 
     const notifications: ReconciliationNotification[] = [];
     const staleRows = visibleDailyBalances
+      .filter(hasConfirmedDailyBalance)
       .map((item) => {
         const saved = balanceReconciliationByKey.get(moneyBalanceComparisonKey(item) ?? '');
-        const drift = getSavedBalanceDrift(item, saved);
+        const drift = saved && sameConfirmedBalanceIdentity(item, saved) ? getSavedBalanceDrift(item, saved) : null;
         return saved && drift && !drift.isActual ? { item, drift } : null;
       })
       .filter((item): item is { item: MoneyOperationDailyBalance; drift: { amountDifference: number; isActual: boolean } } =>
@@ -2771,7 +2955,7 @@ export function MoneyOperations({
     && canUseMoneyAccountForNewOperation(selectedMoneyAccount)
     ? { companyId: selectedMoneyAccount.companyId!, moneyAccountId: selectedMoneyAccount.id }
     : null;
-  const bankImportScopeKey = `${user?.id ?? ''}|${source}|${moneyAccountId}|${canImportBankStatements}|${bankImportTarget?.companyId ?? ''}|${bankImportTarget?.moneyAccountId ?? ''}`;
+  const bankImportScopeKey = `${user?.id ?? ''}|${source}|${moneyAccountId}|${canImportBankStatements}|${bankImportTarget?.companyId ?? ''}|${bankImportTarget?.moneyAccountId ?? ''}|${JSON.stringify(permissions.payments)}`;
   // Keep each selection generation distinct, including A -> B -> A while a picker/request is open.
   if (bankImportScopeRef.current.key !== bankImportScopeKey) {
     bankImportScopeRef.current = { key: bankImportScopeKey, canImport: canImportBankStatements, target: bankImportTarget };
@@ -2791,6 +2975,30 @@ export function MoneyOperations({
   };
   const isCurrentBankImportScope = (scope: BankStatementImportScope) =>
     bankImportMountedRef.current && bankImportScopeRef.current === scope;
+  const closeBankImportDetail = () => {
+    bankImportDetailRequestRef.current += 1;
+    bankImportDetailAbortRef.current?.abort();
+    setSelectedBankImport(null);
+    setBankImportRowSearch('');
+    setBankImportDetailsLoading(false);
+    setBankImportOpeningOperationId(null);
+  };
+  const handleBankImportKeyDown = useModalFocusTrap(bankImportDialogRef, Boolean(selectedBankImport) && !modalOpen, closeBankImportDetail, bankImportCloseRef);
+  useEffect(() => {
+    bankImportDetailRequestRef.current += 1;
+    bankImportDetailAbortRef.current?.abort();
+    setSelectedBankImport(null);
+    setBankImportRowSearch('');
+    setBankImportDetailsLoading(false);
+    setBankImportOpeningOperationId(null);
+    if (bankImportOperationEditorRef.current) {
+      bankImportOperationEditorRef.current = null;
+      setModalOpen(false);
+      setEditingOperation(null);
+      setPendingUnallocatedAdvanceOperation(null);
+    }
+    setBankStatementImportResult(null);
+  }, [bankImportScopeKey]);
   const handleChooseBankStatementFile = () => {
     if (bankImportInFlightRef.current) return;
     const scope = requireBankImportScope();
@@ -2813,12 +3021,12 @@ export function MoneyOperations({
             accountName: account.name,
             label: moneyAccountLabel(account),
           }))
-        : accountSummaries.map((account) => ({
+        : Array.from(new Map(accountSummaries.map((account) => [JSON.stringify([account.source, account.accountName]), {
             id: null,
             source: account.source,
             accountName: account.accountName,
             label: account.accountName,
-          })),
+          }])).values()),
     [accountSummaries, moneyAccounts],
   );
   const visibleMoneyAccountOptions = useMemo(
@@ -2910,7 +3118,7 @@ export function MoneyOperations({
       setMoneyAccounts([]);
       setAccountSummaries([]);
       setDailyBalances([]);
-      setBalanceReconciliationResults([]);
+      setBalanceDataStatus('ready');
       return;
     }
 
@@ -2918,28 +3126,27 @@ export function MoneyOperations({
     setMoneyAccountId('');
     setAccountName('');
 
+    setBalanceDataStatus('loading');
+    setDailyBalances([]);
     Promise.all([
       apiService.getMoneyOperationAccountSummaries({ from, to, source }),
       apiService.getMoneyOperationDailyBalances({ from, to, source }),
-      canViewFullMoneyBalance
-        ? apiService.getMoneyBalanceReconciliationResults({ from, to, source }).catch(() => [])
-        : Promise.resolve([]),
       apiService.getMoneyAccounts({ activeOnly: false }),
     ])
-      .then(([accounts, balances, reconciliationResults, moneyAccountItems]) => {
+      .then(([accounts, balances, moneyAccountItems]) => {
         if (!cancelled) {
           setAccountSummaries(accounts);
           setDailyBalances(balances);
-          setBalanceReconciliationResults(reconciliationResults);
           setMoneyAccounts(moneyAccountItems);
+          setBalanceDataStatus('ready');
         }
       })
       .catch(() => {
         if (!cancelled) {
           setAccountSummaries([]);
           setDailyBalances([]);
-          setBalanceReconciliationResults([]);
           setMoneyAccounts([]);
+          setBalanceDataStatus('error');
         }
       });
 
@@ -2947,6 +3154,27 @@ export function MoneyOperations({
       cancelled = true;
     };
   }, [canViewFullMoneyBalance, from, source, to]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setBalanceReconciliationResults([]);
+    if (source === 'Total' || !canViewFullMoneyBalance) {
+      setReconciliationLoadStatus('ready');
+      return;
+    }
+    setReconciliationLoadStatus('loading');
+    apiService.getMoneyBalanceReconciliationResults({ from, to, source })
+      .then((results) => {
+        if (!cancelled) {
+          setBalanceReconciliationResults(results);
+          setReconciliationLoadStatus('ready');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setReconciliationLoadStatus('error');
+      });
+    return () => { cancelled = true; };
+  }, [canViewFullMoneyBalance, from, reconciliationReloadVersion, source, to]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3118,22 +3346,27 @@ export function MoneyOperations({
     if (source !== 'Cash') {
       setCashInventories([]);
       setCashInventoryTotal(0);
+      setCashInventoryLoadFailed(false);
       return;
     }
 
     let cancelled = false;
     setCashInventoryLoading(true);
+    setCashInventoryLoadFailed(false);
 
     apiService
       .getCashInventories({
         from,
         to,
         accountName: accountName || undefined,
+        moneyAccountId: moneyAccountId === '' ? undefined : moneyAccountId,
         page: 1,
         pageSize: 8,
       })
       .then((response) => {
         if (!cancelled) {
+          if (moneyAccountId !== '' && response.moneyAccountId !== moneyAccountId)
+            throw new Error('Сервер не подтвердил выбранную кассу для истории инвентаризаций.');
           setCashInventories(response.items);
           setCashInventoryTotal(response.total);
         }
@@ -3142,6 +3375,7 @@ export function MoneyOperations({
         if (!cancelled) {
           setCashInventories([]);
           setCashInventoryTotal(0);
+          setCashInventoryLoadFailed(true);
           const message = extractDisplayErrorMessage(error, 'Не удалось загрузить историю инвентаризаций кассы.');
           toast.error(message, 'Касса');
         }
@@ -3155,7 +3389,7 @@ export function MoneyOperations({
     return () => {
       cancelled = true;
     };
-  }, [accountName, cashOrdersRefreshKey, from, source, to, toast]);
+  }, [accountName, cashOrdersRefreshKey, from, moneyAccountId, source, to, toast]);
 
   const saveBankAutoImportSettings = async (nextSettings = bankAutoImportSettings) => {
     setBankAutoImportSaving(true);
@@ -3263,8 +3497,9 @@ export function MoneyOperations({
     }
 
     const inventoryAccountName = accountName || selectedMoneyAccount?.name || '';
-    if (!inventoryAccountName.trim()) {
-      toast.error('Выберите конкретную кассу перед инвентаризацией.', 'Касса');
+    if (!inventoryAccountName.trim() || !selectedMoneyAccount || selectedMoneyAccount.source !== 'Cash'
+      || !canUseMoneyAccountForNewOperation(selectedMoneyAccount)) {
+      toast.error('Выберите доступную кассу перед инвентаризацией.', 'Касса');
       return;
     }
 
@@ -3273,6 +3508,7 @@ export function MoneyOperations({
       await apiService.createCashInventory({
         date: to,
         accountName: inventoryAccountName,
+        moneyAccountId: selectedMoneyAccount.id,
         actualBalance,
         comment: cashInventoryComment.trim() || null,
         createCorrection: cashInventoryCreateCorrection,
@@ -3340,24 +3576,39 @@ export function MoneyOperations({
       return;
     }
 
+    if (accountName && moneyAccountId === '') {
+      toast.error('Выберите подтверждённый счёт для сверки или откройте все счета.', 'Сверка остатков');
+      return;
+    }
+
+    const requestScope = reconciliationScopeRef.current;
     setBalanceReconciliationRunning(true);
     try {
       const result = await apiService.runMoneyBalanceReconciliation({
         from,
         to,
         source,
-        accountName: accountName || undefined,
+        moneyAccountId: moneyAccountId === '' ? undefined : moneyAccountId,
       });
-      setBalanceReconciliationResults(result.items);
+      if (!bankImportMountedRef.current) return;
+      if (reconciliationScopeRef.current !== requestScope) {
+        setReconciliationReloadVersion((version) => version + 1);
+        return;
+      }
+      setBalanceReconciliationResults((current) => {
+        const rows = new Map(current.map((item) => [item.id, item]));
+        result.items.forEach((item) => rows.set(item.id, item));
+        return Array.from(rows.values());
+      });
       toast.success(
         `Сверка сохранена: создано ${result.created}, обновлено ${result.updated}, замечаний ${result.issueCount}.`,
         'Сверка остатков',
       );
     } catch (error) {
       const message = extractDisplayErrorMessage(error, 'Не удалось запустить сверку остатков.');
-      toast.error(message, 'Сверка остатков');
+      if (bankImportMountedRef.current && reconciliationScopeRef.current === requestScope) toast.error(message, 'Сверка остатков');
     } finally {
-      setBalanceReconciliationRunning(false);
+      if (bankImportMountedRef.current) setBalanceReconciliationRunning(false);
     }
   };
 
@@ -3378,10 +3629,10 @@ export function MoneyOperations({
       };
       return {
         label: row.label,
-        start: data.startBalance,
-        income: data.income,
-        expense: data.expense,
-        end: data.endBalance,
+        start: data.startBalance ?? 0,
+        income: data.income ?? 0,
+        expense: data.expense ?? 0,
+        end: data.endBalance ?? 0,
       };
     });
 
@@ -3397,6 +3648,14 @@ export function MoneyOperations({
 
     return { rows, total };
   }, [summary.bySource]);
+  const summaryCurrency = summary.currencyStatus === 'single' && summary.currency?.trim() ? moneyBalanceCurrencyLabel(summary.currency) : null;
+  const validSummaryAmounts = (values: (number | null | undefined)[]) => values.every((value) => typeof value === 'number' && Number.isFinite(value));
+  const summaryAvailable = Boolean(summaryCurrency)
+    && validSummaryAmounts([summary.startBalance, summary.income, summary.expense, summary.endBalance])
+    && summary.bySource.every((row) => validSummaryAmounts([row.startBalance, row.income, row.expense, row.endBalance]));
+  const formatSummaryAmount = (amount: number | null) => summaryAvailable && amount !== null
+    ? `${formatMoney(amount)} ${summaryCurrency}`
+    : summary.currencyStatus === 'empty' && amount === 0 ? '0,00' : '—';
 
   const journalActionBusy =
     moneyOperationsExporting
@@ -3600,13 +3859,16 @@ export function MoneyOperations({
       status: 'Draft',
       date: todayYMD(),
       amount: 0,
-      currency: selectedMoneyAccount?.currency || 'RUB',
+      currency: selectedMoneyAccount && (!accountName || selectedMoneyAccount.name === accountName)
+        ? selectedMoneyAccount.currency?.trim() || '' : '',
       clientId: null,
       clientName: null,
       paymentId: null,
       moneyOperationId: null,
       invoiceId: null,
       account: cashAccountName,
+      selectedMoneyAccountId: selectedMoneyAccount?.source === 'Cash' && canUseMoneyAccountForNewOperation(selectedMoneyAccount)
+        && (!accountName || selectedMoneyAccount.name === accountName) ? selectedMoneyAccount.id : null,
       payerName: '',
       receiverName: cashAccountName,
       basis: '',
@@ -3824,6 +4086,9 @@ export function MoneyOperations({
       if (!isCurrentBankImportScope(scope)) return;
       setShowBankImportsJournal(true);
       setBankImportsRefreshKey((value) => value + 1);
+      if (result.batchId) {
+        await handleOpenBankImport(result.batchId, scope);
+      }
     } catch (error) {
       const message = extractDisplayErrorMessage(error, 'Не удалось загрузить банковскую выписку.');
       if (isCurrentBankImportScope(scope)) toast.error(message, 'Выписка банка');
@@ -3833,36 +4098,65 @@ export function MoneyOperations({
     }
   };
 
-  const handleOpenImportedOperation = async (operationId: number) => {
-    const operation = items.find((item) => item.id === operationId);
-    if (operation) {
-      handleEdit(operation);
-      return;
-    }
-
+  const handleOpenImportedOperation = async (operationId: number, batch?: BankStatementImportBatchDetail) => {
+    if (!permissions.payments.canView || !canEditMoneyOperations || operationId <= 0) return;
+    const scope = bankImportScopeRef.current;
+    const request = ++bankImportDetailRequestRef.current;
+    bankImportDetailAbortRef.current?.abort();
+    const abort = new AbortController();
+    bankImportDetailAbortRef.current = abort;
+    setBankImportDetailsLoading(false);
+    setBankImportOpeningOperationId(operationId);
     try {
-      const loadedOperation = await apiService.getMoneyOperation(operationId);
-      handleEdit(loadedOperation);
+      const operation = await apiService.getMoneyOperation(operationId, abort.signal);
+      if (abort.signal.aborted || request !== bankImportDetailRequestRef.current || !isCurrentBankImportScope(scope)) return;
+      if (!operation || operation.id !== operationId || operation.source !== 'Bank' || operation.isReadonly) {
+        throw new Error('Операция недоступна для уточнения. Обновите карточку выписки.');
+      }
+      if (batch?.moneyAccountId != null && operation.moneyAccountId !== batch.moneyAccountId) {
+        throw new Error('Счёт операции изменился. Обновите карточку выписки перед уточнением.');
+      }
+      bankImportOperationEditorRef.current = { scope, operationId, batchId: batch?.id ?? null,
+        page: batch?.rowsPage ?? 1, search: batch?.rowsSearch ?? '' };
+      setEditingOperation(operation);
+      setModalOpen(true);
     } catch (error) {
       const message = extractDisplayErrorMessage(error, 'Не удалось открыть импортированную операцию.');
-      toast.error(message, 'Выписка банка');
+      if (!abort.signal.aborted && request === bankImportDetailRequestRef.current && isCurrentBankImportScope(scope)) toast.error(message, 'Выписка банка');
+    } finally {
+      if (bankImportDetailAbortRef.current === abort) bankImportDetailAbortRef.current = null;
+      if (request === bankImportDetailRequestRef.current && isCurrentBankImportScope(scope)) setBankImportOpeningOperationId(null);
     }
   };
 
-  const handleOpenBankImport = async (batchId: number) => {
+  const handleOpenBankImport = async (batchId: number, scope = bankImportScopeRef.current, page = 1, search = '') => {
+    const request = ++bankImportDetailRequestRef.current;
+    bankImportDetailAbortRef.current?.abort();
+    const abort = new AbortController();
+    bankImportDetailAbortRef.current = abort;
+    setBankImportOpeningOperationId(null);
+    if (selectedBankImport?.id !== batchId) setBankImportRowSearch('');
     setBankImportDetailsLoading(true);
     try {
-      const detail = await apiService.getBankStatementImport(batchId);
-      setSelectedBankImport(detail);
+      const term = search.trim();
+      const detail = term ? await apiService.getBankStatementImport(batchId, page, term, abort.signal)
+        : page === 1 ? await apiService.getBankStatementImport(batchId) : await apiService.getBankStatementImport(batchId, page);
+      if (term && (detail.rowsSearch !== term || !Number.isInteger(detail.rowsMatched) || detail.rowsMatched! < 0)) {
+        throw new Error('Сервер не подтвердил поиск по выписке. Обновите приложение и повторите действие.');
+      }
+      if (request === bankImportDetailRequestRef.current && isCurrentBankImportScope(scope)) setSelectedBankImport(detail);
     } catch (openError) {
       const message = extractDisplayErrorMessage(openError, 'Не удалось открыть импорт выписки.');
-      toast.error(message, 'Выписка банка');
+      if (!abort.signal.aborted && request === bankImportDetailRequestRef.current && isCurrentBankImportScope(scope)) toast.error(message, 'Выписка банка');
     } finally {
-      setBankImportDetailsLoading(false);
+      if (bankImportDetailAbortRef.current === abort) bankImportDetailAbortRef.current = null;
+      if (request === bankImportDetailRequestRef.current && isCurrentBankImportScope(scope)) setBankImportDetailsLoading(false);
     }
   };
 
   const handleRollbackBankImport = async (batchId: number) => {
+    const scope = bankImportScopeRef.current;
+    const beforeConfirmation = bankImportDetailRequestRef.current;
     if (!canEditMoneyOperations) {
       toast.error('У вас нет прав на откат импорта выписки.', 'Выписка банка');
       return;
@@ -3875,38 +4169,47 @@ export function MoneyOperations({
       cancelLabel: 'Отмена',
       variant: 'danger',
     });
-    if (!approved) return;
+    if (!approved || !isCurrentBankImportScope(scope) || beforeConfirmation !== bankImportDetailRequestRef.current) return;
 
+    const request = ++bankImportDetailRequestRef.current;
+    bankImportDetailAbortRef.current?.abort();
+    setBankImportDetailsLoading(false);
     setBankImportRollbackLoading(true);
     try {
       const result = await apiService.rollbackBankStatementImport(batchId);
+      if (!isCurrentBankImportScope(scope)) return;
       toast.success(
         `Откат импорта: удалено операций ${result.deletedOperations}, пропущено строк ${result.skippedRows}.`,
         'Выписка банка',
       );
       await reload();
+      if (!isCurrentBankImportScope(scope)) return;
       setBankImportsRefreshKey((value) => value + 1);
-      if (selectedBankImport?.id === batchId) {
-        const detail = await apiService.getBankStatementImport(batchId);
-        setSelectedBankImport(detail);
+      if (selectedBankImport?.id === batchId && request === bankImportDetailRequestRef.current) {
+        await handleOpenBankImport(batchId, scope, 1, selectedBankImport.rowsSearch ?? '');
       }
     } catch (rollbackError) {
       const message = extractDisplayErrorMessage(rollbackError, 'Не удалось откатить импорт выписки.');
-      toast.error(message, 'Выписка банка');
+      if (isCurrentBankImportScope(scope)) toast.error(message, 'Выписка банка');
     } finally {
       setBankImportRollbackLoading(false);
     }
   };
 
   const handleReprocessBankImport = async (batchId: number) => {
+    const scope = bankImportScopeRef.current;
     if (!canCreateMoneyOperations) {
       toast.error('У вас нет прав на повторную обработку выписки.', 'Выписка банка');
       return;
     }
 
+    const request = ++bankImportDetailRequestRef.current;
+    bankImportDetailAbortRef.current?.abort();
+    setBankImportDetailsLoading(false);
     setBankImportReprocessLoading(true);
     try {
       const result = await apiService.reprocessBankStatementImport(batchId);
+      if (!isCurrentBankImportScope(scope)) return;
       setBankStatementImportResult({
         batchId: result.batchId ?? null,
         rowsRead: result.rowsRead,
@@ -3917,12 +4220,14 @@ export function MoneyOperations({
       });
       toast.success(`Повторная обработка: создано ${result.created}, пропущено ${result.skipped}.`, 'Выписка банка');
       await reload();
+      if (!isCurrentBankImportScope(scope)) return;
       setBankImportsRefreshKey((value) => value + 1);
-      const detail = await apiService.getBankStatementImport(batchId);
-      setSelectedBankImport(detail);
+      if (request === bankImportDetailRequestRef.current) {
+        await handleOpenBankImport(batchId, scope, 1, selectedBankImport?.id === batchId ? selectedBankImport.rowsSearch ?? '' : '');
+      }
     } catch (reprocessError) {
       const message = extractDisplayErrorMessage(reprocessError, 'Не удалось повторно обработать импорт выписки.');
-      toast.error(message, 'Выписка банка');
+      if (isCurrentBankImportScope(scope)) toast.error(message, 'Выписка банка');
     } finally {
       setBankImportReprocessLoading(false);
     }
@@ -3941,21 +4246,21 @@ export function MoneyOperations({
       case 'income':
         return (
           <span className="text-emerald-600">
-            {item.direction === 'Income' ? `${formatMoney(item.amount)} ₽` : '—'}
+            {item.direction === 'Income' ? `${formatMoney(item.amount)} ${moneyBalanceCurrencyLabel(item.currency ?? null)}` : '—'}
           </span>
         );
       case 'expense':
         return (
           <span className="text-red-600">
-            {item.direction === 'Expense' ? `${formatMoney(item.amount)} ₽` : '—'}
+            {item.direction === 'Expense' ? `${formatMoney(item.amount)} ${moneyBalanceCurrencyLabel(item.currency ?? null)}` : '—'}
           </span>
         );
       case 'vatRate':
         return item.vatRate === null || item.vatRate === undefined ? '—' : `${formatMoney(item.vatRate)}%`;
       case 'vatAmount':
-        return item.vatAmount === null || item.vatAmount === undefined ? '—' : `${formatMoney(item.vatAmount)} ₽`;
+        return item.vatAmount === null || item.vatAmount === undefined ? '—' : `${formatMoney(item.vatAmount)} ${moneyBalanceCurrencyLabel(item.currency ?? null)}`;
       case 'currency':
-        return item.currency ?? 'RUB';
+        return moneyBalanceCurrencyLabel(item.currency ?? null);
       case 'accountName':
         return item.accountName && canOpenLinkedAccounts ? (
           <button
@@ -4079,6 +4384,10 @@ export function MoneyOperations({
   }, [page, source, totalPages]);
 
   const savePreparedMoneyOperation = async (prepared: MoneyOperation) => {
+    const importEditor = bankImportOperationEditorRef.current;
+    const isCurrentImportEditor = () => !importEditor || (bankImportOperationEditorRef.current === importEditor
+      && editingOperation?.id === importEditor.operationId && isCurrentBankImportScope(importEditor.scope));
+    if (!isCurrentImportEditor()) return;
     if (editingOperation ? !canEditMoneyOperations : !canCreateMoneyOperations) {
       toast.error('У вас нет прав на сохранение операции денег.', 'Деньги');
       return;
@@ -4088,7 +4397,9 @@ export function MoneyOperations({
     try {
       if (editingOperation) {
         await apiService.updateMoneyOperation(editingOperation.id, prepared);
+        if (!isCurrentImportEditor()) return;
         await reload();
+        if (!isCurrentImportEditor()) return;
         toast.success('Операция обновлена.', 'Деньги');
       } else if (prepared.direction === 'Transfer') {
         await apiService.createMoneyOperationTransfer({
@@ -4121,9 +4432,15 @@ export function MoneyOperations({
           await reload();
         }
       }
+      if (importEditor?.batchId != null && isCurrentImportEditor()) {
+        await handleOpenBankImport(importEditor.batchId, importEditor.scope, importEditor.page, importEditor.search);
+      }
+      if (!isCurrentImportEditor()) return;
+      bankImportOperationEditorRef.current = null;
       setModalOpen(false);
       setEditingOperation(null);
     } catch (error) {
+      if (!isCurrentImportEditor()) return;
       const message = extractDisplayErrorMessage(error, 'Не удалось сохранить операцию.');
       toast.error(message, 'Деньги');
       throw new Error(message);
@@ -4320,30 +4637,31 @@ export function MoneyOperations({
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-xl border border-slate-200 bg-white p-4">
               <div className="text-sm text-slate-500">Баланс на начало</div>
-              <div className="mt-1 text-xl font-semibold text-amber-600">{formatMoney(totalRows.total.start)} ₽</div>
+              <div className="mt-1 text-xl font-semibold text-amber-600">{formatSummaryAmount(totalRows.total.start)}</div>
               <div className="mt-3 h-0.5 w-full rounded-full bg-amber-400"></div>
               <div className="mt-2 text-xs text-slate-400">{formatDate(from)}</div>
             </div>
             <div className="rounded-xl border border-slate-200 bg-white p-4">
               <div className="text-sm text-slate-500">Приход за период</div>
-              <div className="mt-1 text-xl font-semibold text-emerald-600">{formatMoney(totalRows.total.income)} ₽</div>
+              <div className="mt-1 text-xl font-semibold text-emerald-600">{formatSummaryAmount(totalRows.total.income)}</div>
               <div className="mt-3 h-0.5 w-full rounded-full bg-emerald-400"></div>
               <div className="mt-2 text-xs text-slate-400">Все источники</div>
             </div>
             <div className="rounded-xl border border-slate-200 bg-white p-4">
               <div className="text-sm text-slate-500">Расход за период</div>
-              <div className="mt-1 text-xl font-semibold text-rose-600">{formatMoney(totalRows.total.expense)} ₽</div>
+              <div className="mt-1 text-xl font-semibold text-rose-600">{formatSummaryAmount(totalRows.total.expense)}</div>
               <div className="mt-3 h-0.5 w-full rounded-full bg-rose-400"></div>
               <div className="mt-2 text-xs text-slate-400">Все источники</div>
             </div>
             <div className="rounded-xl border border-slate-200 bg-white p-4">
               <div className="text-sm text-slate-500">Общий баланс</div>
-              <div className="mt-1 text-xl font-semibold text-blue-700">{formatMoney(totalRows.total.end)} ₽</div>
+              <div className="mt-1 text-xl font-semibold text-blue-700">{formatSummaryAmount(totalRows.total.end)}</div>
               <div className="mt-3 h-0.5 w-full rounded-full bg-blue-500"></div>
               <div className="mt-2 text-xs text-slate-400">{formatDate(to)}</div>
             </div>
           </div>
 
+          {!summaryAvailable && summary.currencyStatus !== 'empty' ? <p role="status" className="text-sm text-amber-800">Итоги недоступны: в выбранных операциях разные валюты или валюта не подтверждена.</p> : null}
           <div className="rounded-xl border border-slate-200 bg-white">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[900px] table-fixed text-sm">
@@ -4367,18 +4685,18 @@ export function MoneyOperations({
                   {totalRows.rows.map((row) => (
                     <tr key={row.label} className="hover:bg-slate-50">
                       <td className="px-4 py-3 font-medium text-slate-800">{row.label}</td>
-                      <td className="px-4 py-3">{formatMoney(row.start)}</td>
-                      <td className="px-4 py-3">{formatMoney(row.income)}</td>
-                      <td className="px-4 py-3">{formatMoney(row.expense)}</td>
-                      <td className="px-4 py-3">{formatMoney(row.end)}</td>
+                      <td className="px-4 py-3">{formatSummaryAmount(row.start)}</td>
+                      <td className="px-4 py-3">{formatSummaryAmount(row.income)}</td>
+                      <td className="px-4 py-3">{formatSummaryAmount(row.expense)}</td>
+                      <td className="px-4 py-3">{formatSummaryAmount(row.end)}</td>
                     </tr>
                   ))}
                   <tr className="bg-slate-50 font-semibold">
                     <td className="px-4 py-3 text-slate-900">Итого</td>
-                    <td className="px-4 py-3">{formatMoney(totalRows.total.start)}</td>
-                    <td className="px-4 py-3">{formatMoney(totalRows.total.income)}</td>
-                    <td className="px-4 py-3">{formatMoney(totalRows.total.expense)}</td>
-                    <td className="px-4 py-3">{formatMoney(totalRows.total.end)}</td>
+                    <td className="px-4 py-3">{formatSummaryAmount(totalRows.total.start)}</td>
+                    <td className="px-4 py-3">{formatSummaryAmount(totalRows.total.income)}</td>
+                    <td className="px-4 py-3">{formatSummaryAmount(totalRows.total.expense)}</td>
+                    <td className="px-4 py-3">{formatSummaryAmount(totalRows.total.end)}</td>
                   </tr>
                 </tbody>
               </table>
@@ -4468,7 +4786,7 @@ export function MoneyOperations({
                           <td className="px-3 py-2">{formatDate(item.date)}</td>
                           <td className="px-3 py-2">
                             <span className={item.direction === 'Income' ? 'text-emerald-600' : 'text-rose-600'}>
-                              {item.direction === 'Income' ? '+' : '-'} {formatMoney(item.amount)} ₽
+                              {item.direction === 'Income' ? '+' : '-'} {formatMoney(item.amount)} {moneyBalanceCurrencyLabel(item.currency ?? null)}
                             </span>
                           </td>
                           <td className="px-3 py-2">{item.accountName || '—'}</td>
@@ -4723,7 +5041,7 @@ export function MoneyOperations({
               Лимит кассы
             </label>
             <label className="flex flex-col gap-1 text-sm text-amber-900">
-              Сумма лимита
+              Сумма лимита, ₽
               <input
                 type="number"
                 min="0"
@@ -4750,12 +5068,26 @@ export function MoneyOperations({
             </div>
             <div className="flex items-end text-sm text-amber-900">
               {cashLimitSettings.enabled && cashLimitSettings.amount
-                ? cashLimitExceedances.length > 0
-                  ? `Превышений за период: ${cashLimitExceedances.length}`
-                  : 'Превышений за период нет.'
+                ? !canViewFullMoneyBalance
+                  ? 'Проверка лимита недоступна: у вас ограничен доступ к платежам.'
+                  : balanceDataStatus === 'loading'
+                    ? 'Загрузка остатков для проверки лимита…'
+                    : balanceDataStatus === 'error'
+                      ? 'Не удалось загрузить остатки для проверки лимита.'
+                      : cashLimitExceedances.length > 0
+                        ? `Превышений за период: ${cashLimitExceedances.length}`
+                        : cashLimitCheck.checked > 0
+                          ? 'Превышений за период нет.'
+                          : 'Нет подтверждённых рублёвых остатков для проверки.'
                 : 'Лимит выключен.'}
             </div>
           </div>
+
+          {cashLimitSettings.enabled && cashLimitSettings.amount && cashLimitCheck.unchecked > 0 && (
+            <div className="mt-2 text-sm text-amber-900">
+              Не проверено строк: {cashLimitCheck.unchecked}. Лимит применяется только к рублёвым остаткам с подтверждённой кассой и компанией.
+            </div>
+          )}
 
           {cashLimitSettings.enabled && cashLimitSettings.amount && cashLimitExceedances.length > 0 && (
             <div className="mt-3 overflow-x-auto rounded-lg border border-amber-200 bg-white">
@@ -4770,7 +5102,7 @@ export function MoneyOperations({
                 </thead>
                 <tbody className="divide-y divide-amber-100">
                   {cashLimitExceedances.slice(0, 8).map((item) => (
-                    <tr key={`${item.accountName}-${item.date}`}>
+                    <tr key={`${item.companyId}-${item.moneyAccountId}-${item.date}-${item.currency?.trim().toUpperCase()}`}>
                       <td className="px-3 py-2 font-medium text-slate-800">{formatDate(item.date)}</td>
                       <td className="px-3 py-2 text-slate-600">{item.accountName}</td>
                       <td className="px-3 py-2 text-right text-amber-700">{formatMoney(item.closingBalance)} ₽</td>
@@ -4800,7 +5132,7 @@ export function MoneyOperations({
             </div>
             <div className="rounded-lg bg-slate-50 px-3 py-2 text-right">
               <div className="text-xs uppercase text-slate-400">Учетный остаток</div>
-              <div className="text-base font-semibold text-slate-900">{formatMoney(cashInventoryAccountingBalance)} ₽</div>
+              <div className="text-sm text-slate-700">Рассчитывается по проведённым ордерам при сохранении</div>
             </div>
           </div>
 
@@ -4869,6 +5201,12 @@ export function MoneyOperations({
                   <tr>
                     <td colSpan={7} className="px-3 py-6 text-center text-slate-500">
                       Загрузка инвентаризаций...
+                    </td>
+                  </tr>
+                ) : cashInventoryLoadFailed ? (
+                  <tr>
+                    <td colSpan={7} className="px-3 py-6 text-center text-slate-500">
+                      Не удалось загрузить историю инвентаризаций. Проверьте доступ или повторите позже.
                     </td>
                   </tr>
                 ) : cashInventories.length === 0 ? (
@@ -5084,7 +5422,7 @@ export function MoneyOperations({
                       <td className="px-3 py-2">
                         {operation.direction === 'Income' ? 'Приход' : 'Расход'}
                       </td>
-                      <td className="px-3 py-2">{formatMoney(operation.amount)} ₽</td>
+                      <td className="px-3 py-2">{formatMoney(operation.amount)} {moneyBalanceCurrencyLabel(operation.currency ?? null)}</td>
                       <td className="px-3 py-2">{operation.counterpartyName || '—'}</td>
                       <td className="px-3 py-2">{operation.paymentOrderNumber || '—'}</td>
                       <td className="px-3 py-2 text-right">
@@ -5092,6 +5430,7 @@ export function MoneyOperations({
                           type="button"
                           className="rounded-md border border-blue-200 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50"
                           aria-label={`Открыть операцию импорта ${operation.id}`}
+                          disabled={!canEditMoneyOperations || bankImportOpeningOperationId !== null}
                           onClick={() => void handleOpenImportedOperation(operation.id)}>
                           Открыть
                         </button>
@@ -5205,30 +5544,31 @@ export function MoneyOperations({
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-xl border border-slate-200 bg-white p-4">
             <div className="text-sm text-slate-500">Баланс на начало</div>
-            <div className="text-lg font-semibold text-amber-700">{formatMoney(summary.startBalance)} ₽</div>
+            <div className="text-lg font-semibold text-amber-700">{formatSummaryAmount(summary.startBalance)}</div>
             <div className="mt-3 h-0.5 w-full rounded-full bg-amber-400"></div>
             <div className="mt-2 text-xs text-slate-400">{formatDate(from)}</div>
           </div>
           <div className="rounded-xl border border-slate-200 bg-white p-4">
             <div className="text-sm text-slate-500">Приход Факт</div>
-            <div className="text-lg font-semibold text-cyan-700">{formatMoney(summary.income)} ₽</div>
+            <div className="text-lg font-semibold text-cyan-700">{formatSummaryAmount(summary.income)}</div>
             <div className="mt-3 h-0.5 w-full rounded-full bg-cyan-400"></div>
             <div className="mt-2 text-xs text-slate-400">Всего поступлений: {summary.incomeCount}</div>
           </div>
           <div className="rounded-xl border border-slate-200 bg-white p-4">
             <div className="text-sm text-slate-500">Расход Факт</div>
-            <div className="text-lg font-semibold text-red-500">{formatMoney(summary.expense)} ₽</div>
+            <div className="text-lg font-semibold text-red-500">{formatSummaryAmount(summary.expense)}</div>
             <div className="mt-3 h-0.5 w-full rounded-full bg-red-400"></div>
             <div className="mt-2 text-xs text-slate-400">Всего списаний: {summary.expenseCount}</div>
           </div>
           <div className="rounded-xl border border-slate-200 bg-white p-4">
             <div className="text-sm text-slate-500">Баланс на конец</div>
-            <div className="text-lg font-semibold text-amber-700">{formatMoney(summary.endBalance)} ₽</div>
+            <div className="text-lg font-semibold text-amber-700">{formatSummaryAmount(summary.endBalance)}</div>
             <div className="mt-3 h-0.5 w-full rounded-full bg-amber-400"></div>
             <div className="mt-2 text-xs text-slate-400">{formatDate(to)}</div>
           </div>
         </div>
 
+        {!summaryAvailable && summary.currencyStatus !== 'empty' ? <p role="status" className="text-sm text-amber-800">Итоги недоступны: в выбранных операциях разные валюты или валюта не подтверждена.</p> : null}
         <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
           <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
             <div>
@@ -5241,7 +5581,7 @@ export function MoneyOperations({
                   : 'Доступ к платежам ограничен: общий остаток может отличаться от показанного.'}
               </div>
             </div>
-            {canViewFullMoneyBalance && renderBalanceCheckBadge(summary)}
+            {canViewFullMoneyBalance && summaryAvailable && renderBalanceCheckBadge(summary, summaryCurrency ?? '')}
           </div>
           {permissions.payments.canView ? (
             <div className="rounded-lg border border-rose-100 bg-rose-50 px-3 py-2">
@@ -5392,6 +5732,16 @@ export function MoneyOperations({
         </div>
       )}
 
+      {canViewFullMoneyBalance && reconciliationLoadStatus === 'error' && (
+        <div role="alert" className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <span>Не удалось загрузить сохранённую сверку.</span>
+          <button type="button" onClick={() => setReconciliationReloadVersion((version) => version + 1)}
+            className="font-medium underline hover:no-underline">
+            Повторить загрузку сверки
+          </button>
+        </div>
+      )}
+
       {visibleDailyBalances.length > 0 && (
         <div className="mt-6 rounded-xl border border-slate-200 bg-white">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
@@ -5418,7 +5768,7 @@ export function MoneyOperations({
                 <button
                   type="button"
                   onClick={() => void handleRunBalanceReconciliation()}
-                  disabled={balanceReconciliationRunning}
+                  disabled={balanceReconciliationRunning || reconciliationLoadStatus !== 'ready'}
                   className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
                   <CheckCircle2 className={`h-4 w-4 ${balanceReconciliationRunning ? 'animate-pulse' : ''}`} />
                   {balanceReconciliationRunning ? 'Сверка...' : 'Запустить сверку'}
@@ -5426,6 +5776,11 @@ export function MoneyOperations({
               )}
             </div>
           </div>
+          {visibleDailyBalances.some((item) => !hasConfirmedDailyBalance(item)) && (
+            <div className="border-b border-amber-100 bg-amber-50 px-4 py-2 text-xs text-amber-900">
+              Некоторые остатки не показаны: данные компании, счёта или валюты не подтверждены.
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full min-w-[960px] text-sm">
               <thead className="bg-slate-50 text-xs uppercase text-slate-500">
@@ -5441,37 +5796,39 @@ export function MoneyOperations({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {visibleDailyBalances.slice(0, 12).map((item) => {
-                  const savedResult = balanceReconciliationByKey.get(
+                {visibleDailyBalances.slice(0, 12).map((item, index) => {
+                  const confirmed = hasConfirmedDailyBalance(item);
+                  const candidate = confirmed ? balanceReconciliationByKey.get(
                     moneyBalanceComparisonKey(item) ?? '',
-                  );
+                  ) : undefined;
+                  const savedResult = candidate && sameConfirmedBalanceIdentity(item, candidate) ? candidate : undefined;
 
                   return (
-                    <tr key={moneyBalanceComparisonKey(item) ?? `${item.source}-${item.accountName}-${item.date}`} className="hover:bg-slate-50">
+                    <tr key={confirmed ? moneyBalanceComparisonKey(item) ?? `${item.source}-${item.accountName}-${item.date}-${index}` : `${item.source}-${item.accountName}-${item.date}-${index}`} className="hover:bg-slate-50">
                       <td className="px-4 py-2 text-slate-700">{formatDate(item.date)}</td>
                       <td className="px-4 py-2 text-slate-700">{item.accountName}</td>
-                      <td className="px-4 py-2 text-right text-amber-600">{formatMoney(item.openingBalance)} {moneyBalanceCurrencyLabel(item.currency)}</td>
+                      <td className="px-4 py-2 text-right text-amber-600">{confirmed ? `${formatMoney(item.openingBalance)} ${moneyBalanceCurrencyLabel(item.currency)}` : '—'}</td>
                       <td className="px-4 py-2 text-right text-emerald-600">
-                        {formatMoney(item.income)} {moneyBalanceCurrencyLabel(item.currency)}
-                        <div className="text-[11px] text-slate-400">{item.incomeCount}</div>
+                        {confirmed ? `${formatMoney(item.income)} ${moneyBalanceCurrencyLabel(item.currency)}` : '—'}
+                        {confirmed && <div className="text-[11px] text-slate-400">{item.incomeCount}</div>}
                       </td>
                       <td className="px-4 py-2 text-right text-rose-600">
-                        {formatMoney(item.expense)} {moneyBalanceCurrencyLabel(item.currency)}
-                        <div className="text-[11px] text-slate-400">{item.expenseCount}</div>
+                        {confirmed ? `${formatMoney(item.expense)} ${moneyBalanceCurrencyLabel(item.currency)}` : '—'}
+                        {confirmed && <div className="text-[11px] text-slate-400">{item.expenseCount}</div>}
                       </td>
-                      <td className="px-4 py-2 text-right font-medium text-amber-600">{formatMoney(item.closingBalance)} {moneyBalanceCurrencyLabel(item.currency)}</td>
+                      <td className="px-4 py-2 text-right font-medium text-amber-600">{confirmed ? `${formatMoney(item.closingBalance)} ${moneyBalanceCurrencyLabel(item.currency)}` : '—'}</td>
                       <td className="px-4 py-2 text-right">
                         <span
                           className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${
-                            item.isBalanced ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                            !confirmed ? 'bg-slate-100 text-slate-600' : item.isBalanced ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
                           }`}>
-                          {canViewFullMoneyBalance
+                          {!confirmed ? 'Не подтверждено' : canViewFullMoneyBalance
                             ? item.isBalanced ? 'Сходится' : 'Расхождение'
                             : 'По доступным операциям'}
                         </span>
                       </td>
                       <td className="px-4 py-2 text-right">
-                        {canViewFullMoneyBalance
+                        {confirmed && canViewFullMoneyBalance && reconciliationLoadStatus === 'ready'
                           ? renderSavedBalanceReconciliationBadge(item, savedResult, profileTimeZoneId)
                           : '—'}
                       </td>
@@ -5551,20 +5908,20 @@ export function MoneyOperations({
                         ))}
                       </SystemSelect>
                     </label>
-                    {selectedAccountSummary && (
-                      <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-slate-600">
+                    {selectedAccountSummaries.map((account) => (
+                      <div key={`${account.moneyAccountId}-${account.currency ?? 'unknown'}`} className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-slate-600">
                         <div className="flex items-center justify-between gap-2">
                           <div className="font-medium text-slate-800">
-                            Остаток: {formatMoney(selectedAccountSummary.endBalance)} ₽
+                            Остаток: {account.endBalance === null ? '—' : formatConfirmedMoney(account.endBalance, account.currencyStatus, account.currency)}
                           </div>
-                          {renderBalanceCheckBadge(selectedAccountSummary)}
+                          {account.currencyStatus === 'single' && account.currency && renderBalanceCheckBadge(account, moneyBalanceCurrencyLabel(account.currency))}
                         </div>
                         <div className="mt-1 flex items-center justify-between gap-2">
-                          <span className="text-emerald-600">Приход: {formatMoney(selectedAccountSummary.income)} ₽</span>
-                          <span className="text-rose-600">Расход: {formatMoney(selectedAccountSummary.expense)} ₽</span>
+                          <span className="text-emerald-600">Приход: {account.income === null ? '—' : formatConfirmedMoney(account.income, account.currencyStatus, account.currency)}</span>
+                          <span className="text-rose-600">Расход: {account.expense === null ? '—' : formatConfirmedMoney(account.expense, account.currencyStatus, account.currency)}</span>
                         </div>
                       </div>
-                    )}
+                    ))}
                     <label className="flex flex-col gap-1">
                       Приход/Расход
                       <SystemSelect
@@ -5947,6 +6304,7 @@ export function MoneyOperations({
           to={to}
           search={effectiveSearch}
           accountName={accountName}
+          moneyAccountId={moneyAccountId === '' ? undefined : moneyAccountId}
           refreshKey={cashOrdersRefreshKey}
           onCreate={handleCreateStandaloneCashOrder}
           onOpen={(cashOrderId) => void handleOpenCashOrder(cashOrderId)}
@@ -5958,6 +6316,7 @@ export function MoneyOperations({
 
       <CashOrderModal
         order={selectedCashOrder}
+        moneyAccounts={moneyAccounts}
         open={cashOrderModalOpen}
         timeZoneId={profileTimeZoneId}
         isSaving={cashOrderSaving}
@@ -5981,12 +6340,15 @@ export function MoneyOperations({
 
       {selectedBankImport &&
         createPortal(
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4 py-6">
-            <div className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-2xl bg-white shadow-2xl">
-              <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 px-6 py-4">
+          <div aria-hidden={modalOpen || undefined} style={modalOpen ? { display: 'none' } : undefined}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-3 sm:p-4">
+            <div ref={bankImportDialogRef} role="dialog" aria-modal="true" aria-labelledby="bank-import-dialog-title"
+              onKeyDown={handleBankImportKeyDown}
+              className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 px-3 py-3 sm:px-6">
                 <div>
                   <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Импорт банковской выписки</p>
-                  <h2 className="text-lg font-semibold text-slate-900">{selectedBankImport.fileName}</h2>
+                  <h2 id="bank-import-dialog-title" className="break-all text-lg font-semibold text-slate-900">{selectedBankImport.fileName}</h2>
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
                     <span>ID {selectedBankImport.id}</span>
                     <span>•</span>
@@ -5997,7 +6359,7 @@ export function MoneyOperations({
                     </span>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
                     onClick={() => void handleReprocessBankImport(selectedBankImport.id)}
@@ -6005,8 +6367,9 @@ export function MoneyOperations({
                     className="inline-flex items-center gap-2 rounded-lg border border-blue-200 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
                     disabled={
                       bankImportReprocessLoading ||
+                      bankImportOpeningOperationId !== null ||
                       !canCreateMoneyOperations ||
-                      !selectedBankImport.rows.some((row) => ['Skipped', 'Error', 'RolledBack'].includes(row.status))
+                      !(selectedBankImport.hasReprocessableRows ?? selectedBankImport.rows.some((row) => ['Skipped', 'Error', 'RolledBack'].includes(row.status)))
                     }>
                     <RefreshCw className="h-4 w-4" />
                     Повторить
@@ -6016,13 +6379,14 @@ export function MoneyOperations({
                     onClick={() => void handleRollbackBankImport(selectedBankImport.id)}
                     aria-label={`Откатить импорт выписки ${selectedBankImport.fileName || `#${selectedBankImport.id}`} из карточки`}
                     className="inline-flex items-center gap-2 rounded-lg border border-amber-200 px-3 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60"
-                    disabled={bankImportRollbackLoading || selectedBankImport.status === 'RolledBack' || !canEditMoneyOperations}>
+                    disabled={bankImportRollbackLoading || bankImportOpeningOperationId !== null || selectedBankImport.status === 'RolledBack' || !canEditMoneyOperations}>
                     <RotateCcw className="h-4 w-4" />
                     Откатить
                   </button>
                   <button
                     type="button"
-                    onClick={() => setSelectedBankImport(null)}
+                    ref={bankImportCloseRef}
+                    onClick={closeBankImportDetail}
                     className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50"
                     aria-label="Закрыть импорт">
                     <X className="h-4 w-4" />
@@ -6030,26 +6394,67 @@ export function MoneyOperations({
                 </div>
               </div>
 
-              <div className="grid gap-3 border-b border-slate-100 bg-slate-50 px-6 py-4 sm:grid-cols-4">
-                <div className="rounded-xl bg-white p-3">
-                  <div className="text-xs text-slate-400">Прочитано строк</div>
-                  <div className="text-lg font-semibold text-slate-900">{selectedBankImport.rowsRead}</div>
+              <dl aria-label="Реквизиты выписки" className="grid gap-2 border-b border-slate-100 px-3 py-2 text-sm sm:grid-cols-3 sm:px-6">
+                <div className="min-w-0">
+                  <dt className="text-xs text-slate-400">Компания</dt>
+                  <dd className="break-words text-slate-800">{selectedBankImport.companyName?.trim() || 'Не определена'}</dd>
                 </div>
-                <div className="rounded-xl bg-white p-3">
-                  <div className="text-xs text-slate-400">Создано</div>
-                  <div className="text-lg font-semibold text-emerald-600">{selectedBankImport.createdRows}</div>
+                <div className="min-w-0">
+                  <dt className="text-xs text-slate-400">Счёт</dt>
+                  <dd className="break-words text-slate-800">{selectedBankImport.moneyAccountName?.trim() || 'Не определён'}</dd>
                 </div>
-                <div className="rounded-xl bg-white p-3">
-                  <div className="text-xs text-slate-400">Пропущено</div>
-                  <div className="text-lg font-semibold text-amber-600">{selectedBankImport.skippedRows}</div>
+                <div className="min-w-0">
+                  <dt className="text-xs text-slate-400">Период выписки</dt>
+                  <dd className="flex flex-wrap gap-x-1 text-slate-800">
+                    {selectedBankImport.periodFrom ? <span>с {formatDate(selectedBankImport.periodFrom.slice(0, 10))}</span> : null}
+                    {selectedBankImport.periodTo ? <span>по {formatDate(selectedBankImport.periodTo.slice(0, 10))}</span> : null}
+                    {!selectedBankImport.periodFrom && !selectedBankImport.periodTo ? 'Не указан' : null}
+                  </dd>
                 </div>
-                <div className="rounded-xl bg-white p-3">
-                  <div className="text-xs text-slate-400">Ошибки</div>
-                  <div className="text-lg font-semibold text-red-600">{selectedBankImport.errorRows}</div>
+              </dl>
+
+              <div className="grid grid-cols-4 gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2 sm:px-6">
+                <div className="min-w-0 rounded-xl bg-white p-2">
+                  <div className="text-[11px] leading-tight text-slate-400 sm:text-xs">Прочитано строк</div>
+                  <div className="mt-1 break-all text-sm font-semibold text-slate-900 sm:text-lg">{selectedBankImport.rowsRead}</div>
+                </div>
+                <div className="min-w-0 rounded-xl bg-white p-2">
+                  <div className="text-[11px] leading-tight text-slate-400 sm:text-xs">Создано</div>
+                  <div className="mt-1 break-all text-sm font-semibold text-emerald-600 sm:text-lg">{selectedBankImport.createdRows}</div>
+                </div>
+                <div className="min-w-0 rounded-xl bg-white p-2">
+                  <div className="text-[11px] leading-tight text-slate-400 sm:text-xs">Пропущено</div>
+                  <div className="mt-1 break-all text-sm font-semibold text-amber-600 sm:text-lg">{selectedBankImport.skippedRows}</div>
+                </div>
+                <div className="min-w-0 rounded-xl bg-white p-2">
+                  <div className="text-[11px] leading-tight text-slate-400 sm:text-xs">Ошибки</div>
+                  <div className="mt-1 break-all text-sm font-semibold text-red-600 sm:text-lg">{selectedBankImport.errorRows}</div>
                 </div>
               </div>
 
-              <div className="max-h-[52vh] overflow-auto px-6 py-4">
+              <form aria-label="Поиск по строкам выписки" className="space-y-1 border-b border-slate-100 px-3 py-2 sm:px-6"
+                onSubmit={(event) => { event.preventDefault(); void handleOpenBankImport(selectedBankImport.id, bankImportScopeRef.current, 1, bankImportRowSearch); }}>
+                <div className="flex flex-wrap gap-2">
+                  <input type="search" aria-label="Поиск по строкам выписки" maxLength={200} value={bankImportRowSearch}
+                    onChange={(event) => setBankImportRowSearch(event.target.value)}
+                    placeholder="Контрагент, назначение, номер поручения или комментарий"
+                    className="min-w-0 basis-full flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm sm:basis-auto" />
+                  <button type="submit" disabled={bankImportDetailsLoading || bankImportOpeningOperationId !== null || bankImportRollbackLoading || bankImportReprocessLoading}
+                    className="rounded-lg border border-blue-200 px-3 py-2 text-sm text-blue-700 disabled:opacity-50">Найти</button>
+                  {bankImportRowSearch || selectedBankImport.rowsSearch ? (
+                    <button type="button" disabled={bankImportRollbackLoading || bankImportReprocessLoading}
+                      onClick={() => { setBankImportRowSearch(''); void handleOpenBankImport(selectedBankImport.id); }}
+                      className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:opacity-50">Сбросить поиск</button>
+                  ) : null}
+                </div>
+                {selectedBankImport.rowsSearch ? <p className="break-words text-xs text-slate-500">
+                  Поиск: «{selectedBankImport.rowsSearch}». Найдено: {selectedBankImport.rowsMatched} из {selectedBankImport.rowsTotal}.
+                </p> : null}
+                {bankImportDetailsLoading ? <p role="status" className="text-xs text-slate-500">Загружаем строки выписки…</p> : null}
+                {bankImportOpeningOperationId !== null ? <p role="status" className="text-xs text-slate-500">Открываем денежную операцию…</p> : null}
+              </form>
+
+              <div className="min-h-0 flex-1 overflow-auto px-3 py-3 sm:px-6">
                 <table className="w-full min-w-[920px] text-sm">
                   <thead className="sticky top-0 bg-white text-xs uppercase text-slate-400">
                     <tr>
@@ -6060,6 +6465,7 @@ export function MoneyOperations({
                       <th className="px-3 py-2 text-left font-medium">Контрагент</th>
                       <th className="px-3 py-2 text-left font-medium">Назначение</th>
                       <th className="px-3 py-2 text-left font-medium">Комментарий</th>
+                      <th className="px-3 py-2 text-right font-medium">Действия</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -6071,8 +6477,11 @@ export function MoneyOperations({
                             {getBankImportStatusLabel(row.status)}
                           </span>
                         </td>
-                        <td className="px-3 py-2">{formatDate(row.date)}</td>
-                        <td className="px-3 py-2">{formatMoney(row.amount)} ₽</td>
+                        <td className="px-3 py-2">
+                          <div>{formatDate(row.date)}</div>
+                          {row.paymentOrderNumber ? <div className="mt-1 break-all text-xs text-slate-500">Поручение №{row.paymentOrderNumber}</div> : null}
+                        </td>
+                        <td className="px-3 py-2">{formatMoney(row.amount)} {moneyBalanceCurrencyLabel(row.currency ?? null)}</td>
                         <td className="px-3 py-2">{row.counterpartyName || '—'}</td>
                         <td className="px-3 py-2">
                           <div className="line-clamp-2" title={row.purpose ?? undefined}>
@@ -6080,11 +6489,19 @@ export function MoneyOperations({
                           </div>
                         </td>
                         <td className="px-3 py-2 text-slate-500">{row.message || '—'}</td>
+                        <td className="px-3 py-2 text-right">
+                          {row.moneyOperationId != null && row.moneyOperationId > 0 ? (
+                            <button type="button" aria-label={`Открыть денежную операцию строки ${row.rowNumber}`}
+                              disabled={!canEditMoneyOperations || bankImportDetailsLoading || bankImportOpeningOperationId !== null || bankImportRollbackLoading || bankImportReprocessLoading}
+                              onClick={() => void handleOpenImportedOperation(row.moneyOperationId!, selectedBankImport)}
+                              className="rounded-lg border border-blue-200 px-3 py-1 text-xs font-medium text-blue-700 disabled:opacity-50">Открыть операцию</button>
+                          ) : <span className="text-xs text-slate-400">Операция не создана</span>}
+                        </td>
                       </tr>
                     ))}
                     {selectedBankImport.rows.length === 0 && (
                       <tr>
-                        <td colSpan={7} className="px-3 py-8 text-center text-slate-500">
+                        <td colSpan={8} className="px-3 py-8 text-center text-slate-500">
                           Строки импорта не найдены.
                         </td>
                       </tr>
@@ -6092,6 +6509,20 @@ export function MoneyOperations({
                   </tbody>
                 </table>
               </div>
+              {bankImportVisibleRowsTotal !== undefined && selectedBankImport.rowsPage !== undefined && selectedBankImport.rowsPageSize !== undefined
+                && bankImportVisibleRowsTotal > selectedBankImport.rowsPageSize ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 px-3 py-2 text-sm sm:px-6">
+                    <span>Страница {selectedBankImport.rowsPage} из {Math.ceil(bankImportVisibleRowsTotal / selectedBankImport.rowsPageSize)} · строк: {bankImportVisibleRowsTotal}</span>
+                    <div className="flex gap-2">
+                      <button type="button" disabled={bankImportDetailsLoading || bankImportRollbackLoading || bankImportReprocessLoading || selectedBankImport.rowsPage <= 1}
+                        onClick={() => void handleOpenBankImport(selectedBankImport.id, bankImportScopeRef.current, selectedBankImport.rowsPage! - 1, selectedBankImport.rowsSearch ?? '')}
+                        className="rounded border border-slate-300 px-3 py-1 disabled:opacity-50">Назад</button>
+                      <button type="button" disabled={bankImportDetailsLoading || bankImportRollbackLoading || bankImportReprocessLoading || selectedBankImport.rowsPage * selectedBankImport.rowsPageSize >= bankImportVisibleRowsTotal}
+                        onClick={() => void handleOpenBankImport(selectedBankImport.id, bankImportScopeRef.current, selectedBankImport.rowsPage! + 1, selectedBankImport.rowsSearch ?? '')}
+                        className="rounded border border-slate-300 px-3 py-1 disabled:opacity-50">Далее</button>
+                    </div>
+                  </div>
+                ) : null}
             </div>
           </div>,
           document.body,
@@ -6106,11 +6537,14 @@ export function MoneyOperations({
         categoryOptions={categoryDictionaryOptions}
         open={modalOpen}
         onClose={() => {
+          if (bankImportOperationEditorRef.current) setPendingUnallocatedAdvanceOperation(null);
+          bankImportOperationEditorRef.current = null;
           setModalOpen(false);
           setEditingOperation(null);
         }}
         onSave={handleSave}
         isSaving={saving}
+        preserveBankFact={bankImportOperationEditorRef.current !== null}
       />
       <ConfirmDialog
         open={Boolean(confirmDelete)}

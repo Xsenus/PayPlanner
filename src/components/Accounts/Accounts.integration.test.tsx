@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Accounts } from './Accounts';
@@ -7,6 +7,7 @@ import { clearInvoiceEditorDraft, peekInvoiceEditorDraft, type InvoiceEditorDraf
 
 const {
   createPaymentMock,
+  createInvoiceMock,
   getActResponsiblesMock,
   getAccountsRegistryResultMock,
   getPayablesDashboardResultMock,
@@ -29,6 +30,7 @@ const {
   rolePermissionsResult,
 } = vi.hoisted(() => ({
   createPaymentMock: vi.fn(),
+  createInvoiceMock: vi.fn(),
   getActResponsiblesMock: vi.fn(),
   getAccountsRegistryResultMock: vi.fn(),
   getPayablesDashboardResultMock: vi.fn(),
@@ -311,6 +313,7 @@ vi.mock('../../hooks/useTableSelection', () => ({
 
 vi.mock('../../services/api', () => ({
   apiService: {
+    createInvoice: createInvoiceMock,
     createPayment: createPaymentMock,
     getInvoice: getInvoiceMock,
     getClients: getClientsMock,
@@ -580,6 +583,7 @@ describe('Accounts integration', () => {
   const peekInvoiceEditorDraftMock = vi.mocked(peekInvoiceEditorDraft);
 
   beforeEach(() => {
+    createInvoiceMock.mockReset();
     Object.assign(rolePermissionsResult.clients, { canView: false, canCreate: false, canEdit: false, canDelete: false });
     Object.assign(rolePermissionsResult.legalEntities, { canView: false, canCreate: false, canEdit: false, canDelete: false });
     Object.assign(rolePermissionsResult.accounts, { canView: true, canCreate: true, canEdit: true, canDelete: false });
@@ -667,6 +671,60 @@ describe('Accounts integration', () => {
     createPaymentMock.mockResolvedValue(createSiblingPayment({ id: 600 }));
     clearInvoiceEditorDraftMock.mockImplementation(() => undefined);
     peekInvoiceEditorDraftMock.mockReturnValue(null);
+  });
+
+  it('opens task billing from income accounts when the entry is provided', () => {
+    const open = vi.fn();
+    render(<Accounts defaultType="Income" lockType onOpenTaskBilling={open} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Анализ оплаты задач' }));
+    expect(open).toHaveBeenCalledOnce();
+  });
+
+  it('opens the prepared task invoice draft in the income invoice editor', async () => {
+    const draft = { mode: 'create', presentation: 'modal', pageViewMode: false, billingTaskIds: [42],
+      form: { type: 'Income', description: 'Работа клиента' }, lineItems: [{ id: '1', name: 'Работа клиента' }],
+      selectedActs: [], selectedClientCaseIds: [15] } as unknown as InvoiceEditorDraftState;
+    const handled = vi.fn();
+    render(<Accounts defaultType="Income" lockType initialCreateDraft={{ key: 123, draft }} onInitialCreateDraftHandled={handled} />);
+    await screen.findByTestId('invoice-modal');
+    expect(invoiceModalPropsSpy).toHaveBeenLastCalledWith(expect.objectContaining({ open: true, mode: 'create', resumeDraft: draft }));
+    expect(handled).toHaveBeenCalledWith(123);
+  });
+
+  it.each([true, false])('refreshes the task queue only after invoice creation succeeds: %s', async (success) => {
+    if (success) createInvoiceMock.mockResolvedValue(createInvoice());
+    else createInvoiceMock.mockRejectedValue(new Error('Не удалось сохранить'));
+    const draft = { mode: 'create', presentation: 'modal', pageViewMode: false, billingTaskIds: [42],
+      form: { type: 'Income' }, lineItems: [], selectedActs: [], selectedClientCaseIds: [] } as unknown as InvoiceEditorDraftState;
+    const events: CustomEvent[] = [];
+    const listener = (event: Event) => events.push(event as CustomEvent);
+    window.addEventListener('pp.task_journal.changed', listener);
+    try {
+      render(<Accounts defaultType="Income" lockType initialCreateDraft={{ key: 123, draft }} />);
+      await screen.findByTestId('invoice-modal');
+      const props = invoiceModalPropsSpy.mock.lastCall?.[0] as { onSubmit: (payload: unknown) => Promise<void> };
+      await act(async () => props.onSubmit({ type: 'Income', billingTaskIds: [42] }));
+      expect(createInvoiceMock).toHaveBeenCalledOnce();
+      expect(events).toHaveLength(success ? 1 : 0);
+      if (success) expect(events[0].detail).toEqual({ bulkBillingIds: [42] });
+    } finally {
+      window.removeEventListener('pp.task_journal.changed', listener);
+    }
+  });
+
+  it('does not refresh task queues when a new invoice has no linked tasks', async () => {
+    createInvoiceMock.mockResolvedValue(createInvoice());
+    const onTaskChange = vi.fn();
+    window.addEventListener('pp.task_journal.changed', onTaskChange);
+    try {
+      render(<Accounts defaultType="Income" lockType />);
+      fireEvent.click(screen.getByRole('button', { name: 'Добавить счёт' }));
+      await screen.findByTestId('invoice-modal');
+      const props = invoiceModalPropsSpy.mock.lastCall?.[0] as { onSubmit: (payload: unknown) => Promise<void> };
+      await act(async () => props.onSubmit({ type: 'Income' }));
+      expect(createInvoiceMock).toHaveBeenCalledOnce();
+      expect(onTaskChange).not.toHaveBeenCalled();
+    } finally { window.removeEventListener('pp.task_journal.changed', onTaskChange); }
   });
 
   it('shows a visible summary when a saved period filter hides part of the registry', () => {

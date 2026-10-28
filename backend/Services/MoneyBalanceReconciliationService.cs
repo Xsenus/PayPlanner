@@ -12,7 +12,7 @@ internal sealed class MoneyBalanceReconciliationService(PaymentContext db, ILogg
 {
     public async Task<MoneyBalanceReconciliationRunResultDto> RunAsync(MoneyReconciliationScope scope,
         DateTime? from, DateTime? to, MoneyOperationSource? source, string? accountName,
-        Func<PaymentContext, CancellationToken, Task<bool>> verifyAuthority, CancellationToken ct)
+        Func<PaymentContext, CancellationToken, Task<bool>> verifyAuthority, CancellationToken ct, int? moneyAccountId = null)
     {
         if (from.HasValue && to.HasValue && to.Value.Date < from.Value.Date)
             throw new ArgumentException("Конец периода сверки не может быть раньше начала.");
@@ -35,8 +35,14 @@ internal sealed class MoneyBalanceReconciliationService(PaymentContext db, ILogg
                         .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.ShortName, item => item.ShortName), ct) != 1)
                         throw new UnauthorizedAccessException();
                 if (!await VerifyAuthorityAsync(verifyAuthority, ct)) throw new UnauthorizedAccessException();
-                var balances = await scope.CreateQuery(db).BuildDailyBalanceRowsAsync(from, to, source, accountName,
-                    MoneyJournalVisibility.AllScopedRows, ct, scope);
+                if (moneyAccountId.HasValue && !await scope.Accounts(db).AnyAsync(account => account.Id == moneyAccountId.Value
+                    && (!source.HasValue || account.Source == source.Value), ct))
+                    throw new UnauthorizedAccessException();
+                var balances = await scope.CreateQuery(db).BuildDailyBalanceRowsAsync(from, to, source, moneyAccountId.HasValue ? null : accountName,
+                    MoneyJournalVisibility.AllScopedRows, ct, scope, moneyAccountId);
+                if (!moneyAccountId.HasValue && !string.IsNullOrWhiteSpace(accountName)
+                    && balances.Select(item => (item.CompanyId, item.MoneyAccountId)).Distinct().Skip(1).Any())
+                    throw new ArgumentException("Найдено несколько счетов с таким названием. Выберите конкретный счёт.");
                 if (balances.Count > 25_000) throw new ArgumentException("Сократите период или выберите отдельный счёт для сверки.");
 
                 var keys = balances.Select(item => (Key: item.BalanceKey!, Date: item.Date.Date)).ToHashSet();

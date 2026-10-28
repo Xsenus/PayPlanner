@@ -17,3 +17,22 @@ it('clears all capabilities for affected sections without changing independent p
   expect(result.accounts).toEqual(input.accounts);
   expect(input.tasks.canView).toBe(true);
 });
+
+it('revokes every management permission while preserving independent accounting access', () => {
+  const input = structuredClone(defaultRolePermissions);
+  const { sections, unsupported } = navigationGroupSections({
+    id: 'management',
+    name: 'Управление',
+    itemIds: ['users', 'roles', 'dictionaries', 'audit', 'userActivity', 'settings'],
+  });
+  expect(unsupported).toEqual([]);
+  const result = revokeNavigationGroup(input, sections);
+  for (const section of ['roles', 'dictionaries', 'audit', 'notifications', 'integrations', 'yandexDisk', 's3Storage'] as const) {
+    expect(result[section], section).toMatchObject({
+      canView: false, canCreate: false, canEdit: false, canDelete: false, canExport: false,
+    });
+  }
+  for (const section of ['accounts', 'payments', 'acts', 'contracts'] as const) {
+    expect(result[section], section).toEqual(input[section]);
+  }
+});

@@ -4,7 +4,7 @@ using PayPlanner.Api.Models;
 
 namespace PayPlanner.Api.Services.Notifications;
 
-public sealed class SignalRRealtimeNotificationPublisher : IRealtimeNotificationPublisher, IRolePermissionsChangePublisher, IUserRoleChangePublisher
+public sealed class SignalRRealtimeNotificationPublisher : IRealtimeNotificationPublisher, IReliableRealtimeNotificationPublisher, IRolePermissionsChangePublisher, IUserRoleChangePublisher
 {
     private readonly IHubContext<NotificationsHub> _hubContext;
     private readonly ILogger<SignalRRealtimeNotificationPublisher> _logger;
@@ -18,6 +18,18 @@ public sealed class SignalRRealtimeNotificationPublisher : IRealtimeNotification
     }
 
     public async Task PublishUserNotificationAsync(
+        UserNotification notification,
+        bool toastEnabled = true,
+        CancellationToken cancellationToken = default)
+    {
+        try { await PublishUserNotificationOrThrowAsync(notification, toastEnabled, cancellationToken); }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to publish realtime notification {NotificationId} to user {UserId}.", notification.Id, notification.RecipientUserId);
+        }
+    }
+
+    public async Task PublishUserNotificationOrThrowAsync(
         UserNotification notification,
         bool toastEnabled = true,
         CancellationToken cancellationToken = default)
@@ -42,20 +54,9 @@ public sealed class SignalRRealtimeNotificationPublisher : IRealtimeNotification
             notification.MetadataJson,
             notification.CreatedAt);
 
-        try
-        {
-            await _hubContext.Clients
-                .Group(NotificationsHub.UserGroup(notification.RecipientUserId))
-                .SendAsync(NotificationsHub.UserNotificationCreatedEvent, payload, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(
-                ex,
-                "Failed to publish realtime notification {NotificationId} to user {UserId}.",
-                notification.Id,
-                notification.RecipientUserId);
-        }
+        await _hubContext.Clients
+            .Group(NotificationsHub.UserGroup(notification.RecipientUserId))
+            .SendAsync(NotificationsHub.UserNotificationCreatedEvent, payload, cancellationToken);
     }
 
     public async Task PublishTaskJournalChangedAsync(CancellationToken cancellationToken = default)

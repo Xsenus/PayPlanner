@@ -97,6 +97,55 @@ public partial class MoneyOperationsControllerTests
     }
 
     [Theory]
+    [InlineData("RUB")]
+    [InlineData("USD")]
+    [InlineData(null)]
+    public async Task BankPackageScope_DetailReturnsStoredCurrencyWithoutChangingHistory(string? currency)
+    {
+        await using var fixture = await CreateModelDatabaseAsync(false);
+        var db = fixture.Db;
+        var seed = await SeedBankScopeAsync(db, "own");
+        Assert.Single(seed.Batch.Rows).Currency = currency;
+        await db.SaveChangesAsync();
+        var before = await CaptureBankScopeStateAsync(db);
+        var response = await CreateController(db, seed.ActorId, isAdminClaim: true)
+            .GetBankStatementImport(seed.Batch.Id, CancellationToken.None);
+        var detail = Assert.IsType<BankStatementImportBatchDetailDto>(Assert.IsType<OkObjectResult>(response.Result).Value);
+        Assert.Equal(currency, Assert.Single(detail.Rows).Currency);
+        Assert.Equal(before, await CaptureBankScopeStateAsync(db));
+    }
+
+    [Fact]
+    public async Task BankPackageScope_DetailPagesRowsAndReportsActionsAcrossEntireBatch()
+    {
+        await using var fixture = await CreateModelDatabaseAsync(false);
+        var db = fixture.Db;
+        var seed = await SeedBankScopeAsync(db, "own");
+        for (var i = 2; i <= 106; i++)
+            seed.Batch.Rows.Add(new BankStatementImportRow
+            {
+                RowNumber = i,
+                ImportKey = $"synthetic-page-{i}",
+                Status = i == 106 ? BankStatementImportRowStatus.Error : BankStatementImportRowStatus.Created,
+                Date = BankScopeDate,
+                Amount = i,
+            });
+        await db.SaveChangesAsync();
+        var before = await CaptureBankScopeStateAsync(db);
+        var controller = CreateController(db, seed.ActorId, isAdminClaim: true);
+        var first = Assert.IsType<BankStatementImportBatchDetailDto>(Assert.IsType<OkObjectResult>(
+            (await controller.GetBankStatementImport(seed.Batch.Id, CancellationToken.None)).Result).Value);
+        var last = Assert.IsType<BankStatementImportBatchDetailDto>(Assert.IsType<OkObjectResult>(
+            (await controller.GetBankStatementImport(seed.Batch.Id, CancellationToken.None, 3)).Result).Value);
+        Assert.Equal(106, first.RowsTotal);
+        Assert.Equal(50, first.Rows.Count);
+        Assert.True(first.HasReprocessableRows);
+        Assert.Equal(6, last.Rows.Count);
+        Assert.Equal(106, last.Rows.Last().RowNumber);
+        Assert.Equal(before, await CaptureBankScopeStateAsync(db));
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task BankPackageScope_AdminReadsUnattributedHistoryWithoutAssigningOrigin(bool postgres)

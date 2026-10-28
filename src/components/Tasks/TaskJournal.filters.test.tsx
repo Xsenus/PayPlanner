@@ -8,6 +8,78 @@ import { TaskJournal } from './TaskJournal';
 describe('TaskJournal', () => {
   setupTaskJournalTests();
 
+  it('synchronizes both journal search fields and keeps the second field usable during loading', async () => {
+    await renderJournal([createTask({ title: 'Синтетическая задача' })]);
+    const first = screen.getByRole('textbox', { name: 'Поиск по контрагенту, делу или наименованию задачи' }) as HTMLInputElement;
+    const second = screen.getByRole('textbox', { name: 'Поиск задач над таблицей' }) as HTMLInputElement;
+    fireEvent.change(second, { target: { value: 'договор' } });
+    expect(first.value).toBe('договор');
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenCalledWith(expect.objectContaining({ search: 'договор', page: 1 }), expect.anything()));
+    fireEvent.change(first, { target: { value: 'другое дело' } });
+    expect(second.value).toBe('другое дело');
+    let finish!: (value: { items: TaskJournalItem[]; total: number; page: number; pageSize: number }) => void;
+    apiMock.getTaskJournalItems.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    fireEvent.change(second, { target: { value: 'ожидание' } });
+    await waitFor(() => expect(finish).toBeDefined());
+    expect(screen.getByRole('textbox', { name: 'Поиск задач над таблицей' })).toBe(second);
+    fireEvent.change(second, { target: { value: 'новый поиск' } });
+    expect(first.value).toBe('новый поиск');
+    await act(async () => finish({ items: [], total: 0, page: 1, pageSize: 25 }));
+  });
+
+  it('clears selected tasks when the search above the table changes', async () => {
+    const task = createTask({ title: 'Синтетический выбор' });
+    await renderJournal([task]);
+    fireEvent.click(screen.getByRole('checkbox', { name: `Выбрать задачу ${task.title}` }));
+    expect(screen.getByTestId('task-bulk-actions')).toBeTruthy();
+    const second = screen.getByRole('textbox', { name: 'Поиск задач над таблицей' });
+    fireEvent.change(second, { target: { value: 'другая задача' } });
+    fireEvent.change(second, { target: { value: '' } });
+    expect(screen.queryByTestId('task-bulk-actions')).toBeNull();
+    expect((screen.getByRole('checkbox', { name: `Выбрать задачу ${task.title}` }) as HTMLInputElement).checked).toBe(false);
+  });
+
+  it('returns to the first task page when searching above the table', async () => {
+    const tasks = Array.from({ length: 30 }, (_, index) => createTask({ id: index + 1, title: `Задача ${index + 1}` }));
+    await renderJournal(tasks, { waitForTitle: 'Задача 1' });
+    fireEvent.click(screen.getByRole('button', { name: 'Вперёд' }));
+    await screen.findByText('Задача 26');
+    apiMock.getTaskJournalItems.mockClear();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Поиск задач над таблицей' }), { target: { value: 'Задача 2' } });
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenCalledWith(expect.objectContaining({ search: 'Задача 2', page: 1 }), expect.anything()));
+  });
+
+  it.each([
+    ['authoredByMe', { authorUserId: 7 }],
+    ['observer', { participantRole: 'observer' }],
+    ['approver', { participantRole: 'approver' }],
+    ['underControl', { underControl: true }],
+    ['untriaged', { untriaged: true }],
+  ] as const)('sends the active %s quick filter to planning export', async (quickFilter, expected) => {
+    window.localStorage.setItem('pp.task_journal.filters.v1.user:7', JSON.stringify({ quickFilter, periodMode: 'all' }));
+    await renderJournal([createTask()], { waitForTitle: null });
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenCalledWith(expect.objectContaining(expected), expect.anything()));
+    fireEvent.click(screen.getByRole('button', { name: 'Word' }));
+    await waitFor(() => expect(apiMock.downloadTaskPlanningReport).toHaveBeenCalledWith(expect.objectContaining(expected)));
+  });
+
+  it('keeps contradictory assignee filters empty in the planning export', async () => {
+    window.localStorage.setItem('pp.task_journal.filters.v1.user:7', JSON.stringify({ quickFilter: 'assignedToMe', assigneeFilter: '8', periodMode: 'all' }));
+    await renderJournal([createTask()], { waitForTitle: null, assignees: [
+      { id: 7, name: 'Текущий', email: 'me@example.test' }, { id: 8, name: 'Другой', email: 'other@example.test' },
+    ] });
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenCalledWith(expect.objectContaining({ assigneeUserId: -1 }), expect.anything()));
+    fireEvent.click(screen.getByRole('button', { name: 'PDF' }));
+    await waitFor(() => expect(apiMock.downloadTaskPlanningReport).toHaveBeenCalledWith(expect.objectContaining({ assigneeUserId: -1 })));
+  });
+
+  it('keeps the current-user approval scope in the planning export', async () => {
+    await renderJournal([createTask()], { waitForTitle: null, mode: 'approvals' });
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenCalledWith(expect.objectContaining({ approvalScope: true }), expect.anything()));
+    fireEvent.click(screen.getByRole('button', { name: 'HTML' }));
+    await waitFor(() => expect(apiMock.downloadTaskPlanningReport).toHaveBeenCalledWith(expect.objectContaining({ approvalScope: true })));
+  });
+
   it('restores filters for each employee without writing another employee search into their preferences', async () => {
     const keyA = 'pp.task_journal.filters.v1.user:7';
     const keyB = 'pp.task_journal.filters.v1.user:8';
@@ -287,6 +359,39 @@ describe('TaskJournal', () => {
         priorityFilter: 'urgent',
       });
     });
+  });
+
+  it.each([true, false])('does not show previous counterparty cases (loading: %s)', async (loading) => {
+    clientsState.clients.push({ id: 11, name: 'Петров Петр Петрович' } as Client);
+    casesState.staleCases = [{ id: 100, clientId: 10, title: 'БАНКРОТСТВО', status: 'Open', createdAt: todayAt(8) } as ClientCase];
+    casesState.loading = loading;
+    await renderJournal([createTask()], { waitForTitle: null });
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Поиск по контрагенту, делу или наименованию задачи' }), { target: { value: 'Петров' } });
+    fireEvent.click(screen.getByRole('option', { name: 'Петров Петр Петрович' }));
+    const caseFilter = screen.getByTestId('task-case-filter') as HTMLSelectElement;
+    expect(caseFilter.disabled).toBe(loading);
+    expect(within(caseFilter).queryByText('БАНКРОТСТВО', { selector: 'option' })).toBeNull();
+  });
+
+  it('does not expose a previous legal entity case in the selected entity filter', async () => {
+    casesState.staleCases = [{ id: 100, clientId: 10, title: 'БАНКРОТСТВО', status: 'Open', createdAt: todayAt(8) } as ClientCase];
+    await renderJournal([createTask()], { waitForTitle: null });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Поиск по контрагенту, делу или наименованию задачи' }), { target: { value: 'Ромашка' } });
+    fireEvent.click(screen.getByRole('option', { name: 'ООО Ромашка' }));
+    expect(within(screen.getByTestId('task-case-filter')).queryByText('БАНКРОТСТВО', { selector: 'option' })).toBeNull();
+  });
+
+  it('does not expose case options when the user has no case view permission', async () => {
+    authState.isAdmin = false;
+    permissionsState.caseCanView = false;
+    casesState.staleCases = [{ id: 100, clientId: 10, title: 'БАНКРОТСТВО', status: 'Open', createdAt: todayAt(8) } as ClientCase];
+    await renderJournal([createTask()], { waitForTitle: null });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Поиск по контрагенту, делу или наименованию задачи' }), { target: { value: 'Иванов' } });
+    fireEvent.click(screen.getByRole('option', { name: 'Иванов Иван Иванович' }));
+    const caseFilter = screen.getByTestId('task-case-filter') as HTMLSelectElement;
+    expect(caseFilter.disabled).toBe(true);
+    expect(within(caseFilter).queryByText('БАНКРОТСТВО', { selector: 'option' })).toBeNull();
   });
 
   it('filters tasks by case and remembers the selected case', async () => {

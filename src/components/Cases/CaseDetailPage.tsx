@@ -101,6 +101,7 @@ import type { TaskJournalItem } from '../../utils/taskJournalStore';
 interface CaseDetailPageProps {
   caseId: number;
   onBack: () => void;
+  backLabel?: string;
   onOpenClient?: (clientId: number, caseId?: number) => void;
   onOpenLegalEntity?: (legalEntityId: number, caseId?: number) => void;
   onOpenFinance?: (caseItem: ClientCase) => void;
@@ -1538,6 +1539,7 @@ function buildStageTransitionPrompt(previousStage: string | null | undefined, ne
 export function CaseDetailPage({
   caseId,
   onBack,
+  backLabel = 'Реестр дел',
   onOpenClient,
   onOpenLegalEntity,
   onOpenFinance,
@@ -4045,7 +4047,7 @@ export function CaseDetailPage({
           <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(520px,auto)] xl:items-start">
             <div className="min-w-0">
               <button type="button" onClick={onBack} disabled={caseTaskBulkBusy} className="mb-4 inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
-                <ArrowLeft className="h-4 w-4" /> Реестр дел
+                <ArrowLeft className="h-4 w-4" /> {backLabel}
               </button>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="inline-flex max-w-full min-w-0 items-start gap-2 rounded-full bg-blue-50 px-3 py-1 text-sm font-semibold text-blue-700">
@@ -4064,7 +4066,7 @@ export function CaseDetailPage({
               <p className="mt-2 max-w-3xl text-sm text-slate-600 [overflow-wrap:anywhere]">{caseItem.description || 'Описание по делу пока не заполнено.'}</p>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:justify-end">
+            <div className="grid grid-cols-1 gap-2 min-[480px]:grid-cols-2 sm:grid-cols-3 xl:justify-end">
               {canEdit ? (
                 <button type="button" onClick={openCaseEditPage} disabled={caseTaskBulkBusy} className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700">
                   <Pencil className="h-4 w-4" /> Редактировать дело
@@ -4483,7 +4485,7 @@ export function CaseDetailPage({
                 <ol>
                   {visibleCourtEvents
                     .map((event) => (
-                      <li key={event.id} className="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-x-3 gap-y-1 py-2 sm:grid-cols-[150px_1.5rem_minmax(0,1fr)]">
+                      <li key={event.id} className="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-x-3 gap-y-1 border-b border-slate-100 py-2 last:border-b-0 sm:grid-cols-[150px_1.5rem_minmax(0,1fr)]">
                         <div className="col-start-2 row-start-1 min-w-0 pt-1 text-xs font-semibold text-slate-700 sm:col-start-1">{formatCourtEventSchedule(event) || '—'}</div>
                         <span aria-hidden="true" className="relative col-start-1 row-span-2 row-start-1 flex justify-center before:absolute before:-bottom-2 before:left-1/2 before:-top-2 before:w-px before:-translate-x-1/2 before:bg-slate-200 sm:col-start-2 sm:row-span-1">
                           <span className="relative z-10 mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded-full border border-blue-100 bg-blue-50 text-blue-600">
@@ -6982,10 +6984,10 @@ function TaskList({
                 .map((part) => Array.from(part)[0]).join('').toLocaleUpperCase('ru')).slice(0, 2).join('');
               return (
                 <tr key={task.id}>
-                  {selection.enabled ? <td className="px-2 py-3"><SystemCheckbox
+                  {selection.enabled ? <td className="px-2 py-2"><SystemCheckbox
                     aria-label={`Выбрать задачу: ${task.title}`} checked={selection.selected.has(task.id)}
                     disabled={selection.busy} onChange={() => selection.toggle(task.id)} /></td> : null}
-                  <td className="px-3 py-3 font-semibold text-slate-900">
+                  <td className="px-3 py-2 font-semibold text-slate-900">
                     <div className="flex min-w-0 items-start gap-2">
                       <span role="img" aria-label={`Тип задачи: ${typeOption.label}`} title={typeOption.label} className="mt-0.5 shrink-0 text-blue-700">
                         <TypeIcon className="h-4 w-4" aria-hidden="true" />
@@ -7001,16 +7003,16 @@ function TaskList({
                       ) : <span className="min-w-0 [overflow-wrap:anywhere]">{task.title}</span>}
                     </div>
                   </td>
-                  <td className="px-2 py-2.5 text-xs leading-5 text-slate-700">
+                  <td className="px-2 py-2 text-xs leading-5 text-slate-700">
                     <div className="flex min-w-0 items-start gap-1.5">
                       {initials ? <span aria-hidden="true" className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-100 text-[10px] font-semibold text-blue-700">{initials}</span> : null}
                       <span className="min-w-0 [overflow-wrap:anywhere]">{assigneeName}</span>
                     </div>
                   </td>
-                  <td className="px-3 py-3 text-slate-700">{formatRuDateTime(task.dueAt) || '—'}</td>
-                  <td className="px-2 py-2.5 text-xs [overflow-wrap:anywhere]"><span className={`inline-flex max-w-full rounded-md px-1.5 py-0.5 text-[11px] font-medium ${taskStatusClass(task.status)}`}>{TASK_STATUS_LABELS[task.status] ?? task.status}</span></td>
-                  <td className="px-3 py-3 text-xs text-slate-700 [overflow-wrap:anywhere]">{task.result || '—'}</td>
-                  {hasRowActions ? <td className="px-1 py-3"><CaseTaskRowMenu task={task} caseId={caseId}
+                  <td className="px-3 py-2 text-slate-700">{formatRuDateTime(task.dueAt) || '—'}</td>
+                  <td className="px-2 py-2 text-xs [overflow-wrap:anywhere]"><span className={`inline-flex max-w-full rounded-md px-1.5 py-0.5 text-[11px] font-medium ${taskStatusClass(task.status)}`}>{TASK_STATUS_LABELS[task.status] ?? task.status}</span></td>
+                  <td className="px-3 py-2 text-xs text-slate-700 [overflow-wrap:anywhere]">{task.result || '—'}</td>
+                  {hasRowActions ? <td className="px-1 py-2"><CaseTaskRowMenu task={task} caseId={caseId}
                     disabled={selection.busy} canSelect={selection.enabled} selected={selection.selected.has(task.id)}
                     onToggle={() => selection.toggle(task.id)} canExport={canExportTasks}
                     statusLabels={TASK_STATUS_LABELS} onOpenTask={onOpenTask} /></td> : null}
@@ -8794,7 +8796,7 @@ function DocumentList({
 }
 
 function normalizeDocumentFilter(value?: string | null) {
-  return (value ?? '').trim().toLowerCase();
+  return (value ?? '').trim().normalize('NFC').toLowerCase().normalize('NFC');
 }
 
 type DocumentVersionSummary = {
@@ -8875,6 +8877,8 @@ function DocumentTableRow({ uploadedAtTimestamp, ...cardProps }: DocumentTableRo
   const [hasOpened, setHasOpened] = useState(false);
   const actionsButtonRef = useRef<HTMLButtonElement | null>(null);
   const displayName = document.originalFileName?.trim() || `Документ №${document.id}`;
+  const documentType = document.documentType?.trim() || '';
+  const normalizedDocumentType = documentType.toLocaleLowerCase('ru-RU');
   const { Icon: FormatIcon, label: formatLabel, className: formatClassName } = getCaseDocumentFormatPresentation(document.contentType);
   const detailsId = `case-document-details-${document.clientCaseId}-${document.id}`;
   const actionsLabel = `Сведения и действия документа ${displayName}`;
@@ -8917,8 +8921,16 @@ function DocumentTableRow({ uploadedAtTimestamp, ...cardProps }: DocumentTableRo
         <td className="px-3 py-2 text-xs text-slate-500">
           {uploadedAtTimestamp === null ? '—' : formatRuDateTime(document.uploadedAt) || '—'}
         </td>
-        <td className="px-3 py-2 text-xs text-slate-700 [overflow-wrap:anywhere]">
-          {document.documentType?.trim() || '—'}
+        <td className="px-3 py-2 text-xs [overflow-wrap:anywhere]">
+          {documentType ? (
+            <span className={`inline-block max-w-full rounded px-2 py-1 font-medium ${normalizedDocumentType === 'судебный акт'
+              ? 'bg-emerald-50 text-emerald-700'
+              : normalizedDocumentType === 'договор'
+                ? 'bg-slate-100 text-slate-700'
+                : 'bg-blue-50 text-blue-700'}`}>
+              {documentType}
+            </span>
+          ) : '—'}
         </td>
         <td className="px-3 py-2 text-xs text-slate-500 [overflow-wrap:anywhere]">
           {document.uploadedByName?.trim() || '—'}

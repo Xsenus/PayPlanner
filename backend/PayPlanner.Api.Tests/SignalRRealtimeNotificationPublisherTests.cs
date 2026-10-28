@@ -25,6 +25,21 @@ namespace PayPlanner.Api.Tests;
 public sealed class SignalRRealtimeNotificationPublisherTests
 {
     [Fact]
+    public async Task DurableUserNotification_PropagatesTransportFailure_WhileOrdinaryPublishStaysBestEffort()
+    {
+        var hub = new RecordingHubContext();
+        hub.ClientsRecorder.Proxy.ThrowOnSend = true;
+        var publisher = new SignalRRealtimeNotificationPublisher(hub, NullLogger<SignalRRealtimeNotificationPublisher>.Instance);
+        var notification = new UserNotification { Id = 1, RecipientUserId = 7, EventKey = "synthetic-event", Title = "Тест" };
+        await publisher.PublishUserNotificationAsync(notification);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => publisher.PublishUserNotificationOrThrowAsync(notification));
+        hub.ClientsRecorder.Proxy.ThrowOnSend = false;
+        await publisher.PublishUserNotificationOrThrowAsync(notification);
+        Assert.Equal("user:7", hub.ClientsRecorder.RequestedGroup);
+        Assert.Equal(NotificationsHub.UserNotificationCreatedEvent, hub.ClientsRecorder.Proxy.LastMethodName);
+    }
+
+    [Fact]
     public async Task PublishUsersRoleChangedAsync_UsesOnlyDistinctPositiveUserGroups()
     {
         var hubContext = new RecordingHubContext();

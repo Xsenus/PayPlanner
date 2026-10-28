@@ -199,19 +199,19 @@ jobs:
 
       - name: Verify all Migrations whitespace formatting
         env:
-          DOTNET_GCHeapHardLimit: "200000000"
+          DOTNET_GCHeapHardLimit: "240000000"
           CompilerResponseFile: ${{ github.workspace }}/scripts/compiler-serial.rsp
         run: dotnet format whitespace backend/PayPlanner.Api.Migrations/PayPlanner.Api.Migrations.csproj --verify-no-changes --no-restore --verbosity diagnostic
 
       - name: Verify all Migrations style formatting
         env:
-          DOTNET_GCHeapHardLimit: "200000000"
+          DOTNET_GCHeapHardLimit: "240000000"
           CompilerResponseFile: ${{ github.workspace }}/scripts/compiler-serial.rsp
         run: dotnet format style backend/PayPlanner.Api.Migrations/PayPlanner.Api.Migrations.csproj --verify-no-changes --no-restore --verbosity diagnostic
 
       - name: Verify all Migrations analyzer formatting
         env:
-          DOTNET_GCHeapHardLimit: "200000000"
+          DOTNET_GCHeapHardLimit: "240000000"
           CompilerResponseFile: ${{ github.workspace }}/scripts/compiler-serial.rsp
         run: dotnet format analyzers backend/PayPlanner.Api.Migrations/PayPlanner.Api.Migrations.csproj --verify-no-changes --no-restore --verbosity diagnostic
 
@@ -227,7 +227,7 @@ jobs:
   backend-build:
     needs: [backend-format]
     env:
-      DOTNET_GCHeapHardLimit: "200000000"
+      DOTNET_GCHeapHardLimit: "240000000"
       CompilerResponseFile: ${{ github.workspace }}/scripts/compiler-serial.rsp
     runs-on: [self-hosted, Windows, X64, payplanner-xsenus]
     timeout-minutes: 30

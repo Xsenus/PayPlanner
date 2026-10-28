@@ -357,6 +357,7 @@ export function PaymentModal({
   const permissionRevisionRef = useRef(0);
   const pendingRemainderRef = useRef<{ payment: Payment; payload: PaymentPayload } | null>(null);
   const [remainderPending, setRemainderPending] = useState(false);
+  const [remainderReceiptBlocked, setRemainderReceiptBlocked] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
   const canSavePayment = remainderPending ? canCreatePayment : payment ? canEditPayment : canCreatePayment;
@@ -385,6 +386,7 @@ export function PaymentModal({
       setConfirmedPayment(null);
       pendingRemainderRef.current = null;
       setRemainderPending(false);
+      setRemainderReceiptBlocked(false);
       setSaveError(null);
       setSaveNotice(null);
     }
@@ -403,6 +405,7 @@ export function PaymentModal({
     setConfirmedPayment(null);
     pendingRemainderRef.current = null;
     setRemainderPending(false);
+    setRemainderReceiptBlocked(false);
     setSaveError(null);
     setSaveNotice(null);
     savingRef.current = false;
@@ -433,6 +436,7 @@ export function PaymentModal({
       pendingRemainderRef.current = null;
       setConfirmedPayment(null);
       setRemainderPending(false);
+      setRemainderReceiptBlocked(false);
       setLoading(false);
       setSaveError(null);
       setSaveNotice(null);
@@ -1717,6 +1721,10 @@ export function PaymentModal({
     const actorVersion = paymentCreateSessionVersion();
     const permissionRevision = permissionRevisionRef.current;
     if (pendingRemainderRef.current) {
+      if (remainderReceiptBlocked) {
+        setSaveError('Сначала откройте подтверждённый платёж в разделе восстановления.');
+        return;
+      }
       savingRef.current = true;
       setLoading(true);
       try { await completePendingRemainder(scope); }
@@ -1964,6 +1972,7 @@ export function PaymentModal({
           };
           pendingRemainderRef.current = { payment: saved, payload: nextPayment };
           setRemainderPending(true);
+          setRemainderReceiptBlocked(!receiptAcknowledged);
           if (!createRemainder) {
             if (!receiptAcknowledged) setSaveError('Платёж сохранён, но подтверждение не завершено. Откройте сохранённый платёж в разделе восстановления перед созданием остатка.');
             else setSaveNotice('Платёж сохранён. Для создания остатка нажмите «Сохранить» после проверки прав.');
@@ -3160,15 +3169,21 @@ export function PaymentModal({
                     // the unstarted remainder. Opening that primary must retain its exact pending command.
                     acceptSavedPayment(saved);
                     setRemainderPending(true);
-                    setSaveNotice('Платёж подтверждён. Остаток ещё не создан; нажмите «Сохранить».');
                   } else {
                     recoveryContinuationRef.current = null;
                     pendingRemainderRef.current = null;
                     setRemainderPending(false);
+                    setRemainderReceiptBlocked(false);
                     acceptSavedPayment(saved);
                   }
                   setSaveError(null);
                   return true;
+                }}
+                onAcknowledged={(saved, attempt) => {
+                  if (attempt.operation === 'primary' && pendingRemainderRef.current?.payment.id === saved.id) {
+                    setRemainderReceiptBlocked(false);
+                    setSaveNotice('Платёж подтверждён. Остаток ещё не создан; нажмите «Сохранить».');
+                  }
                 }}
                 onCancelled={(attempt) => {
                   if (recoveryContinuationRef.current?.attemptId === attempt.attemptId) recoveryContinuationRef.current = null;
@@ -4296,7 +4311,7 @@ export function PaymentModal({
 
                   <button
                     type="submit"
-                    disabled={loading || !canSavePayment}
+                    disabled={loading || !canSavePayment || remainderReceiptBlocked}
                     className={`rounded-lg px-4 py-2 font-medium transition-colors sm:min-w-40 ${
                       formData.type === 'Income'
                         ? 'bg-emerald-600 text-white hover:bg-emerald-700'

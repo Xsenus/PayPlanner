@@ -616,7 +616,7 @@ describe('TaskJournal', () => {
       title: index === 29 ? 'Наследство найдено' : `Обычная задача ${index + 1}`,
       billingStatus: 'unbilled',
     }));
-    await renderJournal(tasks, { waitForTitle: 'Обычная задача 1' });
+    await renderJournal(tasks, { billingAnalysisMode: true, waitForTitle: 'Обычная задача 1' });
 
     expect(screen.getByText('Платные задачи без счёта: 30')).toBeTruthy();
     apiMock.getTaskJournalItems.mockClear();

@@ -36,6 +36,7 @@ public sealed record AccountSettingsResult(bool Success, string? Error);
 public sealed class BankSyncService : IBankSyncService
 {
     private const int MaxPages = 500;
+    private const string UnknownAccountCurrency = "Банк не подтвердил валюту счёта. Проверьте данные и повторите обновление.";
     private static readonly TimeSpan OverlapWindow = TimeSpan.FromDays(3);
 
     private readonly PaymentContext _db;
@@ -101,18 +102,49 @@ public sealed class BankSyncService : IBankSyncService
             .Where(item => item.BankConnectionId == connection.Id)
             .ToDictionaryAsync(item => item.ExternalAccountId, StringComparer.Ordinal, ct);
 
+        // A repeated ID with incomplete or conflicting currencies is ambiguous;
+        // no copy of the same bank response may reactivate the account.
+        var uncertainCurrencyIds = remote
+            .Where(info => string.IsNullOrWhiteSpace(info.Currency) || info.Currency.Trim().Length > 8)
+            .Select(info => info.ExternalId?.Trim())
+            .Where(id => !string.IsNullOrEmpty(id))
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var group in remote.Where(info => !string.IsNullOrWhiteSpace(info.ExternalId))
+                     .GroupBy(info => info.ExternalId.Trim(), StringComparer.Ordinal))
+        {
+            if (group.Select(info => info.Currency?.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).Take(2).Count() > 1)
+                uncertainCurrencyIds.Add(group.Key);
+        }
         int added = 0, updated = 0, skipped = 0;
         foreach (var info in remote)
         {
             var externalId = Trim(info.ExternalId, 128);
             var number = Trim(info.AccountNumber, 34);
-            // Без устойчивого идентификатора или номера счёт нельзя сопоставить повторно: пропускаем, а не искажаем.
-            if (externalId is null || number is null || info.ExternalId.Trim().Length > 128 || info.AccountNumber.Trim().Length > 34)
+            if (externalId is null || info.ExternalId.Trim().Length > 128)
             {
                 skipped++;
                 continue;
             }
-
+            if (uncertainCurrencyIds.Contains(externalId))
+            {
+                skipped++;
+                if (existing.TryGetValue(externalId, out var uncertain))
+                {
+                    if (uncertain.Status != BankAccountStatuses.Unavailable) uncertain.StatusChangedAt = DateTime.UtcNow;
+                    uncertain.Status = BankAccountStatuses.Unavailable;
+                    uncertain.IsDefault = false;
+                    uncertain.LastError = UnknownAccountCurrency;
+                    uncertain.UpdatedAt = DateTime.UtcNow;
+                    updated++;
+                }
+                continue;
+            }
+            // Без номера счёт нельзя сопоставить повторно: пропускаем, а не искажаем.
+            if (number is null || info.AccountNumber.Trim().Length > 34)
+            {
+                skipped++;
+                continue;
+            }
             // Чужой ИНН владельца — счёт другой компании: не привязываем.
             if (!string.IsNullOrWhiteSpace(info.OwnerInn) && !string.IsNullOrWhiteSpace(companyInn)
                 && !string.Equals(info.OwnerInn.Trim(), companyInn.Trim(), StringComparison.Ordinal))
@@ -120,16 +152,15 @@ public sealed class BankSyncService : IBankSyncService
                 skipped++;
                 continue;
             }
-
             var status = BankAccountStatuses.All.Contains(info.Status) && info.Status != BankAccountStatuses.NotFoundInBank
                 ? info.Status
                 : BankAccountStatuses.Unavailable;
             var bik = Trim(info.Bik, 16);
-            var currency = Trim(info.Currency, 8) ?? "RUB";
+            var currency = info.Currency.Trim();
             if (existing.TryGetValue(externalId, out var account))
             {
                 var changed = account.AccountNumber != number || account.Bik != bik
-                    || account.Currency != currency || account.Status != status;
+                    || account.Currency != currency || account.Status != status || account.LastError == UnknownAccountCurrency;
                 if (changed)
                 {
                     if (account.Status != status)

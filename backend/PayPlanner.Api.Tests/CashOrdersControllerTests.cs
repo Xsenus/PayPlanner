@@ -73,6 +73,326 @@ public class CashOrdersControllerTests
         Assert.Single(recorder.Commands, sql => sql.Contains("FROM \"UserSettings\"", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData("USD", false)]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData("USD", true)]
+    public async Task CashBook_RejectsUnconfirmedRubleTotalsIncludingOpeningBalance(string? currency, bool beforePeriod)
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canExport: true);
+        db.CashOrders.AddRange(
+            new CashOrder { Number = "ПКО-2026-9100", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 5, 2), Amount = 100m, Account = "Касса", Currency = "RUB" },
+            new CashOrder { Number = "ПКО-2026-9101", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
+                Date = beforePeriod ? new DateTime(2026, 4, 30) : new DateTime(2026, 5, 2), Amount = 20m, Account = "Касса", Currency = currency });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId, isAdminClaim: false);
+        var from = new DateTime(2026, 5, 1);
+        var to = new DateTime(2026, 5, 3);
+
+        var book = await controller.GetCashBook(from, to, "Касса", ct: default);
+        var print = await controller.PrintCashBook(from, to, "Касса", ct: default);
+
+        Assert.IsType<BadRequestObjectResult>(book.Result);
+        Assert.IsType<BadRequestObjectResult>(print);
+        Assert.Equal(2, await db.CashOrders.CountAsync());
+    }
+
+    [Theory]
+    [InlineData("RUB", true)]
+    [InlineData("USD", true)]
+    [InlineData("=1+1", true)]
+    [InlineData(null, false)]
+    public async Task CashBookExport_RequiresOneConfirmedCurrency(string? currency, bool allowed)
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canExport: true);
+        var user = await db.Users.Include(item => item.Role).SingleAsync(item => item.Id == userId);
+        user.Role!.Name = "admin";
+        db.CashOrders.Add(new CashOrder { Number = "ПКО-2026-9110", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
+            Date = new DateTime(2026, 4, 30), Amount = 100m, Account = "Касса", Currency = currency });
+        await db.SaveChangesAsync();
+        var controller = new ReportsController(db, Microsoft.Extensions.Logging.Abstractions.NullLogger<ReportsController>.Instance)
+        {
+            ControllerContext = CreateController(db, userId, isAdminClaim: true).ControllerContext,
+        };
+
+        var result = await controller.ExportManagementReportCsv("cash", new DateTime(2026, 5, 1), new DateTime(2026, 5, 3),
+            null, "Касса", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, default);
+
+        if (allowed)
+        {
+            var file = Assert.IsType<FileContentResult>(result);
+            var text = System.Text.Encoding.UTF8.GetString(file.FileContents);
+            Assert.Contains(currency!, text);
+            if (currency == "=1+1") Assert.True(text.Contains("Код: =1+1", StringComparison.Ordinal), text);
+        }
+        else Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal(1, await db.CashOrders.CountAsync());
+    }
+
+    [Fact]
+    public async Task CashBook_SingleForeignCurrencyIncludesOpeningAndPrintsCorrectly()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canExport: true);
+        db.CashOrders.AddRange(
+            new CashOrder { Number = "ПКО-2026-9170", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 4, 30), Amount = 100m, Account = "Касса", Currency = " usd " },
+            new CashOrder { Number = "РКО-2026-9171", Type = CashOrderType.Outgoing, Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 5, 2), Amount = 20m, Account = "Касса", Currency = "USD" });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId, isAdminClaim: false);
+        controller.Request.Headers["X-PayPlanner-Currency-Contract"] = "1";
+        var from = new DateTime(2026, 5, 1);
+        var to = new DateTime(2026, 5, 3);
+
+        var result = await controller.GetCashBook(from, to, "Касса", ct: default);
+        var book = Assert.IsType<CashBookResponseDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal("single", book.CurrencyStatus);
+        Assert.Equal("USD", book.Currency);
+        Assert.Equal(100m, book.OpeningBalance);
+        Assert.Equal(20m, book.Expense);
+        Assert.Equal(80m, book.ClosingBalance);
+        var print = Assert.IsType<ContentResult>(await controller.PrintCashBook(from, to, "Касса", ct: default));
+        Assert.Contains("100,00 USD", print.Content);
+        Assert.Contains("80,00 USD", print.Content);
+        Assert.DoesNotContain("80,00 руб.", print.Content);
+    }
+
+    [Theory]
+    [InlineData("USD", CashOrderStatus.Posted)]
+    [InlineData(null, CashOrderStatus.Draft)]
+    public async Task LegacyCashClient_CannotReadUnconfirmedCurrencyAsRubles(string? currency, CashOrderStatus status)
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true);
+        db.CashOrders.Add(new CashOrder { Number = "ПКО-2026-9180", Type = CashOrderType.Incoming,
+            Status = status, Date = new DateTime(2026, 5, 2), Amount = 100m, Currency = currency });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        var register = await controller.GetRegister(null, null, null, null, null, ct: default);
+        Assert.IsType<ConflictObjectResult>(register.Result);
+        Assert.Contains("no-store", controller.Response.Headers.CacheControl.ToString());
+        Assert.Contains("X-PayPlanner-Currency-Contract", controller.Response.Headers.Vary.ToString());
+        if (status == CashOrderStatus.Posted)
+        {
+            var book = await controller.GetCashBook(new DateTime(2026, 5, 1), new DateTime(2026, 5, 3), ct: default);
+            Assert.IsType<ConflictObjectResult>(book.Result);
+        }
+        controller.Request.Headers["X-PayPlanner-Currency-Contract"] = "2";
+        Assert.IsType<ConflictObjectResult>((await controller.GetRegister(null, null, null, null, null, ct: default)).Result);
+        controller.Request.Headers["X-PayPlanner-Currency-Contract"] = "1";
+        Assert.IsType<OkObjectResult>((await controller.GetRegister(null, null, null, null, null, ct: default)).Result);
+        if (status == CashOrderStatus.Posted)
+            Assert.IsType<OkObjectResult>((await controller.GetCashBook(new DateTime(2026, 5, 1), new DateTime(2026, 5, 3), ct: default)).Result);
+    }
+
+    [Fact]
+    public async Task LegacyCashClient_CanReadKnownRubleAmounts()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true);
+        db.CashOrders.Add(new CashOrder { Number = "ПКО-2026-9181", Type = CashOrderType.Incoming,
+            Status = CashOrderStatus.Posted, Date = new DateTime(2026, 5, 2), Amount = 100m, Currency = "RUB" });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        Assert.IsType<OkObjectResult>((await controller.GetRegister(null, null, null, null, null, ct: default)).Result);
+        Assert.IsType<OkObjectResult>((await controller.GetCashBook(new DateTime(2026, 5, 1), new DateTime(2026, 5, 3), ct: default)).Result);
+    }
+
+    [Fact]
+    public async Task CashBookExport_RejectsMixedCurrenciesAcrossOpeningAndPeriod()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canExport: true);
+        var user = await db.Users.Include(item => item.Role).SingleAsync(item => item.Id == userId);
+        user.Role!.Name = "admin";
+        db.CashOrders.AddRange(
+            new CashOrder { Number = "ПКО-2026-9172", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 4, 30), Amount = 100m, Currency = "USD" },
+            new CashOrder { Number = "ПКО-2026-9173", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 5, 2), Amount = 20m, Currency = "RUB" });
+        await db.SaveChangesAsync();
+        var controller = new ReportsController(db, Microsoft.Extensions.Logging.Abstractions.NullLogger<ReportsController>.Instance)
+        {
+            ControllerContext = CreateController(db, userId, isAdminClaim: true).ControllerContext,
+        };
+
+        var result = await controller.ExportManagementReportCsv("cash", new DateTime(2026, 5, 1), new DateTime(2026, 5, 3),
+            null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, default);
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal(2, await db.CashOrders.CountAsync());
+    }
+
+    [Fact]
+    public async Task CashBookExport_ExcludesOtherCompanyOrdersBeforeCurrencyCheckAndTotals()
+    {
+        await using var db = await CreateContextAsync();
+        var own = new LegalEntity { ShortName = "Своя" };
+        var foreign = new LegalEntity { ShortName = "Другая" };
+        db.LegalEntities.AddRange(own, foreign);
+        await db.SaveChangesAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canExport: true);
+        var user = await db.Users.SingleAsync(item => item.Id == userId);
+        user.IsEmployee = true;
+        db.RolePermissions.Add(new RolePermission { RoleId = user.RoleId, Section = RolePermissionCatalog.Reports,
+            CanView = true, CanExport = true, ViewScope = DataVisibilityScope.All });
+        db.UserCompanyAccesses.Add(new UserCompanyAccess { UserId = userId, LegalEntityId = own.Id });
+        db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = System.Text.Json.JsonSerializer.Serialize(new[] { own.Id, foreign.Id }) });
+        var ownOperation = new MoneyOperation { MoneyAccount = new MoneyAccount { Name = "Своя касса", Source = MoneyOperationSource.Cash, CompanyId = own.Id },
+            Source = MoneyOperationSource.Cash, Direction = MoneyOperationDirection.Income, AccountingType = MoneyOperationAccountingType.Fact,
+            Date = new DateTime(2026, 5, 2), Amount = 100m, Currency = "RUB" };
+        var foreignOperation = new MoneyOperation { MoneyAccount = new MoneyAccount { Name = "Чужая касса", Source = MoneyOperationSource.Cash, CompanyId = foreign.Id },
+            Source = MoneyOperationSource.Cash, Direction = MoneyOperationDirection.Income, AccountingType = MoneyOperationAccountingType.Fact,
+            Date = new DateTime(2026, 5, 2), Amount = 900m, Currency = "USD" };
+        db.CashOrders.AddRange(
+            new CashOrder { Number = "ПКО-2026-9120", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
+                Date = ownOperation.Date, Amount = 100m, Currency = "RUB", MoneyOperation = ownOperation },
+            new CashOrder { Number = "ПКО-2026-9121", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
+                Date = foreignOperation.Date, Amount = 900m, Currency = "USD", MoneyOperation = foreignOperation });
+        await db.SaveChangesAsync();
+        var controller = new ReportsController(db, Microsoft.Extensions.Logging.Abstractions.NullLogger<ReportsController>.Instance)
+        {
+            ControllerContext = CreateController(db, userId, isAdminClaim: false).ControllerContext,
+        };
+
+        var result = await controller.ExportManagementReportCsv("cash", new DateTime(2026, 5, 1), new DateTime(2026, 5, 3),
+            null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, default);
+
+        var csv = System.Text.Encoding.UTF8.GetString(Assert.IsType<FileContentResult>(result).FileContents);
+        Assert.Contains("100", csv);
+        Assert.DoesNotContain("900", csv);
+    }
+
+    [Fact]
+    public async Task CashBook_IgnoresOtherCashboxesFutureAndDraftForeignOrders()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canExport: true);
+        db.CashOrders.AddRange(
+            new CashOrder { Number = "ПКО-2026-9130", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 5, 2), Amount = 100m, Account = "Своя", Currency = " rub " },
+            new CashOrder { Number = "ПКО-2026-9131", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 5, 2), Amount = 900m, Account = "Другая", Currency = "USD" },
+            new CashOrder { Number = "ПКО-2026-9132", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 5, 4), Amount = 900m, Account = "Своя", Currency = "USD" },
+            new CashOrder { Number = "ПКО-2026-9133", Type = CashOrderType.Incoming, Status = CashOrderStatus.Draft,
+                Date = new DateTime(2026, 5, 2), Amount = 900m, Account = "Своя", Currency = "USD" });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId, isAdminClaim: false);
+        var result = await controller.GetCashBook(new DateTime(2026, 5, 1), new DateTime(2026, 5, 3), "Своя", ct: default);
+
+        var book = Assert.IsType<CashBookResponseDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(100m, book.Income);
+        Assert.Equal(1, book.IncomingCount);
+    }
+
+    [Theory]
+    [InlineData("USD")]
+    [InlineData(null)]
+    public async Task Register_HidesMixedTotalsAcrossPagesAndPrintsEachCurrency(string? currency)
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canExport: true);
+        db.CashOrders.Add(new CashOrder { Number = "ПКО-2026-9140", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
+            Date = new DateTime(2026, 5, 1), Amount = 20m, Currency = currency });
+        for (var index = 1; index <= 5; index++)
+            db.CashOrders.Add(new CashOrder { Number = $"ПКО-2026-914{index}", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 5, 2), Amount = 100m, Currency = "RUB" });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId, isAdminClaim: false);
+        controller.Request.Headers["X-PayPlanner-Currency-Contract"] = "1";
+
+        var result = await controller.GetRegister(null, null, null, null, null, page: 1, pageSize: 5, ct: default);
+        var register = Assert.IsType<CashOrderRegisterResponseDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(6, register.Total);
+        Assert.Equal(5, register.Items.Count);
+        Assert.False(register.AmountsAvailable);
+        Assert.Null(register.IncomingAmount);
+        Assert.Null(register.OutgoingAmount);
+        var json = System.Text.Json.JsonSerializer.SerializeToElement(register, new System.Text.Json.JsonSerializerOptions
+        { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, json.GetProperty("IncomingAmount").ValueKind);
+        var printed = Assert.IsType<ContentResult>(await controller.PrintRegister(null, null, null, null, null, ct: default));
+        Assert.Contains(currency ?? "валюта не указана", printed.Content);
+        Assert.DoesNotContain("520,00 руб.", printed.Content);
+    }
+
+    [Fact]
+    public async Task Register_UsesPostedOrdersForCurrencyTotalsAndEscapesPrintedCurrency()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canExport: true);
+        db.CashOrders.AddRange(
+            new CashOrder { Number = "ПКО-2026-9150", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 5, 1), Amount = 100m, Currency = "RUB" },
+            new CashOrder { Number = "ПКО-2026-9151", Type = CashOrderType.Incoming, Status = CashOrderStatus.Draft,
+                Date = new DateTime(2026, 5, 1), Amount = 10m, Currency = "<tag>" });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId, isAdminClaim: false);
+        controller.Request.Headers["X-PayPlanner-Currency-Contract"] = "1";
+
+        var result = await controller.GetRegister(null, null, null, null, null, ct: default);
+        var register = Assert.IsType<CashOrderRegisterResponseDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.True(register.AmountsAvailable);
+        Assert.Equal(100m, register.IncomingAmount);
+        var printed = Assert.IsType<ContentResult>(await controller.PrintRegister(null, null, null, null, null, ct: default));
+        Assert.Contains("&lt;TAG&gt;", printed.Content);
+        Assert.DoesNotContain("<TAG>", printed.Content);
+    }
+
+    [Fact]
+    public async Task Register_ReportsSingleForeignCurrencyAcrossPages()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canExport: true);
+        for (var index = 0; index < 6; index++)
+            db.CashOrders.Add(new CashOrder { Number = $"ПКО-2026-916{index}", Type = index == 5 ? CashOrderType.Outgoing : CashOrderType.Incoming,
+                Status = CashOrderStatus.Posted, Date = new DateTime(2026, 5, 1), Amount = 10m,
+                Currency = index == 0 ? " usd " : "USD" });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId, isAdminClaim: false);
+        controller.Request.Headers["X-PayPlanner-Currency-Contract"] = "1";
+
+        var result = await controller.GetRegister(null, null, null, null, null, page: 1, pageSize: 5, ct: default);
+        var register = Assert.IsType<CashOrderRegisterResponseDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.True(register.AmountsAvailable);
+        Assert.Equal("single", register.CurrencyStatus);
+        Assert.Equal("USD", register.Currency);
+        Assert.Equal(50m, register.IncomingAmount);
+        Assert.Equal(10m, register.OutgoingAmount);
+        Assert.Equal(5, register.Items.Count);
+        var print = Assert.IsType<ContentResult>(await controller.PrintRegister(null, null, null, null, null, ct: default));
+        Assert.Contains("50,00 USD", print.Content);
+        Assert.Contains("10,00 USD", print.Content);
+        Assert.DoesNotContain("50,00 руб.", print.Content);
+    }
+
+    [Fact]
+    public async Task Register_EmptyFactHasNoClaimedCurrency()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true);
+        db.CashOrders.Add(new CashOrder { Number = "ПКО-2026-9169", Type = CashOrderType.Incoming,
+            Status = CashOrderStatus.Draft, Date = new DateTime(2026, 5, 1), Amount = 10m, Currency = "USD" });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, userId, isAdminClaim: false);
+        controller.Request.Headers["X-PayPlanner-Currency-Contract"] = "1";
+        var result = await controller.GetRegister(null, null, null, null, null, ct: default);
+        var register = Assert.IsType<CashOrderRegisterResponseDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.True(register.AmountsAvailable);
+        Assert.Equal("empty", register.CurrencyStatus);
+        Assert.Null(register.Currency);
+        Assert.Equal(0m, register.IncomingAmount);
+    }
+
     [Fact]
     public async Task CashOrderRegister_KeepsStableOrderAcrossPagesWithSameDate()
     {
@@ -292,6 +612,7 @@ public class CashOrdersControllerTests
         await using var db = await CreateContextAsync();
         var selectedZone = ResolveTimeZoneWithDifferentLocalDate();
         var userId = await CreateUserWithTimeZoneAsync(db, selectedZone.TimeZoneId);
+        await AddConfirmedCashAccountAsync(db, userId, "Main cashbox");
         var controller = CreateController(db, userId);
 
         var nextNumberAction = await controller.GetNextNumber(
@@ -442,6 +763,14 @@ public class CashOrdersControllerTests
             });
         await db.SaveChangesAsync();
         var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canEdit: true);
+        await AddConfirmedCashAccountAsync(db, userId, "Основная касса");
+        var inventoryCash = await db.MoneyAccounts.SingleAsync();
+        foreach (var order in await db.CashOrders.Where(item => item.Account == "Основная касса").ToListAsync())
+        {
+            order.MoneyAccountId = inventoryCash.Id;
+            order.CompanyId = inventoryCash.CompanyId;
+        }
+        await db.SaveChangesAsync();
         var controller = CreateController(db, userId, isAdminClaim: false);
 
         var action = await controller.CreateInventory(
@@ -475,6 +804,891 @@ public class CashOrdersControllerTests
         Assert.Equal(800m, balanceAfterCorrection);
     }
 
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("USD", true)]
+    [InlineData("", true)]
+    [InlineData("USD", false)]
+    public async Task CreateInventory_RejectsUnconfirmedRubleBalanceWithoutWriting(string? currency, bool createCorrection)
+    {
+        await using var db = await CreateContextAsync();
+        db.CashOrders.Add(new CashOrder
+        {
+            Number = "ПКО-2026-9001", Type = CashOrderType.Incoming,
+            Status = CashOrderStatus.Posted, Date = new DateTime(2026, 5, 1),
+            Amount = 100m, Account = "Касса", Currency = currency,
+        });
+        await db.SaveChangesAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canEdit: true);
+        await AddConfirmedCashAccountAsync(db, userId, "Касса");
+        var confirmedCash = await db.MoneyAccounts.SingleAsync();
+        var confirmedOrder = await db.CashOrders.SingleAsync();
+        confirmedOrder.MoneyAccountId = confirmedCash.Id;
+        confirmedOrder.CompanyId = confirmedCash.CompanyId;
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId, isAdminClaim: true);
+
+        var action = await controller.CreateInventory(new CashInventoryCreateRequest
+        {
+            Date = new DateTime(2026, 5, 3), AccountName = "Касса", ActualBalance = 200m, CreateCorrection = createCorrection,
+        }, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(action);
+        Assert.Empty(await db.CashInventories.ToListAsync());
+        Assert.Equal(1, await db.CashOrders.CountAsync());
+    }
+
+    [Fact]
+    public async Task CreateInventory_IgnoresOtherAccountsAndFutureOrUnpostedForeignOrders()
+    {
+        await using var db = await CreateContextAsync();
+        db.CashOrders.AddRange(
+            new CashOrder { Number = "ПКО-2026-9010", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 5, 1), Amount = 100m, Account = "Касса", Currency = " rub " },
+            new CashOrder { Number = "ПКО-2026-9011", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 5, 1), Amount = 200m, Account = "Другая", Currency = "USD" },
+            new CashOrder { Number = "ПКО-2026-9012", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 5, 4), Amount = 200m, Account = "Касса", Currency = "USD" },
+            new CashOrder { Number = "ПКО-2026-9013", Type = CashOrderType.Incoming, Status = CashOrderStatus.Draft,
+                Date = new DateTime(2026, 5, 1), Amount = 200m, Account = "Касса", Currency = "USD" });
+        await db.SaveChangesAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canEdit: true);
+        await AddConfirmedCashAccountAsync(db, userId, "Касса");
+        var inventoryCash = await db.MoneyAccounts.SingleAsync();
+        var includedOrder = await db.CashOrders.SingleAsync(item => item.Number == "ПКО-2026-9010");
+        includedOrder.MoneyAccountId = inventoryCash.Id;
+        includedOrder.CompanyId = inventoryCash.CompanyId;
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId, isAdminClaim: true);
+        var action = await controller.CreateInventory(new CashInventoryCreateRequest
+        {
+            Date = new DateTime(2026, 5, 3), AccountName = "Касса", ActualBalance = 100m, CreateCorrection = true,
+        }, CancellationToken.None);
+
+        var inventory = Assert.IsType<CashInventoryDto>(Assert.IsType<CreatedResult>(action).Value);
+        Assert.Equal(100m, inventory.AccountingBalance);
+        Assert.Null(inventory.CorrectionCashOrderId);
+        Assert.Equal(4, await db.CashOrders.CountAsync());
+    }
+
+    [Fact]
+    public async Task CreateInventory_RejectsPartialVisibleBalanceWithoutWriting()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canEdit: true, viewScope: DataVisibilityScope.Own);
+        await AddConfirmedCashAccountAsync(db, userId, "Касса");
+        var otherId = await CreateUserWithPaymentsPermissionAsync(db, canView: true);
+        db.CashOrders.AddRange(
+            new CashOrder { Number = "ПКО-2026-9002", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 5, 1), Amount = 100m, Account = "Касса", CreatedByUserId = userId },
+            new CashOrder { Number = "ПКО-2026-9003", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 5, 1), Amount = 50m, Account = "Касса", CreatedByUserId = otherId });
+        var confirmedCash = await db.MoneyAccounts.SingleAsync();
+        foreach (var order in db.CashOrders.Local)
+        {
+            order.MoneyAccountId = confirmedCash.Id;
+            order.CompanyId = confirmedCash.CompanyId;
+        }
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        var action = await controller.CreateInventory(new CashInventoryCreateRequest
+        {
+            Date = new DateTime(2026, 5, 3), AccountName = "Касса", ActualBalance = 200m, CreateCorrection = true,
+        }, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(action);
+        Assert.Empty(await db.CashInventories.ToListAsync());
+        Assert.Equal(2, await db.CashOrders.CountAsync());
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public async Task CreateInventory_RejectsCashboxesWithSameNameAcrossCompanies(bool createCorrection, bool isAdmin)
+    {
+        await using var db = await CreateContextAsync();
+        var first = new LegalEntity { ShortName = "Компания 1" };
+        var second = new LegalEntity { ShortName = "Компания 2" };
+        db.LegalEntities.AddRange(first, second);
+        db.MoneyAccounts.AddRange(
+            new MoneyAccount { Name = "Общая касса", Source = MoneyOperationSource.Cash, Company = first, IsActive = true },
+            new MoneyAccount { Name = "Общая касса", Source = MoneyOperationSource.Cash, Company = second, IsActive = false });
+        db.CashOrders.Add(new CashOrder { Number = "ПКО-2026-9020", Type = CashOrderType.Incoming,
+            Status = CashOrderStatus.Posted, Date = new DateTime(2026, 5, 1), Amount = 100m, Account = "Общая касса" });
+        await db.SaveChangesAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canEdit: true);
+        if (isAdmin)
+        {
+            var admin = await db.Users.Include(user => user.Role).SingleAsync(user => user.Id == userId);
+            admin.Role!.Name = "admin";
+            await db.SaveChangesAsync();
+        }
+        var controller = CreateController(db, userId, isAdminClaim: isAdmin);
+
+        var result = await controller.CreateInventory(new CashInventoryCreateRequest
+        {
+            Date = new DateTime(2026, 5, 3), AccountName = "Общая касса", ActualBalance = 200m, CreateCorrection = createCorrection,
+        }, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Empty(await db.CashInventories.ToListAsync());
+        Assert.Equal(1, await db.CashOrders.CountAsync());
+    }
+
+    [Fact]
+    public async Task CreateInventory_AllowsOneNamedCashAccount()
+    {
+        await using var db = await CreateContextAsync();
+        db.MoneyAccounts.Add(new MoneyAccount
+        {
+            Name = "Касса", Source = MoneyOperationSource.Cash,
+            Company = new LegalEntity { ShortName = "Компания" }, IsActive = true,
+        });
+        db.CashOrders.Add(new CashOrder { Number = "ПКО-2026-9030", Type = CashOrderType.Incoming,
+            Status = CashOrderStatus.Posted, Date = new DateTime(2026, 5, 1), Amount = 100m, Account = "Касса" });
+        await db.SaveChangesAsync();
+        var ownCompanyId = await db.MoneyAccounts.Select(account => account.CompanyId!.Value).SingleAsync();
+        var confirmedAccountId = await db.MoneyAccounts.Select(account => account.Id).SingleAsync();
+        var confirmedOrder = await db.CashOrders.SingleAsync();
+        confirmedOrder.MoneyAccountId = confirmedAccountId;
+        confirmedOrder.CompanyId = ownCompanyId;
+        db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = System.Text.Json.JsonSerializer.Serialize(new[] { ownCompanyId }) });
+        await db.SaveChangesAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canEdit: true);
+        var admin = await db.Users.Include(user => user.Role).SingleAsync(user => user.Id == userId);
+        admin.Role!.Name = "admin";
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId, isAdminClaim: true);
+
+        var result = await controller.CreateInventory(new CashInventoryCreateRequest
+        {
+            Date = new DateTime(2026, 5, 3), AccountName = "Касса", ActualBalance = 100m, CreateCorrection = false,
+        }, CancellationToken.None);
+
+        var inventory = Assert.IsType<CashInventoryDto>(Assert.IsType<CreatedResult>(result).Value);
+        Assert.Equal(100m, inventory.AccountingBalance);
+    }
+
+    [Fact]
+    public async Task CreateInventory_RejectsKnownCashAccountOutsideUserCompanies()
+    {
+        await using var db = await CreateContextAsync();
+        db.MoneyAccounts.Add(new MoneyAccount
+        {
+            Name = "Касса", Source = MoneyOperationSource.Cash,
+            Company = new LegalEntity { ShortName = "Другая компания" }, IsActive = true,
+        });
+        await db.SaveChangesAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canEdit: true);
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        var result = await controller.CreateInventory(new CashInventoryCreateRequest
+        {
+            Date = new DateTime(2026, 5, 3), AccountName = "Касса", ActualBalance = 100m, CreateCorrection = true,
+        }, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Empty(await db.CashInventories.ToListAsync());
+        Assert.Empty(await db.CashOrders.ToListAsync());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CreateInventory_OrdinaryEmployeeChecksLinkedMovementCashAccount(bool matches)
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canEdit: true);
+        await AddConfirmedCashAccountAsync(db, userId, "Основная касса");
+        var selectedAccount = await db.MoneyAccounts.SingleAsync();
+        var otherAccount = new MoneyAccount
+        {
+            Name = "Другая касса", Source = MoneyOperationSource.Cash,
+            CompanyId = selectedAccount.CompanyId, IsActive = true,
+        };
+        db.MoneyAccounts.Add(otherAccount);
+        await db.SaveChangesAsync();
+        var movement = new MoneyOperation
+        {
+            Source = MoneyOperationSource.Cash, MoneyAccountId = matches ? selectedAccount.Id : otherAccount.Id,
+            Amount = 50m, Currency = "RUB", Date = new DateTime(2026, 5, 1), ResponsibleUserId = userId,
+        };
+        db.CashOrders.Add(new CashOrder
+        {
+            Number = "ПКО-2026-9400", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
+            Date = movement.Date, Account = selectedAccount.Name, Amount = 50m, Currency = "RUB",
+            CreatedByUserId = userId, MoneyOperation = movement, MoneyAccountId = selectedAccount.Id, CompanyId = selectedAccount.CompanyId,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId, isAdminClaim: false);
+        var action = await controller.CreateInventory(new CashInventoryCreateRequest
+        {
+            Date = new DateTime(2026, 5, 3), AccountName = selectedAccount.Name,
+            ActualBalance = 100m, CreateCorrection = true,
+        }, CancellationToken.None);
+
+        if (matches)
+        {
+            var inventory = Assert.IsType<CashInventoryDto>(Assert.IsType<CreatedResult>(action).Value);
+            Assert.Equal(50m, inventory.AccountingBalance);
+            Assert.Equal(50m, inventory.Difference);
+            Assert.Equal(2, await db.CashOrders.CountAsync());
+        }
+        else
+        {
+            Assert.IsType<BadRequestObjectResult>(action);
+            Assert.Empty(await db.CashInventories.ToListAsync());
+            Assert.Single(await db.CashOrders.ToListAsync());
+        }
+        var storedMovement = await db.MoneyOperations.SingleAsync();
+        Assert.Equal(matches ? selectedAccount.Id : otherAccount.Id, storedMovement.MoneyAccountId);
+        Assert.Equal(50m, storedMovement.Amount);
+    }
+
+    [Fact]
+    public async Task CreateInventory_OrdinaryEmployeeIncludesBoundOrderAfterCashRename()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canEdit: true, viewScope: DataVisibilityScope.Own);
+        await AddConfirmedCashAccountAsync(db, userId, "Новое название");
+        var account = await db.MoneyAccounts.SingleAsync();
+        db.CashOrders.Add(new CashOrder { Number = "SYN-RENAME", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
+            Date = new DateTime(2026, 5, 1), Amount = 100m, Currency = "RUB", Account = "Старое название",
+            MoneyAccountId = account.Id, CompanyId = account.CompanyId, CreatedByUserId = userId });
+        await db.SaveChangesAsync();
+        var result = await CreateController(db, userId, isAdminClaim: false).CreateInventory(new CashInventoryCreateRequest
+        {
+            AccountName = account.Name, MoneyAccountId = account.Id, Date = new DateTime(2026, 5, 3),
+            ActualBalance = 100m, CreateCorrection = true,
+        }, CancellationToken.None);
+        var inventory = Assert.IsType<CashInventoryDto>(Assert.IsType<CreatedResult>(result).Value);
+        Assert.Equal(100m, inventory.AccountingBalance);
+        Assert.Null(inventory.CorrectionCashOrderId);
+        Assert.Single(await db.CashOrders.ToListAsync());
+    }
+
+    [Theory]
+    [InlineData("account")]
+    [InlineData("payment")]
+    [InlineData("movement")]
+    [InlineData("invoice")]
+    public async Task Update_BoundCashOrderCannotChangeAccountOrOrigin(string changedField)
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canEdit: true);
+        await AddConfirmedCashAccountAsync(db, userId, "Касса");
+        var cash = await db.MoneyAccounts.SingleAsync();
+        var order = new CashOrder { Number = "SYN-BOUND", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
+            Date = new DateTime(2026, 5, 1), Amount = 100m, Currency = "RUB", Account = cash.Name,
+            MoneyAccountId = cash.Id, CompanyId = cash.CompanyId, CreatedByUserId = userId };
+        db.CashOrders.Add(order);
+        await db.SaveChangesAsync();
+        var request = new CashOrder { Type = order.Type, Date = order.Date, Amount = order.Amount, Currency = order.Currency,
+            Account = changedField == "account" ? "Другая касса" : order.Account,
+            PaymentId = changedField == "payment" ? 999 : null,
+            MoneyOperationId = changedField == "movement" ? 999 : null,
+            InvoiceId = changedField == "invoice" ? 999 : null,
+            Comment = "Не должно сохраниться" };
+        var controller = CreateController(db, userId, isAdminClaim: false);
+        var result = await controller.Update(order.Id, request, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        db.ChangeTracker.Clear();
+        var stored = await db.CashOrders.SingleAsync();
+        Assert.Equal(cash.Id, stored.MoneyAccountId);
+        Assert.Equal(cash.CompanyId, stored.CompanyId);
+        Assert.Equal("Касса", stored.Account);
+        Assert.Null(stored.PaymentId);
+        Assert.Null(stored.MoneyOperationId);
+        Assert.Null(stored.InvoiceId);
+        Assert.Null(stored.Comment);
+    }
+
+    [Fact]
+    public async Task Update_BoundCashOrderAllowsDescriptionWithoutChangingIdentity()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canEdit: true);
+        await AddConfirmedCashAccountAsync(db, userId, "Касса");
+        var cash = await db.MoneyAccounts.SingleAsync();
+        var order = new CashOrder { Number = "SYN-BOUND-EDIT", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
+            Date = new DateTime(2026, 5, 1), Amount = 100m, Currency = "RUB", Account = cash.Name,
+            MoneyAccountId = cash.Id, CompanyId = cash.CompanyId, CreatedByUserId = userId };
+        db.CashOrders.Add(order);
+        await db.SaveChangesAsync();
+        var result = await CreateController(db, userId, isAdminClaim: false).Update(order.Id, new CashOrder
+        {
+            Type = order.Type, Date = order.Date, Amount = order.Amount, Currency = order.Currency,
+            Account = " Касса ", Comment = "Уточнение",
+        }, CancellationToken.None);
+        Assert.IsType<OkObjectResult>(result);
+        db.ChangeTracker.Clear();
+        var stored = await db.CashOrders.SingleAsync();
+        Assert.Equal(cash.Id, stored.MoneyAccountId);
+        Assert.Equal(cash.CompanyId, stored.CompanyId);
+        Assert.Equal("Уточнение", stored.Comment);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task GetById_BoundCashOrderRequiresAccessToItsCompany(bool ownCompany)
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true);
+        await AddConfirmedCashAccountAsync(db, userId, "Касса");
+        var own = await db.MoneyAccounts.SingleAsync();
+        var other = new MoneyAccount { Name = "Другая касса", Source = MoneyOperationSource.Cash,
+            Company = new LegalEntity { ShortName = "Другая компания" }, IsActive = true };
+        db.MoneyAccounts.Add(other);
+        await db.SaveChangesAsync();
+        var setting = await db.SystemSettings.SingleAsync(item => item.Key == "legalEntities.mainCompanyIds");
+        setting.Value = System.Text.Json.JsonSerializer.Serialize(new[] { own.CompanyId, other.CompanyId });
+        var source = ownCompany ? own : other;
+        var order = new CashOrder { Number = "SYN-BOUND-READ", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
+            Date = new DateTime(2026, 5, 1), Amount = 100m, Currency = "RUB", Account = source.Name,
+            MoneyAccountId = source.Id, CompanyId = source.CompanyId, CreatedByUserId = userId };
+        db.CashOrders.Add(order);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId, isAdminClaim: false);
+        var result = await controller.GetById(order.Id, CancellationToken.None);
+        if (ownCompany) Assert.IsType<OkObjectResult>(result);
+        else Assert.IsType<NotFoundResult>(result);
+        var registryResult = await controller.GetRegister(null, null, null, null, null, ct: CancellationToken.None);
+        var registry = Assert.IsType<CashOrderRegisterResponseDto>(Assert.IsType<OkObjectResult>(registryResult.Result).Value);
+        Assert.Equal(ownCompany ? 1 : 0, registry.Total);
+        Assert.Equal(ownCompany ? 1 : 0, registry.IncomingCount);
+        Assert.Equal(ownCompany ? 100m : 0m, registry.IncomingAmount ?? 0m);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task CreateFromMoneyOperation_RejectsUnknownCurrencyWithoutWriting(string? currency)
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canCreate: true);
+        var operation = new MoneyOperation { Source = MoneyOperationSource.Cash, Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact, Date = new DateTime(2026, 5, 1), Amount = 100m, Currency = currency };
+        db.MoneyOperations.Add(operation);
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db, userId, isAdminClaim: false).CreateFromMoneyOperation(operation.Id, default);
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Empty(await db.CashOrders.ToListAsync());
+        Assert.Equal(currency, (await db.MoneyOperations.SingleAsync()).Currency);
+    }
+
+    [Theory]
+    [InlineData("RUB")]
+    [InlineData("USD")]
+    public async Task CreateFromMoneyOperation_PreservesKnownCurrencyAndReturnsExistingOrder(string currency)
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canCreate: true);
+        var operation = new MoneyOperation { Source = MoneyOperationSource.Cash, Direction = MoneyOperationDirection.Expense,
+            AccountingType = MoneyOperationAccountingType.Fact, Date = new DateTime(2026, 5, 1), Amount = 100m, Currency = currency };
+        db.MoneyOperations.Add(operation);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        var created = Assert.IsType<CashOrderDto>(Assert.IsType<CreatedResult>(await controller.CreateFromMoneyOperation(operation.Id, default)).Value);
+        var repeated = Assert.IsType<CashOrderDto>(Assert.IsType<OkObjectResult>(await controller.CreateFromMoneyOperation(operation.Id, default)).Value);
+        Assert.Equal(currency, created.Currency);
+        Assert.Equal(created.Id, repeated.Id);
+        Assert.Equal(1, await db.CashOrders.CountAsync());
+        var historical = await db.CashOrders.SingleAsync();
+        Assert.Null(historical.MoneyAccountId);
+        Assert.Null(historical.CompanyId);
+    }
+
+    [Fact]
+    public async Task CreateFromMoneyOperation_PersistsConfirmedCashIdentityAndKeepsItOnRetry()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canCreate: true);
+        await AddConfirmedCashAccountAsync(db, userId, "Касса");
+        var account = await db.MoneyAccounts.SingleAsync();
+        var operation = new MoneyOperation { Source = MoneyOperationSource.Cash, Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact, MoneyAccountId = account.Id, AccountName = account.Name,
+            Amount = 100m, Currency = "RUB", Date = new DateTime(2026, 5, 1), ResponsibleUserId = userId };
+        db.MoneyOperations.Add(operation);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId, isAdminClaim: false);
+        Assert.IsType<CreatedResult>(await controller.CreateFromMoneyOperation(operation.Id, CancellationToken.None));
+        var order = await db.CashOrders.SingleAsync();
+        Assert.Equal(account.Id, order.MoneyAccountId);
+        Assert.Equal(account.CompanyId, order.CompanyId);
+        Assert.IsType<OkObjectResult>(await controller.CreateFromMoneyOperation(operation.Id, CancellationToken.None));
+        Assert.Equal(1, await db.CashOrders.CountAsync());
+        Assert.Equal(account.Id, (await db.CashOrders.SingleAsync()).MoneyAccountId);
+    }
+
+    [Theory]
+    [InlineData("account")]
+    [InlineData("operation")]
+    [InlineData("rights")]
+    public async Task CreateFromMoneyOperation_RejectsStaleAccountOperationOrRightsBeforeWriting(string target)
+    {
+        var interceptor = new CashOrderStaleLockInterceptor(target);
+        await using var db = await CreateContextAsync(interceptor);
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canCreate: true);
+        await AddConfirmedCashAccountAsync(db, userId, "Касса");
+        var account = await db.MoneyAccounts.SingleAsync();
+        var operation = new MoneyOperation { Source = MoneyOperationSource.Cash, Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact, MoneyAccountId = account.Id, AccountName = account.Name,
+            Amount = 100m, Currency = "RUB", Date = new DateTime(2026, 5, 1), ResponsibleUserId = userId };
+        db.MoneyOperations.Add(operation);
+        await db.SaveChangesAsync();
+        interceptor.Enabled = true;
+        var result = await CreateController(db, userId, isAdminClaim: false).CreateFromMoneyOperation(operation.Id, CancellationToken.None);
+        Assert.True(interceptor.Triggered);
+        if (target == "rights") Assert.IsType<ForbidResult>(result);
+        else Assert.IsType<ConflictObjectResult>(result);
+        db.ChangeTracker.Clear();
+        Assert.Empty(await db.CashOrders.ToListAsync());
+        Assert.True((await db.MoneyAccounts.SingleAsync()).IsActive);
+        Assert.Equal(100m, (await db.MoneyOperations.SingleAsync()).Amount);
+        Assert.True((await db.RolePermissions.SingleAsync()).CanCreate);
+    }
+
+    [Fact]
+    public async Task CreateFromMoneyOperation_ConcurrentRequestsDoNotCreateDuplicateOrders()
+    {
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = $"synthetic-cash-{Guid.NewGuid():N}", Mode = SqliteOpenMode.Memory,
+            Cache = SqliteCacheMode.Shared, DefaultTimeout = 5,
+        }.ToString();
+        await using var anchor = new SqliteConnection(connectionString);
+        await anchor.OpenAsync();
+        var seedOptions = new DbContextOptionsBuilder<PaymentContext>().UseSqlite(anchor).Options;
+        await using var seed = new PaymentContext(seedOptions);
+        await seed.Database.EnsureCreatedAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(seed, canView: true, canCreate: true);
+        await AddConfirmedCashAccountAsync(seed, userId, "Касса");
+        var account = await seed.MoneyAccounts.SingleAsync();
+        var operation = new MoneyOperation { Source = MoneyOperationSource.Cash, Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact, MoneyAccountId = account.Id, AccountName = account.Name,
+            Amount = 100m, Currency = "RUB", Date = new DateTime(2026, 5, 1), ResponsibleUserId = userId };
+        seed.MoneyOperations.Add(operation);
+        await seed.SaveChangesAsync();
+
+        var gate = new CashOrderConcurrentReadGate();
+        async Task<IActionResult?> InvokeAsync()
+        {
+            await using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync();
+            var options = new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection)
+                .AddInterceptors(new CashOrderConcurrentReadInterceptor(gate)).Options;
+            await using var db = new PaymentContext(options);
+            try { return await CreateController(db, userId, isAdminClaim: false).CreateFromMoneyOperation(operation.Id, CancellationToken.None); }
+            catch (SqliteException error) when (error.SqliteErrorCode is 5 or 6) { return null; }
+        }
+        var results = await Task.WhenAll(Task.Run(InvokeAsync), Task.Run(InvokeAsync));
+        Assert.Equal(2, gate.Arrivals);
+        Assert.Contains(results, result => result is CreatedResult);
+        Assert.All(results, result => Assert.True(result is null or CreatedResult or OkObjectResult));
+        seed.ChangeTracker.Clear();
+        var order = Assert.Single(await seed.CashOrders.ToListAsync());
+        Assert.Equal(operation.Id, order.MoneyOperationId);
+        Assert.Equal(account.Id, order.MoneyAccountId);
+        Assert.IsType<OkObjectResult>(await CreateController(seed, userId, isAdminClaim: false).CreateFromMoneyOperation(operation.Id, CancellationToken.None));
+        Assert.Single(await seed.CashOrders.ToListAsync());
+    }
+
+    [Fact]
+    public async Task ConcurrentInventories_DoNotCreateDuplicateCorrectionForSameBalance()
+    {
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = $"synthetic-inventory-{Guid.NewGuid():N}", Mode = SqliteOpenMode.Memory,
+            Cache = SqliteCacheMode.Shared, DefaultTimeout = 5,
+        }.ToString();
+        await using var anchor = new SqliteConnection(connectionString);
+        await anchor.OpenAsync();
+        await using var seed = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(anchor).Options);
+        await seed.Database.EnsureCreatedAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(seed, canView: true, canEdit: true);
+        await AddConfirmedCashAccountAsync(seed, userId, "Касса");
+        var account = await seed.MoneyAccounts.SingleAsync();
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var arrivals = 0;
+        async Task<IActionResult> InvokeAsync()
+        {
+            await using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync();
+            await using var db = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection).Options);
+            if (Interlocked.Increment(ref arrivals) == 2) start.TrySetResult();
+            await start.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            return await CreateController(db, userId, isAdminClaim: false).CreateInventory(new CashInventoryCreateRequest
+            {
+                AccountName = account.Name, MoneyAccountId = account.Id, Date = new DateTime(2026, 10, 28),
+                ActualBalance = 100m, CreateCorrection = true,
+            }, CancellationToken.None);
+        }
+        var first = Task.Run(InvokeAsync);
+        var second = Task.Run(InvokeAsync);
+        var results = await Task.WhenAll(first, second);
+        Assert.Equal(2, arrivals);
+        Assert.Contains(results, result => result is CreatedResult);
+        Assert.All(results, result => Assert.True(result is ConflictObjectResult or CreatedResult));
+        seed.ChangeTracker.Clear();
+        var adjustment = Assert.Single(await seed.CashOrders.ToListAsync());
+        Assert.Equal(100m, adjustment.Amount);
+        Assert.Equal(account.Id, adjustment.MoneyAccountId);
+        var inventories = await seed.CashInventories.ToListAsync();
+        Assert.InRange(inventories.Count, 1, 2);
+        Assert.Single(inventories, item => item.CorrectionCashOrderId == adjustment.Id);
+        Assert.All(inventories.Where(item => item.CorrectionCashOrderId == null), item => Assert.Equal(0m, item.Difference));
+        if (results.Any(result => result is ConflictObjectResult))
+        {
+            var retry = await CreateController(seed, userId, isAdminClaim: false).CreateInventory(new CashInventoryCreateRequest
+            {
+                AccountName = account.Name, MoneyAccountId = account.Id, Date = new DateTime(2026, 10, 28),
+                ActualBalance = 100m, CreateCorrection = true,
+            }, CancellationToken.None);
+            var retryDto = Assert.IsType<CashInventoryDto>(Assert.IsType<CreatedResult>(retry).Value);
+            Assert.Equal(0m, retryDto.Difference);
+            Assert.Null(retryDto.CorrectionCashOrderId);
+            Assert.Single(await seed.CashOrders.ToListAsync());
+        }
+    }
+
+    [Theory]
+    [InlineData("account")]
+    [InlineData("permission")]
+    [InlineData("company-access")]
+    public async Task CreateInventory_RejectsChangesBeforeCommit(string target)
+    {
+        var interceptor = new InventoryStaleLockInterceptor(target);
+        await using var db = await CreateContextAsync(interceptor);
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canEdit: true);
+        await AddConfirmedCashAccountAsync(db, userId, "Касса");
+        var account = await db.MoneyAccounts.SingleAsync();
+        interceptor.Enabled = true;
+        var result = await CreateController(db, userId, isAdminClaim: false).CreateInventory(new CashInventoryCreateRequest
+        {
+            AccountName = account.Name, MoneyAccountId = account.Id, Date = new DateTime(2026, 10, 28),
+            ActualBalance = 100m, CreateCorrection = true,
+        }, CancellationToken.None);
+        Assert.True(interceptor.Triggered);
+        if (target == "account") Assert.IsType<ConflictObjectResult>(result);
+        else Assert.IsType<ForbidResult>(result);
+        db.ChangeTracker.Clear();
+        Assert.Empty(await db.CashInventories.ToListAsync());
+        Assert.Empty(await db.CashOrders.ToListAsync());
+        Assert.True((await db.MoneyAccounts.SingleAsync()).IsActive);
+        Assert.True((await db.RolePermissions.SingleAsync()).CanEdit);
+        Assert.Single(await db.UserCompanyAccesses.ToListAsync());
+    }
+
+    [Theory]
+    [InlineData(5, false)]
+    [InlineData(6, true)]
+    public async Task CreateInventory_ReportsTransientDatabaseConflictWithoutWriting(int code, bool wrapped)
+    {
+        var interceptor = new InventoryTransientFailureInterceptor(code, wrapped);
+        await using var db = await CreateContextAsync(interceptor);
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canEdit: true);
+        await AddConfirmedCashAccountAsync(db, userId, "Касса");
+        var account = await db.MoneyAccounts.SingleAsync();
+        interceptor.Enabled = true;
+        var controller = CreateController(db, userId, isAdminClaim: false);
+        var request = new CashInventoryCreateRequest { AccountName = account.Name, MoneyAccountId = account.Id,
+            Date = new DateTime(2026, 10, 28), ActualBalance = 100m, CreateCorrection = true };
+        var conflict = Assert.IsType<ConflictObjectResult>(await controller.CreateInventory(request, CancellationToken.None));
+        Assert.Contains("Обновите", Assert.IsType<string>(conflict.Value));
+        Assert.True(interceptor.Triggered);
+        db.ChangeTracker.Clear();
+        Assert.Empty(await db.CashOrders.ToListAsync());
+        Assert.Empty(await db.CashInventories.ToListAsync());
+        interceptor.Enabled = false;
+        Assert.IsType<CreatedResult>(await controller.CreateInventory(request, CancellationToken.None));
+        Assert.Single(await db.CashOrders.ToListAsync());
+        Assert.Single(await db.CashInventories.ToListAsync());
+    }
+
+    [Fact]
+    public async Task CreateInventory_DoesNotHideUnrelatedDatabaseErrorsAsConcurrency()
+    {
+        var interceptor = new InventoryTransientFailureInterceptor(19, false);
+        await using var db = await CreateContextAsync(interceptor);
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canEdit: true);
+        await AddConfirmedCashAccountAsync(db, userId, "Касса");
+        var account = await db.MoneyAccounts.SingleAsync();
+        interceptor.Enabled = true;
+        await Assert.ThrowsAsync<SqliteException>(() => CreateController(db, userId, isAdminClaim: false).CreateInventory(
+            new CashInventoryCreateRequest { AccountName = account.Name, MoneyAccountId = account.Id, ActualBalance = 100m }, CancellationToken.None));
+        Assert.Empty(await db.CashInventories.ToListAsync());
+    }
+
+    [Fact]
+    public async Task CreateInventory_LeavesAmbientTransactionFailureToItsOwner()
+    {
+        var interceptor = new InventoryTransientFailureInterceptor(5, false);
+        await using var db = await CreateContextAsync(interceptor);
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canEdit: true);
+        await AddConfirmedCashAccountAsync(db, userId, "Касса");
+        var account = await db.MoneyAccounts.SingleAsync();
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        interceptor.Enabled = true;
+        await Assert.ThrowsAsync<SqliteException>(() => CreateController(db, userId, isAdminClaim: false).CreateInventory(
+            new CashInventoryCreateRequest { AccountName = account.Name, MoneyAccountId = account.Id, ActualBalance = 100m }, CancellationToken.None));
+        await transaction.RollbackAsync();
+        Assert.Empty(await db.CashInventories.ToListAsync());
+    }
+
+    [Theory]
+    [InlineData("40001", true)]
+    [InlineData("40P01", true)]
+    [InlineData("55P03", true)]
+    [InlineData("23505", false)]
+    public async Task CreateInventory_ClassifiesPostgresErrorsWithoutHidingOtherFailures(string sqlState, bool conflict)
+    {
+        var interceptor = new InventoryPostgresFailureInterceptor(sqlState);
+        await using var db = await CreateContextAsync(interceptor);
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canEdit: true);
+        await AddConfirmedCashAccountAsync(db, userId, "Касса");
+        var account = await db.MoneyAccounts.SingleAsync();
+        interceptor.Enabled = true;
+        var controller = CreateController(db, userId, isAdminClaim: false);
+        var request = new CashInventoryCreateRequest { AccountName = account.Name, MoneyAccountId = account.Id, ActualBalance = 100m };
+        if (conflict) Assert.IsType<ConflictObjectResult>(await controller.CreateInventory(request, CancellationToken.None));
+        else await Assert.ThrowsAsync<Npgsql.PostgresException>(() => controller.CreateInventory(request, CancellationToken.None));
+        Assert.Empty(await db.CashInventories.ToListAsync());
+        Assert.Empty(await db.CashOrders.ToListAsync());
+    }
+
+    [Theory]
+    [InlineData("currency")]
+    [InlineData("inactive")]
+    [InlineData("source")]
+    public async Task CreateFromMoneyOperation_DoesNotBindUnusableCashAccount(string invalid)
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canCreate: true);
+        await AddConfirmedCashAccountAsync(db, userId, "Касса");
+        var account = await db.MoneyAccounts.SingleAsync();
+        if (invalid == "inactive") account.IsActive = false;
+        if (invalid == "source") account.Source = MoneyOperationSource.Bank;
+        var operation = new MoneyOperation { Source = MoneyOperationSource.Cash, Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact, MoneyAccountId = account.Id, AccountName = account.Name,
+            Amount = 100m, Currency = invalid == "currency" ? "USD" : "RUB", Date = new DateTime(2026, 5, 1), ResponsibleUserId = userId };
+        db.MoneyOperations.Add(operation);
+        await db.SaveChangesAsync();
+        var result = await CreateController(db, userId, isAdminClaim: false).CreateFromMoneyOperation(operation.Id, CancellationToken.None);
+        Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Empty(await db.CashOrders.ToListAsync());
+        Assert.Equal(account.Id, (await db.MoneyOperations.SingleAsync()).MoneyAccountId);
+    }
+
+    [Fact]
+    public async Task CreateFromMoneyOperation_ReusesHistoricalOrderWhenCurrencyIsUnknown()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canCreate: true);
+        var operation = new MoneyOperation { Source = MoneyOperationSource.Cash, Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact, Date = new DateTime(2026, 5, 1), Amount = 100m, Currency = null };
+        db.MoneyOperations.Add(operation);
+        await db.SaveChangesAsync();
+        var order = new CashOrder { Number = "ПКО-2026-9040", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
+            Date = operation.Date, Amount = operation.Amount, MoneyOperationId = operation.Id, Currency = "RUB" };
+        db.CashOrders.Add(order);
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db, userId, isAdminClaim: false).CreateFromMoneyOperation(operation.Id, default);
+
+        var returned = Assert.IsType<CashOrderDto>(Assert.IsType<OkObjectResult>(result).Value);
+        Assert.Equal(order.Id, returned.Id);
+        Assert.Equal("RUB", returned.Currency);
+        Assert.Null((await db.MoneyOperations.SingleAsync()).Currency);
+        Assert.Equal(1, await db.CashOrders.CountAsync());
+    }
+
+    [Fact]
+    public async Task CreateFromMoneyOperation_DoesNotExposeAnotherCompanyOperation()
+    {
+        await using var db = await CreateContextAsync();
+        var own = new LegalEntity { ShortName = "Своя" };
+        var foreign = new LegalEntity { ShortName = "Другая" };
+        db.LegalEntities.AddRange(own, foreign);
+        await db.SaveChangesAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canCreate: true);
+        var user = await db.Users.SingleAsync(item => item.Id == userId);
+        user.IsEmployee = true;
+        db.UserCompanyAccesses.Add(new UserCompanyAccess { UserId = userId, LegalEntityId = own.Id });
+        db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = System.Text.Json.JsonSerializer.Serialize(new[] { own.Id, foreign.Id }) });
+        var account = new MoneyAccount { Name = "Другая касса", Source = MoneyOperationSource.Cash, CompanyId = foreign.Id };
+        var operation = new MoneyOperation { Source = MoneyOperationSource.Cash, Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact, Date = new DateTime(2026, 5, 1), Amount = 100m, Currency = null, MoneyAccount = account };
+        db.MoneyOperations.Add(operation);
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db, userId, isAdminClaim: false).CreateFromMoneyOperation(operation.Id, default);
+
+        Assert.IsType<NotFoundResult>(result);
+        Assert.Empty(await db.CashOrders.ToListAsync());
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public async Task Copy_UnknownCurrencyRemainsUnknownAndCannotBePosted(string? currency)
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canEdit: true);
+        var source = new CashOrder { Number = "ПКО-2026-9050", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
+            Date = new DateTime(2026, 5, 1), Amount = 100m, Currency = currency };
+        db.CashOrders.Add(source);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        var copy = Assert.IsType<CashOrderDto>(Assert.IsType<CreatedResult>(await controller.Copy(source.Id, default)).Value);
+        Assert.True(string.IsNullOrWhiteSpace(copy.Currency));
+        Assert.IsType<BadRequestObjectResult>(await controller.Post(copy.Id, default));
+        var stored = await db.CashOrders.SingleAsync(order => order.Id == copy.Id);
+        Assert.Equal(CashOrderStatus.Draft, stored.Status);
+        Assert.True(string.IsNullOrWhiteSpace(stored.Currency));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public async Task Update_UnknownCurrencyDoesNotBecomeRubles(string? currency)
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canEdit: true);
+        var order = new CashOrder { Number = "ПКО-2026-9051", Type = CashOrderType.Incoming, Status = CashOrderStatus.Draft,
+            Date = new DateTime(2026, 5, 1), Amount = 100m, Currency = currency };
+        db.CashOrders.Add(order);
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db, userId, isAdminClaim: false).Update(order.Id,
+            new CashOrder { Type = order.Type, Date = order.Date, Amount = order.Amount, Currency = currency, Comment = "Описание" }, default);
+
+        var saved = Assert.IsType<CashOrderDto>(Assert.IsType<OkObjectResult>(result).Value);
+        Assert.True(string.IsNullOrWhiteSpace(saved.Currency));
+        Assert.Equal("Описание", saved.Comment);
+        Assert.True(string.IsNullOrWhiteSpace((await db.CashOrders.SingleAsync()).Currency));
+    }
+
+    [Fact]
+    public async Task Copy_KnownCurrencyCanBePosted()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canEdit: true);
+        var source = new CashOrder { Number = "ПКО-2026-9052", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
+            Date = new DateTime(2026, 5, 1), Amount = 100m, Currency = "USD" };
+        db.CashOrders.Add(source);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        var copy = Assert.IsType<CashOrderDto>(Assert.IsType<CreatedResult>(await controller.Copy(source.Id, default)).Value);
+        var posted = Assert.IsType<CashOrderDto>(Assert.IsType<OkObjectResult>(await controller.Post(copy.Id, default)).Value);
+        Assert.Equal("USD", posted.Currency);
+        Assert.Equal(CashOrderStatus.Posted, posted.Status);
+    }
+
+    [Fact]
+    public async Task Post_PreviouslyPostedUnknownCurrencyIsIdempotent()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canEdit: true);
+        var order = new CashOrder { Number = "ПКО-2026-9053", Type = CashOrderType.Incoming, Status = CashOrderStatus.Posted,
+            Date = new DateTime(2026, 5, 1), Amount = 100m, Currency = null };
+        db.CashOrders.Add(order);
+        await db.SaveChangesAsync();
+
+        var result = Assert.IsType<CashOrderDto>(Assert.IsType<OkObjectResult>(
+            await CreateController(db, userId, isAdminClaim: false).Post(order.Id, default)).Value);
+        Assert.Null(result.Currency);
+        Assert.Equal(CashOrderStatus.Posted, result.Status);
+        Assert.Equal(1, await db.CashOrders.CountAsync());
+    }
+
+    [Theory]
+    [InlineData("{\"type\":0,\"status\":1,\"amount\":100}")]
+    [InlineData("{\"type\":0,\"status\":1,\"amount\":100,\"currency\":null}")]
+    [InlineData("{\"type\":0,\"status\":1,\"amount\":100,\"currency\":\"  \"}")]
+    public async Task Create_PostedOrderWithUnknownJsonCurrencyIsRejected(string json)
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canCreate: true);
+        var model = System.Text.Json.JsonSerializer.Deserialize<CashOrder>(json,
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!;
+
+        var result = await CreateController(db, userId, isAdminClaim: false).Create(model, default);
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Empty(await db.CashOrders.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Create_DraftWithOmittedJsonCurrencyRemainsUnknownUntilSpecified()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canCreate: true, canEdit: true);
+        var model = System.Text.Json.JsonSerializer.Deserialize<CashOrder>("{\"type\":0,\"status\":0,\"amount\":100}",
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!;
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        var created = Assert.IsType<CashOrderDto>(Assert.IsType<CreatedResult>(await controller.Create(model, default)).Value);
+        Assert.Null(created.Currency);
+        Assert.IsType<BadRequestObjectResult>(await controller.Post(created.Id, default));
+        Assert.Null((await db.CashOrders.SingleAsync()).Currency);
+        var update = await controller.Update(created.Id, new CashOrder
+        {
+            Type = created.Type, Date = created.Date, Amount = created.Amount, Currency = "RUB",
+        }, default);
+        Assert.Equal("RUB", Assert.IsType<CashOrderDto>(Assert.IsType<OkObjectResult>(update).Value).Currency);
+        var posted = Assert.IsType<CashOrderDto>(Assert.IsType<OkObjectResult>(await controller.Post(created.Id, default)).Value);
+        Assert.Equal(CashOrderStatus.Posted, posted.Status);
+    }
+
+    [Fact]
+    public async Task Create_PostedOrderWithExplicitCurrencyPreservesIt()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canCreate: true);
+        var model = System.Text.Json.JsonSerializer.Deserialize<CashOrder>("{\"type\":0,\"status\":1,\"amount\":100,\"currency\":\"USD\"}",
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!;
+
+        var result = await CreateController(db, userId, isAdminClaim: false).Create(model, default);
+
+        var created = Assert.IsType<CashOrderDto>(Assert.IsType<CreatedResult>(result).Value);
+        Assert.Equal("USD", created.Currency);
+        Assert.Equal(CashOrderStatus.Posted, created.Status);
+    }
+
+    [Fact]
+    public async Task CreateInventory_AllowsActiveCashAccountOfAssignedCompany()
+    {
+        await using var db = await CreateContextAsync();
+        var company = new LegalEntity { ShortName = "Своя компания" };
+        db.LegalEntities.Add(company);
+        await db.SaveChangesAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canEdit: true);
+        var employee = await db.Users.SingleAsync(user => user.Id == userId);
+        employee.IsEmployee = true;
+        db.UserCompanyAccesses.Add(new UserCompanyAccess { UserId = userId, LegalEntityId = company.Id });
+        db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = System.Text.Json.JsonSerializer.Serialize(new[] { company.Id }) });
+        db.MoneyAccounts.Add(new MoneyAccount { Name = "Касса", Source = MoneyOperationSource.Cash, CompanyId = company.Id, IsActive = true });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        var result = await controller.CreateInventory(new CashInventoryCreateRequest
+        {
+            Date = new DateTime(2026, 5, 3), AccountName = "Касса", ActualBalance = 0m, CreateCorrection = false,
+        }, CancellationToken.None);
+
+        Assert.IsType<CreatedResult>(result);
+    }
+
     [Fact]
     public async Task GetInventories_FiltersByAccountAndPeriod()
     {
@@ -502,7 +1716,10 @@ public class CashOrdersControllerTests
             });
         await db.SaveChangesAsync();
         var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true);
-        var controller = CreateController(db, userId, isAdminClaim: false);
+        var admin = await db.Users.Include(user => user.Role).SingleAsync(user => user.Id == userId);
+        admin.Role!.Name = "admin";
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId, isAdminClaim: true);
 
         var action = await controller.GetInventories(
             from: new DateTime(2026, 5, 1),
@@ -513,11 +1730,139 @@ public class CashOrdersControllerTests
             ct: CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
-        var response = Assert.IsType<PagedResponse<CashInventoryDto>>(ok.Value);
+        var response = Assert.IsType<CashInventoryPageResponse>(ok.Value);
         var item = Assert.Single(response.Items);
         Assert.Equal("ИНВК-2026-0001", item.Number);
         Assert.Equal("Основная касса", item.AccountName);
         Assert.Equal(1, response.Total);
+    }
+
+    [Theory]
+    [InlineData(DataVisibilityScope.Own)]
+    [InlineData(DataVisibilityScope.All)]
+    public async Task GetInventories_ShowsOnlyConfirmedCompanyAndVisibleCreator(string viewScope)
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, viewScope: viewScope);
+        var otherUserId = await CreateUserWithPaymentsPermissionAsync(db, canView: true);
+        await AddConfirmedCashAccountAsync(db, userId, "Собственная касса");
+        var own = await db.MoneyAccounts.SingleAsync();
+        var otherCompany = new LegalEntity { ShortName = "Чужая компания" };
+        var foreign = new MoneyAccount { Name = "Чужая касса", Source = MoneyOperationSource.Cash, Company = otherCompany, IsActive = true };
+        db.MoneyAccounts.Add(foreign);
+        await db.SaveChangesAsync();
+        var setting = await db.SystemSettings.SingleAsync(item => item.Key == "legalEntities.mainCompanyIds");
+        setting.Value = System.Text.Json.JsonSerializer.Serialize(new[] { own.CompanyId, foreign.CompanyId });
+        var ownRow = new CashInventory { Number = "SYN-OWN", AccountName = own.Name, Date = new DateTime(2026, 5, 1), CompanyId = own.CompanyId, MoneyAccountId = own.Id };
+        var colleagueRow = new CashInventory { Number = "SYN-COLLEAGUE", AccountName = own.Name, Date = new DateTime(2026, 5, 1), CompanyId = own.CompanyId, MoneyAccountId = own.Id };
+        var foreignRow = new CashInventory { Number = "SYN-FOREIGN", AccountName = foreign.Name, Date = new DateTime(2026, 5, 1), CompanyId = foreign.CompanyId, MoneyAccountId = foreign.Id };
+        var legacy = new CashInventory { Number = "SYN-LEGACY", AccountName = own.Name, Date = new DateTime(2026, 5, 1) };
+        var inconsistent = new CashInventory { Number = "SYN-INCONSISTENT", AccountName = own.Name, Date = new DateTime(2026, 5, 1), CompanyId = foreign.CompanyId, MoneyAccountId = own.Id };
+        db.CashInventories.AddRange(ownRow, colleagueRow, foreignRow, legacy, inconsistent);
+        db.Entry(ownRow).Property<int?>("CreatedByUserId").CurrentValue = userId;
+        db.Entry(colleagueRow).Property<int?>("CreatedByUserId").CurrentValue = otherUserId;
+        db.Entry(foreignRow).Property<int?>("CreatedByUserId").CurrentValue = userId;
+        db.Entry(legacy).Property<int?>("CreatedByUserId").CurrentValue = userId;
+        db.Entry(inconsistent).Property<int?>("CreatedByUserId").CurrentValue = userId;
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        var result = await controller.GetInventories(null, null, ct: CancellationToken.None);
+        var page = Assert.IsType<CashInventoryPageResponse>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(viewScope == DataVisibilityScope.All ? 2 : 1, page.Total);
+        Assert.Contains(page.Items, item => item.Number == "SYN-OWN");
+        Assert.Equal(viewScope == DataVisibilityScope.All, page.Items.Any(item => item.Number == "SYN-COLLEAGUE"));
+        Assert.DoesNotContain(page.Items, item => item.Number is "SYN-FOREIGN" or "SYN-LEGACY" or "SYN-INCONSISTENT");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GetInventories_OrdinaryCreatorCanSeeNewInventory(bool createCorrection)
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canEdit: true, viewScope: DataVisibilityScope.Own);
+        await AddConfirmedCashAccountAsync(db, userId, "Собственная касса");
+        var account = await db.MoneyAccounts.SingleAsync();
+        var controller = CreateController(db, userId, isAdminClaim: false);
+        Assert.IsType<CreatedResult>(await controller.CreateInventory(new CashInventoryCreateRequest
+        {
+            AccountName = account.Name, MoneyAccountId = account.Id, Date = new DateTime(2026, 5, 1),
+            ActualBalance = 100m, CreateCorrection = createCorrection,
+        }, CancellationToken.None));
+
+        var result = await controller.GetInventories(null, null, ct: CancellationToken.None);
+        var page = Assert.IsType<CashInventoryPageResponse>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(1, page.Total);
+        var inventory = Assert.Single(page.Items);
+        Assert.Equal(100m, inventory.ActualBalance);
+        Assert.Equal(createCorrection, inventory.CorrectionCashOrderId.HasValue);
+        db.UserCompanyAccesses.Remove(await db.UserCompanyAccesses.SingleAsync(item => item.UserId == userId));
+        await db.SaveChangesAsync();
+        var afterRevocation = await controller.GetInventories(null, null, ct: CancellationToken.None);
+        var filtered = Assert.IsType<CashInventoryPageResponse>(Assert.IsType<OkObjectResult>(afterRevocation.Result).Value);
+        Assert.Equal(0, filtered.Total);
+        Assert.Empty(filtered.Items);
+    }
+
+    [Fact]
+    public async Task GetInventories_HidesInaccessibleCorrectionEvenWhenInventoryBelongsToUser()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, viewScope: DataVisibilityScope.Own);
+        var otherUserId = await CreateUserWithPaymentsPermissionAsync(db, canView: true);
+        await AddConfirmedCashAccountAsync(db, userId, "Собственная касса");
+        var account = await db.MoneyAccounts.SingleAsync();
+        var correction = new CashOrder { Number = "SYN-HIDDEN", Account = account.Name, Date = new DateTime(2026, 5, 1), CreatedByUserId = otherUserId };
+        var inventory = new CashInventory { Number = "SYN-INVENTORY", AccountName = account.Name, Date = correction.Date,
+            CompanyId = account.CompanyId, MoneyAccountId = account.Id, CorrectionCashOrder = correction };
+        db.CashInventories.Add(inventory);
+        db.Entry(inventory).Property<int?>("CreatedByUserId").CurrentValue = userId;
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        var result = await controller.GetInventories(null, null, ct: CancellationToken.None);
+        var page = Assert.IsType<CashInventoryPageResponse>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(0, page.Total);
+        Assert.Empty(page.Items);
+    }
+
+    [Theory]
+    [InlineData(DataVisibilityScope.Own)]
+    [InlineData(DataVisibilityScope.All)]
+    public async Task GetInventories_WithoutReliableCompanyOwnership_HidesLegacyFromNonAdmin(string viewScope)
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, viewScope: viewScope);
+        db.CashInventories.Add(new CashInventory
+        {
+            Number = "ИНВК-2026-0091", Date = new DateTime(2026, 5, 1), AccountName = "Касса",
+            AccountingBalance = 100m, ActualBalance = 100m,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        var result = await controller.GetInventories(null, null, ct: CancellationToken.None);
+
+        var page = Assert.IsType<CashInventoryPageResponse>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(0, page.Total);
+        Assert.Empty(page.Items);
+    }
+
+    [Fact]
+    public async Task GetInventories_AdminClaimDoesNotOverrideCurrentDatabaseRole()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true);
+        db.CashInventories.Add(new CashInventory { Number = "SYN-LEGACY", AccountName = "Касса", Date = new DateTime(2026, 5, 1) });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId, isAdminClaim: true);
+
+        var result = await controller.GetInventories(null, null, ct: CancellationToken.None);
+
+        var page = Assert.IsType<CashInventoryPageResponse>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Empty(page.Items);
+        Assert.Equal(0, page.Total);
     }
 
     [Fact]
@@ -1037,6 +2382,113 @@ public class CashOrdersControllerTests
         return db;
     }
 
+    private sealed class CashOrderConcurrentReadGate
+    {
+        private readonly TaskCompletionSource _both = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _arrivals;
+        public int Arrivals => _arrivals;
+        public async Task ArriveAsync(CancellationToken ct)
+        {
+            if (Interlocked.Increment(ref _arrivals) == 2) _both.TrySetResult();
+            await _both.Task.WaitAsync(TimeSpan.FromSeconds(15), ct);
+        }
+    }
+
+    private sealed class CashOrderConcurrentReadInterceptor(CashOrderConcurrentReadGate gate) : DbCommandInterceptor
+    {
+        private bool _waited;
+        public override async ValueTask<DbDataReader> ReaderExecutedAsync(DbCommand command, CommandExecutedEventData eventData,
+            DbDataReader result, CancellationToken cancellationToken = default)
+        {
+            if (!_waited && command.CommandText.Contains("FROM \"MoneyOperations\" AS", StringComparison.Ordinal))
+            {
+                _waited = true;
+                await gate.ArriveAsync(cancellationToken);
+            }
+            return result;
+        }
+    }
+
+    private sealed class InventoryPostgresFailureInterceptor(string sqlState) : DbCommandInterceptor
+    {
+        public bool Enabled { get; set; }
+        public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (Enabled && command.CommandText.Contains("UPDATE \"MoneyAccounts\"", StringComparison.Ordinal))
+                throw new Npgsql.PostgresException("synthetic failure", "ERROR", "ERROR", sqlState);
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    private sealed class InventoryTransientFailureInterceptor(int code, bool wrapped) : DbCommandInterceptor
+    {
+        public bool Enabled { get; set; }
+        public bool Triggered { get; private set; }
+        public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (Enabled && !Triggered && command.CommandText.Contains("UPDATE \"MoneyAccounts\"", StringComparison.Ordinal))
+            {
+                Triggered = true;
+                var error = new SqliteException("synthetic database conflict", code);
+                if (wrapped) throw new DbUpdateException("synthetic wrapped conflict", error);
+                throw error;
+            }
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    private sealed class InventoryStaleLockInterceptor(string target) : DbCommandInterceptor
+    {
+        public bool Enabled { get; set; }
+        public bool Triggered { get; private set; }
+        public override async ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (Enabled && !Triggered && command.CommandText.Contains("UPDATE \"MoneyAccounts\"", StringComparison.Ordinal))
+            {
+                Triggered = true;
+                await using var change = command.Connection!.CreateCommand();
+                change.Transaction = command.Transaction;
+                change.CommandText = target switch
+                {
+                    "account" => "UPDATE \"MoneyAccounts\" SET \"IsActive\" = 0",
+                    "permission" => "UPDATE \"RolePermissions\" SET \"CanEdit\" = 0",
+                    _ => "DELETE FROM \"UserCompanyAccesses\"",
+                };
+                await change.ExecuteNonQueryAsync(cancellationToken);
+            }
+            return result;
+        }
+    }
+
+    private sealed class CashOrderStaleLockInterceptor(string target) : DbCommandInterceptor
+    {
+        public bool Enabled { get; set; }
+        public bool Triggered { get; private set; }
+
+        public override async ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            var table = target == "account" ? "MoneyAccounts" : "MoneyOperations";
+            if (Enabled && !Triggered && command.CommandText.Contains($"UPDATE \"{table}\"", StringComparison.Ordinal))
+            {
+                Triggered = true;
+                await using var change = command.Connection!.CreateCommand();
+                change.Transaction = command.Transaction;
+                change.CommandText = target switch
+                {
+                    "account" => "UPDATE \"MoneyAccounts\" SET \"IsActive\" = 0",
+                    "rights" => "UPDATE \"RolePermissions\" SET \"CanCreate\" = 0",
+                    _ => "UPDATE \"MoneyOperations\" SET \"Amount\" = 200",
+                };
+                await change.ExecuteNonQueryAsync(cancellationToken);
+            }
+            return result;
+        }
+    }
+
     private sealed class RecordingCommandInterceptor : DbCommandInterceptor
     {
         public List<string> Commands { get; } = [];
@@ -1050,6 +2502,114 @@ public class CashOrdersControllerTests
             Commands.Add(command.CommandText);
             return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
         }
+    }
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task PostBoundCashOrder_RequiresPermissionAndCompanyAccess(bool canEdit, bool hasCompanyAccess)
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canEdit: canEdit);
+        await AddConfirmedCashAccountAsync(db, userId, "Касса");
+        var account = await db.MoneyAccounts.SingleAsync();
+        db.CashOrders.Add(new CashOrder { Number = "SYN-POST", Status = CashOrderStatus.Draft, Amount = 100m,
+            Currency = "RUB", Account = account.Name, MoneyAccountId = account.Id, CompanyId = account.CompanyId, CreatedByUserId = userId });
+        await db.SaveChangesAsync();
+        if (!hasCompanyAccess)
+        {
+            db.UserCompanyAccesses.Remove(await db.UserCompanyAccesses.SingleAsync());
+            await db.SaveChangesAsync();
+        }
+        var order = await db.CashOrders.SingleAsync();
+        var result = await CreateController(db, userId, isAdminClaim: false).Post(order.Id, CancellationToken.None);
+        if (canEdit && hasCompanyAccess)
+        {
+            Assert.IsType<OkObjectResult>(result);
+            Assert.Equal(CashOrderStatus.Posted, order.Status);
+        }
+        else
+        {
+            Assert.True(result is ForbidResult or NotFoundResult);
+            Assert.Equal(CashOrderStatus.Draft, order.Status);
+        }
+    }
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task CopyBoundCashOrder_RequiresPermissionAndCompanyAccess(bool canEdit, bool hasCompanyAccess)
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canEdit: canEdit);
+        await AddConfirmedCashAccountAsync(db, userId, "Касса");
+        var account = await db.MoneyAccounts.SingleAsync();
+        db.CashOrders.Add(new CashOrder { Number = "SYN-COPY", Status = CashOrderStatus.Posted, Amount = 100m,
+            Currency = "RUB", Account = account.Name, MoneyAccountId = account.Id, CompanyId = account.CompanyId, CreatedByUserId = userId });
+        await db.SaveChangesAsync();
+        if (!hasCompanyAccess)
+        {
+            db.UserCompanyAccesses.Remove(await db.UserCompanyAccesses.SingleAsync());
+            await db.SaveChangesAsync();
+        }
+        var result = await CreateController(db, userId, isAdminClaim: false).Copy((await db.CashOrders.SingleAsync()).Id, CancellationToken.None);
+        if (canEdit && hasCompanyAccess)
+        {
+            Assert.IsType<CreatedResult>(result);
+            Assert.Equal(2, await db.CashOrders.CountAsync());
+        }
+        else
+        {
+            Assert.True(result is ForbidResult or NotFoundResult);
+            Assert.Single(await db.CashOrders.ToListAsync());
+        }
+    }
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task CreateManualOrder_RequiresCurrentPermissionAndCompanyAccess(bool canCreate, bool hasCompanyAccess)
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canCreate: canCreate);
+        await AddConfirmedCashAccountAsync(db, userId, "Касса");
+        var account = await db.MoneyAccounts.SingleAsync();
+        if (!hasCompanyAccess)
+        {
+            db.UserCompanyAccesses.Remove(await db.UserCompanyAccesses.SingleAsync());
+            await db.SaveChangesAsync();
+        }
+        var controller = CreateController(db, userId, isAdminClaim: false);
+        var result = await controller.Create(new CashOrder { Number = "SYN-PERMISSION", Status = CashOrderStatus.Draft,
+            Amount = 100m, Currency = "RUB", SelectedMoneyAccountId = account.Id }, CancellationToken.None);
+        if (canCreate && hasCompanyAccess)
+        {
+            Assert.IsType<CreatedResult>(result);
+            var saved = Assert.Single(await db.CashOrders.ToListAsync());
+            Assert.Equal(account.Id, saved.MoneyAccountId);
+            Assert.Equal(account.CompanyId, saved.CompanyId);
+        }
+        else
+        {
+            Assert.True(result is ForbidResult or BadRequestObjectResult);
+            Assert.Empty(await db.CashOrders.ToListAsync());
+        }
+    }
+
+    private static async Task AddConfirmedCashAccountAsync(PaymentContext db, int userId, string accountName)
+    {
+        var company = new LegalEntity { ShortName = "Синтетическая компания" };
+        db.LegalEntities.Add(company);
+        await db.SaveChangesAsync();
+        var user = await db.Users.SingleAsync(item => item.Id == userId);
+        user.IsEmployee = true;
+        db.UserCompanyAccesses.Add(new UserCompanyAccess { UserId = userId, LegalEntityId = company.Id });
+        db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = System.Text.Json.JsonSerializer.Serialize(new[] { company.Id }) });
+        db.MoneyAccounts.Add(new MoneyAccount { Name = accountName, Source = MoneyOperationSource.Cash, CompanyId = company.Id, IsActive = true });
+        await db.SaveChangesAsync();
     }
 
     private static async Task<int> CreateUserWithTimeZoneAsync(PaymentContext db, string timeZoneId)

@@ -1588,6 +1588,32 @@ describe('PaymentModal integration', () => {
     );
   });
 
+  it('retains an explicitly selected cash order day across a save failure and retry', async () => {
+    const payment = doc04Payment({
+      date: '2098-12-29', plannedDate: '2099-12-20', paidDate: '2098-12-30',
+      lastPaymentDate: '2098-12-31', paymentDocumentDate: '2099-01-01',
+      status: 'Completed', isPaid: true, paidAmount: 100, outstandingAmount: 0,
+      paymentSourceId: 6, paymentOrderNumber: 'ПКО-2099-0001',
+    });
+    const onSubmit = vi.fn().mockRejectedValueOnce(new Error('Временный сбой сохранения'))
+      .mockResolvedValueOnce({ ...payment, paymentDocumentDate: '2099-01-02' });
+    render(<PaymentModal isOpen onClose={vi.fn()} onSubmit={onSubmit} payment={payment} />);
+
+    const date = document.querySelector<HTMLInputElement>('input[name="paymentDocumentDate"]');
+    expect(date?.value).toBe('2099-01-01');
+    fireEvent.change(date!, { target: { value: '2099-01-02' } });
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+    expect(await screen.findByText('Временный сбой сохранения')).toBeTruthy();
+    expect(date?.value).toBe('2099-01-02');
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+    for (const [payload] of onSubmit.mock.calls) {
+      expect(payload).toEqual(expect.objectContaining({ id: payment.id, paymentDocumentDate: '2099-01-02' }));
+    }
+    expect(await screen.findByText('Платёж сохранён.')).toBeTruthy();
+    expect(document.querySelector<HTMLInputElement>('input[name="paymentDocumentDate"]')?.value).toBe('2099-01-02');
+  });
+
   it('prints an incoming cash payment as a cash receipt order', async () => {
     render(
       <PaymentModal
@@ -3065,9 +3091,9 @@ describe('PaymentModal integration', () => {
     vi.mocked(apiService.openPaymentCreate).mockImplementation(entry => openCommittedPaymentCreate(entry, io));
     vi.mocked(apiService.acknowledgePaymentCreate).mockImplementation(acknowledgePaymentCreate);
     vi.mocked(apiService.fencePaymentCreateAdoption).mockImplementation(fencePaymentCreateAdoption);
-    let failCleanup = true; const originalRemove = Storage.prototype.removeItem;
+    let failCleanup = 2; const originalRemove = Storage.prototype.removeItem;
     const cleanup = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, key: string) {
-      if (key.startsWith('pp.payment-create.v1:') && failCleanup) { failCleanup = false; throw new Error('cleanup unavailable'); }
+      if (key.startsWith('pp.payment-create.v1:') && failCleanup > 0) { failCleanup -= 1; throw new Error('cleanup unavailable'); }
       return originalRemove.call(this, key);
     });
     try {
@@ -3079,6 +3105,14 @@ describe('PaymentModal integration', () => {
       fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
       await screen.findByRole('alert'); expect(io.commit).toHaveBeenCalledTimes(1);
       expect(onCreateRemainder).not.toHaveBeenCalled();
+      expect((screen.getByRole('button', { name: 'Повторить создание остатка' }) as HTMLButtonElement).disabled).toBe(true);
+      expect(io.register).toHaveBeenCalledTimes(1);
+      expect(io.commit).toHaveBeenCalledTimes(1);
+      expect(pendingPaymentCreates()).toHaveLength(1);
+      fireEvent.click(await screen.findByRole('button', { name: 'Открыть платёж №9901' }));
+      await screen.findByText('cleanup unavailable');
+      expect((screen.getByRole('button', { name: 'Повторить создание остатка' }) as HTMLButtonElement).disabled).toBe(true);
+      expect(io.commit).toHaveBeenCalledTimes(1);
       fireEvent.click(await screen.findByRole('button', { name: 'Открыть платёж №9901' }));
       await screen.findByText('Платёж подтверждён. Остаток ещё не создан; нажмите «Сохранить».');
       fireEvent.click(screen.getByRole('button', { name: 'Повторить создание остатка' }));

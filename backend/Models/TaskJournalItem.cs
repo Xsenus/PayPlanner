@@ -83,6 +83,9 @@ public class TaskJournalItem
     [MaxLength(32)]
     public string Status { get; set; } = "new";
 
+    [MaxLength(32)]
+    public string StatusTransitionToken { get; set; } = Guid.NewGuid().ToString("N");
+
     public bool IsUnderControl { get; set; }
 
     public DateTime? ControlMarkedAt { get; set; }

@@ -549,6 +549,189 @@ public sealed class StickyNotesControllerTests
     }
 
     [Fact]
+    public async Task StickyReminder_ConcurrentNoteEditPreservesMarkerAndDoesNotDuplicateDelivery()
+    {
+        var settings = new SqliteConnectionStringBuilder { DataSource = "pp_sticky_reminder_" + Guid.NewGuid().ToString("N"), Mode = SqliteOpenMode.Memory, Cache = SqliteCacheMode.Shared, Pooling = false };
+        await using var keeper = new SqliteConnection(settings.ConnectionString); await keeper.OpenAsync();
+        DbContextOptions<PaymentContext> Options(SaveChangesInterceptor? interceptor = null)
+        {
+            var builder = new DbContextOptionsBuilder<PaymentContext>().UseSqlite(settings.ConnectionString, sqlite => sqlite.MigrationsAssembly(typeof(PaymentContext).Assembly.FullName));
+            if (interceptor is not null) builder.AddInterceptors(interceptor);
+            return builder.Options;
+        }
+        await using var setup = new PaymentContext(Options()); await setup.Database.EnsureCreatedAsync();
+        var user = await CreateUserAsync(setup);
+        var when = DateTime.UtcNow.AddMinutes(-1);
+        var note = new StickyNote { Board = new StickyNoteBoard { Title = "Общая", Visibility = StickyNoteBoardVisibility.Shared, Background = "cork" }, Text = "Исходный текст", Color = "yellow", Version = 1, Width = 220, Height = 180, AssignedUserId = user.Id, AssignedUserName = user.FullName, ReminderAt = when };
+        setup.StickyNotes.Add(note); await setup.SaveChangesAsync();
+        var gate = new PauseReminderSave();
+        await using var reminderDb = new PaymentContext(Options(gate));
+        await using var editorDb = new PaymentContext(Options());
+        var services = new ServiceCollection(); services.AddSingleton(reminderDb); services.AddSingleton<INotificationService>(CreateNotificationService(reminderDb)); services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        using var provider = services.BuildServiceProvider();
+        var service = new StickyNoteReminderNotificationService(provider.GetRequiredService<IServiceScopeFactory>(), provider.GetRequiredService<IConfiguration>(), NullLogger<StickyNoteReminderNotificationService>.Instance);
+        var pending = service.RunOnceAsync();
+        await gate.Reached.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        try {
+            var request = new UpdateStickyNoteRequest { Text = "Уточнённый текст", Color = "yellow", Width = 220, Height = 180, ZIndex = 1, Version = 1, AssignedUserId = user.Id, ReminderAt = when };
+            Assert.IsType<OkObjectResult>((await CreateController(editorDb, user).UpdateNote(note.Id, request, CancellationToken.None)).Result);
+        } finally { gate.Release.TrySetResult(); }
+        Assert.Equal(1, await pending.WaitAsync(TimeSpan.FromSeconds(15)));
+        reminderDb.ChangeTracker.Clear();
+        Assert.Equal(0, await service.RunOnceAsync());
+        setup.ChangeTracker.Clear();
+        var saved = await setup.StickyNotes.AsNoTracking().SingleAsync(item => item.Id == note.Id);
+        Assert.Equal("Уточнённый текст", saved.Text);
+        Assert.NotNull(saved.ReminderSentAt);
+        Assert.Single(await setup.UserNotifications.Where(item => item.Type == UserNotificationTypes.NoteReminder).ToListAsync());
+    }
+
+    [Fact]
+    public async Task StickyReminder_ConcurrentRescheduleDoesNotMarkNewReminderAsSent()
+    {
+        var settings = new SqliteConnectionStringBuilder { DataSource = "pp_sticky_reminder_" + Guid.NewGuid().ToString("N"), Mode = SqliteOpenMode.Memory, Cache = SqliteCacheMode.Shared, Pooling = false };
+        await using var keeper = new SqliteConnection(settings.ConnectionString); await keeper.OpenAsync();
+        DbContextOptions<PaymentContext> Options(SaveChangesInterceptor? interceptor = null)
+        {
+            var builder = new DbContextOptionsBuilder<PaymentContext>().UseSqlite(settings.ConnectionString, sqlite => sqlite.MigrationsAssembly(typeof(PaymentContext).Assembly.FullName));
+            if (interceptor is not null) builder.AddInterceptors(interceptor);
+            return builder.Options;
+        }
+        await using var setup = new PaymentContext(Options()); await setup.Database.EnsureCreatedAsync();
+        var user = await CreateUserAsync(setup);
+        var when = DateTime.UtcNow.AddMinutes(-1);
+        var note = new StickyNote { Board = new StickyNoteBoard { Title = "Общая", Visibility = StickyNoteBoardVisibility.Shared, Background = "cork" }, Text = "Исходный текст", Color = "yellow", Version = 1, Width = 220, Height = 180, AssignedUserId = user.Id, AssignedUserName = user.FullName, ReminderAt = when };
+        setup.StickyNotes.Add(note); await setup.SaveChangesAsync();
+        var gate = new PauseReminderSave();
+        await using var reminderDb = new PaymentContext(Options(gate));
+        await using var editorDb = new PaymentContext(Options());
+        var services = new ServiceCollection(); services.AddSingleton(reminderDb); services.AddSingleton<INotificationService>(CreateNotificationService(reminderDb)); services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        using var provider = services.BuildServiceProvider();
+        var service = new StickyNoteReminderNotificationService(provider.GetRequiredService<IServiceScopeFactory>(), provider.GetRequiredService<IConfiguration>(), NullLogger<StickyNoteReminderNotificationService>.Instance);
+        var pending = service.RunOnceAsync();
+        await gate.Reached.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        try {
+            var request = new UpdateStickyNoteRequest { Text = "Уточнённый текст", Color = "yellow", Width = 220, Height = 180, ZIndex = 1, Version = 1, AssignedUserId = user.Id, ReminderAt = when.AddDays(2) };
+            Assert.IsType<OkObjectResult>((await CreateController(editorDb, user).UpdateNote(note.Id, request, CancellationToken.None)).Result);
+        } finally { gate.Release.TrySetResult(); }
+        Assert.Equal(1, await pending.WaitAsync(TimeSpan.FromSeconds(15)));
+        reminderDb.ChangeTracker.Clear();
+        Assert.Equal(0, await service.RunOnceAsync());
+        setup.ChangeTracker.Clear();
+        var saved = await setup.StickyNotes.AsNoTracking().SingleAsync(item => item.Id == note.Id);
+        Assert.Equal("Уточнённый текст", saved.Text);
+        Assert.Null(saved.ReminderSentAt);
+        Assert.Equal(when.AddDays(2), saved.ReminderAt);
+        Assert.Single(await setup.UserNotifications.Where(item => item.Type == UserNotificationTypes.NoteReminder).ToListAsync());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StickyReminder_PostgreSqlConcurrentEditPreservesDeliveryAndReschedule(bool reschedule)
+    {
+        await using var template = new PostgreSqlModelTemplate(); await template.InitializeAsync();
+        await using var lease = await template.CreateDatabaseAsync();
+        DbContextOptions<PostgreSqlPaymentContext> Options(SaveChangesInterceptor? interceptor = null)
+        {
+            var builder = new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(lease.ConnectionString);
+            if (interceptor is not null) builder.AddInterceptors(interceptor);
+            return builder.Options;
+        }
+        await using var setup = new PostgreSqlPaymentContext(Options());
+        var user = await CreateUserAsync(setup);
+        var initial = DateTime.UtcNow.AddMinutes(-1);
+        var when = new DateTime(initial.Ticks - initial.Ticks % 10, DateTimeKind.Utc);
+        var note = new StickyNote { Board = new StickyNoteBoard { Title = "Общая", Visibility = StickyNoteBoardVisibility.Shared, Background = "cork" }, Text = "Исходный текст", Color = "yellow", Version = 1, Width = 220, Height = 180, AssignedUserId = user.Id, AssignedUserName = user.FullName, ReminderAt = when };
+        setup.StickyNotes.Add(note); await setup.SaveChangesAsync();
+        var gate = new PauseReminderSave();
+        await using var reminderDb = new PostgreSqlPaymentContext(Options(gate));
+        await using var editorDb = new PostgreSqlPaymentContext(Options());
+        var services = new ServiceCollection(); services.AddSingleton<PaymentContext>(reminderDb); services.AddSingleton<INotificationService>(CreateNotificationService(reminderDb)); services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        using var provider = services.BuildServiceProvider();
+        var service = new StickyNoteReminderNotificationService(provider.GetRequiredService<IServiceScopeFactory>(), provider.GetRequiredService<IConfiguration>(), NullLogger<StickyNoteReminderNotificationService>.Instance);
+        var pending = service.RunOnceAsync(); await gate.Reached.Task.WaitAsync(TimeSpan.FromSeconds(20));
+        try
+        {
+            var request = new UpdateStickyNoteRequest { Text = "Уточнённый текст", Color = "yellow", Width = 220, Height = 180, ZIndex = 1, Version = 1, AssignedUserId = user.Id, ReminderAt = reschedule ? when.AddDays(2) : when };
+            Assert.IsType<OkObjectResult>((await CreateController(editorDb, user).UpdateNote(note.Id, request, CancellationToken.None)).Result);
+        }
+        finally { gate.Release.TrySetResult(); }
+        Assert.Equal(1, await pending.WaitAsync(TimeSpan.FromSeconds(20)));
+        reminderDb.ChangeTracker.Clear(); Assert.Equal(0, await service.RunOnceAsync());
+        setup.ChangeTracker.Clear();
+        var saved = await setup.StickyNotes.AsNoTracking().SingleAsync(item => item.Id == note.Id);
+        Assert.Equal("Уточнённый текст", saved.Text);
+        if (reschedule) { Assert.Null(saved.ReminderSentAt); Assert.Equal(when.AddDays(2), saved.ReminderAt); }
+        else Assert.NotNull(saved.ReminderSentAt);
+        Assert.Single(await setup.UserNotifications.Where(item => item.Type == UserNotificationTypes.NoteReminder).ToListAsync());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task StickyReminder_PostgreSqlConcurrentDeleteOrReassignmentDoesNotMarkWrongReminder(bool delete)
+    {
+        await using var template = new PostgreSqlModelTemplate(); await template.InitializeAsync();
+        await using var lease = await template.CreateDatabaseAsync();
+        DbContextOptions<PostgreSqlPaymentContext> Options(SaveChangesInterceptor? interceptor = null)
+        {
+            var builder = new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(lease.ConnectionString);
+            if (interceptor is not null) builder.AddInterceptors(interceptor);
+            return builder.Options;
+        }
+        await using var setup = new PostgreSqlPaymentContext(Options());
+        var user = await CreateUserAsync(setup); var other = await CreateUserAsync(setup);
+        var initial = DateTime.UtcNow.AddMinutes(-1);
+        var when = new DateTime(initial.Ticks - initial.Ticks % 10, DateTimeKind.Utc);
+        var note = new StickyNote { Board = new StickyNoteBoard { Title = "Общая", Visibility = StickyNoteBoardVisibility.Shared, Background = "cork" }, Text = "Исходный текст", Color = "yellow", Version = 1, Width = 220, Height = 180, AssignedUserId = user.Id, AssignedUserName = user.FullName, ReminderAt = when };
+        setup.StickyNotes.Add(note); await setup.SaveChangesAsync();
+        var gate = new PauseReminderSave();
+        await using var reminderDb = new PostgreSqlPaymentContext(Options(gate));
+        await using var editorDb = new PostgreSqlPaymentContext(Options());
+        var services = new ServiceCollection(); services.AddSingleton<PaymentContext>(reminderDb); services.AddSingleton<INotificationService>(CreateNotificationService(reminderDb)); services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        using var provider = services.BuildServiceProvider();
+        var service = new StickyNoteReminderNotificationService(provider.GetRequiredService<IServiceScopeFactory>(), provider.GetRequiredService<IConfiguration>(), NullLogger<StickyNoteReminderNotificationService>.Instance);
+        var pending = service.RunOnceAsync(); await gate.Reached.Task.WaitAsync(TimeSpan.FromSeconds(20));
+        try
+        {
+            var controller = CreateController(editorDb, user);
+            if (delete) Assert.IsType<NoContentResult>(await controller.DeleteNote(note.Id, CancellationToken.None));
+            else
+            {
+                var request = new UpdateStickyNoteRequest { Text = "Переданная задача", Color = "yellow", Width = 220, Height = 180, ZIndex = 1, Version = 1, AssignedUserId = other.Id, ReminderAt = when };
+                Assert.IsType<OkObjectResult>((await controller.UpdateNote(note.Id, request, CancellationToken.None)).Result);
+            }
+        }
+        finally { gate.Release.TrySetResult(); }
+        Assert.Equal(1, await pending.WaitAsync(TimeSpan.FromSeconds(20)));
+        setup.ChangeTracker.Clear();
+        var saved = await setup.StickyNotes.IgnoreQueryFilters().SingleAsync(item => item.Id == note.Id);
+        Assert.Null(saved.ReminderSentAt);
+        Assert.Equal(delete, setup.Entry(saved).Property<bool>("IsDeleted").CurrentValue);
+        reminderDb.ChangeTracker.Clear(); Assert.Equal(delete ? 0 : 1, await service.RunOnceAsync());
+        setup.ChangeTracker.Clear();
+        var notices = await setup.UserNotifications.Where(item => item.Type == UserNotificationTypes.NoteReminder).ToListAsync();
+        Assert.Equal(delete ? 1 : 2, notices.Count);
+        Assert.Contains(notices, item => item.RecipientUserId == user.Id);
+        if (!delete) Assert.Contains(notices, item => item.RecipientUserId == other.Id);
+    }
+
+    private sealed class PauseReminderSave : SaveChangesInterceptor
+    {
+        public TaskCompletionSource Reached { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (eventData.Context!.ChangeTracker.Entries<StickyNote>().Any(entry => entry.State == EntityState.Modified && entry.Property(item => item.ReminderSentAt).IsModified))
+            {
+                Reached.TrySetResult(); await Release.Task.WaitAsync(cancellationToken);
+            }
+            return result;
+        }
+    }
+
+    [Fact]
     public async Task StickyNoteReminderNotificationService_RunOnce_UsesSingleCandidateQueryForDeniedReminder()
     {
         var commandInterceptor = new RecordingCommandInterceptor();
@@ -873,6 +1056,286 @@ public sealed class StickyNotesControllerTests
 
         Assert.IsType<OkObjectResult>(result.Result);
         Assert.Empty(await db.UserNotifications.ToListAsync());
+    }
+
+    [Fact]
+    public async Task UpdateNote_ConcurrentWritersCannotSilentlyOverwriteSameVersion()
+    {
+        var settings = new SqliteConnectionStringBuilder { DataSource = "pp_sticky_race_" + Guid.NewGuid().ToString("N"), Mode = SqliteOpenMode.Memory, Cache = SqliteCacheMode.Shared, Pooling = false };
+        await using var keeper = new SqliteConnection(settings.ConnectionString);
+        await keeper.OpenAsync();
+        DbContextOptions<PaymentContext> Options(SaveChangesInterceptor? interceptor = null)
+        {
+            var builder = new DbContextOptionsBuilder<PaymentContext>().UseSqlite(settings.ConnectionString, sqlite => sqlite.MigrationsAssembly(typeof(PaymentContext).Assembly.FullName));
+            if (interceptor is not null) builder.AddInterceptors(interceptor);
+            return builder.Options;
+        }
+        await using var setup = new PaymentContext(Options());
+        await setup.Database.EnsureCreatedAsync();
+        var user = await CreateUserAsync(setup);
+        var note = new StickyNote { Board = new StickyNoteBoard { Title = "Общая", Visibility = StickyNoteBoardVisibility.Shared, Background = "cork" }, Text = "Исходный текст", Color = "yellow", Version = 1, Width = 220, Height = 180 };
+        setup.StickyNotes.Add(note);
+        await setup.SaveChangesAsync();
+        var gate = new PauseStickySave();
+        await using var slowDb = new PaymentContext(Options(gate));
+        await using var fastDb = new PaymentContext(Options());
+        UpdateStickyNoteRequest Request(string text) => new() { Text = text, Color = "yellow", Width = 220, Height = 180, ZIndex = 1, Version = 1 };
+        var slow = CreateController(slowDb, user).UpdateNote(note.Id, Request("Первый черновик"), CancellationToken.None);
+        await gate.Reached.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        try
+        {
+            var fast = await CreateController(fastDb, user).UpdateNote(note.Id, Request("Сохранённый текст"), CancellationToken.None);
+            Assert.Equal(423, Assert.IsType<ObjectResult>(fast.Result).StatusCode);
+        }
+        finally { gate.Release.TrySetResult(); }
+        Assert.IsType<OkObjectResult>((await slow.WaitAsync(TimeSpan.FromSeconds(15))).Result);
+        var retry = await CreateController(fastDb, user).UpdateNote(note.Id, Request("Сохранённый текст"), CancellationToken.None);
+        var conflict = Assert.IsType<ConflictObjectResult>(retry.Result);
+        Assert.Equal("Первый черновик", Assert.IsType<StickyNoteDto>(conflict.Value).Text);
+        setup.ChangeTracker.Clear();
+        var saved = await setup.StickyNotes.AsNoTracking().SingleAsync(item => item.Id == note.Id);
+        Assert.Equal("Первый черновик", saved.Text);
+        Assert.Equal(2, saved.Version);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NoteEdit_RejectsConcurrentLayoutOrDeletion(bool delete)
+    {
+        var settings = new SqliteConnectionStringBuilder { DataSource = "pp_sticky_race_" + Guid.NewGuid().ToString("N"), Mode = SqliteOpenMode.Memory, Cache = SqliteCacheMode.Shared, Pooling = false };
+        await using var keeper = new SqliteConnection(settings.ConnectionString);
+        await keeper.OpenAsync();
+        DbContextOptions<PaymentContext> Options(SaveChangesInterceptor? interceptor = null)
+        {
+            var builder = new DbContextOptionsBuilder<PaymentContext>().UseSqlite(settings.ConnectionString, sqlite => sqlite.MigrationsAssembly(typeof(PaymentContext).Assembly.FullName));
+            if (interceptor is not null) builder.AddInterceptors(interceptor);
+            return builder.Options;
+        }
+        await using var setup = new PaymentContext(Options());
+        await setup.Database.EnsureCreatedAsync();
+        var user = await CreateUserAsync(setup);
+        var note = new StickyNote { Board = new StickyNoteBoard { Title = "Общая", Visibility = StickyNoteBoardVisibility.Shared, Background = "cork" }, Text = "Исходный текст", Color = "yellow", Version = 1, Width = 220, Height = 180 };
+        setup.StickyNotes.Add(note); await setup.SaveChangesAsync();
+        var gate = new PauseStickySave();
+        await using var slowDb = new PaymentContext(Options(gate));
+        await using var fastDb = new PaymentContext(Options());
+        var pending = CreateController(slowDb, user).UpdateNote(note.Id, new UpdateStickyNoteRequest { Text = "Новый текст", Color = "yellow", Width = 220, Height = 180, ZIndex = 1, Version = 1 }, CancellationToken.None);
+        await gate.Reached.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        try
+        {
+            var controller = CreateController(fastDb, user);
+            if (delete) Assert.Equal(423, Assert.IsType<ObjectResult>(await controller.DeleteNote(note.Id, CancellationToken.None)).StatusCode);
+            else Assert.Equal(423, Assert.IsType<ObjectResult>((await controller.UpdateNoteLayout(note.Id, new UpdateStickyNoteLayoutRequest { X = 150, Y = 25, Width = 220, Height = 180, ZIndex = 1, Version = 1 }, CancellationToken.None)).Result).StatusCode);
+        }
+        finally { gate.Release.TrySetResult(); }
+        Assert.IsType<OkObjectResult>((await pending.WaitAsync(TimeSpan.FromSeconds(15))).Result);
+        var retry = CreateController(fastDb, user);
+        if (delete) Assert.IsType<NoContentResult>(await retry.DeleteNote(note.Id, CancellationToken.None));
+        else Assert.IsType<ConflictObjectResult>((await retry.UpdateNoteLayout(note.Id, new UpdateStickyNoteLayoutRequest { X = 150, Y = 25, Width = 220, Height = 180, ZIndex = 1, Version = 1 }, CancellationToken.None)).Result);
+        setup.ChangeTracker.Clear();
+        var saved = await setup.StickyNotes.IgnoreQueryFilters().SingleAsync(item => item.Id == note.Id);
+        Assert.Equal("Новый текст", saved.Text);
+        Assert.Equal(delete ? 3 : 2, saved.Version);
+        Assert.Equal(delete, setup.Entry(saved).Property<bool>("IsDeleted").CurrentValue);
+    }
+
+    [Theory]
+    [InlineData("edit")]
+    [InlineData("layout")]
+    [InlineData("delete")]
+    [InlineData("revoke")]
+    [InlineData("revoke_only")]
+    public async Task NoteEdit_PostgreSqlRejectsConcurrentChangeAndRechecksAccess(string scenario)
+    {
+        await using var template = new PostgreSqlModelTemplate();
+        await template.InitializeAsync();
+        await using var lease = await template.CreateDatabaseAsync();
+        DbContextOptions<PostgreSqlPaymentContext> Options(SaveChangesInterceptor? interceptor = null)
+        {
+            var builder = new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(lease.ConnectionString);
+            if (interceptor is not null) builder.AddInterceptors(interceptor);
+            return builder.Options;
+        }
+        await using var setup = new PostgreSqlPaymentContext(Options());
+        var user = await CreateUserAsync(setup);
+        var note = new StickyNote { Board = new StickyNoteBoard { Title = "Общая", Visibility = StickyNoteBoardVisibility.Shared, Background = "cork" }, Text = "Исходный текст", Color = "yellow", Version = 1, Width = 220, Height = 180 };
+        setup.StickyNotes.Add(note); await setup.SaveChangesAsync();
+        var gate = new PauseStickySave();
+        await using var slowDb = new PostgreSqlPaymentContext(Options(gate));
+        await using var fastDb = new PostgreSqlPaymentContext(Options());
+        UpdateStickyNoteRequest Request(string text) => new() { Text = text, Color = "yellow", Width = 220, Height = 180, ZIndex = 1, Version = 1 };
+        var pending = CreateController(slowDb, user).UpdateNote(note.Id, Request("Поздний черновик"), CancellationToken.None);
+        await gate.Reached.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        Task<int>? revokeTask = null;
+        try
+        {
+            var controller = CreateController(fastDb, user);
+            if (scenario == "delete") Assert.IsType<NoContentResult>(await controller.DeleteNote(note.Id, CancellationToken.None));
+            else if (scenario == "layout") Assert.IsType<OkObjectResult>((await controller.UpdateNoteLayout(note.Id, new UpdateStickyNoteLayoutRequest { X = 150, Y = 25, Width = 220, Height = 180, ZIndex = 1, Version = 1 }, CancellationToken.None)).Result);
+            else
+            {
+                if (scenario != "revoke_only") Assert.IsType<OkObjectResult>((await controller.UpdateNote(note.Id, Request("Сохранённый текст"), CancellationToken.None)).Result);
+                if (scenario is "revoke" or "revoke_only")
+                {
+                    var permission = await fastDb.RolePermissions.SingleAsync(item => item.RoleId == user.RoleId && item.Section == RolePermissionCatalog.Notes);
+                    permission.CanEdit = false;
+                    revokeTask = fastDb.SaveChangesAsync();
+                    Assert.NotSame(revokeTask, await Task.WhenAny(revokeTask, Task.Delay(250)));
+                }
+            }
+        }
+        finally { gate.Release.TrySetResult(); }
+        var result = await pending.WaitAsync(TimeSpan.FromSeconds(15));
+        if (scenario == "delete") Assert.IsType<NotFoundResult>(result.Result);
+        else if (scenario == "revoke_only") Assert.IsType<OkObjectResult>(result.Result);
+        else Assert.IsType<ConflictObjectResult>(result.Result);
+        if (revokeTask is not null)
+        {
+            await revokeTask.WaitAsync(TimeSpan.FromSeconds(15));
+            await using var afterRevocation = new PostgreSqlPaymentContext(Options());
+            Assert.IsType<ForbidResult>((await CreateController(afterRevocation, user).UpdateNote(note.Id, Request("Недоступный текст"), CancellationToken.None)).Result);
+        }
+        setup.ChangeTracker.Clear();
+        var saved = await setup.StickyNotes.IgnoreQueryFilters().AsNoTracking().SingleAsync(item => item.Id == note.Id);
+        Assert.Equal(scenario is "edit" or "revoke" ? "Сохранённый текст" : scenario == "revoke_only" ? "Поздний черновик" : "Исходный текст", saved.Text);
+        Assert.Equal(2, saved.Version);
+    }
+
+    [Fact]
+    public async Task NoteEdit_PostgreSqlFailsClosedWhilePermissionRevocationIsPending()
+    {
+        await using var template = new PostgreSqlModelTemplate(); await template.InitializeAsync();
+        await using var lease = await template.CreateDatabaseAsync();
+        DbContextOptions<PostgreSqlPaymentContext> Options() => new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(lease.ConnectionString).Options;
+        await using var setup = new PostgreSqlPaymentContext(Options());
+        var user = await CreateUserAsync(setup);
+        var note = new StickyNote { Board = new StickyNoteBoard { Title = "Общая", Visibility = StickyNoteBoardVisibility.Shared, Background = "cork" }, Text = "Исходный текст", Color = "yellow", Version = 1, Width = 220, Height = 180 };
+        setup.StickyNotes.Add(note); await setup.SaveChangesAsync();
+        await using var revoker = new PostgreSqlPaymentContext(Options());
+        await using var edit = new PostgreSqlPaymentContext(Options());
+        await using var transaction = await revoker.Database.BeginTransactionAsync();
+        var permission = await revoker.RolePermissions.SingleAsync(item => item.RoleId == user.RoleId && item.Section == RolePermissionCatalog.Notes);
+        permission.CanEdit = false; await revoker.SaveChangesAsync();
+        var request = new UpdateStickyNoteRequest { Text = "Недоступный текст", Color = "yellow", Width = 220, Height = 180, ZIndex = 1, Version = 1 };
+        var busy = await CreateController(edit, user).UpdateNote(note.Id, request, CancellationToken.None);
+        Assert.Equal(423, Assert.IsType<ObjectResult>(busy.Result).StatusCode);
+        await transaction.CommitAsync();
+        var denied = await CreateController(edit, user).UpdateNote(note.Id, request, CancellationToken.None);
+        Assert.IsType<ForbidResult>(denied.Result);
+        setup.ChangeTracker.Clear();
+        var saved = await setup.StickyNotes.AsNoTracking().SingleAsync(item => item.Id == note.Id);
+        Assert.Equal("Исходный текст", saved.Text); Assert.Equal(1, saved.Version);
+    }
+
+    [Theory]
+    [InlineData("remove-member")]
+    [InlineData("viewer")]
+    [InlineData("deactivate")]
+    [InlineData("make-private")]
+    public async Task NoteEdit_PostgreSqlFailsClosedDuringBoardOrUserAccessChange(string scenario)
+    {
+        await using var template = new PostgreSqlModelTemplate(); await template.InitializeAsync();
+        await using var lease = await template.CreateDatabaseAsync();
+        DbContextOptions<PostgreSqlPaymentContext> Options() => new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(lease.ConnectionString).Options;
+        await using var setup = new PostgreSqlPaymentContext(Options());
+        var owner = await CreateUserAsync(setup); var editor = await CreateUserAsync(setup);
+        var board = new StickyNoteBoard { Title = "Проверочная доска", Visibility = scenario == "make-private" ? StickyNoteBoardVisibility.Shared : StickyNoteBoardVisibility.Personal, OwnerUserId = owner.Id, Background = "cork", Members = [new StickyNoteBoardMember { UserId = editor.Id, Role = "editor" }] };
+        var note = new StickyNote { Board = board, Text = "Исходный текст", Color = "yellow", Version = 1, Width = 220, Height = 180 };
+        setup.StickyNotes.Add(note); await setup.SaveChangesAsync();
+        await using var revoker = new PostgreSqlPaymentContext(Options());
+        await using var edit = new PostgreSqlPaymentContext(Options());
+        await using var transaction = await revoker.Database.BeginTransactionAsync();
+        if (scenario is "remove-member" or "viewer")
+        {
+            var member = await revoker.StickyNoteBoardMembers.SingleAsync(item => item.BoardId == board.Id && item.UserId == editor.Id);
+            if (scenario == "viewer") member.Role = "viewer"; else revoker.StickyNoteBoardMembers.Remove(member);
+        }
+        else if (scenario == "deactivate") (await revoker.Users.SingleAsync(item => item.Id == editor.Id)).IsActive = false;
+        else
+        {
+            var currentBoard = await revoker.StickyNoteBoards.SingleAsync(item => item.Id == board.Id);
+            currentBoard.Visibility = StickyNoteBoardVisibility.Personal;
+            var member = await revoker.StickyNoteBoardMembers.SingleAsync(item => item.BoardId == board.Id && item.UserId == editor.Id);
+            revoker.StickyNoteBoardMembers.Remove(member);
+        }
+        await revoker.SaveChangesAsync();
+        var request = new UpdateStickyNoteRequest { Text = "Недоступный текст", Color = "yellow", Width = 220, Height = 180, ZIndex = 1, Version = 1 };
+        var busy = await CreateController(edit, editor).UpdateNote(note.Id, request, CancellationToken.None);
+        Assert.Equal(423, Assert.IsType<ObjectResult>(busy.Result).StatusCode);
+        await transaction.CommitAsync();
+        var denied = await CreateController(edit, editor).UpdateNote(note.Id, request, CancellationToken.None);
+        Assert.IsType<ForbidResult>(denied.Result);
+        setup.ChangeTracker.Clear();
+        var saved = await setup.StickyNotes.AsNoTracking().SingleAsync(item => item.Id == note.Id);
+        Assert.Equal("Исходный текст", saved.Text); Assert.Equal(1, saved.Version);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task NoteEdit_PostgreSqlOrdersFirstLegacyPermissionAgainstSave(bool permissionFirst)
+    {
+        await using var template = new PostgreSqlModelTemplate(); await template.InitializeAsync();
+        await using var lease = await template.CreateDatabaseAsync();
+        DbContextOptions<PostgreSqlPaymentContext> Options(SaveChangesInterceptor? interceptor = null)
+        {
+            var builder = new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(lease.ConnectionString);
+            if (interceptor is not null) builder.AddInterceptors(interceptor);
+            return builder.Options;
+        }
+        await using var setup = new PostgreSqlPaymentContext(Options());
+        var user = await CreateUserAsync(setup);
+        var permissions = await setup.RolePermissions.Where(item => item.RoleId == user.RoleId).ToListAsync();
+        setup.RolePermissions.RemoveRange(permissions); await setup.SaveChangesAsync();
+        var note = new StickyNote { Board = new StickyNoteBoard { Title = "Общая", Visibility = StickyNoteBoardVisibility.Shared, Background = "cork" }, Text = "Исходный текст", Color = "yellow", Version = 1, Width = 220, Height = 180 };
+        setup.StickyNotes.Add(note); await setup.SaveChangesAsync();
+        var gate = new PauseStickySave();
+        await using var edit = new PostgreSqlPaymentContext(Options(gate));
+        await using var admin = new PostgreSqlPaymentContext(Options());
+        var request = new UpdateStickyNoteRequest { Text = "Рабочий текст", Color = "yellow", Width = 220, Height = 180, ZIndex = 1, Version = 1 };
+        if (permissionFirst)
+        {
+            await using var transaction = await admin.Database.BeginTransactionAsync();
+            admin.RolePermissions.Add(new RolePermission { RoleId = user.RoleId, Section = RolePermissionCatalog.Notes, CanView = false, CanEdit = false });
+            await admin.SaveChangesAsync();
+            var busy = await CreateController(edit, user).UpdateNote(note.Id, request, CancellationToken.None);
+            Assert.Equal(423, Assert.IsType<ObjectResult>(busy.Result).StatusCode);
+            await transaction.CommitAsync();
+            Assert.IsType<ForbidResult>((await CreateController(edit, user).UpdateNote(note.Id, request, CancellationToken.None)).Result);
+        }
+        else
+        {
+            var pending = CreateController(edit, user).UpdateNote(note.Id, request, CancellationToken.None);
+            await gate.Reached.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            admin.RolePermissions.Add(new RolePermission { RoleId = user.RoleId, Section = RolePermissionCatalog.Notes, CanView = false, CanEdit = false });
+            var insert = admin.SaveChangesAsync();
+            try { Assert.NotSame(insert, await Task.WhenAny(insert, Task.Delay(250))); }
+            finally { gate.Release.TrySetResult(); }
+            Assert.IsType<OkObjectResult>((await pending.WaitAsync(TimeSpan.FromSeconds(15))).Result);
+            await insert.WaitAsync(TimeSpan.FromSeconds(15));
+            await using var after = new PostgreSqlPaymentContext(Options());
+            Assert.IsType<ForbidResult>((await CreateController(after, user).UpdateNote(note.Id, request, CancellationToken.None)).Result);
+        }
+        setup.ChangeTracker.Clear();
+        var saved = await setup.StickyNotes.AsNoTracking().SingleAsync(item => item.Id == note.Id);
+        Assert.Equal(permissionFirst ? "Исходный текст" : "Рабочий текст", saved.Text);
+        Assert.Equal(permissionFirst ? 1 : 2, saved.Version);
+    }
+
+    private sealed class PauseStickySave : SaveChangesInterceptor
+    {
+        public TaskCompletionSource Reached { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (eventData.Context!.ChangeTracker.Entries<StickyNote>().Any(entry => entry.State == EntityState.Modified))
+            {
+                Reached.TrySetResult();
+                await Release.Task.WaitAsync(cancellationToken);
+            }
+            return result;
+        }
     }
 
     [Fact]

@@ -1,9 +1,11 @@
+import { TaskBillingAnalysisPanel } from './TaskBillingAnalysisPanel';
 import { loadAllTaskJournalItems } from './loadAllTaskJournalItems';
 import { subscribeOnPermissionsChange } from '../../services/permissionsService';
 import { taskStatusClass as statusClass } from '../../utils/taskStatusClass';
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { CALENDAR_TASK_VISIBILITY_SETTINGS_HREF } from '../../utils/calendarSettingsNavigation';
 import { TaskUploadStatusPanel } from './TaskUploadStatusPanel';
+import { TaskTimerPanel } from './TaskTimerPanel';
 import { TASK_TYPE_OPTIONS as TYPE_OPTIONS } from './taskTypeOptions';
 import { submitTaskFileUpload, TaskFileUploadWaitingError } from '../../services/taskFileUpload';
 import { SystemDateInput } from '../ui/SystemDateInput';
@@ -203,10 +205,11 @@ type ApprovalDecisionPromptState = {
   task: TaskJournalItem;
   participant: TaskJournalParticipant;
 } | null;
-type TaskJournalMode = 'journal' | 'approvals' | 'untriaged';
+type TaskJournalMode = 'journal' | 'approvals' | 'untriaged' | 'billing';
 type TaskApprovalFinalAction = 'complete' | 'returnToAssignee';
 type TaskJournalProps = {
   initialView?: ViewMode;
+  billingAnalysisMode?: boolean;
   mode?: TaskJournalMode;
   embedded?: boolean;
   contextFilter?: TaskJournalContextFilter;
@@ -2465,6 +2468,7 @@ const TIMELINE_TASK_LANE_GAP = 8;
 
 export function TaskJournal({
   initialView = 'list',
+  billingAnalysisMode = false,
   mode = 'journal',
   embedded = false,
   contextFilter,
@@ -2482,6 +2486,7 @@ export function TaskJournal({
   const { confirm, prompt } = useDialog();
   const currentUserName = user?.fullName || user?.email || 'Текущий пользователь';
   const currentUserId = user?.id ?? null;
+  const preferenceMode: TaskJournalMode = billingAnalysisMode ? 'billing' : mode;
   const [offlineCalendarEnabled, setOfflineCalendarEnabled] = useState(false);
   const [offlineCalendarSnapshot, setOfflineCalendarSnapshot] = useState<OfflineCalendarSnapshot | null>(null);
   const [calendarLoadError, setCalendarLoadError] = useState(false);
@@ -2532,7 +2537,7 @@ export function TaskJournal({
   }, [contextFilter]);
   const initialPreferencesRef = useRef<TaskJournalFilterPreferences | null>(null);
   if (initialPreferencesRef.current === null) {
-    initialPreferencesRef.current = readTaskJournalFilterPreferences(currentUserId, mode, initialView);
+    initialPreferencesRef.current = readTaskJournalFilterPreferences(currentUserId, preferenceMode, initialView);
   }
 
   const initialPreferences = overdueFilterSignal > 0 && mode === 'journal'
@@ -2617,8 +2622,8 @@ export function TaskJournal({
   const automationRefreshRequestedAtRef = useRef(0);
   const taskJournalEventSourceRef = useRef<object>({});
   const [loading, setLoading] = useState(true);
-  const [filterOwnerKey, setFilterOwnerKey] = useState(() => getTaskJournalFilterStorageKey(currentUserId, mode));
-  const [savedViewOwnerKey, setSavedViewOwnerKey] = useState(() => getTaskJournalSavedViewsStorageKey(currentUserId, mode));
+  const [filterOwnerKey, setFilterOwnerKey] = useState(() => getTaskJournalFilterStorageKey(currentUserId, preferenceMode));
+  const [savedViewOwnerKey, setSavedViewOwnerKey] = useState(() => getTaskJournalSavedViewsStorageKey(currentUserId, preferenceMode));
 
   const [quickFilter, setQuickFilter] = useState<QuickFilter>(initialPreferences.quickFilter);
   const activeQuickFilter: QuickFilter = untriagedOnly ? 'untriaged' : quickFilter;
@@ -2665,7 +2670,7 @@ export function TaskJournal({
   const [billingFilter, setBillingFilter] = useState<TaskJournalListParams['billingStatus']>();
   const [sortBy, setSortBy] = useState<TaskJournalSortKey>(initialPreferences.sortBy);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>(initialPreferences.sortDir);
-  const [savedViews, setSavedViews] = useState<TaskJournalSavedView[]>(() => readTaskJournalSavedViews(currentUserId, mode, initialPreferences.viewMode));
+  const [savedViews, setSavedViews] = useState<TaskJournalSavedView[]>(() => readTaskJournalSavedViews(currentUserId, preferenceMode, initialPreferences.viewMode));
   const [selectedSavedViewId, setSelectedSavedViewId] = useState('');
   const [modal, setModal] = useState<ModalState>(null);
   const [creationWizard, setCreationWizard] = useState<TaskCreationWizardState>(null);
@@ -2833,12 +2838,12 @@ export function TaskJournal({
   }, [mode, overdueFilterSignal]);
 
   useLayoutEffect(() => {
-    const nextOwnerKey = getTaskJournalFilterStorageKey(currentUserId, mode);
+    const nextOwnerKey = getTaskJournalFilterStorageKey(currentUserId, preferenceMode);
     if (nextOwnerKey === filterOwnerKey) {
       return;
     }
 
-    const nextPreferences = readTaskJournalFilterPreferences(currentUserId, mode, initialView);
+    const nextPreferences = readTaskJournalFilterPreferences(currentUserId, preferenceMode, initialView);
     if (!isRouteTaskPage) {
       taskListRequestRef.current?.abort();
       taskListLoadedRef.current = false;
@@ -2869,18 +2874,18 @@ export function TaskJournal({
     setPeriodMode(nextPreferences.periodMode);
     setSortBy(nextPreferences.sortBy);
     setSortDir(nextPreferences.sortDir);
-  }, [currentUserId, filterOwnerKey, initialView, isRouteTaskPage, mode]);
+  }, [currentUserId, filterOwnerKey, initialView, isRouteTaskPage, preferenceMode]);
 
   useEffect(() => {
-    const nextOwnerKey = getTaskJournalSavedViewsStorageKey(currentUserId, mode);
+    const nextOwnerKey = getTaskJournalSavedViewsStorageKey(currentUserId, preferenceMode);
     if (nextOwnerKey === savedViewOwnerKey) {
       return;
     }
 
     setSavedViewOwnerKey(nextOwnerKey);
-    setSavedViews(readTaskJournalSavedViews(currentUserId, mode, initialView));
+    setSavedViews(readTaskJournalSavedViews(currentUserId, preferenceMode, initialView));
     setSelectedSavedViewId('');
-  }, [currentUserId, initialView, mode, savedViewOwnerKey]);
+  }, [currentUserId, initialView, preferenceMode, savedViewOwnerKey]);
 
   useEffect(() => {
     if (skipNextFilterSaveRef.current) {
@@ -2908,8 +2913,8 @@ export function TaskJournal({
       periodMode,
       sortBy,
       sortDir,
-    }, mode);
-  }, [assigneeFilter, calendarColorMode, calendarConflictPolicy, calendarLoadWarningMode, caseFilter, counterpartyFilter, currentUserId, dateFromFilter, dateToFilter, icsReminderPreset, metricFilter, mode, periodMode, priorityFilter, quickFilter, search, sortBy, sortDir, statusFilter, typeFilter, viewMode]);
+    }, preferenceMode);
+  }, [assigneeFilter, calendarColorMode, calendarConflictPolicy, calendarLoadWarningMode, caseFilter, counterpartyFilter, currentUserId, dateFromFilter, dateToFilter, icsReminderPreset, metricFilter, preferenceMode, periodMode, priorityFilter, quickFilter, search, sortBy, sortDir, statusFilter, typeFilter, viewMode]);
 
   const captureSavedViewFilters = (): TaskJournalFilterPreferences => ({
     viewMode,
@@ -2988,7 +2993,7 @@ export function TaskJournal({
 
     setSavedViews(nextViews);
     setSelectedSavedViewId(nextView.id);
-    writeTaskJournalSavedViews(currentUserId, mode, nextViews);
+    writeTaskJournalSavedViews(currentUserId, preferenceMode, nextViews);
     toast.success(`Представление «${name}» сохранено.`, 'Журнал задач');
   };
 
@@ -3001,7 +3006,7 @@ export function TaskJournal({
     const nextViews = savedViews.filter((item) => item.id !== selectedSavedViewId);
     setSavedViews(nextViews);
     setSelectedSavedViewId('');
-    writeTaskJournalSavedViews(currentUserId, mode, nextViews);
+    writeTaskJournalSavedViews(currentUserId, preferenceMode, nextViews);
     toast.success(
       deletedView ? `Представление «${deletedView.name}» удалено.` : 'Представление удалено.',
       'Журнал задач',
@@ -3025,7 +3030,7 @@ export function TaskJournal({
   );
 
   useEffect(() => {
-    if (filterOwnerKey !== getTaskJournalFilterStorageKey(currentUserId, mode)) return;
+    if (filterOwnerKey !== getTaskJournalFilterStorageKey(currentUserId, preferenceMode)) return;
     if (!(routeTaskId && routeTaskId > 0)) {
       routeTaskRequestRef.current += 1;
       pendingRouteTaskReadRef.current = null;
@@ -3087,7 +3092,7 @@ export function TaskJournal({
         }
       }
     })();
-  }, [currentUserId, filterOwnerKey, mode, onRouteTaskChange, openTaskEditor, routeTaskId, tasks, toast]);
+  }, [currentUserId, filterOwnerKey, mode, onRouteTaskChange, openTaskEditor, preferenceMode, routeTaskId, tasks, toast]);
 
   const taskTableLayoutSettings = usePersistedTableSettings<TaskTableColumnKey>({
     storageKey: `pp.task_journal.table_settings.v1.user:${currentUserId ?? 'guest'}`,
@@ -3389,7 +3394,7 @@ export function TaskJournal({
   const refreshTasks = useCallback(async () => {
     taskListRequestRef.current?.abort();
     if (isRouteTaskPage) return;
-    if (filterOwnerKey !== getTaskJournalFilterStorageKey(currentUserId, mode) || debouncedSearch !== search) return;
+    if (filterOwnerKey !== getTaskJournalFilterStorageKey(currentUserId, preferenceMode) || debouncedSearch !== search) return;
     const controller = new AbortController();
     taskListRequestRef.current = controller;
     offlineSnapshotSourceRef.current = null;
@@ -3515,7 +3520,7 @@ export function TaskJournal({
     isRouteTaskPage,
     listFilterParams,
     listFilterKey,
-    mode,
+    preferenceMode,
     search,
     shouldUseCalendarVisibility,
     sortBy,
@@ -3602,15 +3607,22 @@ export function TaskJournal({
     let active = true;
     let revision = 0;
     let timer: number | null = null;
+    let retryAfterFailure = false;
     const schedule = () => {
       const request = ++revision;
       if (timer !== null) window.clearTimeout(timer);
       timer = window.setTimeout(() => {
         timer = null;
-        void apiService.getTaskJournalItem(taskId).catch((error: unknown) => {
+        void apiService.getTaskJournalItem(taskId).then(() => {
+          if (active && request === revision && decisionOwnerRef.current.userId === currentUserId) retryAfterFailure = false;
+        }).catch((error: unknown) => {
           if (!active || request !== revision || decisionOwnerRef.current.userId !== currentUserId) return;
           const status = typeof error === 'object' && error !== null && 'status' in error ? error.status : null;
-          if (status !== 401 && status !== 403 && status !== 404) return;
+          if (status !== 401 && status !== 403 && status !== 404) {
+            retryAfterFailure = true;
+            toast.error('Не удалось проверить доступ к задаче. Проверьте соединение; введённые данные остаются в карточке.', 'Журнал задач');
+            return;
+          }
           setModal((current) => current?.task?.id === taskId ? null : current);
           setTasks((current) => current.filter((task) => task.id !== taskId));
           setHighlightedTaskId(null);
@@ -3622,6 +3634,7 @@ export function TaskJournal({
         });
       }, REALTIME_TASK_REFRESH_DEBOUNCE_MS);
     };
+    const onOnline = () => { if (retryAfterFailure) schedule(); };
     const fromNotifications = (event: Event) => {
       const detail = event instanceof CustomEvent ? event.detail as UserNotificationsChangedDetail | null : null;
       if (detail?.source === 'realtime' && (detail.reason === 'user-role-changed' || detail.reason === 'reconnected')) schedule();
@@ -3630,11 +3643,13 @@ export function TaskJournal({
       if (roleId === undefined || roleId === user?.role?.id) schedule();
     });
     window.addEventListener(USER_NOTIFICATIONS_EVENT, fromNotifications);
+    window.addEventListener('online', onOnline);
     return () => {
       active = false;
       revision += 1;
       if (timer !== null) window.clearTimeout(timer);
       window.removeEventListener(USER_NOTIFICATIONS_EVENT, fromNotifications);
+      window.removeEventListener('online', onOnline);
       unsubscribePermissions();
     };
   }, [currentUserId, isRouteTaskPage, modal?.task?.id, toast, user?.role?.id]);
@@ -3649,6 +3664,7 @@ export function TaskJournal({
     let cancelled = false;
     let revision = 0;
     let timer: number | null = null;
+    let retryAfterFailure = false;
     const schedule = () => {
       const requestRevision = ++revision;
       const snapshotRevision = permissionSnapshotRef.current.revision;
@@ -3659,6 +3675,7 @@ export function TaskJournal({
           const owner = decisionOwnerRef.current;
           if (cancelled || requestRevision !== revision || !owner.mounted
             || owner.taskId !== routeTaskId || owner.userId !== currentUserId) return;
+          retryAfterFailure = false;
           if (snapshotRevision === permissionSnapshotRef.current.revision
             && snapshotRevision !== permissionSnapshotRef.current.applied) {
             return revokeOfflineCalendarSnapshot(currentUserId);
@@ -3668,7 +3685,11 @@ export function TaskJournal({
           if (cancelled || requestRevision !== revision || !owner.mounted
             || owner.taskId !== routeTaskId || owner.userId !== currentUserId) return;
           const status = typeof error === 'object' && error !== null && 'status' in error ? error.status : null;
-          if (status !== 401 && status !== 403 && status !== 404) return;
+          if (status !== 401 && status !== 403 && status !== 404) {
+            retryAfterFailure = true;
+            toast.error('Не удалось проверить доступ к задаче. Проверьте соединение; введённые данные остаются в карточке.', 'Журнал задач');
+            return;
+          }
           void revokeOfflineCalendarSnapshot(currentUserId).catch(() => undefined);
           setModal((current) => current?.task?.id === routeTaskId ? null : current);
           setTasks((current) => current.filter((task) => task.id !== routeTaskId));
@@ -3682,6 +3703,7 @@ export function TaskJournal({
         });
       }, REALTIME_TASK_REFRESH_DEBOUNCE_MS);
     };
+    const onOnline = () => { if (retryAfterFailure) schedule(); };
     const fromJournal = (event: Event) => {
       const source = event instanceof CustomEvent ? (event.detail as { source?: object } | null)?.source : null;
       if (source !== taskJournalEventSourceRef.current) schedule();
@@ -3693,6 +3715,7 @@ export function TaskJournal({
     window.addEventListener(TASK_JOURNAL_EVENT, fromJournal);
     window.addEventListener(USER_NOTIFICATIONS_EVENT, fromNotifications);
     window.addEventListener(TASK_JOURNAL_REALTIME_EVENT, schedule);
+    window.addEventListener('online', onOnline);
     const unsubscribePermissions = subscribeOnPermissionsChange((roleId) => {
       if (roleId === undefined || roleId === user?.role?.id) {
         permissionSnapshotRef.current.revision += 1;
@@ -3713,6 +3736,7 @@ export function TaskJournal({
       window.removeEventListener(TASK_JOURNAL_EVENT, fromJournal);
       window.removeEventListener(USER_NOTIFICATIONS_EVENT, fromNotifications);
       window.removeEventListener(TASK_JOURNAL_REALTIME_EVENT, schedule);
+      window.removeEventListener('online', onOnline);
       unsubscribePermissions();
     };
   }, [currentUserId, isRouteTaskPage, routeTaskId, toast, user?.role?.id]);
@@ -4024,14 +4048,17 @@ export function TaskJournal({
     .sort((left, right) => left.label.localeCompare(right.label, 'ru')), [clients, legalEntities]);
 
   const caseFilterOptions = useMemo(() => {
-    if (counterpartyFilter === 'all') {
+    if (counterpartyFilter === 'all' || !canViewCases || filterClientCasesLoading) {
       return [];
     }
 
     return filterClientCases
+      .filter((clientCase) => selectedFilterClientId
+        ? clientCase.clientId === selectedFilterClientId
+        : Boolean(selectedFilterLegalEntityId) && clientCase.legalEntityId === selectedFilterLegalEntityId)
       .map((clientCase) => ({ id: clientCase.id, label: clientCase.title }))
       .sort((left, right) => left.label.localeCompare(right.label, 'ru'));
-  }, [counterpartyFilter, filterClientCases]);
+  }, [canViewCases, counterpartyFilter, filterClientCases, filterClientCasesLoading, selectedFilterClientId, selectedFilterLegalEntityId]);
 
   const selectedFilterCounterparty = useMemo(
     () => filterCounterpartyOptions.find((counterparty) => counterparty.value === counterpartyFilter) ?? null,
@@ -4883,7 +4910,6 @@ export function TaskJournal({
       unclassified: activeTasks.filter((task) => task.billingStatus === 'legacy').length,
     };
   }, [taskListSummary, tasks, viewMode]);
-  const unbilledClientTaskCount = billingAnalysis.unbilled;
   const categorizedBillingTaskCount = billingAnalysis.unbilled
     + billingAnalysis.fixed
     + billingAnalysis.invoiced
@@ -6074,60 +6100,28 @@ export function TaskJournal({
     }
   };
 
-  const buildPlanningReportParams = (format: TaskPlanningReportFormat) => {
-    const nowDate = getCurrentCalendarDate();
-    let from = dateRangeBounds.from?.toISOString();
-    let to = dateRangeBounds.to?.toISOString();
-    let reportStatus: TaskJournalStatus | 'active' | undefined =
-      statusFilter === 'all' || statusFilter === 'overdue' ? undefined : statusFilter;
-    let reportPriority: TaskJournalPriority | 'highPriority' | undefined = priorityFilter === 'all' ? undefined : priorityFilter;
-
-    if (!from && !to && metricFilter === 'none' && periodMode !== 'all' && (viewMode === 'list' || viewMode === 'board')) {
-      const { periodStart, periodEnd } = getTaskPeriodBounds(nowDate, periodMode);
-      from = periodStart.toISOString();
-      to = periodEnd.toISOString();
-    }
-
-    if (statusFilter === 'overdue') {
-      reportStatus = 'active';
-      to = nowDate.toISOString();
-    }
-
-    if (metricFilter === 'active') {
-      reportStatus = 'active';
-    } else if (metricFilter === 'overdue') {
-      reportStatus = 'active';
-      to = nowDate.toISOString();
-    } else if (metricFilter === 'today') {
-      reportStatus = 'active';
-      from = parseDateFilterValue(toLocalDateKey(nowDate), 'start')?.toISOString() ?? startOfDay(nowDate).toISOString();
-      to = parseDateFilterValue(toLocalDateKey(nowDate), 'end')?.toISOString() ?? endOfDay(nowDate).toISOString();
-    } else if (metricFilter === 'highPriority') {
-      reportStatus = 'active';
-      reportPriority = 'highPriority';
-    }
-
-    const reportAssigneeUserId =
-      quickFilter === 'assignedToMe' && currentUserId
-        ? currentUserId
-        : assigneeFilter !== 'all' && /^\d+$/.test(assigneeFilter)
-          ? Number(assigneeFilter)
-          : undefined;
-
-    return {
-      format,
-      search: search.trim() || undefined,
-      status: reportStatus,
-      type: typeFilter === 'all' ? undefined : typeFilter,
-      priority: reportPriority,
-      assigneeUserId: reportAssigneeUserId,
-      clientCaseId: caseFilter !== 'all' ? Number(caseFilter) : undefined,
-      clientId: contextFilter?.clientId ?? selectedFilterClientId,
-      legalEntityId: contextFilter?.legalEntityId ?? selectedFilterLegalEntityId,
-      from,
-      to,
-    };
-  };
+  const buildPlanningReportParams = (format: TaskPlanningReportFormat) => ({
+    format,
+    search: listFilterParams.search,
+    status: listFilterParams.status,
+    type: listFilterParams.type,
+    priority: listFilterParams.priority,
+    underControl: listFilterParams.underControl,
+    assigneeUserId: listFilterParams.assigneeUserId,
+    authorUserId: listFilterParams.authorUserId,
+    participantRole: listFilterParams.participantRole,
+    approvalScope: listFilterParams.approvalScope,
+    metric: listFilterParams.metric,
+    billingStatus: listFilterParams.billingStatus,
+    untriaged: listFilterParams.untriaged,
+    clientCaseId: listFilterParams.clientCaseId,
+    clientId: listFilterParams.clientId,
+    legalEntityId: listFilterParams.legalEntityId,
+    from: listFilterParams.from,
+    to: listFilterParams.to,
+    todayFrom: listFilterParams.todayFrom,
+    todayTo: listFilterParams.todayTo,
+  });
 
   const handlePlanningReportExport = async (format: TaskPlanningReportFormat) => {
     if (!canExportTasks) {
@@ -6232,8 +6226,10 @@ export function TaskJournal({
   );
 
   const contextTitle = contextFilter?.title?.trim();
-  const pageTitle = isApprovalsMode ? 'Согласования' : untriagedOnly ? 'Неразобранные' : underControlOnly ? 'На контроле' : contextTitle ? `Задачи: ${contextTitle}` : 'Журнал задач';
-  const pageDescription = isApprovalsMode
+  const pageTitle = billingAnalysisMode ? 'Анализ оплаты задач' : isApprovalsMode ? 'Согласования' : untriagedOnly ? 'Неразобранные' : underControlOnly ? 'На контроле' : contextTitle ? `Задачи: ${contextTitle}` : 'Журнал задач';
+  const pageDescription = billingAnalysisMode
+    ? 'Выберите категорию и работы одного клиента для подготовки счёта.'
+    : isApprovalsMode
     ? 'Задачи, которые находятся на согласовании и требуют решения текущего согласующего. Они остаются в общем журнале задач.'
     : untriagedOnly
       ? 'Быстрые задачи без клиента и исполнителя. Назначьте ответственного или привяжите задачу к клиенту и определите оплату.'
@@ -6271,6 +6267,7 @@ export function TaskJournal({
             canViewCases={canViewCases}
             currentUserId={currentUserId}
             currentUserName={currentUserName}
+            userTimeZoneId={currentTimeZoneId}
             isAdminUser={isAdminUser}
             taskSettings={taskSettings}
             notificationDefaults={taskNotificationDefaults}
@@ -6675,6 +6672,7 @@ export function TaskJournal({
                   value={search}
                   onFocus={() => setCounterpartySearchOpen(true)}
                   onChange={(event) => {
+                    if (event.target.value !== search) clearBulkSelection();
                     setSearch(event.target.value);
                     setCounterpartySearchOpen(true);
                   }}
@@ -6743,7 +6741,7 @@ export function TaskJournal({
             <SystemSelect
               value={caseFilter}
               onChange={(event) => setCaseFilter(event.target.value)}
-              disabled={counterpartyFilter === 'all'}
+              disabled={counterpartyFilter === 'all' || !canViewCases || filterClientCasesLoading}
               className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               aria-label="Фильтр по делу"
               data-testid="task-case-filter"
@@ -6954,51 +6952,21 @@ export function TaskJournal({
           />
         ) : null}
 
-        {!isApprovalsMode && categorizedBillingTaskCount > 0 ? (
-          <section className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-200 bg-gradient-to-r from-rose-50 to-amber-50 p-3" data-testid="task-unbilled-reminder">
-            <div className="flex items-center gap-3">
-              <span className="rounded-xl bg-rose-600 p-2 text-white"><WalletCards className="h-5 w-5" /></span>
-              <div>
-                <div className="font-semibold text-rose-950">Анализ оплаты задач</div>
-                <div className="mt-1 flex flex-wrap gap-2 text-xs font-bold">
-                  <button type="button" aria-pressed={billingFilter === 'unbilled'} onClick={() => handleBillingFilterClick('unbilled')} title="Показать все платные задачи без счёта, включая уже выполненные, сгруппированные по клиентам" className={`rounded-lg border px-3 py-1.5 shadow-sm transition hover:-translate-y-0.5 hover:shadow ${billingFilter === 'unbilled' ? 'border-rose-700 bg-rose-700 text-white ring-2 ring-rose-200' : 'border-rose-300 bg-rose-100 text-rose-900 hover:bg-rose-200'}`}>Счетов подготовить: {billingAnalysis.invoicesToPrepare}</button>
-                  <button type="button" aria-pressed={billingFilter === 'unbilled'} onClick={() => handleBillingFilterClick('unbilled')} title="Показать все платные задачи, ещё не включённые в счёт, в том числе выполненные" className={`rounded-lg border px-3 py-1.5 shadow-sm transition hover:-translate-y-0.5 hover:shadow ${billingFilter === 'unbilled' ? 'border-rose-700 bg-rose-700 text-white ring-2 ring-rose-200' : 'border-rose-300 bg-white text-rose-900 hover:bg-rose-100'}`}>Платные задачи без счёта: {unbilledClientTaskCount}</button>
-                  <button type="button" aria-pressed={billingFilter === 'fixed'} onClick={() => handleBillingFilterClick('fixed')} className={`rounded-lg border px-3 py-1.5 shadow-sm transition hover:-translate-y-0.5 ${billingFilter === 'fixed' ? 'border-violet-700 bg-violet-700 text-white ring-2 ring-violet-200' : 'border-violet-300 bg-violet-100 text-violet-900 hover:bg-violet-200'}`}>По фиксированному договору: {billingAnalysis.fixed}</button>
-                  <button type="button" aria-pressed={billingFilter === 'internal'} onClick={() => handleBillingFilterClick('internal')} className={`rounded-lg border px-3 py-1.5 shadow-sm transition hover:-translate-y-0.5 ${billingFilter === 'internal' ? 'border-slate-700 bg-slate-700 text-white ring-2 ring-slate-200' : 'border-slate-300 bg-slate-100 text-slate-800 hover:bg-slate-200'}`}>Неоплачиваемые: {billingAnalysis.nonBillable}</button>
-                  <button type="button" aria-pressed={billingFilter === 'invoiced'} onClick={() => handleBillingFilterClick('invoiced')} className={`rounded-lg border px-3 py-1.5 shadow-sm transition hover:-translate-y-0.5 ${billingFilter === 'invoiced' ? 'border-emerald-700 bg-emerald-700 text-white ring-2 ring-emerald-200' : 'border-emerald-300 bg-emerald-100 text-emerald-900 hover:bg-emerald-200'}`}>Уже включены в счёт: {billingAnalysis.invoiced}</button>
-                  {billingAnalysis.unclassified > 0 ? (
-                    <button type="button" aria-pressed={billingFilter === 'legacy'} onClick={() => handleBillingFilterClick('legacy')} className={`rounded-lg border px-3 py-1.5 shadow-sm transition hover:-translate-y-0.5 ${billingFilter === 'legacy' ? 'border-amber-700 bg-amber-700 text-white ring-2 ring-amber-200' : 'border-amber-300 bg-amber-100 text-amber-900 hover:bg-amber-200'}`}>Нужно распределить: {billingAnalysis.unclassified}</button>
-                  ) : null}
-                </div>
-                <div className="mt-1.5 text-xs leading-5 text-rose-800" data-testid="task-billing-counter-help">
-                  «Счетов подготовить» — количество клиентов, для которых можно сформировать объединённый счёт. «Платные задачи без счёта» — общее количество отдельных работ, ещё не включённых в счета.
-                </div>
-                <div className="mt-1 text-sm text-rose-700">
-                  {billingFilter
-                    ? 'Категория открыта в таблице ниже. Повторное нажатие вернёт полный журнал.'
-                    : unbilledClientTaskCount > 0
-                    ? 'В очереди остаются и выполненные задачи: отметьте работы одного клиента и подготовьте по ним единый счёт.'
-                    : 'Все активные задачи распределены, новых счетов по ним готовить не требуется.'}
-                </div>
-                <div className={`mt-1 text-xs font-semibold ${taskSettings.financialDocumentsResponsibleUserName ? 'text-slate-700' : 'text-amber-800'}`}>
-                  {taskSettings.financialDocumentsResponsibleUserName
-                    ? `Ответственный за счета, акты и договоры: ${taskSettings.financialDocumentsResponsibleUserName}`
-                    : 'Ответственный за счета, акты и договоры не назначен. Его может выбрать администратор в настройках журнала задач.'}
-                </div>
-              </div>
-            </div>
-            {unbilledClientTaskCount > 0 ? (
-              <button
-                type="button"
-                onClick={handleCreateInvoiceFromSelectedTasks}
-                disabled={selectedTasksForInvoice.length === 0 || !onCreateInvoiceDraft}
-                className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <WalletCards className="h-4 w-4" />
-                Подготовить счёт{selectedTasksForInvoice.length > 0 ? ` (${selectedTasksForInvoice.length})` : ''}
-              </button>
-            ) : null}
-          </section>
+        {billingAnalysisMode && !isApprovalsMode && categorizedBillingTaskCount > 0 ? (
+          <TaskBillingAnalysisPanel
+            billingAnalysis={billingAnalysis}
+            billingFilter={billingFilter}
+            responsibleName={taskSettings.financialDocumentsResponsibleUserName}
+            selectedCount={selectedTasksForInvoice.length}
+            canCreateInvoice={Boolean(onCreateInvoiceDraft)}
+            onBillingFilterClick={handleBillingFilterClick}
+            onCreateInvoice={handleCreateInvoiceFromSelectedTasks}
+          />
+        ) : null}
+        {billingAnalysisMode && !isApprovalsMode && !loading && !taskListLoadError && categorizedBillingTaskCount === 0 ? (
+          <p role="status" className="mb-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
+            Нет задач для анализа оплаты по текущим фильтрам.
+          </p>
         ) : null}
 
         {viewMode === 'list' && !isApprovalsMode && selectedTasksForBulk.length > 0 && !hasInvoiceOnlySelection ? (
@@ -7051,7 +7019,22 @@ export function TaskJournal({
         ) : null}
 
         {viewMode === 'list' ? (
-          loading ? (
+          <>
+          <label className="mb-2 flex min-w-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-500 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100">
+            <Search className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <input
+              value={search}
+              onChange={(event) => {
+                if (event.target.value !== search) clearBulkSelection();
+                setSearch(event.target.value);
+                setCounterpartySearchOpen(false);
+              }}
+              aria-label="Поиск задач над таблицей"
+              placeholder="Поиск по контрагенту, делу или задаче"
+              className="min-w-0 flex-1 bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400"
+            />
+          </label>
+          {loading ? (
             <div className="rounded-2xl border border-slate-200 bg-white px-6 py-12 text-center text-sm text-slate-500 shadow-sm">
               Загружаем журнал задач...
             </div>
@@ -7104,7 +7087,8 @@ export function TaskJournal({
               recordsLabel="Задач найдено"
             />
           </>
-          )
+          )}
+          </>
         ) : viewMode === 'board' ? (
           <div>
             <div className="mb-3 flex flex-wrap items-center gap-2" aria-label="Группировка доски задач">
@@ -7257,6 +7241,7 @@ export function TaskJournal({
           canViewCases={canViewCases}
           currentUserId={currentUserId}
           currentUserName={currentUserName}
+          userTimeZoneId={currentTimeZoneId}
           isAdminUser={isAdminUser}
           taskSettings={taskSettings}
           notificationDefaults={taskNotificationDefaults}
@@ -11346,6 +11331,7 @@ type TaskModalProps = {
   canViewCases: boolean;
   currentUserId: number | null;
   currentUserName: string;
+  userTimeZoneId: string;
   isAdminUser: boolean;
   taskSettings: TaskJournalSettingsDto;
   notificationDefaults: TaskNotificationDefaults;
@@ -11431,6 +11417,7 @@ function TaskModal({
   canViewCases,
   currentUserId,
   currentUserName,
+  userTimeZoneId,
   isAdminUser,
   taskSettings,
   notificationDefaults,
@@ -13361,11 +13348,15 @@ function TaskModal({
                           setActionMenuOpen(false);
                           void handleDuplicateTask();
                         }}
-                        className="flex w-full items-center gap-3 px-3 py-2 text-left text-slate-700 transition hover:bg-blue-50 hover:text-blue-700"
+                        className="flex w-full items-start gap-3 px-3 py-2 text-left text-slate-700 transition hover:bg-blue-50 hover:text-blue-700"
                         title="Создать отдельную копию задачи"
+                        aria-label="Дублировать задачу"
                       >
-                        <Copy className="h-4 w-4 shrink-0" data-testid="task-duplicate-icon" />
-                        <span className="font-medium">Дублировать задачу</span>
+                        <Copy className="mt-0.5 h-4 w-4 shrink-0" data-testid="task-duplicate-icon" />
+                        <span>
+                          <span className="block font-medium">Дублировать задачу</span>
+                          <span className="block text-xs text-slate-500">Создать новую задачу с основными данными</span>
+                        </span>
                       </button>
                     ) : null}
                     {canCancelTask ? (
@@ -13375,11 +13366,15 @@ function TaskModal({
                           setActionMenuOpen(false);
                           void handleCancelTask();
                         }}
-                        className="flex w-full items-center gap-3 px-3 py-2 text-left text-slate-700 transition hover:bg-rose-50 hover:text-rose-700"
+                        className="flex w-full items-start gap-3 px-3 py-2 text-left text-slate-700 transition hover:bg-rose-50 hover:text-rose-700"
                         title="Оставить в журнале со статусом «Отменена»"
+                        aria-label="Отменить задачу"
                       >
-                        <XCircle className="h-4 w-4 shrink-0" data-testid="task-cancel-icon" />
-                        <span className="font-medium">Отменить задачу</span>
+                        <XCircle className="mt-0.5 h-4 w-4 shrink-0" data-testid="task-cancel-icon" />
+                        <span>
+                          <span className="block font-medium">Отменить задачу</span>
+                          <span className="block text-xs text-slate-500">Оставить в журнале со статусом «Отменена»</span>
+                        </span>
                       </button>
                     ) : null}
                     {state?.task && canDeleteTask ? (
@@ -13669,6 +13664,8 @@ function TaskModal({
                     )
                   ) : null}
                   {activeDetailsTab === 'timer' ? (
+                    <div className="space-y-3">
+                    {taskId && currentUserId ? <TaskTimerPanel key={`${currentUserId}:${taskId}:${canPostComment}`} taskId={taskId} userId={currentUserId} canStart={canPostComment} timeZoneId={userTimeZoneId} /> : <p className="text-sm text-slate-500">Учёт фактического времени доступен после сохранения задачи.</p>}
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
                         <div className="flex items-center gap-2 text-sm font-semibold text-amber-900"><TimerReset className="h-4 w-4" />Плановая длительность</div>
@@ -13679,6 +13676,7 @@ function TaskModal({
                         Длительность, минут
                         <input type="number" min={15} max={480} step={15} value={normalizeTaskDuration(form.plannedDurationMinutes)} onChange={(event) => update('plannedDurationMinutes', Number(event.target.value))} disabled={isReadOnly} className="mt-2 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 outline-none focus:border-blue-400 disabled:bg-slate-100" />
                       </label>
+                    </div>
                     </div>
                   ) : null}
                   {activeDetailsTab === 'activity' ? (
@@ -14303,7 +14301,7 @@ function TaskModal({
                             <Copy className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" data-testid="task-duplicate-icon" />
                             <span>
                               <span className="block font-semibold">Дублировать задачу</span>
-                              <span className="mt-0.5 block text-xs font-normal text-slate-400">Создать отдельную копию с теми же данными</span>
+                              <span className="mt-0.5 block text-xs font-normal text-slate-400">Создать новую задачу с основными данными</span>
                             </span>
                           </button>
                         ) : null}
@@ -14489,7 +14487,20 @@ function TaskModal({
               />
             </Field>
             <Field label="Наименование задачи">
-              <input ref={(node) => { titleInputRef.current = node; }} value={form.title} onChange={(event) => update('title', event.target.value)} disabled={isReadOnly} data-testid="task-title-input" className="form-input" placeholder="Что нужно сделать" />
+              <div className="grid min-w-0">
+                <span aria-hidden="true" className="form-input invisible col-start-1 row-start-1 !h-auto min-h-[44px] whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{form.title || 'Что нужно сделать'} </span>
+                <textarea
+                  ref={(node) => { titleInputRef.current = node; }}
+                  value={form.title}
+                  onChange={(event) => update('title', event.target.value.replace(/[\r\n]/g, ''))}
+                  onKeyDown={(event) => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) event.preventDefault(); }}
+                  disabled={isReadOnly}
+                  rows={1}
+                  data-testid="task-title-input"
+                  className="form-input col-start-1 row-start-1 !h-full min-w-0 resize-none overflow-hidden"
+                  placeholder="Что нужно сделать"
+                />
+              </div>
             </Field>
             <Field label="Дело">
               <div className="flex items-center gap-2">
@@ -14841,6 +14852,8 @@ function TaskModal({
               {resultError ? <p className="mt-1 text-xs font-semibold text-rose-600">{resultError}</p> : null}
             </Field>
           </div>
+
+          {taskId && currentUserId ? <div className="mt-3"><TaskTimerPanel key={`${currentUserId}:${taskId}:${canPostComment}`} taskId={taskId} userId={currentUserId} canStart={canPostComment} timeZoneId={userTimeZoneId} /></div> : null}
 
           {taskId ? (
             <section className="mt-5 rounded-2xl border border-blue-200 bg-white p-4">

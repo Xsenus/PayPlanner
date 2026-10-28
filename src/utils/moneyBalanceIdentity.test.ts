@@ -1,16 +1,28 @@
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest';
-import { moneyBalanceComparisonKey, moneyBalanceCurrencyLabel } from './moneyBalanceIdentity';
+import { formatConfirmedMoney, isCashBookCurrencyConfirmed, moneyBalanceComparisonKey, moneyBalanceCurrencyLabel } from './moneyBalanceIdentity';
 
 const row = { date: '2026-10-16', source: 'Bank', accountName: 'Основной' };
 
 describe('daily balance identity', () => {
+  it('formats confirmed totals in their own currency and hides unconfirmed data', () => {
+    expect(formatConfirmedMoney(80, 'single', 'USD')).toBe('80,00 USD');
+    expect(formatConfirmedMoney(80, 'single', 'RUB')).toBe('80,00 ₽');
+    expect(formatConfirmedMoney(0, 'empty', null)).toBe('0,00');
+    expect(formatConfirmedMoney(80)).toBe('—');
+    expect(formatConfirmedMoney(80, 'single', null)).toBe('—');
+    expect(formatConfirmedMoney(Number.NaN, 'single', 'RUB')).toBe('—');
+    expect(isCashBookCurrencyConfirmed('single', 'USD')).toBe(true);
+    expect(isCashBookCurrencyConfirmed('empty', null)).toBe(true);
+    expect(isCashBookCurrencyConfirmed('single', null)).toBe(false);
+    expect(isCashBookCurrencyConfirmed()).toBe(false);
+  });
   it('shows each currency explicitly and keeps unknown currency unknown', () => {
     expect(moneyBalanceCurrencyLabel('RUB')).toBe('₽');
     expect(moneyBalanceCurrencyLabel(' usd ')).toBe('USD');
     expect(moneyBalanceCurrencyLabel(null)).toBe('валюта не указана');
-    expect(moneyBalanceCurrencyLabel(undefined)).toBe('₽');
+    expect(moneyBalanceCurrencyLabel(undefined)).toBe('валюта не указана');
   });
   it('keeps accounts and currencies with identical display names separate', () => {
     const keys = ['companyA:RUB', 'companyB:RUB', 'companyA:USD'].map(balanceKey =>

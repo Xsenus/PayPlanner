@@ -2090,6 +2090,8 @@ export interface CashOrder {
   invoiceId?: number | null;
   originType?: 'payment' | 'moneyOperation' | 'inventory' | 'manual' | string;
   account?: string | null;
+  selectedMoneyAccountId?: number | null;
+  hasLinkedCashAccount?: boolean;
   payerName?: string | null;
   receiverName?: string | null;
   basis?: string | null;
@@ -2125,6 +2127,9 @@ export interface CashBookSummary {
   from: string;
   to: string;
   accountName?: string | null;
+  moneyAccountId?: number | null;
+  currencyStatus?: 'single' | 'empty' | 'mixed' | 'unknown';
+  currency?: string | null;
   openingBalance: number;
   income: number;
   expense: number;
@@ -2139,13 +2144,17 @@ export interface CashOrderRegister {
   total: number;
   page: number;
   pageSize: number;
+  moneyAccountId?: number | null;
   incomingCount: number;
   outgoingCount: number;
   draftCount: number;
   postedCount: number;
   cancelledCount: number;
-  incomingAmount: number;
-  outgoingAmount: number;
+  amountsAvailable?: boolean;
+  currencyStatus?: 'single' | 'empty' | 'mixed' | 'unknown';
+  currency?: string | null;
+  incomingAmount: number | null;
+  outgoingAmount: number | null;
 }
 
 export interface CashInventory {
@@ -2166,6 +2175,7 @@ export interface CashInventory {
 export interface CashInventoryCreateRequest {
   date: string;
   accountName?: string | null;
+  moneyAccountId?: number | null;
   actualBalance: number;
   comment?: string | null;
   createCorrection: boolean;
@@ -2173,19 +2183,23 @@ export interface CashInventoryCreateRequest {
 
 export interface MoneyOperationSourceSummary {
   source: MoneyOperationSource;
-  startBalance: number;
-  income: number;
-  expense: number;
-  endBalance: number;
+  startBalance: number | null;
+  income: number | null;
+  expense: number | null;
+  endBalance: number | null;
 }
 
 export interface MoneyOperationAccountSummary {
   accountName: string;
   source: MoneyOperationSource;
-  startBalance: number;
-  income: number;
-  expense: number;
-  endBalance: number;
+  moneyAccountId?: number | null;
+  companyId?: number | null;
+  currencyStatus?: 'single' | 'unknown' | 'unattributed';
+  currency?: string | null;
+  startBalance: number | null;
+  income: number | null;
+  expense: number | null;
+  endBalance: number | null;
   incomeCount: number;
   expenseCount: number;
 }
@@ -2254,11 +2268,21 @@ export interface MoneyOperationInvoiceCandidate {
   score: number;
 }
 
+export interface MoneyOperationInvoiceCandidatePage {
+  items: MoneyOperationInvoiceCandidate[];
+  hasMore: boolean;
+  search: string | null;
+  cursor: string | null;
+  nextCursor: string | null;
+}
+
 export interface MoneyOperationsSummary {
-  startBalance: number;
-  income: number;
-  expense: number;
-  endBalance: number;
+  startBalance: number | null;
+  income: number | null;
+  expense: number | null;
+  endBalance: number | null;
+  currencyStatus?: 'single' | 'empty' | 'mixed' | 'unknown';
+  currency?: string | null;
   incomeCount: number;
   expenseCount: number;
   bySource: MoneyOperationSourceSummary[];
@@ -3397,6 +3421,7 @@ export interface BankStatementImportCreatedOperation {
   date: string;
   direction: MoneyOperationDirection;
   amount: number;
+  currency?: string | null;
   counterpartyName?: string | null;
   paymentOrderNumber?: string | null;
   matchStatus?: MoneyOperationMatchStatus;
@@ -3436,6 +3461,12 @@ export interface BankStatementAutoImportRunResult {
 
 export interface BankStatementImportBatch {
   id: number;
+  companyId?: number | null;
+  companyName?: string | null;
+  moneyAccountId?: number | null;
+  moneyAccountName?: string | null;
+  periodFrom?: string | null;
+  periodTo?: string | null;
   fileName: string;
   status: string;
   rowsRead: number;
@@ -3456,6 +3487,7 @@ export interface BankStatementImportRow {
   date: string;
   direction: MoneyOperationDirection;
   amount: number;
+  currency?: string | null;
   accountName?: string | null;
   counterpartyName?: string | null;
   purpose?: string | null;
@@ -3468,6 +3500,12 @@ export interface BankStatementImportBatchDetail extends BankStatementImportBatch
   fileHash: string;
   fileSize: number;
   errorSummary?: string | null;
+  rowsTotal?: number;
+  rowsPage?: number;
+  rowsPageSize?: number;
+  rowsSearch?: string | null;
+  rowsMatched?: number | null;
+  hasReprocessableRows?: boolean;
   rows: BankStatementImportRow[];
 }
 

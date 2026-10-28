@@ -61,20 +61,24 @@ public sealed class MoneyOperationListItemDto
 public sealed class MoneyOperationSourceSummaryDto
 {
     public MoneyOperationSource Source { get; init; }
-    public decimal StartBalance { get; init; }
-    public decimal Income { get; init; }
-    public decimal Expense { get; init; }
-    public decimal EndBalance { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)] public decimal? StartBalance { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)] public decimal? Income { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)] public decimal? Expense { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)] public decimal? EndBalance { get; init; }
 }
 
 public sealed class MoneyOperationAccountSummaryDto
 {
     public string AccountName { get; init; } = string.Empty;
     public MoneyOperationSource Source { get; init; }
-    public decimal StartBalance { get; init; }
-    public decimal Income { get; init; }
-    public decimal Expense { get; init; }
-    public decimal EndBalance { get; init; }
+    public int? MoneyAccountId { get; init; }
+    public int? CompanyId { get; init; }
+    public string CurrencyStatus { get; init; } = "unknown";
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)] public string? Currency { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)] public decimal? StartBalance { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)] public decimal? Income { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)] public decimal? Expense { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)] public decimal? EndBalance { get; init; }
     public int IncomeCount { get; init; }
     public int ExpenseCount { get; init; }
 }
@@ -150,12 +154,27 @@ public sealed class MoneyOperationInvoiceCandidateDto
     public int Score { get; init; }
 }
 
+public sealed class MoneyOperationInvoiceCandidatePageDto
+{
+    public IReadOnlyList<MoneyOperationInvoiceCandidateDto> Items { get; init; } = Array.Empty<MoneyOperationInvoiceCandidateDto>();
+    public bool HasMore { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)]
+    public string? Search { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)]
+    public string? Cursor { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)]
+    public string? NextCursor { get; init; }
+}
+
 public sealed class MoneyOperationsSummaryDto
 {
-    public decimal StartBalance { get; init; }
-    public decimal Income { get; init; }
-    public decimal Expense { get; init; }
-    public decimal EndBalance { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)] public decimal? StartBalance { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)] public decimal? Income { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)] public decimal? Expense { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)] public decimal? EndBalance { get; init; }
+    public string CurrencyStatus { get; init; } = "unknown";
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)]
+    public string? Currency { get; init; }
     public int IncomeCount { get; init; }
     public int ExpenseCount { get; init; }
     public IReadOnlyList<MoneyOperationSourceSummaryDto> BySource { get; init; } = Array.Empty<MoneyOperationSourceSummaryDto>();

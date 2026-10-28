@@ -96,6 +96,23 @@ describe('parallel deploy workflow release contract', () => {
     expect(() => validateDeployWorkflow(replaceOnce(before, after))).toThrow();
   });
 
+  it.each(['200000000', '280000000'])(
+    'requires the qualified nine-GiB cap for the full backend build: %s', heap => {
+      expect(() => validateDeployWorkflow(replaceInJob('backend-build', job => job.replace(
+        'DOTNET_GCHeapHardLimit: "240000000"', `DOTNET_GCHeapHardLimit: "${heap}"`,
+      )))).toThrow(/bounded managed heap profile/);
+    },
+  );
+
+  it.each(['whitespace', 'style', 'analyzers'])(
+    'keeps the qualified cap on the complete Migrations %s process', category => {
+      const expected = `DOTNET_GCHeapHardLimit: "240000000"\n          CompilerResponseFile: \${{ github.workspace }}/scripts/compiler-serial.rsp\n        run: dotnet format ${category}`;
+      expect(workflow).toContain(expected);
+      expect(() => validateDeployWorkflow(replaceOnce(expected, expected.replace('240000000', '200000000'))))
+        .toThrow(/nine-GiB/);
+    },
+  );
+
   it('rejects a new database server and parallel memory-heavy shards', () => {
     expect(() => validateDeployWorkflow(replaceInJob('backend-test', job => job.replace(
       '    steps:', '    services:\n      postgres:\n        image: postgres:17-alpine\n    steps:',

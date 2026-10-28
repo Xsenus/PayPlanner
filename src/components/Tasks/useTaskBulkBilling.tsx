@@ -91,7 +91,8 @@ export function useTaskBulkBilling(params: Params) {
 
   const settled = new Set(outcomes.filter((item) => item.outcome === 'updated' || item.outcome === 'unchanged').map((item) => item.id));
   const remaining = snapshot?.tasks.filter((task) => !settled.has(task.id)) ?? [];
-  const candidates = freshRetryIds === null ? remaining : remaining.filter((task) => freshRetryIds.includes(task.id));
+  const retryIds = freshRetryIds === null ? null : new Set(freshRetryIds);
+  const candidates = retryIds === null ? remaining : remaining.filter((task) => retryIds.has(task.id));
   // A row may legitimately disappear from the filtered page during realtime. Its membership is not an authority check.
   const currentOrigin = () => Boolean(snapshot && mounted.current && live.current.identityKey === snapshot.identityKey
     && live.current.scopeKey === snapshot.scopeKey && live.current.canEdit);

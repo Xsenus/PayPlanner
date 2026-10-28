@@ -39,6 +39,12 @@ const apiMock = vi.hoisted(() => ({
   bulkUpdateTaskJournalItems: vi.fn(),
   bulkDeleteTaskJournalItems: vi.fn(),
   updateTaskJournalApproval: vi.fn(),
+  getCurrentTaskTimer: vi.fn(),
+  getTaskTimerHistory: vi.fn(),
+  getTaskTimerCorrections: vi.fn(),
+  startTaskTimer: vi.fn(),
+  stopTaskTimer: vi.fn(),
+  correctTaskTimer: vi.fn(),
   getTaskJournalComments: vi.fn(),
   createTaskJournalComment: vi.fn(),
   createTaskJournalDeadlineChangeRequest: vi.fn(),
@@ -83,6 +89,8 @@ const clientsState = vi.hoisted(() => ({
 
 const casesState = vi.hoisted(() => ({
   cases: [] as ClientCase[],
+  staleCases: null as ClientCase[] | null,
+  loading: false,
 }));
 
 const legalEntitiesState = vi.hoisted(() => ({
@@ -139,7 +147,7 @@ vi.mock('../../hooks/useClients', () => ({
 
 vi.mock('../../hooks/useClientCases', () => ({
   useClientCases: (clientId?: number | string, options?: { legalEntityId?: number | string }) => ({
-    cases: casesState.cases.filter((clientCase) => {
+    cases: casesState.staleCases ?? casesState.cases.filter((clientCase) => {
       const normalizedClientId = clientId == null ? undefined : Number(clientId);
       const normalizedLegalEntityId = options?.legalEntityId == null ? undefined : Number(options.legalEntityId);
       return normalizedClientId
@@ -148,7 +156,7 @@ vi.mock('../../hooks/useClientCases', () => ({
           ? clientCase.legalEntityId === normalizedLegalEntityId
           : true;
     }),
-    loading: false,
+    loading: casesState.loading,
   }),
 }));
 
@@ -356,6 +364,7 @@ async function renderJournal(
   tasks: TaskJournalItem[] = [createTask()],
   options: {
     initialView?: 'list' | 'board' | 'calendar' | 'timeline';
+    billingAnalysisMode?: boolean;
     mode?: 'journal' | 'approvals' | 'untriaged';
     assignees?: TaskJournalAssignee[];
     withRoute?: boolean;
@@ -439,7 +448,9 @@ async function renderJournal(
     };
   });
   const currentUserId = authState.user.id;
-  const filterStorageKey = options.mode && options.mode !== 'journal'
+  const filterStorageKey = options.billingAnalysisMode
+    ? `pp.task_journal.filters.v1.billing.user:${currentUserId}`
+    : options.mode && options.mode !== 'journal'
     ? `pp.task_journal.filters.v1.${options.mode}.user:${currentUserId}`
     : `pp.task_journal.filters.v1.user:${currentUserId}`;
   if (!window.localStorage.getItem(filterStorageKey)) {
@@ -461,6 +472,7 @@ async function renderJournal(
       {options.nextRouteTaskId ? <button onClick={() => setRouteTaskId(options.nextRouteTaskId!)}>Перейти в другую задачу</button> : null}
       <TaskJournal
         initialView={options.initialView}
+        billingAnalysisMode={options.billingAnalysisMode}
         mode={options.mode}
         embedded={options.embedded}
         contextFilter={options.contextFilter}
@@ -481,6 +493,7 @@ async function renderJournal(
   ) : (
     <TaskJournal
       initialView={options.initialView}
+      billingAnalysisMode={options.billingAnalysisMode}
       mode={options.mode}
       embedded={options.embedded}
       contextFilter={options.contextFilter}
@@ -562,6 +575,8 @@ export function setupTaskJournalTests() {
       { id: 100, clientId: 10, title: 'БАНКРОТСТВО', status: 'Open', createdAt: todayAt(8) } as ClientCase,
       { id: 200, legalEntityId: 20, title: 'КОРПОРАТИВНЫЙ СПОР', status: 'Open', createdAt: todayAt(8) } as ClientCase,
     ];
+    casesState.staleCases = null;
+    casesState.loading = false;
     legalEntitiesState.legalEntities = [
       { id: 20, shortName: 'ООО Ромашка', inn: '5400000000', email: 'office@example.com' } as LegalEntitySummary,
     ];
@@ -658,6 +673,8 @@ export function setupTaskJournalTests() {
     apiMock.bulkUpdateTaskJournalItems.mockResolvedValue({ requested: 1, updated: 1, skipped: 0 });
     apiMock.bulkDeleteTaskJournalItems.mockResolvedValue({ requested: 1, updated: 1, skipped: 0 });
     apiMock.updateTaskJournalApproval.mockResolvedValue(createTask({ status: 'approved' }));
+    apiMock.getCurrentTaskTimer.mockResolvedValue(null);
+    apiMock.getTaskTimerHistory.mockResolvedValue({ items: [], hasMore: false, nextCursor: null });
     apiMock.getTaskJournalComments.mockResolvedValue([]);
     apiMock.createTaskJournalComment.mockResolvedValue({
       id: 501,

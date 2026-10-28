@@ -107,14 +107,15 @@ function chatDraftKey(userId: number, threadId: number) {
 
 function readChatDraft(userId: number, threadId: number) {
   try { return sessionStorage.getItem(chatDraftKey(userId, threadId))?.slice(0, 8000) ?? ''; }
-  catch { return ''; }
+  catch { return null; }
 }
 
 function saveChatDraft(userId: number, threadId: number, value: string) {
   try {
     if (value) sessionStorage.setItem(chatDraftKey(userId, threadId), value);
     else sessionStorage.removeItem(chatDraftKey(userId, threadId));
-  } catch { /* The chat still works when browser storage is unavailable. */ }
+    return true;
+  } catch { return false; }
 }
 
 function mergeChatMessages(first: InternalChatMessage[], second: InternalChatMessage[]): InternalChatMessage[] {
@@ -255,13 +256,17 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
   const [unreadOutsidePage, setUnreadOutsidePage] = useState(false);
   const [visibleLastMessage, setVisibleLastMessage] = useState<{ userId: number; threadId: number; messageId: number } | null>(null);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
-  const [text, setText] = useState(() => readChatDraft(currentUserId, thread.id));
+  const [initialDraft] = useState(() => readChatDraft(currentUserId, thread.id));
+  const [text, setText] = useState(initialDraft ?? '');
+  const [draftReadFailed, setDraftReadFailed] = useState(initialDraft === null);
+  const [draftConflict, setDraftConflict] = useState<string | null>(null);
+  const [draftSaveFailed, setDraftSaveFailed] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
   const [replyTo, setReplyTo] = useState<InternalChatMessage | null>(null);
   const [restoredReplyId, setRestoredReplyId] = useState(() => {
     const pending = readPendingChatSend(currentUserId, thread.id);
-    return pending?.text === readChatDraft(currentUserId, thread.id) ? pending.replyToId : null;
+    return initialDraft !== null && pending?.text === initialDraft ? pending.replyToId : null;
   });
   const [editing, setEditing] = useState<InternalChatMessage | null>(null);
   const editingRef = useRef<InternalChatMessage | null>(null);
@@ -330,8 +335,8 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
   useEffect(() => { editingRef.current = editing; }, [editing]);
 
   useEffect(() => {
-    if (!editing) saveChatDraft(currentUserId, thread.id, text);
-  }, [currentUserId, editing, text, thread.id]);
+    if (!editing && !draftReadFailed) setDraftSaveFailed(!saveChatDraft(currentUserId, thread.id, text));
+  }, [currentUserId, draftReadFailed, editing, text, thread.id]);
 
   useEffect(() => {
     if (!profilePerson) return;
@@ -641,6 +646,20 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
     savePendingChatSend(currentUserId, thread.id, changed);
   };
 
+  const retryDraftRead = () => {
+    const saved = readChatDraft(currentUserId, thread.id);
+    if (saved === null) return;
+    if (saved && text && saved !== text) {
+      setDraftConflict(saved);
+      return;
+    }
+    const pending = readPendingChatSend(currentUserId, thread.id);
+    setRestoredReplyId(pending?.text === (text || saved) ? pending.replyToId : null);
+    setText(text || saved);
+    setDraftConflict(null);
+    setDraftReadFailed(false);
+  };
+
   const insertMarkup = (left: string, right = left) => {
     const element = textareaRef.current;
     if (!element) return;
@@ -650,7 +669,7 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
     const end = element.selectionEnd;
     setText((value) => {
       const next = `${value.slice(0, start)}${left}${value.slice(start, end)}${right}${value.slice(end)}`;
-      if (!editing) saveChatDraft(currentUserId, thread.id, next);
+      if (!editing && !draftReadFailed) saveChatDraft(currentUserId, thread.id, next);
       return next;
     });
     window.setTimeout(() => element.focus(), 0);
@@ -665,7 +684,7 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
     const lineStart = cursor > 0 ? text.lastIndexOf('\n', cursor - 1) + 1 : 0;
     setText((value) => {
       const next = `${value.slice(0, lineStart)}${marker}${value.slice(lineStart)}`;
-      if (!editing) saveChatDraft(currentUserId, thread.id, next);
+      if (!editing && !draftReadFailed) saveChatDraft(currentUserId, thread.id, next);
       return next;
     });
     window.setTimeout(() => {
@@ -958,10 +977,20 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
         <div className="flex items-end gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 focus-within:border-blue-300 focus-within:ring-2 focus-within:ring-blue-100">
           <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(event) => setFiles(Array.from(event.target.files ?? []).slice(0, 10))} />
           <button type="button" onClick={() => fileInputRef.current?.click()} className="rounded-lg p-2 text-slate-500 hover:bg-white" title="Прикрепить файлы"><Paperclip className="h-4 w-4" /></button>
-          <textarea ref={textareaRef} value={text} onChange={(event) => { if (editing) editRevisionRef.current += 1; else markPendingDraftChanged(); setText(event.target.value); if (!editing) saveChatDraft(currentUserId, thread.id, event.target.value); }} onCompositionStart={() => { composingRef.current = true; }} onCompositionEnd={() => { composingRef.current = false; }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !composingRef.current) { event.preventDefault(); void submit(); } }} rows={1} maxLength={8000} placeholder="Напишите сообщение…" className="max-h-32 min-h-9 flex-1 resize-y border-0 bg-transparent px-1 py-2 text-sm outline-none" />
+          <textarea ref={textareaRef} value={text} onChange={(event) => { if (editing) editRevisionRef.current += 1; else markPendingDraftChanged(); setText(event.target.value); if (!editing && !draftReadFailed) saveChatDraft(currentUserId, thread.id, event.target.value); }} onCompositionStart={() => { composingRef.current = true; }} onCompositionEnd={() => { composingRef.current = false; }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !composingRef.current) { event.preventDefault(); void submit(); } }} rows={3} maxLength={8000} placeholder="Напишите сообщение…" className="max-h-48 min-h-20 min-w-0 flex-1 resize-y overflow-y-auto border-0 bg-transparent px-1 py-2 text-sm outline-none" />
           <button type="button" onClick={() => void submit()} disabled={sending || (!text.trim() && files.length === 0)} className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-white disabled:bg-slate-300" aria-label="Отправить">{sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}</button>
         </div>
-        {text && !editing ? <p className="mt-1 text-[11px] text-slate-500">Черновик сохранён в этой вкладке до её закрытия.</p> : null}
+        {!editing && draftReadFailed
+          ? <div role="alert" className="mt-1 text-xs text-amber-800">Не удалось прочитать сохранённый черновик. Текущий текст пока не сохраняется, чтобы не перезаписать прежний.{' '}
+            {draftConflict !== null
+              ? <div>Найден другой черновик:<pre className="my-1 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-amber-50 p-2 font-sans">{draftConflict}</pre><div className="flex flex-wrap gap-x-3 gap-y-1"><button type="button" onClick={() => { const pending = readPendingChatSend(currentUserId, thread.id); setRestoredReplyId(pending?.text === draftConflict ? pending.replyToId : null); setText(draftConflict); setDraftConflict(null); setDraftReadFailed(false); }} className="font-semibold underline">Заменить текущий текст сохранённым</button><button type="button" onClick={() => { setRestoredReplyId(null); setDraftConflict(null); setDraftReadFailed(false); }} className="font-semibold underline">Заменить сохранённый текущим</button></div></div>
+              : <button type="button" onClick={retryDraftRead} className="font-semibold underline">Повторить чтение</button>}</div>
+          : !editing && draftSaveFailed
+          ? <p role="alert" className="mt-1 text-xs text-amber-800">{text
+            ? 'Не удалось сохранить черновик в этой вкладке. При переходе или перезагрузке текст может потеряться.'
+            : 'Не удалось очистить сохранённый черновик. Предыдущий текст может снова появиться при открытии чата.'}{' '}
+            <button type="button" onClick={() => setDraftSaveFailed(!saveChatDraft(currentUserId, thread.id, text))} className="font-semibold underline">{text ? 'Повторить сохранение' : 'Повторить очистку'}</button></p>
+          : text && !editing ? <p className="mt-1 text-[11px] text-slate-500">Черновик сохранён в этой вкладке до её закрытия.</p> : null}
       </footer>
 
       {profilePerson ? (

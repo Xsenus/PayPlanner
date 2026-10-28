@@ -9,6 +9,8 @@ describe('NotificationHelp', () => {
     expect(screen.getByLabelText('Подсказка по Push-уведомлениям')).toBeTruthy();
     expect(screen.getByText('Как работают Push-уведомления')).toBeTruthy();
     expect(screen.getByText(/Включайте Push на каждом устройстве/)).toBeTruthy();
+    expect(screen.getByText(/уведомления разрешённых типов при закрытой вкладке CRM/)).toBeTruthy();
+    expect(screen.getByText(/Доставка также зависит от выбранных каналов и режима/)).toBeTruthy();
     expect(screen.getByText(/браузер запретил уведомления/)).toBeTruthy();
   });
 
@@ -62,6 +64,7 @@ describe('NotificationHelp', () => {
 
     expect(help.getByText(/события остаются в центре уведомлений/)).toBeTruthy();
     expect(help.getByText(/Push, Email, Telegram, SMS и MAX/)).toBeTruthy();
+    expect(help.getByText(/Личное расписание использует часовой пояс из раздела «Ваш профиль» → «Профиль»/)).toBeTruthy();
     expect(help.getByText(/«Срочные уведомления показывать сразу»/)).toBeTruthy();
     expect(help.getByText(/Для MAX администратор задаёт отдельные тихие часы, часовой пояс и дневной лимит/)).toBeTruthy();
     expect(help.getByText(/может ожидать следующего разрешённого времени/)).toBeTruthy();

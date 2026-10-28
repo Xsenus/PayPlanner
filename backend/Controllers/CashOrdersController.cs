@@ -18,6 +18,7 @@ namespace PayPlanner.Api.Controllers;
 [Authorize]
 public class CashOrdersController : ControllerBase
 {
+    private const string CurrencyContractHeader = "X-PayPlanner-Currency-Contract";
     private const string CashSourceToken = "налич";
     private const string CashRegisterSourceToken = "кас";
     private readonly PaymentContext _db;
@@ -56,6 +57,20 @@ public class CashOrdersController : ControllerBase
             : _companyAccess.Visibility.IsAdmin ? _db.Payments
             : BankStatementImportAccess.ScopePaymentCompanies(_db, _db.Payments, _companyAccess.AllowedCompanyIds);
 
+    private async Task<bool> CanViewSelectedCashAccountAsync(int? accountId, CancellationToken ct)
+        => !accountId.HasValue || _companyAccess is not null && await BankStatementImportAccess.CoherentAccounts(_db,
+            BankStatementImportAccess.ScopeAccounts(_db.MoneyAccounts.AsNoTracking(), _companyAccess, ignoreQueryFilters: false))
+            .AnyAsync(account => account.Id == accountId.Value && account.Source == MoneyOperationSource.Cash, ct);
+
+    private bool SupportsCurrencyContract()
+        => string.Equals(Request.Headers[CurrencyContractHeader].ToString(), "1", StringComparison.Ordinal);
+
+    private void MarkCurrencyResponse()
+    {
+        Response.Headers.Append("Vary", CurrencyContractHeader);
+        Response.Headers.CacheControl = "no-store";
+    }
+
     [HttpGet("cashbook")]
     public async Task<ActionResult<CashBookResponseDto>> GetCashBook(
         [FromQuery] DateTime? from,
@@ -66,7 +81,8 @@ public class CashOrdersController : ControllerBase
         [FromQuery] int? caseId = null,
         [FromQuery] int? contractId = null,
         [FromQuery] int? incomeTypeId = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        [FromQuery] int? moneyAccountId = null)
     {
         if (await RequirePaymentsPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
         {
@@ -78,8 +94,9 @@ public class CashOrdersController : ControllerBase
         {
             return Forbid();
         }
+        if (!await CanViewSelectedCashAccountAsync(moneyAccountId, ct)) return NotFound();
 
-        return Ok(await BuildCashBookAsync(
+        var cashBook = await BuildCashBookAsync(
             from,
             to,
             accountName,
@@ -89,7 +106,14 @@ public class CashOrdersController : ControllerBase
             contractId,
             incomeTypeId,
             visibility,
-            ct));
+            ct,
+            moneyAccountId);
+        MarkCurrencyResponse();
+        if (cashBook is not null && cashBook.CurrencyStatus == "single" && cashBook.Currency != "RUB" && !SupportsCurrencyContract())
+            return Conflict("Обновите страницу, чтобы безопасно отобразить кассовую книгу в выбранной валюте.");
+        return cashBook is null
+            ? BadRequest("Нельзя рассчитать кассовую книгу: валюты проведённых ордеров различаются или не указаны.")
+            : Ok(cashBook);
     }
 
     [HttpGet("cashbook/print")]
@@ -102,7 +126,8 @@ public class CashOrdersController : ControllerBase
         [FromQuery] int? caseId = null,
         [FromQuery] int? contractId = null,
         [FromQuery] int? incomeTypeId = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        [FromQuery] int? moneyAccountId = null)
     {
         if (await RequirePaymentsPermissionAsync(static permission => permission.CanExport, ct) is { } forbidden)
         {
@@ -114,6 +139,7 @@ public class CashOrdersController : ControllerBase
         {
             return Forbid();
         }
+        if (!await CanViewSelectedCashAccountAsync(moneyAccountId, ct)) return NotFound();
 
         var cashBook = await BuildCashBookAsync(
             from,
@@ -125,8 +151,11 @@ public class CashOrdersController : ControllerBase
             contractId,
             incomeTypeId,
             visibility,
-            ct);
-        return Content(BuildCashBookPrintHtml(cashBook), "text/html; charset=utf-8", Encoding.UTF8);
+            ct,
+            moneyAccountId);
+        return cashBook is null
+            ? BadRequest("Нельзя распечатать кассовую книгу: валюты проведённых ордеров различаются или не указаны.")
+            : Content(BuildCashBookPrintHtml(cashBook), "text/html; charset=utf-8", Encoding.UTF8);
     }
 
     [HttpGet("next-number")]
@@ -161,7 +190,8 @@ public class CashOrdersController : ControllerBase
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 25,
         [FromQuery] string? accountName = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        [FromQuery] int? moneyAccountId = null)
     {
         if (await RequirePaymentsPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
         {
@@ -176,8 +206,9 @@ public class CashOrdersController : ControllerBase
         {
             return Forbid();
         }
+        if (!await CanViewSelectedCashAccountAsync(moneyAccountId, ct)) return NotFound();
 
-        var query = BuildFilteredQuery(from, to, type, status, search, accountName, visibility);
+        var query = BuildFilteredQuery(from, to, type, status, search, accountName, visibility, moneyAccountId);
 
         var total = await query.CountAsync(ct);
         var items = await query
@@ -207,7 +238,8 @@ public class CashOrdersController : ControllerBase
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 25,
         [FromQuery] string? accountName = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        [FromQuery] int? moneyAccountId = null)
     {
         if (await RequirePaymentsPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
         {
@@ -222,8 +254,9 @@ public class CashOrdersController : ControllerBase
         {
             return Forbid();
         }
+        if (!await CanViewSelectedCashAccountAsync(moneyAccountId, ct)) return NotFound();
 
-        var query = BuildFilteredQuery(from, to, type, status, search, accountName, visibility);
+        var query = BuildFilteredQuery(from, to, type, status, search, accountName, visibility, moneyAccountId);
         var summary = await query
             .GroupBy(_ => 1)
             .Select(group => new
@@ -234,6 +267,13 @@ public class CashOrdersController : ControllerBase
                 DraftCount = group.Count(order => order.Status == CashOrderStatus.Draft),
                 PostedCount = group.Count(order => order.Status == CashOrderStatus.Posted),
                 CancelledCount = group.Count(order => order.Status == CashOrderStatus.Cancelled),
+                HasUnknownCurrency = group.Any(order => order.Status == CashOrderStatus.Posted
+                    && (order.Currency == null || order.Currency.Trim() == "")),
+                HasLegacyUnsafeRows = group.Any(order => order.Currency == null || order.Currency.Trim().ToUpper() != "RUB"),
+                MinCurrency = group.Where(order => order.Status == CashOrderStatus.Posted)
+                    .Min(order => order.Currency == null ? null : order.Currency.Trim().ToUpper()),
+                MaxCurrency = group.Where(order => order.Status == CashOrderStatus.Posted)
+                    .Max(order => order.Currency == null ? null : order.Currency.Trim().ToUpper()),
                 IncomingAmount = group
                     .Where(order => order.Type == CashOrderType.Incoming && order.Status == CashOrderStatus.Posted)
                     .Sum(order => order.Amount),
@@ -243,6 +283,10 @@ public class CashOrdersController : ControllerBase
             })
             .FirstOrDefaultAsync(ct);
 
+        MarkCurrencyResponse();
+        if (summary?.HasLegacyUnsafeRows == true && !SupportsCurrencyContract())
+            return Conflict("Обновите страницу, чтобы безопасно отобразить валюту кассовых ордеров.");
+
         var items = await query
             .OrderByDescending(order => order.Date)
             .ThenByDescending(order => order.Id)
@@ -251,9 +295,13 @@ public class CashOrdersController : ControllerBase
             .Select(CashOrderListProjection)
             .ToListAsync(ct);
 
+        var (currencyStatus, currency) = ResolveRegisterCurrency(summary?.PostedCount ?? 0,
+            summary?.HasUnknownCurrency == true, summary?.MinCurrency, summary?.MaxCurrency);
+        var amountsAvailable = currencyStatus is "single" or "empty";
         return Ok(new CashOrderRegisterResponseDto
         {
             Items = items,
+            MoneyAccountId = moneyAccountId,
             Total = summary?.Total ?? 0,
             Page = page,
             PageSize = pageSize,
@@ -262,8 +310,11 @@ public class CashOrdersController : ControllerBase
             DraftCount = summary?.DraftCount ?? 0,
             PostedCount = summary?.PostedCount ?? 0,
             CancelledCount = summary?.CancelledCount ?? 0,
-            IncomingAmount = summary?.IncomingAmount ?? 0m,
-            OutgoingAmount = summary?.OutgoingAmount ?? 0m,
+            AmountsAvailable = amountsAvailable,
+            CurrencyStatus = currencyStatus,
+            Currency = currency,
+            IncomingAmount = amountsAvailable ? summary?.IncomingAmount ?? 0m : null,
+            OutgoingAmount = amountsAvailable ? summary?.OutgoingAmount ?? 0m : null,
         });
     }
 
@@ -275,7 +326,8 @@ public class CashOrdersController : ControllerBase
         [FromQuery] CashOrderStatus? status,
         [FromQuery] string? search,
         [FromQuery] string? accountName = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        [FromQuery] int? moneyAccountId = null)
     {
         if (await RequirePaymentsPermissionAsync(static permission => permission.CanExport, ct) is { } forbidden)
         {
@@ -287,8 +339,9 @@ public class CashOrdersController : ControllerBase
         {
             return Forbid();
         }
+        if (!await CanViewSelectedCashAccountAsync(moneyAccountId, ct)) return NotFound();
 
-        var query = BuildFilteredQuery(from, to, type, status, search, accountName, visibility);
+        var query = BuildFilteredQuery(from, to, type, status, search, accountName, visibility, moneyAccountId);
         var summary = await query
             .GroupBy(_ => 1)
             .Select(group => new
@@ -299,6 +352,12 @@ public class CashOrdersController : ControllerBase
                 DraftCount = group.Count(order => order.Status == CashOrderStatus.Draft),
                 PostedCount = group.Count(order => order.Status == CashOrderStatus.Posted),
                 CancelledCount = group.Count(order => order.Status == CashOrderStatus.Cancelled),
+                HasUnknownCurrency = group.Any(order => order.Status == CashOrderStatus.Posted
+                    && (order.Currency == null || order.Currency.Trim() == "")),
+                MinCurrency = group.Where(order => order.Status == CashOrderStatus.Posted)
+                    .Min(order => order.Currency == null ? null : order.Currency.Trim().ToUpper()),
+                MaxCurrency = group.Where(order => order.Status == CashOrderStatus.Posted)
+                    .Max(order => order.Currency == null ? null : order.Currency.Trim().ToUpper()),
                 IncomingAmount = group
                     .Where(order => order.Type == CashOrderType.Incoming && order.Status == CashOrderStatus.Posted)
                     .Sum(order => order.Amount),
@@ -314,9 +373,13 @@ public class CashOrdersController : ControllerBase
             .Select(CashOrderListProjection)
             .ToListAsync(ct);
 
+        var (currencyStatus, currency) = ResolveRegisterCurrency(summary?.PostedCount ?? 0,
+            summary?.HasUnknownCurrency == true, summary?.MinCurrency, summary?.MaxCurrency);
+        var amountsAvailable = currencyStatus is "single" or "empty";
         var register = new CashOrderRegisterResponseDto
         {
             Items = items,
+            MoneyAccountId = moneyAccountId,
             Total = summary?.Total ?? 0,
             Page = 1,
             PageSize = items.Count,
@@ -325,26 +388,56 @@ public class CashOrdersController : ControllerBase
             DraftCount = summary?.DraftCount ?? 0,
             PostedCount = summary?.PostedCount ?? 0,
             CancelledCount = summary?.CancelledCount ?? 0,
-            IncomingAmount = summary?.IncomingAmount ?? 0m,
-            OutgoingAmount = summary?.OutgoingAmount ?? 0m,
+            AmountsAvailable = amountsAvailable,
+            CurrencyStatus = currencyStatus,
+            Currency = currency,
+            IncomingAmount = amountsAvailable ? summary?.IncomingAmount ?? 0m : null,
+            OutgoingAmount = amountsAvailable ? summary?.OutgoingAmount ?? 0m : null,
         };
 
         return Content(BuildRegisterPrintHtml(register, from, to, accountName), "text/html; charset=utf-8", Encoding.UTF8);
     }
 
+    private static (string Status, string? Currency) ResolveRegisterCurrency(int postedCount, bool unknown, string? min, string? max)
+        => postedCount == 0 ? ("empty", null)
+            : unknown || string.IsNullOrWhiteSpace(min) || string.IsNullOrWhiteSpace(max) ? ("unknown", null)
+            : !string.Equals(min, max, StringComparison.Ordinal) ? ("mixed", null)
+            : ("single", min);
+
+    internal static (string Status, string? Currency) ResolveCashBookCurrency(IEnumerable<(bool Unknown, string? Min, string? Max)> groups)
+    {
+        string? currency = null;
+        foreach (var group in groups)
+        {
+            if (group.Unknown || string.IsNullOrWhiteSpace(group.Min) || string.IsNullOrWhiteSpace(group.Max)) return ("unknown", null);
+            if (!string.Equals(group.Min, group.Max, StringComparison.Ordinal)
+                || currency is not null && !string.Equals(currency, group.Min, StringComparison.Ordinal)) return ("mixed", null);
+            currency = group.Min;
+        }
+        return currency is null ? ("empty", null) : ("single", currency);
+    }
+
     [HttpGet("inventories")]
-    public async Task<ActionResult<PagedResponse<CashInventoryDto>>> GetInventories(
+    public async Task<ActionResult<CashInventoryPageResponse>> GetInventories(
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] string? accountName = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 10,
+        [FromQuery] int? moneyAccountId = null,
         CancellationToken ct = default)
     {
         if (await RequirePaymentsPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
         {
             return forbidden;
         }
+
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null || _companyAccess is null)
+        {
+            return Forbid();
+        }
+        if (!await CanViewSelectedCashAccountAsync(moneyAccountId, ct)) return NotFound();
 
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 5, 100);
@@ -353,6 +446,22 @@ public class CashOrdersController : ControllerBase
             .Include(item => item.CorrectionCashOrder)
             .AsNoTracking()
             .AsQueryable();
+
+        if (!visibility.IsAdmin)
+        {
+            var accounts = BankStatementImportAccess.CoherentAccounts(_db,
+                BankStatementImportAccess.ScopeAccounts(_db.MoneyAccounts.AsNoTracking(), _companyAccess, ignoreQueryFilters: false));
+            var corrections = CompanyCashOrders.AsNoTracking().ApplyCashOrderVisibility(visibility);
+            query = query.Where(item => item.CompanyId.HasValue && item.MoneyAccountId.HasValue
+                && accounts.Any(account => account.Id == item.MoneyAccountId && account.CompanyId == item.CompanyId)
+                && (!item.CorrectionCashOrderId.HasValue || corrections.Any(order => order.Id == item.CorrectionCashOrderId)));
+            if (!visibility.SeesAll)
+            {
+                var visibleUserIds = visibility.VisibleUserIds.ToArray();
+                query = query.Where(item => EF.Property<int?>(item, "CreatedByUserId").HasValue
+                    && visibleUserIds.Contains(EF.Property<int?>(item, "CreatedByUserId")!.Value));
+            }
+        }
 
         if (from.HasValue)
         {
@@ -365,7 +474,11 @@ public class CashOrdersController : ControllerBase
         }
 
         var accountFilter = NormalizeAccountFilter(accountName);
-        if (accountFilter is not null)
+        if (moneyAccountId.HasValue)
+        {
+            query = query.Where(item => item.MoneyAccountId == moneyAccountId.Value);
+        }
+        else if (accountFilter is not null)
         {
             query = query.Where(item => item.AccountName == accountFilter);
         }
@@ -379,9 +492,10 @@ public class CashOrdersController : ControllerBase
             .Select(item => Map(item))
             .ToListAsync(ct);
 
-        return Ok(new PagedResponse<CashInventoryDto>
+        return Ok(new CashInventoryPageResponse
         {
             Items = items,
+            MoneyAccountId = moneyAccountId,
             Total = total,
             Page = page,
             PageSize = pageSize,
@@ -390,6 +504,28 @@ public class CashOrdersController : ControllerBase
 
     [HttpPost("inventories")]
     public async Task<IActionResult> CreateInventory([FromBody] CashInventoryCreateRequest request, CancellationToken ct)
+    {
+        try
+        {
+            return await CreateInventoryCoreAsync(request, ct);
+        }
+        catch (Exception error) when (_db.Database.CurrentTransaction is null && IsInventoryConcurrencyConflict(error))
+        {
+            return Conflict("Касса или её остаток изменились одновременно с инвентаризацией. Обновите данные и повторите действие.");
+        }
+    }
+
+    private static bool IsInventoryConcurrencyConflict(Exception error)
+    {
+        for (Exception? current = error; current is not null; current = current.InnerException)
+            if (current is DbUpdateConcurrencyException
+                || current is Microsoft.Data.Sqlite.SqliteException { SqliteErrorCode: 5 or 6 }
+                || current is Npgsql.PostgresException { SqlState: Npgsql.PostgresErrorCodes.SerializationFailure
+                    or Npgsql.PostgresErrorCodes.DeadlockDetected or Npgsql.PostgresErrorCodes.LockNotAvailable }) return true;
+        return false;
+    }
+
+    private async Task<IActionResult> CreateInventoryCoreAsync(CashInventoryCreateRequest request, CancellationToken ct)
     {
         if (await RequirePaymentsPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
         {
@@ -415,7 +551,69 @@ public class CashOrdersController : ControllerBase
             return Forbid();
         }
 
-        var accountingBalance = await CalculateCashBalanceAsync(date, accountName, visibility, ct);
+        await using var transaction = _db.Database.CurrentTransaction is null
+            ? await _db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct)
+            : null;
+        // With no explicit identity, an old client must not guess between accounts.
+        // Unassigned orders with the same name are rejected below in both paths.
+        var matchingAccounts = await _db.MoneyAccounts.IgnoreQueryFilters().AsNoTracking()
+            .Where(account => account.Source == MoneyOperationSource.Cash && account.Name == accountName
+                && (!request.MoneyAccountId.HasValue || account.Id == request.MoneyAccountId.Value))
+            .Select(account => new { account.Id, account.CompanyId, account.Currency }).Take(2).ToListAsync(ct);
+        if (matchingAccounts.Count != 1 || request.MoneyAccountId.HasValue && request.MoneyAccountId.Value != matchingAccounts[0].Id
+            || !string.Equals(matchingAccounts[0].Currency?.Trim(), "RUB", StringComparison.OrdinalIgnoreCase)
+            || _companyAccess is null || !await BankStatementImportAccess.CoherentAccounts(
+                    _db, BankStatementImportAccess.ScopeAccounts(_db.MoneyAccounts.AsNoTracking(), _companyAccess,
+                        ignoreQueryFilters: false), forNewOperations: true)
+                .AnyAsync(account => account.Id == matchingAccounts[0].Id, ct))
+        {
+            return BadRequest("Не удалось подтвердить остаток кассы. Проверьте настройки и доступ к операциям.");
+        }
+
+        var selected = matchingAccounts[0];
+        // Use the same company -> cash account lock order as cash-order mutations.
+        if (await _db.LegalEntities.Where(company => company.Id == selected.CompanyId && company.ProfileStatus == CompanyProfileStatuses.Active)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(company => company.ShortName, company => company.ShortName), ct) != 1
+            || await _db.MoneyAccounts.Where(account => account.Id == selected.Id && account.IsActive
+                && account.CompanyId == selected.CompanyId && account.Source == MoneyOperationSource.Cash
+                && account.Currency == selected.Currency && account.Name == accountName)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(account => account.Name, account => account.Name), ct) != 1)
+            return Conflict("Касса изменилась. Обновите данные и повторите инвентаризацию.");
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanEdit, ct) is { } changedPermission) return changedPermission;
+        var freshVisibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (freshVisibility is null || _companyAccess is null
+            || !await BankStatementImportAccess.CoherentAccounts(_db,
+                BankStatementImportAccess.ScopeAccounts(_db.MoneyAccounts.AsNoTracking(), _companyAccess, ignoreQueryFilters: false),
+                forNewOperations: true).AnyAsync(account => account.Id == selected.Id && account.CompanyId == selected.CompanyId, ct))
+            return Forbid();
+        visibility = freshVisibility;
+
+        var selectedAccountId = matchingAccounts[0].Id;
+        var selectedCompanyId = matchingAccounts[0].CompanyId;
+        System.Linq.Expressions.Expression<Func<CashOrder, bool>> inventoryOrder = order =>
+            order.Status == CashOrderStatus.Posted && order.Date <= date.Date
+            && (order.MoneyAccountId == selectedAccountId || !order.MoneyAccountId.HasValue && order.Account == accountName);
+        var relevantOrders = _db.CashOrders.AsNoTracking().Where(inventoryOrder);
+        var visibleOrders = CompanyCashOrders.AsNoTracking().ApplyCashOrderVisibility(visibility).Where(inventoryOrder);
+        // A partial balance must never be used to create a correction. Do not reveal
+        // which inaccessible order caused the rejection.
+        if (await relevantOrders.CountAsync(ct) != await visibleOrders.CountAsync(ct)
+            || await visibleOrders.AnyAsync(order => order.Currency == null || order.Currency.Trim().ToUpper() != "RUB", ct)
+            || await relevantOrders.AnyAsync(order => !order.MoneyAccountId.HasValue
+                || order.MoneyAccountId == selectedAccountId && !order.CompanyId.HasValue
+                || order.CompanyId.HasValue && order.CompanyId != selectedCompanyId
+                || order.MoneyOperationId.HasValue
+                && _db.MoneyOperations.IgnoreQueryFilters().Any(operation => operation.Id == order.MoneyOperationId.Value
+                    && operation.MoneyAccountId.HasValue && operation.MoneyAccountId.Value != matchingAccounts[0].Id)
+                || !order.MoneyOperationId.HasValue && order.PaymentId.HasValue
+                && _db.Payments.IgnoreQueryFilters().Any(payment => payment.Id == order.PaymentId.Value
+                    && payment.SellerCompanyId.HasValue && payment.SellerCompanyId != matchingAccounts[0].CompanyId), ct))
+        {
+            return BadRequest("Не удалось подтвердить остаток кассы. Проверьте настройки и доступ к операциям.");
+        }
+
+        var accountingBalance = await visibleOrders.SumAsync(
+            order => order.Type == CashOrderType.Incoming ? order.Amount : -order.Amount, ct);
         var difference = request.ActualBalance - accountingBalance;
 
         CashOrder? correctionOrder = null;
@@ -431,6 +629,8 @@ public class CashOrdersController : ControllerBase
                 Amount = Math.Abs(difference),
                 Currency = "RUB",
                 Account = accountName,
+                MoneyAccountId = matchingAccounts[0].Id,
+                CompanyId = matchingAccounts[0].CompanyId,
                 PayerName = difference > 0m ? "Инвентаризация кассы" : null,
                 ReceiverName = difference < 0m ? "Инвентаризация кассы" : null,
                 Basis = "Корректировка по инвентаризации кассы",
@@ -447,6 +647,8 @@ public class CashOrdersController : ControllerBase
             Number = await GenerateInventoryNumberAsync(date, ct),
             Date = date,
             AccountName = accountName,
+            MoneyAccountId = matchingAccounts[0].Id,
+            CompanyId = matchingAccounts[0].CompanyId,
             AccountingBalance = accountingBalance,
             ActualBalance = request.ActualBalance,
             Difference = difference,
@@ -456,7 +658,9 @@ public class CashOrdersController : ControllerBase
         };
 
         _db.CashInventories.Add(inventory);
+        _db.Entry(inventory).Property<int?>("CreatedByUserId").CurrentValue = visibility.UserId;
         await _db.SaveChangesAsync(ct);
+        if (transaction is not null) await transaction.CommitAsync(ct);
 
         return Created($"/api/cash-orders/inventories/{inventory.Id}", Map(inventory));
     }
@@ -593,6 +797,62 @@ public class CashOrdersController : ControllerBase
             return Ok(Map(existing));
         }
 
+        if (string.IsNullOrWhiteSpace(operation.Currency))
+        {
+            return BadRequest("В денежной операции не указана валюта. Уточните её перед созданием кассового ордера.");
+        }
+
+        MoneyAccount? confirmedAccount = null;
+        if (operation.MoneyAccountId.HasValue)
+        {
+            if (_companyAccess is null) return Forbid();
+            confirmedAccount = await BankStatementImportAccess.CoherentAccounts(_db,
+                    BankStatementImportAccess.ScopeAccounts(_db.MoneyAccounts.AsNoTracking(), _companyAccess, ignoreQueryFilters: false),
+                    forNewOperations: true)
+                .SingleOrDefaultAsync(account => account.Id == operation.MoneyAccountId && account.Source == MoneyOperationSource.Cash, ct);
+            if (confirmedAccount is null || !string.Equals(confirmedAccount.Currency.Trim(), operation.Currency.Trim(), StringComparison.OrdinalIgnoreCase))
+                return BadRequest("Касса операции недоступна или её валюта не совпадает с валютой операции.");
+        }
+
+        await using var transaction = _db.Database.CurrentTransaction is null
+            ? await _db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct)
+            : null;
+        if (confirmedAccount is not null)
+        {
+            // Match the company -> account -> operation lock order of money mutations.
+            if (await _db.LegalEntities.Where(company => company.Id == confirmedAccount.CompanyId
+                    && company.ProfileStatus == CompanyProfileStatuses.Active)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(company => company.ShortName, company => company.ShortName), ct) != 1
+                || await _db.MoneyAccounts.Where(account => account.Id == confirmedAccount.Id && account.IsActive
+                    && account.CompanyId == confirmedAccount.CompanyId && account.Source == MoneyOperationSource.Cash
+                    && account.Currency == confirmedAccount.Currency)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(account => account.Name, account => account.Name), ct) != 1)
+                return Conflict("Касса операции изменилась. Обновите данные и повторите действие.");
+        }
+        if (await _db.MoneyOperations.Where(item => item.Id == operation.Id && item.MoneyAccountId == operation.MoneyAccountId
+                && item.UpdatedAt == operation.UpdatedAt && item.Source == operation.Source && item.Direction == operation.Direction
+                && item.AccountingType == operation.AccountingType && item.Amount == operation.Amount
+                && item.Currency == operation.Currency && item.Date == operation.Date
+                && item.AccountName == operation.AccountName && item.CounterpartyName == operation.CounterpartyName
+                && item.Purpose == operation.Purpose && item.CategoryName == operation.CategoryName)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.Purpose, item => item.Purpose), ct) != 1)
+            return Conflict("Денежная операция изменилась. Обновите данные и повторите действие.");
+
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanCreate, ct) is { } changedPermission)
+            return changedPermission;
+        var freshVisibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (freshVisibility is null || !await ApplyVisibleMoneyOperationForCashOrders(_db.MoneyOperations.AsNoTracking(), freshVisibility)
+                .AnyAsync(item => item.Id == operation.Id, ct))
+            return NotFound();
+        if (confirmedAccount is not null && (_companyAccess is null || !await BankStatementImportAccess.CoherentAccounts(_db,
+                BankStatementImportAccess.ScopeAccounts(_db.MoneyAccounts.AsNoTracking(), _companyAccess, ignoreQueryFilters: false),
+                forNewOperations: true).AnyAsync(account => account.Id == confirmedAccount.Id && account.CompanyId == confirmedAccount.CompanyId, ct)))
+            return Forbid();
+        existing = await CompanyCashOrders.AsNoTracking()
+            .Where(order => order.MoneyOperationId == operation.Id && order.Status != CashOrderStatus.Cancelled)
+            .OrderByDescending(order => order.Id).FirstOrDefaultAsync(ct);
+        if (existing is not null) return Ok(Map(existing));
+
         var orderType = operation.Direction == MoneyOperationDirection.Expense ? CashOrderType.Outgoing : CashOrderType.Incoming;
         var order = new CashOrder
         {
@@ -601,8 +861,10 @@ public class CashOrdersController : ControllerBase
             Status = CashOrderStatus.Posted,
             Date = operation.Date.Date,
             Amount = operation.Amount,
-            Currency = string.IsNullOrWhiteSpace(operation.Currency) ? "RUB" : operation.Currency,
+            Currency = operation.Currency.Trim(),
             MoneyOperationId = operation.Id,
+            MoneyAccountId = confirmedAccount?.Id,
+            CompanyId = confirmedAccount?.CompanyId,
             Account = operation.AccountName,
             PayerName = operation.CounterpartyName,
             ReceiverName = operation.Direction == MoneyOperationDirection.Expense ? operation.CounterpartyName : null,
@@ -615,6 +877,7 @@ public class CashOrdersController : ControllerBase
 
         _db.CashOrders.Add(order);
         await _db.SaveChangesAsync(ct);
+        if (transaction is not null) await transaction.CommitAsync(ct);
 
         return Created($"/api/cash-orders/{order.Id}", Map(order));
     }
@@ -632,12 +895,50 @@ public class CashOrdersController : ControllerBase
             return BadRequest("Сумма кассового ордера должна быть больше нуля.");
         }
 
+        if (model.Status == CashOrderStatus.Posted && string.IsNullOrWhiteSpace(model.Currency))
+        {
+            return BadRequest("Укажите валюту перед проведением кассового ордера.");
+        }
+
+        await using var transaction = model.SelectedMoneyAccountId.HasValue && _db.Database.CurrentTransaction is null
+            ? await _db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct)
+            : null;
+        if (model.SelectedMoneyAccountId.HasValue)
+        {
+            if (model.PaymentId.HasValue || model.MoneyOperationId.HasValue || model.InvoiceId.HasValue || model.ClientId.HasValue
+                || model.Payment is not null || model.MoneyOperation is not null || model.Client is not null)
+                return BadRequest("Для связанного документа используйте создание ордера из исходной операции.");
+            if (await ResolvePaymentsVisibilityAsync(ct) is null || _companyAccess is null) return Forbid();
+            var selected = await BankStatementImportAccess.CoherentAccounts(_db,
+                    BankStatementImportAccess.ScopeAccounts(_db.MoneyAccounts.AsNoTracking(), _companyAccess, ignoreQueryFilters: false),
+                    forNewOperations: true)
+                .SingleOrDefaultAsync(account => account.Id == model.SelectedMoneyAccountId && account.Source == MoneyOperationSource.Cash, ct);
+            if (selected is null || string.IsNullOrWhiteSpace(selected.Currency)
+                || !string.Equals(selected.Currency.Trim(), model.Currency?.Trim(), StringComparison.OrdinalIgnoreCase))
+                return BadRequest("Касса недоступна или её валюта не совпадает с валютой ордера.");
+            if (await _db.LegalEntities.Where(company => company.Id == selected.CompanyId && company.ProfileStatus == CompanyProfileStatuses.Active)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(company => company.ShortName, company => company.ShortName), ct) != 1
+                || await _db.MoneyAccounts.Where(account => account.Id == selected.Id && account.IsActive && account.CompanyId == selected.CompanyId
+                    && account.Source == MoneyOperationSource.Cash && account.Currency == selected.Currency && account.Name == selected.Name)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(account => account.Name, account => account.Name), ct) != 1)
+                return Conflict("Касса изменилась. Обновите данные и повторите действие.");
+            if (await RequirePaymentsPermissionAsync(static permission => permission.CanCreate, ct) is { } changedPermission) return changedPermission;
+            if (await ResolvePaymentsVisibilityAsync(ct) is null || _companyAccess is null
+                || !await BankStatementImportAccess.CoherentAccounts(_db,
+                    BankStatementImportAccess.ScopeAccounts(_db.MoneyAccounts.AsNoTracking(), _companyAccess, ignoreQueryFilters: false),
+                    forNewOperations: true).AnyAsync(account => account.Id == selected.Id && account.CompanyId == selected.CompanyId, ct))
+                return Forbid();
+            model.MoneyAccountId = selected.Id;
+            model.CompanyId = selected.CompanyId;
+            model.Account = selected.Name;
+        }
+
         var today = await ResolveCashOrderTodayAsync(ct);
         model.Date = model.Date == default ? today : model.Date.Date;
         model.Number = string.IsNullOrWhiteSpace(model.Number)
             ? await GenerateNumberAsync(model.Type, model.Date, ct)
             : model.Number.Trim();
-        model.Currency = string.IsNullOrWhiteSpace(model.Currency) ? "RUB" : model.Currency.Trim();
+        model.Currency = string.IsNullOrWhiteSpace(model.Currency) ? null : model.Currency.Trim();
         model.Account = Normalize(model.Account);
         model.PayerName = Normalize(model.PayerName);
         model.ReceiverName = Normalize(model.ReceiverName);
@@ -652,6 +953,7 @@ public class CashOrdersController : ControllerBase
 
         _db.CashOrders.Add(model);
         await _db.SaveChangesAsync(ct);
+        if (transaction is not null) await transaction.CommitAsync(ct);
 
         return Created($"/api/cash-orders/{model.Id}", Map(model));
     }
@@ -689,10 +991,18 @@ public class CashOrdersController : ControllerBase
             return BadRequest("Сумма кассового ордера должна быть больше нуля.");
         }
 
+        if (order.MoneyAccountId.HasValue && (Normalize(model.Account) != Normalize(order.Account)
+            || model.MoneyOperationId != order.MoneyOperationId || model.PaymentId != order.PaymentId || model.InvoiceId != order.InvoiceId))
+        {
+            return BadRequest("Нельзя изменить кассу или связанные документы у ордера с подтверждённой кассой.");
+        }
+        if (order.MoneyAccountId.HasValue && !string.Equals(Normalize(model.Currency), Normalize(order.Currency), StringComparison.OrdinalIgnoreCase))
+            return BadRequest("Нельзя изменить валюту ордера с подтверждённой кассой.");
+
         order.Type = model.Type;
         order.Date = model.Date == default ? order.Date : model.Date.Date;
         order.Amount = model.Amount;
-        order.Currency = string.IsNullOrWhiteSpace(model.Currency) ? "RUB" : model.Currency.Trim();
+        order.Currency = string.IsNullOrWhiteSpace(model.Currency) ? null : model.Currency.Trim();
         order.ClientId = model.ClientId;
         order.PaymentId = model.PaymentId;
         order.MoneyOperationId = model.MoneyOperationId;
@@ -779,13 +1089,53 @@ public class CashOrdersController : ControllerBase
             return BadRequest("Сумма кассового ордера должна быть больше нуля.");
         }
 
+        if (order.Status != CashOrderStatus.Posted && string.IsNullOrWhiteSpace(order.Currency))
+        {
+            return BadRequest("Укажите валюту перед проведением кассового ордера.");
+        }
+
         if (order.Status != CashOrderStatus.Posted)
         {
+            await using var transaction = order.MoneyAccountId.HasValue && _db.Database.CurrentTransaction is null
+                ? await _db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct)
+                : null;
+            if (order.MoneyAccountId.HasValue)
+            {
+                if (_companyAccess is null || !order.CompanyId.HasValue) return BadRequest("Принадлежность кассы ордера не подтверждена.");
+                var account = await BankStatementImportAccess.CoherentAccounts(_db,
+                        BankStatementImportAccess.ScopeAccounts(_db.MoneyAccounts.AsNoTracking(), _companyAccess, ignoreQueryFilters: false),
+                        forNewOperations: true)
+                    .SingleOrDefaultAsync(item => item.Id == order.MoneyAccountId && item.CompanyId == order.CompanyId
+                        && item.Source == MoneyOperationSource.Cash, ct);
+                if (account is null || string.IsNullOrWhiteSpace(account.Currency)
+                    || !string.Equals(account.Currency.Trim(), order.Currency?.Trim(), StringComparison.OrdinalIgnoreCase))
+                    return BadRequest("Касса недоступна или её валюта не совпадает с валютой ордера.");
+                if (await _db.LegalEntities.Where(company => company.Id == account.CompanyId && company.ProfileStatus == CompanyProfileStatuses.Active)
+                        .ExecuteUpdateAsync(setters => setters.SetProperty(company => company.ShortName, company => company.ShortName), ct) != 1
+                    || await _db.MoneyAccounts.Where(item => item.Id == account.Id && item.IsActive && item.CompanyId == account.CompanyId
+                        && item.Source == MoneyOperationSource.Cash && item.Currency == account.Currency)
+                        .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.Name, item => item.Name), ct) != 1)
+                    return Conflict("Касса изменилась. Обновите данные и повторите действие.");
+                if (await _db.CashOrders.Where(item => item.Id == order.Id && item.MoneyAccountId == order.MoneyAccountId
+                        && item.CompanyId == order.CompanyId && item.UpdatedAt == order.UpdatedAt && item.Status == order.Status
+                        && item.Amount == order.Amount && item.Currency == order.Currency)
+                        .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.Number, item => item.Number), ct) != 1)
+                    return Conflict("Ордер изменился. Обновите данные и повторите действие.");
+                if (await RequirePaymentsPermissionAsync(static permission => permission.CanEdit, ct) is { } changedPermission) return changedPermission;
+                var freshVisibility = await ResolvePaymentsVisibilityAsync(ct);
+                if (freshVisibility is null || _companyAccess is null
+                    || !await CompanyCashOrders.AsNoTracking().ApplyCashOrderVisibility(freshVisibility).AnyAsync(item => item.Id == order.Id, ct)
+                    || !await BankStatementImportAccess.CoherentAccounts(_db,
+                        BankStatementImportAccess.ScopeAccounts(_db.MoneyAccounts.AsNoTracking(), _companyAccess, ignoreQueryFilters: false),
+                        forNewOperations: true).AnyAsync(item => item.Id == account.Id && item.CompanyId == account.CompanyId, ct))
+                    return Forbid();
+            }
             order.Status = CashOrderStatus.Posted;
             order.UpdatedAt = DateTime.UtcNow;
             order.UpdatedByUserId = User.GetUserId();
             order.UpdatedByUserName = User.GetDisplayName();
             await _db.SaveChangesAsync(ct);
+            if (transaction is not null) await transaction.CommitAsync(ct);
         }
 
         return Ok(Map(order));
@@ -851,6 +1201,43 @@ public class CashOrdersController : ControllerBase
             return NotFound();
         }
 
+        await using var transaction = source.MoneyAccountId.HasValue && _db.Database.CurrentTransaction is null
+            ? await _db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct)
+            : null;
+        MoneyAccount? selectedAccount = null;
+        if (source.MoneyAccountId.HasValue)
+        {
+            if (_companyAccess is null || !source.CompanyId.HasValue) return BadRequest("Принадлежность кассы ордера не подтверждена.");
+            selectedAccount = await BankStatementImportAccess.CoherentAccounts(_db,
+                    BankStatementImportAccess.ScopeAccounts(_db.MoneyAccounts.AsNoTracking(), _companyAccess, ignoreQueryFilters: false),
+                    forNewOperations: true)
+                .SingleOrDefaultAsync(account => account.Id == source.MoneyAccountId && account.CompanyId == source.CompanyId
+                    && account.Source == MoneyOperationSource.Cash, ct);
+            if (selectedAccount is null || string.IsNullOrWhiteSpace(source.Currency) || string.IsNullOrWhiteSpace(selectedAccount.Currency)
+                || !string.Equals(source.Currency.Trim(), selectedAccount.Currency.Trim(), StringComparison.OrdinalIgnoreCase))
+                return BadRequest("Касса недоступна или её валюта не совпадает с валютой ордера.");
+            if (await _db.LegalEntities.Where(company => company.Id == selectedAccount.CompanyId && company.ProfileStatus == CompanyProfileStatuses.Active)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(company => company.ShortName, company => company.ShortName), ct) != 1
+                || await _db.MoneyAccounts.Where(account => account.Id == selectedAccount.Id && account.IsActive
+                    && account.CompanyId == selectedAccount.CompanyId && account.Source == MoneyOperationSource.Cash
+                    && account.Currency == selectedAccount.Currency && account.Name == selectedAccount.Name)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(account => account.Name, account => account.Name), ct) != 1)
+                return Conflict("Касса изменилась. Обновите данные и повторите действие.");
+            if (await _db.CashOrders.Where(order => order.Id == source.Id && order.MoneyAccountId == source.MoneyAccountId
+                    && order.CompanyId == source.CompanyId && order.UpdatedAt == source.UpdatedAt && order.Status == source.Status
+                    && order.Amount == source.Amount && order.Currency == source.Currency && order.Account == source.Account)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(order => order.Number, order => order.Number), ct) != 1)
+                return Conflict("Ордер изменился. Обновите данные и повторите действие.");
+            if (await RequirePaymentsPermissionAsync(static permission => permission.CanEdit, ct) is { } changedPermission) return changedPermission;
+            var freshVisibility = await ResolvePaymentsVisibilityAsync(ct);
+            if (freshVisibility is null || _companyAccess is null
+                || !await CompanyCashOrders.AsNoTracking().ApplyCashOrderVisibility(freshVisibility).AnyAsync(order => order.Id == source.Id, ct)
+                || !await BankStatementImportAccess.CoherentAccounts(_db,
+                    BankStatementImportAccess.ScopeAccounts(_db.MoneyAccounts.AsNoTracking(), _companyAccess, ignoreQueryFilters: false),
+                    forNewOperations: true).AnyAsync(account => account.Id == selectedAccount.Id && account.CompanyId == selectedAccount.CompanyId, ct))
+                return Forbid();
+        }
+
         var today = await ResolveCashOrderTodayAsync(ct);
         var order = new CashOrder
         {
@@ -859,10 +1246,12 @@ public class CashOrdersController : ControllerBase
             Status = CashOrderStatus.Draft,
             Date = today,
             Amount = source.Amount,
-            Currency = string.IsNullOrWhiteSpace(source.Currency) ? "RUB" : source.Currency,
+            Currency = string.IsNullOrWhiteSpace(source.Currency) ? null : source.Currency.Trim(),
             ClientId = source.ClientId,
             InvoiceId = source.InvoiceId,
-            Account = source.Account,
+            Account = selectedAccount?.Name ?? source.Account,
+            MoneyAccountId = selectedAccount?.Id,
+            CompanyId = selectedAccount?.CompanyId,
             PayerName = source.PayerName,
             ReceiverName = source.ReceiverName,
             Basis = source.Basis,
@@ -875,6 +1264,7 @@ public class CashOrdersController : ControllerBase
 
         _db.CashOrders.Add(order);
         await _db.SaveChangesAsync(ct);
+        if (transaction is not null) await transaction.CommitAsync(ct);
 
         return Created($"/api/cash-orders/{order.Id}", Map(order));
     }
@@ -1151,7 +1541,7 @@ public class CashOrdersController : ControllerBase
         return CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date;
     }
 
-    private async Task<CashBookResponseDto> BuildCashBookAsync(
+    private async Task<CashBookResponseDto?> BuildCashBookAsync(
         DateTime? from,
         DateTime? to,
         string? accountName,
@@ -1161,7 +1551,8 @@ public class CashOrdersController : ControllerBase
         int? contractId,
         int? incomeTypeId,
         DataVisibilityAccess visibility,
-        CancellationToken ct)
+        CancellationToken ct,
+        int? moneyAccountId = null)
     {
         var fromDate = from?.Date ?? await ResolveCashOrderTodayAsync(ct);
         var toDate = (to ?? fromDate).Date;
@@ -1175,7 +1566,11 @@ public class CashOrdersController : ControllerBase
             .ApplyCashOrderVisibility(visibility)
             .Where(order => order.Status == CashOrderStatus.Posted);
         var accountFilter = NormalizeAccountFilter(accountName);
-        if (accountFilter is not null)
+        if (moneyAccountId.HasValue)
+        {
+            postedOrders = postedOrders.Where(order => order.MoneyAccountId == moneyAccountId.Value);
+        }
+        else if (accountFilter is not null)
         {
             postedOrders = postedOrders.Where(order => order.Account == accountFilter);
         }
@@ -1197,9 +1592,15 @@ public class CashOrdersController : ControllerBase
                 Expense = group.Where(order => order.Type == CashOrderType.Outgoing).Sum(order => order.Amount),
                 IncomingCount = group.Count(order => order.Type == CashOrderType.Incoming),
                 OutgoingCount = group.Count(order => order.Type == CashOrderType.Outgoing),
+                HasUnknownCurrency = group.Any(order => order.Currency == null || order.Currency.Trim() == ""),
+                MinCurrency = group.Min(order => order.Currency == null ? null : order.Currency.Trim().ToUpper()),
+                MaxCurrency = group.Max(order => order.Currency == null ? null : order.Currency.Trim().ToUpper()),
             })
             .OrderBy(group => group.Date)
             .ToListAsync(ct);
+        var (currencyStatus, currency) = ResolveCashBookCurrency(aggregateGroups.Select(group =>
+            (group.HasUnknownCurrency, group.MinCurrency, group.MaxCurrency)));
+        if (currencyStatus is "mixed" or "unknown") return null;
         var openingBalance = aggregateGroups
             .Where(group => group.IsOpening)
             .Sum(group => group.BalanceChange);
@@ -1237,6 +1638,9 @@ public class CashOrdersController : ControllerBase
             From = fromDate,
             To = toDate,
             AccountName = accountFilter,
+            MoneyAccountId = moneyAccountId,
+            CurrencyStatus = currencyStatus,
+            Currency = currency,
             OpeningBalance = openingBalance,
             Income = income,
             Expense = expense,
@@ -1339,15 +1743,6 @@ public class CashOrdersController : ControllerBase
         return query;
     }
 
-    private Task<decimal> CalculateCashBalanceAsync(DateTime date, string accountName, DataVisibilityAccess visibility, CancellationToken ct)
-        => CompanyCashOrders
-            .AsNoTracking()
-            .ApplyCashOrderVisibility(visibility)
-            .Where(order => order.Status == CashOrderStatus.Posted)
-            .Where(order => order.Account == accountName)
-            .Where(order => order.Date <= date.Date)
-            .SumAsync(order => order.Type == CashOrderType.Incoming ? order.Amount : -order.Amount, ct);
-
     private IQueryable<CashOrder> BuildFilteredQuery(
         DateTime? from,
         DateTime? to,
@@ -1355,7 +1750,8 @@ public class CashOrdersController : ControllerBase
         CashOrderStatus? status,
         string? search,
         string? accountName,
-        DataVisibilityAccess visibility)
+        DataVisibilityAccess visibility,
+        int? moneyAccountId = null)
     {
         var query = CompanyCashOrders
             .AsNoTracking()
@@ -1383,7 +1779,11 @@ public class CashOrdersController : ControllerBase
         }
 
         var accountFilter = NormalizeAccountFilter(accountName);
-        if (accountFilter is not null)
+        if (moneyAccountId.HasValue)
+        {
+            query = query.Where(order => order.MoneyAccountId == moneyAccountId.Value);
+        }
+        else if (accountFilter is not null)
         {
             query = query.Where(order => order.Account == accountFilter);
         }
@@ -1513,6 +1913,7 @@ public class CashOrdersController : ControllerBase
                     ? "inventory"
                     : "manual",
         Account = order.Account,
+        HasLinkedCashAccount = order.MoneyAccountId.HasValue,
         PayerName = order.PayerName,
         ReceiverName = order.ReceiverName,
         Basis = order.Basis,
@@ -1545,6 +1946,7 @@ public class CashOrdersController : ControllerBase
             InvoiceId = order.InvoiceId,
             OriginType = ResolveCashOrderOriginType(order),
             Account = order.Account,
+            HasLinkedCashAccount = order.MoneyAccountId.HasValue,
             PayerName = order.PayerName,
             ReceiverName = order.ReceiverName,
             Basis = order.Basis,
@@ -2381,10 +2783,10 @@ public class CashOrdersController : ControllerBase
             : string.Join(Environment.NewLine, cashBook.Days.Select(day => $$"""
               <tr>
                 <td>{{day.Date:dd.MM.yyyy}}</td>
-                <td class="num">{{FormatRub(day.OpeningBalance)}}</td>
-                <td class="num income">{{FormatRub(day.Income)}}</td>
-                <td class="num expense">{{FormatRub(day.Expense)}}</td>
-                <td class="num">{{FormatRub(day.ClosingBalance)}}</td>
+                <td class="num">{{FormatRegisterAmount(day.OpeningBalance, cashBook.Currency, cashBook.CurrencyStatus)}}</td>
+                <td class="num income">{{FormatRegisterAmount(day.Income, cashBook.Currency, cashBook.CurrencyStatus)}}</td>
+                <td class="num expense">{{FormatRegisterAmount(day.Expense, cashBook.Currency, cashBook.CurrencyStatus)}}</td>
+                <td class="num">{{FormatRegisterAmount(day.ClosingBalance, cashBook.Currency, cashBook.CurrencyStatus)}}</td>
                 <td class="num">ПКО: {{day.IncomingCount}}, РКО: {{day.OutgoingCount}}</td>
               </tr>
               """));
@@ -2395,6 +2797,7 @@ public class CashOrdersController : ControllerBase
 <head>
   <meta charset="utf-8" />
   <title>Кассовая книга {{cashBook.From:dd.MM.yyyy}} - {{cashBook.To:dd.MM.yyyy}}</title>
+  {{(cashBook.MoneyAccountId.HasValue ? $"<meta name=\"payplanner-account-id\" content=\"{cashBook.MoneyAccountId.Value}\">" : "")}}
   {{BuildRegisterPrintStyles()}}
 </head>
 <body>
@@ -2404,13 +2807,14 @@ public class CashOrdersController : ControllerBase
       <h1>Кассовая книга</h1>
       <div class="period">Период: {{cashBook.From:dd.MM.yyyy}} - {{cashBook.To:dd.MM.yyyy}}</div>
       <div class="period">Касса: {{Html(accountText)}}</div>
+      {{(cashBook.MoneyAccountId.HasValue ? "<div class=\"period\">Только ордера с подтверждённой кассой; неподтверждённые ордера в остатки не входят.</div>" : "")}}
     </header>
 
     <section class="summary">
-      <div><span>Остаток на начало</span><strong>{{FormatRub(cashBook.OpeningBalance)}}</strong></div>
-      <div><span>Приход</span><strong class="income">{{FormatRub(cashBook.Income)}}</strong><small>ПКО: {{cashBook.IncomingCount}}</small></div>
-      <div><span>Расход</span><strong class="expense">{{FormatRub(cashBook.Expense)}}</strong><small>РКО: {{cashBook.OutgoingCount}}</small></div>
-      <div><span>Остаток на конец</span><strong>{{FormatRub(cashBook.ClosingBalance)}}</strong></div>
+      <div><span>Остаток на начало</span><strong>{{FormatRegisterAmount(cashBook.OpeningBalance, cashBook.Currency, cashBook.CurrencyStatus)}}</strong></div>
+      <div><span>Приход</span><strong class="income">{{FormatRegisterAmount(cashBook.Income, cashBook.Currency, cashBook.CurrencyStatus)}}</strong><small>ПКО: {{cashBook.IncomingCount}}</small></div>
+      <div><span>Расход</span><strong class="expense">{{FormatRegisterAmount(cashBook.Expense, cashBook.Currency, cashBook.CurrencyStatus)}}</strong><small>РКО: {{cashBook.OutgoingCount}}</small></div>
+      <div><span>Остаток на конец</span><strong>{{FormatRegisterAmount(cashBook.ClosingBalance, cashBook.Currency, cashBook.CurrencyStatus)}}</strong></div>
     </section>
 
     <table>
@@ -2464,7 +2868,7 @@ public class CashOrdersController : ControllerBase
                 <td>{{Html(order.Number)}}</td>
                 <td>{{typeLabel}}</td>
                 <td>{{statusLabel}}</td>
-                <td class="num {{amountClass}}">{{FormatRub(order.Amount)}}</td>
+                <td class="num {{amountClass}}">{{FormatCashOrderAmount(order.Amount, order.Currency)}}</td>
                 <td>{{Html(order.PayerName ?? order.ClientName ?? "-")}}</td>
                 <td>{{Html(order.Basis ?? "-")}}</td>
               </tr>
@@ -2477,6 +2881,7 @@ public class CashOrdersController : ControllerBase
 <head>
   <meta charset="utf-8" />
   <title>Журнал регистрации ПКО/РКО</title>
+  {{(register.MoneyAccountId.HasValue ? $"<meta name=\"payplanner-account-id\" content=\"{register.MoneyAccountId.Value}\">" : "")}}
   {{BuildRegisterPrintStyles()}}
   <style>
     thead { display: table-header-group; }
@@ -2505,11 +2910,12 @@ public class CashOrdersController : ControllerBase
       <h1>Журнал регистрации кассовых документов</h1>
       <div class="period">Период: {{fromText}} - {{toText}}</div>
       <div class="period">Касса: {{Html(accountText)}}</div>
+      {{(register.MoneyAccountId.HasValue ? "<div class=\"period\">Только ордера с подтверждённой кассой; неподтверждённые ордера не включены.</div>" : "")}}
     </header>
 
     <section class="summary">
-      <div><span>Приходные ордера</span><strong class="income">{{register.IncomingCount}} на {{FormatRub(register.IncomingAmount)}}</strong></div>
-      <div><span>Расходные ордера</span><strong class="expense">{{register.OutgoingCount}} на {{FormatRub(register.OutgoingAmount)}}</strong></div>
+      <div><span>Приходные ордера</span><strong class="income">{{register.IncomingCount}} на {{FormatRegisterAmount(register.IncomingAmount, register.Currency, register.CurrencyStatus)}}</strong></div>
+      <div><span>Расходные ордера</span><strong class="expense">{{register.OutgoingCount}} на {{FormatRegisterAmount(register.OutgoingAmount, register.Currency, register.CurrencyStatus)}}</strong></div>
       <div><span>Черновиков</span><strong>{{register.DraftCount}}</strong></div>
       <div><span>Проведено</span><strong>{{register.PostedCount}}</strong></div>
       <div><span>Отменено</span><strong>{{register.CancelledCount}}</strong></div>
@@ -2582,6 +2988,18 @@ public class CashOrdersController : ControllerBase
 
     private static string FormatRub(decimal value)
         => $"{value.ToString("N2", System.Globalization.CultureInfo.GetCultureInfo("ru-RU"))} руб.";
+
+    private static string FormatRegisterAmount(decimal? amount, string? currency, string status)
+        => !amount.HasValue ? "—" : status == "empty"
+            ? amount.Value.ToString("N2", System.Globalization.CultureInfo.GetCultureInfo("ru-RU"))
+            : FormatCashOrderAmount(amount.Value, currency);
+
+    private static string FormatCashOrderAmount(decimal amount, string? currency)
+    {
+        var label = string.IsNullOrWhiteSpace(currency) ? "валюта не указана"
+            : string.Equals(currency.Trim(), "RUB", StringComparison.OrdinalIgnoreCase) ? "руб." : currency.Trim().ToUpperInvariant();
+        return $"{amount.ToString("N2", System.Globalization.CultureInfo.GetCultureInfo("ru-RU"))} {Html(label)}";
+    }
 
     private static string FormatCashOrderRubKop(decimal value)
         => $"{FormatWholeRubles(value)}-{FormatKopecks(value)}";

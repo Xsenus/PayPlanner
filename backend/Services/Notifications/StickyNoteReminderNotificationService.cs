@@ -110,7 +110,37 @@ public sealed class StickyNoteReminderNotificationService : BackgroundService
 
         if (dueReminders.Count > 0)
         {
-            await db.SaveChangesAsync(cancellationToken);
+            // The notification has already been created with its stable event key. If a user
+            // edits a note meanwhile, retain the delivery marker only for the same reminder.
+            for (var attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    await db.SaveChangesAsync(cancellationToken);
+                    break;
+                }
+                catch (DbUpdateConcurrencyException error) when (attempt < 2 && error.Entries.All(entry => entry.Entity is StickyNote))
+                {
+                    foreach (var entry in error.Entries)
+                    {
+                        var originalUser = entry.OriginalValues.GetValue<int?>(nameof(StickyNote.AssignedUserId));
+                        var originalReminder = entry.OriginalValues.GetValue<DateTime?>(nameof(StickyNote.ReminderAt));
+                        var current = await entry.GetDatabaseValuesAsync(cancellationToken);
+                        if (current is null || current.GetValue<bool>("IsDeleted")
+                            || current.GetValue<int?>(nameof(StickyNote.AssignedUserId)) != originalUser
+                            || current.GetValue<DateTime?>(nameof(StickyNote.ReminderAt)) != originalReminder
+                            || current.GetValue<DateTime?>(nameof(StickyNote.ReminderSentAt)).HasValue)
+                        {
+                            entry.State = EntityState.Detached;
+                            continue;
+                        }
+                        entry.CurrentValues.SetValues(current);
+                        entry.OriginalValues.SetValues(current);
+                        entry.State = EntityState.Unchanged;
+                        entry.Property(nameof(StickyNote.ReminderSentAt)).CurrentValue = now;
+                    }
+                }
+            }
         }
 
         return sent;

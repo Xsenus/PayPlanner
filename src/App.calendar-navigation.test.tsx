@@ -11,6 +11,8 @@ const permissionsState = vi.hoisted(() => ({
   paymentsCanView: true,
   casesCanView: true,
   tasksCanView: true,
+  accountsCanCreate: true,
+  accountsCanView: true,
   legalEntitiesCanView: true,
   loaded: true,
 }));
@@ -74,7 +76,7 @@ vi.mock('./hooks/useRolePermissions', () => {
         clients: currentSection,
         cases: { ...currentSection, canView: permissionsState.loaded && permissionsState.casesCanView },
         requests: currentSection,
-        accounts: currentSection,
+        accounts: { ...currentSection, canView: permissionsState.loaded && permissionsState.accountsCanView, canCreate: permissionsState.loaded && permissionsState.accountsCanCreate },
         acts: currentSection,
         payments: { ...currentSection, canView: permissionsState.loaded && permissionsState.paymentsCanView },
         contracts: currentSection,
@@ -149,12 +151,26 @@ vi.mock('./components/Tasks/TaskJournal', () => ({
   TaskJournal: ({
     routeTaskId,
     onRouteTaskChange,
+    billingAnalysisMode,
+    onCreateInvoiceDraft,
+    onOpenLegalEntity,
+    onOpenClient,
+    onOpenCase,
   }: {
     routeTaskId?: number | null;
     onRouteTaskChange?: (taskId: number | null) => void;
+    billingAnalysisMode?: boolean;
+    onCreateInvoiceDraft?: (draft: unknown) => void;
+    onOpenLegalEntity?: (id: number) => void;
+    onOpenClient?: (id: number, caseId?: number) => void;
+    onOpenCase?: (id: number, clientId?: number) => void;
   }) => (
     <section data-testid="task-journal">
       <span>task {routeTaskId}</span>
+      {billingAnalysisMode && <><span>accounting billing queue</span><input aria-label="billing queue state" />{onCreateInvoiceDraft && <button onClick={() => onCreateInvoiceDraft({ mode: 'create', billingTaskIds: [42] })}>prepare billing invoice</button>}</>}
+      {billingAnalysisMode && <button onClick={() => onOpenLegalEntity?.(37)}>open billing organization</button>}
+      {billingAnalysisMode && <button onClick={() => onOpenClient?.(42)}>open billing client</button>}
+      {billingAnalysisMode && <button onClick={() => onOpenCase?.(77)}>open billing case</button>}
       <button type="button" onClick={() => onRouteTaskChange?.(null)}>
         save task
       </button>
@@ -166,13 +182,18 @@ vi.mock('./components/Cases/CaseDetailPage', () => ({
   CaseDetailPage: ({
     caseId,
     onOpenFinance,
+    onBack,
+    backLabel,
   }: {
     caseId: number;
     onOpenFinance?: (caseItem: { id: number; clientId: number | null; legalEntityId: number | null }) => void;
+    onBack?: () => void;
+    backLabel?: string;
   }) => (
     <section data-testid="case-detail">
       <span>case {caseId}</span>
       <span>{window.sessionStorage.getItem(`pp.case-detail.${caseId}.view.v1`)}</span>
+      <button type="button" onClick={onBack}>{backLabel ?? 'back from case'}</button>
       <button type="button" onClick={() => onOpenFinance?.({ id: caseId, clientId: null, legalEntityId: 37 })}>
         open legal entity finance
       </button>
@@ -193,8 +214,8 @@ vi.mock('./components/Requests/SalesRequestsPage', () => ({
 }));
 
 vi.mock('./components/LegalEntities/LegalEntities', () => ({
-  LegalEntities: ({ initialLegalEntityId }: { initialLegalEntityId?: number | null }) => (
-    <section data-testid="legal-entities-view">legal entity {initialLegalEntityId ?? 'none'}</section>
+  LegalEntities: ({ initialLegalEntityId, onDetailClose }: { initialLegalEntityId?: number | null; onDetailClose?: () => void }) => (
+    <section data-testid="legal-entities-view">legal entity {initialLegalEntityId ?? 'none'}{onDetailClose && <button onClick={onDetailClose}>close organization</button>}</section>
   ),
 }));
 
@@ -225,8 +246,11 @@ vi.mock('./components/Clients/Clients', () => ({
 }));
 
 vi.mock('./components/Accounts/Accounts', () => ({
-  Accounts: ({ routeInvoiceId }: { routeInvoiceId?: number | null }) => (
-    <section data-testid="accounts-view">invoice {routeInvoiceId ?? 'none'}</section>
+  Accounts: ({ routeInvoiceId, onOpenTaskBilling, initialCreateDraft }: { routeInvoiceId?: number | null; onOpenTaskBilling?: () => void; initialCreateDraft?: { draft: { billingTaskIds?: number[] } } | null }) => (
+    <section data-testid="accounts-view">invoice {routeInvoiceId ?? 'none'}
+      {onOpenTaskBilling && <button onClick={onOpenTaskBilling}>open billing analysis</button>}
+      {initialCreateDraft && <span>draft tasks {initialCreateDraft.draft.billingTaskIds?.join(',')}</span>}
+    </section>
   ),
 }));
 
@@ -272,10 +296,129 @@ describe('App calendar client navigation', () => {
     permissionsState.paymentsCanView = true;
     permissionsState.casesCanView = true;
     permissionsState.tasksCanView = true;
+    permissionsState.accountsCanCreate = true;
+    permissionsState.accountsCanView = true;
     permissionsState.legalEntitiesCanView = true;
     permissionsState.loaded = true;
     authState.loading = false;
     authState.userId = 1;
+  });
+
+  it('opens billing analysis in income accounts and keeps the queue when preparing an invoice', async () => {
+    window.history.replaceState({}, '', '/?ppTab=accountsIncome');
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'open billing analysis' }));
+    expect(await screen.findByText('accounting billing queue')).toBeTruthy();
+    fireEvent.change(await screen.findByLabelText('billing queue state'), { target: { value: 'selected task' } });
+    fireEvent.click(screen.getByRole('button', { name: 'prepare billing invoice' }));
+    expect(await screen.findByText('draft tasks 42')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'prepare billing invoice' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'open billing analysis' }));
+    expect((screen.getByLabelText('billing queue state') as HTMLInputElement).value).toBe('selected task');
+    fireEvent.click(screen.getByRole('button', { name: 'К доходным счетам' }));
+    expect(screen.getByRole('button', { name: 'open billing analysis' })).toBeTruthy();
+  });
+
+  it('returns from a billing organization to the same selected queue', async () => {
+    vi.spyOn(apiService, 'getLegalEntity').mockResolvedValue({ id: 37 } as Awaited<ReturnType<typeof apiService.getLegalEntity>>);
+    window.history.replaceState({}, '', '/?ppTab=accountsIncome');
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'open billing analysis' }));
+    fireEvent.change(await screen.findByLabelText('billing queue state'), { target: { value: 'selected task' } });
+    fireEvent.click(screen.getByRole('button', { name: 'open billing organization' }));
+    expect((await screen.findByTestId('legal-entities-view')).textContent).toContain('legal entity 37');
+    fireEvent.click(screen.getByRole('button', { name: 'close organization' }));
+    expect((screen.getByLabelText('billing queue state') as HTMLInputElement).value).toBe('selected task');
+    expect(screen.getByTestId('navigation').textContent).toBe('accountsIncome');
+  });
+
+  it.each(['client', 'case'] as const)('retains selected billing tasks after visiting a %s', async (target) => {
+    vi.spyOn(apiService, 'getClient').mockResolvedValue({ id: 42 } as Awaited<ReturnType<typeof apiService.getClient>>);
+    window.history.replaceState({}, '', '/?ppTab=accountsIncome');
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'open billing analysis' }));
+    fireEvent.change(await screen.findByLabelText('billing queue state'), { target: { value: 'selected task' } });
+    fireEvent.click(screen.getByRole('button', { name: `open billing ${target}` }));
+    fireEvent.click(await screen.findByRole('button', { name: target === 'case' ? 'К анализу оплаты задач' : 'back from client' }));
+    expect((await screen.findByLabelText('billing queue state') as HTMLInputElement).value).toBe('selected task');
+    expect(screen.getByTestId('navigation').textContent).toBe('accountsIncome');
+  });
+
+  it.each(['accountsCanView', 'tasksCanView'] as const)('discards the hidden billing queue when %s is revoked while viewing a client', async (permission) => {
+    vi.spyOn(apiService, 'getClient').mockResolvedValue({ id: 42 } as Awaited<ReturnType<typeof apiService.getClient>>);
+    window.history.replaceState({}, '', '/?ppTab=accountsIncome');
+    const view = render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'open billing analysis' }));
+    fireEvent.change(await screen.findByLabelText('billing queue state'), { target: { value: 'selected task' } });
+    fireEvent.click(screen.getByRole('button', { name: 'open billing client' }));
+    await screen.findByRole('button', { name: 'back from client' });
+    permissionsState[permission] = false;
+    view.rerender(<App />);
+    expect(screen.queryByLabelText('billing queue state')).toBeNull();
+    permissionsState[permission] = true;
+    view.rerender(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'back from client' }));
+    expect((await screen.findByLabelText('billing queue state') as HTMLInputElement).value).toBe('');
+  });
+
+  it('does not open an organization from billing without access', async () => {
+    const getOrganization = vi.spyOn(apiService, 'getLegalEntity');
+    getOrganization.mockClear();
+    permissionsState.legalEntitiesCanView = false;
+    window.history.replaceState({}, '', '/?ppTab=accountsIncome');
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'open billing analysis' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'open billing organization' }));
+    expect(getOrganization).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('legal-entities-view')).toBeNull();
+  });
+
+  it('closes the billing organization on revoked access and does not reopen it on restoration', async () => {
+    vi.spyOn(apiService, 'getLegalEntity').mockResolvedValue({ id: 37 } as Awaited<ReturnType<typeof apiService.getLegalEntity>>);
+    window.history.replaceState({}, '', '/?ppTab=accountsIncome');
+    const view = render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'open billing analysis' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'open billing organization' }));
+    await screen.findByTestId('legal-entities-view');
+    permissionsState.legalEntitiesCanView = false;
+    view.rerender(<App />);
+    await waitFor(() => expect(screen.queryByTestId('legal-entities-view')).toBeNull());
+    permissionsState.legalEntitiesCanView = true;
+    view.rerender(<App />);
+    expect(screen.queryByTestId('legal-entities-view')).toBeNull();
+    expect(screen.getByLabelText('billing queue state')).toBeTruthy();
+  });
+
+  it('does not offer or retain billing analysis when task viewing is revoked', async () => {
+    window.history.replaceState({}, '', '/?ppTab=accountsIncome');
+    const view = render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'open billing analysis' }));
+    expect(await screen.findByText('accounting billing queue')).toBeTruthy();
+    permissionsState.tasksCanView = false;
+    view.rerender(<App />);
+    await waitFor(() => expect(screen.queryByText('accounting billing queue')).toBeNull());
+    expect(screen.queryByRole('button', { name: 'open billing analysis' })).toBeNull();
+    expect(screen.getByTestId('accounts-view').closest('[hidden]')).toBeNull();
+  });
+
+  it('allows viewing the accounting queue without granting invoice creation', async () => {
+    permissionsState.accountsCanCreate = false;
+    window.history.replaceState({}, '', '/?ppTab=accountsIncome');
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'open billing analysis' }));
+    expect(await screen.findByText('accounting billing queue')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'prepare billing invoice' })).toBeNull();
+  });
+
+  it('hides the accounting queue when access to accounts is revoked', async () => {
+    window.history.replaceState({}, '', '/?ppTab=accountsIncome');
+    const view = render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'open billing analysis' }));
+    expect(await screen.findByText('accounting billing queue')).toBeTruthy();
+    permissionsState.accountsCanView = false;
+    view.rerender(<App />);
+    await waitFor(() => expect(screen.queryByText('accounting billing queue')).toBeNull());
+    expect(screen.queryByRole('button', { name: 'open billing analysis' })).toBeNull();
   });
 
   it('restores the signed-in employee tab after authentication without using the shared legacy key', async () => {

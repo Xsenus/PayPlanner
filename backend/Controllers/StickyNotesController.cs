@@ -9,6 +9,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services.Notifications;
+using PayPlanner.Api.Services.Notes;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -487,6 +488,11 @@ public sealed class StickyNotesController : ControllerBase
     [HttpPut("notes/{noteId:int}")]
     public async Task<ActionResult<StickyNoteDto>> UpdateNote(int noteId, [FromBody] UpdateStickyNoteRequest request, CancellationToken ct)
     {
+
+        var actorId = User.GetUserId();
+        if (!actorId.HasValue || actorId.Value <= 0) return Forbid();
+        await using var accessLease = await StickyNoteAccessLease.TryAcquireAsync(_db, actorId.Value, noteId, ct);
+        if (accessLease is null) return StatusCode(423, new { message = "Доступ или заметка сейчас изменяются. Повторите действие." });
         var access = await GetAccessAsync(static permission => permission.CanEdit, ct);
         if (access is null)
         {
@@ -545,7 +551,9 @@ public sealed class StickyNotesController : ControllerBase
         }
         note.Version++;
 
-        await _db.SaveChangesAsync(ct);
+        try { await _db.SaveChangesAsync(ct); }
+        catch (DbUpdateConcurrencyException) { return await GetNoteEditConflictAsync(note, ct); }
+        await accessLease.CommitAsync(ct);
 
         var dto = ToNoteDto(note, access.Value.UserId, access.Value.DisplayName);
         await PublishAsync(note.BoardId, "noteUpdated", dto, note.Id, access.Value, ct);
@@ -578,6 +586,11 @@ public sealed class StickyNotesController : ControllerBase
     [HttpPatch("notes/{noteId:int}/layout")]
     public async Task<ActionResult<StickyNoteDto>> UpdateNoteLayout(int noteId, [FromBody] UpdateStickyNoteLayoutRequest request, CancellationToken ct)
     {
+
+        var actorId = User.GetUserId();
+        if (!actorId.HasValue || actorId.Value <= 0) return Forbid();
+        await using var accessLease = await StickyNoteAccessLease.TryAcquireAsync(_db, actorId.Value, noteId, ct);
+        if (accessLease is null) return StatusCode(423, new { message = "Доступ или заметка сейчас изменяются. Повторите действие." });
         var access = await GetAccessAsync(static permission => permission.CanEdit, ct);
         if (access is null)
         {
@@ -610,7 +623,9 @@ public sealed class StickyNotesController : ControllerBase
         note.ZIndex = Math.Max(1, request.ZIndex);
         note.Version++;
 
-        await _db.SaveChangesAsync(ct);
+        try { await _db.SaveChangesAsync(ct); }
+        catch (DbUpdateConcurrencyException) { return await GetNoteEditConflictAsync(note, ct); }
+        await accessLease.CommitAsync(ct);
 
         var dto = ToNoteDto(note, access.Value.UserId, access.Value.DisplayName);
         await PublishAsync(note.BoardId, "noteUpdated", dto, note.Id, access.Value, ct);
@@ -620,6 +635,11 @@ public sealed class StickyNotesController : ControllerBase
     [HttpDelete("notes/{noteId:int}")]
     public async Task<IActionResult> DeleteNote(int noteId, CancellationToken ct)
     {
+
+        var actorId = User.GetUserId();
+        if (!actorId.HasValue || actorId.Value <= 0) return Forbid();
+        await using var accessLease = await StickyNoteAccessLease.TryAcquireAsync(_db, actorId.Value, noteId, ct);
+        if (accessLease is null) return StatusCode(423, new { message = "Доступ или заметка сейчас изменяются. Повторите действие." });
         var access = await GetAccessAsync(static permission => permission.CanDelete, ct);
         if (access is null)
         {
@@ -643,8 +663,11 @@ public sealed class StickyNotesController : ControllerBase
         var boardId = note.BoardId;
         var boardTitle = note.Board.Title;
         var shouldNotifyImportantDelete = note.Board.Visibility == StickyNoteBoardVisibility.Shared && note.IsPinned;
+        note.Version++;
         _db.StickyNotes.Remove(note);
-        await _db.SaveChangesAsync(ct);
+        try { await _db.SaveChangesAsync(ct); }
+        catch (DbUpdateConcurrencyException) { return Conflict(new { message = "Заметка изменилась. Обновите доску и повторите действие." }); }
+        await accessLease.CommitAsync(ct);
 
         await PublishAsync(boardId, "noteDeleted", null, noteId, access.Value, ct);
         if (shouldNotifyImportantDelete)
@@ -658,6 +681,11 @@ public sealed class StickyNotesController : ControllerBase
     [HttpPost("notes/{noteId:int}/restore")]
     public async Task<ActionResult<StickyNoteDto>> RestoreNote(int noteId, CancellationToken ct)
     {
+
+        var actorId = User.GetUserId();
+        if (!actorId.HasValue || actorId.Value <= 0) return Forbid();
+        await using var accessLease = await StickyNoteAccessLease.TryAcquireAsync(_db, actorId.Value, noteId, ct);
+        if (accessLease is null) return StatusCode(423, new { message = "Доступ или заметка сейчас изменяются. Повторите действие." });
         var access = await GetAccessAsync(static permission => permission.CanDelete, ct);
         if (access is null)
         {
@@ -689,11 +717,25 @@ public sealed class StickyNotesController : ControllerBase
 
         _db.Entry(note).Property("IsDeleted").CurrentValue = false;
         note.Version++;
-        await _db.SaveChangesAsync(ct);
+        try { await _db.SaveChangesAsync(ct); }
+        catch (DbUpdateConcurrencyException) { return Conflict(new { message = "Заметка изменилась. Обновите доску и повторите действие." }); }
+        await accessLease.CommitAsync(ct);
 
         var dto = ToNoteDto(note, access.Value.UserId, access.Value.DisplayName);
         await PublishAsync(note.BoardId, "noteRestored", dto, note.Id, access.Value, ct);
         return Ok(dto);
+    }
+
+    private async Task<ActionResult> GetNoteEditConflictAsync(StickyNote stale, CancellationToken ct)
+    {
+        _db.Entry(stale).State = EntityState.Detached;
+        var access = await GetAccessAsync(static permission => permission.CanEdit, ct);
+        if (access is null) return Forbid();
+        var current = await _db.StickyNotes.AsNoTracking().Include(note => note.Board).ThenInclude(board => board!.Members)
+            .FirstOrDefaultAsync(note => note.Id == stale.Id, ct);
+        if (current?.Board is null) return NotFound();
+        if (!CanEditBoard(current.Board, access.Value)) return Forbid();
+        return Conflict(ToNoteDto(current));
     }
 
     private async Task<NotesAccess?> GetAccessAsync(Func<RolePermissionValues, bool> isAllowed, CancellationToken ct)

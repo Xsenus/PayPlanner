@@ -16,6 +16,7 @@ public sealed class CashOrderDto
     public int? InvoiceId { get; init; }
     public string OriginType { get; init; } = "manual";
     public string? Account { get; init; }
+    public bool HasLinkedCashAccount { get; init; }
     public string? PayerName { get; init; }
     public string? ReceiverName { get; init; }
     public string? Basis { get; init; }

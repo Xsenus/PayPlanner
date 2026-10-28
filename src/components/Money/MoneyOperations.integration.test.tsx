@@ -34,6 +34,7 @@ const {
   getMoneyOperationDailyBalancesMock,
   getMoneyBalanceReconciliationResultsMock,
   getMoneyOperationInvoiceCandidatesMock,
+  getMoneyOperationInvoiceCandidatePageMock,
   getMoneyOperationMock,
   getMoneyOperationsPagedMock,
   getMoneyOperationsPrintHtmlMock,
@@ -91,6 +92,7 @@ const {
     getMoneyOperationDailyBalancesMock: vi.fn(),
     getMoneyBalanceReconciliationResultsMock: vi.fn(),
     getMoneyOperationInvoiceCandidatesMock: vi.fn(),
+    getMoneyOperationInvoiceCandidatePageMock: vi.fn(),
     getMoneyOperationMock: vi.fn(),
     getMoneyOperationsPagedMock: vi.fn(),
     getMoneyOperationsPrintHtmlMock: vi.fn(),
@@ -127,6 +129,7 @@ const permissionsState = vi.hoisted(() => ({
   paymentsCanExport: true,
   paymentsViewScope: 'all',
 }));
+const testColumnState = vi.hoisted(() => ({ extra: false }));
 
 const expectAbortOptions = () => expect.objectContaining({ signal: expect.any(AbortSignal) });
 
@@ -189,7 +192,7 @@ vi.mock('../../hooks/useDialog', () => ({
 vi.mock('../../hooks/usePersistedTableSettings', () => ({
   usePersistedTableSettings: () => ({
     columnOrder: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'linkedContractNumber', 'linkedActNumber', 'cashOrder', 'attachmentSummary', 'categoryName', 'purpose'],
-    orderedVisibleColumns: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'linkedContractNumber', 'linkedActNumber', 'cashOrder', 'attachmentSummary', 'categoryName', 'purpose'],
+    orderedVisibleColumns: testColumnState.extra ? ['date', 'income', 'expense', 'vatAmount', 'currency'] : ['date', 'accountName', 'counterpartyName', 'responsibleName', 'linkedContractNumber', 'linkedActNumber', 'cashOrder', 'attachmentSummary', 'categoryName', 'purpose'],
     visibleColumns: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'linkedContractNumber', 'linkedActNumber', 'cashOrder', 'attachmentSummary', 'categoryName', 'purpose'],
     pageSize: 25,
     setPageSize: vi.fn(),
@@ -237,6 +240,7 @@ vi.mock('../../services/api', () => ({
     getMoneyOperationDailyBalances: getMoneyOperationDailyBalancesMock,
     getMoneyBalanceReconciliationResults: getMoneyBalanceReconciliationResultsMock,
     getMoneyOperationInvoiceCandidates: getMoneyOperationInvoiceCandidatesMock,
+    getMoneyOperationInvoiceCandidatePage: getMoneyOperationInvoiceCandidatePageMock,
     getMoneyOperation: getMoneyOperationMock,
     getMoneyOperationsPaged: getMoneyOperationsPagedMock,
     getMoneyOperationsPrintHtml: getMoneyOperationsPrintHtmlMock,
@@ -274,8 +278,12 @@ vi.mock('../../utils/dateUtils', () => ({
 function createSummary(items: MoneyOperation[]): MoneyOperationsSummary {
   const incomeItems = items.filter((item) => item.accountingType === 'Fact' && item.direction === 'Income');
   const expenseItems = items.filter((item) => item.accountingType === 'Fact' && item.direction === 'Expense');
+  const currencies = Array.from(new Set([...incomeItems, ...expenseItems].map((item) => item.currency?.trim().toUpperCase() || null)));
+  const currencyStatus = currencies.length === 0 ? 'empty' : currencies.length > 1 ? 'mixed' : currencies[0] ? 'single' : 'unknown';
 
   return {
+    currencyStatus,
+    currency: currencyStatus === 'single' ? currencies[0] : null,
     startBalance: 0,
     income: incomeItems.reduce((sum, item) => sum + item.amount, 0),
     expense: expenseItems.reduce((sum, item) => sum + item.amount, 0),
@@ -394,6 +402,7 @@ describe('MoneyOperations integration', () => {
   let nextId: number;
 
   beforeEach(() => {
+    testColumnState.extra = false;
     operations = [createOperation()];
     nextId = 10;
 
@@ -425,6 +434,11 @@ describe('MoneyOperations integration', () => {
     getMoneyOperationDailyBalancesMock.mockReset();
     getMoneyBalanceReconciliationResultsMock.mockReset();
     getMoneyOperationInvoiceCandidatesMock.mockReset();
+    getMoneyOperationInvoiceCandidatePageMock.mockReset();
+    getMoneyOperationInvoiceCandidatePageMock.mockImplementation(async (id, search, cursor, signal) => ({
+      items: await getMoneyOperationInvoiceCandidatesMock(id, search, signal), search: search ?? null,
+      cursor: cursor ?? null, nextCursor: null, hasMore: false,
+    }));
     getMoneyOperationMock.mockReset();
     getMoneyOperationsPagedMock.mockReset();
     getMoneyOperationsPrintHtmlMock.mockReset();
@@ -643,6 +657,8 @@ describe('MoneyOperations integration', () => {
     getCashBookMock.mockResolvedValue({
       from: '2026-04-01',
       to: '2026-04-30',
+      currencyStatus: 'single',
+      currency: 'RUB',
       openingBalance: 0,
       income: 25000,
       expense: 0,
@@ -1055,6 +1071,7 @@ describe('MoneyOperations integration', () => {
         date: '2026-05-01',
         accountName: 'Основной банк',
         source: 'Bank',
+        companyId: 1, moneyAccountId: 101, currency: 'RUB', balanceKey: 'bank101',
         openingBalance: 1000,
         income: 500,
         expense: 200,
@@ -1073,6 +1090,73 @@ describe('MoneyOperations integration', () => {
     expect(getMoneyOperationDailyBalancesMock).toHaveBeenCalledWith(
       expect.objectContaining({ source: 'Bank', from: '2026-01-01', to: '2026-12-31' }),
     );
+  });
+
+  it('does not label or compare an old daily balance response without confirmed identity and currency', async () => {
+    const old = { date: '2026-05-01', accountName: 'Старый счёт', source: 'Bank', openingBalance: 1000,
+      income: 500, expense: 0, closingBalance: 1500, incomeCount: 1, expenseCount: 0, isBalanced: true };
+    getMoneyOperationDailyBalancesMock.mockResolvedValue([old]);
+    getMoneyBalanceReconciliationResultsMock.mockResolvedValue([{ ...old, id: 7, checkedAt: '2026-05-02T10:00:00Z', issueCount: 0 }]);
+    render(<MoneyOperations source="Bank" />);
+    const account = await screen.findByText('Старый счёт');
+    const row = account.closest('tr')!;
+    expect(within(row).getByText('Не подтверждено')).toBeTruthy();
+    expect(within(row).queryByText('Актуально')).toBeNull();
+    expect(within(row).queryByText('1 500,00 ₽')).toBeNull();
+  });
+
+  it.each([
+    { label: 'Неизвестная валюта', companyId: 1, moneyAccountId: 101, currency: null, balanceKey: 'unknown-currency' },
+    { label: 'Неизвестная касса', companyId: 1, moneyAccountId: null, currency: 'RUB', balanceKey: 'unknown-account' },
+    { label: 'Неизвестная компания', companyId: null, moneyAccountId: 101, currency: 'RUB', balanceKey: 'unknown-company' },
+    { label: 'Нет ключа', companyId: 1, moneyAccountId: 101, currency: 'RUB', balanceKey: null },
+  ])('hides unconfirmed balance amounts: $label', async (identity) => {
+    const row = { ...identity, accountName: identity.label, date: '2026-05-01', source: 'Bank', openingBalance: 0,
+      income: 500, expense: 0, closingBalance: 500, incomeCount: 1, expenseCount: 0, isBalanced: true };
+    getMoneyOperationDailyBalancesMock.mockResolvedValue([row]);
+    getMoneyBalanceReconciliationResultsMock.mockResolvedValue([{ ...row, id: 7, checkedAt: '2026-05-02T10:00:00Z', issueCount: 0 }]);
+    render(<MoneyOperations source="Bank" />);
+    const tableRow = (await screen.findByText(identity.label)).closest('tr')!;
+    expect(within(tableRow).getByText('Не подтверждено')).toBeTruthy();
+    expect(within(tableRow).queryByText(/500,00/)).toBeNull();
+    expect(within(tableRow).queryByText('Актуально')).toBeNull();
+  });
+
+  it('shows saved reconciliation load failure and retries without losing daily balances', async () => {
+    const user = userEvent.setup();
+    const balance = {
+      date: '2026-05-01', accountName: 'Основной банк', source: 'Bank', companyId: 1, moneyAccountId: 101,
+      currency: 'RUB', balanceKey: 'bank101', openingBalance: 100, income: 50, expense: 0,
+      closingBalance: 150, incomeCount: 1, expenseCount: 0, isBalanced: true,
+    };
+    getMoneyOperationDailyBalancesMock.mockResolvedValue([balance]);
+    getMoneyBalanceReconciliationResultsMock.mockRejectedValueOnce(new Error('offline')).mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce([{
+      ...balance, id: 12, checkedAt: '2026-05-02T10:00:00Z', issueCount: 0,
+    }]);
+    render(<MoneyOperations source="Bank" />);
+    expect(await screen.findByText('Не удалось загрузить сохранённую сверку.')).toBeTruthy();
+    expect(screen.getByText('Дневная сверка остатков')).toBeTruthy();
+    expect(screen.queryByText('Нет')).toBeNull();
+    expect((screen.getByRole('button', { name: 'Запустить сверку' }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(screen.getByRole('button', { name: 'Повторить загрузку сверки' }));
+    expect(await screen.findByText('Не удалось загрузить сохранённую сверку.')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Повторить загрузку сверки' }));
+    expect(await screen.findByText('Актуально')).toBeTruthy();
+    expect(screen.queryByText('Не удалось загрузить сохранённую сверку.')).toBeNull();
+    expect(getMoneyOperationDailyBalancesMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores a late saved reconciliation response after changing sections', async () => {
+    let finishBank!: (value: unknown[]) => void;
+    getMoneyBalanceReconciliationResultsMock.mockImplementation(({ source }: { source: string }) =>
+      source === 'Bank' ? new Promise((resolve) => { finishBank = resolve; }) : Promise.resolve([]));
+    const { rerender } = render(<MoneyOperations source="Bank" />);
+    await waitFor(() => expect(finishBank).toBeDefined());
+    rerender(<MoneyOperations source="Cash" />);
+    await waitFor(() => expect(getMoneyBalanceReconciliationResultsMock).toHaveBeenCalledWith(expect.objectContaining({ source: 'Cash' })));
+    await act(async () => finishBank([{ date: '2026-05-01', accountName: 'Чужой раздел', source: 'Bank', checkedAt: '2026-05-02', id: 1 }]));
+    expect(screen.queryByText('Чужой раздел')).toBeNull();
+    expect(screen.queryByText('Не удалось загрузить сохранённую сверку.')).toBeNull();
   });
 
   it('does not load or offer the shared reconciliation with limited payment visibility', async () => {
@@ -1111,6 +1195,7 @@ describe('MoneyOperations integration', () => {
         date: '2026-05-01',
         accountName: 'Основной банк',
         source: 'Bank',
+        companyId: 1, moneyAccountId: 101, currency: 'RUB', balanceKey: 'bank101',
         openingBalance: 1000,
         income: 500,
         expense: 0,
@@ -1131,6 +1216,7 @@ describe('MoneyOperations integration', () => {
           date: '2026-05-01',
           accountName: 'Основной банк',
           source: 'Bank',
+          companyId: 1, moneyAccountId: 101, currency: 'RUB', balanceKey: 'bank101',
           openingBalance: 1000,
           income: 500,
           expense: 0,
@@ -1162,6 +1248,79 @@ describe('MoneyOperations integration', () => {
     );
   });
 
+  it('runs reconciliation using the selected account ID rather than its shared name', async () => {
+    const user = userEvent.setup();
+    getMoneyAccountsMock.mockResolvedValue([
+      { id: 201, companyId: 1, companyName: 'Альфа', name: 'Общий счёт', source: 'Bank', currency: 'RUB', isActive: true, isDefault: true },
+      { id: 202, companyId: 2, companyName: 'Бета', name: 'Общий счёт', source: 'Bank', currency: 'RUB', isActive: true, isDefault: false },
+    ]);
+    const first = {
+      date: '2026-05-01', accountName: 'Старое название', source: 'Bank', companyId: 1, moneyAccountId: 201,
+      currency: 'RUB', balanceKey: 'bank201', openingBalance: 0, income: 10, expense: 0,
+      closingBalance: 10, incomeCount: 1, expenseCount: 0, isBalanced: true,
+    };
+    const second = { ...first, accountName: 'Второй счёт', companyId: 2, moneyAccountId: 202, balanceKey: 'bank202', income: 20, closingBalance: 20 };
+    getMoneyOperationDailyBalancesMock.mockResolvedValue([first, second]);
+    getMoneyBalanceReconciliationResultsMock.mockResolvedValue([{ ...second, id: 2, checkedAt: '2026-05-02T10:00:00Z', issueCount: 0 }]);
+    runMoneyBalanceReconciliationMock.mockResolvedValue({ created: 1, updated: 0, issueCount: 0,
+      items: [{ ...first, id: 1, checkedAt: '2026-05-03T10:00:00Z', issueCount: 0 }] });
+    render(<MoneyOperations source="Bank" />);
+    await screen.findByText('Старое название');
+    await user.click(screen.getByRole('button', { name: /Фильтр/ }));
+    await user.selectOptions(screen.getByLabelText('Банковский счёт'), '201');
+    await user.click(screen.getByRole('button', { name: 'Запустить сверку' }));
+    expect(runMoneyBalanceReconciliationMock).toHaveBeenCalledWith(expect.objectContaining({ source: 'Bank', moneyAccountId: 201 }));
+    expect(runMoneyBalanceReconciliationMock.mock.calls[0][0]).not.toHaveProperty('accountName');
+    expect(await screen.findByText('Актуально')).toBeTruthy();
+    await user.selectOptions(screen.getByLabelText('Банковский счёт'), '202');
+    expect(screen.getByText('Второй счёт')).toBeTruthy();
+    expect(screen.getByText('Актуально')).toBeTruthy();
+  });
+
+  it('does not display a delayed reconciliation result in the newly selected account', async () => {
+    const user = userEvent.setup();
+    getMoneyAccountsMock.mockResolvedValue([
+      { id: 201, companyId: 1, companyName: 'Альфа', name: 'Общий счёт', source: 'Bank', currency: 'RUB', isActive: true, isDefault: true },
+      { id: 202, companyId: 2, companyName: 'Бета', name: 'Общий счёт', source: 'Bank', currency: 'RUB', isActive: true, isDefault: false },
+    ]);
+    const row = { date: '2026-05-01', source: 'Bank', currency: 'RUB', openingBalance: 0, expense: 0,
+      incomeCount: 1, expenseCount: 0, isBalanced: true };
+    getMoneyOperationDailyBalancesMock.mockResolvedValue([
+      { ...row, accountName: 'Первый', companyId: 1, moneyAccountId: 201, balanceKey: 'bank201', income: 10, closingBalance: 10 },
+      { ...row, accountName: 'Второй', companyId: 2, moneyAccountId: 202, balanceKey: 'bank202', income: 20, closingBalance: 20 },
+    ]);
+    let finish!: (value: unknown) => void;
+    runMoneyBalanceReconciliationMock.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    render(<MoneyOperations source="Bank" />);
+    await screen.findByText('Первый');
+    await user.click(screen.getByRole('button', { name: /Фильтр/ }));
+    await user.selectOptions(screen.getByLabelText('Банковский счёт'), '201');
+    await user.click(screen.getByRole('button', { name: 'Запустить сверку' }));
+    await user.selectOptions(screen.getByLabelText('Банковский счёт'), '202');
+    await act(async () => finish({ created: 1, updated: 0, issueCount: 0, items: [{ ...row, id: 1, companyId: 1, moneyAccountId: 201,
+      accountName: 'Первый', balanceKey: 'bank201', income: 10, closingBalance: 10, checkedAt: '2026-05-03T10:00:00Z', issueCount: 0 }] }));
+    expect(screen.getByText('Второй')).toBeTruthy();
+    expect(screen.queryByText('Актуально')).toBeNull();
+    expect(toastSuccessMock).not.toHaveBeenCalled();
+    await waitFor(() => expect(getMoneyBalanceReconciliationResultsMock).toHaveBeenCalledTimes(2));
+  });
+
+  it('does not run a named historical account without a confirmed account ID', async () => {
+    const user = userEvent.setup();
+    getMoneyAccountsMock.mockResolvedValue([]);
+    getMoneyOperationAccountSummariesMock.mockResolvedValue([{ accountName: 'Историческая касса', source: 'Cash', moneyAccountId: null }]);
+    getMoneyOperationDailyBalancesMock.mockResolvedValue([{ date: '2026-05-01', accountName: 'Историческая касса', source: 'Cash',
+      companyId: null, moneyAccountId: null, currency: 'RUB', balanceKey: null, openingBalance: 0, income: 10, expense: 0,
+      closingBalance: 10, incomeCount: 1, expenseCount: 0, isBalanced: true }]);
+    render(<MoneyOperations source="Cash" />);
+    await screen.findByText('Дневная сверка остатков');
+    await user.click(screen.getByRole('button', { name: /Фильтр/ }));
+    await user.selectOptions(screen.getByLabelText('Касса'), 'Историческая касса');
+    await user.click(screen.getByRole('button', { name: 'Запустить сверку' }));
+    expect(runMoneyBalanceReconciliationMock).not.toHaveBeenCalled();
+    expect(toastErrorMock).toHaveBeenCalledWith('Выберите подтверждённый счёт для сверки или откройте все счета.', 'Сверка остатков');
+  });
+
   it('highlights stale saved daily balance reconciliation rows', async () => {
     operations = [createOperation({ accountName: 'Основной банк', amount: 500 })];
     getMoneyOperationDailyBalancesMock.mockResolvedValueOnce([
@@ -1169,6 +1328,7 @@ describe('MoneyOperations integration', () => {
         date: '2026-05-01',
         accountName: 'Основной банк',
         source: 'Bank',
+        companyId: 1, moneyAccountId: 101, currency: 'RUB', balanceKey: 'bank101',
         openingBalance: 1000,
         income: 500,
         expense: 0,
@@ -1184,6 +1344,7 @@ describe('MoneyOperations integration', () => {
         date: '2026-05-01',
         accountName: 'Основной банк',
         source: 'Bank',
+        companyId: 1, moneyAccountId: 101, currency: 'RUB', balanceKey: 'bank101',
         openingBalance: 1000,
         income: 400,
         expense: 0,
@@ -1210,7 +1371,7 @@ describe('MoneyOperations integration', () => {
     expect(screen.getByText('Сумма изменилась')).toBeTruthy();
   });
 
-  it.each(['foreign', 'unattributed', 'renamed'] as const)(
+  it.each(['foreign', 'unattributed', 'renamed', 'wrong-company', 'wrong-account', 'wrong-currency'] as const)(
     'matches a saved daily reconciliation by stable identity: %s',
     async (scenario) => {
       const current = {
@@ -1222,6 +1383,9 @@ describe('MoneyOperations integration', () => {
       getMoneyOperationDailyBalancesMock.mockResolvedValueOnce([current]);
       getMoneyBalanceReconciliationResultsMock.mockResolvedValueOnce([{
         ...current, id: 7, income: 400, closingBalance: 1400,
+        companyId: scenario === 'wrong-company' ? 11 : current.companyId,
+        moneyAccountId: scenario === 'wrong-account' ? 21 : current.moneyAccountId,
+        currency: scenario === 'wrong-currency' ? 'USD' : current.currency,
         balanceKey: scenario === 'unattributed' ? null : scenario === 'foreign' ? 'account30:RUB' : current.balanceKey,
         accountName: scenario === 'renamed' ? 'Прежнее название счёта' : current.accountName,
         checkedAt: '2026-05-02T10:00:00Z', issueCount: 0,
@@ -1261,6 +1425,89 @@ describe('MoneyOperations integration', () => {
     expect(screen.getByText('1 дн. требуют повторной сверки. Разница: 200,00 ₽.')).toBeTruthy();
     expect(screen.getByText('1 дн. требуют повторной сверки. Разница: 800,00 USD.')).toBeTruthy();
     expect(screen.queryByText(/Разница: 1\s?000,00/)).toBeNull();
+  });
+
+  it('checks the ruble cash limit only for identified ruble balances and warns about unchecked rows', async () => {
+    getUserSettingMock.mockImplementation(async (key: string) => {
+      if (key !== 'money.cash.limit') throw new Error('not found');
+      return { key, value: JSON.stringify({ enabled: true, amount: 100 }), updatedAt: '2026-05-01T00:00:00Z' };
+    });
+    const base = { date: '2026-05-01', source: 'Cash', openingBalance: 0, expense: 0, incomeCount: 1, expenseCount: 0, isBalanced: true };
+    getMoneyOperationDailyBalancesMock.mockResolvedValue([
+      { ...base, companyId: 1, moneyAccountId: 103, accountName: 'Рубли', currency: ' rub ', balanceKey: 'cash103', income: 120, closingBalance: 120 },
+      { ...base, companyId: 1, moneyAccountId: 104, accountName: 'На границе', currency: 'RUB', balanceKey: 'cash104', income: 100, closingBalance: 100 },
+      { ...base, companyId: 1, moneyAccountId: 105, accountName: 'Доллары', currency: 'USD', income: 900, closingBalance: 900 },
+      { ...base, companyId: 1, moneyAccountId: 106, accountName: 'Валюта неизвестна', currency: null, income: 500, closingBalance: 500 },
+      { ...base, companyId: null, moneyAccountId: null, accountName: 'Касса неизвестна', currency: 'RUB', income: 700, closingBalance: 700 },
+    ]);
+    render(<MoneyOperations source="Cash" />);
+    expect(await screen.findByText('Превышений за период: 1')).toBeTruthy();
+    expect(screen.getByText('Не проверено строк: 3. Лимит применяется только к рублёвым остаткам с подтверждённой кассой и компанией.')).toBeTruthy();
+    const cashLimitTable = screen.getByRole('columnheader', { name: 'Превышение' }).closest('table')!;
+    expect(within(cashLimitTable).getByText('Рубли')).toBeTruthy();
+    expect(within(cashLimitTable).queryByText('Доллары')).toBeNull();
+    expect(within(cashLimitTable).queryByText('Касса неизвестна')).toBeNull();
+  });
+
+  it.each([
+    { name: 'only an unconfirmed currency', rows: [{ currency: null, companyId: 1, moneyAccountId: 103 }], message: 'Нет подтверждённых рублёвых остатков для проверки.', warning: true },
+    { name: 'no balances', rows: [], message: 'Нет подтверждённых рублёвых остатков для проверки.', warning: false },
+    { name: 'an identified balance at the limit', rows: [{ currency: 'RUB', companyId: 1, moneyAccountId: 103, balanceKey: 'cash103' }], message: 'Превышений за период нет.', warning: false },
+  ])('reports cash limit coverage with $name', async ({ rows, message, warning }) => {
+    getUserSettingMock.mockImplementation(async (key: string) => {
+      if (key !== 'money.cash.limit') throw new Error('not found');
+      return { key, value: JSON.stringify({ enabled: true, amount: 100 }), updatedAt: '2026-05-01T00:00:00Z' };
+    });
+    getMoneyOperationDailyBalancesMock.mockResolvedValue(rows.map((row) => ({
+      ...row, date: '2026-05-01', source: 'Cash', accountName: 'Касса', openingBalance: 0,
+      income: 100, expense: 0, closingBalance: 100, incomeCount: 1, expenseCount: 0, isBalanced: true,
+    })));
+    render(<MoneyOperations source="Cash" />);
+    expect(await screen.findByText(message)).toBeTruthy();
+    expect(Boolean(screen.queryByText(/Не проверено строк:/))).toBe(warning);
+  });
+
+  it.each(['own', 'none'])('does not present an unavailable employee balance as a checked cash limit: %s', async (visibility) => {
+    permissionsState.paymentsViewScope = visibility === 'own' ? 'own' : 'all';
+    permissionsState.paymentsCanView = visibility !== 'none';
+    getUserSettingMock.mockImplementation(async (key: string) => {
+      if (key !== 'money.cash.limit') throw new Error('not found');
+      return { key, value: JSON.stringify({ enabled: true, amount: 100 }), updatedAt: '2026-05-01T00:00:00Z' };
+    });
+    getMoneyOperationDailyBalancesMock.mockResolvedValue([{
+      date: '2026-05-01', source: 'Cash', accountName: 'Касса', companyId: 1, moneyAccountId: 103,
+      currency: 'RUB', openingBalance: 0, income: 150, expense: 0, closingBalance: 150,
+      incomeCount: 1, expenseCount: 0, isBalanced: true,
+    }]);
+    render(<MoneyOperations source="Cash" />);
+    expect(await screen.findByText('Проверка лимита недоступна: у вас ограничен доступ к платежам.')).toBeTruthy();
+    expect(screen.queryByText(/Превышений за период/)).toBeNull();
+    expect(screen.queryByRole('columnheader', { name: 'Превышение' })).toBeNull();
+  });
+
+  it('distinguishes a failed balance request from a cash limit with no violations', async () => {
+    getUserSettingMock.mockImplementation(async (key: string) => {
+      if (key !== 'money.cash.limit') throw new Error('not found');
+      return { key, value: JSON.stringify({ enabled: true, amount: 100 }), updatedAt: '2026-05-01T00:00:00Z' };
+    });
+    getMoneyOperationDailyBalancesMock.mockRejectedValue(new Error('offline'));
+    render(<MoneyOperations source="Cash" />);
+    expect(await screen.findByText('Не удалось загрузить остатки для проверки лимита.')).toBeTruthy();
+    expect(screen.queryByText(/Превышений за период/)).toBeNull();
+  });
+
+  it('does not claim the cash limit has been checked while balances are loading', async () => {
+    getUserSettingMock.mockImplementation(async (key: string) => {
+      if (key !== 'money.cash.limit') throw new Error('not found');
+      return { key, value: JSON.stringify({ enabled: true, amount: 100 }), updatedAt: '2026-05-01T00:00:00Z' };
+    });
+    let finish!: (value: unknown[]) => void;
+    getMoneyOperationDailyBalancesMock.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    render(<MoneyOperations source="Cash" />);
+    expect(await screen.findByText('Загрузка остатков для проверки лимита…')).toBeTruthy();
+    expect(screen.queryByText(/Превышений за период/)).toBeNull();
+    await act(async () => finish([]));
+    expect(await screen.findByText('Нет подтверждённых рублёвых остатков для проверки.')).toBeTruthy();
   });
 
   it('shows reconciliation notifications for bank mismatches', async () => {
@@ -1801,6 +2048,204 @@ describe('MoneyOperations integration', () => {
     expect(toastErrorMock).toHaveBeenCalledWith('Укажите фактический остаток кассы.', 'Касса');
   });
 
+  it('sends the selected cash account ID with an inventory request', async () => {
+    const user = userEvent.setup();
+    render(<MoneyOperations source="Cash" />);
+    await screen.findByRole('heading', { name: 'Инвентаризация кассы' });
+    await user.click(screen.getByRole('button', { name: /Фильтр/ }));
+    await user.selectOptions(screen.getByLabelText('Касса'), '103');
+    await user.type(screen.getByLabelText('Фактический остаток'), '1200');
+    await user.click(screen.getByRole('button', { name: 'Провести' }));
+    await waitFor(() => expect(createCashInventoryMock).toHaveBeenCalledWith(expect.objectContaining({
+      accountName: 'Основная касса', moneyAccountId: 103, actualBalance: 1200,
+    })));
+  });
+
+  it('keeps inventory input after a concurrency conflict and allows a deliberate retry', async () => {
+    const user = userEvent.setup();
+    const message = 'Касса или её остаток изменились одновременно с инвентаризацией. Обновите данные и повторите действие.';
+    createCashInventoryMock.mockRejectedValueOnce(new Error(message));
+    render(<MoneyOperations source="Cash" />);
+    await screen.findByRole('heading', { name: 'Инвентаризация кассы' });
+    await user.click(screen.getByRole('button', { name: /Фильтр/ }));
+    await user.selectOptions(screen.getByLabelText('Касса'), '103');
+    await user.type(screen.getByLabelText('Фактический остаток'), '1200');
+    await user.click(screen.getByRole('button', { name: 'Провести' }));
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith(message, 'Касса'));
+    expect((screen.getByLabelText('Фактический остаток') as HTMLInputElement).value).toBe('1200');
+    expect(toastSuccessMock).not.toHaveBeenCalledWith('Инвентаризация кассы сохранена.', 'Касса');
+    await user.click(screen.getByRole('button', { name: 'Провести' }));
+    await waitFor(() => expect(createCashInventoryMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(toastSuccessMock).toHaveBeenCalledWith('Инвентаризация кассы сохранена.', 'Касса'));
+  });
+
+  it('does not create an inventory for a historical cash name without an account ID', async () => {
+    const user = userEvent.setup();
+    getMoneyAccountsMock.mockResolvedValue([]);
+    getMoneyOperationAccountSummariesMock.mockResolvedValue([{ accountName: 'Историческая касса', source: 'Cash', moneyAccountId: null }]);
+    render(<MoneyOperations source="Cash" />);
+    await screen.findByRole('heading', { name: 'Инвентаризация кассы' });
+    await user.click(screen.getByRole('button', { name: /Фильтр/ }));
+    await user.selectOptions(screen.getByLabelText('Касса'), 'Историческая касса');
+    await user.type(screen.getByLabelText('Фактический остаток'), '1200');
+    await user.click(screen.getByRole('button', { name: 'Провести' }));
+    expect(createCashInventoryMock).not.toHaveBeenCalled();
+    expect(toastErrorMock).toHaveBeenCalledWith('Выберите доступную кассу перед инвентаризацией.', 'Касса');
+  });
+
+  it('does not present the money journal balance as the cash inventory balance', async () => {
+    operations = [createOperation({ id: 1, source: 'Cash', direction: 'Income', amount: 987, currency: 'RUB' })];
+    render(<MoneyOperations source="Cash" />);
+    const heading = await screen.findByRole('heading', { name: 'Инвентаризация кассы' });
+    const inventory = heading.closest('div.rounded-xl');
+    expect(inventory).not.toBeNull();
+    expect(within(inventory as HTMLElement).getByText('Рассчитывается по проведённым ордерам при сохранении')).toBeTruthy();
+    expect(within(inventory as HTMLElement).queryByText('987,00 ₽')).toBeNull();
+  });
+
+  it('does not claim inventory history is empty when it cannot be loaded', async () => {
+    getCashInventoriesMock.mockRejectedValue(new Error('Forbidden'));
+    render(<MoneyOperations source="Cash" />);
+    expect(await screen.findByText('Не удалось загрузить историю инвентаризаций. Проверьте доступ или повторите позже.')).toBeTruthy();
+    expect(screen.queryByText('Инвентаризации за период еще не проводились.')).toBeNull();
+  });
+
+  it('requests inventory history by selected cash account ID, even when names match', async () => {
+    const user = userEvent.setup();
+    getMoneyAccountsMock.mockResolvedValue([
+      { id: 301, companyId: 1, companyName: 'Альфа', name: 'Касса', source: 'Cash', currency: 'RUB', isActive: true, isDefault: false },
+      { id: 302, companyId: 2, companyName: 'Бета', name: 'Касса', source: 'Cash', currency: 'RUB', isActive: true, isDefault: false },
+    ]);
+    render(<MoneyOperations source="Cash" />);
+    await screen.findByText('Кассовые ордера');
+    await user.selectOptions(screen.getByLabelText('Касса в заголовке'), '301');
+    await waitFor(() => expect(getCashInventoriesMock).toHaveBeenLastCalledWith(expect.objectContaining({ moneyAccountId: 301, accountName: 'Касса' })));
+    await user.selectOptions(screen.getByLabelText('Касса в заголовке'), '302');
+    await waitFor(() => expect(getCashInventoriesMock).toHaveBeenLastCalledWith(expect.objectContaining({ moneyAccountId: 302, accountName: 'Касса' })));
+  });
+
+  it('does not show an old server inventory history as belonging to the selected cash account', async () => {
+    const user = userEvent.setup();
+    getCashInventoriesMock.mockResolvedValue({ items: [{ id: 9, number: 'ИНВ-ЧУЖАЯ', date: '2026-10-28',
+      accountName: 'Основная касса', accountingBalance: 900, actualBalance: 900, difference: 0 }], total: 1, page: 1, pageSize: 8 });
+    render(<MoneyOperations source="Cash" />);
+    await screen.findByText('Кассовые ордера');
+    await user.selectOptions(screen.getByLabelText('Касса в заголовке'), '103');
+    expect(await screen.findByText('Не удалось загрузить историю инвентаризаций. Проверьте доступ или повторите позже.')).toBeTruthy();
+    expect(screen.queryByText('ИНВ-ЧУЖАЯ')).toBeNull();
+    expect(screen.queryByText('Инвентаризации за период еще не проводились.')).toBeNull();
+  });
+
+  it('keeps the confirmed second cash history when the first request returns late', async () => {
+    const user = userEvent.setup();
+    let finishFirst!: (value: unknown) => void;
+    getMoneyAccountsMock.mockResolvedValue([
+      { id: 301, companyId: 1, companyName: 'Альфа', name: 'Касса', source: 'Cash', currency: 'RUB', isActive: true, isDefault: false },
+      { id: 302, companyId: 2, companyName: 'Бета', name: 'Касса', source: 'Cash', currency: 'RUB', isActive: true, isDefault: false },
+    ]);
+    getCashInventoriesMock.mockImplementation((params: { moneyAccountId?: number }) => {
+      if (params.moneyAccountId === 301) return new Promise(resolve => { finishFirst = resolve; });
+      const items = params.moneyAccountId === 302 ? [{ id: 2, number: 'ИНВ-БЕТА', date: '2026-10-28',
+        accountName: 'Касса', accountingBalance: 200, actualBalance: 200, difference: 0 }] : [];
+      return Promise.resolve({ items, total: items.length, page: 1, pageSize: 8, moneyAccountId: params.moneyAccountId });
+    });
+    render(<MoneyOperations source="Cash" />);
+    await screen.findByText('Кассовые ордера');
+    await user.selectOptions(screen.getByLabelText('Касса в заголовке'), '301');
+    await waitFor(() => expect(finishFirst).toBeDefined());
+    await user.selectOptions(screen.getByLabelText('Касса в заголовке'), '302');
+    expect(await screen.findByText('ИНВ-БЕТА')).toBeTruthy();
+    await act(async () => finishFirst({ moneyAccountId: 301, items: [{ id: 1, number: 'ИНВ-АЛЬФА', date: '2026-10-28',
+      accountName: 'Касса', accountingBalance: 100, actualBalance: 100, difference: 0 }], total: 1, page: 1, pageSize: 8 }));
+    expect(screen.getByText('ИНВ-БЕТА')).toBeTruthy();
+    expect(screen.queryByText('ИНВ-АЛЬФА')).toBeNull();
+  });
+
+  it('refuses cash journal and printing when an older server does not confirm the selected ID', async () => {
+    const user = userEvent.setup();
+    render(<MoneyOperations source="Cash" />);
+    await screen.findByText('Кассовые ордера');
+    await user.selectOptions(screen.getByLabelText('Касса в заголовке'), '103');
+    await waitFor(() => expect(getCashOrderRegisterMock).toHaveBeenLastCalledWith(expect.objectContaining({ moneyAccountId: 103 }), expectAbortOptions()));
+    await waitFor(() => expect(getCashBookMock).toHaveBeenLastCalledWith(expect.objectContaining({ moneyAccountId: 103 }), expectAbortOptions()));
+    expect((await screen.findAllByText('Обновите сервер для просмотра выбранной кассы.')).length).toBeGreaterThan(0);
+    expect((screen.getByRole('button', { name: 'Кассовая книга' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: /^Журнал$/ }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('loads and prints the cash journal for the confirmed selected account ID', async () => {
+    const user = userEvent.setup();
+    getCashOrderRegisterPrintHtmlMock.mockResolvedValue('<html><head><meta name="payplanner-account-id" content="103"></head><body>Журнал</body></html>');
+    getCashOrderRegisterMock.mockImplementation(async (params: { moneyAccountId?: number }) => ({
+      moneyAccountId: params.moneyAccountId, items: [], total: 0, page: 1, pageSize: 10,
+      incomingCount: 0, outgoingCount: 0, draftCount: 0, postedCount: 0, cancelledCount: 0,
+      amountsAvailable: true, currencyStatus: 'empty', currency: null, incomingAmount: 0, outgoingAmount: 0,
+    }));
+    getCashBookMock.mockImplementation(async (params: { moneyAccountId?: number }) => ({
+      moneyAccountId: params.moneyAccountId, from: '2026-04-01', to: '2026-04-30', currencyStatus: 'single', currency: 'RUB',
+      openingBalance: 0, income: 0, expense: 0, closingBalance: 0, incomingCount: 0, outgoingCount: 0, days: [],
+    }));
+    render(<MoneyOperations source="Cash" />);
+    await screen.findByText('Кассовые ордера');
+    await user.selectOptions(screen.getByLabelText('Касса в заголовке'), '103');
+    await waitFor(() => expect((screen.getByRole('button', { name: /^Журнал$/ }) as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.getByText(/Показаны только ордера с подтверждённой принадлежностью/)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: /^Журнал$/ }));
+    await waitFor(() => expect(getCashOrderRegisterPrintHtmlMock).toHaveBeenCalledWith(expect.objectContaining({ moneyAccountId: 103 })));
+  });
+
+  it('rejects an unconfirmed print response even after the selected account was loaded', async () => {
+    const user = userEvent.setup();
+    getCashOrderRegisterMock.mockImplementation(async (params: { moneyAccountId?: number }) => ({
+      moneyAccountId: params.moneyAccountId, items: [], total: 0, page: 1, pageSize: 10,
+      incomingCount: 0, outgoingCount: 0, draftCount: 0, postedCount: 0, cancelledCount: 0,
+      amountsAvailable: true, currencyStatus: 'empty', currency: null, incomingAmount: 0, outgoingAmount: 0,
+    }));
+    getCashOrderRegisterPrintHtmlMock.mockResolvedValue('<html><body>Ответ старого сервера</body></html>');
+    render(<MoneyOperations source="Cash" />);
+    await screen.findByText('Кассовые ордера');
+    await user.selectOptions(screen.getByLabelText('Касса в заголовке'), '103');
+    await waitFor(() => expect((screen.getByRole('button', { name: /^Журнал$/ }) as HTMLButtonElement).disabled).toBe(false));
+    await user.click(screen.getByRole('button', { name: /^Журнал$/ }));
+    expect(await screen.findByText('Сервер не подтвердил выбранную кассу для печати.')).toBeTruthy();
+  });
+
+  it('keeps an unknown cash order currency empty when editing', async () => {
+    const user = userEvent.setup();
+    const order = { ...(await getCashOrderMock(9)), currency: null };
+    getCashOrderMock.mockResolvedValueOnce(order);
+    getCashOrderRegisterMock.mockResolvedValueOnce({ items: [order], total: 1, page: 1, pageSize: 10,
+      incomingCount: 1, outgoingCount: 0, draftCount: 0, postedCount: 1, cancelledCount: 0,
+      incomingAmount: 25000, outgoingAmount: 0 });
+    render(<MoneyOperations source="Cash" />);
+    await user.click(await screen.findByRole('button', { name: order.number }));
+    const currency = await screen.findByLabelText('Валюта') as HTMLInputElement;
+    expect(currency.value).toBe('');
+    expect(currency.disabled).toBe(false);
+    expect(screen.getAllByText(/валюта не указана/).length).toBeGreaterThan(0);
+    await user.click(getLastButton('Сохранить'));
+    await waitFor(() => expect(updateCashOrderMock).toHaveBeenCalledWith(9, expect.objectContaining({ currency: '' })));
+  });
+
+  it('shows the linked cash account and currency as fixed while keeping notes editable', async () => {
+    const user = userEvent.setup();
+    const order = { ...(await getCashOrderMock(9)), hasLinkedCashAccount: true, currency: 'RUB', account: 'Основная касса' };
+    getCashOrderMock.mockResolvedValueOnce(order);
+    getCashOrderRegisterMock.mockResolvedValueOnce({ items: [order], total: 1, page: 1, pageSize: 10,
+      incomingCount: 1, outgoingCount: 0, draftCount: 0, postedCount: 1, cancelledCount: 0,
+      incomingAmount: 25000, outgoingAmount: 0 });
+    render(<MoneyOperations source="Cash" />);
+    await user.click(await screen.findByRole('button', { name: order.number }));
+    expect((await screen.findByLabelText('Валюта') as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText('Счёт / касса') as HTMLInputElement).disabled).toBe(true);
+    expect(screen.getByText('Касса и валюта закреплены за ордером.')).toBeTruthy();
+    await user.type(screen.getAllByLabelText('Комментарий').find(element => element.tagName === 'TEXTAREA')!, ' Проверка');
+    await user.click(getLastButton('Сохранить'));
+    await waitFor(() => expect(updateCashOrderMock).toHaveBeenCalledWith(9, expect.objectContaining({
+      account: 'Основная касса', currency: 'RUB', comment: expect.stringContaining('Проверка'),
+    })));
+  });
+
   it('creates a paired transfer between money accounts from the operation form', async () => {
     const user = userEvent.setup();
 
@@ -2115,6 +2560,62 @@ describe('MoneyOperations integration', () => {
     );
   }, 15000);
 
+  it('shows account summaries only for the selected account identity and each currency', async () => {
+    const user = userEvent.setup();
+    getMoneyAccountsMock.mockResolvedValue([
+      { id: 201, companyId: 1, companyName: 'Альфа', name: 'Общий счёт', source: 'Bank', currency: 'RUB', isActive: true, isDefault: true },
+      { id: 202, companyId: 2, companyName: 'Бета', name: 'Общий счёт', source: 'Bank', currency: 'RUB', isActive: true, isDefault: false },
+    ]);
+    getMoneyOperationAccountSummariesMock.mockResolvedValue([
+      { moneyAccountId: 201, companyId: 1, accountName: 'Общий счёт', source: 'Bank', currencyStatus: 'single', currency: 'RUB', startBalance: 0, income: 100, expense: 0, endBalance: 100, incomeCount: 1, expenseCount: 0 },
+      { moneyAccountId: 201, companyId: 1, accountName: 'Общий счёт', source: 'Bank', currencyStatus: 'single', currency: 'USD', startBalance: 0, income: 25, expense: 0, endBalance: 25, incomeCount: 1, expenseCount: 0 },
+      { moneyAccountId: 202, companyId: 2, accountName: 'Общий счёт', source: 'Bank', currencyStatus: 'single', currency: 'RUB', startBalance: 0, income: 999, expense: 0, endBalance: 999, incomeCount: 1, expenseCount: 0 },
+    ]);
+    render(<MoneyOperations source="Bank" />);
+    await screen.findByText('Поставщик А');
+    await user.click(screen.getByRole('button', { name: /Фильтр/ }));
+    await user.selectOptions(screen.getByLabelText('Банковский счёт'), '201');
+    expect(screen.getByText('Остаток: 100,00 ₽')).toBeTruthy();
+    expect(screen.getByText('Остаток: 25,00 USD')).toBeTruthy();
+    expect(screen.queryByText('Остаток: 999,00 ₽')).toBeNull();
+  });
+
+  it('filters daily balances and saved reconciliation by account identity after a rename', async () => {
+    const user = userEvent.setup();
+    getMoneyAccountsMock.mockResolvedValue([
+      { id: 201, companyId: 1, companyName: 'Альфа', name: 'Общий счёт', source: 'Bank', currency: 'RUB', isActive: true, isDefault: true },
+      { id: 202, companyId: 2, companyName: 'Бета', name: 'Общий счёт', source: 'Bank', currency: 'RUB', isActive: true, isDefault: false },
+    ]);
+    const base = { date: '2026-05-01', source: 'Bank', currency: 'RUB', openingBalance: 0, expense: 0, incomeCount: 1, expenseCount: 0, isBalanced: true };
+    const rows = [
+      { ...base, companyId: 1, moneyAccountId: 201, accountName: 'Прежнее имя', income: 123, closingBalance: 123, balanceKey: 'one' },
+      { ...base, companyId: 2, moneyAccountId: 202, accountName: 'Общий счёт', income: 999, closingBalance: 999, balanceKey: 'two' },
+      { ...base, companyId: null, moneyAccountId: null, accountName: 'Общий счёт', income: 777, closingBalance: 777, balanceKey: null },
+    ];
+    getMoneyOperationDailyBalancesMock.mockResolvedValue(rows);
+    getMoneyBalanceReconciliationResultsMock.mockResolvedValue(rows.map((row, index) => ({
+      ...row, id: index + 1, checkedAt: `2026-05-0${index + 2}T10:00:00Z`, issueCount: 0,
+    })));
+    render(<MoneyOperations source="Bank" />);
+    await screen.findByText('Прежнее имя');
+    await user.click(screen.getByRole('button', { name: /Фильтр/ }));
+    await user.selectOptions(screen.getByLabelText('Банковский счёт'), '201');
+    expect(screen.getByText('Прежнее имя')).toBeTruthy();
+    expect(screen.queryByText('999,00 ₽')).toBeNull();
+    expect(screen.queryByText('777,00 ₽')).toBeNull();
+    expect(screen.getByText(/сохранено 02\.05\.2026/)).toBeTruthy();
+    await user.selectOptions(screen.getByLabelText('Банковский счёт'), '202');
+    expect(screen.queryByText('Прежнее имя')).toBeNull();
+    expect(screen.getAllByText('999,00 ₽').length).toBeGreaterThan(0);
+    expect(screen.queryByText('777,00 ₽')).toBeNull();
+    expect(screen.getByText(/сохранено 03\.05\.2026/)).toBeTruthy();
+    await user.selectOptions(screen.getByLabelText('Банковский счёт'), '');
+    expect(screen.getByText('Прежнее имя')).toBeTruthy();
+    expect(screen.getAllByText('999,00 ₽').length).toBeGreaterThan(0);
+    expect(screen.getByText('Не подтверждено')).toBeTruthy();
+    expect(screen.queryByText('777,00 ₽')).toBeNull();
+  });
+
   it('applies a category filter to the money journal request', async () => {
     const user = userEvent.setup();
     operations = [
@@ -2372,7 +2873,7 @@ describe('MoneyOperations integration', () => {
     await screen.findByText('Ручной выбор бухгалтера');
     await user.click(screen.getByRole('button', { name: 'Изменить' }));
     await screen.findByRole('button', { name: /Счёт 33 от 21\.04\.2026/ });
-    expect(getMoneyOperationInvoiceCandidatesMock).toHaveBeenCalledWith(8);
+    expect(getMoneyOperationInvoiceCandidatesMock).toHaveBeenCalledWith(8, undefined, expect.any(AbortSignal));
     expect(screen.getByLabelText('ID счёта')).toHaveProperty('value', '');
     expect(operations[0].linkedInvoiceId).toBeNull();
     expect(updateMoneyOperationMock).not.toHaveBeenCalled();
@@ -2844,6 +3345,78 @@ describe('MoneyOperations integration', () => {
     await waitFor(() => expect(getCashOrderRegisterMock).toHaveBeenCalledTimes(2));
   }, 15000);
 
+  it('explains why an order cannot be created for an operation without currency', async () => {
+    const user = userEvent.setup();
+    operations = [{ ...createOperation({ id: 11, source: 'Cash', direction: 'Income', counterpartyName: 'Ручной клиент',
+      amount: 5000, isReadonly: false, relatedPaymentId: null, canCreateCashOrder: true }), currency: null }];
+    const message = 'В денежной операции не указана валюта. Уточните её перед созданием кассового ордера.';
+    createCashOrderFromMoneyOperationMock.mockRejectedValue(new Error(message));
+    render(<MoneyOperations source="Cash" />);
+    await screen.findByText('Ручной клиент');
+    await user.click(screen.getByRole('button', { name: 'Создать приходный кассовый ордер' }));
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith(message, 'Касса'));
+    expect(toastSuccessMock).not.toHaveBeenCalled();
+  });
+
+  it('explains when the cash book currency cannot be confirmed', async () => {
+    const message = 'Нельзя рассчитать кассовую книгу: валюта проведённых ордеров не подтверждена как рубли.';
+    getCashBookMock.mockRejectedValue(new Error(message));
+    const order = { ...(await getCashOrderMock(9)), currency: 'USD' };
+    getCashOrderRegisterMock.mockResolvedValueOnce({ items: [order], total: 1, page: 1, pageSize: 10,
+      incomingCount: 1, outgoingCount: 0, draftCount: 0, postedCount: 1, cancelledCount: 0,
+      amountsAvailable: false, incomingAmount: null, outgoingAmount: null });
+    render(<MoneyOperations source="Cash" />);
+    expect(await screen.findByText(message)).toBeTruthy();
+    expect(screen.queryByTestId('cash-book-summary')).toBeNull();
+    expect(screen.getByRole('button', { name: order.number })).toBeTruthy();
+    expect(screen.getByText(/25.*000,00 USD/)).toBeTruthy();
+    expect(screen.getByText('Приходные ордера').nextElementSibling?.textContent).toContain('1 на —');
+  });
+
+  it('does not trust register totals from an older response without currency confirmation', async () => {
+    const order = { ...(await getCashOrderMock(9)), currency: 'USD' };
+    getCashOrderRegisterMock.mockResolvedValueOnce({ items: [order], total: 1, page: 1, pageSize: 10,
+      incomingCount: 1, outgoingCount: 0, draftCount: 0, postedCount: 1, cancelledCount: 0,
+      incomingAmount: 25000, outgoingAmount: 0 });
+    render(<MoneyOperations source="Cash" />);
+    const heading = await screen.findByText('Приходные ордера');
+    expect(heading.nextElementSibling?.textContent).toContain('1 на —');
+    expect(screen.getByRole('button', { name: order.number })).toBeTruthy();
+  });
+
+  it('shows the register total in its confirmed single currency', async () => {
+    const order = { ...(await getCashOrderMock(9)), currency: 'USD' };
+    getCashOrderRegisterMock.mockResolvedValueOnce({ items: [order], total: 1, page: 1, pageSize: 10,
+      incomingCount: 1, outgoingCount: 0, draftCount: 0, postedCount: 1, cancelledCount: 0,
+      amountsAvailable: true, currencyStatus: 'single', currency: 'USD', incomingAmount: 25000, outgoingAmount: 0 });
+    render(<MoneyOperations source="Cash" />);
+    const heading = await screen.findByText('Приходные ордера');
+    expect(heading.nextElementSibling?.textContent).toMatch(/25.*000,00 USD/);
+    expect(heading.nextElementSibling?.textContent).not.toContain('₽');
+  });
+
+  it('shows cash book balances in their confirmed foreign currency', async () => {
+    getCashBookMock.mockResolvedValueOnce({ from: '2026-04-01', to: '2026-04-30', currencyStatus: 'single', currency: 'USD',
+      openingBalance: 100, income: 0, expense: 20, closingBalance: 80, incomingCount: 0, outgoingCount: 1,
+      days: [{ date: '2026-04-29', openingBalance: 100, income: 0, expense: 20, closingBalance: 80, incomingCount: 0, outgoingCount: 1 }] });
+    render(<MoneyOperations source="Cash" />);
+    const summary = await screen.findByTestId('cash-book-summary');
+    expect(within(summary).getAllByText('100,00 USD').length).toBeGreaterThan(0);
+    expect(within(summary).getAllByText('80,00 USD').length).toBeGreaterThan(0);
+    expect(within(summary).queryByText('80,00 ₽')).toBeNull();
+    expect((screen.getByRole('button', { name: 'Кассовая книга' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('does not label an older cash book response as confirmed rubles', async () => {
+    getCashBookMock.mockResolvedValueOnce({ from: '2026-04-01', to: '2026-04-30', openingBalance: 0,
+      income: 25000, expense: 0, closingBalance: 25000, incomingCount: 1, outgoingCount: 0, days: [] });
+    render(<MoneyOperations source="Cash" />);
+    const summary = await screen.findByTestId('cash-book-summary');
+    expect(within(summary).getAllByText('—').length).toBeGreaterThan(0);
+    expect(within(summary).queryByText('25 000,00 ₽')).toBeNull();
+    expect((screen.getByRole('button', { name: 'Кассовая книга' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('loads and renders the cash orders journal in the cash section', async () => {
     const user = userEvent.setup();
     operations = [];
@@ -3259,11 +3832,11 @@ describe('MoneyOperations integration', () => {
     await screen.findByText('Кассовые ордера');
     await user.click(screen.getByRole('button', { name: 'Создать ордер' }));
     await screen.findByText('Приходный кассовый ордер Новый');
+    expect((screen.getByLabelText('Валюта') as HTMLInputElement).value).toBe('');
 
     await user.clear(screen.getByLabelText('Сумма'));
     await user.type(screen.getByLabelText('Сумма'), '25000');
-    await user.clear(screen.getByLabelText('Счёт / касса'));
-    await user.type(screen.getByLabelText('Счёт / касса'), 'Основная касса');
+    await user.selectOptions(screen.getByLabelText('Счёт / касса'), '103');
     await user.type(screen.getByLabelText('Плательщик'), 'Ахмедова Айтан Рафик Кызы');
     await user.type(screen.getByLabelText('Основание'), 'Оплата по счёту №33');
 
@@ -3277,7 +3850,9 @@ describe('MoneyOperations integration', () => {
           type: 'Incoming',
           status: 'Draft',
           amount: 25000,
+          currency: 'RUB',
           account: 'Основная касса',
+          selectedMoneyAccountId: 103,
           payerName: 'Ахмедова Айтан Рафик Кызы',
           basis: 'Оплата по счёту №33',
         }),
@@ -3302,6 +3877,21 @@ describe('MoneyOperations integration', () => {
     expect(await screen.findByText('Сумма кассового ордера должна быть больше нуля.')).toBeTruthy();
     expect(createCashOrderMock).not.toHaveBeenCalled();
     expect(updateCashOrderMock).not.toHaveBeenCalled();
+  }, 15000);
+
+  it('requires selecting a cash account for a new standalone order', async () => {
+    const user = userEvent.setup();
+    operations = [];
+    render(<MoneyOperations source="Cash" />);
+    await screen.findByText('Кассовые ордера');
+    await user.click(screen.getByRole('button', { name: 'Создать ордер' }));
+    await screen.findByText('Приходный кассовый ордер Новый');
+    await user.clear(screen.getByLabelText('Сумма'));
+    await user.type(screen.getByLabelText('Сумма'), '100');
+    await user.selectOptions(screen.getByLabelText('Счёт / касса'), '');
+    await user.click(getLastButton('Сохранить'));
+    expect(await screen.findByText('Выберите кассу для нового ордера.')).toBeTruthy();
+    expect(createCashOrderMock).not.toHaveBeenCalled();
   }, 15000);
 
   it('posts a draft cash order from the modal', async () => {
@@ -3413,6 +4003,69 @@ describe('MoneyOperations integration', () => {
     );
   }, 15000);
 
+  it.each(['Bank', 'Total'] as const)('does not present mixed currencies as a total in %s', async source => {
+    operations = [createOperation({ id: 1, direction: 'Income', amount: 123, currency: 'USD' }),
+      createOperation({ id: 2, direction: 'Income', amount: 456, currency: 'RUB' })];
+    render(<MoneyOperations source={source} />);
+    expect(await screen.findByText(/Итоги недоступны: в выбранных операциях разные валюты/)).toBeTruthy();
+    expect(screen.queryByText('579,00 ₽')).toBeNull();
+    expect(screen.queryByText('579,00 USD')).toBeNull();
+  });
+
+  it.each(['Bank', 'Total'] as const)('shows a single foreign currency in the %s summary', async source => {
+    operations = [createOperation({ id: 1, direction: 'Income', amount: 123, currency: 'USD' })];
+    render(<MoneyOperations source={source} />);
+    expect((await screen.findAllByText('123,00 USD')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('123,00 ₽')).toBeNull();
+  });
+
+  it('does not present an operation of unknown currency as a confirmed total', async () => {
+    operations = [{ ...createOperation({ id: 1, direction: 'Income', amount: 321 }), currency: null }];
+    render(<MoneyOperations source="Bank" />);
+    expect(await screen.findByText(/Итоги недоступны: в выбранных операциях разные валюты/)).toBeTruthy();
+    expect(screen.queryByText('321,00 ₽')).toBeNull();
+  });
+
+  it('shows each journal operation amount with its currency or an explicit unknown label', async () => {
+    testColumnState.extra = true;
+    operations = [
+      { ...createOperation({ id: 1, direction: 'Income', amount: 123, currency: 'USD' }), vatAmount: 7 },
+      { ...createOperation({ id: 2, direction: 'Expense', amount: 456 }), currency: null, vatAmount: 8 },
+    ];
+    render(<MoneyOperations source="Bank" />);
+    expect(await screen.findByText('123,00 USD')).toBeTruthy();
+    expect(screen.getByText('7,00 USD')).toBeTruthy();
+    expect(screen.getByText('456,00 валюта не указана')).toBeTruthy();
+    expect(screen.getByText('8,00 валюта не указана')).toBeTruthy();
+  });
+
+  it('shows currency for each operation in the combined journal', async () => {
+    const user = userEvent.setup();
+    operations = [
+      createOperation({ id: 1, direction: 'Income', amount: 123, currency: 'USD' }),
+      { ...createOperation({ id: 2, direction: 'Expense', amount: 456 }), currency: null },
+    ];
+    render(<MoneyOperations source="Total" />);
+    await screen.findByText('Общий баланс');
+    await user.click(screen.getByRole('button', { name: 'ОДДС' }));
+    expect(await screen.findByText('+ 123,00 USD')).toBeTruthy();
+    expect(screen.getByText('- 456,00 валюта не указана')).toBeTruthy();
+  });
+
+  it('shows the actual or unknown currency in the imported operation summary', async () => {
+    const user = userEvent.setup();
+    importBankStatementMock.mockResolvedValueOnce({ batchId: null, rowsRead: 2, created: 2, skipped: 0, errors: [], operations: [
+      { id: 1, date: '2026-04-29', direction: 'Income', amount: 123, currency: 'USD' },
+      { id: 2, date: '2026-04-29', direction: 'Expense', amount: 456, currency: null },
+    ] });
+    const { container } = render(<MoneyOperations source="Bank" />);
+    await selectBankImportAccount(user);
+    await user.click(screen.getByRole('button', { name: 'Загрузить выписку' }));
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(['synthetic'], 'statement.csv')] } });
+    expect(await screen.findByText('123,00 USD')).toBeTruthy();
+    expect(screen.getByText('456,00 валюта не указана')).toBeTruthy();
+  }, 15000);
+
   it('imports a bank statement file and reloads bank operations', async () => {
     const user = userEvent.setup();
     operations = [];
@@ -3455,13 +4108,861 @@ describe('MoneyOperations integration', () => {
 
     await waitFor(() => expect(importBankStatementMock).toHaveBeenCalledWith(file, { companyId: 1, moneyAccountId: 102 }));
     await screen.findByText('Импорт выписки: прочитано 2, создано 2, пропущено 0');
+    await screen.findByText('Импорт банковской выписки');
+    await user.click(screen.getByRole('button', { name: 'Закрыть импорт' }));
     await screen.findByText('Ахмедова Айтан Рафик Кызы');
     await screen.findByText('101');
     await userEvent.click(screen.getByRole('button', { name: 'Открыть операцию импорта 301' }));
-    await waitFor(() => expect(getMoneyOperationMock).toHaveBeenCalledWith(301));
+    await waitFor(() => expect(getMoneyOperationMock).toHaveBeenCalledWith(301, expect.objectContaining({ aborted: false })));
     await screen.findByText('Редактировать операцию по банку');
     expect(toastSuccessMock).toHaveBeenCalledWith('Создано операций: 2. Пропущено: 0.', 'Выписка банка');
     await waitFor(() => expect(getMoneyOperationsPagedMock).toHaveBeenCalledTimes(requestsBeforeImport + 1));
+  }, 15000);
+
+  it.each([
+    { companyName: 'Компания из сохранённого пакета', moneyAccountName: 'Счёт из сохранённого пакета',
+      periodFrom: '2026-10-01T00:00:00', periodTo: '2026-10-28T00:00:00',
+      expectedCompany: 'Компания из сохранённого пакета', expectedAccount: 'Счёт из сохранённого пакета',
+      expectedFrom: 'с 01.10.2026', expectedTo: 'по 28.10.2026' },
+    { companyName: null, moneyAccountName: ' ', periodFrom: null, periodTo: null,
+      expectedCompany: 'Не определена', expectedAccount: 'Не определён', expectedFrom: null, expectedTo: null },
+    { companyName: '', moneyAccountName: null, periodFrom: '2026-10-01', periodTo: null,
+      expectedCompany: 'Не определена', expectedAccount: 'Не определён', expectedFrom: 'с 01.10.2026', expectedTo: null },
+    { companyName: 'Компания из сохранённого пакета', moneyAccountName: 'Счёт из сохранённого пакета',
+      periodFrom: null, periodTo: '2026-10-28', expectedCompany: 'Компания из сохранённого пакета',
+      expectedAccount: 'Счёт из сохранённого пакета', expectedFrom: null, expectedTo: 'по 28.10.2026' },
+  ])('shows saved bank import identity and period without inferring missing values: $expectedFrom / $expectedTo', async (scenario) => {
+    const user = userEvent.setup();
+    const original = getBankStatementImportMock.getMockImplementation()!;
+    getBankStatementImportMock.mockImplementation(async (id: number) => ({ ...await original(id),
+      companyName: scenario.companyName, moneyAccountName: scenario.moneyAccountName,
+      periodFrom: scenario.periodFrom, periodTo: scenario.periodTo }));
+    importBankStatementMock.mockResolvedValueOnce({ batchId: 1, rowsRead: 1, created: 1, skipped: 0, errors: [], operations: [] });
+    const { container } = render(<MoneyOperations source="Bank" />);
+    await selectBankImportAccount(user);
+    await user.click(screen.getByRole('button', { name: 'Загрузить выписку' }));
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(['synthetic'], 'statement.csv')] } });
+    const dialog = await screen.findByRole('dialog', { name: 'statement.csv' });
+    const identity = within(dialog).getByLabelText('Реквизиты выписки');
+    expect(within(identity).getByText(scenario.expectedCompany)).toBeTruthy();
+    expect(within(identity).getByText(scenario.expectedAccount)).toBeTruthy();
+    expect(within(identity).queryByText('Основной счет')).toBeNull();
+    if (scenario.expectedFrom) expect(within(identity).getByText(scenario.expectedFrom)).toBeTruthy();
+    if (scenario.expectedTo) expect(within(identity).getByText(scenario.expectedTo)).toBeTruthy();
+    expect(within(identity).queryByText('Не указан') !== null).toBe(!scenario.expectedFrom && !scenario.expectedTo);
+    expect(rollbackBankStatementImportMock).not.toHaveBeenCalled();
+    expect(reprocessBankStatementImportMock).not.toHaveBeenCalled();
+  }, 15000);
+
+  it('opens an imported batch automatically and closing it does not roll back or reprocess it', async () => {
+    const user = userEvent.setup();
+    importBankStatementMock.mockResolvedValueOnce({ batchId: 1, rowsRead: 1, created: 1, skipped: 0, errors: [], operations: [] });
+    getBankStatementImportsMock.mockResolvedValue({ items: [{ id: 1, fileName: 'statement.csv', status: 'Applied', rowsRead: 1,
+      createdRows: 1, skippedRows: 0, errorRows: 0, rollbackRows: 0, createdAt: '2026-04-29T10:00:00Z', rolledBackAt: null }],
+    total: 1, page: 1, pageSize: 5 });
+    const { container } = render(<MoneyOperations source="Bank" />);
+    await selectBankImportAccount(user);
+    await user.click(screen.getByRole('button', { name: 'Загрузить выписку' }));
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(['synthetic'], 'statement.csv')] } });
+    await screen.findByText('Импорт банковской выписки');
+    expect(getBankStatementImportMock).toHaveBeenCalledWith(1);
+    await user.click(screen.getByRole('button', { name: 'Закрыть импорт' }));
+    expect(screen.queryByText('Импорт банковской выписки')).toBeNull();
+    expect(rollbackBankStatementImportMock).not.toHaveBeenCalled();
+    expect(reprocessBankStatementImportMock).not.toHaveBeenCalled();
+    await user.click(await screen.findByRole('button', { name: 'Открыть импорт выписки statement.csv' }));
+    expect(await screen.findByText('Импорт банковской выписки')).toBeTruthy();
+  }, 15000);
+
+  it('does not open a late import detail after the employee loses import permission', async () => {
+    const user = userEvent.setup();
+    let complete!: (value: unknown) => void;
+    const detail = getBankStatementImportMock.getMockImplementation()!;
+    getBankStatementImportMock.mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
+    importBankStatementMock.mockResolvedValueOnce({ batchId: 1, rowsRead: 1, created: 1, skipped: 0, errors: [], operations: [] });
+    const { container, rerender } = render(<MoneyOperations source="Bank" />);
+    await selectBankImportAccount(user);
+    await user.click(screen.getByRole('button', { name: 'Загрузить выписку' }));
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(['synthetic'], 'statement.csv')] } });
+    await waitFor(() => expect(getBankStatementImportMock).toHaveBeenCalledWith(1));
+    permissionsState.paymentsCanCreate = false;
+    rerender(<MoneyOperations source="Bank" />);
+    await act(async () => complete(await detail(1)));
+    expect(screen.queryByText('Импорт банковской выписки')).toBeNull();
+  }, 15000);
+
+  it('clears an already opened import result when import permission is revoked', async () => {
+    const user = userEvent.setup();
+    importBankStatementMock.mockResolvedValueOnce({ batchId: 1, rowsRead: 1, created: 1, skipped: 0, errors: [], operations: [] });
+    const { container, rerender } = render(<MoneyOperations source="Bank" />);
+    await selectBankImportAccount(user);
+    await user.click(screen.getByRole('button', { name: 'Загрузить выписку' }));
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(['synthetic'], 'statement.csv')] } });
+    await screen.findByText('Импорт банковской выписки');
+    permissionsState.paymentsCanCreate = false;
+    rerender(<MoneyOperations source="Bank" />);
+    await waitFor(() => expect(screen.queryByText('Импорт банковской выписки')).toBeNull());
+    expect(screen.queryByText(/Импорт выписки: прочитано/)).toBeNull();
+  }, 15000);
+
+  it('focuses the import dialog, traps keyboard navigation and closes on Escape without changing the batch', async () => {
+    const user = userEvent.setup();
+    importBankStatementMock.mockResolvedValueOnce({ batchId: 1, rowsRead: 1, created: 1, skipped: 0, errors: [], operations: [] });
+    const { container } = render(<MoneyOperations source="Bank" />);
+    await selectBankImportAccount(user);
+    const opener = screen.getByRole('button', { name: 'Загрузить выписку' });
+    await user.click(opener);
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(['synthetic'], 'statement.csv')] } });
+    const dialog = await screen.findByRole('dialog', { name: 'statement.csv' });
+    const close = within(dialog).getByRole('button', { name: 'Закрыть импорт' });
+    const rollback = within(dialog).getByRole('button', { name: /Откатить импорт выписки/ });
+    await waitFor(() => expect(document.activeElement).toBe(close));
+    await user.tab();
+    expect(document.activeElement).toBe(within(dialog).getByRole('searchbox'));
+    await user.tab();
+    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Найти' }));
+    await user.tab();
+    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Открыть денежную операцию строки 2' }));
+    await user.tab();
+    expect(document.activeElement).toBe(rollback);
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Открыть денежную операцию строки 2' }));
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Найти' }));
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(within(dialog).getByRole('searchbox'));
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(close);
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'statement.csv' })).toBeNull();
+    expect(document.activeElement).toBe(opener);
+    expect(rollbackBankStatementImportMock).not.toHaveBeenCalled();
+    expect(reprocessBankStatementImportMock).not.toHaveBeenCalled();
+  }, 15000);
+
+  describe('bank import row operation navigation', () => {
+    const prepare = () => {
+      const original = getBankStatementImportMock.getMockImplementation()!;
+      getBankStatementImportMock.mockImplementation(async (id: number, page = 1, search?: string) => {
+        const detail = await original(id);
+        return { ...detail, companyId: 1, moneyAccountId: 101, rowsTotal: 130, rowsPage: page, rowsPageSize: 50,
+          rowsSearch: search ?? null, rowsMatched: search ? 70 : null, hasReprocessableRows: true,
+          rows: [{ ...detail.rows[0], id: page, rowNumber: page === 2 ? 51 : 1, direction: 'Expense', moneyOperationId: 44 }] };
+      });
+      getBankStatementImportsMock.mockImplementation(async () => ({ items: [await original(1)], total: 1, page: 1, pageSize: 5 }));
+      importBankStatementMock.mockResolvedValueOnce({ batchId: 1, rowsRead: 130, created: 129, skipped: 1, errors: [], operations: [] });
+      const operation = createOperation({ id: 44, moneyAccountId: 101, amount: 25000, date: '2026-04-29',
+        purpose: 'Свежие данные операции', isAdvancePayment: false, paidAmount: 0, paidInvoiceNumber: '', paidAccountName: '', matchStatus: 'ClarificationRequired' });
+      getMoneyOperationMock.mockResolvedValue(operation);
+      return operation;
+    };
+    const openBatch = async (user: ReturnType<typeof userEvent.setup>) => {
+      const rendered = render(<MoneyOperations source="Bank" />);
+      await selectBankImportAccount(user);
+      await user.click(screen.getByRole('button', { name: 'Загрузить выписку' }));
+      fireEvent.change(rendered.container.querySelector('input[type="file"]')!, { target: { files: [new File(['synthetic'], 'statement.csv')] } });
+      const dialog = await screen.findByRole('dialog', { name: 'statement.csv' });
+      return { ...rendered, dialog };
+    };
+    const filteredSecondPage = async (user: ReturnType<typeof userEvent.setup>, dialog: HTMLElement) => {
+      fireEvent.change(within(dialog).getByRole('searchbox'), { target: { value: 'ёжик' } });
+      await user.click(within(dialog).getByRole('button', { name: 'Найти' }));
+      await within(dialog).findByText('Поиск: «ёжик». Найдено: 70 из 130.');
+      await user.click(within(dialog).getByRole('button', { name: 'Далее' }));
+      await within(dialog).findByText(/Страница 2 из 2/);
+    };
+    const candidates = () => [201, 202].map(id => ({ invoiceId: id, paymentId: id * 10, invoiceNumber: String(id),
+      amount: 25000, paidAmount: 0, outstandingAmount: 25000, status: 'Pending', matchReason: 'Нужен выбор бухгалтера', score: 100 }));
+
+    const candidatePage = (cursor?: string, search?: string) => ({
+      items: candidates().map(item => ({ ...item, invoiceId: item.invoiceId + (cursor ? 100 : search ? 700 : 0),
+        invoiceNumber: String(item.invoiceId + (cursor ? 100 : search ? 700 : 0)) })),
+      cursor: cursor ?? null, search: search ?? null, hasMore: !cursor && !search, nextCursor: !cursor && !search ? 'page-two' : null,
+    });
+
+    it('pages invoice candidates forward and back without applying a draft search or selecting a document', async () => {
+      const user = userEvent.setup();
+      prepare();
+      getMoneyOperationInvoiceCandidatePageMock.mockImplementation(async (_id, search, cursor) => candidatePage(cursor, search));
+      const { dialog } = await openBatch(user);
+      await user.click(within(dialog).getByRole('button', { name: 'Открыть денежную операцию строки 1' }));
+      const editor = await screen.findByRole('dialog', { name: 'Редактировать операцию по банку' });
+      await within(editor).findByRole('button', { name: /Счёт 201/ });
+      fireEvent.change(within(editor).getByRole('searchbox'), { target: { value: 'черновик' } });
+      await user.click(within(editor).getByRole('button', { name: 'Далее по счетам' }));
+      await within(editor).findByRole('button', { name: /Счёт 301/ });
+      expect(getMoneyOperationInvoiceCandidatePageMock).toHaveBeenLastCalledWith(44, undefined, 'page-two', expect.any(AbortSignal));
+      expect(within(editor).getByRole('group', { name: 'Страницы счетов для сверки' }).textContent).toContain('Страница 2');
+      expect(within(editor).getByLabelText('ID счёта')).toHaveProperty('value', '');
+      expect(within(editor).getByRole('searchbox')).toHaveProperty('value', 'черновик');
+      expect(within(editor).getByRole('button', { name: 'Далее по счетам' })).toHaveProperty('disabled', true);
+      await user.click(within(editor).getByRole('button', { name: 'Назад к счетам' }));
+      await within(editor).findByRole('button', { name: /Счёт 201/ });
+      expect(getMoneyOperationInvoiceCandidatePageMock).toHaveBeenLastCalledWith(44, undefined, undefined, expect.any(AbortSignal));
+      await user.click(within(editor).getByRole('button', { name: 'Найти счёт' }));
+      await within(editor).findByRole('button', { name: /Счёт 901/ });
+      expect(within(editor).getByRole('group', { name: 'Страницы счетов для сверки' }).textContent).toContain('Страница 1');
+      expect(updateMoneyOperationMock).not.toHaveBeenCalled();
+      expect(createMoneyOperationMock).not.toHaveBeenCalled();
+    });
+
+    it('retains the visible invoice page on a failed next request and retries that cursor', async () => {
+      const user = userEvent.setup();
+      prepare();
+      let fail = true;
+      getMoneyOperationInvoiceCandidatePageMock.mockImplementation(async (_id, search, cursor) => {
+        if (cursor && fail) throw new Error('connection failed');
+        return candidatePage(cursor, search);
+      });
+      const { dialog } = await openBatch(user);
+      await user.click(within(dialog).getByRole('button', { name: 'Открыть денежную операцию строки 1' }));
+      const editor = await screen.findByRole('dialog', { name: 'Редактировать операцию по банку' });
+      await within(editor).findByRole('button', { name: /Счёт 201/ });
+      await user.click(within(editor).getByRole('button', { name: 'Далее по счетам' }));
+      await within(editor).findByRole('alert');
+      expect(within(editor).getByRole('button', { name: /Счёт 201/ })).toBeTruthy();
+      expect(within(editor).getByRole('group', { name: 'Страницы счетов для сверки' }).textContent).toContain('Страница 1');
+      fail = false;
+      await user.click(within(editor).getByRole('button', { name: 'Далее по счетам' }));
+      await within(editor).findByRole('button', { name: /Счёт 301/ });
+      expect(within(editor).queryByRole('alert')).toBeNull();
+      expect(getMoneyOperationInvoiceCandidatePageMock).toHaveBeenLastCalledWith(44, undefined, 'page-two', expect.any(AbortSignal));
+    });
+
+    it.each(['search', 'cursor', 'legacy-array', 'oversized', 'loop'] as const)('rejects an unsupported invoice page response: %s', async mode => {
+      const user = userEvent.setup();
+      prepare();
+      getMoneyOperationInvoiceCandidatePageMock.mockImplementation(async (_id, search, cursor) => {
+        if (!cursor) return candidatePage(cursor, search);
+        const page = candidatePage(cursor, search);
+        if (mode === 'search') return { ...page, search: 'другой' };
+        if (mode === 'cursor') return { ...page, cursor: 'другой' };
+        if (mode === 'legacy-array') return page.items;
+        if (mode === 'oversized') return { ...page, items: Array.from({ length: 11 }, () => page.items[0]) };
+        return { ...page, hasMore: true, nextCursor: cursor };
+      });
+      const { dialog } = await openBatch(user);
+      await user.click(within(dialog).getByRole('button', { name: 'Открыть денежную операцию строки 1' }));
+      const editor = await screen.findByRole('dialog', { name: 'Редактировать операцию по банку' });
+      await within(editor).findByRole('button', { name: /Счёт 201/ });
+      await user.click(within(editor).getByRole('button', { name: 'Далее по счетам' }));
+      await within(editor).findByRole('alert');
+      expect(within(editor).queryByRole('button', { name: /Счёт 301/ })).toBeNull();
+      expect(within(editor).getByRole('button', { name: /Счёт 201/ })).toBeTruthy();
+      expect(updateMoneyOperationMock).not.toHaveBeenCalled();
+    });
+
+    it('cancels the pending invoice page when applying a different search and discards its late result', async () => {
+      const user = userEvent.setup();
+      prepare();
+      let complete!: (page: ReturnType<typeof candidatePage>) => void;
+      getMoneyOperationInvoiceCandidatePageMock.mockImplementation(async (_id, search, cursor) => cursor
+        ? new Promise(resolve => { complete = resolve; }) : candidatePage(cursor, search));
+      const { dialog } = await openBatch(user);
+      await user.click(within(dialog).getByRole('button', { name: 'Открыть денежную операцию строки 1' }));
+      const editor = await screen.findByRole('dialog', { name: 'Редактировать операцию по банку' });
+      await within(editor).findByRole('button', { name: /Счёт 201/ });
+      await user.click(within(editor).getByRole('button', { name: 'Далее по счетам' }));
+      await waitFor(() => expect(complete).toBeDefined());
+      const signal = getMoneyOperationInvoiceCandidatePageMock.mock.calls.find(call => call[2] === 'page-two')![3];
+      fireEvent.change(within(editor).getByRole('searchbox'), { target: { value: 'Ёжик' } });
+      await user.click(within(editor).getByRole('button', { name: 'Найти счёт' }));
+      await within(editor).findByRole('button', { name: /Счёт 901/ });
+      expect(signal.aborted).toBe(true);
+      await act(async () => complete(candidatePage('page-two')));
+      expect(within(editor).queryByRole('button', { name: /Счёт 301/ })).toBeNull();
+      expect(within(editor).getByRole('button', { name: /Счёт 901/ })).toBeTruthy();
+    });
+
+    it('saves the invoice explicitly selected from the second page with unchanged bank facts', async () => {
+      const user = userEvent.setup();
+      const operation = prepare();
+      getMoneyOperationInvoiceCandidatePageMock.mockImplementation(async (_id, search, cursor) => candidatePage(cursor, search));
+      updateMoneyOperationMock.mockImplementation(async (_id, payload) => payload);
+      const { dialog } = await openBatch(user);
+      await user.click(within(dialog).getByRole('button', { name: 'Открыть денежную операцию строки 1' }));
+      const editor = await screen.findByRole('dialog', { name: 'Редактировать операцию по банку' });
+      await within(editor).findByRole('button', { name: /Счёт 201/ });
+      await user.click(within(editor).getByRole('button', { name: 'Далее по счетам' }));
+      await user.click(await within(editor).findByRole('button', { name: /Счёт 301/ }));
+      await user.click(within(editor).getByRole('button', { name: 'Сохранить' }));
+      await waitFor(() => expect(updateMoneyOperationMock).toHaveBeenCalledTimes(1));
+      expect(updateMoneyOperationMock).toHaveBeenCalledWith(44, expect.objectContaining({ linkedInvoiceId: 301, matchStatus: 'Matched',
+        moneyAccountId: 101, amount: operation.amount, date: operation.date, currency: operation.currency, direction: operation.direction }));
+      expect(createMoneyOperationMock).not.toHaveBeenCalled();
+    });
+
+    it.each(['permission', 'close'] as const)('cancels a pending invoice page after %s and ignores its completion', async mode => {
+      const user = userEvent.setup();
+      prepare();
+      let complete!: (page: ReturnType<typeof candidatePage>) => void;
+      getMoneyOperationInvoiceCandidatePageMock.mockImplementation(async (_id, search, cursor) => cursor
+        ? new Promise(resolve => { complete = resolve; }) : candidatePage(cursor, search));
+      const { dialog, rerender } = await openBatch(user);
+      await user.click(within(dialog).getByRole('button', { name: 'Открыть денежную операцию строки 1' }));
+      const editor = await screen.findByRole('dialog', { name: 'Редактировать операцию по банку' });
+      await within(editor).findByRole('button', { name: /Счёт 201/ });
+      await user.click(within(editor).getByRole('button', { name: 'Далее по счетам' }));
+      await waitFor(() => expect(complete).toBeDefined());
+      const signal = getMoneyOperationInvoiceCandidatePageMock.mock.calls.find(call => call[2] === 'page-two')![3];
+      if (mode === 'permission') { permissionsState.paymentsCanEdit = false; rerender(<MoneyOperations source="Bank" />); }
+      else await user.click(within(editor).getByRole('button', { name: 'Закрыть форму денежной операции' }));
+      await waitFor(() => expect(signal.aborted).toBe(true));
+      await act(async () => complete(candidatePage('page-two')));
+      expect(screen.queryByRole('dialog', { name: 'Редактировать операцию по банку' })).toBeNull();
+      expect(screen.queryByRole('button', { name: /Счёт 301/ })).toBeNull();
+      expect(updateMoneyOperationMock).not.toHaveBeenCalled();
+    });
+
+    it('searches invoices only on explicit submission and resets without selecting or saving', async () => {
+      const user = userEvent.setup();
+      prepare();
+      getMoneyOperationInvoiceCandidatesMock.mockResolvedValue(candidates());
+      const { dialog } = await openBatch(user);
+      await user.click(within(dialog).getByRole('button', { name: 'Открыть денежную операцию строки 1' }));
+      const editor = await screen.findByRole('dialog', { name: 'Редактировать операцию по банку' });
+      await within(editor).findByRole('button', { name: /Счёт 201/ });
+      const previousCount = getMoneyOperationInvoiceCandidatesMock.mock.calls.length;
+      fireEvent.change(within(editor).getByRole('searchbox'), { target: { value: '  Ёжик &%_' } });
+      expect(getMoneyOperationInvoiceCandidatesMock).toHaveBeenCalledTimes(previousCount);
+      await user.click(within(editor).getByRole('button', { name: 'Найти счёт' }));
+      await waitFor(() => expect(getMoneyOperationInvoiceCandidatesMock).toHaveBeenLastCalledWith(44, 'Ёжик &%_', expect.any(AbortSignal)));
+      expect(getMoneyOperationInvoiceCandidatesMock.mock.calls[0][2]?.aborted).toBe(true);
+      await within(editor).findByRole('button', { name: /Счёт 201/ });
+      expect(within(editor).getByLabelText('ID счёта')).toHaveProperty('value', '');
+      await user.click(within(editor).getByRole('button', { name: 'Сбросить поиск счетов' }));
+      await waitFor(() => expect(getMoneyOperationInvoiceCandidatesMock).toHaveBeenLastCalledWith(44, undefined, expect.any(AbortSignal)));
+      expect(within(editor).getByRole('searchbox')).toHaveProperty('value', '');
+      expect(updateMoneyOperationMock).not.toHaveBeenCalled();
+      expect(createMoneyOperationMock).not.toHaveBeenCalled();
+    });
+
+    it('discards an older invoice search response and cancels its request', async () => {
+      const user = userEvent.setup();
+      prepare();
+      let complete!: (items: ReturnType<typeof candidates>) => void;
+      getMoneyOperationInvoiceCandidatesMock.mockImplementation(async (_id, query) => query === 'первый'
+        ? new Promise(resolve => { complete = resolve; }) : candidates().filter(item => item.invoiceId === 202));
+      const { dialog } = await openBatch(user);
+      await user.click(within(dialog).getByRole('button', { name: 'Открыть денежную операцию строки 1' }));
+      const editor = await screen.findByRole('dialog', { name: 'Редактировать операцию по банку' });
+      const input = within(editor).getByRole('searchbox');
+      fireEvent.change(input, { target: { value: 'первый' } });
+      await user.click(within(editor).getByRole('button', { name: 'Найти счёт' }));
+      await waitFor(() => expect(complete).toBeDefined());
+      const firstSignal = getMoneyOperationInvoiceCandidatesMock.mock.calls.find(call => call[1] === 'первый')![2];
+      fireEvent.change(input, { target: { value: 'второй' } });
+      await user.click(within(editor).getByRole('button', { name: 'Найти счёт' }));
+      await within(editor).findByRole('button', { name: /Счёт 202/ });
+      expect(firstSignal?.aborted).toBe(true);
+      await act(async () => complete(candidates().filter(item => item.invoiceId === 201)));
+      expect(within(editor).queryByRole('button', { name: /Счёт 201/ })).toBeNull();
+      expect(within(editor).getByRole('button', { name: /Счёт 202/ })).toBeTruthy();
+      expect(updateMoneyOperationMock).not.toHaveBeenCalled();
+    });
+
+    it('shows a failed invoice search separately from no matches and permits retry', async () => {
+      const user = userEvent.setup();
+      prepare();
+      let failed = true;
+      getMoneyOperationInvoiceCandidatesMock.mockImplementation(async (_id, query) => {
+        if (query && failed) throw new Error('404 old server');
+        return candidates();
+      });
+      const { dialog } = await openBatch(user);
+      await user.click(within(dialog).getByRole('button', { name: 'Открыть денежную операцию строки 1' }));
+      const editor = await screen.findByRole('dialog', { name: 'Редактировать операцию по банку' });
+      fireEvent.change(within(editor).getByRole('searchbox'), { target: { value: 'Счёт в хвосте' } });
+      await user.click(within(editor).getByRole('button', { name: 'Найти счёт' }));
+      await within(editor).findByRole('alert');
+      expect(within(editor).queryByText(/По запросу счета не найдены/)).toBeNull();
+      expect(within(editor).queryByRole('button', { name: /Счёт 201/ })).toBeNull();
+      failed = false;
+      await user.click(within(editor).getByRole('button', { name: 'Найти счёт' }));
+      await within(editor).findByRole('button', { name: /Счёт 201/ });
+      expect(within(editor).queryByRole('alert')).toBeNull();
+      expect(within(editor).getByLabelText('ID счёта')).toHaveProperty('value', '');
+    });
+
+    it('saves only the explicitly selected searched invoice without changing bank facts', async () => {
+      const user = userEvent.setup();
+      const operation = prepare();
+      const found = { ...candidates()[1], invoiceId: 999, invoiceNumber: 'Хвост-999' };
+      getMoneyOperationInvoiceCandidatesMock.mockImplementation(async (_id, query) => query ? [found] : candidates());
+      updateMoneyOperationMock.mockImplementation(async (_id, payload) => payload);
+      const { dialog } = await openBatch(user);
+      await user.click(within(dialog).getByRole('button', { name: 'Открыть денежную операцию строки 1' }));
+      const editor = await screen.findByRole('dialog', { name: 'Редактировать операцию по банку' });
+      fireEvent.change(within(editor).getByRole('searchbox'), { target: { value: 'Хвост' } });
+      await user.click(within(editor).getByRole('button', { name: 'Найти счёт' }));
+      await user.click(await within(editor).findByRole('button', { name: /Счёт Хвост-999/ }));
+      await user.click(within(editor).getByRole('button', { name: 'Сохранить' }));
+      await waitFor(() => expect(updateMoneyOperationMock).toHaveBeenCalledTimes(1));
+      expect(updateMoneyOperationMock).toHaveBeenCalledWith(44, expect.objectContaining({
+        linkedInvoiceId: 999, matchStatus: 'Matched', amount: operation.amount, date: operation.date,
+        moneyAccountId: 101, source: 'Bank', direction: operation.direction, currency: operation.currency,
+      }));
+      expect(createMoneyOperationMock).not.toHaveBeenCalled();
+    });
+
+    it('loads the current operation and returns to the filtered page on Escape without saving', async () => {
+      const user = userEvent.setup();
+      prepare();
+      operations = [createOperation({ id: 44, moneyAccountId: 101, purpose: 'Старые кешированные данные' })];
+      getMoneyOperationInvoiceCandidatesMock.mockResolvedValue(candidates());
+      const { dialog } = await openBatch(user);
+      await filteredSecondPage(user, dialog);
+      fireEvent.change(within(dialog).getByRole('searchbox'), { target: { value: 'Ещё не применённый запрос' } });
+      const beforeOpen = getBankStatementImportMock.mock.calls.length;
+      await user.click(within(dialog).getByRole('button', { name: 'Открыть денежную операцию строки 51' }));
+      const editor = await screen.findByRole('dialog', { name: 'Редактировать операцию по банку' });
+      expect(await within(editor).findByDisplayValue('Свежие данные операции')).toBeTruthy();
+      expect(getMoneyOperationMock).toHaveBeenCalledWith(44, expect.objectContaining({ aborted: false }));
+      expect(screen.queryByRole('dialog', { name: 'statement.csv' })).toBeNull();
+      await waitFor(() => expect(document.activeElement).toBe(within(editor).getByRole('button', { name: 'Закрыть форму денежной операции' })));
+      expect(within(editor).getByLabelText('ID счёта')).toHaveProperty('value', '');
+      await user.click(await within(editor).findByRole('button', { name: /Счёт 202/ }));
+      expect(within(editor).getByLabelText('ID счёта')).toHaveProperty('value', '202');
+      expect(updateMoneyOperationMock).not.toHaveBeenCalled();
+      await user.keyboard('{Escape}');
+      const restored = await screen.findByRole('dialog', { name: 'statement.csv' });
+      expect(within(restored).getByText(/Страница 2 из 2/)).toBeTruthy();
+      expect(within(restored).getByRole('searchbox')).toHaveProperty('value', 'Ещё не применённый запрос');
+      expect(within(restored).getByText('Поиск: «ёжик». Найдено: 70 из 130.')).toBeTruthy();
+      expect(getBankStatementImportMock).toHaveBeenCalledTimes(beforeOpen);
+      expect(updateMoneyOperationMock).not.toHaveBeenCalled();
+      expect(createMoneyOperationMock).not.toHaveBeenCalled();
+    }, 15000);
+
+    it('saves only the explicitly selected invoice and refreshes the same package page', async () => {
+      const user = userEvent.setup();
+      prepare();
+      getMoneyOperationInvoiceCandidatesMock.mockResolvedValue(candidates());
+      const { dialog } = await openBatch(user);
+      await filteredSecondPage(user, dialog);
+      await user.click(within(dialog).getByRole('button', { name: 'Открыть денежную операцию строки 51' }));
+      const editor = await screen.findByRole('dialog', { name: 'Редактировать операцию по банку' });
+      await user.click(await within(editor).findByRole('button', { name: /Счёт 202/ }));
+      expect(updateMoneyOperationMock).not.toHaveBeenCalled();
+      await user.click(within(editor).getByRole('button', { name: 'Сохранить' }));
+      await waitFor(() => expect(updateMoneyOperationMock).toHaveBeenCalledTimes(1));
+      expect(updateMoneyOperationMock).toHaveBeenCalledWith(44, expect.objectContaining({ linkedInvoiceId: 202, paidInvoiceNumber: '202',
+        matchStatus: 'Matched', amount: 25000, currency: 'RUB', moneyAccountId: 101, source: 'Bank' }));
+      const restored = await screen.findByRole('dialog', { name: 'statement.csv' });
+      expect(within(restored).getByText(/Страница 2 из 2/)).toBeTruthy();
+      expect(getBankStatementImportMock).toHaveBeenLastCalledWith(1, 2, 'ёжик', expect.objectContaining({ aborted: false }));
+      expect(createMoneyOperationMock).not.toHaveBeenCalled();
+    }, 15000);
+
+    it.each(['account', 'source', 'identity', 'readonly', 'denied'] as const)('keeps the package open when the loaded operation is invalid: %s', async (mode) => {
+      const user = userEvent.setup();
+      const operation = prepare();
+      if (mode === 'denied') getMoneyOperationMock.mockRejectedValueOnce(new Error('Нет доступа к операции'));
+      else getMoneyOperationMock.mockResolvedValueOnce({ ...operation, ...(mode === 'account' ? { moneyAccountId: 102 }
+        : mode === 'source' ? { source: 'Cash' } : mode === 'identity' ? { id: 45 } : { isReadonly: true }) });
+      const { dialog } = await openBatch(user);
+      await user.click(within(dialog).getByRole('button', { name: 'Открыть денежную операцию строки 1' }));
+      await waitFor(() => expect(toastErrorMock).toHaveBeenCalled());
+      expect(screen.getByRole('dialog', { name: 'statement.csv' })).toBeTruthy();
+      expect(screen.queryByRole('dialog', { name: 'Редактировать операцию по банку' })).toBeNull();
+      expect(updateMoneyOperationMock).not.toHaveBeenCalled();
+      expect(createMoneyOperationMock).not.toHaveBeenCalled();
+    }, 15000);
+
+    it.each(['close', 'revoke', 'source'] as const)('discards a late operation open after %s', async (mode) => {
+      const user = userEvent.setup();
+      const operation = prepare();
+      let complete!: (value: MoneyOperation) => void;
+      let signal!: AbortSignal;
+      getMoneyOperationMock.mockImplementationOnce((_id: number, cancellation: AbortSignal) => { signal = cancellation; return new Promise<MoneyOperation>(resolve => { complete = resolve; }); });
+      const { dialog, rerender } = await openBatch(user);
+      await user.click(within(dialog).getByRole('button', { name: 'Открыть денежную операцию строки 1' }));
+      await waitFor(() => expect(complete).toBeDefined());
+      if (mode === 'close') await user.click(within(dialog).getByRole('button', { name: 'Закрыть импорт' }));
+      else if (mode === 'revoke') { permissionsState.paymentsCanEdit = false; rerender(<MoneyOperations source="Bank" />); }
+      else rerender(<MoneyOperations source="Cash" />);
+      expect(signal.aborted).toBe(true);
+      await act(async () => complete(operation));
+      expect(screen.queryByRole('dialog', { name: 'Редактировать операцию по банку' })).toBeNull();
+      expect(updateMoneyOperationMock).not.toHaveBeenCalled();
+    }, 15000);
+
+    it('requires edit permission and never creates an operation for a row without a reference', async () => {
+      const user = userEvent.setup();
+      prepare();
+      permissionsState.paymentsCanEdit = false;
+      const original = getBankStatementImportMock.getMockImplementation()!;
+      getBankStatementImportMock.mockImplementation(async (...args: unknown[]) => {
+        const detail = await original(...args);
+        return { ...detail, rows: [...detail.rows, { ...detail.rows[0], id: 999, rowNumber: 2, moneyOperationId: null, status: 'Error' }] };
+      });
+      const { dialog } = await openBatch(user);
+      expect(within(dialog).getByRole('button', { name: 'Открыть денежную операцию строки 1' })).toHaveProperty('disabled', true);
+      expect(within(dialog).queryByRole('button', { name: 'Открыть денежную операцию строки 2' })).toBeNull();
+      expect(within(dialog).getByText('Операция не создана')).toBeTruthy();
+      expect(getMoneyOperationMock).not.toHaveBeenCalled();
+      expect(createMoneyOperationMock).not.toHaveBeenCalled();
+    }, 15000);
+
+    it.each(['permission', 'source'] as const)('closes the bank operation editor when its %s changes', async (mode) => {
+      const user = userEvent.setup();
+      prepare();
+      const { dialog, rerender } = await openBatch(user);
+      await user.click(within(dialog).getByRole('button', { name: 'Открыть денежную операцию строки 1' }));
+      await screen.findByRole('dialog', { name: 'Редактировать операцию по банку' });
+      if (mode === 'permission') { permissionsState.paymentsCanEdit = false; rerender(<MoneyOperations source="Bank" />); }
+      else rerender(<MoneyOperations source="Cash" />);
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Редактировать операцию по банку' })).toBeNull());
+      expect(screen.queryByRole('dialog', { name: 'statement.csv' })).toBeNull();
+      expect(updateMoneyOperationMock).not.toHaveBeenCalled();
+    }, 15000);
+
+    it('locks bank movement facts while keeping classification and explicit invoice selection available', async () => {
+      const user = userEvent.setup();
+      prepare();
+      getMoneyOperationInvoiceCandidatesMock.mockResolvedValue(candidates());
+      const { dialog } = await openBatch(user);
+      await user.click(within(dialog).getByRole('button', { name: 'Открыть денежную операцию строки 1' }));
+      const editor = await screen.findByRole('dialog', { name: 'Редактировать операцию по банку' });
+      expect(within(editor).getByLabelText('Сумма, RUB')).toHaveProperty('disabled', true);
+      expect(within(editor).getByLabelText('Дата')).toHaveProperty('disabled', true);
+      expect(within(editor).getByLabelText('Номер ПП')).toHaveProperty('disabled', true);
+      expect(within(editor).getByRole('combobox', { name: /^Банковский счёт\./ })).toHaveProperty('disabled', true);
+      expect(within(editor).getByRole('combobox', { name: /^Тип учёта денежной операции\./ })).toHaveProperty('disabled', true);
+      expect(within(editor).getByRole('combobox', { name: /^Количество денежных операций\./ })).toHaveProperty('disabled', true);
+      expect(within(editor).getByRole('radio', { name: 'Расход' })).toHaveProperty('disabled', true);
+      expect(within(editor).getByLabelText('Статья расхода')).not.toHaveProperty('disabled', true);
+      expect(within(editor).getByLabelText('ID счёта')).not.toHaveProperty('disabled', true);
+      expect(await within(editor).findByRole('button', { name: /Счёт 202/ })).not.toHaveProperty('disabled', true);
+      expect(updateMoneyOperationMock).not.toHaveBeenCalled();
+    }, 15000);
+
+    it.each(['permission', 'new-editor'] as const)('discards an old operation save response after %s', async (mode) => {
+      const user = userEvent.setup();
+      const operation = prepare();
+      getMoneyOperationInvoiceCandidatesMock.mockResolvedValue(candidates());
+      let complete!: (value: MoneyOperation) => void;
+      updateMoneyOperationMock.mockImplementationOnce(() => new Promise<MoneyOperation>(resolve => { complete = resolve; }));
+      const { dialog, rerender } = await openBatch(user);
+      await user.click(within(dialog).getByRole('button', { name: 'Открыть денежную операцию строки 1' }));
+      const editor = await screen.findByRole('dialog', { name: 'Редактировать операцию по банку' });
+      await user.click(await within(editor).findByRole('button', { name: /Счёт 202/ }));
+      await user.click(within(editor).getByRole('button', { name: 'Сохранить' }));
+      await waitFor(() => expect(complete).toBeDefined());
+      const detailCalls = getBankStatementImportMock.mock.calls.length;
+      if (mode === 'permission') { permissionsState.paymentsCanEdit = false; rerender(<MoneyOperations source="Bank" />); }
+      else {
+        await user.click(within(editor).getByRole('button', { name: 'Закрыть форму денежной операции' }));
+        const restored = await screen.findByRole('dialog', { name: 'statement.csv' });
+        await user.click(within(restored).getByRole('button', { name: 'Открыть денежную операцию строки 1' }));
+        await screen.findByRole('dialog', { name: 'Редактировать операцию по банку' });
+      }
+      await act(async () => complete({ ...operation, linkedInvoiceId: 202, matchStatus: 'Matched' }));
+      if (mode === 'permission') expect(screen.queryByRole('dialog', { name: 'Редактировать операцию по банку' })).toBeNull();
+      else expect(screen.getByRole('dialog', { name: 'Редактировать операцию по банку' })).toBeTruthy();
+      expect(getBankStatementImportMock).toHaveBeenCalledTimes(detailCalls);
+      expect(updateMoneyOperationMock).toHaveBeenCalledTimes(1);
+      expect(createMoneyOperationMock).not.toHaveBeenCalled();
+    }, 15000);
+
+    it.each(['missing', 'null', 'USD'] as const)('preserves the operation currency without assuming rubles: %s', async (mode) => {
+      const user = userEvent.setup();
+      const operation = prepare();
+      if (mode === 'missing') delete operation.currency;
+      else operation.currency = mode === 'null' ? null : 'USD';
+      const { dialog } = await openBatch(user);
+      await user.click(within(dialog).getByRole('button', { name: 'Открыть денежную операцию строки 1' }));
+      const editor = await screen.findByRole('dialog', { name: 'Редактировать операцию по банку' });
+      expect(within(editor).getByLabelText(`Сумма, ${mode === 'USD' ? 'USD' : 'валюта не указана'}`)).toHaveProperty('value', '25000');
+      expect(within(editor).getByLabelText('ID счёта')).toHaveProperty('disabled', true);
+      expect(getMoneyOperationInvoiceCandidatesMock).not.toHaveBeenCalled();
+      await user.click(within(editor).getByRole('button', { name: 'Закрыть форму денежной операции' }));
+      expect(updateMoneyOperationMock).not.toHaveBeenCalled();
+    }, 15000);
+  });
+
+  it.each([
+    ['rollback', 'close'], ['rollback', 'revoke'], ['reprocess', 'close'], ['reprocess', 'revoke'],
+  ] as const)('does not reopen bank import detail after a late %s response following %s', async (action, change) => {
+    const user = userEvent.setup();
+    const original = getBankStatementImportMock.getMockImplementation()!;
+    getBankStatementImportMock.mockImplementation(async (id: number) => ({ ...await original(id), hasReprocessableRows: true }));
+    let complete!: (value: unknown) => void;
+    const mutation = action === 'rollback' ? rollbackBankStatementImportMock : reprocessBankStatementImportMock;
+    mutation.mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
+    importBankStatementMock.mockResolvedValueOnce({ batchId: 1, rowsRead: 1, created: 1, skipped: 0, errors: [], operations: [] });
+    const { container, rerender } = render(<MoneyOperations source="Bank" />);
+    await selectBankImportAccount(user);
+    await user.click(screen.getByRole('button', { name: 'Загрузить выписку' }));
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(['synthetic'], 'statement.csv')] } });
+    const dialog = await screen.findByRole('dialog', { name: 'statement.csv' });
+    await user.click(within(dialog).getByRole('button', { name: action === 'rollback' ? /Откатить импорт/ : /Повторить обработку/ }));
+    await waitFor(() => expect(mutation).toHaveBeenCalledWith(1));
+    const detailCalls = getBankStatementImportMock.mock.calls.length;
+    if (change === 'close') await user.click(within(dialog).getByRole('button', { name: 'Закрыть импорт' }));
+    else { permissionsState.paymentsCanCreate = false; rerender(<MoneyOperations source="Bank" />); }
+    await act(async () => complete(action === 'rollback'
+      ? { batchId: 1, status: 'RolledBack', deletedOperations: 1, skippedRows: 0, messages: [] }
+      : { batchId: 1, rowsRead: 1, created: 1, skipped: 0, errors: [], operations: [] }));
+    expect(screen.queryByRole('dialog', { name: 'statement.csv' })).toBeNull();
+    expect(getBankStatementImportMock).toHaveBeenCalledTimes(detailCalls);
+    expect(mutation).toHaveBeenCalledTimes(1);
+  }, 15000);
+
+  it.each([
+    ['rollback', 'close'], ['rollback', 'revoke'], ['reprocess', 'close'], ['reprocess', 'revoke'],
+  ] as const)('discards a late bank import detail refresh after %s and %s', async (action, change) => {
+    const user = userEvent.setup();
+    const original = getBankStatementImportMock.getMockImplementation()!;
+    getBankStatementImportMock.mockImplementation(async (id: number) => ({ ...await original(id), hasReprocessableRows: true }));
+    importBankStatementMock.mockResolvedValueOnce({ batchId: 1, rowsRead: 1, created: 1, skipped: 0, errors: [], operations: [] });
+    const { container, rerender } = render(<MoneyOperations source="Bank" />);
+    await selectBankImportAccount(user);
+    await user.click(screen.getByRole('button', { name: 'Загрузить выписку' }));
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(['synthetic'], 'statement.csv')] } });
+    const dialog = await screen.findByRole('dialog', { name: 'statement.csv' });
+    let complete!: (value: unknown) => void;
+    getBankStatementImportMock.mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
+    await user.click(within(dialog).getByRole('button', { name: action === 'rollback' ? /Откатить импорт/ : /Повторить обработку/ }));
+    await waitFor(() => expect(complete).toBeDefined());
+    if (change === 'close') await user.click(within(dialog).getByRole('button', { name: 'Закрыть импорт' }));
+    else { permissionsState.paymentsCanCreate = false; rerender(<MoneyOperations source="Bank" />); }
+    await act(async () => complete(await original(1)));
+    expect(screen.queryByRole('dialog', { name: 'statement.csv' })).toBeNull();
+  }, 15000);
+
+  it.each(['close', 'revoke'] as const)('does not submit a delayed rollback confirmation after %s', async (change) => {
+    const user = userEvent.setup();
+    let approve!: (value: boolean) => void;
+    dialogConfirmMock.mockImplementationOnce(() => new Promise<boolean>(resolve => { approve = resolve; }));
+    importBankStatementMock.mockResolvedValueOnce({ batchId: 1, rowsRead: 1, created: 1, skipped: 0, errors: [], operations: [] });
+    const { container, rerender } = render(<MoneyOperations source="Bank" />);
+    await selectBankImportAccount(user);
+    await user.click(screen.getByRole('button', { name: 'Загрузить выписку' }));
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(['synthetic'], 'statement.csv')] } });
+    const dialog = await screen.findByRole('dialog', { name: 'statement.csv' });
+    await user.click(within(dialog).getByRole('button', { name: /Откатить импорт/ }));
+    await waitFor(() => expect(approve).toBeDefined());
+    if (change === 'close') await user.click(within(dialog).getByRole('button', { name: 'Закрыть импорт' }));
+    else { permissionsState.paymentsCanCreate = false; rerender(<MoneyOperations source="Bank" />); }
+    await act(async () => approve(true));
+    expect(rollbackBankStatementImportMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: 'statement.csv' })).toBeNull();
+  }, 15000);
+
+  it.each(['rollback', 'reprocess'] as const)('retains the applied bank import row search after %s', async (action) => {
+    const user = userEvent.setup();
+    const original = getBankStatementImportMock.getMockImplementation()!;
+    getBankStatementImportMock.mockImplementation(async (id: number, page = 1, search?: string) => ({ ...await original(id),
+      rowsPage: page, rowsPageSize: 50, rowsTotal: 130, rowsSearch: search ?? null, rowsMatched: search ? 70 : null, hasReprocessableRows: true }));
+    importBankStatementMock.mockResolvedValueOnce({ batchId: 1, rowsRead: 1, created: 1, skipped: 0, errors: [], operations: [] });
+    const { container } = render(<MoneyOperations source="Bank" />);
+    await selectBankImportAccount(user);
+    await user.click(screen.getByRole('button', { name: 'Загрузить выписку' }));
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(['synthetic'], 'statement.csv')] } });
+    const dialog = await screen.findByRole('dialog', { name: 'statement.csv' });
+    fireEvent.change(within(dialog).getByRole('searchbox'), { target: { value: 'ёжик' } });
+    await user.click(within(dialog).getByRole('button', { name: 'Найти' }));
+    await within(dialog).findByText('Поиск: «ёжик». Найдено: 70 из 130.');
+    await user.click(within(dialog).getByRole('button', { name: 'Далее' }));
+    await within(dialog).findByText(/Страница 2 из 2/);
+    await user.click(within(dialog).getByRole('button', { name: action === 'rollback' ? /Откатить импорт/ : /Повторить обработку/ }));
+    await waitFor(() => expect(getBankStatementImportMock).toHaveBeenLastCalledWith(1, 1, 'ёжик', expect.objectContaining({ aborted: false })));
+    expect(within(dialog).getByText('Поиск: «ёжик». Найдено: 70 из 130.')).toBeTruthy();
+    expect(within(dialog).getByText(/Страница 1 из 2/)).toBeTruthy();
+    expect(action === 'rollback' ? rollbackBankStatementImportMock : reprocessBankStatementImportMock).toHaveBeenCalledTimes(1);
+  }, 15000);
+
+  it('searches the whole bank import from page one, preserves the search on paging and clears it explicitly', async () => {
+    const user = userEvent.setup();
+    const original = getBankStatementImportMock.getMockImplementation()!;
+    getBankStatementImportMock.mockImplementation(async (id: number, page = 1, search?: string) => {
+      const detail = await original(id);
+      return { ...detail, rowsPage: page, rowsPageSize: 50, rowsTotal: 130, hasReprocessableRows: true,
+        rowsSearch: search ?? null, rowsMatched: search ? 70 : null,
+        rows: [{ ...detail.rows[0], counterpartyName: search ? `Совпадение ${page}` : `Без поиска ${page}` }] };
+    });
+    importBankStatementMock.mockResolvedValueOnce({ batchId: 1, rowsRead: 130, created: 129, skipped: 0, errors: [], operations: [] });
+    const { container } = render(<MoneyOperations source="Bank" />);
+    await selectBankImportAccount(user);
+    await user.click(screen.getByRole('button', { name: 'Загрузить выписку' }));
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(['synthetic'], 'statement.csv')] } });
+    const dialog = await screen.findByRole('dialog', { name: 'statement.csv' });
+    expect(within(dialog).getByText('Поручение №101')).toBeTruthy();
+    await user.click(within(dialog).getByRole('button', { name: 'Далее' }));
+    await within(dialog).findByText('Без поиска 2');
+    fireEvent.change(within(dialog).getByRole('searchbox', { name: 'Поиск по строкам выписки' }), { target: { value: '  ЁЖИК &%_?  ' } });
+    await user.click(within(dialog).getByRole('button', { name: 'Найти' }));
+    expect(await within(dialog).findByText('Совпадение 1')).toBeTruthy();
+    expect(getBankStatementImportMock).toHaveBeenLastCalledWith(1, 1, 'ЁЖИК &%_?', expect.objectContaining({ aborted: false }));
+    expect(within(dialog).getByText('Поиск: «ЁЖИК &%_?». Найдено: 70 из 130.')).toBeTruthy();
+    expect(within(dialog).getByText(/Страница 1 из 2/)).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: /Повторить обработку/ })).not.toHaveProperty('disabled', true);
+    await user.click(within(dialog).getByRole('button', { name: 'Далее' }));
+    expect(await within(dialog).findByText('Совпадение 2')).toBeTruthy();
+    expect(getBankStatementImportMock).toHaveBeenLastCalledWith(1, 2, 'ЁЖИК &%_?', expect.objectContaining({ aborted: false }));
+    await user.click(within(dialog).getByRole('button', { name: 'Сбросить поиск' }));
+    expect(await within(dialog).findByText('Без поиска 1')).toBeTruthy();
+    expect(getBankStatementImportMock).toHaveBeenLastCalledWith(1);
+    expect(within(dialog).getByRole('searchbox')).toHaveProperty('value', '');
+    expect(rollbackBankStatementImportMock).not.toHaveBeenCalled();
+    expect(reprocessBankStatementImportMock).not.toHaveBeenCalled();
+  }, 15000);
+
+  it.each(['request-error', 'missing-acknowledgement'] as const)('keeps the previous bank import page and search draft on %s', async (mode) => {
+    const user = userEvent.setup();
+    const original = getBankStatementImportMock.getMockImplementation()!;
+    let attempts = 0;
+    getBankStatementImportMock.mockImplementation(async (id: number, page = 1, search?: string) => {
+      const detail = await original(id);
+      if (search && attempts++ === 0) {
+        if (mode === 'request-error') throw new Error('Поиск недоступен');
+        return detail;
+      }
+      return { ...detail, rowsPage: page, rowsPageSize: 50, rowsTotal: 80, rowsSearch: search ?? null,
+        rowsMatched: search ? 0 : null, rows: search ? [] : [{ ...detail.rows[0], counterpartyName: `Исходная страница ${page}` }] };
+    });
+    importBankStatementMock.mockResolvedValueOnce({ batchId: 1, rowsRead: 80, created: 80, skipped: 0, errors: [], operations: [] });
+    const { container } = render(<MoneyOperations source="Bank" />);
+    await selectBankImportAccount(user);
+    await user.click(screen.getByRole('button', { name: 'Загрузить выписку' }));
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(['synthetic'], 'statement.csv')] } });
+    const dialog = await screen.findByRole('dialog', { name: 'statement.csv' });
+    await user.click(within(dialog).getByRole('button', { name: 'Далее' }));
+    await within(dialog).findByText('Исходная страница 2');
+    fireEvent.change(within(dialog).getByRole('searchbox'), { target: { value: 'новый запрос' } });
+    await user.click(within(dialog).getByRole('button', { name: 'Найти' }));
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith(mode === 'request-error' ? 'Поиск недоступен'
+      : 'Сервер не подтвердил поиск по выписке. Обновите приложение и повторите действие.', 'Выписка банка'));
+    expect(within(dialog).getByText('Исходная страница 2')).toBeTruthy();
+    expect(within(dialog).getByRole('searchbox')).toHaveProperty('value', 'новый запрос');
+    await user.click(within(dialog).getByRole('button', { name: 'Найти' }));
+    expect(await within(dialog).findByText('Строки импорта не найдены.')).toBeTruthy();
+    expect(within(dialog).getByText('Поиск: «новый запрос». Найдено: 0 из 80.')).toBeTruthy();
+    expect(within(dialog).queryByRole('button', { name: 'Далее' })).toBeNull();
+  }, 15000);
+
+  it.each(['readonly-view', 'visibility-narrowed', 'edit-only'] as const)(
+    'discards bank import row search results after a distinct permission change: %s', async (mode) => {
+      const user = userEvent.setup();
+      const original = getBankStatementImportMock.getMockImplementation()!;
+      if (mode === 'readonly-view') permissionsState.paymentsCanCreate = false;
+      getBankStatementImportsMock.mockResolvedValue({ items: [await original(1)], total: 1, page: 1, pageSize: 5 });
+      let complete!: (value: unknown) => void;
+      let signal!: AbortSignal;
+      getBankStatementImportMock.mockImplementation(async (id: number, _page?: number, search?: string, cancellation?: AbortSignal) => {
+        if (search) { signal = cancellation!; return new Promise(resolve => { complete = resolve; }); }
+        return original(id);
+      });
+      const { rerender } = render(<MoneyOperations source="Bank" />);
+      await user.click(await screen.findByRole('button', { name: 'Открыть журнал импортов выписки' }));
+      await user.click(await screen.findByRole('button', { name: 'Открыть импорт выписки statement.csv' }));
+      const dialog = await screen.findByRole('dialog', { name: 'statement.csv' });
+      fireEvent.change(within(dialog).getByRole('searchbox'), { target: { value: 'защищённый поиск' } });
+      await user.click(within(dialog).getByRole('button', { name: 'Найти' }));
+      await waitFor(() => expect(complete).toBeDefined());
+      if (mode === 'readonly-view') permissionsState.paymentsCanView = false;
+      else if (mode === 'visibility-narrowed') permissionsState.paymentsViewScope = 'own';
+      else permissionsState.paymentsCanEdit = false;
+      rerender(<MoneyOperations source="Bank" />);
+      await act(async () => complete({ ...await original(1), rowsSearch: 'защищённый поиск', rowsMatched: 1 }));
+      expect(screen.queryByRole('dialog', { name: 'statement.csv' })).toBeNull();
+      expect(signal.aborted).toBe(true);
+    }, 15000,
+  );
+
+  it.each(['close', 'revoke'] as const)('aborts a bank import row search on %s and discards a late response', async (mode) => {
+    const user = userEvent.setup();
+    const original = getBankStatementImportMock.getMockImplementation()!;
+    let complete!: (value: unknown) => void;
+    let signal!: AbortSignal;
+    getBankStatementImportMock.mockImplementation(async (id: number, _page?: number, search?: string, cancellation?: AbortSignal) => {
+      if (search) { signal = cancellation!; return new Promise(resolve => { complete = resolve; }); }
+      return original(id);
+    });
+    getBankStatementImportsMock.mockResolvedValue({ items: [await original(1)], total: 1, page: 1, pageSize: 5 });
+    importBankStatementMock.mockResolvedValueOnce({ batchId: 1, rowsRead: 1, created: 1, skipped: 0, errors: [], operations: [] });
+    const { container, rerender } = render(<MoneyOperations source="Bank" />);
+    await selectBankImportAccount(user);
+    await user.click(screen.getByRole('button', { name: 'Загрузить выписку' }));
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(['synthetic'], 'statement.csv')] } });
+    const dialog = await screen.findByRole('dialog', { name: 'statement.csv' });
+    fireEvent.change(within(dialog).getByRole('searchbox'), { target: { value: 'поздний' } });
+    await user.click(within(dialog).getByRole('button', { name: 'Найти' }));
+    await waitFor(() => expect(signal).toBeDefined());
+    if (mode === 'close') await user.click(within(dialog).getByRole('button', { name: 'Закрыть импорт' }));
+    else { permissionsState.paymentsCanCreate = false; rerender(<MoneyOperations source="Bank" />); }
+    await waitFor(() => expect(signal.aborted).toBe(true));
+    await act(async () => complete({ ...await original(1), rowsSearch: 'поздний', rowsMatched: 1 }));
+    expect(screen.queryByRole('dialog', { name: 'statement.csv' })).toBeNull();
+    if (mode === 'close') {
+      await user.click(screen.getByRole('button', { name: 'Открыть импорт выписки statement.csv' }));
+      const reopened = await screen.findByRole('dialog', { name: 'statement.csv' });
+      expect(within(reopened).getByRole('searchbox')).toHaveProperty('value', '');
+    }
+  }, 15000);
+
+  it('pages a long imported batch while keeping actions available for errors on another page', async () => {
+    const user = userEvent.setup();
+    const original = getBankStatementImportMock.getMockImplementation()!;
+    getBankStatementImportMock.mockImplementation(async (id: number, page?: number) => {
+      const detail = await original(id);
+      return { ...detail, rowsPage: page ?? 1, rowsPageSize: 50, rowsTotal: 101, hasReprocessableRows: true,
+        rows: [{ ...detail.rows[0], id: page ?? 1, rowNumber: page === 2 ? 51 : 1, counterpartyName: page === 2 ? 'Вторая страница' : 'Первая страница' }] };
+    });
+    importBankStatementMock.mockResolvedValueOnce({ batchId: 1, rowsRead: 101, created: 100, skipped: 1, errors: [], operations: [] });
+    const { container } = render(<MoneyOperations source="Bank" />);
+    await selectBankImportAccount(user);
+    await user.click(screen.getByRole('button', { name: 'Загрузить выписку' }));
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(['synthetic'], 'statement.csv')] } });
+    const dialog = await screen.findByRole('dialog', { name: 'statement.csv' });
+    expect(within(dialog).getByText('Первая страница')).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: /Повторить обработку/ })).not.toHaveProperty('disabled', true);
+    await user.click(within(dialog).getByRole('button', { name: 'Далее' }));
+    expect(await within(dialog).findByText('Вторая страница')).toBeTruthy();
+    expect(getBankStatementImportMock).toHaveBeenCalledWith(1, 2);
+    expect(within(dialog).getByText(/Страница 2 из 3/)).toBeTruthy();
+    await user.click(within(dialog).getByRole('button', { name: 'Назад' }));
+    expect(await within(dialog).findByText('Первая страница')).toBeTruthy();
+    expect(rollbackBankStatementImportMock).not.toHaveBeenCalled();
+    expect(reprocessBankStatementImportMock).not.toHaveBeenCalled();
+  }, 15000);
+
+  it('keeps the current import page on a failed page request and allows retry', async () => {
+    const user = userEvent.setup();
+    const original = getBankStatementImportMock.getMockImplementation()!;
+    let failed = false;
+    getBankStatementImportMock.mockImplementation(async (id: number, page?: number) => {
+      if (page === 2 && !failed) { failed = true; throw new Error('Страница недоступна'); }
+      const detail = await original(id);
+      return { ...detail, rowsPage: page ?? 1, rowsPageSize: 50, rowsTotal: 51,
+        rows: [{ ...detail.rows[0], counterpartyName: page === 2 ? 'Вторая страница' : 'Первая страница' }] };
+    });
+    importBankStatementMock.mockResolvedValueOnce({ batchId: 1, rowsRead: 51, created: 51, skipped: 0, errors: [], operations: [] });
+    const { container } = render(<MoneyOperations source="Bank" />);
+    await selectBankImportAccount(user);
+    await user.click(screen.getByRole('button', { name: 'Загрузить выписку' }));
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(['synthetic'], 'statement.csv')] } });
+    const dialog = await screen.findByRole('dialog', { name: 'statement.csv' });
+    await user.click(within(dialog).getByRole('button', { name: 'Далее' }));
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith('Страница недоступна', 'Выписка банка'));
+    expect(within(dialog).getByText('Первая страница')).toBeTruthy();
+    await user.click(within(dialog).getByRole('button', { name: 'Далее' }));
+    expect(await within(dialog).findByText('Вторая страница')).toBeTruthy();
+  }, 15000);
+
+  it('keeps the successful import result when opening its detail fails', async () => {
+    const user = userEvent.setup();
+    importBankStatementMock.mockResolvedValueOnce({ batchId: 1, rowsRead: 1, created: 1, skipped: 0, errors: [], operations: [] });
+    getBankStatementImportMock.mockRejectedValueOnce(new Error('Синтетическая ошибка карточки'));
+    const { container } = render(<MoneyOperations source="Bank" />);
+    await selectBankImportAccount(user);
+    await user.click(screen.getByRole('button', { name: 'Загрузить выписку' }));
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(['synthetic'], 'statement.csv')] } });
+    await screen.findByText('Импорт выписки: прочитано 1, создано 1, пропущено 0');
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith('Синтетическая ошибка карточки', 'Выписка банка'));
+    expect(importBankStatementMock).toHaveBeenCalledTimes(1);
+    expect(rollbackBankStatementImportMock).not.toHaveBeenCalled();
   }, 15000);
 
   it('loads and saves bank statement auto import settings', async () => {
@@ -3979,6 +5480,31 @@ describe('MoneyOperations integration', () => {
 
     await waitFor(() => expect(rollbackBankStatementImportMock).toHaveBeenCalledWith(1));
     expect(toastSuccessMock).toHaveBeenCalledWith('Откат импорта: удалено операций 1, пропущено строк 0.', 'Выписка банка');
+  }, 15000);
+
+  it('shows the stored currency of each imported row without assuming rubles', async () => {
+    const user = userEvent.setup();
+    const defaultDetails = getBankStatementImportMock.getMockImplementation()!;
+    getBankStatementImportMock.mockImplementationOnce(async (id: number) => {
+      const detail = await defaultDetails(id);
+      return { ...detail, rows: [
+        { ...detail.rows[0], id: 1, rowNumber: 1, amount: 101, currency: 'RUB' },
+        { ...detail.rows[0], id: 2, rowNumber: 2, amount: 102, currency: 'USD' },
+        { ...detail.rows[0], id: 3, rowNumber: 3, amount: 103, currency: null },
+        { ...detail.rows[0], id: 4, rowNumber: 4, amount: 104 },
+      ] };
+    });
+    getBankStatementImportsMock.mockResolvedValue({ items: [{ id: 1, fileName: 'statement.csv', status: 'Applied', rowsRead: 4,
+      createdRows: 4, skippedRows: 0, errorRows: 0, rollbackRows: 0, createdAt: '2026-04-29T10:00:00Z', rolledBackAt: null }],
+    total: 1, page: 1, pageSize: 5 });
+    render(<MoneyOperations source="Bank" />);
+    await user.click(screen.getByRole('button', { name: 'Открыть журнал импортов выписки' }));
+    await screen.findByText('statement.csv');
+    await user.click(screen.getByRole('button', { name: 'Открыть импорт выписки statement.csv' }));
+    expect(await screen.findByText('101,00 ₽')).toBeTruthy();
+    expect(screen.getByText('102,00 USD')).toBeTruthy();
+    expect(screen.getByText('103,00 валюта не указана')).toBeTruthy();
+    expect(screen.getByText('104,00 валюта не указана')).toBeTruthy();
   }, 15000);
 
   it('reprocesses a rolled back bank import batch', async () => {

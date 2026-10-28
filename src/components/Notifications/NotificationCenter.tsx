@@ -388,13 +388,16 @@ export function NotificationCenter({
   }, [knownTypeKeys]);
 
   useEffect(() => {
+    const nextSearch = searchInput.trim();
+    if (nextSearch === search) return undefined;
+
     const timer = window.setTimeout(() => {
-      setSearch(searchInput.trim());
+      setSearch(nextSearch);
       setPage(1);
     }, 300);
 
     return () => window.clearTimeout(timer);
-  }, [searchInput]);
+  }, [searchInput, search]);
 
   const refresh = useCallback(() => {
     let alive = true;

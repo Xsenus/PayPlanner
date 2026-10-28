@@ -4963,7 +4963,7 @@ public partial class CasesV2Controller : ControllerBase
 
         if (latestOnly)
         {
-            query = query.Where(item => !_db.ClientCaseDocuments.Any(other =>
+            query = query.Where(item => item.DocumentKey == null || item.DocumentKey == "" || !_db.ClientCaseDocuments.Any(other =>
                 other.ClientCaseId == item.ClientCaseId &&
                 other.DocumentKey == item.DocumentKey &&
                 other.Version > item.Version));
@@ -5012,9 +5012,11 @@ public partial class CasesV2Controller : ControllerBase
             return NotFound();
         }
 
-        var latestVersion = await _db.ClientCaseDocuments
-            .Where(item => item.ClientCaseId == document.ClientCaseId && item.DocumentKey == document.DocumentKey)
-            .MaxAsync(item => (int?)item.Version, ct) ?? document.Version;
+        var latestVersion = string.IsNullOrEmpty(document.DocumentKey)
+            ? document.Version
+            : await _db.ClientCaseDocuments
+                .Where(item => item.ClientCaseId == document.ClientCaseId && item.DocumentKey == document.DocumentKey)
+                .MaxAsync(item => (int?)item.Version, ct) ?? document.Version;
 
         var templates = await GetCaseDocumentTemplateLibraryAsync(ct);
         return Ok(MapDocument(document, document.Version == latestVersion, templates));
@@ -12596,6 +12598,7 @@ public partial class CasesV2Controller : ControllerBase
         IReadOnlyCollection<CaseDocumentTemplateDefinition>? templates = null)
     {
         var versionGroups = documents
+            .Where(item => !string.IsNullOrEmpty(item.DocumentKey))
             .GroupBy(item => item.DocumentKey, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(
                 group => group.Key,
@@ -12605,9 +12608,10 @@ public partial class CasesV2Controller : ControllerBase
         return documents
             .Select(item =>
             {
+                if (string.IsNullOrEmpty(item.DocumentKey)) return MapDocument(item, true, templates);
                 var group = versionGroups[item.DocumentKey];
                 var dto = MapDocument(item, item.Version == group.LatestVersion, templates);
-                dto.VersionGroupId = string.IsNullOrEmpty(item.DocumentKey) ? null : group.GroupId;
+                dto.VersionGroupId = group.GroupId;
                 return dto;
             })
             .ToList();
@@ -12623,7 +12627,8 @@ public partial class CasesV2Controller : ControllerBase
         }
 
         var caseIds = documents.Select(item => item.ClientCaseId).Distinct().ToArray();
-        var documentKeys = documents.Select(item => item.DocumentKey).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var documentKeys = documents.Where(item => !string.IsNullOrEmpty(item.DocumentKey))
+            .Select(item => item.DocumentKey).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         var latestVersions = await _db.ClientCaseDocuments
             .AsNoTracking()
             .Where(item => caseIds.Contains(item.ClientCaseId) && documentKeys.Contains(item.DocumentKey))
@@ -12645,7 +12650,8 @@ public partial class CasesV2Controller : ControllerBase
         return documents
             .Select(item => MapDocument(
                 item,
-                latestByKey.TryGetValue($"{item.ClientCaseId}:{item.DocumentKey}", out var latest) && item.Version == latest,
+                string.IsNullOrEmpty(item.DocumentKey) ||
+                    latestByKey.TryGetValue($"{item.ClientCaseId}:{item.DocumentKey}", out var latest) && item.Version == latest,
                 templates))
             .ToList();
     }

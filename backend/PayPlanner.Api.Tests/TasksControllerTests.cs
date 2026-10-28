@@ -29,6 +29,38 @@ namespace PayPlanner.Api.Tests;
 
 public partial class TasksControllerTests : IDisposable
 {
+    private sealed class RevokingReadStream(byte[] data, Func<Task> revoke) : MemoryStream(data)
+    {
+        private bool called;
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (!called) { called = true; await revoke(); }
+            return await base.ReadAsync(buffer, cancellationToken);
+        }
+    }
+
+    [Fact]
+    public async Task UploadFile_RejectsAccessRevokedDuringStreamProbe()
+    {
+        using var storage = new TaskUploadStorageScope();
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "probe-author@example.test", "Автор");
+        var assignee = await CreateTaskUserAsync(db, "probe-assignee@example.test", "Исполнитель", canEdit: false);
+        var client = await CreateClientAsync(db, "Синтетический клиент");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id);
+        var controller = CreateController(db, new RecordingNotificationService(), assignee, configuration: storage.Configuration);
+        var bytes = Encoding.UTF8.GetBytes("synthetic file");
+        using var stream = new RevokingReadStream(bytes, async () => {
+            await db.Users.Where(x => x.Id == assignee.Id).ExecuteUpdateAsync(s => s.SetProperty(x => x.IsActive, false));
+        });
+        var file = new FormFile(stream, 0, bytes.Length, "file", "probe.txt") { Headers = new HeaderDictionary(), ContentType = "text/plain" };
+        var result = await controller.UploadFile(task.Id, file, null, CancellationToken.None);
+        Assert.IsType<ForbidResult>(result.Result);
+        Assert.Empty(await db.TaskJournalFiles.AsNoTracking().ToListAsync());
+        Assert.Empty(await db.ClientCaseDocuments.AsNoTracking().ToListAsync());
+        Assert.Empty(Directory.EnumerateFiles(storage.Root, "*", SearchOption.AllDirectories));
+    }
+
     private const string FileStoragePrefix = "pp-task-controller-";
     private readonly string _fileStorageRoot = Path.GetFullPath(
         Path.Combine(Path.GetTempPath(), FileStoragePrefix + Guid.NewGuid().ToString("N")));
@@ -3182,6 +3214,79 @@ public partial class TasksControllerTests : IDisposable
         Assert.Equal("onApproval", dto.Status);
         Assert.Equal("Работа выполнена, документы приложены к задаче.", dto.Result);
         Assert.Contains(task.Id, notifications.ApprovalRequestedTaskIds);
+    }
+
+    [Fact]
+    public async Task UpdateStatus_ExecutorCanRepeatIdenticalCompletionWithoutChangingTaskOrNotifyingAgain()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "completion-retry-author@example.test", "Автор");
+        var executor = await CreateTaskUserAsync(db, "completion-retry-worker@example.test", "Исполнитель", canEdit: false);
+        var client = await CreateClientAsync(db, "Синтетический клиент");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, executor.Id);
+        db.SystemSettings.Add(new SystemSetting { Key = "tasks.executorCompletionAllowedUserIds", Value = $"[{executor.Id}]" });
+        await db.SaveChangesAsync();
+        var notifications = new RecordingNotificationService();
+        var controller = CreateController(db, notifications, executor);
+        var request = new UpdateTaskJournalStatusRequest { Status = "done", Result = "Синтетический результат" };
+        Assert.IsType<OkObjectResult>((await controller.UpdateStatus(task.Id, request, CancellationToken.None)).Result);
+        var before = await db.TaskJournalItems.AsNoTracking().SingleAsync(t => t.Id == task.Id);
+        var history = await db.TaskJournalComments.CountAsync(c => c.TaskJournalItemId == task.Id);
+        var payments = await db.Payments.CountAsync();
+        Assert.Single(notifications.CompletedTaskIds);
+        db.ChangeTracker.Clear();
+        Assert.IsType<OkObjectResult>((await controller.UpdateStatus(task.Id, request, CancellationToken.None)).Result);
+        var after = await db.TaskJournalItems.AsNoTracking().SingleAsync(t => t.Id == task.Id);
+        Assert.Equal(before.UpdatedAt, after.UpdatedAt);
+        Assert.Equal(history, await db.TaskJournalComments.CountAsync(c => c.TaskJournalItemId == task.Id));
+        Assert.Equal(payments, await db.Payments.CountAsync());
+        Assert.Single(notifications.CompletedTaskIds);
+        var correction = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest { Status = "done", Result = "Уточнённый результат" }, CancellationToken.None);
+        Assert.IsType<OkObjectResult>(correction.Result);
+        Assert.Equal("Уточнённый результат", (await db.TaskJournalItems.AsNoTracking().SingleAsync(t => t.Id == task.Id)).Result);
+        Assert.Equal(payments, await db.Payments.CountAsync());
+        Assert.Single(notifications.CompletedTaskIds);
+    }
+
+    [Fact]
+    public async Task UpdateStatus_ExecutorCanRepeatIdenticalApprovalAfterLostResponseWithoutSideEffects()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "retry-approval-author@example.test", "Автор");
+        var executor = await CreateTaskUserAsync(db, "retry-approval-executor@example.test", "Исполнитель", canEdit: false);
+        var client = await CreateClientAsync(db, "Синтетический клиент");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, executor.Id);
+        var notifications = new RecordingNotificationService();
+        var controller = CreateController(db, notifications, executor);
+        var request = new UpdateTaskJournalStatusRequest { Status = "onApproval", Result = "Синтетический результат" };
+        Assert.IsType<OkObjectResult>((await controller.UpdateStatus(task.Id, request, CancellationToken.None)).Result);
+        var before = await db.TaskJournalItems.AsNoTracking().SingleAsync(t => t.Id == task.Id);
+        var historyCount = await db.TaskJournalComments.CountAsync(c => c.TaskJournalItemId == task.Id);
+        var participantCount = await db.TaskJournalParticipants.CountAsync(p => p.TaskJournalItemId == task.Id);
+        Assert.Single(notifications.ApprovalRequestedTaskIds);
+        db.ChangeTracker.Clear();
+
+        var repeated = await controller.UpdateStatus(task.Id, request, CancellationToken.None);
+        var dto = Assert.IsType<TaskJournalItemDto>(Assert.IsType<OkObjectResult>(repeated.Result).Value);
+        Assert.Equal("onApproval", dto.Status);
+        Assert.Equal("Синтетический результат", dto.Result);
+        var after = await db.TaskJournalItems.AsNoTracking().SingleAsync(t => t.Id == task.Id);
+        Assert.Equal(before.UpdatedAt, after.UpdatedAt);
+        Assert.Equal(historyCount, await db.TaskJournalComments.CountAsync(c => c.TaskJournalItemId == task.Id));
+        Assert.Equal(participantCount, await db.TaskJournalParticipants.CountAsync(p => p.TaskJournalItemId == task.Id));
+        Assert.Single(notifications.ApprovalRequestedTaskIds);
+        var changed = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest { Status = "onApproval", Result = "Другой результат" }, CancellationToken.None);
+        Assert.IsType<ForbidResult>(changed.Result);
+        var changedDue = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest { Status = "onApproval", Result = "Синтетический результат", DueAt = task.DueAt.AddDays(1) }, CancellationToken.None);
+        Assert.IsType<ForbidResult>(changedDue.Result);
+        var empty = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest { Status = "onApproval", Result = "" }, CancellationToken.None);
+        Assert.IsType<ForbidResult>(empty.Result);
+        Assert.Equal("Синтетический результат", (await db.TaskJournalItems.AsNoTracking().SingleAsync(t => t.Id == task.Id)).Result);
+        var observer = await CreateTaskUserAsync(db, "retry-approval-observer@example.test", "Наблюдатель", canEdit: false);
+        db.TaskJournalParticipants.Add(new TaskJournalParticipant { TaskJournalItemId = task.Id, UserId = observer.Id, Role = "observer", DisplayName = observer.FullName });
+        await db.SaveChangesAsync();
+        var observerController = CreateController(db, new RecordingNotificationService(), observer);
+        Assert.IsType<ForbidResult>((await observerController.UpdateStatus(task.Id, request, CancellationToken.None)).Result);
     }
 
     [Fact]
@@ -9455,10 +9560,21 @@ public partial class TasksControllerTests : IDisposable
         Assert.Equal(assignee.Id, file.UploadedByUserId);
         Assert.Single(await db.TaskJournalFiles.Where(item => item.TaskJournalItemId == task.Id).ToListAsync());
 
+        var nextResult = await controller.UploadFile(task.Id, CreateFormFile("Вторая версия", "результат-v2.txt"), file.DocumentKey, CancellationToken.None);
+        var next = Assert.IsType<TaskJournalFileDto>(Assert.IsType<CreatedResult>(nextResult.Result).Value);
+        Assert.Equal(file.DocumentKey, next.DocumentKey);
+        Assert.Equal(2, next.Version);
         Assert.IsType<ForbidResult>(await controller.DeleteFile(task.Id, file.Id, CancellationToken.None));
-        Assert.Single(await db.TaskJournalFiles.Where(item => item.TaskJournalItemId == task.Id).ToListAsync());
+        task.AssigneeUserId = null;
+        task.AssigneeName = string.Empty;
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var rejected = await controller.UploadFile(task.Id, CreateFormFile("После отзыва", "результат-v3.txt"), file.DocumentKey, CancellationToken.None);
+        Assert.IsType<NotFoundResult>(rejected.Result);
+        Assert.Equal(2, await db.TaskJournalFiles.CountAsync(item => item.TaskJournalItemId == task.Id));
 
         var adminController = CreateController(db, new RecordingNotificationService(), author, configuration: storage.Configuration);
+        Assert.IsType<NoContentResult>(await adminController.DeleteFile(task.Id, next.Id, CancellationToken.None));
         Assert.IsType<NoContentResult>(await adminController.DeleteFile(task.Id, file.Id, CancellationToken.None));
     }
 
@@ -11822,8 +11938,9 @@ public partial class TasksControllerTests : IDisposable
         }
     }
 
-    private sealed class RecordingNotificationService : INotificationService
+    private sealed class RecordingNotificationService : INotificationService, IDurableTaskStatusNotificationService
     {
+        public bool FailDurableDelivery { get; set; }
         public List<int> CompletedTaskIds { get; } = [];
         public List<(int TaskId, string Action)> CancelledTaskIds { get; } = [];
         public List<int> AssignedTaskIds { get; } = [];
@@ -11911,6 +12028,12 @@ public partial class TasksControllerTests : IDisposable
             return Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
         }
 
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyCompletionForEventAsync(TaskJournalItem task, string eventKey, CancellationToken cancellationToken = default)
+            => FailDurableDelivery ? throw new IOException("Injected durable delivery failure.") : NotifyTaskCompletedAsync(task, cancellationToken);
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyApprovalForEventAsync(TaskJournalItem task, string actorName, int actorUserId, string eventKey, CancellationToken cancellationToken = default)
+            => FailDurableDelivery ? throw new IOException("Injected durable delivery failure.") : NotifyTaskApprovalRequestedAsync(task, actorName, actorUserId, cancellationToken);
+
         public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskCancelledAsync(TaskJournalItem task, string actorName, int actorUserId, string action, CancellationToken cancellationToken = default)
         {
             CancelledTaskIds.Add((task.Id, action));
@@ -11934,6 +12057,9 @@ public partial class TasksControllerTests : IDisposable
             ApprovalDecisionTaskIds.Add((task.Id, decision));
             return Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
         }
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskDeadlineReviewerAssignedAsync(TaskJournalItem task, TaskJournalDeadlineChangeRequest request, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
 
         public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskDeadlineChangeRequestedAsync(TaskJournalItem task, TaskJournalDeadlineChangeRequest request, CancellationToken cancellationToken = default)
         {

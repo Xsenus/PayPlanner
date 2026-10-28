@@ -323,6 +323,8 @@ function AppContent() {
   );
 
   const [activeTab, setActiveTab] = useState<Tab>(getInitialTab);
+  const [taskBillingAnalysis, setTaskBillingAnalysis] = useState<{ ownerId: number; open: boolean } | null>(null);
+  const [taskBillingOrganization, setTaskBillingOrganization] = useState<{ ownerId: number; id: number } | null>(null);
   const [routeOwnerId, setRouteOwnerId] = useState<number | null>(null);
   const hasEstablishedRouteOwner = useRef(false);
   const [selectedClientId, setSelectedClientId] = useState<number | null>(getInitialClientId);
@@ -475,8 +477,9 @@ function AppContent() {
   );
 
   const getTaskReturnTab = useCallback(
-    (): Tab => (activeTab === 'tasksApprovals' || activeTab === 'tasksCalendar' || activeTab === 'tasksControl' || activeTab === 'tasksUntriaged' ? activeTab : 'tasks'),
-    [activeTab],
+    (): Tab => (activeTab === 'accountsIncome' && taskBillingAnalysis?.open ? 'accountsIncome'
+      : activeTab === 'tasksApprovals' || activeTab === 'tasksCalendar' || activeTab === 'tasksControl' || activeTab === 'tasksUntriaged' ? activeTab : 'tasks'),
+    [activeTab, taskBillingAnalysis?.open],
   );
 
   const handleOpenTaskClient = useCallback(
@@ -537,6 +540,27 @@ function AppContent() {
     },
     [activeTab, logActivity, permissions.legalEntities.canView, toast],
   );
+
+  const handleOpenBillingOrganization = useCallback(async (legalEntityId: number) => {
+    if (!permissions.legalEntities.canView || !user) {
+      toast.error('Доступ к карточке юридического лица запрещен.');
+      return;
+    }
+    try {
+      await apiService.getLegalEntity(legalEntityId);
+      setTaskBillingOrganization({ ownerId: user.id, id: legalEntityId });
+    } catch (err) {
+      toast.error(extractDisplayErrorMessage(err, 'Доступ к карточке юридического лица запрещен или карточка недоступна.'));
+    }
+  }, [permissions.legalEntities.canView, toast, user]);
+
+  const closeBillingOrganization = useCallback(() => setTaskBillingOrganization(null), []);
+
+  useEffect(() => {
+    if (!user || !permissions.accounts.canView || !permissions.tasks.canView || !permissions.legalEntities.canView) {
+      setTaskBillingOrganization(null);
+    }
+  }, [permissions.accounts.canView, permissions.legalEntities.canView, permissions.tasks.canView, user]);
 
   const handleContactScopeChange = useCallback((nextScope: ContactScope) => {
     setActiveTab(nextScope === 'people' || nextScope === 'clients'
@@ -739,6 +763,7 @@ function AppContent() {
     }
 
     setSelectedInvoiceId(null);
+    setTaskBillingAnalysis((current) => current ? { ...current, open: false } : null);
     setCaseInvoiceCreateDraft({ key: Date.now(), draft });
     setActiveTab('accountsIncome');
   }, [permissions.accounts.canCreate, toast]);
@@ -1524,6 +1549,7 @@ function AppContent() {
               setActiveTab(caseReturnTab === 'caseDetail' ? 'cases' : caseReturnTab);
               setCaseReturnTab('cases');
             }}
+            backLabel={caseReturnTab === 'accountsIncome' && taskBillingAnalysis?.open ? 'К анализу оплаты задач' : undefined}
             onOpenClient={(clientId, caseId) =>
               handleOpenClient(clientId, caseId, { returnTo: { tab: 'caseDetail' } })
             }
@@ -1714,12 +1740,15 @@ function AppContent() {
       case 'accountsIncome':
         return permissions.accounts.canView
           ? (
+              <>
+              <div hidden={Boolean(permissions.tasks.canView && taskBillingAnalysis?.ownerId === user.id && taskBillingAnalysis.open)}>
               <Accounts
                 routeInvoiceId={selectedInvoiceId}
                 onRouteInvoiceChange={handleRouteInvoiceChange}
                 onRouteInvoicePageBack={handleBackToClientFromInvoicePage}
                 defaultType="Income"
                 lockType
+                onOpenTaskBilling={permissions.tasks.canView ? () => setTaskBillingAnalysis({ ownerId: user.id, open: true }) : undefined}
                 initialCreateDraft={caseInvoiceCreateDraft}
                 onInitialCreateDraftHandled={(key) => {
                   setCaseInvoiceCreateDraft((current) => (current?.key === key ? null : current));
@@ -1738,6 +1767,8 @@ function AppContent() {
                   })
                 }
               />
+              </div>
+              </>
             )
           : renderNoAccess('Раздел счетов недоступен для вашей роли.');
 
@@ -2162,6 +2193,32 @@ function AppContent() {
             >
               <Suspense fallback={renderPageLoader()}>
                 <ActiveTabContent render={renderContent} />
+                {permissions.accounts.canView && permissions.tasks.canView && taskBillingAnalysis?.ownerId === user.id && (
+                  activeTab === 'accountsIncome'
+                  || (activeTab === 'caseDetail' && caseReturnTab === 'accountsIncome')
+                  || (activeTab === 'clientDetail' && (clientReturnTab?.tab === 'accountsIncome'
+                    || (clientReturnTab?.tab === 'caseDetail' && caseReturnTab === 'accountsIncome')))
+                ) && (
+                  <div hidden={activeTab !== 'accountsIncome' || !taskBillingAnalysis.open || Boolean(permissions.legalEntities.canView && taskBillingOrganization?.ownerId === user.id)}>
+                    <div className="px-3 pt-3 lg:px-4">
+                      <button type="button" onClick={() => setTaskBillingAnalysis({ ownerId: user.id, open: false })}
+                        className="rounded border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
+                        К доходным счетам
+                      </button>
+                    </div>
+                    <TaskJournal
+                      key={`accounting-billing-${user.id}`}
+                      billingAnalysisMode
+                      onOpenClient={handleOpenTaskClient}
+                      onOpenCase={openRelatedCase}
+                      onOpenLegalEntity={handleOpenBillingOrganization}
+                      onCreateInvoiceDraft={permissions.accounts.canCreate ? openTaskBillingInvoiceDraft : undefined}
+                    />
+                  </div>
+                )}
+                {activeTab === 'accountsIncome' && permissions.accounts.canView && permissions.tasks.canView && permissions.legalEntities.canView && taskBillingAnalysis?.ownerId === user.id && taskBillingAnalysis.open && taskBillingOrganization?.ownerId === user.id && (
+                  <LegalEntities initialLegalEntityId={taskBillingOrganization.id} detailOnly onDetailClose={closeBillingOrganization} />
+                )}
               </Suspense>
             </RouteErrorBoundary>
           </main>

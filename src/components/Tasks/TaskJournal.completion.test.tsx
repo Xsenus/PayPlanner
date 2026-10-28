@@ -681,8 +681,10 @@ describe('TaskJournal', () => {
     expect(within(card).queryByRole('button', { name: 'Удалить файл' })).toBeNull();
   });
 
-  it('allows executor to upload a new file version in the modern read-only task card', async () => {
+  it.each(['legacy', 'modern'] as const)('allows executor to upload a new file version without general edit permission in the %s card', async (taskCardWindowMode) => {
     authState.isAdmin = false;
+    permissionsState.taskCanEdit = false;
+    permissionsState.taskCanEditOthers = false;
     authState.user = { id: 7, fullName: 'Исполнитель', email: 'assignee@example.com' };
     apiMock.getTaskJournalFiles.mockResolvedValueOnce([{
       id: 600,
@@ -707,12 +709,13 @@ describe('TaskJournal', () => {
           { userId: 7, role: 'assignee', displayName: 'Исполнитель', approvalStatus: 'pending' },
         ],
       }),
-    ], { settings: { taskCardWindowMode: 'modern', executorCompletionAllowedUserIds: [] } });
+    ], { settings: { taskCardWindowMode, executorCompletionAllowedUserIds: [] } });
 
     fireEvent.click(screen.getByTitle('Просмотр'));
-    const card = await screen.findByTestId('task-modern-card-window');
-    fireEvent.click(within(card).getByRole('tab', { name: 'Файлы 1' }));
-    const versionButton = await within(card).findByRole('button', { name: 'Загрузить новую версию document.pdf' });
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    expect(within(card).queryByRole('button', { name: 'Редактировать задачу' })).toBeNull();
+    if (taskCardWindowMode === 'modern') fireEvent.click(within(card).getByRole('tab', { name: 'Файлы 1' }));
+    const versionButton = await within(card).findByRole('button', { name: taskCardWindowMode === 'modern' ? 'Загрузить новую версию document.pdf' : 'Новая версия' });
     const versionInput = versionButton.previousElementSibling as HTMLInputElement;
     const file = new File(['Исправленная версия'], 'document-v2.pdf', { type: 'application/pdf' });
     fireEvent.change(versionInput, { target: { files: [file] } });
@@ -762,6 +765,8 @@ describe('TaskJournal', () => {
     ['legacy', 'onApproval'], ['modern', 'onApproval'], ['legacy', 'done'], ['modern', 'done'],
   ] as const)('retains the executor result and does not retransmit pending files in the %s card for %s', async (taskCardWindowMode, targetStatus) => {
     authState.isAdmin = false;
+    permissionsState.taskCanEdit = false;
+    permissionsState.taskCanEditOthers = false;
     authState.user = { id: 7, fullName: 'Исполнитель', email: 'assignee@example.com' };
     await renderJournal([createTask({ assigneeUserId: 7, assigneeName: 'Исполнитель', authorUserId: 8, authorName: 'Постановщик', result: '',
       participants: [{ userId: 7, role: 'assignee', displayName: 'Исполнитель', approvalStatus: 'pending' }] })],
@@ -794,9 +799,29 @@ describe('TaskJournal', () => {
     apiMock.getTaskFileUploadStates.mockResolvedValue([{ uploadKey: 'pending-key', status: 'uploaded', fileId: 601 }]);
     apiMock.getTaskJournalFiles.mockResolvedValue([{ id: 601, taskJournalItemId: 101, documentKey: 'doc-1', version: 1,
       originalFileName: 'результат.pdf', contentType: 'application/pdf', sizeBytes: 9, uploadedByName: 'Исполнитель', uploadedAt: todayAt(10), isLatestVersion: true }]);
+    let committedSubmissions = 0;
+    apiMock.updateTaskJournalStatus.mockImplementationOnce(async () => {
+      committedSubmissions += 1;
+      throw new Error('Потерян ответ после сохранения.');
+    }).mockImplementationOnce(async (_id, status, result) => {
+      expect(committedSubmissions).toBe(1);
+      expect(status).toBe(targetStatus);
+      expect(result).toBe('Работа выполнена.');
+      return createTask({ status: targetStatus, result });
+    });
+    await waitFor(() => expect((screen.getAllByRole('button', { name: actionName }).at(-1)! as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getAllByRole('button', { name: actionName }).at(-1)!);
-    await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(101, targetStatus, 'Работа выполнена.'));
+    await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/Не удалось подтвердить сохранение результата задачи/)).toBeTruthy();
+    expect((document.getElementById('task-completion-result') as HTMLTextAreaElement).value).toBe('Работа выполнена.');
+    expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledTimes(1);
     expect(apiMock.uploadTaskJournalFile).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect((screen.getAllByRole('button', { name: actionName }).at(-1)! as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getAllByRole('button', { name: actionName }).at(-1)!);
+    await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledTimes(2));
+    expect(apiMock.updateTaskJournalStatus).toHaveBeenLastCalledWith(101, targetStatus, 'Работа выполнена.');
+    expect(apiMock.uploadTaskJournalFile).toHaveBeenCalledTimes(1);
+    expect(committedSubmissions).toBe(1);
     cleanup();
   });
 

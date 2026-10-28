@@ -11,6 +11,11 @@ namespace PayPlanner.Api.Services;
 /// </summary>
 public static class MoneyOperationInvoiceAllocationService
 {
+    // Existing CRM invoices are denominated in rubles. A missing operation
+    // currency is not evidence that the bank movement was in rubles.
+    public static bool HasConfirmedRubleCurrency(MoneyOperation operation)
+        => string.Equals(operation.Currency?.Trim(), "RUB", StringComparison.OrdinalIgnoreCase);
+
     public static async Task ApplyAsync(
         PaymentContext db,
         MoneyOperation operation,
@@ -22,6 +27,8 @@ public static class MoneyOperationInvoiceAllocationService
         {
             return;
         }
+        if (!HasConfirmedRubleCurrency(operation))
+            throw new InvalidOperationException("Валюта денежной операции не подтверждена как рубли; сверка со счётом недоступна.");
 
         var targetType = operation.Direction == MoneyOperationDirection.Expense ? PaymentType.Expense : PaymentType.Income;
         var payments = loadedPayments is null

@@ -6,6 +6,7 @@ import type { Payment } from '../../types';
 
 type Props = {
   onOpen?: (payment: Payment, attempt: PendingPaymentCreate) => Promise<boolean> | boolean;
+  onAcknowledged?: (payment: Payment, attempt: PendingPaymentCreate) => void;
   onCancelled?: (attempt: PendingPaymentCreate) => void;
   scopeVersion?: () => string | number;
   beforeOpen?: (attempt: PendingPaymentCreate) => Promise<boolean>;
@@ -13,7 +14,7 @@ type Props = {
 
 // One compact recovery surface for the common editor and the direct Calculator consumer.
 // Metadata has no form values. A recovered payment is opened only by an explicit user action.
-export function PaymentCreateRecovery({ onOpen, onCancelled, beforeOpen, scopeVersion }: Props) {
+export function PaymentCreateRecovery({ onOpen, onAcknowledged, onCancelled, beforeOpen, scopeVersion }: Props) {
   const live = useRef(0);
   const busyRef = useRef(false);
   const session = useRef(paymentCreateSessionVersion());
@@ -68,7 +69,10 @@ export function PaymentCreateRecovery({ onOpen, onCancelled, beforeOpen, scopeVe
         // A changed actor still forbids acknowledgement; navigation after successful adoption does not.
         if (!isPaymentCreateOwnerCurrent(actor)) return;
         await apiService.acknowledgePaymentCreate(entry, saved);
-        if (current()) setNotice(`Сохранён платёж №${saved.id}.`);
+        if (current()) {
+          onAcknowledged?.(saved, entry);
+          setNotice(`Сохранён платёж №${saved.id}.`);
+        }
       } else {
         const state = await apiService.inspectPaymentCreate(entry, action === 'cancel');
         if (!current()) return;

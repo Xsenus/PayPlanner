@@ -49,12 +49,12 @@ internal sealed class MoneyJournalQuery(PaymentContext db, MoneyJournalQuerySour
 
     public async Task<List<MoneyOperationDailyBalanceDto>> BuildDailyBalanceRowsAsync(
         DateTime? from, DateTime? to, MoneyOperationSource? source, string? accountName,
-        MoneyJournalVisibility visibility, CancellationToken cancellationToken, MoneyReconciliationScope? scope = null)
+        MoneyJournalVisibility visibility, CancellationToken cancellationToken, MoneyReconciliationScope? scope = null, int? moneyAccountId = null)
     {
         const int maxBalanceRows = 25_000;
         IQueryable<MoneyOperationQueryRow> Rows(DateTime? start, DateTime? end)
         {
-            var query = Build(start, end, source, null, MoneyOperationAccountingType.Fact, null, accountName, null, null);
+            var query = Build(start, end, source, null, MoneyOperationAccountingType.Fact, moneyAccountId, accountName, null, null);
             query = visibility.SeesAll ? query : query.Where(item =>
                 (item.VisibilityResponsibleUserId ?? item.ResponsibleUserId).HasValue
                 && visibility.VisibleUserIds.Contains((item.VisibilityResponsibleUserId ?? item.ResponsibleUserId)!.Value));

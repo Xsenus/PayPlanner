@@ -1,8 +1,84 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { webcrypto } from 'node:crypto';
 
-import { AUTH_SESSION_EXPIRED_EVENT, apiService, extractResponseErrorMessage, STICKY_NOTE_REALTIME_EVENT_TYPES } from './api';
+import { AUTH_SESSION_EXPIRED_EVENT, apiService, extractResponseErrorMessage, StickyNoteConflictError, STICKY_NOTE_REALTIME_EVENT_TYPES } from './api';
 import { resolveApiBaseUrl } from './apiBaseUrl';
+
+describe('bank import row search requests', () => {
+  afterEach(() => { vi.unstubAllGlobals(); localStorage.clear(); });
+
+  it('encodes an opaque invoice page cursor and preserves cancellation and a fresh first page', async () => {
+    localStorage.setItem('pp_token', 'synthetic-token');
+    const payload = { items: [], hasMore: false, search: null, cursor: null, nextCursor: null };
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify(payload), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const cancellation = new AbortController();
+    expect(await apiService.getMoneyOperationInvoiceCandidatePage(44, '  Ёжик  ', 'opaque?&%_cursor', cancellation.signal)).toEqual(payload);
+    const request = new URL(String(fetchMock.mock.calls[0][0]), 'http://fixture.local');
+    expect(request.pathname).toContain('/money-operations/44/invoice-candidates/pages');
+    expect([...request.searchParams]).toEqual([['search', 'Ёжик'], ['cursor', 'opaque?&%_cursor']]);
+    expect(fetchMock.mock.calls[0][1]?.signal).toBe(cancellation.signal);
+    expect(fetchMock.mock.calls[0][1]?.cache).toBe('no-store');
+    await apiService.getMoneyOperationInvoiceCandidatePage(44);
+    expect(String(fetchMock.mock.calls[1][0])).toMatch(/\/money-operations\/44\/invoice-candidates\/pages$/);
+  });
+
+  it('uses a distinct cancellable uncached invoice search route and retains default suggestions', async () => {
+    localStorage.setItem('pp_token', 'synthetic-token');
+    const fetchMock = vi.fn().mockImplementation(async () => new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const cancellation = new AbortController();
+    await apiService.getMoneyOperationInvoiceCandidates(44, "  Ёжик &%_?\\'  ", cancellation.signal);
+    const request = new URL(String(fetchMock.mock.calls[0][0]), 'http://fixture.local');
+    expect(request.pathname).toContain('/money-operations/44/invoice-candidates/search');
+    expect([...request.searchParams]).toEqual([['search', "Ёжик &%_?\\'"]]);
+    expect(fetchMock.mock.calls[0][1]?.signal).toBe(cancellation.signal);
+    expect(fetchMock.mock.calls[0][1]?.cache).toBe('no-store');
+    await apiService.getMoneyOperationInvoiceCandidates(44, '  ');
+    expect(String(fetchMock.mock.calls[1][0])).toMatch(/\/money-operations\/44\/invoice-candidates$/);
+  });
+
+  it('loads a fresh imported operation read with cancellation and without browser caching', async () => {
+    localStorage.setItem('pp_token', 'synthetic-token');
+    const payload = { id: 44, source: 'Bank', moneyAccountId: 101 };
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify(payload), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const cancellation = new AbortController();
+    expect(await apiService.getMoneyOperation(44, cancellation.signal)).toEqual(payload);
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/\/money-operations\/44$/);
+    expect(fetchMock.mock.calls[0][1]?.signal).toBe(cancellation.signal);
+    expect(fetchMock.mock.calls[0][1]?.cache).toBe('no-store');
+    expect(fetchMock.mock.calls[0][1]?.method ?? 'GET').toBe('GET');
+    await apiService.getMoneyOperation(44);
+    expect(fetchMock.mock.calls[1][1]?.cache).toBe('no-store');
+    expect(fetchMock.mock.calls[1][1]?.signal).toBeUndefined();
+  });
+
+  it('encodes bank import row search as literal query data and forwards cancellation', async () => {
+    localStorage.setItem('pp_token', 'synthetic-token');
+    const payload = { id: 17, rowsSearch: "Ёжик &%_?\\'", rowsMatched: 0, rows: [] };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(payload), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const cancellation = new AbortController();
+    expect(await apiService.getBankStatementImport(17, 2, "  Ёжик &%_?\\'  ", cancellation.signal)).toEqual(payload);
+    const [url, options] = fetchMock.mock.calls[0];
+    const request = new URL(String(url), 'http://fixture.local');
+    expect(request.pathname).toContain('/money-operations/bank-statement/imports/17');
+    expect([...request.searchParams]).toEqual([['page', '2'], ['search', "Ёжик &%_?\\'"]]);
+    expect(options?.signal).toBe(cancellation.signal);
+    expect(options?.method ?? 'GET').toBe('GET');
+  });
+
+  it('omits empty bank import row searches and preserves the existing unfiltered endpoint', async () => {
+    localStorage.setItem('pp_token', 'synthetic-token');
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ id: 17, rows: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    await apiService.getBankStatementImport(17, undefined, '  ');
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/\/bank-statement\/imports\/17$/);
+    await apiService.getBankStatementImport(17, 2);
+    expect(String(fetchMock.mock.calls[1][0])).toMatch(/\/bank-statement\/imports\/17\?page=2$/);
+  });
+});
 
 describe('financial work order retry identity', () => {
   const kinds = ['invoice', 'act', 'contract'] as const;
@@ -223,6 +299,7 @@ describe('apiService object audit', () => {
     expect(String(url)).toContain('searchAliases=PhoneNumber');
     expect(String(url)).toContain('page=2');
     expect(options?.signal).toBe(controller.signal);
+    expect(new Headers(options?.headers).get('X-PayPlanner-Currency-Contract')).toBe('1');
   });
 });
 
@@ -629,6 +706,44 @@ describe('apiService summary stats', () => {
 });
 
 describe('apiService money operations', () => {
+  it.each(['read', 'run'])('requests currency-aware saved reconciliation: %s', async (operation) => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(operation === 'read' ? [] : {}), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    if (operation === 'read') await apiService.getMoneyBalanceReconciliationResults({ source: 'Cash' });
+    else await apiService.runMoneyBalanceReconciliation({ source: 'Cash', moneyAccountId: 201 });
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain(`/money-operations/balance-reconciliation${operation === 'run' ? '/run' : ''}?`);
+    expect(new Headers(options?.headers).get('X-PayPlanner-Currency-Contract')).toBe('1');
+    if (operation === 'run') {
+      expect(options?.method).toBe('POST');
+      expect(String(url)).toContain('moneyAccountId=201');
+    }
+  });
+
+  it('requests currency-aware daily balances', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify([]), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    await apiService.getMoneyOperationDailyBalances({ source: 'Cash' });
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/money-operations/daily-balances?');
+    expect(new Headers(options?.headers).get('X-PayPlanner-Currency-Contract')).toBe('1');
+  });
+
+  it('requests currency-aware account summaries', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify([]), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    await apiService.getMoneyOperationAccountSummaries({ source: 'Bank' });
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/money-operations/account-summaries?');
+    expect(new Headers(options?.headers).get('X-PayPlanner-Currency-Contract')).toBe('1');
+  });
+
   it('passes the abort signal to the paged money operations request', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       items: [], total: 0, page: 2, pageSize: 25, summary: {},
@@ -648,6 +763,7 @@ describe('apiService money operations', () => {
     expect(String(url)).toContain('source=Bank');
     expect(String(url)).toContain('page=2');
     expect(options?.signal).toBe(controller.signal);
+    expect(new Headers(options?.headers).get('X-PayPlanner-Currency-Contract')).toBe('1');
   });
 });
 
@@ -750,6 +866,7 @@ describe('apiService cash order reads', () => {
     expect(String(url)).toContain('from=2026-07-01');
     expect(String(url)).toContain('accountName=');
     expect(options?.signal).toBe(controller.signal);
+    expect(new Headers(options?.headers).get('X-PayPlanner-Currency-Contract')).toBe('1');
   });
 });
 
@@ -843,6 +960,38 @@ describe('resolveApiBaseUrl', () => {
     expect(resolveApiBaseUrl({ isProduction: false, pageProtocol: 'http:' })).toBe(
       'http://localhost:5080/api',
     );
+  });
+});
+
+describe('sticky note save conflict response', () => {
+  it.each(['text', 'layout'] as const)('returns the current note to the %s conflict UI', async (kind) => {
+    const serverNote = { id: 11, boardId: 9, text: 'Актуальная версия', color: 'yellow', x: 150, y: 25,
+      width: 220, height: 180, fontSize: 14, isBold: false, isItalic: false, isUnderline: false,
+      opacity: 100, zIndex: 1, version: 2, isPinned: false, assignedUserName: '', authorUserName: '',
+      lastUpdatedByUserName: '', createdAt: '2026-10-28T00:00:00Z' };
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(serverNote), {
+      status: 409, headers: { 'content-type': 'application/json; charset=utf-8' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const layout = { x: 10, y: 20, width: 220, height: 180, zIndex: 1, version: 1 };
+    const request = kind === 'text'
+      ? apiService.updateStickyNote(11, { ...layout, text: 'Мой черновик', color: 'yellow', isPinned: false })
+      : apiService.updateStickyNoteLayout(11, layout);
+    await expect(request).rejects.toMatchObject({ name: 'StickyNoteConflictError', serverNote });
+    await expect(request).rejects.toBeInstanceOf(StickyNoteConflictError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['text', 'layout'] as const)('treats a temporary %s access lock as a retryable error, not a version conflict', async (kind) => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ message: 'Доступ сейчас изменяется.' }), {
+      status: 423, headers: { 'content-type': 'application/json' },
+    })));
+    const layout = { x: 10, y: 20, width: 220, height: 180, zIndex: 1, version: 1 };
+    const request = kind === 'text'
+      ? apiService.updateStickyNote(11, { ...layout, text: 'Мой черновик', color: 'yellow', isPinned: false })
+      : apiService.updateStickyNoteLayout(11, layout);
+    await expect(request).rejects.toThrow('HTTP 423');
+    await expect(request).rejects.not.toBeInstanceOf(StickyNoteConflictError);
   });
 });
 

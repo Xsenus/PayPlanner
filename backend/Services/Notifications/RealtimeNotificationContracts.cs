@@ -24,6 +24,11 @@ public interface IRealtimeNotificationPublisher
     Task PublishTaskJournalChangedAsync(CancellationToken cancellationToken = default);
 }
 
+public interface IReliableRealtimeNotificationPublisher
+{
+    Task PublishUserNotificationOrThrowAsync(UserNotification notification, bool toastEnabled = true, CancellationToken cancellationToken = default);
+}
+
 public interface IRolePermissionsChangePublisher
 {
     Task PublishRolePermissionsChangedAsync(IReadOnlyCollection<int> userIds, CancellationToken cancellationToken = default);

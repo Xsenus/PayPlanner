@@ -725,6 +725,58 @@ describe('ClientDetail integration', () => {
     }));
   });
 
+  it('associates individual profile labels with editable fields', async () => {
+    const user = userEvent.setup();
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+    const mainInfo = await screen.findByRole('region', { name: 'Основная информация' });
+    await user.click(screen.getByRole('button', { name: 'Редактировать' }));
+    for (const name of ['Фамилия', 'Имя', 'Отчество', 'ИНН', 'СНИЛС']) {
+      const input = within(mainInfo).getByRole('textbox', { name: new RegExp(`^${name}`) });
+      const label = within(mainInfo).getByText(new RegExp(`^${name}`), { selector: 'label' });
+      await user.click(label);
+      expect(document.activeElement).toBe(input);
+    }
+  });
+
+  it('labels and opens the individual profile selectors from their visible labels', async () => {
+    const user = userEvent.setup();
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+    const mainInfo = await screen.findByRole('region', { name: 'Основная информация' });
+    await user.click(screen.getByRole('button', { name: 'Редактировать' }));
+    for (const name of ['Пол', 'Семейное положение']) {
+      const selector = within(mainInfo).getByRole('combobox', { name: new RegExp(`^${name}\\.`) });
+      await user.click(within(mainInfo).getByText(name, { selector: 'label' }));
+      expect(selector.getAttribute('aria-expanded')).toBe('true');
+      await user.keyboard('{Escape}');
+      expect(selector.getAttribute('aria-expanded')).toBe('false');
+    }
+  });
+
+  it('selects and saves a historical birth date using an accessible calendar label', async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiService.getClient).mockResolvedValue(createClient({ birthDate: '2000-01-02' }));
+    vi.mocked(apiService.updateClient).mockResolvedValue(createClient({ birthDate: '1945-03-15' }));
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+    await screen.findByRole('region', { name: 'Основная информация' });
+    await user.click(screen.getByRole('button', { name: 'Редактировать' }));
+    const mainInfo = screen.getByRole('region', { name: 'Основная информация' });
+    await user.click(within(mainInfo).getByText('Дата рождения', { selector: 'label' }));
+    expect(document.activeElement).toBe(within(mainInfo).getByLabelText('Дата рождения'));
+    await user.click(screen.getByRole('button', { name: 'Выбрать: Дата рождения' }));
+    await user.click(screen.getByRole('button', { name: 'Выбрать месяц и год' }));
+    const year = screen.getByRole('spinbutton', { name: 'Год' });
+    await user.clear(year);
+    await user.type(year, '1945');
+    await user.click(screen.getByRole('button', { name: 'Март' }));
+    await user.click(screen.getByRole('button', { name: '15.03.1945' }));
+    await user.click(screen.getByRole('button', { name: 'Применить' }));
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(apiService.updateClient).toHaveBeenCalled());
+    const [, payload] = vi.mocked(apiService.updateClient).mock.calls.at(-1) ?? [];
+    const notes = (payload as { notes: string }).notes;
+    expect(JSON.parse(notes.slice(CLIENT_PROFILE_NOTES_PREFIX.length))).toEqual(expect.objectContaining({ birthDate: '1945-03-15' }));
+  });
+
   it('opens the client profile in readonly mode until editing is requested', async () => {
     const user = userEvent.setup();
     const phones = ['+79990000001', '+79990000002'];
@@ -872,6 +924,33 @@ describe('ClientDetail integration', () => {
     const savedNotes = await screen.findByLabelText('Заметки клиента');
     expect([...savedNotes.querySelectorAll('dd')].map((element) => element.textContent)).toEqual([editedComment, legacyNotes]);
     expect(within(savedNotes).queryByRole('textbox')).toBeNull();
+  });
+
+  it('preserves edited notes after a save failure and sends the same text on retry', async () => {
+    const user = userEvent.setup();
+    const updatedComment = 'Сохранить после повтора';
+    vi.mocked(apiService.getClient).mockResolvedValue(createClient({ comment: 'Исходная заметка' }));
+    vi.mocked(apiService.updateClient)
+      .mockRejectedValueOnce(new Error('Временный сбой'))
+      .mockResolvedValueOnce(createClient({ comment: updatedComment }));
+    const { container } = render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+
+    await screen.findByText('Исходная заметка');
+    await user.click(screen.getByRole('button', { name: 'Редактировать' }));
+    const comment = container.querySelector<HTMLTextAreaElement>('textarea[name="comment"]')!;
+    await user.clear(comment);
+    await user.type(comment, updatedComment);
+    const callsBefore = vi.mocked(apiService.updateClient).mock.calls.length;
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(apiService.updateClient).toHaveBeenCalledTimes(callsBefore + 1));
+    expect((container.querySelector<HTMLTextAreaElement>('textarea[name="comment"]'))?.value).toBe(updatedComment);
+    expect(screen.getByRole('button', { name: 'Сохранить' })).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(apiService.updateClient).toHaveBeenCalledTimes(callsBefore + 2));
+    const payload = vi.mocked(apiService.updateClient).mock.calls.at(-1)?.[1] as { notes: string };
+    expect(JSON.parse(payload.notes.slice(CLIENT_PROFILE_NOTES_PREFIX.length)).comment).toBe(updatedComment);
+    expect(await screen.findByText(updatedComment)).toBeTruthy();
   });
 
   it('shows empty contact text without exposing edit controls to a read-only role', async () => {
@@ -1175,6 +1254,58 @@ describe('ClientDetail integration', () => {
       });
     });
   });
+
+  it('shows whitespace-only additional profile values as unspecified without changing stored values', async () => {
+    vi.mocked(apiService.getClient).mockResolvedValue(createClient({
+      education: [{ institution: 'НГУ', specialty: '   ', diplomaNumber: '', oksoCode: '' }],
+    }));
+    const user = userEvent.setup();
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+    await screen.findByRole('heading', { level: 1, name: 'Иванов Иван Иванович' });
+    await user.click(screen.getByRole('button', { name: 'Дополнительная информация' }));
+    await user.click(screen.getByRole('button', { name: 'Образование (ОКСО)' }));
+    const panel = screen.getByRole('region', { name: 'Образование (ОКСО)' });
+    const specialty = within(panel).getByText('Специальность').parentElement;
+    expect(specialty?.querySelector('dd')?.textContent).toBe('Не указано');
+    expect(within(panel).getByText('НГУ')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Редактировать' }));
+    expect(Array.from(document.querySelectorAll('input')).some((input) => input.value === '   ')).toBe(true);
+    await user.click(screen.getByRole('button', { name: 'Отмена' }));
+    expect(apiService.updateClient).not.toHaveBeenCalled();
+  });
+
+  it('shows additional profile groups as readable text and preserves editing on cancel', async () => {
+    const user = userEvent.setup();
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+    await screen.findByRole('heading', { level: 1, name: 'Иванов Иван Иванович' });
+    await user.click(screen.getByRole('button', { name: 'Дополнительная информация' }));
+    for (const [name, value] of [
+      ['Образование (ОКСО)', 'НГУ'],
+      ['Профессии (ОКПДТР)', '12345'],
+      ['Работа и должности', 'ООО Альфа'],
+      ['Родственники', 'Иванов Петр Сергеевич'],
+    ]) {
+      await user.click(screen.getByRole('button', { name }));
+      expect(screen.getByText(value)).toBeTruthy();
+      const panel = screen.getByRole('region', { name: name === 'Работа и должности' ? 'Места работы и должности' : name === 'Родственники' ? 'Близкие родственники' : name });
+      expect(within(panel).queryByRole('textbox')).toBeNull();
+      expect(within(panel).queryByRole('button', { name: /Добавить|Удалить/ })).toBeNull();
+      if (name === 'Работа и должности') {
+        expect(within(panel).getByText('01.01.2024')).toBeTruthy();
+        expect(within(panel).getByText('31.12.2024')).toBeTruthy();
+      }
+    }
+    await user.click(screen.getByRole('button', { name: 'Редактировать' }));
+    const relation = screen.getByDisplayValue('Отец');
+    await user.clear(relation);
+    await user.type(relation, 'Брат');
+    await user.click(screen.getByRole('button', { name: 'Образование (ОКСО)' }));
+    await user.click(screen.getByRole('button', { name: 'Родственники' }));
+    expect(screen.getByDisplayValue('Брат')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Отмена' }));
+    expect(screen.getByText('Отец')).toBeTruthy();
+    expect(screen.queryByText('Брат')).toBeNull();
+  }, 15000);
 
   it('shows delete controls in profile subsections and removes an education row', async () => {
     const user = userEvent.setup();

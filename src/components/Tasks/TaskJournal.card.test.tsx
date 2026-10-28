@@ -7,6 +7,43 @@ import { TaskJournal } from './TaskJournal';
 describe('TaskJournal', () => {
   setupTaskJournalTests();
 
+  it.each(['legacy', 'modern'] as const)('shows the same actual-time controls in the %s card', async (mode) => {
+    await renderJournal([createTask()], { settings: { taskCardWindowMode: mode } });
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId(`task-${mode}-card-window`);
+    if (mode === 'modern') fireEvent.click(within(card).getByRole('tab', { name: 'Таймер' }));
+    expect(await within(card).findByText('Таймер не запущен.')).toBeTruthy();
+    expect(within(card).getByRole('button', { name: 'Запустить таймер' })).not.toHaveProperty('disabled', true);
+    expect(apiMock.getCurrentTaskTimer).toHaveBeenCalled();
+  });
+
+  it.each(['legacy', 'modern'] as const)('shows the current timer using the profile time zone in the %s card', async (mode) => {
+    apiMock.getUserSetting.mockImplementation(async (key: string) => key === 'profile.timeZoneId' ? { value: 'Europe/Moscow' } : Promise.reject(new Error('not found')));
+    apiMock.getCurrentTaskTimer.mockResolvedValue({ id: 'c89554b9-91b2-44e8-a8db-666ecdddcfa1', taskId: 101,
+      startedAtUtc: '2026-10-27T10:00:00Z', stoppedAtUtc: null, correctedSeconds: null, revision: 0 });
+    await renderJournal([createTask()], { settings: { taskCardWindowMode: mode } });
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId(`task-${mode}-card-window`);
+    if (mode === 'modern') fireEvent.click(within(card).getByRole('tab', { name: 'Таймер' }));
+    expect(await within(card).findByText(/Начало: 27\.10\.2026, 13:00:00/)).toBeTruthy();
+  });
+
+  it.each(['legacy', 'modern'] as const)('discards a late timer response after a user switch in the %s card', async (mode) => {
+    let resolveTimer!: (value: { id: string; taskId: number; startedAtUtc: string; stoppedAtUtc: null; correctedSeconds: null; revision: number }) => void;
+    apiMock.getCurrentTaskTimer.mockReturnValueOnce(new Promise((resolve) => { resolveTimer = resolve; }));
+    const rendered = await renderJournal([createTask()], { settings: { taskCardWindowMode: mode } });
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId(`task-${mode}-card-window`);
+    if (mode === 'modern') fireEvent.click(within(card).getByRole('tab', { name: 'Таймер' }));
+    await waitFor(() => expect(apiMock.getCurrentTaskTimer).toHaveBeenCalledTimes(1));
+    authState.user = { id: 8, fullName: 'Другой сотрудник', email: 'other@local' };
+    rendered.rerender(<TaskJournal />);
+    expect(screen.queryByTestId(`task-${mode}-card-window`)).toBeNull();
+    await act(async () => { resolveTimer({ id: 'c89554b9-91b2-44e8-a8db-666ecdddcfa1', taskId: 101, startedAtUtc: '2026-10-27T10:00:00Z', stoppedAtUtc: null, correctedSeconds: null, revision: 0 }); });
+    expect(screen.queryByText('Таймер этой задачи запущен.')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Остановить таймер' })).toBeNull();
+  });
+
   it.each(['legacy', 'modern'] as const)('closes the %s task card when task access is revoked', async (mode) => {
     await renderJournal([createTask({ title: 'Закрытая задача' })], { settings: { taskCardWindowMode: mode } });
     await openFirstTaskForEdit();
@@ -120,8 +157,10 @@ describe('TaskJournal', () => {
     expect(offlineCalendarMock.revokeOfflineCalendarSnapshot).toHaveBeenCalledWith(7);
   });
 
-  it.each(['legacy', 'modern'] as const)('keeps journal %s task draft on a temporary access recheck failure', async (mode) => {
-    await renderJournal([createTask()], { settings: { taskCardWindowMode: mode } });
+  it.each([
+    ['legacy', false], ['modern', false], ['legacy', true], ['modern', true],
+  ] as const)('warns and keeps %s task draft on a temporary access recheck failure, routed=%s', async (mode, withRoute) => {
+    await renderJournal([createTask()], { settings: { taskCardWindowMode: mode }, withRoute });
     await openFirstTaskForEdit();
     const card = await screen.findByTestId(`task-${mode}-card-window`);
     const title = within(card).getByTestId('task-title-input') as HTMLTextAreaElement;
@@ -130,6 +169,9 @@ describe('TaskJournal', () => {
     apiMock.getTaskJournalItem.mockRejectedValue(new Error('Network unavailable'));
     fireEvent(window, new CustomEvent('payplanner:user-notifications-changed', { detail: { source: 'realtime', reason: 'user-role-changed' } }));
     await waitFor(() => expect(apiMock.getTaskJournalItem).toHaveBeenCalledWith(101));
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith(
+      'Не удалось проверить доступ к задаче. Проверьте соединение; введённые данные остаются в карточке.', 'Журнал задач',
+    ));
     expect(screen.getByTestId(`task-${mode}-card-window`)).toBeTruthy();
     expect(title.value).toBe('Несохранённое название');
   });
@@ -142,6 +184,32 @@ describe('TaskJournal', () => {
     apiMock.getTaskJournalItem.mockRejectedValue(Object.assign(new Error('Denied'), { status: 403 }));
     fireEvent(window, new CustomEvent('pp.permissions.changed', { detail: { roleId: 42 } }));
     await waitFor(() => expect(screen.queryByTestId(`task-${mode}-card-window`)).toBeNull());
+  });
+
+  it.each([
+    ['legacy', false, false], ['modern', false, false], ['legacy', true, false], ['modern', true, false],
+    ['legacy', false, true], ['modern', false, true], ['legacy', true, true], ['modern', true, true],
+  ] as const)('rechecks %s task after network recovery: routed=%s denied=%s', async (mode, withRoute, denied) => {
+    const task = createTask();
+    await renderJournal([task], { settings: { taskCardWindowMode: mode }, withRoute });
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId(`task-${mode}-card-window`);
+    const title = within(card).getByTestId('task-title-input') as HTMLTextAreaElement;
+    fireEvent.change(title, { target: { value: 'Незавершённый ввод' } });
+    apiMock.getTaskJournalItem.mockReset().mockRejectedValueOnce(new Error('Network unavailable'));
+    if (denied) apiMock.getTaskJournalItem.mockRejectedValue(Object.assign(new Error('Denied'), { status: 403 }));
+    else apiMock.getTaskJournalItem.mockResolvedValue(task);
+    fireEvent(window, new CustomEvent('payplanner:user-notifications-changed', { detail: { source: 'realtime', reason: 'user-role-changed' } }));
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith(
+      'Не удалось проверить доступ к задаче. Проверьте соединение; введённые данные остаются в карточке.', 'Журнал задач',
+    ));
+    fireEvent(window, new Event('online'));
+    await waitFor(() => expect(apiMock.getTaskJournalItem).toHaveBeenCalledTimes(2));
+    if (denied) await waitFor(() => expect(screen.queryByTestId(`task-${mode}-card-window`)).toBeNull());
+    else {
+      expect(screen.getByTestId(`task-${mode}-card-window`)).toBeTruthy();
+      expect(title.value).toBe('Незавершённый ввод');
+    }
   });
 
   it('hides a journal task immediately when the user changes', async () => {
@@ -239,6 +307,22 @@ describe('TaskJournal', () => {
     fireEvent.click(within(card).getByRole('button', { name: 'Действия с задачей' }));
     fireEvent.click(within(card).getByRole('button', { name: /^Редактировать$/ }));
     expect(document.activeElement).toBe(within(card).getByTestId('task-title-input'));
+  });
+
+  it('keeps a long legacy task title editable and saves it as one line', async () => {
+    const title = 'Длинное название задачи для проверки отображения на узком экране';
+    await renderJournal([createTask({ title })], { settings: { taskCardWindowMode: 'legacy' } });
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId('task-legacy-card-window');
+    const field = within(card).getByTestId('task-title-input') as HTMLTextAreaElement;
+    expect(field.tagName).toBe('TEXTAREA');
+    expect(field.value).toBe(title);
+    fireEvent.change(field, { target: { value: `${title}\nпродолжение` } });
+    expect(field.value).toBe(`${title}продолжение`);
+    fireEvent.keyDown(field, { key: 'Enter' });
+    expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+    fireEvent.click(within(card).getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({ title: `${title}продолжение` })));
   });
 
   it.each(['legacy', 'modern'] as const)('uses the shared task chat in the %s card selected by global settings', async (mode) => {

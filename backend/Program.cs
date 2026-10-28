@@ -218,7 +218,9 @@ builder.Services.AddScoped<IRealtimeNotificationPublisher>(sp => sp.GetRequiredS
 builder.Services.AddScoped<IRolePermissionsChangePublisher>(sp => sp.GetRequiredService<SignalRRealtimeNotificationPublisher>());
 builder.Services.AddScoped<IUserRoleChangePublisher>(sp => sp.GetRequiredService<SignalRRealtimeNotificationPublisher>());
 builder.Services.AddScoped<IWebPushNotificationService, WebPushNotificationService>();
-builder.Services.AddScoped<INotificationService, NotificationService>();
+builder.Services.AddScoped<NotificationService>();
+builder.Services.AddScoped<INotificationService>(sp => sp.GetRequiredService<NotificationService>());
+builder.Services.AddScoped<IDurableTaskStatusNotificationService>(sp => sp.GetRequiredService<NotificationService>());
 builder.Services.AddScoped<ICaseDocumentNotificationLiveDispatcher>(sp => (ICaseDocumentNotificationLiveDispatcher)sp.GetRequiredService<INotificationService>());
 builder.Services.AddScoped<CaseDocumentNotificationDispatchProcessor>();
 builder.Services.AddScoped<ISmsChannelWarningPublisher, SmsChannelWarningPublisher>();
@@ -328,6 +330,8 @@ else
 builder.Services.AddSingleton<TaskJournalReminderNotificationService>();
 builder.Services.AddSingleton<InternalChatNoReplyReminderService>();
 builder.Services.AddSingleton<InternalChatNotificationRecoveryService>();
+builder.Services.AddScoped<TaskDeadlineReviewerDispatchProcessor>();
+builder.Services.AddScoped<TaskStatusNotificationDispatchProcessor>();
 builder.Services.AddSingleton<StickyNoteReminderNotificationService>();
 builder.Services.AddSingleton<NotificationRetrySchedulerService>();
 builder.Services.AddSingleton<NotificationDeliveryRetentionService>();
@@ -355,6 +359,8 @@ if (builder.Configuration.GetValue("BackgroundServices:Enabled", true))
     builder.Services.AddHostedService<MessengerDocumentOutboxWorker>();
     builder.Services.AddHostedService<MaxOutboxWorker>();
     builder.Services.AddHostedService<CaseDocumentNotificationDispatchWorker>();
+    builder.Services.AddHostedService<TaskDeadlineReviewerDispatchWorker>();
+    builder.Services.AddHostedService<TaskStatusNotificationDispatchWorker>();
     builder.Services.AddHostedService<ExternalCalendarTaskSyncOutboxWorker>();
     builder.Services.AddHostedService<ExternalWorkOrderApprovalExpirationService>();
     builder.Services.AddHostedService<PaymentStatusUpdater>();

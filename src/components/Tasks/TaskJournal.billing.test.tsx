@@ -314,6 +314,29 @@ describe('TaskJournal', () => {
     expect(apiMock.createTaskJournalItem.mock.calls[0][0]).not.toHaveProperty('billingContractId');
   });
 
+  it('keeps payment analysis out of the ordinary task journal', async () => {
+    await renderJournal([createTask({ id: 301, billingStatus: 'unbilled' })]);
+    expect(screen.queryByTestId('task-unbilled-reminder')).toBeNull();
+    expect(screen.getByTestId('task-view-controls')).toBeTruthy();
+  });
+
+  it('explains an empty accounting queue without inventing counts', async () => {
+    await renderJournal([], { billingAnalysisMode: true, waitForTitle: null });
+    expect(await screen.findByText('Нет задач для анализа оплаты по текущим фильтрам.')).toBeTruthy();
+    expect(screen.queryByTestId('task-unbilled-reminder')).toBeNull();
+  });
+
+  it('keeps accounting queue filters separate from journal preferences', async () => {
+    const key = 'pp.task_journal.filters.v1.user:7';
+    const original = JSON.stringify({ quickFilter: 'all', viewMode: 'list', periodMode: 'all', search: 'личный поиск' });
+    window.localStorage.setItem(key, original);
+    await renderJournal([createTask({ id: 301, billingStatus: 'unbilled' })], { billingAnalysisMode: true });
+    fireEvent.click(within(screen.getByTestId('task-unbilled-reminder')).getByRole('button', { name: 'Платные задачи без счёта: 1' }));
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenLastCalledWith(expect.objectContaining({ billingStatus: 'unbilled' }), expect.anything()));
+    expect(window.localStorage.getItem(key)).toBe(original);
+    expect(window.localStorage.getItem('pp.task_journal.filters.v1.billing.user:7')).toBeTruthy();
+  });
+
   it('shows how many invoices are needed and distributes active tasks by billing category', async () => {
     await renderJournal([
       createTask({ id: 301, clientId: 10, billingStatus: 'unbilled' }),
@@ -323,7 +346,7 @@ describe('TaskJournal', () => {
       createTask({ id: 305, billingStatus: 'internal' }),
       createTask({ id: 306, billingStatus: 'invoiced' }),
       createTask({ id: 307, billingStatus: 'legacy' }),
-    ]);
+    ], { billingAnalysisMode: true });
 
     const analysis = await screen.findByTestId('task-unbilled-reminder');
     expect(within(analysis).getByText('Счетов подготовить: 2')).toBeTruthy();
@@ -359,6 +382,7 @@ describe('TaskJournal', () => {
       billingStatus: 'unbilled',
     });
     await renderJournal([unbilledTask], {
+      billingAnalysisMode: true,
       onCreateInvoiceDraft,
       waitForTitle: null,
       settings: {
@@ -391,6 +415,19 @@ describe('TaskJournal', () => {
     expect(draft.form.description).toContain('Задачи созданы по поручению клиента и хранятся в электронном виде в CRM-системе исполнителя.');
   });
 
+  it('refreshes the accounting queue after the selected task is invoiced', async () => {
+    const tasks = [createTask({ id: 321, title: 'Работа для счёта', clientBillingClassification: 'billable', billingStatus: 'unbilled' })];
+    await renderJournal(tasks, { billingAnalysisMode: true, onCreateInvoiceDraft: vi.fn() });
+    fireEvent.click(within(screen.getByTestId('task-unbilled-reminder')).getByRole('button', { name: 'Платные задачи без счёта: 1' }));
+    const checkbox = await screen.findByRole('checkbox', { name: 'Выбрать задачу Работа для счёта' });
+    fireEvent.click(checkbox);
+    expect(screen.getByRole('button', { name: 'Подготовить счёт (1)' })).toBeTruthy();
+    tasks[0] = { ...tasks[0], billingStatus: 'invoiced', billingInvoiceId: 987 };
+    act(() => window.dispatchEvent(new CustomEvent('pp.task_journal.changed', { detail: { bulkBillingIds: [321] } })));
+    await waitFor(() => expect(screen.queryByRole('checkbox', { name: 'Выбрать задачу Работа для счёта' })).toBeNull());
+    expect(screen.queryByRole('button', { name: 'Подготовить счёт (1)' })).toBeNull();
+  });
+
   it('keeps a completed paid task in the unbilled queue until an invoice is prepared', async () => {
     const activeTask = createTask({
       id: 331,
@@ -409,7 +446,7 @@ describe('TaskJournal', () => {
       billingStatus: 'unbilled',
     });
 
-    await renderJournal([activeTask, completedTask], { onCreateInvoiceDraft: vi.fn() });
+    await renderJournal([activeTask, completedTask], { billingAnalysisMode: true, onCreateInvoiceDraft: vi.fn() });
 
     const analysis = await screen.findByTestId('task-unbilled-reminder');
     expect(within(analysis).getByText('Платные задачи без счёта: 2')).toBeTruthy();
@@ -440,7 +477,7 @@ describe('TaskJournal', () => {
       billingMode: 'Actual',
       billingStatus: 'unbilled',
     });
-    await renderJournal([task], { onCreateInvoiceDraft });
+    await renderJournal([task], { billingAnalysisMode: true, onCreateInvoiceDraft });
 
     const analysis = await screen.findByTestId('task-unbilled-reminder');
     fireEvent.click(within(analysis).getByRole('button', { name: 'Платные задачи без счёта: 1' }));

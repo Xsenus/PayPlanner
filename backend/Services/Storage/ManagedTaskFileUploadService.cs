@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Npgsql;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 
@@ -270,6 +271,21 @@ public sealed class ManagedTaskFileUploadService(PaymentContext db, IStorageObje
             var committed = false;
             try
             {
+                // Lock actor authority in the same order as task deadline and
+                // legacy upload transactions before locking the task itself.
+                if (db.Database.IsNpgsql())
+                {
+                    try
+                    {
+                        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Users\" WHERE \"Id\" = {intent.ActorId} FOR SHARE NOWAIT", ct);
+                        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Roles\" WHERE \"Id\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {intent.ActorId}) FOR SHARE NOWAIT", ct);
+                        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"RolePermissions\" WHERE \"RoleId\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {intent.ActorId}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);
+                    }
+                    catch (PostgresException error) when (error.SqlState is PostgresErrorCodes.LockNotAvailable or PostgresErrorCodes.DeadlockDetected or PostgresErrorCodes.SerializationFailure)
+                    {
+                        return new("pending");
+                    }
+                }
                 // Serialize publication for this task, but do not use UpdatedAt
                 // as a version: another independent attachment or comment also
                 // changes it. Document versions and the case link have their own
@@ -284,6 +300,31 @@ public sealed class ManagedTaskFileUploadService(PaymentContext db, IStorageObje
                     if (refreshed is not null && Matches(published, request, type, sha) && published!.FileId.HasValue)
                         return await PublishedResultAsync(published, refreshed.ObjectId, key, ct);
                     return new("conflict");
+                }
+                if (db.Database.IsNpgsql())
+                {
+                    try
+                    {
+                        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"TaskJournalParticipants\" WHERE \"TaskJournalItemId\" = {intent.TaskId} ORDER BY \"Id\" FOR SHARE NOWAIT", ct);
+                    }
+                    catch (PostgresException error) when (error.SqlState is PostgresErrorCodes.LockNotAvailable or PostgresErrorCodes.DeadlockDetected or PostgresErrorCodes.SerializationFailure)
+                    {
+                        return new("pending");
+                    }
+                    var salesRequestId = await db.TaskJournalItems.AsNoTracking().Where(task => task.Id == intent.TaskId)
+                        .Select(task => task.SalesRequestId).SingleOrDefaultAsync(ct);
+                    if (salesRequestId.HasValue)
+                    {
+                        try
+                        {
+                            await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"SalesRequests\" WHERE \"Id\" = {salesRequestId.Value} FOR SHARE NOWAIT", ct);
+                            await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Users\" WHERE \"Id\" IN (SELECT \"ResponsibleUserId\" FROM \"SalesRequests\" WHERE \"Id\" = {salesRequestId.Value} UNION SELECT \"CreatedByUserId\" FROM \"SalesRequests\" WHERE \"Id\" = {salesRequestId.Value}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);
+                        }
+                        catch (PostgresException error) when (error.SqlState is PostgresErrorCodes.LockNotAvailable or PostgresErrorCodes.DeadlockDetected or PostgresErrorCodes.SerializationFailure)
+                        {
+                            return new("pending");
+                        }
+                    }
                 }
                 if (request.AuthorizePublication is not null && !await request.AuthorizePublication(ct)) return new("forbidden");
                 // A concurrent request may have completed this same intent while

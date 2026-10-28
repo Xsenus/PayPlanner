@@ -155,7 +155,7 @@ export function validateDeployWorkflow(source) {
     && workflow.env?.PayPlannerSkipMigrationsBuild === undefined
     && workflow.env?.ArtifactsPath === undefined && workflow.env?.UseArtifactsOutput === undefined,
   'Keep the reviewed bounded coordinator/build resource profile');
-  const heapLimits = { 'backend-format': '180000000', 'backend-build': '200000000',
+  const heapLimits = { 'backend-format': '180000000', 'backend-build': '240000000',
     'backend-test': 'C0000000', 'backend-browser': 'C0000000', backend: 'C0000000' };
   for (const [id, heap] of Object.entries(heapLimits)) {
     requireValue(jobs[id]?.env?.DOTNET_GCHeapHardLimit === heap, `${id}: keep the bounded managed heap profile`);
@@ -314,9 +314,9 @@ export function validateDeployWorkflow(source) {
     'Fresh format workspace may not inherit local artifact paths or skipped project references');
   for (const [index, row] of formats.entries()) {
     if (index >= 1 && index <= 3) {
-      requireValue(JSON.stringify(row.step.env) === JSON.stringify({ DOTNET_GCHeapHardLimit: '200000000',
+      requireValue(JSON.stringify(row.step.env) === JSON.stringify({ DOTNET_GCHeapHardLimit: '240000000',
         CompilerResponseFile: '${{ github.workspace }}/scripts/compiler-serial.rsp' }),
-      'Each full Migrations category uses the measured eight-GiB serial compiler profile');
+      'Each full Migrations category uses the measured nine-GiB serial compiler profile');
     } else requireValue(row.step.env === undefined, 'Other full project formats use the measured six-GiB profile without a response file');
   }
   requireValue(command('frontend', 'node scripts/verify-xsenus-runner.mjs build').index < fe[0].index,

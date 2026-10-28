@@ -1,6 +1,6 @@
 namespace PayPlanner.Api.Models;
 
-public class CashOrder
+public class CashOrder : System.Text.Json.Serialization.IJsonOnDeserializing
 {
     public int Id { get; set; }
     public string Number { get; set; } = string.Empty;
@@ -18,6 +18,14 @@ public class CashOrder
     public int? InvoiceId { get; set; }
     public Invoice? Invoice { get; set; }
     public string? Account { get; set; }
+    // Assigned by trusted server flows only; incoming cash-order JSON must not set identity.
+    [System.Text.Json.Serialization.JsonIgnore]
+    public int? MoneyAccountId { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public int? CompanyId { get; set; }
+    // Request-only selection. The server verifies access and assigns the persisted identity.
+    [System.ComponentModel.DataAnnotations.Schema.NotMapped]
+    public int? SelectedMoneyAccountId { get; set; }
     public string? PayerName { get; set; }
     public string? ReceiverName { get; set; }
     public string? Basis { get; set; }
@@ -31,4 +39,8 @@ public class CashOrder
     public DateTime? UpdatedAt { get; set; }
     public int? UpdatedByUserId { get; set; }
     public string? UpdatedByUserName { get; set; }
+
+    // A missing currency in an API request is unknown, even though internally
+    // constructed legacy orders retain their existing default.
+    void System.Text.Json.Serialization.IJsonOnDeserializing.OnDeserializing() => Currency = null;
 }

@@ -59,7 +59,7 @@ vi.mock('./BankDirectorySettings', () => ({
 }));
 
 vi.mock('./NotificationSettings', () => ({
-  NotificationSettings: () => <div>Настройки уведомлений mock</div>,
+  NotificationSettings: ({ canEdit }: { canEdit: boolean }) => <div data-can-edit={String(canEdit)}>Настройки уведомлений mock</div>,
 }));
 
 vi.mock('./DatabaseMaintenanceSettings', () => ({
@@ -131,6 +131,28 @@ describe('AppSettings', () => {
         headers: { 'content-type': 'application/json' },
       });
     }));
+  });
+
+  it.each([
+    { name: 'administrator', admin: true, view: false, edit: false, allowed: true, canEdit: 'true' },
+    { name: 'read-only notification role', admin: false, view: true, edit: false, allowed: true, canEdit: 'false' },
+    { name: 'role without notification access', admin: false, view: false, edit: false, allowed: false, canEdit: null },
+  ])('respects permissions for the notification help settings link: $name', async ({ admin, view, edit, allowed, canEdit }) => {
+    authMockState.isAdmin = admin;
+    permissionsMockState.permissions = buildPermissions({
+      notifications: { ...defaultRestrictedRolePermissions.notifications, canView: view, canEdit: edit },
+      integrations: { ...defaultRestrictedRolePermissions.integrations, canView: true },
+    });
+    window.history.replaceState(null, '', '/?ppTab=settings&settingsSection=notifications');
+
+    render(<AppSettings />);
+
+    if (allowed) {
+      expect((await screen.findByText('Настройки уведомлений mock')).getAttribute('data-can-edit')).toBe(canEdit);
+    } else {
+      expect(await screen.findByRole('tab', { name: /DaData/ })).toBeTruthy();
+      expect(screen.queryByText('Настройки уведомлений mock')).toBeNull();
+    }
   });
 
   it('opens the calendar tab from a direct URL without loading DaData credentials', async () => {

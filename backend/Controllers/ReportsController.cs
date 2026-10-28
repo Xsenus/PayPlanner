@@ -781,6 +781,8 @@ public class ReportsController : ControllerBase
                         cancellationToken => BuildCashBookReportAsync(start, end, normalizedAccountName, normalizedCounterpartyName, effectiveClientId, effectiveCaseId, effectiveContractId, effectiveIncomeTypeId, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
+                    if (reportDto is null)
+                        return (null, BadRequest("Нельзя выгрузить кассовую книгу: валюты проведённых ордеров различаются или не указаны."));
                     return (BuildCashBookExportDocument(reportDto), null);
                 }
 
@@ -2849,6 +2851,7 @@ public class ReportsController : ControllerBase
                 new("Остаток на конец", MoneyCell(report.ClosingBalance)),
                 new("ПКО за период", report.IncomingCount.ToString(CultureInfo.InvariantCulture)),
                 new("РКО за период", report.OutgoingCount.ToString(CultureInfo.InvariantCulture)),
+                new("Валюта", report.Currency is null ? "Не определена" : $"Код: {report.Currency}"),
             ],
             [
                 new("Дневное движение кассы", ["Дата", "Остаток на начало", "Приход", "Расход", "Остаток на конец", "ПКО", "РКО"], report.Days.Select(day => new ReportExportRow([
@@ -8843,7 +8846,7 @@ public class ReportsController : ControllerBase
             ? "RUB"
             : currency.Trim().ToUpperInvariant();
 
-    private async Task<CashBookResponseDto> BuildCashBookReportAsync(
+    private async Task<CashBookResponseDto?> BuildCashBookReportAsync(
         DateTime from,
         DateTime to,
         string? accountName,
@@ -8855,8 +8858,7 @@ public class ReportsController : ControllerBase
         DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var postedOrders = _db.CashOrders
-            .AsNoTracking()
+        var postedOrders = BankStatementImportAccess.ScopeCashOrderCompanies(_db, _db.CashOrders.AsNoTracking(), moneyReportAccess)
             .ApplyCashOrderVisibility(paymentsVisibility)
             .Where(order => order.Status == CashOrderStatus.Posted);
         if (!string.IsNullOrWhiteSpace(accountName))
@@ -8945,23 +8947,28 @@ public class ReportsController : ControllerBase
                     operation.IncomeTypeId == targetIncomeTypeId)));
         }
 
-        var openingBalance = await postedOrders
-            .Where(order => order.Date < from)
-            .SumAsync(order => order.Type == CashOrderType.Incoming ? order.Amount : -order.Amount, ct);
-
-        var periodGroups = await postedOrders
-            .Where(order => order.Date >= from && order.Date <= to)
-            .GroupBy(order => order.Date.Date)
+        var aggregateGroups = await postedOrders
+            .Where(order => order.Date <= to)
+            .GroupBy(order => new { IsOpening = order.Date < from, Date = order.Date < from ? from : order.Date.Date })
             .Select(group => new
             {
-                Date = group.Key,
+                group.Key.IsOpening,
+                group.Key.Date,
                 Income = group.Where(order => order.Type == CashOrderType.Incoming).Sum(order => order.Amount),
                 Expense = group.Where(order => order.Type == CashOrderType.Outgoing).Sum(order => order.Amount),
                 IncomingCount = group.Count(order => order.Type == CashOrderType.Incoming),
                 OutgoingCount = group.Count(order => order.Type == CashOrderType.Outgoing),
+                HasUnknownCurrency = group.Any(order => order.Currency == null || order.Currency.Trim() == ""),
+                MinCurrency = group.Min(order => order.Currency == null ? null : order.Currency.Trim().ToUpper()),
+                MaxCurrency = group.Max(order => order.Currency == null ? null : order.Currency.Trim().ToUpper()),
             })
             .OrderBy(group => group.Date)
             .ToListAsync(ct);
+        var (currencyStatus, currency) = CashOrdersController.ResolveCashBookCurrency(aggregateGroups.Select(group =>
+            (group.HasUnknownCurrency, group.MinCurrency, group.MaxCurrency)));
+        if (currencyStatus is "mixed" or "unknown") return null;
+        var openingBalance = aggregateGroups.Where(group => group.IsOpening).Sum(group => group.Income - group.Expense);
+        var periodGroups = aggregateGroups.Where(group => !group.IsOpening).ToArray();
         var periodGroupsByDate = periodGroups.ToDictionary(group => group.Date);
 
         var runningBalance = openingBalance;
@@ -8994,6 +9001,8 @@ public class ReportsController : ControllerBase
             From = from,
             To = to,
             AccountName = accountName,
+            CurrencyStatus = currencyStatus,
+            Currency = currency,
             OpeningBalance = openingBalance,
             Income = income,
             Expense = expense,

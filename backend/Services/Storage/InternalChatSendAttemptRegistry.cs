@@ -234,8 +234,10 @@ public sealed class InternalChatSendAttemptRegistry(PaymentContext db, TimeProvi
 
     internal async Task<bool> HasPayloadScopeAsync(InternalChatSendSnapshot snapshot, CancellationToken ct)
     {
-        if (snapshot.ReplyToMessageId is { } replyId && !await db.InternalChatMessages.AsNoTracking()
-                .AnyAsync(message => message.Id == replyId && message.ThreadId == snapshot.ThreadId && message.DeletedAt == null, ct)) return false;
+        if (snapshot.ReplyToMessageId is { } replyId && !await AuthorizedMembers()
+                .AnyAsync(member => member.ThreadId == snapshot.ThreadId && member.UserId == snapshot.ActorId
+                    && db.InternalChatMessages.Any(message => message.Id == replyId && message.ThreadId == snapshot.ThreadId
+                        && message.DeletedAt == null && message.Id > (member.HistoryHiddenThroughMessageId ?? 0)), ct)) return false;
         return snapshot.MentionUserIds.Length == 0 || await AuthorizedMembers()
             .CountAsync(member => member.ThreadId == snapshot.ThreadId && snapshot.MentionUserIds.Contains(member.UserId), ct) == snapshot.MentionUserIds.Length;
     }

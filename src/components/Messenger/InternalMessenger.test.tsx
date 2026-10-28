@@ -387,6 +387,136 @@ describe('InternalMessenger', () => {
       'Ответ, ожидающий подтверждения', [], 22, [], key));
   });
 
+  it.each([
+    ['messenger', 'old'], ['messenger', 'new'], ['task', 'old'], ['task', 'new'],
+  ] as const)('preserves an unreadable draft until the user chooses a version: %s %s', async (host, choice) => {
+    const threadId = host === 'task' ? 44 : thread.id;
+    if (host === 'task') chatApiMock.openTask.mockResolvedValue({ ...thread, id: threadId, kind: 'task', taskJournalItemId: 101 });
+    const key = `payplanner.chatDraft.v1.7.${threadId}`;
+    sessionStorage.setItem(key, 'Прежний черновик');
+    const originalGet = Storage.prototype.getItem;
+    let unavailable = true;
+    const read = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, name) {
+      if (name === key && unavailable) throw new Error('storage unavailable');
+      return originalGet.call(this, name);
+    });
+    try {
+      render(host === 'task' ? <TaskChatPanel taskId={101} /> : <InternalMessenger />);
+      const editor = await screen.findByPlaceholderText('Напишите сообщение…') as HTMLTextAreaElement;
+      expect(await screen.findByText(/Не удалось прочитать сохранённый черновик/)).toBeTruthy();
+      expect(originalGet.call(sessionStorage, key)).toBe('Прежний черновик');
+      fireEvent.change(editor, { target: { value: 'Новый ввод' } });
+      expect(originalGet.call(sessionStorage, key)).toBe('Прежний черновик');
+      unavailable = false;
+      fireEvent.click(screen.getByRole('button', { name: 'Повторить чтение' }));
+      expect(screen.getByText(/Найден другой черновик/)).toBeTruthy();
+      expect(screen.getByText('Прежний черновик')).toBeTruthy();
+      expect(originalGet.call(sessionStorage, key)).toBe('Прежний черновик');
+      fireEvent.click(screen.getByRole('button', { name: choice === 'old' ? 'Заменить текущий текст сохранённым' : 'Заменить сохранённый текущим' }));
+      const expected = choice === 'old' ? 'Прежний черновик' : 'Новый ввод';
+      await waitFor(() => expect(sessionStorage.getItem(key)).toBe(expected));
+      expect(editor.value).toBe(expected);
+    } finally { read.mockRestore(); }
+  });
+
+  it.each(['messenger', 'task'] as const)('restores an unreadable draft after storage access returns: %s', async (host) => {
+    const threadId = host === 'task' ? 44 : thread.id;
+    if (host === 'task') chatApiMock.openTask.mockResolvedValue({ ...thread, id: threadId, kind: 'task', taskJournalItemId: 101 });
+    const key = `payplanner.chatDraft.v1.7.${threadId}`;
+    sessionStorage.setItem(key, 'Черновик до сбоя');
+    const originalGet = Storage.prototype.getItem;
+    let unavailable = true;
+    const read = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, name) {
+      if (name === key && unavailable) throw new Error('storage unavailable');
+      return originalGet.call(this, name);
+    });
+    try {
+      render(host === 'task' ? <TaskChatPanel taskId={101} /> : <InternalMessenger />);
+      const editor = await screen.findByPlaceholderText('Напишите сообщение…') as HTMLTextAreaElement;
+      expect(await screen.findByText(/Не удалось прочитать сохранённый черновик/)).toBeTruthy();
+      unavailable = false;
+      fireEvent.click(screen.getByRole('button', { name: 'Повторить чтение' }));
+      await waitFor(() => expect(editor.value).toBe('Черновик до сбоя'));
+      expect(sessionStorage.getItem(key)).toBe('Черновик до сбоя');
+      expect(screen.queryByText(/Не удалось прочитать сохранённый черновик/)).toBeNull();
+    } finally { read.mockRestore(); }
+  });
+
+  it.each(['messenger', 'task'] as const)('restores the reply target with an unreadable draft: %s', async (host) => {
+    const threadId = host === 'task' ? 44 : thread.id;
+    if (host === 'task') chatApiMock.openTask.mockResolvedValue({ ...thread, id: threadId, kind: 'task', taskJournalItemId: 101 });
+    const key = `payplanner.chatDraft.v1.7.${threadId}`;
+    sessionStorage.setItem(key, 'Ответ до сбоя');
+    sessionStorage.setItem(`payplanner.chatSend.v1.7.${threadId}`, JSON.stringify({
+      id: '9914bb8f-e85a-4cc8-a4a1-b6d8eef2cc1c', text: 'Ответ до сбоя', replyToId: 22, files: [],
+    }));
+    const originalGet = Storage.prototype.getItem;
+    let unavailable = true;
+    const read = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, name) {
+      if (name === key && unavailable) throw new Error('storage unavailable');
+      return originalGet.call(this, name);
+    });
+    try {
+      render(host === 'task' ? <TaskChatPanel taskId={101} /> : <InternalMessenger />);
+      await screen.findByText(/Не удалось прочитать сохранённый черновик/);
+      unavailable = false;
+      fireEvent.click(screen.getByRole('button', { name: 'Повторить чтение' }));
+      expect(await screen.findByText('Ответ на сообщение №22 · сохранённый черновик')).toBeTruthy();
+      expect((screen.getByPlaceholderText('Напишите сообщение…') as HTMLTextAreaElement).value).toBe('Ответ до сбоя');
+    } finally { read.mockRestore(); }
+  });
+
+  it.each(['messenger', 'task'] as const)('warns when the draft cannot be stored and retries without losing text: %s', async (host) => {
+    const threadId = host === 'task' ? 44 : thread.id;
+    if (host === 'task') chatApiMock.openTask.mockResolvedValue({ ...thread, id: threadId, kind: 'task', taskJournalItemId: 101 });
+    const originalSet = Storage.prototype.setItem;
+    let unavailable = true;
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (key === `payplanner.chatDraft.v1.7.${threadId}` && unavailable) throw new Error('storage unavailable');
+      return originalSet.call(this, key, value);
+    });
+    try {
+      render(host === 'task' ? <TaskChatPanel taskId={101} /> : <InternalMessenger />);
+      const editor = await screen.findByPlaceholderText('Напишите сообщение…') as HTMLTextAreaElement;
+      fireEvent.change(editor, { target: { value: 'Незаконченный текст' } });
+      expect(await screen.findByText(/Не удалось сохранить черновик в этой вкладке/)).toBeTruthy();
+      expect(screen.queryByText('Черновик сохранён в этой вкладке до её закрытия.')).toBeNull();
+      expect(editor.value).toBe('Незаконченный текст');
+      expect((screen.getByRole('button', { name: 'Отправить' }) as HTMLButtonElement).disabled).toBe(false);
+      unavailable = false;
+      fireEvent.click(screen.getByRole('button', { name: 'Повторить сохранение' }));
+      expect(await screen.findByText('Черновик сохранён в этой вкладке до её закрытия.')).toBeTruthy();
+      expect(sessionStorage.getItem(`payplanner.chatDraft.v1.7.${threadId}`)).toBe('Незаконченный текст');
+    } finally { write.mockRestore(); }
+  });
+
+  it.each(['messenger', 'task'] as const)('warns and retries when an already sent draft cannot be cleared: %s', async (host) => {
+    const threadId = host === 'task' ? 44 : thread.id;
+    if (host === 'task') chatApiMock.openTask.mockResolvedValue({ ...thread, id: threadId, kind: 'task', taskJournalItemId: 101 });
+    const originalRemove = Storage.prototype.removeItem;
+    let unavailable = false;
+    const remove = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, key) {
+      if (key === `payplanner.chatDraft.v1.7.${threadId}` && unavailable) throw new Error('storage unavailable');
+      return originalRemove.call(this, key);
+    });
+    try {
+      render(host === 'task' ? <TaskChatPanel taskId={101} /> : <InternalMessenger />);
+      const editor = await screen.findByPlaceholderText('Напишите сообщение…') as HTMLTextAreaElement;
+      fireEvent.change(editor, { target: { value: 'Отправленный текст' } });
+      expect(sessionStorage.getItem(`payplanner.chatDraft.v1.7.${threadId}`)).toBe('Отправленный текст');
+      unavailable = true;
+      fireEvent.click(screen.getByRole('button', { name: 'Отправить' }));
+      await waitFor(() => expect(editor.value).toBe(''));
+      expect(await screen.findByText(/Не удалось очистить сохранённый черновик/)).toBeTruthy();
+      expect(chatApiMock.sendMessage).toHaveBeenCalledTimes(1);
+      unavailable = false;
+      fireEvent.click(screen.getByRole('button', { name: 'Повторить очистку' }));
+      await waitFor(() => expect(sessionStorage.getItem(`payplanner.chatDraft.v1.7.${threadId}`)).toBeNull());
+      expect(screen.queryByText(/Не удалось очистить сохранённый черновик/)).toBeNull();
+      expect(chatApiMock.sendMessage).toHaveBeenCalledTimes(1);
+    } finally { remove.mockRestore(); }
+  });
+
   it.each(['messenger', 'task'] as const)('keeps IME confirmation in the draft and sends only ordinary Enter: %s', async (host) => {
     const threadId = host === 'task' ? 44 : thread.id;
     if (host === 'task') chatApiMock.openTask.mockResolvedValue({ ...thread, id: threadId, kind: 'task', taskJournalItemId: 101 });
@@ -883,6 +1013,27 @@ describe('InternalMessenger', () => {
     await waitFor(() => expect(sessionStorage.getItem('payplanner.chatDraft.v1.7.44')).toBeNull());
   });
 
+  it.each(['messenger', 'task'] as const)('keeps a multiline draft and cursor during a chat update: %s', async (host) => {
+    chatApiMock.openTask.mockResolvedValue({ ...thread, id: 44, kind: 'task', taskJournalItemId: 101 });
+    render(host === 'task' ? <TaskChatPanel taskId={101} /> : <InternalMessenger />);
+    const editor = await screen.findByPlaceholderText('Напишите сообщение…') as HTMLTextAreaElement;
+    const draft = Array.from({ length: 18 }, (_, index) => `Длинная строка ${index} для проверки ввода и прокрутки`).join('\n');
+    expect(editor.rows).toBeGreaterThanOrEqual(3);
+    fireEvent.change(editor, { target: { value: draft } });
+    editor.focus();
+    editor.setSelectionRange(27, 27);
+    editor.scrollTop = 65;
+    chatApiMock.getMessages.mockResolvedValue({ items: [message, { ...message, id: 23, text: 'Новое событие' }], hasMore: false });
+    const handlers = connectionMock.on.mock.calls.filter(([name]) => name === 'taskJournalChanged').map(([, handler]) => handler);
+    await act(async () => { handlers.forEach((handler) => handler()); });
+    await screen.findByText('Новое событие');
+    expect(editor.value).toBe(draft);
+    expect(editor.selectionStart).toBe(27);
+    expect(editor.selectionEnd).toBe(27);
+    expect(editor.scrollTop).toBe(65);
+    expect(sessionStorage.getItem(`payplanner.chatDraft.v1.7.${host === 'task' ? 44 : 12}`)).toBe(draft);
+  });
+
   it('keeps the reading position and draft when a realtime message arrives', async () => {
     render(<InternalMessenger />);
     expect(await screen.findByText('документ')).toBeTruthy();
@@ -1239,6 +1390,35 @@ describe('InternalMessenger', () => {
     fireEvent.scroll(conversation);
     fireEvent.click(screen.getByRole('button', { name: 'К последним сообщениям' }));
     expect(conversation.scrollTop).toBe(1000);
+  });
+
+  it.each(['general', 'task'] as const)('preserves the reading position when loading a long history in the %s chat', async (kind) => {
+    const items = (first: number, last: number) => Array.from({ length: last - first + 1 }, (_, index) => ({
+      ...message, id: first + index, text: `История ${first + index}`,
+    }));
+    chatApiMock.getThreads.mockResolvedValue([{ ...thread, unreadCount: 0, lastReadMessageId: 61 }]);
+    chatApiMock.openTask.mockResolvedValue({ ...thread, kind: 'task', taskJournalItemId: 101, unreadCount: 0, lastReadMessageId: 61 });
+    chatApiMock.getMessages.mockResolvedValueOnce({ items: items(12, 61), hasMore: true });
+    chatApiMock.getMessages.mockResolvedValueOnce({ items: items(1, 11), hasMore: false });
+    render(kind === 'general' ? <InternalMessenger /> : <TaskChatPanel taskId={101} />);
+
+    await screen.findByText('История 12');
+    const conversation = screen.getByLabelText('Сообщения чата');
+    Object.defineProperty(conversation, 'scrollHeight', {
+      configurable: true,
+      get: () => conversation.querySelectorAll('[data-message-id]').length * 20,
+    });
+    Object.defineProperty(conversation, 'clientHeight', { configurable: true, value: 300 });
+    conversation.scrollTop = 100;
+    fireEvent.scroll(conversation);
+    fireEvent.click(screen.getByRole('button', { name: 'Показать более ранние' }));
+
+    await screen.findByText('История 1');
+    expect(chatApiMock.getMessages).toHaveBeenLastCalledWith(12, expect.objectContaining({ beforeId: 12 }));
+    expect(conversation.querySelectorAll('[data-message-id]')).toHaveLength(61);
+    expect(conversation.scrollTop).toBe(320);
+    expect(screen.queryByRole('button', { name: 'Показать более ранние' })).toBeNull();
+    expect(chatApiMock.markRead).not.toHaveBeenCalled();
   });
 
   it('ignores an older conversation response after a search result arrives', async () => {

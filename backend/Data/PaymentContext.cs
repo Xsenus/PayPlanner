@@ -1410,6 +1410,9 @@ public class PaymentContext : DbContext
         modelBuilder.Entity<CashOrder>(entity =>
         {
             entity.HasKey(e => e.Id);
+            entity.HasOne<MoneyAccount>().WithMany().HasForeignKey(e => e.MoneyAccountId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne<LegalEntity>().WithMany().HasForeignKey(e => e.CompanyId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasIndex(e => new { e.MoneyAccountId, e.Date }).HasDatabaseName("IX_CashOrders_MoneyAccount_Date");
             entity.Property(e => e.Number).HasMaxLength(64).IsRequired();
             entity.Property(e => e.Type).HasConversion<string>();
             entity.Property(e => e.Status).HasConversion<string>();
@@ -1467,6 +1470,9 @@ public class PaymentContext : DbContext
         modelBuilder.Entity<CashInventory>(entity =>
         {
             entity.HasKey(e => e.Id);
+            entity.HasOne<MoneyAccount>().WithMany().HasForeignKey(e => e.MoneyAccountId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne<LegalEntity>().WithMany().HasForeignKey(e => e.CompanyId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasIndex(e => new { e.CompanyId, e.MoneyAccountId, e.Date }).HasDatabaseName("IX_CashInventories_Company_Account_Date");
             entity.Property(e => e.Number).HasMaxLength(64).IsRequired();
             entity.Property(e => e.Date).HasColumnType("date");
             entity.Property(e => e.AccountName).HasMaxLength(120).IsRequired();
@@ -3326,6 +3332,7 @@ public class PaymentContext : DbContext
         modelBuilder.Entity<TaskJournalItem>(entity =>
         {
             entity.HasKey(e => e.Id);
+            entity.Property(e => e.StatusTransitionToken).HasMaxLength(32).HasDefaultValue("").IsRequired();
             entity.HasIndex(e => e.SalesRequestId).HasDatabaseName("IX_TaskJournalItems_SalesRequestId");
             entity.HasOne(e => e.Client)
                 .WithMany()
@@ -3864,15 +3871,35 @@ public class PaymentContext : DbContext
             entity.HasIndex(item => new { item.RecipientLinkId, item.CreatedAt });
         });
 
+        modelBuilder.Entity<TaskStatusNotificationOutbox>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.EventKey).HasMaxLength(160).IsRequired();
+            entity.Property(item => item.EventType).HasMaxLength(24).IsRequired();
+            entity.Property(item => item.StatusTransitionToken).HasMaxLength(32).IsRequired();
+            entity.Property(item => item.ActorName).HasMaxLength(256).IsRequired();
+            entity.Property(item => item.LeaseToken).HasMaxLength(64);
+            entity.HasOne(item => item.TaskJournalItem).WithMany()
+                .HasForeignKey(item => item.TaskJournalItemId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(item => item.ApprovalParticipant).WithMany()
+                .HasForeignKey(item => item.ApprovalParticipantId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasIndex(item => item.EventKey).IsUnique();
+            entity.HasIndex(item => new { item.CompletedAt, item.LeaseUntil, item.Id });
+            entity.HasIndex(item => new { item.TaskJournalItemId, item.Id });
+        });
+
         modelBuilder.Entity<TaskJournalDeadlineChangeRequest>(entity =>
         {
             entity.HasKey(e => e.Id);
             entity.Property(e => e.RequestedByName).HasMaxLength(256).IsRequired();
             entity.Property(e => e.ReviewerName).HasMaxLength(256).IsRequired();
             entity.Property(e => e.Reason).HasMaxLength(1000).IsRequired();
-            entity.Property(e => e.Status).HasMaxLength(32).HasDefaultValue("pending").IsRequired();
+            entity.Property(e => e.Status).HasMaxLength(32).HasDefaultValue("pending").IsRequired().IsConcurrencyToken();
             entity.Property(e => e.DecisionComment).HasMaxLength(1000);
             entity.Property(e => e.DecidedByName).HasMaxLength(256);
+            entity.Property(e => e.ReviewerDispatchPending).HasDefaultValue(false);
+            entity.Property(e => e.ReviewerDispatchLeaseToken).HasMaxLength(64);
+            entity.Property(e => e.ReviewerDispatchAttempts).HasDefaultValue(0);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
 
             entity.HasOne(e => e.TaskJournalItem)
@@ -3913,6 +3940,7 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.DecisionCommentId).HasDatabaseName("IX_TaskDeadlineChangeRequests_DecisionCommentId");
             entity.HasIndex(e => new { e.TaskJournalItemId, e.Status }).HasDatabaseName("IX_TaskDeadlineChangeRequests_Task_Status");
             entity.HasIndex(e => new { e.ReviewerUserId, e.Status, e.CreatedAt }).HasDatabaseName("IX_TaskDeadlineChangeRequests_Reviewer_Status_Created");
+            entity.HasIndex(e => new { e.ReviewerDispatchPending, e.ReviewerDispatchLeaseUntil, e.Id }).HasDatabaseName("IX_TaskDeadlineChangeRequests_ReviewerDispatch");
         });
 
         modelBuilder.Entity<TaskJournalFile>(entity =>
@@ -4151,6 +4179,7 @@ public class PaymentContext : DbContext
         modelBuilder.Entity<StickyNote>(entity =>
         {
             entity.HasKey(e => e.Id);
+            entity.Property(e => e.Version).IsConcurrencyToken();
             entity.Property(e => e.Text).HasMaxLength(4000);
             entity.Property(e => e.Color).HasMaxLength(24).HasDefaultValue("yellow").IsRequired();
             entity.Property(e => e.FontSize).HasDefaultValue(14);
@@ -4223,6 +4252,31 @@ public class PaymentContext : DbContext
             ConfigureAudit<Role>(modelBuilder, enableSoftDelete: false);
             ConfigureAudit<User>(modelBuilder, enableSoftDelete: false);
         }
+
+        modelBuilder.Entity<TaskTimeEntry>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.UserNameSnapshot).HasMaxLength(256).IsRequired();
+            entity.HasIndex(item => item.UserId).IsUnique().HasFilter("\"StoppedAtUtc\" IS NULL AND \"UserId\" IS NOT NULL")
+                .HasDatabaseName("IX_TaskTimeEntries_OneRunningPerUser");
+            entity.HasIndex(item => new { item.TaskId, item.UserId, item.StartedAtUtc, item.Id });
+            entity.HasOne(item => item.Task).WithMany().HasForeignKey(item => item.TaskId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.User).WithMany().HasForeignKey(item => item.UserId).OnDelete(DeleteBehavior.SetNull);
+            entity.ToTable(table =>
+            {
+                table.HasCheckConstraint("CK_TaskTimeEntries_OrderedInterval", "\"StoppedAtUtc\" IS NULL OR \"StoppedAtUtc\" >= \"StartedAtUtc\"");
+                table.HasCheckConstraint("CK_TaskTimeEntries_Correction", "(\"CorrectedSeconds\" IS NULL OR \"CorrectedSeconds\" >= 0) AND \"Revision\" >= 0");
+            });
+        });
+
+        modelBuilder.Entity<TaskTimeCorrection>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.Reason).HasMaxLength(500).IsRequired();
+            entity.HasIndex(item => new { item.EntryId, item.Id });
+            entity.HasOne(item => item.Entry).WithMany().HasForeignKey(item => item.EntryId).OnDelete(DeleteBehavior.Restrict);
+            entity.ToTable(table => table.HasCheckConstraint("CK_TaskTimeCorrections_NonNegative", "\"NewSeconds\" >= 0 AND (\"PreviousSeconds\" IS NULL OR \"PreviousSeconds\" >= 0)"));
+        });
 
         modelBuilder.Entity<ActLineItem>()
             .HasQueryFilter(item => Acts.Any(parent => parent.Id == item.ActId));
@@ -4516,12 +4570,72 @@ public class PaymentContext : DbContext
            || propertyName.Contains("Percent", StringComparison.OrdinalIgnoreCase)
            || propertyName.Contains("Hours", StringComparison.OrdinalIgnoreCase);
 
+    private void CaptureTaskStatusTransitions()
+    {
+        var transitions = ChangeTracker.Entries<TaskJournalItem>()
+            .Where(entry => entry.State == EntityState.Modified && entry.Property(task => task.Status).IsModified
+                && !string.Equals(entry.Property(task => task.Status).OriginalValue, entry.Entity.Status, StringComparison.OrdinalIgnoreCase)
+                && !(IsApprovalCycleStatus(entry.Property(task => task.Status).OriginalValue) && IsApprovalCycleStatus(entry.Entity.Status)))
+            .ToArray();
+        if (transitions.Length == 0) return;
+        var pending = ChangeTracker.Entries<TaskStatusNotificationOutbox>()
+            .Where(item => item.State == EntityState.Added).ToArray();
+        var pendingById = pending.Where(item => item.Entity.TaskJournalItemId > 0)
+            .ToLookup(item => item.Entity.TaskJournalItemId);
+        var pendingByTask = pending.Where(item => item.Entity.TaskJournalItem is not null)
+            .ToLookup(item => item.Entity.TaskJournalItem, ReferenceEqualityComparer.Instance);
+        foreach (var entry in transitions)
+        {
+            entry.Entity.StatusTransitionToken = Guid.NewGuid().ToString("N");
+            foreach (var item in pendingById[entry.Entity.Id].Concat(pendingByTask[entry.Entity]).Distinct())
+                item.Entity.StatusTransitionToken = entry.Entity.StatusTransitionToken;
+        }
+    }
+
+    private static bool IsApprovalCycleStatus(string? status)
+        => string.Equals(status, "onApproval", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, "overdueApproval", StringComparison.OrdinalIgnoreCase);
+
     public override int SaveChanges()
     {
         return SaveChanges(acceptAllChangesOnSuccess: true);
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        CaptureTaskStatusTransitions();
+        var (closedTaskIds, deletedUserIds, revokedUserIds) = CaptureTimeTrackingTransitions();
+        using var taskTimeTransaction = (closedTaskIds.Length > 0 || deletedUserIds.Length > 0 || revokedUserIds.Length > 0) && Database.CurrentTransaction is null ? Database.BeginTransaction() : null;
+        try
+        {
+            if (deletedUserIds.Length > 0)
+            {
+                Users.Where(user => deletedUserIds.Contains(user.Id))
+                    .ExecuteUpdate(set => set.SetProperty(user => user.UpdatedAt, user => user.UpdatedAt));
+                var deletedAt = DateTime.UtcNow;
+                TaskTimeEntries.Where(entry => entry.UserId.HasValue && deletedUserIds.Contains(entry.UserId.Value) && entry.StoppedAtUtc == null)
+                    .ExecuteUpdate(set => set.SetProperty(entry => entry.StoppedAtUtc,
+                        entry => entry.StartedAtUtc > deletedAt ? entry.StartedAtUtc : deletedAt));
+            }
+            var result = SaveChangesWithPassportEncryption(acceptAllChangesOnSuccess);
+            if (closedTaskIds.Length > 0 || revokedUserIds.Length > 0)
+            {
+                var stoppedAt = DateTime.UtcNow;
+                TaskTimeEntries.Where(entry => (closedTaskIds.Contains(entry.TaskId) || (entry.UserId.HasValue && revokedUserIds.Contains(entry.UserId.Value))) && entry.StoppedAtUtc == null)
+                    .ExecuteUpdate(set => set.SetProperty(entry => entry.StoppedAtUtc,
+                        entry => entry.StartedAtUtc > stoppedAt ? entry.StartedAtUtc : stoppedAt));
+            }
+            taskTimeTransaction?.Commit();
+            return result;
+        }
+        catch
+        {
+            taskTimeTransaction?.Rollback();
+            throw;
+        }
+    }
+
+    private int SaveChangesWithPassportEncryption(bool acceptAllChangesOnSuccess)
     {
         var encryptionWork = CapturePassportEncryptionWork();
         if (encryptionWork.Count == 0)
@@ -4570,6 +4684,41 @@ public class PaymentContext : DbContext
 
     private async Task<int> SaveChangesCoreAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken)
     {
+        CaptureTaskStatusTransitions();
+        var (closedTaskIds, deletedUserIds, revokedUserIds) = CaptureTimeTrackingTransitions();
+        await using var taskTimeTransaction = (closedTaskIds.Length > 0 || deletedUserIds.Length > 0 || revokedUserIds.Length > 0) && Database.CurrentTransaction is null
+            ? await Database.BeginTransactionAsync(cancellationToken) : null;
+        try
+        {
+            if (deletedUserIds.Length > 0)
+            {
+                await Users.Where(user => deletedUserIds.Contains(user.Id))
+                    .ExecuteUpdateAsync(set => set.SetProperty(user => user.UpdatedAt, user => user.UpdatedAt), cancellationToken);
+                var deletedAt = DateTime.UtcNow;
+                await TaskTimeEntries.Where(entry => entry.UserId.HasValue && deletedUserIds.Contains(entry.UserId.Value) && entry.StoppedAtUtc == null)
+                    .ExecuteUpdateAsync(set => set.SetProperty(entry => entry.StoppedAtUtc,
+                        entry => entry.StartedAtUtc > deletedAt ? entry.StartedAtUtc : deletedAt), cancellationToken);
+            }
+            var result = await SaveChangesWithPassportEncryptionAsync(acceptAllChangesOnSuccess, cancellationToken);
+            if (closedTaskIds.Length > 0 || revokedUserIds.Length > 0)
+            {
+                var stoppedAt = DateTime.UtcNow;
+                await TaskTimeEntries.Where(entry => (closedTaskIds.Contains(entry.TaskId) || (entry.UserId.HasValue && revokedUserIds.Contains(entry.UserId.Value))) && entry.StoppedAtUtc == null)
+                    .ExecuteUpdateAsync(set => set.SetProperty(entry => entry.StoppedAtUtc,
+                        entry => entry.StartedAtUtc > stoppedAt ? entry.StartedAtUtc : stoppedAt), cancellationToken);
+            }
+            if (taskTimeTransaction is not null) await taskTimeTransaction.CommitAsync(cancellationToken);
+            return result;
+        }
+        catch
+        {
+            if (taskTimeTransaction is not null) await taskTimeTransaction.RollbackAsync(cancellationToken);
+            throw;
+        }
+    }
+
+    private async Task<int> SaveChangesWithPassportEncryptionAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken)
+    {
         var encryptionWork = CapturePassportEncryptionWork();
         if (encryptionWork.Count == 0)
             return await SaveChangesWithoutPassportEncryptionAsync(acceptAllChangesOnSuccess, cancellationToken);
@@ -4609,6 +4758,30 @@ public class PaymentContext : DbContext
         var result = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
         await PersistAuditEventsAsync(pendingAuditEvents, acceptAllChangesOnSuccess, cancellationToken);
         return result;
+    }
+
+    private (int[] TaskIds, int[] DeletedUserIds, int[] RevokedUserIds) CaptureTimeTrackingTransitions()
+    {
+        var tasks = new HashSet<int>();
+        var deletedUsers = new HashSet<int>();
+        var revokedUsers = new HashSet<int>();
+        foreach (var entry in ChangeTracker.Entries())
+        {
+            if (entry.Entity is User user && user.Id > 0)
+            {
+                if (entry.State == EntityState.Deleted) deletedUsers.Add(user.Id);
+                else if (entry.State == EntityState.Modified
+                         && ((!user.IsActive && entry.Property(nameof(User.IsActive)).IsModified)
+                             || (!user.IsApproved && entry.Property(nameof(User.IsApproved)).IsModified)))
+                    revokedUsers.Add(user.Id);
+            }
+            else if (entry.Entity is TaskJournalItem task && task.Id > 0 && (entry.State == EntityState.Deleted
+                     || (entry.State == EntityState.Modified && entry.Property(nameof(TaskJournalItem.Status)).IsModified
+                         && (string.Equals(task.Status, "done", StringComparison.OrdinalIgnoreCase)
+                             || string.Equals(task.Status, "cancelled", StringComparison.OrdinalIgnoreCase)))))
+                tasks.Add(task.Id);
+        }
+        return (tasks.ToArray(), deletedUsers.ToArray(), revokedUsers.ToArray());
     }
 
     private List<PassportEncryptionWorkItem> CapturePassportEncryptionWork()
@@ -5225,6 +5398,8 @@ public class PaymentContext : DbContext
     public DbSet<ObjectAuditEvent> ObjectAuditEvents { get; set; }
     public DbSet<YandexDiskCrmSyncState> YandexDiskCrmSyncStates { get; set; }
     public DbSet<TaskJournalItem> TaskJournalItems { get; set; }
+    public DbSet<TaskTimeEntry> TaskTimeEntries { get; set; }
+    public DbSet<TaskTimeCorrection> TaskTimeCorrections { get; set; }
     public DbSet<TaskJournalParticipant> TaskJournalParticipants { get; set; }
     public DbSet<TaskJournalComment> TaskJournalComments { get; set; }
     public DbSet<InternalChatThread> InternalChatThreads { get; set; }
@@ -5247,6 +5422,7 @@ public class PaymentContext : DbContext
     public DbSet<MaxInboundCorrespondenceMessage> MaxInboundCorrespondenceMessages { get; set; }
     public DbSet<MaxOutboxMessage> MaxOutboxMessages { get; set; }
     public DbSet<TaskJournalDeadlineChangeRequest> TaskJournalDeadlineChangeRequests { get; set; }
+    public DbSet<TaskStatusNotificationOutbox> TaskStatusNotificationOutboxes { get; set; }
     public DbSet<TaskJournalFile> TaskJournalFiles { get; set; }
     public DbSet<TaskJournalTemplate> TaskJournalTemplates { get; set; }
     public DbSet<CasePositionTemplate> CasePositionTemplates { get; set; }

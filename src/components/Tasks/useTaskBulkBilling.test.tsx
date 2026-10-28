@@ -30,6 +30,23 @@ beforeEach(() => {
 });
 
 describe('shared safe bulk billing dialog', () => {
+  it('refuses conflicting versions of one selected task before opening or sending', () => {
+    const conflicting = [rows[0], { ...rows[0], updatedAt: null as unknown as string }];
+    render(<Harness tasks={conflicting} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Открыть учёт' }));
+    expect(screen.getByRole('alert').textContent).toMatch(/разные версии одной задачи/i);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(mocks.bulk).not.toHaveBeenCalled(); expect(mocks.settings).not.toHaveBeenCalled();
+  });
+  it('keeps the original selection if its proposed replacement has conflicting versions', async () => {
+    const { rerender } = render(<Harness />); await open();
+    rerender(<Harness tasks={[{ ...rows[0], id: 99 }, { ...rows[0], id: 99, updatedAt: null as unknown as string }]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Новый выбор с текущей страницы' }));
+    expect(await screen.findByText(/разные версии одной задачи/i)).toBeTruthy();
+    expect(screen.getByText('#1 · Выбранная 1')).toBeTruthy();
+    expect(screen.getByText('#2 · Выбранная 2')).toBeTruthy();
+    expect(mocks.confirm).not.toHaveBeenCalled(); expect(mocks.bulk).not.toHaveBeenCalled();
+  });
   it('sends one isolated bulk request, including explicit null/raw tokens and the completed opt-in', async () => {
     render(<Harness />); await open();
     fireEvent.change(screen.getByLabelText('Новый тип учёта выбранных задач'), { target: { value: 'billable' } });
@@ -131,6 +148,66 @@ describe('shared safe bulk billing dialog', () => {
     expect(mocks.bulk.mock.calls[1][0].ids).toEqual([2]);
     expect(mocks.bulk.mock.calls[1][0].expectedUpdatedAtById).toEqual({ '2': '2026-10-24T03:04:05.1111111Z' });
     expect(screen.getByLabelText('Построчный итог смены учёта').textContent).toContain('#1');
+  });
+  it('retries over 50 frozen tasks with bounded reads and never resends successful or inaccessible rows', async () => {
+    const many = Array.from({ length: 60 }, (_, index) => ({ id: index + 1, title: `Задача ${index + 1}`,
+      status: 'new', updatedAt: '2026-10-24T01:02:03.1234567Z' })) as TaskJournalItem[];
+    const updated = many.slice(0, 5).map((task) => task.id);
+    const remainingIds = many.slice(5).map((task) => task.id);
+    mocks.bulk.mockResolvedValueOnce({ requested: 60, updated: 5, unchanged: 0, skipped: 0, conflicted: 55,
+      items: [...result(updated).items, ...result(remainingIds, 'conflict').items] });
+    let active = 0; let peak = 0;
+    mocks.get.mockImplementation(async (id: number) => {
+      active++; peak = Math.max(peak, active);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        if (id === 6) throw new Error('HTTP 403 - Forbidden');
+        return { ...many[id - 1], updatedAt: '2026-10-24T03:04:05.1111111Z' };
+      } finally { active--; }
+    });
+    render(<Harness tasks={many} />); await open(); submit();
+    await screen.findByText(/Изменено: 5.*Конфликтов: 55/);
+    fireEvent.click(screen.getByRole('button', { name: 'Обновить оставшиеся задачи' }));
+    await screen.findByText(/Готово к повтору после свежего чтения: 54/);
+    expect(mocks.get).toHaveBeenCalledTimes(55);
+    expect(peak).toBeGreaterThan(1); expect(peak).toBeLessThanOrEqual(4);
+    expect(mocks.get.mock.calls.map(([id]) => id).sort((a, b) => a - b)).toEqual(remainingIds);
+    submit(); await waitFor(() => expect(mocks.bulk).toHaveBeenCalledTimes(2));
+    const retried = mocks.bulk.mock.calls[1][0];
+    expect(retried.ids).toEqual(remainingIds.filter((id) => id !== 6));
+    expect(Object.keys(retried.expectedUpdatedAtById)).toHaveLength(54);
+    expect(retried.expectedUpdatedAtById['7']).toBe('2026-10-24T03:04:05.1111111Z');
+    expect(screen.getByLabelText('Построчный итог смены учёта').textContent).toContain('#6');
+  });
+  it('stops starting reads after a server failure and retries only confirmed remaining tasks', async () => {
+    const many = Array.from({ length: 60 }, (_, index) => ({ id: index + 1, title: `Задача ${index + 1}`,
+      status: 'new', updatedAt: '2026-10-24T01:02:03.1234567Z' })) as TaskJournalItem[];
+    const completedIds = many.slice(0, 5).map((task) => task.id);
+    const conflictIds = many.slice(5).map((task) => task.id);
+    mocks.bulk.mockResolvedValueOnce({ requested: 60, updated: 5, unchanged: 0, skipped: 0, conflicted: 55,
+      items: [...result(completedIds).items, ...result(conflictIds, 'conflict').items] });
+    mocks.get.mockImplementation(async (id: number) => {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      if (id === 6) throw new Error('HTTP 503 - Unavailable');
+      return { ...many[id - 1], updatedAt: '2026-10-24T03:04:05.1111111Z' };
+    });
+    render(<Harness tasks={many} />); await open(); submit();
+    await screen.findByText(/Изменено: 5.*Конфликтов: 55/);
+    fireEvent.click(screen.getByRole('button', { name: 'Обновить оставшиеся задачи' }));
+    await screen.findByText(/Готово к повтору после свежего чтения: 3/);
+    expect(mocks.get.mock.calls.map(([id]) => id).sort((a, b) => a - b)).toEqual([6, 7, 8, 9]);
+    expect(screen.getByLabelText('Построчный итог смены учёта').textContent).toContain('Свежие сведения не получены');
+    submit(); await waitFor(() => expect(mocks.bulk).toHaveBeenCalledTimes(2));
+    expect(mocks.bulk.mock.calls[1][0].ids).toEqual([7, 8, 9]);
+    await screen.findByText(/Перед повтором оставшихся 52 задач/);
+    mocks.get.mockImplementation(async (id: number) => ({ ...many[id - 1], updatedAt: '2026-10-24T04:04:05.1111111Z' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Обновить оставшиеся задачи' }));
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Подтвердить повтор оставшихся' }) as HTMLButtonElement).disabled).toBe(false));
+    submit(); await waitFor(() => expect(mocks.bulk).toHaveBeenCalledTimes(3));
+    const finalIds = mocks.bulk.mock.calls[2][0].ids as number[];
+    expect(finalIds).toEqual(conflictIds.filter((id) => ![7, 8, 9].includes(id)));
+    expect(finalIds).not.toContain(1); expect(finalIds).not.toContain(7);
+    expect(mocks.bulk.mock.calls[2][0].expectedUpdatedAtById['6']).toBe('2026-10-24T04:04:05.1111111Z');
   });
   it('requires explicit confirmation before replacing the fixed operation with a new selection', async () => {
     const { rerender } = render(<Harness />); await open();

@@ -37,6 +37,14 @@ public sealed partial class InternalChatControllerTests
     [InlineData(true, "replySystem")]
     [InlineData(false, "replySelf")]
     [InlineData(true, "replySelf")]
+    [InlineData(false, "replyHidden")]
+    [InlineData(true, "replyHidden")]
+    [InlineData(false, "replyRestored")]
+    [InlineData(true, "replyRestored")]
+    [InlineData(false, "replyHiddenAfterPublish")]
+    [InlineData(true, "replyHiddenAfterPublish")]
+    [InlineData(false, "revokedAfterPublish")]
+    [InlineData(true, "revokedAfterPublish")]
     [InlineData(false, "disabled")]
     [InlineData(true, "disabled")]
     [InlineData(false, "staleLease")]
@@ -50,7 +58,7 @@ public sealed partial class InternalChatControllerTests
         var thread = await CaptureChannelAsync(f, actor, other);
         var request = CaptureSnapshot(thread.Id, actor.Id);
         int? replyId = null;
-        if (scenario is "replyMention" or "replySystem" or "replySelf")
+        if (scenario is "replyMention" or "replySystem" or "replySelf" or "replyHidden" or "replyRestored" or "replyHiddenAfterPublish")
         {
             var reply = new InternalChatMessage
             {
@@ -93,6 +101,11 @@ public sealed partial class InternalChatControllerTests
         Assert.Equal("accepted", (await writer.WriteAsync(request, ChatOriginalInputs(request), default)).Status);
         var before = await f.Db.InternalChatSendAttempts.AsNoTracking().SingleAsync();
         var identities = await f.Db.InternalChatSendAttemptFiles.AsNoTracking().OrderBy(item => item.Index).ToArrayAsync();
+        if (scenario is "replyHidden" or "replyRestored")
+        {
+            var member = f.Db.InternalChatMembers.Where(item => item.ThreadId == thread.Id && item.UserId == actor.Id);
+            await member.ExecuteUpdateAsync(set => set.SetProperty(item => item.HistoryHiddenThroughMessageId, replyId));
+        }
         if (scenario == "copyPending") await f.Db.StorageReplicas.ExecuteUpdateAsync(set => set.SetProperty(item => item.Status, StorageReplicaStatuses.Pending));
         if (scenario == "corruptSecond")
         {
@@ -112,6 +125,13 @@ public sealed partial class InternalChatControllerTests
                 .SetProperty(item => item.RecoveryLeaseExpiresAt, expiry));
         }
         var bindings = new ChatPublicationBindings(new ProductStorageBindingService(f.Db, policies), scenario == "bindingFailure");
+        if (scenario == "replyRestored")
+        {
+            Assert.Equal("conflict", (await writer.PublishAsync(thread.Id, actor.Id, request.ClientRequestId, policies, bindings, default)).Status);
+            Assert.False(await f.Db.InternalChatMessages.AnyAsync(item => item.ClientRequestId == request.ClientRequestId));
+            await f.Db.InternalChatMembers.Where(item => item.ThreadId == thread.Id && item.UserId == actor.Id)
+                .ExecuteUpdateAsync(set => set.SetProperty(item => item.HistoryHiddenThroughMessageId, (int?)null));
+        }
         ack.Armed = scenario == "lostCommitAck";
         var puts = local.PutCalls;
         InternalChatSendPublicationResult result;
@@ -125,7 +145,7 @@ public sealed partial class InternalChatControllerTests
         var expected = scenario switch
         {
             "copyPending" => "notReady",
-            "corruptSecond" => "conflict",
+            "corruptSecond" or "replyHidden" => "conflict",
             "revoked" or "revokedDuringRead" => "forbidden",
             "bindingFailure" => "notReady",
             "disabled" => "disabled",
@@ -165,7 +185,7 @@ public sealed partial class InternalChatControllerTests
             if (replyId.HasValue)
             {
                 var reminder = await f.Db.InternalChatMessages.AsNoTracking().Where(item => item.Id == replyId).Select(item => item.NextNoReplyReminderAt).SingleAsync();
-                if (scenario == "replyMention") Assert.Null(reminder);
+                if (scenario is "replyMention" or "replyRestored" or "replyHiddenAfterPublish") Assert.Null(reminder);
                 else Assert.NotNull(reminder);
             }
             foreach (var identity in identities)
@@ -176,6 +196,10 @@ public sealed partial class InternalChatControllerTests
                 Assert.Equal(identity.StorageObjectId, await f.Db.StorageProductBindings.Where(item => item.SourceId == attachment.Id).Select(item => item.StorageObjectId).SingleAsync());
             }
             var reads = local.ReadCalls;
+            if (scenario == "replyHiddenAfterPublish") await f.Db.InternalChatMembers.Where(item => item.ThreadId == thread.Id && item.UserId == actor.Id)
+                .ExecuteUpdateAsync(set => set.SetProperty(item => item.HistoryHiddenThroughMessageId, replyId));
+            if (scenario == "revokedAfterPublish") await f.Db.InternalChatMembers.Where(item => item.ThreadId == thread.Id && item.UserId == actor.Id)
+                .ExecuteUpdateAsync(set => set.SetProperty(item => item.IsActive, false));
             if (scenario == "deletedReceipt")
             {
                 var deletedAt = DateTime.UtcNow;
@@ -183,7 +207,9 @@ public sealed partial class InternalChatControllerTests
             }
             if (scenario == "corruptReceipt") await f.Db.StorageProductBindings.ExecuteUpdateAsync(set => set.SetProperty(item => item.Version, 0L));
             var replay = await writer.PublishAsync(thread.Id, actor.Id, request.ClientRequestId, policies, bindings, default);
-            Assert.Equal(scenario switch { "deletedReceipt" => "deleted", "corruptReceipt" => "conflict", _ => "published" }, replay.Status);
+            Assert.Equal(scenario switch { "deletedReceipt" => "deleted", "corruptReceipt" => "conflict", "revokedAfterPublish" => "forbidden", _ => "published" }, replay.Status);
+            if (scenario == "revokedAfterPublish") Assert.Null(replay.MessageId);
+            if (scenario == "replyHiddenAfterPublish") Assert.Equal(result.MessageId, replay.MessageId);
             Assert.Equal(reads, local.ReadCalls);
             Assert.Equal(puts, local.PutCalls);
             Assert.Single(await f.Db.InternalChatMessages.Where(item => item.ClientRequestId == request.ClientRequestId).ToArrayAsync());

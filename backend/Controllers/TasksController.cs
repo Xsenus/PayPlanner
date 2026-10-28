@@ -20,6 +20,7 @@ using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Documents;
 using PayPlanner.Api.Services.Invoices;
 using PayPlanner.Api.Services.Notifications;
+using PayPlanner.Api.Services.Tasks;
 using PayPlanner.Api.Services.Storage;
 
 namespace PayPlanner.Api.Controllers;
@@ -144,6 +145,8 @@ public class TasksController : ControllerBase
     private readonly IProductStorageDeletionService? _productStorageDeletion;
     private readonly ITaskFilePublicationAuthorizationService _taskFilePublicationAuthorization;
     private readonly ITaskFileUploadStatusReader? _taskFileUploadStatusReader;
+    private readonly ILogger<TaskDeadlineReviewerDispatchProcessor>? _reviewerDispatchLogger;
+    private readonly ILogger<TaskStatusNotificationDispatchProcessor>? _statusDispatchLogger;
 
     public TasksController(
         PaymentContext db,
@@ -161,7 +164,9 @@ public class TasksController : ControllerBase
         IManagedTaskFileUploadService? managedTaskUploads = null,
         IProductStorageDeletionService? productStorageDeletion = null,
         ITaskFilePublicationAuthorizationService? taskFilePublicationAuthorization = null,
-        ITaskFileUploadStatusReader? taskFileUploadStatusReader = null)
+        ITaskFileUploadStatusReader? taskFileUploadStatusReader = null,
+        ILogger<TaskDeadlineReviewerDispatchProcessor>? reviewerDispatchLogger = null,
+        ILogger<TaskStatusNotificationDispatchProcessor>? statusDispatchLogger = null)
     {
         _db = db;
         _productStorageReader = productStorageReader;
@@ -169,6 +174,8 @@ public class TasksController : ControllerBase
         _productStorageDeletion = productStorageDeletion;
         _taskFilePublicationAuthorization = taskFilePublicationAuthorization ?? new TaskFilePublicationAuthorizationService(db);
         _taskFileUploadStatusReader = taskFileUploadStatusReader;
+        _reviewerDispatchLogger = reviewerDispatchLogger;
+        _statusDispatchLogger = statusDispatchLogger;
         _notificationService = notificationService;
         _caseDocumentStorage = caseDocumentStorage ?? new LocalCaseDocumentStorage(environment, configuration);
         _pdfService = pdfService;
@@ -244,14 +251,7 @@ public class TasksController : ControllerBase
             todayTo,
             billingStatus);
 
-        if (untriaged)
-        {
-            query = query.Where(task =>
-                !task.ClientId.HasValue &&
-                !task.LegalEntityId.HasValue &&
-                !task.AssigneeUserId.HasValue &&
-                task.AssigneeName == "");
-        }
+        query = ApplyTaskUntriagedFilter(query, untriaged);
 
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 200);
@@ -1239,7 +1239,16 @@ public class TasksController : ControllerBase
         [FromQuery] int? clientId = null,
         [FromQuery] int? legalEntityId = null,
         [FromQuery] string? priority = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        [FromQuery] bool? underControl = null,
+        [FromQuery] int? authorUserId = null,
+        [FromQuery] string? participantRole = null,
+        [FromQuery] bool approvalScope = false,
+        [FromQuery] string? metric = null,
+        [FromQuery] DateTime? todayFrom = null,
+        [FromQuery] DateTime? todayTo = null,
+        [FromQuery] string? billingStatus = null,
+        [FromQuery] bool untriaged = false)
     {
         var access = await GetTaskAccessAsync(ct);
         if (access is null)
@@ -1263,18 +1272,16 @@ public class TasksController : ControllerBase
             return BadRequest("Поддерживаются форматы html, word и pdf.");
         }
 
-        var tasks = await ApplyTaskJournalFilters(
-                BuildVisibleTasksQuery(access).AsNoTracking(),
-                search,
-                status,
-                type,
-                assigneeUserId,
-                from,
-                to,
-                clientCaseId,
-                clientId,
-                legalEntityId,
-                priority)
+        var query = BuildTaskJournalListQuery(
+            access, search, status, type, assigneeUserId, from, to, clientCaseId, clientId,
+            legalEntityId, priority, underControl, authorUserId, participantRole, approvalScope,
+            metric, todayFrom, todayTo, billingStatus);
+        query = ApplyTaskUntriagedFilter(query, untriaged);
+        var tasks = await query
+            .Include(task => task.Client)
+            .Include(task => task.LegalEntity)
+            .Include(task => task.ClientCase)
+            .Include(task => task.Participants)
             .OrderBy(task => task.Client != null ? task.Client.Name : task.LegalEntity != null ? task.LegalEntity.ShortName : task.ObjectName)
             .ThenBy(task => task.ClientCase != null ? task.ClientCase.Title : task.ObjectName)
             .ThenBy(task => task.DueAt)
@@ -1290,7 +1297,9 @@ public class TasksController : ControllerBase
         var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
         var generatedAtUtc = NormalizeUtcInstant(DateTime.UtcNow);
         var generatedAtLocal = CalendarTimeZoneHelper.ToUserLocal(generatedAtUtc, timeZone);
-        var filterText = BuildTaskPlanningReportFilterText(status, type, priority, from, to);
+        var effectiveStatus = string.Equals(billingStatus?.Trim(), "unbilled", StringComparison.OrdinalIgnoreCase) ? null : status;
+        var filterText = BuildTaskPlanningReportFilterText(effectiveStatus, type, priority, from, to, search, assigneeUserId, clientCaseId, clientId, legalEntityId, timeZone,
+            underControl, authorUserId, participantRole, approvalScope, metric, billingStatus, untriaged);
         var fileStamp = generatedAtLocal.ToString("yyyyMMdd-HHmm", CultureInfo.InvariantCulture);
 
         if (normalizedFormat == "pdf")
@@ -2460,13 +2469,20 @@ public class TasksController : ControllerBase
         var access = await GetTaskAccessAsync(ct);
         if (access is null)
         {
-            return Unauthorized();
+            return User.GetUserId().HasValue ? Forbid() : Unauthorized();
         }
 
         if (!access.IsAdmin && access.Permission?.CanView != true)
         {
             return Forbid();
         }
+
+        if (!await BuildVisibleTasksQuery(access).AnyAsync(item => item.Id == id, ct)) return NotFound();
+        await using var requestLease = await TaskDeadlineRequestLease.TryAcquireAsync(_db, access.UserId, id, ct);
+        if (requestLease is null) return StatusCode(423, new { message = "Задача сейчас изменяется. Повторите запрос переноса срока." });
+        access = await GetTaskAccessAsync(ct);
+        if (access is null) return User.GetUserId().HasValue ? Forbid() : Unauthorized();
+        if (!access.IsAdmin && access.Permission?.CanView != true) return Forbid();
 
         var entity = await BuildVisibleTasksQuery(access).FirstOrDefaultAsync(item => item.Id == id, ct);
         if (entity is null)
@@ -2541,6 +2557,7 @@ public class TasksController : ControllerBase
         _db.TaskJournalDeadlineChangeRequests.Add(deadlineRequest);
         entity.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
+        await requestLease.CommitAsync(ct);
         await _notificationService.NotifyTaskDeadlineChangeRequestedAsync(entity, deadlineRequest, ct);
         await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
 
@@ -2694,7 +2711,11 @@ public class TasksController : ControllerBase
         deadlineRequest.DecisionCommentEntry = decisionHistory;
         deadlineRequest.UpdatedAt = decidedAt;
 
-        await _db.SaveChangesAsync(ct);
+        try { await _db.SaveChangesAsync(ct); }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict(new { message = "Запрос переноса срока уже обработан. Обновите задачу." });
+        }
         await _notificationService.NotifyTaskDeadlineChangeApprovedAsync(entity, deadlineRequest, ct);
         await NotifyTaskScheduleConflictIfNeededAsync(entity, access, ct);
         await SafeSyncExternalCalendarTaskAsync(entity.Id, ct);
@@ -2786,7 +2807,11 @@ public class TasksController : ControllerBase
         deadlineRequest.DecisionCommentEntry = decisionHistory;
         deadlineRequest.UpdatedAt = decidedAt;
 
-        await _db.SaveChangesAsync(ct);
+        try { await _db.SaveChangesAsync(ct); }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict(new { message = "Запрос переноса срока уже обработан. Обновите задачу." });
+        }
         await _notificationService.NotifyTaskDeadlineChangeRejectedAsync(entity, deadlineRequest, ct);
         await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
 
@@ -3018,6 +3043,14 @@ public class TasksController : ControllerBase
             return StatusCode(503, new { message = "Обязательные копии файла ещё не готовы или загрузка временно отключена. Вложение пока не добавлено; повторите отправку того же файла позже." });
         }
 
+        // Serialize publication against task reassignment and changes to the actor's
+        // account, role and permissions. Recheck under the lock before persisting.
+        await using var uploadLease = await TaskDeadlineRequestLease.TryAcquireAsync(_db, access.UserId, id, ct);
+        if (uploadLease is null)
+            return StatusCode(423, new { message = "Задача или доступ сейчас изменяются. Повторите загрузку файла." });
+        await _db.Entry(entity).ReloadAsync(ct);
+        if (!await _taskFilePublicationAuthorization.CanPublishAsync(access.UserId, id, ct)) return Forbid();
+
         var isNewDocument = normalizedDocumentKey is null;
         if (isNewDocument)
         {
@@ -3042,7 +3075,6 @@ public class TasksController : ControllerBase
         var fullPath = ResolveTaskFilePath(relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         string? caseDocumentStoragePath = null;
-        Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction? uploadTransaction = null;
         var commitStarted = false;
         var taskFileCreated = false;
         var caseFileSaved = false;
@@ -3053,6 +3085,14 @@ public class TasksController : ControllerBase
             {
                 taskFileCreated = true;
                 await UploadValidationHelper.CopyValidatedAsync(uploadFile, stream, MaxTaskFileBytes, ct);
+            }
+
+            // A request may have been revoked while its bytes were received.
+            if (!await _taskFilePublicationAuthorization.CanPublishAsync(access.UserId, id, ct))
+            {
+                TryDeletePhysicalFile(fullPath);
+                taskFileCreated = false;
+                return Forbid();
             }
 
             var taskFile = new TaskJournalFile
@@ -3115,10 +3155,9 @@ public class TasksController : ControllerBase
                     : $"Загружена новая версия файла: {safeFileName} (v{version}).",
                 new { fileName = safeFileName, documentKey = normalizedDocumentKey, version });
 
-            uploadTransaction = await _db.Database.BeginTransactionAsync(ct);
             await _db.SaveChangesAsync(ct);
             commitStarted = true;
-            await uploadTransaction.CommitAsync(ct);
+            await uploadLease.CommitAsync(ct);
             await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
 
             var caseDocumentIds = await ResolveTaskCaseDocumentIdsAsync(entity.ClientCaseId, [taskFile], ct);
@@ -3133,11 +3172,6 @@ public class TasksController : ControllerBase
             // bytes already referenced by committed task/case records.
             if (!commitStarted)
             {
-                if (uploadTransaction is not null)
-                {
-                    using var rollbackTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                    await uploadTransaction.RollbackAsync(rollbackTimeout.Token);
-                }
                 if (taskFileCreated) TryDeletePhysicalFile(fullPath);
                 if (caseFileSaved && caseDocumentStoragePath is not null)
                 {
@@ -3145,13 +3179,9 @@ public class TasksController : ControllerBase
                 }
             }
 
-            if (ex is InvalidDataException && uploadTransaction is null)
+            if (ex is InvalidDataException)
                 return BadRequest(new { message = "Файл повреждён или его размер неверен. Допустимый размер — до 25 МБ." });
             throw;
-        }
-        finally
-        {
-            if (uploadTransaction is not null) await uploadTransaction.DisposeAsync();
         }
     }
 
@@ -3460,17 +3490,41 @@ public class TasksController : ControllerBase
             AddTaskHistory(entity, access, "Отдельный согласующий не выбран: постановщик автоматически добавлен как согласующий.");
         }
         _db.TaskJournalItems.Add(entity);
+        TaskStatusNotificationOutbox? statusNotification = null;
+        if (IsApprovalActiveStatus(entity.Status))
+        {
+            statusNotification = new TaskStatusNotificationOutbox
+            {
+                TaskJournalItem = entity,
+                EventKey = $"task:new:status:{Guid.NewGuid():N}",
+                EventType = "approval",
+                ApprovalParticipant = GetPendingTaskApprover(entity),
+                StatusTransitionToken = entity.StatusTransitionToken,
+                ActorUserId = access.UserId,
+                ActorName = access.DisplayName,
+                CreatedAt = createdAt,
+            };
+            _db.TaskStatusNotificationOutboxes.Add(statusNotification);
+        }
         await _db.SaveChangesAsync(ct);
         await SyncContractorPaymentAsync(entity, await ResolveContractorPaymentResultBaseDateAsync(null, nextStatus, entity.CreatedAt, ct), ct);
         await _db.SaveChangesAsync(ct);
         await _notificationService.NotifyTaskAssignedAsync(entity, access.DisplayName, access.UserId, ct);
-        if (IsApprovalActiveStatus(entity.Status))
-        {
-            await _notificationService.NotifyTaskApprovalRequestedAsync(entity, access.DisplayName, access.UserId, ct);
-        }
         await NotifyTaskScheduleConflictIfNeededAsync(entity, access, ct);
         await SafeSyncExternalCalendarTaskAsync(entity.Id, ct);
         await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+        if (statusNotification is not null && _notificationService is IDurableTaskStatusNotificationService durableNotifications)
+        {
+            try
+            {
+                var processor = new TaskStatusNotificationDispatchProcessor(_db, durableNotifications, logger: _statusDispatchLogger);
+                await processor.ProcessAsync(statusNotification.Id, ct);
+            }
+            catch (Exception error) when (error is not OperationCanceledException)
+            {
+                _statusDispatchLogger?.LogWarning(error, "Task status notification event {EventId} remains queued.", statusNotification.Id);
+            }
+        }
         return Created($"/api/tasks/{entity.Id}", Map(entity, binding));
     }
 
@@ -4004,9 +4058,10 @@ public class TasksController : ControllerBase
             entity.Participants.Add(participant);
         }
 
+        List<TaskJournalDeadlineChangeRequest> pendingDeadlineRequests = [];
         if (authorChanged)
         {
-            var pendingDeadlineRequests = await _db.TaskJournalDeadlineChangeRequests
+            pendingDeadlineRequests = await _db.TaskJournalDeadlineChangeRequests
                 .Where(item => item.TaskJournalItemId == entity.Id && item.Status == "pending")
                 .ToListAsync(ct);
             foreach (var deadlineRequest in pendingDeadlineRequests)
@@ -4014,6 +4069,16 @@ public class TasksController : ControllerBase
                 deadlineRequest.ReviewerUserId = nextAuthorUserId;
                 deadlineRequest.ReviewerName = nextAuthorName;
                 deadlineRequest.UpdatedAt = updatedAt;
+                deadlineRequest.ReviewerDispatchPending = true;
+                deadlineRequest.ReviewerDispatchLeaseToken = null;
+                deadlineRequest.ReviewerDispatchLeaseUntil = null;
+                deadlineRequest.ReviewerDispatchAttempts = 0;
+                // A concurrent delivery claim may have changed these columns after the read.
+                var deadlineEntry = _db.Entry(deadlineRequest);
+                deadlineEntry.Property(item => item.ReviewerDispatchPending).IsModified = true;
+                deadlineEntry.Property(item => item.ReviewerDispatchLeaseToken).IsModified = true;
+                deadlineEntry.Property(item => item.ReviewerDispatchLeaseUntil).IsModified = true;
+                deadlineEntry.Property(item => item.ReviewerDispatchAttempts).IsModified = true;
             }
         }
 
@@ -4052,8 +4117,26 @@ public class TasksController : ControllerBase
         {
             await SyncContractorPaymentAsync(entity, await ResolveContractorPaymentResultBaseDateAsync(previousStatus, nextStatus, entity.UpdatedAt, ct), ct);
         }
+        var approvalRequested = approvalQueueRestarted || (!IsApprovalActiveStatus(previousStatus) && IsApprovalActiveStatus(entity.Status));
+        TaskStatusNotificationOutbox? statusNotification = null;
+        if (approvalRequested || becameDone)
+        {
+            statusNotification = new TaskStatusNotificationOutbox
+            {
+                TaskJournalItemId = entity.Id,
+                EventKey = $"task:{entity.Id}:status:{Guid.NewGuid():N}",
+                EventType = approvalRequested ? "approval" : "completion",
+                ApprovalParticipant = approvalRequested ? GetPendingTaskApprover(entity) : null,
+                StatusTransitionToken = entity.StatusTransitionToken,
+                ActorUserId = access.UserId,
+                ActorName = access.DisplayName,
+                CreatedAt = DateTime.UtcNow,
+            };
+            _db.TaskStatusNotificationOutboxes.Add(statusNotification);
+        }
         await _db.SaveChangesAsync(ct);
         await updateTransaction.CommitAsync(ct);
+        await updateTransaction.DisposeAsync();
         await SynchronizeExistingTaskChatMembersAsync([entity], ct);
         await AppendTaskChatSystemMessagesAsync([(entity.Id, (IReadOnlyList<string>)changeLabels)], access, ct);
         await NotifyRecurringTaskCreatedAsync(nextRecurringTask, access, ct);
@@ -4077,18 +4160,32 @@ public class TasksController : ControllerBase
             await _notificationService.NotifyTaskCommentAsync(entity, userComment, ct);
         }
 
-        if (approvalQueueRestarted || (!IsApprovalActiveStatus(previousStatus) && IsApprovalActiveStatus(entity.Status)))
-        {
-            await _notificationService.NotifyTaskApprovalRequestedAsync(entity, access.DisplayName, access.UserId, ct);
-        }
-
-        if (becameDone)
-        {
-            await _notificationService.NotifyTaskCompletedAsync(entity, ct);
-        }
         await NotifyTaskScheduleConflictIfNeededAsync(entity, access, ct);
         await SafeSyncExternalCalendarTaskAsync(entity.Id, ct);
         await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+        // A failed delivery can leave tracked notification entities; do not perform more writes with this context afterward.
+        var reviewerDispatch = new TaskDeadlineReviewerDispatchProcessor(_db, _notificationService, logger: _reviewerDispatchLogger);
+        foreach (var pendingDeadlineRequest in pendingDeadlineRequests)
+        {
+            try { await reviewerDispatch.ProcessAsync(pendingDeadlineRequest.Id, ct); }
+            catch (Exception error) when (error is not OperationCanceledException)
+            {
+                _reviewerDispatchLogger?.LogWarning(error, "Deadline reviewer notification for request {RequestId} remains queued.", pendingDeadlineRequest.Id);
+            }
+            await _db.Entry(pendingDeadlineRequest).ReloadAsync(ct);
+        }
+        if (statusNotification is not null && _notificationService is IDurableTaskStatusNotificationService durableNotifications)
+        {
+            try
+            {
+                var processor = new TaskStatusNotificationDispatchProcessor(_db, durableNotifications, logger: _statusDispatchLogger);
+                await processor.ProcessAsync(statusNotification.Id, ct);
+            }
+            catch (Exception error) when (error is not OperationCanceledException)
+            {
+                _statusDispatchLogger?.LogWarning(error, "Task status notification event {EventId} remains queued.", statusNotification.Id);
+            }
+        }
         return Ok(Map(entity, binding));
     }
 
@@ -4106,6 +4203,12 @@ public class TasksController : ControllerBase
             return Forbid();
         }
 
+        await using var statusLease = await TaskDeadlineRequestLease.TryAcquireAsync(_db, access.UserId, id, ct);
+        if (statusLease is null) return StatusCode(423, new { message = "Задача или доступ сейчас изменяются. Повторите действие." });
+        access = await GetTaskAccessAsync(ct);
+        if (access is null) return User.GetUserId().HasValue ? Forbid() : Unauthorized();
+        if (!access.IsAdmin && access.Permission?.CanView != true) return Forbid();
+
         var entity = await BuildVisibleTasksQuery(access).FirstOrDefaultAsync(item => item.Id == id, ct);
         if (entity is null)
         {
@@ -4114,9 +4217,33 @@ public class TasksController : ControllerBase
 
         var settings = await GetTaskJournalSettingsAsync(ct);
         var nextStatus = NormalizeEnumValue(request.Status, AllowedStatuses, "new");
-        if (!CanUpdateTaskStatus(entity, access, settings, nextStatus))
+        var canUpdateStatus = CanUpdateTaskStatus(entity, access, settings, nextStatus);
+        // A lost response may lead the assigned executor to repeat the exact
+        // submission after the task has already entered approval. This is a
+        // read-only confirmation, not permission to change a pending result.
+        if (!canUpdateStatus && string.Equals(nextStatus, "onApproval", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(entity.Status, "onApproval", StringComparison.OrdinalIgnoreCase)
+            && IsTaskExecutor(entity, access.UserId)
+            && !string.IsNullOrWhiteSpace(request.Result)
+            && string.Equals(NormalizeOptional(request.Result), NormalizeOptional(entity.Result), StringComparison.Ordinal)
+            && (!request.DueAt.HasValue || NormalizeUtcInstant(request.DueAt.Value) == entity.DueAt))
+        {
+            return Ok(Map(entity));
+        }
+        if (!canUpdateStatus)
         {
             return Forbid();
+        }
+        // The same completed result may be retried after the server committed
+        // but its response was lost. Do not rewrite the task or re-trigger work.
+        if (!access.IsAdmin && IsTaskExecutor(entity, access.UserId) && !IsTaskAuthor(entity, access.UserId)
+            && string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(entity.Status, "done", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(request.Result)
+            && string.Equals(NormalizeOptional(request.Result), NormalizeOptional(entity.Result), StringComparison.Ordinal)
+            && (!request.DueAt.HasValue || NormalizeUtcInstant(request.DueAt.Value) == entity.DueAt))
+        {
+            return Ok(Map(entity));
         }
 
         var requestedDueAt = request.DueAt.HasValue ? NormalizeUtcInstant(request.DueAt.Value) : entity.DueAt;
@@ -4214,7 +4341,26 @@ public class TasksController : ControllerBase
         {
             await SyncContractorPaymentAsync(entity, await ResolveContractorPaymentResultBaseDateAsync(oldStatus, entity.Status, entity.UpdatedAt, ct), ct);
         }
+        var approvalRequested = (statusChanged || resultChanged || dueAtChanged)
+            && (approvalQueueRestarted || (!IsApprovalActiveStatus(oldStatus) && IsApprovalActiveStatus(entity.Status)));
+        TaskStatusNotificationOutbox? statusNotification = null;
+        if (approvalRequested || becameDone)
+        {
+            statusNotification = new TaskStatusNotificationOutbox
+            {
+                TaskJournalItemId = entity.Id,
+                EventKey = $"task:{entity.Id}:status:{Guid.NewGuid():N}",
+                EventType = approvalRequested ? "approval" : "completion",
+                ApprovalParticipant = approvalRequested ? GetPendingTaskApprover(entity) : null,
+                StatusTransitionToken = entity.StatusTransitionToken,
+                ActorUserId = access.UserId,
+                ActorName = access.DisplayName,
+                CreatedAt = DateTime.UtcNow,
+            };
+            _db.TaskStatusNotificationOutboxes.Add(statusNotification);
+        }
         await _db.SaveChangesAsync(ct);
+        await statusLease.CommitAsync(ct);
         await SynchronizeExistingTaskChatMembersAsync([entity], ct);
         await NotifyRecurringTaskCreatedAsync(nextRecurringTask, access, ct);
         if (statusChanged || resultChanged || dueAtChanged)
@@ -4237,11 +4383,7 @@ public class TasksController : ControllerBase
 
             await AppendTaskChatSystemMessagesAsync([(entity.Id, (IReadOnlyList<string>)changeLabels)], access, ct);
 
-            if (approvalQueueRestarted || (!IsApprovalActiveStatus(oldStatus) && IsApprovalActiveStatus(entity.Status)))
-            {
-                await _notificationService.NotifyTaskApprovalRequestedAsync(entity, access.DisplayName, access.UserId, ct);
-            }
-            else
+            if (!approvalRequested)
             {
                 if (becameCancelled)
                 {
@@ -4254,12 +4396,20 @@ public class TasksController : ControllerBase
             }
         }
 
-        if (becameDone)
-        {
-            await _notificationService.NotifyTaskCompletedAsync(entity, ct);
-        }
         await SafeSyncExternalCalendarTaskAsync(entity.Id, ct);
         await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+        if (statusNotification is not null && _notificationService is IDurableTaskStatusNotificationService durableNotifications)
+        {
+            try
+            {
+                var processor = new TaskStatusNotificationDispatchProcessor(_db, durableNotifications, logger: _statusDispatchLogger);
+                await processor.ProcessAsync(statusNotification.Id, ct);
+            }
+            catch (Exception error) when (error is not OperationCanceledException)
+            {
+                _statusDispatchLogger?.LogWarning(error, "Task status notification event {EventId} remains queued.", statusNotification.Id);
+            }
+        }
         return Ok(Map(entity));
     }
 
@@ -4410,7 +4560,7 @@ public class TasksController : ControllerBase
             .ToListAsync(ct);
 
         var updated = 0;
-        var notifications = new List<(TaskJournalItem Task, IReadOnlyList<string> ChangeLabels, bool BecameDone, bool BecameCancelled, bool ApprovalRequested, bool AssigneeChanged, int? PreviousAssigneeUserId, string? PreviousAssigneeName)>();
+        var notifications = new List<(TaskJournalItem Task, IReadOnlyList<string> ChangeLabels, bool BecameCancelled, bool AssigneeChanged, int? PreviousAssigneeUserId, string? PreviousAssigneeName, TaskStatusNotificationOutbox? StatusNotification)>();
         var now = DateTime.UtcNow;
         foreach (var entity in entities)
         {
@@ -4434,6 +4584,20 @@ public class TasksController : ControllerBase
                 continue;
             }
 
+            var requestDueAt = request.DueAt.HasValue ? NormalizeUtcInstant(request.DueAt.Value) : (DateTime?)null;
+            var requestedResult = NormalizeOptional(request.Result);
+            var nextResult = nextStatus is null ? null : NormalizeCompletionResult(nextStatus, requestedResult ?? entity.Result);
+            if (nextStatus is not null)
+            {
+                var effectiveDueAt = requestDueAt ?? entity.DueAt;
+                var bulkAllowAdminForceCompletion = CanAdminForceCompleteTask(access, settings, nextStatus);
+                if (ValidateRevisionDueAt(nextStatus, effectiveDueAt, now) is not null
+                    || ValidateStatusRules(nextStatus, nextResult, entity.Participants, settings.RequireCompletionResult, bulkAllowAdminForceCompletion) is not null)
+                {
+                    continue;
+                }
+            }
+
             var changes = new List<string>();
             var approvalRequested = false;
             var previousAssigneeUserId = entity.AssigneeUserId;
@@ -4453,7 +4617,6 @@ public class TasksController : ControllerBase
                 changes.Add($"Приоритет: {TaskPriorityLabel(oldPriority)} -> {TaskPriorityLabel(entity.Priority)}");
             }
 
-            var requestDueAt = request.DueAt.HasValue ? NormalizeUtcInstant(request.DueAt.Value) : (DateTime?)null;
             if (requestDueAt.HasValue && entity.DueAt != requestDueAt.Value)
             {
                 changes.Add($"Срок: {FormatHistoryDateTime(entity.DueAt)} -> {FormatHistoryDateTime(requestDueAt.Value)}");
@@ -4466,21 +4629,6 @@ public class TasksController : ControllerBase
             {
                 var oldStatus = entity.Status;
                 var oldResult = entity.Result;
-                var requestedResult = NormalizeOptional(request.Result);
-                var nextResult = NormalizeCompletionResult(nextStatus, requestedResult ?? entity.Result);
-                var effectiveDueAt = requestDueAt ?? entity.DueAt;
-                if (ValidateRevisionDueAt(nextStatus, effectiveDueAt, now) is not null)
-                {
-                    continue;
-                }
-
-                var bulkAllowAdminForceCompletion = CanAdminForceCompleteTask(access, settings, nextStatus);
-                var statusValidation = ValidateStatusRules(nextStatus, nextResult, entity.Participants, settings.RequireCompletionResult, bulkAllowAdminForceCompletion);
-                if (statusValidation is not null)
-                {
-                    continue;
-                }
-
                 var approvalQueueRestarted = ResetApprovalQueueIfStartingApproval(entity.Status, nextStatus, entity.Participants);
                 becameDone = !string.Equals(entity.Status, "done", StringComparison.OrdinalIgnoreCase)
                     && string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase);
@@ -4525,8 +4673,24 @@ public class TasksController : ControllerBase
 
             entity.UpdatedAt = now;
             AddTaskHistory(entity, access, $"Массовое изменение: {string.Join(", ", changes)}.");
+            TaskStatusNotificationOutbox? statusNotification = null;
+            if (approvalRequested || becameDone)
+            {
+                statusNotification = new TaskStatusNotificationOutbox
+                {
+                    TaskJournalItemId = entity.Id,
+                    EventKey = $"task:{entity.Id}:status:{Guid.NewGuid():N}",
+                    EventType = approvalRequested ? "approval" : "completion",
+                    ApprovalParticipant = approvalRequested ? GetPendingTaskApprover(entity) : null,
+                    StatusTransitionToken = entity.StatusTransitionToken,
+                    ActorUserId = access.UserId,
+                    ActorName = access.DisplayName,
+                    CreatedAt = now,
+                };
+                _db.TaskStatusNotificationOutboxes.Add(statusNotification);
+            }
             updated++;
-            notifications.Add((entity, changes, becameDone, becameCancelled, approvalRequested, assigneeChanged, previousAssigneeUserId, previousAssigneeName));
+            notifications.Add((entity, changes, becameCancelled, assigneeChanged, previousAssigneeUserId, previousAssigneeName, statusNotification));
         }
 
         await _db.SaveChangesAsync(ct);
@@ -4569,14 +4733,17 @@ public class TasksController : ControllerBase
                     ct);
             }
 
-            if (notification.ApprovalRequested)
+            if (notification.StatusNotification is not null && _notificationService is IDurableTaskStatusNotificationService durableNotifications)
             {
-                await _notificationService.NotifyTaskApprovalRequestedAsync(notification.Task, access.DisplayName, access.UserId, ct);
-            }
-
-            if (notification.BecameDone)
-            {
-                await _notificationService.NotifyTaskCompletedAsync(notification.Task, ct);
+                try
+                {
+                    var processor = new TaskStatusNotificationDispatchProcessor(_db, durableNotifications, logger: _statusDispatchLogger);
+                    await processor.ProcessAsync(notification.StatusNotification.Id, ct);
+                }
+                catch (Exception error) when (error is not OperationCanceledException)
+                {
+                    _statusDispatchLogger?.LogWarning(error, "Task status notification event {EventId} remains queued.", notification.StatusNotification.Id);
+                }
             }
 
             await NotifyTaskScheduleConflictIfNeededAsync(notification.Task, access, ct);
@@ -5094,13 +5261,19 @@ public class TasksController : ControllerBase
         var access = await GetTaskAccessAsync(ct);
         if (access is null)
         {
-            return Unauthorized();
+            return User.GetUserId().HasValue ? Forbid() : Unauthorized();
         }
 
         if (!access.IsAdmin && access.Permission?.CanView != true)
         {
             return Forbid();
         }
+
+        await using var approvalLease = await TaskDeadlineRequestLease.TryAcquireAsync(_db, access.UserId, id, ct);
+        if (approvalLease is null) return StatusCode(423, new { message = "Задача или доступ сейчас изменяются. Повторите действие." });
+        access = await GetTaskAccessAsync(ct);
+        if (access is null) return User.GetUserId().HasValue ? Forbid() : Unauthorized();
+        if (!access.IsAdmin && access.Permission?.CanView != true) return Forbid();
 
         var entity = await BuildVisibleTasksQuery(access).FirstOrDefaultAsync(item => item.Id == id, ct);
         if (entity is null)
@@ -5147,6 +5320,9 @@ public class TasksController : ControllerBase
         {
             return Forbid();
         }
+
+        if (string.Equals(participant.ApprovalStatus, "approved", StringComparison.OrdinalIgnoreCase))
+            return Conflict(new { message = "Решение этого согласующего уже принято. Обновите задачу." });
 
         var participantIndex = approvers.IndexOf(participant);
         if (participantIndex > 0 && approvers.Take(participantIndex).Any(item =>
@@ -5228,22 +5404,52 @@ public class TasksController : ControllerBase
             ? await CreateNextRecurringTaskIfNeededAsync(entity, access, ct)
             : null;
         await SyncContractorPaymentAsync(entity, await ResolveContractorPaymentResultBaseDateAsync(oldStatus, entity.Status, entity.UpdatedAt, ct), ct);
-        await _db.SaveChangesAsync(ct);
-        await NotifyRecurringTaskCreatedAsync(nextRecurringTask, access, ct);
-        await _notificationService.NotifyTaskApprovalDecisionAsync(
-            entity,
-            participant,
-            decision,
-            access.DisplayName,
-            access.UserId,
-            resolution,
-            ct);
-        if (string.Equals(entity.Status, "done", StringComparison.OrdinalIgnoreCase))
+        TaskStatusNotificationOutbox? statusNotification = null;
+        var notifyNextApprover = string.Equals(decision, "approved", StringComparison.OrdinalIgnoreCase)
+            && IsApprovalActiveStatus(entity.Status);
+        if (notifyNextApprover || string.Equals(entity.Status, "done", StringComparison.OrdinalIgnoreCase))
         {
-            await _notificationService.NotifyTaskCompletedAsync(entity, ct);
+            statusNotification = new TaskStatusNotificationOutbox
+            {
+                TaskJournalItemId = entity.Id,
+                EventKey = $"task:{entity.Id}:status:{Guid.NewGuid():N}",
+                EventType = notifyNextApprover ? "approval" : "completion",
+                ApprovalParticipant = notifyNextApprover ? GetPendingTaskApprover(entity) : null,
+                StatusTransitionToken = entity.StatusTransitionToken,
+                ActorUserId = access.UserId,
+                ActorName = access.DisplayName,
+                CreatedAt = DateTime.UtcNow,
+            };
+            _db.TaskStatusNotificationOutboxes.Add(statusNotification);
+        }
+        await _db.SaveChangesAsync(ct);
+        await approvalLease.CommitAsync(ct);
+        await NotifyRecurringTaskCreatedAsync(nextRecurringTask, access, ct);
+        if (!notifyNextApprover)
+        {
+            await _notificationService.NotifyTaskApprovalDecisionAsync(
+                entity,
+                participant,
+                decision,
+                access.DisplayName,
+                access.UserId,
+                resolution,
+                ct);
         }
         await SafeSyncExternalCalendarTaskAsync(entity.Id, ct);
         await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+        if (statusNotification is not null && _notificationService is IDurableTaskStatusNotificationService durableNotifications)
+        {
+            try
+            {
+                var processor = new TaskStatusNotificationDispatchProcessor(_db, durableNotifications, logger: _statusDispatchLogger);
+                await processor.ProcessAsync(statusNotification.Id, ct);
+            }
+            catch (Exception error) when (error is not OperationCanceledException)
+            {
+                _statusDispatchLogger?.LogWarning(error, "Task status notification event {EventId} remains queued.", statusNotification.Id);
+            }
+        }
         return Ok(Map(entity));
     }
 
@@ -5536,6 +5742,10 @@ public class TasksController : ControllerBase
         query = ApplyTaskMetricFilter(query, metric, todayFrom, todayTo);
         return ApplyTaskBillingFilter(query, billingStatus);
     }
+
+    private static IQueryable<TaskJournalItem> ApplyTaskUntriagedFilter(IQueryable<TaskJournalItem> query, bool untriaged)
+        => !untriaged ? query : query.Where(task =>
+            !task.ClientId.HasValue && !task.LegalEntityId.HasValue && !task.AssigneeUserId.HasValue && task.AssigneeName == "");
 
     private static IQueryable<TaskJournalItem> ApplyTaskBillingFilter(
         IQueryable<TaskJournalItem> query,
@@ -5872,14 +6082,62 @@ public class TasksController : ControllerBase
         };
     }
 
-    private static string BuildTaskPlanningReportFilterText(string? status, string? type, string? priority, DateTime? from, DateTime? to)
+    private static string BuildTaskPlanningReportFilterText(
+        string? status, string? type, string? priority, DateTime? from, DateTime? to,
+        string? search, int? assigneeUserId, int? clientCaseId, int? clientId, int? legalEntityId, TimeZoneInfo timeZone,
+        bool? underControl, int? authorUserId, string? participantRole, bool approvalScope, string? metric, string? billingStatus, bool untriaged)
     {
         var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            // The same text is used in HTML and Word XML; replace invalid XML controls without changing the actual filter.
+            var visibleSearch = new StringBuilder();
+            foreach (var rune in search.Trim().EnumerateRunes())
+            {
+                var value = rune.Value;
+                visibleSearch.Append(value is >= 0x20 and <= 0xD7FF or >= 0xE000 and <= 0xFFFD or >= 0x10000 and <= 0x10FFFF
+                    ? rune.ToString() : " ");
+            }
+            parts.Add($"поиск: {visibleSearch.ToString().Trim()}");
+        }
+        if (assigneeUserId.HasValue) parts.Add(assigneeUserId.Value == -1 ? "исполнитель: условия несовместимы" : $"исполнитель: №{assigneeUserId.Value}");
+        if (clientCaseId.HasValue) parts.Add($"дело: №{clientCaseId.Value}");
+        if (clientId.HasValue) parts.Add(clientId.Value == -1 ? "клиент: условия несовместимы" : $"клиент: №{clientId.Value}");
+        if (legalEntityId.HasValue) parts.Add(legalEntityId.Value == -1 ? "организация: условия несовместимы" : $"организация: №{legalEntityId.Value}");
+        if (underControl.HasValue) parts.Add(underControl.Value ? "на контроле" : "без контроля");
+        if (authorUserId.HasValue) parts.Add($"автор: №{authorUserId.Value}");
+        if (string.Equals(participantRole, "observer", StringComparison.OrdinalIgnoreCase)) parts.Add("участие: наблюдатель");
+        if (string.Equals(participantRole, "approver", StringComparison.OrdinalIgnoreCase)) parts.Add("участие: согласующий");
+        if (approvalScope) parts.Add("согласования");
+        if (untriaged) parts.Add("неразобранные");
+        var metricLabel = metric?.Trim().ToLowerInvariant() switch
+        {
+            "active" => "активные",
+            "overdue" => "просроченные",
+            "today" => "на сегодня",
+            "highpriority" => "высокий или срочный приоритет",
+            _ => null,
+        };
+        if (metricLabel is not null) parts.Add($"показатель: {metricLabel}");
+        var billingLabel = billingStatus?.Trim().ToLowerInvariant() switch
+        {
+            "unbilled" => "платные задачи без счёта",
+            "fixed" => "по фиксированному договору",
+            "invoiced" => "включённые в счёт",
+            "internal" => "неоплачиваемые",
+            "legacy" => "требуют распределения",
+            _ => null,
+        };
+        if (billingLabel is not null) parts.Add($"учёт: {billingLabel}");
         if (!string.IsNullOrWhiteSpace(status) && !string.Equals(status, "all", StringComparison.OrdinalIgnoreCase))
         {
-            parts.Add(string.Equals(status, "active", StringComparison.OrdinalIgnoreCase)
-                ? "статус: активные"
-                : $"статус: {TaskStatusLabel(NormalizeEnumValue(status, AllowedStatuses, "new")).ToLowerInvariant()}");
+            parts.Add(status.ToLowerInvariant() switch
+            {
+                "active" => "статус: активные",
+                "overdue" => "статус: просроченные",
+                "completed" => "статус: завершённые и отменённые",
+                _ => $"статус: {TaskStatusLabel(NormalizeEnumValue(status, AllowedStatuses, "new")).ToLowerInvariant()}",
+            });
         }
 
         if (!string.IsNullOrWhiteSpace(type) && !string.Equals(type, "all", StringComparison.OrdinalIgnoreCase))
@@ -5896,8 +6154,8 @@ public class TasksController : ControllerBase
 
         if (from.HasValue || to.HasValue)
         {
-            var fromText = from.HasValue ? FormatPlanningDate(from.Value) : "без начала";
-            var toText = to.HasValue ? FormatPlanningDate(to.Value) : "без окончания";
+            var fromText = from.HasValue ? FormatPlanningDate(from.Value, timeZone) : "без начала";
+            var toText = to.HasValue ? FormatPlanningDate(to.Value, timeZone) : "без окончания";
             parts.Add($"срок: {fromText} - {toText}");
         }
 
@@ -8409,6 +8667,11 @@ public class TasksController : ControllerBase
     private static bool IsApprovalActiveStatus(string? status)
         => string.Equals(status, "onApproval", StringComparison.OrdinalIgnoreCase)
            || string.Equals(status, "overdueApproval", StringComparison.OrdinalIgnoreCase);
+
+    private static TaskJournalParticipant? GetPendingTaskApprover(TaskJournalItem task)
+        => task.Participants.Where(participant => string.Equals(participant.Role, "approver", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(participant.ApprovalStatus, "approved", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(participant => participant.SortOrder).ThenBy(participant => participant.Id).FirstOrDefault();
 
     private static string? ValidateStatusRules(
         string status,

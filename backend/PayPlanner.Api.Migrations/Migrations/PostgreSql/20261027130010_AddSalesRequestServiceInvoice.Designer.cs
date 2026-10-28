@@ -12196,6 +12196,87 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("TaskJournalTemplateParticipants");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.TaskTimeCorrection", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<Guid>("EntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("NewSeconds")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("PreviousSeconds")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EntryId", "Id");
+
+                    b.ToTable("TaskTimeCorrections", t =>
+                        {
+                            t.HasCheckConstraint("CK_TaskTimeCorrections_NonNegative", "\"NewSeconds\" >= 0 AND (\"PreviousSeconds\" IS NULL OR \"PreviousSeconds\" >= 0)");
+                        });
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.TaskTimeEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("CorrectedSeconds")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("StartedAtUtc")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("StoppedAtUtc")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("TaskId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UserNameSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_TaskTimeEntries_OneRunningPerUser")
+                        .HasFilter("\"StoppedAtUtc\" IS NULL AND \"UserId\" IS NOT NULL");
+
+                    b.HasIndex("TaskId", "UserId", "StartedAtUtc", "Id");
+
+                    b.ToTable("TaskTimeEntries", t =>
+                        {
+                            t.HasCheckConstraint("CK_TaskTimeEntries_Correction", "(\"CorrectedSeconds\" IS NULL OR \"CorrectedSeconds\" >= 0) AND \"Revision\" >= 0");
+
+                            t.HasCheckConstraint("CK_TaskTimeEntries_OrderedInterval", "\"StoppedAtUtc\" IS NULL OR \"StoppedAtUtc\" >= \"StartedAtUtc\"");
+                        });
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.TaxRegisterEntry", b =>
                 {
                     b.Property<int>("Id")
@@ -15800,6 +15881,35 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("TaskJournalTemplate");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.TaskTimeCorrection", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.TaskTimeEntry", "Entry")
+                        .WithMany()
+                        .HasForeignKey("EntryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Entry");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.TaskTimeEntry", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.TaskJournalItem", "Task")
+                        .WithMany()
+                        .HasForeignKey("TaskId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Task");
 
                     b.Navigation("User");
                 });

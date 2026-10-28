@@ -1,6 +1,6 @@
-## Актуальная инвентаризация — 27 октября 2026
+## Актуальная инвентаризация — 28 октября 2026
 
-Всего **134** места ExecuteUpdateAsync/ExecuteDeleteAsync. Новый технический UPDATE удерживает строку чата в существующей транзакции без изменения её значения; условный UPDATE меняет только личную границу истории и её версию у авторизованного участника. Публикация сообщений и собственное состояние фиксируются в соответствующих транзакциях; общие сообщения не удаляются. Проверки конкурентных сценариев ещё выполняются. Прежние разделы сохранены как история.
+Всего **150** мест ExecuteUpdateAsync/ExecuteDeleteAsync. Для очереди статусов два условных обновления захватывают и завершают доставку по токену и сроку; данные задачи не меняются. Для доставки переназначенного запроса два условных обновления захватывают и завершают только текущую попытку по токену; данные задачи и решения не меняются. Технический UPDATE удерживает строку чата в существующей транзакции без изменения её значения; условный UPDATE меняет только личную границу истории и её версию у авторизованного участника. При изменении счёта и переходе заявки технический UPDATE удерживает заявку в общей транзакции без изменения версии; связанные проверки и фактический переход выполняются в этой транзакции. При удалении дела техническая блокировка после проверки видимости сериализует действие с операциями над документами; изменения дела и аудит сохраняются штатно. Для таймера технические UPDATE блокируют задачу и сотрудника без изменения данных; условные обновления останавливают собственный интервал, закрывают активные интервалы при деактивации, удалении сотрудника, завершении или удалении задачи либо исправляют длительность с проверкой версии и записью причины в той же транзакции. При объединении учётных записей интервалы переносятся к основному сотруднику после остановки активного интервала источника. Публикация сообщений и личное состояние фиксируются в соответствующих транзакциях; общие сообщения не удаляются. Проверки конкурентных сценариев ещё выполняются. Прежние разделы сохранены как история.
 
 - `backend/Controllers/InternalChatController.cs:592`
 - `backend/Controllers/InternalChatController.cs:789`
@@ -20,18 +20,29 @@
 - `backend/Controllers/MoneyOperationsController.CompanyAccess.cs:63`
 - `backend/Controllers/MoneyOperationsController.CompanyAccess.cs:94`
 - `backend/Controllers/StorageAdminController.cs:145`
-- `backend/Controllers/TasksController.cs:3250`
-- `backend/Controllers/TasksController.cs:4715`
-- `backend/Controllers/TasksController.cs:4920`
-- `backend/Controllers/TasksController.cs:5023`
-- `backend/Controllers/TasksController.cs:5269`
+- `backend/Controllers/TaskTimeController.cs:102`
+- `backend/Controllers/TaskTimeController.cs:142`
+- `backend/Controllers/TaskTimeController.cs:146`
+- `backend/Controllers/TaskTimeController.cs:206`
+- `backend/Controllers/TaskTimeController.cs:94`
+- `backend/Controllers/TasksController.cs:3280`
+- `backend/Controllers/TasksController.cs:4882`
+- `backend/Controllers/TasksController.cs:5087`
+- `backend/Controllers/TasksController.cs:5190`
+- `backend/Controllers/TasksController.cs:5475`
 - `backend/Controllers/UserActivityController.cs:418`
 - `backend/Controllers/UserActivityController.cs:540`
-- `backend/Controllers/V2/CasesV2Controller.cs:10882`
-- `backend/Controllers/V2/CasesV2Controller.cs:5740`
-- `backend/Controllers/V2/CasesV2Controller.cs:6077`
-- `backend/Services/AuthService.cs:261`
-- `backend/Services/AuthService.cs:743`
+- `backend/Controllers/V2/CasesV2Controller.cs:10909`
+- `backend/Controllers/V2/CasesV2Controller.cs:5767`
+- `backend/Controllers/V2/CasesV2Controller.cs:6104`
+- `backend/Data/PaymentContext.cs:4690`
+- `backend/Data/PaymentContext.cs:4693`
+- `backend/Data/PaymentContext.cs:4701`
+- `backend/Services/AuthService.Accounts.cs:579`
+- `backend/Services/AuthService.Accounts.cs:582`
+- `backend/Services/AuthService.Accounts.cs:585`
+- `backend/Services/AuthService.cs:267`
+- `backend/Services/AuthService.cs:793`
 - `backend/Services/Banking/BankStatementImportService.Native.cs:74`
 - `backend/Services/Banking/BankStatementImportService.cs:531`
 - `backend/Services/Banking/BankStatementImportService.cs:550`
@@ -58,13 +69,18 @@
 - `backend/Services/Notifications/InternalChatNotificationRecoveryService.cs:56`
 - `backend/Services/Notifications/MaxWebhookService.cs:268`
 - `backend/Services/Notifications/NotificationDeliveryRetentionService.cs:150`
-- `backend/Services/Requests/SalesRequestService.cs:1002`
-- `backend/Services/Requests/SalesRequestService.cs:325`
-- `backend/Services/Requests/SalesRequestService.cs:488`
-- `backend/Services/Requests/SalesRequestService.cs:749`
-- `backend/Services/Requests/SalesRequestService.cs:969`
-- `backend/Services/Requests/SalesRequestService.cs:981`
-- `backend/Services/Requests/SalesRequestService.cs:991`
+- `backend/Services/Notifications/TaskDeadlineReviewerDispatchProcessor.cs:51`
+- `backend/Services/Notifications/TaskDeadlineReviewerDispatchProcessor.cs:74`
+- `backend/Services/Notifications/TaskStatusNotificationDispatchProcessor.cs:100`
+- `backend/Services/Notifications/TaskStatusNotificationDispatchProcessor.cs:48`
+- `backend/Services/Requests/SalesRequestService.cs:1128`
+- `backend/Services/Requests/SalesRequestService.cs:1140`
+- `backend/Services/Requests/SalesRequestService.cs:1150`
+- `backend/Services/Requests/SalesRequestService.cs:1161`
+- `backend/Services/Requests/SalesRequestService.cs:340`
+- `backend/Services/Requests/SalesRequestService.cs:432`
+- `backend/Services/Requests/SalesRequestService.cs:647`
+- `backend/Services/Requests/SalesRequestService.cs:908`
 - `backend/Services/SpreadsheetImportService.Rollback.cs:33`
 - `backend/Services/SpreadsheetImportService.Rollback.cs:35`
 - `backend/Services/SpreadsheetImportService.Rollback.cs:43`
@@ -101,9 +117,9 @@
 - `backend/Services/Storage/ManagedCaseDocumentUploadService.cs:585`
 - `backend/Services/Storage/ManagedCaseDocumentUploadService.cs:592`
 - `backend/Services/Storage/ManagedProfilePhotoUploadService.cs:125`
-- `backend/Services/Storage/ManagedTaskFileUploadService.cs:279`
-- `backend/Services/Storage/ManagedTaskFileUploadService.cs:377`
-- `backend/Services/Storage/ManagedTaskFileUploadService.cs:426`
+- `backend/Services/Storage/ManagedTaskFileUploadService.cs:295`
+- `backend/Services/Storage/ManagedTaskFileUploadService.cs:418`
+- `backend/Services/Storage/ManagedTaskFileUploadService.cs:467`
 - `backend/Services/Storage/ProductStorageBindingService.cs:102`
 - `backend/Services/Storage/ProductStorageBindingService.cs:143`
 - `backend/Services/Storage/StorageCapacityAdmission.cs:156`
@@ -212,7 +228,7 @@
 | backend/Controllers/V2/CasesV2Controller.cs:5740 | ExecuteUpdateAsync |
 | backend/Controllers/V2/CasesV2Controller.cs:6077 | ExecuteUpdateAsync |
 | backend/Services/AuthService.cs:261 | ExecuteUpdateAsync |
-| backend/Services/AuthService.cs:743 | ExecuteUpdateAsync |
+| backend/Services/AuthService.cs:744 | ExecuteUpdateAsync |
 | backend/Services/Banking/BankStatementImportService.Native.cs:74 | ExecuteUpdateAsync |
 | backend/Services/Banking/BankStatementImportService.cs:531 | ExecuteUpdateAsync |
 | backend/Services/Banking/BankStatementImportService.cs:550 | ExecuteUpdateAsync |
@@ -329,7 +345,7 @@ EF-операции `ExecuteUpdateAsync` и `ExecuteDeleteAsync` обходят 
 | `backend/Services/DatabaseRestoreManagedReplicas.cs:92` | `ExecuteUpdateAsync` | Прежние невыбранные реплики максимум 250 восстановленных поколений за пакет | Причина исключения старого адреса сохраняется в самой реплике; выбранная локальная реплика сохраняется в той же транзакции после проверки байтов и фактов снимка. | Изолированное чтение не обращается к прежним провайдерам; обновление ограничено ID текущего пакета, поколения и tombstone не изменяются. |
 | `backend/Services/DatabaseBackupService.cs:1095` | `ExecuteUpdateAsync` | Незавершённые попытки резервирования того же каталога при следующем запуске | Построчный объектный аудит не создаётся: запись технической попытки сохраняет статус `interrupted`, прежний этап, время окончания и безопасную причину. Исходные комплекты и другие каталоги не меняются. | После получения общего lease каталог не используется другим согласованным запуском резервирования. Условный переход только из `running` фиксирует прерывание без загрузки всей истории и не превращает старую попытку в подтверждённую копию. |
 | `backend/Services/AuthService.cs:261` | `ExecuteUpdateAsync` | Сводные поля входа и активности текущего пользователя | Объектное событие не создаётся; сам вход отражается в журнале авторизации и активности. | Небольшой набор технических полей присутствия обновляется атомарно без загрузки устаревшей отслеживаемой сущности. |
-| `backend/Services/AuthService.cs:743` | `ExecuteUpdateAsync` | Версия JWT и сводные поля выхода текущего пользователя | Объектное событие не создаётся; выход отражается временем и действием `logout` в самой записи пользователя. | Условное атомарное увеличение версии делает отзыв всех JWT мгновенным и не позволяет двум параллельным logout повторно изменить состояние. |
+| `backend/Services/AuthService.cs:744` | `ExecuteUpdateAsync` | Версия JWT и сводные поля выхода текущего пользователя | Объектное событие не создаётся; выход отражается временем и действием `logout` в самой записи пользователя. | Условное атомарное увеличение версии делает отзыв всех JWT мгновенным и не позволяет двум параллельным logout повторно изменить состояние. |
 | `backend/Controllers/UserActivityController.cs:418` | `ExecuteUpdateAsync` | Метаданные последней активности текущего пользователя | Объектное событие не создаётся; отдельная строка журнала активности является следом аудита. | Лёгкие поля присутствия обновляются без загрузки полного агрегата пользователя на каждый запрос. |
 | `backend/Controllers/UserActivityController.cs:540` | `ExecuteDeleteAsync` | Очистка журнала активности по запросу администратора | Построчный объектный аудит не создаётся; контроллер журналирует количество удалённых строк и возвращает результат обслуживания. | Операция намеренно пакетно очищает технический журнал активности. |
 | `backend/Controllers/LegalEntitiesController.cs:1010` | `ExecuteDeleteAsync` | Адреса юридического лица перед заменой коллекции | Построчный аудит адресов не создаётся; сохранение юридического лица фиксирует видимое изменение основной сущности. | Адреса являются заменяемыми дочерними строками формы юридического лица. |

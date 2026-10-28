@@ -68,7 +68,13 @@ public sealed class BankStatementImportBatchDetailDto : BankStatementImportBatch
     public string FileHash { get; init; } = string.Empty;
     public long FileSize { get; init; }
     public string? ErrorSummary { get; init; }
-    public IReadOnlyList<BankStatementImportRowDto> Rows { get; init; } = Array.Empty<BankStatementImportRowDto>();
+    public int RowsTotal { get; init; }
+    public int RowsPage { get; init; }
+    public int RowsPageSize { get; init; }
+    public string? RowsSearch { get; init; }
+    public int? RowsMatched { get; set; }
+    public bool HasReprocessableRows { get; init; }
+    public IReadOnlyList<BankStatementImportRowDto> Rows { get; set; } = Array.Empty<BankStatementImportRowDto>();
 }
 
 public sealed class BankStatementImportRowDto
@@ -81,6 +87,7 @@ public sealed class BankStatementImportRowDto
     public DateTime Date { get; init; }
     public MoneyOperationDirection Direction { get; init; }
     public decimal Amount { get; init; }
+    public string? Currency { get; init; }
     public string? AccountName { get; init; }
     public string? CounterpartyName { get; init; }
     public string? Purpose { get; init; }
@@ -104,6 +111,7 @@ public sealed class BankStatementImportCreatedOperationDto
     public DateTime Date { get; set; }
     public MoneyOperationDirection Direction { get; set; }
     public decimal Amount { get; set; }
+    public string? Currency { get; set; }
     public string? CounterpartyName { get; set; }
     public string? PaymentOrderNumber { get; set; }
     public MoneyOperationMatchStatus MatchStatus { get; set; }

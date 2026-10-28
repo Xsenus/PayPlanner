@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ForcedTaskRevisionModal } from './ForcedTaskRevisionModal';
 import type { PagedResult, UserNotificationDto } from '../../services/api';
 import { USER_NOTIFICATIONS_EVENT } from '../../utils/userNotifications';
+import { TASK_JOURNAL_REALTIME_EVENT } from '../../services/realtimeNotifications';
 import {
   FORCED_TASK_SNOOZE_STORAGE_KEY,
   getForcedTaskApprovalSnoozeKey,
@@ -734,6 +735,218 @@ describe('ForcedTaskRevisionModal', () => {
     expect(screen.getAllByText('30.06.2026, 13:00').length).toBeGreaterThan(0);
   });
 
+  it('closes a former reviewer’s notification when the request was reassigned', async () => {
+    mockNotificationPages([], [], [createDeadlineChangeNotification({
+      metadataJson: JSON.stringify({ deadlineChangeRequestId: 901, reviewerUserId: 7 }),
+    })]);
+
+    render(<ForcedTaskRevisionModal />);
+
+    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(51));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(apiMock.approveTaskJournalDeadlineChangeRequest).not.toHaveBeenCalled();
+  });
+
+  it('closes an open former reviewer’s prompt after a reassignment causes a forbidden decision', async () => {
+    apiMock.getTaskJournalDeadlineChangeRequest.mockResolvedValueOnce({
+      id: 901, taskJournalItemId: 303, reviewerUserId: 7, reviewerName: 'Прежний постановщик',
+      requestedDueAt: '2026-06-30T09:00:00Z', reason: 'Причина', status: 'pending',
+    }).mockResolvedValueOnce({
+      id: 901, taskJournalItemId: 303, reviewerUserId: 8, reviewerName: 'Новый постановщик',
+      requestedDueAt: '2026-06-30T09:00:00Z', reason: 'Причина', status: 'pending',
+    });
+    apiMock.approveTaskJournalDeadlineChangeRequest.mockRejectedValueOnce(new Error('HTTP 403 Forbidden'));
+    mockNotificationPages([], [], [createDeadlineChangeNotification({
+      metadataJson: JSON.stringify({ deadlineChangeRequestId: 901, reviewerUserId: 7 }),
+    })]);
+
+    render(<ForcedTaskRevisionModal />);
+    const input = await screen.findByLabelText('Новый срок задачи') as HTMLInputElement;
+    await waitFor(() => expect(input.value).toBe('2026-06-30T13:00'));
+    fireEvent.click(screen.getByRole('button', { name: 'Согласовать перенос' }));
+
+    await waitFor(() => expect(apiMock.getTaskJournalDeadlineChangeRequest).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(51));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('keeps an observer’s notification when another reviewer was reassigned', async () => {
+    mockNotificationPages([], [], [createDeadlineChangeNotification({
+      metadataJson: JSON.stringify({ deadlineChangeRequestId: 901, reviewerUserId: 8 }),
+    })]);
+    apiMock.getTaskJournalDeadlineChangeRequest.mockResolvedValueOnce({
+      id: 901, taskJournalItemId: 303, reviewerUserId: 9, reviewerName: 'Новый постановщик',
+      requestedDueAt: '2026-06-30T09:00:00Z', reason: 'Причина', status: 'pending',
+    });
+
+    render(<ForcedTaskRevisionModal />);
+    expect(await screen.findByTestId('forced-deadline-change-prompt')).toBeTruthy();
+    await waitFor(() => expect(screen.getByText(/Новый постановщик/)).toBeTruthy());
+    expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+  });
+
+  it.each(['same reviewer', 'network error'])('keeps the draft after forbidden response when reassignment is unconfirmed: %s', async (caseName) => {
+    const original = {
+      id: 901, taskJournalItemId: 303, reviewerUserId: 7, reviewerName: 'Постановщик',
+      requestedDueAt: '2026-06-30T09:00:00Z', reason: 'Причина', status: 'pending',
+    };
+    apiMock.getTaskJournalDeadlineChangeRequest.mockResolvedValueOnce(original);
+    if (caseName === 'same reviewer') apiMock.getTaskJournalDeadlineChangeRequest.mockResolvedValueOnce(original);
+    else apiMock.getTaskJournalDeadlineChangeRequest.mockRejectedValueOnce(new Error('Нет сети'));
+    apiMock.approveTaskJournalDeadlineChangeRequest.mockRejectedValueOnce(new Error('HTTP 403 Forbidden'));
+    mockNotificationPages([], [], [createDeadlineChangeNotification({
+      metadataJson: JSON.stringify({ deadlineChangeRequestId: 901, reviewerUserId: 7 }),
+    })]);
+
+    render(<ForcedTaskRevisionModal />);
+    const input = await screen.findByLabelText('Новый срок задачи') as HTMLInputElement;
+    await waitFor(() => expect(input.value).toBe('2026-06-30T13:00'));
+    fireEvent.change(input, { target: { value: '2026-07-01T10:30' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Согласовать перенос' }));
+    await waitFor(() => expect(apiMock.getTaskJournalDeadlineChangeRequest).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('Недостаточно прав для выполнения действия.')).toBeTruthy();
+    expect(input.value).toBe('2026-07-01T10:30');
+    expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+  });
+
+  it('closes an open former reviewer’s prompt after a forbidden rejection', async () => {
+    apiMock.getTaskJournalDeadlineChangeRequest.mockResolvedValueOnce({
+      id: 901, taskJournalItemId: 303, reviewerUserId: 7, reviewerName: 'Прежний постановщик',
+      requestedDueAt: '2026-06-30T09:00:00Z', reason: 'Причина', status: 'pending',
+    }).mockResolvedValueOnce({
+      id: 901, taskJournalItemId: 303, reviewerUserId: 8, reviewerName: 'Новый постановщик',
+      requestedDueAt: '2026-06-30T09:00:00Z', reason: 'Причина', status: 'pending',
+    });
+    apiMock.rejectTaskJournalDeadlineChangeRequest.mockRejectedValueOnce(new Error('HTTP 403 Forbidden'));
+    mockNotificationPages([], [], [createDeadlineChangeNotification({
+      metadataJson: JSON.stringify({ deadlineChangeRequestId: 901, reviewerUserId: 7 }),
+    })]);
+
+    render(<ForcedTaskRevisionModal />);
+    const input = await screen.findByLabelText('Новый срок задачи') as HTMLInputElement;
+    await waitFor(() => expect(input.value).toBe('2026-06-30T13:00'));
+    fireEvent.change(screen.getByLabelText('Комментарий к решению'), { target: { value: 'Причина отказа' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Отказать' }));
+    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(51));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('closes an open former reviewer’s prompt when a task change arrives', async () => {
+    apiMock.getTaskJournalDeadlineChangeRequest.mockResolvedValueOnce({
+      id: 901, taskJournalItemId: 303, reviewerUserId: 7, reviewerName: 'Прежний постановщик',
+      requestedDueAt: '2026-06-30T09:00:00Z', reason: 'Причина', status: 'pending',
+    }).mockResolvedValueOnce({
+      id: 901, taskJournalItemId: 303, reviewerUserId: 8, reviewerName: 'Новый постановщик',
+      requestedDueAt: '2026-06-30T09:00:00Z', reason: 'Причина', status: 'pending',
+    });
+    mockNotificationPages([], [], [createDeadlineChangeNotification({
+      metadataJson: JSON.stringify({ deadlineChangeRequestId: 901, reviewerUserId: 7 }),
+    })]);
+    render(<ForcedTaskRevisionModal />);
+    const input = await screen.findByLabelText('Новый срок задачи') as HTMLInputElement;
+    await waitFor(() => expect(input.value).toBe('2026-06-30T13:00'));
+    act(() => window.dispatchEvent(new Event(TASK_JOURNAL_REALTIME_EVENT)));
+    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(51));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(apiMock.approveTaskJournalDeadlineChangeRequest).not.toHaveBeenCalled();
+  });
+
+  it.each(['same reviewer', 'network error'])('preserves the open draft on realtime refresh: %s', async (caseName) => {
+    const original = {
+      id: 901, taskJournalItemId: 303, reviewerUserId: 7, reviewerName: 'Постановщик',
+      requestedDueAt: '2026-06-30T09:00:00Z', reason: 'Причина', status: 'pending',
+    };
+    apiMock.getTaskJournalDeadlineChangeRequest.mockResolvedValueOnce(original);
+    if (caseName === 'same reviewer') apiMock.getTaskJournalDeadlineChangeRequest.mockResolvedValueOnce(original);
+    else apiMock.getTaskJournalDeadlineChangeRequest.mockRejectedValueOnce(new Error('Нет сети'));
+    mockNotificationPages([], [], [createDeadlineChangeNotification({
+      metadataJson: JSON.stringify({ deadlineChangeRequestId: 901, reviewerUserId: 7 }),
+    })]);
+    render(<ForcedTaskRevisionModal />);
+    const input = await screen.findByLabelText('Новый срок задачи') as HTMLInputElement;
+    await waitFor(() => expect(input.value).toBe('2026-06-30T13:00'));
+    fireEvent.change(input, { target: { value: '2026-07-01T10:30' } });
+    fireEvent.change(screen.getByLabelText('Комментарий к решению'), { target: { value: 'Важный текст' } });
+    act(() => window.dispatchEvent(new Event(TASK_JOURNAL_REALTIME_EVENT)));
+    await waitFor(() => expect(apiMock.getTaskJournalDeadlineChangeRequest).toHaveBeenCalledTimes(2));
+    expect(input.value).toBe('2026-07-01T10:30');
+    expect((screen.getByLabelText('Комментарий к решению') as HTMLTextAreaElement).value).toBe('Важный текст');
+    expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+  });
+
+  it.each(['reconnected', 'fallback-poll'])('refreshes the open deadline request on %s', async (reason) => {
+    apiMock.getTaskJournalDeadlineChangeRequest.mockResolvedValueOnce({
+      id: 901, taskJournalItemId: 303, reviewerUserId: 7, requestedDueAt: '2026-06-30T09:00:00Z', status: 'pending',
+    }).mockResolvedValueOnce({
+      id: 901, taskJournalItemId: 303, reviewerUserId: 8, requestedDueAt: '2026-06-30T09:00:00Z', status: 'pending',
+    });
+    mockNotificationPages([], [], [createDeadlineChangeNotification({ metadataJson: JSON.stringify({ deadlineChangeRequestId: 901, reviewerUserId: 7 }) })]);
+    render(<ForcedTaskRevisionModal />);
+    const input = await screen.findByLabelText('Новый срок задачи') as HTMLInputElement;
+    await waitFor(() => expect(input.value).toBe('2026-06-30T13:00'));
+    act(() => window.dispatchEvent(new CustomEvent(USER_NOTIFICATIONS_EVENT, { detail: { source: 'realtime', reason, taskJournalItemId: 303 } })));
+    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(51));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('coalesces task changes while an open deadline request refresh is running', async () => {
+    const original = { id: 901, taskJournalItemId: 303, reviewerUserId: 7, requestedDueAt: '2026-06-30T09:00:00Z', status: 'pending' };
+    let finishRefresh: ((value: typeof original) => void) | undefined;
+    apiMock.getTaskJournalDeadlineChangeRequest.mockResolvedValueOnce(original)
+      .mockImplementationOnce(() => new Promise((resolve) => { finishRefresh = resolve; }))
+      .mockResolvedValueOnce(original);
+    mockNotificationPages([], [], [createDeadlineChangeNotification({ metadataJson: JSON.stringify({ deadlineChangeRequestId: 901, reviewerUserId: 7 }) })]);
+    render(<ForcedTaskRevisionModal />);
+    const input = await screen.findByLabelText('Новый срок задачи') as HTMLInputElement;
+    await waitFor(() => expect(input.value).toBe('2026-06-30T13:00'));
+    act(() => {
+      window.dispatchEvent(new Event(TASK_JOURNAL_REALTIME_EVENT));
+      window.dispatchEvent(new Event(TASK_JOURNAL_REALTIME_EVENT));
+      window.dispatchEvent(new Event(TASK_JOURNAL_REALTIME_EVENT));
+    });
+    await waitFor(() => expect(apiMock.getTaskJournalDeadlineChangeRequest).toHaveBeenCalledTimes(2));
+    act(() => {
+      window.dispatchEvent(new Event(TASK_JOURNAL_REALTIME_EVENT));
+      window.dispatchEvent(new Event(TASK_JOURNAL_REALTIME_EVENT));
+    });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(apiMock.getTaskJournalDeadlineChangeRequest).toHaveBeenCalledTimes(2);
+    await act(async () => { finishRefresh?.(original); });
+    await waitFor(() => expect(apiMock.getTaskJournalDeadlineChangeRequest).toHaveBeenCalledTimes(3));
+    expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+  });
+
+  it('does not reopen a stale prompt when the initial read finishes after realtime reassignment', async () => {
+    let finishInitial: ((value: Record<string, unknown>) => void) | undefined;
+    apiMock.getTaskJournalDeadlineChangeRequest.mockImplementationOnce(() => new Promise((resolve) => { finishInitial = resolve; }))
+      .mockResolvedValueOnce({ id: 901, taskJournalItemId: 303, reviewerUserId: 8, status: 'pending' });
+    mockNotificationPages([], [], [createDeadlineChangeNotification({ metadataJson: JSON.stringify({ deadlineChangeRequestId: 901, reviewerUserId: 7 }) })]);
+    render(<ForcedTaskRevisionModal />);
+    expect(await screen.findByTestId('forced-deadline-change-prompt')).toBeTruthy();
+    act(() => window.dispatchEvent(new Event(TASK_JOURNAL_REALTIME_EVENT)));
+    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(51));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await act(async () => { finishInitial?.({ id: 901, reviewerUserId: 7, status: 'pending', requestedDueAt: '2026-06-30T09:00:00Z' }); });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(apiMock.markUserNotificationRead).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores a deadline refresh that finishes after the window is unmounted', async () => {
+    let finishRefresh: ((value: Record<string, unknown>) => void) | undefined;
+    apiMock.getTaskJournalDeadlineChangeRequest.mockResolvedValueOnce({
+      id: 901, taskJournalItemId: 303, reviewerUserId: 7, requestedDueAt: '2026-06-30T09:00:00Z', status: 'pending',
+    }).mockImplementationOnce(() => new Promise((resolve) => { finishRefresh = resolve; }));
+    mockNotificationPages([], [], [createDeadlineChangeNotification({ metadataJson: JSON.stringify({ deadlineChangeRequestId: 901, reviewerUserId: 7 }) })]);
+    const view = render(<ForcedTaskRevisionModal />);
+    const input = await screen.findByLabelText('Новый срок задачи') as HTMLInputElement;
+    await waitFor(() => expect(input.value).toBe('2026-06-30T13:00'));
+    act(() => window.dispatchEvent(new Event(TASK_JOURNAL_REALTIME_EVENT)));
+    await waitFor(() => expect(apiMock.getTaskJournalDeadlineChangeRequest).toHaveBeenCalledTimes(2));
+    view.unmount();
+    await act(async () => { finishRefresh?.({ id: 901, reviewerUserId: 8, status: 'pending' }); });
+    expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+  });
+
   it('closes a stale deadline change notification when the request no longer exists', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     apiMock.getTaskJournalDeadlineChangeRequest.mockRejectedValue(new Error('HTTP 404 Not Found'));
@@ -796,6 +1009,160 @@ describe('ForcedTaskRevisionModal', () => {
     }));
     await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(52));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it.each(['done', 'approved', 'revision', 'cancelled'] as const)('closes an already resolved approval when task status is %s', async (status) => {
+    mockNotificationPages([], [], [], [createApprovalRequestNotification()]);
+    apiMock.getTaskJournalItem.mockResolvedValue(createApprovalTask({ status }));
+    apiMock.getTaskJournalFiles.mockImplementation(() => new Promise(() => {}));
+    render(<ForcedTaskRevisionModal />);
+    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(61));
+    await waitFor(() => expect(screen.queryByTestId('forced-task-approval-prompt')).toBeNull());
+    expect(apiMock.updateTaskJournalApproval).not.toHaveBeenCalled();
+  });
+
+  it.each(['onApproval', 'overdueApproval'] as const)('retains an active approval while status is %s', async (status) => {
+    mockNotificationPages([], [], [], [createApprovalRequestNotification()]);
+    apiMock.getTaskJournalItem.mockResolvedValue(createApprovalTask({ status }));
+    render(<ForcedTaskRevisionModal />);
+    await screen.findByTestId('forced-task-approval-prompt');
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Согласовать и завершить' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+  });
+
+  it('waits for attachment loading before allowing an active approval decision', async () => {
+    mockNotificationPages([], [], [], [createApprovalRequestNotification()]);
+    let finishFiles: (files: never[]) => void = () => {};
+    apiMock.getTaskJournalFiles.mockImplementation(() => new Promise((resolve) => { finishFiles = resolve; }));
+    render(<ForcedTaskRevisionModal />);
+    await screen.findByText('Иск проверен, правки внесены, документы готовы.');
+    const button = screen.getByRole('button', { name: 'Согласовать и завершить' }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    await act(async () => { finishFiles([]); });
+    await waitFor(() => expect(button.disabled).toBe(false));
+    expect(apiMock.updateTaskJournalApproval).not.toHaveBeenCalled();
+  });
+
+  it('closes an unavailable approval task even while its files are still loading', async () => {
+    mockNotificationPages([], [], [], [createApprovalRequestNotification()]);
+    apiMock.getTaskJournalItem.mockRejectedValue(new Error('HTTP 404 Not Found'));
+    apiMock.getTaskJournalFiles.mockImplementation(() => new Promise(() => {}));
+    render(<ForcedTaskRevisionModal />);
+    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(61));
+    await waitFor(() => expect(screen.queryByTestId('forced-task-approval-prompt')).toBeNull());
+    expect(apiMock.updateTaskJournalApproval).not.toHaveBeenCalled();
+  });
+
+  it.each(['HTTP 403 Forbidden', 'HTTP 500 Failed'])('keeps the approval notification when task read fails with %s', async (reason) => {
+    mockNotificationPages([], [], [], [createApprovalRequestNotification()]);
+    apiMock.getTaskJournalItem.mockRejectedValue(new Error(reason));
+    render(<ForcedTaskRevisionModal />);
+    await screen.findByTestId('forced-task-approval-prompt');
+    await screen.findByText(reason.includes('403') ? 'Недостаточно прав для выполнения действия.' : 'Не удалось загрузить задачу для согласования.');
+    expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+  });
+
+  it('preserves an approval draft and disables decisions when a refreshed task fails to load', async () => {
+    apiMock.getUserNotifications.mockImplementation(async (params) => createPage(params.type === 'taskApprovalRequested'
+      ? [{ ...createApprovalRequestNotification() }] : []));
+    render(<ForcedTaskRevisionModal />);
+    const comment = await screen.findByLabelText('Комментарий для возврата на доработку') as HTMLTextAreaElement;
+    await waitFor(() => expect(comment.disabled).toBe(false));
+    fireEvent.change(comment, { target: { value: 'Несохранённый комментарий' } });
+    apiMock.getTaskJournalItem.mockRejectedValue(new Error('HTTP 500 Failed'));
+    act(() => window.dispatchEvent(new Event(USER_NOTIFICATIONS_EVENT)));
+    await screen.findByText('Не удалось загрузить задачу для согласования.');
+    expect((screen.getByLabelText('Комментарий для возврата на доработку') as HTMLTextAreaElement).value).toBe('Несохранённый комментарий');
+    expect((screen.getByRole('button', { name: 'Согласовать' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+  });
+
+  it('ignores a late unavailable-task response after the window unmounts', async () => {
+    mockNotificationPages([], [], [], [createApprovalRequestNotification()]);
+    let rejectRead: (reason: Error) => void = () => {};
+    apiMock.getTaskJournalItem.mockImplementation(() => new Promise((_, reject) => { rejectRead = reject; }));
+    const view = render(<ForcedTaskRevisionModal />);
+    await screen.findByTestId('forced-task-approval-prompt');
+    await waitFor(() => expect(apiMock.getTaskJournalItem).toHaveBeenCalled());
+    view.unmount();
+    await act(async () => { rejectRead(new Error('HTTP 404 Not Found')); });
+    expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+  });
+
+  it('ignores an older initial approval read after a newer realtime read', async () => {
+    mockNotificationPages([], [], [], [createApprovalRequestNotification()]);
+    let finishOld: (task: ReturnType<typeof createApprovalTask>) => void = () => {};
+    apiMock.getTaskJournalItem.mockImplementationOnce(() => new Promise((resolve) => { finishOld = resolve; }));
+    apiMock.getTaskJournalItem.mockResolvedValue(createApprovalTask({ status: 'onApproval' }));
+    render(<ForcedTaskRevisionModal />);
+    await screen.findByTestId('forced-task-approval-prompt');
+    await waitFor(() => expect(apiMock.getTaskJournalItem).toHaveBeenCalledTimes(1));
+    act(() => window.dispatchEvent(new Event(TASK_JOURNAL_REALTIME_EVENT)));
+    await act(async () => { finishOld(createApprovalTask({ status: 'done' })); });
+    await waitFor(() => expect(apiMock.getTaskJournalItem).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId('forced-task-approval-prompt')).toBeTruthy();
+    expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Согласовать и завершить' }) as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it('closes an open approval after a realtime task update confirms it is resolved', async () => {
+    mockNotificationPages([], [], [], [createApprovalRequestNotification()]);
+    apiMock.getTaskJournalItem.mockResolvedValue(createApprovalTask({ status: 'onApproval' }));
+    render(<ForcedTaskRevisionModal />);
+    const comment = await screen.findByLabelText('Комментарий для возврата на доработку') as HTMLTextAreaElement;
+    await waitFor(() => expect(comment.disabled).toBe(false));
+    fireEvent.change(comment, { target: { value: 'Мой текст' } });
+    apiMock.getTaskJournalItem.mockResolvedValue(createApprovalTask({ status: 'done' }));
+    act(() => window.dispatchEvent(new Event(TASK_JOURNAL_REALTIME_EVENT)));
+    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(61));
+    await waitFor(() => expect(screen.queryByTestId('forced-task-approval-prompt')).toBeNull());
+    expect(apiMock.updateTaskJournalApproval).not.toHaveBeenCalled();
+  });
+
+  it('disables a resolved open approval until its notification can be closed', async () => {
+    mockNotificationPages([], [], [], [createApprovalRequestNotification()]);
+    apiMock.getTaskJournalItem.mockResolvedValue(createApprovalTask({ status: 'onApproval' }));
+    render(<ForcedTaskRevisionModal />);
+    const button = await screen.findByRole('button', { name: 'Согласовать и завершить' }) as HTMLButtonElement;
+    await waitFor(() => expect(button.disabled).toBe(false));
+    apiMock.getTaskJournalItem.mockResolvedValue(createApprovalTask({ status: 'done' }));
+    apiMock.markUserNotificationRead.mockRejectedValueOnce(new Error('Нет связи'));
+    act(() => window.dispatchEvent(new Event(TASK_JOURNAL_REALTIME_EVENT)));
+    await screen.findByText(/Не удалось закрыть уведомление/);
+    expect(button.disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить закрытие уведомления' }));
+    await waitFor(() => expect(screen.queryByTestId('forced-task-approval-prompt')).toBeNull());
+    expect(apiMock.updateTaskJournalApproval).not.toHaveBeenCalled();
+  });
+
+  it('keeps an open approval draft on a failed realtime refresh', async () => {
+    mockNotificationPages([], [], [], [createApprovalRequestNotification()]);
+    apiMock.getTaskJournalItem.mockResolvedValue(createApprovalTask({ status: 'onApproval' }));
+    render(<ForcedTaskRevisionModal />);
+    const comment = await screen.findByLabelText('Комментарий для возврата на доработку') as HTMLTextAreaElement;
+    await waitFor(() => expect(comment.disabled).toBe(false));
+    fireEvent.change(comment, { target: { value: 'Мой сохранённый текст' } });
+    const reads = apiMock.getTaskJournalItem.mock.calls.length;
+    apiMock.getTaskJournalItem.mockRejectedValue(new Error('HTTP 500 Failed'));
+    act(() => window.dispatchEvent(new Event(TASK_JOURNAL_REALTIME_EVENT)));
+    await waitFor(() => expect(apiMock.getTaskJournalItem).toHaveBeenCalledTimes(reads + 1));
+    expect((screen.getByLabelText('Комментарий для возврата на доработку') as HTMLTextAreaElement).value).toBe('Мой сохранённый текст');
+    expect((screen.getByRole('button', { name: 'Согласовать' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+  });
+
+  it('retains an unavailable approval when acknowledgement fails', async () => {
+    mockNotificationPages([], [], [], [createApprovalRequestNotification()]);
+    apiMock.getTaskJournalItem.mockRejectedValue(new Error('HTTP 404 Not Found'));
+    apiMock.markUserNotificationRead.mockRejectedValueOnce(new Error('Нет связи'));
+    render(<ForcedTaskRevisionModal />);
+    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(61));
+    expect(screen.getByTestId('forced-task-approval-prompt')).toBeTruthy();
+    expect(await screen.findByText(/Не удалось закрыть уведомление/)).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Согласовать' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить закрытие уведомления' }));
+    await waitFor(() => expect(screen.queryByTestId('forced-task-approval-prompt')).toBeNull());
+    expect(apiMock.markUserNotificationRead).toHaveBeenCalledTimes(2);
   });
 
   it('lets the approver approve and complete a task from the forced approval prompt', async () => {

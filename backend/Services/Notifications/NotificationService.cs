@@ -11,10 +11,11 @@ using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.LegalIntegrations;
+using PayPlanner.Api.Services.Tasks;
 
 namespace PayPlanner.Api.Services.Notifications;
 
-public sealed class NotificationService : INotificationService, ICaseDocumentNotificationLiveDispatcher
+public sealed class NotificationService : INotificationService, ICaseDocumentNotificationLiveDispatcher, IDurableTaskStatusNotificationService
 {
     public const string CourtEventLeaderUserIdSettingKey = "notifications.courtEventLeaderUserId";
     private static readonly SemaphoreSlim SmsRateLimitGate = new(1, 1);
@@ -1032,11 +1033,27 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
         return deliveries;
     }
 
-    public async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskCompletedAsync(
+    public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskCompletedAsync(
         TaskJournalItem task,
         CancellationToken cancellationToken = default)
+        => NotifyCompletionForEventCoreAsync(task, $"task:{task.Id}:completed", false, cancellationToken);
+
+    public Task<IReadOnlyList<NotificationDelivery>> NotifyCompletionForEventAsync(
+        TaskJournalItem task, string eventKey, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(eventKey);
+        return NotifyCompletionForEventCoreAsync(task, eventKey, true, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<NotificationDelivery>> NotifyCompletionForEventCoreAsync(
+        TaskJournalItem task, string eventKey, bool retryMaxQueue, CancellationToken cancellationToken)
     {
         if (!task.AuthorUserId.HasValue)
+        {
+            return Array.Empty<NotificationDelivery>();
+        }
+
+        if (retryMaxQueue && !(await ResolveDurableTaskRecipientsAsync(task.Id, [task.AuthorUserId.Value], cancellationToken, authorOnly: true)).Contains(task.AuthorUserId.Value))
         {
             return Array.Empty<NotificationDelivery>();
         }
@@ -1057,14 +1074,19 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
             await CreateUserNotificationAsync(
                 task.AuthorUserId.Value,
                 UserNotificationTypes.TaskCompleted,
-                $"task:{task.Id}:completed",
+                eventKey,
                 message.Subject,
                 message.Body,
                 "blue",
                 task,
                 new { status = task.Status },
-                cancellationToken);
+                cancellationToken,
+                retryMaxQueue: retryMaxQueue,
+                replayRealtimeOnRetry: retryMaxQueue);
         }
+
+        if (retryMaxQueue && !await IsDurableTaskRecipientCurrentAsync(task, task.AuthorUserId.Value, true, cancellationToken))
+            return Array.Empty<NotificationDelivery>();
 
         var enabledChannels = await ResolveUserNotificationChannelsAsync(
             task.AuthorUserId.Value,
@@ -1077,7 +1099,7 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
                 task.AuthorUserId.Value,
                 message,
                 enabledChannels,
-                $"task:{task.Id}:completed",
+                eventKey,
                 cancellationToken);
     }
 
@@ -3506,22 +3528,43 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
         return deliveries;
     }
 
-    public async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalRequestedAsync(
+    public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalRequestedAsync(
         TaskJournalItem task,
         string actorName,
         int actorUserId,
         CancellationToken cancellationToken = default)
     {
+        var approver = GetCurrentApprover(task);
+        return NotifyApprovalForEventCoreAsync(task, actorName, actorUserId,
+            $"task:{task.Id}:approval-request:{approver?.Id ?? 0}:{DateTime.UtcNow:yyyyMMddHHmmssfff}", false, cancellationToken);
+    }
+
+    public Task<IReadOnlyList<NotificationDelivery>> NotifyApprovalForEventAsync(
+        TaskJournalItem task, string actorName, int actorUserId, string eventKey, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(eventKey);
+        return NotifyApprovalForEventCoreAsync(task, actorName, actorUserId, eventKey, true, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<NotificationDelivery>> NotifyApprovalForEventCoreAsync(
+        TaskJournalItem task, string actorName, int actorUserId, string eventKey, bool retryMaxQueue, CancellationToken cancellationToken)
+    {
         var recipients = ResolveApprovalRequestRecipientUserIds(task, actorUserId);
+        if (retryMaxQueue)
+        {
+            var eligible = await ResolveDurableTaskRecipientsAsync(task.Id, recipients, cancellationToken);
+            recipients = recipients.Where(eligible.Contains).ToArray();
+        }
         if (recipients.Count == 0)
         {
             return Array.Empty<NotificationDelivery>();
         }
 
         var currentApprover = GetCurrentApprover(task);
+        if (retryMaxQueue && currentApprover is null)
+            return Array.Empty<NotificationDelivery>();
         var approvalSubject = $"Задача ожидает согласования: {task.Title}";
         var channels = ResolveTaskMessageChannels(task);
-        var eventKey = $"task:{task.Id}:approval-request:{currentApprover?.Id ?? 0}:{DateTime.UtcNow:yyyyMMddHHmmssfff}";
         var recipientTimeZones = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
             _context,
             recipients,
@@ -3571,12 +3614,17 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
                     task,
                     new { actorUserId, actorName, currentApproverId = currentApprover?.Id },
                     cancellationToken,
-                    recipientNotificationChannels[userId]);
+                    recipientNotificationChannels[userId],
+                    retryMaxQueue: retryMaxQueue,
+                    replayRealtimeOnRetry: retryMaxQueue,
+                    expectedApprovalParticipantId: retryMaxQueue ? currentApprover!.Id : null);
             }
 
             var enabledChannels = channels
                 .Where(recipientNotificationChannels[userId].Contains)
                 .ToList();
+            if (retryMaxQueue && !await IsDurableTaskRecipientCurrentAsync(task, userId, false, cancellationToken, currentApprover!.Id))
+                continue;
             if (enabledChannels.Count > 0 && deliveryRecipients.TryGetValue(userId, out var recipient))
             {
                 deliveries.AddRange(await SendAsync(recipient, message, enabledChannels, eventKey, cancellationToken));
@@ -3584,6 +3632,45 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
         }
 
         return deliveries;
+    }
+
+    private async Task<HashSet<int>> ResolveDurableTaskRecipientsAsync(
+        int taskId, IReadOnlyCollection<int> candidates, CancellationToken cancellationToken, bool authorOnly = false)
+    {
+        if (candidates.Count == 0) return [];
+        var task = await _context.TaskJournalItems.AsNoTracking().Where(item => item.Id == taskId)
+            .Select(item => new { item.SalesRequestId }).SingleOrDefaultAsync(cancellationToken);
+        if (task is null) return [];
+
+        var eligible = _context.Users.AsNoTracking().Where(user => candidates.Contains(user.Id)
+            && user.IsActive && user.IsApproved && user.Role != null
+            && (user.Role.Name.ToLower() == "admin" || user.Role.Permissions.Any(permission =>
+                permission.Section == RolePermissionCatalog.Tasks && permission.CanView))
+            && _context.TaskJournalItems.Any(current => current.Id == taskId
+                && current.SalesRequestId == task.SalesRequestId
+                && (current.AuthorUserId == user.Id || (!authorOnly && (current.AssigneeUserId == user.Id
+                    || current.Participants.Any(participant => participant.UserId == user.Id))))));
+        if (task.SalesRequestId is int requestId)
+            eligible = eligible.WithSalesRequestAccess(requestId, _context);
+        return (await eligible.Select(user => user.Id).ToListAsync(cancellationToken)).ToHashSet();
+    }
+
+    private async Task<bool> IsDurableTaskRecipientCurrentAsync(TaskJournalItem task, int userId, bool authorOnly, CancellationToken ct, int? expectedApprovalParticipantId = null)
+    {
+        var eligible = await ResolveDurableTaskRecipientsAsync(task.Id, [userId], ct, authorOnly);
+        return eligible.Contains(userId) && await _context.TaskJournalItems.AsNoTracking()
+            .AnyAsync(current => current.Id == task.Id && current.StatusTransitionToken == task.StatusTransitionToken, ct)
+            && (!expectedApprovalParticipantId.HasValue || await IsApprovalStageCurrentAsync(task.Id, expectedApprovalParticipantId.Value, ct));
+    }
+
+    private async Task<bool> IsApprovalStageCurrentAsync(int taskId, int expectedParticipantId, CancellationToken ct)
+    {
+        var current = await _context.TaskJournalParticipants.AsNoTracking()
+            .Where(participant => participant.TaskJournalItemId == taskId
+                && participant.Role.ToLower() == "approver" && participant.ApprovalStatus.ToLower() != "approved")
+            .OrderBy(participant => participant.SortOrder).ThenBy(participant => participant.Id)
+            .Select(participant => (int?)participant.Id).FirstOrDefaultAsync(ct);
+        return current == expectedParticipantId;
     }
 
     public async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalDecisionAsync(
@@ -3692,20 +3779,49 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
         return deliveries;
     }
 
-    public async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskDeadlineChangeRequestedAsync(
+    public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskDeadlineChangeRequestedAsync(
         TaskJournalItem task,
         TaskJournalDeadlineChangeRequest request,
         CancellationToken cancellationToken = default)
     {
         var actorUserId = request.RequestedByUserId ?? 0;
         var recipients = ResolveDeadlineChangeRequestRecipientUserIds(task, request, actorUserId, includeReviewer: true, includeRequester: false, includeObservers: true);
+        var eventKey = $"task:{task.Id}:deadline-change-request:{request.Id}:requested";
+        return NotifyTaskDeadlineChangeRequestedCoreAsync(task, request, recipients, eventKey, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskDeadlineReviewerAssignedAsync(
+        TaskJournalItem task,
+        TaskJournalDeadlineChangeRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (request.ReviewerUserId is not > 0) return Array.Empty<NotificationDelivery>();
+        var reviewerId = request.ReviewerUserId.Value;
+        IReadOnlyList<int> recipients = [reviewerId];
+        var access = await _context.ResolveSectionAccessAsync(CreateNotificationRecipientPrincipal(reviewerId), RolePermissionCatalog.Tasks, cancellationToken, requireApprovedUser: true);
+        if (access?.Permission?.CanView != true
+            || !await _context.TaskJournalItems.AsNoTracking().Where(item => item.Id == task.Id).ApplyTaskVisibility(access.Visibility, _context).AnyAsync(cancellationToken)
+            || !await _context.TaskJournalDeadlineChangeRequests.AsNoTracking().AnyAsync(item => item.Id == request.Id && item.TaskJournalItemId == task.Id && item.Status == "pending" && item.ReviewerUserId == reviewerId && item.UpdatedAt == request.UpdatedAt, cancellationToken))
+            return Array.Empty<NotificationDelivery>();
+
+        var eventKey = $"task:{task.Id}:deadline-change-request:{request.Id}:reviewer:{reviewerId}:{request.UpdatedAt?.Ticks ?? 0}";
+        return await NotifyTaskDeadlineChangeRequestedCoreAsync(task, request, recipients, eventKey, cancellationToken, retryMaxQueue: true);
+    }
+
+    private async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskDeadlineChangeRequestedCoreAsync(
+        TaskJournalItem task,
+        TaskJournalDeadlineChangeRequest request,
+        IReadOnlyList<int> recipients,
+        string eventKey,
+        CancellationToken cancellationToken,
+        bool retryMaxQueue = false)
+    {
         if (recipients.Count == 0)
         {
             return Array.Empty<NotificationDelivery>();
         }
 
         var channels = ResolveTaskMessageChannels(task);
-        var eventKey = $"task:{task.Id}:deadline-change-request:{request.Id}:requested";
         var recipientTimeZones = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
             _context,
             recipients,
@@ -3771,7 +3887,8 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
                         reason = request.Reason
                     },
                     cancellationToken,
-                    recipientNotificationChannels[userId]);
+                    recipientNotificationChannels[userId],
+                    retryMaxQueue);
             }
 
             var enabledChannels = channels
@@ -4657,7 +4774,10 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
         TaskJournalItem task,
         object? metadata,
         CancellationToken cancellationToken,
-        IReadOnlySet<string>? resolvedNotificationChannels = null)
+        IReadOnlySet<string>? resolvedNotificationChannels = null,
+        bool retryMaxQueue = false,
+        bool replayRealtimeOnRetry = false,
+        int? expectedApprovalParticipantId = null)
         => CreateUserNotificationAsync(
             new NotificationEventEnvelope(
                 recipientUserId,
@@ -4672,7 +4792,10 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
                 metadata,
                 task),
             cancellationToken,
-            resolvedNotificationChannels: resolvedNotificationChannels);
+            resolvedNotificationChannels: resolvedNotificationChannels,
+            retryMaxQueue: retryMaxQueue,
+            replayRealtimeOnRetry: replayRealtimeOnRetry,
+            expectedApprovalParticipantId: expectedApprovalParticipantId);
 
     private Task<bool> CreateUserNotificationAsync(
         int recipientUserId,
@@ -4710,7 +4833,10 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
         NotificationEventEnvelope notificationEvent,
         CancellationToken cancellationToken,
         bool objectVisibilityValidated = false,
-        IReadOnlySet<string>? resolvedNotificationChannels = null)
+        IReadOnlySet<string>? resolvedNotificationChannels = null,
+        bool retryMaxQueue = false,
+        bool replayRealtimeOnRetry = false,
+        int? expectedApprovalParticipantId = null)
     {
         if (notificationEvent.RecipientUserId <= 0 || string.IsNullOrWhiteSpace(notificationEvent.EventKey))
         {
@@ -4721,6 +4847,23 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
         if (string.IsNullOrWhiteSpace(type))
         {
             return false;
+        }
+
+        await using var accessLease = replayRealtimeOnRetry && notificationEvent.Task is not null
+            ? await TaskDeadlineRequestLease.TryAcquireAsync(_context, notificationEvent.RecipientUserId, notificationEvent.Task.Id, cancellationToken)
+            : null;
+        if (replayRealtimeOnRetry)
+        {
+            if (notificationEvent.Task is null || accessLease is null)
+                throw new InvalidOperationException("Task notification access is temporarily locked.");
+            var task = notificationEvent.Task;
+            var allowed = await ResolveDurableTaskRecipientsAsync(task.Id, [notificationEvent.RecipientUserId], cancellationToken,
+                authorOnly: type == UserNotificationTypes.TaskCompleted);
+            var currentToken = await _context.TaskJournalItems.AsNoTracking().Where(item => item.Id == task.Id)
+                .Select(item => item.StatusTransitionToken).SingleOrDefaultAsync(cancellationToken);
+            if (!allowed.Contains(notificationEvent.RecipientUserId) || currentToken != task.StatusTransitionToken
+                || (expectedApprovalParticipantId.HasValue && !await IsApprovalStageCurrentAsync(task.Id, expectedApprovalParticipantId.Value, cancellationToken)))
+                return false;
         }
 
         var inAppEnabled = resolvedNotificationChannels is not null
@@ -4735,10 +4878,36 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
             return false;
         }
 
-        var alreadyExists = await _context.UserNotifications
-            .AsNoTracking()
-            .AnyAsync(UserNotificationAntiSpamPolicy.ExactDuplicatePredicate(notificationEvent), cancellationToken);
-        if (alreadyExists)
+        var duplicates = _context.UserNotifications.AsNoTracking()
+            .Where(UserNotificationAntiSpamPolicy.ExactDuplicatePredicate(notificationEvent));
+        if (retryMaxQueue)
+        {
+            var existing = await duplicates.FirstOrDefaultAsync(cancellationToken);
+            if (existing is not null)
+            {
+                if (accessLease is not null) await accessLease.CommitAsync(cancellationToken);
+                if (accessLease is not null && !await IsDurableTaskRecipientCurrentAsync(notificationEvent.Task!, notificationEvent.RecipientUserId,
+                    type == UserNotificationTypes.TaskCompleted, cancellationToken, expectedApprovalParticipantId)) return false;
+                if (objectVisibilityValidated || await CanRecipientSeeNotificationObjectAsync(notificationEvent, type, cancellationToken))
+                {
+                    await QueueMaxNotificationIfAvailableAsync(existing, cancellationToken, throwOnFailure: true);
+                    if (replayRealtimeOnRetry && !existing.IsRead && !existing.IsArchived && existing.DeletedAt is null)
+                    {
+                        var toast = resolvedNotificationChannels is not null
+                            ? resolvedNotificationChannels.Contains(NotificationChannels.Toast)
+                            : await IsUserNotificationChannelEnabledAsync(existing.RecipientUserId, type, NotificationChannels.Toast, cancellationToken);
+                        await PublishDurableRealtimeAsync(existing, toast, cancellationToken);
+                        var push = resolvedNotificationChannels is not null
+                            ? resolvedNotificationChannels.Contains(NotificationChannels.WebPush)
+                            : await IsUserNotificationChannelEnabledAsync(existing.RecipientUserId, type, NotificationChannels.WebPush, cancellationToken);
+                        if (push && _webPushNotificationService is not null)
+                            await _webPushNotificationService.SendUserNotificationAsync(existing, cancellationToken);
+                    }
+                }
+                return false;
+            }
+        }
+        else if (await duplicates.AnyAsync(cancellationToken))
         {
             return false;
         }
@@ -4779,7 +4948,10 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
         };
         _context.UserNotifications.Add(notification);
         await _context.SaveChangesAsync(cancellationToken);
-        await QueueMaxNotificationIfAvailableAsync(notification, cancellationToken);
+        if (accessLease is not null) await accessLease.CommitAsync(cancellationToken);
+        if (accessLease is not null && !await IsDurableTaskRecipientCurrentAsync(notificationEvent.Task!, notificationEvent.RecipientUserId,
+            type == UserNotificationTypes.TaskCompleted, cancellationToken, expectedApprovalParticipantId)) return false;
+        await QueueMaxNotificationIfAvailableAsync(notification, cancellationToken, throwOnFailure: retryMaxQueue);
         var toastEnabled = resolvedNotificationChannels is not null
             ? resolvedNotificationChannels.Contains(NotificationChannels.Toast)
             : await IsUserNotificationChannelEnabledAsync(
@@ -4801,7 +4973,10 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
             await _context.SaveChangesAsync(cancellationToken);
             return true;
         }
-        await _realtimePublisher.PublishUserNotificationAsync(notification, toastEnabled, cancellationToken);
+        if (replayRealtimeOnRetry)
+            await PublishDurableRealtimeAsync(notification, toastEnabled, cancellationToken);
+        else
+            await _realtimePublisher.PublishUserNotificationAsync(notification, toastEnabled, cancellationToken);
 
         var webPushEnabled = resolvedNotificationChannels is not null
             ? resolvedNotificationChannels.Contains(NotificationChannels.WebPush)
@@ -4818,6 +4993,11 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
 
         return true;
     }
+
+    private Task PublishDurableRealtimeAsync(UserNotification notification, bool toastEnabled, CancellationToken ct)
+        => _realtimePublisher is IReliableRealtimeNotificationPublisher reliable
+            ? reliable.PublishUserNotificationOrThrowAsync(notification, toastEnabled, ct)
+            : _realtimePublisher.PublishUserNotificationAsync(notification, toastEnabled, ct);
 
     public async Task<string> DispatchCaseDocumentAsync(int notificationId, string channel, bool toastEnabled, Func<CancellationToken, Task<bool>> ownsLease, CancellationToken ct)
     {
@@ -4856,7 +5036,7 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
         return "completed";
     }
 
-    private async Task QueueMaxNotificationIfAvailableAsync(UserNotification notification, CancellationToken cancellationToken)
+    private async Task QueueMaxNotificationIfAvailableAsync(UserNotification notification, CancellationToken cancellationToken, bool throwOnFailure = false)
     {
         if (_maxService is null || _maxOutboxService is null
             || UserNotificationTypes.Find(notification.Type) is not { } typeDefinition
@@ -4881,6 +5061,13 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
                     cancellationToken))
                 return;
 
+            // An employee without a verified MAX link cannot receive this channel.
+            // Treat that as a skip, so recovery does not retry forever or block other channels.
+            if (throwOnFailure && !await _context.MaxRecipientLinks.AsNoTracking().AnyAsync(
+                    link => link.UserId == notification.RecipientUserId && link.ClientPortalAccountId == null
+                        && link.Status == MaxRecipientLinkStatuses.Verified && link.MaxUserId != null, cancellationToken))
+                return;
+
             await _maxOutboxService.QueueAsync(new MaxQueueRequest(
                 notification.RecipientUserId,
                 MaxMessengerScenarios.Notifications,
@@ -4895,6 +5082,8 @@ public sealed class NotificationService : INotificationService, ICaseDocumentNot
             // Отказ дополнительного канала не должен скрывать уже сохранённое уведомление CRM.
             _logger.LogWarning("MAX notification was not queued for user {RecipientUserId}, type {Type}: {ErrorType}.",
                 notification.RecipientUserId, notification.Type, exception.GetType().Name);
+            if (_maxRuntimeSettingsTask?.IsFaulted == true) _maxRuntimeSettingsTask = null;
+            if (throwOnFailure) throw;
         }
     }
 

@@ -76,6 +76,7 @@ import { TablePagination } from '../ui/TablePagination';
 import { TableSelectCheckbox } from '../ui/TableSelectCheckbox';
 import { StatusChangeModal, type StatusChangeOption } from '../ui/StatusChangeModal';
 import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
+import { TASK_JOURNAL_EVENT } from '../../utils/taskJournalStore';
 
 interface AccountsProps {
   defaultType?: PaymentKind;
@@ -88,6 +89,7 @@ interface AccountsProps {
   onOpenClient?: (clientId: number) => void;
   onOpenContract?: (contractId: number) => void;
   onOpenPayment?: (paymentId: number, paymentType?: PaymentKind) => void;
+  onOpenTaskBilling?: () => void;
   onOpenActPage?: (actId: number, options?: { invoiceId?: number | null }) => void;
   onCreateActPage?: (
     initialValues?: Partial<ActInput> & { amount?: number | null },
@@ -552,6 +554,7 @@ export function Accounts({
   onOpenClient,
   onOpenContract,
   onOpenPayment,
+  onOpenTaskBilling,
   onOpenActPage,
   onCreateActPage,
 }: AccountsProps) {
@@ -1466,6 +1469,9 @@ export function Accounts({
         deferEditorClose(closeEditPage);
       } else {
         await apiService.createInvoice(payload);
+        if (payload.billingTaskIds?.length) {
+          window.dispatchEvent(new CustomEvent(TASK_JOURNAL_EVENT, { detail: { bulkBillingIds: payload.billingTaskIds } }));
+        }
         if (page !== 1) {
           setPage(1);
         } else {
@@ -2631,6 +2637,13 @@ export function Accounts({
             <p className="text-sm text-gray-500">{headingDescription}</p>
           </div>
 
+          <div className="flex flex-wrap gap-2">
+          {onOpenTaskBilling && (
+            <button type="button" onClick={onOpenTaskBilling}
+              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+              Анализ оплаты задач
+            </button>
+          )}
           {canCreate && (
             <button
               type="button"
@@ -2641,6 +2654,7 @@ export function Accounts({
               {t('invoiceAdd') ?? 'Добавить счёт'}
             </button>
           )}
+          </div>
         </div>
 
         <div className="mb-6 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">

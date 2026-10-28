@@ -37,6 +37,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -1381,7 +1382,7 @@ function ProfileDocumentReadList({ title, entries }: { title: string; entries: A
       <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
       {populatedEntries.length === 0 ? <p className="text-sm text-slate-500">Не указано</p> : populatedEntries.map((entry, index) => (
         <dl key={index} className="grid min-w-0 gap-2 border-b border-slate-200 pb-3 last:border-0 last:pb-0 md:grid-cols-2 xl:grid-cols-4">
-          {entry.map(({ label, value }) => <div key={label} className="min-w-0"><dt className="text-xs text-slate-500">{label}</dt><dd className="whitespace-pre-wrap text-sm text-slate-900 [overflow-wrap:anywhere]">{value || 'Не указано'}</dd></div>)}
+          {entry.map(({ label, value }) => <div key={label} className="min-w-0"><dt className="text-xs text-slate-500">{label}</dt><dd className="whitespace-pre-wrap text-sm text-slate-900 [overflow-wrap:anywhere]">{typeof value === 'string' && value.trim() ? value : 'Не указано'}</dd></div>)}
         </dl>
       ))}
     </section>
@@ -1399,6 +1400,7 @@ export function ClientDetail({
   onOpenCasePage,
   onOpenTask,
 }: ClientDetailProps) {
+  const profileFieldId = useId();
   const { t } = useTranslation();
   const { user, isAdmin } = useAuth();
   const { confirm } = useDialog();
@@ -6509,11 +6511,12 @@ export function ClientDetail({
                     <>
                   <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(min(100%,150px),1fr))]">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <label htmlFor={`${profileFieldId}-lastName`} className="block text-sm font-medium text-gray-700 mb-2">
                         {"Фамилия" + requiredMark("LastName")}
                       </label>
                       <input
                         type="text"
+                        id={`${profileFieldId}-lastName`}
                         name="lastName"
                         value={clientFormState.lastName}
                         onChange={handleClientFormChange}
@@ -6523,11 +6526,12 @@ export function ClientDetail({
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <label htmlFor={`${profileFieldId}-firstName`} className="block text-sm font-medium text-gray-700 mb-2">
                         {"Имя" + requiredMark("FirstName")}
                       </label>
                       <input
                         type="text"
+                        id={`${profileFieldId}-firstName`}
                         name="firstName"
                         value={clientFormState.firstName}
                         onChange={handleClientFormChange}
@@ -6537,11 +6541,12 @@ export function ClientDetail({
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <label htmlFor={`${profileFieldId}-middleName`} className="block text-sm font-medium text-gray-700 mb-2">
                         {"Отчество" + requiredMark("MiddleName")}
                       </label>
                       <input
                         type="text"
+                        id={`${profileFieldId}-middleName`}
                         name="middleName"
                         value={clientFormState.middleName}
                         onChange={handleClientFormChange}
@@ -6550,10 +6555,12 @@ export function ClientDetail({
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <label htmlFor={`${profileFieldId}-gender`} className="block text-sm font-medium text-gray-700 mb-2">
                         Пол
                       </label>
                       <SystemSelect
+                        id={`${profileFieldId}-gender`}
+                        aria-label="Пол"
                         name="gender"
                         value={clientFormState.gender}
                         onChange={handleClientFormChange}
@@ -6569,11 +6576,12 @@ export function ClientDetail({
 
                   <div className="md:col-span-2 grid gap-3 md:grid-cols-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <label htmlFor={`${profileFieldId}-inn`} className="block text-sm font-medium text-gray-700 mb-2">
                         {"ИНН" + requiredMark("Inn")}
                       </label>
                       <input
                         type="text"
+                        id={`${profileFieldId}-inn`}
                         name="inn"
                         value={clientFormState.inn}
                         onChange={handleClientFormChange}
@@ -6582,11 +6590,12 @@ export function ClientDetail({
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <label htmlFor={`${profileFieldId}-snils`} className="block text-sm font-medium text-gray-700 mb-2">
                         {"СНИЛС" + requiredMark("Snils")}
                       </label>
                       <input
                         type="text"
+                        id={`${profileFieldId}-snils`}
                         name="snils"
                         value={clientFormState.snils}
                         onChange={handleClientFormChange}
@@ -6595,12 +6604,14 @@ export function ClientDetail({
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <label htmlFor={`${profileFieldId}-birthDate`} className="block text-sm font-medium text-gray-700 mb-2">
                         Дата рождения
                       </label>
                       <SystemDateInput
                         type="date"
+                        id={`${profileFieldId}-birthDate`}
                         name="birthDate"
+                        aria-label="Дата рождения"
                         value={clientFormState.birthDate}
                         onChange={handleClientFormChange}
                         disabled={!canEditClientProfile}
@@ -6608,10 +6619,12 @@ export function ClientDetail({
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <label htmlFor={`${profileFieldId}-maritalStatus`} className="block text-sm font-medium text-gray-700 mb-2">
                         Семейное положение
                       </label>
                       <SystemSelect
+                        id={`${profileFieldId}-maritalStatus`}
+                        aria-label="Семейное положение"
                         name="maritalStatus"
                         value={clientFormState.maritalStatus}
                         onChange={handleClientFormChange}
@@ -7326,7 +7339,7 @@ export function ClientDetail({
                           </div>
                       {clientFormState.kind === "individual" &&
                         profileAdditionalOpen &&
-                        activeProfileGroup === "education" && (
+                        activeProfileGroup === "education" && (canEditClientProfile ? (
                           <div className="md:col-span-2">
                             <label className="block text-sm font-medium text-gray-700 mb-2">
                               Образование (ОКСО)
@@ -7431,7 +7444,9 @@ export function ClientDetail({
                               </button>
                             </div>
                           </div>
-                        )}
+                        ) : (
+                          <ProfileDocumentReadList title="Образование (ОКСО)" entries={clientFormState.education.map((item) => ([{ label: "Учебное заведение", value: item.institution }, { label: "Специальность", value: item.specialty }, { label: "№ диплома", value: item.diplomaNumber }, { label: "Код ОКСО", value: item.oksoCode }]))} />
+                        ))}
 
                       <datalist id="okso-codes">
                         {oksoOptions.map((item) => (
@@ -7449,7 +7464,7 @@ export function ClientDetail({
                       </datalist>
                       {clientFormState.kind === "individual" &&
                         profileAdditionalOpen &&
-                        activeProfileGroup === "professions" && (
+                        activeProfileGroup === "professions" && (canEditClientProfile ? (
                           <div className="md:col-span-2">
                             <label className="block text-sm font-medium text-gray-700 mb-2">
                               Профессии (ОКПДТР)
@@ -7528,10 +7543,12 @@ export function ClientDetail({
                               </button>
                             </div>
                           </div>
-                        )}
+                        ) : (
+                          <ProfileDocumentReadList title="Профессии (ОКПДТР)" entries={clientFormState.professions.map((item) => ([{ label: "Профессия", value: item.profession }, { label: "Код ОКПДТР", value: item.okpdtrCode }]))} />
+                        ))}
                       {clientFormState.kind === "individual" &&
                         profileAdditionalOpen &&
-                        activeProfileGroup === "workplaces" && (
+                        activeProfileGroup === "workplaces" && (canEditClientProfile ? (
                           <div className="md:col-span-2">
                             <label className="block text-sm font-medium text-gray-700 mb-2">
                               Места работы и должности
@@ -7646,10 +7663,12 @@ export function ClientDetail({
                               </button>
                             </div>
                           </div>
-                        )}
+                        ) : (
+                          <ProfileDocumentReadList title="Места работы и должности" entries={clientFormState.workplaces.map((item) => ([{ label: "Организация", value: item.organizationName }, { label: "Должность", value: item.position }, { label: "Начало", value: item.startDate ? formatClientBirthDate(item.startDate) : "" }, { label: "Окончание", value: item.endDate ? formatClientBirthDate(item.endDate) : "" }]))} />
+                        ))}
                       {clientFormState.kind === "individual" &&
                         profileAdditionalOpen &&
-                        activeProfileGroup === "relatives" && (
+                        activeProfileGroup === "relatives" && (canEditClientProfile ? (
                           <div className="md:col-span-2">
                             <label className="block text-sm font-medium text-gray-700 mb-2">
                               Близкие родственники
@@ -7745,7 +7764,9 @@ export function ClientDetail({
                               </button>
                             </div>
                           </div>
-                        )}
+                        ) : (
+                          <ProfileDocumentReadList title="Близкие родственники" entries={clientFormState.relatives.map((item) => ([{ label: "Степень родства", value: item.relation }, { label: "ФИО", value: item.fullName }, { label: "Год рождения", value: item.birthYear }, { label: "Номер телефона", value: item.phone }]))} />
+                        ))}
                       {clientFormState.kind === "individual" &&
                         profileAdditionalOpen &&
                         activeProfileGroup === "poa" && (

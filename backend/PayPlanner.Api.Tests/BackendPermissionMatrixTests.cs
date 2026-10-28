@@ -297,7 +297,7 @@ public class BackendPermissionMatrixTests
     [InlineData("none", 0, 0)]
     [InlineData("own", 1, 0)]
     [InlineData("all", 2, 1)]
-    public async Task CaseRegistry_ReturnsOnlyPermittedTaskSummary(string scope, int expectedOpen, int expectedOverdue)
+    public async Task CaseRegistryAndOverview_ReturnOnlyPermittedTaskSummary(string scope, int expectedOpen, int expectedOverdue)
     {
         await using var db = await CreateContextAsync();
         var permissions = new List<RolePermission>
@@ -336,6 +336,13 @@ public class BackendPermissionMatrixTests
             Assert.Null(item.NextInactivityControlAt);
             Assert.Null(item.LastMeaningfulActivityAt);
         }
+
+        var summaryResult = await controller.GetSummary(clientCase.Id, CancellationToken.None);
+        var summary = Assert.IsType<CasesV2Controller.ClientCaseSummaryDto>(Assert.IsType<OkObjectResult>(summaryResult.Result).Value);
+        Assert.Equal(expectedOpen, summary.OpenTaskCount);
+        Assert.Equal(expectedOverdue, summary.OverdueTaskCount);
+        Assert.Equal(scope switch { "none" => "none", "own" => "partial", _ => "full" }, summary.TaskSummaryVisibility);
+        if (scope == "none") Assert.Null(summary.LastTaskAt);
     }
 
     [Theory]
