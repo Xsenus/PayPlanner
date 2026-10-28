@@ -14,18 +14,22 @@ const context = (change: Record<string, string | undefined> = {}) => ({
   PAYPLANNER_CI_ARTIFACT_ROOT: productionStoreRoot, ...change,
 });
 
-describe('main artifact transport caller and matrix bindings', () => {
-  it.each(['0', '1', '2', '3'])('derives canonical shard %s from the actual matrix job without mutating its environment', shard => {
-    const env = context({ GITHUB_JOB: 'backend-test', ARTIFACT_SHARD: shard });
+describe('main artifact transport caller and worker bindings', () => {
+  it.each(['0', '1', '2', '3'])('binds canonical shard %s to the actual worker without mutating its environment', shard => {
+    const env = context({ GITHUB_JOB: `backend-test-${shard}`, ARTIFACT_SHARD: shard });
     const result = contextFromEnvironment(env, 'win32');
     expect(result.producerJob).toBe(`backend-test-${shard}`);
-    expect(env.GITHUB_JOB).toBe('backend-test');
+    expect(env.GITHUB_JOB).toBe(`backend-test-${shard}`);
     expect(env.ARTIFACT_SHARD).toBe(shard);
   });
-  it.each([undefined, '', '-1', '4', '01', '0 ', '1,2'])('rejects a missing or noncanonical matrix shard %s', shard => {
-    expect(() => contextFromEnvironment(context({ GITHUB_JOB: 'backend-test', ARTIFACT_SHARD: shard }), 'win32')).toThrow();
+  it.each(['', '-1', '4', '01', '0 ', '1,2'])('rejects a noncanonical or mismatched worker shard %s', shard => {
+    expect(() => contextFromEnvironment(context({ GITHUB_JOB: 'backend-test-0', ARTIFACT_SHARD: shard }), 'win32')).toThrow();
   });
-  it.each(['backend-test-0', 'backend-test-3', 'unknown'])('rejects a fabricated actual job %s', job => {
+  it('derives the shard from the actual worker when the optional shard hint is absent', () => {
+    expect(contextFromEnvironment(context({ GITHUB_JOB: 'backend-test-0' }), 'win32').producerJob).toBe('backend-test-0');
+    expect(() => contextFromEnvironment(context({ GITHUB_JOB: 'backend-test', ARTIFACT_SHARD: '0' }), 'win32')).toThrow();
+  });
+  it.each(['backend-test-4', 'backend-test-01', 'unknown'])('rejects a fabricated actual job %s', job => {
     expect(() => contextFromEnvironment(context({ GITHUB_JOB: job }), 'win32')).toThrow();
   });
   it('rejects a shard claimed by a nonmatrix job', () => {
@@ -37,10 +41,13 @@ describe('main artifact transport caller and matrix bindings', () => {
       GITHUB_WORKFLOW_REF: 'Xsenus/PayPlanner/.github/workflows/deploy.yml@refs/heads/claude/practical-bardeen-pglcf3' }), 'win32')).toThrow();
     expect(() => contextFromEnvironment(context({ PAYPLANNER_CI_ARTIFACT_ROOT: 'D:\\PayPlannerCIArtifacts\\store' }), 'win32')).toThrow();
   });
-  it.each([0, 1, 2, 3])('uses needs.backend-test.outputs.shard_%s_id rather than an invented needs job', shard => {
+  it.each([0, 1, 2, 3])('binds shard %s to the exact worker or aggregate output', shard => {
     const ctx = { needs: { 'backend-test': { result: 'success', outputs: { [`shard_${shard}_id`]: id } } } };
     expect(() => need(ctx, `backend-test-${shard}`, 'qualified-artifact-id', id)).not.toThrow();
-    expect(() => need({ needs: { [`backend-test-${shard}`]: { result: 'success', outputs: { 'qualified-artifact-id': id } } } },
+    const worker = { needs: { [`backend-test-${shard}`]: { result: 'success', outputs: { 'qualified-artifact-id': id } } } };
+    expect(() => need(worker, `backend-test-${shard}`, 'qualified-artifact-id', id)).not.toThrow();
+    expect(() => need(worker, `backend-test-${shard}`, 'qualified-artifact-id', 'xsenus-local-v1:' + 'd'.repeat(64))).toThrow();
+    expect(() => need({ needs: { [`backend-test-${shard}`]: { result: 'success', outputs: { 'frontend-artifact-id': id } } } },
       `backend-test-${shard}`, 'qualified-artifact-id', id)).toThrow();
     expect(() => need(ctx, `backend-test-${shard}`, 'qualified-artifact-id', 'xsenus-local-v1:' + 'd'.repeat(64))).toThrow();
   });

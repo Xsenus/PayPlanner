@@ -248,7 +248,7 @@ describe('TaskJournal', () => {
       }),
     ], { withRoute: true });
 
-    const searchInput = screen.getByRole('textbox') as HTMLInputElement;
+    const searchInput = screen.getByRole('textbox', { name: 'Поиск по контрагенту, делу или наименованию задачи' }) as HTMLInputElement;
     fireEvent.change(searchInput, { target: { value: 'EGOROV' } });
 
     expect(await screen.findByText('Egor task')).toBeTruthy();
@@ -265,8 +265,9 @@ describe('TaskJournal', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Журнал задач' }));
 
-    const restoredSearchInput = await screen.findByRole('textbox') as HTMLInputElement;
+    const restoredSearchInput = await screen.findByRole('textbox', { name: 'Поиск по контрагенту, делу или наименованию задачи' }) as HTMLInputElement;
     expect(restoredSearchInput.value).toBe('EGOROV');
+    expect((screen.getByRole('textbox', { name: 'Поиск задач над таблицей' }) as HTMLInputElement).value).toBe('EGOROV');
     expect(screen.getByText('Egor task')).toBeTruthy();
     expect(screen.queryByText('Other task')).toBeNull();
 
@@ -302,7 +303,7 @@ describe('TaskJournal', () => {
       }),
     ]);
 
-    const searchInput = screen.getByRole('textbox') as HTMLInputElement;
+    const searchInput = screen.getByRole('textbox', { name: 'Поиск по контрагенту, делу или наименованию задачи' }) as HTMLInputElement;
     fireEvent.change(searchInput, { target: { value: 'ЕГОРОВА' } });
 
     expect(await screen.findByText('ЕГОРОВА - счет 94')).toBeTruthy();
@@ -985,7 +986,7 @@ describe('TaskJournal', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Просрочены/i }));
 
-    expect(screen.getByText('Overdue task')).toBeTruthy();
+    expect(await screen.findByText('Overdue task')).toBeTruthy();
     await waitFor(() => expect(screen.queryByText('Future task')).toBeNull());
   });
 
