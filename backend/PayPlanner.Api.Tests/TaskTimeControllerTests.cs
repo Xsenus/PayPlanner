@@ -1,10 +1,12 @@
 using System.Security.Claims;
 using System.Reflection;
+using System.Data.Common;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
@@ -18,6 +20,48 @@ namespace PayPlanner.Api.Tests;
 
 public sealed partial class InternalChatControllerTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TaskTimer_DeletedTaskPreservesIntervalsAndCorrectionsForRestore(bool postgres)
+    {
+        await using var fixture = postgres ? await Fixture.CreatePostgresModelAsync() : await Fixture.CreateSharedModelAsync();
+        var actor = await fixture.AddUserAsync("timer-deleted-history@example.test", "Автор");
+        var task = await AddTimerTaskAsync(fixture, actor);
+        var clock = new TimerClock(new DateTimeOffset(2099, 10, 27, 10, 0, 0, TimeSpan.Zero));
+        var controller = TimerController(fixture.Db, actor, clock);
+        var firstId = Guid.NewGuid();
+        TimerState(await controller.Start(new(firstId, task.Id), default));
+        clock.Value = clock.Value.AddMinutes(2);
+        TimerState(await controller.Stop(firstId, default));
+        var corrected = TimerState(await controller.Correct(task.Id, firstId, new(0, 125, "Уточнение времени"), default));
+        var activeId = Guid.NewGuid();
+        TimerState(await controller.Start(new(activeId, task.Id), default));
+        fixture.Db.ChangeTracker.CascadeDeleteTiming = CascadeTiming.OnSaveChanges;
+        fixture.Db.TaskJournalItems.Remove(task);
+        await fixture.Db.SaveChangesAsync();
+        fixture.Db.ChangeTracker.Clear();
+        Assert.Empty(await fixture.Db.TaskTimeEntries.ToListAsync());
+        Assert.Empty(await fixture.Db.TaskTimeCorrections.ToListAsync());
+        var raw = await fixture.Db.TaskTimeEntries.IgnoreQueryFilters().Where(item => item.TaskId == task.Id).ToListAsync();
+        Assert.Equal(2, raw.Count);
+        Assert.All(raw, item => Assert.NotNull(item.StoppedAtUtc));
+        var retained = Assert.Single(raw, item => item.Id == firstId);
+        Assert.Equal(corrected.StartedAtUtc, retained.StartedAtUtc);
+        Assert.Equal(corrected.StoppedAtUtc, retained.StoppedAtUtc);
+        Assert.Equal(125, retained.CorrectedSeconds);
+        Assert.Equal(1, retained.Revision);
+        var correction = await fixture.Db.TaskTimeCorrections.IgnoreQueryFilters().SingleAsync();
+        Assert.Equal(firstId, correction.EntryId);
+        Assert.Equal("Уточнение времени", correction.Reason);
+        Assert.Null(Assert.IsType<OkObjectResult>(await controller.Current(default)).Value);
+        Assert.IsType<NotFoundResult>(await controller.History(task.Id, default));
+        Assert.Equal(1, await fixture.Db.TaskJournalItems.IgnoreQueryFilters().Where(item => item.Id == task.Id)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(item => EF.Property<bool>(item, "IsDeleted"), false)));
+        Assert.Equal(2, await fixture.Db.TaskTimeEntries.CountAsync());
+        Assert.Equal(correction.Id, (await fixture.Db.TaskTimeCorrections.SingleAsync()).Id);
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(false, true)]
@@ -202,7 +246,7 @@ public sealed partial class InternalChatControllerTests
             if (transition == "deleted") { fixture.Db.ChangeTracker.CascadeDeleteTiming = CascadeTiming.OnSaveChanges; fixture.Db.TaskJournalItems.Remove(task); }
             else task.Status = transition;
             await fixture.Db.SaveChangesAsync();
-            Assert.Equal(2, await fixture.Db.TaskTimeEntries.CountAsync(item => item.TaskId == task.Id && item.StoppedAtUtc != null));
+            Assert.Equal(2, await fixture.Db.TaskTimeEntries.IgnoreQueryFilters().CountAsync(item => item.TaskId == task.Id && item.StoppedAtUtc != null));
             await transaction.RollbackAsync();
         }
         fixture.Db.ChangeTracker.Clear();
@@ -212,8 +256,16 @@ public sealed partial class InternalChatControllerTests
         else current.Status = transition;
         if (transition == "cancelled") fixture.Db.SaveChanges(); else await fixture.Db.SaveChangesAsync();
         fixture.Db.ChangeTracker.Clear();
-        Assert.Equal(2, await fixture.Db.TaskTimeEntries.CountAsync(item => item.TaskId == task.Id && item.StoppedAtUtc != null));
+        Assert.Equal(2, await fixture.Db.TaskTimeEntries.IgnoreQueryFilters().CountAsync(item => item.TaskId == task.Id && item.StoppedAtUtc != null));
         Assert.Null((await fixture.Db.TaskTimeEntries.SingleAsync(item => item.Id == third)).StoppedAtUtc);
+        if (transition == "deleted")
+        {
+            Assert.Empty(await fixture.Db.TaskTimeEntries.Where(item => item.TaskId == task.Id).ToListAsync());
+            var stopped = TimerState(await TimerController(fixture.Db, actor, clock).Stop(first, default));
+            Assert.Null(stopped.TaskId);
+            Assert.NotNull(stopped.StoppedAtUtc);
+            Assert.IsType<NotFoundResult>(await TimerController(fixture.Db, other, clock).Stop(first, default));
+        }
     }
 
     [Theory]
@@ -327,11 +379,59 @@ public sealed partial class InternalChatControllerTests
         var update = Task.Run(() => new AuthService(right, new ConfigurationBuilder().Build(), null!, null!, new PasswordHasher<User>())
             .UpdateUserAsync(actor.Id, new UpdateUserRequest { IsActive = false }, actor.Id));
         await Task.WhenAll(timer, update);
-        Assert.True(await timer is OkObjectResult or ConflictObjectResult or ForbidResult);
+        var timerResult = await timer;
+        // Revocation after actor validation is hidden by the subsequent live task authorization check.
+        Assert.True(timerResult is OkObjectResult or ConflictObjectResult or ForbidResult or NotFoundResult,
+            $"Unexpected timer response: {timerResult.GetType().Name}");
         Assert.NotNull(await update);
         fixture.Db.ChangeTracker.Clear();
         Assert.False((await fixture.Db.Users.SingleAsync(item => item.Id == actor.Id)).IsActive);
         Assert.False(await fixture.Db.TaskTimeEntries.AnyAsync(item => item.UserId == actor.Id && item.StoppedAtUtc == null));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TaskTimer_DeactivationBetweenActorAndTaskChecksReturnsNotFoundWithoutStarting(bool postgres)
+    {
+        await using var fixture = postgres ? await Fixture.CreatePostgresModelAsync() : await Fixture.CreateSharedModelAsync();
+        var actor = await fixture.AddUserAsync("timer-check-boundary@example.test", "Автор");
+        var task = await AddTimerTaskAsync(fixture, actor);
+        var gate = new TaskTimerActorValidationGate();
+        await using PaymentContext reading = postgres
+            ? new PostgreSqlPaymentContext(new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
+                .UseNpgsql(fixture.Db.Database.GetConnectionString()).AddInterceptors(gate).Options)
+            : new PaymentContext(new DbContextOptionsBuilder<PaymentContext>()
+                .UseSqlite(fixture.Db.Database.GetConnectionString()).UsePayPlannerSqliteMigrations().AddInterceptors(gate).Options);
+        var clock = new TimerClock(new DateTimeOffset(2026, 10, 27, 10, 0, 0, TimeSpan.Zero));
+        var timer = TimerController(reading, actor, clock).Start(new(Guid.NewGuid(), task.Id), default);
+        try
+        {
+            await gate.BeforeTaskAuthorization.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            await using var changing = CaptureFreshDb(fixture, independentSqlite: true);
+            var user = await changing.Users.SingleAsync(item => item.Id == actor.Id);
+            user.IsActive = false;
+            await changing.SaveChangesAsync();
+        }
+        finally { gate.Release.TrySetResult(); }
+        Assert.IsType<NotFoundResult>(await timer);
+        Assert.False(await fixture.Db.TaskTimeEntries.IgnoreQueryFilters().AnyAsync(item => item.UserId == actor.Id));
+    }
+
+    private sealed class TaskTimerActorValidationGate : DbCommandInterceptor
+    {
+        private int userReads;
+        public TaskCompletionSource BeforeTaskAuthorization { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("FROM \"Users\"", StringComparison.Ordinal) && Interlocked.Increment(ref userReads) == 2)
+            {
+                BeforeTaskAuthorization.TrySetResult();
+                await Release.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+            }
+            return result;
+        }
     }
 
     [Theory]

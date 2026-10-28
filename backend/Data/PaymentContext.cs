@@ -4356,6 +4356,12 @@ public class PaymentContext : DbContext
             .HasQueryFilter(item => TaskJournalItems.Any(parent => parent.Id == item.TaskJournalItemId));
         modelBuilder.Entity<TaskJournalParticipant>()
             .HasQueryFilter(item => TaskJournalItems.Any(parent => parent.Id == item.TaskJournalItemId));
+        modelBuilder.Entity<TaskStatusNotificationOutbox>()
+            .HasQueryFilter(item => TaskJournalItems.Any(parent => parent.Id == item.TaskJournalItemId));
+        modelBuilder.Entity<TaskTimeEntry>()
+            .HasQueryFilter(item => TaskJournalItems.Any(parent => parent.Id == item.TaskId));
+        modelBuilder.Entity<TaskTimeCorrection>()
+            .HasQueryFilter(item => TaskTimeEntries.Any(parent => parent.Id == item.EntryId));
         modelBuilder.Entity<TaskJournalTemplateParticipant>()
             .HasQueryFilter(item => TaskJournalTemplates.Any(parent => parent.Id == item.TaskJournalTemplateId));
         modelBuilder.Entity<UserCompanyAccess>()
@@ -4613,7 +4619,7 @@ public class PaymentContext : DbContext
                 Users.Where(user => deletedUserIds.Contains(user.Id))
                     .ExecuteUpdate(set => set.SetProperty(user => user.UpdatedAt, user => user.UpdatedAt));
                 var deletedAt = DateTime.UtcNow;
-                TaskTimeEntries.Where(entry => entry.UserId.HasValue && deletedUserIds.Contains(entry.UserId.Value) && entry.StoppedAtUtc == null)
+                TaskTimeEntries.IgnoreQueryFilters().Where(entry => entry.UserId.HasValue && deletedUserIds.Contains(entry.UserId.Value) && entry.StoppedAtUtc == null)
                     .ExecuteUpdate(set => set.SetProperty(entry => entry.StoppedAtUtc,
                         entry => entry.StartedAtUtc > deletedAt ? entry.StartedAtUtc : deletedAt));
             }
@@ -4621,7 +4627,7 @@ public class PaymentContext : DbContext
             if (closedTaskIds.Length > 0 || revokedUserIds.Length > 0)
             {
                 var stoppedAt = DateTime.UtcNow;
-                TaskTimeEntries.Where(entry => (closedTaskIds.Contains(entry.TaskId) || (entry.UserId.HasValue && revokedUserIds.Contains(entry.UserId.Value))) && entry.StoppedAtUtc == null)
+                TaskTimeEntries.IgnoreQueryFilters().Where(entry => (closedTaskIds.Contains(entry.TaskId) || (entry.UserId.HasValue && revokedUserIds.Contains(entry.UserId.Value))) && entry.StoppedAtUtc == null)
                     .ExecuteUpdate(set => set.SetProperty(entry => entry.StoppedAtUtc,
                         entry => entry.StartedAtUtc > stoppedAt ? entry.StartedAtUtc : stoppedAt));
             }
@@ -4695,7 +4701,7 @@ public class PaymentContext : DbContext
                 await Users.Where(user => deletedUserIds.Contains(user.Id))
                     .ExecuteUpdateAsync(set => set.SetProperty(user => user.UpdatedAt, user => user.UpdatedAt), cancellationToken);
                 var deletedAt = DateTime.UtcNow;
-                await TaskTimeEntries.Where(entry => entry.UserId.HasValue && deletedUserIds.Contains(entry.UserId.Value) && entry.StoppedAtUtc == null)
+                await TaskTimeEntries.IgnoreQueryFilters().Where(entry => entry.UserId.HasValue && deletedUserIds.Contains(entry.UserId.Value) && entry.StoppedAtUtc == null)
                     .ExecuteUpdateAsync(set => set.SetProperty(entry => entry.StoppedAtUtc,
                         entry => entry.StartedAtUtc > deletedAt ? entry.StartedAtUtc : deletedAt), cancellationToken);
             }
@@ -4703,7 +4709,7 @@ public class PaymentContext : DbContext
             if (closedTaskIds.Length > 0 || revokedUserIds.Length > 0)
             {
                 var stoppedAt = DateTime.UtcNow;
-                await TaskTimeEntries.Where(entry => (closedTaskIds.Contains(entry.TaskId) || (entry.UserId.HasValue && revokedUserIds.Contains(entry.UserId.Value))) && entry.StoppedAtUtc == null)
+                await TaskTimeEntries.IgnoreQueryFilters().Where(entry => (closedTaskIds.Contains(entry.TaskId) || (entry.UserId.HasValue && revokedUserIds.Contains(entry.UserId.Value))) && entry.StoppedAtUtc == null)
                     .ExecuteUpdateAsync(set => set.SetProperty(entry => entry.StoppedAtUtc,
                         entry => entry.StartedAtUtc > stoppedAt ? entry.StartedAtUtc : stoppedAt), cancellationToken);
             }

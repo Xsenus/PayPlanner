@@ -1691,6 +1691,7 @@ public partial class CasesV2ControllerTests(PostgreSqlModelTemplate modelTemplat
         await using var db = await CreateContextAsync();
         var owner = await CreateUserAsync(db, "owner@example.com", "Owner");
         await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Payments, viewScope: DataVisibilityScope.All);
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Tasks, viewScope: DataVisibilityScope.All);
         var client = new Client
         {
             Name = "Client One",

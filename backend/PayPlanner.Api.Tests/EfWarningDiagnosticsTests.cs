@@ -8,6 +8,19 @@ namespace PayPlanner.Api.Tests;
 
 public class EfWarningDiagnosticsTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PaymentContextModel_QueryFiltersDoNotRequireSchemaChanges(bool postgres)
+    {
+        using PaymentContext context = postgres
+            ? new PostgreSqlPaymentContext(new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
+                .UseNpgsql("Host=127.0.0.1;Port=5433;Database=metadata_only;Username=metadata_only").Options)
+            : new PaymentContext(new DbContextOptionsBuilder<PaymentContext>()
+                .UseSqlite("Data Source=:memory:").UsePayPlannerSqliteMigrations().Options);
+        Assert.False(context.Database.HasPendingModelChanges());
+    }
+
     [Fact]
     public void PaymentContextModel_DoesNotWarnAboutRequiredFilteredNavigations()
     {

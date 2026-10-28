@@ -518,22 +518,30 @@ public sealed class SalesRequestFinalConcurrencyTests(PostgreSqlModelTemplate da
         Assert.True((await service.SetServiceInvoiceAsync(request.Id, request.Version, invoice.Id, user.Id, default)).Ok);
         var paid = await db.SalesRequestStatuses.Where(status => status.Key == "paid").Select(status => status.Id).SingleAsync();
         var eventCount = await db.SalesRequestEvents.CountAsync();
-        await using var concurrent = new PostgreSqlPaymentContext(options);
-        await using var transaction = await concurrent.Database.BeginTransactionAsync();
+        var gate = new TaskEditLockGate(afterUpdate: path == "bulk");
+        var editOptions = new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(lease.ConnectionString).AddInterceptors(gate).Options;
+        await using var concurrent = new PostgreSqlPaymentContext(editOptions);
         var notifications = DispatchProxy.Create<INotificationService, NoExternalNotifications>();
         var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "test"));
         var tasks = new TasksController(concurrent, notifications)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = principal } },
         };
-        if (path == "status")
-            Assert.IsType<OkObjectResult>((await tasks.UpdateStatus(taskId, new UpdateTaskJournalStatusRequest { Status = "inProgress" }, default)).Result);
-        else
-            Assert.IsType<OkObjectResult>((await tasks.BulkUpdateTasks(new BulkUpdateTaskJournalItemsRequest { Ids = [taskId], Status = "inProgress" }, default)).Result);
-
-        var blocked = await service.TransitionAsync(request.Id, new SalesRequestTransitionInput(paid, request.Version, payment.Id, true, null), user.Id, default);
-        Assert.Equal(409, blocked.Status);
-        await transaction.CommitAsync();
+        async Task<IActionResult?> ReopenAsync()
+        {
+            if (path == "status")
+                return (await tasks.UpdateStatus(taskId, new UpdateTaskJournalStatusRequest { Status = "inProgress" }, default)).Result;
+            return (await tasks.BulkUpdateTasks(new BulkUpdateTaskJournalItemsRequest { Ids = [taskId], Status = "inProgress" }, default)).Result;
+        }
+        var update = ReopenAsync();
+        try
+        {
+            await gate.Locked.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            var blocked = await service.TransitionAsync(request.Id, new SalesRequestTransitionInput(paid, request.Version, payment.Id, true, null), user.Id, default);
+            Assert.Equal(409, blocked.Status);
+        }
+        finally { gate.Release.TrySetResult(); }
+        Assert.IsType<OkObjectResult>(await update);
         db.ChangeTracker.Clear();
         var denied = await service.TransitionAsync(request.Id, new SalesRequestTransitionInput(paid, request.Version, payment.Id, true, null), user.Id, default);
         Assert.Equal(409, denied.Status);
@@ -618,13 +626,25 @@ public sealed class SalesRequestFinalConcurrencyTests(PostgreSqlModelTemplate da
         Assert.Equal("inProgress", (await db.TaskJournalItems.AsNoTracking().SingleAsync(task => task.Id == original.Id)).Status);
     }
 
-    private sealed class TaskEditLockGate : DbCommandInterceptor
+    private sealed class TaskEditLockGate(bool afterUpdate = false) : DbCommandInterceptor
     {
         public TaskCompletionSource Locked { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public override async ValueTask<DbDataReader> ReaderExecutedAsync(DbCommand command, CommandExecutedEventData eventData, DbDataReader result, CancellationToken cancellationToken = default)
         {
-            if (command.CommandText.Contains("FROM \"TaskJournalItems\"", StringComparison.Ordinal)
+            if ((command.CommandText.Contains("FROM \"TaskJournalItems\"", StringComparison.Ordinal)
+                && command.CommandText.Contains("FOR UPDATE", StringComparison.Ordinal))
+                || (afterUpdate && command.CommandText.Contains("UPDATE \"TaskJournalItems\"", StringComparison.Ordinal)))
+            {
+                Locked.TrySetResult();
+                await Release.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+            }
+            return result;
+        }
+
+        public override async ValueTask<int> NonQueryExecutedAsync(DbCommand command, CommandExecutedEventData eventData, int result, CancellationToken cancellationToken = default)
+        {
+            if (!afterUpdate && command.CommandText.Contains("FROM \"TaskJournalItems\"", StringComparison.Ordinal)
                 && command.CommandText.Contains("FOR UPDATE", StringComparison.Ordinal))
             {
                 Locked.TrySetResult();

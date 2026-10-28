@@ -31,7 +31,7 @@ public sealed class TaskTimeController(PaymentContext db, TimeProvider clock) : 
     {
         var actor = await ActiveActorAsync(ct);
         if (actor is null) return Forbid();
-        var entry = await db.TaskTimeEntries.AsNoTracking()
+        var entry = await db.TaskTimeEntries.IgnoreQueryFilters().AsNoTracking()
             .SingleOrDefaultAsync(item => item.UserId == actor && item.StoppedAtUtc == null, ct);
         if (entry is null) return Ok(null);
         var permitted = await new TaskFilePublicationAuthorizationService(db).CanPublishAsync(actor.Value, entry.TaskId, ct);
@@ -146,7 +146,7 @@ public sealed class TaskTimeController(PaymentContext db, TimeProvider clock) : 
                     .ExecuteUpdateAsync(set => set.SetProperty(item => item.UpdatedAt, item => item.UpdatedAt), ct) != 1)
                 return NotFound();
             if (!await authorization.CanPublishAsync(actor.Value, request.TaskId, ct)) return NotFound();
-            var previous = await db.TaskTimeEntries.AsNoTracking().SingleOrDefaultAsync(item => item.Id == request.RequestId, ct);
+            var previous = await db.TaskTimeEntries.IgnoreQueryFilters().AsNoTracking().SingleOrDefaultAsync(item => item.Id == request.RequestId, ct);
             if (previous is not null)
             {
                 if (previous.UserId != actor || previous.TaskId != request.TaskId) return Conflict("Идентификатор запуска уже используется.");
@@ -158,7 +158,7 @@ public sealed class TaskTimeController(PaymentContext db, TimeProvider clock) : 
             if (status is null) return NotFound();
             if (status.Equals("done", StringComparison.OrdinalIgnoreCase) || status.Equals("cancelled", StringComparison.OrdinalIgnoreCase))
                 return Conflict("Запустить таймер для завершённой или отменённой задачи нельзя.");
-            if (await db.TaskTimeEntries.AsNoTracking().AnyAsync(item => item.UserId == actor && item.StoppedAtUtc == null, ct))
+            if (await db.TaskTimeEntries.IgnoreQueryFilters().AsNoTracking().AnyAsync(item => item.UserId == actor && item.StoppedAtUtc == null, ct))
                 return Conflict("У вас уже запущен таймер. Остановите его перед запуском другого.");
             var userName = await db.Users.AsNoTracking().Where(item => item.Id == actor).Select(item => item.FullName).SingleAsync(ct);
             var entry = new TaskTimeEntry
@@ -179,7 +179,7 @@ public sealed class TaskTimeController(PaymentContext db, TimeProvider clock) : 
             db.ChangeTracker.Clear();
             try
             {
-                var existing = await db.TaskTimeEntries.AsNoTracking()
+                var existing = await db.TaskTimeEntries.IgnoreQueryFilters().AsNoTracking()
                     .SingleOrDefaultAsync(item => item.Id == request.RequestId && item.UserId == actor && item.TaskId == request.TaskId, ct);
                 if (existing is not null)
                     return await authorization.CanPublishAsync(actor.Value, request.TaskId, ct) ? Ok(ToDto(existing, true)) : NotFound();
@@ -195,21 +195,21 @@ public sealed class TaskTimeController(PaymentContext db, TimeProvider clock) : 
     {
         var actor = await ActiveActorAsync(ct);
         if (actor is null) return Forbid();
-        var existing = await db.TaskTimeEntries.AsNoTracking()
+        var existing = await db.TaskTimeEntries.IgnoreQueryFilters().AsNoTracking()
             .SingleOrDefaultAsync(item => item.Id == id && item.UserId == actor, ct);
         if (existing is null) return NotFound();
         var now = clock.GetUtcNow().UtcDateTime;
         if (now < existing.StartedAtUtc) now = existing.StartedAtUtc;
         try
         {
-            await db.TaskTimeEntries.Where(item => item.Id == id && item.UserId == actor && item.StoppedAtUtc == null)
+            await db.TaskTimeEntries.IgnoreQueryFilters().Where(item => item.Id == id && item.UserId == actor && item.StoppedAtUtc == null)
                 .ExecuteUpdateAsync(set => set.SetProperty(item => item.StoppedAtUtc, now), ct);
         }
         catch (Exception error) when (IsAdmissionConflict(error))
         {
             return Conflict("Таймер занят. Повторите остановку.");
         }
-        var result = await db.TaskTimeEntries.AsNoTracking().SingleAsync(item => item.Id == id && item.UserId == actor, ct);
+        var result = await db.TaskTimeEntries.IgnoreQueryFilters().AsNoTracking().SingleAsync(item => item.Id == id && item.UserId == actor, ct);
         var permitted = await new TaskFilePublicationAuthorizationService(db).CanPublishAsync(actor.Value, result.TaskId, ct);
         return Ok(ToDto(result, permitted));
     }

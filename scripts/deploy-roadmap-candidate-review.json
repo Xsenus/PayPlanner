@@ -15,7 +15,7 @@
     "20261028080010_CashInventoryAccountIdentityPostgreSql"
   ],
   "schemaDeltaSha256": "c85888f1459247224ec6be1f9eb81d28ed92b87600f1dc86c414433c3956b790",
-  "releaseCatalogSha256": "99ab97ffb3613ab219805cebe13f92ec105f579909a22e489ec600ddb37cf1b5",
-  "releaseSeedsCount": 247,
-  "releaseSeedsSha256": "5302edc3abcd592df199a5b0c31ceac83b65728da8a50f355e5976ce4b119949"
+  "releaseCatalogSha256": "14b1e40029c97eeea37e95198c514c2a0198d04ee6093d8b8e0aacad6b3a3a20",
+  "releaseSeedsCount": 249,
+  "releaseSeedsSha256": "7d40d36968e77c6cd4e344c6a88ce21d06c50b2831e366efb32dbb02859a5ad6"
 }

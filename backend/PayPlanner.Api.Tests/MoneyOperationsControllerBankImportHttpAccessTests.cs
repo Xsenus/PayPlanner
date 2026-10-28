@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net;
+using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Encodings.Web;
@@ -145,7 +146,14 @@ public partial class MoneyOperationsControllerTests
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
         using var after = await client.GetAsync("/api/money-operations/accounts");
-        Assert.Equal(HttpStatusCode.Unauthorized, after.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, after.StatusCode);
+
+        var restored = await db.RolePermissions.SingleAsync(item => item.Id == permission.Id);
+        restored.CanView = true;
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        using var regranted = await client.GetAsync("/api/money-operations/accounts");
+        Assert.Equal(HttpStatusCode.OK, regranted.StatusCode);
     }
 
     [Theory]
