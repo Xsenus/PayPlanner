@@ -183,6 +183,7 @@ export function validateDeployWorkflow(source) {
       requireValue(step['continue-on-error'] === undefined || step['continue-on-error'] === false, `${id}: step continue-on-error bypass`);
       const diagnostic = step.uses === undefined && (
         (shardJobs.includes(id) && step.run === `${store} put --kind shard-diagnostics --source test-results/ --retention-days 14`)
+        || (shardJobs.includes(id) && step.run === `node scripts/report-backend-execution.mjs ${shardJobs.indexOf(id)}`)
         || (id === 'backend-browser' && step.run === `${store} put --kind restored-diagnostics --source test-results/restored-browser/ --retention-days 14`));
       const qualifiedAlias = shardJobs.includes(id) && step.uses === undefined
         && step.run === `${store} put --kind qualified-shard --source test-results/ --retention-days 14`;
@@ -256,7 +257,7 @@ export function validateDeployWorkflow(source) {
   requireValue(command('backend-format', restore).index < command('backend-format', format).index, 'Strict restore must precede full format');
   requireValue(command('frontend', 'node scripts/verify-xsenus-runner.mjs build').index < fe[0].index,
     'Trusted host preflight must precede frontend tools');
-  for (const check of ['node --test scripts/xsenus-artifact-store.node-tests.mjs', 'node --test scripts/task-notification-refresh-observer.node-tests.mjs']) {
+  for (const check of ['node --test scripts/xsenus-artifact-store.node-tests.mjs', 'node --test scripts/report-backend-execution.node-tests.mjs', 'node --test scripts/task-notification-refresh-observer.node-tests.mjs']) {
     const gate = command('frontend', check);
     requireValue(command('frontend', 'node scripts/verify-xsenus-runner.mjs build').index < gate.index
       && gate.index < fe[14].index && gate.index < feUpload.index,
@@ -355,7 +356,10 @@ export function validateDeployWorkflow(source) {
   for (let index = 0; index < 4; index += 1) {
     const id = shardJobs[index];
     const metadata = { ...resultMetadata, ARTIFACT_SHARD: String(index) };
+    const report = command(id, `node scripts/report-backend-execution.mjs ${index}`);
     const diagnostic = transport(id, `${store} put --kind shard-diagnostics --source test-results/ --retention-days 14`, metadata);
+    requireValue(report.step.if === 'always()' && shards[index].index < report.index && report.index < diagnostic.index,
+      'Bounded execution diagnostics must be logged after tests even on failure');
     const qualified = transport(id, `${store} put --kind qualified-shard --source test-results/ --retention-days 14`, {
       ...metadata, EXPECTED_DIAGNOSTIC_ARTIFACT_ID: '${{ steps.shard-diagnostics.outputs.artifact-id }}',
     });
@@ -436,6 +440,7 @@ export function validateDeployWorkflow(source) {
       if (step.env?.ARTIFACT_SHARD !== undefined) step.env.ARTIFACT_SHARD = '<shard>';
     }
     return JSON.stringify(normalized)
+      .replaceAll(`report-backend-execution.mjs ${index}`, 'report-backend-execution.mjs INDEX')
       .replaceAll(`shard_${index}_id`, 'shard_INDEX_id')
       .replaceAll(`--shard ${index}`, '--shard INDEX')
       .replaceAll(`shard-${index}`, 'shard-INDEX');

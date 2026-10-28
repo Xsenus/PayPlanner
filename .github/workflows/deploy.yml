@@ -71,6 +71,9 @@ jobs:
       - name: Test local artifact store contract
         run: node --test scripts/xsenus-artifact-store.node-tests.mjs
 
+      - name: Test bounded execution diagnostics
+        run: node --test scripts/report-backend-execution.node-tests.mjs
+
       - name: Install FE deps
         run: npm ci
 
@@ -372,6 +375,10 @@ jobs:
           mkdir -p test-results
           dotnet tools/PayPlanner.TestShards/bin/Release/net9.0/PayPlanner.TestShards.dll run --manifest test-plan.json --manifest-sha "$EXPECTED_MANIFEST_SHA" --shard 0 --results test-results/shard-0 --workers auto --suite all 2>&1 | tee test-results/shard-0.log
 
+      - name: Report bounded execution diagnostics
+        if: always()
+        run: node scripts/report-backend-execution.mjs 0
+
       - name: Preserve exact shard results
         id: shard-diagnostics
         if: always()
@@ -485,6 +492,10 @@ jobs:
           set -euo pipefail
           mkdir -p test-results
           dotnet tools/PayPlanner.TestShards/bin/Release/net9.0/PayPlanner.TestShards.dll run --manifest test-plan.json --manifest-sha "$EXPECTED_MANIFEST_SHA" --shard 1 --results test-results/shard-1 --workers auto --suite all 2>&1 | tee test-results/shard-1.log
+
+      - name: Report bounded execution diagnostics
+        if: always()
+        run: node scripts/report-backend-execution.mjs 1
 
       - name: Preserve exact shard results
         id: shard-diagnostics
@@ -600,6 +611,10 @@ jobs:
           mkdir -p test-results
           dotnet tools/PayPlanner.TestShards/bin/Release/net9.0/PayPlanner.TestShards.dll run --manifest test-plan.json --manifest-sha "$EXPECTED_MANIFEST_SHA" --shard 2 --results test-results/shard-2 --workers auto --suite all 2>&1 | tee test-results/shard-2.log
 
+      - name: Report bounded execution diagnostics
+        if: always()
+        run: node scripts/report-backend-execution.mjs 2
+
       - name: Preserve exact shard results
         id: shard-diagnostics
         if: always()
@@ -713,6 +728,10 @@ jobs:
           set -euo pipefail
           mkdir -p test-results
           dotnet tools/PayPlanner.TestShards/bin/Release/net9.0/PayPlanner.TestShards.dll run --manifest test-plan.json --manifest-sha "$EXPECTED_MANIFEST_SHA" --shard 3 --results test-results/shard-3 --workers auto --suite all 2>&1 | tee test-results/shard-3.log
+
+      - name: Report bounded execution diagnostics
+        if: always()
+        run: node scripts/report-backend-execution.mjs 3
 
       - name: Preserve exact shard results
         id: shard-diagnostics

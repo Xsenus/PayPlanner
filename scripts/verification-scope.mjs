@@ -40,7 +40,7 @@ const commands = Object.freeze({
   'backend-full': ['dotnet test backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-build --no-restore -c Release'],
   'backend-dependency-audit': ['dotnet list backend/PayPlanner.Api.sln package --vulnerable --include-transitive'],
   'reference-cache-contracts': ['npm run audit:reference-cache'],
-  'workflow-contracts': ['node scripts/validate-deploy-workflow.mjs', 'node --test scripts/xsenus-artifact-store.node-tests.mjs', 'npx vitest run scripts/validate-deploy-workflow.test.ts scripts/verify-xsenus-runner.test.ts scripts/prepare-windows-ci-toolchain.test.ts'],
+  'workflow-contracts': ['node scripts/validate-deploy-workflow.mjs', 'node --test scripts/xsenus-artifact-store.node-tests.mjs', 'node --test scripts/report-backend-execution.node-tests.mjs', 'npx vitest run scripts/validate-deploy-workflow.test.ts scripts/verify-xsenus-runner.test.ts scripts/prepare-windows-ci-toolchain.test.ts'],
   'deploy-shell-contracts': ['bash scripts/prune-deploy-backups.test.sh', 'bash scripts/preserve-data-protection-keys.test.sh'],
   'storage-backfill-contracts': ['node --test scripts/storage-legacy-backfill.node-tests.mjs'],
   'notification-observer-contracts': ['node --test scripts/task-notification-refresh-observer.node-tests.mjs'],

@@ -333,6 +333,8 @@ describe('parallel deploy workflow release contract', () => {
     ['archive retention shortened', 'put --kind frontend --source frontend.tar.gz --retention-days 3', 'put --kind frontend --source frontend.tar.gz --retention-days 1'],
     ['store variable fallback', '${{ vars.PAYPLANNER_CI_ARTIFACT_ROOT }}', "${{ vars.PAYPLANNER_CI_ARTIFACT_ROOT || 'temp' }}"],
     ['transport tests omitted', 'node --test scripts/xsenus-artifact-store.node-tests.mjs', 'echo transport-tested'],
+    ['execution report tests omitted', 'node --test scripts/report-backend-execution.node-tests.mjs', 'echo report-tested'],
+    ['execution report omitted', 'node scripts/report-backend-execution.mjs 0', 'echo report-complete'],
     ['store preflight omitted', 'run: node scripts/xsenus-artifact-store.mjs check', 'run: echo storage-ready'],
     ['diagnostic role substituted', 'put --kind qualified-shard', 'put --kind shard-diagnostics'],
     ['unsafe overlapping merge', 'get --kind frontend --producer-job frontend --destination deploy-artifacts --merge-disjoint', 'get --kind frontend --producer-job frontend --destination deploy-artifacts --merge'],
