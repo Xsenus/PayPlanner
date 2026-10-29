@@ -16,7 +16,8 @@ public interface IDocumentSeller
 }
 
 public sealed record SellerSnapshotMetadata(DateTime? FrozenAtUtc, string? FreezeReason, bool LegacyImages,
-    string? CompanyName = null, string? BranchName = null);
+    string? CompanyName = null, string? BranchName = null,
+    CompanyDocumentImagePrintDefaults? ImagePrintDefaults = null, bool ImagePrintDefaultsFrozen = false);
 
 /// <summary>
 /// Собирает «виртуальное юрлицо» продавца из компании и выбранного подразделения, чтобы существующие
@@ -54,7 +55,9 @@ public static class SellerLegalEntityComposer
         bool? ImagesFrozen = null,
         DateTime? FrozenAtUtc = null,
         string? FreezeReason = null,
-        string? BranchName = null);
+        string? BranchName = null,
+        JsonElement? ImagePrintDefaults = null,
+        bool? ImagePrintDefaultsFrozen = null);
 
     public static LegalEntity Compose(LegalEntity company, CompanyBranch? branch)
     {
@@ -114,14 +117,17 @@ public static class SellerLegalEntityComposer
     }
 
     public static string ToSnapshotJson(LegalEntity seller, int? logoVersionId = null, int? sealVersionId = null, int? signatureVersionId = null, bool imagesFrozen = false,
-        DateTime? frozenAtUtc = null, string? freezeReason = null, string? branchName = null)
+        DateTime? frozenAtUtc = null, string? freezeReason = null, string? branchName = null,
+        CompanyDocumentImagePrintDefaults? imagePrintDefaults = null, bool imagePrintDefaultsFrozen = false)
         => JsonSerializer.Serialize(new SellerSnapshotData(
             seller.Id, seller.ShortName, seller.FullName, seller.OrganizationForm, seller.Inn, seller.Kpp,
             seller.Ogrn, seller.Okpo, seller.Okved, seller.TaxSystem, seller.VatWithoutVat,
             seller.Address, seller.Phone, seller.Email, seller.Director, seller.DocumentDirectorJson,
             seller.BankAccountsJson, seller.TreasuryBankName,
             seller.TreasuryBankBik, seller.TreasuryAccountNumber, seller.TreasuryCorrAccountNumber,
-            logoVersionId, sealVersionId, signatureVersionId, imagesFrozen ? true : null, frozenAtUtc, freezeReason, branchName),
+            logoVersionId, sealVersionId, signatureVersionId, imagesFrozen ? true : null, frozenAtUtc, freezeReason, branchName,
+            imagePrintDefaults is null ? null : JsonSerializer.Deserialize<JsonElement>(CompanyDocumentImagePrintDefaultsService.Serialize(imagePrintDefaults)),
+            imagePrintDefaultsFrozen ? true : null),
             new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
 
     public static SellerSnapshotMetadata? ReadMetadata(string? json)
@@ -131,9 +137,20 @@ public static class SellerLegalEntityComposer
         {
             var data = JsonSerializer.Deserialize<SellerSnapshotData>(json);
             return data is null ? null : new SellerSnapshotMetadata(data.FrozenAtUtc, data.FreezeReason, data.ImagesFrozen != true,
-                data.ShortName, data.BranchName);
+                data.ShortName, data.BranchName, ReadPrintDefaults(data), data.ImagePrintDefaultsFrozen == true);
         }
         catch (JsonException) { return null; }
+    }
+
+    private static CompanyDocumentImagePrintDefaults? ReadPrintDefaults(SellerSnapshotData data)
+    {
+        // Missing marker is the old document format: never infer preferences from the live profile.
+        if (data.ImagePrintDefaultsFrozen != true || data.ImagePrintDefaults is null
+            || data.ImagePrintDefaults.Value.ValueKind == JsonValueKind.Null) return null;
+        var state = CompanyDocumentImagePrintDefaultsService.Parse(data.ImagePrintDefaults.Value.GetRawText());
+        if (state.Invalid)
+            throw new SellerSelectionException("Сохранённые настройки изображений документа повреждены. Автоматическая замена настройками профиля недоступна.");
+        return state.Value;
     }
 
     /// <summary>Номера версий фирменных изображений из снимка (пусто у старых снимков, где изображения берутся из профиля).</summary>
@@ -542,11 +559,15 @@ public sealed class DocumentSellerService : IDocumentSellerService
             // Если транзакция уже есть, версии и документ commit/rollback вместе с ней.
             await using var versionTransaction = _db.Database.CurrentTransaction is null
                 ? await _db.Database.BeginTransactionAsync(ct) : null;
+            var printDefaults = await new CompanyDocumentImagePrintDefaultsService(_db).ReadForSnapshotAsync(company.Id, ct);
+            if (printDefaults.Invalid)
+                throw new SellerSelectionException("Настройки изображений компании повреждены. Исправьте или сбросьте их в профиле компании перед фиксацией документа.");
             var logo = await EnsureImageVersionAsync(company.Id, CompanyBrandImageKinds.Logo, composed.LogoDataUrl, ct);
             var seal = await EnsureImageVersionAsync(company.Id, CompanyBrandImageKinds.Seal, composed.SealDataUrl, ct);
             var signature = await EnsureImageVersionAsync(company.Id, CompanyBrandImageKinds.Signature, composed.DirectorSignatureDataUrl, ct);
             var snapshot = SellerLegalEntityComposer.ToSnapshotJson(composed, logo, seal, signature, imagesFrozen: true,
-                frozenAtUtc: DateTime.UtcNow, freezeReason: DocumentSellerSnapshotPolicy.Effective(document.SellerSnapshotPolicy), branchName: branch?.Name);
+                frozenAtUtc: DateTime.UtcNow, freezeReason: DocumentSellerSnapshotPolicy.Effective(document.SellerSnapshotPolicy), branchName: branch?.Name,
+                imagePrintDefaults: printDefaults.Value, imagePrintDefaultsFrozen: true);
             if (snapshot.Length > MaxSnapshotLength)
             {
                 // Молча оставить документ «живым» нельзя: выданный файл потеряет защиту от правок профиля.

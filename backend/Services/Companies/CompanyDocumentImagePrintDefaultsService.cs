@@ -38,6 +38,16 @@ public sealed class CompanyDocumentImagePrintDefaultsService(PaymentContext db)
         return Parse(value) with { Version = VersionOf(companyId, value) };
     }
 
+    // The caller holds the company lease. No edit token or unbounded corrupt value is needed for capture.
+    public async Task<CompanyDocumentImagePrintDefaultsState> ReadForSnapshotAsync(int companyId, CancellationToken ct = default)
+    {
+        var key = Key(companyId);
+        var value = await db.SystemSettings.AsNoTracking().Where(row => row.Key == key)
+            .Select(row => row.Value.Length > MaximumLength ? row.Value.Substring(0, MaximumLength + 1) : row.Value)
+            .SingleOrDefaultAsync(ct);
+        return Parse(value);
+    }
+
     public static bool IsValidVersion(string? version) => version is { Length: 64 } && version.All(Uri.IsHexDigit);
 
     private static string VersionOf(int companyId, string? value)

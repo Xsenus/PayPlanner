@@ -3750,6 +3750,8 @@ export interface DocumentSellerSnapshotInfo {
   frozenAtUtc?: string | null;
   freezeReason?: 'first-file' | 'on-create' | null;
   legacyImages: boolean;
+  imagePrintDefaults?: import('./documentImagePrint').CompanyDocumentImagePrintDefaults | null;
+  imagePrintDefaultsFrozen?: boolean;
 }
 
 export interface DocumentSellerCreateSelection {
