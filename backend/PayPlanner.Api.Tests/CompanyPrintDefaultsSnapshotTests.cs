@@ -241,8 +241,14 @@ public class CompanyPrintDefaultsSnapshotTests
         db.Payments.Add(payment);
         db.SystemSettings.Add(new SystemSetting { Key = CompanyDocumentImagePrintDefaultsService.Key(company.Id), Value = "broken" });
         await db.SaveChangesAsync();
-        var act = new Act { Number = "SIDE", Amount = 100m, InvoiceId = payment.Id, SellerCompanyId = company.Id,
-            SellerSnapshotPolicy = onCreate ? DocumentSellerSnapshotPolicy.OnCreate : DocumentSellerSnapshotPolicy.FirstFile };
+        var act = new Act
+        {
+            Number = "SIDE",
+            Amount = 100m,
+            InvoiceId = payment.Id,
+            SellerCompanyId = company.Id,
+            SellerSnapshotPolicy = onCreate ? DocumentSellerSnapshotPolicy.OnCreate : DocumentSellerSnapshotPolicy.FirstFile
+        };
         if (!onCreate) { db.Acts.Add(act); await db.SaveChangesAsync(); act = await db.Acts.AsNoTracking().SingleAsync(); }
         act.Invoice = new Payment { Id = payment.Id, Type = expense ? PaymentType.Income : PaymentType.Expense };
         var service = new DocumentSellerService(db);

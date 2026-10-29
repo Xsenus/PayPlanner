@@ -1,4 +1,4 @@
-## Актуальная инвентаризация — 28 октября 2026
+## Актуальная инвентаризация — 29 октября 2026
 
 Всего **163** мест ExecuteUpdateAsync/ExecuteDeleteAsync. Для очереди статусов два условных обновления захватывают и завершают доставку по токену и сроку; данные задачи не меняются. Для доставки переназначенного запроса два условных обновления захватывают и завершают только текущую попытку по токену; данные задачи и решения не меняются. Технический UPDATE удерживает строку чата в существующей транзакции без изменения её значения; условный UPDATE меняет только личную границу истории и её версию у авторизованного участника. При изменении счёта и переходе заявки технический UPDATE удерживает заявку в общей транзакции без изменения версии; связанные проверки и фактический переход выполняются в этой транзакции. При удалении дела техническая блокировка после проверки видимости сериализует действие с операциями над документами; изменения дела и аудит сохраняются штатно. Для таймера технические UPDATE блокируют задачу и сотрудника без изменения данных; условные обновления останавливают собственный интервал, закрывают активные интервалы при деактивации, удалении сотрудника, завершении или удалении задачи либо исправляют длительность с проверкой версии и записью причины в той же транзакции. При объединении учётных записей интервалы переносятся к основному сотруднику после остановки активного интервала источника. Публикация сообщений и личное состояние фиксируются в соответствующих транзакциях; общие сообщения не удаляются. Проверки конкурентных сценариев ещё выполняются. Прежние разделы сохранены как история.
 
@@ -21,7 +21,7 @@
 - `backend/Controllers/InternalChatController.cs:592`
 - `backend/Controllers/InternalChatController.cs:789`
 - `backend/Controllers/InternalChatHistoryController.cs:75`
-- `backend/Controllers/LegalEntitiesController.cs:1010`
+- `backend/Controllers/LegalEntitiesController.cs:1028`
 - `backend/Controllers/MessengerDocumentDeliveriesController.cs:485`
 - `backend/Controllers/MessengerDocumentDeliveriesController.cs:496`
 - `backend/Controllers/MessengerDocumentDeliveriesController.cs:513`
@@ -51,9 +51,9 @@
 - `backend/Controllers/V2/CasesV2Controller.cs:10909`
 - `backend/Controllers/V2/CasesV2Controller.cs:5767`
 - `backend/Controllers/V2/CasesV2Controller.cs:6104`
-- `backend/Data/PaymentContext.cs:4696`
-- `backend/Data/PaymentContext.cs:4699`
-- `backend/Data/PaymentContext.cs:4707`
+- `backend/Data/PaymentContext.cs:4702`
+- `backend/Data/PaymentContext.cs:4705`
+- `backend/Data/PaymentContext.cs:4713`
 - `backend/Services/AuthService.Accounts.cs:579`
 - `backend/Services/AuthService.Accounts.cs:582`
 - `backend/Services/AuthService.Accounts.cs:585`
@@ -218,7 +218,7 @@
 | --- | --- |
 | backend/Controllers/InternalChatController.cs:566 | ExecuteUpdateAsync |
 | backend/Controllers/InternalChatController.cs:755 | ExecuteUpdateAsync |
-| backend/Controllers/LegalEntitiesController.cs:1010 | ExecuteDeleteAsync |
+| backend/Controllers/LegalEntitiesController.cs:1028 | ExecuteDeleteAsync |
 | backend/Controllers/MessengerDocumentDeliveriesController.cs:485 | ExecuteUpdateAsync |
 | backend/Controllers/MessengerDocumentDeliveriesController.cs:496 | ExecuteUpdateAsync |
 | backend/Controllers/MessengerDocumentDeliveriesController.cs:513 | ExecuteUpdateAsync |
@@ -364,7 +364,7 @@ EF-операции `ExecuteUpdateAsync` и `ExecuteDeleteAsync` обходят 
 | `backend/Services/AuthService.cs:744` | `ExecuteUpdateAsync` | Версия JWT и сводные поля выхода текущего пользователя | Объектное событие не создаётся; выход отражается временем и действием `logout` в самой записи пользователя. | Условное атомарное увеличение версии делает отзыв всех JWT мгновенным и не позволяет двум параллельным logout повторно изменить состояние. |
 | `backend/Controllers/UserActivityController.cs:418` | `ExecuteUpdateAsync` | Метаданные последней активности текущего пользователя | Объектное событие не создаётся; отдельная строка журнала активности является следом аудита. | Лёгкие поля присутствия обновляются без загрузки полного агрегата пользователя на каждый запрос. |
 | `backend/Controllers/UserActivityController.cs:540` | `ExecuteDeleteAsync` | Очистка журнала активности по запросу администратора | Построчный объектный аудит не создаётся; контроллер журналирует количество удалённых строк и возвращает результат обслуживания. | Операция намеренно пакетно очищает технический журнал активности. |
-| `backend/Controllers/LegalEntitiesController.cs:1010` | `ExecuteDeleteAsync` | Адреса юридического лица перед заменой коллекции | Построчный аудит адресов не создаётся; сохранение юридического лица фиксирует видимое изменение основной сущности. | Адреса являются заменяемыми дочерними строками формы юридического лица. |
+| `backend/Controllers/LegalEntitiesController.cs:1028` | `ExecuteDeleteAsync` | Адреса юридического лица перед заменой коллекции | Построчный аудит адресов не создаётся; сохранение юридического лица фиксирует видимое изменение основной сущности. | Адреса являются заменяемыми дочерними строками формы юридического лица. |
 | `backend/Services/UserActivity/UserActivityRetentionService.cs:109` | `ExecuteDeleteAsync` | Просроченные строки журнала активности | Построчный аудит не создаётся; сервис журналирует количество удалённых строк и границу хранения. | Регламентная очистка пакетно удаляет технические записи с истёкшим сроком хранения. |
 | `backend/Services/Notifications/NotificationDeliveryRetentionService.cs:150` | `ExecuteDeleteAsync` | Просроченные технические строки доставки уведомлений | Построчный аудит не создаётся; сервис сохраняет состояние системного задания и журналирует количество удалённых строк. | Регламентная очистка пакетно удаляет устаревшую диагностику доставки. |
 | `backend/Services/CalendarSyncLogRetentionService.cs:198` | `ExecuteDeleteAsync` | Просроченные строки синхронизации Google Календаря | Построчный аудит не создаётся; системное задание хранит число удалений по провайдеру и общий итог. | Диагностика синхронизации удаляется ограниченными порциями. |

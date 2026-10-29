@@ -974,7 +974,9 @@ export function ContractDetailPage({
         previewWindow.opener = null;
       }
       signal.addEventListener('abort', closePendingWindow, { once: true });
-      const blob = await apiService.downloadContractDocument(request.documentId, request.format === 'print' ? 'html' : request.format, { ...images, signal });
+      const blob = request.format === 'print'
+        ? await apiService.prepareDocumentPrint('contracts', request.documentId, { ...images, signal })
+        : await apiService.downloadContractDocument(request.documentId, request.format, { ...images, signal });
       signal.throwIfAborted();
       if (request.scope !== printScopeRef.current) throw new Error('Документ или права изменились. Откройте карточку повторно.');
       if (request.format === 'print') {
@@ -2317,6 +2319,7 @@ export function ContractDetailPage({
         <DocumentImagePrintDialog key={`${contract.id}:${imagePrintRequest.generation}`}
           documentName={`Договор № ${contract.number || contract.id}`} initialOptions={imagePrintRequest.initialOptions}
           defaultsSource={{ section: 'contracts', documentId: contract.id }}
+          notice={imagePrintRequest.format === 'print' ? 'Подготовка печатной копии закрепляет реквизиты по выбранному для документа правилу. Отмена в системном окне печати не отменяет подготовку копии.' : undefined}
           confirmLabel={imagePrintRequest.format === 'print' ? 'Печатать' : `Скачать ${imagePrintRequest.format === 'word' ? 'Word' : 'PDF'}`}
           onConfirm={confirmDocumentCopy} onClose={() => setImagePrintRequest(null)} />
       ) : null}

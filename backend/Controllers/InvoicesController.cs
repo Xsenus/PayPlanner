@@ -3225,8 +3225,14 @@ public class InvoicesController : ControllerBase
         var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
         if (visibility is null) return MissingAccountsVisibilityResult();
         var document = await BuildVisibleInvoicePaymentsQuery(trackChanges: false, visibility).Where(payment => payment.Id == id)
-            .Select(payment => new Payment { Id = payment.Id, Type = payment.Type, SellerCompanyId = payment.SellerCompanyId,
-                SellerBranchId = payment.SellerBranchId, SellerSnapshotJson = payment.SellerSnapshotJson }).SingleOrDefaultAsync(ct);
+            .Select(payment => new Payment
+            {
+                Id = payment.Id,
+                Type = payment.Type,
+                SellerCompanyId = payment.SellerCompanyId,
+                SellerBranchId = payment.SellerBranchId,
+                SellerSnapshotJson = payment.SellerSnapshotJson
+            }).SingleOrDefaultAsync(ct);
         if (document is null) return NotFound();
         var options = await _documentSeller.ReadImagePrintDefaultsAsync(document, ct);
         if (options is null)
@@ -3239,7 +3245,7 @@ public class InvoicesController : ControllerBase
     }
 
     [HttpGet("{id:int}/document")]
-    public async Task<IActionResult> GetDocument(
+    public Task<IActionResult> GetDocument(
         int id,
         [FromQuery] string? format = "word",
         [FromQuery] string? templateKey = null,
@@ -3248,6 +3254,22 @@ public class InvoicesController : ControllerBase
         [FromQuery] bool? includeLogo = null,
         [FromQuery] bool? includeSeal = null,
         [FromQuery] bool? includeSignature = null)
+        => BuildDocumentAsync(id, format, templateKey, includeSignatureAndSeal, ct, includeLogo, includeSeal, includeSignature, false);
+
+    [HttpPost("{id:int}/print")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public Task<IActionResult> PreparePrintDocument(
+        int id,
+        [FromQuery] string? templateKey = null,
+        [FromQuery] bool? includeSignatureAndSeal = null,
+        CancellationToken ct = default,
+        [FromQuery] bool? includeLogo = null,
+        [FromQuery] bool? includeSeal = null,
+        [FromQuery] bool? includeSignature = null)
+        => BuildDocumentAsync(id, "html", templateKey, includeSignatureAndSeal, ct, includeLogo, includeSeal, includeSignature, true);
+
+    private async Task<IActionResult> BuildDocumentAsync(int id, string? format, string? templateKey,
+        bool? includeSignatureAndSeal, CancellationToken ct, bool? includeLogo, bool? includeSeal, bool? includeSignature, bool issueForPrint)
     {
         if (await RequireAccountsPermissionAsync(permission => permission.CanExport, ct) is { } forbidden)
         {
@@ -3267,7 +3289,7 @@ public class InvoicesController : ControllerBase
         var documentSettings = await GetInvoiceDocumentTemplateSettingsAsync(ct);
         var template = SelectInvoiceDocumentTemplate(documentSettings, templateKey);
         await RememberInvoiceDocumentTemplateAsync(payment, template.Key, ct);
-        var mainCompany = await ResolveInvoiceSellerAsync(payment, await LoadMainCompanyAsync(ct), normalizedFormat != "html", ct);
+        var mainCompany = await ResolveInvoiceSellerAsync(payment, await LoadMainCompanyAsync(ct), issueForPrint || normalizedFormat != "html", ct);
         var shouldIncludeSignatureAndSeal = includeSignatureAndSeal ?? documentSettings.PrintWithSignatureAndSealByDefault;
         var defaults = includeSignatureAndSeal.HasValue || (includeLogo.HasValue && includeSeal.HasValue && includeSignature.HasValue)
             ? null : await _documentSeller.ReadImagePrintDefaultsAsync(payment, ct);

@@ -1389,8 +1389,14 @@ public class ActsController : ControllerBase
         var visibility = await ResolveActsVisibilityAsync(ct);
         if (visibility is null) return MissingActsVisibilityResult();
         var document = await _db.Acts.AsNoTracking().ApplyActVisibility(visibility).Where(act => act.Id == id)
-            .Select(act => new Act { Id = act.Id, SellerCompanyId = act.SellerCompanyId, SellerBranchId = act.SellerBranchId,
-                SellerSnapshotJson = act.SellerSnapshotJson, Invoice = act.Invoice == null ? null : new Payment { Type = act.Invoice.Type } }).SingleOrDefaultAsync(ct);
+            .Select(act => new Act
+            {
+                Id = act.Id,
+                SellerCompanyId = act.SellerCompanyId,
+                SellerBranchId = act.SellerBranchId,
+                SellerSnapshotJson = act.SellerSnapshotJson,
+                Invoice = act.Invoice == null ? null : new Payment { Type = act.Invoice.Type }
+            }).SingleOrDefaultAsync(ct);
         if (document is null) return NotFound();
         var options = await _documentSeller.ReadImagePrintDefaultsAsync(document, ct);
         if (options is null)

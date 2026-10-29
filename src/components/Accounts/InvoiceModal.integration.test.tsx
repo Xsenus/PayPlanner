@@ -124,6 +124,7 @@ vi.mock('../../services/api', () => ({
   apiService: {
     getOwnCompanyOptions: vi.fn().mockResolvedValue([]),
     getDocumentImagePrintDefaults: vi.fn().mockResolvedValue({ includeLogo: false, includeSeal: false, includeSignature: false }),
+    prepareDocumentPrint: vi.fn(),
     getInvoicePreview: vi.fn().mockResolvedValue(new Blob(['<html><body>preview</body></html>'], { type: 'text/html' })),
     downloadInvoiceDocument: vi
       .fn()
@@ -322,6 +323,7 @@ describe('InvoiceModal integration', () => {
   beforeEach(() => {
     printAuthState.user = { id: 7, role: { id: 1 } };
     vi.mocked(apiService.getDocumentImagePrintDefaults).mockReset().mockResolvedValue({ includeLogo: false, includeSeal: false, includeSignature: false });
+    vi.mocked(apiService.prepareDocumentPrint).mockReset().mockImplementation(async () => Object.assign(new Blob(['print copy']), { text: async () => 'print copy' }));
     permissionState.value = null;
     vi.mocked(apiService.getInvoicePreview).mockClear();
     caseModalSubmitPayloadRef.current = {
@@ -3390,7 +3392,7 @@ describe('InvoiceModal integration', () => {
       const choices = { includeLogo: false, includeSeal: true, includeSignature: false };
       vi.mocked(apiService.getDocumentImagePrintDefaults).mockResolvedValueOnce(choices);
       const download = vi.mocked(apiService.downloadInvoiceDocument); download.mockClear();
-      download.mockResolvedValueOnce(Object.assign(new Blob(['print copy']), { text: async () => 'print copy' }));
+      if (format !== 'print') download.mockResolvedValueOnce(Object.assign(new Blob(['print copy']), { text: async () => 'print copy' }));
       const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
       try {
         const current = props(); render(<InvoiceModal {...current} />);
@@ -3399,10 +3401,15 @@ describe('InvoiceModal integration', () => {
         await waitFor(() => expect((dialog.getByRole('button', { name: label }) as HTMLButtonElement).disabled).toBe(false));
         expect(apiService.getDocumentImagePrintDefaults).toHaveBeenCalledExactlyOnceWith('invoices', 660, expect.any(AbortSignal));
         expect(download).not.toHaveBeenCalled();
+        expect(apiService.prepareDocumentPrint).not.toHaveBeenCalled();
+        if (format === 'print') expect(dialog.getByText(/Отмена в системном окне печати/)).toBeTruthy();
         expect((dialog.getByLabelText('Печать') as HTMLInputElement).checked).toBe(true);
         fireEvent.click(dialog.getByLabelText('Подпись')); fireEvent.click(dialog.getByRole('button', { name: label }));
-        await waitFor(() => expect(download).toHaveBeenCalledExactlyOnceWith(660, format === 'print' ? 'html' : format,
-          { includeLogo: false, includeSeal: true, includeSignature: true, ...(template.key ? { templateKey: template.key } : {}), signal: expect.any(AbortSignal) }));
+        const options = { includeLogo: false, includeSeal: true, includeSignature: true, ...(template.key ? { templateKey: template.key } : {}), signal: expect.any(AbortSignal) };
+        if (format === 'print') {
+          await waitFor(() => expect(apiService.prepareDocumentPrint).toHaveBeenCalledExactlyOnceWith('invoices', 660, options));
+          expect(download).not.toHaveBeenCalled();
+        } else await waitFor(() => expect(download).toHaveBeenCalledExactlyOnceWith(660, format, options));
         await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Изображения в документе' })).toBeNull());
         expect(current.onSubmit).not.toHaveBeenCalled(); expect(choices.includeSignature).toBe(false);
         if (format === 'print') expect(vi.mocked(window.open).mock.results.at(-1)!.value.document.write).toHaveBeenCalledWith('print copy');
@@ -3438,6 +3445,33 @@ describe('InvoiceModal integration', () => {
         await act(async () => finish(new Blob(['private former copy'])));
         expect(click).not.toHaveBeenCalled(); expect(screen.queryByRole('dialog', { name: 'Изображения в документе' })).toBeNull();
       } finally { click.mockRestore(); }
+    });
+
+    it.each(['change', 'close', 'revoke', 'hide', 'user', 'role', 'scope', 'cancel'])('closes only the pending print window immediately on %s', async action => {
+      let finish!: (value: Blob) => void;
+      vi.mocked(apiService.prepareDocumentPrint).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+      const current = props(); const view = render(<InvoiceModal {...current} />); const dialog = choose('print');
+      await waitFor(() => expect((dialog.getByRole('button', { name: 'Печатать' }) as HTMLButtonElement).disabled).toBe(false));
+      fireEvent.click(dialog.getByRole('button', { name: 'Печатать' }));
+      await waitFor(() => expect(apiService.prepareDocumentPrint).toHaveBeenCalledTimes(1));
+      const signal = vi.mocked(apiService.prepareDocumentPrint).mock.calls[0][2].signal!;
+      const popup = vi.mocked(window.open).mock.results.at(-1)!.value as Window;
+      const writesBeforeCancellation = vi.mocked(popup.document.write).mock.calls.length;
+      if (action === 'cancel') fireEvent.click(dialog.getByRole('button', { name: 'Отмена' }));
+      else view.rerender(<InvoiceModal {...changeOwner(action, current)} />);
+      expect(signal.aborted).toBe(true); expect(popup.close).toHaveBeenCalled();
+      await act(async () => finish(Object.assign(new Blob(['former private print']), { text: async () => 'former private print' })));
+      expect(popup.document.write).toHaveBeenCalledTimes(writesBeforeCancellation);
+      expect(popup.print).not.toHaveBeenCalled(); expect(current.onSubmit).not.toHaveBeenCalled();
+    });
+
+    it('does not prepare a print snapshot if the browser blocks its window', async () => {
+      vi.mocked(window.open).mockReturnValueOnce(null);
+      const current = props(); render(<InvoiceModal {...current} />); const dialog = choose('print');
+      await waitFor(() => expect((dialog.getByRole('button', { name: 'Печатать' }) as HTMLButtonElement).disabled).toBe(false));
+      fireEvent.click(dialog.getByRole('button', { name: 'Печатать' }));
+      expect((await dialog.findByRole('alert')).textContent).toContain('окно печати');
+      expect(apiService.prepareDocumentPrint).not.toHaveBeenCalled();
     });
 
     it('keeps an explicit old menu choice independent of profile loading', async () => {
@@ -3645,7 +3679,7 @@ describe('InvoiceModal integration', () => {
   });
 
   it('prints the established HTML form with the requested signature and seal mode', async () => {
-    const downloadMock = vi.mocked(apiService.downloadInvoiceDocument);
+    const downloadMock = vi.mocked(apiService.prepareDocumentPrint);
     downloadMock.mockClear();
     // JSDOM's Blob lacks text(); this is the synthetic API response, not the print implementation.
     const response = new Blob(['<html><body>Печатный счёт</body></html>'], { type: 'text/html' });
@@ -3689,7 +3723,7 @@ describe('InvoiceModal integration', () => {
 
     expect(openMock).toHaveBeenCalled();
     await waitFor(() => {
-      expect(downloadMock).toHaveBeenCalledWith(552, 'html', { includeLogo: true, includeSeal: false, includeSignature: true, signal: expect.any(AbortSignal) });
+      expect(downloadMock).toHaveBeenCalledWith('invoices', 552, { includeLogo: true, includeSeal: false, includeSignature: true, signal: expect.any(AbortSignal) });
     });
 
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Изображения в документе' })).toBeNull());
@@ -3698,7 +3732,7 @@ describe('InvoiceModal integration', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Печатать' }));
 
     await waitFor(() => {
-      expect(downloadMock).toHaveBeenLastCalledWith(552, 'html', {
+      expect(downloadMock).toHaveBeenLastCalledWith('invoices', 552, {
         includeLogo: true, includeSeal: false, includeSignature: false, signal: expect.any(AbortSignal),
         templateKey: 'invoice-offer',
       });

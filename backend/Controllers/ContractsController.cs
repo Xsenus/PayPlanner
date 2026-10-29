@@ -380,8 +380,13 @@ public class ContractsController : ControllerBase
         var visibility = await ResolveContractsVisibilityAsync(ct);
         if (visibility is null) return MissingContractsVisibilityResult();
         var document = await _db.Contracts.AsNoTracking().ApplyContractVisibility(visibility).Where(contract => contract.Id == id)
-            .Select(contract => new Contract { Id = contract.Id, SellerCompanyId = contract.SellerCompanyId,
-                SellerBranchId = contract.SellerBranchId, SellerSnapshotJson = contract.SellerSnapshotJson }).SingleOrDefaultAsync(ct);
+            .Select(contract => new Contract
+            {
+                Id = contract.Id,
+                SellerCompanyId = contract.SellerCompanyId,
+                SellerBranchId = contract.SellerBranchId,
+                SellerSnapshotJson = contract.SellerSnapshotJson
+            }).SingleOrDefaultAsync(ct);
         if (document is null) return NotFound();
         var options = await _documentSeller.ReadImagePrintDefaultsAsync(document, ct) ?? new(false, false, false);
         if (!await CanUseContractSellerAsync(id, edit: false, ct)) return Forbid();
@@ -389,7 +394,7 @@ public class ContractsController : ControllerBase
     }
 
     [HttpGet("{id:int}/document")]
-    public async Task<IActionResult> GetDocument(
+    public Task<IActionResult> GetDocument(
         int id,
         [FromQuery] string? format = "word",
         [FromQuery] string? templateKey = null,
@@ -397,6 +402,21 @@ public class ContractsController : ControllerBase
         [FromQuery] bool? includeLogo = null,
         [FromQuery] bool? includeSeal = null,
         [FromQuery] bool? includeSignature = null)
+        => BuildDocumentAsync(id, format, templateKey, ct, includeLogo, includeSeal, includeSignature, false);
+
+    [HttpPost("{id:int}/print")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public Task<IActionResult> PreparePrintDocument(
+        int id,
+        [FromQuery] string? templateKey = null,
+        CancellationToken ct = default,
+        [FromQuery] bool? includeLogo = null,
+        [FromQuery] bool? includeSeal = null,
+        [FromQuery] bool? includeSignature = null)
+        => BuildDocumentAsync(id, "html", templateKey, ct, includeLogo, includeSeal, includeSignature, true);
+
+    private async Task<IActionResult> BuildDocumentAsync(int id, string? format, string? templateKey,
+        CancellationToken ct, bool? includeLogo, bool? includeSeal, bool? includeSignature, bool issueForPrint)
     {
         if (await RequireSectionPermissionAsync(RolePermissionCatalog.Contracts, permission => permission.CanExport, ct) is { } forbidden)
         {
@@ -406,7 +426,7 @@ public class ContractsController : ControllerBase
         var contract = await LoadContractForDocumentAsync(id, ct);
         if (contract is null) return NotFound();
 
-        var mainCompany = await ResolveContractSellerAsync(contract, await LoadMainCompanyAsync(ct), NormalizeDocumentFormat(format) != "html", ct);
+        var mainCompany = await ResolveContractSellerAsync(contract, await LoadMainCompanyAsync(ct), issueForPrint || NormalizeDocumentFormat(format) != "html", ct);
         var template = await GetContractDocumentTemplateAsync(templateKey, ct);
         var defaults = includeLogo.HasValue && includeSeal.HasValue && includeSignature.HasValue
             ? null : await _documentSeller.ReadImagePrintDefaultsAsync(contract, ct);

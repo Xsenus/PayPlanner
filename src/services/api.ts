@@ -4766,6 +4766,27 @@ export class ApiService {
     return this.request<DocumentImagePrintOptions>(`/${section}/${id}/image-print-defaults`, { signal, cache: 'no-store' });
   }
 
+  async prepareDocumentPrint(section: 'invoices' | 'contracts', id: number,
+    options: DocumentImagePrintOptions & { templateKey?: string; signal?: AbortSignal }) {
+    const session = captureAuthSessionIdentity();
+    const query = buildQuery({ templateKey: options.templateKey, includeLogo: options.includeLogo,
+      includeSeal: options.includeSeal, includeSignature: options.includeSignature });
+    const { response, sessionRefreshed } = await this.fetchWithSessionRefresh(`${API_BASE_URL}/${section}/${id}/print${query}`,
+      { method: 'POST', cache: 'no-store', ...(options.signal ? { signal: options.signal } : {}) });
+    assertAuthSessionIdentity(session);
+    options.signal?.throwIfAborted();
+    if (!response.ok) {
+      if (response.status === 401 && !sessionRefreshed) notifyAuthSessionExpired();
+      const message = await extractResponseErrorMessage(response);
+      assertAuthSessionIdentity(session);
+      throw new Error(message || `HTTP ${response.status} ${response.statusText}`);
+    }
+    const blob = await response.blob();
+    assertAuthSessionIdentity(session);
+    options.signal?.throwIfAborted();
+    return blob;
+  }
+
   async downloadInvoiceDocument(
     id: number,
     format: 'word' | 'pdf' | 'html' = 'word',

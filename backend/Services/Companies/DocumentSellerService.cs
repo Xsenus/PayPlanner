@@ -415,8 +415,12 @@ public sealed class DocumentSellerService : IDocumentSellerService
             var root = rows.Single(row => DocumentId(row) == id);
             IDocumentSeller current = root switch
             {
-                Act act => new Act { InvoiceId = act.InvoiceId, Invoice = document is Act { Invoice: { } observed }
-                    ? new Payment { Type = observed.Type } : null },
+                Act act => new Act
+                {
+                    InvoiceId = act.InvoiceId,
+                    Invoice = document is Act { Invoice: { } observed }
+                    ? new Payment { Type = observed.Type } : null
+                },
                 Payment payment => new Payment { Type = payment.Type },
                 Contract => new Contract(),
                 _ => throw new NotSupportedException("Неизвестный документ продавца."),

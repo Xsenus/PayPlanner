@@ -266,8 +266,14 @@ public partial class ActContractImagePrintTests
             await fixture.Db.SaveChangesAsync();
             return new(true, true, true);
         });
-        var context = new ControllerContext { HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(
-            new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, fixture.User.Id.ToString())], "print-test")) } };
+        var context = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(
+            new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, fixture.User.Id.ToString())], "print-test"))
+            }
+        };
         Task<ActionResult<DocumentImagePrintOptions>> pending = section switch
         {
             "invoices" => new InvoicesController(fixture.Db, new NoEmail(), new NoRequirements(), documentSellerService: hooked)

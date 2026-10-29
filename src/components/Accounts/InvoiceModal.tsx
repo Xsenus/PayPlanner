@@ -3127,7 +3127,7 @@ export function InvoiceModal({
     if (typeof window === 'undefined') return;
     const previewWindow = window.open('', '_blank', 'width=1180,height=900');
     if (!previewWindow) {
-      throw new Error('Браузер заблокировал окно PDF. Разрешите всплывающие окна и повторите.');
+      throw new Error('Браузер заблокировал окно печати. Разрешите всплывающие окна и повторите.');
     }
 
     previewWindow.document.open();
@@ -3213,11 +3213,15 @@ export function InvoiceModal({
       if (request.scope !== printScopeRef.current) throw new Error('Документ или права изменились. Откройте карточку повторно.');
     };
     let previewWindow: Window | null | undefined;
+    const closePendingWindow = () => { if (previewWindow && !previewWindow.closed) previewWindow.close(); };
     try {
       requireCurrentCopy();
       if (request.format === 'print') previewWindow = openPendingDocumentWindow();
-      const blob = await apiService.downloadInvoiceDocument(request.documentId, request.format === 'print' ? 'html' : request.format,
-        { ...images, ...(request.templateKey ? { templateKey: request.templateKey } : {}), signal });
+      signal.addEventListener('abort', closePendingWindow, { once: true });
+      const options = { ...images, ...(request.templateKey ? { templateKey: request.templateKey } : {}), signal };
+      const blob = request.format === 'print'
+        ? await apiService.prepareDocumentPrint('invoices', request.documentId, options)
+        : await apiService.downloadInvoiceDocument(request.documentId, request.format, options);
       requireCurrentCopy();
       if (request.format === 'print') {
         const html = await blob.text();
@@ -3227,8 +3231,10 @@ export function InvoiceModal({
         downloadBlob(blob, buildInvoiceDocumentFileName(invoice.number, invoice.date, request.format, request.templateKey));
       }
     } catch (cause) {
-      if (previewWindow && !previewWindow.closed) previewWindow.close();
+      closePendingWindow();
       throw cause;
+    } finally {
+      signal.removeEventListener('abort', closePendingWindow);
     }
   };
 
@@ -5890,6 +5896,7 @@ export function InvoiceModal({
           documentName={`${imagePrintRequest.templateKey === INVOICE_OFFER_TEMPLATE_KEY ? 'Счёт-договор' : imagePrintRequest.templateKey === INVOICE_ORDER_TEMPLATE_KEY ? 'Заказ' : 'Счёт'} № ${invoice.number || invoice.id}`}
           initialOptions={imagePrintRequest.initialOptions}
           defaultsSource={imagePrintRequest.useDefaults ? { section: 'invoices', documentId: invoice.id } : undefined}
+          notice={imagePrintRequest.format === 'print' ? 'Подготовка печатной копии закрепляет реквизиты по выбранному для документа правилу. Отмена в системном окне печати не отменяет подготовку копии.' : undefined}
           confirmLabel={imagePrintRequest.format === 'print' ? 'Печатать' : `Скачать ${imagePrintRequest.format === 'word' ? 'Word' : 'PDF'}`}
           onConfirm={confirmDocumentCopy} onClose={() => setImagePrintRequest(null)} />
       ) : null}
