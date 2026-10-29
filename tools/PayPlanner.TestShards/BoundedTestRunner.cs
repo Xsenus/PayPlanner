@@ -53,7 +53,7 @@ internal static class BoundedTestRunner
             };
             foreach (var argument in new[] { "exec", vstestConsolePath, ShardPlan.Resolve(manifest, plan.AssemblyPath), "/Settings:" + settings,
                          "/Logger:console;verbosity=normal", "/Logger:trx;LogFileName=results.trx", "/ResultsDirectory:" + root }) start.ArgumentList.Add(argument);
-            ExecutionScheduling.ConfigureWorkerEnvironment(start.Environment, batch.Lane);
+            ExecutionScheduling.ConfigureWorkerEnvironment(start.Environment, batch.Lane, HostResources.Read().AvailableBytes);
             var batchStarted = DateTime.UtcNow;
             var batchExit = -1;
             string? batchError = null;
@@ -76,7 +76,13 @@ internal static class BoundedTestRunner
                         Cases = batch.Cases.Length,
                         GcHeapHardLimit = start.Environment["DOTNET_GCHeapHardLimit"]
                     });
-                    Console.WriteLine(JsonSerializer.Serialize(new { Batch = batch.Id, Status = "started", Cases = batch.Cases.Length }));
+                    Console.WriteLine(JsonSerializer.Serialize(new
+                    {
+                        Batch = batch.Id,
+                        Status = "started",
+                        Cases = batch.Cases.Length,
+                        GcHeapHardLimit = start.Environment["DOTNET_GCHeapHardLimit"]
+                    }));
                 }
                 finally
                 {

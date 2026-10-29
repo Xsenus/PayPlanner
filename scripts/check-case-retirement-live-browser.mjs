@@ -6,7 +6,7 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { createServer as createControlServer } from 'node:http';
 import { build, preview } from 'vite';
 import { prepareSyntheticBrowserUi } from './synthetic-browser-ui.mjs';
-import { createCaseReadLifecycle, createCaseRestartObserver, createCaseStartupReadTrace, isCaseBoundaryRead, waitForCaseRestartResolution } from './case-retirement-browser-lifecycle.mjs';
+import { completeCaseUploadResponse, createCaseReadLifecycle, createCaseRestartObserver, createCaseStartupReadTrace, isCaseBoundaryRead, waitForCaseRestartResolution } from './case-retirement-browser-lifecycle.mjs';
 import { openRetirementProductionBundle, retirementBundlePhase, withRetirementBuildEnvironment } from './case-retirement-production-bundle.mjs';
 
 const api = new URL(process.env.CASE_RETIREMENT_API);
@@ -306,6 +306,7 @@ try {
       if (url.pathname.includes('/documents/uploads') && request.method() === 'GET') reads.push(url.searchParams.getAll('uploadKeys'));
       if (request.method() === 'POST' && (url.pathname === '/api/v2/cases/' + settings.caseId + '/documents' || /\/api\/case-documents\/\d+\/versions$/.test(url.pathname))) {
         filePosts++; fileKeys.push(request.headers()['x-upload-key']);
+        return (${completeCaseUploadResponse.toString()})(route, caseReads);
       }
       return route.continue();
     });
@@ -368,7 +369,11 @@ try {
       await restartFinished;
       const unresolved = panel.getByText('Не удалось подтвердить результат. Обновите загрузки перед следующим действием.', { exact: true });
       const succeeded = panel.getByText('Прежняя попытка прекращена. Новый файл выберите и отправьте отдельно.', { exact: true });
-      if (await (${waitForCaseRestartResolution.toString()})(unresolved, succeeded, waitAtPhase)) {
+      // The durable row alone can precede the action result. Only its enabled
+      // explicit-confirmation button proves that the UI still retains the identity.
+      const retired = panel.getByRole('listitem').filter({ hasText: 'Прежняя попытка прекращена и больше не добавит документ. Новый файл отправляется отдельным действием.' })
+        .getByRole('button', { name: 'Подготовить новую загрузку', exact: true, disabled: false });
+      if (await (${waitForCaseRestartResolution.toString()})(unresolved, succeeded, waitAtPhase, retired)) {
         check(retirePosts === 1 && filePosts === 0 && caseSaves === 0, 'Unresolved restart triggered an automatic write');
         const retained = await page.evaluate(() => JSON.parse(sessionStorage.getItem('pp.case-document-upload-attempts.v1')));
         check(retained?.length === 1 && retained[0].key === settings.key, 'Unavailable proof released the identity');

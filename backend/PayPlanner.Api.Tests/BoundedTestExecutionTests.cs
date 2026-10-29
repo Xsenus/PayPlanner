@@ -188,7 +188,8 @@ public sealed class BoundedTestExecutionTests
         Assert.True(ExecutionScheduling.CanLaunchAdditional(0, 4, 6 * Fixture.Gib));
         Assert.False(ExecutionScheduling.CanLaunchAdditional(0, 4, 6 * Fixture.Gib - 1));
         Assert.True(ExecutionScheduling.CanLaunchAdditional(0, 4, 7 * Fixture.Gib, "exclusive"));
-        Assert.False(ExecutionScheduling.CanLaunchAdditional(0, 4, 7 * Fixture.Gib - 1, "exclusive"));
+        Assert.True(ExecutionScheduling.CanLaunchAdditional(0, 4, 6 * Fixture.Gib, "exclusive"));
+        Assert.False(ExecutionScheduling.CanLaunchAdditional(0, 4, 6 * Fixture.Gib - 1, "exclusive"));
         Assert.False(ExecutionScheduling.CanLaunchAdditional(1, 4, 20 * Fixture.Gib, "exclusive"));
         Assert.Throws<InvalidDataException>(() => ExecutionScheduling.CanLaunchAdditional(0, 1, 20 * Fixture.Gib, "unknown"));
         Assert.True(ExecutionScheduling.CanLaunchAdditional(1, 4, 6 * Fixture.Gib));
@@ -216,6 +217,35 @@ public sealed class BoundedTestExecutionTests
             Assert.Equal("unchanged", environment["KEEP_EXISTING_SETTING"]);
         }
         Assert.Throws<InvalidDataException>(() => ExecutionScheduling.ConfigureWorkerEnvironment(new Dictionary<string, string?>(), "unknown"));
+    }
+
+    [Theory]
+    [InlineData(6, 0, "80000000")]
+    [InlineData(7, -1, "80000000")]
+    [InlineData(7, 0, "C0000000")]
+    [InlineData(20, 0, "C0000000")]
+    public void ExclusiveHeapPreservesTheReserveAndPrefersTheLargerProfile(int gib, int offset, string expected)
+    {
+        var environment = new Dictionary<string, string?>();
+        var available = (ulong)((long)gib * (long)Fixture.Gib + offset);
+        ExecutionScheduling.ConfigureWorkerEnvironment(environment, "exclusive", available);
+        Assert.Equal(expected, environment["DOTNET_GCHeapHardLimit"]);
+        Assert.Equal("2", environment["DOTNET_PROCESSOR_COUNT"]);
+        Assert.Equal("false", environment["Email__Enabled"]);
+        Assert.Equal("false", environment["BackgroundServices__Enabled"]);
+        Assert.False(ExecutionScheduling.CanLaunchAdditional(1, 4, available, "exclusive"));
+    }
+
+    [Theory]
+    [InlineData("fast")]
+    [InlineData("heavy")]
+    [InlineData("exclusive")]
+    public void ALastMomentMemoryDropCannotConfigureAnUnbudgetedHost(string lane)
+    {
+        var environment = new Dictionary<string, string?> { ["KEEP_EXISTING_SETTING"] = "unchanged" };
+        Assert.Throws<InvalidDataException>(() => ExecutionScheduling.ConfigureWorkerEnvironment(environment, lane, 6 * Fixture.Gib - 1));
+        Assert.Single(environment);
+        Assert.Equal("unchanged", environment["KEEP_EXISTING_SETTING"]);
     }
 
     [Theory]

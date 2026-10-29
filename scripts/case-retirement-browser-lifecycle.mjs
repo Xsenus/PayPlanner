@@ -1,10 +1,23 @@
 // Serialized into Playwright CLI's minimal VM. Keep all state and dependencies
 // inside the function; this observes actual requests without replacing them.
-export async function waitForCaseRestartResolution(unresolved, succeeded, waitAtPhase) {
+export async function waitForCaseRestartResolution(unresolved, succeeded, waitAtPhase, retired) {
   // The restart acknowledgement precedes the browser's fallback proof read.
   // Decide only after the UI has actually resolved that read, under its existing deadline.
-  await waitAtPhase(unresolved.or(succeeded), 'restart-resolution');
-  return unresolved.isVisible();
+  // A reconnect refresh can replace a transient notice with the durable retired
+  // receipt. It still requires explicit confirmation; it is not an acknowledged release.
+  const retained = retired ? unresolved.or(retired) : unresolved;
+  const outcome = retired ? retained.or(succeeded).first() : retained.or(succeeded);
+  await waitAtPhase(outcome, 'restart-resolution');
+  // A successful notice takes precedence over the durable row that may remain.
+  return retired ? !await succeeded.isVisible() && (await unresolved.isVisible() || await retired.isVisible()) : unresolved.isVisible();
+}
+
+// Fetch the real upload once, then finish earlier reads before publishing its
+// response to React. Upload start and completion both change the panel revision.
+export async function completeCaseUploadResponse(route, caseReads) {
+  const response = await route.fetch();
+  await caseReads.drain('document-upload');
+  return route.fulfill({ response });
 }
 
 export function createCaseStartupReadTrace(page, apiOrigin, caseId) {

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { runInNewContext } from 'node:vm';
 import { describe, it } from 'vitest';
-import { createCaseReadLifecycle, createCaseStartupReadTrace, isCaseBoundaryRead, waitForCaseRestartResolution } from './case-retirement-browser-lifecycle.mjs';
+import { completeCaseUploadResponse, createCaseReadLifecycle, createCaseStartupReadTrace, isCaseBoundaryRead, waitForCaseRestartResolution } from './case-retirement-browser-lifecycle.mjs';
 
 describe('restart proof resolution', () => {
   for (const unresolvedResult of [true, false]) it(`waits for the late UI result before choosing unresolved=${unresolvedResult}`, async () => {
@@ -33,6 +33,50 @@ describe('restart proof resolution', () => {
     const failure = new Error('original bounded readiness failure');
     const unresolved = { or: () => ({}), isVisible: () => { throw new Error('Premature result inspection'); } };
     await assert.rejects(waitForCaseRestartResolution(unresolved, {}, async () => { throw failure; }), error => error === failure);
+  });
+});
+
+describe('upload response read boundary', () => {
+  it('fetches once and retains the exact response until prior reads complete', async () => {
+    const ready = deferred(); const entered = deferred(); const response = {}; const order = [];
+    const route = {
+      fetch: async () => { order.push('fetch'); return response; },
+      fulfill: async options => { assert.equal(options.response, response); order.push('fulfill'); return 'forwarded'; },
+    };
+    const finish = runInNewContext('(' + completeCaseUploadResponse.toString() + ')');
+    const pending = finish(route, { drain: async phase => { assert.equal(phase, 'document-upload'); order.push('drain'); entered.resolve(); await ready.promise; } });
+    await entered.promise;
+    assert.deepEqual(order, ['fetch', 'drain']);
+    ready.resolve(); assert.equal(await pending, 'forwarded');
+    assert.deepEqual(order, ['fetch', 'drain', 'fulfill']);
+  });
+  for (const stage of ['fetch', 'drain']) it(`preserves the original ${stage} failure without forwarding or retrying`, async () => {
+    const failure = new Error('original boundary failure'); let fetches = 0;
+    const route = {
+      fetch: async () => { fetches++; if (stage === 'fetch') throw failure; return {}; },
+      fulfill: () => { throw new Error('Must not publish an incomplete boundary'); },
+    };
+    await assert.rejects(completeCaseUploadResponse(route, { drain: async () => { throw failure; } }), error => error === failure);
+    assert.equal(fetches, 1);
+  });
+});
+
+describe('durable restart resolution', () => {
+  for (const visible of [['retired'], ['unresolved'], ['retired', 'unresolved'], ['succeeded'], ['succeeded', 'retired']])
+    it(`chooses explicit recovery for retained state ${visible.join('+')}`, async () => {
+      const locator = names => ({ names, or: other => locator([...names, ...other.names]),
+        first: () => ({ names, firstOnly: true }), isVisible: async () => names.some(name => visible.includes(name)) });
+      const wait = runInNewContext('(' + waitForCaseRestartResolution.toString() + ')');
+      assert.equal(await wait(locator(['unresolved']), locator(['succeeded']), async (outcome, phase) => {
+        assert.equal(outcome.firstOnly, true);
+        assert.deepEqual(outcome.names.sort(), ['retired', 'succeeded', 'unresolved']);
+        assert.equal(phase, 'restart-resolution');
+      }, locator(['retired'])), !visible.includes('succeeded'));
+    });
+  it('never interprets a failed durable readiness check as a successful release', async () => {
+    const failure = new Error('no proven UI outcome');
+    const unresolved = { or: () => ({ or: () => ({ first: () => ({}) }), isVisible: () => { throw new Error('Premature branch'); } }) };
+    await assert.rejects(waitForCaseRestartResolution(unresolved, {}, async () => { throw failure; }, {}), error => error === failure);
   });
 });
 
