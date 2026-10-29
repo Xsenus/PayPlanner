@@ -389,7 +389,7 @@ export function validateDeployWorkflow(source) {
     const preflight = command(id, 'node scripts/verify-xsenus-runner.mjs postgres');
     requireValue(preflight.step.env?.PAYPLANNER_TEST_POSTGRES === '${{ secrets.PAYPLANNER_XSENUS_TEST_POSTGRES }}',
       `${id}: preflight must verify the same dedicated test connection`);
-    for (const prereq of ['npm ci', 'npx playwright install chromium chrome', 'npm install --global @playwright/cli@0.1.22']) {
+    for (const prereq of ['npm ci', 'node scripts/prepare-ci-browsers.mjs', 'npm install --global @playwright/cli@0.1.22']) {
       requireValue(command(id, prereq).index < gate.index, `${id}: complete prerequisites must precede tests`);
     }
     requireValue(preflight.index < gate.index, `${id}: verify isolation before running tests`);

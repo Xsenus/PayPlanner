@@ -395,7 +395,7 @@ jobs:
         run: npm ci
 
       - name: Install browsers for writable and restored CRM verification
-        run: npx playwright install chromium chrome
+        run: node scripts/prepare-ci-browsers.mjs
 
       - name: Install pinned Playwright CLI for writable CRM verification
         run: |
@@ -515,7 +515,7 @@ jobs:
         run: npm ci
 
       - name: Install browsers for writable and restored CRM verification
-        run: npx playwright install chromium chrome
+        run: node scripts/prepare-ci-browsers.mjs
 
       - name: Install pinned Playwright CLI for writable CRM verification
         run: |
@@ -635,7 +635,7 @@ jobs:
         run: npm ci
 
       - name: Install browsers for writable and restored CRM verification
-        run: npx playwright install chromium chrome
+        run: node scripts/prepare-ci-browsers.mjs
 
       - name: Install pinned Playwright CLI for writable CRM verification
         run: |
@@ -755,7 +755,7 @@ jobs:
         run: npm ci
 
       - name: Install browsers for writable and restored CRM verification
-        run: npx playwright install chromium chrome
+        run: node scripts/prepare-ci-browsers.mjs
 
       - name: Install pinned Playwright CLI for writable CRM verification
         run: |
@@ -899,7 +899,7 @@ jobs:
         run: npm ci
 
       - name: Install browsers for writable and restored CRM verification
-        run: npx playwright install chromium chrome
+        run: node scripts/prepare-ci-browsers.mjs
 
       - name: Install pinned Playwright CLI for writable CRM verification
         run: |

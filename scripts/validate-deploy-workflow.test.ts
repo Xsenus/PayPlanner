@@ -31,6 +31,12 @@ function replaceInJob(id: string, change: (job: string) => string) {
 }
 
 describe('merged production workflow protections', () => {
+  it.each([...shardJobs, 'backend-browser'])('requires verified Chromium and Chrome preparation for %s', id => {
+    expect(() => validateDeployWorkflow(replaceInJob(id, job => job.replace(
+      'node scripts/prepare-ci-browsers.mjs', 'echo browser ready',
+    )))).toThrow();
+  });
+
   it('retains every mandatory gate and four independent qualified workers', () => {
     const jobs = parseWorkflow(workflow).jobs;
     expect(Object.keys(jobs).sort()).toEqual(allJobs.toSorted());
