@@ -10,6 +10,7 @@ using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Invoices;
 using PayPlanner.Api.Services.LegalEntities;
+using PayPlanner.Api.Services.Documents;
 
 namespace PayPlanner.Api.Services.Acts;
 
@@ -246,6 +247,20 @@ public static class ActDocumentTemplateEngine
         }
 
         return RenderCustomTemplateHtml(templateHtml, act, lineItems, mainCompany, includeSignatureAndSeal);
+    }
+
+    public static string RenderHtml(
+        Act act, IReadOnlyCollection<ActLineItem> lineItems, LegalEntity? mainCompany,
+        DocumentImagePrintOptions imageOptions)
+        => RenderHtml(DefaultTemplateHtml, act, lineItems, mainCompany, imageOptions);
+
+    public static string RenderHtml(
+        string templateHtml, Act act, IReadOnlyCollection<ActLineItem> lineItems, LegalEntity? mainCompany,
+        DocumentImagePrintOptions imageOptions)
+    {
+        ArgumentNullException.ThrowIfNull(imageOptions);
+        return RenderCustomTemplateHtml(string.IsNullOrWhiteSpace(templateHtml) ? DefaultTemplateHtml : templateHtml,
+            act, lineItems, mainCompany, false, imageOptions);
     }
 
     private static string RenderSystemDefaultHtml(
@@ -645,7 +660,8 @@ public static class ActDocumentTemplateEngine
         Act act,
         IReadOnlyCollection<ActLineItem> lineItems,
         LegalEntity? mainCompany,
-        bool includeSignatureAndSeal)
+        bool includeSignatureAndSeal,
+        DocumentImagePrintOptions? imageOptions = null)
     {
         var companyParty = BuildSeller(mainCompany);
         var isExpenseAct = act.Invoice?.Type == PaymentType.Expense;
@@ -655,11 +671,11 @@ public static class ActDocumentTemplateEngine
         var totalAmount = effectiveLineItems.Sum(item => item.Total);
         var documentTitle = $"Акт № {act.Number} от {FormatLongDate(act.Date)}";
         var usesManagedDefaultSignatureLayout = templateHtml.Contains("class=\"sign-content\"", StringComparison.Ordinal);
-        var signatureHtml = includeSignatureAndSeal && !isExpenseAct
-            ? BuildImageHtml(mainCompany?.DirectorSignatureDataUrl, "Подпись", "signature", usesManagedDefaultSignatureLayout ? 76 : null, usesManagedDefaultSignatureLayout ? 42 : null)
+        var signatureHtml = !isExpenseAct
+            ? BuildImageHtml(imageOptions is null ? includeSignatureAndSeal ? mainCompany?.DirectorSignatureDataUrl : null : imageOptions.SignatureOf(mainCompany), "Подпись", "signature", usesManagedDefaultSignatureLayout ? 76 : null, usesManagedDefaultSignatureLayout ? 42 : null)
             : string.Empty;
-        var sealHtml = includeSignatureAndSeal && !isExpenseAct
-            ? BuildImageHtml(mainCompany?.SealDataUrl, "Печать", "seal", usesManagedDefaultSignatureLayout ? 90 : null, usesManagedDefaultSignatureLayout ? 90 : null)
+        var sealHtml = !isExpenseAct
+            ? BuildImageHtml(imageOptions is null ? includeSignatureAndSeal ? mainCompany?.SealDataUrl : null : imageOptions.SealOf(mainCompany), "Печать", "seal", usesManagedDefaultSignatureLayout ? 90 : null, usesManagedDefaultSignatureLayout ? 90 : null)
             : string.Empty;
         var commentHtml = string.IsNullOrWhiteSpace(act.Comment)
             ? string.Empty
@@ -701,6 +717,9 @@ public static class ActDocumentTemplateEngine
             ["seller.signatoryShortName"] = Encode(seller.SignatoryShortName),
             ["seller.signatureHtml"] = signatureHtml,
             ["seller.sealHtml"] = sealHtml,
+            ["seller.logoHtml"] = imageOptions is not null && !isExpenseAct
+                ? BuildImageHtml(imageOptions.LogoOf(mainCompany), "Логотип", "logo", 120, 90)
+                : string.Empty,
             ["buyer.requisitesHtml"] = buyer.RequisitesHtml,
             ["buyer.signaturePartyName"] = Encode(buyer.SignaturePartyName),
             ["buyer.signatoryShortName"] = Encode(buyer.SignatoryShortName),

@@ -7,6 +7,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Documents;
 
 namespace PayPlanner.Api.Services.Contracts;
 
@@ -130,6 +131,15 @@ public static class ContractDocumentTemplateEngine
         => RenderHtml(DefaultTemplateHtml, contract, mainCompany);
 
     public static string RenderHtml(string templateHtml, Contract contract, LegalEntity? mainCompany)
+        => RenderCore(templateHtml, contract, mainCompany, null);
+
+    public static string RenderHtml(string templateHtml, Contract contract, LegalEntity? mainCompany, DocumentImagePrintOptions imageOptions)
+    {
+        ArgumentNullException.ThrowIfNull(imageOptions);
+        return RenderCore(templateHtml, contract, mainCompany, imageOptions);
+    }
+
+    private static string RenderCore(string templateHtml, Contract contract, LegalEntity? mainCompany, DocumentImagePrintOptions? imageOptions)
     {
         var sellerName = FirstNotEmpty(mainCompany?.FullName, mainCompany?.ShortName, "Исполнитель");
         var sellerRequisites = BuildLegalEntityRequisites(mainCompany, sellerName);
@@ -191,6 +201,9 @@ public static class ContractDocumentTemplateEngine
             ["contract.conditionsHtml"] = conditions.Length > 0 ? conditions.ToString() : "<p>Условия договора не заполнены в карточке.</p>",
             ["seller.name"] = Encode(sellerName),
             ["seller.requisites"] = Encode(sellerRequisites),
+            ["seller.logoHtml"] = BuildImageHtml(imageOptions?.LogoOf(mainCompany), "Логотип", "logo", 120, 90),
+            ["seller.sealHtml"] = BuildImageHtml(imageOptions?.SealOf(mainCompany), "Печать", "seal", 90, 90),
+            ["seller.signatureHtml"] = BuildImageHtml(imageOptions?.SignatureOf(mainCompany), "Подпись", "signature", 76, 42),
             ["customer.name"] = Encode(customerName),
             ["customer.requisites"] = Encode(customerRequisites),
         };
@@ -292,6 +305,10 @@ public static class ContractDocumentTemplateEngine
 </html>
 """;
     }
+
+    private static string BuildImageHtml(string? dataUrl, string alt, string cssClass, int width, int height)
+        => string.IsNullOrWhiteSpace(dataUrl) ? string.Empty
+            : $"<img src=\"{WebUtility.HtmlEncode(dataUrl)}\" alt=\"{alt}\" class=\"{cssClass}\" width=\"{width}\" height=\"{height}\" style=\"width: {width}px; height: {height}px; object-fit: contain;\" />";
 
     private static string ReplaceTokens(string templateHtml, IReadOnlyDictionary<string, string> tokens)
         => TokenRegex.Replace(templateHtml, match =>

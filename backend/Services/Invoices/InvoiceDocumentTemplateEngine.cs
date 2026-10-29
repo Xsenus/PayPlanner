@@ -8,6 +8,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Documents;
 using PayPlanner.Api.Services.Tax;
 using PayPlanner.Api.Services.LegalEntities;
 
@@ -149,7 +150,27 @@ public static class InvoiceDocumentTemplateEngine
         bool includeSignatureAndSeal = true,
         string? installmentScheduleHtml = null)
     {
-        var model = BuildRenderModel(payment, lineItems, mainCompany, includeSignatureAndSeal, installmentScheduleHtml);
+        return RenderCore(templateHtml, payment, lineItems, mainCompany, includeSignatureAndSeal, installmentScheduleHtml, null);
+    }
+
+    public static string RenderHtml(
+        string templateHtml,
+        Payment payment,
+        IReadOnlyCollection<InvoiceLineItemDto> lineItems,
+        LegalEntity? mainCompany,
+        DocumentImagePrintOptions imageOptions,
+        string? installmentScheduleHtml = null)
+    {
+        ArgumentNullException.ThrowIfNull(imageOptions);
+        return RenderCore(templateHtml, payment, lineItems, mainCompany, false, installmentScheduleHtml, imageOptions);
+    }
+
+    private static string RenderCore(
+        string templateHtml, Payment payment, IReadOnlyCollection<InvoiceLineItemDto> lineItems,
+        LegalEntity? mainCompany, bool includeSignatureAndSeal, string? installmentScheduleHtml,
+        DocumentImagePrintOptions? imageOptions)
+    {
+        var model = BuildRenderModel(payment, lineItems, mainCompany, includeSignatureAndSeal, installmentScheduleHtml, imageOptions);
         var rendered = RenderLineItems(templateHtml, model.LineItems);
         return ReplaceTokens(rendered, model.Tokens);
     }
@@ -239,7 +260,8 @@ public static class InvoiceDocumentTemplateEngine
         IReadOnlyCollection<InvoiceLineItemDto> lineItems,
         LegalEntity? mainCompany,
         bool includeSignatureAndSeal,
-        string? installmentScheduleHtml)
+        string? installmentScheduleHtml,
+        DocumentImagePrintOptions? imageOptions)
     {
         var invoiceDate = PaymentDomainService.NormalizeLocalDate(payment.Invoice?.Date ?? payment.AccountDate ?? payment.Date);
         var dueDate = PaymentDomainService.NormalizeLocalDate(payment.Date);
@@ -352,13 +374,9 @@ public static class InvoiceDocumentTemplateEngine
                 ["seller.chiefAccountantPosition"] = Encode(chiefAccountantPosition),
                 ["seller.chiefAccountantFullName"] = Encode(chiefAccountantFullName),
                 ["seller.chiefAccountantShortName"] = Encode(chiefAccountantShortName),
-                ["seller.logoHtml"] = BuildImageHtml(sellerLegalEntity?.LogoDataUrl, "Логотип", "logo"),
-                ["seller.sealHtml"] = includeSignatureAndSeal
-                    ? BuildImageHtml(sellerLegalEntity?.SealDataUrl, "Печать", "seal")
-                    : string.Empty,
-                ["seller.signatureHtml"] = includeSignatureAndSeal
-                    ? BuildImageHtml(sellerLegalEntity?.DirectorSignatureDataUrl, "Подпись", "signature")
-                    : string.Empty,
+                ["seller.logoHtml"] = BuildImageHtml(imageOptions is null ? sellerLegalEntity?.LogoDataUrl : imageOptions.LogoOf(sellerLegalEntity), "Логотип", "logo"),
+                ["seller.sealHtml"] = BuildImageHtml(imageOptions is null ? includeSignatureAndSeal ? sellerLegalEntity?.SealDataUrl : null : imageOptions.SealOf(sellerLegalEntity), "Печать", "seal"),
+                ["seller.signatureHtml"] = BuildImageHtml(imageOptions is null ? includeSignatureAndSeal ? sellerLegalEntity?.DirectorSignatureDataUrl : null : imageOptions.SignatureOf(sellerLegalEntity), "Подпись", "signature"),
                 ["buyer.name"] = Encode(buyer.Name),
                 ["buyer.address"] = Encode(buyer.Address),
                 ["buyer.passport"] = Encode(buyer.Passport),

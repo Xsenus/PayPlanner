@@ -1,0 +1,18 @@
+using PayPlanner.Api.Models;
+using PayPlanner.Api.Services.Companies;
+
+namespace PayPlanner.Api.Services.Documents;
+
+/// <summary>Явный выбор изображений при выдаче документа; отсутствие выбора сохраняет прежний режим.</summary>
+public sealed record DocumentImagePrintOptions(bool IncludeLogo, bool IncludeSeal, bool IncludeSignature)
+{
+    public string? LogoOf(LegalEntity? seller) => Select(seller?.LogoDataUrl, IncludeLogo);
+    public string? SealOf(LegalEntity? seller) => Select(seller?.SealDataUrl, IncludeSeal);
+    public string? SignatureOf(LegalEntity? seller) => Select(seller?.DirectorSignatureDataUrl, IncludeSignature);
+
+    // Только прежняя безопасная проверка inline-растра: не применяем новые upload-ограничения к снимкам.
+    private static string? Select(string? value, bool enabled)
+        => enabled && !string.IsNullOrWhiteSpace(value) && InlineImageDataUrlValidator.Validate(value) is null
+            ? value.Trim()
+            : null;
+}
