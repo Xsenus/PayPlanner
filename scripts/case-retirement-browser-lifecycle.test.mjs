@@ -4,7 +4,37 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { runInNewContext } from 'node:vm';
 import { describe, it } from 'vitest';
-import { createCaseReadLifecycle, createCaseStartupReadTrace, isCaseBoundaryRead } from './case-retirement-browser-lifecycle.mjs';
+import { createCaseReadLifecycle, createCaseStartupReadTrace, isCaseBoundaryRead, waitForCaseRestartResolution } from './case-retirement-browser-lifecycle.mjs';
+
+describe('restart proof resolution', () => {
+  for (const unresolvedResult of [true, false]) it(`waits for the late UI result before choosing unresolved=${unresolvedResult}`, async () => {
+    const ready = deferred();
+    const succeeded = {};
+    const outcome = {};
+    let inspected = false;
+    const unresolved = {
+      or: other => { assert.equal(other, succeeded); return outcome; },
+      isVisible: async () => { inspected = true; return unresolvedResult; },
+    };
+    const wait = runInNewContext('(' + waitForCaseRestartResolution.toString() + ')');
+    const pending = wait(unresolved, succeeded, async (locator, phase) => {
+      assert.equal(locator, outcome);
+      assert.equal(phase, 'restart-resolution');
+      await ready.promise;
+    });
+    await Promise.resolve();
+    assert.equal(inspected, false);
+    ready.resolve();
+    assert.equal(await pending, unresolvedResult);
+    assert.equal(inspected, true);
+  });
+
+  it('preserves the original readiness failure without guessing a branch', async () => {
+    const failure = new Error('original bounded readiness failure');
+    const unresolved = { or: () => ({}), isVisible: () => { throw new Error('Premature result inspection'); } };
+    await assert.rejects(waitForCaseRestartResolution(unresolved, {}, async () => { throw failure; }), error => error === failure);
+  });
+});
 
 describe('startup request diagnostics', () => {
   it('observes completion, pending reads and failures without serializing URLs or payloads', () => {

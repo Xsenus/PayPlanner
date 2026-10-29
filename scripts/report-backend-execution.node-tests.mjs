@@ -64,7 +64,7 @@ test('malformed JSON is rejected without reflecting its content', t => {
   assert.throws(() => executionReport(f.root, 0), /^Error: Execution metadata is unreadable or unsafe$/);
 });
 
-test('TRX diagnostics expose only outcomes and IDs, never test names or error text', t => {
+test('TRX diagnostics expose outcomes, IDs and fixed stages, never test names or error text', t => {
   const f = fixture(t), id = '12345678-1234-1234-1234-123456789abc';
   mkdirSync(join(f.shard, 'batches/exclusive-0'), { recursive: true });
   writeFileSync(join(f.shard, 'batches/exclusive-0/results.trx'),
@@ -75,4 +75,26 @@ test('TRX diagnostics expose only outcomes and IDs, never test names or error te
   assert.deepEqual(report.batches[0].results.unsuccessfulIds, [id]);
   assert.equal(report.batches[0].qualified, false);
   assert.equal(JSON.stringify(report).includes('secret'), false);
+});
+
+test('browser failure diagnostics expose only allowlisted stage codes', t => {
+  const f = fixture(t), id = '12345678-1234-1234-1234-123456789abc';
+  mkdirSync(join(f.shard, 'batches/exclusive-0'), { recursive: true });
+  writeFileSync(join(f.shard, 'batches/exclusive-0/results.trx'),
+    `<TestRun><Results><UnitTestResult testId="${id}" outcome="Failed" testName="secret-name"><Output><ErrorInfo><Message>`
+    + 'secret-error CASE_RETIREMENT_BUNDLE_TEMP_ROOT_MISMATCH\n'
+    + 'CASE_RETIREMENT_UPLOAD_WAIT {"phase":"separate-writ-response","password":"secret-password","filePosts":123}\n'
+    + 'CASE_RETIREMENT_UPLOAD_WAIT {&quot;phase&quot;:&quot;separate-version-response&quot;,&quot;secret&quot;:true}\n'
+    + 'CASE_RETIREMENT_UPLOAD_WAIT {"phase":"secret-unknown-stage"}\n'
+    + 'CASE_RETIREMENT_UPLOAD_WAIT {"phase":"separate-writ-response"}\n'
+    + '</Message></ErrorInfo></Output></UnitTestResult></Results></TestRun>');
+  const report = executionReport(f.root, 0);
+  assert.deepEqual(report.batches[0].results.browserFailureStages,
+    ['separate-version-response', 'separate-writ-response', 'temporary-root-mismatch']);
+  assert.deepEqual(report.batches[0].results.capturedOutcomes, { Failed: 1 });
+  assert.deepEqual(report.batches[0].results.unsuccessfulIds, [id]);
+  assert.equal(report.batches[0].qualified, false);
+  assert.equal(JSON.stringify(report).includes('secret'), false);
+  assert.equal(JSON.stringify(report).includes('password'), false);
+  assert.equal(JSON.stringify(report).includes('filePosts'), false);
 });

@@ -57,6 +57,16 @@ public sealed class CaseRetirementBrowserBundle : IAsyncLifetime, IAsyncDisposab
         if (File.ReadAllText(path) != marker) throw new IOException("Bundle ownership changed.");
     }
 
+    internal void ConfigureNodeTemporaryDirectory(IDictionary<string, string?> environment)
+    {
+        ValidateOwner();
+        // Windows .NET prefers TMP, while Node prefers TEMP. Pin both child aliases
+        // to the validated owner parent; never relax the Node ownership boundary.
+        var parent = Path.GetDirectoryName(Root)!;
+        environment["TEMP"] = parent;
+        environment["TMP"] = parent;
+    }
+
     private static TcpListener Reserve(int port)
     {
         var listener = new TcpListener(IPAddress.Loopback, port) { ExclusiveAddressUse = true };
@@ -100,6 +110,7 @@ public sealed class CaseRetirementBrowserBundle : IAsyncLifetime, IAsyncDisposab
             foreach (var (key, value) in inherited)
                 if (new[] { "PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", "HOME", "USERPROFILE" }
                     .Contains(key, StringComparer.OrdinalIgnoreCase)) start.Environment[key] = value;
+            ConfigureNodeTemporaryDirectory(start.Environment);
             start.ArgumentList.Add(Path.Combine(repository.FullName, "scripts", "case-retirement-production-bundle.mjs"));
             start.ArgumentList.Add("--finalize");
             start.ArgumentList.Add(Root);
@@ -162,6 +173,11 @@ public sealed class CaseRetirementBrowserBundle : IAsyncLifetime, IAsyncDisposab
         internal Uri ApiAddress => owner.ApiAddress;
         internal string Root => owner.Root;
         internal string OwnerId => owner.OwnerId;
+        internal void ConfigureNodeTemporaryDirectory(IDictionary<string, string?> environment)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            owner.ConfigureNodeTemporaryDirectory(environment);
+        }
         internal void ReleaseReservationForStart()
         {
             if (disposed || handedToProcess) throw new InvalidOperationException("API address handoff is single-use.");

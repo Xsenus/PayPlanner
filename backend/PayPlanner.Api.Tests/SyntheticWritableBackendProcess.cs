@@ -587,6 +587,7 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
         {
             Assert.False(generatedDocuments || courtDocuments || financialDocuments || chatAttachments,
                 "The production-bundle pilot is limited to retirement scenarios.");
+            _retirementBundle.ConfigureNodeTemporaryDirectory(start.Environment);
             start.Environment["CASE_RETIREMENT_BUNDLE_ROOT"] = _retirementBundle.Root;
             start.Environment["CASE_RETIREMENT_BUNDLE_OWNER"] = _retirementBundle.OwnerId;
             start.Environment["CI"] = "true";

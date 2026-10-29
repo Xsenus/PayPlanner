@@ -1,5 +1,12 @@
 // Serialized into Playwright CLI's minimal VM. Keep all state and dependencies
 // inside the function; this observes actual requests without replacing them.
+export async function waitForCaseRestartResolution(unresolved, succeeded, waitAtPhase) {
+  // The restart acknowledgement precedes the browser's fallback proof read.
+  // Decide only after the UI has actually resolved that read, under its existing deadline.
+  await waitAtPhase(unresolved.or(succeeded), 'restart-resolution');
+  return unresolved.isVisible();
+}
+
 export function createCaseStartupReadTrace(page, apiOrigin, caseId) {
   const records = [];
   const requests = new WeakMap();
