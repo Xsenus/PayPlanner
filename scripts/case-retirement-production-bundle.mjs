@@ -71,7 +71,9 @@ async function tree(root, dependencies = false) {
 async function ownedRoot(root, owner) {
   assert.ok(isAbsolute(root) && resolve(root) === root);
   assert.match(owner, /^[a-f0-9]{32}$/);
-  assert.equal(dirname(root), resolve(tmpdir()));
+  const temporaryRoot = resolve(tmpdir());
+  if (dirname(root) !== temporaryRoot) console.log('CASE_RETIREMENT_BUNDLE_TEMP_ROOT_MISMATCH');
+  assert.equal(dirname(root), temporaryRoot);
   assert.equal(basename(root), 'pp_case_retirement_bundle_' + owner);
   assert.ok((await lstat(root)).isDirectory() && !(await lstat(root)).isSymbolicLink());
 }

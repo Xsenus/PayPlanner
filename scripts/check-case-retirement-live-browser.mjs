@@ -6,7 +6,7 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { createServer as createControlServer } from 'node:http';
 import { build, preview } from 'vite';
 import { prepareSyntheticBrowserUi } from './synthetic-browser-ui.mjs';
-import { createCaseReadLifecycle, createCaseRestartObserver, createCaseStartupReadTrace, isCaseBoundaryRead } from './case-retirement-browser-lifecycle.mjs';
+import { completeCaseUploadResponse, createCaseReadLifecycle, createCaseRestartObserver, createCaseStartupReadTrace, isCaseBoundaryRead, waitForCaseRestartResolution } from './case-retirement-browser-lifecycle.mjs';
 import { openRetirementProductionBundle, retirementBundlePhase, withRetirementBuildEnvironment } from './case-retirement-production-bundle.mjs';
 
 const api = new URL(process.env.CASE_RETIREMENT_API);
@@ -181,6 +181,16 @@ try {
     page.on('requestfinished', request => traceRead('finished', request));
     page.on('requestfailed', request => traceRead('failed', request));
     let retirePosts = 0; let filePosts = 0; let caseSaves = 0; let documentReads = 0; let publisherPosts = 0;
+    let uploadInputState = null;
+    const uploadResponseAtPhase = (phase, predicate) => page.waitForResponse(predicate).catch(error => {
+      if (error && typeof error.message === 'string') {
+        const diagnostic = JSON.stringify({ phase, filePosts, caseSaves, uploadInputState,
+          reads: caseReads.snapshot(), startupReads: startupReads.snapshot() });
+        error.message = 'CASE_RETIREMENT_UPLOAD_WAIT ' + diagnostic + '\n' + error.message;
+        if (typeof error.stack === 'string') error.stack = 'CASE_RETIREMENT_UPLOAD_WAIT ' + diagnostic + '\n' + error.stack;
+      }
+      throw error;
+    });
     const editing = settings.flow !== 'documents' && settings.flow !== 'version';
     const versionAttempt = settings.flow.includes('version');
     const publishedWinner = settings.flow.startsWith('published-');
@@ -296,6 +306,7 @@ try {
       if (url.pathname.includes('/documents/uploads') && request.method() === 'GET') reads.push(url.searchParams.getAll('uploadKeys'));
       if (request.method() === 'POST' && (url.pathname === '/api/v2/cases/' + settings.caseId + '/documents' || /\/api\/case-documents\/\d+\/versions$/.test(url.pathname))) {
         filePosts++; fileKeys.push(request.headers()['x-upload-key']);
+        return (${completeCaseUploadResponse.toString()})(route, caseReads);
       }
       return route.continue();
     });
@@ -357,7 +368,12 @@ try {
     if (restarted) {
       await restartFinished;
       const unresolved = panel.getByText('Не удалось подтвердить результат. Обновите загрузки перед следующим действием.', { exact: true });
-      if (await unresolved.isVisible()) {
+      const succeeded = panel.getByText('Прежняя попытка прекращена. Новый файл выберите и отправьте отдельно.', { exact: true });
+      // The durable row alone can precede the action result. Only its enabled
+      // explicit-confirmation button proves that the UI still retains the identity.
+      const retired = panel.getByRole('listitem').filter({ hasText: 'Прежняя попытка прекращена и больше не добавит документ. Новый файл отправляется отдельным действием.' })
+        .getByRole('button', { name: 'Подготовить новую загрузку', exact: true, disabled: false });
+      if (await (${waitForCaseRestartResolution.toString()})(unresolved, succeeded, waitAtPhase, retired)) {
         check(retirePosts === 1 && filePosts === 0 && caseSaves === 0, 'Unresolved restart triggered an automatic write');
         const retained = await page.evaluate(() => JSON.parse(sessionStorage.getItem('pp.case-document-upload-attempts.v1')));
         check(retained?.length === 1 && retained[0].key === settings.key, 'Unavailable proof released the identity');
@@ -409,7 +425,7 @@ try {
       const inputName = modal ? 'Загрузить новую версию base-browser-version.bin' : 'Загрузить новую версию документа base-browser-version.bin';
       await openDocumentActions('base-browser-version.bin');
       const [versionResponse] = await Promise.all([
-        page.waitForResponse(response => response.request().method() === 'POST' && (modal
+        uploadResponseAtPhase('separate-version-response', response => response.request().method() === 'POST' && (modal
           ? new URL(response.url()).pathname === '/api/v2/cases/' + settings.caseId + '/documents'
           : new URL(response.url()).pathname === '/api/case-documents/' + settings.sourceDocumentId + '/versions')),
         page.getByLabel(inputName, { exact: true }).setInputFiles({ name: settings.pending.fileName,
@@ -426,8 +442,12 @@ try {
     } else if (editing) {
       const writFileName = settings.flow.includes('writ') ? settings.pending.fileName : 'separate-browser-writ.pdf';
       const [writResponse] = await Promise.all([
-        page.waitForResponse(response => new URL(response.url()).pathname === '/api/v2/cases/' + settings.caseId + '/documents' && response.request().method() === 'POST'),
-        page.getByLabel('Загрузить скан исполнительного листа', { exact: true }).setInputFiles({ name: writFileName, mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\nOwned browser writ\n%%EOF') }),
+        uploadResponseAtPhase('separate-writ-response', response => new URL(response.url()).pathname === '/api/v2/cases/' + settings.caseId + '/documents' && response.request().method() === 'POST'),
+        (async () => {
+          const input = page.getByLabel('Загрузить скан исполнительного листа', { exact: true });
+          await input.setInputFiles({ name: writFileName, mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\nOwned browser writ\n%%EOF') });
+          uploadInputState = await input.evaluate(element => ({ connected: element.isConnected, disabled: element.disabled, files: element.files?.length ?? 0 }));
+        })(),
       ]);
       check(writResponse.status() === 201, 'Actual writ upload failed: ' + await writResponse.text());
       await waitAtPhase(page.getByLabel('Скачать скан ' + writFileName, { exact: true }), 'new-writ-visible');
@@ -436,7 +456,7 @@ try {
     } else {
     await page.getByLabel('Файл документа', { exact: true }).setInputFiles({ name: 'separate-browser-document.txt', mimeType: 'text/plain', buffer: Buffer.from('Separate browser document') });
     const [uploaded] = await Promise.all([
-      page.waitForResponse(response => new URL(response.url()).pathname === '/api/v2/cases/' + settings.caseId + '/documents' && response.request().method() === 'POST'),
+      uploadResponseAtPhase('separate-document-response', response => new URL(response.url()).pathname === '/api/v2/cases/' + settings.caseId + '/documents' && response.request().method() === 'POST'),
       page.getByRole('button', { name: 'Загрузить', exact: true }).click(),
     ]);
     check(uploaded.status() === 201, 'Actual document upload failed: ' + uploaded.status() + ' ' + await uploaded.text());
@@ -447,7 +467,7 @@ try {
     await caseReads.drain('document-upload');
     tracePhase = 'version-upload';
     const [versionResponse] = await Promise.all([
-      page.waitForResponse(response => /\/api\/case-documents\/\d+\/versions$/.test(new URL(response.url()).pathname) && response.request().method() === 'POST'),
+      uploadResponseAtPhase('separate-document-version-response', response => /\/api\/case-documents\/\d+\/versions$/.test(new URL(response.url()).pathname) && response.request().method() === 'POST'),
       versionInput.setInputFiles({ name: 'separate-browser-version.txt', mimeType: 'text/plain', buffer: Buffer.from('Separate browser version') }),
     ]);
     check(versionResponse.status() === 201, 'Actual version upload failed: ' + versionResponse.status() + ' ' + await versionResponse.text());

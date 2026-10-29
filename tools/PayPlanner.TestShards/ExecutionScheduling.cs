@@ -156,20 +156,27 @@ public static class ExecutionScheduling
         ShardPlan.Require(lane is "fast" or "heavy" or "exclusive", "Unsupported execution lane.");
         // The first process needs the same reserve as its siblings. The 1 GiB
         // floor is an emergency stop, not enough headroom to admit a test host.
-        var heap = lane == "exclusive" ? ExclusiveHeapBytes : OrdinaryHeapBytes;
+        // Exclusive still runs alone. Below its preferred 3 GiB heap, use the
+        // same bounded 2 GiB host as ordinary batches, retaining all 4 GiB reserve.
         return active < initialBudget && (lane != "exclusive" || active == 0)
-            && availableBytes >= ReservedBytes + heap;
+            && availableBytes >= ReservedBytes + OrdinaryHeapBytes;
     }
 
-    public static void ConfigureWorkerEnvironment(IDictionary<string, string?> environment, string lane)
+    public static void ConfigureWorkerEnvironment(IDictionary<string, string?> environment, string lane, ulong? availableBytes = null)
     {
         ShardPlan.Require(lane is "fast" or "heavy" or "exclusive", "Unsupported execution lane.");
+        var heap = lane == "exclusive" ? ExclusiveHeapBytes : OrdinaryHeapBytes;
+        if (availableBytes is { } available)
+        {
+            ShardPlan.Require(available >= ReservedBytes + OrdinaryHeapBytes,
+                "The test-host memory reserve is unavailable immediately before launch.");
+            if (lane == "exclusive" && available < ReservedBytes + ExclusiveHeapBytes) heap = OrdinaryHeapBytes;
+        }
         environment["Email__Enabled"] = "false";
         environment["BackgroundServices__Enabled"] = "false";
         environment["DOTNET_PROCESSOR_COUNT"] = "2";
         foreach (var key in environment.Keys.Where(key => key.StartsWith("DOTNET_GCHeapHardLimit", StringComparison.OrdinalIgnoreCase)
                      || key.StartsWith("COMPlus_GCHeapHardLimit", StringComparison.OrdinalIgnoreCase)).ToArray()) environment.Remove(key);
-        environment["DOTNET_GCHeapHardLimit"] = (lane == "exclusive" ? ExclusiveHeapBytes : OrdinaryHeapBytes)
-            .ToString("X", System.Globalization.CultureInfo.InvariantCulture);
+        environment["DOTNET_GCHeapHardLimit"] = heap.ToString("X", System.Globalization.CultureInfo.InvariantCulture);
     }
 }

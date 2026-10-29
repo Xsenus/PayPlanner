@@ -8,6 +8,8 @@ const eventKinds = new Set(['initial-budget', 'lane-budget', 'launch-budget', 'b
 const errorKinds = new Set(['InvalidDataException', 'IOException', 'Win32Exception', 'InvalidOperationException',
   'UnauthorizedAccessException', 'OutOfMemoryException', 'TaskCanceledException', 'OperationCanceledException', 'JsonException']);
 const numberFields = ['BatchCount', 'AdmittedWorkers', 'AvailableBytes', 'Processors', 'Workers', 'Active', 'Cases', 'ExitCode', 'VstestPeakWorkingSetBytes'];
+const uploadFailureStages = new Set(['separate-version-response', 'separate-writ-response',
+  'separate-document-response', 'separate-document-version-response']);
 
 function readJson(path) {
   try {
@@ -45,7 +47,20 @@ function trxSummary(path) {
     counts[outcome] = (counts[outcome] ?? 0) + 1;
     if (outcome !== 'Passed' && id) unsuccessfulIds.push(id);
   }
+  const browserFailureStages = new Set();
+  if (text.includes('CASE_RETIREMENT_BUNDLE_TEMP_ROOT_MISMATCH')) browserFailureStages.add('temporary-root-mismatch');
+  const marker = 'CASE_RETIREMENT_UPLOAD_WAIT ';
+  let offset = -marker.length;
+  // Emit only fixed stage codes, never the diagnostic object, paths or errors.
+  for (let captured = 0; captured < 100; captured++) {
+    offset = text.indexOf(marker, offset + marker.length);
+    if (offset < 0) break;
+    const prefix = text.slice(offset + marker.length, offset + marker.length + 200).replaceAll('&quot;', '"');
+    const stage = /^\{"phase":"([^"\r\n]{1,64})"/.exec(prefix)?.[1];
+    if (uploadFailureStages.has(stage)) browserFailureStages.add(stage);
+  }
   return { available: true, capturedOutcomes: counts, unsuccessfulIds: unsuccessfulIds.slice(0, 100),
+    browserFailureStages: [...browserFailureStages].sort(),
     omittedIds: Math.max(0, unsuccessfulIds.length - 100) };
 }
 
