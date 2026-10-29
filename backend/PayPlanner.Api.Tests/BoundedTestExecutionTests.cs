@@ -183,8 +183,14 @@ public sealed class BoundedTestExecutionTests
         Assert.Throws<InvalidDataException>(() => ExecutionScheduling.PartitionCapacity("auto", 0));
         Assert.Equal(2, ExecutionScheduling.WorkerBudget("auto", 12 * Fixture.Gib - 1, 8));
         Assert.Equal(1, ExecutionScheduling.WorkerBudget("auto", 8 * Fixture.Gib - 1, 8));
-        Assert.True(ExecutionScheduling.CanLaunchAdditional(0, 4, Fixture.Gib));
+        Assert.False(ExecutionScheduling.CanLaunchAdditional(0, 4, Fixture.Gib));
         Assert.False(ExecutionScheduling.CanLaunchAdditional(0, 4, Fixture.Gib - 1));
+        Assert.True(ExecutionScheduling.CanLaunchAdditional(0, 4, 6 * Fixture.Gib));
+        Assert.False(ExecutionScheduling.CanLaunchAdditional(0, 4, 6 * Fixture.Gib - 1));
+        Assert.True(ExecutionScheduling.CanLaunchAdditional(0, 4, 7 * Fixture.Gib, "exclusive"));
+        Assert.False(ExecutionScheduling.CanLaunchAdditional(0, 4, 7 * Fixture.Gib - 1, "exclusive"));
+        Assert.False(ExecutionScheduling.CanLaunchAdditional(1, 4, 20 * Fixture.Gib, "exclusive"));
+        Assert.Throws<InvalidDataException>(() => ExecutionScheduling.CanLaunchAdditional(0, 1, 20 * Fixture.Gib, "unknown"));
         Assert.True(ExecutionScheduling.CanLaunchAdditional(1, 4, 6 * Fixture.Gib));
         Assert.False(ExecutionScheduling.CanLaunchAdditional(1, 4, 6 * Fixture.Gib - 1));
         Assert.False(ExecutionScheduling.CanLaunchAdditional(4, 4, 100 * Fixture.Gib));
