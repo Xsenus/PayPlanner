@@ -6,6 +6,16 @@ namespace PayPlanner.Api.Services.Documents;
 /// <summary>Явный выбор изображений при выдаче документа; отсутствие выбора сохраняет прежний режим.</summary>
 public sealed record DocumentImagePrintOptions(bool IncludeLogo, bool IncludeSeal, bool IncludeSignature)
 {
+    public static DocumentImagePrintOptions? WithDefaults(DocumentImagePrintOptions? defaults,
+        bool legacyLogo, bool legacyCombined, bool? combinedOverride,
+        bool? includeLogo, bool? includeSeal, bool? includeSignature)
+    {
+        // An explicit old menu/query choice keeps its meaning, including the legacy logo behavior.
+        if (combinedOverride.HasValue || defaults is null)
+            return FromOverrides(legacyLogo, combinedOverride ?? legacyCombined, includeLogo, includeSeal, includeSignature);
+        return new(includeLogo ?? defaults.IncludeLogo, includeSeal ?? defaults.IncludeSeal, includeSignature ?? defaults.IncludeSignature);
+    }
+
     public static DocumentImagePrintOptions? FromOverrides(bool legacyLogo, bool legacyCombined,
         bool? includeLogo, bool? includeSeal, bool? includeSignature)
         => includeLogo is null && includeSeal is null && includeSignature is null ? null

@@ -1,6 +1,27 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { apiService } from './api';
 
+describe('document image defaults transport', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it.each(['invoices', 'acts', 'contracts'] as const)('reads %s defaults without caching or issuing a file', async section => {
+    const options = { includeLogo: false, includeSeal: true, includeSignature: false };
+    const request = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(options), { headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', request);
+    const controller = new AbortController();
+    await expect(apiService.getDocumentImagePrintDefaults(section, 7, controller.signal)).resolves.toEqual(options);
+    expect(request).toHaveBeenCalledTimes(1);
+    const [url, init] = request.mock.calls[0];
+    expect(String(url)).toMatch(new RegExp(`/${section}/7/image-print-defaults$`));
+    expect(init?.signal).toBe(controller.signal);
+    expect(init?.cache).toBe('no-store');
+    expect(init?.method ?? 'GET').toBe('GET');
+  });
+  it('preserves a readable access error', async () => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ message: 'Нет доступа' }), { status: 403, headers: { 'Content-Type': 'application/json' } })));
+    await expect(apiService.getDocumentImagePrintDefaults('acts', 7)).rejects.toThrow('Нет доступа');
+  });
+});
+
 describe('invoice independent image transport', () => {
   afterEach(() => vi.unstubAllGlobals());
 

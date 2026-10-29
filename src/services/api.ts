@@ -4762,6 +4762,10 @@ export class ApiService {
     return response.blob();
   }
 
+  async getDocumentImagePrintDefaults(section: 'invoices' | 'acts' | 'contracts', id: number, signal?: AbortSignal) {
+    return this.request<DocumentImagePrintOptions>(`/${section}/${id}/image-print-defaults`, { signal, cache: 'no-store' });
+  }
+
   async downloadInvoiceDocument(
     id: number,
     format: 'word' | 'pdf' | 'html' = 'word',

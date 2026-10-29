@@ -1382,6 +1382,26 @@ public class ActsController : ControllerBase
         return Ok(ActDocumentTemplateEngine.CreateResponse(storage));
     }
 
+    [HttpGet("{id:int}/image-print-defaults")]
+    public async Task<ActionResult<DocumentImagePrintOptions>> GetImagePrintDefaults(int id, CancellationToken ct)
+    {
+        if (await RequireActsPermissionAsync(permission => permission.CanExport, ct) is { } forbidden) return forbidden;
+        var visibility = await ResolveActsVisibilityAsync(ct);
+        if (visibility is null) return MissingActsVisibilityResult();
+        var document = await _db.Acts.AsNoTracking().ApplyActVisibility(visibility).Where(act => act.Id == id)
+            .Select(act => new Act { Id = act.Id, SellerCompanyId = act.SellerCompanyId, SellerBranchId = act.SellerBranchId,
+                SellerSnapshotJson = act.SellerSnapshotJson, Invoice = act.Invoice == null ? null : new Payment { Type = act.Invoice.Type } }).SingleOrDefaultAsync(ct);
+        if (document is null) return NotFound();
+        var options = await _documentSeller.ReadImagePrintDefaultsAsync(document, ct);
+        if (options is null)
+        {
+            var settings = await GetActDocumentTemplateSettingsAsync(ct);
+            options = new(false, settings.PrintWithSignatureAndSealByDefault, settings.PrintWithSignatureAndSealByDefault);
+        }
+        if (!await CanUseActSellerAsync(id, edit: false, ct)) return Forbid();
+        return Ok(options);
+    }
+
     [HttpGet("{id:int}/document")]
     public async Task<IActionResult> GetDocument(
         int id,
@@ -1408,7 +1428,10 @@ public class ActsController : ControllerBase
         var template = SelectActDocumentTemplate(documentSettings);
         var mainCompany = await ResolveActSellerAsync(act, await LoadMainCompanyAsync(ct), normalizedFormat != "html", ct);
         var shouldIncludeSignatureAndSeal = includeSignatureAndSeal ?? documentSettings.PrintWithSignatureAndSealByDefault;
-        var imageOptions = DocumentImagePrintOptions.FromOverrides(false, shouldIncludeSignatureAndSeal, includeLogo, includeSeal, includeSignature);
+        var defaults = includeSignatureAndSeal.HasValue || (includeLogo.HasValue && includeSeal.HasValue && includeSignature.HasValue)
+            ? null : await _documentSeller.ReadImagePrintDefaultsAsync(act, ct);
+        var imageOptions = DocumentImagePrintOptions.WithDefaults(defaults, false, documentSettings.PrintWithSignatureAndSealByDefault,
+            includeSignatureAndSeal, includeLogo, includeSeal, includeSignature);
         var lines = act.LineItems.OrderBy(item => item.SortOrder).ThenBy(item => item.Id).ToList();
         var documentHtml = imageOptions is null
             ? ActDocumentTemplateEngine.RenderHtml(template.Html, act, lines, mainCompany, shouldIncludeSignatureAndSeal)

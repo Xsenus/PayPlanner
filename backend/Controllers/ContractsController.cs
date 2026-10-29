@@ -373,6 +373,21 @@ public class ContractsController : ControllerBase
         return dto is null ? NotFound() : Ok(dto);
     }
 
+    [HttpGet("{id:int}/image-print-defaults")]
+    public async Task<ActionResult<DocumentImagePrintOptions>> GetImagePrintDefaults(int id, CancellationToken ct)
+    {
+        if (await RequireSectionPermissionAsync(RolePermissionCatalog.Contracts, permission => permission.CanExport, ct) is { } forbidden) return forbidden;
+        var visibility = await ResolveContractsVisibilityAsync(ct);
+        if (visibility is null) return MissingContractsVisibilityResult();
+        var document = await _db.Contracts.AsNoTracking().ApplyContractVisibility(visibility).Where(contract => contract.Id == id)
+            .Select(contract => new Contract { Id = contract.Id, SellerCompanyId = contract.SellerCompanyId,
+                SellerBranchId = contract.SellerBranchId, SellerSnapshotJson = contract.SellerSnapshotJson }).SingleOrDefaultAsync(ct);
+        if (document is null) return NotFound();
+        var options = await _documentSeller.ReadImagePrintDefaultsAsync(document, ct) ?? new(false, false, false);
+        if (!await CanUseContractSellerAsync(id, edit: false, ct)) return Forbid();
+        return Ok(options);
+    }
+
     [HttpGet("{id:int}/document")]
     public async Task<IActionResult> GetDocument(
         int id,
@@ -393,7 +408,9 @@ public class ContractsController : ControllerBase
 
         var mainCompany = await ResolveContractSellerAsync(contract, await LoadMainCompanyAsync(ct), NormalizeDocumentFormat(format) != "html", ct);
         var template = await GetContractDocumentTemplateAsync(templateKey, ct);
-        var imageOptions = DocumentImagePrintOptions.FromOverrides(false, false, includeLogo, includeSeal, includeSignature);
+        var defaults = includeLogo.HasValue && includeSeal.HasValue && includeSignature.HasValue
+            ? null : await _documentSeller.ReadImagePrintDefaultsAsync(contract, ct);
+        var imageOptions = DocumentImagePrintOptions.WithDefaults(defaults, false, false, null, includeLogo, includeSeal, includeSignature);
         var documentHtml = imageOptions is null
             ? ContractDocumentTemplateEngine.RenderHtml(template.Html, contract, mainCompany)
             : ContractDocumentTemplateEngine.RenderHtml(template.Html, contract, mainCompany, imageOptions);

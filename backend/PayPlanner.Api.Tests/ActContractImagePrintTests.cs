@@ -22,7 +22,7 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public class ActContractImagePrintTests
+public partial class ActContractImagePrintTests
 {
     private const string Image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
     public static IEnumerable<object[]> Masks() => Enumerable.Range(0, 8).Select(mask => new object[] { mask });
@@ -63,11 +63,12 @@ public class ActContractImagePrintTests
         return new(db, user, company, act, contract);
     }
 
-    private static TestServer Server(Fixture fixture) => new(new WebHostBuilder().ConfigureServices(services =>
+    private static TestServer Server(Fixture fixture, PdfRecorder? pdf = null) => new(new WebHostBuilder().ConfigureServices(services =>
     {
         services.AddSingleton(fixture.Db);
         services.AddSingleton<IEmailService>(new NoEmail());
         services.AddSingleton<IFormRequirementsService>(new NoRequirements());
+        if (pdf is not null) services.AddSingleton<IInvoiceDocumentPdfService>(pdf);
         services.AddAuthentication("print-test").AddScheme<AuthenticationSchemeOptions, PrintAuthentication>("print-test", _ => { });
         services.AddAuthorization();
         services.AddControllers().AddApplicationPart(typeof(ActsController).Assembly);

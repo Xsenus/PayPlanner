@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services.Documents;
 using PayPlanner.Api.Services.LegalEntities;
 
 namespace PayPlanner.Api.Services.Companies;
@@ -247,6 +248,9 @@ public sealed class SellerSnapshotTooLargeException(int length, int limit) : Exc
 
 public interface IDocumentSellerService
 {
+    /// <summary>Read-only defaults for an already authorized document; never freezes or loads images.</summary>
+    Task<DocumentImagePrintOptions?> ReadImagePrintDefaultsAsync(IDocumentSeller document, CancellationToken ct);
+
     Task<string> ReadCreationPolicyAsync(CancellationToken ct);
 
     /// <summary>Вызывается только для нового документа в его атомарной транзакции, после проверки seller choice.</summary>
@@ -274,6 +278,38 @@ public sealed class DocumentSellerService : IDocumentSellerService
     public DocumentSellerService(PaymentContext db)
     {
         _db = db;
+    }
+
+    public async Task<DocumentImagePrintOptions?> ReadImagePrintDefaultsAsync(IDocumentSeller document, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        // These documents must never acquire our images on the supplier's side.
+        if (document is Payment { Type: PaymentType.Expense }) return null;
+        if (document is Act { Invoice.Type: PaymentType.Expense }) return new(false, false, false);
+        CompanyDocumentImagePrintDefaults? defaults;
+        if (!string.IsNullOrWhiteSpace(document.SellerSnapshotJson))
+        {
+            var metadata = SellerLegalEntityComposer.ReadMetadata(document.SellerSnapshotJson)
+                ?? throw new SellerSelectionException("Сохранённые реквизиты документа повреждены. Автоматическая замена текущим профилем недоступна.");
+            defaults = metadata.ImagePrintDefaults;
+        }
+        else
+        {
+            var registry = await OwnCompanyRegistry.ReadStateAsync(_db, ct);
+            var selected = await SelectForFreezeAsync(document, registry, false, ct);
+            if (!selected.CompanyId.HasValue) return null;
+            var state = await new CompanyDocumentImagePrintDefaultsService(_db).ReadForSnapshotAsync(selected.CompanyId.Value, ct);
+            if (state.Invalid)
+                throw new SellerSelectionException("Настройки изображений компании повреждены. Исправьте или сбросьте их в профиле компании.");
+            defaults = state.Value;
+        }
+        return document switch
+        {
+            Payment => defaults?.Invoice,
+            Act => defaults?.Act,
+            Contract => defaults?.Contract,
+            _ => throw new NotSupportedException("Неизвестный документ продавца."),
+        };
     }
 
     public async Task<string> ReadCreationPolicyAsync(CancellationToken ct)

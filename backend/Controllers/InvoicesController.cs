@@ -3218,6 +3218,26 @@ public class InvoicesController : ControllerBase
         return Content(html, "text/html; charset=utf-8");
     }
 
+    [HttpGet("{id:int}/image-print-defaults")]
+    public async Task<ActionResult<DocumentImagePrintOptions>> GetImagePrintDefaults(int id, CancellationToken ct)
+    {
+        if (await RequireAccountsPermissionAsync(permission => permission.CanExport, ct) is { } forbidden) return forbidden;
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        if (visibility is null) return MissingAccountsVisibilityResult();
+        var document = await BuildVisibleInvoicePaymentsQuery(trackChanges: false, visibility).Where(payment => payment.Id == id)
+            .Select(payment => new Payment { Id = payment.Id, Type = payment.Type, SellerCompanyId = payment.SellerCompanyId,
+                SellerBranchId = payment.SellerBranchId, SellerSnapshotJson = payment.SellerSnapshotJson }).SingleOrDefaultAsync(ct);
+        if (document is null) return NotFound();
+        var options = await _documentSeller.ReadImagePrintDefaultsAsync(document, ct);
+        if (options is null)
+        {
+            var settings = await GetInvoiceDocumentTemplateSettingsAsync(ct);
+            options = new(true, settings.PrintWithSignatureAndSealByDefault, settings.PrintWithSignatureAndSealByDefault);
+        }
+        if (!await CanUseInvoiceSellerAsync(id, edit: false, ct)) return Forbid();
+        return Ok(options);
+    }
+
     [HttpGet("{id:int}/document")]
     public async Task<IActionResult> GetDocument(
         int id,
@@ -3249,7 +3269,10 @@ public class InvoicesController : ControllerBase
         await RememberInvoiceDocumentTemplateAsync(payment, template.Key, ct);
         var mainCompany = await ResolveInvoiceSellerAsync(payment, await LoadMainCompanyAsync(ct), normalizedFormat != "html", ct);
         var shouldIncludeSignatureAndSeal = includeSignatureAndSeal ?? documentSettings.PrintWithSignatureAndSealByDefault;
-        var imageOptions = DocumentImagePrintOptions.FromOverrides(true, shouldIncludeSignatureAndSeal, includeLogo, includeSeal, includeSignature);
+        var defaults = includeSignatureAndSeal.HasValue || (includeLogo.HasValue && includeSeal.HasValue && includeSignature.HasValue)
+            ? null : await _documentSeller.ReadImagePrintDefaultsAsync(payment, ct);
+        var imageOptions = DocumentImagePrintOptions.WithDefaults(defaults, true, documentSettings.PrintWithSignatureAndSealByDefault,
+            includeSignatureAndSeal, includeLogo, includeSeal, includeSignature);
         var documentHtml = imageOptions is null ? InvoiceDocumentTemplateEngine.RenderHtml(
             template.Html,
             payment,
