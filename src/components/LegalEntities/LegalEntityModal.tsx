@@ -95,6 +95,7 @@ import {
   type LegalEntityImageUploadProfile,
 } from "./legalEntityImageUtils";
 import { inspectLegalEntityImageSource, validateLegalEntityImageDimensions } from "./legalEntityImageSourceUtils";
+import { validateLegalEntityImageTransparency } from "./legalEntityImageTransparencyUtils";
 import { getLegalEntityImageFieldState } from "./legalEntityImageFieldUtils";
 import { CompanyBankConnectionsSection } from "./CompanyBankConnectionsSection";
 import { CompanyBranchesSection } from "./CompanyBranchesSection";
@@ -702,6 +703,7 @@ async function convertImageToUploadProfileDataUrl(
   context.clearRect(0, 0, canvas.width, canvas.height);
   context.drawImage(image, 0, 0, canvas.width, canvas.height);
 
+  validateLegalEntityImageTransparency(canvas, context, profile);
   return encodeLegalEntityImageCanvas(canvas, context, profile);
 }
 

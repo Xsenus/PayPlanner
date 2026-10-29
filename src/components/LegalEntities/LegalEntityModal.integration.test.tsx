@@ -161,6 +161,10 @@ function createInitialLegalEntity(
   } as LegalEntityDetail;
 }
 
+function transparentImageData(_x: number, _y: number, width: number, height: number): ImageData {
+  return { data: new Uint8ClampedArray(width * height * 4) } as ImageData;
+}
+
 function deferCompanyImageProcessing() {
   const images: DeferredImage[] = [];
   let drawnSource = '';
@@ -176,6 +180,7 @@ function deferCompanyImageProcessing() {
   const context = {
     clearRect: vi.fn(),
     drawImage: vi.fn((image: DeferredImage) => { drawnSource = image.source; }),
+    getImageData: vi.fn(transparentImageData),
     save: vi.fn(), restore: vi.fn(), fillRect: vi.fn(),
   };
   const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext')
@@ -184,6 +189,8 @@ function deferCompanyImageProcessing() {
   vi.stubGlobal('Image', DeferredImage);
   return {
     images,
+    context,
+    encode,
     restore() { vi.unstubAllGlobals(); getContext.mockRestore(); encode.mockRestore(); },
   };
 }
@@ -662,7 +669,7 @@ describe('LegalEntityModal integration', () => {
     const logo = 'data:image/png;base64,existing-logo';
     const initial = createInitialLegalEntity({ shortName: 'Неизменённая компания', logoDataUrl: logo });
     const submit = vi.fn();
-    const context = { clearRect: vi.fn(), drawImage: vi.fn(), save: vi.fn(), restore: vi.fn(), fillRect: vi.fn() };
+    const context = { clearRect: vi.fn(), drawImage: vi.fn(), getImageData: vi.fn(transparentImageData), save: vi.fn(), restore: vi.fn(), fillRect: vi.fn() };
     const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context as unknown as CanvasRenderingContext2D);
     const encode = vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockImplementation(mime => mime === 'image/png'
       ? 'P'.repeat(500_000) : 'data:image/jpeg;base64,incorrect-white-background');
@@ -939,6 +946,42 @@ describe('LegalEntityModal integration', () => {
       expect(submit).not.toHaveBeenCalled();
       await waitFor(() => expect(signature.value).toBe(''));
     } finally { read.mockRestore(); }
+  });
+
+  it.each([
+    ['page', 'Печать компании', 'sealDataUrl'], ['modal', 'Печать компании', 'sealDataUrl'],
+    ['page', 'Подпись руководителя', 'directorSignatureDataUrl'], ['modal', 'Подпись руководителя', 'directorSignatureDataUrl'],
+  ] as const)('rejects an opaque %s %s before encoding, then accepts a transparent retry', async (mode, label, key) => {
+    const user = userEvent.setup();
+    const deferred = deferCompanyImageProcessing();
+    const initial = createInitialLegalEntity({ shortName: 'Несохранённые реквизиты', logoDataUrl: 'data:image/png;base64,old-logo' });
+    const submit = vi.fn<(payload: LegalEntityInput) => Promise<LegalEntityDetail>>().mockResolvedValue(initial);
+    deferred.context.getImageData.mockImplementationOnce((_x, _y, width, height) => ({
+      data: new Uint8ClampedArray(width * height * 4).fill(255),
+    } as ImageData));
+    try {
+      render(<LegalEntityModal isOpen mode={mode} onClose={vi.fn()} onSubmit={submit} initial={initial}
+        suggest={vi.fn().mockResolvedValue([])} findById={vi.fn()} allowEdit allowDelete={false} />);
+      const input = (await screen.findByText(label)).parentElement!.querySelector('input[type="file"]') as HTMLInputElement;
+      const file = imageFixtureFile('same-png.png');
+      await user.upload(input, file);
+      await waitFor(() => expect(deferred.images).toHaveLength(1));
+      await act(async () => { deferred.images[0].onload?.(); });
+      await screen.findByText(`${label}: нужен PNG с прозрачными областями. Выберите файл без непрозрачной подложки.`);
+      await waitFor(() => expect(input.value).toBe(''));
+      expect(deferred.encode).not.toHaveBeenCalled();
+      expect(submit).not.toHaveBeenCalled();
+      expect(screen.queryByAltText(label)).toBeNull();
+      expect(screen.getByDisplayValue('Несохранённые реквизиты')).toBeTruthy();
+      expect(screen.getByAltText('Логотип компании').getAttribute('src')).toBe(initial.logoDataUrl);
+      await user.upload(input, file);
+      await waitFor(() => expect(deferred.images).toHaveLength(2));
+      await act(async () => { deferred.images[1].onload?.(); });
+      await screen.findByAltText(label);
+      await user.click(screen.getByRole('button', { name: /^Сохранить$/ }));
+      await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+      expect(submit.mock.calls[0][0]).toMatchObject({ [key]: expect.stringContaining('data:image/png;base64,'), shortName: initial.shortName, logoChanged: false });
+    } finally { deferred.restore(); }
   });
 
   it.each(['page', 'modal'] as const)('rejects actual source headers in the %s form before full read, preserving the draft', async mode => {
