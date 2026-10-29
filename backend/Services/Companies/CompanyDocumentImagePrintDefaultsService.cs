@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
@@ -14,7 +16,7 @@ public sealed record CompanyDocumentImagePrintDefaults(
     public bool IsEmpty => Invoice is null && Act is null && Contract is null;
 }
 
-public sealed record CompanyDocumentImagePrintDefaultsState(CompanyDocumentImagePrintDefaults? Value, bool Invalid = false);
+public sealed record CompanyDocumentImagePrintDefaultsState(CompanyDocumentImagePrintDefaults? Value, bool Invalid = false, string? Version = null);
 
 /// <summary>Настройки компании в существующем хранилище; запись участвует в SaveChanges профиля.</summary>
 public sealed class CompanyDocumentImagePrintDefaultsService(PaymentContext db)
@@ -33,8 +35,49 @@ public sealed class CompanyDocumentImagePrintDefaultsService(PaymentContext db)
     {
         var key = Key(companyId);
         var value = await db.SystemSettings.AsNoTracking().Where(row => row.Key == key).Select(row => row.Value).SingleOrDefaultAsync(ct);
-        return Parse(value);
+        return Parse(value) with { Version = VersionOf(companyId, value) };
     }
+
+    public static bool IsValidVersion(string? version) => version is { Length: 64 } && version.All(Uri.IsHexDigit);
+
+    private static string VersionOf(int companyId, string? value)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        hash.AppendData(Encoding.UTF8.GetBytes(Key(companyId) + (value is null ? ":missing" : ":value:")));
+        if (value is not null)
+        {
+            // Даже повреждённая большая запись не требует второго большого буфера.
+            var encoder = Encoding.UTF8.GetEncoder();
+            Span<byte> bytes = stackalloc byte[2048];
+            var remaining = value.AsSpan();
+            do
+            {
+                encoder.Convert(remaining, bytes, true, out var used, out var written, out _);
+                hash.AppendData(bytes[..written]);
+                remaining = remaining[used..];
+            } while (!remaining.IsEmpty);
+        }
+        return Convert.ToHexString(hash.GetHashAndReset());
+    }
+
+    public Task<T> EditAsync<T>(int companyId, string expectedVersion, Func<Task<T>> edit, CancellationToken ct)
+        => DocumentSellerLease.RunAsync(db, async lease =>
+        {
+            lease.AdmitCleanTracker();
+            // Строка компании существует и при отсутствии/сбросе настройки: блокируем также первый INSERT.
+            if (db.Database.IsNpgsql())
+            {
+                var ids = await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"LegalEntities\" WHERE \"Id\" = {companyId} FOR UPDATE NOWAIT").ToArrayAsync(ct);
+                if (ids.Length != 1) throw new SellerSnapshotConflictException();
+            }
+            else if (!await db.LegalEntities.AsNoTracking().AnyAsync(row => row.Id == companyId, ct))
+                throw new SellerSnapshotConflictException();
+            var current = await ReadAsync(companyId, ct);
+            if (!string.Equals(expectedVersion, current.Version, StringComparison.OrdinalIgnoreCase)) throw new SellerSnapshotConflictException();
+            var tracked = db.SystemSettings.Local.SingleOrDefault(row => row.Key == Key(companyId));
+            if (tracked is not null) await db.Entry(tracked).ReloadAsync(ct);
+            return await edit();
+        }, ct);
 
     // Не сохраняет чужие pending entries: вызывающий сохраняет настройки и профиль одним SaveChanges/транзакцией.
     public async Task StageAsync(int companyId, CompanyDocumentImagePrintDefaults? value, bool? changed, CancellationToken ct = default)

@@ -170,6 +170,7 @@ public class LegalEntityRequest
 
     public CompanyDocumentImagePrintDefaultsRequest? DocumentImagePrintDefaults { get; set; }
     public bool? DocumentImagePrintDefaultsChanged { get; set; }
+    public string? DocumentImagePrintDefaultsVersion { get; set; }
 
     [MaxLength(8000)]
     public string? DocumentDirectorJson { get; set; }

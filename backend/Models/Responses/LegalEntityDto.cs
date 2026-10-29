@@ -109,6 +109,7 @@ public class LegalEntityDetailDto : LegalEntityListItemDto
     public CompanyDocumentImagePrintDefaults? DocumentImagePrintDefaults { get; set; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
     public bool DocumentImagePrintDefaultsInvalid { get; set; }
+    public string DocumentImagePrintDefaultsVersion { get; set; } = string.Empty;
 }
 
 public class MainCompanySettingsDto

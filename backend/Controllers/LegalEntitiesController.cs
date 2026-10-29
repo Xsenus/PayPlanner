@@ -524,6 +524,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         var defaults = await new CompanyDocumentImagePrintDefaultsService(_db).ReadAsync(entity.Id, ct);
         result.DocumentImagePrintDefaults = defaults.Value;
         result.DocumentImagePrintDefaultsInvalid = defaults.Invalid;
+        result.DocumentImagePrintDefaultsVersion = defaults.Version!;
         return result;
     }
 
@@ -2246,74 +2247,90 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             return errorResult;
         }
 
-        entity.ShortName = request.ShortName.Trim();
-        entity.FullName = NormalizeOptional(request.FullName);
-        entity.Inn = NormalizeOptional(request.Inn);
-        entity.Kpp = NormalizeOptional(request.Kpp);
-        entity.Ogrn = NormalizeOptional(request.Ogrn);
-        entity.Address = ResolveLegacyAddressValue(request.Addresses, request.Address);
-        entity.Phone = NormalizeOptional(request.Phone);
-        entity.Email = NormalizeOptional(request.Email);
-        entity.Director = NormalizeOptional(request.Director);
-        entity.ResponsibleUserId = responsibleUserId;
-        entity.ClientStatusId = request.ClientStatusId;
-        entity.IsClientAndSupplier = request.IsClientAndSupplier;
-        entity.Country = NormalizeOptional(request.Country);
-        entity.BaseCurrency = NormalizeOptional(request.BaseCurrency);
-        entity.ServiceLanguage = NormalizeOptional(request.ServiceLanguage);
-        entity.OrganizationForm = NormalizeOptional(request.OrganizationForm);
-        entity.Timezone = NormalizeOptional(request.Timezone);
-        entity.TaxSystem = NormalizeOptional(request.TaxSystem);
-        entity.TaxSystemMode = NormalizeOptional(request.TaxSystemMode);
-        entity.IncomeTaxRate = NormalizeOptional(request.IncomeTaxRate);
-        entity.IncomeExpenseTaxRate = NormalizeOptional(request.IncomeExpenseTaxRate);
-        entity.VatWithoutVat = request.VatWithoutVat;
-        entity.Okved = NormalizeOptional(request.Okved);
-        entity.Okpo = NormalizeOptional(request.Okpo);
-        entity.Okato = NormalizeOptional(request.Okato);
-        entity.Oktmo = NormalizeOptional(request.Oktmo);
-        entity.Okogu = NormalizeOptional(request.Okogu);
-        entity.Okfs = NormalizeOptional(request.Okfs);
-        entity.Okopf = NormalizeOptional(request.Okopf);
-        entity.Pfr = NormalizeOptional(request.Pfr);
-        entity.Fss = NormalizeOptional(request.Fss);
-        entity.CharterCapital = NormalizeOptional(request.CharterCapital);
-        entity.TaxRegistrationDate = NormalizeOptional(request.TaxRegistrationDate);
-        entity.TaxOfficeCode = NormalizeOptional(request.TaxOfficeCode);
-        entity.TaxRegion = NormalizeOptional(request.TaxRegion);
-        entity.IfnsName = NormalizeOptional(request.IfnsName);
-        entity.TaxOfficePhone = NormalizeOptional(request.TaxOfficePhone);
-        entity.TreasuryInn = NormalizeOptional(request.TreasuryInn);
-        entity.TreasuryKpp = NormalizeOptional(request.TreasuryKpp);
-        entity.TreasuryRecipientName = NormalizeOptional(request.TreasuryRecipientName);
-        entity.TreasuryBankBik = NormalizeOptional(request.TreasuryBankBik);
-        entity.TreasuryBankName = NormalizeOptional(request.TreasuryBankName);
-        entity.TreasuryAccountNumber = NormalizeOptional(request.TreasuryAccountNumber);
-        entity.TreasuryCorrAccountNumber = NormalizeOptional(request.TreasuryCorrAccountNumber);
-        entity.TreasuryKbk = NormalizeOptional(request.TreasuryKbk);
-        entity.BankAccountsJson = bankAccounts.Json;
-        entity.CashRegistersJson = NormalizeOptional(request.CashRegistersJson);
-        entity.CardsJson = NormalizeOptional(request.CardsJson);
-        entity.RequisitesEnglishJson = NormalizeOptional(request.RequisitesEnglishJson);
-        entity.LogoDataUrl = ResolveUpdatedAssetValue(entity.LogoDataUrl, request.LogoDataUrl, request.LogoChanged);
-        entity.SealDataUrl = ResolveUpdatedAssetValue(entity.SealDataUrl, request.SealDataUrl, request.SealChanged);
-        entity.DirectorSignatureDataUrl = ResolveUpdatedAssetValue(entity.DirectorSignatureDataUrl, request.DirectorSignatureDataUrl, request.DirectorSignatureChanged);
-        entity.DocumentDirectorJson = NormalizeOptional(request.DocumentDirectorJson);
-        entity.ChiefAccountantJson = NormalizeOptional(request.ChiefAccountantJson);
-        entity.ContactPhonesJson = NormalizeOptional(request.ContactPhonesJson);
-        entity.ContactEmailsJson = NormalizeOptional(request.ContactEmailsJson);
-        entity.Notes = NormalizeOptional(request.Notes);
-        entity.ProfileStatus = profileStatus;
-        entity.UpdatedAt = DateTime.UtcNow;
+        async Task<ActionResult<LegalEntityDetailDto>> SaveProfileAsync()
+        {
+            entity.ShortName = request.ShortName.Trim();
+            entity.FullName = NormalizeOptional(request.FullName);
+            entity.Inn = NormalizeOptional(request.Inn);
+            entity.Kpp = NormalizeOptional(request.Kpp);
+            entity.Ogrn = NormalizeOptional(request.Ogrn);
+            entity.Address = ResolveLegacyAddressValue(request.Addresses, request.Address);
+            entity.Phone = NormalizeOptional(request.Phone);
+            entity.Email = NormalizeOptional(request.Email);
+            entity.Director = NormalizeOptional(request.Director);
+            entity.ResponsibleUserId = responsibleUserId;
+            entity.ClientStatusId = request.ClientStatusId;
+            entity.IsClientAndSupplier = request.IsClientAndSupplier;
+            entity.Country = NormalizeOptional(request.Country);
+            entity.BaseCurrency = NormalizeOptional(request.BaseCurrency);
+            entity.ServiceLanguage = NormalizeOptional(request.ServiceLanguage);
+            entity.OrganizationForm = NormalizeOptional(request.OrganizationForm);
+            entity.Timezone = NormalizeOptional(request.Timezone);
+            entity.TaxSystem = NormalizeOptional(request.TaxSystem);
+            entity.TaxSystemMode = NormalizeOptional(request.TaxSystemMode);
+            entity.IncomeTaxRate = NormalizeOptional(request.IncomeTaxRate);
+            entity.IncomeExpenseTaxRate = NormalizeOptional(request.IncomeExpenseTaxRate);
+            entity.VatWithoutVat = request.VatWithoutVat;
+            entity.Okved = NormalizeOptional(request.Okved);
+            entity.Okpo = NormalizeOptional(request.Okpo);
+            entity.Okato = NormalizeOptional(request.Okato);
+            entity.Oktmo = NormalizeOptional(request.Oktmo);
+            entity.Okogu = NormalizeOptional(request.Okogu);
+            entity.Okfs = NormalizeOptional(request.Okfs);
+            entity.Okopf = NormalizeOptional(request.Okopf);
+            entity.Pfr = NormalizeOptional(request.Pfr);
+            entity.Fss = NormalizeOptional(request.Fss);
+            entity.CharterCapital = NormalizeOptional(request.CharterCapital);
+            entity.TaxRegistrationDate = NormalizeOptional(request.TaxRegistrationDate);
+            entity.TaxOfficeCode = NormalizeOptional(request.TaxOfficeCode);
+            entity.TaxRegion = NormalizeOptional(request.TaxRegion);
+            entity.IfnsName = NormalizeOptional(request.IfnsName);
+            entity.TaxOfficePhone = NormalizeOptional(request.TaxOfficePhone);
+            entity.TreasuryInn = NormalizeOptional(request.TreasuryInn);
+            entity.TreasuryKpp = NormalizeOptional(request.TreasuryKpp);
+            entity.TreasuryRecipientName = NormalizeOptional(request.TreasuryRecipientName);
+            entity.TreasuryBankBik = NormalizeOptional(request.TreasuryBankBik);
+            entity.TreasuryBankName = NormalizeOptional(request.TreasuryBankName);
+            entity.TreasuryAccountNumber = NormalizeOptional(request.TreasuryAccountNumber);
+            entity.TreasuryCorrAccountNumber = NormalizeOptional(request.TreasuryCorrAccountNumber);
+            entity.TreasuryKbk = NormalizeOptional(request.TreasuryKbk);
+            entity.BankAccountsJson = bankAccounts.Json;
+            entity.CashRegistersJson = NormalizeOptional(request.CashRegistersJson);
+            entity.CardsJson = NormalizeOptional(request.CardsJson);
+            entity.RequisitesEnglishJson = NormalizeOptional(request.RequisitesEnglishJson);
+            entity.LogoDataUrl = ResolveUpdatedAssetValue(entity.LogoDataUrl, request.LogoDataUrl, request.LogoChanged);
+            entity.SealDataUrl = ResolveUpdatedAssetValue(entity.SealDataUrl, request.SealDataUrl, request.SealChanged);
+            entity.DirectorSignatureDataUrl = ResolveUpdatedAssetValue(entity.DirectorSignatureDataUrl, request.DirectorSignatureDataUrl, request.DirectorSignatureChanged);
+            entity.DocumentDirectorJson = NormalizeOptional(request.DocumentDirectorJson);
+            entity.ChiefAccountantJson = NormalizeOptional(request.ChiefAccountantJson);
+            entity.ContactPhonesJson = NormalizeOptional(request.ContactPhonesJson);
+            entity.ContactEmailsJson = NormalizeOptional(request.ContactEmailsJson);
+            entity.Notes = NormalizeOptional(request.Notes);
+            entity.ProfileStatus = profileStatus;
+            entity.UpdatedAt = DateTime.UtcNow;
 
-        await EnsureAndNormalizeDictionaryValuesAsync(entity, ct);
-        await ApplyClientLinksAsync(entity.Id, clientIds, ct);
-        await ApplyLegalEntityAddressesAsync(entity, request.Addresses, ct);
-        await new CompanyDocumentImagePrintDefaultsService(_db).StageAsync(entity.Id, printDefaults, request.DocumentImagePrintDefaultsChanged, ct);
-        await _db.SaveChangesAsync(ct);
+            await EnsureAndNormalizeDictionaryValuesAsync(entity, ct);
+            await ApplyClientLinksAsync(entity.Id, clientIds, ct);
+            await ApplyLegalEntityAddressesAsync(entity, request.Addresses, ct);
+            await new CompanyDocumentImagePrintDefaultsService(_db).StageAsync(entity.Id, printDefaults, request.DocumentImagePrintDefaultsChanged, ct);
+            await _db.SaveChangesAsync(ct);
 
-        var responseEntity = await LoadLegalEntityForDetailAsync(entity.Id, ct);
-        return Ok(await MapDetailForCurrentUserAsync(responseEntity ?? entity, ct, includeInlineAssets: false));
+            var responseEntity = await LoadLegalEntityForDetailAsync(entity.Id, ct);
+            return Ok(await MapDetailForCurrentUserAsync(responseEntity ?? entity, ct, includeInlineAssets: false));
+        }
+
+        if (!CompanyDocumentImagePrintDefaultsService.ShouldWrite(request.DocumentImagePrintDefaultsChanged)) return await SaveProfileAsync();
+        if (!CompanyDocumentImagePrintDefaultsService.IsValidVersion(request.DocumentImagePrintDefaultsVersion))
+            return BadRequest("Для изменения настроек печати обновите карточку компании.");
+        try
+        {
+            return await new CompanyDocumentImagePrintDefaultsService(_db).EditAsync(entity.Id,
+                request.DocumentImagePrintDefaultsVersion!, SaveProfileAsync, ct);
+        }
+        catch (SellerSnapshotConflictException)
+        {
+            return Conflict(new { message = "Настройки печати компании изменились или сейчас сохраняются другим сотрудником. Обновите карточку и повторите изменение." });
+        }
     }
 
     /// <summary>
