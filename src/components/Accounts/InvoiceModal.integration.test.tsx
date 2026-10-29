@@ -23,6 +23,7 @@ import { storeInvoiceEditorDraft } from '../../utils/invoiceEditorBridge';
 import { defaultRolePermissions, type RolePermissions } from '../../types/permissions';
 
 const permissionState = vi.hoisted(() => ({ value: null as RolePermissions | null }));
+const printAuthState = vi.hoisted(() => ({ user: { id: 7, role: { id: 1 } } }));
 vi.mock('../../hooks/useRolePermissions', () => ({
   useRolePermissions: () => permissionState.value ?? defaultRolePermissions,
 }));
@@ -96,7 +97,7 @@ vi.mock('../../hooks/useUserTimeZone', () => ({
 
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({
-    user: { id: 7, role: { id: 1 } },
+    user: printAuthState.user,
   }),
 }));
 
@@ -122,6 +123,7 @@ vi.mock('../../hooks/useToast', () => ({
 vi.mock('../../services/api', () => ({
   apiService: {
     getOwnCompanyOptions: vi.fn().mockResolvedValue([]),
+    getDocumentImagePrintDefaults: vi.fn().mockResolvedValue({ includeLogo: false, includeSeal: false, includeSignature: false }),
     getInvoicePreview: vi.fn().mockResolvedValue(new Blob(['<html><body>preview</body></html>'], { type: 'text/html' })),
     downloadInvoiceDocument: vi
       .fn()
@@ -318,6 +320,8 @@ describe('InvoiceModal integration', () => {
   });
 
   beforeEach(() => {
+    printAuthState.user = { id: 7, role: { id: 1 } };
+    vi.mocked(apiService.getDocumentImagePrintDefaults).mockReset().mockResolvedValue({ includeLogo: false, includeSeal: false, includeSignature: false });
     permissionState.value = null;
     vi.mocked(apiService.getInvoicePreview).mockClear();
     caseModalSubmitPayloadRef.current = {
@@ -3358,6 +3362,91 @@ describe('InvoiceModal integration', () => {
         clientCaseId: null,
         clientCaseIds: [],
       }));
+    });
+  });
+
+  describe('invoice document defaults', () => {
+    const templates = [{ label: 'Счет', key: undefined }, { label: 'Счет-договор', key: 'invoice-offer' }, { label: 'Заказ', key: 'invoice-order' }];
+    const props = () => ({ open: true, mode: 'edit' as const, presentation: 'page' as const,
+      invoice: { id: 660, number: '660', date: '2026-04-08', dueDate: '2026-05-07', type: 'Income', amount: 100, status: 'Pending', lineItems: [] } as unknown as Invoice,
+      onClose: vi.fn(), onSubmit: vi.fn(), submitting: false, clients: [], responsibles: [], lookupsLoading: false, relatedPayments: [] });
+    const choose = (format: 'print' | 'pdf' | 'word', index = 0) => {
+      fireEvent.click(screen.getByRole('button', { name: format === 'print' ? /^Печать/ : /^Скачать/ }));
+      if (format === 'print') fireEvent.click(screen.getAllByRole('button', { name: 'По настройкам документа' })[index]);
+      else fireEvent.click(screen.getByRole('button', { name: `${templates[index].label}: ${format === 'pdf' ? 'PDF' : 'Word'} по настройкам` }));
+      return within(screen.getByRole('dialog', { name: 'Изображения в документе' }));
+    };
+    const changeOwner = (action: string, current: ReturnType<typeof props>) => {
+      if (['revoke', 'hide', 'scope'].includes(action)) permissionState.value = { ...defaultRolePermissions,
+        accounts: { ...defaultRolePermissions.accounts, canExport: action !== 'revoke', canView: action !== 'hide', viewScope: action === 'scope' ? 'own' : 'all' } };
+      if (action === 'user') printAuthState.user = { id: 8, role: { id: 1 } };
+      if (action === 'role') printAuthState.user = { id: 7, role: { id: 2 } };
+      if (action === 'close') return { ...current, open: false };
+      if (action === 'change') return { ...current, invoice: { ...current.invoice, id: 661, number: '661' } };
+      return { ...current };
+    };
+
+    it.each(templates.flatMap((template, index) => (['print', 'pdf', 'word'] as const).map(format => ({ template, index, format }))))('loads saved choices for $template.label $format and applies edits only to its copy', async ({ template, index, format }) => {
+      const choices = { includeLogo: false, includeSeal: true, includeSignature: false };
+      vi.mocked(apiService.getDocumentImagePrintDefaults).mockResolvedValueOnce(choices);
+      const download = vi.mocked(apiService.downloadInvoiceDocument); download.mockClear();
+      download.mockResolvedValueOnce(Object.assign(new Blob(['print copy']), { text: async () => 'print copy' }));
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+      try {
+        const current = props(); render(<InvoiceModal {...current} />);
+        const dialog = choose(format, index);
+        const label = format === 'print' ? 'Печатать' : `Скачать ${format === 'pdf' ? 'PDF' : 'Word'}`;
+        await waitFor(() => expect((dialog.getByRole('button', { name: label }) as HTMLButtonElement).disabled).toBe(false));
+        expect(apiService.getDocumentImagePrintDefaults).toHaveBeenCalledExactlyOnceWith('invoices', 660, expect.any(AbortSignal));
+        expect(download).not.toHaveBeenCalled();
+        expect((dialog.getByLabelText('Печать') as HTMLInputElement).checked).toBe(true);
+        fireEvent.click(dialog.getByLabelText('Подпись')); fireEvent.click(dialog.getByRole('button', { name: label }));
+        await waitFor(() => expect(download).toHaveBeenCalledExactlyOnceWith(660, format === 'print' ? 'html' : format,
+          { includeLogo: false, includeSeal: true, includeSignature: true, ...(template.key ? { templateKey: template.key } : {}), signal: expect.any(AbortSignal) }));
+        await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Изображения в документе' })).toBeNull());
+        expect(current.onSubmit).not.toHaveBeenCalled(); expect(choices.includeSignature).toBe(false);
+        if (format === 'print') expect(vi.mocked(window.open).mock.results.at(-1)!.value.document.write).toHaveBeenCalledWith('print copy');
+      } finally { click.mockRestore(); }
+    });
+
+    it.each(['change', 'close', 'revoke', 'hide', 'user', 'role', 'scope'])('aborts defaults and ignores the former owner on %s', async action => {
+      let finish!: (value: { includeLogo: boolean; includeSeal: boolean; includeSignature: boolean }) => void;
+      vi.mocked(apiService.getDocumentImagePrintDefaults).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+      vi.mocked(apiService.downloadInvoiceDocument).mockClear();
+      const current = props(); const view = render(<InvoiceModal {...current} />); choose('pdf');
+      const signal = vi.mocked(apiService.getDocumentImagePrintDefaults).mock.calls[0][2]!;
+      view.rerender(<InvoiceModal {...changeOwner(action, current)} />);
+      expect(signal.aborted).toBe(true);
+      await act(async () => finish({ includeLogo: true, includeSeal: true, includeSignature: true }));
+      expect(screen.queryByRole('dialog', { name: 'Изображения в документе' })).toBeNull();
+      expect(apiService.downloadInvoiceDocument).not.toHaveBeenCalled(); expect(current.onSubmit).not.toHaveBeenCalled();
+    });
+
+    it.each(['revoke', 'hide', 'user', 'role', 'scope'])('rejects a late file after print authority changes on %s', async action => {
+      let finish!: (value: Blob) => void;
+      const download = vi.mocked(apiService.downloadInvoiceDocument); download.mockClear();
+      download.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+      try {
+        const current = props(); const view = render(<InvoiceModal {...current} />); const dialog = choose('pdf');
+        await waitFor(() => expect((dialog.getByRole('button', { name: 'Скачать PDF' }) as HTMLButtonElement).disabled).toBe(false));
+        fireEvent.click(dialog.getByRole('button', { name: 'Скачать PDF' }));
+        await waitFor(() => expect(download).toHaveBeenCalledTimes(1));
+        const signal = download.mock.calls[0][2]!.signal!;
+        view.rerender(<InvoiceModal {...changeOwner(action, current)} />);
+        expect(signal.aborted).toBe(true);
+        await act(async () => finish(new Blob(['private former copy'])));
+        expect(click).not.toHaveBeenCalled(); expect(screen.queryByRole('dialog', { name: 'Изображения в документе' })).toBeNull();
+      } finally { click.mockRestore(); }
+    });
+
+    it('keeps an explicit old menu choice independent of profile loading', async () => {
+      const current = props(); render(<InvoiceModal {...current} />);
+      fireEvent.click(screen.getByRole('button', { name: /^Скачать/ }));
+      fireEvent.click(screen.getByRole('button', { name: 'Счет: PDF без подписи и печати' }));
+      expect(apiService.getDocumentImagePrintDefaults).not.toHaveBeenCalled();
+      expect((within(screen.getByRole('dialog', { name: 'Изображения в документе' })).getByLabelText('Логотип') as HTMLInputElement).checked).toBe(true);
+      fireEvent.click(screen.getByRole('button', { name: 'Отмена' }));
     });
   });
 

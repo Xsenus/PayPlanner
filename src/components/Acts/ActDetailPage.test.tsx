@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ActDetailPage } from './ActDetailPage';
+import { apiService } from '../../services/api';
 
 const {
   actModalSpy,
@@ -80,6 +81,7 @@ vi.mock('../../hooks/useToast', () => ({
 vi.mock('../../services/api', () => ({
   apiService: {
     getOwnCompanyOptions: vi.fn().mockResolvedValue([]),
+    getDocumentImagePrintDefaults: vi.fn().mockResolvedValue({ includeLogo: false, includeSeal: false, includeSignature: false }),
     getAct: getActMock,
     getClients: getClientsMock,
     getActResponsibles: getActResponsiblesMock,
@@ -110,6 +112,7 @@ vi.mock('../ui/ObjectAuditModal', () => ({
 
 describe('ActDetailPage', () => {
   beforeEach(() => {
+    vi.mocked(apiService.getDocumentImagePrintDefaults).mockReset().mockResolvedValue({ includeLogo: false, includeSeal: false, includeSignature: false });
     vi.clearAllMocks();
     dialogConfirmMock.mockResolvedValue(true);
     dialogPromptMock.mockResolvedValue('Уточнение суммы');
@@ -476,6 +479,44 @@ describe('ActDetailPage', () => {
       fireEvent.click(screen.getByRole('button', { name: format === 'print' ? 'С подписью и печатью' : `${format === 'word' ? 'Word' : 'PDF'} без подписи и печати` }));
       return within(screen.getByRole('dialog', { name: 'Изображения в документе' }));
     };
+
+    it.each(['print', 'word', 'pdf'] as const)('loads act document defaults for %s before preparing its copy', async format => {
+      vi.mocked(apiService.getDocumentImagePrintDefaults).mockResolvedValueOnce({ includeLogo: true, includeSeal: false, includeSignature: true });
+      render(<ActDetailPage actId={35} onBack={vi.fn()} />); await loaded();
+      fireEvent.click(screen.getByRole('button', { name: format === 'print' ? 'Печать' : 'Скачать' }));
+      fireEvent.click(screen.getByRole('button', { name: format === 'print' ? 'По настройкам документа' : `${format === 'word' ? 'Word' : 'PDF'} по настройкам` }));
+      const dialog = within(screen.getByRole('dialog', { name: 'Изображения в документе' }));
+      const label = format === 'print' ? 'Печатать' : `Скачать ${format === 'word' ? 'Word' : 'PDF'}`;
+      await waitFor(() => expect((dialog.getByRole('button', { name: label }) as HTMLButtonElement).disabled).toBe(false));
+      expect(apiService.getDocumentImagePrintDefaults).toHaveBeenCalledExactlyOnceWith('acts', 35, expect.any(AbortSignal));
+      expect(downloadActDocumentMock).not.toHaveBeenCalled();
+      fireEvent.click(dialog.getByLabelText('Печать')); fireEvent.click(dialog.getByRole('button', { name: label }));
+      await waitFor(() => expect(downloadActDocumentMock).toHaveBeenCalledExactlyOnceWith(35, format === 'print' ? 'pdf' : format,
+        { includeLogo: true, includeSeal: true, includeSignature: true, signal: expect.any(AbortSignal) }));
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Изображения в документе' })).toBeNull());
+      expect(updateActMock).not.toHaveBeenCalled();
+    });
+
+    it.each(['switch', 'revoke', 'hide'] as const)('aborts an act document defaults read on %s', async change => {
+      let finish!: (value: { includeLogo: boolean; includeSeal: boolean; includeSignature: boolean }) => void;
+      vi.mocked(apiService.getDocumentImagePrintDefaults).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+      const view = render(<ActDetailPage actId={35} onBack={vi.fn()} />); await loaded();
+      fireEvent.click(screen.getByRole('button', { name: 'Скачать' })); fireEvent.click(screen.getByRole('button', { name: 'PDF по настройкам' }));
+      const signal = vi.mocked(apiService.getDocumentImagePrintDefaults).mock.calls[0][2]!;
+      if (change === 'revoke') rolePermissionsMock.acts.canExport = false;
+      if (change === 'hide') rolePermissionsMock.acts.canView = false;
+      view.rerender(<ActDetailPage actId={change === 'switch' ? 36 : 35} onBack={vi.fn()} />);
+      expect(signal.aborted).toBe(true);
+      await act(async () => finish({ includeLogo: true, includeSeal: true, includeSignature: true }));
+      expect(screen.queryByRole('dialog', { name: 'Изображения в документе' })).toBeNull();
+      expect(downloadActDocumentMock.mock.calls.filter(call => call[2]?.signal)).toHaveLength(0);
+      expect(updateActMock).not.toHaveBeenCalled();
+    });
+
+    it('does not read act document defaults for an explicit old menu choice', async () => {
+      render(<ActDetailPage actId={35} onBack={vi.fn()} />); await loaded(); open('word');
+      expect(apiService.getDocumentImagePrintDefaults).not.toHaveBeenCalled();
+    });
 
     it.each(['print', 'word', 'pdf'] as const)('confirms independent images for %s without changing the act', async format => {
       render(<ActDetailPage actId={35} onBack={vi.fn()} />); await loaded();

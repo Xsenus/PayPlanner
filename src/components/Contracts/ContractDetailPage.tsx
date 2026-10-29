@@ -2316,6 +2316,7 @@ export function ContractDetailPage({
       {imagePrintRequest && canView && canExport && contract.id === contractId && imagePrintRequest.scope === printScope && imagePrintRequest.documentId === contract.id ? (
         <DocumentImagePrintDialog key={`${contract.id}:${imagePrintRequest.generation}`}
           documentName={`Договор № ${contract.number || contract.id}`} initialOptions={imagePrintRequest.initialOptions}
+          defaultsSource={{ section: 'contracts', documentId: contract.id }}
           confirmLabel={imagePrintRequest.format === 'print' ? 'Печатать' : `Скачать ${imagePrintRequest.format === 'word' ? 'Word' : 'PDF'}`}
           onConfirm={confirmDocumentCopy} onClose={() => setImagePrintRequest(null)} />
       ) : null}

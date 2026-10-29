@@ -33,6 +33,7 @@ import type {
 import { fromInputToApiDate, todayYMDInTimeZone, toDateInputValue } from '../../utils/dateUtils';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
+import { useDocumentMenuLayout } from '../../hooks/useDocumentMenuLayout';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useInvoiceReferenceDictionaries } from '../../hooks/useInvoiceReferenceDictionaries';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
@@ -1031,14 +1032,21 @@ export function InvoiceModal({
   const [printMenuOpen, setPrintMenuOpen] = useState(false);
   const printButtonRef = useRef<HTMLButtonElement>(null);
   const printRequestGeneration = useRef(0);
+  const canReadPrint = isAdmin || permissions.accounts.canView;
+  const printScope = JSON.stringify([open, invoice?.id, currentUser?.id, currentUser?.role?.id,
+    canReadPrint, canExport, permissions.accounts.viewScope]);
+  const printScopeRef = useRef(printScope);
+  printScopeRef.current = printScope;
   const [imagePrintRequest, setImagePrintRequest] = useState<{
-    documentId: number; generation: number; format: 'print' | 'word' | 'pdf'; templateKey?: string;
+    documentId: number; scope: string; generation: number; format: 'print' | 'word' | 'pdf'; templateKey?: string; useDefaults: boolean;
     initialOptions: DocumentImagePrintOptions;
   } | null>(null);
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
+  const printMenuLayout = useDocumentMenuLayout(printMenuOpen && open && canReadPrint && canExport, 24);
+  const downloadMenuLayout = useDocumentMenuLayout(downloadMenuOpen && open && canReadPrint && canExport, 28);
   const [messengerDeliveryOpen, setMessengerDeliveryOpen] = useState(false);
   const [electronicSignatureOpen, setElectronicSignatureOpen] = useState(false);
-  useEffect(() => { setImagePrintRequest(null); }, [open, invoice?.id]);
+  useEffect(() => { setImagePrintRequest(null); setPrintMenuOpen(false); setDownloadMenuOpen(false); }, [printScope]);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [cancelScope, setCancelScope] = useState<InvoiceCancellationScope>('All');
@@ -3182,35 +3190,38 @@ export function InvoiceModal({
     window.setTimeout(callback, 160);
   }, []);
 
-  const requestDocumentCopy = (format: 'print' | 'word' | 'pdf', combined: boolean, templateKey?: string) => {
+  const requestDocumentCopy = (format: 'print' | 'word' | 'pdf', combined?: boolean, templateKey?: string) => {
     if (!invoice?.id) {
       toast.error('Сначала сохраните счёт, затем можно подготовить документ.');
       return;
     }
-    if (!canExport) return;
+    if (!canExport || !canReadPrint) return;
     (format === 'print' ? printButtonRef.current : downloadMenuRef.current?.querySelector('button'))?.focus();
     setPrintMenuOpen(false);
     setDownloadMenuOpen(false);
-    setImagePrintRequest({ documentId: invoice.id, generation: ++printRequestGeneration.current, format, templateKey,
-      initialOptions: { includeLogo: true, includeSeal: combined, includeSignature: combined } });
+    setImagePrintRequest({ documentId: invoice.id, scope: printScope, generation: ++printRequestGeneration.current, format, templateKey, useDefaults: combined === undefined,
+      initialOptions: { includeLogo: true, includeSeal: combined ?? false, includeSignature: combined ?? false } });
   };
 
   const handlePrintDocument = (templateKey?: string, combined = true) => requestDocumentCopy('print', combined, templateKey);
-  const handleDownloadDocument = (format: 'word' | 'pdf', combined: boolean, templateKey?: string) => requestDocumentCopy(format, combined, templateKey);
 
   const confirmDocumentCopy = async (images: DocumentImagePrintOptions, signal: AbortSignal) => {
     const request = imagePrintRequest;
-    if (!request || request.documentId !== invoice?.id || !canExport) throw new Error('Документ или права изменились. Откройте карточку повторно.');
+    if (!request || request.documentId !== invoice?.id || !canReadPrint || !canExport || request.scope !== printScopeRef.current) throw new Error('Документ или права изменились. Откройте карточку повторно.');
+    const requireCurrentCopy = () => {
+      signal.throwIfAborted();
+      if (request.scope !== printScopeRef.current) throw new Error('Документ или права изменились. Откройте карточку повторно.');
+    };
     let previewWindow: Window | null | undefined;
     try {
-      signal.throwIfAborted();
+      requireCurrentCopy();
       if (request.format === 'print') previewWindow = openPendingDocumentWindow();
       const blob = await apiService.downloadInvoiceDocument(request.documentId, request.format === 'print' ? 'html' : request.format,
         { ...images, ...(request.templateKey ? { templateKey: request.templateKey } : {}), signal });
-      signal.throwIfAborted();
+      requireCurrentCopy();
       if (request.format === 'print') {
         const html = await blob.text();
-        signal.throwIfAborted();
+        requireCurrentCopy();
         printHtmlInWindow(html, previewWindow);
       } else {
         downloadBlob(blob, buildInvoiceDocumentFileName(invoice.number, invoice.date, request.format, request.templateKey));
@@ -4277,13 +4288,13 @@ export function InvoiceModal({
                 }}
                 aria-expanded={printMenuOpen}
                 ref={printButtonRef}
-                disabled={!canExport}
+                disabled={!canReadPrint || !canExport}
                 className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"
               >
                 <Printer className="h-4 w-4" />Печать<ChevronDown className="h-4 w-4" />
               </button>
               {printMenuOpen ? (
-                <div className="absolute bottom-full left-0 z-30 mb-2 w-[24rem] max-w-[calc(100vw-2rem)] rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
+                <div ref={printMenuLayout} className="absolute bottom-full left-0 z-30 mb-2 max-h-[70dvh] overflow-y-auto w-[24rem] max-w-[calc(100vw-2rem)] rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
                   {[
                     { label: 'Счет', templateKey: undefined },
                     { label: 'Счет-договор', templateKey: INVOICE_OFFER_TEMPLATE_KEY },
@@ -4292,6 +4303,9 @@ export function InvoiceModal({
                     <div key={document.label} className="rounded-lg px-1 py-1">
                       <div className="px-2 pb-1 pt-1 text-xs font-semibold uppercase tracking-wide text-slate-400">{document.label}</div>
                       <div className="grid grid-cols-2 gap-1">
+                        <button type="button" onClick={() => requestDocumentCopy('print', undefined, document.templateKey)} className="col-span-2 rounded-md px-2 py-2 text-left text-sm font-medium text-blue-700 hover:bg-blue-50">
+                          По настройкам документа
+                        </button>
                         <button
                           type="button"
                           onClick={() => {
@@ -4334,13 +4348,13 @@ export function InvoiceModal({
                   setDownloadMenuOpen((prev) => !prev);
                   setPrintMenuOpen(false);
                 }}
-                disabled={!canExport}
+                disabled={!canReadPrint || !canExport}
                 className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"
               >
                 <Download className="h-4 w-4" />Скачать<ChevronDown className="h-4 w-4" />
               </button>
               {downloadMenuOpen ? (
-                <div className="absolute bottom-full left-0 z-20 mb-2 w-[28rem] max-w-[calc(100vw-2rem)] rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
+                <div ref={downloadMenuLayout} className="absolute bottom-full left-0 z-20 mb-2 max-h-[70dvh] overflow-y-auto w-[28rem] max-w-[calc(100vw-2rem)] rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
                   {[
                     { label: 'Счет', templateKey: undefined, tone: 'text-slate-700' },
                     { label: 'Счет-договор', templateKey: INVOICE_OFFER_TEMPLATE_KEY, tone: 'text-emerald-700' },
@@ -4349,20 +4363,23 @@ export function InvoiceModal({
                     <div key={document.label} className="rounded-lg px-1 py-1">
                       <div className="px-2 pb-1 pt-1 text-xs font-semibold uppercase tracking-wide text-slate-400">{document.label}</div>
                       <div className="grid grid-cols-2 gap-1">
-                        {(['pdf', 'word'] as const).flatMap((format) => ([
+                        {[
+                          ...(['pdf', 'word'] as const).map(format => ({ signed: undefined, label: `${format === 'pdf' ? 'PDF' : 'Word'} по настройкам` })),
+                          ...(['pdf', 'word'] as const).flatMap((format) => ([
                           { signed: false, label: `${format === 'pdf' ? 'PDF' : 'Word'} без подписи и печати` },
                           { signed: true, label: `${format === 'pdf' ? 'PDF' : 'Word'} с подписью и печатью` },
-                        ])).map((variant) => (
+                          ])),
+                        ].map((variant) => (
                           <button
                             key={variant.label}
                             type="button"
-                            onClick={() => void handleDownloadDocument(
+                            onClick={() => void requestDocumentCopy(
                               variant.label.startsWith('PDF') ? 'pdf' : 'word',
                               variant.signed,
                               document.templateKey,
                             )}
                             aria-label={`${document.label}: ${variant.label}`}
-                            className={`rounded-md px-2 py-2 text-left text-sm hover:bg-slate-50 ${variant.signed ? 'font-medium text-emerald-700 hover:bg-emerald-50' : document.tone}`}
+                            className={`rounded-md px-2 py-2 text-left text-sm hover:bg-slate-50 ${variant.signed === undefined ? 'font-medium text-blue-700 hover:bg-blue-50' : variant.signed ? 'font-medium text-emerald-700 hover:bg-emerald-50' : document.tone}`}
                           >
                             {variant.label}
                           </button>
@@ -5868,10 +5885,11 @@ export function InvoiceModal({
         responsibles={responsibles}
       />
 
-      {imagePrintRequest && invoice && open && canExport && imagePrintRequest.documentId === invoice.id ? (
+      {imagePrintRequest && invoice && open && canReadPrint && canExport && imagePrintRequest.scope === printScope && imagePrintRequest.documentId === invoice.id ? (
         <DocumentImagePrintDialog key={`${invoice.id}:${imagePrintRequest.generation}`}
           documentName={`${imagePrintRequest.templateKey === INVOICE_OFFER_TEMPLATE_KEY ? 'Счёт-договор' : imagePrintRequest.templateKey === INVOICE_ORDER_TEMPLATE_KEY ? 'Заказ' : 'Счёт'} № ${invoice.number || invoice.id}`}
           initialOptions={imagePrintRequest.initialOptions}
+          defaultsSource={imagePrintRequest.useDefaults ? { section: 'invoices', documentId: invoice.id } : undefined}
           confirmLabel={imagePrintRequest.format === 'print' ? 'Печатать' : `Скачать ${imagePrintRequest.format === 'word' ? 'Word' : 'PDF'}`}
           onConfirm={confirmDocumentCopy} onClose={() => setImagePrintRequest(null)} />
       ) : null}

@@ -1,6 +1,7 @@
 import { ArrowLeft, Ban, Check, ChevronDown, Download, FilePlus2, Link2, List, Loader2, Pencil, Printer, Send, Trash2, UploadCloud, UserRound } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useDocumentMenuLayout } from '../../hooks/useDocumentMenuLayout';
 import { useDialog } from '../../hooks/useDialog';
 import { useDocumentStatusSettings } from '../../hooks/useDocumentStatusSettings';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
@@ -223,12 +224,14 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
   const [editorError, setEditorError] = useState<string | null>(null);
   const [printMenuOpen, setPrintMenuOpen] = useState(false);
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
+  const printMenuLayout = useDocumentMenuLayout(printMenuOpen && canView && canExport, 22);
+  const downloadMenuLayout = useDocumentMenuLayout(downloadMenuOpen && canView && canExport, 22);
   const printScope = JSON.stringify([actScope, canExport, act?.updatedAt, act?.auditUpdatedAt]);
   const printScopeRef = useRef(printScope);
   printScopeRef.current = printScope;
   const printGeneration = useRef(0);
   const [imagePrintRequest, setImagePrintRequest] = useState<{
-    documentId: number; scope: string; generation: number; format: 'print' | DocumentFormat;
+    documentId: number; scope: string; generation: number; format: 'print' | DocumentFormat; useDefaults: boolean;
     initialOptions: DocumentImagePrintOptions;
   } | null>(null);
   const [pageActionLoading, setPageActionLoading] = useState<PageAction | null>(null);
@@ -511,13 +514,13 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
     return `${url.origin}${url.pathname}${url.search}${url.hash}`;
   }, [act?.id]);
 
-  const requestDocumentCopy = (format: 'print' | DocumentFormat, combined: boolean) => {
+  const requestDocumentCopy = (format: 'print' | DocumentFormat, combined?: boolean) => {
     if (!act?.id || !canView || !canExport) return;
     (format === 'print' ? printMenuRef : downloadMenuRef).current?.querySelector('button')?.focus();
     setPrintMenuOpen(false);
     setDownloadMenuOpen(false);
-    setImagePrintRequest({ documentId: act.id, scope: printScope, generation: ++printGeneration.current, format,
-      initialOptions: { includeLogo: false, includeSeal: combined, includeSignature: combined } });
+    setImagePrintRequest({ documentId: act.id, scope: printScope, generation: ++printGeneration.current, format, useDefaults: combined === undefined,
+      initialOptions: { includeLogo: false, includeSeal: combined ?? false, includeSignature: combined ?? false } });
   };
   const handlePrintDocument = (combined: boolean) => requestDocumentCopy('print', combined);
   const handleDownloadDocument = (format: DocumentFormat, combined: boolean) => requestDocumentCopy(format, combined);
@@ -1211,9 +1214,12 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
                 <ChevronDown className="h-4 w-4" />
               </button>
               {printMenuOpen ? (
-                <div className="absolute bottom-full left-0 z-30 mb-2 w-[22rem] max-w-[calc(100vw-2rem)] rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
+                <div ref={printMenuLayout} className="absolute bottom-full left-0 z-30 mb-2 max-h-[70dvh] overflow-y-auto w-[22rem] max-w-[calc(100vw-2rem)] rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
                   <div className="px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Акт</div>
                   <div className="grid grid-cols-2 gap-1">
+                    <button type="button" onClick={() => requestDocumentCopy('print')} className="col-span-2 rounded-md px-2 py-2 text-left text-sm font-medium text-blue-700 hover:bg-blue-50">
+                      По настройкам документа
+                    </button>
                     <button type="button" onClick={() => void handlePrintDocument(false)} className="rounded-md px-2 py-2 text-left text-sm text-slate-700 hover:bg-slate-50">
                       Без подписи и печати
                     </button>
@@ -1261,9 +1267,14 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
                 <ChevronDown className="h-4 w-4" />
               </button>
               {downloadMenuOpen ? (
-                <div className="absolute bottom-full left-0 z-20 mb-2 w-[22rem] max-w-[calc(100vw-2rem)] rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
+                <div ref={downloadMenuLayout} className="absolute bottom-full left-0 z-20 mb-2 max-h-[70dvh] overflow-y-auto w-[22rem] max-w-[calc(100vw-2rem)] rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
                   <div className="px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Акт</div>
                   <div className="grid grid-cols-2 gap-1">
+                  {(['pdf', 'word'] as const).map(format => (
+                    <button key={format} type="button" onClick={() => requestDocumentCopy(format)} className="rounded-md px-2 py-2 text-left text-sm font-medium text-blue-700 hover:bg-blue-50">
+                      {format === 'pdf' ? 'PDF' : 'Word'} по настройкам
+                    </button>
+                  ))}
                   <button
                     type="button"
                     onClick={() => void handleDownloadDocument('pdf', false)}
@@ -1425,6 +1436,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
       {imagePrintRequest && canView && canExport && imagePrintRequest.scope === printScope && imagePrintRequest.documentId === act.id ? (
         <DocumentImagePrintDialog key={`${act.id}:${imagePrintRequest.generation}`}
           documentName={`Акт № ${act.number || act.id}`} initialOptions={imagePrintRequest.initialOptions}
+          defaultsSource={imagePrintRequest.useDefaults ? { section: 'acts', documentId: act.id } : undefined}
           notice={act.type === 'Expense' ? 'В расходном акте изображения нашей компании не используются.' : undefined}
           confirmLabel={imagePrintRequest.format === 'print' ? 'Печатать' : `Скачать ${imagePrintRequest.format === 'word' ? 'Word' : 'PDF'}`}
           onConfirm={confirmDocumentCopy} onClose={() => setImagePrintRequest(null)} />
