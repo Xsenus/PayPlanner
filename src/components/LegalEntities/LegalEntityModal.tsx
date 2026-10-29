@@ -257,6 +257,7 @@ type LegalEntityPaymentModalMode = "create" | "edit";
 type LegalEntityCaseStatusFilter = "all" | "open" | "hold" | "closed" | "lost";
 
 const BACKEND_IMAGE_DATA_URL_MAX_LENGTH = 350_000;
+const IMAGE_PROCESSING_SAVE_MESSAGE = "Дождитесь окончания обработки изображений перед сохранением.";
 const LEGAL_ENTITY_REQUEST_BODY_MAX_LENGTH = 900_000;
 
 const EMPTY_PERSON_DOC: PersonDocInfo = {
@@ -547,23 +548,50 @@ const mapAddressTypeFromForm = (type: string): number => {
   return 9;
 };
 
-function readFileAsDataUrl(file: File): Promise<string> {
+function readFileAsDataUrl(file: File, signal?: AbortSignal): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () =>
+    const cleanup = () => {
+      signal?.removeEventListener("abort", abort);
+      reader.onload = null;
+      reader.onerror = null;
+    };
+    const abort = () => {
+      cleanup();
+      reader.abort();
+      reject(new DOMException("Обработка изображения отменена.", "AbortError"));
+    };
+    reader.onload = () => {
+      cleanup();
       resolve(typeof reader.result === "string" ? reader.result : "");
-    reader.onerror = () =>
+    };
+    reader.onerror = () => {
+      cleanup();
       reject(new Error("Не удалось прочитать файл изображения."));
+    };
+    if (signal?.aborted) { abort(); return; }
+    signal?.addEventListener("abort", abort, { once: true });
     reader.readAsDataURL(file);
   });
 }
 
-function loadImageElement(dataUrl: string): Promise<HTMLImageElement> {
+function loadImageElement(dataUrl: string, signal?: AbortSignal): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () =>
-      reject(new Error("Не удалось обработать изображение."));
+    const cleanup = () => {
+      signal?.removeEventListener("abort", abort);
+      image.onload = null;
+      image.onerror = null;
+    };
+    const abort = () => {
+      cleanup();
+      image.removeAttribute("src");
+      reject(new DOMException("Обработка изображения отменена.", "AbortError"));
+    };
+    image.onload = () => { cleanup(); resolve(image); };
+    image.onerror = () => { cleanup(); reject(new Error("Не удалось обработать изображение.")); };
+    if (signal?.aborted) { abort(); return; }
+    signal?.addEventListener("abort", abort, { once: true });
     image.src = dataUrl;
   });
 }
@@ -644,9 +672,11 @@ function fitImageIntoBox(
 async function convertImageToUploadProfileDataUrl(
   file: File,
   profile: LegalEntityImageUploadProfile,
+  signal: AbortSignal,
 ): Promise<string> {
-  const original = await readFileAsDataUrl(file);
-  const image = await loadImageElement(original);
+  const original = await readFileAsDataUrl(file, signal);
+  const image = await loadImageElement(original, signal);
+  signal.throwIfAborted();
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d");
 
@@ -890,6 +920,9 @@ export function LegalEntityModal({
   const [sealChanged, setSealChanged] = useState(false);
   const [directorSignatureChanged, setDirectorSignatureChanged] =
     useState(false);
+  const imageUploadsRef = useRef(new Map<LegalEntityImageKind, AbortController>());
+  const imageFormGenerationRef = useRef(0);
+  const [imageProcessing, setImageProcessing] = useState(false);
   const [requisitesTab, setRequisitesTab] = useState<RequisitesTab>("base");
   const [addressEntries, setAddressEntries] = useState<
     ClientAddressEntryFormValue[]
@@ -948,6 +981,16 @@ export function LegalEntityModal({
   );
 
   const readOnly = !allowEdit && !!initial;
+  useEffect(() => {
+    const uploads = imageUploadsRef.current;
+    setImageProcessing(false);
+    setError((current) => current === IMAGE_PROCESSING_SAVE_MESSAGE ? null : current);
+    return () => {
+      imageFormGenerationRef.current += 1;
+      for (const controller of uploads.values()) controller.abort();
+      uploads.clear();
+    };
+  }, [initial, isOpen, readOnly]);
   const canMutateRelated = (
     section: 'cases' | 'accounts' | 'acts' | 'payments',
     permission: 'canCreate' | 'canEdit' | 'canDelete',
@@ -1536,45 +1579,75 @@ export function LegalEntityModal({
     );
   };
 
+  const updateImageProcessingState = () => {
+    const pending = imageUploadsRef.current.size > 0;
+    setImageProcessing(pending);
+    if (!pending) setError((current) => current === IMAGE_PROCESSING_SAVE_MESSAGE ? null : current);
+  };
+
   const handleImageUpload = async (
     file: File | null,
     setter: (value: string) => void,
     markChanged: (value: boolean) => void,
     kind: LegalEntityImageKind,
   ) => {
-    if (!file) return;
+    if (!file || readOnly || loading) return;
+    imageUploadsRef.current.get(kind)?.abort();
+    const controller = new AbortController();
+    imageUploadsRef.current.set(kind, controller);
+    setImageProcessing(true);
     setError(null);
     try {
       const optimized = await convertImageToUploadProfileDataUrl(
         file,
         getLegalEntityImageProfile(kind),
+        controller.signal,
       );
+      if (imageUploadsRef.current.get(kind) !== controller || controller.signal.aborted) return;
       setter(optimized);
       markChanged(true);
     } catch (err) {
+      if (imageUploadsRef.current.get(kind) !== controller || controller.signal.aborted) return;
       setError(
         err instanceof Error
           ? err.message
           : "Не удалось загрузить изображение.",
       );
+    } finally {
+      if (imageUploadsRef.current.get(kind) === controller) {
+        imageUploadsRef.current.delete(kind);
+        updateImageProcessingState();
+      }
     }
   };
 
+  const cancelImageUpload = (kind: LegalEntityImageKind) => {
+    imageUploadsRef.current.get(kind)?.abort();
+    imageUploadsRef.current.delete(kind);
+    updateImageProcessingState();
+  };
+
   const restoreImageValue = (
+    kind: LegalEntityImageKind,
     persistedValue: string,
     setter: (value: string) => void,
     markChanged: (value: boolean) => void,
   ) => {
+    if (readOnly || loading) return;
+    cancelImageUpload(kind);
     setter(persistedValue);
     markChanged(false);
   };
 
   const requestImageRemoval = async (
+    kind: LegalEntityImageKind,
     title: string,
     hasPersistedValue: boolean,
     setter: (value: string) => void,
     markChanged: (value: boolean) => void,
   ) => {
+    if (readOnly || loading) return;
+    const generation = imageFormGenerationRef.current;
     const approved = await confirm({
       title: "Удалить изображение",
       description: hasPersistedValue
@@ -1585,10 +1658,11 @@ export function LegalEntityModal({
       variant: "danger",
     });
 
-    if (!approved) {
+    if (!approved || generation !== imageFormGenerationRef.current) {
       return;
     }
 
+    cancelImageUpload(kind);
     setter("");
     markChanged(true);
     toast.info(
@@ -1600,9 +1674,12 @@ export function LegalEntityModal({
   };
 
   const clearImageValue = (
+    kind: LegalEntityImageKind,
     setter: (value: string) => void,
     markChanged: (value: boolean) => void,
   ) => {
+    if (readOnly || loading) return;
+    cancelImageUpload(kind);
     setter("");
     markChanged(true);
   };
@@ -1959,6 +2036,10 @@ export function LegalEntityModal({
     e.preventDefault();
     if (readOnly) {
       onClose();
+      return;
+    }
+    if (imageUploadsRef.current.size > 0) {
+      setError(IMAGE_PROCESSING_SAVE_MESSAGE);
       return;
     }
     setError(null);
@@ -4617,14 +4698,20 @@ export function LegalEntityModal({
         ) : null}
 
         {isOwnLegalEntity ? (
-        <div className="mt-6 grid gap-6 lg:grid-cols-3">
+        <div className="mt-6 grid gap-6 lg:grid-cols-3" aria-busy={imageProcessing}>
+          {imageProcessing ? (
+            <p role="status" className="flex items-center gap-2 text-sm text-slate-600 lg:col-span-3">
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              Обрабатываем изображения. Дождитесь окончания перед сохранением.
+            </p>
+          ) : null}
           <LegalEntityImageField
             title="Логотип компании"
             alt="Логотип компании"
             value={logoDataUrl}
             persistedValue={persistedLogoDataUrl}
             changed={logoChanged}
-            readOnly={readOnly}
+            readOnly={readOnly || loading}
             compactDisplay={compactReadOnlyView}
             onUpload={async (file) => {
               await handleImageUpload(
@@ -4636,6 +4723,7 @@ export function LegalEntityModal({
             }}
             onRemove={async () => {
               await requestImageRemoval(
+                "logo",
                 "Логотип компании",
                 persistedLogoDataUrl.trim().length > 0,
                 setLogoDataUrl,
@@ -4644,6 +4732,7 @@ export function LegalEntityModal({
             }}
             onRestore={() =>
               restoreImageValue(
+                "logo",
                 persistedLogoDataUrl,
                 setLogoDataUrl,
                 setLogoChanged,
@@ -4656,7 +4745,7 @@ export function LegalEntityModal({
             value={sealDataUrl}
             persistedValue={persistedSealDataUrl}
             changed={sealChanged}
-            readOnly={readOnly}
+            readOnly={readOnly || loading}
             compactDisplay={compactReadOnlyView}
             onUpload={async (file) => {
               await handleImageUpload(
@@ -4668,6 +4757,7 @@ export function LegalEntityModal({
             }}
             onRemove={async () => {
               await requestImageRemoval(
+                "seal",
                 "Печать компании",
                 persistedSealDataUrl.trim().length > 0,
                 setSealDataUrl,
@@ -4676,6 +4766,7 @@ export function LegalEntityModal({
             }}
             onRestore={() =>
               restoreImageValue(
+                "seal",
                 persistedSealDataUrl,
                 setSealDataUrl,
                 setSealChanged,
@@ -4688,7 +4779,7 @@ export function LegalEntityModal({
             value={directorSignatureDataUrl}
             persistedValue={persistedDirectorSignatureDataUrl}
             changed={directorSignatureChanged}
-            readOnly={readOnly}
+            readOnly={readOnly || loading}
             compactDisplay={compactReadOnlyView}
             onUpload={async (file) => {
               await handleImageUpload(
@@ -4700,6 +4791,7 @@ export function LegalEntityModal({
             }}
             onRemove={async () => {
               await requestImageRemoval(
+                "signature",
                 "Подпись руководителя",
                 persistedDirectorSignatureDataUrl.trim().length > 0,
                 setDirectorSignatureDataUrl,
@@ -4708,6 +4800,7 @@ export function LegalEntityModal({
             }}
             onRestore={() =>
               restoreImageValue(
+                "signature",
                 persistedDirectorSignatureDataUrl,
                 setDirectorSignatureDataUrl,
                 setDirectorSignatureChanged,
@@ -4725,7 +4818,7 @@ export function LegalEntityModal({
                     type="file"
                     accept="image/*"
                     className="mx-auto block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-2 file:text-blue-700"
-                    disabled={readOnly}
+                    disabled={readOnly || loading}
                     onChange={(e) => {
                       void handleImageUpload(
                         e.target.files?.[0] ?? null,
@@ -4742,11 +4835,11 @@ export function LegalEntityModal({
                         alt="Логотип"
                         className="mx-auto mt-3 h-16 w-auto rounded-xl border border-slate-200 bg-slate-50 p-1"
                       />
-                      {!readOnly ? (
+                      {!readOnly && !loading ? (
                         <button
                           type="button"
                           onClick={() =>
-                            clearImageValue(setLogoDataUrl, setLogoChanged)
+                            clearImageValue("logo", setLogoDataUrl, setLogoChanged)
                           }
                           className="mt-3 rounded-lg border border-rose-200 px-3 py-2 text-xs font-medium text-rose-600 transition hover:bg-rose-50"
                         >
@@ -4777,7 +4870,7 @@ export function LegalEntityModal({
                     type="file"
                     accept="image/*"
                     className="mx-auto block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-slate-700"
-                    disabled={readOnly}
+                    disabled={readOnly || loading}
                     onChange={(e) => {
                       void handleImageUpload(
                         e.target.files?.[0] ?? null,
@@ -4794,11 +4887,11 @@ export function LegalEntityModal({
                         alt="Печать"
                         className="mx-auto mt-3 h-16 w-auto rounded-xl border border-slate-200 bg-slate-50 p-1"
                       />
-                      {!readOnly ? (
+                      {!readOnly && !loading ? (
                         <button
                           type="button"
                           onClick={() =>
-                            clearImageValue(setSealDataUrl, setSealChanged)
+                            clearImageValue("seal", setSealDataUrl, setSealChanged)
                           }
                           className="mt-3 rounded-lg border border-rose-200 px-3 py-2 text-xs font-medium text-rose-600 transition hover:bg-rose-50"
                         >
@@ -4829,7 +4922,7 @@ export function LegalEntityModal({
                     type="file"
                     accept="image/*"
                     className="mx-auto block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-slate-700"
-                    disabled={readOnly}
+                    disabled={readOnly || loading}
                     onChange={(e) => {
                       void handleImageUpload(
                         e.target.files?.[0] ?? null,
@@ -4846,11 +4939,12 @@ export function LegalEntityModal({
                         alt="Подпись"
                         className="mx-auto mt-3 h-16 w-auto rounded-xl border border-slate-200 bg-slate-50 p-1"
                       />
-                      {!readOnly ? (
+                      {!readOnly && !loading ? (
                         <button
                           type="button"
                           onClick={() =>
                             clearImageValue(
+                              "signature",
                               setDirectorSignatureDataUrl,
                               setDirectorSignatureChanged,
                             )
@@ -5053,7 +5147,7 @@ export function LegalEntityModal({
                 </button>
                 <button
                   type="submit"
-                  disabled={loading || readOnly}
+                  disabled={loading || readOnly || imageProcessing}
                   className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
                 >
                   {loading && <Loader2 className="h-4 w-4 animate-spin" />}

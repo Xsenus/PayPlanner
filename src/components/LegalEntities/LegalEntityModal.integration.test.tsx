@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -153,6 +153,33 @@ function createInitialLegalEntity(
     addresses: [],
     ...overrides,
   } as LegalEntityDetail;
+}
+
+function deferCompanyImageProcessing() {
+  const images: DeferredImage[] = [];
+  let drawnSource = '';
+  class DeferredImage {
+    width = 400;
+    height = 400;
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    source = '';
+    set src(value: string) { this.source = value; images.push(this); }
+    removeAttribute(name: string) { if (name === 'src') this.source = ''; }
+  }
+  const context = {
+    clearRect: vi.fn(),
+    drawImage: vi.fn((image: DeferredImage) => { drawnSource = image.source; }),
+    save: vi.fn(), restore: vi.fn(), fillRect: vi.fn(),
+  };
+  const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext')
+    .mockReturnValue(context as unknown as CanvasRenderingContext2D);
+  const encode = vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockImplementation(() => drawnSource);
+  vi.stubGlobal('Image', DeferredImage);
+  return {
+    images,
+    restore() { vi.unstubAllGlobals(); getContext.mockRestore(); encode.mockRestore(); },
+  };
 }
 
 describe('LegalEntityModal integration', () => {
@@ -666,6 +693,167 @@ describe('LegalEntityModal integration', () => {
       getContext.mockRestore();
       encode.mockRestore();
     }
+  });
+
+  it.each([
+    ['page', 'Логотип компании', 'logoDataUrl'], ['modal', 'Логотип компании', 'logoDataUrl'],
+    ['page', 'Печать компании', 'sealDataUrl'], ['modal', 'Печать компании', 'sealDataUrl'],
+    ['page', 'Подпись руководителя', 'directorSignatureDataUrl'], ['modal', 'Подпись руководителя', 'directorSignatureDataUrl'],
+  ] as const)('keeps the latest %s %s upload and prevents saving while it is processing', async (mode, label, field) => {
+    const user = userEvent.setup();
+    const deferred = deferCompanyImageProcessing();
+    const initial = createInitialLegalEntity({ shortName: 'Компания' });
+    const submit = vi.fn().mockResolvedValue(initial);
+    try {
+      render(<LegalEntityModal isOpen mode={mode} onClose={vi.fn()} onSubmit={submit} initial={initial}
+        suggest={vi.fn().mockResolvedValue([])} findById={vi.fn()} allowEdit allowDelete={false} />);
+      const title = await screen.findByText(label);
+      const input = title.parentElement!.querySelector('input[type="file"]') as HTMLInputElement;
+      await user.upload(input, new File(['first'], 'first.png', { type: 'image/png' }));
+      await waitFor(() => expect(deferred.images).toHaveLength(1));
+      const oldLoad = deferred.images[0].onload;
+      const oldError = deferred.images[0].onerror;
+      await user.upload(input, new File(['latest'], 'latest.png', { type: 'image/png' }));
+      await waitFor(() => expect(deferred.images).toHaveLength(2));
+      const save = screen.getByRole('button', { name: /^Сохранить$/ }) as HTMLButtonElement;
+      expect(save.disabled).toBe(true);
+      fireEvent.submit(save.closest('form')!);
+      expect(submit).not.toHaveBeenCalled();
+      expect(screen.getByText('Дождитесь окончания обработки изображений перед сохранением.')).toBeTruthy();
+      const latest = deferred.images[1].source;
+      await act(async () => { deferred.images[1].onload?.(); });
+      await waitFor(() => expect(save.disabled).toBe(false));
+      expect(screen.queryByText('Дождитесь окончания обработки изображений перед сохранением.')).toBeNull();
+      await act(async () => { oldLoad?.(); oldError?.(); });
+      expect(screen.getByAltText(label).getAttribute('src')).toBe(latest);
+      expect(screen.queryByText('Не удалось обработать изображение.')).toBeNull();
+      await user.click(save);
+      await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+      expect(submit.mock.calls[0][0]).toMatchObject({ [field]: latest, shortName: 'Компания' });
+    } finally { deferred.restore(); }
+  });
+
+  it.each(['page', 'modal'] as const)('cancels a pending replacement when restoring the saved seal in %s mode', async mode => {
+    const user = userEvent.setup();
+    const deferred = deferCompanyImageProcessing();
+    const seal = 'data:image/png;base64,c2F2ZWQ=';
+    const initial = createInitialLegalEntity({ shortName: 'Компания', sealDataUrl: seal });
+    confirmMock.mockResolvedValue(true);
+    try {
+      render(<LegalEntityModal isOpen mode={mode} onClose={vi.fn()} onSubmit={vi.fn()} initial={initial}
+        suggest={vi.fn().mockResolvedValue([])} findById={vi.fn()} allowEdit allowDelete={false} />);
+      await screen.findByAltText('Печать компании');
+      await user.click(screen.getByRole('button', { name: 'Удалить изображение' }));
+      const input = screen.getByText('Печать компании').parentElement!.querySelector('input[type="file"]') as HTMLInputElement;
+      await user.upload(input, new File(['replacement'], 'replacement.png', { type: 'image/png' }));
+      await waitFor(() => expect(deferred.images).toHaveLength(1));
+      const oldLoad = deferred.images[0].onload;
+      await user.click(screen.getByRole('button', { name: 'Вернуть текущее изображение' }));
+      await act(async () => { oldLoad?.(); });
+      expect(screen.getByAltText('Печать компании').getAttribute('src')).toBe(seal);
+      expect((screen.getByRole('button', { name: /^Сохранить$/ }) as HTMLButtonElement).disabled).toBe(false);
+    } finally { deferred.restore(); }
+  });
+
+  it.each(['page', 'modal'] as const)('waits for independent image fields before enabling save in %s mode', async mode => {
+    const user = userEvent.setup();
+    const deferred = deferCompanyImageProcessing();
+    try {
+      render(<LegalEntityModal isOpen mode={mode} onClose={vi.fn()} onSubmit={vi.fn()}
+        initial={createInitialLegalEntity({ shortName: 'Компания' })} suggest={vi.fn().mockResolvedValue([])}
+        findById={vi.fn()} allowEdit allowDelete={false} />);
+      for (const [index, label] of ['Логотип компании', 'Подпись руководителя'].entries()) {
+        const title = await screen.findByText(label);
+        const input = title.parentElement!.querySelector('input[type="file"]') as HTMLInputElement;
+        await user.upload(input, new File([label], `${index}.png`, { type: 'image/png' }));
+        await waitFor(() => expect(deferred.images).toHaveLength(index + 1));
+      }
+      const save = screen.getByRole('button', { name: /^Сохранить$/ }) as HTMLButtonElement;
+      await act(async () => { deferred.images[0].onload?.(); });
+      expect(save.disabled).toBe(true);
+      await act(async () => { deferred.images[1].onload?.(); });
+      await waitFor(() => expect(save.disabled).toBe(false));
+    } finally { deferred.restore(); }
+  });
+
+  it.each([
+    ['page', 'close'], ['modal', 'close'], ['page', 'refresh'], ['modal', 'refresh'],
+    ['page', 'permission'], ['modal', 'permission'],
+  ] as const)('discards pending image work after %s form %s', async (mode, change) => {
+    const user = userEvent.setup();
+    const deferred = deferCompanyImageProcessing();
+    const initial = createInitialLegalEntity({ shortName: 'Первая компания' });
+    const props = { isOpen: true, mode, initial, onClose: vi.fn(), onSubmit: vi.fn(),
+      suggest: vi.fn().mockResolvedValue([]), findById: vi.fn(), allowEdit: true, allowDelete: false };
+    try {
+      const view = render(<LegalEntityModal {...props} />);
+      const title = await screen.findByText('Логотип компании');
+      const input = title.parentElement!.querySelector('input[type="file"]') as HTMLInputElement;
+      await user.upload(input, new File(['old'], 'old.png', { type: 'image/png' }));
+      await waitFor(() => expect(deferred.images).toHaveLength(1));
+      const oldLoad = deferred.images[0].onload;
+      const next = change === 'refresh' ? { ...initial, shortName: 'Обновлённая компания' } : initial;
+      view.rerender(<LegalEntityModal {...props} initial={next} isOpen={change !== 'close'} allowEdit={change !== 'permission'} />);
+      await act(async () => { oldLoad?.(); });
+      view.rerender(<LegalEntityModal {...props} initial={next} />);
+      await screen.findByText('Логотип компании');
+      expect(screen.queryByAltText('Логотип компании')).toBeNull();
+      expect(screen.queryByText('Обрабатываем изображения. Дождитесь окончания перед сохранением.')).toBeNull();
+      expect(props.onSubmit).not.toHaveBeenCalled();
+    } finally { deferred.restore(); }
+  });
+
+  it.each(['page', 'modal'] as const)('cancels file reading and recovers from the current read failure in %s mode', async mode => {
+    const user = userEvent.setup();
+    const deferred = deferCompanyImageProcessing();
+    const readers: DeferredReader[] = [];
+    class DeferredReader {
+      result: string | null = null;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      abort = vi.fn();
+      readAsDataURL(file: File) {
+        this.result = `data:image/png;base64,${btoa(file.name)}`;
+        readers.push(this);
+      }
+    }
+    vi.stubGlobal('FileReader', DeferredReader);
+    const seal = 'data:image/png;base64,c2F2ZWQ=';
+    const submit = vi.fn().mockResolvedValue(createInitialLegalEntity());
+    try {
+      render(<LegalEntityModal isOpen mode={mode} onClose={vi.fn()} onSubmit={submit}
+        initial={createInitialLegalEntity({ shortName: 'Компания', sealDataUrl: seal })}
+        suggest={vi.fn().mockResolvedValue([])} findById={vi.fn()} allowEdit allowDelete={false} />);
+      const title = await screen.findByText('Логотип компании');
+      const input = title.parentElement!.querySelector('input[type="file"]') as HTMLInputElement;
+      const file = new File(['pixels'], 'latest.png', { type: 'image/png' });
+      await user.upload(input, new File(['old'], 'old.png', { type: 'image/png' }));
+      const oldLoad = readers[0].onload;
+      const oldError = readers[0].onerror;
+      await user.upload(input, file);
+      expect(readers[0].abort).toHaveBeenCalledTimes(1);
+      await act(async () => { oldLoad?.(); oldError?.(); });
+      expect(deferred.images).toHaveLength(0);
+      const save = screen.getByRole('button', { name: /^Сохранить$/ }) as HTMLButtonElement;
+      expect(save.disabled).toBe(true);
+      await act(async () => { readers[1].onerror?.(); });
+      await screen.findByText('Не удалось прочитать файл изображения.');
+      expect(save.disabled).toBe(false);
+      expect(screen.getByAltText('Печать компании').getAttribute('src')).toBe(seal);
+      await waitFor(() => expect(input.value).toBe(''));
+      await user.upload(input, file);
+      expect(readers).toHaveLength(3);
+      const latest = readers[2].result;
+      await act(async () => { readers[2].onload?.(); });
+      await waitFor(() => expect(deferred.images).toHaveLength(1));
+      await act(async () => { deferred.images[0].onload?.(); });
+      await waitFor(() => expect(save.disabled).toBe(false));
+      expect(screen.getByAltText('Логотип компании').getAttribute('src')).toBe(latest);
+      expect(screen.queryByText('Не удалось прочитать файл изображения.')).toBeNull();
+      await user.click(save);
+      await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+      expect(submit.mock.calls[0][0]).toMatchObject({ logoDataUrl: latest });
+    } finally { deferred.restore(); }
   });
 
   it('hides logo, seal and signature fields for non-own legal entities', async () => {
