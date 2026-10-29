@@ -5,12 +5,45 @@ import {
   LEGAL_ENTITY_SAFE_REQUEST_BODY_MAX_LENGTH,
   getLegalEntityImageProfile,
   encodeLegalEntityImageCanvas,
+  LEGAL_ENTITY_LOGO_SOURCE_MAX_BYTES,
+  getLegalEntityImageAccept,
+  getLegalEntityImageSourceHint,
+  validateLegalEntityImageSourceFile,
   isLegalEntityInlineAssetPayloadSafe,
   isLegalEntityRequestBodyLengthSafe,
   sumLegalEntityInlineAssetLengths,
 } from './legalEntityImageUtils';
 
 describe('legalEntityImageUtils', () => {
+  describe('source file preflight', () => {
+    it.each(['logo', 'seal', 'signature'] as const)('accepts PNG metadata for %s, including missing browser MIME', kind => {
+      expect(() => validateLegalEntityImageSourceFile({ type: 'image/png', name: 'scan.png', size: 1 }, kind)).not.toThrow();
+      expect(() => validateLegalEntityImageSourceFile({ type: '', name: 'SCAN.PNG', size: 1 }, kind)).not.toThrow();
+      expect(getLegalEntityImageAccept(kind)).toBe(kind === 'logo' ? 'image/png,image/jpeg' : 'image/png');
+      expect(getLegalEntityImageSourceHint(kind)).toContain(kind === 'logo' ? '2 МБ' : 'прозрачным');
+    });
+
+    it('accepts a logo at the inclusive 2 MiB boundary and rejects one byte above it', () => {
+      const file = { type: 'image/jpeg', name: 'logo.jpg', size: LEGAL_ENTITY_LOGO_SOURCE_MAX_BYTES };
+      expect(() => validateLegalEntityImageSourceFile(file, 'logo')).not.toThrow();
+      expect(() => validateLegalEntityImageSourceFile({ ...file, type: '', name: 'logo.JPEG' }, 'logo')).not.toThrow();
+      expect(() => validateLegalEntityImageSourceFile({ ...file, size: file.size + 1 }, 'logo')).toThrow('исходный файл больше 2 МБ');
+    });
+
+    it.each(['seal', 'signature'] as const)('rejects JPEG metadata for %s even with a PNG extension', kind => {
+      expect(() => validateLegalEntityImageSourceFile({ type: 'image/jpeg', name: 'renamed.png', size: 100 }, kind)).toThrow('PNG с прозрачным фоном');
+      expect(() => validateLegalEntityImageSourceFile({ type: '', name: 'seal.jpg', size: 100 }, kind)).toThrow('PNG с прозрачным фоном');
+    });
+
+    it.each(['logo', 'seal', 'signature'] as const)('rejects empty and unsupported files for %s before reading them', kind => {
+      expect(() => validateLegalEntityImageSourceFile({ type: 'image/png', name: 'empty.png', size: 0 }, kind)).toThrow('пустой файл');
+      for (const type of ['image/svg+xml', 'image/gif', 'image/webp', 'application/octet-stream']) {
+        expect(() => validateLegalEntityImageSourceFile({ type, name: 'renamed.png', size: 100 }, kind)).toThrow();
+      }
+      expect(() => validateLegalEntityImageSourceFile({ type: '', name: 'file.unknown', size: 100 }, kind)).toThrow();
+    });
+  });
+
   it('returns stable upload profiles', () => {
     expect(getLegalEntityImageProfile('logo')).toEqual(LEGAL_ENTITY_IMAGE_UPLOAD_PROFILES.logo);
     expect(getLegalEntityImageProfile('seal')).toEqual(LEGAL_ENTITY_IMAGE_UPLOAD_PROFILES.seal);

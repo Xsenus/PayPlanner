@@ -87,6 +87,9 @@ import {
 import {
   getLegalEntityImageProfile,
   encodeLegalEntityImageCanvas,
+  getLegalEntityImageAccept,
+  getLegalEntityImageSourceHint,
+  validateLegalEntityImageSourceFile,
   isLegalEntityInlineAssetPayloadSafe,
   isLegalEntityRequestBodyLengthSafe,
   type LegalEntityImageKind,
@@ -136,6 +139,7 @@ interface LegalEntityModalProps {
 }
 
 interface LegalEntityImageFieldProps {
+  kind: LegalEntityImageKind;
   title: string;
   alt: string;
   value: string;
@@ -366,6 +370,7 @@ function caseStatusClassName(status?: string | null) {
 }
 
 function LegalEntityImageField({
+  kind,
   title,
   alt,
   value,
@@ -441,7 +446,7 @@ function LegalEntityImageField({
             <input
               id={inputId}
               type="file"
-              accept="image/png,image/jpeg"
+              accept={getLegalEntityImageAccept(kind)}
               className="hidden"
               onChange={(event) => {
                 const input = event.currentTarget;
@@ -458,10 +463,10 @@ function LegalEntityImageField({
               <Plus className="h-4 w-4" />
               Выбрать файл
             </label>
-            <p className="max-w-xs text-xs leading-5 text-slate-500">
+            <p role={removalPending ? "status" : undefined} className="max-w-xs text-xs leading-5 text-slate-500">
               {removalPending
                 ? "Изображение помечено на удаление. Сохраните карточку, чтобы удалить его, или выберите новый файл вместо него."
-                : "Загрузите изображение в формате JPG, JPEG или PNG."}
+                : getLegalEntityImageSourceHint(kind)}
             </p>
             {removalPending ? (
               <button
@@ -674,6 +679,7 @@ async function convertImageToUploadProfileDataUrl(
   profile: LegalEntityImageUploadProfile,
   signal: AbortSignal,
 ): Promise<string> {
+  validateLegalEntityImageSourceFile(file, profile.kind);
   const original = await readFileAsDataUrl(file, signal);
   const image = await loadImageElement(original, signal);
   signal.throwIfAborted();
@@ -1641,7 +1647,6 @@ export function LegalEntityModal({
 
   const requestImageRemoval = async (
     kind: LegalEntityImageKind,
-    title: string,
     hasPersistedValue: boolean,
     setter: (value: string) => void,
     markChanged: (value: boolean) => void,
@@ -1665,12 +1670,6 @@ export function LegalEntityModal({
     cancelImageUpload(kind);
     setter("");
     markChanged(true);
-    toast.info(
-      hasPersistedValue
-        ? "Изображение помечено на удаление. Сохраните карточку, чтобы применить изменение."
-        : "Изображение убрано из формы. Сохраните карточку, чтобы применить изменение.",
-      title,
-    );
   };
 
   const clearImageValue = (
@@ -4706,6 +4705,7 @@ export function LegalEntityModal({
             </p>
           ) : null}
           <LegalEntityImageField
+            kind="logo"
             title="Логотип компании"
             alt="Логотип компании"
             value={logoDataUrl}
@@ -4724,7 +4724,6 @@ export function LegalEntityModal({
             onRemove={async () => {
               await requestImageRemoval(
                 "logo",
-                "Логотип компании",
                 persistedLogoDataUrl.trim().length > 0,
                 setLogoDataUrl,
                 setLogoChanged,
@@ -4740,6 +4739,7 @@ export function LegalEntityModal({
             }
           />
           <LegalEntityImageField
+            kind="seal"
             title="Печать компании"
             alt="Печать компании"
             value={sealDataUrl}
@@ -4758,7 +4758,6 @@ export function LegalEntityModal({
             onRemove={async () => {
               await requestImageRemoval(
                 "seal",
-                "Печать компании",
                 persistedSealDataUrl.trim().length > 0,
                 setSealDataUrl,
                 setSealChanged,
@@ -4774,6 +4773,7 @@ export function LegalEntityModal({
             }
           />
           <LegalEntityImageField
+            kind="signature"
             title="Подпись руководителя"
             alt="Подпись руководителя"
             value={directorSignatureDataUrl}
@@ -4792,7 +4792,6 @@ export function LegalEntityModal({
             onRemove={async () => {
               await requestImageRemoval(
                 "signature",
-                "Подпись руководителя",
                 persistedDirectorSignatureDataUrl.trim().length > 0,
                 setDirectorSignatureDataUrl,
                 setDirectorSignatureChanged,
@@ -4816,7 +4815,7 @@ export function LegalEntityModal({
                 <div className="mt-4 rounded-xl border-2 border-dashed border-blue-400 px-4 py-6 text-center text-sm text-blue-600">
                   <input
                     type="file"
-                    accept="image/*"
+                    accept={getLegalEntityImageAccept('logo')}
                     className="mx-auto block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-2 file:text-blue-700"
                     disabled={readOnly || loading}
                     onChange={(e) => {
@@ -4868,7 +4867,7 @@ export function LegalEntityModal({
                 <div className="mt-4 rounded-xl border-2 border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-400">
                   <input
                     type="file"
-                    accept="image/*"
+                    accept={getLegalEntityImageAccept('seal')}
                     className="mx-auto block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-slate-700"
                     disabled={readOnly || loading}
                     onChange={(e) => {
@@ -4920,7 +4919,7 @@ export function LegalEntityModal({
                 <div className="mt-4 rounded-xl border-2 border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-400">
                   <input
                     type="file"
-                    accept="image/*"
+                    accept={getLegalEntityImageAccept('signature')}
                     className="mx-auto block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-slate-700"
                     disabled={readOnly || loading}
                     onChange={(e) => {

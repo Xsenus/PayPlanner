@@ -10,6 +10,7 @@ import type {
   InvoiceSummary,
   LegalEntityDadataDetails,
   LegalEntityDetail,
+  LegalEntityInput,
   LegalEntitySuggestion,
   Payment,
 } from '../../types';
@@ -854,6 +855,81 @@ describe('LegalEntityModal integration', () => {
       await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
       expect(submit.mock.calls[0][0]).toMatchObject({ logoDataUrl: latest });
     } finally { deferred.restore(); }
+  });
+
+  it.each([
+    ['page', 'Логотип компании', 'logoDataUrl', 'logoChanged', 'remove'],
+    ['page', 'Логотип компании', 'logoDataUrl', 'logoChanged', 'restore'],
+    ['modal', 'Логотип компании', 'logoDataUrl', 'logoChanged', 'remove'],
+    ['modal', 'Логотип компании', 'logoDataUrl', 'logoChanged', 'restore'],
+    ['page', 'Печать компании', 'sealDataUrl', 'sealChanged', 'remove'],
+    ['page', 'Печать компании', 'sealDataUrl', 'sealChanged', 'restore'],
+    ['modal', 'Печать компании', 'sealDataUrl', 'sealChanged', 'remove'],
+    ['modal', 'Печать компании', 'sealDataUrl', 'sealChanged', 'restore'],
+    ['page', 'Подпись руководителя', 'directorSignatureDataUrl', 'directorSignatureChanged', 'remove'],
+    ['page', 'Подпись руководителя', 'directorSignatureDataUrl', 'directorSignatureChanged', 'restore'],
+    ['modal', 'Подпись руководителя', 'directorSignatureDataUrl', 'directorSignatureChanged', 'remove'],
+    ['modal', 'Подпись руководителя', 'directorSignatureDataUrl', 'directorSignatureChanged', 'restore'],
+  ] as const)('keeps deletion feedback inline in %s for %s, preserving %s/%s on %s', async (mode, label, field, flag, action) => {
+    const user = userEvent.setup();
+    const initial = createInitialLegalEntity({ shortName: 'Компания' });
+    initial[field] = 'data:image/png;base64,c2F2ZWQ=';
+    const submit = vi.fn<(payload: LegalEntityInput) => Promise<LegalEntityDetail>>().mockResolvedValue(initial);
+    confirmMock.mockResolvedValue(true);
+    render(<LegalEntityModal isOpen mode={mode} onClose={vi.fn()} onSubmit={submit} initial={initial}
+      suggest={vi.fn().mockResolvedValue([])} findById={vi.fn()} allowEdit allowDelete={false} />);
+    const title = await screen.findByText(label);
+    const imageField = title.parentElement!;
+    await user.click(screen.getByRole('button', { name: 'Удалить изображение' }));
+    await waitFor(() => expect(imageField.querySelector('[role="status"]')?.textContent).toContain('Изображение помечено на удаление.'));
+    expect(toastInfoMock).not.toHaveBeenCalled();
+    if (action === 'restore') {
+      await user.click(screen.getByRole('button', { name: 'Вернуть текущее изображение' }));
+      expect(imageField.querySelector('[role="status"]')).toBeNull();
+    }
+    await user.click(screen.getByRole('button', { name: /^Сохранить$/ }));
+    await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+    const payload = submit.mock.calls[0][0];
+    expect(payload[flag]).toBe(action === 'remove');
+    if (action === 'remove') expect(payload[field]).toBeNull();
+    else expect(Object.hasOwn(payload, field)).toBe(false);
+  });
+
+  it.each(['page', 'modal'] as const)('rejects source metadata in the %s form before reading, preserving the draft and other image', async mode => {
+    const user = userEvent.setup({ applyAccept: false });
+    const seal = 'data:image/png;base64,c2F2ZWQ=';
+    const initial = createInitialLegalEntity({ shortName: 'Компания', sealDataUrl: seal });
+    const submit = vi.fn();
+    const read = vi.spyOn(FileReader.prototype, 'readAsDataURL');
+    render(<LegalEntityModal isOpen mode={mode} onClose={vi.fn()} onSubmit={submit} initial={initial}
+      suggest={vi.fn().mockResolvedValue([])} findById={vi.fn()} allowEdit allowDelete={false} />);
+    const logoField = (await screen.findByText('Логотип компании')).parentElement!;
+    const input = logoField.querySelector('input[type="file"]') as HTMLInputElement;
+    const name = screen.getByDisplayValue('Компания');
+    await user.clear(name);
+    await user.type(name, 'Мой черновик');
+    try {
+      for (const [file, message] of [
+        [new File([], 'empty.png', { type: 'image/png' }), 'Логотип компании: выбран пустой файл. Выберите изображение.'],
+        [new File(['<svg/>'], 'renamed.png', { type: 'image/svg+xml' }), 'Логотип компании: PNG или JPG, до 2 МБ.'],
+        [new File([new Uint8Array(2 * 1024 * 1024 + 1)], 'big.png', { type: 'image/png' }), 'Логотип компании: исходный файл больше 2 МБ. Выберите файл меньшего размера.'],
+      ] as const) {
+        await user.upload(input, file);
+        await screen.findByText(message);
+        await waitFor(() => expect(input.value).toBe(''));
+        expect((name as HTMLInputElement).value).toBe('Мой черновик');
+        expect(screen.getByAltText('Печать компании').getAttribute('src')).toBe(seal);
+        expect(screen.getByRole<HTMLButtonElement>('button', { name: /^Сохранить$/ }).disabled).toBe(false);
+      }
+      const signatureField = screen.getByText('Подпись руководителя').parentElement!;
+      const signature = signatureField.querySelector('input[type="file"]') as HTMLInputElement;
+      expect(signature.accept).toBe('image/png');
+      await user.upload(signature, new File(['jpeg'], 'renamed.png', { type: 'image/jpeg' }));
+      await screen.findByText('Подпись руководителя: PNG с прозрачным фоном.');
+      expect(read).not.toHaveBeenCalled();
+      expect(submit).not.toHaveBeenCalled();
+      await waitFor(() => expect(signature.value).toBe(''));
+    } finally { read.mockRestore(); }
   });
 
   it('hides logo, seal and signature fields for non-own legal entities', async () => {

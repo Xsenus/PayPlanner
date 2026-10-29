@@ -12,6 +12,37 @@ export interface LegalEntityImageUploadProfile {
 
 export const LEGAL_ENTITY_SAFE_REQUEST_BODY_MAX_LENGTH = 900_000;
 export const LEGAL_ENTITY_SAFE_INLINE_ASSETS_TOTAL_MAX_LENGTH = 700_000;
+export const LEGAL_ENTITY_LOGO_SOURCE_MAX_BYTES = 2 * 1024 * 1024;
+
+export function getLegalEntityImageAccept(kind: LegalEntityImageKind): string {
+  return kind === 'logo' ? 'image/png,image/jpeg' : 'image/png';
+}
+
+export function getLegalEntityImageSourceHint(kind: LegalEntityImageKind): string {
+  return kind === 'logo'
+    ? 'PNG или JPG, до 2 МБ.'
+    : 'PNG с прозрачным фоном.';
+}
+
+// File metadata is an early UX check; it does not replace raster decoding or server validation.
+export function validateLegalEntityImageSourceFile(
+  file: Pick<File, 'type' | 'name' | 'size'>,
+  kind: LegalEntityImageKind,
+): void {
+  const label = LEGAL_ENTITY_IMAGE_UPLOAD_PROFILES[kind].label;
+  if (!Number.isSafeInteger(file.size) || file.size <= 0) {
+    throw new Error(`${label}: выбран пустой файл. Выберите изображение.`);
+  }
+  const mime = file.type.trim().toLowerCase();
+  const format = mime || (/\.png$/i.test(file.name) ? 'image/png'
+    : /\.jpe?g$/i.test(file.name) ? 'image/jpeg' : '');
+  if (format !== 'image/png' && (kind !== 'logo' || format !== 'image/jpeg')) {
+    throw new Error(`${label}: ${getLegalEntityImageSourceHint(kind)}`);
+  }
+  if (kind === 'logo' && file.size > LEGAL_ENTITY_LOGO_SOURCE_MAX_BYTES) {
+    throw new Error(`${label}: исходный файл больше 2 МБ. Выберите файл меньшего размера.`);
+  }
+}
 
 export const LEGAL_ENTITY_IMAGE_UPLOAD_PROFILES: Record<LegalEntityImageKind, LegalEntityImageUploadProfile> = {
   logo: {
