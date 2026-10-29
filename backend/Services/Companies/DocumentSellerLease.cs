@@ -200,6 +200,19 @@ internal sealed class DocumentSellerLease : IAsyncDisposable
             .Select(payment => new VisiblePaymentRoot(payment.Id, payment.InvoiceId, payment.Type, payment.DocumentKind,
                 payment.ClientId, payment.LegalEntityId)).ToArrayAsync(ct);
 
+    public async Task<PaymentType?> ReadLockedActInvoiceTypeAsync(Act act, CancellationToken ct)
+    {
+        if (!act.InvoiceId.HasValue) return act.Invoice?.Type;
+        var id = act.InvoiceId.Value;
+        if (db.Database.IsNpgsql())
+            await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"Payments\" WHERE \"Id\" = {id} FOR SHARE NOWAIT").ToArrayAsync(ct);
+        var type = await db.Payments.AsNoTracking().Where(payment => payment.Id == id)
+            .Select(payment => (PaymentType?)payment.Type).SingleOrDefaultAsync(ct);
+        // The renderer still holds the observed side. Never freeze one side and stamp the other.
+        if (act.Invoice is not null && type != act.Invoice.Type) throw new SellerSnapshotConflictException();
+        return type;
+    }
+
     public async Task LockCompanyAsync(int companyId, int? branchId, CancellationToken ct)
     {
         if (!db.Database.IsNpgsql())

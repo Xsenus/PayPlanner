@@ -412,8 +412,16 @@ public sealed class DocumentSellerService : IDocumentSellerService
             var rows = await lease.LockDocumentAsync(document, ct);
             if (canStillRead is not null && !await canStillRead(ct)) throw new SellerSnapshotConflictException();
             lease.AdmitCleanTracker();
-            var current = new Act();
-            CopySnapshot(rows.Single(row => DocumentId(row) == id), current);
+            var root = rows.Single(row => DocumentId(row) == id);
+            IDocumentSeller current = root switch
+            {
+                Act act => new Act { InvoiceId = act.InvoiceId, Invoice = document is Act { Invoice: { } observed }
+                    ? new Payment { Type = observed.Type } : null },
+                Payment payment => new Payment { Type = payment.Type },
+                Contract => new Contract(),
+                _ => throw new NotSupportedException("Неизвестный документ продавца."),
+            };
+            CopySnapshot(root, current);
             var winners = rows.Where(row => !string.IsNullOrWhiteSpace(row.SellerSnapshotJson)).ToArray();
             var winner = winners.FirstOrDefault();
             if (winner is not null)
@@ -545,6 +553,10 @@ public sealed class DocumentSellerService : IDocumentSellerService
             throw new SellerSelectionException("Сохранённые реквизиты документа повреждены. Автоматическая замена текущим профилем недоступна.");
         }
 
+        // The linked financial side is read from persisted data under the same short lease.
+        // Caller navigation data may be stale; expense acts freeze buyer requisites, not our print defaults.
+        var captureOwnPrintDefaults = !freeze || document is not Act actDocument || lease is null
+            || await lease.ReadLockedActInvoiceTypeAsync(actDocument, ct) != PaymentType.Expense;
         LegalEntity? company;
         CompanyBranch? branch = null;
         if (freeze && lease is not null)
@@ -595,7 +607,9 @@ public sealed class DocumentSellerService : IDocumentSellerService
             // Если транзакция уже есть, версии и документ commit/rollback вместе с ней.
             await using var versionTransaction = _db.Database.CurrentTransaction is null
                 ? await _db.Database.BeginTransactionAsync(ct) : null;
-            var printDefaults = await new CompanyDocumentImagePrintDefaultsService(_db).ReadForSnapshotAsync(company.Id, ct);
+            var printDefaults = captureOwnPrintDefaults
+                ? await new CompanyDocumentImagePrintDefaultsService(_db).ReadForSnapshotAsync(company.Id, ct)
+                : new CompanyDocumentImagePrintDefaultsState(null);
             if (printDefaults.Invalid)
                 throw new SellerSelectionException("Настройки изображений компании повреждены. Исправьте или сбросьте их в профиле компании перед фиксацией документа.");
             var logo = await EnsureImageVersionAsync(company.Id, CompanyBrandImageKinds.Logo, composed.LogoDataUrl, ct);

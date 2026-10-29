@@ -63,12 +63,13 @@ public partial class ActContractImagePrintTests
         return new(db, user, company, act, contract);
     }
 
-    private static TestServer Server(Fixture fixture, PdfRecorder? pdf = null) => new(new WebHostBuilder().ConfigureServices(services =>
+    private static TestServer Server(Fixture fixture, PdfRecorder? pdf = null, PayPlanner.Api.Services.Companies.IDocumentSellerService? documentSeller = null) => new(new WebHostBuilder().ConfigureServices(services =>
     {
         services.AddSingleton(fixture.Db);
         services.AddSingleton<IEmailService>(new NoEmail());
         services.AddSingleton<IFormRequirementsService>(new NoRequirements());
         if (pdf is not null) services.AddSingleton<IInvoiceDocumentPdfService>(pdf);
+        if (documentSeller is not null) services.AddSingleton(documentSeller);
         services.AddAuthentication("print-test").AddScheme<AuthenticationSchemeOptions, PrintAuthentication>("print-test", _ => { });
         services.AddAuthorization();
         services.AddControllers().AddApplicationPart(typeof(ActsController).Assembly);

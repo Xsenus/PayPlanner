@@ -185,6 +185,32 @@ public partial class ActContractImagePrintTests
     }
 
     [Fact]
+    public async Task DefaultsHttp_ExpenseActFileIgnoresUnusedDamagedImageDefaultsButKeepsBuyerSnapshot()
+    {
+        await using var fixture = await DefaultsFixtureAsync();
+        fixture.Act.Invoice!.Type = PaymentType.Expense;
+        fixture.Db.SystemSettings.Add(new SystemSetting { Key = CompanyDocumentImagePrintDefaultsService.Key(fixture.Company.Id), Value = "broken" });
+        await fixture.Db.SaveChangesAsync();
+        var pdf = new PdfRecorder();
+        using var server = Server(fixture, pdf); using var client = server.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Print-User", fixture.User.Id.ToString());
+        using var response = await client.GetAsync($"/api/acts/{fixture.Act.Id}/document?format=pdf");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        AssertImages(pdf.Html, false, false, false);
+        Assert.DoesNotContain(Image, pdf.Html);
+        var saved = await fixture.Db.Acts.AsNoTracking().SingleAsync();
+        Assert.Equal(fixture.Act.InvoiceId, saved.InvoiceId);
+        Assert.Equal(fixture.Act.Amount, saved.Amount);
+        Assert.Equal(fixture.Company.Id, saved.SellerCompanyId);
+        Assert.Equal(fixture.Company.ShortName, SellerLegalEntityComposer.ReadMetadata(saved.SellerSnapshotJson)!.CompanyName);
+        Assert.True(SellerLegalEntityComposer.ReadMetadata(saved.SellerSnapshotJson)!.ImagePrintDefaultsFrozen);
+        Assert.Null(SellerLegalEntityComposer.ReadMetadata(saved.SellerSnapshotJson)!.ImagePrintDefaults);
+        Assert.Null(await fixture.Db.Payments.AsNoTracking().Select(row => row.SellerSnapshotJson).SingleAsync());
+        Assert.Empty(await fixture.Db.MoneyOperations.ToArrayAsync());
+        Assert.Empty(await fixture.Db.TaskJournalItems.ToArrayAsync());
+    }
+
+    [Fact]
     public async Task DefaultsHttp_FileIssueFreezesDefaultsAndLaterProfileChangesDoNotAffectTheCopy()
     {
         await using var fixture = await DefaultsFixtureAsync();
@@ -253,6 +279,41 @@ public partial class ActContractImagePrintTests
         };
         Assert.IsType<ForbidResult>((await pending).Result);
         Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public async Task DefaultsHttp_ChangedFinancialSideBeforeFreezeStopsFileAndOwnImages()
+    {
+        await using var fixture = await DefaultsFixtureAsync();
+        var pdf = new PdfRecorder();
+        var service = new FinancialSideChangeHook(fixture.Db);
+        using var server = Server(fixture, pdf, service); using var client = server.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Print-User", fixture.User.Id.ToString());
+        using var response = await client.GetAsync($"/api/acts/{fixture.Act.Id}/document?format=pdf&{Query(7)}");
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(string.Empty, pdf.Html);
+        Assert.Null(await fixture.Db.Acts.AsNoTracking().Select(row => row.SellerSnapshotJson).SingleAsync());
+        Assert.Empty(await fixture.Db.CompanyBrandImageVersions.ToArrayAsync());
+        Assert.Equal(fixture.Act.InvoiceId, await fixture.Db.Acts.AsNoTracking().Select(row => row.InvoiceId).SingleAsync());
+        Assert.Equal(100m, await fixture.Db.Acts.AsNoTracking().Select(row => row.Amount).SingleAsync());
+    }
+
+    private sealed class FinancialSideChangeHook(PayPlanner.Api.Data.PaymentContext db) : IDocumentSellerService
+    {
+        private readonly DocumentSellerService inner = new(db);
+        public Task<DocumentImagePrintOptions?> ReadImagePrintDefaultsAsync(IDocumentSeller document, CancellationToken ct) => inner.ReadImagePrintDefaultsAsync(document, ct);
+        public Task<string> ReadCreationPolicyAsync(CancellationToken ct) => inner.ReadCreationPolicyAsync(ct);
+        public Task InitializeForCreationAsync(IDocumentSeller document, LegalEntity? company, CancellationToken ct) => inner.InitializeForCreationAsync(document, company, ct);
+        public Task<string?> ValidateSelectionAsync(int? company, int? branch, CancellationToken ct) => inner.ValidateSelectionAsync(company, branch, ct);
+        public async Task<LegalEntity?> ResolveAsync(IDocumentSeller document, LegalEntity? company, bool freeze, CancellationToken ct,
+            Func<CancellationToken, Task<bool>>? canStillRead = null)
+        {
+            if (freeze && document is Act { InvoiceId: { } id })
+                await db.Payments.Where(row => row.Id == id).ExecuteUpdateAsync(setters => setters.SetProperty(row => row.Type, PaymentType.Expense), ct);
+            return await inner.ResolveAsync(document, company, freeze, ct, canStillRead);
+        }
+        public Task UpdateSelectionAsync(IDocumentSeller document, int? company, int? branch, CancellationToken ct,
+            Func<CancellationToken, Task<bool>> canStillEdit) => inner.UpdateSelectionAsync(document, company, branch, ct, canStillEdit);
     }
 
     private sealed class DefaultsReadHook(Func<CancellationToken, Task<DocumentImagePrintOptions?>> read) : IDocumentSellerService

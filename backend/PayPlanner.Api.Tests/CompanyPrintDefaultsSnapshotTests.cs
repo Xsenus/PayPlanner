@@ -228,6 +228,55 @@ public class CompanyPrintDefaultsSnapshotTests
         Assert.Equal(EntityState.Modified, db.Entry(company).State);
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Capture_ActUsesPersistedFinancialSideInsteadOfStaleNavigation(bool expense, bool onCreate)
+    {
+        await using var db = await SqliteTestContextFactory.CreateAsync();
+        var company = await SeedAsync(db);
+        var payment = new Payment { Account = "SIDE", Type = expense ? PaymentType.Expense : PaymentType.Income, Amount = 100m };
+        db.Payments.Add(payment);
+        db.SystemSettings.Add(new SystemSetting { Key = CompanyDocumentImagePrintDefaultsService.Key(company.Id), Value = "broken" });
+        await db.SaveChangesAsync();
+        var act = new Act { Number = "SIDE", Amount = 100m, InvoiceId = payment.Id, SellerCompanyId = company.Id,
+            SellerSnapshotPolicy = onCreate ? DocumentSellerSnapshotPolicy.OnCreate : DocumentSellerSnapshotPolicy.FirstFile };
+        if (!onCreate) { db.Acts.Add(act); await db.SaveChangesAsync(); act = await db.Acts.AsNoTracking().SingleAsync(); }
+        act.Invoice = new Payment { Id = payment.Id, Type = expense ? PaymentType.Income : PaymentType.Expense };
+        var service = new DocumentSellerService(db);
+        await using var transaction = onCreate ? await db.Database.BeginTransactionAsync() : null;
+        Task Capture() => onCreate ? service.InitializeForCreationAsync(act, company, default)
+            : service.ResolveAsync(act, company, true, default, _ => Task.FromResult(true));
+        await Assert.ThrowsAsync<SellerSnapshotConflictException>(Capture);
+        Assert.Null(act.SellerSnapshotJson);
+        // The caller explicitly reloads the observed side; the service does not retry or mutate it.
+        act.Invoice = new Payment { Id = payment.Id, Type = expense ? PaymentType.Expense : PaymentType.Income };
+        if (expense)
+        {
+            await Capture();
+            var metadata = SellerLegalEntityComposer.ReadMetadata(act.SellerSnapshotJson)!;
+            Assert.True(metadata.ImagePrintDefaultsFrozen);
+            Assert.Null(metadata.ImagePrintDefaults);
+            Assert.Equal(company.ShortName, metadata.CompanyName);
+            Assert.Equal(act.SellerSnapshotPolicy, metadata.FreezeReason);
+            if (onCreate) { act.Invoice = null; db.Acts.Add(act); await db.SaveChangesAsync(); await transaction!.CommitAsync(); }
+            Assert.Equal(act.SellerSnapshotJson, await db.Acts.AsNoTracking().Select(row => row.SellerSnapshotJson).SingleAsync());
+        }
+        else
+        {
+            await Assert.ThrowsAsync<SellerSelectionException>(Capture);
+            Assert.Null(act.SellerSnapshotJson);
+            if (onCreate) await transaction!.RollbackAsync();
+            Assert.False(await db.Acts.AsNoTracking().AnyAsync(row => row.SellerSnapshotJson != null));
+        }
+        Assert.Equal(expense ? PaymentType.Expense : PaymentType.Income, await db.Payments.AsNoTracking().Select(row => row.Type).SingleAsync());
+        Assert.Equal(100m, await db.Payments.AsNoTracking().Select(row => row.Amount).SingleAsync());
+        Assert.Empty(await db.TaskJournalItems.ToArrayAsync());
+        Assert.Empty(await db.MoneyOperations.ToArrayAsync());
+    }
+
     private static IDocumentSeller Document(string kind) => kind switch
     {
         "invoice" => new Payment { Type = PaymentType.Income },
