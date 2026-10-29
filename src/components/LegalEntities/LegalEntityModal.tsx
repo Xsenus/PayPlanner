@@ -102,6 +102,8 @@ import { CompanyBranchesSection } from "./CompanyBranchesSection";
 import { CompanyRequisitesCheck } from "./CompanyRequisitesCheck";
 import { CompanyTaxRegisterSection } from "./CompanyTaxRegisterSection";
 import { LegalEntityFinanceSection } from "./LegalEntityFinanceSection";
+import { CompanyImagePrintDefaultsSection } from './CompanyImagePrintDefaultsSection';
+import { companyImagePrintDraft, companyImagePrintPayload } from './companyImagePrintDefaults';
 
 interface LegalEntityModalProps {
   isOpen: boolean;
@@ -926,6 +928,7 @@ export function LegalEntityModal({
     setPersistedDirectorSignatureDataUrl,
   ] = useState<string>("");
   const [logoChanged, setLogoChanged] = useState(false);
+  const [printDefaultsDraft, setPrintDefaultsDraft] = useState(() => companyImagePrintDraft(initial));
   const [sealChanged, setSealChanged] = useState(false);
   const [directorSignatureChanged, setDirectorSignatureChanged] =
     useState(false);
@@ -990,6 +993,14 @@ export function LegalEntityModal({
   );
 
   const readOnly = !allowEdit && !!initial;
+  const saveLifetime = useRef({ epoch: 0 });
+  const saveContext = useRef({ id: initial?.id, isOpen, readOnly, mode, initial });
+  saveContext.current = { id: initial?.id, isOpen, readOnly, mode, initial };
+  useEffect(() => {
+    const lifetime = saveLifetime.current;
+    setLoading(false);
+    return () => { ++lifetime.epoch; };
+  }, [initial?.id, isOpen, readOnly, mode]);
   useEffect(() => {
     const uploads = imageUploadsRef.current;
     setImageProcessing(false);
@@ -1188,6 +1199,7 @@ export function LegalEntityModal({
     if (!isOpen) {
       return;
     }
+    setPrintDefaultsDraft(companyImagePrintDraft(initial));
     if (initial) {
       setFormState({
         shortName: initial.shortName ?? "",
@@ -2036,6 +2048,7 @@ export function LegalEntityModal({
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (loading || !isOpen) return;
     if (readOnly) {
       onClose();
       return;
@@ -2044,6 +2057,11 @@ export function LegalEntityModal({
       setError(IMAGE_PROCESSING_SAVE_MESSAGE);
       return;
     }
+    const lifetime = saveLifetime.current.epoch;
+    const context = saveContext.current;
+    const isCurrentSave = () => lifetime === saveLifetime.current.epoch
+      && saveContext.current.id === context.id && saveContext.current.isOpen
+      && saveContext.current.readOnly === context.readOnly && saveContext.current.mode === context.mode;
     setError(null);
     setLoading(true);
     try {
@@ -2092,6 +2110,7 @@ export function LegalEntityModal({
         dedupedAddressInputs[0];
 
       const payload: LegalEntityInput = {
+        ...(isOwnLegalEntity ? companyImagePrintPayload(printDefaultsDraft) : {}),
         shortName,
         fullName: normalize(formState.fullName),
         inn: normalize(formState.inn),
@@ -2211,6 +2230,12 @@ export function LegalEntityModal({
         return;
       }
       const saved = await onSubmit(payload);
+      if (!isCurrentSave()) return;
+      const latestInitial = saveContext.current.initial;
+      if (latestInitial !== context.initial && latestInitial !== saved
+        && latestInitial?.documentImagePrintDefaultsVersion !== context.initial?.documentImagePrintDefaultsVersion
+        && latestInitial?.documentImagePrintDefaultsVersion !== saved.documentImagePrintDefaultsVersion) return;
+      setPrintDefaultsDraft(companyImagePrintDraft(saved));
       setFormState((prev) => ({
         ...prev,
         shortName: saved.shortName ?? payload.shortName,
@@ -2407,6 +2432,8 @@ export function LegalEntityModal({
         onClose();
       }
     } catch (err) {
+      if (!isCurrentSave()) return;
+      if (saveContext.current.initial?.documentImagePrintDefaultsVersion !== context.initial?.documentImagePrintDefaultsVersion) return;
       const message = extractErrorMessage(
         err,
         t("saveError") || "Не удалось сохранить",
@@ -2414,7 +2441,7 @@ export function LegalEntityModal({
       setError(message);
       toast.error(message, "Ошибка сохранения");
     } finally {
-      setLoading(false);
+      if (isCurrentSave()) setLoading(false);
     }
   };
 
@@ -4697,6 +4724,14 @@ export function LegalEntityModal({
               readOnly={readOnly}
             />
           </>
+        ) : null}
+
+        {isOwnLegalEntity ? (
+          <CompanyImagePrintDefaultsSection
+            draft={printDefaultsDraft}
+            disabled={readOnly || loading}
+            onChange={value => setPrintDefaultsDraft(previous => ({ ...previous, value, touched: true }))}
+          />
         ) : null}
 
         {isOwnLegalEntity ? (

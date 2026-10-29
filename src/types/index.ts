@@ -1,3 +1,5 @@
+import type { CompanyDocumentImagePrintDefaults } from './documentImagePrint';
+
 export type PaymentStatus = 'Pending' | 'Completed' | 'Overdue' | 'Cancelled' | 'Processing';
 export type PaymentOverpaymentHandling = 'Advance' | 'NextInstallment' | 'Refund';
 export type InvoiceWorkflowStatus =
@@ -491,6 +493,9 @@ export interface LegalEntitySummary {
 
 export interface LegalEntityDetail extends LegalEntitySummary {
   clients: LegalEntityClientLink[];
+  documentImagePrintDefaults?: CompanyDocumentImagePrintDefaults | null;
+  documentImagePrintDefaultsInvalid?: boolean;
+  documentImagePrintDefaultsVersion?: string | null;
 }
 
 export interface LegalEntitySuggestion {
@@ -677,6 +682,9 @@ export interface LegalEntityInput {
   logoChanged?: boolean | null;
   sealChanged?: boolean | null;
   directorSignatureChanged?: boolean | null;
+  documentImagePrintDefaults?: CompanyDocumentImagePrintDefaults | null;
+  documentImagePrintDefaultsChanged?: boolean;
+  documentImagePrintDefaultsVersion?: string;
   documentDirectorJson?: string | null;
   chiefAccountantJson?: string | null;
   contactPhonesJson?: string | null;

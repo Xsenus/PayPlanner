@@ -429,8 +429,9 @@ describe('LegalEntityModal integration', () => {
     expect(apiService.getPaymentsV2).not.toHaveBeenCalled();
     expect(apiService.getLegalEntityCaseFinanceSummaries).not.toHaveBeenCalled();
     expect(screen.queryByText('Дела и документы')).toBeNull();
-    expect(screen.queryByText('Счета')).toBeNull();
-    expect(screen.queryByText('Акты')).toBeNull();
+    // Document-kind legends in profile preferences do not grant access to financial sections.
+    expect(screen.queryByRole('heading', { name: 'Счета' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Акты' })).toBeNull();
     expect(screen.queryByText('Платежи')).toBeNull();
   });
 
@@ -1045,6 +1046,102 @@ describe('LegalEntityModal integration', () => {
     } finally { deferred.restore(); }
   });
 
+  it.each(['page', 'modal'] as const)('print defaults: round trips independent choices and the new version in %s mode for a delegated editor', async mode => {
+    const user = userEvent.setup();
+    const initial = createInitialLegalEntity({ shortName: 'Own company', documentImagePrintDefaultsVersion: 'A'.repeat(64) });
+    const onSubmit = vi.fn().mockImplementation(async (payload: LegalEntityInput) => ({ ...initial, ...payload, documentImagePrintDefaultsVersion: 'B'.repeat(64) }));
+    render(<LegalEntityModal isOpen mode={mode} initial={initial} allowEdit allowDelete={false} canManageOwnCompanySettings={false} onClose={vi.fn()} onSubmit={onSubmit} suggest={vi.fn()} findById={vi.fn()} />);
+    const ownInvoice = await screen.findByRole('checkbox', { name: 'Свой набор для счетов' });
+    await user.click(ownInvoice);
+    await user.click(screen.getByRole('checkbox', { name: 'Логотип для счетов' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Печать для счетов' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Свой набор для договоров' }));
+    expect(screen.getByRole('checkbox', { name: 'Свой набор для актов' })).toHaveProperty('checked', false);
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toEqual(expect.objectContaining({
+      documentImagePrintDefaultsChanged: true, documentImagePrintDefaultsVersion: 'A'.repeat(64),
+      documentImagePrintDefaults: { invoice: { includeLogo: false, includeSeal: true, includeSignature: false }, act: null, contract: { includeLogo: true, includeSeal: false, includeSignature: false } },
+    }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Сохранить' })).toHaveProperty('disabled', false));
+    await user.click(screen.getByRole('checkbox', { name: 'Свой набор для актов' }));
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+    expect(onSubmit.mock.calls[1][0]).toEqual(expect.objectContaining({ documentImagePrintDefaultsVersion: 'B'.repeat(64) }));
+  });
+
+  it.each(['page', 'modal'] as const)('print defaults: preserves draft and original version on conflict in %s mode', async mode => {
+    const user = userEvent.setup();
+    const initial = createInitialLegalEntity({ shortName: 'Own company', documentImagePrintDefaultsVersion: 'A'.repeat(64) });
+    const onSubmit = vi.fn().mockRejectedValue(new Error('Настройки печати компании изменились. Обновите карточку.'));
+    render(<LegalEntityModal isOpen mode={mode} initial={initial} allowEdit allowDelete={false} onClose={vi.fn()} onSubmit={onSubmit} suggest={vi.fn()} findById={vi.fn()} />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Свой набор для счетов' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Подпись для счетов' }));
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalled());
+    expect(screen.getByRole('checkbox', { name: 'Подпись для счетов' })).toHaveProperty('checked', true);
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+    expect(onSubmit.mock.calls[1][0]).toEqual(onSubmit.mock.calls[0][0]);
+    expect(onSubmit.mock.calls[1][0].documentImagePrintDefaultsVersion).toBe('A'.repeat(64));
+  });
+
+  it.each(['page', 'modal'] as const)('print defaults: explicit reset repairs an unreadable setting in %s mode', async mode => {
+    const user = userEvent.setup();
+    const initial = createInitialLegalEntity({ shortName: 'Preserved name', documentImagePrintDefaultsInvalid: true, documentImagePrintDefaultsVersion: 'A'.repeat(64) });
+    const onSubmit = vi.fn().mockResolvedValue({ ...initial, documentImagePrintDefaultsInvalid: false, documentImagePrintDefaultsVersion: 'B'.repeat(64) });
+    render(<LegalEntityModal isOpen mode={mode} initial={initial} allowEdit allowDelete={false} onClose={vi.fn()} onSubmit={onSubmit} suggest={vi.fn()} findById={vi.fn()} />);
+    await user.click(await screen.findByRole('button', { name: 'Сбросить настройки изображений' }));
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ shortName: 'Preserved name', documentImagePrintDefaultsChanged: true, documentImagePrintDefaults: null, documentImagePrintDefaultsVersion: 'A'.repeat(64) })));
+    await waitFor(() => expect(screen.queryByText(/Сохранённые настройки изображений не удалось прочитать/)).toBeNull());
+  });
+
+  it.each(['page', 'modal'] as const)('print defaults: reverted choices and ordinary saves omit all settings fields in %s mode', async mode => {
+    const user = userEvent.setup();
+    const initial = createInitialLegalEntity({ shortName: 'Own company', documentImagePrintDefaultsVersion: 'A'.repeat(64) });
+    const onSubmit = vi.fn().mockResolvedValue(initial);
+    render(<LegalEntityModal isOpen mode={mode} initial={initial} allowEdit allowDelete={false} onClose={vi.fn()} onSubmit={onSubmit} suggest={vi.fn()} findById={vi.fn()} />);
+    const own = await screen.findByRole('checkbox', { name: 'Свой набор для счетов' });
+    await user.click(own); await user.click(own);
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    for (const key of ['documentImagePrintDefaults', 'documentImagePrintDefaultsChanged', 'documentImagePrintDefaultsVersion']) expect(onSubmit.mock.calls[0][0]).not.toHaveProperty(key);
+  });
+
+  it.each(['page', 'modal'] as const)('print defaults: view-only and unavailable-version controls stay disabled in %s mode', async mode => {
+    const initial = createInitialLegalEntity({ shortName: 'Own company' });
+    const props = { isOpen: true, mode, initial, allowEdit: true, allowDelete: false, onClose: vi.fn(), onSubmit: vi.fn(), suggest: vi.fn(), findById: vi.fn() };
+    const view = render(<LegalEntityModal {...props} />);
+    expect(await screen.findByRole('checkbox', { name: 'Свой набор для счетов' })).toHaveProperty('disabled', true);
+    view.rerender(<LegalEntityModal {...props} allowEdit={false} initial={{ ...initial, documentImagePrintDefaultsVersion: 'A'.repeat(64) }} />);
+    expect(screen.getByRole('checkbox', { name: 'Свой набор для счетов' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Сбросить настройки изображений' })).toHaveProperty('disabled', true);
+    expect(props.onSubmit).not.toHaveBeenCalled();
+  });
+
+  it.each((['page', 'modal'] as const).flatMap(mode => (['company', 'close', 'permission', 'refresh'] as const).flatMap(reason => (['success', 'error'] as const).map(outcome => [mode, reason, outcome] as const))))('print defaults: ignores late %s save after %s (%s)', async (mode, reason, outcome) => {
+    const user = userEvent.setup();
+    const initial = createInitialLegalEntity({ shortName: 'Original company', documentImagePrintDefaultsVersion: 'A'.repeat(64) });
+    let resolve!: (value: LegalEntityDetail) => void; let reject!: (error: Error) => void;
+    const pending = new Promise<LegalEntityDetail>((ok, fail) => { resolve = ok; reject = fail; });
+    const props = { isOpen: true, mode, initial, allowEdit: true, allowDelete: false, onClose: vi.fn(), onSubmit: vi.fn().mockReturnValue(pending), suggest: vi.fn(), findById: vi.fn() };
+    const view = render(<LegalEntityModal {...props} />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Свой набор для счетов' }));
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(props.onSubmit).toHaveBeenCalledTimes(1));
+    const refreshed = { ...initial, shortName: 'Fresh profile', documentImagePrintDefaultsVersion: 'C'.repeat(64) };
+    if (reason === 'company') view.rerender(<LegalEntityModal {...props} initial={{ ...refreshed, id: 10 }} />);
+    if (reason === 'close') { view.rerender(<LegalEntityModal {...props} isOpen={false} />); view.rerender(<LegalEntityModal {...props} initial={refreshed} />); }
+    if (reason === 'permission') view.rerender(<LegalEntityModal {...props} initial={refreshed} allowEdit={false} />);
+    if (reason === 'refresh') view.rerender(<LegalEntityModal {...props} initial={refreshed} />);
+    await act(async () => { if (outcome === 'success') resolve({ ...initial, shortName: 'Late obsolete name', documentImagePrintDefaultsVersion: 'B'.repeat(64) }); else reject(new Error('Late obsolete error')); });
+    expect(screen.queryByDisplayValue('Late obsolete name')).toBeNull();
+    expect(screen.queryByText('Late obsolete error')).toBeNull();
+    expect(props.onClose).not.toHaveBeenCalled(); expect(toastErrorMock).not.toHaveBeenCalled();
+    if (reason !== 'company') expect(screen.getByRole('checkbox', { name: 'Свой набор для счетов' })).toHaveProperty('checked', false);
+  });
+
   it('hides logo, seal and signature fields for non-own legal entities', async () => {
     vi.mocked(apiService.getMainCompanySettings).mockResolvedValueOnce({
       defaultCompanyId: 7,
@@ -1069,5 +1166,6 @@ describe('LegalEntityModal integration', () => {
     expect(screen.queryByText('Логотип компании')).toBeNull();
     expect(screen.queryByText('Печать компании')).toBeNull();
     expect(screen.queryByText('Подпись руководителя')).toBeNull();
+    expect(screen.queryByText('Изображения в документах')).toBeNull();
   });
 });
