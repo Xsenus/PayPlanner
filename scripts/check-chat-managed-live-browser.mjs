@@ -84,6 +84,7 @@ try {
   const browserUi = await prepareSyntheticBrowserUi({ api, port });
   console.log('PP_CHAT_BROWSER_PHASE preview-listen');
   vite = await browserUi.startPreview();
+  console.log('PP_CHAT_BROWSER_PHASE cli-open');
   await cli('open', 'about:blank', '--browser', channel); opened = true;
   await cli('snapshot');
   console.log('PP_CHAT_BROWSER_PHASE pending-scenario');

@@ -1,23 +1,25 @@
 namespace PayPlanner.Api.Tests;
 
-/// <summary>Cold production compilation has its own bound; financial browser assertions retain their original three minutes.</summary>
+/// <summary>Cold production compilation has its own bound; financial/chat browser assertions retain their original three minutes.</summary>
 internal sealed class SyntheticBrowserPhaseBudget
 {
-    private readonly bool financial;
+    private readonly string? browserStartMarker;
     private readonly Action<TimeSpan> reschedule;
     private bool browserStarted;
 
-    internal SyntheticBrowserPhaseBudget(bool financial, Action<TimeSpan> reschedule)
+    internal SyntheticBrowserPhaseBudget(bool financial, Action<TimeSpan> reschedule, bool chat = false)
     {
-        this.financial = financial;
+        if (financial && chat) throw new ArgumentException("Select only one browser family.", nameof(chat));
+        browserStartMarker = financial ? "PP_FINANCIAL_BROWSER_PHASE cli-open"
+            : chat ? "PP_CHAT_BROWSER_PHASE cli-open" : null;
         this.reschedule = reschedule;
-        reschedule(TimeSpan.FromMinutes(financial ? 5 : 3));
+        reschedule(TimeSpan.FromMinutes(browserStartMarker is null ? 3 : 5));
     }
 
     internal void ObserveLine(string line)
     {
         // One transition only: repeated child output cannot extend the deadline.
-        if (!financial || browserStarted || line != "PP_FINANCIAL_BROWSER_PHASE cli-open") return;
+        if (browserStartMarker is null || browserStarted || line != browserStartMarker) return;
         browserStarted = true;
         reschedule(TimeSpan.FromMinutes(3));
     }
