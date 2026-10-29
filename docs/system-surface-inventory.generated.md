@@ -10,7 +10,7 @@
 - HTTP endpoints: 949; с прямой тестовой связью: 664.
 - HTTP endpoints с точной ссылкой из документации: 250; критичных без такой ссылки: 534.
 - Критичных endpoints без прямой тестовой связи: 237.
-- Реальных HTML-форм: 20; с найденной тестовой связью: 18.
+- Реальных HTML-форм: 21; с найденной тестовой связью: 19.
 - Фоновых сервисов: 35; с найденной тестовой связью: 28.
 - Исходящих HTTP-интеграций: 12; с найденной тестовой связью: 12.
 
@@ -78,7 +78,7 @@
 
 | Компонент | Файл | Строка | Тест найден | Документация |
 | --- | --- | --- | --- | --- |
-| InvoiceModal | src/components/Accounts/InvoiceModal.tsx | 4413 | да | docs/action-map-pay-32-individual-client-2026-10-12.md, docs/date-time-inventory.md, docs/development-performance-audit-2026-10-23.md, docs/development-test-acceleration-2026-10-21.md, docs/final-acceptance-2026-06-10.md, docs/financial-invoice-cancellation-current-state-2026-07-08.md, docs/full-project-audit-2026-06-10.md, docs/pay-33-36-implementation-log-2026-10-09.md, docs/payplanner-financial-documents-roadmap-2026-10-14.md |
+| InvoiceModal | src/components/Accounts/InvoiceModal.tsx | 4391 | да | docs/action-map-pay-32-individual-client-2026-10-12.md, docs/date-time-inventory.md, docs/development-performance-audit-2026-10-23.md, docs/development-test-acceleration-2026-10-21.md, docs/final-acceptance-2026-06-10.md, docs/financial-invoice-cancellation-current-state-2026-07-08.md, docs/full-project-audit-2026-06-10.md, docs/pay-33-36-implementation-log-2026-10-09.md, docs/payplanner-company-roadmap-2026-10-14.md, docs/payplanner-financial-documents-roadmap-2026-10-14.md, docs/payplanner-work-order-2026-10-21.md |
 | ActModal | src/components/Acts/ActModal.tsx | 1632 | да | docs/action-map-pay-32-individual-client-2026-10-12.md, docs/date-time-inventory.md, docs/full-project-audit-2026-06-10.md, docs/pay-33-36-implementation-log-2026-10-09.md |
 | Login | src/components/Auth/Login.tsx | 73 | да | docs/external-authentication-security-and-performance.md, docs/field-encryption-candidates.generated.md, docs/field-encryption-data-inventory-2026-07-30.md, docs/full-project-audit-2026-06-10.md |
 | Register | src/components/Auth/Register.tsx | 94 | да | docs/batch-operations-audit-coverage-2026-06-10.md, docs/date-time-inventory.md, docs/field-encryption-candidates.generated.md, docs/pay-33-36-implementation-log-2026-10-09.md, docs/payplanner-tax-roadmap-2026-10-14.md, docs/storage-resilience-runbook.md, docs/storage-s3-backup-audit-2026-09-22.md |
@@ -87,6 +87,7 @@
 | ClientModal | src/components/Clients/ClientModal.tsx | 240 | да | docs/action-map-pay-32-individual-client-2026-10-12.md, docs/claude-yougile-ui-development-spec-2026-10-10.md |
 | ContractCreatePage | src/components/Contracts/ContractCreatePage.tsx | 297 | нет | docs/full-project-audit-2026-06-10.md, docs/unused-frontend-candidates-2026-06-10.md |
 | ContractModal | src/components/Contracts/ContractModal.tsx | 370 | да | docs/action-map-pay-32-individual-client-2026-10-12.md, docs/full-project-audit-2026-06-10.md |
+| DocumentImagePrintDialog | src/components/Documents/DocumentImagePrintDialog.tsx | 56 | да | docs/payplanner-company-roadmap-2026-10-14.md |
 | LegalEntityModal | src/components/LegalEntities/LegalEntityModal.tsx | 3941 | да | docs/action-map-pay-32-individual-client-2026-10-12.md, docs/development-profile-max-planning-final-gate-2026-10-23.md, docs/full-project-audit-2026-06-10.md, docs/pay-33-36-implementation-log-2026-10-09.md, docs/payplanner-company-roadmap-2026-10-14.md |
 | MoneyOperations | src/components/Money/MoneyOperations.tsx | 6435 | да | docs/bank-integrations-api-verification-2026-10-09.md, docs/batch-operations-audit-coverage-2026-06-10.md, docs/date-time-inventory.md, docs/deployment-manual-2026-10-22.md, docs/development-bank-import-verification-2026-10-16.md, docs/development-client-detail-visual-2026-10-24.md, docs/development-performance-audit-2026-10-23.md, docs/development-performance-implementation-2026-10-23.md, docs/development-roadmap-release-integration-2026-10-28.md, docs/development-test-speed-drafts-2026-10-24.md, docs/financial-cash-access-acceptance-report-2026-06-16.md, docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md, docs/max-finance-provenance-review-2026-10-15.md, docs/max-latest-reply-drafts-2026-10-15.md, docs/max-review-and-replies-2026-10-16.md, docs/max-today-reply-drafts-2026-10-14.md, docs/payplanner-bank-import-guide-2026-10-24.md, docs/payplanner-bank-roadmap-2026-10-14.md |
 | ClientPortalPage | src/components/Public/ClientPortalPage.tsx | 223 | да | нет |
@@ -904,8 +905,8 @@
 | POST | api/[controller]/change-responsible | InvoicesController | ChangeResponsible | backend/Controllers/InvoicesController.cs:3115 | [Authorize] | да | нет |
 | GET | api/[controller]/{id:int}/preview | InvoicesController | GetPreview | backend/Controllers/InvoicesController.cs:3196 | [Authorize] | да | нет |
 | GET | api/[controller]/{id:int}/document | InvoicesController | GetDocument | backend/Controllers/InvoicesController.cs:3221 | [Authorize] | да | нет |
-| POST | api/[controller]/{id:int}/yandex-disk | InvoicesController | UploadDocumentToYandexDisk | backend/Controllers/InvoicesController.cs:3291 | [Authorize] | да | нет |
-| POST | api/[controller]/{id:int}/send-email | InvoicesController | SendInvoiceEmail | backend/Controllers/InvoicesController.cs:3444 | [Authorize] | да | нет |
+| POST | api/[controller]/{id:int}/yandex-disk | InvoicesController | UploadDocumentToYandexDisk | backend/Controllers/InvoicesController.cs:3297 | [Authorize] | да | нет |
+| POST | api/[controller]/{id:int}/send-email | InvoicesController | SendInvoiceEmail | backend/Controllers/InvoicesController.cs:3450 | [Authorize] | да | нет |
 | POST | api/storage/legacy-replicas | LegacyStorageMigrationController | Run | backend/Controllers/LegacyStorageMigrationController.cs:12 | [Authorize(Policy = "Admin")] | нет | docs/storage-resilience-runbook.md |
 | POST | api/legal-entities/clean/address | LegalEntitiesController | CleanAddress | backend/Controllers/LegalEntitiesController.cs:874 | [Authorize] | да | нет |
 | POST | api/legal-entities/clean/email | LegalEntitiesController | CleanEmail | backend/Controllers/LegalEntitiesController.cs:906 | [Authorize] | да | нет |

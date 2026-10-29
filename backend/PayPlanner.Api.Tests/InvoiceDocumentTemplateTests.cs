@@ -16,7 +16,7 @@ using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public class InvoiceDocumentTemplateTests
+public partial class InvoiceDocumentTemplateTests
 {
     [Fact]
     public void RenderHtml_PreservesTaskCommentLines_AndMakesCrmLinksClickable()

@@ -2,6 +2,7 @@ import { acknowledgePaymentCreate, fencePaymentCreateAdoption, createPaymentGuar
   type PaymentCreateContext, type PaymentCreateOwner, type PaymentCreatePorts, type PendingPaymentCreate } from './paymentCreateAttempts';
 import { createClientRequestId } from '../utils/clientRequestId';
 import { API_BASE_URL } from './apiBaseUrl';
+import type { DocumentImagePrintOptions } from '../types/documentImagePrint';
 import { apiFetch as fetch } from './apiTransport';
 import { authService, assertAuthSessionIdentity, captureAuthSessionIdentity, AuthSessionChangedError } from './authService';
 import { TaskFileUploadAcceptedError } from './taskFileUploadReceipt';
@@ -4759,17 +4760,21 @@ export class ApiService {
   async downloadInvoiceDocument(
     id: number,
     format: 'word' | 'pdf' | 'html' = 'word',
-    options?: { includeSignatureAndSeal?: boolean; templateKey?: string },
+    options?: Partial<DocumentImagePrintOptions> & { includeSignatureAndSeal?: boolean; templateKey?: string; signal?: AbortSignal },
   ) {
     const token = getAuthToken();
     const query = buildQuery({
       format,
       templateKey: options?.templateKey,
       includeSignatureAndSeal: options?.includeSignatureAndSeal,
+      includeLogo: options?.includeLogo,
+      includeSeal: options?.includeSeal,
+      includeSignature: options?.includeSignature,
     });
     const response = await fetch(`${API_BASE_URL}/invoices/${id}/document${query}`, {
       method: 'GET',
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      ...(options?.signal ? { signal: options.signal } : {}),
     });
 
     if (!response.ok) {

@@ -3224,7 +3224,10 @@ public class InvoicesController : ControllerBase
         [FromQuery] string? format = "word",
         [FromQuery] string? templateKey = null,
         [FromQuery] bool? includeSignatureAndSeal = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        [FromQuery] bool? includeLogo = null,
+        [FromQuery] bool? includeSeal = null,
+        [FromQuery] bool? includeSignature = null)
     {
         if (await RequireAccountsPermissionAsync(permission => permission.CanExport, ct) is { } forbidden)
         {
@@ -3246,13 +3249,16 @@ public class InvoicesController : ControllerBase
         await RememberInvoiceDocumentTemplateAsync(payment, template.Key, ct);
         var mainCompany = await ResolveInvoiceSellerAsync(payment, await LoadMainCompanyAsync(ct), normalizedFormat != "html", ct);
         var shouldIncludeSignatureAndSeal = includeSignatureAndSeal ?? documentSettings.PrintWithSignatureAndSealByDefault;
-        var documentHtml = InvoiceDocumentTemplateEngine.RenderHtml(
+        var imageOptions = DocumentImagePrintOptions.FromOverrides(true, shouldIncludeSignatureAndSeal, includeLogo, includeSeal, includeSignature);
+        var documentHtml = imageOptions is null ? InvoiceDocumentTemplateEngine.RenderHtml(
             template.Html,
             payment,
             installmentDocumentContext.LineItems,
             mainCompany,
             shouldIncludeSignatureAndSeal,
-            installmentDocumentContext.ScheduleHtml);
+            installmentDocumentContext.ScheduleHtml)
+            : InvoiceDocumentTemplateEngine.RenderHtml(template.Html, payment, installmentDocumentContext.LineItems,
+                mainCompany, imageOptions, installmentDocumentContext.ScheduleHtml);
 
         if (normalizedFormat == "html")
         {

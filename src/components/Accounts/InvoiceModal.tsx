@@ -2,6 +2,8 @@ import { hasStorableLineItemPrecision, lineItemPrecisionError, roundedLineTotal 
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { DocumentSellerPicker } from '../Documents/DocumentSellerPicker';
+import { DocumentImagePrintDialog } from '../Documents/DocumentImagePrintDialog';
+import type { DocumentImagePrintOptions } from '../../types/documentImagePrint';
 import { VatRateSelect } from '../Documents/VatRateSelect';
 import { SystemSelect } from '../ui/SystemSelect';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -1027,9 +1029,16 @@ export function InvoiceModal({
   const [documentPreviewError, setDocumentPreviewError] = useState<string | null>(null);
   const [yandexDiskUploading, setYandexDiskUploading] = useState(false);
   const [printMenuOpen, setPrintMenuOpen] = useState(false);
+  const printButtonRef = useRef<HTMLButtonElement>(null);
+  const printRequestGeneration = useRef(0);
+  const [imagePrintRequest, setImagePrintRequest] = useState<{
+    documentId: number; generation: number; format: 'print' | 'word' | 'pdf'; templateKey?: string;
+    initialOptions: DocumentImagePrintOptions;
+  } | null>(null);
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
   const [messengerDeliveryOpen, setMessengerDeliveryOpen] = useState(false);
   const [electronicSignatureOpen, setElectronicSignatureOpen] = useState(false);
+  useEffect(() => { setImagePrintRequest(null); }, [open, invoice?.id]);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [cancelScope, setCancelScope] = useState<InvoiceCancellationScope>('All');
@@ -3173,74 +3182,42 @@ export function InvoiceModal({
     window.setTimeout(callback, 160);
   }, []);
 
-  const getDocumentActionErrorMessage = useCallback((error: unknown, fallback: string) => {
-    if (!(error instanceof Error)) {
-      return fallback;
-    }
-
-    const message = error.message.trim();
-    if (!message) {
-      return fallback;
-    }
-
-    const separatorIndex = message.lastIndexOf(' - ');
-    if (separatorIndex >= 0) {
-      const detail = message.slice(separatorIndex + 3).trim();
-      if (detail) {
-        return detail;
-      }
-    }
-
-    return message;
-  }, []);
-
-  const handlePrintDocument = async (templateKey?: string, includeSignatureAndSeal = true) => {
+  const requestDocumentCopy = (format: 'print' | 'word' | 'pdf', combined: boolean, templateKey?: string) => {
     if (!invoice?.id) {
-      toast.error('Сначала сохраните счёт, затем можно печатать документ.');
+      toast.error('Сначала сохраните счёт, затем можно подготовить документ.');
       return;
     }
-
-    let previewWindow: Window | null | undefined;
-    try {
-      previewWindow = openPendingDocumentWindow();
-      const blob = await apiService.downloadInvoiceDocument(
-        invoice.id,
-        'html',
-        templateKey
-          ? { includeSignatureAndSeal, templateKey }
-          : { includeSignatureAndSeal },
-      );
-      printHtmlInWindow(await blob.text(), previewWindow);
-    } catch (err) {
-      if (previewWindow && !previewWindow.closed) {
-        previewWindow.close();
-      }
-      toast.error(getDocumentActionErrorMessage(err, 'Не удалось открыть печатную форму документа.'));
-    }
+    if (!canExport) return;
+    (format === 'print' ? printButtonRef.current : downloadMenuRef.current?.querySelector('button'))?.focus();
+    setPrintMenuOpen(false);
+    setDownloadMenuOpen(false);
+    setImagePrintRequest({ documentId: invoice.id, generation: ++printRequestGeneration.current, format, templateKey,
+      initialOptions: { includeLogo: true, includeSeal: combined, includeSignature: combined } });
   };
 
-  const handleDownloadDocument = async (
-    format: 'word' | 'pdf',
-    includeSignatureAndSeal: boolean,
-    templateKey?: string,
-  ) => {
-    if (!invoice?.id) {
-      toast.error('Сначала сохраните счёт, затем можно скачать документ.');
-      return;
-    }
+  const handlePrintDocument = (templateKey?: string, combined = true) => requestDocumentCopy('print', combined, templateKey);
+  const handleDownloadDocument = (format: 'word' | 'pdf', combined: boolean, templateKey?: string) => requestDocumentCopy(format, combined, templateKey);
 
+  const confirmDocumentCopy = async (images: DocumentImagePrintOptions, signal: AbortSignal) => {
+    const request = imagePrintRequest;
+    if (!request || request.documentId !== invoice?.id || !canExport) throw new Error('Документ или права изменились. Откройте карточку повторно.');
+    let previewWindow: Window | null | undefined;
     try {
-      const blob = await apiService.downloadInvoiceDocument(
-        invoice.id,
-        format,
-        templateKey
-          ? { includeSignatureAndSeal, templateKey }
-          : { includeSignatureAndSeal },
-      );
-      downloadBlob(blob, buildInvoiceDocumentFileName(form.number, form.date, format, templateKey));
-      setDownloadMenuOpen(false);
-    } catch (err) {
-      toast.error(getDocumentActionErrorMessage(err, 'Не удалось скачать документ.'));
+      signal.throwIfAborted();
+      if (request.format === 'print') previewWindow = openPendingDocumentWindow();
+      const blob = await apiService.downloadInvoiceDocument(request.documentId, request.format === 'print' ? 'html' : request.format,
+        { ...images, ...(request.templateKey ? { templateKey: request.templateKey } : {}), signal });
+      signal.throwIfAborted();
+      if (request.format === 'print') {
+        const html = await blob.text();
+        signal.throwIfAborted();
+        printHtmlInWindow(html, previewWindow);
+      } else {
+        downloadBlob(blob, buildInvoiceDocumentFileName(invoice.number, invoice.date, request.format, request.templateKey));
+      }
+    } catch (cause) {
+      if (previewWindow && !previewWindow.closed) previewWindow.close();
+      throw cause;
     }
   };
 
@@ -4299,6 +4276,7 @@ export function InvoiceModal({
                   setDownloadMenuOpen(false);
                 }}
                 aria-expanded={printMenuOpen}
+                ref={printButtonRef}
                 disabled={!canExport}
                 className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"
               >
@@ -5889,6 +5867,14 @@ export function InvoiceModal({
         overlayClassName="z-[2300]"
         responsibles={responsibles}
       />
+
+      {imagePrintRequest && invoice && open && canExport && imagePrintRequest.documentId === invoice.id ? (
+        <DocumentImagePrintDialog key={`${invoice.id}:${imagePrintRequest.generation}`}
+          documentName={`${imagePrintRequest.templateKey === INVOICE_OFFER_TEMPLATE_KEY ? 'Счёт-договор' : imagePrintRequest.templateKey === INVOICE_ORDER_TEMPLATE_KEY ? 'Заказ' : 'Счёт'} № ${invoice.number || invoice.id}`}
+          initialOptions={imagePrintRequest.initialOptions}
+          confirmLabel={imagePrintRequest.format === 'print' ? 'Печатать' : `Скачать ${imagePrintRequest.format === 'word' ? 'Word' : 'PDF'}`}
+          onConfirm={confirmDocumentCopy} onClose={() => setImagePrintRequest(null)} />
+      ) : null}
 
       {messengerDeliveryOpen && invoice && (invoice.type === 'Expense' ? invoice.expenseClientId : invoice.clientId) ? (
         <MessengerDocumentDeliveryModal
