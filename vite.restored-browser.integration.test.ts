@@ -29,7 +29,7 @@ async function launchBrowser(): Promise<Browser> {
   throw new Error('Для браузерного теста нужен установленный Chromium/Edge/Chrome.');
 }
 
-it('qualifies native browser CSP, probe transport and clean-profile barriers against loopback fixtures', async () => {
+async function qualifyNativeBrowserFixture(coldTransformDelayMs = 0) {
   let identity = ID;
   let uiOrigin = '';
   const requests: Array<{ path: string; marker?: string }> = [];
@@ -79,7 +79,15 @@ it('qualifies native browser CSP, probe transport and clean-profile barriers aga
   let server: Awaited<ReturnType<typeof createServer>> | undefined;
   try {
     const config = createPayPlannerViteConfig(env);
-    const fixturePlugin: Plugin = { name: 'restored-browser-fixture', configureServer(vite) {
+    let coldTransformFinished = coldTransformDelayMs === 0;
+    const fixturePlugin: Plugin = { name: 'restored-browser-fixture',
+      async transform(_code, id) {
+        if (!coldTransformFinished && coldTransformDelayMs > 0 && id.replaceAll('\\', '/').split('?')[0].endsWith('/src/services/restoredBrowserSession.ts')) {
+          await new Promise(resolve => setTimeout(resolve, coldTransformDelayMs));
+          coldTransformFinished = true;
+        }
+        return null;
+      }, configureServer(vite) {
       vite.middlewares.use((request, response, next) => {
       if (request.url === '/__probe.js') {
         response.setHeader('Content-Type', 'application/javascript');
@@ -124,6 +132,15 @@ it('qualifies native browser CSP, probe transport and clean-profile barriers aga
     } };
     server = await createServer({ ...config, plugins: [...(config.plugins ?? []), fixturePlugin], configFile: false, server: { ...config.server, port: uiPort, watch: null } });
     await server.listen();
+    // Compile the fixture's actual imports before starting the navigation clock,
+    // as the task-browser fixture does. Preparation remains inside the existing
+    // 90-second scenario; every browser action still has its 10-second deadline.
+    for (const entry of ['/src/services/restoredBrowserSession.ts', '/src/services/apiTransport.ts', '/src/services/restoredRealtime.ts']) {
+      const transformed = await server.transformRequest(entry);
+      expect(transformed?.code).toBeTruthy();
+    }
+    await server.waitForRequestsIdle();
+    expect(coldTransformFinished).toBe(true);
     browser = await launchBrowser();
     const outside: string[] = [];
     const context = await browser.newContext({ acceptDownloads: true });
@@ -237,4 +254,10 @@ it('qualifies native browser CSP, probe transport and clean-profile barriers aga
     await server?.close();
     await new Promise<void>((resolve, reject) => api.close(error => error ? reject(error) : resolve()));
   }
-}, 90_000);
+}
+
+it('qualifies native browser CSP, probe transport and clean-profile barriers against loopback fixtures',
+  () => qualifyNativeBrowserFixture(), 90_000);
+
+it('prepares cold fixture imports before navigation while retaining all native browser barriers',
+  () => qualifyNativeBrowserFixture(11_000), 90_000);
