@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseAppHost>false</UseAppHost>
+    <UseSharedCompilation>false</UseSharedCompilation>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="SkiaSharp" Version="4.154.0" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.154.0" />
+    <!-- Same production validator, no API/EF/DB/project reference or application startup. -->
+    <Compile Include="../../backend/Services/Companies/CompanyImageUploadValidator.cs" Link="CompanyImageUploadValidator.cs" />
+    <Compile Include="../../backend/Models/CompanyBrandImageVersion.cs" Link="CompanyBrandImageVersion.cs" />
+    <None Include="../../backend/Assets/Licenses/SkiaSharp-*.txt" Link="licenses/%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

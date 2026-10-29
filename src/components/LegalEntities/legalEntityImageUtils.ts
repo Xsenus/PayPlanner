@@ -13,12 +13,19 @@ export interface LegalEntityImageUploadProfile {
 export const LEGAL_ENTITY_SAFE_REQUEST_BODY_MAX_LENGTH = 900_000;
 export const LEGAL_ENTITY_SAFE_INLINE_ASSETS_TOTAL_MAX_LENGTH = 700_000;
 export const LEGAL_ENTITY_LOGO_SOURCE_MAX_BYTES = 2 * 1024 * 1024;
+export const LEGAL_ENTITY_RASTER_SOURCE_MAX_BYTES = 16 * 1024 * 1024;
+export const LEGAL_ENTITY_SOURCE_MAX_DIMENSION = 4096;
+export const LEGAL_ENTITY_SOURCE_MAX_PIXELS = 4_000_000;
 
 export function getLegalEntityImageAccept(kind: LegalEntityImageKind): string {
   return kind === 'logo' ? 'image/png,image/jpeg' : 'image/png';
 }
 
 export function getLegalEntityImageSourceHint(kind: LegalEntityImageKind): string {
+  return `${getLegalEntityImageFormatHint(kind)}${kind === 'logo' ? '' : ' До 16 МБ.'} Не более 4096 пикселей по стороне и 4 мегапикселей.`;
+}
+
+function getLegalEntityImageFormatHint(kind: LegalEntityImageKind): string {
   return kind === 'logo'
     ? 'PNG или JPG, до 2 МБ.'
     : 'PNG с прозрачным фоном.';
@@ -37,10 +44,13 @@ export function validateLegalEntityImageSourceFile(
   const format = mime || (/\.png$/i.test(file.name) ? 'image/png'
     : /\.jpe?g$/i.test(file.name) ? 'image/jpeg' : '');
   if (format !== 'image/png' && (kind !== 'logo' || format !== 'image/jpeg')) {
-    throw new Error(`${label}: ${getLegalEntityImageSourceHint(kind)}`);
+    throw new Error(`${label}: ${getLegalEntityImageFormatHint(kind)}`);
   }
   if (kind === 'logo' && file.size > LEGAL_ENTITY_LOGO_SOURCE_MAX_BYTES) {
     throw new Error(`${label}: исходный файл больше 2 МБ. Выберите файл меньшего размера.`);
+  }
+  if (kind !== 'logo' && file.size > LEGAL_ENTITY_RASTER_SOURCE_MAX_BYTES) {
+    throw new Error(`${label}: исходный файл больше 16 МБ. Выберите файл меньшего размера.`);
   }
 }
 

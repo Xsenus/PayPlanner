@@ -89,12 +89,12 @@ import {
   encodeLegalEntityImageCanvas,
   getLegalEntityImageAccept,
   getLegalEntityImageSourceHint,
-  validateLegalEntityImageSourceFile,
   isLegalEntityInlineAssetPayloadSafe,
   isLegalEntityRequestBodyLengthSafe,
   type LegalEntityImageKind,
   type LegalEntityImageUploadProfile,
 } from "./legalEntityImageUtils";
+import { inspectLegalEntityImageSource, validateLegalEntityImageDimensions } from "./legalEntityImageSourceUtils";
 import { getLegalEntityImageFieldState } from "./legalEntityImageFieldUtils";
 import { CompanyBankConnectionsSection } from "./CompanyBankConnectionsSection";
 import { CompanyBranchesSection } from "./CompanyBranchesSection";
@@ -679,10 +679,11 @@ async function convertImageToUploadProfileDataUrl(
   profile: LegalEntityImageUploadProfile,
   signal: AbortSignal,
 ): Promise<string> {
-  validateLegalEntityImageSourceFile(file, profile.kind);
+  await inspectLegalEntityImageSource(file, profile.kind, signal);
   const original = await readFileAsDataUrl(file, signal);
   const image = await loadImageElement(original, signal);
   signal.throwIfAborted();
+  validateLegalEntityImageDimensions(image.naturalWidth || image.width, image.naturalHeight || image.height, profile.kind);
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d");
 
