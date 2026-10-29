@@ -42,6 +42,16 @@ test('distinguishes qualification from native success and missing metadata', t =
   assert.equal(report.batches[1].exitCode, null);
 });
 
+test('reports bounded admission waiting and timeout without exposing arbitrary fields', t => {
+  const f = fixture(t);
+  f.write('execution.json', { Events: ['admission-wait', 'admission-ready', 'admission-timeout'].map(Kind =>
+    ({ Kind, Lane: 'exclusive', Active: 0, AvailableBytes: 123, Message: 'secret-host-state' })) });
+  const report = executionReport(f.root, 0);
+  assert.deepEqual(report.events.map(row => row.Kind), ['admission-wait', 'admission-ready', 'admission-timeout']);
+  assert.equal(report.events.every(row => row.AvailableBytes === 123 && row.Active === 0), true);
+  assert.equal(JSON.stringify(report).includes('secret'), false);
+});
+
 test('missing shard is reported without claiming successful execution', t => {
   const f = fixture(t);
   assert.deepEqual(executionReport(f.root, 1), { shard: 1, available: false });
