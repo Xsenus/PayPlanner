@@ -168,7 +168,7 @@ jobs:
     env:
       DOTNET_GCHeapHardLimit: "180000000"
     runs-on: [self-hosted, Windows, X64, payplanner-xsenus]
-    timeout-minutes: 30
+    timeout-minutes: 45
     defaults:
       run:
         shell: bash
