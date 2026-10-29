@@ -10,12 +10,13 @@ interface Props {
   documentName: string;
   initialOptions: DocumentImagePrintOptions;
   confirmLabel: string;
+  notice?: string;
   onConfirm: (options: DocumentImagePrintOptions, signal: AbortSignal) => Promise<void>;
   onClose: () => void;
 }
 
 // Mount with a key for the document/action identity. Each mounted dialog owns its request.
-export function DocumentImagePrintDialog({ documentName, initialOptions, confirmLabel, onConfirm, onClose }: Props) {
+export function DocumentImagePrintDialog({ documentName, initialOptions, confirmLabel, notice, onConfirm, onClose }: Props) {
   const [options, setOptions] = useState(() => ({ ...initialOptions }));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -65,6 +66,7 @@ export function DocumentImagePrintDialog({ documentName, initialOptions, confirm
         </div>
         <div className="space-y-3 p-3">
           <p className="text-sm text-slate-600">Выберите изображения для этой копии документа.</p>
+          {notice ? <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">{notice}</p> : null}
           <fieldset disabled={busy} className="space-y-2">
             <legend className="sr-only">Печатать в документе</legend>
             {([

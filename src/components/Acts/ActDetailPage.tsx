@@ -16,6 +16,8 @@ import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { MessengerDocumentDeliveryModal } from '../Cases/MessengerDocumentDeliveryModal';
 import { ElectronicSignatureModal } from '../Documents/ElectronicSignatureModal';
+import { DocumentImagePrintDialog } from '../Documents/DocumentImagePrintDialog';
+import type { DocumentImagePrintOptions } from '../../types/documentImagePrint';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 import { DocumentSellerPicker } from '../Documents/DocumentSellerPicker';
 import { StatusChangeModal, type StatusChangeOption } from '../ui/StatusChangeModal';
@@ -112,22 +114,19 @@ function downloadBlob(fileName: string, blob: Blob) {
 }
 
 function openBlobInWindow(blob: Blob, targetWindow: Window | null, options?: { autoPrint?: boolean }) {
+  if (!targetWindow || targetWindow.closed) throw new Error('Разрешите всплывающее окно для печати и повторите попытку.');
   const href = URL.createObjectURL(blob);
-  const nextWindow = targetWindow ?? window.open('', '_blank', 'width=1180,height=900');
-  if (nextWindow) {
-    nextWindow.location.href = href;
-  }
-
+  const nextWindow = targetWindow;
   const cleanup = () => URL.revokeObjectURL(href);
-  if (options?.autoPrint && nextWindow) {
+  if (options?.autoPrint) {
     nextWindow.onload = () => {
+      if (nextWindow.closed) return;
       nextWindow.focus();
       nextWindow.print();
-      window.setTimeout(cleanup, 60_000);
     };
-  } else {
-    window.setTimeout(cleanup, 60_000);
   }
+  window.setTimeout(cleanup, 60_000);
+  nextWindow.location.href = href;
 }
 
 function getDocumentActionErrorMessage(error: unknown, fallback: string) {
@@ -171,6 +170,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
   const toast = useToast();
   const permissions = useRolePermissions(user?.role?.id);
   const canView = permissions.acts.canView;
+  const canExport = permissions.acts.canExport;
   const canEdit = permissions.acts.canEdit;
   const canDelete = permissions.acts.canDelete;
   const canViewLinkedAccounts = permissions.accounts.canView;
@@ -223,6 +223,14 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
   const [editorError, setEditorError] = useState<string | null>(null);
   const [printMenuOpen, setPrintMenuOpen] = useState(false);
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
+  const printScope = JSON.stringify([actScope, canExport, act?.updatedAt, act?.auditUpdatedAt]);
+  const printScopeRef = useRef(printScope);
+  printScopeRef.current = printScope;
+  const printGeneration = useRef(0);
+  const [imagePrintRequest, setImagePrintRequest] = useState<{
+    documentId: number; scope: string; generation: number; format: 'print' | DocumentFormat;
+    initialOptions: DocumentImagePrintOptions;
+  } | null>(null);
   const [pageActionLoading, setPageActionLoading] = useState<PageAction | null>(null);
   const [statusChangeOpen, setStatusChangeOpen] = useState(false);
   const [messengerDeliveryOpen, setMessengerDeliveryOpen] = useState(false);
@@ -234,6 +242,11 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
 
   const printMenuRef = useRef<HTMLDivElement | null>(null);
   const downloadMenuRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    setImagePrintRequest(null);
+    setPrintMenuOpen(false);
+    setDownloadMenuOpen(false);
+  }, [printScope]);
 
   const loadActBundle = useCallback(async () => {
     const revision = ++actLoadRevisionRef.current;
@@ -315,7 +328,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
   }, [actScope, canView, loadedActId]);
 
   useEffect(() => {
-    if (!act?.id) {
+    if (!act?.id || !canExport) {
       setDocumentPreviewHtml('');
       setDocumentPreviewError(null);
       setDocumentPreviewLoading(false);
@@ -351,7 +364,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
     return () => {
       active = false;
     };
-  }, [act?.id, act?.updatedAt, act?.auditUpdatedAt]);
+  }, [act?.id, act?.updatedAt, act?.auditUpdatedAt, canExport]);
 
   useEffect(() => {
     if (!printMenuOpen && !downloadMenuOpen) return undefined;
@@ -498,39 +511,41 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
     return `${url.origin}${url.pathname}${url.search}${url.hash}`;
   }, [act?.id]);
 
-  const handlePrintDocument = async (includeSignatureAndSeal: boolean) => {
-    if (!act?.id) return;
-
-    let previewWindow: Window | null | undefined;
-    try {
-      previewWindow = window.open('', '_blank', 'width=1180,height=900');
-      const blob = await apiService.downloadActDocument(act.id, 'pdf', {
-        includeSignatureAndSeal,
-      });
-      setPrintMenuOpen(false);
-      openBlobInWindow(blob, previewWindow, { autoPrint: true });
-    } catch (printError) {
-      if (previewWindow && !previewWindow.closed) {
-        previewWindow.close();
-      }
-      setError(getDocumentActionErrorMessage(printError, 'Не удалось открыть печатную форму акта.'));
-    }
+  const requestDocumentCopy = (format: 'print' | DocumentFormat, combined: boolean) => {
+    if (!act?.id || !canView || !canExport) return;
+    (format === 'print' ? printMenuRef : downloadMenuRef).current?.querySelector('button')?.focus();
+    setPrintMenuOpen(false);
+    setDownloadMenuOpen(false);
+    setImagePrintRequest({ documentId: act.id, scope: printScope, generation: ++printGeneration.current, format,
+      initialOptions: { includeLogo: false, includeSeal: combined, includeSignature: combined } });
   };
+  const handlePrintDocument = (combined: boolean) => requestDocumentCopy('print', combined);
+  const handleDownloadDocument = (format: DocumentFormat, combined: boolean) => requestDocumentCopy(format, combined);
 
-  const handleDownloadDocument = async (
-    format: DocumentFormat,
-    includeSignatureAndSeal: boolean,
-  ) => {
-    if (!act?.id) return;
-
+  const confirmDocumentCopy = async (images: DocumentImagePrintOptions, signal: AbortSignal) => {
+    const request = imagePrintRequest;
+    if (!request || request.documentId !== act?.id || !canView || !canExport || request.scope !== printScopeRef.current)
+      throw new Error('Документ или права изменились. Откройте карточку повторно.');
+    let previewWindow: Window | null | undefined;
+    const closePendingWindow = () => { if (previewWindow && !previewWindow.closed) previewWindow.close(); };
     try {
-      const blob = await apiService.downloadActDocument(act.id, format, {
-        includeSignatureAndSeal,
-      });
-      downloadBlob(buildActDocumentFileName(act.number || String(act.id), act.date || '', format), blob);
-      setDownloadMenuOpen(false);
-    } catch (downloadError) {
-      setError(getDocumentActionErrorMessage(downloadError, 'Не удалось скачать документ акта.'));
+      signal.throwIfAborted();
+      if (request.format === 'print') {
+        previewWindow = window.open('', '_blank', 'width=1180,height=900');
+        if (!previewWindow) throw new Error('Разрешите всплывающее окно для печати и повторите попытку.');
+        previewWindow.opener = null;
+      }
+      signal.addEventListener('abort', closePendingWindow, { once: true });
+      const blob = await apiService.downloadActDocument(request.documentId, request.format === 'print' ? 'pdf' : request.format, { ...images, signal });
+      signal.throwIfAborted();
+      if (request.scope !== printScopeRef.current) throw new Error('Документ или права изменились. Откройте карточку повторно.');
+      if (request.format === 'print') openBlobInWindow(blob, previewWindow ?? null, { autoPrint: true });
+      else downloadBlob(buildActDocumentFileName(act.number || String(act.id), act.date || '', request.format), blob);
+    } catch (cause) {
+      closePendingWindow();
+      throw new Error(getDocumentActionErrorMessage(cause, 'Не удалось подготовить документ акта.'));
+    } finally {
+      signal.removeEventListener('abort', closePendingWindow);
     }
   };
 
@@ -982,7 +997,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
                   <div className="flex min-h-[22rem] items-center justify-center px-6 text-center text-sm text-rose-600">
                     {documentPreviewError}
                   </div>
-                ) : documentPreviewHtml ? (
+                ) : canExport && documentPreviewHtml ? (
                   <iframe
                     title={`Печатный шаблон акта ${act.number || ''}`.trim()}
                     srcDoc={documentPreviewHtml}
@@ -991,7 +1006,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
                   />
                 ) : (
                   <div className="flex min-h-[22rem] items-center justify-center px-6 text-center text-sm text-slate-500">
-                    Подготовка печатного шаблона...
+                    {canExport ? 'Подготовка печатного шаблона...' : 'Нет права экспорта печатной формы.'}
                   </div>
                 )}
               </div>
@@ -1188,6 +1203,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
                   setDownloadMenuOpen(false);
                 }}
                 aria-expanded={printMenuOpen}
+                disabled={!canExport || !canView}
                 className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-50"
               >
                 <Printer className="h-4 w-4" />
@@ -1237,6 +1253,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
                   setDownloadMenuOpen((previous) => !previous);
                   setPrintMenuOpen(false);
                 }}
+                disabled={!canExport || !canView}
                 className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-50"
               >
                 <Download className="h-4 w-4" />
@@ -1405,6 +1422,13 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
         error={statusChangeError}
         loading={statusChangeSubmitting}
       />
+      {imagePrintRequest && canView && canExport && imagePrintRequest.scope === printScope && imagePrintRequest.documentId === act.id ? (
+        <DocumentImagePrintDialog key={`${act.id}:${imagePrintRequest.generation}`}
+          documentName={`Акт № ${act.number || act.id}`} initialOptions={imagePrintRequest.initialOptions}
+          notice={act.type === 'Expense' ? 'В расходном акте изображения нашей компании не используются.' : undefined}
+          confirmLabel={imagePrintRequest.format === 'print' ? 'Печатать' : `Скачать ${imagePrintRequest.format === 'word' ? 'Word' : 'PDF'}`}
+          onConfirm={confirmDocumentCopy} onClose={() => setImagePrintRequest(null)} />
+      ) : null}
       {messengerDeliveryOpen && act.clientId ? (
         <MessengerDocumentDeliveryModal
           clientId={act.clientId}

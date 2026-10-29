@@ -3838,12 +3838,17 @@ export class ApiService {
     });
   }
 
-  async downloadContractDocument(id: number, format: 'word' | 'pdf' | 'html' = 'word') {
+  async downloadContractDocument(
+    id: number,
+    format: 'word' | 'pdf' | 'html' = 'word',
+    options?: Partial<DocumentImagePrintOptions> & { signal?: AbortSignal },
+  ) {
     const token = getAuthToken();
-    const query = buildQuery({ format });
+    const query = buildQuery({ format, includeLogo: options?.includeLogo, includeSeal: options?.includeSeal, includeSignature: options?.includeSignature });
     const response = await fetch(`${API_BASE_URL}/contracts/${id}/document${query}`, {
       method: 'GET',
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      ...(options?.signal ? { signal: options.signal } : {}),
     });
 
     if (!response.ok) {
@@ -4803,16 +4808,20 @@ export class ApiService {
   async downloadActDocument(
     id: number,
     format: 'word' | 'pdf' | 'html' = 'word',
-    options?: { includeSignatureAndSeal?: boolean },
+    options?: Partial<DocumentImagePrintOptions> & { includeSignatureAndSeal?: boolean; signal?: AbortSignal },
   ) {
     const token = getAuthToken();
     const query = buildQuery({
       format,
       includeSignatureAndSeal: options?.includeSignatureAndSeal,
+      includeLogo: options?.includeLogo,
+      includeSeal: options?.includeSeal,
+      includeSignature: options?.includeSignature,
     });
     const response = await fetch(`${API_BASE_URL}/acts/${id}/document${query}`, {
       method: 'GET',
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      ...(options?.signal ? { signal: options.signal } : {}),
     });
 
     if (!response.ok) {

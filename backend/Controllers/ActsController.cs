@@ -1387,7 +1387,10 @@ public class ActsController : ControllerBase
         int id,
         [FromQuery] string? format = "word",
         [FromQuery] bool? includeSignatureAndSeal = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        [FromQuery] bool? includeLogo = null,
+        [FromQuery] bool? includeSeal = null,
+        [FromQuery] bool? includeSignature = null)
     {
         if (await RequireActsPermissionAsync(permission => permission.CanExport, ct) is { } forbidden)
         {
@@ -1404,15 +1407,12 @@ public class ActsController : ControllerBase
         var documentSettings = await GetActDocumentTemplateSettingsAsync(ct);
         var template = SelectActDocumentTemplate(documentSettings);
         var mainCompany = await ResolveActSellerAsync(act, await LoadMainCompanyAsync(ct), normalizedFormat != "html", ct);
-        var documentHtml = ActDocumentTemplateEngine.RenderHtml(
-            template.Html,
-            act,
-            act.LineItems
-                .OrderBy(item => item.SortOrder)
-                .ThenBy(item => item.Id)
-                .ToList(),
-            mainCompany,
-            includeSignatureAndSeal ?? documentSettings.PrintWithSignatureAndSealByDefault);
+        var shouldIncludeSignatureAndSeal = includeSignatureAndSeal ?? documentSettings.PrintWithSignatureAndSealByDefault;
+        var imageOptions = DocumentImagePrintOptions.FromOverrides(false, shouldIncludeSignatureAndSeal, includeLogo, includeSeal, includeSignature);
+        var lines = act.LineItems.OrderBy(item => item.SortOrder).ThenBy(item => item.Id).ToList();
+        var documentHtml = imageOptions is null
+            ? ActDocumentTemplateEngine.RenderHtml(template.Html, act, lines, mainCompany, shouldIncludeSignatureAndSeal)
+            : ActDocumentTemplateEngine.RenderHtml(template.Html, act, lines, mainCompany, imageOptions);
 
         if (normalizedFormat == "html")
         {

@@ -1,18 +1,19 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Contract } from '../../types';
 import { ContractDetailPage } from './ContractDetailPage';
 
-const { dialogConfirmMock, dialogPromptMock, rolePermissionsResult } = vi.hoisted(() => ({
+const { dialogConfirmMock, dialogPromptMock, rolePermissionsResult, authState } = vi.hoisted(() => ({
   dialogConfirmMock: vi.fn(),
   dialogPromptMock: vi.fn(),
+  authState: { user: { id: 7, role: { id: 1 } } },
   rolePermissionsResult: {
     clients: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     legalEntities: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     accounts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     acts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     payments: { canView: true, canCreate: false, canEdit: false, canDelete: false },
-    contracts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+    contracts: { canView: true, canCreate: false, canEdit: false, canDelete: false, canExport: true, viewScope: 'all' },
   },
 }));
 
@@ -53,9 +54,7 @@ function createPersistedTableSettings(
 }
 
 vi.mock('../../contexts/AuthContext', () => ({
-  useAuth: () => ({
-    user: { id: 7, role: { id: 1 } },
-  }),
+  useAuth: () => authState,
 }));
 
 vi.mock('../../hooks/useToast', () => ({
@@ -157,6 +156,10 @@ const contractFixture = {
 describe('ContractDetailPage integration', () => {
   beforeEach(() => {
     vi.useRealTimers();
+    authState.user = { id: 7, role: { id: 1 } };
+    rolePermissionsResult.contracts.canView = true;
+    rolePermissionsResult.contracts.canExport = true;
+    rolePermissionsResult.contracts.viewScope = 'all';
     Object.assign(rolePermissionsResult.clients, { canView: true, canCreate: false, canEdit: false, canDelete: false });
     Object.assign(rolePermissionsResult.legalEntities, { canView: true, canCreate: false, canEdit: false, canDelete: false });
     Object.assign(rolePermissionsResult.accounts, { canView: true, canCreate: false, canEdit: false, canDelete: false });
@@ -459,16 +462,21 @@ describe('ContractDetailPage integration', () => {
     });
 
     fireEvent.click(await screen.findByRole('button', { name: 'Word' }));
+    expect(apiService.downloadContractDocument).not.toHaveBeenCalled();
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Изображения в документе' })).getByRole('button', { name: 'Скачать Word' }));
 
     await waitFor(() => {
-      expect(apiService.downloadContractDocument).toHaveBeenCalledWith(77, 'word');
+      expect(apiService.downloadContractDocument).toHaveBeenCalledWith(77, 'word', { includeLogo: false, includeSeal: false, includeSignature: false, signal: expect.any(AbortSignal) });
     });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Изображения в документе' })).toBeNull());
 
     fireEvent.click(screen.getByRole('button', { name: 'PDF' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Изображения в документе' })).getByRole('button', { name: 'Скачать PDF' }));
 
     await waitFor(() => {
-      expect(apiService.downloadContractDocument).toHaveBeenCalledWith(77, 'pdf');
+      expect(apiService.downloadContractDocument).toHaveBeenCalledWith(77, 'pdf', { includeLogo: false, includeSeal: false, includeSignature: false, signal: expect.any(AbortSignal) });
     });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Изображения в документе' })).toBeNull());
 
     fireEvent.click(screen.getByRole('button', { name: 'Email' }));
 
@@ -483,6 +491,178 @@ describe('ContractDetailPage integration', () => {
 
     await waitFor(() => {
       expect(apiService.uploadContractDocumentToYandexDisk).toHaveBeenCalledWith(77, 'pdf');
+    });
+  });
+
+  describe('image print dialog', () => {
+    const open = (format: 'print' | 'word' | 'pdf') => {
+      fireEvent.click(screen.getByRole('button', { name: format === 'print' ? 'Печать' : format === 'word' ? 'Word' : 'PDF' }));
+      return within(screen.getByRole('dialog', { name: 'Изображения в документе' }));
+    };
+    const ready = async () => screen.findByRole('button', { name: 'Word' });
+
+    it.each(['print', 'word', 'pdf'] as const)('confirms independent images for %s without saving the contract', async format => {
+      render(<ContractDetailPage contractId={77} onBack={vi.fn()} />); await ready();
+      const dialog = open(format);
+      expect(apiService.downloadContractDocument).not.toHaveBeenCalled();
+      fireEvent.click(dialog.getByLabelText('Логотип')); fireEvent.click(dialog.getByLabelText('Подпись'));
+      fireEvent.click(dialog.getByRole('button', { name: format === 'print' ? 'Печатать' : `Скачать ${format === 'word' ? 'Word' : 'PDF'}` }));
+      await waitFor(() => expect(apiService.downloadContractDocument).toHaveBeenCalledExactlyOnceWith(77, format === 'print' ? 'html' : format,
+        { includeLogo: true, includeSeal: false, includeSignature: true, signal: expect.any(AbortSignal) }));
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Изображения в документе' })).toBeNull());
+      expect(apiService.updateContract).not.toHaveBeenCalled();
+      if (format === 'print') {
+        const popup = vi.mocked(window.open).mock.results.at(-1)!.value as Window;
+        expect(popup.location.href).toBe('blob:contract'); expect(popup.close).not.toHaveBeenCalled();
+      }
+    });
+
+    it('cancels before confirmation without fetching a document', async () => {
+      render(<ContractDetailPage contractId={77} onBack={vi.fn()} />); await ready();
+      fireEvent.click(open('word').getByRole('button', { name: 'Отмена' }));
+      expect(apiService.downloadContractDocument).not.toHaveBeenCalled();
+      expect(screen.queryByRole('dialog', { name: 'Изображения в документе' })).toBeNull();
+    });
+
+    it('retains choices on failure and retries with a fresh request', async () => {
+      vi.mocked(apiService.downloadContractDocument).mockRejectedValueOnce(new Error('Синтетический отказ')).mockResolvedValueOnce(new Blob(['contract']));
+      render(<ContractDetailPage contractId={77} onBack={vi.fn()} />); await ready();
+      const dialog = open('word'); fireEvent.click(dialog.getByLabelText('Печать'));
+      fireEvent.click(dialog.getByRole('button', { name: 'Скачать Word' })); await dialog.findByRole('alert');
+      expect((dialog.getByLabelText('Печать') as HTMLInputElement).checked).toBe(true);
+      fireEvent.click(dialog.getByRole('button', { name: 'Скачать Word' }));
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Изображения в документе' })).toBeNull());
+      const calls = vi.mocked(apiService.downloadContractDocument).mock.calls;
+      expect(calls).toHaveLength(2); expect(calls[1][2]?.signal).not.toBe(calls[0][2]?.signal);
+    });
+
+    it('aborts print and closes its pending window immediately on cancellation', async () => {
+      let resolve!: (value: Blob) => void; const pending = new Promise<Blob>(done => { resolve = done; });
+      vi.mocked(apiService.downloadContractDocument).mockReturnValueOnce(pending);
+      render(<ContractDetailPage contractId={77} onBack={vi.fn()} />); await ready();
+      const dialog = open('print'); fireEvent.click(dialog.getByRole('button', { name: 'Печатать' }));
+      const signal = vi.mocked(apiService.downloadContractDocument).mock.calls[0][2]!.signal!;
+      const popup = vi.mocked(window.open).mock.results.at(-1)!.value as Window;
+      fireEvent.click(dialog.getByRole('button', { name: 'Отмена' }));
+      expect(signal.aborted).toBe(true); expect(popup.close).toHaveBeenCalled();
+      await act(async () => { resolve(new Blob(['late'])); await pending; });
+      expect(popup.location.href).toBe('');
+    });
+
+    it.each(['switch', 'unmount', 'revoke', 'hide'] as const)('fences a late document on %s', async change => {
+      let resolve!: (value: Blob) => void; const pending = new Promise<Blob>(done => { resolve = done; });
+      vi.mocked(apiService.downloadContractDocument).mockReturnValueOnce(pending);
+      const view = render(<ContractDetailPage contractId={77} onBack={vi.fn()} />); await ready();
+      fireEvent.click(open('word').getByRole('button', { name: 'Скачать Word' }));
+      const signal = vi.mocked(apiService.downloadContractDocument).mock.calls[0][2]!.signal!;
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click');
+      try {
+        if (change === 'unmount') view.unmount();
+        else {
+          if (change === 'revoke') rolePermissionsResult.contracts.canExport = false;
+          if (change === 'hide') rolePermissionsResult.contracts.canView = false;
+          if (change === 'switch') vi.mocked(apiService.getContract).mockResolvedValue({ ...contractFixture, id: 78, number: 'CTR-78' });
+          view.rerender(<ContractDetailPage contractId={change === 'switch' ? 78 : 77} onBack={vi.fn()} />);
+        }
+        expect(signal.aborted).toBe(true);
+        await act(async () => { resolve(new Blob(['late'])); await pending; });
+        expect(click).not.toHaveBeenCalled(); expect(screen.queryByRole('dialog', { name: 'Изображения в документе' })).toBeNull();
+      } finally { click.mockRestore(); }
+    });
+
+    it('disables document actions without export permission', async () => {
+      rolePermissionsResult.contracts.canExport = false;
+      render(<ContractDetailPage contractId={77} onBack={vi.fn()} />); await ready();
+      for (const label of ['Печать', 'Word', 'PDF']) expect((screen.getByRole('button', { name: label }) as HTMLButtonElement).disabled).toBe(true);
+      expect(apiService.downloadContractDocument).not.toHaveBeenCalled();
+    });
+
+    it('does not request a document if its print window is blocked', async () => {
+      render(<ContractDetailPage contractId={77} onBack={vi.fn()} />); await ready();
+      vi.mocked(window.open).mockReturnValueOnce(null);
+      const dialog = open('print'); fireEvent.click(dialog.getByRole('button', { name: 'Печатать' }));
+      await dialog.findByRole('alert'); expect(apiService.downloadContractDocument).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('contract access scope', () => {
+    const deferred = () => {
+      let resolve!: (value: Contract) => void;
+      const promise = new Promise<Contract>(done => { resolve = done; });
+      return { promise, resolve };
+    };
+
+    it('does not load or display a contract without view permission', async () => {
+      rolePermissionsResult.contracts.canView = false;
+      render(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+      expect((await screen.findByRole('alert')).textContent).toContain('Нет доступа к договору.');
+      expect(apiService.getContract).not.toHaveBeenCalled();
+      expect(apiService.getContractRulesSettings).not.toHaveBeenCalled();
+      expect(screen.queryByDisplayValue('CTR-77')).toBeNull();
+    });
+
+    it('hides cached data on revocation and requires a fresh load after view is restored', async () => {
+      const view = render(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+      await screen.findByDisplayValue('CTR-77');
+      rolePermissionsResult.contracts.canView = false;
+      view.rerender(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+      expect(screen.getByRole('alert').textContent).toContain('Нет доступа к договору.');
+      expect(screen.queryByDisplayValue('CTR-77')).toBeNull();
+      expect(apiService.getContract).toHaveBeenCalledTimes(1);
+      const fresh = deferred(); vi.mocked(apiService.getContract).mockReturnValueOnce(fresh.promise);
+      rolePermissionsResult.contracts.canView = true;
+      view.rerender(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+      expect(screen.queryByDisplayValue('CTR-77')).toBeNull();
+      await act(async () => { fresh.resolve({ ...contractFixture, number: 'FRESH-77' }); await fresh.promise; });
+      expect(await screen.findByDisplayValue('FRESH-77')).toBeTruthy();
+    });
+
+    it('hides old data across visibility changes and ignores a late response from the previous scope', async () => {
+      const view = render(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+      await screen.findByDisplayValue('CTR-77');
+      const own = deferred(); vi.mocked(apiService.getContract).mockReturnValueOnce(own.promise);
+      rolePermissionsResult.contracts.viewScope = 'own';
+      view.rerender(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+      expect(screen.queryByDisplayValue('CTR-77')).toBeNull();
+      const all = deferred(); vi.mocked(apiService.getContract).mockReturnValueOnce(all.promise);
+      rolePermissionsResult.contracts.viewScope = 'all';
+      view.rerender(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+      expect(screen.queryByDisplayValue('CTR-77')).toBeNull();
+      await act(async () => { own.resolve({ ...contractFixture, number: 'HIDDEN-LATE' }); await own.promise; });
+      expect(screen.queryByDisplayValue('HIDDEN-LATE')).toBeNull();
+      await act(async () => { all.resolve({ ...contractFixture, number: 'CURRENT-ALL' }); await all.promise; });
+      expect(await screen.findByDisplayValue('CURRENT-ALL')).toBeTruthy();
+      expect(apiService.getContract).toHaveBeenCalledTimes(3);
+    });
+
+    it.each(['user', 'role'] as const)('hides cached data before reloading for a changed %s', async change => {
+      const view = render(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+      await screen.findByDisplayValue('CTR-77');
+      const fresh = deferred(); vi.mocked(apiService.getContract).mockReturnValueOnce(fresh.promise);
+      authState.user = change === 'user' ? { id: 8, role: { id: 1 } } : { id: 7, role: { id: 2 } };
+      view.rerender(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+      expect(screen.queryByDisplayValue('CTR-77')).toBeNull();
+      await act(async () => { fresh.resolve({ ...contractFixture, number: 'CURRENT-USER' }); await fresh.promise; });
+      expect(await screen.findByDisplayValue('CURRENT-USER')).toBeTruthy();
+      expect(apiService.getContract).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not display a response belonging to a different contract ID', async () => {
+      vi.mocked(apiService.getContract).mockResolvedValue({ ...contractFixture, id: 78, number: 'FOREIGN-78' });
+      render(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+      expect((await screen.findByRole('alert')).textContent).toContain('Договор недоступен.');
+      expect(screen.queryByDisplayValue('FOREIGN-78')).toBeNull();
+    });
+
+    it('shows a failed scope reload without restoring cached contract data', async () => {
+      const view = render(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+      await screen.findByDisplayValue('CTR-77');
+      vi.mocked(apiService.getContract).mockRejectedValueOnce(new Error('Нет доступа к этому договору.'));
+      rolePermissionsResult.contracts.viewScope = 'own';
+      view.rerender(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+      expect((await screen.findByRole('alert')).textContent).toContain('Нет доступа к этому договору.');
+      expect(screen.queryByDisplayValue('CTR-77')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Word' })).toBeNull();
     });
   });
 

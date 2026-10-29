@@ -2,7 +2,7 @@ import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { AlertTriangle, ArrowLeft, Ban, Check, Download, FileText, FileX, GripVertical, Loader2, Mail, Pencil, Plus, Printer, Save, Send, Settings2, UploadCloud, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
@@ -25,6 +25,8 @@ import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 import { CounterpartyPickerModal, type CounterpartyKind, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
 import { MessengerDocumentDeliveryModal } from '../Cases/MessengerDocumentDeliveryModal';
 import { ElectronicSignatureModal } from '../Documents/ElectronicSignatureModal';
+import { DocumentImagePrintDialog } from '../Documents/DocumentImagePrintDialog';
+import type { DocumentImagePrintOptions } from '../../types/documentImagePrint';
 
 interface Props {
   contractId: number;
@@ -176,6 +178,8 @@ export function ContractDetailPage({
   const toast = useToast();
   const { confirm, prompt } = useDialog();
   const rolePermissions = useRolePermissions(user?.role?.id);
+  const canView = rolePermissions.contracts.canView;
+  const canExport = rolePermissions.contracts.canExport;
   const canViewClients = rolePermissions.clients.canView;
   const canViewLegalEntities = rolePermissions.legalEntities.canView;
   const canViewInvoices = rolePermissions.accounts.canView;
@@ -189,7 +193,21 @@ export function ContractDetailPage({
   }, [canViewClients, canViewLegalEntities]);
   const canSelectCounterparties = allowedCounterpartyScopes.length > 0;
   const requiresFinancialActionReason = Boolean(user?.requiresFinancialActionReason);
-  const [contract, setContract] = useState<Contract | null>(null);
+  const detailScope = JSON.stringify([contractId, user?.id, user?.role?.id, canView, rolePermissions.contracts.viewScope]);
+  const detailScopeRef = useRef(detailScope);
+  detailScopeRef.current = detailScope;
+  const [contractState, setContractState] = useState<{ scope: string; value: Contract | null }>({ scope: detailScope, value: null });
+  const contract = contractState.scope === detailScope ? contractState.value : null;
+  const setContract = useCallback((next: Contract | null | ((previous: Contract | null) => Contract | null)) => {
+    if (detailScopeRef.current !== detailScope) return;
+    setContractState(previous => {
+      if (detailScopeRef.current !== detailScope) return previous;
+      const current = previous.scope === detailScope ? previous.value : null;
+      const value = typeof next === 'function' ? next(current) : next;
+      return previous.scope === detailScope && previous.value === value ? previous : { scope: detailScope, value };
+    });
+  }, [detailScope]);
+  const [loadError, setLoadError] = useState<{ scope: string; message: string } | null>(null);
   const [contractRules, setContractRules] = useState<ContractRulesSettingsDto>({
     autoGenerateWhenEmpty: true,
     allowManualNumberEdit: true,
@@ -204,6 +222,15 @@ export function ContractDetailPage({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [messengerDeliveryOpen, setMessengerDeliveryOpen] = useState(false);
   const [electronicSignatureOpen, setElectronicSignatureOpen] = useState(false);
+  const printScope = JSON.stringify([detailScope, canExport]);
+  const printScopeRef = useRef(printScope);
+  printScopeRef.current = printScope;
+  const printGeneration = useRef(0);
+  const [imagePrintRequest, setImagePrintRequest] = useState<{
+    documentId: number; scope: string; generation: number; format: 'print' | 'word' | 'pdf';
+    initialOptions: DocumentImagePrintOptions;
+  } | null>(null);
+  useEffect(() => { setImagePrintRequest(null); }, [printScope]);
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const visibleTabs = useMemo(
@@ -344,6 +371,17 @@ export function ContractDetailPage({
 
   useEffect(() => {
     let cancel = false;
+    setContract(null);
+    setLoadError(null);
+    setEditMode(false);
+    setSettingsOpen(false);
+    setPickerOpen(false);
+    setMessengerDeliveryOpen(false);
+    setElectronicSignatureOpen(false);
+    if (!canView) {
+      setLoading(false);
+      return;
+    }
 
     const load = async () => {
       setLoading(true);
@@ -355,9 +393,15 @@ export function ContractDetailPage({
 
         if (cancel) return;
 
+        if (nextContract.id !== contractId) {
+          setLoadError({ scope: detailScope, message: 'Договор недоступен.' });
+          return;
+        }
         setContract(nextContract);
         setContractRules(nextRules);
         setAmountInput(formatAmountInput(nextContract.billingMode === 'Fixed' ? nextContract.amount : null));
+      } catch (cause) {
+        if (!cancel) setLoadError({ scope: detailScope, message: extractDisplayErrorMessage(cause, 'Не удалось загрузить договор.') });
       } finally {
         if (!cancel) {
           setLoading(false);
@@ -369,7 +413,7 @@ export function ContractDetailPage({
     return () => {
       cancel = true;
     };
-  }, [contractId]);
+  }, [canView, contractId, detailScope, setContract]);
 
   const contractClientIds = useMemo(
     () => (contract?.clients ?? []).map((item) => item.id).filter((id) => Number.isFinite(id)),
@@ -908,19 +952,45 @@ export function ContractDetailPage({
     URL.revokeObjectURL(url);
   };
 
-  const openContractDocumentPreview = async () => {
-    if (!contract || documentSaving) return;
+  const requestDocumentCopy = (format: 'print' | 'word' | 'pdf') => {
+    if (!contract || contract.id !== contractId || documentSaving || !canView || !canExport) return;
+    setImagePrintRequest({ documentId: contract.id, scope: printScope, generation: ++printGeneration.current, format,
+      initialOptions: { includeLogo: false, includeSeal: false, includeSignature: false } });
+  };
+  const openContractDocumentPreview = () => requestDocumentCopy('print');
+  const downloadContractDocument = (format: 'word' | 'pdf') => requestDocumentCopy(format);
 
-    setDocumentSaving(true);
+  const confirmDocumentCopy = async (images: DocumentImagePrintOptions, signal: AbortSignal) => {
+    const request = imagePrintRequest;
+    if (!request || request.documentId !== contract?.id || request.documentId !== contractId || !canView || !canExport || request.scope !== printScopeRef.current)
+      throw new Error('Документ или права изменились. Откройте карточку повторно.');
+    let previewWindow: Window | null | undefined;
+    const closePendingWindow = () => { if (previewWindow && !previewWindow.closed) previewWindow.close(); };
     try {
-      const blob = await apiService.downloadContractDocument(contract.id, 'html');
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank', 'noopener,noreferrer');
-      window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
-    } catch (error) {
-      toast.error(extractDisplayErrorMessage(error, 'Не удалось открыть печатную форму договора'), 'Договоры');
+      signal.throwIfAborted();
+      if (request.format === 'print') {
+        previewWindow = window.open('', '_blank', 'width=1180,height=900');
+        if (!previewWindow) throw new Error('Разрешите всплывающее окно для печати и повторите попытку.');
+        previewWindow.opener = null;
+      }
+      signal.addEventListener('abort', closePendingWindow, { once: true });
+      const blob = await apiService.downloadContractDocument(request.documentId, request.format === 'print' ? 'html' : request.format, { ...images, signal });
+      signal.throwIfAborted();
+      if (request.scope !== printScopeRef.current) throw new Error('Документ или права изменились. Откройте карточку повторно.');
+      if (request.format === 'print') {
+        if (!previewWindow || previewWindow.closed) throw new Error('Окно печати закрыто. Повторите попытку.');
+        const url = URL.createObjectURL(blob);
+        window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+        previewWindow.location.href = url;
+      } else {
+        saveContractDocumentBlob(blob, request.format);
+        toast.success(request.format === 'pdf' ? 'PDF договора подготовлен.' : 'Документ договора подготовлен.', 'Договоры');
+      }
+    } catch (cause) {
+      closePendingWindow();
+      throw cause;
     } finally {
-      setDocumentSaving(false);
+      signal.removeEventListener('abort', closePendingWindow);
     }
   };
 
@@ -937,21 +1007,6 @@ export function ContractDetailPage({
       );
     } catch (error) {
       toast.error(extractDisplayErrorMessage(error, 'Не удалось сформировать соглашение о расторжении'), 'Договоры');
-    } finally {
-      setDocumentSaving(false);
-    }
-  };
-
-  const downloadContractDocument = async (format: 'word' | 'pdf') => {
-    if (!contract || documentSaving) return;
-
-    setDocumentSaving(true);
-    try {
-      const blob = await apiService.downloadContractDocument(contract.id, format);
-      saveContractDocumentBlob(blob, format);
-      toast.success(format === 'pdf' ? 'PDF договора подготовлен.' : 'Документ договора подготовлен.', 'Договоры');
-    } catch (error) {
-      toast.error(extractDisplayErrorMessage(error, 'Не удалось сформировать договор'), 'Договоры');
     } finally {
       setDocumentSaving(false);
     }
@@ -1022,6 +1077,12 @@ export function ContractDetailPage({
     !contract?.status ||
     !cancellableContractStatuses.includes(contract.status);
 
+  if (!canView || (loadError?.scope === detailScope && !contract)) {
+    return <div className="space-y-3 p-3 lg:p-4">
+      <button type="button" onClick={onBack} className="inline-flex items-center gap-2 rounded border px-3 py-2"><ArrowLeft className="h-4 w-4" />Назад</button>
+      <p role="alert">{!canView ? 'Нет доступа к договору.' : loadError?.message}</p>
+    </div>;
+  }
   if (loading || !contract) {
     return (
       <div className="p-8">
@@ -1042,7 +1103,7 @@ export function ContractDetailPage({
           <button
             type="button"
             onClick={() => void openContractDocumentPreview()}
-            disabled={documentSaving}
+            disabled={documentSaving || !canView || !canExport || contract.id !== contractId}
             className="inline-flex items-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm disabled:opacity-60"
           >
             {documentSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
@@ -1051,7 +1112,7 @@ export function ContractDetailPage({
           <button
             type="button"
             onClick={() => void downloadContractDocument('word')}
-            disabled={documentSaving}
+            disabled={documentSaving || !canView || !canExport || contract.id !== contractId}
             className="inline-flex items-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm disabled:opacity-60"
           >
             {documentSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
@@ -1060,7 +1121,7 @@ export function ContractDetailPage({
           <button
             type="button"
             onClick={() => void downloadContractDocument('pdf')}
-            disabled={documentSaving}
+            disabled={documentSaving || !canView || !canExport || contract.id !== contractId}
             className="inline-flex items-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm disabled:opacity-60"
           >
             {documentSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
@@ -2252,6 +2313,12 @@ export function ContractDetailPage({
         onApply={handleApplyCounterparties}
         onClose={() => setPickerOpen(false)}
       />
+      {imagePrintRequest && canView && canExport && contract.id === contractId && imagePrintRequest.scope === printScope && imagePrintRequest.documentId === contract.id ? (
+        <DocumentImagePrintDialog key={`${contract.id}:${imagePrintRequest.generation}`}
+          documentName={`Договор № ${contract.number || contract.id}`} initialOptions={imagePrintRequest.initialOptions}
+          confirmLabel={imagePrintRequest.format === 'print' ? 'Печатать' : `Скачать ${imagePrintRequest.format === 'word' ? 'Word' : 'PDF'}`}
+          onConfirm={confirmDocumentCopy} onClose={() => setImagePrintRequest(null)} />
+      ) : null}
       {messengerDeliveryOpen && contract.clients.length > 0 ? (
         <MessengerDocumentDeliveryModal
           clientId={contract.clients[0].id}

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ActDetailPage } from './ActDetailPage';
@@ -37,6 +37,7 @@ const {
       canView: true,
       canEdit: true,
       canDelete: true,
+      canExport: true,
       viewScope: 'all',
     },
     accounts: {
@@ -116,6 +117,7 @@ describe('ActDetailPage', () => {
     rolePermissionsMock.acts.canView = true;
     rolePermissionsMock.acts.canEdit = true;
     rolePermissionsMock.acts.canDelete = true;
+    rolePermissionsMock.acts.canExport = true;
     rolePermissionsMock.acts.viewScope = 'all';
     rolePermissionsMock.accounts.canView = true;
     rolePermissionsMock.clients.canView = true;
@@ -454,6 +456,114 @@ describe('ActDetailPage', () => {
     });
     await waitFor(() => {
       expect(screen.queryByRole('heading', { name: 'Смена статуса документа' })).toBeNull();
+    });
+  });
+
+  describe('image print dialog', () => {
+    beforeEach(() => {
+      getActMock.mockImplementation(async (id: number) => ({ id, number: String(id), date: '2026-04-14', amount: 100,
+        status: 'Created', type: 'Income', clientId: 7, lineItems: [] }));
+      getClientsMock.mockResolvedValue({ items: [] });
+      getActResponsiblesMock.mockResolvedValue({ items: [] });
+      downloadActDocumentMock.mockResolvedValue(Object.assign(new Blob(['<html>Preview</html>']), { text: async () => '<html>Preview</html>' }));
+    });
+    const loaded = async () => {
+      await waitFor(() => expect(downloadActDocumentMock).toHaveBeenCalledWith(35, 'html', { includeSignatureAndSeal: false }));
+      downloadActDocumentMock.mockClear();
+    };
+    const open = (format: 'print' | 'word' | 'pdf') => {
+      fireEvent.click(screen.getByRole('button', { name: format === 'print' ? 'Печать' : 'Скачать' }));
+      fireEvent.click(screen.getByRole('button', { name: format === 'print' ? 'С подписью и печатью' : `${format === 'word' ? 'Word' : 'PDF'} без подписи и печати` }));
+      return within(screen.getByRole('dialog', { name: 'Изображения в документе' }));
+    };
+
+    it.each(['print', 'word', 'pdf'] as const)('confirms independent images for %s without changing the act', async format => {
+      render(<ActDetailPage actId={35} onBack={vi.fn()} />); await loaded();
+      const dialog = open(format);
+      expect(downloadActDocumentMock).not.toHaveBeenCalled();
+      fireEvent.click(dialog.getByLabelText('Логотип'));
+      if (format === 'print') fireEvent.click(dialog.getByLabelText('Подпись'));
+      else fireEvent.click(dialog.getByLabelText('Печать'));
+      fireEvent.click(dialog.getByRole('button', { name: format === 'print' ? 'Печатать' : `Скачать ${format === 'word' ? 'Word' : 'PDF'}` }));
+      await waitFor(() => expect(downloadActDocumentMock).toHaveBeenCalledExactlyOnceWith(35, format === 'print' ? 'pdf' : format,
+        { includeLogo: true, includeSeal: true, includeSignature: false, signal: expect.any(AbortSignal) }));
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Изображения в документе' })).toBeNull());
+      expect(updateActMock).not.toHaveBeenCalled();
+    });
+
+    it('cancels before confirmation without fetching a document', async () => {
+      render(<ActDetailPage actId={35} onBack={vi.fn()} />); await loaded();
+      fireEvent.click(open('word').getByRole('button', { name: 'Отмена' }));
+      expect(downloadActDocumentMock).not.toHaveBeenCalled();
+      expect(screen.queryByRole('dialog', { name: 'Изображения в документе' })).toBeNull();
+    });
+
+    it('retains image choices after an error and retries with a new request', async () => {
+      render(<ActDetailPage actId={35} onBack={vi.fn()} />); await loaded();
+      downloadActDocumentMock.mockRejectedValueOnce(new Error('Синтетический отказ')).mockResolvedValueOnce(new Blob(['act']));
+      const dialog = open('word'); fireEvent.click(dialog.getByLabelText('Подпись'));
+      fireEvent.click(dialog.getByRole('button', { name: 'Скачать Word' }));
+      await dialog.findByRole('alert');
+      expect((dialog.getByLabelText('Подпись') as HTMLInputElement).checked).toBe(true);
+      fireEvent.click(dialog.getByRole('button', { name: 'Скачать Word' }));
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Изображения в документе' })).toBeNull());
+      expect(downloadActDocumentMock).toHaveBeenCalledTimes(2);
+      expect(downloadActDocumentMock.mock.calls[1][2].signal).not.toBe(downloadActDocumentMock.mock.calls[0][2].signal);
+    });
+
+    it('aborts print and closes only its pending window immediately on cancellation', async () => {
+      render(<ActDetailPage actId={35} onBack={vi.fn()} />); await loaded();
+      let resolve!: (value: Blob) => void; const pending = new Promise<Blob>(done => { resolve = done; });
+      downloadActDocumentMock.mockReturnValueOnce(pending);
+      const dialog = open('print'); fireEvent.click(dialog.getByRole('button', { name: 'Печатать' }));
+      const signal = downloadActDocumentMock.mock.calls[0][2].signal as AbortSignal;
+      const popup = vi.mocked(window.open).mock.results.at(-1)!.value as Window;
+      fireEvent.click(dialog.getByRole('button', { name: 'Отмена' }));
+      expect(signal.aborted).toBe(true); expect(popup.close).toHaveBeenCalled();
+      await act(async () => { resolve(new Blob(['late'])); await pending; });
+      expect(popup.location.href).toBe(''); expect(popup.print).not.toHaveBeenCalled();
+    });
+
+    it.each(['switch', 'unmount', 'revoke'] as const)('fences a late download on %s', async change => {
+      const view = render(<ActDetailPage actId={35} onBack={vi.fn()} />); await loaded();
+      let resolve!: (value: Blob) => void; const pending = new Promise<Blob>(done => { resolve = done; });
+      downloadActDocumentMock.mockReturnValueOnce(pending);
+      fireEvent.click(open('word').getByRole('button', { name: 'Скачать Word' }));
+      const signal = downloadActDocumentMock.mock.calls[0][2].signal as AbortSignal;
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click');
+      try {
+        if (change === 'unmount') view.unmount();
+        else {
+          if (change === 'revoke') rolePermissionsMock.acts.canExport = false;
+          view.rerender(<ActDetailPage actId={change === 'switch' ? 36 : 35} onBack={vi.fn()} />);
+        }
+        expect(signal.aborted).toBe(true);
+        await act(async () => { resolve(new Blob(['late'])); await pending; });
+        expect(click).not.toHaveBeenCalled();
+        expect(screen.queryByRole('dialog', { name: 'Изображения в документе' })).toBeNull();
+      } finally { click.mockRestore(); }
+    });
+
+    it('does not fetch preview or allow export without export permission', async () => {
+      rolePermissionsMock.acts.canExport = false;
+      render(<ActDetailPage actId={35} onBack={vi.fn()} />);
+      expect((await screen.findByRole('button', { name: 'Печать' }) as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByRole('button', { name: 'Скачать' }) as HTMLButtonElement).disabled).toBe(true);
+      expect(downloadActDocumentMock).not.toHaveBeenCalled();
+      expect(document.querySelector('iframe')).toBeNull();
+    });
+
+    it('explains that expense acts do not use our company images', async () => {
+      getActMock.mockResolvedValue({ id: 35, number: '35', date: '2026-04-14', amount: 100, status: 'Created', type: 'Expense', lineItems: [] });
+      render(<ActDetailPage actId={35} onBack={vi.fn()} />); await loaded();
+      expect(open('print').getByText('В расходном акте изображения нашей компании не используются.')).toBeTruthy();
+    });
+
+    it('does not fetch when the print window is blocked', async () => {
+      render(<ActDetailPage actId={35} onBack={vi.fn()} />); await loaded();
+      vi.mocked(window.open).mockReturnValueOnce(null);
+      const dialog = open('print'); fireEvent.click(dialog.getByRole('button', { name: 'Печатать' }));
+      await dialog.findByRole('alert'); expect(downloadActDocumentMock).not.toHaveBeenCalled();
     });
   });
 

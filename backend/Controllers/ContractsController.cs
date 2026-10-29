@@ -378,7 +378,10 @@ public class ContractsController : ControllerBase
         int id,
         [FromQuery] string? format = "word",
         [FromQuery] string? templateKey = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        [FromQuery] bool? includeLogo = null,
+        [FromQuery] bool? includeSeal = null,
+        [FromQuery] bool? includeSignature = null)
     {
         if (await RequireSectionPermissionAsync(RolePermissionCatalog.Contracts, permission => permission.CanExport, ct) is { } forbidden)
         {
@@ -390,7 +393,10 @@ public class ContractsController : ControllerBase
 
         var mainCompany = await ResolveContractSellerAsync(contract, await LoadMainCompanyAsync(ct), NormalizeDocumentFormat(format) != "html", ct);
         var template = await GetContractDocumentTemplateAsync(templateKey, ct);
-        var documentHtml = ContractDocumentTemplateEngine.RenderHtml(template.Html, contract, mainCompany);
+        var imageOptions = DocumentImagePrintOptions.FromOverrides(false, false, includeLogo, includeSeal, includeSignature);
+        var documentHtml = imageOptions is null
+            ? ContractDocumentTemplateEngine.RenderHtml(template.Html, contract, mainCompany)
+            : ContractDocumentTemplateEngine.RenderHtml(template.Html, contract, mainCompany, imageOptions);
         var normalizedFormat = NormalizeDocumentFormat(format);
 
         if (normalizedFormat == "html")
