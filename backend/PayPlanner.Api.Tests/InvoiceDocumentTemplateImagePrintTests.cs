@@ -40,8 +40,14 @@ public partial class InvoiceDocumentTemplateTests
     }
 
     [Theory]
-    [InlineData(0)] [InlineData(1)] [InlineData(2)] [InlineData(3)]
-    [InlineData(4)] [InlineData(5)] [InlineData(6)] [InlineData(7)]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
     public async Task GetDocument_ImagePrintHonorsIndependentFlagsForAllInvoiceTemplates(int mask)
     {
         await using var db = await CreateContextAsync();
@@ -63,7 +69,8 @@ public partial class InvoiceDocumentTemplateTests
     }
 
     [Theory]
-    [InlineData(false)] [InlineData(true)]
+    [InlineData(false)]
+    [InlineData(true)]
     public void GetDocument_ImagePrintPartialOverridesPreserveUnspecifiedLegacyDefaults(bool combined)
     {
         Assert.Null(DocumentImagePrintOptions.FromOverrides(true, combined, null, null, null));

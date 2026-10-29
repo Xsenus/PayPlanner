@@ -259,7 +259,19 @@ public static class ActDocumentTemplateEngine
         DocumentImagePrintOptions imageOptions)
     {
         ArgumentNullException.ThrowIfNull(imageOptions);
-        return RenderCustomTemplateHtml(string.IsNullOrWhiteSpace(templateHtml) ? DefaultTemplateHtml : templateHtml,
+        templateHtml = string.IsNullOrWhiteSpace(templateHtml) ? DefaultTemplateHtml : templateHtml;
+        if (string.Equals(templateHtml.Trim(), DefaultTemplateHtml, StringComparison.Ordinal))
+        {
+            if (act.Invoice?.Type != PaymentType.Expense && imageOptions.LogoOf(mainCompany) is not null)
+                templateHtml = templateHtml.Replace("<h1>{{document.title}}</h1>",
+                    "<table class=\"document-header\"><tbody><tr><td style=\"width:75%;vertical-align:middle\"><h1>{{document.title}}</h1></td><td style=\"width:25%;text-align:right;vertical-align:middle\">{{seller.logoHtml}}</td></tr></tbody></table>", StringComparison.Ordinal);
+            // Word не применяет CSS с дочерним комбинатором к ячейкам стандартного шаблона.
+            templateHtml = templateHtml.Replace("<td><div class=\"role\">", "<td width=\"48%\" style=\"width:48%;vertical-align:top\"><div class=\"role\">", StringComparison.Ordinal)
+                .Replace("<td class=\"gap\">", "<td class=\"gap\" width=\"4%\" style=\"width:4%\">", StringComparison.Ordinal)
+                .Replace("<table class=\"signatures\"><tbody><tr>",
+                    "<table class=\"signatures\" style=\"page-break-inside:avoid;break-inside:avoid\"><tbody><tr style=\"page-break-inside:avoid;break-inside:avoid\">", StringComparison.Ordinal);
+        }
+        return RenderCustomTemplateHtml(templateHtml,
             act, lineItems, mainCompany, false, imageOptions);
     }
 
@@ -672,10 +684,14 @@ public static class ActDocumentTemplateEngine
         var documentTitle = $"Акт № {act.Number} от {FormatLongDate(act.Date)}";
         var usesManagedDefaultSignatureLayout = templateHtml.Contains("class=\"sign-content\"", StringComparison.Ordinal);
         var signatureHtml = !isExpenseAct
-            ? BuildImageHtml(imageOptions is null ? includeSignatureAndSeal ? mainCompany?.DirectorSignatureDataUrl : null : imageOptions.SignatureOf(mainCompany), "Подпись", "signature", usesManagedDefaultSignatureLayout ? 76 : null, usesManagedDefaultSignatureLayout ? 42 : null)
+            ? imageOptions is not null
+                ? DocumentPrintImage.Render(imageOptions.SignatureOf(mainCompany), "Подпись", "signature", 76, 42)
+                : BuildImageHtml(includeSignatureAndSeal ? mainCompany?.DirectorSignatureDataUrl : null, "Подпись", "signature", usesManagedDefaultSignatureLayout ? 76 : null, usesManagedDefaultSignatureLayout ? 42 : null)
             : string.Empty;
         var sealHtml = !isExpenseAct
-            ? BuildImageHtml(imageOptions is null ? includeSignatureAndSeal ? mainCompany?.SealDataUrl : null : imageOptions.SealOf(mainCompany), "Печать", "seal", usesManagedDefaultSignatureLayout ? 90 : null, usesManagedDefaultSignatureLayout ? 90 : null)
+            ? imageOptions is not null
+                ? DocumentPrintImage.Render(imageOptions.SealOf(mainCompany), "Печать", "seal", 90, 90)
+                : BuildImageHtml(includeSignatureAndSeal ? mainCompany?.SealDataUrl : null, "Печать", "seal", usesManagedDefaultSignatureLayout ? 90 : null, usesManagedDefaultSignatureLayout ? 90 : null)
             : string.Empty;
         var commentHtml = string.IsNullOrWhiteSpace(act.Comment)
             ? string.Empty
@@ -718,7 +734,7 @@ public static class ActDocumentTemplateEngine
             ["seller.signatureHtml"] = signatureHtml,
             ["seller.sealHtml"] = sealHtml,
             ["seller.logoHtml"] = imageOptions is not null && !isExpenseAct
-                ? BuildImageHtml(imageOptions.LogoOf(mainCompany), "Логотип", "logo", 120, 90)
+                ? DocumentPrintImage.Render(imageOptions.LogoOf(mainCompany), "Логотип", "logo", 120, 90)
                 : string.Empty,
             ["buyer.requisitesHtml"] = buyer.RequisitesHtml,
             ["buyer.signaturePartyName"] = Encode(buyer.SignaturePartyName),

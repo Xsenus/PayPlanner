@@ -136,6 +136,28 @@ public static class ContractDocumentTemplateEngine
     public static string RenderHtml(string templateHtml, Contract contract, LegalEntity? mainCompany, DocumentImagePrintOptions imageOptions)
     {
         ArgumentNullException.ThrowIfNull(imageOptions);
+        templateHtml = string.IsNullOrWhiteSpace(templateHtml) ? DefaultTemplateHtml : templateHtml;
+        if (string.Equals(templateHtml.Trim(), DefaultTemplateHtml, StringComparison.Ordinal))
+        {
+            if (imageOptions.LogoOf(mainCompany) is not null)
+                templateHtml = templateHtml.Replace("<h1>Договор № {{contract.number}}</h1>",
+                    "<table class=\"document-header\"><tr><td style=\"width:75%;vertical-align:middle\"><h1>Договор № {{contract.number}}</h1></td><td style=\"width:25%;text-align:right;vertical-align:middle\">{{seller.logoHtml}}</td></tr></table>", StringComparison.Ordinal);
+            var hasSeal = imageOptions.SealOf(mainCompany) is not null;
+            if (hasSeal || imageOptions.SignatureOf(mainCompany) is not null)
+            {
+                var height = hasSeal ? 90 : 42;
+                var rowStart = $"<table class=\"image-signature\" style=\"width:190px;height:{height}px;table-layout:fixed\"><tr>";
+                var emptyCell = $"<td style=\"padding:0;vertical-align:middle;height:{height}px\">";
+                templateHtml = templateHtml.Replace("Исполнитель<br>",
+                    $"Исполнитель<br>{rowStart}{emptyCell}{{{{seller.signatureHtml}}}}</td>{emptyCell}{{{{seller.sealHtml}}}}</td></tr></table>", StringComparison.Ordinal)
+                    .Replace("Заказчик<br>", $"Заказчик<br>{rowStart}{emptyCell}</td></tr></table>", StringComparison.Ordinal);
+                templateHtml = templateHtml.Replace("<h2>Подписи сторон</h2>", "<h2 style=\"page-break-after:avoid\">Подписи сторон</h2>", StringComparison.Ordinal)
+                    .Replace("<table class=\"signatures\">", "<table class=\"signatures\" style=\"page-break-inside:avoid;break-inside:avoid\">", StringComparison.Ordinal);
+                var signatureTable = templateHtml.IndexOf("<table class=\"signatures\"", StringComparison.Ordinal);
+                var signatureRow = templateHtml.IndexOf("<tr>", signatureTable, StringComparison.Ordinal);
+                templateHtml = templateHtml.Insert(signatureRow + 3, " style=\"page-break-inside:avoid;break-inside:avoid\"");
+            }
+        }
         return RenderCore(templateHtml, contract, mainCompany, imageOptions);
     }
 
@@ -201,9 +223,9 @@ public static class ContractDocumentTemplateEngine
             ["contract.conditionsHtml"] = conditions.Length > 0 ? conditions.ToString() : "<p>Условия договора не заполнены в карточке.</p>",
             ["seller.name"] = Encode(sellerName),
             ["seller.requisites"] = Encode(sellerRequisites),
-            ["seller.logoHtml"] = BuildImageHtml(imageOptions?.LogoOf(mainCompany), "Логотип", "logo", 120, 90),
-            ["seller.sealHtml"] = BuildImageHtml(imageOptions?.SealOf(mainCompany), "Печать", "seal", 90, 90),
-            ["seller.signatureHtml"] = BuildImageHtml(imageOptions?.SignatureOf(mainCompany), "Подпись", "signature", 76, 42),
+            ["seller.logoHtml"] = DocumentPrintImage.Render(imageOptions?.LogoOf(mainCompany), "Логотип", "logo", 120, 90),
+            ["seller.sealHtml"] = DocumentPrintImage.Render(imageOptions?.SealOf(mainCompany), "Печать", "seal", 90, 90),
+            ["seller.signatureHtml"] = DocumentPrintImage.Render(imageOptions?.SignatureOf(mainCompany), "Подпись", "signature", 76, 42),
             ["customer.name"] = Encode(customerName),
             ["customer.requisites"] = Encode(customerRequisites),
         };
@@ -305,10 +327,6 @@ public static class ContractDocumentTemplateEngine
 </html>
 """;
     }
-
-    private static string BuildImageHtml(string? dataUrl, string alt, string cssClass, int width, int height)
-        => string.IsNullOrWhiteSpace(dataUrl) ? string.Empty
-            : $"<img src=\"{WebUtility.HtmlEncode(dataUrl)}\" alt=\"{alt}\" class=\"{cssClass}\" width=\"{width}\" height=\"{height}\" style=\"width: {width}px; height: {height}px; object-fit: contain;\" />";
 
     private static string ReplaceTokens(string templateHtml, IReadOnlyDictionary<string, string> tokens)
         => TokenRegex.Replace(templateHtml, match =>

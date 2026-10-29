@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services.Acts;
 using PayPlanner.Api.Services.Companies;
@@ -126,8 +127,15 @@ public class DocumentImagePrintOptionsTests
         var act = Act(invoice);
         Assert.Equal(InvoiceDocumentTemplateEngine.RenderHtml(InvoiceDocumentTemplateEngine.DefaultTemplateHtml, invoice, [], seller, combined),
             InvoiceDocumentTemplateEngine.RenderHtml(InvoiceDocumentTemplateEngine.DefaultTemplateHtml, invoice, [], seller, new DocumentImagePrintOptions(true, combined, combined)));
-        Assert.Equal(ActDocumentTemplateEngine.RenderHtml(act, [], seller, combined),
-            ActDocumentTemplateEngine.RenderHtml(act, [], seller, new DocumentImagePrintOptions(false, combined, combined)));
+        var legacyAct = ActDocumentTemplateEngine.RenderHtml(act, [], seller, combined);
+        var selectedAct = ActDocumentTemplateEngine.RenderHtml(act, [], seller, new DocumentImagePrintOptions(false, combined, combined));
+        // Новая копия сохраняет текст и выбор изображений; Word получает пропорции и явные ширины ячеек.
+        var withoutWordCellWidths = selectedAct.Replace(" width=\"48%\" style=\"width:48%;vertical-align:top\"", string.Empty, StringComparison.Ordinal)
+            .Replace(" width=\"4%\" style=\"width:4%\"", string.Empty, StringComparison.Ordinal)
+            .Replace(" style=\"page-break-inside:avoid;break-inside:avoid\"", string.Empty, StringComparison.Ordinal);
+        Assert.Equal(Regex.Replace(legacyAct, "<img[^>]*>", string.Empty), Regex.Replace(withoutWordCellWidths, "<img[^>]*>", string.Empty));
+        AssertImages(selectedAct, new DocumentImagePrintOptions(false, combined, combined));
+        if (combined) Assert.Contains("class=\"signature\" width=\"42\" height=\"42\"", selectedAct);
     }
 
     [Theory]
