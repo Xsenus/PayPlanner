@@ -16,6 +16,62 @@ namespace PayPlanner.Api.Tests;
 public sealed class TaskStatusNotificationDispatchTests
 {
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DeletedTaskEvents_DoNotHideLiveEventsBehindTheBatchLimit(bool postgres)
+    {
+        await using var harness = await Harness.CreateAsync(postgres);
+        var firstId = await harness.SeedAsync();
+        long liveId;
+        int deletedTaskId;
+        await using (var setup = harness.Context())
+        {
+            var first = await setup.TaskStatusNotificationOutboxes.Include(item => item.TaskJournalItem).SingleAsync(item => item.Id == firstId);
+            var deletedTask = first.TaskJournalItem;
+            deletedTaskId = deletedTask.Id;
+            for (var index = 1; index < 50; index++)
+                setup.TaskStatusNotificationOutboxes.Add(new TaskStatusNotificationOutbox
+                {
+                    TaskJournalItemId = deletedTask.Id,
+                    EventKey = $"task:deleted:{index}",
+                    EventType = "completion",
+                    StatusTransitionToken = deletedTask.StatusTransitionToken,
+                    ActorName = "Автор",
+                    CreatedAt = DateTime.UtcNow,
+                });
+            await setup.SaveChangesAsync();
+            var liveTask = new TaskJournalItem { Title = "Действующая задача", ObjectName = "Дело", AuthorUserId = deletedTask.AuthorUserId, DueAt = DateTime.UtcNow.AddHours(1), Status = "done" };
+            var live = new TaskStatusNotificationOutbox
+            {
+                TaskJournalItem = liveTask,
+                EventKey = "task:live:after-deleted",
+                EventType = "completion",
+                StatusTransitionToken = liveTask.StatusTransitionToken,
+                ActorName = "Автор",
+                CreatedAt = DateTime.UtcNow,
+            };
+            setup.TaskStatusNotificationOutboxes.Add(live);
+            setup.ChangeTracker.CascadeDeleteTiming = Microsoft.EntityFrameworkCore.ChangeTracking.CascadeTiming.OnSaveChanges;
+            setup.TaskJournalItems.Remove(deletedTask);
+            await setup.SaveChangesAsync();
+            liveId = live.Id;
+        }
+        await using var db = harness.Context();
+        Assert.True(await db.TaskJournalItems.IgnoreQueryFilters().Where(task => task.Id == deletedTaskId).Select(task => EF.Property<bool>(task, "IsDeleted")).SingleAsync());
+        Assert.Equal(51, await db.TaskStatusNotificationOutboxes.IgnoreQueryFilters().CountAsync());
+        Assert.Equal(1, await db.TaskStatusNotificationOutboxes.CountAsync());
+        Assert.Equal(1, await db.TaskStatusNotificationOutboxes.Include(item => item.TaskJournalItem).CountAsync());
+        var probe = new BlockingNotifications();
+        probe.Release.TrySetResult();
+        Assert.Equal(1, await new TaskStatusNotificationDispatchProcessor(db, probe).ProcessBatchAsync(CancellationToken.None));
+        Assert.Equal(1, probe.Calls);
+        Assert.NotNull((await db.TaskStatusNotificationOutboxes.AsNoTracking().SingleAsync(item => item.Id == liveId)).CompletedAt);
+        Assert.Equal(50, await db.TaskStatusNotificationOutboxes.IgnoreQueryFilters().CountAsync(item => item.TaskJournalItemId == deletedTaskId && item.Attempts == 0 && item.LeaseToken == null && item.CompletedAt == null));
+        Assert.Equal(1, await db.TaskJournalItems.IgnoreQueryFilters().Where(task => task.Id == deletedTaskId).ExecuteUpdateAsync(setters => setters.SetProperty(task => EF.Property<bool>(task, "IsDeleted"), false)));
+        Assert.Equal(51, await db.TaskStatusNotificationOutboxes.CountAsync());
+    }
+
+    [Theory]
     [InlineData(false, false)]
     [InlineData(false, true)]
     [InlineData(true, false)]

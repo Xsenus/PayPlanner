@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
-import { mkdtemp, mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdtemp, mkdir, readFile, realpath, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
@@ -150,3 +150,33 @@ for (const change of ['dependency-before-hit', 'dependency-added', 'dependency-r
     await assert.rejects(verifyRetirementDependencyInputs(admitted, f.repo, tool), /Dependency\/tool drift/);
   });
 }
+
+test('bounded readers retain every nested dependency hash and only the existing cache exclusions', async t => {
+  const f = await fixture(t), dependencies = join(f.repo, 'node_modules');
+  const expected = Object.fromEntries([['dependency.js', createHash('sha256').update('dependency-one').digest('hex')]]);
+  for (let index = 0; index < 40; index++) {
+    const directory = `package-${index}/глубже`;
+    await mkdir(join(dependencies, directory), { recursive: true });
+    for (const name of ['__proto__', 'source.js', '.bin']) {
+      const key = `${directory}/${name}`, content = `content-${key}`;
+      await writeFile(join(dependencies, key), content);
+      expected[key] = createHash('sha256').update(content).digest('hex');
+    }
+    for (const cache of ['.vite', '.vite-temp', '.cache']) {
+      await mkdir(join(dependencies, directory, cache));
+      await writeFile(join(dependencies, directory, cache, 'transient.js'), 'excluded-cache');
+    }
+  }
+  await writeFile(join(dependencies, '__proto__'), 'owned-special-name');
+  Object.defineProperty(expected, '__proto__', { value: createHash('sha256').update('owned-special-name').digest('hex'), enumerable: true });
+  const captured = await captureRetirementDependencyInputs(f.repo);
+  assert.deepEqual(captured.files, expected);
+  assert.equal(Object.hasOwn(captured.files, '__proto__'), true);
+  await verifyRetirementDependencyInputs(captured, f.repo);
+});
+
+test('dependency directory links cannot escape or duplicate the admitted tree', async t => {
+  const f = await fixture(t), dependencies = join(f.repo, 'node_modules');
+  await symlink(await realpath(join(f.repo, 'src')), join(dependencies, 'linked-directory'), process.platform === 'win32' ? 'junction' : 'dir');
+  await assert.rejects(captureRetirementDependencyInputs(f.repo), /Unowned input link/);
+});

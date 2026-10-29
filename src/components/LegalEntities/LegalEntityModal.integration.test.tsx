@@ -621,6 +621,53 @@ describe('LegalEntityModal integration', () => {
     expect(screen.getByText('Подпись руководителя')).toBeTruthy();
   });
 
+  it.each([
+    ['page', 'Печать компании'], ['page', 'Подпись руководителя'],
+    ['modal', 'Печать компании'], ['modal', 'Подпись руководителя'],
+  ] as const)('keeps %s form values and clears the %s file input after an oversized PNG rejection', async (mode, label) => {
+    const user = userEvent.setup();
+    const logo = 'data:image/png;base64,existing-logo';
+    const initial = createInitialLegalEntity({ shortName: 'Неизменённая компания', logoDataUrl: logo });
+    const submit = vi.fn();
+    const context = { clearRect: vi.fn(), drawImage: vi.fn(), save: vi.fn(), restore: vi.fn(), fillRect: vi.fn() };
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context as unknown as CanvasRenderingContext2D);
+    const encode = vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockImplementation(mime => mime === 'image/png'
+      ? 'P'.repeat(500_000) : 'data:image/jpeg;base64,incorrect-white-background');
+    class DecodedImage {
+      width = 400;
+      height = 400;
+      onload: (() => void) | null = null;
+      set src(_value: string) { queueMicrotask(() => this.onload?.()); }
+    }
+    vi.stubGlobal('Image', DecodedImage);
+    try {
+      render(<LegalEntityModal isOpen mode={mode} onClose={vi.fn()} onSubmit={submit} initial={initial}
+        suggest={vi.fn().mockResolvedValue([])} findById={vi.fn()} allowEdit allowDelete={false} />);
+      const title = await screen.findByText(label);
+      const input = title.parentElement!.querySelector('input[type="file"]') as HTMLInputElement;
+      expect(input).not.toBeNull();
+      const companyName = screen.getByDisplayValue('Неизменённая компания');
+      await user.clear(companyName);
+      await user.type(companyName, 'Несохранённое название');
+      const file = new File(['synthetic pixels handled by the image stub'], 'same-seal.png', { type: 'image/png' });
+      await user.upload(input, file);
+      await screen.findByText(`${label}: PNG слишком большой для сохранения. Выберите PNG меньшего размера с прозрачным фоном.`);
+      await waitFor(() => expect(input.value).toBe(''));
+      expect((companyName as HTMLInputElement).value).toBe('Несохранённое название');
+      expect(screen.getByAltText('Логотип компании').getAttribute('src')).toBe(logo);
+      expect(context.fillRect).not.toHaveBeenCalled();
+      expect(encode).toHaveBeenCalledExactlyOnceWith('image/png');
+      await user.upload(input, file);
+      await waitFor(() => expect(encode).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(input.value).toBe(''));
+      expect(submit).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+      getContext.mockRestore();
+      encode.mockRestore();
+    }
+  });
+
   it('hides logo, seal and signature fields for non-own legal entities', async () => {
     vi.mocked(apiService.getMainCompanySettings).mockResolvedValueOnce({
       defaultCompanyId: 7,

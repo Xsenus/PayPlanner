@@ -790,6 +790,7 @@ public class CashOrdersControllerTests
         var selectedZone = ResolveTimeZoneWithDifferentLocalDate();
         var userId = await CreateUserWithTimeZoneAsync(db, selectedZone.TimeZoneId);
         await AddConfirmedCashAccountAsync(db, userId, "Main cashbox");
+        var cashAccount = await db.MoneyAccounts.SingleAsync(account => account.Name == "Main cashbox");
         var controller = CreateController(db, userId);
 
         var nextNumberAction = await controller.GetNextNumber(
@@ -810,6 +811,7 @@ public class CashOrdersControllerTests
             Amount = 1_200m,
             Currency = "RUB",
             Account = "Main cashbox",
+            SelectedMoneyAccountId = cashAccount.Id,
             PayerName = "Client",
             Basis = "Cash payment",
         }, CancellationToken.None);
@@ -817,6 +819,9 @@ public class CashOrdersControllerTests
         var createdResult = Assert.IsType<CreatedResult>(createAction);
         var created = Assert.IsType<CashOrderDto>(createdResult.Value);
         Assert.Equal(selectedZone.ProfileToday, created.Date);
+        var storedOrder = await db.CashOrders.AsNoTracking().SingleAsync(order => order.Id == created.Id);
+        Assert.Equal(cashAccount.Id, storedOrder.MoneyAccountId);
+        Assert.Equal(cashAccount.CompanyId, storedOrder.CompanyId);
         Assert.StartsWith($"ПКО-{selectedZone.ProfileToday.Year}-", created.Number);
 
         var cashBookAction = await controller.GetCashBook(
@@ -836,6 +841,7 @@ public class CashOrdersControllerTests
             {
                 Date = default,
                 AccountName = "Main cashbox",
+                MoneyAccountId = cashAccount.Id,
                 ActualBalance = 1_200m,
                 CreateCorrection = false,
             },

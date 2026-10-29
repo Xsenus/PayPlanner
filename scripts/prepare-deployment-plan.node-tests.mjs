@@ -68,12 +68,15 @@ test('binds qualified needs, exact package maps, current history, source pins an
   assert.equal(plan.rollbackAfterStartup, 'halt-for-manual-review');
 });
 
-test('qualifies exactly the reviewed eleven-migration candidate and all 242 release insertions', t => {
+test('qualifies exactly the reviewed eleven-migration candidate and all 249 release insertions', t => {
   const input = fixture(t, true);
   const { plan, qualificationRaw } = createPlan(input);
   const review = reviewedCandidate(input.root);
   assert.equal(plan.expectedMigration, review.migrationIds.join('+'));
-  assert.equal(plan.expectedReleaseSeeds.length, 242);
+  assert.equal(plan.expectedReleaseSeeds.length, 249);
+  assert.deepEqual(plan.expectedReleaseSeeds.slice(0, 5).map(entry => entry.version), ['1.14.391', '1.14.390', '1.14.389', '1.14.388', '1.14.387']);
+  assert.ok(plan.expectedReleaseSeeds.slice(0, 5).every(entry => entry.isActive === false));
+  assert.deepEqual(plan.expectedReleaseSeeds, JSON.parse(readFileSync(resolve('backend/AppReleases/releases.json'), 'utf8')).slice(0, 249));
   assert.equal(plan.expectedReleaseCatalogSha256, review.releaseCatalogSha256);
   assert.deepEqual(JSON.parse(qualificationRaw).expectedReleaseSeeds, plan.expectedReleaseSeeds);
 });

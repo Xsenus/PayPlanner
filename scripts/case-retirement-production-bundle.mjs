@@ -24,22 +24,48 @@ async function fileHash(path) {
 async function tree(root, dependencies = false) {
   const rootInfo = await lstat(root);
   assert.ok(rootInfo.isDirectory() && !rootInfo.isSymbolicLink(), 'Input or artifact root must be an ordinary directory');
-  const result = {};
-  async function walk(directory) {
-    for (const name of (await readdir(directory)).sort()) {
-      if (dependencies && caches.has(name)) continue;
-      const path = join(directory, name), info = await lstat(path);
-      const key = relative(root, path).replaceAll('\\', '/');
-      if (info.isSymbolicLink()) {
-        const target = await realpath(path);
-        assert.ok(dependencies && inside(root, target) && (await lstat(target)).isFile(), 'Unowned input link');
-        result[key] = { link: await readlink(path), target, sha256: await fileHash(target) };
-      } else if (info.isDirectory()) await walk(path);
-      else { assert.ok(info.isFile(), 'Non-ordinary input'); result[key] = await fileHash(path); }
-    }
+  const directories = [root], files = [];
+  // Keep the complete file/link boundary; hide Windows metadata latency with bounded I/O.
+  for (let index = 0; index < directories.length;) {
+    const batch = directories.slice(index, index + 12);
+    index += batch.length;
+    const scanned = await Promise.allSettled(batch.map(async directory => {
+      const info = await lstat(directory);
+      assert.ok(info.isDirectory() && !info.isSymbolicLink(), 'Input or artifact root must be an ordinary directory');
+      for (const entry of await readdir(directory, { withFileTypes: true })) {
+        if (dependencies && caches.has(entry.name)) continue;
+        const path = join(directory, entry.name), key = relative(root, path).replaceAll('\\', '/');
+        if (entry.isSymbolicLink()) {
+          const target = await realpath(path);
+          assert.ok(dependencies && inside(root, target) && (await lstat(target)).isFile(), 'Unowned input link');
+          files.push({ path, key, target, link: await readlink(path) });
+        } else if (entry.isDirectory()) directories.push(path);
+        else { assert.ok(entry.isFile(), 'Non-ordinary input'); files.push({ path, key }); }
+      }
+    }));
+    const rejected = scanned.find(result => result.status === 'rejected');
+    if (rejected) throw rejected.reason;
   }
-  await walk(root);
-  return result;
+  files.sort((left, right) => left.key < right.key ? -1 : left.key > right.key ? 1 : 0);
+  const records = new Array(files.length);
+  let next = 0, failed = false, failure;
+  await Promise.all(Array.from({ length: Math.min(12, files.length) }, async () => {
+    while (!failed) {
+      const index = next++;
+      if (index >= files.length) return;
+      const entry = files[index];
+      try {
+        const digest = await fileHash(entry.target ?? entry.path);
+        records[index] = [entry.key, entry.target ? { link: entry.link, target: entry.target, sha256: digest } : digest];
+      } catch (error) {
+        if (!failed) failure = error;
+        failed = true;
+      }
+    }
+  }));
+  // Every started read settles before a failed owner can be released.
+  if (failed) throw failure;
+  return Object.fromEntries(records);
 }
 
 async function ownedRoot(root, owner) {

@@ -23,8 +23,6 @@ public class CalendarNotificationInventoryTests
             "NotifyTaskChangedAsync",
             "NotifyTaskReassignedAsync",
             "NotifyTaskCancelledAsync",
-            "NotifyTaskCompletedAsync",
-            "NotifyTaskApprovalRequestedAsync",
             "NotifyTaskScheduleConflictIfNeededAsync",
             "SafeSyncExternalCalendarTaskAsync");
 
@@ -33,8 +31,6 @@ public class CalendarNotificationInventoryTests
             "UpdateStatus",
             "NotifyTaskChangedAsync",
             "NotifyTaskCancelledAsync",
-            "NotifyTaskCompletedAsync",
-            "NotifyTaskApprovalRequestedAsync",
             "SafeSyncExternalCalendarTaskAsync");
 
         AssertMethodContains(
@@ -43,8 +39,6 @@ public class CalendarNotificationInventoryTests
             "NotifyTaskChangedAsync",
             "NotifyTaskReassignedAsync",
             "NotifyTaskCancelledAsync",
-            "NotifyTaskCompletedAsync",
-            "NotifyTaskApprovalRequestedAsync",
             "NotifyTaskScheduleConflictIfNeededAsync",
             "SafeSyncExternalCalendarTaskAsync");
 
@@ -53,6 +47,23 @@ public class CalendarNotificationInventoryTests
             "UpdateApproval",
             "NotifyTaskApprovalDecisionAsync",
             "SafeSyncExternalCalendarTaskAsync");
+
+        foreach (var method in new[] { "CreateTask", "UpdateTask", "UpdateStatus", "BulkUpdateTasks", "UpdateApproval" })
+        {
+            AssertMethodContains(controllerSource, method,
+                "new TaskStatusNotificationOutbox", "_db.TaskStatusNotificationOutboxes.Add(statusNotification)",
+                "StatusTransitionToken = entity.StatusTransitionToken", "\"approval\"",
+                "new TaskStatusNotificationDispatchProcessor", "processor.ProcessAsync(");
+            if (method != "CreateTask")
+            {
+                AssertMethodContains(controllerSource, method, "\"completion\"");
+            }
+        }
+
+        var dispatcherSource = ReadSourceFile("backend", "Services", "Notifications", "TaskStatusNotificationDispatchProcessor.cs");
+        AssertMethodContains(dispatcherSource, "ProcessAsync",
+            "item.EventType == \"approval\"", "notifications.NotifyApprovalForEventAsync",
+            "notifications.NotifyCompletionForEventAsync", "item.EventKey", "task.StatusTransitionToken");
 
         AssertMethodContains(
             controllerSource,
@@ -95,7 +106,7 @@ public class CalendarNotificationInventoryTests
     {
         var methodMatch = Regex.Match(
             source,
-            $@"\b{Regex.Escape(methodName)}\s*\(",
+            $@"\b(?:public|private|protected|internal)\s+(?:[\w<>?,\[\].]+\s+)+{Regex.Escape(methodName)}\s*\(",
             RegexOptions.CultureInvariant);
         Assert.True(methodMatch.Success, $"Method {methodName} was not found.");
 

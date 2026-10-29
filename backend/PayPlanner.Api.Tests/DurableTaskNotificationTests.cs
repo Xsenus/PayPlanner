@@ -99,7 +99,7 @@ public partial class NotificationServiceTests
         db.Users.AddRange(assignee, approver);
         await db.SaveChangesAsync();
         var task = new TaskJournalItem { ObjectName = "Дело", Title = "Задача", AuthorUserId = author.Id, AssigneeUserId = assignee.Id, DueAt = DateTime.UtcNow.AddHours(1), Status = "onApproval", ChannelsJson = "[\"inApp\"]", Participants = [new TaskJournalParticipant { UserId = approver.Id, Role = "approver", ApprovalStatus = "pending" }] };
-        var entry = new TaskStatusNotificationOutbox { TaskJournalItem = task, EventKey = "task:durable:approval-realtime", EventType = "approval", StatusTransitionToken = task.StatusTransitionToken, ActorUserId = author.Id, ActorName = "Автор", CreatedAt = DateTime.UtcNow };
+        var entry = new TaskStatusNotificationOutbox { TaskJournalItem = task, EventKey = "task:durable:approval-realtime", EventType = "approval", ApprovalParticipant = task.Participants.Single(), StatusTransitionToken = task.StatusTransitionToken, ActorUserId = author.Id, ActorName = "Автор", CreatedAt = DateTime.UtcNow };
         db.TaskStatusNotificationOutboxes.Add(entry);
         await db.SaveChangesAsync();
         var id = entry.Id;
