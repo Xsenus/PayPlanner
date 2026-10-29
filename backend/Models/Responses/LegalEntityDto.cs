@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services.Companies;
 
 namespace PayPlanner.Api.Models.Responses;
 
@@ -104,6 +105,10 @@ public class LegalEntityListItemDto
 
 public class LegalEntityDetailDto : LegalEntityListItemDto
 {
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public CompanyDocumentImagePrintDefaults? DocumentImagePrintDefaults { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool DocumentImagePrintDefaultsInvalid { get; set; }
 }
 
 public class MainCompanySettingsDto

@@ -520,7 +520,11 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         bool includeInlineAssets = true)
     {
         var visibleClientIds = await LoadVisibleClientIdsAsync([entity], ct);
-        return MapDetail(entity, includeInlineAssets, visibleClientIds);
+        var result = MapDetail(entity, includeInlineAssets, visibleClientIds);
+        var defaults = await new CompanyDocumentImagePrintDefaultsService(_db).ReadAsync(entity.Id, ct);
+        result.DocumentImagePrintDefaults = defaults.Value;
+        result.DocumentImagePrintDefaultsInvalid = defaults.Invalid;
+        return result;
     }
 
     private async Task<LegalEntity?> LoadLegalEntityForDetailAsync(int id, CancellationToken ct)
@@ -1061,6 +1065,11 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             return Forbid();
         }
 
+        CompanyDocumentImagePrintDefaults? printDefaults = null;
+        if (request.DocumentImagePrintDefaults is { } requestedDefaults && !requestedDefaults.TryToValue(out printDefaults))
+            return BadRequest("Для каждого выбранного вида документа укажите логотип, печать и подпись.");
+        var writePrintDefaults = CompanyDocumentImagePrintDefaultsService.ShouldWrite(request.DocumentImagePrintDefaultsChanged);
+
         var requirementsSection = string.Equals(request.FormRequirementsSection, "clients-modal-legal", StringComparison.OrdinalIgnoreCase)
             ? "clients-modal-legal"
             : "legal-entities";
@@ -1189,9 +1198,13 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             UpdatedAt = DateTime.UtcNow,
         };
 
+        await using var defaultsTransaction = writePrintDefaults && _db.Database.CurrentTransaction is null
+            ? await _db.Database.BeginTransactionAsync(ct) : null;
         await EnsureAndNormalizeDictionaryValuesAsync(entity, ct);
         _db.LegalEntities.Add(entity);
         await _db.SaveChangesAsync(ct);
+
+        await new CompanyDocumentImagePrintDefaultsService(_db).StageAsync(entity.Id, printDefaults, request.DocumentImagePrintDefaultsChanged, ct);
 
         if (clientIds.Count > 0)
         {
@@ -1200,6 +1213,8 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
 
         await ApplyLegalEntityAddressesAsync(entity, request.Addresses, ct);
         await _db.SaveChangesAsync(ct);
+
+        if (defaultsTransaction is not null) await defaultsTransaction.CommitAsync(ct);
 
         var responseEntity = await LoadLegalEntityForDetailAsync(entity.Id, ct);
         var response = await MapDetailForCurrentUserAsync(responseEntity ?? entity, ct, includeInlineAssets: false);
@@ -1274,6 +1289,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         }
 
         await RemoveCompanyFromMainCompanySettingsAsync(entity.Id, ct);
+        await new CompanyDocumentImagePrintDefaultsService(_db).StageAsync(entity.Id, null, true, ct);
         _db.LegalEntities.Remove(entity);
         await _db.SaveChangesAsync(ct);
         return NoContent();
@@ -2118,6 +2134,10 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             if (!profileAccess.CompanyIds.Contains(id)) return NotFound();
         }
 
+        CompanyDocumentImagePrintDefaults? printDefaults = null;
+        if (request.DocumentImagePrintDefaults is { } requestedDefaults && !requestedDefaults.TryToValue(out printDefaults))
+            return BadRequest("Для каждого выбранного вида документа укажите логотип, печать и подпись.");
+
         var missingUpdate = await _formRequirements.GetMissingFieldsAsync("legal-entities", request, ct);
         if (missingUpdate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingUpdate });
 
@@ -2289,6 +2309,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         await EnsureAndNormalizeDictionaryValuesAsync(entity, ct);
         await ApplyClientLinksAsync(entity.Id, clientIds, ct);
         await ApplyLegalEntityAddressesAsync(entity, request.Addresses, ct);
+        await new CompanyDocumentImagePrintDefaultsService(_db).StageAsync(entity.Id, printDefaults, request.DocumentImagePrintDefaultsChanged, ct);
         await _db.SaveChangesAsync(ct);
 
         var responseEntity = await LoadLegalEntityForDetailAsync(entity.Id, ct);

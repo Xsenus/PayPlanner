@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services.Companies;
 
 namespace PayPlanner.Api.Services;
 
@@ -268,7 +269,8 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
                 x => x.Id, x => x.Id, x => Key(x.Key), x => Key(x.Key), CopySystemSetting, new Dictionary<int, int>(), cancellationToken,
                 // Source-local company IDs and the target's future-document policy must not cross a database merge.
                 new[] { "legalEntities.mainCompanyId", "legalEntities.mainCompanyIds", "legalEntities.defaultMainCompanyId",
-                    DocumentSellerSnapshotPolicy.SettingKey }.Select(NormalizeText).ToHashSet(StringComparer.Ordinal)));
+                    DocumentSellerSnapshotPolicy.SettingKey }.Select(NormalizeText).ToHashSet(StringComparer.Ordinal),
+                NormalizeText(CompanyDocumentImagePrintDefaultsService.KeyPrefix)));
     }
 
     private async Task ImportBusinessDataAsync(
@@ -737,7 +739,8 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
         Action<T, T> copyAction,
         Dictionary<int, int> importedIdMap,
         CancellationToken cancellationToken,
-        IReadOnlySet<string>? preservedTargetKeys = null)
+        IReadOnlySet<string>? preservedTargetKeys = null,
+        string? preservedTargetKeyPrefix = null)
         where T : class, new()
     {
         var sourceItems = await sourceQuery(source).ToListAsync(cancellationToken);
@@ -756,7 +759,8 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
         foreach (var sourceItem in sourceItems.OrderBy(sourceIdSelector))
         {
             var key = sourceKeySelector(sourceItem);
-            if (preservedTargetKeys?.Contains(key) == true)
+            if (preservedTargetKeys?.Contains(key) == true
+                || (preservedTargetKeyPrefix is not null && key.StartsWith(preservedTargetKeyPrefix, StringComparison.Ordinal)))
             {
                 table.Skipped += 1;
                 continue;

@@ -168,6 +168,9 @@ public class LegalEntityRequest
 
     public bool? DirectorSignatureChanged { get; set; }
 
+    public CompanyDocumentImagePrintDefaultsRequest? DocumentImagePrintDefaults { get; set; }
+    public bool? DocumentImagePrintDefaultsChanged { get; set; }
+
     [MaxLength(8000)]
     public string? DocumentDirectorJson { get; set; }
 
