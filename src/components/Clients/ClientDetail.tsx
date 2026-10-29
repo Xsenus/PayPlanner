@@ -54,6 +54,8 @@ import { apiService } from "../../services/api";
 import { useTranslation } from "../../hooks/useTranslation";
 import { useFormRequirements } from "../../hooks/useFormRequirements";
 import { useAuth } from "../../contexts/AuthContext";
+import { useAsyncOperationOwner } from '../../hooks/useAsyncOperationOwner';
+import { awaitOwnedUiResult, StaleUiOperationError } from '../../utils/StaleUiOperationError';
 import { useRolePermissions } from "../../hooks/useRolePermissions";
 import { useDialog } from "../../hooks/useDialog";
 import { useToast } from "../../hooks/useToast";
@@ -1678,6 +1680,22 @@ export function ClientDetail({
   const [legalEntityModalOpen, setLegalEntityModalOpen] = useState(false);
   const [legalEntityModalInitial, setLegalEntityModalInitial] =
     useState<LegalEntityDetail | null>(null);
+  const { capture: captureLegalOwner, isCurrent: isCurrentLegalOwner, invalidate: invalidateLegalOwner } = useAsyncOperationOwner(JSON.stringify([
+    user?.id, user?.role?.id, clientId, clientPermissions.canView, clientPermissions.canEdit,
+    legalEntityPermissions.canView, legalEntityPermissions.canEdit, legalEntityPermissions.viewScope,
+    legalEntityModalOpen, legalEntityModalInitial?.id, clientFormState.legalEntityId,
+  ]));
+  const legalOwnerAtRender = captureLegalOwner();
+  const legalModalContext = JSON.stringify([clientId, user?.id, user?.role?.id, clientPermissions.canView, clientPermissions.canEdit,
+    legalEntityPermissions.canView, legalEntityPermissions.canEdit, legalEntityPermissions.viewScope]);
+  const previousLegalModalContext = useRef(legalModalContext);
+  useEffect(() => {
+    if (previousLegalModalContext.current === legalModalContext) return;
+    previousLegalModalContext.current = legalModalContext;
+    invalidateLegalOwner();
+    setLegalEntityModalOpen(false);
+    setLegalEntityModalInitial(null);
+  }, [legalModalContext, invalidateLegalOwner]);
   const [poaPromptOpen, setPoaPromptOpen] = useState(false);
   const [poaPromptSubmitting, setPoaPromptSubmitting] = useState(false);
   const [poaPromptError, setPoaPromptError] = useState<string | null>(null);
@@ -1747,17 +1765,24 @@ export function ClientDetail({
   }, []);
 
   const openLegalEntityCreateModal = () => {
+    invalidateLegalOwner();
     setLegalEntityModalInitial(null);
     setLegalEntityModalOpen(true);
   };
 
   const openLegalEntityEditModal = async () => {
     if (!selectedLegalEntity) return;
+    invalidateLegalOwner();
+    const owner = captureLegalOwner();
+    const targetId = selectedLegalEntity.id;
     try {
       const detail = await apiService.getLegalEntity(selectedLegalEntity.id);
+      if (!isCurrentLegalOwner(owner)) return;
+      if (detail.id !== targetId) throw new Error('Сервер вернул другую карточку юридического лица. Повторите открытие.');
       setLegalEntityModalInitial(detail);
       setLegalEntityModalOpen(true);
     } catch (error) {
+      if (!isCurrentLegalOwner(owner)) return;
       const message = extractDisplayErrorMessage(
         error,
         "Не удалось загрузить карточку юридического лица",
@@ -1767,6 +1792,7 @@ export function ClientDetail({
   };
 
   const closeLegalEntityModal = () => {
+    invalidateLegalOwner();
     setLegalEntityModalOpen(false);
     setLegalEntityModalInitial(null);
   };
@@ -1774,14 +1800,18 @@ export function ClientDetail({
   const submitLegalEntityModal = async (
     payload: LegalEntityInput,
   ): Promise<LegalEntityDetail> => {
+    if (!isCurrentLegalOwner(legalOwnerAtRender)) throw new StaleUiOperationError();
+    if (!legalEntityModalOpen || !clientPermissions.canView || !clientPermissions.canEdit) throw new Error('Нет разрешения на сохранение юридического лица.');
+    const owner = legalOwnerAtRender;
+    const targetId = legalEntityModalInitial?.id;
     const nextClientIds = Array.from(
       new Set([...(payload.clientIds ?? []), clientId].filter((id) => id > 0)),
     );
     const nextPayload = { ...payload, clientIds: nextClientIds };
-    const saved = legalEntityModalInitial
-      ? await apiService.updateLegalEntity(legalEntityModalInitial.id, nextPayload)
-      : await apiService.createLegalEntity(nextPayload);
-
+    const saved = await awaitOwnedUiResult(() => legalEntityModalInitial
+      ? apiService.updateLegalEntity(legalEntityModalInitial.id, nextPayload)
+      : apiService.createLegalEntity(nextPayload), () => isCurrentLegalOwner(owner));
+    if (targetId !== undefined && saved.id !== targetId) throw new Error('Сервер вернул другую карточку юридического лица. Обновите страницу.');
     mergeLegalEntityOptions([saved]);
     setClientFormState((prev) => ({
       ...prev,
@@ -11306,7 +11336,7 @@ export function ClientDetail({
           />
         )}
 
-        {legalEntityModalOpen ? (
+        {legalEntityModalOpen && previousLegalModalContext.current === legalModalContext ? (
           <LegalEntityModal
           isOpen={legalEntityModalOpen}
           onClose={closeLegalEntityModal}

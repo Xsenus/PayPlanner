@@ -104,6 +104,7 @@ import { CompanyTaxRegisterSection } from "./CompanyTaxRegisterSection";
 import { LegalEntityFinanceSection } from "./LegalEntityFinanceSection";
 import { CompanyImagePrintDefaultsSection } from './CompanyImagePrintDefaultsSection';
 import { companyImagePrintDraft, companyImagePrintPayload } from './companyImagePrintDefaults';
+import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
 
 interface LegalEntityModalProps {
   isOpen: boolean;
@@ -2231,6 +2232,7 @@ export function LegalEntityModal({
       }
       const saved = await onSubmit(payload);
       if (!isCurrentSave()) return;
+      if (initial && saved.id !== initial.id) throw new Error('Сервер вернул другую карточку юридического лица. Обновите карточку и повторите сохранение.');
       const latestInitial = saveContext.current.initial;
       if (latestInitial !== context.initial && latestInitial !== saved
         && latestInitial?.documentImagePrintDefaultsVersion !== context.initial?.documentImagePrintDefaultsVersion
@@ -2432,6 +2434,7 @@ export function LegalEntityModal({
         onClose();
       }
     } catch (err) {
+      if (err instanceof StaleUiOperationError) return;
       if (!isCurrentSave()) return;
       if (saveContext.current.initial?.documentImagePrintDefaultsVersion !== context.initial?.documentImagePrintDefaultsVersion) return;
       const message = extractErrorMessage(

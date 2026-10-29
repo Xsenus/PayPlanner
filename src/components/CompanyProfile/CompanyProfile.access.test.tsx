@@ -36,6 +36,15 @@ describe('company profile access boundaries', () => {
     expect(api.getMainCompanySettings).not.toHaveBeenCalled(); expect(api.getLegalEntity).not.toHaveBeenCalled();
   });
 
+  it('parent ownership: does not show a different company returned for an assigned ID', async () => {
+    fixture.view = true;
+    api.getLegalEntity.mockResolvedValue({ ...company, id: 8, shortName: 'Wrong returned profile' });
+    render(<CompanyProfile />);
+    await screen.findByText('Сервер вернул другой профиль компании. Откройте карточку заново.');
+    expect(fixture.modal).not.toHaveBeenCalled();
+    expect(screen.queryByText('Wrong returned profile')).toBeNull();
+  });
+
   it('keeps a viewer read-only even if the stored mode requests editing', async () => {
     fixture.view = true; window.localStorage.setItem('pp.companyProfileMode', 'edit');
     render(<CompanyProfile />); await screen.findByText('Assigned company', { selector: 'span' });

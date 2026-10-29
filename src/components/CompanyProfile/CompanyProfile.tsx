@@ -87,6 +87,7 @@ export function CompanyProfile() {
 
       const detail = await apiService.getLegalEntity(Number(companyId));
       if (request !== profileRequest.current) return;
+      if (detail.id !== Number(companyId)) throw new Error('Сервер вернул другой профиль компании. Откройте карточку заново.');
       setProfile(detail);
     } catch (error) {
       if (request !== profileRequest.current) return;

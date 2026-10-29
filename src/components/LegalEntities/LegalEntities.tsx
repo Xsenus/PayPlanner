@@ -1,4 +1,6 @@
 import { SystemSelect } from '../ui/SystemSelect';
+import { useAsyncOperationOwner } from '../../hooks/useAsyncOperationOwner';
+import { awaitOwnedUiResult, StaleUiOperationError } from '../../utils/StaleUiOperationError';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
@@ -131,6 +133,22 @@ export function LegalEntities({
   const [editing, setEditing] = useState<LegalEntityDetail | null>(null);
   const [modalBusy, setModalBusy] = useState(false);
   const [readOnlyMode, setReadOnlyMode] = useState(false);
+  const detailSecurityScope = JSON.stringify([
+    user?.id, user?.role?.id, legalPermissions.canView, legalPermissions.canCreate, legalPermissions.canEdit,
+    legalPermissions.viewScope,
+  ]);
+  const { capture: captureDetailOwner, isCurrent: isCurrentDetailOwner, invalidate: invalidateDetailOwner } = useAsyncOperationOwner(JSON.stringify([detailSecurityScope, initialLegalEntityId, detailOnly]));
+  const detailOwnerAtRender = captureDetailOwner();
+  const currentDetailTarget = useRef(editing?.id);
+  currentDetailTarget.current = editing?.id;
+  const previousDetailSecurityScope = useRef(detailSecurityScope);
+  useEffect(() => {
+    if (previousDetailSecurityScope.current === detailSecurityScope) return;
+    previousDetailSecurityScope.current = detailSecurityScope;
+    invalidateDetailOwner();
+    setEditing(null); setDetailPageOpen(false); setModalBusy(false); setReadOnlyMode(false);
+    setItems([]); setTotal(0); setError(null);
+  }, [detailSecurityScope, invalidateDetailOwner]);
 
   const debouncedSearch = useDebouncedValue(search, 300);
 
@@ -168,6 +186,7 @@ export function LegalEntities({
 
   const fetchLegalEntities = useCallback(
     async (targetPage = page, withLoading = true, signal?: AbortSignal) => {
+      const owner = captureDetailOwner();
       try {
         if (withLoading) setLoading(true);
         setError(null);
@@ -180,7 +199,7 @@ export function LegalEntities({
         const response = signal
           ? await apiService.getLegalEntitiesPaged(params, { signal })
           : await apiService.getLegalEntitiesPaged(params);
-        if (signal?.aborted) return;
+        if (signal?.aborted || !isCurrentDetailOwner(owner)) return;
 
         if (targetPage > 1 && response.items.length === 0 && response.total > 0) {
           setPage(targetPage - 1);
@@ -190,21 +209,21 @@ export function LegalEntities({
         setItems(response.items ?? []);
         setTotal(response.total ?? 0);
       } catch (err) {
-        if (signal?.aborted) return;
+        if (signal?.aborted || !isCurrentDetailOwner(owner)) return;
         const message = extractDisplayErrorMessage(err, 'Не удалось загрузить юридические лица');
         setItems([]);
         setTotal(0);
         setError(message);
         toast.error(message);
       } finally {
-        if (withLoading && !signal?.aborted) setLoading(false);
+        if (withLoading && !signal?.aborted && isCurrentDetailOwner(owner)) setLoading(false);
       }
     },
-    [debouncedSearch, page, pageSize, toast],
+    [debouncedSearch, page, pageSize, toast, captureDetailOwner, isCurrentDetailOwner],
   );
 
   useEffect(() => {
-    if (detailOnly || detailPageOpen) {
+    if (detailOnly || detailPageOpen || modalBusy) {
       return undefined;
     }
     if (page !== 1 && previousLegalEntitiesQueryScopeRef.current !== legalEntitiesQueryScopeKey) {
@@ -217,7 +236,7 @@ export function LegalEntities({
     return () => {
       controller.abort();
     };
-  }, [detailOnly, detailPageOpen, fetchLegalEntities, legalEntitiesQueryScopeKey, page]);
+  }, [detailOnly, detailPageOpen, modalBusy, fetchLegalEntities, legalEntitiesQueryScopeKey, page, detailSecurityScope]);
 
   useEffect(() => {
     setPage(1);
@@ -283,13 +302,19 @@ export function LegalEntities({
   );
 
   const openDetailPage = useCallback(async (id: number, allowEditing: boolean) => {
+    invalidateDetailOwner();
+    const owner = captureDetailOwner();
+    setEditing(null); setDetailPageOpen(false);
     try {
       setModalBusy(true);
       const detail = await apiService.getLegalEntity(id);
+      if (!isCurrentDetailOwner(owner)) return;
+      if (detail.id !== id) throw new Error('Сервер вернул другую карточку юридического лица. Повторите открытие.');
       setEditing(detail);
       setReadOnlyMode(!allowEditing);
       setDetailPageOpen(true);
     } catch (err) {
+      if (!isCurrentDetailOwner(owner)) return;
       toast.error(
         extractDisplayErrorMessage(err, 'Не удалось загрузить данные юридического лица'),
       );
@@ -297,31 +322,37 @@ export function LegalEntities({
         onDetailClose?.();
       }
     } finally {
-      setModalBusy(false);
+      if (isCurrentDetailOwner(owner)) setModalBusy(false);
     }
-  }, [detailOnly, onDetailClose, toast]);
+  }, [detailOnly, onDetailClose, toast, captureDetailOwner, invalidateDetailOwner, isCurrentDetailOwner]);
 
   useEffect(() => {
-    if (!initialLegalEntityId || !(initialLegalEntityId > 0)) {
+    if (!initialLegalEntityId || !(initialLegalEntityId > 0) || !legalPermissions.canView) {
       return;
     }
 
     onInitialLegalEntityHandled?.();
     void openDetailPage(initialLegalEntityId, canEdit);
-  }, [canEdit, initialLegalEntityId, onInitialLegalEntityHandled, openDetailPage]);
+  }, [canEdit, initialLegalEntityId, onInitialLegalEntityHandled, openDetailPage, detailSecurityScope, legalPermissions.canView]);
 
   const handleCreate = () => {
     if (!canCreate) return;
+    invalidateDetailOwner();
+    setModalBusy(false);
     setEditing(null);
     setReadOnlyMode(false);
     setDetailPageOpen(true);
   };
 
   const handleSubmit = async (payload: LegalEntityInput) => {
-    const saved = editing
-      ? await apiService.updateLegalEntity(editing.id, payload)
-      : await apiService.createLegalEntity(payload);
-
+    if (!isCurrentDetailOwner(detailOwnerAtRender) || currentDetailTarget.current !== editing?.id) throw new StaleUiOperationError();
+    if (!detailPageOpen || readOnlyMode || !(editing ? canEdit : canCreate)) throw new Error('Нет разрешения на сохранение юридического лица.');
+    const owner = detailOwnerAtRender;
+    const targetId = editing?.id;
+    const saved = await awaitOwnedUiResult(() => editing
+      ? apiService.updateLegalEntity(editing.id, payload)
+      : apiService.createLegalEntity(payload), () => isCurrentDetailOwner(owner));
+    if (targetId !== undefined && saved.id !== targetId) throw new Error('Сервер вернул другую карточку юридического лица. Обновите страницу.');
     setEditing(saved);
     setReadOnlyMode(false);
     toast.success(editing ? 'Юр. лицо обновлено' : 'Юр. лицо создано');
@@ -334,6 +365,7 @@ export function LegalEntities({
       setPage(1);
     }
 
+    if (!isCurrentDetailOwner(owner)) throw new StaleUiOperationError();
     return saved;
   };
 
@@ -529,12 +561,17 @@ export function LegalEntities({
   };
 
   const closeDetailPage = () => {
+    invalidateDetailOwner();
+    setModalBusy(false);
     setDetailPageOpen(false);
     setEditing(null);
     setReadOnlyMode(false);
     onDetailClose?.();
   };
 
+  if (previousDetailSecurityScope.current !== detailSecurityScope) {
+    return <div role="status" className="p-3 lg:p-4">Обновляем доступ к карточкам...</div>;
+  }
   return (
     <div className={detailOnly ? 'p-3 lg:p-4' : 'p-6'}>
       {!detailOnly ? (

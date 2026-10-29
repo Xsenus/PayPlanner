@@ -1,12 +1,20 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LegalEntities } from './LegalEntities';
 import { defaultRolePermissions } from '../../types/permissions';
+import type { LegalEntityDetail, LegalEntityInput } from '../../types';
+import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
+
+type OwnerModalProps = { isOpen: boolean; initial?: LegalEntityDetail | null; onBack: () => void; onSubmit: (payload: LegalEntityInput) => Promise<LegalEntityDetail> };
+const modalSpy = vi.hoisted(() => vi.fn());
+const authUser = vi.hoisted(() => ({ id: 1, role: { id: 10, name: 'limited-lawyer' } }));
 
 const apiMocks = vi.hoisted(() => ({
   getLegalEntitiesPaged: vi.fn(),
   getLegalEntity: vi.fn(),
+  createLegalEntity: vi.fn(),
+  updateLegalEntity: vi.fn(),
 }));
 
 const permissionMocks = vi.hoisted(() => ({
@@ -26,8 +34,8 @@ vi.mock('../../services/api', () => ({
   apiService: {
     getLegalEntitiesPaged: apiMocks.getLegalEntitiesPaged,
     getLegalEntity: apiMocks.getLegalEntity,
-    createLegalEntity: vi.fn(),
-    updateLegalEntity: vi.fn(),
+    createLegalEntity: apiMocks.createLegalEntity,
+    updateLegalEntity: apiMocks.updateLegalEntity,
     deleteLegalEntity: vi.fn(),
     getUserSetting: vi.fn().mockResolvedValue(null),
     upsertUserSetting: vi.fn().mockResolvedValue(null),
@@ -38,7 +46,7 @@ vi.mock('../../services/api', () => ({
 
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({
-    user: { id: 1, role: { id: 10, name: 'limited-lawyer' } },
+    user: authUser,
   }),
 }));
 
@@ -81,9 +89,10 @@ vi.mock('../ui/TableColumnSettings', () => ({
 }));
 
 vi.mock('./LegalEntityModal', () => ({
-  LegalEntityModal: ({ isOpen, onBack }: { isOpen: boolean; onBack: () => void }) => (
-    isOpen ? <button type="button" onClick={onBack}>Назад из карточки</button> : null
-  ),
+  LegalEntityModal: (props: OwnerModalProps) => {
+    modalSpy(props);
+    return props.isOpen ? <button type="button" onClick={props.onBack}>Назад из карточки</button> : null;
+  },
 }));
 
 const legalEntity = {
@@ -115,6 +124,9 @@ const legalEntity = {
 
 describe('LegalEntities permissions', () => {
   beforeEach(() => {
+    modalSpy.mockClear(); toastMocks.success.mockClear(); toastMocks.error.mockClear();
+    authUser.id = 1; authUser.role.id = 10;
+    apiMocks.createLegalEntity.mockReset(); apiMocks.updateLegalEntity.mockReset();
     apiMocks.getLegalEntitiesPaged.mockReset();
     apiMocks.getLegalEntity.mockReset();
     dialogMocks.confirm.mockReset();
@@ -155,6 +167,106 @@ describe('LegalEntities permissions', () => {
 
     await userEvent.click(await screen.findByRole('button', { name: 'Назад из карточки' }));
     expect(onDetailClose).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['close', 'company', 'permission', 'visibility', 'user', 'role', 'unmount'] as const)('parent ownership: ignores a saved entity after %s', async change => {
+    apiMocks.getLegalEntity.mockImplementation(async (id: number) => ({ ...legalEntity, id, shortName: `Company ${id}` }));
+    let finish!: (value: LegalEntityDetail) => void;
+    apiMocks.updateLegalEntity.mockReturnValue(new Promise<LegalEntityDetail>(resolve => { finish = resolve; }));
+    const props = { initialLegalEntityId: 7, detailOnly: true };
+    const view = render(<LegalEntities {...props} />);
+    await waitFor(() => expect(modalSpy).toHaveBeenCalled());
+    const original = modalSpy.mock.calls.at(-1)![0] as OwnerModalProps;
+    let pending!: Promise<LegalEntityDetail | Error>;
+    act(() => { pending = original.onSubmit({ shortName: 'Late old result', clientIds: [] }).catch(error => error); });
+    await waitFor(() => expect(apiMocks.updateLegalEntity).toHaveBeenCalledTimes(1));
+    if (change === 'close') act(() => original.onBack());
+    if (change === 'company') { view.rerender(<LegalEntities {...props} initialLegalEntityId={8} />); await waitFor(() => expect((modalSpy.mock.calls.at(-1)![0] as OwnerModalProps).initial?.id).toBe(8)); }
+    if (change === 'permission') { permissionMocks.useRolePermissions.mock.results.at(-1)!.value.legalEntities.canEdit = false; view.rerender(<LegalEntities {...props} />); }
+    if (change === 'visibility') { permissionMocks.useRolePermissions.mock.results.at(-1)!.value.legalEntities.viewScope = 'own'; view.rerender(<LegalEntities {...props} />); }
+    if (change === 'user') { authUser.id = 2; view.rerender(<LegalEntities {...props} />); }
+    if (change === 'role') { authUser.role.id = 11; view.rerender(<LegalEntities {...props} />); }
+    if (change === 'unmount') view.unmount();
+    await act(async () => { finish({ ...legalEntity, shortName: 'Late old result' } as LegalEntityDetail); expect(await pending).toBeInstanceOf(StaleUiOperationError); });
+    expect(toastMocks.success).not.toHaveBeenCalled();
+    expect(apiMocks.getLegalEntitiesPaged).not.toHaveBeenCalled();
+    expect((modalSpy.mock.calls.at(-1)![0] as OwnerModalProps).initial?.shortName).not.toBe('Late old result');
+    if (change === 'company') expect((modalSpy.mock.calls.at(-1)![0] as OwnerModalProps).initial?.id).toBe(8);
+    if (change === 'close') expect(screen.queryByRole('button', { name: 'Назад из карточки' })).toBeNull();
+  });
+
+  it.each(['success', 'error'] as const)('parent ownership: discards obsolete %s opening response', async outcome => {
+    let finish!: (value: LegalEntityDetail) => void; let fail!: (error: Error) => void;
+    const first = new Promise<LegalEntityDetail>((resolve, reject) => { finish = resolve; fail = reject; });
+    apiMocks.getLegalEntity.mockImplementation((id: number) => id === 7 ? first : Promise.resolve({ ...legalEntity, id: 8 }));
+    const view = render(<LegalEntities initialLegalEntityId={7} detailOnly />);
+    await waitFor(() => expect(apiMocks.getLegalEntity).toHaveBeenCalledWith(7));
+    view.rerender(<LegalEntities initialLegalEntityId={8} detailOnly />);
+    await waitFor(() => expect((modalSpy.mock.calls.at(-1)?.[0] as OwnerModalProps | undefined)?.initial?.id).toBe(8));
+    await act(async () => { if (outcome === 'success') finish(legalEntity as LegalEntityDetail); else fail(new Error('Obsolete load error')); await first.catch(() => undefined); });
+    expect((modalSpy.mock.calls.at(-1)![0] as OwnerModalProps).initial?.id).toBe(8);
+    expect(toastMocks.error).not.toHaveBeenCalled();
+  });
+
+  it('parent ownership: accepts a normal update but rejects a held callback after close', async () => {
+    apiMocks.updateLegalEntity.mockResolvedValue({ ...legalEntity, shortName: 'Current saved name' });
+    render(<LegalEntities initialLegalEntityId={7} detailOnly />);
+    await waitFor(() => expect(modalSpy).toHaveBeenCalled());
+    const props = modalSpy.mock.calls.at(-1)![0] as OwnerModalProps;
+    await act(async () => { await props.onSubmit({ shortName: 'Current saved name', clientIds: [] }); });
+    expect((modalSpy.mock.calls.at(-1)![0] as OwnerModalProps).initial?.shortName).toBe('Current saved name');
+    expect(toastMocks.success).toHaveBeenCalledTimes(1);
+    const current = modalSpy.mock.calls.at(-1)![0] as OwnerModalProps;
+    act(() => current.onBack());
+    await expect(current.onSubmit({ shortName: 'Must not write', clientIds: [] })).rejects.toBeInstanceOf(StaleUiOperationError);
+    expect(apiMocks.updateLegalEntity).toHaveBeenCalledTimes(1);
+  });
+
+  it('parent ownership: accepts a created registry entry with its new ID', async () => {
+    apiMocks.createLegalEntity.mockResolvedValue({ ...legalEntity, id: 8, shortName: 'New registry company' });
+    render(<LegalEntities />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Добавить юр. лицо' }));
+    const props = modalSpy.mock.calls.at(-1)![0] as OwnerModalProps;
+    expect(props.initial).toBeNull();
+    await act(async () => { await props.onSubmit({ shortName: 'New registry company', clientIds: [] }); });
+    expect(apiMocks.createLegalEntity).toHaveBeenCalledTimes(1);
+    expect((modalSpy.mock.calls.at(-1)![0] as OwnerModalProps).initial?.id).toBe(8);
+    expect(toastMocks.success).toHaveBeenCalledWith('Юр. лицо создано');
+    await expect(props.onSubmit({ shortName: 'Old create callback', clientIds: [] })).rejects.toBeInstanceOf(StaleUiOperationError);
+    expect(apiMocks.createLegalEntity).toHaveBeenCalledTimes(1);
+  });
+
+  it('parent ownership: cannot return an old success after a role change during registry refresh', async () => {
+    apiMocks.getLegalEntity.mockImplementation(async () => ({ ...legalEntity, shortName: `Fresh role ${authUser.role.id}` }));
+    apiMocks.updateLegalEntity.mockResolvedValue({ ...legalEntity, shortName: 'Acknowledged previous role write' });
+    let finish!: (value: unknown) => void;
+    apiMocks.getLegalEntitiesPaged.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    const view = render(<LegalEntities initialLegalEntityId={7} detailOnly />);
+    await waitFor(() => expect(modalSpy).toHaveBeenCalled());
+    const original = modalSpy.mock.calls.at(-1)![0] as OwnerModalProps;
+    let pending!: Promise<unknown>;
+    act(() => { pending = original.onSubmit({ shortName: 'Acknowledged previous role write', clientIds: [] }).catch(error => error); });
+    await waitFor(() => expect(apiMocks.getLegalEntitiesPaged).toHaveBeenCalledTimes(1));
+    authUser.role.id = 11; view.rerender(<LegalEntities initialLegalEntityId={7} detailOnly />);
+    await waitFor(() => expect((modalSpy.mock.calls.at(-1)![0] as OwnerModalProps).initial?.shortName).toBe('Fresh role 11'));
+    await act(async () => { finish({ items: [{ ...legalEntity, shortName: 'Previous role registry row' }], total: 1, page: 1, pageSize: 12 }); expect(await pending).toBeInstanceOf(StaleUiOperationError); });
+    expect((modalSpy.mock.calls.at(-1)![0] as OwnerModalProps).initial?.shortName).toBe('Fresh role 11');
+  });
+
+  it.each(['read', 'save'] as const)('parent ownership: refuses a wrong entity ID returned during %s', async operation => {
+    if (operation === 'read') apiMocks.getLegalEntity.mockResolvedValue({ ...legalEntity, id: 8 });
+    else apiMocks.updateLegalEntity.mockResolvedValue({ ...legalEntity, id: 8 });
+    render(<LegalEntities initialLegalEntityId={7} detailOnly />);
+    if (operation === 'read') {
+      await waitFor(() => expect(toastMocks.error).toHaveBeenCalled());
+      expect(modalSpy).not.toHaveBeenCalled();
+    } else {
+      await waitFor(() => expect(modalSpy).toHaveBeenCalled());
+      const original = modalSpy.mock.calls.at(-1)![0] as OwnerModalProps;
+      await expect(original.onSubmit({ shortName: 'Wrong response', clientIds: [] })).rejects.toThrow('другую карточку');
+      expect((modalSpy.mock.calls.at(-1)![0] as OwnerModalProps).initial?.id).toBe(7);
+      expect(toastMocks.success).not.toHaveBeenCalled();
+    }
   });
 
   it('hides related finance and case columns when role cannot view those sections', async () => {

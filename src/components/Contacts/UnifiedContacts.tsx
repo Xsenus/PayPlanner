@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useAsyncOperationOwner } from '../../hooks/useAsyncOperationOwner';
+import { awaitOwnedUiResult, StaleUiOperationError } from '../../utils/StaleUiOperationError';
 import {
   Building2,
   GripVertical,
@@ -426,6 +428,17 @@ export function UnifiedContacts({
   const [legalTotal, setLegalTotal] = useState(0);
   const [legalDetail, setLegalDetail] = useState<LegalEntityDetail | null>(null);
   const [detailPageOpen, setDetailPageOpen] = useState(false);
+  const legalSecurityScope = JSON.stringify([user?.id, user?.role?.id, canViewClients, canViewLegalEntities, permissions.legalEntities.canView, canEditLegalEntities, permissions.legalEntities.viewScope]);
+  const { capture: captureLegalOwner, isCurrent: isCurrentLegalOwner, invalidate: invalidateLegalOwner } = useAsyncOperationOwner(JSON.stringify([legalSecurityScope, kind, lockKind]));
+  const legalOwnerAtRender = captureLegalOwner();
+  const previousLegalSecurityScope = useRef(legalSecurityScope);
+  useEffect(() => {
+    if (previousLegalSecurityScope.current === legalSecurityScope) return;
+    previousLegalSecurityScope.current = legalSecurityScope;
+    invalidateLegalOwner();
+    setLegalDetail(null); setDetailPageOpen(false); setDetailLoadingId(null);
+    setItems([]); setTotal(0); setError(null);
+  }, [legalSecurityScope, invalidateLegalOwner]);
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const viewModeSaveTimerRef = useRef<number | null>(null);
@@ -671,7 +684,7 @@ export function UnifiedContacts({
       activeRequestControllerRef.current = null;
       requestIdRef.current += 1;
     };
-  }, [load]);
+  }, [load, legalSecurityScope]);
 
   useEffect(() => {
     setPage(1);
@@ -806,15 +819,20 @@ export function UnifiedContacts({
     }
 
     if (item.kind === 'legal') {
+      invalidateLegalOwner();
+      const owner = captureLegalOwner();
       try {
         setDetailLoadingId(item.id);
         const detail = await apiService.getLegalEntity(item.sourceId);
+        if (!isCurrentLegalOwner(owner)) return;
+        if (detail.id !== item.sourceId) throw new Error('Сервер вернул другую карточку юридического лица. Повторите открытие.');
         setLegalDetail(detail);
         setDetailPageOpen(true);
       } catch (err) {
+        if (!isCurrentLegalOwner(owner)) return;
         setError(err instanceof Error ? err.message : 'Не удалось открыть карточку юрлица');
       } finally {
-        setDetailLoadingId(null);
+        if (isCurrentLegalOwner(owner)) setDetailLoadingId(null);
       }
     }
   };
@@ -823,15 +841,23 @@ export function UnifiedContacts({
     if (!legalDetail) {
       throw new Error('Не выбрано юридическое лицо для обновления');
     }
+    if (!isCurrentLegalOwner(legalOwnerAtRender)) throw new StaleUiOperationError();
+    if (!detailPageOpen || !canViewLegalEntities || !canEditLegalEntities) throw new Error('Нет разрешения на сохранение юридического лица.');
+    const owner = legalOwnerAtRender;
+    const targetId = legalDetail.id;
 
-    const saved = await apiService.updateLegalEntity(legalDetail.id, payload);
+    const saved = await awaitOwnedUiResult(() => apiService.updateLegalEntity(legalDetail.id, payload), () => isCurrentLegalOwner(owner));
+    if (saved.id !== targetId) throw new Error('Сервер вернул другую карточку юридического лица. Обновите страницу.');
     setLegalDetail(saved);
     toast.success('Юр. лицо обновлено');
     await load(false);
+    if (!isCurrentLegalOwner(owner)) throw new StaleUiOperationError();
     return saved;
   };
 
   const closeLegalDetailPage = () => {
+    invalidateLegalOwner();
+    setDetailLoadingId(null);
     setDetailPageOpen(false);
     setLegalDetail(null);
   };
@@ -853,6 +879,9 @@ export function UnifiedContacts({
       ? 'Организации и ИП'
       : 'Клиенты и юридические лица в одном реестре';
 
+  if (previousLegalSecurityScope.current !== legalSecurityScope) {
+    return <div role="status" className="p-3 lg:p-4">Обновляем доступ к контактам...</div>;
+  }
   if (detailPageOpen) {
     return (
       <div className="p-6">

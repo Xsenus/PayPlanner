@@ -4,20 +4,23 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { UnifiedContacts } from './UnifiedContacts';
 import { formatContactDate } from './contactFormatters';
 import { apiService, type UserSettingDto } from '../../services/api';
-import type { Client, LegalEntityDetail, LegalEntitySummary } from '../../types';
+import type { Client, LegalEntityDetail, LegalEntityInput, LegalEntitySummary } from '../../types';
+import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
 
 type LegalEntityModalMockProps = {
+  initial?: LegalEntityDetail | null;
   isOpen?: boolean;
   allowEdit?: boolean;
   allowDelete?: boolean;
   mode?: string;
   onBack?: () => void;
-  onSubmit: (payload: Partial<LegalEntityDetail>) => Promise<void> | void;
+  onSubmit: (payload: LegalEntityInput) => Promise<LegalEntityDetail> | void;
   hideFormActions?: boolean;
   hideDadataSection?: boolean;
   compactReadOnlyView?: boolean;
   titleOverride?: string;
 };
+const authUser = vi.hoisted(() => ({ id: 42, email: 'test@example.test', role: { id: 1, name: 'admin' } }));
 
 const legalEntityModalMock = vi.hoisted(() => vi.fn((props: LegalEntityModalMockProps) => {
   void props;
@@ -48,7 +51,7 @@ const permissionsMock = vi.hoisted(() => {
 
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({
-    user: { id: 42, email: 'test@example.test', role: { id: 1, name: 'admin' } },
+    user: authUser,
   }),
 }));
 
@@ -223,6 +226,7 @@ async function openColumnSettings() {
 
 describe('UnifiedContacts', () => {
   beforeEach(() => {
+    authUser.id = 42; authUser.role.id = 1;
     vi.useRealTimers();
     localStorage.clear();
     vi.clearAllMocks();
@@ -477,6 +481,68 @@ describe('UnifiedContacts', () => {
 
     expect(apiService.updateLegalEntity).toHaveBeenCalledWith(21, payload);
     expect(toastSuccessMock).toHaveBeenCalledWith('Юр. лицо обновлено');
+  });
+
+  it.each(['close', 'company', 'permission', 'user', 'role', 'unmount'] as const)('parent ownership: ignores an obsolete legal save after %s', async change => {
+    const first = createLegalEntity({ id: 21, shortName: 'Owner company A' }) as LegalEntityDetail;
+    const second = createLegalEntity({ id: 22, shortName: 'Owner company B' }) as LegalEntityDetail;
+    vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({ items: [first, second], total: 2, page: 1, pageSize: 24 });
+    vi.mocked(apiService.getLegalEntity).mockImplementation(async id => id === 21 ? first : second);
+    let finish!: (value: LegalEntityDetail) => void;
+    vi.mocked(apiService.updateLegalEntity).mockReturnValue(new Promise<LegalEntityDetail>(resolve => { finish = resolve; }));
+    const view = render(<UnifiedContacts initialKind="legal" lockKind />);
+    fireEvent.click(await screen.findByText('Owner company A'));
+    await waitFor(() => expect(legalEntityModalMock).toHaveBeenCalled());
+    const original = legalEntityModalMock.mock.calls.at(-1)![0];
+    let pending: unknown;
+    act(() => { pending = Promise.resolve(original.onSubmit({ shortName: 'Obsolete saved name', clientIds: [] })).catch(error => error); });
+    await waitFor(() => expect(apiService.updateLegalEntity).toHaveBeenCalledTimes(1));
+    toastSuccessMock.mockClear();
+    if (change === 'close' || change === 'company') act(() => original.onBack?.());
+    if (change === 'company') { fireEvent.click(await screen.findByText('Owner company B')); await waitFor(() => expect(legalEntityModalMock.mock.calls.at(-1)![0].initial?.id).toBe(22)); }
+    if (change === 'permission') { permissionsMock.value.legalEntities = { ...permissionsMock.value.legalEntities, canEdit: false }; view.rerender(<UnifiedContacts initialKind="legal" lockKind />); }
+    if (change === 'user') { authUser.id = 43; view.rerender(<UnifiedContacts initialKind="legal" lockKind />); }
+    if (change === 'role') { authUser.role.id = 2; view.rerender(<UnifiedContacts initialKind="legal" lockKind />); }
+    if (change === 'unmount') view.unmount();
+    await act(async () => { finish({ ...first, shortName: 'Obsolete saved name' }); expect(await pending).toBeInstanceOf(StaleUiOperationError); });
+    expect(toastSuccessMock).not.toHaveBeenCalled();
+    expect(legalEntityModalMock.mock.calls.at(-1)![0].initial?.shortName).not.toBe('Obsolete saved name');
+    if (change === 'company') expect(legalEntityModalMock.mock.calls.at(-1)![0].initial?.id).toBe(22);
+  });
+
+  it.each(['success', 'error'] as const)('parent ownership: ignores an obsolete %s legal opening response', async outcome => {
+    const first = createLegalEntity({ id: 21, shortName: 'Owner load A' }) as LegalEntityDetail;
+    const second = createLegalEntity({ id: 22, shortName: 'Owner load B' }) as LegalEntityDetail;
+    vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({ items: [first, second], total: 2, page: 1, pageSize: 24 });
+    let finish!: (value: LegalEntityDetail) => void; let fail!: (error: Error) => void;
+    const pending = new Promise<LegalEntityDetail>((resolve, reject) => { finish = resolve; fail = reject; });
+    vi.mocked(apiService.getLegalEntity).mockImplementation(id => id === 21 ? pending : Promise.resolve(second));
+    render(<UnifiedContacts initialKind="legal" lockKind />);
+    fireEvent.click(await screen.findByText('Owner load A')); fireEvent.click(screen.getByText('Owner load B'));
+    await waitFor(() => expect(legalEntityModalMock.mock.calls.at(-1)?.[0].initial?.id).toBe(22));
+    await act(async () => { if (outcome === 'success') finish(first); else fail(new Error('Obsolete opening error')); await pending.catch(() => undefined); });
+    expect(legalEntityModalMock.mock.calls.at(-1)![0].initial?.id).toBe(22);
+    act(() => legalEntityModalMock.mock.calls.at(-1)![0].onBack?.());
+    expect(screen.queryByText('Obsolete opening error')).toBeNull();
+  });
+
+  it.each(['read', 'save'] as const)('parent ownership: refuses a wrong legal ID returned during %s', async operation => {
+    const original = createLegalEntity({ id: 21, shortName: 'Wrong ID fixture' }) as LegalEntityDetail;
+    vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({ items: [original], total: 1, page: 1, pageSize: 24 });
+    vi.mocked(apiService.getLegalEntity).mockResolvedValue({ ...original, id: operation === 'read' ? 22 : 21 });
+    vi.mocked(apiService.updateLegalEntity).mockResolvedValue({ ...original, id: 22 });
+    render(<UnifiedContacts initialKind="legal" lockKind />);
+    fireEvent.click(await screen.findByText('Wrong ID fixture'));
+    if (operation === 'read') {
+      await screen.findByText(/Сервер вернул другую карточку/);
+      expect(legalEntityModalMock).not.toHaveBeenCalled();
+    } else {
+      await waitFor(() => expect(legalEntityModalMock).toHaveBeenCalled());
+      const modal = legalEntityModalMock.mock.calls.at(-1)![0];
+      await expect(modal.onSubmit({ shortName: 'Wrong response', clientIds: [] })).rejects.toThrow('другую карточку');
+      expect(legalEntityModalMock.mock.calls.at(-1)![0].initial?.id).toBe(21);
+      expect(toastSuccessMock).not.toHaveBeenCalled();
+    }
   });
 
   it('aborts an obsolete client request and keeps the latest response', async () => {

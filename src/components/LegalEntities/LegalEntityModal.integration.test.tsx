@@ -5,6 +5,7 @@ import { imageFixtureBytes, imageFixtureFile, installBlobArrayBufferForTests } f
 
 import { LegalEntityModal } from './LegalEntityModal';
 import { apiService } from '../../services/api';
+import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
 import type { MenuSectionPermissions } from '../../types/permissions';
 import type {
   ActsSummary,
@@ -1140,6 +1141,33 @@ describe('LegalEntityModal integration', () => {
     expect(screen.queryByText('Late obsolete error')).toBeNull();
     expect(props.onClose).not.toHaveBeenCalled(); expect(toastErrorMock).not.toHaveBeenCalled();
     if (reason !== 'company') expect(screen.getByRole('checkbox', { name: 'Свой набор для счетов' })).toHaveProperty('checked', false);
+  });
+
+  it.each(['page', 'modal'] as const)('parent ownership: stale result is silent and cannot close the current %s form', async mode => {
+    const user = userEvent.setup();
+    const initial = createInitialLegalEntity({ shortName: 'Current profile', documentImagePrintDefaultsVersion: 'A'.repeat(64) });
+    const onClose = vi.fn();
+    const onSubmit = vi.fn().mockRejectedValue(new StaleUiOperationError());
+    render(<LegalEntityModal isOpen mode={mode} initial={initial} allowEdit allowDelete={false} onClose={onClose} onSubmit={onSubmit} suggest={vi.fn()} findById={vi.fn()} />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Свой набор для счетов' }));
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Сохранить' })).toHaveProperty('disabled', false));
+    expect(onClose).not.toHaveBeenCalled(); expect(toastErrorMock).not.toHaveBeenCalled();
+    expect(screen.getByRole('checkbox', { name: 'Свой набор для счетов' })).toHaveProperty('checked', true);
+  });
+
+  it.each(['page', 'modal'] as const)('parent ownership: refuses a wrong saved ID in the current %s form', async mode => {
+    const user = userEvent.setup();
+    const initial = createInitialLegalEntity({ shortName: 'Current profile', documentImagePrintDefaultsVersion: 'A'.repeat(64) });
+    const onClose = vi.fn();
+    const onSubmit = vi.fn().mockResolvedValue({ ...initial, id: 10, shortName: 'Wrong returned profile', documentImagePrintDefaultsVersion: 'B'.repeat(64) });
+    render(<LegalEntityModal isOpen mode={mode} initial={initial} allowEdit allowDelete={false} onClose={onClose} onSubmit={onSubmit} suggest={vi.fn()} findById={vi.fn()} />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Свой набор для счетов' }));
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalled());
+    expect(onClose).not.toHaveBeenCalled(); expect(screen.queryByDisplayValue('Wrong returned profile')).toBeNull();
+    expect(screen.getByRole('checkbox', { name: 'Свой набор для счетов' })).toHaveProperty('checked', true);
   });
 
   it('hides logo, seal and signature fields for non-own legal entities', async () => {
