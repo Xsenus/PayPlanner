@@ -1120,9 +1120,9 @@ public partial class LegalEntitiesControllerTests
             CashRegistersJson = "[{\"name\":\"ККТ-1\",\"currency\":\"RUB\",\"access\":\"owner\"}]",
             CardsJson = "[{\"number\":\"220220******0001\",\"bank\":\"Точка\",\"currency\":\"RUB\",\"holder\":\"Кожеваткин А.В.\"}]",
             RequisitesEnglishJson = "{\"organizationName\":\"ElitPravo\",\"fullName\":\"Individual entrepreneur Kozhevatkin Andrey Vladimirovich\",\"form\":\"IE\",\"legalAddress\":\"Samara region\",\"actualAddress\":\"Samara region\",\"position\":\"Director\",\"lastName\":\"Kozhevatkin\",\"firstName\":\"Andrey\",\"middleName\":\"Vladimirovich\"}",
-            LogoDataUrl = "data:image/png;base64,QUFBQUFB",
-            SealDataUrl = "data:image/png;base64,QkJCQkJC",
-            DirectorSignatureDataUrl = "data:image/png;base64,Q0NDQ0ND",
+            LogoDataUrl = CompanyImageTestData.TransparentPng,
+            SealDataUrl = CompanyImageTestData.TransparentPng,
+            DirectorSignatureDataUrl = CompanyImageTestData.TransparentPng,
             DocumentDirectorJson = "{\"position\":\"Директор\",\"lastName\":\"Кожеваткин\",\"firstName\":\"Андрей\",\"middleName\":\"Владимирович\",\"noMiddleName\":false}",
             ChiefAccountantJson = "{\"position\":\"Главный бухгалтер\",\"lastName\":\"Кожеваткина\",\"firstName\":\"Анна\",\"middleName\":\"Игоревна\",\"noMiddleName\":false}",
             ContactPhonesJson = "[\"+7 (927) 000-00-00\",\"+7 (927) 111-11-11\"]",
@@ -1282,7 +1282,7 @@ public partial class LegalEntitiesControllerTests
         await CreateController(db, adminId).UpdateMainCompanySettings(
             new UpdateMainCompanySettingsRequest { CompanyIds = [companyId], DefaultCompanyId = companyId },
             CancellationToken.None);
-        var request = new LegalEntityRequest { ShortName = "Своя компания", SealDataUrl = "data:image/png;base64,QUFB" };
+        var request = new LegalEntityRequest { ShortName = "Своя компания", SealDataUrl = CompanyImageTestData.TransparentPng };
 
         var denied = await CreateController(db, viewerId, isAdmin: false).Update(companyId, request, CancellationToken.None);
         var legalOnly = await CreateController(db, editorId, isAdmin: false).Update(companyId, request, CancellationToken.None);
@@ -1295,7 +1295,7 @@ public partial class LegalEntitiesControllerTests
 
         Assert.IsType<ForbidResult>(denied.Result);
         Assert.IsType<OkObjectResult>(allowed.Result);
-        Assert.Equal("data:image/png;base64,QUFB", (await db.LegalEntities.AsNoTracking().SingleAsync(le => le.Id == companyId)).SealDataUrl);
+        Assert.Equal(request.SealDataUrl, (await db.LegalEntities.AsNoTracking().SingleAsync(le => le.Id == companyId)).SealDataUrl);
     }
 
     [Fact]

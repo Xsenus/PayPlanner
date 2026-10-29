@@ -25,7 +25,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
     private const string MainCompanyIdsSettingKey = "legalEntities.mainCompanyIds";
     private const string DefaultMainCompanyIdSettingKey = "legalEntities.defaultMainCompanyId";
     private const long MaxLegalEntityRequestSizeBytes = 16 * 1024 * 1024;
-    private const int MaxInlineLegalEntityAssetDataUrlLength = 350_000;
+    private const int MaxInlineLegalEntityAssetDataUrlLength = CompanyImageUploadValidator.MaxDataUrlLength;
     private const int MaxInlineLegalEntityAssetsTotalLength = 800_000;
     private static readonly string[] PagedVisibilitySections =
     [
@@ -787,6 +787,19 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         return $"{name}|{address}";
     }
 
+    private static string? ValidateNewInlineAssets(LegalEntityRequest request, LegalEntity? current, CancellationToken ct)
+    {
+        var logoError = CompanyImageUploadValidator.ValidateNewValue(current?.LogoDataUrl,
+            ResolveUpdatedAssetValue(current?.LogoDataUrl, request.LogoDataUrl, request.LogoChanged), CompanyBrandImageKinds.Logo, ct);
+        if (logoError is not null) return $"Логотип компании: {logoError}";
+        var sealError = CompanyImageUploadValidator.ValidateNewValue(current?.SealDataUrl,
+            ResolveUpdatedAssetValue(current?.SealDataUrl, request.SealDataUrl, request.SealChanged), CompanyBrandImageKinds.Seal, ct);
+        if (sealError is not null) return $"Печать компании: {sealError}";
+        var signatureError = CompanyImageUploadValidator.ValidateNewValue(current?.DirectorSignatureDataUrl,
+            ResolveUpdatedAssetValue(current?.DirectorSignatureDataUrl, request.DirectorSignatureDataUrl, request.DirectorSignatureChanged), CompanyBrandImageKinds.Signature, ct);
+        return signatureError is null ? null : $"Подпись руководителя: {signatureError}";
+    }
+
     private static string? ResolveUpdatedAssetValue(string? currentValue, string? incomingValue, bool? changed)
     {
         if (changed == true)
@@ -1079,7 +1092,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             return BadRequest($"Статус клиента #{request.ClientStatusId} не найден");
         }
 
-        var inlineAssetError = ValidateInlineAssetPayload(request);
+        var inlineAssetError = ValidateInlineAssetPayload(request) ?? ValidateNewInlineAssets(request, null, ct);
         if (inlineAssetError is not null)
         {
             return BadRequest(inlineAssetError);
@@ -2152,7 +2165,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             return BadRequest($"Статус клиента #{request.ClientStatusId} не найден");
         }
 
-        var inlineAssetError = ValidateInlineAssetPayload(request);
+        var inlineAssetError = ValidateInlineAssetPayload(request) ?? ValidateNewInlineAssets(request, entity, ct);
         if (inlineAssetError is not null)
         {
             return BadRequest(inlineAssetError);
