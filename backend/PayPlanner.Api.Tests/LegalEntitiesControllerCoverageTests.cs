@@ -1205,7 +1205,8 @@ public class LegalEntitiesControllerCoverageTests
     public async Task Delete_ReturnsNotFound_WhenEntityMissing()
     {
         await using var db = await CreateContextAsync();
-        var controller = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: 1);
+        var actor = await CreateAdminUserAsync(db);
+        var controller = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: actor.Id);
 
         var action = await controller.Delete(404, CancellationToken.None);
         Assert.IsType<NotFoundResult>(action);

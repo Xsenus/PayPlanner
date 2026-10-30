@@ -1285,28 +1285,54 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
+        try
+        {
+            var initial = await ResolveDeleteAccessAsync(id, ct);
+            if (initial.Error is not null) return initial.Error;
+            return await DocumentSellerLease.RunSerializableAsync<IActionResult>(_db, async lease =>
+            {
+                lease.AdmitCleanTracker();
+                _db.ChangeTracker.Clear();
+                var current = await ResolveDeleteAccessAsync(id, ct);
+                if (current.Error is not null) return current.Error;
+                return await DeleteCoreAsync(id, current.Access!, ct);
+            }, static result => result is NoContentResult, ct);
+        }
+        catch (Exception error) when (error is SellerSnapshotConflictException || DocumentSellerLease.IsConflict(error))
+        {
+            return Conflict(new { code = "CompanyDeletionConflict", message = "Компания или её связи изменились либо сейчас сохраняются. Удаление не выполнено. Обновите список компаний и повторите действие." });
+        }
+    }
+
+    private async Task<(DataVisibilityAccess? Access, IActionResult? Error)> ResolveDeleteAccessAsync(int id, CancellationToken ct)
+    {
+        // Establish the transaction's read snapshot from the current actor first,
+        // rather than an earlier registry read preceding account validation.
+        var access = await GetCurrentAccessAsync(ct);
+        var canDelete = access is not null && await _db.HasApprovedUserSectionPermissionAsync(
+            User, RolePermissionCatalog.LegalEntities, static permission => permission.CanDelete, ct);
         if ((await OwnCompanyRegistry.LoadIdsAsync(_db, ct)).Contains(id) && !await IsDatabaseAdminAsync(ct))
         {
-            return Forbid();
+            return (null, Forbid());
         }
 
-        var access = await GetCurrentAccessAsync(ct);
         if (access is null)
         {
-            return Unauthorized();
+            return (null, Unauthorized());
         }
 
-        if (!await HasLegalEntitiesPermissionAsync(static permission => permission.CanDelete, ct))
+        if (!canDelete)
         {
-            return Forbid();
+            return (null, Forbid());
         }
+        return (access, null);
+    }
 
-        var query = await ApplyResponsibleVisibilityAsync(_db.LegalEntities
+    private async Task<IActionResult> DeleteCoreAsync(int id, DataVisibilityAccess access, CancellationToken ct)
+    {
+        var query = _db.LegalEntities
             .Include(le => le.Clients)
-            .Include(le => le.Addresses)
-            .Include(le => le.ResponsibleUser)
-            .Include(le => le.ClientStatus)
-            .AsQueryable(), ct);
+            .AsQueryable().ApplyLegalEntityVisibility(access);
 
         var entity = await query.FirstOrDefaultAsync(le => le.Id == id, ct);
         if (entity is null)
