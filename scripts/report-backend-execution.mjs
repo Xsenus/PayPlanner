@@ -51,12 +51,23 @@ const retirementFailureCodes = [
   ['The forced outage did not exercise explicit unresolved-proof recovery', 'outage-recovery-not-exercised'],
   ['A refused proof was silently accepted', 'refused-proof-accepted'],
   ['Confirmed retirement retained its browser identity', 'confirmed-identity-retained'],
+  ['Checkpoint writer readiness timed out.', 'storage-checkpoint-readiness-timeout'],
+  ['Owned checkpoint writer did not start.', 'storage-checkpoint-not-started'],
 ];
 const retirementExceptionKinds = ['System.IO.IOException', 'System.IO.FileNotFoundException',
   'System.IO.DirectoryNotFoundException', 'System.UnauthorizedAccessException', 'System.TimeoutException',
   'System.OperationCanceledException', 'System.Threading.Tasks.TaskCanceledException',
   'System.OutOfMemoryException', 'System.ComponentModel.Win32Exception', 'System.Net.Sockets.SocketException',
-  'Microsoft.Data.Sqlite.SqliteException', 'Xunit.Sdk.TrueException', 'Xunit.Sdk.EqualException'];
+  'Microsoft.Data.Sqlite.SqliteException', 'Npgsql.NpgsqlException', 'Npgsql.PostgresException',
+  'Xunit.Sdk.TrueException', 'Xunit.Sdk.EqualException'];
+
+function durationMilliseconds(attributes) {
+  const value = /\bduration="(\d{2}):([0-5]\d):([0-5]\d)(?:\.(\d{1,7}))?"/.exec(attributes);
+  if (!value) return null;
+  const milliseconds = Math.round((Number(value[1]) * 3600 + Number(value[2]) * 60
+    + Number(value[3]) + Number('0.' + (value[4] ?? '0'))) * 1000);
+  return milliseconds <= 86_400_000 ? milliseconds : null;
+}
 
 function retirementDiagnostics(text) {
   // Observed signals only, not a root-cause verdict or a qualification gate.
@@ -116,7 +127,7 @@ function trxSummary(path) {
     if (error.code === 'ENOENT') return { available: false };
     throw new Error('Test result metadata is unreadable or unsafe');
   }
-  const counts = {}, unsuccessfulIds = [];
+  const counts = {}, unsuccessfulIds = [], unsuccessfulCaseDetails = [];
   // Diagnostic extraction only; the existing native verifier still qualifies
   // the complete XML and exact case union. Never reflect names or error text.
   for (const match of text.matchAll(/<UnitTestResult\b([^>]{0,65536})>/g)) {
@@ -124,7 +135,24 @@ function trxSummary(path) {
     const id = /\btestId="([a-fA-F0-9-]{36})"/.exec(match[1])?.[1];
     if (!['Passed', 'Failed', 'NotExecuted', 'Timeout', 'Aborted', 'Inconclusive', 'Error', 'NotRunnable', 'Warning', 'Pending'].includes(outcome)) continue;
     counts[outcome] = (counts[outcome] ?? 0) + 1;
-    if (outcome !== 'Passed' && id) unsuccessfulIds.push(id);
+    if (outcome !== 'Passed' && id) {
+      unsuccessfulIds.push(id);
+      if (unsuccessfulCaseDetails.length < 100) {
+        const start = match.index + match[0].length;
+        const end = text.indexOf('</UnitTestResult>', start);
+        const nextResult = text.indexOf('<UnitTestResult', start);
+        const selfClosing = match[0].endsWith('/>');
+        const boundedBodyAvailable = selfClosing || (end >= start && end - start <= 65_536
+          && (nextResult < 0 || nextResult > end));
+        const body = boundedBodyAvailable && !selfClosing ? text.slice(start, end) : '';
+        // Captured entries can repeat a case for fixture cleanup. They never
+        // replace the native verifier's exact case union or qualification.
+        unsuccessfulCaseDetails.push({ id, outcome, durationMs: durationMilliseconds(match[1]), boundedBodyAvailable,
+          observedExceptionKinds: retirementExceptionKinds.filter(kind => body.includes(kind)),
+          observedFailureCodes: [...new Set(retirementFailureCodes.filter(([message]) => body.includes(message))
+            .map(([, code]) => code))].sort() });
+      }
+    }
   }
   const browserFailureStages = new Set();
   if (text.includes('CASE_RETIREMENT_BUNDLE_TEMP_ROOT_MISMATCH')) browserFailureStages.add('temporary-root-mismatch');
@@ -138,7 +166,7 @@ function trxSummary(path) {
     const stage = /^\{"phase":"([^"\r\n]{1,64})"/.exec(prefix)?.[1];
     if (uploadFailureStages.has(stage)) browserFailureStages.add(stage);
   }
-  return { available: true, capturedOutcomes: counts, unsuccessfulIds: unsuccessfulIds.slice(0, 100),
+  return { available: true, capturedOutcomes: counts, unsuccessfulIds: unsuccessfulIds.slice(0, 100), unsuccessfulCaseDetails,
     browserFailureStages: [...browserFailureStages].sort(),
     retirementDiagnostics: retirementDiagnostics(text),
     omittedIds: Math.max(0, unsuccessfulIds.length - 100) };

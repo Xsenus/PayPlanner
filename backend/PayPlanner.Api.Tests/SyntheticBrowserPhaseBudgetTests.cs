@@ -5,6 +5,49 @@ namespace PayPlanner.Api.Tests;
 public sealed class SyntheticBrowserPhaseBudgetTests
 {
     [Fact]
+    public void ColdRetirementPreparationHasASeparateBoundedDeadline()
+    {
+        var deadlines = new List<TimeSpan>();
+        var budget = new SyntheticBrowserPhaseBudget(false, deadlines.Add, retirement: true);
+        foreach (var line in new[] { "CASE_RETIREMENT_BUNDLE_PHASE production-build",
+            "PP_CHAT_BROWSER_PHASE cli-open", "PP_FINANCIAL_BROWSER_PHASE cli-open" })
+            budget.ObserveLine(line);
+        Assert.Equal(new[] { TimeSpan.FromMinutes(5) }, deadlines);
+    }
+
+    [Fact]
+    public void RetirementBrowserStartKeepsTheOriginalThreeMinuteAssertionBudget()
+    {
+        var deadlines = new List<TimeSpan>();
+        var budget = new SyntheticBrowserPhaseBudget(false, deadlines.Add, retirement: true);
+        budget.ObserveLine("PP_CASE_RETIREMENT_BROWSER_PHASE cli-open");
+        Assert.Equal(new[] { TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(3) }, deadlines);
+    }
+
+    [Fact]
+    public void RetirementProgressAndRepeatedStartCannotRenewTheBrowserDeadline()
+    {
+        var deadlines = new List<TimeSpan>();
+        var budget = new SyntheticBrowserPhaseBudget(false, deadlines.Add, retirement: true);
+        foreach (var line in new[] { "cli-open", " PP_CASE_RETIREMENT_BROWSER_PHASE cli-open",
+            "PP_CASE_RETIREMENT_BROWSER_PHASE cli-open extra" }) budget.ObserveLine(line);
+        Assert.Equal(new[] { TimeSpan.FromMinutes(5) }, deadlines);
+        for (var index = 0; index < 100; index++) budget.ObserveLine("PP_CASE_RETIREMENT_BROWSER_PHASE cli-open");
+        foreach (var phase in new[] { "browser-goto", "scenario", "browser-close", "production-build" })
+            budget.ObserveLine("CASE_RETIREMENT_BUNDLE_PHASE " + phase);
+        Assert.Equal(new[] { TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(3) }, deadlines);
+    }
+
+    [Fact]
+    public void RetirementCannotBeCombinedWithAnotherBrowserFamily()
+    {
+        var deadlines = new List<TimeSpan>();
+        Assert.Throws<ArgumentException>(() => new SyntheticBrowserPhaseBudget(true, deadlines.Add, retirement: true));
+        Assert.Throws<ArgumentException>(() => new SyntheticBrowserPhaseBudget(false, deadlines.Add, chat: true, retirement: true));
+        Assert.Empty(deadlines);
+    }
+
+    [Fact]
     public void ColdChatPreparationAndBrowserStartHaveSeparateBoundedDeadlines()
     {
         var deadlines = new List<TimeSpan>();

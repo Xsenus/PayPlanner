@@ -8,6 +8,49 @@ namespace PayPlanner.Api.Tests;
 public sealed class BoundedTestExecutionTests
 {
     [Fact]
+    public async Task ExitedChildWithInheritedStdoutHandleFailsInsteadOfHanging()
+    {
+        var stdout = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var drain = OwnedOutputDrain.WaitAsync(Task.CompletedTask,
+            stdout.Task, Task.CompletedTask,
+            () => throw new InvalidOperationException("An exited child must not be stopped again."),
+            TimeSpan.FromMilliseconds(30));
+        await Assert.ThrowsAsync<TimeoutException>(() => drain.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.True(drain.IsFaulted, "The outer observation bound cannot substitute for the drain failure.");
+        Assert.False(stdout.Task.IsCompleted);
+        stdout.SetResult();
+    }
+
+    [Fact]
+    public async Task ClosedStdoutDoesNotHideAnInheritedStderrHandle()
+    {
+        var stderr = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var drain = OwnedOutputDrain.WaitAsync(Task.CompletedTask,
+            Task.CompletedTask, stderr.Task,
+            () => throw new InvalidOperationException("An exited child must not be stopped again."),
+            TimeSpan.FromMilliseconds(30));
+        await Assert.ThrowsAsync<TimeoutException>(() => drain.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.True(drain.IsFaulted, "The outer observation bound cannot substitute for the drain failure.");
+        Assert.False(stderr.Task.IsCompleted);
+        stderr.SetResult();
+    }
+
+    [Fact]
+    public async Task OutputCloseBoundStartsOnlyAfterTheChildExits()
+    {
+        var exited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stdout = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var drain = OwnedOutputDrain.WaitAsync(exited.Task, stdout.Task, Task.CompletedTask,
+            () => throw new InvalidOperationException("A healthy owned child must not be stopped."),
+            TimeSpan.FromMilliseconds(30));
+        await Task.Delay(60);
+        Assert.False(drain.IsCompleted);
+        stdout.SetResult();
+        exited.SetResult();
+        await drain.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
     public async Task FailedOutputSinkStopsOnlyItsOwnedProcessAndDrainsBothPipes()
     {
         var exited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

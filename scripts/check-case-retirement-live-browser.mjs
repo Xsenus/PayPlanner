@@ -133,6 +133,7 @@ try {
     vite = await browserUi.startPreview();
   }
   // Own the browser before navigation so a failed page load still closes it.
+  console.log('PP_CASE_RETIREMENT_BROWSER_PHASE cli-open');
   await phase('browser-open', () => cli('open', 'about:blank', '--browser', browser));
   opened = true;
   await phase('browser-goto', () => cli('goto', ui + '/cases/' + caseId));
