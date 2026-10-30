@@ -1048,6 +1048,11 @@ export function LegalEntityModal({
     canManageOwnCompanySettings, initial?.profileEditVersion, deleteSession]);
   const { capture: captureClassificationOwner, isCurrent: isClassificationOwnerCurrent } = useAsyncOperationOwner(classificationScope);
   const classificationOwner = captureClassificationOwner();
+  const { capture: captureInvoiceCaseOwner, isCurrent: isInvoiceCaseOwnerCurrent } = useAsyncOperationOwner(JSON.stringify([
+    classificationScope, invoiceModalOpen, invoiceModalMode, selectedInvoice?.id, canViewCases,
+    canMutateRelated('accounts', invoiceModalMode === 'edit' ? 'canEdit' : 'canCreate'),
+  ]));
+  const invoiceCaseOwner = captureInvoiceCaseOwner();
   const legacyClassification = mainCompanyState?.owner === classificationOwner ? mainCompanyState : null;
   const ownCompanyClassification = currentLegalEntityId === null ? false
     : typeof initial?.isOwnCompany === 'boolean' ? initial.isOwnCompany
@@ -1091,7 +1096,6 @@ export function LegalEntityModal({
     loading: documentClientsLoading,
     refreshing: documentClientsRefreshing,
     error: documentClientsError,
-    refresh: refreshDocumentClients,
   } = useClients(clientsLookupOptions);
   const {
     legalEntities,
@@ -2724,14 +2728,16 @@ export function LegalEntityModal({
   };
 
   const handleInvoiceCaseCreated = (clientCase: ClientCase) => {
-    if (!canViewCases) return;
-    if (clientCase.legalEntityId !== currentLegalEntityId) return;
+    if (!isOpen || !invoiceModalOpen || !canViewCases || !currentLegalEntityId
+      || !isInvoiceCaseOwnerCurrent(invoiceCaseOwner) || !isAuthSessionIdentityCurrent(deleteSession)
+      || !canMutateRelated('accounts', invoiceModalMode === 'edit' ? 'canEdit' : 'canCreate')) return;
+    if (!clientCase || !Number.isInteger(clientCase.id) || clientCase.id <= 0 || clientCase.legalEntityId !== currentLegalEntityId) return;
     setLegalEntityCases((prev) =>
       prev.some((item) => item.id === clientCase.id)
         ? prev
         : [clientCase, ...prev],
     );
-    setSelectedLegalEntityCaseId(clientCase.id);
+    // The invoice owns its selected cases; changing the parent's default resets its unsaved form.
     setCaseFinanceReloadToken((value) => value + 1);
   };
 
@@ -5330,16 +5336,6 @@ export function LegalEntityModal({
           legalEntities={legalEntities}
           legalEntitiesLoading={legalEntitiesLoading}
           legalEntitiesError={legalEntitiesError ?? undefined}
-          onClientCreated={(client) => {
-            if (client.legalEntityId === currentLegalEntityId) {
-              setSelectedClients((prev) =>
-                prev.some((item) => item.id === client.id)
-                  ? prev
-                  : [...prev, toClientAssociationItem(client)],
-              );
-            }
-            void refreshDocumentClients("refresh");
-          }}
           responsibles={responsibles}
           lookupsLoading={documentsLookupsLoading}
           lookupsError={documentsLookupsError || undefined}

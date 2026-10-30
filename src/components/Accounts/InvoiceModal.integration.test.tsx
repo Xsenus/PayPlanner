@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { StrictMode } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { InvoiceModal } from './InvoiceModal';
 import type {
@@ -23,6 +24,7 @@ import { storeInvoiceEditorDraft } from '../../utils/invoiceEditorBridge';
 import { defaultRolePermissions, type RolePermissions } from '../../types/permissions';
 import { configureDocumentDeliveryTestApi } from '../../test/documentDeliveryFixtures';
 import { documentCopyTestSession } from '../../test/documentCopySession';
+import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
 
 const permissionState = vi.hoisted(() => ({ value: null as RolePermissions | null }));
 const printAuthState = vi.hoisted(() => ({ user: { id: 7, role: { id: 1 } } }));
@@ -38,6 +40,7 @@ type ContractModalMockProps = {
 type CaseModalMockProps = {
   isOpen: boolean;
   onSave: (payload: Partial<ClientCase>) => void | Promise<void>;
+  onClose: () => void;
   overlayClassName?: string;
 };
 
@@ -2977,135 +2980,244 @@ describe('InvoiceModal integration', () => {
       }));
     });
   
-  it('creates and loads client cases for the expense client on expense invoices', async () => {
-    const getCasesMock = vi.mocked(apiService.getCases);
-    const createCaseMock = vi.mocked(apiService.createCase);
-    const onClientCaseCreated = vi.fn();
-    getCasesMock.mockResolvedValue([]);
-    createCaseMock.mockResolvedValue({
-      id: 441,
-      clientId: 2,
-      title: 'Case from invoice',
-      description: 'Created from invoice',
-      status: 'Open',
-      createdAt: '2026-04-15T10:00:00Z',
-    } as ClientCase);
+  describe('invoice case creation owner', () => {
+    let session: ReturnType<typeof documentCopyTestSession>;
+    beforeEach(() => { session = documentCopyTestSession(); });
+    afterEach(() => session.restore());
+    const propsFor = () => ({ open: true, mode: 'create' as const, invoice: null, defaultClientId: 1,
+      clients: [createTestClient(1, 'Case owner'), createTestClient(2, 'Other case owner')], responsibles: [], lookupsLoading: false,
+      submitting: false, onClose: vi.fn(), onSubmit: vi.fn().mockResolvedValue(undefined), onClientCaseCreated: vi.fn(), relatedPayments: [] });
+    const createdCase = (overrides: Partial<ClientCase> = {}) => ({ id: 440, clientId: 1, legalEntityId: null, title: 'Owned new case', status: 'Open', createdAt: '2026-10-31T01:00:00Z', ...overrides } as ClientCase);
+    const caseSave = () => caseModalPropsSpy.mock.lastCall![0].onSave as (patch: Partial<ClientCase>) => Promise<void>;
+    const openCase = async () => { fireEvent.click(screen.getByRole('button', { name: 'Создать дело' })); await screen.findByTestId('case-modal'); return caseSave(); };
 
-    const invoice = {
-      id: 820,
-      invoiceEntityId: 820,
-      number: '820',
-      date: '2026-04-15',
-      dueDate: '2026-04-20',
-      amount: 5000,
-      type: 'Expense',
-      status: 'Pending',
-      clientId: 1,
-      expenseClientId: 2,
-      lineItems: [{ name: 'Expense service', quantity: 1, unit: 'pcs', price: 5000 }],
-    } as unknown as Invoice;
-
-    render(
-      <InvoiceModal
-        open
-        mode="edit"
-        invoice={invoice}
-        onClose={vi.fn()}
-        onSubmit={vi.fn().mockResolvedValue(undefined)}
-        submitting={false}
-        clients={[createTestClient(1, 'Client owner'), createTestClient(2, 'Expense supplier')]}
-        responsibles={[]}
-        lookupsLoading={false}
-        relatedPayments={[]}
-        onClientCaseCreated={onClientCaseCreated}
-      />,
-    );
-
-    await waitFor(() => {
-      expect(getCasesMock).toHaveBeenCalledWith({ clientId: 2 });
+    it('case creation owner: late response cannot enter a newly opened invoice', async () => {
+      const pending = createDeferred<ClientCase>(); vi.mocked(apiService.createCase).mockReturnValue(pending.promise);
+      const props = propsFor(); const view = render(<InvoiceModal {...props} />); const save = await openCase();
+      let result!: Promise<void>; act(() => { result = save({ title: 'Owned new case' }); });
+      view.rerender(<InvoiceModal {...props} defaultClientId={2} />);
+      await act(async () => { pending.resolve(createdCase()); await result.catch(() => undefined); });
+      expect(props.onClientCaseCreated).not.toHaveBeenCalled(); expect(screen.queryByText('Owned new case')).toBeNull();
+    });
+    it.each(['closed', 'reopened', 'mode', 'invoice', 'presentation', 'unmount', 'case-permission', 'invoice-permission', 'permission-aba'] as const)('case creation owner: discards a pending response after %s', async change => {
+      const pending = createDeferred<ClientCase>(); vi.mocked(apiService.createCase).mockReturnValue(pending.promise);
+      const props = propsFor(); const view = render(<InvoiceModal {...props} />); const save = await openCase();
+      let result!: Promise<void>; act(() => { result = save({ title: 'Owned new case' }); });
+      if (change === 'closed' || change === 'reopened') { view.rerender(<InvoiceModal {...props} open={false} />); if (change === 'reopened') view.rerender(<InvoiceModal {...props} />); }
+      if (change === 'mode') view.rerender(<InvoiceModal {...props} mode="edit" />);
+      if (change === 'invoice') view.rerender(<InvoiceModal {...props} invoice={{ id: 92, clientId: 1, type: 'Income', lineItems: [] } as unknown as Invoice} />);
+      if (change === 'presentation') view.rerender(<InvoiceModal {...props} presentation="page" />);
+      if (change === 'unmount') view.unmount();
+      if (change === 'case-permission' || change === 'permission-aba') permissionState.value = { ...defaultRolePermissions, cases: { ...defaultRolePermissions.cases, canCreate: false } };
+      if (change === 'invoice-permission') permissionState.value = { ...defaultRolePermissions, accounts: { ...defaultRolePermissions.accounts, canCreate: false } };
+      if (change.includes('permission')) { view.rerender(<InvoiceModal {...props} />); if (change === 'permission-aba') { permissionState.value = null; view.rerender(<InvoiceModal {...props} />); } }
+      await act(async () => { pending.resolve(createdCase()); await expect(result).rejects.toBeInstanceOf(StaleUiOperationError); });
+      expect(props.onClientCaseCreated).not.toHaveBeenCalled(); expect(screen.queryByText('Owned new case')).toBeNull(); expect(toastErrorMock).not.toHaveBeenCalled();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Создать дело' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'submit-case' }));
+    it.each(['login', 'actor', 'logout'] as const)('case creation owner: rejects %s response and old dispatch without a render', async change => {
+      const pending = createDeferred<ClientCase>(); vi.mocked(apiService.createCase).mockReturnValue(pending.promise);
+      const props = propsFor(); render(<InvoiceModal {...props} />); const save = await openCase();
+      let result!: Promise<void>; act(() => { result = save({ title: 'Owned new case' }); }); session.replace(change);
+      await expect(save({ title: 'Second case' })).rejects.toBeInstanceOf(StaleUiOperationError);
+      await act(async () => { pending.resolve(createdCase()); await expect(result).rejects.toBeInstanceOf(StaleUiOperationError); });
+      expect(apiService.createCase).toHaveBeenCalledOnce(); expect(props.onClientCaseCreated).not.toHaveBeenCalled();
+    });
 
-    await waitFor(() => {
-      expect(createCaseMock).toHaveBeenCalledWith(expect.objectContaining({
+    it('case creation owner: accepts token refresh, prevents duplicates and preserves the owner payload', async () => {
+      const pending = createDeferred<ClientCase>(); vi.mocked(apiService.createCase).mockReturnValue(pending.promise);
+      const props = propsFor(); render(<InvoiceModal {...props} />); const save = await openCase();
+      let result!: Promise<void>; act(() => { result = save({ title: ' Owned new case ' }); });
+      await expect(save({ title: 'Duplicate' })).rejects.toBeInstanceOf(StaleUiOperationError); session.refresh();
+      await act(async () => { pending.resolve(createdCase()); await result; });
+      expect(apiService.createCase).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ clientId: 1, legalEntityId: null, title: 'Owned new case' }));
+      expect(props.onClientCaseCreated).toHaveBeenCalledExactlyOnceWith(createdCase()); expect(await screen.findByText('Owned new case')).toBeTruthy();
+    });
+
+    it.each([{ id: 0 }, { clientId: 2 }, { legalEntityId: 9 }] as const)('case creation owner: rejects a malformed or foreign result %j', async wrong => {
+      vi.mocked(apiService.createCase).mockResolvedValue(createdCase(wrong)); const props = propsFor(); render(<InvoiceModal {...props} />); const save = await openCase();
+      await act(async () => { await expect(save({ title: 'Owned new case' })).rejects.toThrow('принадлежность'); });
+      expect(props.onClientCaseCreated).not.toHaveBeenCalled(); expect(screen.queryByText('Owned new case')).toBeNull(); expect(screen.getByTestId('case-modal')).toBeTruthy();
+    });
+
+    it('case creation owner: old finalization and close cannot unlock or close the next attempt', async () => {
+      const first = createDeferred<ClientCase>(); const next = createDeferred<ClientCase>(); vi.mocked(apiService.createCase).mockReturnValueOnce(first.promise).mockReturnValueOnce(next.promise);
+      const props = propsFor(); render(<InvoiceModal {...props} />); const oldSave = await openCase(); const oldClose = caseModalPropsSpy.mock.lastCall![0].onClose as () => void;
+      let result!: Promise<void>; act(() => { result = oldSave({ title: 'Old case' }); }); act(() => oldClose());
+      const newSave = await openCase(); let newResult!: Promise<void>; act(() => { newResult = newSave({ title: 'New case' }); });
+      await act(async () => { first.resolve(createdCase({ title: 'Old case' })); await expect(result).rejects.toBeInstanceOf(StaleUiOperationError); });
+      act(() => oldClose()); expect(screen.getByTestId('case-modal')).toBeTruthy(); await expect(newSave({ title: 'Duplicate' })).rejects.toBeInstanceOf(StaleUiOperationError);
+      await act(async () => { next.resolve(createdCase({ id: 441, title: 'New case' })); await newResult; });
+      expect(apiService.createCase).toHaveBeenCalledTimes(2); expect(props.onClientCaseCreated).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 441 })); expect(await screen.findByText('New case')).toBeTruthy();
+    });
+
+    it('case creation owner: current failure preserves the editor and allows a deliberate retry', async () => {
+      vi.mocked(apiService.createCase).mockRejectedValueOnce(new Error('Case creation refused')).mockResolvedValueOnce(createdCase()); const props = propsFor(); render(<InvoiceModal {...props} />); const save = await openCase();
+      await act(async () => { await expect(save({ title: 'Owned new case' })).rejects.toThrow('Case creation refused'); }); expect(screen.getByTestId('case-modal')).toBeTruthy(); expect(props.onClientCaseCreated).not.toHaveBeenCalled();
+      await act(async () => { await caseSave()({ title: 'Owned new case' }); }); expect(apiService.createCase).toHaveBeenCalledTimes(2); expect(props.onClientCaseCreated).toHaveBeenCalledOnce();
+    });
+
+    it('case creation owner: a late failure is not exposed in the new dialog', async () => {
+      const pending = createDeferred<ClientCase>(); vi.mocked(apiService.createCase).mockReturnValue(pending.promise); const props = propsFor(); const view = render(<InvoiceModal {...props} />); const save = await openCase();
+      let result!: Promise<void>; act(() => { result = save({ title: 'Owned new case' }); }); view.rerender(<InvoiceModal {...props} defaultClientId={2} />); await openCase();
+      await act(async () => { pending.reject(new Error('Private old server failure')); await expect(result).rejects.toBeInstanceOf(StaleUiOperationError); }); expect(screen.queryByText('Private old server failure')).toBeNull(); expect(screen.getByTestId('case-modal')).toBeTruthy();
+    });
+
+    it.each(['case', 'invoice'] as const)('case creation owner: current %s denial disables creation and blocks a retained handler', async area => {
+      const props = propsFor(); const view = render(<InvoiceModal {...props} />); const save = await openCase();
+      permissionState.value = area === 'case' ? { ...defaultRolePermissions, cases: { ...defaultRolePermissions.cases, canCreate: false } } : { ...defaultRolePermissions, accounts: { ...defaultRolePermissions.accounts, canCreate: false } };
+      view.rerender(<InvoiceModal {...props} />); expect(screen.getByRole('button', { name: 'Создать дело' })).toHaveProperty('disabled', true); expect(screen.queryByTestId('case-modal')).toBeNull();
+      await expect(save({ title: 'Denied' })).rejects.toBeInstanceOf(StaleUiOperationError); expect(apiService.createCase).not.toHaveBeenCalled();
+    });
+
+    it.each(['success', 'failure'] as const)('case creation list: an older list %s cannot erase a confirmed new case', async outcome => {
+      const list = createDeferred<ClientCase[]>(); vi.mocked(apiService.getCases).mockReturnValue(list.promise); vi.mocked(apiService.createCase).mockResolvedValue(createdCase());
+      const props = propsFor(); render(<InvoiceModal {...props} />); await waitFor(() => expect(apiService.getCases).toHaveBeenCalledOnce()); const save = await openCase();
+      await act(async () => { await save({ title: 'Owned new case' }); }); expect(await screen.findByText('Owned new case')).toBeTruthy();
+      await act(async () => { if (outcome === 'success') list.resolve([]); else list.reject(new Error('Old private list error')); });
+      expect(screen.getByText('Owned new case')).toBeTruthy(); expect(screen.queryByText('Old private list error')).toBeNull(); expect(props.onClientCaseCreated).toHaveBeenCalledOnce();
+      fireEvent.change(screen.getByLabelText(/Номер сч/i), { target: { value: 'INV-CURRENT-CASE' } }); fireEvent.submit(document.getElementById('invoice-edit-form')!);
+      await waitFor(() => expect(props.onSubmit).toHaveBeenCalledWith(expect.objectContaining({ clientCaseIds: [440] })));
+    });
+
+    it('case creation owner extra: accepts a current legal-entity expense case in StrictMode', async () => {
+      const props = propsFor(); vi.mocked(apiService.createCase).mockResolvedValue(createdCase({ clientId: null, legalEntityId: 9 }));
+      render(<StrictMode><InvoiceModal {...props} defaultClientId={undefined} defaultType="Expense" defaultLegalEntityId={9} legalEntities={[{ id: 9, shortName: 'Legal expense owner' } as LegalEntitySummary]} /></StrictMode>);
+      const save = await openCase(); await act(async () => { await save({ title: 'Owned new case' }); });
+      expect(apiService.createCase).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ clientId: null, legalEntityId: 9 })); expect(props.onClientCaseCreated).toHaveBeenCalledOnce(); expect(await screen.findByText('Owned new case')).toBeTruthy();
+    });
+
+    it('creates and loads client cases for the expense client on expense invoices', async () => {
+      const getCasesMock = vi.mocked(apiService.getCases);
+      const createCaseMock = vi.mocked(apiService.createCase);
+      const onClientCaseCreated = vi.fn();
+      getCasesMock.mockResolvedValue([]);
+      createCaseMock.mockResolvedValue({
+        id: 441,
         clientId: 2,
         title: 'Case from invoice',
+        description: 'Created from invoice',
         status: 'Open',
+        createdAt: '2026-04-15T10:00:00Z',
+      } as ClientCase);
+
+      const invoice = {
+        id: 820,
+        invoiceEntityId: 820,
+        number: '820',
+        date: '2026-04-15',
+        dueDate: '2026-04-20',
+        amount: 5000,
+        type: 'Expense',
+        status: 'Pending',
+        clientId: 1,
+        expenseClientId: 2,
+        lineItems: [{ name: 'Expense service', quantity: 1, unit: 'pcs', price: 5000 }],
+      } as unknown as Invoice;
+
+      render(
+        <InvoiceModal
+          open
+          mode="edit"
+          invoice={invoice}
+          onClose={vi.fn()}
+          onSubmit={vi.fn().mockResolvedValue(undefined)}
+          submitting={false}
+          clients={[createTestClient(1, 'Client owner'), createTestClient(2, 'Expense supplier')]}
+          responsibles={[]}
+          lookupsLoading={false}
+          relatedPayments={[]}
+          onClientCaseCreated={onClientCaseCreated}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(getCasesMock).toHaveBeenCalledWith({ clientId: 2 });
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Создать дело' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'submit-case' }));
+
+      await waitFor(() => {
+        expect(createCaseMock).toHaveBeenCalledWith(expect.objectContaining({
+          clientId: 2,
+          title: 'Case from invoice',
+          status: 'Open',
+        }));
+      });
+
+      expect(onClientCaseCreated).toHaveBeenCalledWith(expect.objectContaining({
+        id: 441,
+        clientId: 2,
+        title: 'Case from invoice',
       }));
+      expect(await screen.findByText('Case from invoice')).toBeTruthy();
     });
 
-    expect(onClientCaseCreated).toHaveBeenCalledWith(expect.objectContaining({
-      id: 441,
-      clientId: 2,
-      title: 'Case from invoice',
-    }));
-    expect(await screen.findByText('Case from invoice')).toBeTruthy();
-  });
-
-  it('submits a newly created client case with the invoice payload', async () => {
-    const getCasesMock = vi.mocked(apiService.getCases);
-    const createCaseMock = vi.mocked(apiService.createCase);
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
-    getCasesMock.mockResolvedValue([]);
-    createCaseMock.mockResolvedValue({
-      id: 442,
-      clientId: 1,
-      title: 'Case from invoice',
-      description: 'Created from invoice',
-      status: 'Open',
-      createdAt: '2026-04-15T10:00:00Z',
-    } as ClientCase);
-
-    render(
-      <InvoiceModal
-        open
-        mode="create"
-        invoice={null}
-        onClose={vi.fn()}
-        onSubmit={onSubmit}
-        submitting={false}
-        clients={[createTestClient(1, 'Client owner')]}
-        responsibles={[]}
-        lookupsLoading={false}
-        defaultClientId={1}
-        relatedPayments={[]}
-      />,
-    );
-
-    await waitFor(() => {
-      expect(getCasesMock).toHaveBeenCalledWith({ clientId: 1 });
-    });
-
-    fireEvent.change(screen.getByLabelText(/Номер сч/i), {
-      target: { value: 'INV-CASE-1' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Создать дело' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'submit-case' }));
-
-    await waitFor(() => {
-      expect(createCaseMock).toHaveBeenCalledWith(expect.objectContaining({
+    it('submits a newly created client case with the invoice payload', async () => {
+      const getCasesMock = vi.mocked(apiService.getCases);
+      const createCaseMock = vi.mocked(apiService.createCase);
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+      getCasesMock.mockResolvedValue([]);
+      createCaseMock.mockResolvedValue({
+        id: 442,
         clientId: 1,
         title: 'Case from invoice',
+        description: 'Created from invoice',
         status: 'Open',
-      }));
+        createdAt: '2026-04-15T10:00:00Z',
+      } as ClientCase);
+
+      render(
+        <InvoiceModal
+          open
+          mode="create"
+          invoice={null}
+          onClose={vi.fn()}
+          onSubmit={onSubmit}
+          submitting={false}
+          clients={[createTestClient(1, 'Client owner')]}
+          responsibles={[]}
+          lookupsLoading={false}
+          defaultClientId={1}
+          relatedPayments={[]}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(getCasesMock).toHaveBeenCalledWith({ clientId: 1 });
+      });
+
+      fireEvent.change(screen.getByLabelText(/Номер сч/i), {
+        target: { value: 'INV-CASE-1' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Создать дело' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'submit-case' }));
+
+      await waitFor(() => {
+        expect(createCaseMock).toHaveBeenCalledWith(expect.objectContaining({
+          clientId: 1,
+          title: 'Case from invoice',
+          status: 'Open',
+        }));
+      });
+
+      expect(await screen.findByText('Case from invoice')).toBeTruthy();
+
+      const form = document.getElementById('invoice-edit-form') as HTMLFormElement | null;
+      expect(form).toBeTruthy();
+      fireEvent.submit(form!);
+
+      await waitFor(() => {
+        expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+          number: 'INV-CASE-1',
+          clientId: 1,
+          clientCaseId: 442,
+          clientCaseIds: [442],
+        }));
+      });
     });
 
-    expect(await screen.findByText('Case from invoice')).toBeTruthy();
-
-    const form = document.getElementById('invoice-edit-form') as HTMLFormElement | null;
-    expect(form).toBeTruthy();
-    fireEvent.submit(form!);
-
-    await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
-        number: 'INV-CASE-1',
-        clientId: 1,
-        clientCaseId: 442,
-        clientCaseIds: [442],
-      }));
-    });
   });
 
   it('keeps the default client case in the create payload when case options are incomplete', async () => {

@@ -11,6 +11,7 @@ import type { MenuSectionPermissions } from '../../types/permissions';
 import type {
   ActsSummary,
   Client,
+  ClientCase,
   InvoiceSummary,
   LegalEntityDadataDetails,
   LegalEntityDetail,
@@ -28,6 +29,7 @@ const {
   emptyActsSummary,
   emptyInvoiceSummary,
   paymentModalPropsSpy,
+  invoiceModalPropsSpy,
   toastErrorMock,
   toastInfoMock,
   toastSuccessMock,
@@ -48,6 +50,7 @@ const {
     overdue: { amount: 0, count: 0 },
   } satisfies InvoiceSummary,
   paymentModalPropsSpy: vi.fn(),
+  invoiceModalPropsSpy: vi.fn(),
   toastErrorMock: vi.fn(),
   toastInfoMock: vi.fn(),
   toastSuccessMock: vi.fn(),
@@ -153,8 +156,10 @@ vi.mock('../Calendar/PaymentModal', () => ({
 }));
 
 // These tests verify the parent's lookup lifecycle; document editors have their own suites.
-vi.mock('../Accounts/InvoiceModal', () => ({ InvoiceModal: ({ clients, lookupsLoading, lookupsError, onClose }: { clients: { name: string }[]; lookupsLoading: boolean; lookupsError?: string; onClose: () => void }) =>
-  <div data-testid="invoice-lookup-fixture"><span>{lookupsLoading ? 'Loading clients' : clients.map(client => client.name).join(',')}</span><span>{lookupsError}</span><button onClick={onClose}>Close document fixture</button></div> }));
+vi.mock('../Accounts/InvoiceModal', () => ({ InvoiceModal: (props: { clients: { name: string }[]; lookupsLoading: boolean; lookupsError?: string; onClose: () => void }) => {
+  invoiceModalPropsSpy(props);
+  return <div data-testid="invoice-lookup-fixture"><span>{props.lookupsLoading ? 'Loading clients' : props.clients.map(client => client.name).join(',')}</span><span>{props.lookupsError}</span><button onClick={props.onClose}>Close document fixture</button></div>;
+} }));
 vi.mock('../Acts/ActModal', () => ({ ActModal: ({ clients, lookupsLoading, lookupsError, onClose }: { clients: { name: string }[]; lookupsLoading: boolean; lookupsError?: string; onClose: () => void }) =>
   <div data-testid="act-lookup-fixture"><span>{lookupsLoading ? 'Loading clients' : clients.map(client => client.name).join(',')}</span><span>{lookupsError}</span><button onClick={onClose}>Close document fixture</button></div> }));
 
@@ -245,6 +250,53 @@ describe('LegalEntityModal integration', () => {
         expect(signal.aborted).toBe(true); await act(async () => finish(true)); expect(apiService.closeTaxRegisterYear).not.toHaveBeenCalled(); expect(toastErrorMock).not.toHaveBeenCalled();
       });
     }
+  });
+
+  describe('invoice case parent ownership', () => {
+    let session: ReturnType<typeof documentCopyTestSession>;
+    beforeEach(() => { session = documentCopyTestSession(); invoiceModalPropsSpy.mockReset(); vi.mocked(apiService.getClientsV2).mockReset().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 200 }); });
+    afterEach(() => session.restore());
+    const propsFor = (mode: 'page' | 'modal', own = false) => ({ isOpen: true, mode, initial: createInitialLegalEntity({ isOwnCompany: own }),
+      allowEdit: true, allowDelete: false, canManageOwnCompanySettings: false, canViewCases: true, canViewAccounts: true, canViewActs: false, canViewPayments: false,
+      onClose: vi.fn(), onSubmit: vi.fn(), suggest: vi.fn(), findById: vi.fn() });
+    const created = (overrides: Partial<ClientCase> = {}) => ({ id: 441, legalEntityId: 9, clientId: null, title: 'Owned invoice case', status: 'Open', createdAt: '2026-10-31T02:00:00Z', ...overrides } as ClientCase);
+    const callback = () => invoiceModalPropsSpy.mock.lastCall![0].onClientCaseCreated as (value: ClientCase) => void;
+    const openInvoice = async () => { fireEvent.click(await screen.findByRole('button', { name: 'Счёт' })); await screen.findByTestId('invoice-lookup-fixture'); await waitFor(() => expect(apiService.getClientsV2).toHaveBeenCalled()); return callback(); };
+
+    for (const mode of ['page', 'modal'] as const) {
+      it.each([false, true])(`invoice case parent: owned result remains available without own-settings authority in ${mode}, own=%s`, async own => {
+        const props = propsFor(mode, own); render(<LegalEntityModal {...props} />); const accept = await openInvoice();
+        const reads = vi.mocked(apiService.getClientsV2).mock.calls.length; const defaultCase = invoiceModalPropsSpy.mock.lastCall![0].defaultClientCaseId;
+        expect(invoiceModalPropsSpy.mock.lastCall![0].onClientCreated).toBeUndefined(); session.refresh();
+        act(() => { accept(created()); accept(created()); });
+        expect(invoiceModalPropsSpy.mock.lastCall![0].defaultClientCaseId).toBe(defaultCase);
+        expect(screen.getAllByText('Owned invoice case').length).toBeGreaterThan(0); expect(apiService.getClientsV2).toHaveBeenCalledTimes(reads);
+      });
+
+      it.each(['company', 'readonly', 'invoice-rights', 'case-rights', 'closed', 'reopen', 'document-reopen', 'mode', 'profile-version', 'unmount', 'rights-aba'] as const)(`invoice case parent: old callback cannot follow %s in ${mode}`, async change => {
+        const props = propsFor(mode); const view = render(<LegalEntityModal {...props} />); const accept = await openInvoice();
+        if (change === 'company') view.rerender(<LegalEntityModal {...props} initial={{ ...props.initial, id: 8 }} />);
+        if (change === 'readonly') view.rerender(<LegalEntityModal {...props} allowEdit={false} />);
+        if (change === 'invoice-rights' || change === 'rights-aba') { view.rerender(<LegalEntityModal {...props} canCreateAccounts={false} />); if (change === 'rights-aba') view.rerender(<LegalEntityModal {...props} />); }
+        if (change === 'case-rights') view.rerender(<LegalEntityModal {...props} canViewCases={false} />);
+        if (change === 'closed' || change === 'reopen') { view.rerender(<LegalEntityModal {...props} isOpen={false} />); if (change === 'reopen') view.rerender(<LegalEntityModal {...props} />); }
+        if (change === 'document-reopen') { fireEvent.click(screen.getByRole('button', { name: 'Close document fixture' })); await openInvoice(); }
+        if (change === 'mode') view.rerender(<LegalEntityModal {...props} mode={mode === 'page' ? 'modal' : 'page'} />);
+        if (change === 'profile-version') view.rerender(<LegalEntityModal {...props} initial={{ ...props.initial, profileEditVersion: 'B'.repeat(64) }} />);
+        if (change === 'unmount') view.unmount();
+        const reads = vi.mocked(apiService.getClientsV2).mock.calls.length; act(() => accept(created()));
+        if (change === 'case-rights') view.rerender(<LegalEntityModal {...props} />);
+        expect(screen.queryAllByText('Owned invoice case')).toHaveLength(0); expect(apiService.getClientsV2).toHaveBeenCalledTimes(reads); expect(toastErrorMock).not.toHaveBeenCalled();
+      });
+    }
+    it.each(['login', 'actor', 'logout'] as const)('invoice case parent: old %s callback is rejected without a render', async change => {
+      render(<LegalEntityModal {...propsFor('page')} />); const accept = await openInvoice(); session.replace(change); act(() => accept(created()));
+      expect(screen.queryAllByText('Owned invoice case')).toHaveLength(0);
+    });
+    it.each([{ id: 0 }, { legalEntityId: 8 }, { legalEntityId: null, clientId: 7 }] as const)('invoice case parent: rejects a malformed or foreign case %j', async wrong => {
+      render(<LegalEntityModal {...propsFor('page')} />); const accept = await openInvoice(); act(() => accept(created(wrong)));
+      expect(screen.queryAllByText('Owned invoice case')).toHaveLength(0);
+    });
   });
 
   describe('document client lookup lifecycle', () => {

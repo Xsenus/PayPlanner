@@ -35,6 +35,7 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDocumentMenuLayout } from '../../hooks/useDocumentMenuLayout';
 import { useDocumentDeliveryOwner, type DocumentDeliveryRead } from '../../hooks/useDocumentDeliveryOwner';
+import { awaitOwnedUiResult, StaleUiOperationError } from '../../utils/StaleUiOperationError';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useInvoiceReferenceDictionaries } from '../../hooks/useInvoiceReferenceDictionaries';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
@@ -1006,6 +1007,7 @@ export function InvoiceModal({
   const [clientCasesLoading, setClientCasesLoading] = useState(false);
   const [clientCasesError, setClientCasesError] = useState<string | null>(null);
   const [clientCasesLoadedOwnerKey, setClientCasesLoadedOwnerKey] = useState('');
+  const clientCasesLoadGeneration = useRef(0);
   const [actsLoading, setActsLoading] = useState(false);
   const [actsError, setActsError] = useState<string | null>(null);
   const [invoiceRules, setInvoiceRules] = useState({ maxClientCasesPerInvoice: 1, maxActsPerInvoice: 1 });
@@ -1416,6 +1418,7 @@ export function InvoiceModal({
   const leaveInvoiceCard = (leave: () => void) => {
     printOwner.invalidate();
     delivery.invalidate();
+    caseCreation.invalidate();
     leave();
   };
   const yandexDiskUploading = delivery.kind === 'disk';
@@ -1443,6 +1446,11 @@ export function InvoiceModal({
     : caseOwnerLegalEntityIdNumber
       ? `legal:${caseOwnerLegalEntityIdNumber}`
       : '';
+  const canCreateRelatedCase = (isAdmin || permissions.cases.canCreate)
+    && (isAdmin || (mode === 'edit' ? permissions.accounts.canEdit : permissions.accounts.canCreate));
+  const caseCreation = useDocumentDeliveryOwner(JSON.stringify([open, mode, invoice?.id, presentation, createCaseOpen,
+    caseOwnerKey, form.type, currentUser?.id, currentUser?.role?.id, currentUser?.role?.name,
+    canCreateRelatedCase, permissions.cases.viewScope, permissions.accounts.viewScope]));
   const selectedCaseOwnerClient = isIncome ? selectedClient : (selectedExpenseClient ?? selectedClient);
   const selectedCaseOwnerLegalEntity = caseOwnerClientIdNumber
     ? null
@@ -1797,6 +1805,8 @@ export function InvoiceModal({
     let cancelled = false;
 
     async function loadClientCasesByClient() {
+      const generation = ++clientCasesLoadGeneration.current;
+      const current = () => !cancelled && generation === clientCasesLoadGeneration.current;
       if (!open || !caseOwnerKey) {
         setClientCaseOptions([]);
         setClientCasesError(null);
@@ -1822,7 +1832,7 @@ export function InvoiceModal({
           clientId: clientId && clientId > 0 ? clientId : undefined,
           legalEntityId: legalEntityId && legalEntityId > 0 ? legalEntityId : undefined,
         });
-        if (!cancelled) {
+        if (current()) {
           const nextOptions = [...(response ?? [])].sort(
             (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
           );
@@ -1830,13 +1840,13 @@ export function InvoiceModal({
           setClientCasesLoadedOwnerKey(caseOwnerKey);
         }
       } catch (error) {
-        if (!cancelled) {
+        if (current()) {
           setClientCaseOptions([]);
           setClientCasesLoadedOwnerKey('');
           setClientCasesError(error instanceof Error ? error.message : 'Не удалось загрузить дела');
         }
       } finally {
-        if (!cancelled) setClientCasesLoading(false);
+        if (current()) setClientCasesLoading(false);
       }
     }
 
@@ -2474,60 +2484,70 @@ export function InvoiceModal({
   };
 
   const handleCreateClientCase = async (patch: Partial<ClientCase>) => {
-    if (!caseOwnerClientIdNumber && !caseOwnerLegalEntityIdNumber) {
-      throw new Error(isIncome ? 'Сначала выберите клиента' : 'Сначала выберите клиента, к которому относится расход');
-    }
-
-    const created = await apiService.createCase({
-      clientId: caseOwnerClientIdNumber,
-      legalEntityId: caseOwnerLegalEntityIdNumber,
-      title: patch.title?.trim() ?? '',
-      description: patch.description?.trim(),
-      status: patch.status ?? 'Open',
-      caseNumber: patch.caseNumber?.trim() ?? '',
-      caseType: patch.caseType?.trim() ?? '',
-      stage: patch.stage?.trim() ?? '',
-      responsibleUserId: patch.responsibleUserId ?? null,
-      startDate: patch.startDate ?? null,
-      dueDate: patch.dueDate ?? null,
-      feeAmount: patch.feeAmount ?? 0,
-      priority: patch.priority ?? 'normal',
-      courtName: patch.courtName?.trim() ?? '',
-      courtCaseNumber: patch.courtCaseNumber?.trim() ?? '',
-      courtUrl: patch.courtUrl?.trim() ?? '',
-      nextHearingAt: patch.nextHearingAt ?? null,
-      claimant: patch.claimant?.trim() ?? '',
-      defendant: patch.defendant?.trim() ?? '',
-      thirdParties: patch.thirdParties?.trim() ?? '',
-      representatives: patch.representatives?.trim() ?? '',
-      judgeName: patch.judgeName?.trim() ?? '',
-      courtroom: patch.courtroom?.trim() ?? '',
-      courtSecretaryContacts: patch.courtSecretaryContacts?.trim() ?? '',
-      claimFiledAt: patch.claimFiledAt ?? null,
-      appealDeadlineAt: patch.appealDeadlineAt ?? null,
-      motionDeadlineAt: patch.motionDeadlineAt ?? null,
-      objectionDeadlineAt: patch.objectionDeadlineAt ?? null,
-      documentsSummary: patch.documentsSummary?.trim() ?? '',
-      eventHistory: patch.eventHistory?.trim() ?? '',
-      strategy: patch.strategy?.trim() ?? '',
-    });
-
-    setClientCaseOptions((prev) => {
-      const next = [created, ...prev.filter((item) => item.id !== created.id)];
-      return next.sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
-    });
-    onClientCaseCreated?.(created);
-    setSelectedClientCaseIds((prev) => {
-      if (prev.includes(created.id)) return prev;
-      if (prev.length >= invoiceRules.maxClientCasesPerInvoice) {
-        toast.error(`В счёте можно выбрать не более ${invoiceRules.maxClientCasesPerInvoice} дела(дел).`, 'Ограничение счёта');
-        return prev;
+    const operation = open && createCaseOpen && canCreateRelatedCase ? caseCreation.begin('case') : null;
+    if (!operation) throw new StaleUiOperationError();
+    try {
+      if (!caseOwnerClientIdNumber && !caseOwnerLegalEntityIdNumber) {
+        throw new Error(isIncome ? 'Сначала выберите клиента' : 'Сначала выберите клиента, к которому относится расход');
       }
 
-      return [...prev, created.id];
-    });
-    setCaseDropdownOpen(false);
-    setCreateCaseOpen(false);
+      const created = await awaitOwnedUiResult(() => apiService.createCase({
+        clientId: caseOwnerClientIdNumber,
+        legalEntityId: caseOwnerLegalEntityIdNumber,
+        title: patch.title?.trim() ?? '',
+        description: patch.description?.trim(),
+        status: patch.status ?? 'Open',
+        caseNumber: patch.caseNumber?.trim() ?? '',
+        caseType: patch.caseType?.trim() ?? '',
+        stage: patch.stage?.trim() ?? '',
+        responsibleUserId: patch.responsibleUserId ?? null,
+        startDate: patch.startDate ?? null,
+        dueDate: patch.dueDate ?? null,
+        feeAmount: patch.feeAmount ?? 0,
+        priority: patch.priority ?? 'normal',
+        courtName: patch.courtName?.trim() ?? '',
+        courtCaseNumber: patch.courtCaseNumber?.trim() ?? '',
+        courtUrl: patch.courtUrl?.trim() ?? '',
+        nextHearingAt: patch.nextHearingAt ?? null,
+        claimant: patch.claimant?.trim() ?? '',
+        defendant: patch.defendant?.trim() ?? '',
+        thirdParties: patch.thirdParties?.trim() ?? '',
+        representatives: patch.representatives?.trim() ?? '',
+        judgeName: patch.judgeName?.trim() ?? '',
+        courtroom: patch.courtroom?.trim() ?? '',
+        courtSecretaryContacts: patch.courtSecretaryContacts?.trim() ?? '',
+        claimFiledAt: patch.claimFiledAt ?? null,
+        appealDeadlineAt: patch.appealDeadlineAt ?? null,
+        motionDeadlineAt: patch.motionDeadlineAt ?? null,
+        objectionDeadlineAt: patch.objectionDeadlineAt ?? null,
+        documentsSummary: patch.documentsSummary?.trim() ?? '',
+        eventHistory: patch.eventHistory?.trim() ?? '',
+        strategy: patch.strategy?.trim() ?? '',
+      }), operation.isCurrent);
+      if (!created || !Number.isInteger(created.id) || created.id <= 0
+        || !isClientCaseLinkedToOwner(created, caseOwnerClientIdNumber, caseOwnerLegalEntityIdNumber))
+        throw new Error('Не удалось подтвердить принадлежность созданного дела. Откройте список дел повторно.');
+
+      // A list requested before this successful creation must not erase the new case.
+      ++clientCasesLoadGeneration.current;
+      setClientCasesLoading(false);
+      setClientCaseOptions((prev) => {
+        const next = [created, ...prev.filter((item) => item.id !== created.id)];
+        return next.sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+      });
+      onClientCaseCreated?.(created);
+      setSelectedClientCaseIds((prev) => {
+        if (prev.includes(created.id)) return prev;
+        if (prev.length >= invoiceRules.maxClientCasesPerInvoice) {
+          toast.error(`В счёте можно выбрать не более ${invoiceRules.maxClientCasesPerInvoice} дела(дел).`, 'Ограничение счёта');
+          return prev;
+        }
+
+        return [...prev, created.id];
+      });
+      setCaseDropdownOpen(false);
+      setCreateCaseOpen(false);
+    } finally { operation.finish(); }
   };
 
   const handleCreateAct = async () => {
@@ -3661,8 +3681,8 @@ export function InvoiceModal({
                 type="button"
                 title="Создать дело"
                 aria-label="Создать дело"
-                onClick={() => setCreateCaseOpen(true)}
-                disabled={!caseOwnerKey}
+                onClick={() => { if (canCreateRelatedCase && !caseCreation.busy) setCreateCaseOpen(true); }}
+                disabled={!caseOwnerKey || !canCreateRelatedCase || caseCreation.busy}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Plus className="h-4 w-4" />
@@ -5899,8 +5919,9 @@ export function InvoiceModal({
       )}
 
       <CaseModal
-        isOpen={createCaseOpen}
-        onClose={() => setCreateCaseOpen(false)}
+        key={caseCreation.scope}
+        isOpen={createCaseOpen && canCreateRelatedCase}
+        onClose={() => { if (caseCreation.capture()) { caseCreation.invalidate(); setCreateCaseOpen(false); } }}
         caseData={createCaseStub}
         onSave={handleCreateClientCase}
         overlayClassName="z-[2300]"
