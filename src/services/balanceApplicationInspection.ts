@@ -23,8 +23,8 @@ export function parseBalanceApplicationInspection(value: unknown, requestId: str
   const expected = key(requestId);
   const invalid = () => new Error('Результат проверки зачёта не подтверждён. Обновите проверку перед новым зачётом.');
   if (!positiveId(paymentId) || !record(value) || value.paymentId !== paymentId || key(value.requestId) !== expected) throw invalid();
-  if (value.state === 'Unconfirmed' && value.result === null)
-    return { requestId: expected, paymentId, state: 'Unconfirmed', result: null };
+  if ((value.state === 'Unconfirmed' || value.state === 'Cancelled') && value.result === null)
+    return { requestId: expected, paymentId, state: value.state, result: null };
   const result = value.result;
   if (value.state !== 'Committed' || !record(result) || key(result.requestId) !== expected || result.isReplay !== true
     || typeof result.appliedAmount !== 'number' || !Number.isFinite(result.appliedAmount) || result.appliedAmount <= 0

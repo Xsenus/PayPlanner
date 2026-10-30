@@ -52,3 +52,8 @@ public sealed class BalanceApplicationInspectionDto
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public BalanceApplicationResultDto? Result { get; set; }
 }
+
+public sealed class CancelBalanceApplicationRequest
+{
+    public int PaymentId { get; set; }
+}

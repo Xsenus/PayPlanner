@@ -24,6 +24,53 @@ public sealed class BalanceApplicationHttpTests
     [InlineData(true, false)]
     [InlineData(false, true)]
     [InlineData(true, true)]
+    public async Task WireCancel_ClosesOnlyAnUncommittedAttemptAndNeverRefunds(bool legalEntity, bool committed)
+    {
+        await using var db = await SqliteTestContextFactory.CreateAsync();
+        var fixture = await SeedAsync(db, legalEntity); var request = Request(fixture);
+        if (committed) Result(await ApplyAsync(db, fixture, request));
+        using var server = CreateServer(db); using var client = server.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Fixture-User", fixture.ActorId.ToString());
+        var route = $"/api/{(legalEntity ? "legal-entities" : "clients")}/{fixture.OwnerId}/balance/applications/{request.RequestId}/cancel";
+        using var response = await client.PostAsJsonAsync(route, new { paymentId = fixture.PaymentId });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode); Assert.True(response.Headers.CacheControl?.NoStore);
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(committed ? "Committed" : "Cancelled", json.GetProperty("state").GetString());
+        Assert.Equal(fixture.PaymentId, json.GetProperty("paymentId").GetInt32());
+        Assert.Equal(request.RequestId, json.GetProperty("requestId").GetGuid());
+        if (committed) Assert.Equal(25m, json.GetProperty("result").GetProperty("appliedAmount").GetDecimal());
+        else Assert.Equal(JsonValueKind.Null, json.GetProperty("result").ValueKind);
+        using var repeated = await client.PostAsJsonAsync(route, new { paymentId = fixture.PaymentId });
+        Assert.Equal(HttpStatusCode.OK, repeated.StatusCode);
+        var original = await ApplyAsync(db, fixture, request);
+        if (committed) Assert.True(Result(original).IsReplay); else Assert.IsType<Microsoft.AspNetCore.Mvc.ConflictObjectResult>(original);
+        Assert.Equal(committed ? 25m : 0m, (await db.Payments.AsNoTracking().SingleAsync()).PaidAmount);
+        Assert.Single(await db.BalanceApplicationReceipts.ToArrayAsync());
+        Assert.Equal(committed ? 2 : 1, await db.ClientBalanceTransactions.CountAsync());
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task WireCancel_AnonymousOrMalformedBodyNeverCreatesAFence(bool legalEntity, bool anonymous)
+    {
+        await using var db = await SqliteTestContextFactory.CreateAsync();
+        var fixture = await SeedAsync(db, legalEntity);
+        using var server = CreateServer(db); using var client = server.CreateClient();
+        if (!anonymous) client.DefaultRequestHeaders.Add("X-Fixture-User", fixture.ActorId.ToString());
+        var route = $"/api/{(legalEntity ? "legal-entities" : "clients")}/{fixture.OwnerId}/balance/applications/{Guid.NewGuid()}/cancel";
+        using var response = await client.PostAsJsonAsync(route, new { paymentId = "invalid" });
+        Assert.Equal(anonymous ? HttpStatusCode.Unauthorized : HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Empty(await db.BalanceApplicationReceipts.ToArrayAsync());
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
     public async Task WireInspect_ReturnsNoStoreAndDistinguishesCommittedFromUnconfirmed(bool legalEntity, bool committed)
     {
         await using var db = await SqliteTestContextFactory.CreateAsync();

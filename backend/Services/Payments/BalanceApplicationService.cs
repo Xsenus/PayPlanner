@@ -33,21 +33,20 @@ internal static class BalanceApplicationService
             var receipt = await db.BalanceApplicationReceipts.AsNoTracking()
                 .Where(r => r.RequestId == key && r.ActorUserId == actorId.Value && r.PaymentId == paymentId
                     && r.ClientId == clientId && r.LegalEntityId == legalEntityId)
-                .Select(r => new BalanceApplicationResultDto
+                .Select(r => new BalanceApplicationReceipt
                 {
                     RequestId = r.RequestId,
+                    PaymentId = r.PaymentId,
+                    State = r.State,
                     AppliedAmount = r.AppliedAmount,
-                    Balance = r.Balance,
-                    IsReplay = true,
+                    Balance = r.Balance
                 }).SingleOrDefaultAsync(ct);
-            var status = new BalanceApplicationInspectionDto { RequestId = key, PaymentId = paymentId, Result = receipt };
             if (receipt is null)
             {
                 // Absence is NOT cancellation: a delayed original request may still arrive.
-                return new AcceptedResult((string?)null, status);
+                return new AcceptedResult((string?)null, new BalanceApplicationInspectionDto { RequestId = key, PaymentId = paymentId });
             }
-            status.State = "Committed";
-            return new OkObjectResult(status);
+            return new OkObjectResult(Outcome(receipt));
         }
         catch (Exception error) when (BalanceApplicationLease.IsConflict(error))
         {
@@ -55,6 +54,74 @@ internal static class BalanceApplicationService
         }
         finally { if (lease is not null) await lease.DisposeAsync(); }
     }
+
+    public static async Task<IActionResult> CancelAsync(PaymentContext db, int? clientId, int? legalEntityId,
+        Guid key, int paymentId, HttpContext context, Func<CancellationToken, Task<IActionResult?>> authorize, CancellationToken ct)
+    {
+        var actorId = context.User.GetUserId();
+        if (actorId is not > 0) return new UnauthorizedResult();
+        if (key == Guid.Empty || paymentId <= 0) return new BadRequestResult();
+        BalanceApplicationLease? lease = null;
+        try
+        {
+            lease = await BalanceApplicationLease.BeginAsync(db, actorId.Value, ct);
+            if (!await db.Users.AsNoTracking().AnyAsync(user => user.Id == actorId.Value && user.IsActive && user.IsApproved, ct))
+                return new UnauthorizedResult();
+            if (await authorize(ct) is { } denied) return denied;
+            if (!await db.Payments.AsNoTracking().AnyAsync(p => p.Id == paymentId && p.ClientId == clientId && p.LegalEntityId == legalEntityId, ct))
+                return new NotFoundResult();
+            await lease.LockOwnedPaymentAsync(paymentId, clientId, legalEntityId, ct);
+            var receipt = await db.BalanceApplicationReceipts.AsNoTracking().SingleOrDefaultAsync(r => r.RequestId == key, ct);
+            if (receipt is not null)
+            {
+                if (receipt.ActorUserId != actorId.Value || receipt.ClientId != clientId || receipt.LegalEntityId != legalEntityId || receipt.PaymentId != paymentId)
+                    return new NotFoundResult();
+                // Cancellation never reverses money or rewrites an existing outcome.
+                return new OkObjectResult(Outcome(receipt));
+            }
+            receipt = new BalanceApplicationReceipt
+            {
+                RequestId = key,
+                ActorUserId = actorId.Value,
+                ClientId = clientId,
+                LegalEntityId = legalEntityId,
+                PaymentId = paymentId,
+                State = BalanceApplicationState.Cancelled,
+                CommandVersion = Version,
+                CreatedAtUtc = DateTime.UtcNow,
+            };
+            db.BalanceApplicationReceipts.Add(receipt);
+            await db.SaveChangesAsync(ct);
+            await lease.CommitAsync(ct);
+            return new OkObjectResult(Outcome(receipt));
+        }
+        catch (Exception error) when (BalanceApplicationLease.IsConflict(error)
+            && (lease?.CommitStarted != true || BalanceApplicationLease.IsDefiniteDatabaseAbort(error)))
+        {
+            return new ConflictObjectResult(new { message = FinancialConcurrencyGuard.ConflictMessage });
+        }
+        finally { if (lease is not null) await lease.DisposeAsync(); }
+    }
+
+    private static BalanceApplicationInspectionDto Outcome(BalanceApplicationReceipt receipt)
+        => new()
+        {
+            RequestId = receipt.RequestId,
+            PaymentId = receipt.PaymentId,
+            State = receipt.State switch
+            {
+                BalanceApplicationState.Committed => "Committed",
+                BalanceApplicationState.Cancelled => "Cancelled",
+                _ => throw new InvalidOperationException("Unknown balance-application outcome."),
+            },
+            Result = receipt.State == BalanceApplicationState.Committed ? new BalanceApplicationResultDto
+            {
+                RequestId = receipt.RequestId,
+                AppliedAmount = receipt.AppliedAmount,
+                Balance = receipt.Balance,
+                IsReplay = true,
+            } : null,
+        };
 
     private const string Version = "balance-apply-v1";
     internal static string CommandHash(int? clientId, int? legalEntityId, ApplyClientBalanceRequest request)
@@ -94,6 +161,10 @@ internal static class BalanceApplicationService
             if (receipt is not null)
             {
                 if (receipt.ActorUserId != actorId.Value) return new NotFoundResult();
+                if (receipt.State == BalanceApplicationState.Cancelled)
+                    return new ConflictObjectResult(new { message = "Эта попытка зачёта отменена. Поздний повтор не выполнит списание." });
+                if (receipt.State != BalanceApplicationState.Committed)
+                    return new ConflictObjectResult(new { message = "Результат зачёта не подтверждён. Обновите проверку." });
                 if (receipt.CommandVersion != Version || receipt.CommandSha256 != hash
                     || receipt.ClientId != clientId || receipt.LegalEntityId != legalEntityId || receipt.PaymentId != request.PaymentId)
                     return new ConflictObjectResult(new { message = "Параметры этого зачёта уже зафиксированы. Проверьте результат перед новой операцией." });

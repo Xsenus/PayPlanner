@@ -1193,13 +1193,14 @@ public class PaymentContext : DbContext
             entity.ToTable("BalanceApplicationReceipts", table =>
             {
                 table.HasCheckConstraint("CK_BalanceApplicationReceipts_Owner", "(\"ClientId\" IS NOT NULL AND \"LegalEntityId\" IS NULL) OR (\"ClientId\" IS NULL AND \"LegalEntityId\" IS NOT NULL)");
-                table.HasCheckConstraint("CK_BalanceApplicationReceipts_Outcome", "\"ActorUserId\" > 0 AND \"PaymentId\" > 0 AND \"AppliedAmount\" > 0 AND length(\"CommandSha256\") = 64");
+                table.HasCheckConstraint("CK_BalanceApplicationReceipts_Outcome", "\"ActorUserId\" > 0 AND \"PaymentId\" > 0 AND ((\"State\" = 'Committed' AND \"AppliedAmount\" > 0 AND \"CommandSha256\" IS NOT NULL AND length(\"CommandSha256\") = 64) OR (\"State\" = 'Cancelled' AND \"AppliedAmount\" = 0 AND \"Balance\" = 0 AND \"CommandSha256\" IS NULL))");
             });
             entity.HasKey(receipt => receipt.RequestId);
             entity.HasIndex(receipt => receipt.ActorUserId);
             entity.Property(receipt => receipt.RequestId).ValueGeneratedNever();
             entity.Property(receipt => receipt.CommandVersion).HasMaxLength(32).IsRequired();
-            entity.Property(receipt => receipt.CommandSha256).HasMaxLength(64).IsRequired();
+            entity.Property(receipt => receipt.CommandSha256).HasMaxLength(64);
+            entity.Property(receipt => receipt.State).HasConversion<string>().HasMaxLength(16).HasDefaultValue(BalanceApplicationState.Committed);
             entity.Property(receipt => receipt.AppliedAmount).HasColumnType("decimal(18,2)");
             entity.Property(receipt => receipt.Balance).HasColumnType("decimal(18,2)");
         });

@@ -15,6 +15,80 @@ public sealed class BalanceApplicationPostgresTests(PostgreSqlModelTemplate temp
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task NativePendingApply_CancelConflictsThenReturnsCommittedWithoutRefund(bool legalEntity)
+    {
+        await using var database = await template.CreateDatabaseAsync();
+        Fixture fixture;
+        await using (var seed = Open(database.ConnectionString)) fixture = await SeedAsync(seed, legalEntity);
+        var request = Request(fixture); var barrier = new HoldFirstBalanceRead();
+        await using var writer = Open(database.ConnectionString, barrier); await using var canceller = Open(database.ConnectionString);
+        var pending = ApplyAsync(writer, fixture, request);
+        await barrier.Entered.Task.WaitAsync(TimeSpan.FromSeconds(20));
+        try { Assert.IsType<ConflictObjectResult>(await BalanceApplicationCancellationTests.CancelAsync(canceller, fixture, request.RequestId!.Value).WaitAsync(TimeSpan.FromSeconds(10))); }
+        finally { barrier.Release.TrySetResult(); }
+        var applied = Result(await pending);
+        var status = BalanceApplicationCancellationTests.CancelResult(await BalanceApplicationCancellationTests.CancelAsync(canceller, fixture, request.RequestId!.Value));
+        Assert.Equal("Committed", status.State); Assert.NotNull(status.Result); Assert.Equal(applied.AppliedAmount, status.Result.AppliedAmount);
+        Assert.Equal(25m, (await canceller.Payments.AsNoTracking().SingleAsync()).PaidAmount);
+        Assert.Single(await canceller.BalanceApplicationReceipts.ToArrayAsync());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NativePendingCancel_EveryConcurrentOrLateApplyIsFenced(bool legalEntity)
+    {
+        await using var database = await template.CreateDatabaseAsync();
+        Fixture fixture;
+        await using (var seed = Open(database.ConnectionString)) fixture = await SeedAsync(seed, legalEntity);
+        var request = Request(fixture); var barrier = new HoldReceiptInsert();
+        await using var canceller = Open(database.ConnectionString, barrier); await using var writer = Open(database.ConnectionString);
+        var pending = BalanceApplicationCancellationTests.CancelAsync(canceller, fixture, request.RequestId!.Value);
+        await barrier.Entered.Task.WaitAsync(TimeSpan.FromSeconds(20));
+        try { Assert.IsType<ConflictObjectResult>(await ApplyAsync(writer, fixture, request).WaitAsync(TimeSpan.FromSeconds(10))); }
+        finally { barrier.Release.TrySetResult(); }
+        Assert.Equal("Cancelled", BalanceApplicationCancellationTests.CancelResult(await pending).State);
+        Assert.IsType<ConflictObjectResult>(await ApplyAsync(writer, fixture, request));
+        Assert.Equal(0m, (await writer.Payments.AsNoTracking().SingleAsync()).PaidAmount);
+        Assert.Single(await writer.ClientBalanceTransactions.ToArrayAsync());
+        Assert.Equal(BalanceApplicationState.Cancelled, (await writer.BalanceApplicationReceipts.SingleAsync()).State);
+    }
+
+    [Fact]
+    public async Task NativeCancelUnknownAcknowledgement_RecoversTheFenceWithoutSpendingMoney()
+    {
+        await using var database = await template.CreateDatabaseAsync();
+        Fixture fixture;
+        await using (var seed = Open(database.ConnectionString)) fixture = await SeedAsync(seed, false);
+        var request = Request(fixture);
+        await using (var failing = Open(database.ConnectionString, new LoseAcknowledgement()))
+            await Assert.ThrowsAsync<IOException>(() => BalanceApplicationCancellationTests.CancelAsync(failing, fixture, request.RequestId!.Value));
+        await using var fresh = Open(database.ConnectionString);
+        Assert.Equal("Cancelled", BalanceApplicationInspectionTests.InspectResult(await BalanceApplicationInspectionTests.InspectAsync(fresh, fixture, request.RequestId!.Value)).State);
+        Assert.IsType<ConflictObjectResult>(await ApplyAsync(fresh, fixture, request));
+        Assert.Equal(0m, (await fresh.Payments.AsNoTracking().SingleAsync()).PaidAmount);
+    }
+
+    [Theory]
+    [InlineData(PostgresErrorCodes.SerializationFailure)]
+    [InlineData(PostgresErrorCodes.DeadlockDetected)]
+    public async Task NativeCancelDefiniteAbort_RollsBackTheFenceAndAllowsTheOriginal(string sqlState)
+    {
+        await using var database = await template.CreateDatabaseAsync();
+        Fixture fixture;
+        await using (var seed = Open(database.ConnectionString)) fixture = await SeedAsync(seed, false);
+        var request = Request(fixture);
+        await using (var failing = Open(database.ConnectionString, new AbortCommit(sqlState)))
+            Assert.IsType<ConflictObjectResult>(await BalanceApplicationCancellationTests.CancelAsync(failing, fixture, request.RequestId!.Value));
+        await using var fresh = Open(database.ConnectionString);
+        Assert.Empty(await fresh.BalanceApplicationReceipts.ToArrayAsync());
+        Assert.False(Result(await ApplyAsync(fresh, fixture, request)).IsReplay);
+        Assert.Equal(25m, (await fresh.Payments.AsNoTracking().SingleAsync()).PaidAmount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task NativeInspect_SeesCommittedOnlyAfterThePendingWriterFinishes(bool legalEntity)
     {
         await using var database = await template.CreateDatabaseAsync();
@@ -191,6 +265,17 @@ public sealed class BalanceApplicationPostgresTests(PostgreSqlModelTemplate temp
     {
         public override ValueTask<InterceptionResult> TransactionCommittingAsync(DbTransaction transaction, TransactionEventData eventData, InterceptionResult result, CancellationToken ct = default)
             => throw new PostgresException("Synthetic definite server abort", "ERROR", "ERROR", sqlState);
+    }
+    private sealed class HoldReceiptInsert : DbCommandInterceptor
+    {
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken ct = default)
+        {
+            if (command.CommandText.Contains("INSERT INTO \"BalanceApplicationReceipts\"", StringComparison.Ordinal))
+            { Entered.TrySetResult(); await Release.Task.WaitAsync(TimeSpan.FromSeconds(30), ct); }
+            return await base.ReaderExecutingAsync(command, eventData, result, ct);
+        }
     }
     private sealed class LoseAcknowledgement : DbTransactionInterceptor
     {

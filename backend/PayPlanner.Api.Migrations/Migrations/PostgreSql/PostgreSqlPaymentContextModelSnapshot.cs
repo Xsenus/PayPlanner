@@ -584,7 +584,6 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("integer");
 
                     b.Property<string>("CommandSha256")
-                        .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
@@ -602,13 +601,20 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<int>("PaymentId")
                         .HasColumnType("integer");
 
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("Committed");
+
                     b.HasKey("RequestId");
 
                     b.HasIndex("ActorUserId");
 
                     b.ToTable("BalanceApplicationReceipts", null, t =>
                         {
-                            t.HasCheckConstraint("CK_BalanceApplicationReceipts_Outcome", "\"ActorUserId\" > 0 AND \"PaymentId\" > 0 AND \"AppliedAmount\" > 0 AND length(\"CommandSha256\") = 64");
+                            t.HasCheckConstraint("CK_BalanceApplicationReceipts_Outcome", "\"ActorUserId\" > 0 AND \"PaymentId\" > 0 AND ((\"State\" = 'Committed' AND \"AppliedAmount\" > 0 AND \"CommandSha256\" IS NOT NULL AND length(\"CommandSha256\") = 64) OR (\"State\" = 'Cancelled' AND \"AppliedAmount\" = 0 AND \"Balance\" = 0 AND \"CommandSha256\" IS NULL))");
 
                             t.HasCheckConstraint("CK_BalanceApplicationReceipts_Owner", "(\"ClientId\" IS NOT NULL AND \"LegalEntityId\" IS NULL) OR (\"ClientId\" IS NULL AND \"LegalEntityId\" IS NOT NULL)");
                         });

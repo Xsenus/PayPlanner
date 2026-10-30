@@ -6094,6 +6094,24 @@ export class ApiService {
     return this.inspectBalanceApplication('legalEntity', id, paymentId, requestId, signal);
   }
 
+  private async cancelBalanceApplication(kind: BalanceApplicationOwnerKind, id: number, paymentId: number, requestId: string, signal?: AbortSignal) {
+    const path = `${balanceApplicationInspectionPath(kind, id, paymentId, requestId).split('?')[0]}/cancel`;
+    const value = await this.request<unknown>(path, {
+      method: 'POST', body: JSON.stringify({ paymentId }), signal, cache: 'no-store', expectedStatus: 200,
+    });
+    const status = parseBalanceApplicationInspection(value, requestId, paymentId);
+    if (status.state === 'Unconfirmed') throw new Error('Отмена зачёта ещё не подтверждена. Проверьте результат перед новым зачётом.');
+    return status;
+  }
+
+  async cancelClientBalanceApplication(id: number, paymentId: number, requestId: string, signal?: AbortSignal) {
+    return this.cancelBalanceApplication('client', id, paymentId, requestId, signal);
+  }
+
+  async cancelLegalEntityBalanceApplication(id: number, paymentId: number, requestId: string, signal?: AbortSignal) {
+    return this.cancelBalanceApplication('legalEntity', id, paymentId, requestId, signal);
+  }
+
   async getLegalEntityBalance(id: number) {
     return this.request<ClientBalanceSummary>(`/legal-entities/${id}/balance`);
   }

@@ -3581,6 +3581,7 @@ export type BalanceApplicationInspection = {
   paymentId: number;
 } & (
   | { state: 'Unconfirmed'; result: null }
+  | { state: 'Cancelled'; result: null }
   | { state: 'Committed'; result: ApplyClientBalanceResult & { requestId: string; isReplay: true } }
 );
 

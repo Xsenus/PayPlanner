@@ -124,6 +124,17 @@ public class LegalEntityBalancesController : ControllerBase
                 return null;
             }, ct);
 
+    [HttpPost("applications/{requestId:guid}/cancel")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<IActionResult> CancelApplication(int legalEntityId, Guid requestId, [FromBody] CancelBalanceApplicationRequest request, CancellationToken ct)
+        => await PayPlanner.Api.Services.Payments.BalanceApplicationService.CancelAsync(_db, null, legalEntityId, requestId, request.PaymentId, HttpContext,
+            async token =>
+            {
+                if (await RequireVisibleLegalEntityAsync(legalEntityId, token) is { } denied) return denied;
+                if (!await CanEditPaymentsAsync(token) || !await CanViewFullBalanceAsync(token)) return Forbid();
+                return null;
+            }, ct);
+
     [HttpPost("apply")]
     public async Task<IActionResult> ApplyCredit(
         int legalEntityId,

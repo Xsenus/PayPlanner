@@ -1,8 +1,11 @@
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Responses;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -60,6 +63,9 @@ public sealed class BalanceApplicationMigrationTests
     {
         int? paymentId = null;
         int? ledgerId = null;
+        BalanceApplicationIdempotencyTests.Fixture? originalFixture = null;
+        ApplyClientBalanceRequest? originalRequest = null;
+        string? originalHash = null;
         if (upgrade)
         {
             await db.Database.MigrateAsync(previous);
@@ -71,6 +77,31 @@ public sealed class BalanceApplicationMigrationTests
             db.ClientBalanceTransactions.Add(ledger);
             await db.SaveChangesAsync();
             paymentId = payment.Id; ledgerId = ledger.Id;
+            db.ChangeTracker.Clear();
+            // Exercise a genuinely old receipt table: its schema has no State column yet.
+            await db.Database.MigrateAsync(current);
+            originalFixture = await BalanceApplicationIdempotencyTests.SeedAsync(db, false);
+            originalRequest = BalanceApplicationIdempotencyTests.Request(originalFixture);
+            var target = await db.Payments.SingleAsync(p => p.Id == originalFixture.PaymentId);
+            target.PaidAmount = 25m;
+            db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
+            {
+                ClientId = originalFixture.OwnerId,
+                PaymentId = target.Id,
+                Type = ClientBalanceTransactionType.CreditApplied,
+                Direction = ClientBalanceDirection.Debit,
+                Amount = 25m,
+                Description = "Preserve old application"
+            });
+            await db.SaveChangesAsync();
+            // Frozen v1 fixture, independent of the current private command builder.
+            var command = FormattableString.Invariant($"{{\"Version\":\"balance-apply-v1\",\"ClientId\":{originalFixture.OwnerId},\"LegalEntityId\":null,\"PaymentId\":{originalFixture.PaymentId},\"Amount\":\"25\",\"Description\":\"\",\"SourcePaymentId\":null}}");
+            originalHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(command)));
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO "BalanceApplicationReceipts"
+                    ("RequestId", "ActorUserId", "CommandSha256", "CommandVersion", "ClientId", "LegalEntityId", "PaymentId", "AppliedAmount", "Balance", "CreatedAtUtc")
+                VALUES ({originalRequest.RequestId!.Value}, {originalFixture.ActorId}, {originalHash}, 'balance-apply-v1', {originalFixture.OwnerId}, NULL, {originalFixture.PaymentId}, {25m}, {75m}, '2026-10-31 00:00:00')
+                """);
             db.ChangeTracker.Clear();
         }
         await db.Database.MigrateAsync();
@@ -86,12 +117,24 @@ public sealed class BalanceApplicationMigrationTests
             Assert.Equal(67.89m, ledger.Amount); Assert.Equal(payment.Id, ledger.PaymentId);
             Assert.Equal("Preserve old credit", ledger.Description); Assert.Equal("historical-synthetic-key", ledger.ExternalKey);
             Assert.Equal(payment.ClientId, ledger.ClientId);
+            var oldReceipt = await db.BalanceApplicationReceipts.AsNoTracking().SingleAsync(r => r.RequestId == originalRequest!.RequestId);
+            Assert.Equal(BalanceApplicationState.Committed, oldReceipt.State);
+            Assert.Equal(originalHash, oldReceipt.CommandSha256);
+            var replay = BalanceApplicationIdempotencyTests.Result(await BalanceApplicationIdempotencyTests.ApplyAsync(db, originalFixture!, originalRequest!));
+            Assert.True(replay.IsReplay); Assert.Equal(25m, replay.AppliedAmount); Assert.Equal(75m, replay.Balance);
+            Assert.Equal(25m, (await db.Payments.AsNoTracking().SingleAsync(p => p.Id == originalFixture!.PaymentId)).PaidAmount);
         }
-        db.BalanceApplicationReceipts.Add(new BalanceApplicationReceipt { RequestId = Guid.NewGuid(), ActorUserId = 11, ClientId = 22, PaymentId = 33, CommandSha256 = new string('a', 64), AppliedAmount = 1.23m, Balance = 4.56m, CreatedAtUtc = DateTime.UtcNow });
+        var newKey = Guid.NewGuid();
+        db.BalanceApplicationReceipts.Add(new BalanceApplicationReceipt { RequestId = newKey, ActorUserId = 11, ClientId = 22, PaymentId = 33, CommandSha256 = new string('a', 64), AppliedAmount = 1.23m, Balance = 4.56m, CreatedAtUtc = DateTime.UtcNow });
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
-        var receipt = Assert.Single(await db.BalanceApplicationReceipts.AsNoTracking().ToArrayAsync());
+        var receipt = Assert.Single(await db.BalanceApplicationReceipts.AsNoTracking().Where(r => r.RequestId == newKey).ToArrayAsync());
         Assert.Equal(1.23m, receipt.AppliedAmount); Assert.Equal(4.56m, receipt.Balance);
+        Assert.Equal(BalanceApplicationState.Committed, receipt.State);
+        originalFixture ??= await BalanceApplicationIdempotencyTests.SeedAsync(db, false);
+        var cancelledRequest = BalanceApplicationIdempotencyTests.Request(originalFixture);
+        Assert.Equal("Cancelled", BalanceApplicationCancellationTests.CancelResult(await BalanceApplicationCancellationTests.CancelAsync(db, originalFixture, cancelledRequest.RequestId!.Value)).State);
+        Assert.IsType<Microsoft.AspNetCore.Mvc.ConflictObjectResult>(await BalanceApplicationIdempotencyTests.ApplyAsync(db, originalFixture, cancelledRequest));
         Assert.Empty(db.Model.FindEntityType(typeof(BalanceApplicationReceipt))!.GetForeignKeys());
         Assert.Equal("RequestId", Assert.Single(db.Model.FindEntityType(typeof(BalanceApplicationReceipt))!.FindPrimaryKey()!.Properties).Name);
     }

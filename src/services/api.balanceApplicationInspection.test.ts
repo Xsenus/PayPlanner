@@ -70,7 +70,7 @@ describe('balance application inspection contract', () => {
   });
   it.each([
     null, [], {}, { ...committed(), requestId: otherKey }, { ...committed(), paymentId: 20 },
-    { ...committed(), state: 'Cancelled' }, { ...committed(), state: 'committed' },
+    { ...committed(), state: 'Expired' }, { ...committed(), state: 'committed' },
     { ...committed(), result: null }, { ...committed(), result: { ...result, requestId: otherKey } },
     { ...committed(), result: { ...result, isReplay: false } }, { ...unconfirmed(), result: undefined },
     { ...unconfirmed(), result: { ...result } },
@@ -85,6 +85,8 @@ describe('balance application inspection contract', () => {
   });
   it('keeps an explicitly unconfirmed result distinct from a committed result', () => {
     expect(parseBalanceApplicationInspection(unconfirmed(), requestId, 19)).toEqual(unconfirmed());
+    expect(parseBalanceApplicationInspection({ ...unconfirmed(), state: 'Cancelled' }, requestId, 19)).toEqual({ ...unconfirmed(), state: 'Cancelled' });
+    expect(() => parseBalanceApplicationInspection({ ...committed(), state: 'Cancelled' }, requestId, 19)).toThrow();
     expect(parseBalanceApplicationInspection({ ...committed(), result: { ...result, balance: -5.12 } }, requestId, 19)).toMatchObject({ state: 'Committed', result: { balance: -5.12 } });
   });
 });
