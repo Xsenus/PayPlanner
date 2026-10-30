@@ -6275,8 +6275,8 @@ export class ApiService {
     return this.request<void>(`/banks/${id}`, { method: 'DELETE' });
   }
 
-  async getCompanyRequisitesCheck(companyId: number) {
-    return this.request<RequisitesCheck>(`/legal-entities/${companyId}/requisites-check`);
+  async getCompanyRequisitesCheck(companyId: number, signal?: AbortSignal) {
+    return this.request<RequisitesCheck>(`/legal-entities/${companyId}/requisites-check`, { signal, cache: 'no-store' });
   }
 
   async getBankConnections(companyId: number) {

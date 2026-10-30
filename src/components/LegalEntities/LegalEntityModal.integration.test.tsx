@@ -574,7 +574,8 @@ describe('LegalEntityModal integration', () => {
     expect(screen.getByText('ООО Пример')).toBeTruthy();
   });
 
-  it('allows delegated profile requisites editing without administrator or financial actions', async () => {
+  it.each([false, true])('allows delegated profile requisites editing without administrator or financial actions when checkFailed=%s', async checkFailed => {
+    if (checkFailed) vi.mocked(apiService.getCompanyRequisitesCheck).mockRejectedValueOnce(new Error('Проверка временно недоступна'));
     const user = userEvent.setup();
     const initial = createInitialLegalEntity({ id: 9, shortName: 'Assigned own company' });
     const onSubmit = vi.fn().mockResolvedValue(initial);
@@ -584,7 +585,9 @@ describe('LegalEntityModal integration', () => {
       canCreateAccounts={false} canViewActs={false} canViewPayments={false} />);
     await screen.findByText('Печать компании');
     expect(vi.mocked(apiService.getCompanyBranches)).not.toHaveBeenCalled();
-    expect(vi.mocked(apiService.getCompanyRequisitesCheck)).not.toHaveBeenCalled();
+    if (checkFailed) expect(await screen.findByText('Проверка временно недоступна')).toBeTruthy();
+    else expect(await screen.findByText('По проверяемым реквизитам замечаний нет.')).toBeTruthy();
+    expect(vi.mocked(apiService.getCompanyRequisitesCheck)).toHaveBeenCalledExactlyOnceWith(9, expect.any(AbortSignal));
     expect(vi.mocked(apiService.getBankConnections)).not.toHaveBeenCalled();
     expect(screen.queryByLabelText('Состояние профиля компании')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Добавить клиента' })).toBeNull();
@@ -595,7 +598,7 @@ describe('LegalEntityModal integration', () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ shortName: 'Updated own company' })));
   });
 
-  it('renders company profile page as read-only when profile mode hides editing controls', () => {
+  it('renders company profile page as read-only when profile mode hides editing controls', async () => {
     const initial = createInitialLegalEntity({
       shortName: 'ИП Кожеваткин Андрей Владимирович',
       fullName: 'Индивидуальный предприниматель Кожеваткин Андрей Владимирович',
@@ -628,6 +631,8 @@ describe('LegalEntityModal integration', () => {
     );
 
     expect(screen.getByText('Профиль компании')).toBeTruthy();
+    expect(await screen.findByText('По проверяемым реквизитам замечаний нет.')).toBeTruthy();
+    expect(vi.mocked(apiService.getCompanyRequisitesCheck)).toHaveBeenCalledExactlyOnceWith(initial.id, expect.any(AbortSignal));
     expect(screen.queryByRole('button', { name: 'Назад' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Сохранить' })).toBeNull();
     expect(screen.queryByText('Заполнить по данным DaData')).toBeNull();

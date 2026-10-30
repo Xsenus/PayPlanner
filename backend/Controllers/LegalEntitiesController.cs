@@ -1947,11 +1947,17 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
     /// Ничего не меняет и не блокирует сохранение — возвращает список замечаний для экрана профиля компании.
     /// </summary>
     [HttpGet("{id:int}/requisites-check")]
-    [Authorize(Policy = "Admin")]
     public async Task<ActionResult<RequisitesCheckResponse>> CheckRequisites(int id, CancellationToken ct)
     {
+        if (!await IsDatabaseAdminAsync(ct))
+        {
+            var access = await CompanyProfileAccess.ResolveAsync(_db, User, ct);
+            if (access is null || !access.CompanyIds.Contains(id)) return NotFound();
+        }
+
         var entity = await _db.LegalEntities
             .AsNoTracking()
+            .Select(le => new { le.Id, le.Inn, le.Kpp, le.Ogrn, le.BankAccountsJson })
             .FirstOrDefaultAsync(le => le.Id == id, ct);
         if (entity is null)
         {

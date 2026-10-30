@@ -4718,7 +4718,6 @@ export function LegalEntityModal({
                 <option value="Archived">В архиве</option>
               </SystemSelect>
             </div>
-            <CompanyRequisitesCheck companyId={currentLegalEntityId} refreshKey={initial?.updatedAt} />
             <CompanyBankConnectionsSection companyId={currentLegalEntityId} />
             <CompanyTaxRegisterSection companyId={currentLegalEntityId} />
             <CompanyBranchesSection
@@ -4735,6 +4734,10 @@ export function LegalEntityModal({
             disabled={readOnly || loading}
             onChange={value => setPrintDefaultsDraft(previous => ({ ...previous, value, touched: true }))}
           />
+        ) : null}
+
+        {isOwnLegalEntity && currentLegalEntityId !== null ? (
+          <CompanyRequisitesCheck companyId={currentLegalEntityId} refreshKey={initial?.updatedAt} />
         ) : null}
 
         {isOwnLegalEntity ? (

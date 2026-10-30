@@ -21,15 +21,17 @@ describe('CompanyRequisitesCheck', () => {
     expect(await screen.findByText('ИНН не проходит проверку контрольных разрядов.')).toBeTruthy();
   });
 
-  it('renders nothing when everything is fine or the check fails', async () => {
+  it('shows that the saved data check completed without issues', async () => {
     vi.mocked(apiService.getCompanyRequisitesCheck).mockResolvedValueOnce({ legalEntityId: 5, issues: [] });
-    const first = render(<CompanyRequisitesCheck companyId={5} />);
+    render(<CompanyRequisitesCheck companyId={5} />);
     await waitFor(() => expect(apiService.getCompanyRequisitesCheck).toHaveBeenCalledTimes(1));
-    expect(first.container.textContent).toBe('');
+    expect(await screen.findByText('По проверяемым реквизитам замечаний нет.')).toBeTruthy();
+  });
 
+  it('does not present an access failure as a successful check', async () => {
     vi.mocked(apiService.getCompanyRequisitesCheck).mockRejectedValueOnce(new Error('403'));
-    const second = render(<CompanyRequisitesCheck companyId={6} />);
-    await waitFor(() => expect(apiService.getCompanyRequisitesCheck).toHaveBeenCalledTimes(2));
-    expect(second.container.textContent).toBe('');
+    render(<CompanyRequisitesCheck companyId={6} />);
+    expect((await screen.findByRole('alert')).textContent).toContain('403');
+    expect(screen.queryByText('По проверяемым реквизитам замечаний нет.')).toBeNull();
   });
 });
