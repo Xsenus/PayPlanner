@@ -3,6 +3,8 @@ import { createContext } from 'react';
 export type DialogVariant = 'primary' | 'danger' | 'success' | 'error';
 
 export interface ConfirmOptions {
+  /** Cancels this confirmation when its owning screen is no longer current. */
+  signal?: AbortSignal;
   title: string;
   description?: string;
   confirmLabel?: string;

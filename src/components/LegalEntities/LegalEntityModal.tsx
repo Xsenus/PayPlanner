@@ -1,4 +1,6 @@
 import { PaymentCreateAdoptedError } from '../../services/paymentCreateAttempts';
+import { captureAuthSessionIdentity, isAuthSessionIdentityCurrent } from '../../services/authService';
+import { useAsyncOperationOwner } from '../../hooks/useAsyncOperationOwner';
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
@@ -104,13 +106,14 @@ import { CompanyTaxRegisterSection } from "./CompanyTaxRegisterSection";
 import { LegalEntityFinanceSection } from "./LegalEntityFinanceSection";
 import { CompanyImagePrintDefaultsSection } from './CompanyImagePrintDefaultsSection';
 import { companyImagePrintDraft, companyImagePrintPayload } from './companyImagePrintDefaults';
-import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
+import { awaitOwnedUiResult, StaleUiOperationError } from '../../utils/StaleUiOperationError';
 
 interface LegalEntityModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSubmit: (payload: LegalEntityInput) => Promise<LegalEntityDetail>;
   onDelete?: () => Promise<void>;
+  deleteOwnerScope?: string;
   initial?: LegalEntityDetail | null;
   suggest: (payload: {
     query?: string;
@@ -765,6 +768,7 @@ export function LegalEntityModal({
   onClose,
   onSubmit,
   onDelete,
+  deleteOwnerScope,
   initial,
   suggest,
   findById,
@@ -995,6 +999,20 @@ export function LegalEntityModal({
   );
 
   const readOnly = !allowEdit && !!initial;
+  const deleteSession = captureAuthSessionIdentity();
+  const { capture: captureDeleteOwner, isCurrent: isCurrentDeleteOwner } = useAsyncOperationOwner(JSON.stringify([
+    initial?.id, isOpen, readOnly, allowDelete, mode, deleteSession, deleteOwnerScope,
+  ]));
+  const deleteOwnerAtRender = captureDeleteOwner();
+  const deleteContext = useRef({ initial, isOpen, readOnly, allowDelete, mode, onDelete, onClose });
+  deleteContext.current = { initial, isOpen, readOnly, allowDelete, mode, onDelete, onClose };
+  const deleteAttempt = useRef<{ isCurrent: () => boolean; cancel: () => void } | null>(null);
+  const activeSave = useRef<{ isCurrent: () => boolean } | null>(null);
+  useEffect(() => {
+    const pending = deleteAttempt;
+    setDeleting(false);
+    return () => { const attempt = pending.current; if (attempt && !attempt.isCurrent()) attempt.cancel(); };
+  }, [initial, isOpen, readOnly, allowDelete, mode, deleteSession.epoch, deleteSession.actor, deleteSession.authenticated, deleteOwnerScope]);
   const saveLifetime = useRef({ epoch: 0 });
   const saveContext = useRef({ id: initial?.id, isOpen, readOnly, mode, initial });
   saveContext.current = { id: initial?.id, isOpen, readOnly, mode, initial };
@@ -2051,6 +2069,7 @@ export function LegalEntityModal({
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (deleteAttempt.current?.isCurrent()) return;
     if (loading || !isOpen) return;
     if (readOnly) {
       onClose();
@@ -2065,6 +2084,8 @@ export function LegalEntityModal({
     const isCurrentSave = () => lifetime === saveLifetime.current.epoch
       && saveContext.current.id === context.id && saveContext.current.isOpen
       && saveContext.current.readOnly === context.readOnly && saveContext.current.mode === context.mode;
+    const saveAttempt = { isCurrent: () => isCurrentSave() && saveContext.current.initial === context.initial };
+    activeSave.current = saveAttempt;
     setError(null);
     setLoading(true);
     try {
@@ -2456,31 +2477,43 @@ export function LegalEntityModal({
       setError(message);
       toast.error(message, "Ошибка сохранения");
     } finally {
+      if (activeSave.current === saveAttempt) activeSave.current = null;
       if (isCurrentSave()) setLoading(false);
     }
   };
 
   const handleDelete = async () => {
-    if (!onDelete || !initial) return;
-    if (
-      !(await confirm({
+    const context = deleteContext.current;
+    const current = () => isCurrentDeleteOwner(deleteOwnerAtRender)
+      && isAuthSessionIdentityCurrent(deleteSession)
+      && deleteContext.current.initial === context.initial && deleteContext.current.isOpen
+      && deleteContext.current.allowDelete && deleteContext.current.readOnly === context.readOnly
+      && deleteContext.current.mode === context.mode;
+    if (!current() || !deleteSession.authenticated || !context.onDelete || !context.initial
+      || deleteAttempt.current?.isCurrent() || activeSave.current?.isCurrent() || loading || imageUploadsRef.current.size > 0) return;
+    deleteAttempt.current?.cancel();
+    const controller = new AbortController();
+    const attempt = { isCurrent: current, cancel: () => controller.abort() };
+    deleteAttempt.current = attempt;
+    setDeleting(true);
+    setError(null);
+    try {
+      const approved = await awaitOwnedUiResult(() => confirm({
+        signal: controller.signal,
         title: "Подтверждение удаления",
         description:
-          initial.clientsCount > 0
-            ? `Удалить юридическое лицо? Карточки связанных клиентов (${initial.clientsCount}) сохранятся, связь с этой организацией будет снята.`
+          context.initial!.clientsCount > 0
+            ? `Удалить юридическое лицо? Карточки связанных клиентов (${context.initial!.clientsCount}) сохранятся, связь с этой организацией будет снята.`
             : t("deleteLegalEntityConfirm") || "Удалить юридическое лицо?",
         confirmLabel: "Удалить",
         cancelLabel: "Отмена",
         variant: "danger",
-      }))
-    ) {
-      return;
-    }
-    try {
-      setDeleting(true);
-      await onDelete();
-      onClose();
+      }), current);
+      if (!approved) return;
+      await awaitOwnedUiResult(context.onDelete, current);
+      context.onClose();
     } catch (err) {
+      if (err instanceof StaleUiOperationError || !current()) return;
       const message = extractErrorMessage(
         err,
         t("legalEntityDeleteError") || "Не удалось удалить запись",
@@ -2488,7 +2521,11 @@ export function LegalEntityModal({
       setError(message);
       toast.error(message, "Удаление недоступно");
     } finally {
-      setDeleting(false);
+      if (deleteAttempt.current === attempt) {
+        deleteAttempt.current = null;
+        controller.abort();
+        if (current()) setDeleting(false);
+      }
     }
   };
 
@@ -5183,7 +5220,7 @@ export function LegalEntityModal({
                 <button
                   type="button"
                   onClick={handleDelete}
-                  disabled={deleting}
+                  disabled={deleting || loading || imageProcessing}
                   className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-100"
                 >
                   {deleting && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -5202,7 +5239,7 @@ export function LegalEntityModal({
                 </button>
                 <button
                   type="submit"
-                  disabled={loading || readOnly || imageProcessing}
+                  disabled={loading || deleting || readOnly || imageProcessing}
                   className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
                 >
                   {loading && <Loader2 className="h-4 w-4 animate-spin" />}

@@ -1,11 +1,12 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { imageFixtureBytes, imageFixtureFile, installBlobArrayBufferForTests } from './legalEntityImageTestFixtures';
 
 import { LegalEntityModal } from './LegalEntityModal';
 import { apiService } from '../../services/api';
 import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
+import { documentCopyTestSession } from '../../test/documentCopySession';
 import type { MenuSectionPermissions } from '../../types/permissions';
 import type {
   ActsSummary,
@@ -198,6 +199,172 @@ function deferCompanyImageProcessing() {
 }
 
 describe('LegalEntityModal integration', () => {
+  describe('deletion guard', () => {
+    let session: ReturnType<typeof documentCopyTestSession>;
+    beforeEach(() => { session = documentCopyTestSession(); });
+    afterEach(() => session.restore());
+    const propsFor = (mode: 'page' | 'modal') => ({
+      isOpen: true, mode, initial: createInitialLegalEntity({ id: 7, shortName: 'Reviewed delete target' }), allowEdit: true, allowDelete: true,
+      onDelete: vi.fn().mockResolvedValue(undefined), onClose: vi.fn(), onSubmit: vi.fn(), suggest: vi.fn(), findById: vi.fn(),
+    });
+    for (const mode of ['page', 'modal'] as const) {
+      it(`deletion generation: cancels the parent role scope in ${mode}`, async () => {
+        let approve!: (value: boolean) => void;
+        confirmMock.mockReturnValue(new Promise<boolean>(resolve => { approve = resolve; }));
+        const props = propsFor(mode); const view = render(<LegalEntityModal {...props} deleteOwnerScope="role-one" />);
+        fireEvent.click(await screen.findByRole('button', { name: /^Удалить$/ }));
+        const signal = confirmMock.mock.lastCall![0].signal as AbortSignal;
+        view.rerender(<LegalEntityModal {...props} deleteOwnerScope="role-two" />);
+        expect(signal.aborted).toBe(true);
+        await act(async () => { approve(true); });
+        expect(props.onDelete).not.toHaveBeenCalled(); expect(props.onClose).not.toHaveBeenCalled();
+      });
+
+      it(`deletion generation: an old result cannot unlock a new deletion in ${mode}`, async () => {
+        let finishFirst!: () => void; let finishSecond!: () => void;
+        confirmMock.mockResolvedValue(true);
+        const first = propsFor(mode); first.onDelete.mockReturnValue(new Promise<void>(resolve => { finishFirst = resolve; }));
+        const second = { ...propsFor(mode), initial: createInitialLegalEntity({ id: 8, shortName: 'Second deletion' }) };
+        second.onDelete.mockReturnValue(new Promise<void>(resolve => { finishSecond = resolve; }));
+        const view = render(<LegalEntityModal {...first} />);
+        fireEvent.click(await screen.findByRole('button', { name: /^Удалить$/ })); await waitFor(() => expect(first.onDelete).toHaveBeenCalledOnce());
+        view.rerender(<LegalEntityModal {...second} />);
+        const button = screen.getByRole('button', { name: /^Удалить$/ }); fireEvent.click(button);
+        await waitFor(() => expect(second.onDelete).toHaveBeenCalledOnce());
+        await act(async () => { finishFirst(); });
+        expect(button).toHaveProperty('disabled', true); fireEvent.submit(button.closest('form')!);
+        expect(second.onSubmit).not.toHaveBeenCalled(); expect(first.onClose).not.toHaveBeenCalled();
+        await act(async () => { finishSecond(); }); expect(second.onClose).toHaveBeenCalledOnce();
+      });
+
+      it.each(['closed', 'permission', 'readonly', 'mode', 'same-id-data', 'unmount', 'reopen', 'permission-aba'])(`rejects a stale %s confirmation in ${mode}`, async change => {
+        let approve!: (value: boolean) => void;
+        confirmMock.mockReturnValue(new Promise<boolean>(resolve => { approve = resolve; }));
+        const props = propsFor(mode); const view = render(<LegalEntityModal {...props} />);
+        fireEvent.click(await screen.findByRole('button', { name: /^Удалить$/ }));
+        if (change === 'closed') view.rerender(<LegalEntityModal {...props} isOpen={false} />);
+        if (change === 'permission') view.rerender(<LegalEntityModal {...props} allowDelete={false} />);
+        if (change === 'readonly') view.rerender(<LegalEntityModal {...props} allowEdit={false} />);
+        if (change === 'mode') view.rerender(<LegalEntityModal {...props} mode={mode === 'page' ? 'modal' : 'page'} />);
+        if (change === 'same-id-data') view.rerender(<LegalEntityModal {...props} initial={{ ...props.initial, shortName: 'Updated same company' }} />);
+        if (change === 'unmount') view.unmount();
+        if (change === 'reopen') { view.rerender(<LegalEntityModal {...props} isOpen={false} />); view.rerender(<LegalEntityModal {...props} />); }
+        if (change === 'permission-aba') { view.rerender(<LegalEntityModal {...props} allowDelete={false} />); view.rerender(<LegalEntityModal {...props} />); }
+        await act(async () => { approve(true); });
+        expect(props.onDelete).not.toHaveBeenCalled(); expect(props.onClose).not.toHaveBeenCalled(); expect(toastErrorMock).not.toHaveBeenCalled();
+      });
+
+      it.each(['login', 'actor', 'logout'] as const)(`rejects an old %s confirmation without a rerender in ${mode}`, async change => {
+        let approve!: (value: boolean) => void;
+        confirmMock.mockReturnValue(new Promise<boolean>(resolve => { approve = resolve; }));
+        const props = propsFor(mode); render(<LegalEntityModal {...props} />);
+        fireEvent.click(await screen.findByRole('button', { name: /^Удалить$/ }));
+        session.replace(change);
+        await act(async () => { approve(true); });
+        expect(props.onDelete).not.toHaveBeenCalled(); expect(props.onClose).not.toHaveBeenCalled(); expect(toastErrorMock).not.toHaveBeenCalled();
+      });
+
+      it.each(['cancel', 'confirm-error', 'server-error'])(`preserves the draft after %s in ${mode}`, async outcome => {
+        const props = propsFor(mode);
+        if (outcome === 'cancel') confirmMock.mockResolvedValue(false);
+        if (outcome === 'confirm-error') confirmMock.mockRejectedValue(new Error('Confirmation unavailable'));
+        if (outcome === 'server-error') { confirmMock.mockResolvedValue(true); props.onDelete.mockRejectedValue(new Error('Company changed, deletion refused')); }
+        render(<LegalEntityModal {...props} />);
+        const name = await screen.findByDisplayValue('Reviewed delete target');
+        fireEvent.change(name, { target: { value: 'Unsaved company draft' } });
+        const button = screen.getByRole('button', { name: /^Удалить$/ }); fireEvent.click(button);
+        if (outcome !== 'cancel') await waitFor(() => expect(toastErrorMock).toHaveBeenCalledOnce());
+        await waitFor(() => expect(button).toHaveProperty('disabled', false));
+        expect(screen.getByDisplayValue('Unsaved company draft')).toBeTruthy(); expect(props.onClose).not.toHaveBeenCalled();
+        expect(props.onDelete).toHaveBeenCalledTimes(outcome === 'server-error' ? 1 : 0);
+      });
+
+      it.each(['normal', 'readonly', 'refresh'])(`closes exactly once after an owned %s deletion in ${mode}`, async kind => {
+        let approve!: (value: boolean) => void;
+        confirmMock.mockReturnValue(new Promise<boolean>(resolve => { approve = resolve; }));
+        const props = propsFor(mode); const view = render(<LegalEntityModal {...props} allowEdit={kind !== 'readonly'} />);
+        fireEvent.click(await screen.findByRole('button', { name: /^Удалить$/ }));
+        if (kind === 'refresh') { session.refresh(); view.rerender(<LegalEntityModal {...props} />); }
+        await act(async () => { approve(true); });
+        await waitFor(() => expect(props.onClose).toHaveBeenCalledOnce()); expect(props.onDelete).toHaveBeenCalledOnce(); expect(toastErrorMock).not.toHaveBeenCalled();
+      });
+
+      it(`blocks duplicate deletion and saving during confirmation and request in ${mode}`, async () => {
+        let approve!: (value: boolean) => void; let finish!: () => void;
+        confirmMock.mockReturnValue(new Promise<boolean>(resolve => { approve = resolve; }));
+        const props = propsFor(mode); props.onDelete.mockReturnValue(new Promise<void>(resolve => { finish = resolve; }));
+        render(<LegalEntityModal {...props} />);
+        const button = await screen.findByRole('button', { name: /^Удалить$/ }); const form = button.closest('form')!;
+        fireEvent.click(button); fireEvent.click(button); fireEvent.submit(form);
+        expect(confirmMock).toHaveBeenCalledOnce(); expect(props.onSubmit).not.toHaveBeenCalled();
+        expect(screen.getByRole('button', { name: /^Сохранить$/ })).toHaveProperty('disabled', true);
+        await act(async () => { approve(true); });
+        await waitFor(() => expect(props.onDelete).toHaveBeenCalledOnce());
+        fireEvent.click(button); fireEvent.submit(form);
+        expect(props.onDelete).toHaveBeenCalledOnce(); expect(props.onSubmit).not.toHaveBeenCalled();
+        await act(async () => { finish(); }); expect(props.onClose).toHaveBeenCalledOnce();
+      });
+
+      it(`blocks deletion while the current save is pending in ${mode}`, async () => {
+        let finish!: (value: LegalEntityDetail) => void;
+        const props = propsFor(mode); props.onSubmit.mockReturnValue(new Promise<LegalEntityDetail>(resolve => { finish = resolve; }));
+        render(<LegalEntityModal {...props} />);
+        fireEvent.click(await screen.findByRole('button', { name: /^Сохранить$/ }));
+        await waitFor(() => expect(props.onSubmit).toHaveBeenCalledOnce());
+        const button = screen.getByRole('button', { name: /^Удалить$/ }); expect(button).toHaveProperty('disabled', true); fireEvent.click(button);
+        expect(confirmMock).not.toHaveBeenCalled(); expect(props.onDelete).not.toHaveBeenCalled();
+        await act(async () => { finish(props.initial); });
+      });
+
+      it(`discards an obsolete confirmation error in ${mode}`, async () => {
+        let fail!: (error: Error) => void;
+        confirmMock.mockReturnValue(new Promise<boolean>((_resolve, reject) => { fail = reject; }));
+        const props = propsFor(mode); const view = render(<LegalEntityModal {...props} />);
+        fireEvent.click(await screen.findByRole('button', { name: /^Удалить$/ }));
+        view.rerender(<LegalEntityModal {...props} initial={{ ...props.initial, id: 8 }} />);
+        await act(async () => { fail(new Error('Old confirmation failed')); });
+        expect(props.onDelete).not.toHaveBeenCalled(); expect(props.onClose).not.toHaveBeenCalled(); expect(toastErrorMock).not.toHaveBeenCalled();
+        expect(screen.queryByText('Old confirmation failed')).toBeNull();
+      });
+    }
+  });
+
+  it.each(['page', 'modal'] as const)('deletion ownership: drops confirmation after a company change in %s', async mode => {
+    const session = documentCopyTestSession();
+    try {
+      let approve!: (value: boolean) => void;
+      confirmMock.mockReturnValue(new Promise<boolean>(resolve => { approve = resolve; }));
+      const initial = createInitialLegalEntity({ id: 7, shortName: 'Original delete target' });
+      const props = { isOpen: true, mode, initial, allowEdit: true, allowDelete: true, onDelete: vi.fn().mockResolvedValue(undefined), onClose: vi.fn(), onSubmit: vi.fn(), suggest: vi.fn(), findById: vi.fn() };
+      const view = render(<LegalEntityModal {...props} />);
+      fireEvent.click(await screen.findByRole('button', { name: /^Удалить$/ }));
+      expect(confirmMock).toHaveBeenCalledOnce();
+      view.rerender(<LegalEntityModal {...props} initial={createInitialLegalEntity({ id: 8, shortName: 'Current delete target' })} />);
+      await act(async () => { approve(true); });
+      expect(props.onDelete).not.toHaveBeenCalled(); expect(props.onClose).not.toHaveBeenCalled();
+      expect(screen.getByDisplayValue('Current delete target')).toBeTruthy();
+    } finally { session.restore(); }
+  });
+
+  for (const mode of ['page', 'modal'] as const) it.each(['success', 'failure'])('deletion ownership: discards a late %s in '+mode, async outcome => {
+    const session = documentCopyTestSession();
+    try {
+      let finish!: () => void; let fail!: (error: Error) => void;
+      const pending = new Promise<void>((resolve, reject) => { finish = resolve; fail = reject; });
+      confirmMock.mockResolvedValue(true);
+      const initial = createInitialLegalEntity({ id: 7, shortName: 'Original delete target' });
+      const props = { isOpen: true, mode, initial, allowEdit: true, allowDelete: true, onDelete: vi.fn().mockReturnValue(pending), onClose: vi.fn(), onSubmit: vi.fn(), suggest: vi.fn(), findById: vi.fn() };
+      const view = render(<LegalEntityModal {...props} />);
+      fireEvent.click(await screen.findByRole('button', { name: /^Удалить$/ }));
+      await waitFor(() => expect(props.onDelete).toHaveBeenCalledOnce());
+      view.rerender(<LegalEntityModal {...props} initial={createInitialLegalEntity({ id: 8, shortName: 'Current delete target' })} />);
+      await act(async () => { if (outcome === 'success') finish(); else fail(new Error('Old deletion failed')); });
+      expect(props.onClose).not.toHaveBeenCalled(); expect(toastErrorMock).not.toHaveBeenCalled();
+      expect(screen.queryByText('Old deletion failed')).toBeNull();
+      expect(screen.getByDisplayValue('Current delete target')).toBeTruthy();
+    } finally { session.restore(); }
+  });
+
   it.each(['page', 'modal'] as const)('company creation conflict: keeps new input without an automatic retry in %s', async mode => {
     const user = userEvent.setup();
     const onSubmit = vi.fn().mockRejectedValue(new Error('Карточка не создана. Проверьте список компаний и повторите действие.'));

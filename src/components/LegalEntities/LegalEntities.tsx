@@ -1,6 +1,7 @@
 import { SystemSelect } from '../ui/SystemSelect';
 import { useAsyncOperationOwner } from '../../hooks/useAsyncOperationOwner';
 import { awaitOwnedUiResult, StaleUiOperationError } from '../../utils/StaleUiOperationError';
+import { captureAuthSessionIdentity, isAuthSessionIdentityCurrent } from '../../services/authService';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
@@ -116,6 +117,7 @@ export function LegalEntities({
 }: LegalEntitiesProps = {}) {
   const { t } = useTranslation();
   const { user } = useAuth();
+  const deleteSession = captureAuthSessionIdentity();
   const toast = useToast();
   const permissions = useRolePermissions(user?.role?.id);
   const legalPermissions = permissions.legalEntities;
@@ -135,7 +137,7 @@ export function LegalEntities({
   const [readOnlyMode, setReadOnlyMode] = useState(false);
   const detailSecurityScope = JSON.stringify([
     user?.id, user?.role?.id, legalPermissions.canView, legalPermissions.canCreate, legalPermissions.canEdit,
-    legalPermissions.viewScope,
+    legalPermissions.viewScope, deleteSession,
   ]);
   const { capture: captureDetailOwner, isCurrent: isCurrentDetailOwner, invalidate: invalidateDetailOwner } = useAsyncOperationOwner(JSON.stringify([detailSecurityScope, initialLegalEntityId, detailOnly]));
   const detailOwnerAtRender = captureDetailOwner();
@@ -285,6 +287,20 @@ export function LegalEntities({
   const canCreate = legalPermissions.canCreate;
   const canEdit = legalPermissions.canEdit;
   const canDelete = legalPermissions.canDelete;
+  const { capture: captureDeleteOwner, isCurrent: isCurrentDeleteOwner } = useAsyncOperationOwner(JSON.stringify([
+    detailSecurityScope, user?.role?.name, canDelete, deleteSession, detailOwnerAtRender, initialLegalEntityId, detailOnly,
+    detailPageOpen, editing?.id, readOnlyMode, modalBusy, search, page, pageSize, viewMode,
+  ]));
+  const deleteOwnerAtRender = captureDeleteOwner();
+  const currentDeleteTarget = useRef(editing);
+  currentDeleteTarget.current = editing;
+  const deleteAttempt = useRef<{ isCurrent: () => boolean; cancel: () => void } | null>(null);
+  useEffect(() => {
+    const pending = deleteAttempt;
+    return () => { const attempt = pending.current; if (attempt && !attempt.isCurrent()) attempt.cancel(); };
+  }, [deleteOwnerAtRender]);
+  const [deletePendingOwner, setDeletePendingOwner] = useState<number | null>(null);
+  const deletePending = deletePendingOwner === deleteOwnerAtRender;
 
   const allowDetailEdit = editing ? !readOnlyMode && canEdit : false;
   const allowDetailDelete = editing ? !readOnlyMode && canDelete : false;
@@ -372,37 +388,67 @@ export function LegalEntities({
   const handleDeleteFromDetail =
     editing && allowDetailDelete
       ? async () => {
-          await apiService.deleteLegalEntity(editing.id);
-          toast.success('Юр. лицо удалено');
-          setEditing(null);
-          setReadOnlyMode(false);
-          setDetailPageOpen(false);
-          onDetailClose?.();
-          await refreshAfterMutation(Math.max(0, items.length - 1));
+          const target = editing;
+          const current = () => isCurrentDeleteOwner(deleteOwnerAtRender) && isCurrentDetailOwner(detailOwnerAtRender)
+            && isAuthSessionIdentityCurrent(deleteSession) && currentDeleteTarget.current === target;
+          if (!current() || !deleteSession.authenticated) throw new StaleUiOperationError();
+          if (!detailPageOpen || !legalPermissions.canView || !canDelete || readOnlyMode) throw new Error('Нет разрешения на удаление юридического лица.');
+          if (deleteAttempt.current?.isCurrent()) throw new Error('Удаление компании уже выполняется.');
+          deleteAttempt.current?.cancel();
+          const attempt = { isCurrent: current, cancel: () => undefined };
+          deleteAttempt.current = attempt;
+          setDeletePendingOwner(deleteOwnerAtRender);
+          try {
+            await awaitOwnedUiResult(() => apiService.deleteLegalEntity(target.id), current);
+            toast.success('Юр. лицо удалено');
+            if (!detailOnly && items.length <= 1 && page > 1) setPage(page - 1);
+            // The owning form closes itself once; its close resumes the list effect.
+          } finally {
+            if (deleteAttempt.current === attempt) {
+              deleteAttempt.current = null;
+              if (isCurrentDetailOwner(detailOwnerAtRender) && isAuthSessionIdentityCurrent(deleteSession)) setDeletePendingOwner(null);
+            }
+          }
         }
       : undefined;
 
   const handleDeleteDirect = async (entity: LegalEntitySummary) => {
-    if (!canDelete) return;
+    const current = () => isCurrentDeleteOwner(deleteOwnerAtRender) && isCurrentDetailOwner(detailOwnerAtRender)
+      && isAuthSessionIdentityCurrent(deleteSession);
+    if (!current() || !deleteSession.authenticated || !legalPermissions.canView || !canDelete
+      || detailPageOpen || modalBusy || deleteAttempt.current?.isCurrent()) return;
+    deleteAttempt.current?.cancel();
+    const controller = new AbortController();
+    const attempt = { isCurrent: current, cancel: () => controller.abort() };
+    deleteAttempt.current = attempt;
+    setDeletePendingOwner(deleteOwnerAtRender);
 
     const linkedClientsNotice = entity.clientsCount > 0
       ? ` Карточки связанных клиентов (${entity.clientsCount}) сохранятся, связь с этой организацией будет снята.`
       : '';
-    const approved = await confirm({
-      title: 'Подтверждение удаления',
-      description: `Удалить юридическое лицо "${entity.shortName}"?${linkedClientsNotice}`,
-      confirmLabel: 'Удалить',
-      cancelLabel: 'Отмена',
-      variant: 'danger',
-    });
-    if (!approved) return;
-
     try {
-      await apiService.deleteLegalEntity(entity.id);
+      const approved = await awaitOwnedUiResult(() => confirm({
+        signal: controller.signal,
+        title: 'Подтверждение удаления',
+        description: `Удалить юридическое лицо "${entity.shortName}"?${linkedClientsNotice}`,
+        confirmLabel: 'Удалить',
+        cancelLabel: 'Отмена',
+        variant: 'danger',
+      }), current);
+      if (!approved) return;
+
+      await awaitOwnedUiResult(() => apiService.deleteLegalEntity(entity.id), current);
       toast.success('Юр. лицо удалено');
       await refreshAfterMutation(Math.max(0, items.length - 1));
     } catch (err) {
+      if (err instanceof StaleUiOperationError || !current()) return;
       toast.error(extractDisplayErrorMessage(err, 'Не удалось удалить юридическое лицо'));
+    } finally {
+      if (deleteAttempt.current === attempt) {
+        deleteAttempt.current = null;
+        controller.abort();
+        if (isCurrentDetailOwner(detailOwnerAtRender) && isAuthSessionIdentityCurrent(deleteSession)) setDeletePendingOwner(null);
+      }
     }
   };
 
@@ -710,6 +756,7 @@ export function LegalEntities({
           onClose={closeDetailPage}
           onSubmit={handleSubmit}
           onDelete={handleDeleteFromDetail}
+          deleteOwnerScope={JSON.stringify([detailSecurityScope, user?.role?.name, canDelete, detailOwnerAtRender])}
           initial={editing}
           suggest={(payload) => apiService.suggestLegalEntities(payload)}
           findById={(payload) => apiService.findLegalEntityById(payload)}
@@ -840,7 +887,7 @@ export function LegalEntities({
                   <button
                     type="button"
                     onClick={() => void handleDeleteDirect(entity)}
-                    disabled={!canDelete}
+                    disabled={!canDelete || deletePending}
                     aria-label={`Удалить ${entity.shortName}`}
                     className="ml-auto inline-flex items-center rounded-lg border border-red-200 bg-red-50 p-2 text-red-600 hover:border-red-300 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-300"
                   >
@@ -951,7 +998,7 @@ export function LegalEntities({
                         <button
                           type="button"
                           onClick={() => void handleDeleteDirect(entity)}
-                          disabled={!canDelete}
+                          disabled={!canDelete || deletePending}
                           aria-label={`Удалить ${entity.shortName}`}
                           className="rounded-lg border border-red-200 px-3 py-1.5 text-xs text-red-600 hover:border-red-300 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-300"
                         >

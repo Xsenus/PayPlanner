@@ -1,12 +1,13 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LegalEntities } from './LegalEntities';
 import { defaultRolePermissions } from '../../types/permissions';
 import type { LegalEntityDetail, LegalEntityInput } from '../../types';
 import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
+import { documentCopyTestSession } from '../../test/documentCopySession';
 
-type OwnerModalProps = { isOpen: boolean; initial?: LegalEntityDetail | null; onBack: () => void; onSubmit: (payload: LegalEntityInput) => Promise<LegalEntityDetail> };
+type OwnerModalProps = { isOpen: boolean; initial?: LegalEntityDetail | null; onBack: () => void; onClose: () => void; onDelete?: () => Promise<void>; onSubmit: (payload: LegalEntityInput) => Promise<LegalEntityDetail> };
 const modalSpy = vi.hoisted(() => vi.fn());
 const authUser = vi.hoisted(() => ({ id: 1, role: { id: 10, name: 'limited-lawyer' } }));
 
@@ -15,6 +16,7 @@ const apiMocks = vi.hoisted(() => ({
   getLegalEntity: vi.fn(),
   createLegalEntity: vi.fn(),
   updateLegalEntity: vi.fn(),
+  deleteLegalEntity: vi.fn(),
 }));
 
 const permissionMocks = vi.hoisted(() => ({
@@ -36,7 +38,7 @@ vi.mock('../../services/api', () => ({
     getLegalEntity: apiMocks.getLegalEntity,
     createLegalEntity: apiMocks.createLegalEntity,
     updateLegalEntity: apiMocks.updateLegalEntity,
-    deleteLegalEntity: vi.fn(),
+    deleteLegalEntity: apiMocks.deleteLegalEntity,
     getUserSetting: vi.fn().mockResolvedValue(null),
     upsertUserSetting: vi.fn().mockResolvedValue(null),
     suggestLegalEntities: vi.fn(),
@@ -123,10 +125,169 @@ const legalEntity = {
 };
 
 describe('LegalEntities permissions', () => {
+  describe('deletion guard', () => {
+    let session: ReturnType<typeof documentCopyTestSession>;
+    beforeEach(() => {
+      session = documentCopyTestSession();
+      apiMocks.getLegalEntity.mockImplementation(async (id: number) => ({ ...legalEntity, id, shortName: `Company ${id} user ${authUser.id}` }));
+    });
+    afterEach(() => session.restore());
+    const permissions = () => permissionMocks.useRolePermissions.mock.results.at(-1)!.value as typeof defaultRolePermissions;
+    const changePermission = (values: Partial<typeof defaultRolePermissions.legalEntities>) => {
+      const current = permissions(); permissionMocks.useRolePermissions.mockReturnValue({ ...current, legalEntities: { ...current.legalEntities, ...values } });
+    };
+    const opened = async () => {
+      await waitFor(() => expect((modalSpy.mock.lastCall?.[0] as OwnerModalProps)?.onDelete).toBeTypeOf('function'));
+      return modalSpy.mock.lastCall![0] as OwnerModalProps;
+    };
+
+    it('deletion generation: a changed role name invalidates its callback without changing the role ID', async () => {
+      const props = { initialLegalEntityId: 7, detailOnly: true }; const view = render(<LegalEntities {...props} />); const original = await opened();
+      const scope = (original as OwnerModalProps & { deleteOwnerScope: string }).deleteOwnerScope;
+      authUser.role.name = 'Changed role'; view.rerender(<LegalEntities {...props} />);
+      expect((modalSpy.mock.lastCall![0] as OwnerModalProps & { deleteOwnerScope: string }).deleteOwnerScope).not.toBe(scope);
+      await act(async () => { await original.onDelete!().catch(() => undefined); }); expect(apiMocks.deleteLegalEntity).not.toHaveBeenCalled();
+    });
+
+    it('deletion generation: an old detail response cannot clear a newer request lock', async () => {
+      let finishFirst!: () => void; let finishSecond!: () => void;
+      apiMocks.deleteLegalEntity.mockReturnValueOnce(new Promise<void>(resolve => { finishFirst = resolve; })).mockReturnValueOnce(new Promise<void>(resolve => { finishSecond = resolve; }));
+      const props = { initialLegalEntityId: 7, detailOnly: true }; const view = render(<LegalEntities {...props} />); const first = await opened();
+      let a!: Promise<unknown>; act(() => { a = first.onDelete!().catch(error => error); });
+      view.rerender(<LegalEntities {...props} initialLegalEntityId={8} />);
+      await waitFor(() => expect((modalSpy.mock.lastCall![0] as OwnerModalProps).initial?.id).toBe(8)); const second = await opened();
+      let b!: Promise<void>; act(() => { b = second.onDelete!(); });
+      await act(async () => { finishFirst(); expect(await a).toBeInstanceOf(StaleUiOperationError); });
+      await expect(second.onDelete!()).rejects.toThrow('уже выполняется'); expect(apiMocks.deleteLegalEntity).toHaveBeenCalledTimes(2);
+      await act(async () => { finishSecond(); await b; }); expect(toastMocks.success).toHaveBeenCalledOnce();
+    });
+
+    it.each(['close', 'company', 'permission', 'visibility', 'user', 'same-id-data', 'permission-aba', 'session'])('blocks a retained detail callback after %s', async change => {
+      const props = { initialLegalEntityId: 7, detailOnly: true }; const view = render(<LegalEntities {...props} />); const original = await opened();
+      if (change === 'close') act(() => original.onBack());
+      if (change === 'company') view.rerender(<LegalEntities {...props} initialLegalEntityId={8} />);
+      if (change === 'permission') { changePermission({ canDelete: false }); view.rerender(<LegalEntities {...props} />); }
+      if (change === 'visibility') { changePermission({ viewScope: 'own' }); view.rerender(<LegalEntities {...props} />); }
+      if (change === 'user') { authUser.id++; view.rerender(<LegalEntities {...props} />); }
+      if (change === 'same-id-data') {
+        apiMocks.updateLegalEntity.mockResolvedValue({ ...legalEntity, shortName: 'Changed same company' });
+        await act(async () => { await original.onSubmit({ shortName: 'Changed same company', clientIds: [] }); });
+        toastMocks.success.mockClear();
+      }
+      if (change === 'permission-aba') { changePermission({ canDelete: false }); view.rerender(<LegalEntities {...props} />); changePermission({ canDelete: true }); view.rerender(<LegalEntities {...props} />); }
+      if (change === 'session') session.replace();
+      const before = apiMocks.getLegalEntitiesPaged.mock.calls.length;
+      let result: unknown;
+      await act(async () => { result = await original.onDelete!().catch(error => error); });
+      expect(result).toBeInstanceOf(StaleUiOperationError); expect(apiMocks.deleteLegalEntity).not.toHaveBeenCalled();
+      expect(toastMocks.success).not.toHaveBeenCalled(); expect(apiMocks.getLegalEntitiesPaged).toHaveBeenCalledTimes(before);
+    });
+
+    for (const outcome of ['success', 'failure']) it.each(['company', 'user', 'permission', 'session'])(`discards a late detail ${outcome} after %s`, async change => {
+      let finish!: () => void; let fail!: (error: Error) => void;
+      apiMocks.deleteLegalEntity.mockReturnValue(new Promise<void>((resolve, reject) => { finish = resolve; fail = reject; }));
+      const onDetailClose = vi.fn(); const props = { initialLegalEntityId: 7, detailOnly: true, onDetailClose };
+      const view = render(<LegalEntities {...props} />); const original = await opened();
+      let pending!: Promise<unknown>;
+      act(() => { pending = original.onDelete!().catch(error => error); });
+      expect(apiMocks.deleteLegalEntity).toHaveBeenCalledOnce();
+      if (change === 'company') view.rerender(<LegalEntities {...props} initialLegalEntityId={8} />);
+      if (change === 'user') { authUser.id++; view.rerender(<LegalEntities {...props} />); }
+      if (change === 'permission') { changePermission({ canDelete: false }); view.rerender(<LegalEntities {...props} />); }
+      if (change === 'session') session.replace();
+      await act(async () => { if (outcome === 'success') finish(); else fail(new Error('Old parent deletion failed')); expect(await pending).toBeInstanceOf(StaleUiOperationError); });
+      expect(onDetailClose).not.toHaveBeenCalled(); expect(toastMocks.success).not.toHaveBeenCalled(); expect(toastMocks.error).not.toHaveBeenCalled();
+      expect(apiMocks.getLegalEntitiesPaged).not.toHaveBeenCalled();
+    });
+
+    it('lets only the owned form close a detail-only deletion, without loading a hidden registry', async () => {
+      const onDetailClose = vi.fn(); render(<LegalEntities initialLegalEntityId={7} detailOnly onDetailClose={onDetailClose} />); const original = await opened();
+      await act(async () => { await original.onDelete!(); });
+      expect(apiMocks.deleteLegalEntity).toHaveBeenCalledExactlyOnceWith(7); expect(toastMocks.success).toHaveBeenCalledOnce();
+      expect(onDetailClose).not.toHaveBeenCalled(); expect(apiMocks.getLegalEntitiesPaged).not.toHaveBeenCalled();
+      act(() => original.onClose()); expect(onDetailClose).toHaveBeenCalledOnce(); expect(apiMocks.getLegalEntitiesPaged).not.toHaveBeenCalled();
+    });
+
+    it('reloads the registry once after the owning detail form closes', async () => {
+      const onDetailClose = vi.fn(); render(<LegalEntities onDetailClose={onDetailClose} />);
+      fireEvent.click(await screen.findByRole('button', { name: legalEntity.shortName }));
+      const original = await opened(); const reads = apiMocks.getLegalEntitiesPaged.mock.calls.length;
+      await act(async () => { await original.onDelete!(); });
+      expect(onDetailClose).not.toHaveBeenCalled(); expect(apiMocks.getLegalEntitiesPaged).toHaveBeenCalledTimes(reads);
+      act(() => original.onClose());
+      await waitFor(() => expect(apiMocks.getLegalEntitiesPaged).toHaveBeenCalledTimes(reads + 1)); expect(onDetailClose).toHaveBeenCalledOnce();
+    });
+
+    it.each(['permission', 'scope', 'search', 'view', 'unmount', 'session'])('drops direct confirmation after %s', async change => {
+      let approve!: (value: boolean) => void;
+      dialogMocks.confirm.mockReturnValue(new Promise<boolean>(resolve => { approve = resolve; }));
+      const view = render(<LegalEntities />);
+      fireEvent.click(await screen.findByRole('button', { name: `Удалить ${legalEntity.shortName}` }));
+      if (change === 'permission') { changePermission({ canDelete: false }); view.rerender(<LegalEntities />); }
+      if (change === 'scope') { changePermission({ viewScope: 'own' }); view.rerender(<LegalEntities />); }
+      if (change === 'search') fireEvent.change(screen.getByPlaceholderText('Поиск по названию, ИНН, директору'), { target: { value: 'Different company' } });
+      if (change === 'view') fireEvent.click(screen.getByRole('button', { name: 'Таблица' }));
+      if (change === 'unmount') view.unmount();
+      if (change === 'session') session.replace('logout');
+      await act(async () => { approve(true); });
+      expect(apiMocks.deleteLegalEntity).not.toHaveBeenCalled(); expect(toastMocks.success).not.toHaveBeenCalled(); expect(toastMocks.error).not.toHaveBeenCalled();
+    });
+
+    it.each(['cards', 'table'])('blocks duplicate direct requests and refreshes once in %s', async mode => {
+      let finish!: () => void; apiMocks.deleteLegalEntity.mockReturnValue(new Promise<void>(resolve => { finish = resolve; }));
+      dialogMocks.confirm.mockResolvedValue(true); const view = render(<LegalEntities />);
+      await screen.findByRole('button', { name: `Удалить ${legalEntity.shortName}` });
+      if (mode === 'table') fireEvent.click(screen.getByRole('button', { name: 'Таблица' }));
+      const button = screen.getByRole('button', { name: `Удалить ${legalEntity.shortName}` }); fireEvent.click(button); fireEvent.click(button);
+      await waitFor(() => expect(apiMocks.deleteLegalEntity).toHaveBeenCalledExactlyOnceWith(7));
+      expect(dialogMocks.confirm).toHaveBeenCalledOnce(); expect(button).toHaveProperty('disabled', true);
+      session.refresh(); view.rerender(<LegalEntities />);
+      const reads = apiMocks.getLegalEntitiesPaged.mock.calls.length;
+      await act(async () => { finish(); });
+      await waitFor(() => expect(apiMocks.getLegalEntitiesPaged).toHaveBeenCalledTimes(reads + 1)); expect(toastMocks.success).toHaveBeenCalledOnce();
+    });
+
+    it('invalidates a direct confirmation when pagination changes', async () => {
+      let approve!: (value: boolean) => void;
+      dialogMocks.confirm.mockReturnValue(new Promise<boolean>(resolve => { approve = resolve; }));
+      apiMocks.getLegalEntitiesPaged.mockResolvedValue({ items: [legalEntity], total: 24, page: 1, pageSize: 12 });
+      render(<LegalEntities />); fireEvent.click(await screen.findByRole('button', { name: `Удалить ${legalEntity.shortName}` }));
+      fireEvent.click(screen.getByRole('button', { name: 'Вперед' }));
+      await act(async () => { approve(true); });
+      expect(apiMocks.deleteLegalEntity).not.toHaveBeenCalled(); expect(toastMocks.success).not.toHaveBeenCalled();
+    });
+
+    it.each(['cancel', 'confirmation-error', 'server-error'])('retains the direct list after %s', async outcome => {
+      dialogMocks.confirm.mockResolvedValue(outcome !== 'cancel');
+      if (outcome === 'confirmation-error') dialogMocks.confirm.mockRejectedValue(new Error('Cannot confirm'));
+      if (outcome === 'server-error') apiMocks.deleteLegalEntity.mockRejectedValue(new Error('Company busy'));
+      render(<LegalEntities />); const button = await screen.findByRole('button', { name: `Удалить ${legalEntity.shortName}` });
+      const reads = apiMocks.getLegalEntitiesPaged.mock.calls.length; fireEvent.click(button);
+      if (outcome !== 'cancel') await waitFor(() => expect(toastMocks.error).toHaveBeenCalledOnce());
+      await waitFor(() => expect(button).toHaveProperty('disabled', false));
+      expect(apiMocks.deleteLegalEntity).toHaveBeenCalledTimes(outcome === 'server-error' ? 1 : 0); expect(toastMocks.success).not.toHaveBeenCalled();
+      expect(apiMocks.getLegalEntitiesPaged).toHaveBeenCalledTimes(reads); expect(screen.getByRole('button', { name: legalEntity.shortName })).toBeTruthy();
+    });
+
+    it.each(['success', 'failure'])('ignores a late direct %s after another company opens', async outcome => {
+      let finish!: () => void; let fail!: (error: Error) => void;
+      apiMocks.deleteLegalEntity.mockReturnValue(new Promise<void>((resolve, reject) => { finish = resolve; fail = reject; }));
+      dialogMocks.confirm.mockResolvedValue(true); const view = render(<LegalEntities />);
+      fireEvent.click(await screen.findByRole('button', { name: `Удалить ${legalEntity.shortName}` }));
+      await waitFor(() => expect(apiMocks.deleteLegalEntity).toHaveBeenCalledOnce());
+      view.rerender(<LegalEntities initialLegalEntityId={8} detailOnly />);
+      await opened(); const reads = apiMocks.getLegalEntitiesPaged.mock.calls.length;
+      await act(async () => { if (outcome === 'success') finish(); else fail(new Error('Old direct deletion failed')); });
+      expect((modalSpy.mock.lastCall![0] as OwnerModalProps).initial?.id).toBe(8);
+      expect(toastMocks.success).not.toHaveBeenCalled(); expect(toastMocks.error).not.toHaveBeenCalled(); expect(apiMocks.getLegalEntitiesPaged).toHaveBeenCalledTimes(reads);
+    });
+  });
+
   beforeEach(() => {
     modalSpy.mockClear(); toastMocks.success.mockClear(); toastMocks.error.mockClear();
-    authUser.id = 1; authUser.role.id = 10;
+    authUser.id = 1; authUser.role.id = 10; authUser.role.name = 'limited-lawyer';
     apiMocks.createLegalEntity.mockReset(); apiMocks.updateLegalEntity.mockReset();
+    apiMocks.deleteLegalEntity.mockReset().mockResolvedValue(undefined);
     apiMocks.getLegalEntitiesPaged.mockReset();
     apiMocks.getLegalEntity.mockReset();
     dialogMocks.confirm.mockReset();
@@ -167,6 +328,37 @@ describe('LegalEntities permissions', () => {
 
     await userEvent.click(await screen.findByRole('button', { name: 'Назад из карточки' }));
     expect(onDetailClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('deletion ownership: a retained detail callback cannot send after a role change', async () => {
+    const session = documentCopyTestSession();
+    try {
+      const props = { initialLegalEntityId: 7, detailOnly: true };
+      const view = render(<LegalEntities {...props} />);
+      await waitFor(() => expect((modalSpy.mock.lastCall?.[0] as OwnerModalProps)?.onDelete).toBeTypeOf('function'));
+      const original = modalSpy.mock.lastCall![0] as OwnerModalProps;
+      authUser.role.id++;
+      view.rerender(<LegalEntities {...props} />);
+      await act(async () => { await original.onDelete!().catch(() => undefined); });
+      expect(apiMocks.deleteLegalEntity).not.toHaveBeenCalled();
+      expect(toastMocks.success).not.toHaveBeenCalled();
+    } finally { session.restore(); }
+  });
+
+  it('deletion ownership: direct confirmation belongs to the original user', async () => {
+    const session = documentCopyTestSession();
+    try {
+      let approve!: (value: boolean) => void;
+      dialogMocks.confirm.mockReturnValue(new Promise<boolean>(resolve => { approve = resolve; }));
+      const view = render(<LegalEntities />);
+      fireEvent.click(await screen.findByRole('button', { name: `Удалить ${legalEntity.shortName}` }));
+      expect(dialogMocks.confirm).toHaveBeenCalledOnce();
+      authUser.id++;
+      view.rerender(<LegalEntities />);
+      await act(async () => { approve(true); });
+      expect(apiMocks.deleteLegalEntity).not.toHaveBeenCalled();
+      expect(toastMocks.success).not.toHaveBeenCalled();
+    } finally { session.restore(); }
   });
 
   it.each(['close', 'company', 'permission', 'visibility', 'user', 'role', 'unmount'] as const)('parent ownership: ignores a saved entity after %s', async change => {
@@ -370,6 +562,8 @@ describe('LegalEntities permissions', () => {
   });
 
   it('warns that linked client cards will be preserved when deleting an organization', async () => {
+    const session = documentCopyTestSession();
+    try {
     render(<LegalEntities />);
     await waitFor(() => expect(apiMocks.getLegalEntitiesPaged).toHaveBeenCalled());
 
@@ -378,5 +572,6 @@ describe('LegalEntities permissions', () => {
     expect(dialogMocks.confirm).toHaveBeenCalledWith(expect.objectContaining({
       description: expect.stringContaining('Карточки связанных клиентов (1) сохранятся'),
     }));
+    } finally { session.restore(); }
   });
 });

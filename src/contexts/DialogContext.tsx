@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useModalFocusTrap } from '../hooks/useModalFocusTrap';
 import { DialogContext, type AlertOptions, type ConfirmOptions, type DialogContextValue, type DialogVariant, type PromptOptions } from './dialogContextCore';
@@ -59,10 +59,36 @@ export function DialogProvider({ children }: { children: ReactNode }) {
   const alertButtonRef = useRef<HTMLButtonElement>(null);
   const promptDialogRef = useRef<HTMLFormElement>(null);
   const promptInitialFocusRef = useRef<HTMLElement | null>(null);
+  const ownedConfirmations = useRef(new Set<() => void>());
+  useEffect(() => {
+    const pending = ownedConfirmations.current;
+    return () => { for (const abandon of [...pending]) abandon(); };
+  }, []);
 
   const confirm = useCallback((options: ConfirmOptions | string) => {
     return new Promise<boolean>((resolve) => {
-      setConfirmRequest({ ...toConfirmOptions(options), resolve });
+      const parsed = toConfirmOptions(options);
+      const signal = parsed.signal;
+      if (!signal) { setConfirmRequest({ ...parsed, resolve }); return; }
+      if (signal.aborted) { resolve(false); return; }
+      let settled = false;
+      const abandon = () => cancel();
+      const settle = (approved: boolean) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener('abort', cancel);
+        ownedConfirmations.current.delete(abandon);
+        resolve(approved);
+      };
+      const cancel = () => {
+        settle(false);
+        setConfirmRequest(current => current === request ? null : current);
+      };
+      const request: ConfirmRequest = { ...parsed, resolve: settle };
+      ownedConfirmations.current.add(abandon);
+      signal.addEventListener('abort', cancel, { once: true });
+      if (signal.aborted) { cancel(); return; }
+      setConfirmRequest(request);
     });
   }, []);
 
