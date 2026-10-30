@@ -1,7 +1,7 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Trash2, Info, History, Search, UserRoundSearch, Ban, WalletCards, Printer, ChevronDown } from 'lucide-react';
 import { useClients } from '../../hooks/useClients';
@@ -445,7 +445,7 @@ export function PaymentModal({
   const defaultDate = todayYMDInTimeZone(profileTimeZoneId);
   const defaultDateRef = useRef(defaultDate);
 
-  const [loading, setLoading] = useState(false);
+  const [savingLoading, setLoading] = useState(false);
   const [paymentPrinting, setPaymentPrinting] = useState(false);
   useEffect(() => {
     const ownerChanged = () => {
@@ -473,7 +473,6 @@ export function PaymentModal({
   }, [isOpen, onClose]);
 
   const [printMenuOpen, setPrintMenuOpen] = useState(false);
-  const [balanceApplyLoading, setBalanceApplyLoading] = useState(false);
   const [balanceApplyAmount, setBalanceApplyAmount] = useState('');
   const [appliedClientBalanceAmount, setAppliedClientBalanceAmount] = useState(0);
   const [localClientBalance, setLocalClientBalance] = useState<number | null>(null);
@@ -482,9 +481,9 @@ export function PaymentModal({
   const [overpaymentHandling, setOverpaymentHandling] = useState<PaymentOverpaymentHandling | ''>('');
   const [overpaymentTargetPaymentId, setOverpaymentTargetPaymentId] = useState<number | null>(null);
   const [overpaymentComment, setOverpaymentComment] = useState('');
-  const [installmentPayments, setInstallmentPayments] = useState<Payment[]>([]);
+  const [installmentPaymentsValue, setInstallmentPayments] = useState<Payment[]>([]);
   const [installmentPaymentsLoading, setInstallmentPaymentsLoading] = useState(false);
-  const [installmentPaymentsError, setInstallmentPaymentsError] = useState<string | null>(null);
+  const [installmentPaymentsErrorValue, setInstallmentPaymentsError] = useState<string | null>(null);
   const [installmentTargetDialogMode, setInstallmentTargetDialogMode] = useState<'overpayment' | 'balance' | null>(null);
   const [installmentTargetDraftId, setInstallmentTargetDraftId] = useState<number | null>(null);
   const [cases, setCases] = useState<ClientCase[]>([]);
@@ -524,6 +523,51 @@ export function PaymentModal({
     systemNotes: '',
     rescheduleCount: 0,
   });
+  const financialWriteOwner = useDocumentDeliveryOwner(JSON.stringify([confirmationOwner.scope, payment?.id, formData.type,
+    payment?.clientId, payment?.legalEntityId, payment?.type,
+    formData.clientId, formData.legalEntityId,
+    !!onApplyClientBalance, !!onBalanceApplied]));
+  const financialWrites = useRef(new Map<string, { screenId: number | undefined; operation: NonNullable<ReturnType<typeof financialWriteOwner.begin>> }>());
+  const [, renderFinancialWrites] = useState(0);
+  const financialComponentMounted = useRef(true);
+  useEffect(() => { financialComponentMounted.current = true; return () => { financialComponentMounted.current = false; }; }, []);
+  const pendingScreenWrites = [...financialWrites.current.values()].filter(write => write.screenId === payment?.id);
+  const loading = savingLoading || financialWriteOwner.busy || pendingScreenWrites.length > 0;
+  const balanceApplyLoading = pendingScreenWrites.some(write => write.operation.kind.startsWith('balance'));
+  const { capture: captureBalanceRead, scope: balanceReadScope } = useDocumentDeliveryOwner(JSON.stringify([isOpen, initialPayment?.id,
+    formData.type, formData.clientId, formData.legalEntityId, canViewSharedBalance, user?.id, user?.role?.id, user?.role?.name, paymentPermissions.viewScope]));
+  const [balanceDataScope, setBalanceDataScope] = useState<string | null>(null);
+  useLayoutEffect(() => {
+    setBalanceDataScope(balanceReadScope); setLocalClientBalance(null); setFetchedClientBalance(0); setClientBalanceLoading(false);
+  }, [balanceReadScope]);
+  const suppliedBalanceIsCurrent = availableClientBalance !== undefined
+    && formData.clientId === String(payment?.clientId ?? defaultClientId ?? '')
+    && formData.legalEntityId === String(payment?.legalEntityId ?? defaultLegalEntityId ?? '');
+  const savedCounterpartyIsCurrent = !!payment && formData.type === payment.type
+    && formData.clientId === String(payment.clientId ?? '') && formData.legalEntityId === String(payment.legalEntityId ?? '');
+  const { capture: captureInstallmentRead, scope: installmentReadScope } = useDocumentDeliveryOwner(JSON.stringify([isOpen, payment?.id,
+    formData.type, formData.clientId, formData.legalEntityId, formData.clientCaseId, formData.invoiceId, formData.account, formData.accountDate,
+    canViewLinkedInvoices, user?.id, user?.role?.id, user?.role?.name, paymentPermissions.canView, paymentPermissions.viewScope]));
+  const [installmentDataScope, setInstallmentDataScope] = useState<string | null>(null);
+  const installmentPayments = installmentDataScope === installmentReadScope ? installmentPaymentsValue : [];
+  const installmentPaymentsError = installmentDataScope === installmentReadScope ? installmentPaymentsErrorValue : null;
+  useLayoutEffect(() => {
+    setInstallmentDataScope(installmentReadScope); setInstallmentPayments([]); setInstallmentPaymentsError(null);
+    setInstallmentPaymentsLoading(false); setInstallmentTargetDialogMode(null); setInstallmentTargetDraftId(null); setOverpaymentTargetPaymentId(null);
+  }, [installmentReadScope]);
+  const beginFinancialWrite = (kind: string, allowed = canEditPayment, targetId = payment?.id) => {
+    const key = String(targetId ?? 'new');
+    if (!isOpen || !allowed || savingRef.current || savingLoading || financialWrites.current.has(key)) return null;
+    const operation = financialWriteOwner.begin(kind);
+    if (!operation) return null;
+    const entry = { screenId: payment?.id, operation };
+    financialWrites.current.set(key, entry); renderFinancialWrites(value => value + 1);
+    return { ...operation, finish: () => {
+      if (financialWrites.current.get(key) !== entry) return;
+      financialWrites.current.delete(key); operation.finish();
+      if (financialComponentMounted.current) renderFinancialWrites(value => value + 1);
+    } };
+  };
   const systemNotesEntries = useMemo(() => {
     return getVisibleSystemNoteLines(formData.systemNotes);
   }, [formData.systemNotes]);
@@ -1255,7 +1299,7 @@ export function PaymentModal({
   };
 
   useEffect(() => {
-    if (!isOpen || !canViewSharedBalance || availableClientBalance !== undefined) return;
+    if (!isOpen || !canViewSharedBalance || suppliedBalanceIsCurrent) return;
     const clientId = Number(formData.clientId || 0);
     const legalEntityId = Number(formData.legalEntityId || 0);
     if (formData.type !== 'Income' || (!clientId && !legalEntityId)) {
@@ -1263,7 +1307,10 @@ export function PaymentModal({
       return;
     }
 
+    const owner = captureBalanceRead();
+    if (!owner) return;
     let cancelled = false;
+    const current = () => !cancelled && owner.isCurrent();
     setClientBalanceLoading(true);
     const request = clientId > 0
       ? apiService.getClientBalance(clientId)
@@ -1271,19 +1318,19 @@ export function PaymentModal({
 
     request
       .then((summary) => {
-        if (!cancelled) setFetchedClientBalance(summary.balance ?? 0);
+        if (current()) setFetchedClientBalance(summary.balance ?? 0);
       })
       .catch(() => {
-        if (!cancelled) setFetchedClientBalance(0);
+        if (current()) setFetchedClientBalance(0);
       })
       .finally(() => {
-        if (!cancelled) setClientBalanceLoading(false);
+        if (current()) setClientBalanceLoading(false);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [availableClientBalance, canViewSharedBalance, formData.clientId, formData.legalEntityId, formData.type, isOpen]);
+  }, [suppliedBalanceIsCurrent, captureBalanceRead, canViewSharedBalance, formData.clientId, formData.legalEntityId, formData.type, isOpen]);
 
   useEffect(() => {
     if (!isOpen || !formData.invoiceId) {
@@ -1303,7 +1350,10 @@ export function PaymentModal({
       return;
     }
 
+    const owner = captureInstallmentRead();
+    if (!owner) return;
     let cancelled = false;
+    const current = () => !cancelled && owner.isCurrent();
     const account = formData.account.trim();
     const accountDate = formData.accountDate;
     const clientId = formData.clientId ? parseInt(formData.clientId, 10) : undefined;
@@ -1313,7 +1363,7 @@ export function PaymentModal({
     setInstallmentPaymentsError(null);
 
     const resolveInstallmentInvoiceId = async () => {
-      if (!account || (!clientId && !legalEntityId)) {
+      if (!canViewLinkedInvoices || !account || (!clientId && !legalEntityId)) {
         return invoiceId;
       }
 
@@ -1327,7 +1377,7 @@ export function PaymentModal({
           page: 1,
           pageSize: 20,
         });
-        if (cancelled) {
+        if (!current()) {
           return invoiceId;
         }
 
@@ -1373,11 +1423,11 @@ export function PaymentModal({
     };
 
     resolveInstallmentInvoiceId()
-      .then((resolvedInvoiceId) =>
-        apiService.getPaymentsV2({ invoiceId: resolvedInvoiceId, type: 'Income', pageSize: 100, sortBy: 'date', sortDir: 'asc' }),
+      .then((resolvedInvoiceId) => current()
+        ? apiService.getPaymentsV2({ invoiceId: resolvedInvoiceId, type: 'Income', pageSize: 100, sortBy: 'date', sortDir: 'asc' }) : undefined,
       )
       .then((result) => {
-        if (cancelled) return;
+        if (!current() || !result) return;
 
         const activeItems = (result.items ?? []).filter((item) => item.status !== 'Cancelled');
         const items = activeItems
@@ -1399,20 +1449,20 @@ export function PaymentModal({
         );
       })
       .catch((error) => {
-        if (!cancelled) {
+        if (current()) {
           setInstallmentPayments([]);
           setInstallmentPaymentsError(error instanceof Error ? error.message : 'Не удалось загрузить платежи рассрочки.');
           setOverpaymentTargetPaymentId(null);
         }
       })
       .finally(() => {
-        if (!cancelled) setInstallmentPaymentsLoading(false);
+        if (current()) setInstallmentPaymentsLoading(false);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [formData.account, formData.accountDate, formData.clientCaseId, formData.clientId, formData.invoiceId, formData.legalEntityId, formData.type, isOpen, payment?.id]);
+  }, [captureInstallmentRead, canViewLinkedInvoices, formData.account, formData.accountDate, formData.clientCaseId, formData.clientId, formData.invoiceId, formData.legalEntityId, formData.type, isOpen, payment?.id]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -1747,11 +1797,13 @@ export function PaymentModal({
         setSaveError('Сначала откройте подтверждённый платёж в разделе восстановления.');
         return;
       }
+      const write = beginFinancialWrite('save', canSavePayment);
+      if (!write) return;
       savingRef.current = true;
       setLoading(true);
       try { await completePendingRemainder(scope); }
       catch (error) { if (scope === scopeRef.current && actorVersion === paymentCreateSessionVersion()) setSaveError(error instanceof Error ? error.message : 'Не удалось создать остаток.'); }
-      finally { if (scope === scopeRef.current && actorVersion === paymentCreateSessionVersion()) { savingRef.current = false; setLoading(false); } }
+      finally { write.finish(); if (scope === scopeRef.current && actorVersion === paymentCreateSessionVersion()) { savingRef.current = false; setLoading(false); } }
       return;
     }
 
@@ -1826,6 +1878,8 @@ export function PaymentModal({
       setSaveError('Сначала сохраните платёж целиком без переноса остатка. Затем откройте перенос остатка в сохранённой карточке.');
       return;
     }
+    const write = beginFinancialWrite('save', canSavePayment);
+    if (!write) return;
     savingRef.current = true;
     try {
       if (!payment) {
@@ -2030,6 +2084,7 @@ export function PaymentModal({
     } catch (error) {
       if (scope === scopeRef.current && actorVersion === paymentCreateSessionVersion()) setSaveError(error instanceof Error ? error.message : 'Не удалось сохранить платёж.');
     } finally {
+      write.finish();
       if (scope === scopeRef.current && actorVersion === paymentCreateSessionVersion()) { savingRef.current = false; setLoading(false); }
     }
   };
@@ -2685,14 +2740,15 @@ export function PaymentModal({
       return;
     }
 
+    const write = beginFinancialWrite('move');
+    if (!write) return;
     try {
-      setLoading(true);
       await onSubmit({ id: payment.id, ...paymentData });
-      onClose();
+      if (write.isCurrent()) onClose();
     } catch {
       return;
     } finally {
-      setLoading(false);
+      write.finish();
     }
   };
 
@@ -2708,14 +2764,15 @@ export function PaymentModal({
     });
     if (!approved || !confirmationContext?.isCurrent()) return;
 
+    const write = beginFinancialWrite('rollback');
+    if (!write) return;
     try {
-      setLoading(true);
       await onRollbackRemainderTransfer(payment.id);
-      onClose();
+      if (write.isCurrent()) onClose();
     } catch {
       return;
     } finally {
-      setLoading(false);
+      write.finish();
     }
   };
 
@@ -2732,14 +2789,15 @@ export function PaymentModal({
       return;
     }
 
+    const write = beginFinancialWrite('adjust');
+    if (!write) return;
     try {
-      setLoading(true);
       await onAdjustRemainderTransfer(payment.id, Number(paidAmount.toFixed(2)), adjustRemainderDate);
-      onClose();
+      if (write.isCurrent()) onClose();
     } catch {
       return;
     } finally {
-      setLoading(false);
+      write.finish();
     }
   };
 
@@ -2755,19 +2813,20 @@ export function PaymentModal({
     });
     if (!approved || !confirmationContext?.isCurrent()) return;
 
+    const write = beginFinancialWrite('cancel');
+    if (!write) return;
     try {
-      setLoading(true);
       await onSubmit({ id: payment.id, ...buildCancelledPaymentPayload(payment) });
-      onClose();
+      if (write.isCurrent()) onClose();
     } catch {
       return;
     } finally {
-      setLoading(false);
+      write.finish();
     }
   };
 
   const handleApplyClientBalance = async () => {
-    if (!payment || balanceApplyLoading) return;
+    if (!payment || !canViewSharedBalance || !savedCounterpartyIsCurrent || !canEditPayment || remainderPending || loading) return;
 
     const requestedAmount = parseDecimal(balanceApplyAmount);
     if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
@@ -2775,8 +2834,9 @@ export function PaymentModal({
       return;
     }
 
+    const write = beginFinancialWrite('balance-current');
+    if (!write) return;
     try {
-      setBalanceApplyLoading(true);
       const clientId = Number(formData.clientId || 0);
       const amount = parseDecimal(formData.amount);
       const paid = parseDecimal(formData.paidAmount);
@@ -2801,6 +2861,7 @@ export function PaymentModal({
         });
       }
 
+      if (!write.isCurrent()) return;
       const appliedAmount = Math.max(
         0,
         Math.min(result?.appliedAmount ?? expectedApplied, currentRemaining),
@@ -2820,15 +2881,17 @@ export function PaymentModal({
       setAppliedClientBalanceAmount((prev) =>
         Number((prev + appliedAmount).toFixed(2)),
       );
+      setBalanceDataScope(balanceReadScope);
       setLocalClientBalance(nextBalance);
       setFetchedClientBalance(nextBalance);
       await onBalanceApplied?.(payment.id);
+      if (!write.isCurrent()) return;
       toast.success('Баланс зачтен в платеж.');
       setBalanceApplyAmount('');
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Не удалось зачесть баланс.');
+      if (write.isCurrent()) toast.error(error instanceof Error ? error.message : 'Не удалось зачесть баланс.');
     } finally {
-      setBalanceApplyLoading(false);
+      write.finish();
     }
   };
 
@@ -2872,7 +2935,8 @@ export function PaymentModal({
   };
 
   const confirmInstallmentTargetDialog = async () => {
-    if (!installmentTargetDialogMode || !installmentTargetDraftId) return;
+    const targetOwner = captureInstallmentRead();
+    if (!isOpen || !canSavePayment || !installmentTargetDialogMode || !installmentTargetDraftId || !targetOwner) return;
 
     const selected = installmentPayments.find((item) => item.id === installmentTargetDraftId);
     if (!selected) {
@@ -2887,7 +2951,7 @@ export function PaymentModal({
       return;
     }
 
-    if (balanceApplyLoading) return;
+    if (loading || !canEditPayment || !canViewSharedBalance || !savedCounterpartyIsCurrent || remainderPending) return;
 
     const clientId = Number(formData.clientId || 0);
     if (!clientId) {
@@ -2909,15 +2973,18 @@ export function PaymentModal({
       return;
     }
 
+    const write = beginFinancialWrite('balance-installment', canEditPayment, selected.id);
+    if (!write) return;
     try {
-      setBalanceApplyLoading(true);
       const result = await apiService.applyClientBalance(clientId, {
         paymentId: selected.id,
         amount: amountToApply,
       });
+      if (!write.isCurrent() || !targetOwner.isCurrent()) return;
       const appliedAmount = Math.max(0, result.appliedAmount ?? amountToApply);
       const nextBalance = result.balance ?? Math.max(Number((currentBalance - appliedAmount).toFixed(2)), 0);
 
+      setBalanceDataScope(balanceReadScope);
       setLocalClientBalance(nextBalance);
       setFetchedClientBalance(nextBalance);
       if (selected.id === payment?.id) {
@@ -2950,14 +3017,15 @@ export function PaymentModal({
           .filter((item) => resolvePaymentOutstandingAmount(item) > 0.005),
       );
       await onBalanceApplied?.(selected.id);
+      if (!write.isCurrent() || !targetOwner.isCurrent()) return;
       toast.success('Баланс зачтен в выбранный платеж.');
       setBalanceApplyAmount('');
       setInstallmentTargetDialogMode(null);
       setInstallmentTargetDraftId(null);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Не удалось зачесть баланс.');
+      if (write.isCurrent() && targetOwner.isCurrent()) toast.error(error instanceof Error ? error.message : 'Не удалось зачесть баланс.');
     } finally {
-      setBalanceApplyLoading(false);
+      write.finish();
     }
   };
 
@@ -2970,16 +3038,18 @@ export function PaymentModal({
   const overpaid = paidAmountNum > amountNum + 0.005;
   const hasPartial = paidAmountNum > 0 && remainingAmount > 0;
   const effectiveClientBalance = canViewSharedBalance
-    ? localClientBalance ?? availableClientBalance ?? fetchedClientBalance
+    ? (balanceDataScope === balanceReadScope ? localClientBalance : null)
+      ?? (suppliedBalanceIsCurrent ? availableClientBalance : undefined)
+      ?? (balanceDataScope === balanceReadScope ? fetchedClientBalance : 0)
     : 0;
   const visibleAvailableBalance = Math.max(Number(effectiveClientBalance || 0), 0);
   const selectedBalanceOwnerLabel = formData.legalEntityId ? 'юрлица' : 'клиента';
   const showAvailableBalanceNotice = formData.type === 'Income'
     && Boolean(formData.clientId || formData.legalEntityId)
     && (clientBalanceLoading || visibleAvailableBalance > 0);
-  const canApplyClientBalanceToCurrent = Boolean(payment && effectiveClientBalance > 0 && remainingAmount > 0 && formData.type === 'Income');
+  const canApplyClientBalanceToCurrent = Boolean(canEditPayment && savedCounterpartyIsCurrent && payment && effectiveClientBalance > 0 && remainingAmount > 0 && formData.type === 'Income');
   const canApplyClientBalance = Boolean(
-    payment &&
+    canEditPayment && savedCounterpartyIsCurrent && payment &&
     effectiveClientBalance > 0 &&
     formData.type === 'Income' &&
     (remainingAmount > 0 || installmentPayments.length > 0),
@@ -4307,12 +4377,14 @@ export function PaymentModal({
                           variant: 'danger',
                         });
                         if (!ok || !confirmationContext?.isCurrent()) return;
+                        const write = beginFinancialWrite('delete', !!onDelete);
+                        if (!write) return;
                         try {
                           await onDelete!(payment.id);
-                          onClose();
+                          if (write.isCurrent()) onClose();
                         } catch {
                           return;
-                        }
+                        } finally { write.finish(); }
                       }}
                       className="inline-flex min-w-40 items-center justify-center gap-2 rounded-lg bg-red-50 px-4 py-2 font-medium text-red-700 transition-colors hover:bg-red-100">
                       <Trash2 className="h-4 w-4" />

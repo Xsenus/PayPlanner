@@ -325,6 +325,125 @@ function doc04RealAttemptFixture(primary = doc04Payment(), rest = doc04Payment({
 }
 
 describe('PaymentModal integration', () => {
+  describe('balance write ownership', () => {
+    const current = (overrides: Partial<Payment> = {}) => doc04Payment({ clientId: 69, amount: 100, paidAmount: 0, invoiceId: undefined, ...overrides });
+    const openBalance = async () => { const field = await screen.findByRole('textbox', { name: 'Сумма зачета' }); fireEvent.change(field, { target: { value: '25' } }); return screen.getByRole('button', { name: 'Зачесть' }); };
+    type Route = 'direct' | 'callback' | 'installment';
+    const routes = ['direct', 'callback', 'installment'] as const;
+    const pending = <T,>() => { let resolve!: (value: T) => void; let reject!: (error: Error) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
+    const target = current({ id: 9903, invoiceId: 31, description: 'Target installment', systemNotes: '[pp:installment-payment]' });
+    const setup = (route: Route) => {
+      const onApplyClientBalance = vi.fn(); const onBalanceApplied = vi.fn().mockResolvedValue(undefined); const onSubmit = vi.fn().mockResolvedValue(current());
+      if (route === 'installment') getPaymentsV2Mock.mockResolvedValue({ items: [target], total: 1, page: 1, pageSize: 100 });
+      const props = { isOpen: true, payment: current(route === 'installment' ? { invoiceId: 31 } : {}), availableClientBalance: 50, onClose: vi.fn(), onSubmit, onBalanceApplied, ...(route === 'callback' ? { onApplyClientBalance } : {}) };
+      const view = render(<PaymentModal {...props} />); return { props, view, mutation: route === 'callback' ? onApplyClientBalance : applyClientBalanceMock };
+    };
+    const apply = async (route: Route) => {
+      if (route !== 'installment') { fireEvent.click(await openBalance()); return; }
+      const field = await screen.findByRole('textbox', { name: 'Сумма зачета' }); fireEvent.change(field, { target: { value: '25' } });
+      if (!screen.queryByRole('heading', { name: 'Выберите платеж для зачета аванса' })) fireEvent.click(await screen.findByRole('button', { name: 'Выбрать платеж' })); fireEvent.click(await screen.findByRole('radio', { name: /Target installment/ }));
+      const heading = screen.getByRole('heading', { name: 'Выберите платеж для зачета аванса' }); fireEvent.click(within(heading.parentElement!.parentElement!.parentElement!).getByRole('button', { name: 'Зачесть' }));
+    };
+    for (const route of routes) {
+      for (const outcome of ['success', 'error'] as const) it.each(['payment', 'closed', 'reopen', 'permission', 'permission-aba', 'visibility', 'unmount'] as const)(`balance matrix: ${route} ${outcome} cannot follow changed %s`, async change => {
+        const saved = pending<{ appliedAmount: number; balance: number }>(); const { view, props, mutation } = setup(route); mutation.mockReturnValue(saved.promise); await apply(route); await waitFor(() => expect(mutation).toHaveBeenCalledOnce());
+        if (change === 'payment') view.rerender(<PaymentModal {...props} payment={current({ id: 9902 })} />);
+        if (change === 'closed' || change === 'reopen') { view.rerender(<PaymentModal {...props} isOpen={false} />); if (change === 'reopen') view.rerender(<PaymentModal {...props} />); }
+        if (change === 'permission' || change === 'permission-aba') { view.rerender(<PaymentModal {...props} canEditPayment={false} />); if (change === 'permission-aba') view.rerender(<PaymentModal {...props} />); }
+        if (change === 'visibility') { paymentScopeState.value = 'own'; view.rerender(<PaymentModal {...props} />); }
+        if (change === 'unmount') view.unmount();
+        await act(async () => { if (outcome === 'success') saved.resolve({ appliedAmount: 25, balance: 25 }); else saved.reject(new Error('Private previous allocation failed')); }); expect(props.onBalanceApplied).not.toHaveBeenCalled(); expect(toastSuccessMock).not.toHaveBeenCalled(); expect(toastErrorMock).not.toHaveBeenCalled();
+        const paid = document.querySelector<HTMLInputElement>('[name="paidAmount"]'); if (paid) expect(paid.value).toBe('0,00');
+      });
+      it.each(['login', 'actor', 'logout'] as const)(`balance matrix: ${route} cannot accept a committed result after changed %s without render`, async change => {
+        const session = documentCopyTestSession(); try {
+          const saved = pending<{ appliedAmount: number; balance: number }>(); const { props, mutation } = setup(route); mutation.mockReturnValue(saved.promise); await apply(route); await waitFor(() => expect(mutation).toHaveBeenCalledOnce()); await act(async () => undefined); session.replace(change);
+          await act(async () => saved.resolve({ appliedAmount: 25, balance: 25 })); expect(props.onBalanceApplied).not.toHaveBeenCalled(); expect(toastSuccessMock).not.toHaveBeenCalled(); expect(document.querySelector<HTMLInputElement>('[name="paidAmount"]')?.value).toBe('0,00'); expect(mutation).toHaveBeenCalledOnce();
+        } finally { session.restore(); }
+      });
+      it(`balance current: ${route} keeps endpoint, precision, explicit retry and refresh`, async () => {
+        const { props, mutation } = setup(route); mutation.mockRejectedValueOnce(new Error('Current allocation refused')).mockResolvedValue({ appliedAmount: 25, balance: 25 }); await apply(route); await waitFor(() => expect(toastErrorMock).toHaveBeenCalledOnce()); await apply(route); await waitFor(() => expect(props.onBalanceApplied).toHaveBeenCalledOnce());
+        const id = route === 'installment' ? 9903 : 9901; if (route === 'callback') expect(mutation).toHaveBeenLastCalledWith(25, expect.objectContaining({ id })); else expect(mutation).toHaveBeenLastCalledWith(69, { paymentId: id, amount: 25 }); expect(props.onBalanceApplied).toHaveBeenCalledWith(id); expect(toastSuccessMock).toHaveBeenCalledOnce(); expect(mutation).toHaveBeenCalledTimes(2);
+        if (route !== 'installment') expect(document.querySelector<HTMLInputElement>('[name="paidAmount"]')?.value).toBe('25,00'); else expect(document.querySelector<HTMLInputElement>('[name="paidAmount"]')?.value).toBe('0,00');
+      });
+      it(`balance lock: ${route} cannot overlap another balance, save or annul`, async () => {
+        const saved = pending<{ appliedAmount: number; balance: number }>(); const { props, mutation } = setup(route); mutation.mockReturnValue(saved.promise); await apply(route); await waitFor(() => expect(mutation).toHaveBeenCalledOnce()); fireEvent.submit(document.querySelector('form')!); fireEvent.click(screen.getByRole('button', { name: 'Аннулировать' })); await act(async () => undefined); expect(props.onSubmit).not.toHaveBeenCalled(); expect(mutation).toHaveBeenCalledOnce(); await act(async () => saved.resolve({ appliedAmount: 25, balance: 25 }));
+      });
+    }
+    it('balance lock: an obsolete finally cannot release a newer payment allocation', async () => {
+      const first = pending<{ appliedAmount: number; balance: number }>(); const second = pending<{ appliedAmount: number; balance: number }>(); const { props, view } = setup('direct'); applyClientBalanceMock.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise); await apply('direct'); view.rerender(<PaymentModal {...props} payment={current({ id: 9902 })} />); await apply('direct');
+      await act(async () => first.resolve({ appliedAmount: 25, balance: 25 })); fireEvent.submit(document.querySelector('form')!); expect(props.onSubmit).not.toHaveBeenCalled(); expect(applyClientBalanceMock).toHaveBeenCalledTimes(2); await act(async () => second.resolve({ appliedAmount: 25, balance: 25 })); expect(props.onBalanceApplied).toHaveBeenCalledExactlyOnceWith(9902); expect(toastSuccessMock).toHaveBeenCalledOnce();
+    });
+    for (const route of routes) it.each(['reopen', 'permission-aba'] as const)(`balance pending lock: ${route} keeps the same payment reserved across %s until its dispatched result arrives`, async change => {
+      const saved = pending<{ appliedAmount: number; balance: number }>(); const { props, view, mutation } = setup(route); mutation.mockReturnValue(saved.promise); await apply(route); await waitFor(() => expect(mutation).toHaveBeenCalledOnce());
+      if (change === 'reopen') { view.rerender(<PaymentModal {...props} isOpen={false} />); view.rerender(<PaymentModal {...props} />); } else { view.rerender(<PaymentModal {...props} canEditPayment={false} />); view.rerender(<PaymentModal {...props} />); }
+      fireEvent.submit(document.querySelector('form')!); for (const balance of screen.queryAllByRole('button', { name: 'Зачесть' })) fireEvent.click(balance); expect(props.onSubmit).not.toHaveBeenCalled(); expect(mutation).toHaveBeenCalledOnce(); await act(async () => saved.resolve({ appliedAmount: 25, balance: 25 })); expect(props.onBalanceApplied).not.toHaveBeenCalled(); expect(toastSuccessMock).not.toHaveBeenCalled();
+    });
+    it.each([0, -1, Number.NaN])('balance boundary: requested amount=%s sends no financial command', async amount => {
+      setup('direct'); const field = await screen.findByRole('textbox', { name: 'Сумма зачета' }); fireEvent.change(field, { target: { value: String(amount) } }); fireEvent.click(screen.getByRole('button', { name: 'Зачесть' })); expect(applyClientBalanceMock).not.toHaveBeenCalled(); expect(toastErrorMock).toHaveBeenCalledOnce();
+    });
+    it('balance boundary: request precision and the existing remaining-amount cap are preserved', async () => {
+      applyClientBalanceMock.mockResolvedValue({ appliedAmount: 25.56789, balance: 24.43 }); render(<PaymentModal isOpen payment={current({ paidAmount: 80, outstandingAmount: 20 })} availableClientBalance={50} onClose={vi.fn()} onSubmit={vi.fn()} />); const field = await screen.findByRole('textbox', { name: 'Сумма зачета' }); fireEvent.change(field, { target: { value: '25.56789' } }); fireEvent.click(screen.getByRole('button', { name: 'Зачесть' })); await waitFor(() => expect(applyClientBalanceMock).toHaveBeenCalledExactlyOnceWith(69, { paymentId: 9901, amount: 25.56789 })); await screen.findByText(/Зачтено с баланса: 20,00/); expect(document.querySelector<HTMLInputElement>('[name="paidAmount"]')?.value).toBe('100,00');
+    });
+    it('balance boundary: changing a draft counterparty cannot allocate against the old saved party', async () => {
+      setup('direct'); await openBalance(); fireEvent.click(screen.getByRole('button', { name: 'Выбрать контрагента' })); await selectPickerOption('Supplier Client'); expect(screen.queryByRole('textbox', { name: 'Сумма зачета' })).toBeNull(); expect(applyClientBalanceMock).not.toHaveBeenCalled();
+    });
+    it('balance owner: a pending refresh callback cannot clear new input or notify a new card', async () => {
+      const refreshed = pending<void>(); const { props, view } = setup('direct'); props.onBalanceApplied.mockReturnValueOnce(refreshed.promise); applyClientBalanceMock.mockResolvedValue({ appliedAmount: 25, balance: 25 }); await apply('direct'); await waitFor(() => expect(props.onBalanceApplied).toHaveBeenCalledOnce()); view.rerender(<PaymentModal {...props} payment={current({ id: 9902 })} />); const field = await screen.findByRole('textbox', { name: 'Сумма зачета' }); fireEvent.change(field, { target: { value: '17' } }); await act(async () => refreshed.resolve()); expect(field).toHaveProperty('value', '17'); expect(toastSuccessMock).not.toHaveBeenCalled();
+    });
+    it('balance owner: readonly cannot offer allocation and a saved counterparty replacement invalidates its draft action', async () => {
+      const { props, view } = setup('direct'); await openBalance(); view.rerender(<PaymentModal {...props} canEditPayment={false} />); expect(screen.queryByRole('textbox', { name: 'Сумма зачета' })).toBeNull(); view.rerender(<PaymentModal {...props} payment={current({ clientId: 77 })} />); expect(screen.queryByRole('textbox', { name: 'Сумма зачета' })).toBeNull(); expect(applyClientBalanceMock).not.toHaveBeenCalled();
+    });
+    it.each(['actor', 'logout'] as const)('balance read: late result cannot follow %s without render', async change => {
+      const session = documentCopyTestSession(); try { const read = pending<{ clientId: number; balance: number }>(); getClientBalanceMock.mockReturnValue(read.promise); render(<PaymentModal isOpen payment={current()} onClose={vi.fn()} onSubmit={vi.fn()} />); await waitFor(() => expect(getClientBalanceMock).toHaveBeenCalledOnce()); await act(async () => undefined); session.replace(change); await act(async () => read.resolve({ clientId: 69, balance: 50 })); expect(screen.queryByRole('textbox', { name: 'Сумма зачета' })).toBeNull(); } finally { session.restore(); }
+    });
+    it('balance read: scope loss hides the previous balance and its restored scope awaits a new read', async () => {
+      getClientBalanceMock.mockResolvedValue({ clientId: 69, balance: 50 }); const props = { isOpen: true, payment: current(), onClose: vi.fn(), onSubmit: vi.fn() }; const view = render(<PaymentModal {...props} />); await screen.findByRole('textbox', { name: 'Сумма зачета' }); paymentScopeState.value = 'own'; view.rerender(<PaymentModal {...props} />); expect(screen.queryByRole('textbox', { name: 'Сумма зачета' })).toBeNull();
+      const next = pending<{ clientId: number; balance: number }>(); getClientBalanceMock.mockReturnValue(next.promise); paymentScopeState.value = 'all'; view.rerender(<PaymentModal {...props} />); expect(screen.queryByRole('textbox', { name: 'Сумма зачета' })).toBeNull(); await act(async () => next.resolve({ clientId: 69, balance: 75 })); expect(screen.getByRole('textbox', { name: 'Сумма зачета' })).toBeTruthy(); expect(getClientBalanceMock).toHaveBeenCalledTimes(2);
+    });
+    it('balance read: a normal token refresh does not reread a settled balance or installment list', async () => {
+      const session = documentCopyTestSession(); try { const { props, view } = setup('installment'); await screen.findByRole('button', { name: 'Выбрать платеж' }); const before = getPaymentsV2Mock.mock.calls.length; session.refresh(); view.rerender(<PaymentModal {...props} />); expect(getPaymentsV2Mock).toHaveBeenCalledTimes(before); } finally { session.restore(); }
+    });
+    it.each(['login', 'actor', 'logout'] as const)('balance target read: a late invoice lookup cannot issue another payment GET after %s', async change => {
+      const session = documentCopyTestSession(); try {
+        const read = pending<{ items: never[] }>(); getInvoicesMock.mockReturnValue(read.promise); render(<PaymentModal isOpen payment={current({ invoiceId: 31, account: 'I-31', accountDate: '2026-04-10' })} onClose={vi.fn()} onSubmit={vi.fn()} />); await waitFor(() => expect(getInvoicesMock).toHaveBeenCalledOnce()); await act(async () => undefined); session.replace(change); await act(async () => read.resolve({ items: [] })); expect(getPaymentsV2Mock).not.toHaveBeenCalled();
+      } finally { session.restore(); }
+    });
+    it('balance target read: a cached target dialog cannot cross payment visibility', async () => {
+      const { props, view } = setup('installment'); await screen.findByRole('button', { name: 'Выбрать платеж' }); fireEvent.click(screen.getByRole('button', { name: 'Выбрать платеж' })); await screen.findByRole('radio', { name: /Target installment/ }); getPaymentsV2Mock.mockReturnValue(new Promise(() => undefined)); paymentScopeState.value = 'own'; view.rerender(<PaymentModal {...props} />); expect(screen.queryByRole('radio', { name: /Target installment/ })).toBeNull(); expect(screen.queryByRole('heading', { name: 'Выберите платеж для зачета аванса' })).toBeNull(); expect(applyClientBalanceMock).not.toHaveBeenCalled();
+    });
+    const actions = ['cancel', 'move', 'delete', 'rollback', 'adjust'] as const;
+    const actionProps = (action: typeof actions[number]) => ({ isOpen: true, payment: current(action === 'rollback' || action === 'adjust' ? { systemNotes: '[pp:partial-remainder-source] {"sourceOriginalAmount":125,"paidAmount":25,"remainderAmount":100,"remainderDate":"2026-11-01"}' } : {}), onSubmit: vi.fn(), onClose: vi.fn(), onDelete: vi.fn(), onRollbackRemainderTransfer: vi.fn(), onAdjustRemainderTransfer: vi.fn() });
+    const invokeAction = async (action: typeof actions[number]) => {
+      if (action === 'cancel') fireEvent.click(screen.getByRole('button', { name: 'Аннулировать' }));
+      if (action === 'delete') fireEvent.click(screen.getByRole('button', { name: 'delete' }));
+      if (action === 'move') { fireEvent.click(screen.getByRole('button', { name: 'Перенести' })); fireEvent.click(screen.getByRole('button', { name: 'Сохранить перенос' })); }
+      if (action === 'rollback') fireEvent.click(screen.getByRole('button', { name: 'Откатить перенос' }));
+      if (action === 'adjust') { fireEvent.click(screen.getByRole('button', { name: 'Изменить разделение' })); const paid = screen.getByRole('textbox', { name: 'Фактически оплачено' }); fireEvent.change(paid, { target: { value: '25' } }); const tools = paid.closest('label')!.parentElement!; fireEvent.click(within(tools).getByRole('button', { name: 'Сохранить' })); }
+    };
+    for (const action of actions) it.each(['payment', 'closed', 'permission', 'actor', 'unmount'] as const)(`financial action owner: ${action} completion cannot close another owner after %s`, async change => {
+      const session = documentCopyTestSession(); try {
+        const saved = pending<Payment>(); const props = actionProps(action); const write = action === 'delete' ? props.onDelete : action === 'rollback' ? props.onRollbackRemainderTransfer : action === 'adjust' ? props.onAdjustRemainderTransfer : props.onSubmit; write.mockReturnValue(saved.promise); const view = render(<PaymentModal {...props} />); await invokeAction(action); await waitFor(() => expect(write).toHaveBeenCalledOnce());
+        if (change === 'payment') view.rerender(<PaymentModal {...props} payment={current({ id: 9902 })} />); if (change === 'closed') view.rerender(<PaymentModal {...props} isOpen={false} />); if (change === 'permission') view.rerender(<PaymentModal {...props} {...(action === 'delete' ? { onDelete: undefined } : { canEditPayment: false })} />); if (change === 'actor') session.replace('actor'); if (change === 'unmount') view.unmount(); await act(async () => saved.resolve(current())); expect(props.onClose).not.toHaveBeenCalled(); expect(write).toHaveBeenCalledOnce();
+      } finally { session.restore(); }
+    });
+    it.each(actions)('financial action lock: a pending %s also excludes a balance write', async action => {
+      const saved = pending<Payment>(); const props = { ...actionProps(action), availableClientBalance: 50 }; const write = action === 'delete' ? props.onDelete : action === 'rollback' ? props.onRollbackRemainderTransfer : action === 'adjust' ? props.onAdjustRemainderTransfer : props.onSubmit; write.mockReturnValue(saved.promise); render(<PaymentModal {...props} />); const balance = await openBalance(); await invokeAction(action); await waitFor(() => expect(write).toHaveBeenCalledOnce()); fireEvent.click(balance); expect(applyClientBalanceMock).not.toHaveBeenCalled(); await act(async () => saved.resolve(current())); expect(props.onClose).toHaveBeenCalledOnce();
+    });
+    it('balance owner: late direct apply cannot update the next payment or invoke its refresh', async () => {
+      let finish!: (value: { appliedAmount: number; balance: number }) => void; applyClientBalanceMock.mockReturnValue(new Promise(resolve => { finish = resolve; })); const onBalanceApplied = vi.fn(); const props = { isOpen: true, availableClientBalance: 50, onClose: vi.fn(), onSubmit: vi.fn(), onBalanceApplied };
+      const view = render(<PaymentModal {...props} payment={current()} />); fireEvent.click(await openBalance()); await waitFor(() => expect(applyClientBalanceMock).toHaveBeenCalledOnce()); view.rerender(<PaymentModal {...props} payment={current({ id: 9902 })} />);
+      await act(async () => finish({ appliedAmount: 25, balance: 25 })); expect(document.querySelector<HTMLInputElement>('[name="paidAmount"]')?.value).toBe('0,00'); expect(onBalanceApplied).not.toHaveBeenCalled(); expect(toastSuccessMock).not.toHaveBeenCalled();
+    });
+    it('balance owner: pending balance excludes an overlapping save', async () => {
+      applyClientBalanceMock.mockReturnValue(new Promise(() => undefined)); const onSubmit = vi.fn().mockResolvedValue(current()); render(<PaymentModal isOpen availableClientBalance={50} payment={current()} onClose={vi.fn()} onSubmit={onSubmit} />); fireEvent.click(await openBalance()); await waitFor(() => expect(applyClientBalanceMock).toHaveBeenCalledOnce()); fireEvent.submit(document.querySelector('form')!); await act(async () => undefined); expect(onSubmit).not.toHaveBeenCalled();
+    });
+    it('balance owner: late balance read cannot become visible after login changes without render', async () => {
+      const session = documentCopyTestSession(); try {
+        let finish!: (value: { clientId: number; balance: number }) => void; getClientBalanceMock.mockReturnValue(new Promise(resolve => { finish = resolve; })); render(<PaymentModal isOpen payment={current()} onClose={vi.fn()} onSubmit={vi.fn()} />); await waitFor(() => expect(getClientBalanceMock).toHaveBeenCalledOnce()); await act(async () => undefined); session.replace('login'); await act(async () => finish({ clientId: 69, balance: 50 })); expect(screen.queryByRole('textbox', { name: 'Сумма зачета' })).toBeNull();
+      } finally { session.restore(); }
+    });
+  });
   describe('payment confirmation ownership', () => {
     it('payment confirm capability: withdrawing deletion revokes the pending old delete callback', async () => {
       let finish!: (value: boolean) => void; confirmMock.mockReturnValue(new Promise<boolean>(resolve => { finish = resolve; })); const onDelete = vi.fn().mockResolvedValue(undefined); const props = { isOpen: true, payment: doc04Payment(), onSubmit: vi.fn(), onClose: vi.fn() };
