@@ -117,6 +117,8 @@ public class LegalEntityDetailDto : LegalEntityListItemDto
 
 public class MainCompanySettingsDto
 {
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? SettingsVersion { get; set; }
     public int? DefaultCompanyId { get; set; }
     public List<LegalEntityListItemDto> Companies { get; set; } = new();
     public string SellerSnapshotTiming { get; set; } = DocumentSellerSnapshotPolicy.FirstFile;

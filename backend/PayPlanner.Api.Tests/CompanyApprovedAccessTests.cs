@@ -72,6 +72,7 @@ public partial class LegalEntitiesControllerTests
         var contact = new ExternalContact { ContactType = "Organization", FullName = "Contact company", Inn = "7700000111", ResponsibleUserId = actor };
         db.ExternalContacts.Add(contact); await db.SaveChangesAsync();
         var before = await CompanyApprovalMutationSnapshot(db);
+        var settingsVersion = await MainCompanySettingsVersionTestAccess.ReadAsync(CreateController(db, actor));
         if (stage == "before-auth") await db.Users.Where(user => user.Id == actor).ExecuteUpdateAsync(setters => setters.SetProperty(user => user.IsApproved, false));
         using var server = CompanyApprovalServer(db, stage == "after-auth" ? actor : null);
         using var client = server.CreateClient(); client.DefaultRequestHeaders.Add("X-Company-Approval-Actor", actor.ToString(CultureInfo.InvariantCulture));
@@ -79,7 +80,7 @@ public partial class LegalEntitiesControllerTests
         {
             "create" => await client.PostAsJsonAsync("/api/legal-entities", new LegalEntityRequest { ShortName = "Must require approval", Inn = "7700000112" }),
             "promote" => await client.PostAsJsonAsync($"/api/contacts/external/{contact.Id}/promote", new PromoteContactRequest { Target = "legalEntity", Role = "Client" }),
-            "settings" => await client.PutAsJsonAsync("/api/legal-entities/main-companies/settings", new UpdateMainCompanySettingsRequest { CompanyIds = [second], DefaultCompanyId = second }),
+            "settings" => await client.PutAsJsonAsync("/api/legal-entities/main-companies/settings", new UpdateMainCompanySettingsRequest { ExpectedVersion = settingsVersion, CompanyIds = [second], DefaultCompanyId = second }),
             "default" => await client.PutAsync($"/api/legal-entities/company-profile/main/{second}", null),
             "requisites" => await client.GetAsync($"/api/legal-entities/{first}/requisites-check"),
             "delete-own" => await client.DeleteAsync($"/api/legal-entities/{first}"),

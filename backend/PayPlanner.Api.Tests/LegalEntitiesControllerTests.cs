@@ -154,9 +154,11 @@ public partial class LegalEntitiesControllerTests
         var userId = await CreateUserAsync(db);
         var controller = CreateController(db, userId, isAdmin: true);
         var setupAdmin = await CreateUserAsync(db, "admin");
-        Assert.IsType<OkObjectResult>((await CreateController(db, setupAdmin).UpdateMainCompanySettings(
+        var setupController = CreateController(db, setupAdmin);
+        Assert.IsType<OkObjectResult>((await setupController.UpdateMainCompanySettings(
             new UpdateMainCompanySettingsRequest
             {
+                ExpectedVersion = await MainCompanySettingsVersionTestAccess.ReadAsync(setupController),
                 CompanyIds = [companyId],
                 DefaultCompanyId = companyId,
             },
@@ -177,6 +179,7 @@ public partial class LegalEntitiesControllerTests
         await controller.UpdateMainCompanySettings(
             new UpdateMainCompanySettingsRequest
             {
+                ExpectedVersion = await MainCompanySettingsVersionTestAccess.ReadAsync(controller),
                 CompanyIds = [companyId],
                 DefaultCompanyId = companyId,
             },
@@ -202,6 +205,7 @@ public partial class LegalEntitiesControllerTests
         var settingsAction = await controller.UpdateMainCompanySettings(
             new UpdateMainCompanySettingsRequest
             {
+                ExpectedVersion = await MainCompanySettingsVersionTestAccess.ReadAsync(controller),
                 CompanyIds = [firstCompanyId, secondCompanyId],
                 DefaultCompanyId = secondCompanyId,
             },
@@ -361,6 +365,7 @@ public partial class LegalEntitiesControllerTests
         await controller.UpdateMainCompanySettings(
             new UpdateMainCompanySettingsRequest
             {
+                ExpectedVersion = await MainCompanySettingsVersionTestAccess.ReadAsync(controller),
                 CompanyIds = [firstCompanyId, secondCompanyId],
                 DefaultCompanyId = firstCompanyId,
             },
@@ -415,6 +420,7 @@ public partial class LegalEntitiesControllerTests
         var action = await controller.UpdateMainCompanySettings(
             new UpdateMainCompanySettingsRequest
             {
+                ExpectedVersion = await MainCompanySettingsVersionTestAccess.ReadAsync(controller),
                 CompanyIds = [firstCompanyId],
                 DefaultCompanyId = firstCompanyId,
             },
@@ -1280,8 +1286,9 @@ public partial class LegalEntitiesControllerTests
         await SetLegalEntityPermissionAsync(db, editorId, canCreate: false, canEdit: true, canDelete: false);
         await SetLegalEntityPermissionAsync(db, viewerId, canCreate: false, canEdit: false, canDelete: false);
         var companyId = await CreateLegalEntityAsync(db, "Своя компания", responsibleUserId: editorId);
-        await CreateController(db, adminId).UpdateMainCompanySettings(
-            new UpdateMainCompanySettingsRequest { CompanyIds = [companyId], DefaultCompanyId = companyId },
+        var adminController = CreateController(db, adminId);
+        await adminController.UpdateMainCompanySettings(
+            new UpdateMainCompanySettingsRequest { ExpectedVersion = await MainCompanySettingsVersionTestAccess.ReadAsync(adminController), CompanyIds = [companyId], DefaultCompanyId = companyId },
             CancellationToken.None);
         var request = new LegalEntityRequest { ShortName = "Своя компания", SealDataUrl = CompanyImageTestData.TransparentPng, ProfileEditVersion = await ReadProfileEditVersionAsync(db, companyId) };
 
@@ -1311,7 +1318,7 @@ public partial class LegalEntitiesControllerTests
         Assert.IsType<BadRequestObjectResult>(unknown.Result);
 
         await controller.UpdateMainCompanySettings(
-            new UpdateMainCompanySettingsRequest { CompanyIds = [entityId], DefaultCompanyId = entityId },
+            new UpdateMainCompanySettingsRequest { ExpectedVersion = await MainCompanySettingsVersionTestAccess.ReadAsync(controller), CompanyIds = [entityId], DefaultCompanyId = entityId },
             CancellationToken.None);
 
         var archive = await controller.Update(entityId, new LegalEntityRequest { ShortName = "Своя компания", ProfileStatus = "archived" }, CancellationToken.None);
@@ -1347,9 +1354,9 @@ public partial class LegalEntitiesControllerTests
         var controller = CreateController(db, userId);
 
         var refused = await controller.UpdateMainCompanySettings(
-            new UpdateMainCompanySettingsRequest { CompanyIds = [activeId, draftId] }, CancellationToken.None);
+            new UpdateMainCompanySettingsRequest { ExpectedVersion = await MainCompanySettingsVersionTestAccess.ReadAsync(controller), CompanyIds = [activeId, draftId] }, CancellationToken.None);
         var accepted = await controller.UpdateMainCompanySettings(
-            new UpdateMainCompanySettingsRequest { CompanyIds = [activeId] }, CancellationToken.None);
+            new UpdateMainCompanySettingsRequest { ExpectedVersion = await MainCompanySettingsVersionTestAccess.ReadAsync(controller), CompanyIds = [activeId] }, CancellationToken.None);
 
         Assert.IsType<ConflictObjectResult>(refused.Result);
         Assert.IsType<OkObjectResult>(accepted.Result);

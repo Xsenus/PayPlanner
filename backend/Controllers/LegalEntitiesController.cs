@@ -11,6 +11,7 @@ using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Companies;
 using PayPlanner.Api.Services.LegalEntities;
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -102,7 +103,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
     private static string? NormalizeInvoiceNumber(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim().ToLowerInvariant();
 
-    private sealed record MainCompanySettingsState(IReadOnlyList<int> CompanyIds, int? DefaultCompanyId);
+    private sealed record MainCompanySettingsState(IReadOnlyList<int> CompanyIds, int? DefaultCompanyId, string SellerSnapshotTiming, string Version);
 
     private Task<DataVisibilityAccess?> GetCurrentAccessAsync(CancellationToken ct)
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.LegalEntities, ct);
@@ -114,13 +115,29 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
 
     private async Task<MainCompanySettingsState> LoadMainCompanySettingsStateAsync(CancellationToken ct)
     {
-        var values = await _db.SystemSettings
+        // Read the registry, policy and edit version from the same database statement.
+        var rows = await _db.SystemSettings
             .AsNoTracking()
             .Where(item =>
                 item.Key == LegacyMainCompanySettingKey
                 || item.Key == MainCompanyIdsSettingKey
-                || item.Key == DefaultMainCompanyIdSettingKey)
-            .ToDictionaryAsync(item => item.Key, item => item.Value, ct);
+                || item.Key == DefaultMainCompanyIdSettingKey
+                || item.Key == DocumentSellerSnapshotPolicy.SettingKey)
+            .ToListAsync(ct);
+        var values = rows.ToDictionary(item => item.Key, item => item.Value);
+        var versionBytes = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            scope = "main-company-settings-v1",
+            rows = rows.OrderBy(item => item.Key, StringComparer.Ordinal).Select(item => new
+            {
+                item.Id,
+                item.Key,
+                item.Value,
+                created = item.CreatedAt.Ticks / 10,
+                updated = item.UpdatedAt.Ticks / 10,
+            }),
+        });
+        var version = Convert.ToHexString(SHA256.HashData(versionBytes));
 
         var companyIds = new List<int>();
 
@@ -177,7 +194,8 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             defaultCompanyId = companyIds[0];
         }
 
-        return new MainCompanySettingsState(companyIds, defaultCompanyId);
+        return new MainCompanySettingsState(companyIds, defaultCompanyId,
+            DocumentSellerSnapshotPolicy.Effective(values.GetValueOrDefault(DocumentSellerSnapshotPolicy.SettingKey)), version);
     }
 
     private async Task<int?> GetMainCompanyIdAsync(CancellationToken ct)
@@ -1344,11 +1362,14 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         var access = await CompanyProfileAccess.ResolveAsync(_db, User, ct);
         if (access is null) return Forbid();
         var state = await LoadMainCompanySettingsStateAsync(ct);
-        var companies = access.CompanyIds.Count == 0
+        // For an administrator use this exact registry snapshot, not the earlier
+        // access resolver's registry read, which may precede another admin's save.
+        var visibleIds = access.Section.Visibility.IsAdmin ? state.CompanyIds : state.CompanyIds.Where(access.CompanyIds.Contains).ToArray();
+        var companies = visibleIds.Count == 0
             ? new List<LegalEntityListItemDto>()
             : await _db.LegalEntities
                 .AsNoTracking()
-                .Where(le => access.CompanyIds.Contains(le.Id))
+                .Where(le => visibleIds.Contains(le.Id))
                 .OrderBy(le => le.ShortName)
                 .Select(le => new LegalEntityListItemDto
                 {
@@ -1362,10 +1383,11 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
 
         return Ok(new MainCompanySettingsDto
         {
-            DefaultCompanyId = state.DefaultCompanyId is int defaultId && access.CompanyIds.Contains(defaultId)
+            DefaultCompanyId = state.DefaultCompanyId is int defaultId && visibleIds.Contains(defaultId)
                 ? defaultId : companies.FirstOrDefault()?.Id,
             Companies = companies,
-            SellerSnapshotTiming = await new DocumentSellerService(_db).ReadCreationPolicyAsync(ct),
+            SellerSnapshotTiming = state.SellerSnapshotTiming,
+            SettingsVersion = access.Section.Visibility.IsAdmin ? state.Version : null,
         });
     }
 
@@ -1378,6 +1400,9 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
 
     private async Task<ActionResult<MainCompanySettingsDto>> UpdateMainCompanySettingsCoreAsync(UpdateMainCompanySettingsRequest request, CancellationToken ct)
     {
+        if (!CompanyDocumentImagePrintDefaultsService.IsValidVersion(request.ExpectedVersion)
+            || !string.Equals((await LoadMainCompanySettingsStateAsync(ct)).Version, request.ExpectedVersion, StringComparison.OrdinalIgnoreCase))
+            return Conflict(new { code = "MainCompanySettingsChanged", message = "Список собственных компаний или правило фиксации документов изменились. Ваш выбор не сохранён. Загрузите актуальные настройки и внесите изменения заново." });
         if (request.SellerSnapshotTiming is not null && !DocumentSellerSnapshotPolicy.IsValid(request.SellerSnapshotTiming))
             return BadRequest(new { message = "Выберите фиксацию реквизитов при первой подготовке файла или при создании документа." });
         var normalizedIds = (request.CompanyIds ?? [])

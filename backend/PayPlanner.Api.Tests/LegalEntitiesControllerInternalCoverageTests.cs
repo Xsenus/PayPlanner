@@ -399,6 +399,7 @@ public class LegalEntitiesControllerInternalCoverageTests
         var action = await controller.UpdateMainCompanySettings(
             new UpdateMainCompanySettingsRequest
             {
+                ExpectedVersion = await MainCompanySettingsVersionTestAccess.ReadAsync(controller),
                 CompanyIds = [99, 3, 99, 5],
                 DefaultCompanyId = 99,
             },

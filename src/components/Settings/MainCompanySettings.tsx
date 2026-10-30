@@ -1,7 +1,9 @@
 import { Building2, Loader2, PencilLine, Plus, Star, Trash2 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { useAuth } from '../../contexts/AuthContext';
 import { useTabNavigation } from '../../contexts/TabContext';
+import { useAsyncOperationOwner } from '../../hooks/useAsyncOperationOwner';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { apiService, type DocumentSellerSnapshotTiming, type MainCompanySettingsDto } from '../../services/api';
 import type { LegalEntitySummary } from '../../types';
@@ -9,6 +11,9 @@ import { setStoredCompanyProfileCompanyId, setStoredCompanyProfileMode } from '.
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
 import { useToast } from '../../hooks/useToast';
+import { captureAuthSessionIdentity, isAuthSessionIdentityCurrent, type AuthSessionIdentity } from '../../services/authService';
+
+const validVersion = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/i.test(value);
 
 function buildCompanyOption(entity: LegalEntitySummary): LookupSelectOption {
   const descriptionParts = [
@@ -42,6 +47,15 @@ function buildSnapshot(settings: MainCompanySettingsDto | null) {
 }
 
 export function MainCompanySettings() {
+  const { user, isAdmin } = useAuth();
+  const admin = isAdmin();
+  const { epoch, actor, authenticated } = captureAuthSessionIdentity();
+  const session = useMemo(() => ({ epoch, actor, authenticated }), [epoch, actor, authenticated]);
+  if (!user || !admin || !authenticated) return <p className="text-sm text-slate-600">Настройки собственных компаний доступны администратору.</p>;
+  return <MainCompanySettingsScreen key={JSON.stringify([user.id, user.role?.id, admin, session])} session={session} />;
+}
+
+function MainCompanySettingsScreen({ session }: { session: AuthSessionIdentity }) {
   const { setActiveTab } = useTabNavigation();
   const toast = useToast();
   const {
@@ -57,20 +71,39 @@ export function MainCompanySettings() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedCompanyToAddId, setSelectedCompanyToAddId] = useState('');
+  const mounted = useRef(true);
+  const loadSequence = useRef(0);
+  const savingRef = useRef(false);
+  const { capture, isCurrent } = useAsyncOperationOwner('main-company-settings');
+  const renderedOwner = capture();
+
+  useEffect(() => {
+    const sequence = loadSequence;
+    mounted.current = true;
+    return () => { mounted.current = false; ++sequence.current; };
+  }, []);
 
   const loadSettings = useCallback(async () => {
+    if (!mounted.current || savingRef.current || !isAuthSessionIdentityCurrent(session)) return;
+    const sequence = ++loadSequence.current;
+    const current = () => mounted.current && sequence === loadSequence.current && isAuthSessionIdentityCurrent(session);
     try {
       setLoading(true);
       setError(null);
       const response = await apiService.getMainCompanySettings();
+      if (!current()) return;
+      if (!validVersion(response.settingsVersion)) throw new Error('Не удалось получить актуальную версию настроек. Обновите страницу перед сохранением.');
       setSettings(response);
       setSavedSnapshot(buildSnapshot(response));
+      setSelectedCompanyToAddId('');
+      setMessage(null);
     } catch (loadError) {
+      if (!current()) return;
       setError(extractDisplayErrorMessage(loadError, 'Не удалось загрузить настройки основных компаний.'));
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
-  }, []);
+  }, [session]);
 
   useEffect(() => {
     void loadSettings();
@@ -170,37 +203,46 @@ export function MainCompanySettings() {
   }, []);
 
   const handleOpenCompanyProfile = useCallback((companyId: number) => {
+    if (!mounted.current || !isCurrent(renderedOwner) || !isAuthSessionIdentityCurrent(session)) return;
     setStoredCompanyProfileCompanyId(companyId);
     setStoredCompanyProfileMode('edit');
     setActiveTab('companyProfile');
-  }, [setActiveTab]);
+  }, [isCurrent, renderedOwner, session, setActiveTab]);
 
   const handleSave = useCallback(async () => {
+    const current = () => mounted.current && isCurrent(renderedOwner) && isAuthSessionIdentityCurrent(session);
+    if (!current() || savingRef.current || loading || !settings || !validVersion(settings.settingsVersion) || !hasChanges) return;
+    savingRef.current = true;
     try {
       setSaving(true);
       setError(null);
       setMessage(null);
 
       const payload = {
+        expectedVersion: settings.settingsVersion,
         companyIds: (settings?.companies ?? []).map((company) => company.id),
         defaultCompanyId: settings?.defaultCompanyId ?? null,
         sellerSnapshotTiming: settings?.sellerSnapshotTiming ?? 'first-file',
       };
 
       const response = await apiService.updateMainCompanySettings(payload);
+      if (!current()) return;
+      if (!validVersion(response.settingsVersion)) throw new Error('Сервер не подтвердил версию сохранённых настроек. Загрузите сохранённые настройки, чтобы проверить результат.');
       setSettings(response);
       setSavedSnapshot(buildSnapshot(response));
       setMessage('Настройки основных компаний сохранены.');
       toast.success('Настройки основных компаний сохранены.', 'Настройки');
       await refreshLegalEntities();
     } catch (saveError) {
+      if (!current()) return;
       const nextError = extractDisplayErrorMessage(saveError, 'Не удалось сохранить основные компании.');
       setError(nextError);
       toast.error(nextError, 'Настройки');
     } finally {
-      setSaving(false);
+      savingRef.current = false;
+      if (current()) setSaving(false);
     }
-  }, [refreshLegalEntities, settings, toast]);
+  }, [hasChanges, isCurrent, loading, refreshLegalEntities, renderedOwner, session, settings, toast]);
 
   return (
     <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
@@ -375,11 +417,16 @@ export function MainCompanySettings() {
             </div>
           ) : null}
 
-          <div className="flex justify-end">
+          <p className="text-xs text-slate-500">Загрузка сохранённых настроек заменит текущий несохранённый выбор.</p>
+          <div className="flex flex-wrap justify-end gap-2">
+            <button type="button" onClick={() => void loadSettings()} disabled={loading || saving}
+              className="rounded-xl border border-slate-200 px-3 py-2 text-sm disabled:opacity-60">
+              Загрузить сохранённые настройки
+            </button>
             <button
               type="button"
               onClick={() => void handleSave()}
-              disabled={loading || saving || !hasChanges}
+              disabled={loading || saving || !settings || !validVersion(settings.settingsVersion) || !hasChanges}
               className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}

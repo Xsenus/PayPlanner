@@ -2322,6 +2322,7 @@ export interface UpdateTaskJournalSettingsRequest {
 export type DocumentSellerSnapshotTiming = 'first-file' | 'on-create';
 
 export interface MainCompanySettingsDto {
+  settingsVersion?: string | null;
   defaultCompanyId?: number | null;
   companies: LegalEntitySummary[];
   sellerSnapshotTiming?: DocumentSellerSnapshotTiming;
@@ -2333,6 +2334,7 @@ export type ReconciliationCompanyParty = Pick<LegalEntitySummary,
   | 'directorSignatureDataUrl' | 'sealDataUrl'>;
 
 export interface UpdateMainCompanySettingsRequest {
+  expectedVersion: string;
   companyIds: number[];
   defaultCompanyId?: number | null;
   sellerSnapshotTiming?: DocumentSellerSnapshotTiming;

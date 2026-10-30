@@ -25,6 +25,7 @@ public partial class LegalEntitiesControllerTests
         var company = await CreateLegalEntityAsync(writer, "Candidate");
         var contact = await SeedCompanyCreationContact(writer, actor);
         var before = await CompanyApprovalMutationSnapshot(writer);
+        var settingsVersion = await MainCompanySettingsVersionTestAccess.ReadAsync(CreateController(writer, actor));
         var hook = new CompanyApprovalAdmissionHook(writer, actor);
         await using var db = CompanyCreatePgContext(database.ConnectionString, hook);
         var controller = CreateController(db, actor);
@@ -32,7 +33,7 @@ public partial class LegalEntitiesControllerTests
         {
             "create" => (await controller.Create(new LegalEntityRequest { ShortName = "Must require approval", Inn = "7700000113" }, default)).Result,
             "promote" => (await CompanyCreationContactsController(db, actor).PromoteExternalContact(contact, new PromoteContactRequest { Target = "legalEntity", Role = "Client" }, default)).Result,
-            "settings" => (await controller.UpdateMainCompanySettings(new UpdateMainCompanySettingsRequest { CompanyIds = [company], DefaultCompanyId = company }, default)).Result,
+            "settings" => (await controller.UpdateMainCompanySettings(new UpdateMainCompanySettingsRequest { ExpectedVersion = settingsVersion, CompanyIds = [company], DefaultCompanyId = company }, default)).Result,
             "default" => (await controller.SetCompanyProfileMain(company, default)).Result,
             _ => throw new ArgumentOutOfRangeException(nameof(operation)),
         };
@@ -56,10 +57,11 @@ public partial class LegalEntitiesControllerTests
             new SystemSetting { Key = DocumentSellerSnapshotPolicy.SettingKey, Value = DocumentSellerSnapshotPolicy.FirstFile });
         db.UserCompanyAccesses.Add(new UserCompanyAccess { UserId = actor, LegalEntityId = first }); await db.SaveChangesAsync();
         var before = await CompanyApprovalMutationSnapshot(db);
-        failure.Remaining = 1;
         var controller = CreateController(db, actor);
+        var settingsVersion = await MainCompanySettingsVersionTestAccess.ReadAsync(controller);
+        failure.Remaining = 1;
         if (operation == "settings")
-            await Assert.ThrowsAsync<InvalidOperationException>(() => controller.UpdateMainCompanySettings(new UpdateMainCompanySettingsRequest { CompanyIds = [second], DefaultCompanyId = second, SellerSnapshotTiming = DocumentSellerSnapshotPolicy.OnCreate }, default));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => controller.UpdateMainCompanySettings(new UpdateMainCompanySettingsRequest { ExpectedVersion = settingsVersion, CompanyIds = [second], DefaultCompanyId = second, SellerSnapshotTiming = DocumentSellerSnapshotPolicy.OnCreate }, default));
         else await Assert.ThrowsAsync<InvalidOperationException>(() => controller.SetCompanyProfileMain(second, default));
         Assert.Null(db.Database.CurrentTransaction); Assert.Empty(db.ChangeTracker.Entries());
         Assert.Equal(before, await CompanyApprovalMutationSnapshot(db));

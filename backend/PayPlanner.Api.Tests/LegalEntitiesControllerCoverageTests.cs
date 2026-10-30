@@ -297,6 +297,7 @@ public class LegalEntitiesControllerCoverageTests
         await adminController.UpdateMainCompanySettings(
             new UpdateMainCompanySettingsRequest
             {
+                ExpectedVersion = await MainCompanySettingsVersionTestAccess.ReadAsync(adminController),
                 CompanyIds = [mainCompanyId],
                 DefaultCompanyId = mainCompanyId,
             },
@@ -1162,6 +1163,7 @@ public class LegalEntitiesControllerCoverageTests
         var missingAction = await controller.UpdateMainCompanySettings(
             new UpdateMainCompanySettingsRequest
             {
+                ExpectedVersion = await MainCompanySettingsVersionTestAccess.ReadAsync(controller),
                 CompanyIds = [firstCompanyId, 999],
                 DefaultCompanyId = firstCompanyId,
             },
@@ -1181,12 +1183,13 @@ public class LegalEntitiesControllerCoverageTests
             (await controller.UpdateMainCompanySettings(
                 new UpdateMainCompanySettingsRequest
                 {
+                    ExpectedVersion = await MainCompanySettingsVersionTestAccess.ReadAsync(controller),
                     CompanyIds = [firstCompanyId, secondCompanyId],
                     DefaultCompanyId = secondCompanyId,
                 },
                 CancellationToken.None)).Result);
 
-        var cleared = await controller.UpdateMainCompanySettings(new UpdateMainCompanySettingsRequest(), CancellationToken.None);
+        var cleared = await controller.UpdateMainCompanySettings(new UpdateMainCompanySettingsRequest { ExpectedVersion = await MainCompanySettingsVersionTestAccess.ReadAsync(controller) }, CancellationToken.None);
         var clearedOk = Assert.IsType<OkObjectResult>(cleared.Result);
         var dto = Assert.IsType<MainCompanySettingsDto>(clearedOk.Value);
         Assert.Empty(dto.Companies);
