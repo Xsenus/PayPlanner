@@ -230,7 +230,7 @@ public class CompanyBranchesControllerTests
         var wrongCompany = await controller.Update(other.Id, created.Id, Request(), CancellationToken.None);
         Assert.IsType<NotFoundResult>(wrongCompany.Result);
 
-        var archived = await controller.Update(companyId, created.Id, Request("Офис", r => r.Status = "Archived"), CancellationToken.None);
+        var archived = await controller.Update(companyId, created.Id, Request("Офис", r => { r.Status = "Archived"; r.ExpectedVersion = created.EditVersion; }), CancellationToken.None);
         Assert.Equal(CompanyProfileStatuses.Archived, Assert.IsType<CompanyBranchDto>(Assert.IsType<OkObjectResult>(archived.Result).Value).Status);
 
         var visible = Assert.IsType<List<CompanyBranchDto>>(Assert.IsType<OkObjectResult>((await controller.List(companyId, false, CancellationToken.None)).Result).Value);
@@ -255,5 +255,82 @@ public class CompanyBranchesControllerTests
         var snapshot = Assert.IsType<CompanyEffectiveRequisitesResponse>(Assert.IsType<OkObjectResult>(action.Result).Value).Requisites;
         Assert.Equal("780201001", snapshot.Kpp);
         Assert.Equal("7707083893", snapshot.Inn);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("invalid")]
+    [InlineData("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")]
+    public async Task Update_RejectsMissingMalformedOrStaleVersionWithoutWriting(string? version)
+    {
+        var (db, companyId) = await CreateAsync(); await using var _ = db;
+        var controller = Controller(db);
+        var created = Assert.IsType<CompanyBranchDto>(Assert.IsType<CreatedResult>((await controller.Create(companyId, Request(), default)).Result).Value);
+        var before = System.Text.Json.JsonSerializer.Serialize(await db.CompanyBranches.AsNoTracking().SingleAsync());
+        var auditCount = await db.ObjectAuditEvents.CountAsync(); db.ChangeTracker.Clear();
+        var conflict = Assert.IsType<ConflictObjectResult>((await controller.Update(companyId, created.Id,
+            Request("Must not overwrite", request => { request.ExpectedVersion = version; request.Status = "Archived"; }), default)).Result);
+        Assert.Contains("CompanyBranchVersionConflict", System.Text.Json.JsonSerializer.Serialize(conflict.Value));
+        Assert.DoesNotContain(created.EditVersion, System.Text.Json.JsonSerializer.Serialize(conflict.Value));
+        Assert.Equal(before, System.Text.Json.JsonSerializer.Serialize(await db.CompanyBranches.AsNoTracking().SingleAsync()));
+        Assert.Equal(auditCount, await db.ObjectAuditEvents.CountAsync()); Assert.Empty(db.ChangeTracker.Entries());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Update_SequentialOldEditorCannotOverwriteNewState_AndExplicitReloadWorks(bool archive)
+    {
+        var (db, companyId) = await CreateAsync(); await using var _ = db; var controller = Controller(db);
+        var created = Assert.IsType<CompanyBranchDto>(Assert.IsType<CreatedResult>((await controller.Create(companyId, Request(), default)).Result).Value);
+        var updated = Assert.IsType<CompanyBranchDto>(Assert.IsType<OkObjectResult>((await controller.Update(companyId, created.Id,
+            Request("Current name", request => { request.ExpectedVersion = created.EditVersion.ToLowerInvariant(); request.SignerJson = "{\"lastName\":\"Current signer\"}"; request.Notes = "Current notes"; }), default)).Result).Value);
+        Assert.NotEqual(created.EditVersion, updated.EditVersion);
+        Assert.IsType<ConflictObjectResult>((await controller.Update(companyId, created.Id,
+            Request("Stale name", request => { request.ExpectedVersion = created.EditVersion; request.Status = archive ? "Archived" : "Active"; }), default)).Result);
+        var reloaded = Assert.Single(Assert.IsType<List<CompanyBranchDto>>(Assert.IsType<OkObjectResult>((await controller.List(companyId, true, default)).Result).Value));
+        Assert.Equal(updated.EditVersion, reloaded.EditVersion); Assert.Equal("Current notes", reloaded.Notes);
+        var saved = Assert.IsType<CompanyBranchDto>(Assert.IsType<OkObjectResult>((await controller.Update(companyId, created.Id,
+            Request(reloaded.Name, request => { request.ExpectedVersion = reloaded.EditVersion; request.SignerJson = reloaded.SignerJson; request.Notes = reloaded.Notes; request.Status = archive ? "Archived" : "Active"; }), default)).Result).Value);
+        Assert.Equal("Current name", saved.Name); Assert.Equal(updated.SignerJson, saved.SignerJson); Assert.Equal("Current notes", saved.Notes);
+        Assert.Equal(archive ? "Archived" : "Active", saved.Status);
+    }
+}
+
+public class CompanyBranchEditVersionTests
+{
+    [Theory]
+    [InlineData("Id")]
+    [InlineData("LegalEntityId")]
+    [InlineData("Kind")]
+    [InlineData("Name")]
+    [InlineData("Code")]
+    [InlineData("Status")]
+    [InlineData("Kpp")]
+    [InlineData("Address")]
+    [InlineData("BankAccountId")]
+    [InlineData("SignerJson")]
+    [InlineData("Notes")]
+    [InlineData("CreatedAt")]
+    [InlineData("UpdatedAt")]
+    public void Version_BindsEveryPersistedScalarIncludingIdentityAndHiddenFields(string field)
+    {
+        var branch = new CompanyBranch { Id = 1, LegalEntityId = 2, Name = "Office", CreatedAt = new DateTime(2026, 10, 31, 0, 0, 0, DateTimeKind.Utc) };
+        var before = CompanyProfileEditVersion.Compute(branch);
+        var property = typeof(CompanyBranch).GetProperty(field)!;
+        object value = property.PropertyType == typeof(string) ? "Changed" : property.PropertyType == typeof(int) ? 999 : branch.CreatedAt.AddSeconds(1);
+        property.SetValue(branch, value);
+        Assert.Matches("^[A-F0-9]{64}$", before); Assert.NotEqual(before, CompanyProfileEditVersion.Compute(branch));
+    }
+
+    [Fact]
+    public void Version_NormalizesPostgresMicrosecondPrecisionAndDateKind()
+    {
+        var branch = new CompanyBranch { Name = "Office", CreatedAt = new DateTime(2026, 10, 31, 0, 0, 0, DateTimeKind.Utc).AddTicks(7) };
+        var before = CompanyProfileEditVersion.Compute(branch);
+        branch.CreatedAt = DateTime.SpecifyKind(new DateTime(branch.CreatedAt.Ticks / 10 * 10), DateTimeKind.Unspecified);
+        Assert.Equal(before, CompanyProfileEditVersion.Compute(branch));
+        branch.CreatedAt = branch.CreatedAt.AddTicks(10); Assert.NotEqual(before, CompanyProfileEditVersion.Compute(branch));
     }
 }

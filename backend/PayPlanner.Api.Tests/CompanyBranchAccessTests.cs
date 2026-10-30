@@ -60,10 +60,11 @@ public partial class LegalEntitiesControllerTests
         if (role != "anonymous") client.DefaultRequestHeaders.Add("X-Fixture-User", actor.ToString(CultureInfo.InvariantCulture));
         var url = $"/api/legal-entities/{fixture.Company}/branches";
         using var list = await client.GetAsync(url + "?includeArchived=true");
+        var listed = readStatus == HttpStatusCode.OK ? await list.Content.ReadFromJsonAsync<List<PayPlanner.Api.Models.Responses.CompanyBranchDto>>() : null;
         using var effective = await client.GetAsync(url + $"/{fixture.Branch}/effective-requisites");
         using var create = await client.PostAsJsonAsync(url, new { name = "New branch" });
         db.ChangeTracker.Clear();
-        using var update = await client.PutAsJsonAsync(url + $"/{fixture.Branch}", new { name = "Renamed branch" });
+        using var update = await client.PutAsJsonAsync(url + $"/{fixture.Branch}", new { name = "Renamed branch", expectedVersion = listed?.Single().EditVersion });
         Assert.Equal(readStatus, list.StatusCode); Assert.Equal(readStatus, effective.StatusCode);
         Assert.Equal(createStatus, create.StatusCode); Assert.Equal(updateStatus, update.StatusCode);
         if (readStatus != HttpStatusCode.OK)

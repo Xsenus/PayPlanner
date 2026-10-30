@@ -102,6 +102,16 @@ public class CompanyBranchesController : ControllerBase
             return NotFound();
         }
 
+        if (!CompanyProfileEditVersion.IsValid(request.ExpectedVersion)
+            || !string.Equals(request.ExpectedVersion, CompanyProfileEditVersion.Compute(branch), StringComparison.OrdinalIgnoreCase))
+        {
+            return Conflict(new
+            {
+                code = "CompanyBranchVersionConflict",
+                message = "Подразделение изменено после открытия формы. Ваш ввод сохранён в форме. Загрузите сохранённые данные перед новым изменением."
+            });
+        }
+
         var error = await ApplyAsync(company, branch, request, ct);
         if (error is not null)
         {

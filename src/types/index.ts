@@ -127,6 +127,7 @@ export type CompanyBranchKind = 'Branch' | 'Office' | 'Point' | 'Direction';
 
 /** Филиал, офис, точка или направление собственной компании; пустые поля наследуются от компании. */
 export interface CompanyBranch {
+  editVersion?: string | null;
   id: number;
   legalEntityId: number;
   kind: CompanyBranchKind;
@@ -392,6 +393,7 @@ export interface DocumentSellerSelection {
 }
 
 export interface CompanyBranchInput {
+  expectedVersion?: string | null;
   kind: CompanyBranchKind;
   name: string;
   code?: string | null;

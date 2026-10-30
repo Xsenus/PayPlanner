@@ -8,8 +8,9 @@ import { StrictMode } from 'react';
 
 const { success, error } = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock('../../hooks/useToast', () => ({ useToast: () => ({ success, error }) }));
+vi.mock('../../hooks/useDialog', () => ({ useDialog: () => ({ confirm: vi.fn() }) }));
 vi.mock('../../services/api', () => ({ apiService: { getCompanyBranches: vi.fn(), createCompanyBranch: vi.fn(), updateCompanyBranch: vi.fn() } }));
-const branch = (companyId = 5, patch: Partial<CompanyBranch> = {}): CompanyBranch => ({ id: companyId, legalEntityId: companyId, name: `Office ${companyId}`, kind: 'Office', status: 'Active', createdAt: '2026-10-30T00:00:00Z', ...patch });
+const branch = (companyId = 5, patch: Partial<CompanyBranch> = {}): CompanyBranch => ({ id: companyId, editVersion: 'A'.repeat(64), legalEntityId: companyId, name: `Office ${companyId}`, kind: 'Office', status: 'Active', createdAt: '2026-10-30T00:00:00Z', ...patch });
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: Error) => void; const promise = new Promise<T>((a, b) => { resolve = a; reject = b; }); return { resolve, reject, promise }; }
 const props = (companyId = 5) => ({ companyId, bankAccounts: [], readOnly: false });
 function newEditor(name = 'New office') {

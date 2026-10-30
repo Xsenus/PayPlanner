@@ -15,8 +15,18 @@ public static class CompanyProfileEditVersion
 {
     private static readonly PropertyInfo[] CompanyProperties = ScalarProperties(typeof(LegalEntity));
     private static readonly PropertyInfo[] AddressProperties = ScalarProperties(typeof(AddressRecord));
+    private static readonly PropertyInfo[] BranchProperties = ScalarProperties(typeof(CompanyBranch));
 
     public static bool IsValid(string? value) => CompanyDocumentImagePrintDefaultsService.IsValidVersion(value);
+
+    public static string Compute(CompanyBranch branch)
+    {
+        ArgumentNullException.ThrowIfNull(branch);
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        AppendText(hash, "company-branch-edit-v1");
+        AppendObject(hash, branch, BranchProperties);
+        return Convert.ToHexString(hash.GetHashAndReset());
+    }
 
     public static string Compute(LegalEntity company, IEnumerable<AddressRecord> addresses, IEnumerable<int> clientIds, string imageDefaultsVersion)
     {

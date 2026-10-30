@@ -4,6 +4,10 @@ namespace PayPlanner.Api.Models.Requests;
 
 public class CompanyBranchRequest
 {
+    /// <summary>Версия сохранённого подразделения; обязательна при изменении, не нужна при создании.</summary>
+    [MaxLength(64)]
+    public string? ExpectedVersion { get; set; }
+
     /// <summary>Branch, Office, Point или Direction.</summary>
     [MaxLength(16)]
     public string? Kind { get; set; }

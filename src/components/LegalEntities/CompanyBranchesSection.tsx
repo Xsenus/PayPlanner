@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useToast } from '../../hooks/useToast';
+import { useDialog } from '../../hooks/useDialog';
 import { useAsyncOperationOwner } from '../../hooks/useAsyncOperationOwner';
 import { apiService } from '../../services/api';
 import { captureAuthSessionIdentity, isAuthSessionIdentityCurrent, type AuthSessionIdentity } from '../../services/authService';
@@ -46,6 +47,7 @@ const EMPTY_FORM: CompanyBranchInput = {
 };
 
 const toInput = (branch: CompanyBranch): CompanyBranchInput => ({
+  expectedVersion: branch.editVersion,
   kind: branch.kind,
   name: branch.name,
   code: branch.code ?? '',
@@ -61,6 +63,17 @@ const blankToNull = (value: string | null | undefined) => {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
 };
+
+const validVersion = (value: unknown): value is string => typeof value === 'string' && /^[a-f\d]{64}$/i.test(value);
+const VERSION_CONFLICT = 'Подразделение изменено после открытия формы. Ваш ввод сохранён. Загрузите сохранённые данные перед новым изменением.';
+function isVersionConflict(error: unknown) {
+  const raw = error instanceof Error ? error.message : '';
+  const marker = raw.indexOf(' - ');
+  try {
+    const payload: unknown = JSON.parse(marker < 0 ? raw : raw.slice(marker + 3));
+    return !!payload && typeof payload === 'object' && 'code' in payload && payload.code === 'CompanyBranchVersionConflict';
+  } catch { return false; }
+}
 
 function isBranch(value: unknown, companyId: number): value is CompanyBranch {
   const branch = value as Partial<CompanyBranch> | null;
@@ -80,6 +93,7 @@ export function CompanyBranchesSection({ companyId, bankAccounts, readOnly, owne
 
 function CompanyBranchesScreen({ companyId, bankAccounts, readOnly, session }: Omit<CompanyBranchesSectionProps, 'ownerScope'> & { session: AuthSessionIdentity }) {
   const toast = useToast();
+  const { confirm } = useDialog();
   const { capture, isCurrent } = useAsyncOperationOwner('company-branches');
   const owner = capture();
   const current = useCallback((value: number) => isCurrent(value) && isAuthSessionIdentityCurrent(session), [isCurrent, session]);
@@ -88,10 +102,13 @@ function CompanyBranchesScreen({ companyId, bankAccounts, readOnly, session }: O
   const [loadError, setLoadError] = useState<string | null>(null);
   const [editor, setEditor] = useState<{ id: number | null; form: CompanyBranchInput } | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
+  const [editorNeedsReload, setEditorNeedsReload] = useState(false);
+  const [listNeedsReload, setListNeedsReload] = useState(false);
   const [busy, setBusy] = useState(false);
   const mutation = useRef<object | null>(null);
   const listRequest = useRef(0);
   const listController = useRef<AbortController | null>(null);
+  const reloadController = useRef<AbortController | null>(null);
   const editorGeneration = useRef(0);
   const editorAtRender = editorGeneration.current;
   const editorRef = useRef(editor);
@@ -116,6 +133,8 @@ function CompanyBranchesScreen({ companyId, bankAccounts, readOnly, session }: O
       if (!Array.isArray(items) || !items.every(branch => isBranch(branch, companyId)) || new Set(items.map(branch => branch.id)).size !== items.length)
         throw new Error('Не удалось подтвердить список подразделений этой компании. Повторите загрузку.');
       setBranches(items);
+      setListNeedsReload(false);
+      return items;
     } catch (error) {
       if (error instanceof StaleUiOperationError || !belongs()) return;
       setLoadError(extractDisplayErrorMessage(error, 'Не удалось загрузить подразделения.'));
@@ -126,21 +145,25 @@ function CompanyBranchesScreen({ companyId, bankAccounts, readOnly, session }: O
 
   useEffect(() => {
     const pending = listController;
+    const prompt = reloadController;
     void load(capture());
-    return () => pending.current?.abort();
+    return () => { pending.current?.abort(); prompt.current?.abort(); };
   }, [capture, load]);
 
   const closeEditor = () => {
     if (!current(owner) || editorGeneration.current !== editorAtRender) return;
     ++editorGeneration.current;
+    reloadController.current?.abort();
     setEditor(null);
     setEditorError(null);
+    setEditorNeedsReload(false);
   };
 
   const openEditor = (branch?: CompanyBranch) => {
-    if (!current(owner) || readOnly || loading || loadError || mutation.current || branch && !branches.includes(branch)) return;
+    if (!current(owner) || readOnly || loading || loadError || listNeedsReload || mutation.current || branch && !branches.includes(branch)) return;
     ++editorGeneration.current;
     setEditorError(null);
+    setEditorNeedsReload(false);
     setEditor(branch ? { id: branch.id, form: toInput(branch) } : { id: null, form: { ...EMPTY_FORM } });
   };
 
@@ -150,8 +173,12 @@ function CompanyBranchesScreen({ companyId, bankAccounts, readOnly, session }: O
   };
 
   const save = async () => {
-    if (!editor || editorRef.current !== editor || !current(owner) || readOnly || loading || loadError || mutation.current || editorGeneration.current !== editorAtRender) {
+    if (!editor || editorRef.current !== editor || !current(owner) || readOnly || loading || loadError || listNeedsReload || editorNeedsReload || mutation.current || editorGeneration.current !== editorAtRender) {
       return;
+    }
+
+    if (editor.id !== null && !validVersion(editor.form.expectedVersion)) {
+      setEditorNeedsReload(true); setEditorError(VERSION_CONFLICT); return;
     }
 
     if (!editor.form.name.trim()) {
@@ -186,7 +213,10 @@ function CompanyBranchesScreen({ companyId, bankAccounts, readOnly, session }: O
       await load(owner);
     } catch (error) {
       if (error instanceof StaleUiOperationError || !current(owner)) return;
-      if (ownsEditor()) setEditorError(extractDisplayErrorMessage(error, 'Не удалось сохранить подразделение.'));
+      if (ownsEditor()) {
+        if (isVersionConflict(error)) setEditorNeedsReload(true);
+        setEditorError(extractDisplayErrorMessage(error, 'Не удалось сохранить подразделение.'));
+      }
       else await load(owner);
     } finally {
       if (mutation.current === attempt) {
@@ -196,8 +226,40 @@ function CompanyBranchesScreen({ companyId, bankAccounts, readOnly, session }: O
     }
   };
 
+  const reloadEditor = async () => {
+    if (!editor || editor.id === null || editorRef.current !== editor || !current(owner) || readOnly || mutation.current || !editorNeedsReload) return;
+    const generation = editorAtRender;
+    const controller = new AbortController(); reloadController.current = controller;
+    const ownsEditor = () => current(owner) && editorGeneration.current === generation && !controller.signal.aborted;
+    const attempt = {}; mutation.current = attempt; setBusy(true);
+    try {
+      const approved = await awaitOwnedUiResult(() => confirm({ signal: controller.signal,
+        title: 'Загрузить сохранённые данные?',
+        description: 'Введённые в этой форме изменения будут заменены текущими данными подразделения. Можно отменить загрузку и сохранить свой ввод для сравнения.',
+        confirmLabel: 'Заменить ввод', cancelLabel: 'Оставить ввод',
+      }), ownsEditor);
+      if (!approved) return;
+      const items = await load(owner);
+      if (!ownsEditor()) return;
+      const saved = items?.find(item => item.id === editor.id);
+      if (!saved || !validVersion(saved.editVersion)) {
+        setEditorError('Не удалось получить актуальное подразделение. Ваш ввод сохранён; закройте форму и проверьте доступный список.'); return;
+      }
+      setEditor({ id: saved.id, form: toInput(saved) });
+      setEditorError(null); setEditorNeedsReload(false);
+    } catch (error) {
+      if (!(error instanceof StaleUiOperationError) && ownsEditor())
+        setEditorError(extractDisplayErrorMessage(error, 'Не удалось загрузить сохранённые данные. Ваш ввод сохранён.'));
+    } finally {
+      controller.abort();
+      if (reloadController.current === controller) reloadController.current = null;
+      if (mutation.current === attempt) { mutation.current = null; if (current(owner)) setBusy(false); }
+    }
+  };
+
   const toggleArchived = async (branch: CompanyBranch) => {
-    if (!current(owner) || readOnly || loading || loadError || editorRef.current || mutation.current || !branches.includes(branch)) return;
+    if (!current(owner) || readOnly || loading || loadError || listNeedsReload || editorRef.current || mutation.current || !branches.includes(branch)) return;
+    if (!validVersion(branch.editVersion)) { setListNeedsReload(true); return; }
     const attempt = {}; mutation.current = attempt; setBusy(true);
     const archived = branch.status !== 'Archived';
     try {
@@ -211,6 +273,7 @@ function CompanyBranchesScreen({ companyId, bankAccounts, readOnly, session }: O
       await load(owner);
     } catch (error) {
       if (error instanceof StaleUiOperationError || !current(owner)) return;
+      if (isVersionConflict(error)) setListNeedsReload(true);
       toast.error(extractDisplayErrorMessage(error, 'Не удалось изменить статус подразделения.'), 'Подразделения');
     } finally {
       if (mutation.current === attempt) {
@@ -242,7 +305,7 @@ function CompanyBranchesScreen({ companyId, bankAccounts, readOnly, session }: O
           <button
             type="button"
             onClick={() => openEditor()}
-            disabled={busy || loading || !!loadError || !!editor}
+            disabled={busy || loading || !!loadError || listNeedsReload || !!editor}
             className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
           >
             <Plus className="h-4 w-4" />
@@ -250,6 +313,10 @@ function CompanyBranchesScreen({ companyId, bankAccounts, readOnly, session }: O
           </button>
         ) : null}
       </div>
+
+      {listNeedsReload ? <div role="alert" className="mt-3 text-sm text-rose-600"><p>Данные подразделений устарели. Обновите список перед изменением статуса.</p>
+        <button type="button" className="mt-1 underline" disabled={busy || loading} onClick={() => void load(owner)}>Обновить подразделения</button>
+      </div> : null}
 
       {loadError ? <div role="alert" className="mt-3 text-sm text-rose-600"><p>{loadError}</p>
         <button type="button" className="mt-1 underline" disabled={busy || loading} onClick={() => void load(owner)}>Повторить загрузку</button>
@@ -288,7 +355,7 @@ function CompanyBranchesScreen({ companyId, bankAccounts, readOnly, session }: O
                         <button
                           type="button"
                           onClick={() => openEditor(branch)}
-                          disabled={busy || loading || !!loadError || !!editor}
+                          disabled={busy || loading || !!loadError || listNeedsReload || !!editor}
                           className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50"
                           title="Редактировать подразделение"
                         >
@@ -297,7 +364,7 @@ function CompanyBranchesScreen({ companyId, bankAccounts, readOnly, session }: O
                         <button
                           type="button"
                           onClick={() => void toggleArchived(branch)}
-                          disabled={busy || loading || !!loadError || !!editor}
+                          disabled={busy || loading || !!loadError || listNeedsReload || !!editor}
                           className="inline-flex h-8 items-center rounded-lg border border-slate-200 px-2 text-xs text-slate-500 transition hover:bg-slate-50"
                         >
                           {branch.status === 'Archived' ? 'Из архива' : 'В архив'}
@@ -335,6 +402,9 @@ function CompanyBranchesScreen({ companyId, bankAccounts, readOnly, session }: O
                     {editorError}
                   </p>
                 ) : null}
+
+                {editorNeedsReload ? <button type="button" className="mx-4 mt-2 text-sm text-blue-700 underline" disabled={busy || loading}
+                  onClick={() => void reloadEditor()}>Загрузить сохранённые данные</button> : null}
 
                 <fieldset disabled={busy} className="grid min-w-0 gap-3 px-4 py-3 md:grid-cols-2">
                   <label className="block">
@@ -421,7 +491,7 @@ function CompanyBranchesScreen({ companyId, bankAccounts, readOnly, session }: O
                   </button>
                   <button
                     type="button"
-                    disabled={busy || loading}
+                    disabled={busy || loading || !!loadError || editorNeedsReload || listNeedsReload}
                     onClick={() => void save()}
                     className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
                   >

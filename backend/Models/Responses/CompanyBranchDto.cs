@@ -4,6 +4,7 @@ namespace PayPlanner.Api.Models.Responses;
 
 public sealed class CompanyBranchDto
 {
+    public string EditVersion { get; set; } = string.Empty;
     public int Id { get; set; }
     public int LegalEntityId { get; set; }
     public string Kind { get; set; } = string.Empty;
@@ -20,6 +21,7 @@ public sealed class CompanyBranchDto
 
     public static CompanyBranchDto From(CompanyBranch branch) => new()
     {
+        EditVersion = CompanyProfileEditVersion.Compute(branch),
         Id = branch.Id,
         LegalEntityId = branch.LegalEntityId,
         Kind = branch.Kind,

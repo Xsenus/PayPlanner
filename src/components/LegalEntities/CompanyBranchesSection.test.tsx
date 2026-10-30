@@ -15,6 +15,7 @@ const { toastSuccessMock, toastErrorMock } = vi.hoisted(() => ({
 vi.mock('../../hooks/useToast', () => ({
   useToast: () => ({ success: toastSuccessMock, error: toastErrorMock, info: vi.fn() }),
 }));
+vi.mock('../../hooks/useDialog', () => ({ useDialog: () => ({ confirm: vi.fn() }) }));
 
 vi.mock('../../services/api', () => ({
   apiService: {
@@ -26,6 +27,7 @@ vi.mock('../../services/api', () => ({
 
 const branch = (patch: Partial<CompanyBranch> = {}): CompanyBranch => ({
   id: 1,
+  editVersion: 'A'.repeat(64),
   legalEntityId: 5,
   kind: 'Office',
   name: 'Офис СПб',

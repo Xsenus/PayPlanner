@@ -21,11 +21,12 @@ public partial class LegalEntitiesControllerTests
     private static CompanyBranchesController BranchController(PaymentContext db, int actor)
         => new(db) { ControllerContext = CreateController(db, actor).ControllerContext };
 
-    private static Task<ActionResult<CompanyBranchDto>> BranchMutation(PaymentContext db, CompanyDeleteData fixture, string operation)
+    private static async Task<ActionResult<CompanyBranchDto>> BranchMutation(PaymentContext db, CompanyDeleteData fixture, string operation)
     {
         var controller = BranchController(db, fixture.Actor);
         var request = new CompanyBranchRequest { Name = "Branch write", Kpp = "780201001" };
-        return operation == "create" ? controller.Create(fixture.Company, request, default) : controller.Update(fixture.Company, fixture.Branch, request, default);
+        if (operation == "update") request.ExpectedVersion = CompanyProfileEditVersion.Compute(await db.CompanyBranches.AsNoTracking().SingleAsync(row => row.Id == fixture.Branch));
+        return operation == "create" ? await controller.Create(fixture.Company, request, default) : await controller.Update(fixture.Company, fixture.Branch, request, default);
     }
 
     [Theory]
@@ -133,6 +134,44 @@ public partial class LegalEntitiesControllerTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BranchVersion_PostgreSqlRejectsOldBaselineWithoutChangingDocuments(bool legacyWrite)
+    {
+        await using var template = new PostgreSqlModelTemplate(); await template.InitializeAsync();
+        await using var database = await template.CreateDatabaseAsync();
+        await using var first = CompanyCreatePgContext(database.ConnectionString);
+        await using var second = CompanyCreatePgContext(database.ConnectionString);
+        var fixture = await CompanyDeleteFixture(first, true);
+        var protectedBefore = JsonNode.Parse(await CompanyDeleteProtectedSnapshot(first))!.AsObject(); protectedBefore.Remove("branches");
+        var controller = BranchController(first, fixture.Actor);
+        var created = Assert.IsType<CompanyBranchDto>(Assert.IsType<CreatedResult>((await controller.Create(fixture.Company,
+            new CompanyBranchRequest { Name = "Versioned office" }, default)).Result).Value);
+        var read = (await second.CompanyBranches.AsNoTracking().SingleAsync(row => row.Id == created.Id));
+        Assert.Equal(created.EditVersion, CompanyProfileEditVersion.Compute(read));
+        if (legacyWrite)
+            await second.CompanyBranches.Where(row => row.Id == created.Id).ExecuteUpdateAsync(update => update.SetProperty(row => row.Notes, "Direct legacy notes"));
+        else
+            Assert.IsType<OkObjectResult>((await BranchController(second, fixture.Actor).Update(fixture.Company, created.Id,
+                new CompanyBranchRequest { Name = created.Name, ExpectedVersion = created.EditVersion, Notes = "Other editor notes", SignerJson = "{\"name\":\"Other signer\"}" }, default)).Result);
+        var beforeConflict = await CompanyDeleteSnapshot(second);
+        var conflict = Assert.IsType<ConflictObjectResult>((await controller.Update(fixture.Company, created.Id,
+            new CompanyBranchRequest { Name = "Stale office", ExpectedVersion = created.EditVersion, Status = "Archived" }, default)).Result);
+        Assert.Contains("CompanyBranchVersionConflict", System.Text.Json.JsonSerializer.Serialize(conflict.Value));
+        Assert.Equal(beforeConflict, await CompanyDeleteSnapshot(second));
+        Assert.Empty(first.ChangeTracker.Entries()); Assert.Null(first.Database.CurrentTransaction);
+        var listed = Assert.IsType<List<CompanyBranchDto>>(Assert.IsType<OkObjectResult>((await controller.List(fixture.Company, true, default)).Result).Value).Single(row => row.Id == created.Id);
+        Assert.NotEqual(created.EditVersion, listed.EditVersion);
+        Assert.IsType<OkObjectResult>((await controller.Update(fixture.Company, listed.Id,
+            new CompanyBranchRequest { Name = listed.Name, ExpectedVersion = listed.EditVersion, Notes = listed.Notes, SignerJson = listed.SignerJson, Status = "Archived" }, default)).Result);
+        var final = await second.CompanyBranches.AsNoTracking().SingleAsync(row => row.Id == created.Id);
+        Assert.Equal("Archived", final.Status); Assert.Equal(listed.Notes, final.Notes); Assert.Equal(listed.SignerJson, final.SignerJson);
+        var protectedAfter = JsonNode.Parse(await CompanyDeleteProtectedSnapshot(second))!.AsObject(); protectedAfter.Remove("branches");
+        Assert.Equal(protectedBefore.ToJsonString(), protectedAfter.ToJsonString());
+        Assert.All(first.ChangeTracker.Entries(), entry => Assert.Equal(EntityState.Unchanged, entry.State)); Assert.Null(first.Database.CurrentTransaction);
+    }
+
+    [Theory]
     [InlineData("create", "approval", 403)]
     [InlineData("update", "own-company", 404)]
     public async Task BranchMutation_PostgreSqlRechecksAdmissionBeforeWriting(string operation, string change, int expected)
@@ -178,7 +217,7 @@ public partial class LegalEntitiesControllerTests
         Assert.Equal(2, await seed.CompanyBranches.CountAsync());
         Assert.Equal("Historical branch", await seed.CompanyBranches.Where(row => row.Id == fixture.Branch).Select(row => row.Name).SingleAsync());
         Assert.IsType<OkObjectResult>((await BranchController(second, fixture.Actor).Update(fixture.Company, created.Id,
-            new CompanyBranchRequest { Name = created.Name, Status = CompanyProfileStatuses.Archived }, default)).Result);
+            new CompanyBranchRequest { Name = created.Name, Status = CompanyProfileStatuses.Archived, ExpectedVersion = created.EditVersion }, default)).Result);
         Assert.Equal(CompanyProfileStatuses.Archived, await seed.CompanyBranches.Where(row => row.Id == created.Id).Select(row => row.Status).SingleAsync());
         var protectedAfter = JsonNode.Parse(await CompanyDeleteProtectedSnapshot(seed))!.AsObject(); protectedAfter.Remove("branches");
         Assert.Equal(protectedBefore.ToJsonString(), protectedAfter.ToJsonString());
