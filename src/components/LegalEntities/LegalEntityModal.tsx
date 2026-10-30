@@ -1,6 +1,7 @@
 import { PaymentCreateAdoptedError } from '../../services/paymentCreateAttempts';
 import { captureAuthSessionIdentity, isAuthSessionIdentityCurrent } from '../../services/authService';
 import { useAsyncOperationOwner } from '../../hooks/useAsyncOperationOwner';
+import { useDocumentDeliveryOwner, type DocumentDeliveryRead } from '../../hooks/useDocumentDeliveryOwner';
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
@@ -975,16 +976,14 @@ export function LegalEntityModal({
   const [invoiceModalMode, setInvoiceModalMode] =
     useState<LegalEntityInvoiceModalMode>("create");
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
-  const [invoiceSubmitting, setInvoiceSubmitting] = useState(false);
-  const [invoiceModalError, setInvoiceModalError] = useState<string | null>(
+  const [invoiceModalError, setInvoiceModalError] = useState<{ owner: DocumentDeliveryRead; message: string } | null>(
     null,
   );
   const [actModalOpen, setActModalOpen] = useState(false);
   const [actModalMode, setActModalMode] =
     useState<LegalEntityActModalMode>("create");
   const [selectedAct, setSelectedAct] = useState<Act | null>(null);
-  const [actSubmitting, setActSubmitting] = useState(false);
-  const [actModalError, setActModalError] = useState<string | null>(null);
+  const [actModalError, setActModalError] = useState<{ owner: DocumentDeliveryRead; message: string } | null>(null);
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [paymentModalMode, setPaymentModalMode] =
     useState<LegalEntityPaymentModalMode>("create");
@@ -1058,6 +1057,12 @@ export function LegalEntityModal({
   ]));
   const paymentReadOwner = capturePaymentReadOwner();
   const paymentReadAttempt = useRef<{ id: number; isCurrent: () => boolean } | null>(null);
+  const relatedCaseOwner = useDocumentDeliveryOwner(JSON.stringify([classificationScope, caseModalOpen, caseMode, editingCase?.id,
+    canMutateRelated('cases', caseMode === 'edit' ? 'canEdit' : 'canCreate'), canMutateRelated('cases', 'canDelete'), canViewPayments]));
+  const relatedInvoiceOwner = useDocumentDeliveryOwner(JSON.stringify([classificationScope, invoiceModalOpen, invoiceModalMode, selectedInvoice?.id,
+    selectedLegalEntityCaseId, canMutateRelated('accounts', invoiceModalMode === 'edit' ? 'canEdit' : 'canCreate'), canViewPayments, canViewActs]));
+  const relatedActOwner = useDocumentDeliveryOwner(JSON.stringify([classificationScope, actModalOpen, actModalMode, selectedAct?.id,
+    selectedLegalEntityCaseId, canMutateRelated('acts', actModalMode === 'edit' ? 'canEdit' : 'canCreate'), canViewAccounts]));
   const legacyClassification = mainCompanyState?.owner === classificationOwner ? mainCompanyState : null;
   const ownCompanyClassification = currentLegalEntityId === null ? false
     : typeof initial?.isOwnCompany === 'boolean' ? initial.isOwnCompany
@@ -2587,60 +2592,77 @@ export function LegalEntityModal({
   };
 
   const saveLegalEntityCase = async (patch: Partial<ClientCase>) => {
-    if (!canMutateRelated('cases', caseMode === 'edit' ? 'canEdit' : 'canCreate') || !currentLegalEntityId) return;
+    const operation = isOpen && caseModalOpen && deleteSession.authenticated && currentLegalEntityId
+      && canMutateRelated('cases', caseMode === 'edit' ? 'canEdit' : 'canCreate') ? relatedCaseOwner.begin('save') : null;
+    if (!operation) throw new StaleUiOperationError();
+    try {
 
-    const payload: LegalEntityCasePayload = {
-      clientId: null,
-      legalEntityId: currentLegalEntityId,
-      title: (patch.title ?? editingCase?.title ?? "").trim(),
-      description: patch.description ?? editingCase?.description ?? "",
-      status: patch.status ?? editingCase?.status ?? "Open",
-      caseNumber: (patch.caseNumber ?? editingCase?.caseNumber ?? "").trim(),
-      caseType: (patch.caseType ?? editingCase?.caseType ?? "").trim(),
-      stage: (patch.stage ?? editingCase?.stage ?? "").trim(),
-      responsibleUserId:
-        patch.responsibleUserId === undefined
-          ? editingCase?.responsibleUserId ?? null
-          : patch.responsibleUserId,
-      startDate:
-        patch.startDate === undefined
-          ? editingCase?.startDate ?? null
-          : patch.startDate,
-      dueDate:
-        patch.dueDate === undefined ? editingCase?.dueDate ?? null : patch.dueDate,
-      feeAmount: patch.feeAmount ?? editingCase?.feeAmount ?? 0,
-      priority: patch.priority ?? editingCase?.priority ?? "normal",
-      courtName: (patch.courtName ?? editingCase?.courtName ?? "").trim(),
-      courtCaseNumber: (
-        patch.courtCaseNumber ??
-        editingCase?.courtCaseNumber ??
-        ""
-      ).trim(),
-      courtUrl: (patch.courtUrl ?? editingCase?.courtUrl ?? "").trim(),
-      nextHearingAt:
-        patch.nextHearingAt === undefined
-          ? editingCase?.nextHearingAt ?? null
-          : patch.nextHearingAt,
-    };
+      const payload: LegalEntityCasePayload = {
+        clientId: null,
+        legalEntityId: currentLegalEntityId,
+        title: (patch.title ?? editingCase?.title ?? "").trim(),
+        description: patch.description ?? editingCase?.description ?? "",
+        status: patch.status ?? editingCase?.status ?? "Open",
+        caseNumber: (patch.caseNumber ?? editingCase?.caseNumber ?? "").trim(),
+        caseType: (patch.caseType ?? editingCase?.caseType ?? "").trim(),
+        stage: (patch.stage ?? editingCase?.stage ?? "").trim(),
+        responsibleUserId:
+          patch.responsibleUserId === undefined
+            ? editingCase?.responsibleUserId ?? null
+            : patch.responsibleUserId,
+        startDate:
+          patch.startDate === undefined
+            ? editingCase?.startDate ?? null
+            : patch.startDate,
+        dueDate:
+          patch.dueDate === undefined ? editingCase?.dueDate ?? null : patch.dueDate,
+        feeAmount: patch.feeAmount ?? editingCase?.feeAmount ?? 0,
+        priority: patch.priority ?? editingCase?.priority ?? "normal",
+        courtName: (patch.courtName ?? editingCase?.courtName ?? "").trim(),
+        courtCaseNumber: (
+          patch.courtCaseNumber ??
+          editingCase?.courtCaseNumber ??
+          ""
+        ).trim(),
+        courtUrl: (patch.courtUrl ?? editingCase?.courtUrl ?? "").trim(),
+        nextHearingAt:
+          patch.nextHearingAt === undefined
+            ? editingCase?.nextHearingAt ?? null
+            : patch.nextHearingAt,
+      };
 
-    if (caseMode === "edit" && editingCase) {
-      await updateLegalEntityCase(editingCase.id, payload);
+      if (caseMode === "edit" && editingCase) {
+        await updateLegalEntityCase(editingCase.id, payload, operation.isCurrent);
+        if (!operation.isCurrent()) throw new StaleUiOperationError();
+        setCaseFinanceReloadToken((value) => value + 1);
+        return;
+      }
+
+      const created = await createLegalEntityCase(payload, operation.isCurrent);
+      if (!operation.isCurrent()) throw new StaleUiOperationError();
+      setSelectedLegalEntityCaseId(created.id);
       setCaseFinanceReloadToken((value) => value + 1);
-      return;
-    }
-
-    const created = await createLegalEntityCase(payload);
-    setSelectedLegalEntityCaseId(created.id);
-    setCaseFinanceReloadToken((value) => value + 1);
+    } finally { operation.finish(); }
   };
 
   const removeLegalEntityCase = async () => {
-    if (!canMutateRelated('cases', 'canDelete') || !editingCase) return;
-    await deleteLegalEntityCase(editingCase.id);
-    if (selectedLegalEntityCaseId === editingCase.id) {
-      setSelectedLegalEntityCaseId("all");
-    }
-    setCaseFinanceReloadToken((value) => value + 1);
+    const operation = isOpen && caseModalOpen && deleteSession.authenticated && editingCase
+      && canMutateRelated('cases', 'canDelete') ? relatedCaseOwner.begin('delete') : null;
+    if (!operation || !editingCase) throw new StaleUiOperationError();
+    try {
+      await deleteLegalEntityCase(editingCase.id, operation.isCurrent);
+      if (!operation.isCurrent()) throw new StaleUiOperationError();
+      if (selectedLegalEntityCaseId === editingCase.id) {
+        setSelectedLegalEntityCaseId("all");
+      }
+      setCaseFinanceReloadToken((value) => value + 1);
+    } finally { operation.finish(); }
+  };
+
+  const closeCaseModal = () => {
+    if (!relatedCaseOwner.capture()) return;
+    relatedCaseOwner.invalidate();
+    setCaseModalOpen(false);
   };
 
   const openCreateInvoice = () => {
@@ -2660,31 +2682,37 @@ export function LegalEntityModal({
   };
 
   const closeInvoiceModal = () => {
+    if (!relatedInvoiceOwner.capture()) return;
+    relatedInvoiceOwner.invalidate();
     setInvoiceModalOpen(false);
     setSelectedInvoice(null);
     setInvoiceModalError(null);
   };
 
   const submitInvoice = async (payload: InvoiceInput) => {
-    if (!canMutateRelated('accounts', invoiceModalMode === 'edit' ? 'canEdit' : 'canCreate')) return;
+    const errorOwner = relatedInvoiceOwner.capture();
+    const operation = isOpen && invoiceModalOpen && deleteSession.authenticated
+      && canMutateRelated('accounts', invoiceModalMode === 'edit' ? 'canEdit' : 'canCreate') ? relatedInvoiceOwner.begin('save') : null;
+    if (!operation || !errorOwner) throw new StaleUiOperationError();
     try {
-      setInvoiceSubmitting(true);
       setInvoiceModalError(null);
       if (invoiceModalMode === "edit" && selectedInvoice) {
-        await legalEntityInvoicesResult.updateInvoice(selectedInvoice.id, payload);
+        await legalEntityInvoicesResult.updateInvoice(selectedInvoice.id, payload, operation.isCurrent);
       } else {
-        await legalEntityInvoicesResult.createInvoice(payload);
+        await legalEntityInvoicesResult.createInvoice(payload, operation.isCurrent);
       }
-      if (canViewPayments) await legalEntityPaymentsResult.refresh();
-      if (canViewActs) await legalEntityActsResult.refresh();
+      if (canViewPayments) await legalEntityPaymentsResult.refreshOwned(operation.isCurrent);
+      if (canViewActs) await legalEntityActsResult.refreshOwned(operation.isCurrent);
+      if (!operation.isCurrent()) throw new StaleUiOperationError();
       setCaseFinanceReloadToken((value) => value + 1);
       closeInvoiceModal();
     } catch (err) {
+      if (!operation.isCurrent()) throw new StaleUiOperationError();
       const message = extractErrorMessage(err, "Не удалось сохранить счёт");
-      setInvoiceModalError(message);
+      setInvoiceModalError({ owner: errorOwner, message });
       throw err;
     } finally {
-      setInvoiceSubmitting(false);
+      operation.finish();
     }
   };
 
@@ -2705,30 +2733,36 @@ export function LegalEntityModal({
   };
 
   const closeActModal = () => {
+    if (!relatedActOwner.capture()) return;
+    relatedActOwner.invalidate();
     setActModalOpen(false);
     setSelectedAct(null);
     setActModalError(null);
   };
 
   const submitAct = async (payload: ActInput) => {
-    if (!canMutateRelated('acts', actModalMode === 'edit' ? 'canEdit' : 'canCreate')) return;
+    const errorOwner = relatedActOwner.capture();
+    const operation = isOpen && actModalOpen && deleteSession.authenticated
+      && canMutateRelated('acts', actModalMode === 'edit' ? 'canEdit' : 'canCreate') ? relatedActOwner.begin('save') : null;
+    if (!operation || !errorOwner) throw new StaleUiOperationError();
     try {
-      setActSubmitting(true);
       setActModalError(null);
       if (actModalMode === "edit" && selectedAct) {
-        await legalEntityActsResult.updateAct(selectedAct.id, payload);
+        await legalEntityActsResult.updateAct(selectedAct.id, payload, operation.isCurrent);
       } else {
-        await legalEntityActsResult.createAct(payload);
+        await legalEntityActsResult.createAct(payload, operation.isCurrent);
       }
-      if (canViewAccounts) await legalEntityInvoicesResult.refresh();
+      if (canViewAccounts) await legalEntityInvoicesResult.refreshOwned(operation.isCurrent);
+      if (!operation.isCurrent()) throw new StaleUiOperationError();
       setCaseFinanceReloadToken((value) => value + 1);
       closeActModal();
     } catch (err) {
+      if (!operation.isCurrent()) throw new StaleUiOperationError();
       const message = extractErrorMessage(err, "Не удалось сохранить акт");
-      setActModalError(message);
+      setActModalError({ owner: errorOwner, message });
       throw err;
     } finally {
-      setActSubmitting(false);
+      operation.finish();
     }
   };
 
@@ -3018,7 +3052,7 @@ export function LegalEntityModal({
     </div>
   );
 
-  const blankLegalEntityCase: ClientCase = {
+  const blankLegalEntityCase: ClientCase = useMemo(() => ({
     id: 0,
     clientId: null,
     legalEntityId: currentLegalEntityId,
@@ -3026,7 +3060,9 @@ export function LegalEntityModal({
     description: "",
     status: "Open",
     createdAt: new Date().toISOString(),
-  };
+  }), [currentLegalEntityId]);
+  const initialRelatedActValues = useMemo(() => actModalMode === 'create' && currentLegalEntityId
+    ? { legalEntityId: currentLegalEntityId } : undefined, [actModalMode, currentLegalEntityId]);
 
   const documentsLookupsLoading =
     documentClientsLoading || documentClientsRefreshing || legalEntitiesLoading;
@@ -5324,8 +5360,9 @@ export function LegalEntityModal({
 
       {caseModalOpen && canMutateRelated('cases', caseMode === 'edit' ? 'canEdit' : 'canCreate') ? (
         <CaseModal
+          key={relatedCaseOwner.scope}
           isOpen={caseModalOpen}
-          onClose={() => setCaseModalOpen(false)}
+          onClose={closeCaseModal}
           caseData={
             caseMode === "edit" && editingCase
               ? editingCase
@@ -5333,6 +5370,7 @@ export function LegalEntityModal({
           }
           onSave={saveLegalEntityCase}
           onNextHearingConfirmed={(confirmation) => {
+            if (!relatedCaseOwner.capture() || !canMutateRelated('cases', 'canEdit') || !editingCase) return;
             setEditingCase((current) => current ? { ...current, ...confirmation } : current);
             setLegalEntityCases((current) => current.map((item) => item.id === editingCase?.id ? { ...item, ...confirmation } : item));
           }}
@@ -5344,13 +5382,14 @@ export function LegalEntityModal({
 
       {invoiceModalOpen && canMutateRelated('accounts', invoiceModalMode === 'edit' ? 'canEdit' : 'canCreate') ? (
         <InvoiceModal
+          key={relatedInvoiceOwner.scope}
           mode={invoiceModalMode}
           open={invoiceModalOpen}
           invoice={selectedInvoice}
           onClose={closeInvoiceModal}
           onSubmit={submitInvoice}
-          submitting={invoiceSubmitting}
-          errorMessage={invoiceModalError}
+          submitting={relatedInvoiceOwner.busy}
+          errorMessage={invoiceModalError?.owner.isCurrent() ? invoiceModalError.message : null}
           clients={documentClients}
           legalEntities={legalEntities}
           legalEntitiesLoading={legalEntitiesLoading}
@@ -5372,13 +5411,14 @@ export function LegalEntityModal({
 
       {actModalOpen && canMutateRelated('acts', actModalMode === 'edit' ? 'canEdit' : 'canCreate') ? (
         <ActModal
+          key={relatedActOwner.scope}
           open={actModalOpen}
           mode={actModalMode}
           act={selectedAct}
           onClose={closeActModal}
           onSubmit={submitAct}
-          submitting={actSubmitting}
-          errorMessage={actModalError}
+          submitting={relatedActOwner.busy}
+          errorMessage={actModalError?.owner.isCurrent() ? actModalError.message : null}
           clients={documentClients}
           responsibles={responsibles}
           lookupsLoading={documentsLookupsLoading}
@@ -5388,11 +5428,7 @@ export function LegalEntityModal({
               ? Number(formState.responsibleUserId)
               : undefined
           }
-          initialValues={
-            actModalMode === "create" && currentLegalEntityId
-              ? { legalEntityId: currentLegalEntityId }
-              : undefined
-          }
+          initialValues={initialRelatedActValues}
         />
       ) : null}
 

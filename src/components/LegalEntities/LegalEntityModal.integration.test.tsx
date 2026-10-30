@@ -13,6 +13,10 @@ import type {
   Client,
   ClientCase,
   InvoiceSummary,
+  Invoice,
+  InvoiceInput,
+  Act,
+  ActInput,
   LegalEntityDadataDetails,
   LegalEntityDetail,
   LegalEntityInput,
@@ -33,6 +37,8 @@ const {
   emptyInvoiceSummary,
   paymentModalPropsSpy,
   invoiceModalPropsSpy,
+  relatedCasePropsSpy,
+  relatedActPropsSpy,
   toastErrorMock,
   toastInfoMock,
   toastSuccessMock,
@@ -54,6 +60,8 @@ const {
   } satisfies InvoiceSummary,
   paymentModalPropsSpy: vi.fn(),
   invoiceModalPropsSpy: vi.fn(),
+  relatedCasePropsSpy: vi.fn(),
+  relatedActPropsSpy: vi.fn(),
   toastErrorMock: vi.fn(),
   toastInfoMock: vi.fn(),
   toastSuccessMock: vi.fn(),
@@ -109,6 +117,13 @@ vi.mock('../../services/api', () => ({
     getActs: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 5 }),
     getActsSummary: vi.fn().mockResolvedValue(emptyActsSummary),
     getCasesV1: vi.fn().mockResolvedValue([]),
+    createCase: vi.fn(),
+    updateCase: vi.fn(),
+    deleteCase: vi.fn(),
+    createInvoice: vi.fn(),
+    updateInvoice: vi.fn(),
+    createAct: vi.fn(),
+    updateAct: vi.fn(),
     getClientsV2: vi.fn().mockResolvedValue({ items: [], total: 0 }),
     getClient: vi.fn().mockResolvedValue(null),
     getInvoices: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 5 }),
@@ -163,8 +178,13 @@ vi.mock('../Accounts/InvoiceModal', () => ({ InvoiceModal: (props: { clients: { 
   invoiceModalPropsSpy(props);
   return <div data-testid="invoice-lookup-fixture"><span>{props.lookupsLoading ? 'Loading clients' : props.clients.map(client => client.name).join(',')}</span><span>{props.lookupsError}</span><button onClick={props.onClose}>Close document fixture</button></div>;
 } }));
-vi.mock('../Acts/ActModal', () => ({ ActModal: ({ clients, lookupsLoading, lookupsError, onClose }: { clients: { name: string }[]; lookupsLoading: boolean; lookupsError?: string; onClose: () => void }) =>
-  <div data-testid="act-lookup-fixture"><span>{lookupsLoading ? 'Loading clients' : clients.map(client => client.name).join(',')}</span><span>{lookupsError}</span><button onClick={onClose}>Close document fixture</button></div> }));
+vi.mock('../Acts/ActModal', () => ({ ActModal: (props: { clients: { name: string }[]; lookupsLoading: boolean; lookupsError?: string; onClose: () => void }) => {
+  relatedActPropsSpy(props);
+  return <div data-testid="act-lookup-fixture"><span>{props.lookupsLoading ? 'Loading clients' : props.clients.map(client => client.name).join(',')}</span><span>{props.lookupsError}</span><button onClick={props.onClose}>Close document fixture</button></div>;
+} }));
+vi.mock('../Clients/CaseModal', () => ({ CaseModal: (props: { isOpen: boolean; onClose: () => void }) => {
+  relatedCasePropsSpy(props); return props.isOpen ? <div data-testid="related-case-fixture"><button onClick={props.onClose}>Close case fixture</button></div> : null;
+} }));
 
 vi.mock('../Clients/ClientStatusBadge', () => ({
   ClientStatusBadge: () => null,
@@ -299,6 +319,135 @@ describe('LegalEntityModal integration', () => {
     it.each([{ id: 0 }, { legalEntityId: 8 }, { legalEntityId: null, clientId: 7 }] as const)('invoice case parent: rejects a malformed or foreign case %j', async wrong => {
       render(<LegalEntityModal {...propsFor('page')} />); const accept = await openInvoice(); act(() => accept(created(wrong)));
       expect(screen.queryAllByText('Owned invoice case')).toHaveLength(0);
+    });
+  });
+
+  describe('related write ownership', () => {
+    type Kind = 'case' | 'invoice' | 'act';
+    type Child = { onSave: (payload: Partial<ClientCase>) => Promise<void>; onSubmit: (payload: InvoiceInput | ActInput) => Promise<void>; onDelete?: () => Promise<void>; onClose: () => void; onNextHearingConfirmed?: (value: Partial<ClientCase>) => void; submitting?: boolean; errorMessage?: string | null; caseData?: ClientCase; initialValues?: Partial<ActInput> };
+    const kindSection = { case: 'cases', invoice: 'accounts', act: 'acts' } as const;
+    const kindLabel = { case: 'Дело', invoice: 'Счёт', act: 'Акт' };
+    const fixture = { case: 'related-case-fixture', invoice: 'invoice-lookup-fixture', act: 'act-lookup-fixture' };
+    const spy = (kind: Kind) => kind === 'case' ? relatedCasePropsSpy : kind === 'invoice' ? invoiceModalPropsSpy : relatedActPropsSpy;
+    const child = (kind: Kind) => spy(kind).mock.lastCall![0] as Child;
+    const row = { id: 81, legalEntityId: 9, clientId: null, title: 'Owned related case', status: 'Open', createdAt: '2026-10-31' } as ClientCase;
+    const payload = (kind: Kind) => kind === 'case' ? { title: 'Preserved case title', feeAmount: 215.5 } : { number: 'PRESERVED-NUMBER', legalEntityId: 9, type: 'Income', amount: 215.5 } as InvoiceInput;
+    const save = (kind: Kind, props = child(kind)) => kind === 'case' ? props.onSave(payload(kind) as Partial<ClientCase>) : props.onSubmit(payload(kind) as InvoiceInput);
+    const apiCreate = (kind: Kind) => kind === 'case' ? vi.mocked(apiService.createCase) : kind === 'invoice' ? vi.mocked(apiService.createInvoice) : vi.mocked(apiService.createAct);
+    const propsFor = (mode: 'page' | 'modal') => ({ isOpen: true, mode, initial: createInitialLegalEntity({ isOwnCompany: false }), allowEdit: true, allowDelete: false,
+      canViewCases: true, canViewAccounts: true, canViewActs: true, canViewPayments: true, onClose: vi.fn(), onSubmit: vi.fn(), suggest: vi.fn(), findById: vi.fn() });
+    const open = async (kind: Kind) => { fireEvent.click(await screen.findByRole('button', { name: kindLabel[kind] })); await screen.findByTestId(fixture[kind]); return child(kind); };
+    const counts = () => [apiService.getCasesV1, apiService.getInvoices, apiService.getInvoicesSummary, apiService.getActs, apiService.getActsSummary, apiService.getPaymentsV2, apiService.getLegalEntityCaseFinanceSummaries].map(fn => vi.mocked(fn).mock.calls.length);
+    beforeEach(() => {
+      relatedCasePropsSpy.mockReset(); relatedActPropsSpy.mockReset(); invoiceModalPropsSpy.mockReset();
+      vi.mocked(apiService.getClientsV2).mockReset().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 200 });
+      vi.mocked(apiService.createCase).mockReset().mockResolvedValue(row); vi.mocked(apiService.updateCase).mockReset().mockResolvedValue(row); vi.mocked(apiService.deleteCase).mockReset().mockResolvedValue(undefined);
+      vi.mocked(apiService.createInvoice).mockReset().mockResolvedValue({ id: 82, number: 'PRESERVED-NUMBER' } as Invoice); vi.mocked(apiService.updateInvoice).mockReset().mockResolvedValue({ id: 82 } as Invoice);
+      vi.mocked(apiService.createAct).mockReset().mockResolvedValue({ id: 83, number: 'PRESERVED-NUMBER' } as Act); vi.mocked(apiService.updateAct).mockReset().mockResolvedValue({ id: 83 } as Act);
+    });
+    it('related write microtask: login replacement after hook acceptance prevents the parent continuation', async () => {
+      const session = documentCopyTestSession(); try {
+        vi.mocked(apiService.createCase).mockImplementation(async () => { queueMicrotask(() => queueMicrotask(() => queueMicrotask(() => session.replace('actor')))); return row; });
+        render(<LegalEntityModal {...propsFor('page')} />); const current = await open('case');
+        await act(async () => { await expect(save('case', current)).rejects.toBeInstanceOf(StaleUiOperationError); });
+      } finally { session.restore(); }
+    });
+    it.each(['save', 'delete'] as const)('related write microtask: login replacement after case %s prevents the parent continuation', async action => {
+      const session = documentCopyTestSession(); try {
+        vi.mocked(apiService.getCasesV1).mockResolvedValue([row]); const mutation = action === 'save' ? vi.mocked(apiService.updateCase) : vi.mocked(apiService.deleteCase);
+        (mutation as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => { queueMicrotask(() => queueMicrotask(() => queueMicrotask(() => session.replace('actor')))); return action === 'delete' ? undefined : row; });
+        render(<LegalEntityModal {...propsFor('page')} />); fireEvent.click(await screen.findByTitle('Редактировать дело')); const old = child('case');
+        await act(async () => { await expect(action === 'save' ? save('case', old) : old.onDelete!()).rejects.toBeInstanceOf(StaleUiOperationError); });
+      } finally { session.restore(); }
+    });
+    for (const mode of ['page', 'modal'] as const) for (const kind of ['case', 'invoice', 'act'] as const) {
+      it.each(['company', 'readonly', 'permission', 'permission-aba', 'closed', 'reopen', 'mode', 'version', 'unmount'] as const)(`related write: pending ${kind} cannot follow %s in ${mode}`, async change => {
+        let finish!: (value: unknown) => void; (apiCreate(kind) as unknown as ReturnType<typeof vi.fn>).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+        const props = propsFor(mode); const view = render(<LegalEntityModal {...props} />); const old = await open(kind); let saved!: Promise<void>; act(() => { saved = save(kind, old); });
+        if (change === 'company') view.rerender(<LegalEntityModal {...props} initial={{ ...props.initial, id: 8 }} />);
+        if (change === 'readonly') view.rerender(<LegalEntityModal {...props} allowEdit={false} />);
+        if (change === 'permission' || change === 'permission-aba') { view.rerender(<LegalEntityModal {...props} relatedRecordPermissions={{ [kindSection[kind]]: relatedPermissions({ canCreate: false }) }} />); if (change === 'permission-aba') view.rerender(<LegalEntityModal {...props} />); }
+        if (change === 'closed' || change === 'reopen') { view.rerender(<LegalEntityModal {...props} isOpen={false} />); if (change === 'reopen') { view.rerender(<LegalEntityModal {...props} />); await open(kind); } }
+        if (change === 'mode') view.rerender(<LegalEntityModal {...props} mode={mode === 'page' ? 'modal' : 'page'} />);
+        if (change === 'version') view.rerender(<LegalEntityModal {...props} initial={{ ...props.initial, profileEditVersion: 'B'.repeat(64) }} />);
+        if (change === 'unmount') view.unmount();
+        const before = counts(); await act(async () => { finish(kind === 'case' ? row : { id: 82, number: 'Private old result' }); await expect(saved).rejects.toBeInstanceOf(StaleUiOperationError); });
+        expect(counts()).toEqual(before); expect(screen.queryAllByText('Owned related case')).toHaveLength(0); expect(screen.queryAllByText('Private old result')).toHaveLength(0); expect(toastErrorMock).not.toHaveBeenCalled();
+        if (change === 'reopen') { act(() => old.onClose()); expect(screen.getByTestId(fixture[kind])).toBeTruthy(); }
+      });
+
+      it(`related write: current ${kind} blocks duplicates, preserves seeds and finishes in ${mode}`, async () => {
+        let finish!: (value: unknown) => void; (apiCreate(kind) as unknown as ReturnType<typeof vi.fn>).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+        render(<LegalEntityModal {...propsFor(mode)} />); const old = await open(kind); let saved!: Promise<void>; act(() => { saved = save(kind, old); });
+        await expect(save(kind, old)).rejects.toBeInstanceOf(StaleUiOperationError); expect(apiCreate(kind)).toHaveBeenCalledOnce();
+        if (kind === 'case') expect(child(kind).caseData).toBe(old.caseData); else expect(child(kind).submitting).toBe(true);
+        if (kind === 'act') expect(child(kind).initialValues).toBe(old.initialValues);
+        await act(async () => { finish(kind === 'case' ? row : { id: 82 }); await saved; });
+        if (kind === 'case') { expect(screen.getAllByText('Owned related case').length).toBeGreaterThan(0); act(() => old.onClose()); }
+        expect(screen.queryByTestId(fixture[kind])).toBeNull();
+        expect(apiCreate(kind)).toHaveBeenCalledWith(expect.objectContaining(kind === 'case' ? { legalEntityId: 9, clientId: null, title: 'Preserved case title', feeAmount: 215.5 } : { number: 'PRESERVED-NUMBER', legalEntityId: 9, amount: 215.5 }));
+      });
+    }
+
+    for (const kind of ['case', 'invoice', 'act'] as const) {
+      it.each(['login', 'actor', 'logout'] as const)(`related write: ${kind} completion rejects a changed %s without render`, async change => {
+        const session = documentCopyTestSession(); try {
+          let finish!: (value: unknown) => void; (apiCreate(kind) as unknown as ReturnType<typeof vi.fn>).mockReturnValue(new Promise(resolve => { finish = resolve; })); render(<LegalEntityModal {...propsFor('page')} />);
+          const old = await open(kind); let saved!: Promise<void>; act(() => { saved = save(kind, old); }); session.replace(change);
+          await expect(save(kind, old)).rejects.toBeInstanceOf(StaleUiOperationError); const before = counts(); await act(async () => { finish(kind === 'case' ? row : { id: 82 }); await expect(saved).rejects.toBeInstanceOf(StaleUiOperationError); });
+          expect(counts()).toEqual(before); expect(apiCreate(kind)).toHaveBeenCalledOnce();
+        } finally { session.restore(); }
+      });
+      it(`related write: current ${kind} failure preserves the form and allows a deliberate retry`, async () => {
+        (apiCreate(kind) as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('Current write rejected')); render(<LegalEntityModal {...propsFor('page')} />); const old = await open(kind);
+        await act(async () => { await expect(save(kind, old)).rejects.toThrow('Current write rejected'); }); expect(screen.getByTestId(fixture[kind])).toBeTruthy(); if (kind !== 'case') { expect(child(kind).submitting).toBe(false); expect(child(kind).errorMessage).toBe('Current write rejected'); }
+        await act(async () => { await save(kind); }); expect(apiCreate(kind)).toHaveBeenCalledTimes(2);
+      });
+    }
+
+    it('related write: old invoice finalization and close cannot unlock a new pending invoice', async () => {
+      let first!: (value: Invoice) => void; let second!: (value: Invoice) => void; vi.mocked(apiService.createInvoice).mockReturnValueOnce(new Promise(resolve => { first = resolve; })).mockReturnValueOnce(new Promise(resolve => { second = resolve; }));
+      render(<LegalEntityModal {...propsFor('page')} />); const old = await open('invoice'); let firstSave!: Promise<void>; act(() => { firstSave = save('invoice', old); }); act(() => old.onClose()); const next = await open('invoice'); let secondSave!: Promise<void>; act(() => { secondSave = save('invoice', next); });
+      await act(async () => { first({ id: 82 } as Invoice); await expect(firstSave).rejects.toBeInstanceOf(StaleUiOperationError); }); act(() => old.onClose()); expect(child('invoice').submitting).toBe(true); expect(screen.getByTestId(fixture.invoice)).toBeTruthy();
+      await act(async () => { second({ id: 83 } as Invoice); await secondSave; }); expect(screen.queryByTestId(fixture.invoice)).toBeNull();
+    });
+    it.each(['save', 'delete'] as const)('related write: current case %s keeps edit/delete callbacks and API identity', async action => {
+      vi.mocked(apiService.getCasesV1).mockResolvedValue([row]); render(<LegalEntityModal {...propsFor('page')} />); fireEvent.click(await screen.findByTitle('Редактировать дело')); await screen.findByTestId(fixture.case); const current = child('case');
+      await act(async () => { if (action === 'save') await save('case', current); else await current.onDelete!(); });
+      if (action === 'save') expect(apiService.updateCase).toHaveBeenCalledWith(81, expect.objectContaining({ title: 'Preserved case title', legalEntityId: 9, feeAmount: 215.5 })); else expect(apiService.deleteCase).toHaveBeenCalledExactlyOnceWith(81);
+    });
+    it.each(['invoice', 'act'] as const)('related write edit: current %s keeps its existing ID and update payload', async kind => {
+      if (kind === 'invoice') vi.mocked(apiService.getInvoices).mockResolvedValue({ items: [{ id: 82, invoiceEntityId: 82, number: 'INV-EDIT', type: 'Income', date: '2026-10-31', legalEntityId: 9, amount: 100, status: 'Pending' } as Invoice], total: 1, page: 1, pageSize: 5 });
+      else vi.mocked(apiService.getActs).mockResolvedValue({ items: [{ id: 83, number: 'ACT-EDIT', date: '2026-10-31', amount: 100, status: 'Created', legalEntityId: 9, createdAt: '2026-10-31' } as Act], total: 1, page: 1, pageSize: 5 });
+      render(<LegalEntityModal {...propsFor('page')} />); fireEvent.click(await screen.findByRole('button', { name: kind === 'invoice' ? /INV-EDIT/ : /ACT-EDIT/ })); await screen.findByTestId(fixture[kind]);
+      await act(async () => { await save(kind); });
+      if (kind === 'invoice') expect(apiService.updateInvoice).toHaveBeenCalledExactlyOnceWith(82, payload(kind)); else expect(apiService.updateAct).toHaveBeenCalledExactlyOnceWith(83, payload(kind));
+      expect(apiCreate(kind)).not.toHaveBeenCalled(); expect(screen.queryByTestId(fixture[kind])).toBeNull();
+    });
+    it.each(['invoice', 'act'] as const)('related write edit: stale %s error and a restored permission cannot revive old form errors', async kind => {
+      let reject!: (error: Error) => void; (apiCreate(kind) as unknown as ReturnType<typeof vi.fn>).mockReturnValueOnce(new Promise((_resolve, fail) => { reject = fail; }));
+      const props = propsFor('page'); const view = render(<LegalEntityModal {...props} />); const old = await open(kind); let saved!: Promise<void>; act(() => { saved = save(kind, old); }); act(() => old.onClose()); await open(kind);
+      await act(async () => { reject(new Error('Private old form error')); await expect(saved).rejects.toBeInstanceOf(StaleUiOperationError); }); expect(child(kind).errorMessage).toBeNull(); expect(screen.getByTestId(fixture[kind])).toBeTruthy();
+      (apiCreate(kind) as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('Current owned error')); await act(async () => { await expect(save(kind)).rejects.toThrow('Current owned error'); }); expect(child(kind).errorMessage).toBe('Current owned error');
+      view.rerender(<LegalEntityModal {...props} relatedRecordPermissions={{ [kindSection[kind]]: relatedPermissions({ canCreate: false }) }} />); view.rerender(<LegalEntityModal {...props} />); expect(child(kind).errorMessage).toBeNull();
+    });
+    for (const mode of ['page', 'modal'] as const) for (const action of ['save', 'delete'] as const) {
+      it.each(['company', 'permission'] as const)(`related case edit: ${action} cannot follow %s in ${mode}`, async change => {
+        let finish!: (value: unknown) => void; vi.mocked(apiService.getCasesV1).mockImplementation(async params => params?.legalEntityId === 9 ? [row] : []);
+        const mutation = action === 'save' ? vi.mocked(apiService.updateCase) : vi.mocked(apiService.deleteCase); (mutation as unknown as ReturnType<typeof vi.fn>).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+        const props = propsFor(mode); const view = render(<LegalEntityModal {...props} />); fireEvent.click(await screen.findByTitle('Редактировать дело'));
+        await screen.findByTestId(fixture.case); const old = child('case'); let saved!: Promise<void>; act(() => { saved = action === 'save' ? save('case', old) : old.onDelete!(); });
+        if (change === 'company') view.rerender(<LegalEntityModal {...props} initial={{ ...props.initial, id: 8 }} />);
+        else view.rerender(<LegalEntityModal {...props} relatedRecordPermissions={{ cases: relatedPermissions(action === 'save' ? { canEdit: false } : { canEdit: true, canDelete: false }) }} />);
+        const before = counts(); await act(async () => { finish(action === 'save' ? { ...row, title: 'Private edited case' } : undefined); await expect(saved).rejects.toBeInstanceOf(StaleUiOperationError); }); expect(counts()).toEqual(before); expect(screen.queryByText('Private edited case')).toBeNull();
+      });
+    }
+    it('related case edit: old hearing confirmation cannot modify a new case while its current callback works', async () => {
+      vi.mocked(apiService.getCasesV1).mockImplementation(async params => params?.legalEntityId === 9 ? [row] : [{ ...row, id: 84, legalEntityId: 8 }]);
+      const props = propsFor('page'); const view = render(<LegalEntityModal {...props} />); fireEvent.click(await screen.findByTitle('Редактировать дело')); const old = child('case');
+      view.rerender(<LegalEntityModal {...props} initial={{ ...props.initial, id: 8 }} />); fireEvent.click(await screen.findByTitle('Редактировать дело')); const confirmation = { nextHearingConfirmedAt: '2026-10-31T06:00:00Z' };
+      act(() => old.onNextHearingConfirmed!(confirmation)); expect(child('case').caseData?.nextHearingConfirmedAt).toBeUndefined();
+      act(() => child('case').onNextHearingConfirmed!(confirmation)); expect(child('case').caseData?.nextHearingConfirmedAt).toBe(confirmation.nextHearingConfirmedAt);
     });
   });
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../services/api';
 import type { Invoice, InvoiceClientRole, InvoiceInput, InvoiceSummary, InvoiceWorkflowStatus, PaymentKind, PaymentStatus } from '../types';
 import { extractDisplayErrorMessage } from '../utils/errorUtils';
+import { awaitOwnedUiResult } from '../utils/StaleUiOperationError';
 
 export type InvoicesSortKey =
   | 'date'
@@ -52,9 +53,10 @@ interface UseInvoicesResult {
   summaryLoading: boolean;
   pagination: InvoicesPagination;
   refresh: () => Promise<void>;
-  createInvoice: (payload: InvoiceInput) => Promise<Invoice>;
-  updateInvoice: (id: number, payload: InvoiceInput) => Promise<Invoice>;
-  deleteInvoice: (id: number) => Promise<void>;
+  refreshOwned: (isCurrent: () => boolean) => Promise<void>;
+  createInvoice: (payload: InvoiceInput, isCurrent?: () => boolean) => Promise<Invoice>;
+  updateInvoice: (id: number, payload: InvoiceInput, isCurrent?: () => boolean) => Promise<Invoice>;
+  deleteInvoice: (id: number, isCurrent?: () => boolean) => Promise<void>;
 }
 
 function makeSummaryKey(filters: InvoicesFilters): string {
@@ -99,7 +101,8 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
   const summaryKey = useMemo(() => makeSummaryKey(filters), [filters]);
 
   const fetchInvoices = useCallback(
-    async (mode: 'auto' | 'refresh' = 'auto') => {
+    async (mode: 'auto' | 'refresh' = 'auto', isCurrent: () => boolean = () => true) => {
+      if (!isCurrent()) return;
       invoicesAbortRef.current?.abort();
       invoicesAbortRef.current = null;
       if (!enabled) {
@@ -145,7 +148,7 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
           },
           { signal: controller.signal },
         );
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || !isCurrent()) return;
         setInvoices(response.items ?? []);
         setPagination({
           page: response.page ?? filters.page ?? 1,
@@ -154,7 +157,7 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
         });
         hasLoadedRef.current = true;
       } catch (err) {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || !isCurrent()) return;
         const message = extractDisplayErrorMessage(err, 'Не удалось загрузить счета');
         setError(message);
         if (!hasLoadedRef.current) {
@@ -195,7 +198,8 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
   );
 
   const fetchSummary = useCallback(
-    async (mode: 'auto' | 'refresh' = 'auto') => {
+    async (mode: 'auto' | 'refresh' = 'auto', isCurrent: () => boolean = () => true) => {
+      if (!isCurrent()) return;
       summaryAbortRef.current?.abort();
       summaryAbortRef.current = null;
       if (!enabled) {
@@ -231,11 +235,11 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
           },
           { signal: controller.signal },
         );
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || !isCurrent()) return;
         setSummary(response);
         hasSummaryLoadedRef.current = true;
       } catch {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || !isCurrent()) return;
         if (!hasSummaryLoadedRef.current) {
           setSummary(null);
         }
@@ -288,30 +292,34 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
     await Promise.all([fetchInvoices('refresh'), fetchSummary('refresh')]);
   }, [fetchInvoices, fetchSummary]);
 
+  const refreshOwned = useCallback(async (isCurrent: () => boolean) => {
+    await awaitOwnedUiResult(() => Promise.all([fetchInvoices('refresh', isCurrent), fetchSummary('refresh', isCurrent)]), isCurrent);
+  }, [fetchInvoices, fetchSummary]);
+
   const createInvoice = useCallback(
-    async (payload: InvoiceInput) => {
-      const created = await apiService.createInvoice(payload);
-      await refresh();
+    async (payload: InvoiceInput, isCurrent: () => boolean = () => true) => {
+      const created = await awaitOwnedUiResult(() => apiService.createInvoice(payload), isCurrent);
+      await refreshOwned(isCurrent);
       return created;
     },
-    [refresh],
+    [refreshOwned],
   );
 
   const updateInvoice = useCallback(
-    async (id: number, payload: InvoiceInput) => {
-      const updated = await apiService.updateInvoice(id, payload);
-      await refresh();
+    async (id: number, payload: InvoiceInput, isCurrent: () => boolean = () => true) => {
+      const updated = await awaitOwnedUiResult(() => apiService.updateInvoice(id, payload), isCurrent);
+      await refreshOwned(isCurrent);
       return updated;
     },
-    [refresh],
+    [refreshOwned],
   );
 
   const deleteInvoice = useCallback(
-    async (id: number) => {
-      await apiService.deleteInvoice(id);
-      await refresh();
+    async (id: number, isCurrent: () => boolean = () => true) => {
+      await awaitOwnedUiResult(() => apiService.deleteInvoice(id), isCurrent);
+      await refreshOwned(isCurrent);
     },
-    [refresh],
+    [refreshOwned],
   );
 
   return {
@@ -323,6 +331,7 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
     summaryLoading,
     pagination,
     refresh,
+    refreshOwned,
     createInvoice,
     updateInvoice,
     deleteInvoice,

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiService } from '../services/api';
 import type { ClientCase } from '../types';
+import { awaitOwnedUiResult, StaleUiOperationError } from '../utils/StaleUiOperationError';
 
 type CaseCreateUpdate = Omit<ClientCase, 'id' | 'createdAt' | 'payments'>;
 
@@ -56,27 +57,42 @@ export function useClientCases(clientId?: number | string, options: { enabled?: 
   }, [refresh]);
 
   const createCase = useCallback(
-    async (payload: CaseCreateUpdate) => {
+    async (payload: CaseCreateUpdate, isCurrent: () => boolean = () => true) => {
       if (!cid && !legalEntityId) throw new Error('clientId or legalEntityId is required');
-      const created = await apiService.createCase({
+      const created = await awaitOwnedUiResult(() => apiService.createCase({
         ...payload,
         clientId: cid ?? null,
         legalEntityId: legalEntityId ?? null,
-      } as CaseCreateUpdate);
+      } as CaseCreateUpdate), isCurrent);
+      if (!isCurrent()) throw new StaleUiOperationError();
+      abortRef.current?.abort();
+      abortRef.current = null;
+      setLoading(false);
+      setError(null);
       setCases((prev) => [created, ...prev]);
       return created;
     },
     [cid, legalEntityId],
   );
 
-  const updateCase = useCallback(async (id: number, payload: CaseCreateUpdate) => {
-    const updated = await apiService.updateCase(id, payload);
+  const updateCase = useCallback(async (id: number, payload: CaseCreateUpdate, isCurrent: () => boolean = () => true) => {
+    const updated = await awaitOwnedUiResult(() => apiService.updateCase(id, payload), isCurrent);
+    if (!isCurrent()) throw new StaleUiOperationError();
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setLoading(false);
+    setError(null);
     setCases((prev) => prev.map((k) => (k.id === id ? updated : k)));
     return updated;
   }, []);
 
-  const deleteCase = useCallback(async (id: number) => {
-    await apiService.deleteCase(id);
+  const deleteCase = useCallback(async (id: number, isCurrent: () => boolean = () => true) => {
+    await awaitOwnedUiResult(() => apiService.deleteCase(id), isCurrent);
+    if (!isCurrent()) throw new StaleUiOperationError();
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setLoading(false);
+    setError(null);
     setCases((prev) => prev.filter((k) => k.id !== id));
   }, []);
 

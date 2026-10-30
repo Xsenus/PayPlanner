@@ -3,6 +3,7 @@ import { apiService } from '../services/api';
 import type { Act, ActInput, ActStatus, ActWorkflowStatus, ActsSummary, PaymentKind } from '../types';
 import { normalizeActArray, normalizeActsSummary } from '../utils/acts';
 import { extractDisplayErrorMessage } from '../utils/errorUtils';
+import { awaitOwnedUiResult } from '../utils/StaleUiOperationError';
 
 export type ActsSortKey =
   | 'date'
@@ -51,9 +52,10 @@ interface UseActsResult {
   summaryLoading: boolean;
   pagination: ActsPagination;
   refresh: () => Promise<void>;
-  createAct: (payload: ActInput) => Promise<Act>;
-  updateAct: (id: number, payload: ActInput) => Promise<Act>;
-  deleteAct: (id: number) => Promise<void>;
+  refreshOwned: (isCurrent: () => boolean) => Promise<void>;
+  createAct: (payload: ActInput, isCurrent?: () => boolean) => Promise<Act>;
+  updateAct: (id: number, payload: ActInput, isCurrent?: () => boolean) => Promise<Act>;
+  deleteAct: (id: number, isCurrent?: () => boolean) => Promise<void>;
 }
 
 function makeSummaryKey(filters: ActsFilters): string {
@@ -97,7 +99,8 @@ export function useActs(filters: ActsFilters): UseActsResult {
   const summaryKey = useMemo(() => makeSummaryKey(filters), [filters]);
 
   const fetchActs = useCallback(
-    async (mode: 'auto' | 'refresh' = 'auto') => {
+    async (mode: 'auto' | 'refresh' = 'auto', isCurrent: () => boolean = () => true) => {
+      if (!isCurrent()) return;
       actsAbortRef.current?.abort();
       actsAbortRef.current = null;
       if (!enabled) {
@@ -142,7 +145,7 @@ export function useActs(filters: ActsFilters): UseActsResult {
           },
           { signal: controller.signal },
         );
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || !isCurrent()) return;
         setActs(normalizeActArray(response?.items));
         setPagination({
           page: Number(response?.page ?? filters.page ?? 1) || 1,
@@ -151,7 +154,7 @@ export function useActs(filters: ActsFilters): UseActsResult {
         });
         hasLoadedRef.current = true;
       } catch (err) {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || !isCurrent()) return;
         const message = extractDisplayErrorMessage(err, 'Не удалось загрузить акты');
         setError(message);
         if (!hasLoadedRef.current) {
@@ -172,7 +175,8 @@ export function useActs(filters: ActsFilters): UseActsResult {
   );
 
   const fetchSummary = useCallback(
-    async (mode: 'auto' | 'refresh' = 'auto') => {
+    async (mode: 'auto' | 'refresh' = 'auto', isCurrent: () => boolean = () => true) => {
+      if (!isCurrent()) return;
       summaryAbortRef.current?.abort();
       summaryAbortRef.current = null;
       if (!enabled) {
@@ -207,11 +211,11 @@ export function useActs(filters: ActsFilters): UseActsResult {
           },
           { signal: controller.signal },
         );
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || !isCurrent()) return;
         setSummary(normalizeActsSummary(response));
         hasSummaryLoadedRef.current = true;
       } catch {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || !isCurrent()) return;
         if (!hasSummaryLoadedRef.current) {
           setSummary(null);
         }
@@ -248,30 +252,34 @@ export function useActs(filters: ActsFilters): UseActsResult {
     await Promise.all([fetchActs('refresh'), fetchSummary('refresh')]);
   }, [fetchActs, fetchSummary]);
 
+  const refreshOwned = useCallback(async (isCurrent: () => boolean) => {
+    await awaitOwnedUiResult(() => Promise.all([fetchActs('refresh', isCurrent), fetchSummary('refresh', isCurrent)]), isCurrent);
+  }, [fetchActs, fetchSummary]);
+
   const createAct = useCallback(
-    async (payload: ActInput) => {
-      const created = await apiService.createAct(payload);
-      await refresh();
+    async (payload: ActInput, isCurrent: () => boolean = () => true) => {
+      const created = await awaitOwnedUiResult(() => apiService.createAct(payload), isCurrent);
+      await refreshOwned(isCurrent);
       return created;
     },
-    [refresh],
+    [refreshOwned],
   );
 
   const updateAct = useCallback(
-    async (id: number, payload: ActInput) => {
-      const updated = await apiService.updateAct(id, payload);
-      await refresh();
+    async (id: number, payload: ActInput, isCurrent: () => boolean = () => true) => {
+      const updated = await awaitOwnedUiResult(() => apiService.updateAct(id, payload), isCurrent);
+      await refreshOwned(isCurrent);
       return updated;
     },
-    [refresh],
+    [refreshOwned],
   );
 
   const deleteAct = useCallback(
-    async (id: number) => {
-      await apiService.deleteAct(id);
-      await refresh();
+    async (id: number, isCurrent: () => boolean = () => true) => {
+      await awaitOwnedUiResult(() => apiService.deleteAct(id), isCurrent);
+      await refreshOwned(isCurrent);
     },
-    [refresh],
+    [refreshOwned],
   );
 
   return {
@@ -283,6 +291,7 @@ export function useActs(filters: ActsFilters): UseActsResult {
     summaryLoading,
     pagination,
     refresh,
+    refreshOwned,
     createAct,
     updateAct,
     deleteAct,

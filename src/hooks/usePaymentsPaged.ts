@@ -1,3 +1,4 @@
+import { awaitOwnedUiResult } from '../utils/StaleUiOperationError';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../services/api';
 import type { ClientRole, Payment, PaymentAdvanceReviewStatus, PaymentsListSummary, PaymentStatus } from '../types';
@@ -97,7 +98,8 @@ export function usePaymentsPaged(params: UsePaymentsPagedParams) {
   const enabled = params.enabled ?? true;
 
   const fetchPage = useCallback(
-    async (mode: 'initial' | 'refresh' = 'initial') => {
+    async (mode: 'initial' | 'refresh' = 'initial', isCurrent: () => boolean = () => true) => {
+      if (!isCurrent()) return;
       abortRef.current?.abort();
 
       if (!enabled) {
@@ -126,12 +128,12 @@ export function usePaymentsPaged(params: UsePaymentsPagedParams) {
           requestParams,
           { signal: controller.signal },
         );
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || !isCurrent()) return;
         setPayments(data.items ?? []);
         setTotal(data.total ?? 0);
         setSummary(data.summary ?? EMPTY_SUMMARY);
       } catch (err) {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || !isCurrent()) return;
         setPayments([]);
         setTotal(0);
         setSummary(EMPTY_SUMMARY);
@@ -167,6 +169,10 @@ export function usePaymentsPaged(params: UsePaymentsPagedParams) {
     await currentFetchRef.current?.('refresh');
   }, []);
 
+  const refreshOwned = useCallback(async (isCurrent: () => boolean) => {
+    await awaitOwnedUiResult(() => currentFetchRef.current?.('refresh', isCurrent) ?? Promise.resolve(), isCurrent);
+  }, []);
+
   return {
     payments,
     total,
@@ -175,5 +181,6 @@ export function usePaymentsPaged(params: UsePaymentsPagedParams) {
     refreshing,
     error,
     refresh,
+    refreshOwned,
   };
 }
