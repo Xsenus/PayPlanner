@@ -199,6 +199,81 @@ function deferCompanyImageProcessing() {
 }
 
 describe('LegalEntityModal integration', () => {
+  for (const mode of ['page', 'modal'] as const) {
+    it(`branch default: missing management authority remains readonly in ${mode}`, async () => {
+      const session = documentCopyTestSession();
+      try {
+        render(<LegalEntityModal isOpen mode={mode} initial={createInitialLegalEntity({ id: 9 })} allowEdit allowDelete={false}
+          onClose={vi.fn()} onSubmit={vi.fn()} suggest={vi.fn()} findById={vi.fn()} canViewCases={false} canViewAccounts={false} canViewActs={false} canViewPayments={false} />);
+        await waitFor(() => expect(screen.getByTestId('company-branches-section').textContent).toContain('Подразделения не добавлены.'));
+        expect(screen.getByTestId('company-branches-section').querySelector('button')).toBeNull();
+      } finally { session.restore(); }
+    });
+
+    it(`branch hookup: a compact read-only assigned profile shows branches in ${mode}`, async () => {
+      const session = documentCopyTestSession();
+      try {
+        vi.mocked(apiService.getCompanyBranches).mockResolvedValueOnce([{ id: 19, legalEntityId: 9, name: 'Read-only office', kind: 'Office', status: 'Active', createdAt: '2026-10-30T00:00:00Z' }]);
+        render(<LegalEntityModal isOpen mode={mode} initial={createInitialLegalEntity({ id: 9 })} allowEdit={false} allowDelete={false} canManageOwnCompanySettings={false} compactReadOnlyView hideFormActions
+          onClose={vi.fn()} onSubmit={vi.fn()} suggest={vi.fn()} findById={vi.fn()} canViewCases={false} canViewAccounts={false} canViewActs={false} canViewPayments={false} />);
+        expect(await screen.findByText('Read-only office')).toBeTruthy(); expect(screen.getByTestId('company-branches-section').querySelector('button')).toBeNull();
+      } finally { session.restore(); }
+    });
+
+    it(`branch hookup: changing the parent profile version closes its branch editor in ${mode}`, async () => {
+      const session = documentCopyTestSession();
+      try {
+        const initial = createInitialLegalEntity({ id: 9, profileEditVersion: 'A'.repeat(64) });
+        const props = { isOpen: true, mode, initial, allowEdit: true, allowDelete: false, canManageCompanyBranches: true, onClose: vi.fn(), onSubmit: vi.fn(), suggest: vi.fn(), findById: vi.fn(), canViewCases: false, canViewAccounts: false, canViewActs: false, canViewPayments: false };
+        const view = render(<LegalEntityModal {...props} />);
+        const add = await screen.findByRole('button', { name: /^Добавить$/ }); await waitFor(() => expect(add).toHaveProperty('disabled', false));
+        fireEvent.click(add); expect(screen.getByRole('dialog', { name: 'Подразделение' })).toBeTruthy();
+        view.rerender(<LegalEntityModal {...props} initial={{ ...initial, profileEditVersion: 'B'.repeat(64) }} />);
+        expect(screen.queryByRole('dialog', { name: 'Подразделение' })).toBeNull();
+      } finally { session.restore(); }
+    });
+
+    it(`branch hookup: revoking management keeps profile editing but removes branch editing in ${mode}`, async () => {
+      const session = documentCopyTestSession();
+      try {
+        const props = { isOpen: true, mode, initial: createInitialLegalEntity({ id: 9 }), allowEdit: true, allowDelete: false, canManageCompanyBranches: true, onClose: vi.fn(), onSubmit: vi.fn(), suggest: vi.fn(), findById: vi.fn(), canViewCases: false, canViewAccounts: false, canViewActs: false, canViewPayments: false };
+        const view = render(<LegalEntityModal {...props} />); const add = await screen.findByRole('button', { name: /^Добавить$/ });
+        await waitFor(() => expect(add).toHaveProperty('disabled', false)); fireEvent.click(add);
+        view.rerender(<LegalEntityModal {...props} canManageOwnCompanySettings={false} />);
+        expect(screen.queryByRole('dialog', { name: 'Подразделение' })).toBeNull();
+        await waitFor(() => expect(screen.getByTestId('company-branches-section').textContent).toContain('Подразделения не добавлены.'));
+        expect(screen.getByTestId('company-branches-section').querySelector('button')).toBeNull();
+      } finally { session.restore(); }
+    });
+
+    it(`branch hookup: a counterparty does not load own-company branches in ${mode}`, async () => {
+      const session = documentCopyTestSession();
+      try {
+        render(<LegalEntityModal isOpen mode={mode} initial={createInitialLegalEntity({ id: 77 })} allowEdit allowDelete={false}
+          onClose={vi.fn()} onSubmit={vi.fn()} suggest={vi.fn()} findById={vi.fn()} canViewCases={false} canViewAccounts={false} canViewActs={false} canViewPayments={false} />);
+        await waitFor(() => expect(apiService.getMainCompanySettings).toHaveBeenCalled());
+        expect(screen.queryByTestId('company-branches-section')).toBeNull(); expect(apiService.getCompanyBranches).not.toHaveBeenCalled();
+      } finally { session.restore(); }
+    });
+  }
+
+  it.each(['page', 'modal'] as const)('branch access baseline: shows assigned branches without administrator actions in %s', async mode => {
+    const session = documentCopyTestSession();
+    try {
+      const initial = createInitialLegalEntity({ id: 9, shortName: 'Assigned own company' });
+      vi.mocked(apiService.getCompanyBranches).mockResolvedValueOnce([{ id: 19, legalEntityId: 9, name: 'Assigned office', kind: 'Office', status: 'Active', createdAt: '2026-10-30T00:00:00Z' }]);
+      render(<LegalEntityModal isOpen mode={mode} initial={initial} allowEdit allowDelete={false} canManageOwnCompanySettings={false}
+        canViewCases={false} canViewAccounts={false} canViewActs={false} canViewPayments={false}
+        onClose={vi.fn()} onSubmit={vi.fn()} suggest={vi.fn()} findById={vi.fn()} />);
+      expect(await screen.findByText('Assigned office')).toBeTruthy();
+      const section = screen.getByTestId('company-branches-section');
+      expect(section.querySelector('button')).toBeNull();
+      expect(screen.queryByLabelText('Состояние профиля компании')).toBeNull();
+      expect(screen.getByDisplayValue('Assigned own company')).toHaveProperty('disabled', false);
+      expect(apiService.getBankConnections).not.toHaveBeenCalled();
+    } finally { session.restore(); }
+  });
+
   describe('deletion guard', () => {
     let session: ReturnType<typeof documentCopyTestSession>;
     beforeEach(() => { session = documentCopyTestSession(); });

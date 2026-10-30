@@ -762,6 +762,7 @@ export function LegalEntities({
           findById={(payload) => apiService.findLegalEntityById(payload)}
           allowEdit={editing ? allowDetailEdit : canCreate}
           allowDelete={allowDetailDelete}
+          canManageCompanyBranches={user?.role?.name?.toLowerCase() === 'admin'}
           canViewCases={permissions.cases.canView}
           canViewAccounts={permissions.accounts.canView}
           canCreateAccounts={permissions.accounts.canView && permissions.accounts.canCreate}

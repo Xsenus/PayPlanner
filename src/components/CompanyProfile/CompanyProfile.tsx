@@ -236,6 +236,7 @@ function CompanyProfileScreen({ userId, roleId, permissions, isAdminUser, canVie
           allowEdit={!isReadOnlyProfile}
           allowDelete={false}
           canManageOwnCompanySettings={isAdminUser}
+          canManageCompanyBranches={isAdminUser}
           relatedRecordPermissions={isAdminUser ? undefined : permissions}
           canViewCases={isAdminUser || permissions.cases?.canView === true}
           canViewAccounts={isAdminUser || permissions.accounts?.canView === true}

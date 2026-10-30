@@ -1222,6 +1222,13 @@ describe('ClientDetail integration', () => {
     return { view, props, entity, modal: legalModalOwnerSpy.mock.calls.at(-1)?.[0] as LegalModalOwnerProps };
   }
 
+  it.each([false, true])('branch caller: client requisites forward explicit management when admin=%s', async admin => {
+    const previous = authState.isAdmin; authState.isAdmin = admin;
+    try {
+      await openOwnerLegalModal(); expect(legalModalOwnerSpy.mock.lastCall?.[0]).toMatchObject({ canManageCompanyBranches: admin });
+    } finally { authState.isAdmin = previous; }
+  });
+
   it.each(['close', 'client', 'permission', 'user', 'role', 'unmount'] as const)('parent ownership: does not select an obsolete legal save after %s', async change => {
     const { view, props, entity, modal } = await openOwnerLegalModal();
     let finish!: (value: LegalEntityDetail) => void;

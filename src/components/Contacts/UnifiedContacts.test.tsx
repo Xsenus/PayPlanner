@@ -225,6 +225,18 @@ async function openColumnSettings() {
 }
 
 describe('UnifiedContacts', () => {
+  it.each(['admin', 'editor'])('branch caller: contacts forwards the current %s role without inferring it from edit permission', async role => {
+    const previous = authUser.role.name; authUser.role.name = role;
+    try {
+      const company = createLegalEntity({ shortName: 'Branch authority company' });
+      vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({ items: [company], total: 1, page: 1, pageSize: 24 });
+      vi.mocked(apiService.getLegalEntity).mockResolvedValue(company as LegalEntityDetail);
+      render(<UnifiedContacts initialKind="legal" lockKind />); fireEvent.click(await screen.findByText('Branch authority company'));
+      await waitFor(() => expect(legalEntityModalMock.mock.lastCall?.[0]?.initial?.id).toBe(company.id));
+      expect(legalEntityModalMock.mock.lastCall?.[0]).toMatchObject({ canManageCompanyBranches: role === 'admin' });
+    } finally { authUser.role.name = previous; }
+  });
+
   beforeEach(() => {
     authUser.id = 42; authUser.role.id = 1;
     vi.useRealTimers();

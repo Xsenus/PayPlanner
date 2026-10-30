@@ -1,10 +1,11 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CompanyBranchesSection } from './CompanyBranchesSection';
 import { apiService } from '../../services/api';
 import type { CompanyBranch, LegalEntityBankAccount } from '../../types';
+import { documentCopyTestSession } from '../../test/documentCopySession';
 
 const { toastSuccessMock, toastErrorMock } = vi.hoisted(() => ({
   toastSuccessMock: vi.fn(),
@@ -39,16 +40,19 @@ const accounts: LegalEntityBankAccount[] = [
 ];
 
 describe('CompanyBranchesSection', () => {
+  let session: ReturnType<typeof documentCopyTestSession>;
   beforeEach(() => {
+    session = documentCopyTestSession();
     vi.clearAllMocks();
     vi.mocked(apiService.getCompanyBranches).mockResolvedValue([branch()]);
   });
+  afterEach(() => session.restore());
 
   it('loads branches including archived ones and shows inherited values', async () => {
     render(<CompanyBranchesSection companyId={5} bankAccounts={accounts} readOnly={false} />);
 
     expect(await screen.findByText('Офис СПб')).toBeTruthy();
-    expect(apiService.getCompanyBranches).toHaveBeenCalledWith(5, true);
+    expect(apiService.getCompanyBranches).toHaveBeenCalledWith(5, true, expect.any(AbortSignal));
     expect(screen.getByText('как у компании')).toBeTruthy();
     expect(screen.getByText('Основной счет компании')).toBeTruthy();
   });

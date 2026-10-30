@@ -125,6 +125,13 @@ const legalEntity = {
 };
 
 describe('LegalEntities permissions', () => {
+  it.each(['admin', 'ADMIN', 'limited-lawyer'])('branch caller: derives management from the current role %s', async role => {
+    authUser.role.name = role;
+    render(<LegalEntities initialLegalEntityId={7} detailOnly />);
+    await waitFor(() => expect(modalSpy.mock.lastCall?.[0]?.initial?.id).toBe(7));
+    expect(modalSpy.mock.lastCall?.[0]).toMatchObject({ canManageCompanyBranches: role.toLowerCase() === 'admin' });
+  });
+
   describe('deletion guard', () => {
     let session: ReturnType<typeof documentCopyTestSession>;
     beforeEach(() => {

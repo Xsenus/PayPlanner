@@ -22,6 +22,12 @@ const api = vi.mocked(apiService);
 const company = { id: 7, shortName: 'Assigned company', clients: [], clientsCount: 0, createdAt: '2026-10-23T00:00:00Z' };
 
 describe('company profile access boundaries', () => {
+  it.each([false, true])('branch caller: forwards explicit administrator authority from the profile when admin=%s', async admin => {
+    fixture.admin = admin; fixture.view = true; fixture.edit = true;
+    render(<CompanyProfile />); await screen.findByText('Assigned company', { selector: 'span' });
+    expect(fixture.modal.mock.lastCall?.[0]).toMatchObject({ canManageCompanyBranches: admin });
+  });
+
   beforeEach(() => {
     vi.clearAllMocks(); window.localStorage.clear(); fixture.admin = false; fixture.view = false; fixture.edit = false;
     api.getMainCompanySettings.mockResolvedValue({ defaultCompanyId: 7, companies: [company] });

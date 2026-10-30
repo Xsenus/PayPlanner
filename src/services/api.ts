@@ -6485,9 +6485,9 @@ export class ApiService {
     });
   }
 
-  async getCompanyBranches(companyId: number, includeArchived = false) {
+  async getCompanyBranches(companyId: number, includeArchived = false, signal?: AbortSignal) {
     const query = includeArchived ? '?includeArchived=true' : '';
-    return this.request<CompanyBranch[]>(`/legal-entities/${companyId}/branches${query}`);
+    return this.request<CompanyBranch[]>(`/legal-entities/${companyId}/branches${query}`, { signal, cache: 'no-store' });
   }
 
   async createCompanyBranch(companyId: number, payload: CompanyBranchInput) {

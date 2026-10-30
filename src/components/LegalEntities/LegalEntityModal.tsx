@@ -137,6 +137,7 @@ interface LegalEntityModalProps {
   hideDictionaryButtons?: boolean;
   compactReadOnlyView?: boolean;
   canManageOwnCompanySettings?: boolean;
+  canManageCompanyBranches?: boolean;
   canViewCases?: boolean;
   canViewAccounts?: boolean;
   canCreateAccounts?: boolean;
@@ -785,6 +786,7 @@ export function LegalEntityModal({
   hideDictionaryButtons = false,
   compactReadOnlyView = false,
   canManageOwnCompanySettings = true,
+  canManageCompanyBranches = false,
   canViewCases = true,
   canViewAccounts = true,
   canCreateAccounts = true,
@@ -4769,12 +4771,13 @@ export function LegalEntityModal({
             </div>
             <CompanyBankConnectionsSection companyId={currentLegalEntityId} />
             <CompanyTaxRegisterSection companyId={currentLegalEntityId} />
-            <CompanyBranchesSection
-              companyId={currentLegalEntityId}
-              bankAccounts={bankAccounts}
-              readOnly={readOnly}
-            />
           </>
+        ) : null}
+
+        {isOwnLegalEntity && currentLegalEntityId !== null ? (
+          <CompanyBranchesSection companyId={currentLegalEntityId} bankAccounts={bankAccounts}
+            readOnly={readOnly || !canManageOwnCompanySettings || !canManageCompanyBranches}
+            ownerScope={JSON.stringify([isOpen, mode, deleteOwnerScope, canManageOwnCompanySettings, canManageCompanyBranches, initial?.profileEditVersion])} />
         ) : null}
 
         {isOwnLegalEntity ? (

@@ -894,6 +894,7 @@ export function UnifiedContacts({
           findById={(payload) => apiService.findLegalEntityById(payload)}
           allowEdit={canEditLegalEntities}
           allowDelete={false}
+          canManageCompanyBranches={user?.role?.name?.toLowerCase() === 'admin'}
           canViewCases={permissions.cases.canView}
           canViewAccounts={permissions.accounts.canView}
           canCreateAccounts={permissions.accounts.canView && permissions.accounts.canCreate}
