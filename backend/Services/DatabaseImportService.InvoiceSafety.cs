@@ -18,7 +18,7 @@ public sealed partial class DatabaseImportService
                 || (act.ClientId.HasValue && act.ClientId != act.Invoice.ClientId)
                 || (act.LegalEntityId.HasValue && act.LegalEntityId != act.Invoice.LegalEntityId)
                 || (act.SellerCompanyId.HasValue && act.SellerCompanyId != act.Invoice.SellerCompanyId)
-                || act.SellerBranchId.HasValue), ct))
+                || (act.SellerBranchId.HasValue && act.SellerBranchId != act.Invoice.SellerBranchId)), ct))
             throw new InvalidOperationException("Связь акта со счетом или филиалом требует уточнения. Данные не изменены.");
 
         var sourceInvoices = await source.Invoices.AsNoTracking().Include(invoice => invoice.Payments).ToListAsync(ct);
@@ -74,9 +74,10 @@ public sealed partial class DatabaseImportService
         PaymentContext db, List<Invoice> invoices, CancellationToken ct)
     {
         var payments = invoices.SelectMany(invoice => invoice.Payments).ToList();
-        // Branches have no import map in this legacy database importer. Never silently discard their identity.
-        if (payments.Any(payment => payment.SellerBranchId.HasValue))
-            throw new InvalidOperationException("Импорт счетов с филиалами требует сопоставления филиалов. Данные не изменены.");
+        var branchIds = payments.Where(payment => payment.SellerBranchId.HasValue).Select(payment => payment.SellerBranchId!.Value).Distinct().ToArray();
+        var branches = branchIds.Length == 0 ? new Dictionary<int, string>()
+            : (await db.CompanyBranches.AsNoTracking().Where(branch => branchIds.Contains(branch.Id)).ToArrayAsync(ct))
+                .ToDictionary(branch => branch.Id, branch => Key(branch.Kind, branch.Code, branch.Name, branch.Kpp, branch.Address));
         var clientIds = payments.Where(payment => payment.ClientId.HasValue).Select(payment => payment.ClientId!.Value).Distinct().ToList();
         var legalIds = payments.SelectMany(payment => new[] { payment.LegalEntityId, payment.SellerCompanyId })
             .Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToList();
@@ -94,7 +95,7 @@ public sealed partial class DatabaseImportService
             var documents = invoice.Payments.Where(payment => payment.DocumentKind == DocumentKind.Invoice).ToList();
             if (documents.Count == 0) documents = invoice.Payments.ToList();
             var owners = documents.Select(payment => Key(OwnerKey(clients, payment.ClientId), OwnerKey(companies, payment.LegalEntityId),
-                payment.Type, OwnerKey(companies, payment.SellerCompanyId))).Distinct(StringComparer.Ordinal).ToList();
+                payment.Type, OwnerKey(companies, payment.SellerCompanyId), OwnerKey(branches, payment.SellerBranchId))).Distinct(StringComparer.Ordinal).ToList();
             var uids = documents.Select(payment => SpreadsheetImportService.ExtractOneCExternalId(payment.Notes))
                 .Where(uid => !string.IsNullOrWhiteSpace(uid)).Distinct(StringComparer.Ordinal).ToList();
             if (owners.Count > 1 || uids.Count > 1)

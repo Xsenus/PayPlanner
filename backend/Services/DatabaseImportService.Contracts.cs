@@ -10,10 +10,12 @@ public sealed partial class DatabaseImportService
     private async Task RestoreDerivedClientContractsAsync(
         PaymentContext target,
         DatabaseImportTableResultDto table,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int[]? importedContractIds = null)
     {
         var existingKeys = (await target.ClientContracts
                 .AsNoTracking()
+                .Where(link => importedContractIds == null || importedContractIds.Contains(link.ContractId))
                 .Select(link => new { link.ContractId, link.ClientId })
                 .ToListAsync(cancellationToken))
             .Select(link => Key(link.ContractId, link.ClientId))
@@ -21,28 +23,28 @@ public sealed partial class DatabaseImportService
 
         var directPaymentPairs = await target.Payments
             .AsNoTracking()
-            .Where(payment => payment.ContractId.HasValue && payment.ClientId.HasValue)
+            .Where(payment => payment.ContractId.HasValue && payment.ClientId.HasValue && (importedContractIds == null || importedContractIds.Contains(payment.ContractId.Value)))
             .Select(payment => new { ContractId = payment.ContractId!.Value, ClientId = payment.ClientId!.Value })
             .ToListAsync(cancellationToken);
 
         var contractPaymentPairs = await (
                 from contractPayment in target.ContractPayments.AsNoTracking()
                 join payment in target.Payments.AsNoTracking() on contractPayment.PaymentId equals payment.Id
-                where payment.ClientId.HasValue
+                where payment.ClientId.HasValue && (importedContractIds == null || importedContractIds.Contains(contractPayment.ContractId))
                 select new { contractPayment.ContractId, ClientId = payment.ClientId!.Value })
             .ToListAsync(cancellationToken);
 
         var contractInvoicePairs = await (
                 from contractInvoice in target.ContractInvoices.AsNoTracking()
                 join payment in target.Payments.AsNoTracking() on contractInvoice.InvoiceId equals payment.Id
-                where payment.ClientId.HasValue
+                where payment.ClientId.HasValue && (importedContractIds == null || importedContractIds.Contains(contractInvoice.ContractId))
                 select new { contractInvoice.ContractId, ClientId = payment.ClientId!.Value })
             .ToListAsync(cancellationToken);
 
         var contractActPairs = await (
                 from contractAct in target.ContractActs.AsNoTracking()
                 join act in target.Acts.AsNoTracking() on contractAct.ActId equals act.Id
-                where act.ClientId.HasValue
+                where act.ClientId.HasValue && (importedContractIds == null || importedContractIds.Contains(contractAct.ContractId))
                 select new { contractAct.ContractId, ClientId = act.ClientId!.Value })
             .ToListAsync(cancellationToken);
 

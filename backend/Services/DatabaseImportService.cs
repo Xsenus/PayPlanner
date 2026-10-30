@@ -18,6 +18,13 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
     {
         public Dictionary<int, int> Roles { get; } = [];
         public Dictionary<(string Table, int Id), string?> SellerPolicies { get; } = [];
+        public Dictionary<(string Table, int Id), SellerImportState> SellerHistory { get; } = [];
+        public Dictionary<int, int> SellerCompanies { get; } = [];
+        public Dictionary<int, int> SellerBranches { get; } = [];
+        public Dictionary<int, CompanyBranch> PlannedSellerBranches { get; } = [];
+        public Dictionary<int, SellerImportImage> SellerImages { get; } = [];
+        public Dictionary<int, int> SellerImageIds { get; } = [];
+        public HashSet<int> ExistingSellerContractIds { get; } = [];
         public Dictionary<int, int> Users { get; } = [];
         public Dictionary<int, int> DealTypes { get; } = [];
         public Dictionary<int, int> IncomeTypes { get; } = [];
@@ -119,12 +126,14 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
         await using var importTransaction = await target.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
         // Inspect both sides before the first write. Ambiguous historical links need a separate repair.
         await InspectSourceSellerStateAsync(source, maps, cancellationToken);
+        await PlanSellerHistoryAsync(source, target, maps, cancellationToken);
         var invoiceKeys = await BuildSafeInvoiceImportKeysAsync(source, target, cancellationToken);
-        await InspectTargetSellerStateAsync(source, target, invoiceKeys, cancellationToken);
+        await InspectTargetSellerStateAsync(source, target, invoiceKeys, maps, cancellationToken);
         await ImportReferenceDataAsync(source, target, result, maps, cancellationToken);
         await ImportBusinessDataAsync(source, target, result, maps, invoiceKeys, cancellationToken);
         await RunTableAsync(result, target, "DerivedClientContracts", "Restore client-contract links", table =>
-            RestoreDerivedClientContractsAsync(target, table, cancellationToken));
+            RestoreDerivedClientContractsAsync(target, table, cancellationToken,
+                maps.SellerHistory.Count == 0 ? null : maps.Contracts.Values.Except(maps.ExistingSellerContractIds).ToArray()));
         await ImportActivityDataAsync(source, target, result, maps, cancellationToken);
 
         result.FinishedAt = DateTime.UtcNow;
@@ -157,33 +166,36 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
         ImportMaps maps,
         CancellationToken cancellationToken)
     {
-        await RunTableAsync(result, target, "Roles", "Роли", table =>
-            ImportRolesAsync(source, target, table, maps, cancellationToken));
+        if (maps.SellerHistory.Count == 0)
+        {
+            await RunTableAsync(result, target, "Roles", "Роли", table =>
+                ImportRolesAsync(source, target, table, maps, cancellationToken));
 
-        await RunTableAsync(result, target, "RolePermissions", "Права ролей", table =>
-            ImportEntitiesAsync(
-                source,
-                target,
-                table,
-                ctx => ctx.RolePermissions.AsNoTracking(),
-                ctx => ctx.RolePermissions,
-                x => x.Id,
-                x => x.Id,
-                x =>
-                {
-                    var roleId = MapId(maps.Roles, x.RoleId);
-                    return roleId.HasValue ? Key(roleId.Value, x.Section) : string.Empty;
-                },
-                x => Key(x.RoleId, x.Section),
-                (sourceItem, targetItem) => CopyRolePermission(sourceItem, targetItem, maps),
-                new Dictionary<int, int>(),
-                cancellationToken));
+            await RunTableAsync(result, target, "RolePermissions", "Права ролей", table =>
+                ImportEntitiesAsync(
+                    source,
+                    target,
+                    table,
+                    ctx => ctx.RolePermissions.AsNoTracking(),
+                    ctx => ctx.RolePermissions,
+                    x => x.Id,
+                    x => x.Id,
+                    x =>
+                    {
+                        var roleId = MapId(maps.Roles, x.RoleId);
+                        return roleId.HasValue ? Key(roleId.Value, x.Section) : string.Empty;
+                    },
+                    x => Key(x.RoleId, x.Section),
+                    (sourceItem, targetItem) => CopyRolePermission(sourceItem, targetItem, maps),
+                    new Dictionary<int, int>(),
+                    cancellationToken));
 
+        }
         await RunTableAsync(result, target, "Departments", "Отделы", table =>
             ImportEntitiesAsync(source, target, table, ctx => ctx.Departments.AsNoTracking(), ctx => ctx.Departments,
                 x => x.Id, x => x.Id, x => Key(x.Name), x => Key(x.Name), CopyDepartment, maps.Departments, cancellationToken));
 
-        await RunTableAsync(result, target, "Users", "Пользователи", table =>
+        if (maps.SellerHistory.Count == 0) await RunTableAsync(result, target, "Users", "Пользователи", table =>
             ImportUsersAsync(source, target, table, maps, cancellationToken));
 
         await RunTableAsync(result, target, "DealTypes", "Типы сделок", table =>
@@ -264,7 +276,7 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
             ImportEntitiesAsync(source, target, table, ctx => ctx.OkpdtrDictionaryItems.AsNoTracking(), ctx => ctx.OkpdtrDictionaryItems,
                 x => x.Id, x => x.Id, x => Key(x.Code), x => Key(x.Code), CopyOkpdtr, maps.Okpdtr, cancellationToken));
 
-        await RunTableAsync(result, target, "SystemSettings", "Системные настройки", table =>
+        if (maps.SellerHistory.Count == 0) await RunTableAsync(result, target, "SystemSettings", "Системные настройки", table =>
             ImportEntitiesAsync(source, target, table, ctx => ctx.SystemSettings.AsNoTracking(), ctx => ctx.SystemSettings,
                 x => x.Id, x => x.Id, x => Key(x.Key), x => Key(x.Key), CopySystemSetting, new Dictionary<int, int>(), cancellationToken,
                 // Source-local company IDs and the target's future-document policy must not cross a database merge.
@@ -286,6 +298,8 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
                 x => x.Id, x => x.Id, BuildLegalEntityKey, BuildLegalEntityKey,
                 (sourceItem, targetItem) => CopyLegalEntity(sourceItem, targetItem, maps),
                 maps.LegalEntities, cancellationToken));
+
+        await MaterializeSellerHistoryAsync(source, target, maps, cancellationToken);
 
         await RunTableAsync(result, target, "Clients", "Клиенты", table =>
             ImportEntitiesAsync(source, target, table, ctx => ctx.Clients.AsNoTracking(), ctx => ctx.Clients,
@@ -348,7 +362,7 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
                 maps.Acts, cancellationToken));
 
         await RunTableAsync(result, target, "AddressRecords", "Адреса", table =>
-            ImportEntitiesAsync(source, target, table, ctx => ctx.AddressRecords.AsNoTracking(), ctx => ctx.AddressRecords,
+            ImportEntitiesAsync(source, target, table, ctx => ctx.AddressRecords.AsNoTracking().Where(a => !a.LegalEntityId.HasValue || !maps.SellerCompanies.Keys.Contains(a.LegalEntityId.Value)), ctx => ctx.AddressRecords,
                 x => x.Id, x => x.Id,
                 x => BuildAddressKey(x, maps),
                 BuildTargetAddressKey,
@@ -464,7 +478,7 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
             ImportEntitiesAsync(source, target, table, ctx => ctx.MoneyOperations.AsNoTracking(), ctx => ctx.MoneyOperations,
                 x => x.Id, x => x.Id, BuildMoneyOperationKey, BuildMoneyOperationKey, CopyMoneyOperation, maps.MoneyOperations, cancellationToken));
 
-        await RunTableAsync(result, target, "UserSettings", "Пользовательские настройки", table =>
+        if (maps.SellerHistory.Count == 0) await RunTableAsync(result, target, "UserSettings", "Пользовательские настройки", table =>
             ImportEntitiesAsync(source, target, table, ctx => ctx.UserSettings.AsNoTracking(), ctx => ctx.UserSettings,
                 x => x.Id, x => x.Id,
                 x =>

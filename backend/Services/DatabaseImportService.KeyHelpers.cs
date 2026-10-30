@@ -67,10 +67,10 @@ public sealed partial class DatabaseImportService
 
     private static string BuildActKey(Act item, ImportMaps maps) => Key(item.Number, item.Date,
         MapId(maps.Clients, item.ClientId), MapId(maps.LegalEntities, item.LegalEntityId),
-        MapId(maps.LegalEntities, item.SellerCompanyId), MapId(maps.Payments, item.InvoiceId), SpreadsheetImportService.ExtractOneCExternalId(item.Comment));
+        MapId(maps.LegalEntities, item.SellerCompanyId), MapId(maps.SellerBranches, item.SellerBranchId), MapId(maps.Payments, item.InvoiceId), SpreadsheetImportService.ExtractOneCExternalId(item.Comment));
 
     private static string BuildTargetActKey(Act item) => Key(item.Number, item.Date, item.ClientId, item.LegalEntityId,
-        item.SellerCompanyId, item.InvoiceId, SpreadsheetImportService.ExtractOneCExternalId(item.Comment));
+        item.SellerCompanyId, item.SellerBranchId, item.InvoiceId, SpreadsheetImportService.ExtractOneCExternalId(item.Comment));
 
     private static string BuildAddressKey(AddressRecord item, ImportMaps maps)
     {

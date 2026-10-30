@@ -256,6 +256,8 @@ public sealed partial class DatabaseImportService
 
     private static void CopyLegalEntity(LegalEntity source, LegalEntity target, ImportMaps maps)
     {
+        // Historical references must not replace the destination profile or its stable account IDs.
+        if (target.Id > 0 && maps.SellerHistory.Count > 0) return;
         target.ShortName = source.ShortName;
         target.FullName = source.FullName;
         target.Inn = source.Inn;
@@ -317,6 +319,7 @@ public sealed partial class DatabaseImportService
 
     private static void CopyClient(Client source, Client target, ImportMaps maps)
     {
+        if (target.Id > 0 && maps.SellerHistory.Count > 0) return;
         target.Name = source.Name;
         target.Email = source.Email;
         target.Phone = source.Phone;
@@ -332,6 +335,7 @@ public sealed partial class DatabaseImportService
 
     private static void CopyClientCase(ClientCase source, ClientCase target, ImportMaps maps)
     {
+        if (target.Id > 0 && maps.SellerHistory.Count > 0) return;
         target.ClientId = MapId(maps.Clients, source.ClientId);
         target.LegalEntityId = MapId(maps.LegalEntities, source.LegalEntityId);
         target.Title = source.Title;
