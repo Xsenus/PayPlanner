@@ -7,6 +7,8 @@ import { LegalEntityModal } from './LegalEntityModal';
 import { apiService } from '../../services/api';
 import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
 import { documentCopyTestSession } from '../../test/documentCopySession';
+import { bindPaymentCreateOwner, createPaymentGuarded, pendingPaymentCreates, openCommittedPaymentCreate, fencePaymentCreateAdoption,
+  acknowledgePaymentCreate, PaymentCreateAdoptedError, PaymentCreateRecoveryError, type PaymentCreatePorts, type PaymentAttemptState } from '../../services/paymentCreateAttempts';
 import type { MenuSectionPermissions } from '../../types/permissions';
 import type {
   ActsSummary,
@@ -22,6 +24,7 @@ import type {
   LegalEntityInput,
   LegalEntitySuggestion,
   Payment,
+  PaymentPayload,
 } from '../../types';
 
 let restoreArrayBuffer: () => void;
@@ -124,6 +127,11 @@ vi.mock('../../services/api', () => ({
     updateInvoice: vi.fn(),
     createAct: vi.fn(),
     updateAct: vi.fn(),
+    createPayment: vi.fn(),
+    updatePayment: vi.fn(),
+    transferPaymentRemainder: vi.fn(),
+    rollbackPaymentRemainderTransfer: vi.fn(),
+    adjustPaymentRemainderTransfer: vi.fn(),
     getClientsV2: vi.fn().mockResolvedValue({ items: [], total: 0 }),
     getClient: vi.fn().mockResolvedValue(null),
     getInvoices: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 5 }),
@@ -448,6 +456,123 @@ describe('LegalEntityModal integration', () => {
       view.rerender(<LegalEntityModal {...props} initial={{ ...props.initial, id: 8 }} />); fireEvent.click(await screen.findByTitle('Редактировать дело')); const confirmation = { nextHearingConfirmedAt: '2026-10-31T06:00:00Z' };
       act(() => old.onNextHearingConfirmed!(confirmation)); expect(child('case').caseData?.nextHearingConfirmedAt).toBeUndefined();
       act(() => child('case').onNextHearingConfirmed!(confirmation)); expect(child('case').caseData?.nextHearingConfirmedAt).toBe(confirmation.nextHearingConfirmedAt);
+    });
+  });
+
+  describe('payment write ownership', () => {
+    type Child = { onSubmit: (payload: PaymentPayload | ({ id: number } & PaymentPayload)) => Promise<Payment>; onTransferRemainder: (payload: { id: number } & PaymentPayload, date: string) => Promise<Payment>; onRollbackRemainderTransfer: (id: number) => Promise<void>; onAdjustRemainderTransfer: (id: number, paid: number, date: string) => Promise<void>; onClose: () => void };
+    const child = () => paymentModalPropsSpy.mock.lastCall![0] as Child;
+    const payload = { date: '2026-10-31', plannedDate: '2026-10-31', legalEntityId: 9, amount: 123.456789, paidAmount: 0, type: 'Income', status: 'Pending', description: 'Owned payment', isPaid: false, notes: '', systemNotes: '', rescheduleCount: 0 } as PaymentPayload;
+    const payment = { ...payload, id: 701, createdAt: '2026-10-31' } as Payment;
+    const propsFor = (mode: 'page' | 'modal' = 'page') => ({ isOpen: true, mode, initial: createInitialLegalEntity({ isOwnCompany: false }), allowEdit: true, allowDelete: false,
+      canViewCases: true, canViewAccounts: true, canViewActs: true, canViewPayments: true, onClose: vi.fn(), onSubmit: vi.fn(), suggest: vi.fn(), findById: vi.fn() });
+    const open = async () => { fireEvent.click(await screen.findByRole('button', { name: 'Платёж' })); await screen.findByTestId('legal-related-payment-modal'); return child(); };
+    const counts = () => [apiService.getPaymentsV2, apiService.getInvoices, apiService.getInvoicesSummary, apiService.getActs, apiService.getActsSummary, apiService.getLegalEntityCaseFinanceSummaries].map(fn => vi.mocked(fn).mock.calls.length);
+    type Action = 'create' | 'update' | 'transfer' | 'rollback' | 'adjust';
+    const apiFor = (action: Action) => action === 'create' ? apiService.createPayment : action === 'update' ? apiService.updatePayment : action === 'transfer' ? apiService.transferPaymentRemainder : action === 'rollback' ? apiService.rollbackPaymentRemainderTransfer : apiService.adjustPaymentRemainderTransfer;
+    const invoke = (action: Action, props = child()): Promise<unknown> => action === 'create' ? props.onSubmit(payload) : action === 'update' ? props.onSubmit({ ...payload, id: 701 }) : action === 'transfer' ? props.onTransferRemainder({ ...payload, id: 701 }, '2026-11-02') : action === 'rollback' ? props.onRollbackRemainderTransfer(701) : props.onAdjustRemainderTransfer(701, 12.345678, '2026-11-02');
+    const response = (action: Action) => action === 'create' || action === 'update' ? payment : action === 'rollback' ? { payment, removedRemainderPaymentId: 702 } : { payment, remainderPayment: { ...payment, id: 702 }, createdRemainder: action === 'transfer' };
+    beforeEach(() => {
+      vi.mocked(apiService.createPayment).mockReset().mockResolvedValue(payment); vi.mocked(apiService.updatePayment).mockReset().mockResolvedValue(payment);
+      vi.mocked(apiService.transferPaymentRemainder).mockReset().mockResolvedValue({ payment, remainderPayment: { ...payment, id: 702 }, createdRemainder: true } as Awaited<ReturnType<typeof apiService.transferPaymentRemainder>>);
+      vi.mocked(apiService.rollbackPaymentRemainderTransfer).mockReset().mockResolvedValue({ payment, removedRemainderPaymentId: 702 });
+      vi.mocked(apiService.adjustPaymentRemainderTransfer).mockReset().mockResolvedValue({ payment, remainderPayment: { ...payment, id: 702 }, createdRemainder: false });
+    });
+    it('payment write owner: committed create returns its exact canonical object without refreshing another company', async () => {
+      let finish!: (value: Payment) => void; vi.mocked(apiService.createPayment).mockReturnValue(new Promise(resolve => { finish = resolve; })); const props = propsFor(); const view = render(<LegalEntityModal {...props} />); const old = await open();
+      let saved!: Promise<Payment>; act(() => { saved = old.onSubmit(payload); }); view.rerender(<LegalEntityModal {...props} initial={{ ...props.initial, id: 8 }} />); const before = counts();
+      await act(async () => { finish(payment); expect(await saved).toBe(payment); }); expect(counts()).toEqual(before); expect(toastErrorMock).not.toHaveBeenCalled(); expect(toastSuccessMock).not.toHaveBeenCalled();
+    });
+    it('payment write owner: late rollback never closes a newly opened payment', async () => {
+      let finish!: (value: Awaited<ReturnType<typeof apiService.rollbackPaymentRemainderTransfer>>) => void; vi.mocked(apiService.rollbackPaymentRemainderTransfer).mockReturnValue(new Promise(resolve => { finish = resolve; })); const props = propsFor(); const view = render(<LegalEntityModal {...props} />); const old = await open();
+      let saved!: Promise<void>; act(() => { saved = old.onRollbackRemainderTransfer(701); }); view.rerender(<LegalEntityModal {...props} initial={{ ...props.initial, id: 8 }} />); await open(); const before = counts();
+      await act(async () => { finish({ payment, removedRemainderPaymentId: 702 }); await saved; }); expect(screen.getByTestId('legal-related-payment-modal')).toBeTruthy(); expect(counts()).toEqual(before); expect(toastSuccessMock).not.toHaveBeenCalled();
+    });
+    it('payment party: an explicitly selected client does not acquire the profile company as another counterparty', async () => {
+      render(<LegalEntityModal {...propsFor()} />); const current = await open(); await act(async () => { await current.onSubmit({ ...payload, clientId: 69, legalEntityId: null }); });
+      expect(apiService.createPayment).toHaveBeenCalledWith(expect.objectContaining({ clientId: 69, legalEntityId: null, amount: 123.456789 }));
+    });
+    for (const mode of ['page', 'modal'] as const) for (const action of ['create', 'update', 'transfer', 'rollback', 'adjust'] as const) {
+      it.each(['company', 'readonly', 'permission', 'permission-aba', 'closed', 'reopen', 'mode', 'version', 'unmount'] as const)(`payment write matrix: ${action} success cannot follow %s in ${mode}`, async change => {
+        let finish!: (value: unknown) => void; (apiFor(action) as unknown as ReturnType<typeof vi.fn>).mockReturnValue(new Promise(resolve => { finish = resolve; })); const props = propsFor(mode); const view = render(<LegalEntityModal {...props} />); const old = await open();
+        let saved!: Promise<unknown>; act(() => { saved = invoke(action, old); });
+        if (change === 'company') view.rerender(<LegalEntityModal {...props} initial={{ ...props.initial, id: 8 }} />);
+        if (change === 'readonly') view.rerender(<LegalEntityModal {...props} allowEdit={false} />);
+        if (change === 'permission' || change === 'permission-aba') { view.rerender(<LegalEntityModal {...props} relatedRecordPermissions={{ payments: relatedPermissions({ canCreate: false, canEdit: false }) }} />); if (change === 'permission-aba') view.rerender(<LegalEntityModal {...props} />); }
+        if (change === 'closed' || change === 'reopen') { view.rerender(<LegalEntityModal {...props} isOpen={false} />); if (change === 'reopen') { view.rerender(<LegalEntityModal {...props} />); await open(); } }
+        if (change === 'mode') view.rerender(<LegalEntityModal {...props} mode={mode === 'page' ? 'modal' : 'page'} />);
+        if (change === 'version') view.rerender(<LegalEntityModal {...props} initial={{ ...props.initial, profileEditVersion: 'B'.repeat(64) }} />);
+        if (change === 'unmount') view.unmount(); const before = counts();
+        await act(async () => { finish(response(action)); const value = await saved; if (action === 'create' || action === 'update' || action === 'transfer') expect(value).toBe(payment); });
+        expect(counts()).toEqual(before); expect(toastSuccessMock).not.toHaveBeenCalled(); expect(toastErrorMock).not.toHaveBeenCalled();
+        if (change === 'reopen') { act(() => old.onClose()); expect(screen.getByTestId('legal-related-payment-modal')).toBeTruthy(); }
+      });
+      it(`payment write matrix: current ${action} preserves precision, endpoint and duplicate exclusion in ${mode}`, async () => {
+        let finish!: (value: unknown) => void; (apiFor(action) as unknown as ReturnType<typeof vi.fn>).mockReturnValue(new Promise(resolve => { finish = resolve; })); render(<LegalEntityModal {...propsFor(mode)} />); const current = await open(); let saved!: Promise<unknown>; act(() => { saved = invoke(action, current); });
+        await expect(invoke(action, current)).rejects.toBeInstanceOf(StaleUiOperationError); expect(apiFor(action)).toHaveBeenCalledOnce();
+        await act(async () => { finish(response(action)); const value = await saved; if (action === 'create' || action === 'update' || action === 'transfer') expect(value).toBe(payment); });
+        if (action === 'create') expect(apiService.createPayment).toHaveBeenCalledWith(expect.objectContaining({ amount: 123.456789, legalEntityId: 9, clientId: null }));
+        if (action === 'update') expect(apiService.updatePayment).toHaveBeenCalledWith(701, expect.objectContaining({ amount: 123.456789, legalEntityId: 9 }));
+        if (action === 'transfer') expect(apiService.transferPaymentRemainder).toHaveBeenCalledWith(701, expect.objectContaining({ amount: 123.456789 }), '2026-11-02');
+        if (action === 'rollback') expect(apiService.rollbackPaymentRemainderTransfer).toHaveBeenCalledExactlyOnceWith(701);
+        if (action === 'adjust') expect(apiService.adjustPaymentRemainderTransfer).toHaveBeenCalledExactlyOnceWith(701, 12.345678, '2026-11-02');
+        if (action === 'rollback' || action === 'adjust') expect(screen.queryByTestId('legal-related-payment-modal')).toBeNull(); else expect(screen.getByTestId('legal-related-payment-modal')).toBeTruthy();
+      });
+    }
+    for (const action of ['create', 'update', 'transfer', 'rollback', 'adjust'] as const) {
+      it.each(['login', 'actor', 'logout'] as const)(`payment write matrix: ${action} keeps confirmed success but no old UI after %s without render`, async change => {
+        const session = documentCopyTestSession(); try {
+          let finish!: (value: unknown) => void; (apiFor(action) as unknown as ReturnType<typeof vi.fn>).mockReturnValue(new Promise(resolve => { finish = resolve; })); render(<LegalEntityModal {...propsFor()} />); const old = await open(); let saved!: Promise<unknown>; act(() => { saved = invoke(action, old); }); session.replace(change); const before = counts();
+          await expect(invoke(action, old)).rejects.toBeInstanceOf(StaleUiOperationError); await act(async () => { finish(response(action)); await saved; }); expect(apiFor(action)).toHaveBeenCalledOnce(); expect(counts()).toEqual(before); expect(toastSuccessMock).not.toHaveBeenCalled(); expect(toastErrorMock).not.toHaveBeenCalled();
+        } finally { session.restore(); }
+      });
+      it(`payment write matrix: ${action} failure remains retryable but a stale failure cannot notify a new form`, async () => {
+        (apiFor(action) as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('Current payment write refused')); const props = propsFor(); const view = render(<LegalEntityModal {...props} />); const current = await open();
+        await act(async () => { await expect(invoke(action, current)).rejects.toThrow('Current payment write refused'); }); expect(toastErrorMock).toHaveBeenCalledOnce(); await act(async () => { await invoke(action); }); expect(apiFor(action)).toHaveBeenCalledTimes(2);
+        if (action === 'rollback' || action === 'adjust') await open(); let reject!: (error: Error) => void; (apiFor(action) as unknown as ReturnType<typeof vi.fn>).mockReturnValueOnce(new Promise((_resolve, fail) => { reject = fail; })); let saved!: Promise<unknown>; act(() => { saved = invoke(action); });
+        view.rerender(<LegalEntityModal {...props} initial={{ ...props.initial, id: 8 }} />); const errors = toastErrorMock.mock.calls.length; const successes = toastSuccessMock.mock.calls.length;
+        await act(async () => { reject(new Error('Private stale write error')); await expect(saved).rejects.toThrow('Private stale write error'); }); expect(toastErrorMock).toHaveBeenCalledTimes(errors); expect(toastSuccessMock).toHaveBeenCalledTimes(successes);
+      });
+      it(`payment write matrix: ${action} rejects a retained handler before dispatch`, async () => {
+        render(<LegalEntityModal {...propsFor()} />); const old = await open(); act(() => old.onClose()); await expect(invoke(action, old)).rejects.toBeInstanceOf(StaleUiOperationError); expect(apiFor(action)).not.toHaveBeenCalled();
+      });
+    }
+    it('payment write matrix: a cross-command duplicate cannot overlap a pending update', async () => {
+      let finish!: (value: Payment) => void; vi.mocked(apiService.updatePayment).mockReturnValue(new Promise(resolve => { finish = resolve; })); render(<LegalEntityModal {...propsFor()} />); const current = await open(); let saved!: Promise<unknown>; act(() => { saved = invoke('update', current); });
+      await expect(invoke('transfer', current)).rejects.toBeInstanceOf(StaleUiOperationError); await expect(invoke('rollback', current)).rejects.toBeInstanceOf(StaleUiOperationError); await act(async () => { finish(payment); await saved; });
+      expect(apiService.transferPaymentRemainder).not.toHaveBeenCalled(); expect(apiService.rollbackPaymentRemainderTransfer).not.toHaveBeenCalled();
+    });
+    it('payment refresh owner: returning a confirmed payment does not await or own the background read lock', async () => {
+      render(<LegalEntityModal {...propsFor()} />); const old = await open(); let finish!: (value: Awaited<ReturnType<typeof apiService.getPaymentsV2>>) => void; vi.mocked(apiService.getPaymentsV2).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+      await act(async () => { expect(await old.onSubmit(payload)).toBe(payment); }); act(() => old.onClose()); await open(); const before = counts();
+      await act(async () => finish({ items: [{ ...payment, description: 'Private old background read' }], total: 1, page: 1, pageSize: 5, summary: { income: 0, expense: 0, balance: 0, incomeCount: 0, expenseCount: 0, total: 1 } }));
+      expect(counts()).toEqual(before); expect(screen.queryByText('Private old background read')).toBeNull(); expect(screen.getByTestId('legal-related-payment-modal')).toBeTruthy();
+    });
+    it.each(['rollback', 'adjust'] as const)('payment refresh owner: completed %s cannot close a new form after its refresh waits', async action => {
+      const props = propsFor(); const view = render(<LegalEntityModal {...props} />); const old = await open(); let finish!: (value: Awaited<ReturnType<typeof apiService.getPaymentsV2>>) => void; vi.mocked(apiService.getPaymentsV2).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+      let saved!: Promise<unknown>; act(() => { saved = invoke(action, old); }); await waitFor(() => expect(apiFor(action)).toHaveBeenCalledOnce()); view.rerender(<LegalEntityModal {...props} initial={{ ...props.initial, id: 8 }} />); await open(); const before = counts();
+      await act(async () => { finish({ items: [], total: 0, page: 1, pageSize: 5, summary: { income: 0, expense: 0, balance: 0, incomeCount: 0, expenseCount: 0, total: 0 } }); await saved; }); expect(counts()).toEqual(before); expect(screen.getByTestId('legal-related-payment-modal')).toBeTruthy(); expect(toastSuccessMock).not.toHaveBeenCalled();
+    });
+    it.each([{ clientId: 69, legalEntityId: undefined, expectedClient: 69, expectedCompany: null }, { clientId: 0, legalEntityId: null, expectedClient: 0, expectedCompany: null }, { clientId: null, legalEntityId: undefined, expectedClient: null, expectedCompany: 9 }, { clientId: 69, legalEntityId: 8, expectedClient: null, expectedCompany: 8 }])('payment party: primary choice and fallback are explicit %j', async ({ clientId, legalEntityId, expectedClient, expectedCompany }) => {
+      render(<LegalEntityModal {...propsFor()} />); const current = await open(); await act(async () => { await current.onSubmit({ ...payload, clientId, legalEntityId }); }); expect(apiService.createPayment).toHaveBeenCalledWith(expect.objectContaining({ clientId: expectedClient, legalEntityId: expectedCompany, amount: 123.456789 }));
+    });
+    it('payment receipt owner: a replaced company keeps the exact durable success and blocks a second registration until explicit recovery', async () => {
+      const previousLocks = Object.getOwnPropertyDescriptor(navigator, 'locks'); Object.defineProperty(navigator, 'locks', { configurable: true, value: { request: async (_name: string, _options: LockOptions, action: (lock: Lock) => Promise<unknown>) => action({ name: 'synthetic-payment-write', mode: 'exclusive' } as Lock) } }); bindPaymentCreateOwner(7, '/api/company-payment-write-tests');
+      try {
+        const now = new Date(); const state: PaymentAttemptState = { attemptId: '11111111-1111-4111-8111-111111111111', state: 'Draft', operation: 'primary', primaryPaymentId: null, sellerCompanyId: null, sellerBranchId: null, createdAtUtc: now.toISOString(), expiresAtUtc: new Date(now.getTime() + 3600000).toISOString(), canonicalPaymentId: null, identityVersion: 'payment-create-v1' };
+        let finish!: (value: Payment) => void; const io: PaymentCreatePorts = { register: vi.fn().mockResolvedValue(state), commit: vi.fn().mockReturnValue(new Promise(resolve => { finish = resolve; })), get: vi.fn().mockResolvedValue({ ...state, state: 'Committed', canonicalPaymentId: 701 }), cancel: vi.fn(), payment: vi.fn().mockResolvedValue(payment) };
+        vi.mocked(apiService.createPayment).mockImplementation(value => createPaymentGuarded(value, undefined, io)); const props = propsFor(); const view = render(<LegalEntityModal {...props} />); const old = await open(); let saved!: Promise<Payment>; act(() => { saved = old.onSubmit(payload); }); await waitFor(() => expect(io.commit).toHaveBeenCalledOnce());
+        view.rerender(<LegalEntityModal {...props} initial={{ ...props.initial, id: 8 }} />); const next = await open(); await act(async () => { finish(payment); expect(await saved).toBe(payment); }); const entry = pendingPaymentCreates()[0]; expect(entry.canonicalPaymentId).toBe(701);
+        await act(async () => { await expect(next.onSubmit({ ...payload, legalEntityId: 8 })).rejects.toBeInstanceOf(PaymentCreateRecoveryError); }); expect(io.register).toHaveBeenCalledOnce(); expect(io.commit).toHaveBeenCalledOnce();
+        const recovered = await openCommittedPaymentCreate(entry, io); await fencePaymentCreateAdoption(entry, recovered); await acknowledgePaymentCreate(entry, recovered); expect(pendingPaymentCreates()).toEqual([]); expect(io.commit).toHaveBeenCalledOnce();
+      } finally {
+        bindPaymentCreateOwner(null, '/api/company-payment-write-tests'); for (const key of Object.keys(localStorage)) if (key.startsWith('pp.payment-create.v1:') && key.includes('company-payment-write-tests')) localStorage.removeItem(key);
+        if (previousLocks) Object.defineProperty(navigator, 'locks', previousLocks); else Reflect.deleteProperty(navigator, 'locks');
+      }
+    });
+    it.each(['adopted', 'recovery'] as const)('payment receipt owner: preserves the %s error object for the existing continuation', async kind => {
+      const error = kind === 'adopted' ? new PaymentCreateAdoptedError(payment) : new PaymentCreateRecoveryError({ attemptId: '11111111-1111-4111-8111-111111111111', operation: 'primary', primaryPaymentId: null, sellerCompanyId: null, sellerBranchId: null, canonicalPaymentId: null, createdAtUtc: '2026-10-31T00:00:00Z', expiresAtUtc: '2026-11-01T00:00:00Z', identityVersion: 'payment-create-v1', actorId: 7, apiScope: '/api/company-payment-write-tests', phase: 'dispatched' }, true);
+      vi.mocked(apiService.createPayment).mockRejectedValue(error); render(<LegalEntityModal {...propsFor()} />); const current = await open(); await act(async () => { await expect(current.onSubmit(payload)).rejects.toBe(error); }); if (kind === 'adopted') expect(toastErrorMock).not.toHaveBeenCalled();
     });
   });
 

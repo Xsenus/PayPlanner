@@ -1,9 +1,11 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PaymentModal } from './PaymentModal';
 import type { Payment, PaymentPayload } from '../../types';
 import { apiService } from '../../services/api';
+import { documentCopyTestSession } from '../../test/documentCopySession';
 import { acknowledgePaymentCreate, bindPaymentCreateOwner, createPaymentGuarded, fencePaymentCreateAdoption, inspectPaymentCreate, pendingPaymentCreates,
   openCommittedPaymentCreate, type PaymentAttemptState, type PaymentCreateContext, type PaymentCreatePorts } from '../../services/paymentCreateAttempts';
 
@@ -291,6 +293,8 @@ function doc04NewFields() {
 }
 
 
+
+
 function doc04RealAttemptFixture(primary = doc04Payment(), rest = doc04Payment({ id: 9902, amount: 65 })) {
   localStorage.setItem('pp_token', `header.${btoa(JSON.stringify({ sub: '1' }))}.signature`);
   localStorage.setItem('pp.auth-session-epoch.v1', 'real-attempt-A'); bindPaymentCreateOwner(1, '/api');
@@ -321,6 +325,53 @@ function doc04RealAttemptFixture(primary = doc04Payment(), rest = doc04Payment({
 }
 
 describe('PaymentModal integration', () => {
+  describe('payment confirmation ownership', () => {
+    it('payment confirm capability: withdrawing deletion revokes the pending old delete callback', async () => {
+      let finish!: (value: boolean) => void; confirmMock.mockReturnValue(new Promise<boolean>(resolve => { finish = resolve; })); const onDelete = vi.fn().mockResolvedValue(undefined); const props = { isOpen: true, payment: doc04Payment(), onSubmit: vi.fn(), onClose: vi.fn() };
+      const view = render(<PaymentModal {...props} onDelete={onDelete} />); fireEvent.click(screen.getByRole('button', { name: 'delete' })); await waitFor(() => expect(confirmMock).toHaveBeenCalledOnce()); const signal = confirmMock.mock.lastCall![0].signal as AbortSignal;
+      view.rerender(<PaymentModal {...props} />); await act(async () => finish(true)); expect(onDelete).not.toHaveBeenCalled(); expect(props.onClose).not.toHaveBeenCalled(); expect(signal.aborted).toBe(true);
+    });
+    it.each(['defaultClientId', 'defaultLegalEntityId', 'defaultExpenseClientId', 'defaultExpenseLegalEntityId', 'defaultClientCaseId', 'type', 'linkedInvoice', 'canViewLinkedInvoices', 'canCreateLinkedInvoices'] as const)('payment confirm capability: pending new create cannot follow changed %s', async change => {
+      let finish!: (value: boolean) => void; confirmMock.mockReturnValue(new Promise<boolean>(resolve => { finish = resolve; })); const props = { isOpen: true, onSubmit: vi.fn(), onClose: vi.fn(), defaultClientId: 69 };
+      const view = render(<PaymentModal {...props} />); doc04NewFields(); fireEvent.submit(document.querySelector('form')!); await waitFor(() => expect(confirmMock).toHaveBeenCalledOnce()); const signal = confirmMock.mock.lastCall![0].signal as AbortSignal;
+      const value = change === 'type' ? 'Expense' : change === 'linkedInvoice' ? { invoiceEntityId: 31, number: '31', date: '2026-04-10', clientId: 69 } : change.startsWith('can') ? false : 77;
+      view.rerender(<PaymentModal {...props} {...{ [change]: value }} />); await act(async () => finish(true)); expect(props.onSubmit).not.toHaveBeenCalled(); expect(signal.aborted).toBe(true);
+    });
+    it('payment confirm owner: pending cancellation is aborted on unmount', async () => {
+      confirmMock.mockReturnValue(new Promise<boolean>(() => undefined)); const onSubmit = vi.fn();
+      const view = render(<PaymentModal isOpen payment={doc04Payment()} onClose={vi.fn()} onSubmit={onSubmit} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Аннулировать' })); await waitFor(() => expect(confirmMock).toHaveBeenCalled());
+      const signal = confirmMock.mock.lastCall![0].signal as AbortSignal; expect(signal).toBeInstanceOf(AbortSignal); view.unmount(); expect(signal.aborted).toBe(true); expect(onSubmit).not.toHaveBeenCalled();
+    });
+    it.each(['closed', 'payment', 'permission', 'permission-aba', 'visibility'] as const)('payment confirm owner: pending cancellation cannot follow %s', async change => {
+      let finish!: (value: boolean) => void; confirmMock.mockReturnValue(new Promise<boolean>(resolve => { finish = resolve; })); const onSubmit = vi.fn(); const props = { isOpen: true, payment: doc04Payment(), onClose: vi.fn(), onSubmit };
+      const view = render(<PaymentModal {...props} />); fireEvent.click(screen.getByRole('button', { name: 'Аннулировать' })); await waitFor(() => expect(confirmMock).toHaveBeenCalled()); const signal = confirmMock.mock.lastCall![0].signal as AbortSignal;
+      if (change === 'closed') view.rerender(<PaymentModal {...props} isOpen={false} />);
+      if (change === 'payment') view.rerender(<PaymentModal {...props} payment={doc04Payment({ id: 9902 })} />);
+      if (change === 'permission' || change === 'permission-aba') { view.rerender(<PaymentModal {...props} canEditPayment={false} />); if (change === 'permission-aba') view.rerender(<PaymentModal {...props} />); }
+      if (change === 'visibility') { paymentScopeState.value = 'own'; view.rerender(<PaymentModal {...props} />); }
+      expect(signal.aborted).toBe(true); await act(async () => finish(true)); expect(onSubmit).not.toHaveBeenCalled(); expect(props.onClose).not.toHaveBeenCalled();
+    });
+    it.each(['login', 'actor', 'logout'] as const)('payment confirm owner: rejects a changed %s without rerender', async change => {
+      const session = documentCopyTestSession(); try {
+        let finish!: (value: boolean) => void; confirmMock.mockReturnValue(new Promise<boolean>(resolve => { finish = resolve; })); const onSubmit = vi.fn(); render(<PaymentModal isOpen payment={doc04Payment()} onClose={vi.fn()} onSubmit={onSubmit} />);
+        fireEvent.click(screen.getByRole('button', { name: 'Аннулировать' })); await waitFor(() => expect(confirmMock).toHaveBeenCalled()); session.replace(change); await act(async () => finish(true)); expect(onSubmit).not.toHaveBeenCalled();
+      } finally { session.restore(); }
+    });
+    it('payment confirm owner: checks the final side effect after the confirmation helper resolves', async () => {
+      const session = documentCopyTestSession(); try {
+        confirmMock.mockImplementation(async () => { queueMicrotask(() => queueMicrotask(() => session.replace('actor'))); return true; }); const onSubmit = vi.fn(); render(<PaymentModal isOpen payment={doc04Payment()} onClose={vi.fn()} onSubmit={onSubmit} />);
+        await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Аннулировать' }))); expect(confirmMock).toHaveBeenCalledOnce(); expect(onSubmit).not.toHaveBeenCalled();
+      } finally { session.restore(); }
+    });
+    it.each([false, true])('payment confirm owner: current StrictMode cancellation retains decision=%s', async answer => {
+      confirmMock.mockResolvedValue(answer); const onSubmit = vi.fn().mockResolvedValue(doc04Payment({ status: 'Cancelled' })); const onClose = vi.fn();
+      render(<StrictMode><PaymentModal isOpen payment={doc04Payment()} onClose={onClose} onSubmit={onSubmit} /></StrictMode>); await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Аннулировать' })));
+      expect(onSubmit).toHaveBeenCalledTimes(answer ? 1 : 0); expect(onClose).toHaveBeenCalledTimes(answer ? 1 : 0);
+      if (answer) expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ id: 9901, status: 'Cancelled', paidAmount: 0 }));
+    });
+  });
+
   beforeEach(() => {
     paymentScopeState.value = 'all';
     confirmMock.mockReset();

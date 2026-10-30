@@ -1063,6 +1063,9 @@ export function LegalEntityModal({
     selectedLegalEntityCaseId, canMutateRelated('accounts', invoiceModalMode === 'edit' ? 'canEdit' : 'canCreate'), canViewPayments, canViewActs]));
   const relatedActOwner = useDocumentDeliveryOwner(JSON.stringify([classificationScope, actModalOpen, actModalMode, selectedAct?.id,
     selectedLegalEntityCaseId, canMutateRelated('acts', actModalMode === 'edit' ? 'canEdit' : 'canCreate'), canViewAccounts]));
+  const relatedPaymentOwner = useDocumentDeliveryOwner(JSON.stringify([classificationScope, paymentModalOpen, paymentModalMode, selectedPayment?.id,
+    selectedLegalEntityCaseId, canMutateRelated('payments', 'canCreate'), canMutateRelated('payments', 'canEdit'),
+    relatedRecordPermissions?.payments?.viewScope, canViewCases, canViewAccounts, canViewActs]));
   const legacyClassification = mainCompanyState?.owner === classificationOwner ? mainCompanyState : null;
   const ownCompanyClassification = currentLegalEntityId === null ? false
     : typeof initial?.isOwnCompany === 'boolean' ? initial.isOwnCompany
@@ -2819,45 +2822,57 @@ export function LegalEntityModal({
   };
 
   const closePaymentModal = () => {
+    if (!relatedPaymentOwner.capture()) return;
+    relatedPaymentOwner.invalidate();
     paymentReadAttempt.current = null;
     setPaymentModalOpen(false);
     setSelectedPayment(null);
   };
 
-  const normalizeLegalEntityPaymentPayload = (payload: PaymentPayload): PaymentPayload => ({
-    ...payload,
-    notes: payload.notes ?? "",
-    systemNotes: payload.systemNotes ?? "",
-    clientId: payload.legalEntityId ? null : payload.clientId ?? null,
-    legalEntityId: payload.legalEntityId ?? currentLegalEntityId ?? null,
-    expenseClientId: payload.expenseLegalEntityId ? null : payload.expenseClientId ?? null,
-    expenseLegalEntityId: payload.expenseLegalEntityId ?? null,
-    clientCaseId: payload.clientCaseId ?? selectedCaseId ?? null,
-    dealTypeId: payload.dealTypeId ?? null,
-    incomeTypeId: payload.incomeTypeId ?? null,
-    paymentSourceId: payload.paymentSourceId ?? null,
-    paymentStatusId: payload.paymentStatusId ?? null,
-    account: payload.account ?? null,
-    accountDate: payload.accountDate ?? null,
-  });
+  const normalizeLegalEntityPaymentPayload = (payload: PaymentPayload): PaymentPayload => {
+    const legalEntityId = payload.legalEntityId ?? (payload.clientId != null ? null : currentLegalEntityId);
+    return {
+      ...payload,
+      notes: payload.notes ?? "",
+      systemNotes: payload.systemNotes ?? "",
+      clientId: legalEntityId ? null : payload.clientId ?? null,
+      legalEntityId: legalEntityId ?? null,
+      expenseClientId: payload.expenseLegalEntityId ? null : payload.expenseClientId ?? null,
+      expenseLegalEntityId: payload.expenseLegalEntityId ?? null,
+      clientCaseId: payload.clientCaseId ?? selectedCaseId ?? null,
+      dealTypeId: payload.dealTypeId ?? null,
+      incomeTypeId: payload.incomeTypeId ?? null,
+      paymentSourceId: payload.paymentSourceId ?? null,
+      paymentStatusId: payload.paymentStatusId ?? null,
+      account: payload.account ?? null,
+      accountDate: payload.accountDate ?? null,
+    };
+  };
 
-  const refreshAfterPaymentSave = async () => {
+  const refreshAfterPaymentSave = async (owner: DocumentDeliveryRead) => {
     try {
-      if (canViewPayments) await legalEntityPaymentsResult.refresh();
-      if (canViewAccounts) await legalEntityInvoicesResult.refresh();
-      if (canViewActs) await legalEntityActsResult.refresh();
+      if (canViewPayments) await legalEntityPaymentsResult.refreshOwned(owner.isCurrent);
+      if (canViewAccounts) await legalEntityInvoicesResult.refreshOwned(owner.isCurrent);
+      if (canViewActs) await legalEntityActsResult.refreshOwned(owner.isCurrent);
+      if (!owner.isCurrent()) return;
       setCaseFinanceReloadToken((value) => value + 1);
     } catch {
-      toast.error('Платёж сохранён, но не удалось обновить связанные списки.', 'Платежи');
+      if (owner.isCurrent()) toast.error('Платёж сохранён, но не удалось обновить связанные списки.', 'Платежи');
     }
+  };
+
+  const beginPaymentWrite = (permission: 'canCreate' | 'canEdit', kind: string) => {
+    const owner = relatedPaymentOwner.capture();
+    const operation = isOpen && paymentModalOpen && deleteSession.authenticated && currentLegalEntityId
+      && canMutateRelated('payments', permission) ? relatedPaymentOwner.begin(kind) : null;
+    if (!owner || !operation) throw new StaleUiOperationError();
+    return { owner, operation };
   };
 
   const submitPayment = async (
     payload: PaymentPayload | ({ id: number } & PaymentPayload),
   ): Promise<Payment> => {
-    if (!canMutateRelated('payments', 'id' in payload ? 'canEdit' : 'canCreate')) {
-      throw new Error('Недостаточно прав для сохранения платежа.');
-    }
+    const { owner, operation } = beginPaymentWrite('id' in payload ? 'canEdit' : 'canCreate', 'save');
     let savedPayment: Payment;
     try {
       if ("id" in payload) {
@@ -2866,25 +2881,27 @@ export function LegalEntityModal({
       } else {
         savedPayment = await apiService.createPayment(normalizeLegalEntityPaymentPayload(payload));
       }
+      // Preserve the exact receipt-bearing result even if its UI was replaced.
+      // PaymentModal decides adoption; a dispatched financial write is not undone.
+      if (operation.isCurrent()) void refreshAfterPaymentSave(owner);
+      return savedPayment;
     } catch (error) {
       if (error instanceof PaymentCreateAdoptedError) throw error;
-      toast.error(
+      if (operation.isCurrent()) toast.error(
         extractErrorMessage(error, "Не удалось сохранить платёж"),
         "Платежи",
       );
       throw error;
+    } finally {
+      operation.finish();
     }
-    void refreshAfterPaymentSave();
-    return savedPayment;
   };
 
   const transferPaymentRemainder = async (
     payload: { id: number } & PaymentPayload,
     remainderDate: string,
   ): Promise<Payment> => {
-    if (!canMutateRelated('payments', 'canEdit')) {
-      throw new Error('Недостаточно прав для сохранения платежа.');
-    }
+    const { owner, operation } = beginPaymentWrite('canEdit', 'transfer');
     let savedPayment: Payment;
     try {
       const { id, ...rest } = payload;
@@ -2894,34 +2911,39 @@ export function LegalEntityModal({
         remainderDate,
       );
       savedPayment = result.payment;
+      if (operation.isCurrent()) {
+        void refreshAfterPaymentSave(owner);
+        toast.success("Остаток платежа перенесён.", "Платежи");
+      }
+      return savedPayment;
     } catch (error) {
-      toast.error(
+      if (operation.isCurrent()) toast.error(
         extractErrorMessage(error, "Не удалось перенести остаток платежа"),
         "Платежи",
       );
       throw error;
+    } finally {
+      operation.finish();
     }
-    void refreshAfterPaymentSave();
-    toast.success("Остаток платежа перенесён.", "Платежи");
-    return savedPayment;
   };
 
   const rollbackPaymentRemainderTransfer = async (paymentId: number) => {
-    if (!canMutateRelated('payments', 'canEdit')) return;
+    const { owner, operation } = beginPaymentWrite('canEdit', 'rollback');
     try {
       await apiService.rollbackPaymentRemainderTransfer(paymentId);
-      if (canViewPayments) await legalEntityPaymentsResult.refresh();
-      if (canViewAccounts) await legalEntityInvoicesResult.refresh();
-      if (canViewActs) await legalEntityActsResult.refresh();
-      setCaseFinanceReloadToken((value) => value + 1);
+      if (!operation.isCurrent()) return;
+      await refreshAfterPaymentSave(owner);
+      if (!operation.isCurrent()) return;
       closePaymentModal();
       toast.success("Перенос остатка отменен.", "Платежи");
     } catch (error) {
-      toast.error(
+      if (operation.isCurrent()) toast.error(
         extractErrorMessage(error, "Не удалось откатить перенос остатка"),
         "Платежи",
       );
       throw error;
+    } finally {
+      operation.finish();
     }
   };
 
@@ -2930,21 +2952,22 @@ export function LegalEntityModal({
     paidAmount: number,
     remainderDate: string,
   ) => {
-    if (!canMutateRelated('payments', 'canEdit')) return;
+    const { owner, operation } = beginPaymentWrite('canEdit', 'adjust');
     try {
       await apiService.adjustPaymentRemainderTransfer(paymentId, paidAmount, remainderDate);
-      if (canViewPayments) await legalEntityPaymentsResult.refresh();
-      if (canViewAccounts) await legalEntityInvoicesResult.refresh();
-      if (canViewActs) await legalEntityActsResult.refresh();
-      setCaseFinanceReloadToken((value) => value + 1);
+      if (!operation.isCurrent()) return;
+      await refreshAfterPaymentSave(owner);
+      if (!operation.isCurrent()) return;
       closePaymentModal();
       toast.success("Разделение платежа обновлено.", "Платежи");
     } catch (error) {
-      toast.error(
+      if (operation.isCurrent()) toast.error(
         extractErrorMessage(error, "Не удалось изменить разделение платежа"),
         "Платежи",
       );
       throw error;
+    } finally {
+      operation.finish();
     }
   };
 
@@ -5434,11 +5457,7 @@ export function LegalEntityModal({
 
       {paymentModalOpen && canMutateRelated('payments', paymentModalMode === 'edit' ? 'canEdit' : 'canCreate') ? (
         <PaymentModal
-          key={
-            paymentModalMode === "edit" && selectedPayment
-              ? `legal-payment-${selectedPayment.id}`
-              : `legal-payment-new-${selectedCaseId ?? "all"}`
-          }
+          key={relatedPaymentOwner.scope}
           isOpen={paymentModalOpen}
           onClose={closePaymentModal}
           payment={selectedPayment ?? undefined}

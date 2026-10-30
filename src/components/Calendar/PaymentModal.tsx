@@ -30,6 +30,8 @@ import { toDateInputValue, fromInputToApiDate, todayYMDInTimeZone, toRuDate } fr
 import { buildOptionsWithSelected } from '../../utils/formOptions';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { useDialog } from '../../hooks/useDialog';
+import { useDocumentDeliveryOwner } from '../../hooks/useDocumentDeliveryOwner';
+import type { ConfirmOptions } from '../../contexts/dialogContextCore';
 import { useFormRequirements } from '../../hooks/useFormRequirements';
 import { useToast } from '../../hooks/useToast';
 import { InvoiceModal } from '../Accounts/InvoiceModal';
@@ -367,16 +369,41 @@ export function PaymentModal({
   const { legalEntities, loading: legalEntitiesLoading, error: legalEntitiesError } = useLegalEntities();
   const { dealTypes, incomeTypes, paymentSources, services = [] } = useDictionaries();
   const { t } = useTranslation();
+  const { user, isAdmin } = useAuth();
+  const paymentPermissions = useRolePermissions(user?.role?.id).payments;
+  const canViewSharedBalance = isAdmin() || (
+    paymentPermissions.canView && paymentPermissions.viewScope === 'all'
+  );
   const { confirm } = useDialog();
+  const confirmationOwner = useDocumentDeliveryOwner(JSON.stringify([isOpen, initialPayment?.id, canCreatePayment, canEditPayment, paymentCreateSessionVersion(),
+    defaultClientId, defaultLegalEntityId, defaultExpenseClientId, defaultExpenseLegalEntityId, defaultClientCaseId, type, linkedInvoice,
+    canViewLinkedInvoices, canCreateLinkedInvoices, !!onDelete, !!onCreateRemainder, !!onTransferRemainder, !!onRollbackRemainderTransfer, !!onAdjustRemainderTransfer,
+    user?.id, user?.role?.id, user?.role?.name, paymentPermissions.canView, paymentPermissions.viewScope]));
+  const { capture: captureConfirmationOwner } = confirmationOwner;
+  const confirmationContext = useMemo(() => captureConfirmationOwner(), [captureConfirmationOwner]);
+  const pendingConfirmations = useRef(new Set<AbortController>());
+  useEffect(() => {
+    const pending = pendingConfirmations.current;
+    return () => { for (const controller of pending) controller.abort(); pending.clear(); };
+  }, [confirmationOwner.scope]);
+  const confirmPaymentAction = useCallback(async (options: ConfirmOptions) => {
+    const owner = captureConfirmationOwner();
+    if (!owner) return false;
+    const controller = new AbortController();
+    pendingConfirmations.current.add(controller);
+    try { return await confirm({ ...options, signal: controller.signal }) && owner.isCurrent(); }
+    finally { pendingConfirmations.current.delete(controller); }
+  }, [confirm, captureConfirmationOwner]);
   const handleClose = useCallback(async () => {
     if (savingRef.current) return;
-    if (pendingRemainderRef.current && !await confirm({
+    if (pendingRemainderRef.current && !await confirmPaymentAction({
       title: 'Остаток ещё не создан',
       description: 'Сам платёж сохранён. Закрыть карточку без завершения создания остатка?',
       confirmLabel: 'Закрыть карточку', cancelLabel: 'Продолжить работу', variant: 'danger',
     })) return;
+    if (!confirmationContext?.isCurrent()) return;
     onClose();
-  }, [confirm, onClose]);
+  }, [confirmPaymentAction, confirmationContext, onClose]);
   useEffect(() => {
     scopeRef.current += 1;
     savingRef.current = false;
@@ -413,11 +440,6 @@ export function PaymentModal({
     prevOpenRef.current = false;
   }, [confirmedPaymentId, initialPayment?.id]);
   const toast = useToast();
-  const { user, isAdmin } = useAuth();
-  const paymentPermissions = useRolePermissions(user?.role?.id).payments;
-  const canViewSharedBalance = isAdmin() || (
-    paymentPermissions.canView && paymentPermissions.viewScope === 'all'
-  );
   const { isRequired } = useFormRequirements('payments', isOpen);
   const profileTimeZoneId = useUserTimeZone();
   const defaultDate = todayYMDInTimeZone(profileTimeZoneId);
@@ -1807,14 +1829,14 @@ export function PaymentModal({
     savingRef.current = true;
     try {
       if (!payment) {
-        const approved = await confirm({
+        const approved = await confirmPaymentAction({
           title: 'Подтверждение добавления платежа',
           description: 'Добавить новый платеж с текущими данными?',
           confirmLabel: 'Добавить платеж',
           cancelLabel: 'Отмена',
           variant: 'primary',
         });
-        if (!approved) {
+        if (!approved || !confirmationContext?.isCurrent()) {
           return;
         }
       }
@@ -1918,7 +1940,7 @@ export function PaymentModal({
         paymentData.advanceReviewStatus !== 'AcceptedAsAdvance';
 
       if (isUnallocatedAdvanceCandidate) {
-        const approved = await confirm({
+        const approved = await confirmPaymentAction({
           title: 'Нераспределенный аванс',
           description: hasContractForAdvance
             ? 'Платеж привязан к договору, но не связан со счетом или актом. Если сохранить его сейчас, деньги будут приняты как авансовый платеж и добавлены на баланс клиента для дальнейшего распределения.'
@@ -1927,7 +1949,7 @@ export function PaymentModal({
           cancelLabel: 'Вернуться к привязке',
           variant: 'danger',
         });
-        if (!approved) {
+        if (!approved || !confirmationContext?.isCurrent()) {
           return;
         }
 
@@ -2130,14 +2152,14 @@ export function PaymentModal({
   const clearInvoiceSelection = async () => {
     if (hasLockedInvoice || !canViewLinkedInvoices) return;
 
-    const approved = await confirm({
+    const approved = await confirmPaymentAction({
       title: 'Убрать связь со счетом',
       description: 'Удалить привязку текущего платежа к выбранному счету?',
       confirmLabel: 'Убрать связь',
       cancelLabel: 'Отмена',
       variant: 'danger',
     });
-    if (!approved) return;
+    if (!approved || !confirmationContext?.isCurrent()) return;
 
     setFormData((prev) => ({
       ...prev,
@@ -2384,7 +2406,7 @@ export function PaymentModal({
       return;
     }
 
-    const approved = await confirm({
+    const approved = await confirmPaymentAction({
       title: 'Включить синхронизацию дат?',
       description:
         'При изменении даты фактического платежа ожидаемая дата платежа будет автоматически становиться такой же.',
@@ -2393,7 +2415,7 @@ export function PaymentModal({
       variant: 'primary',
     });
 
-    if (!approved) return;
+    if (!approved || !confirmationContext?.isCurrent()) return;
     setSyncDateWithPayment(true);
   };
 
@@ -2645,14 +2667,14 @@ export function PaymentModal({
       return;
     }
 
-    const approved = await confirm({
+    const approved = await confirmPaymentAction({
       title: 'Перенести платеж',
       description: `Дата платежа будет изменена на ${toRuDate(normalizedMoveDate) || normalizedMoveDate}. Продолжить?`,
       confirmLabel: 'Перенести',
       cancelLabel: 'Отмена',
       variant: 'primary',
     });
-    if (!approved) return;
+    if (!approved || !confirmationContext?.isCurrent()) return;
 
     const paymentData = buildActionPaymentPayload({
       date: normalizedMoveDate,
@@ -2677,14 +2699,14 @@ export function PaymentModal({
   const handleRollbackRemainderTransfer = async () => {
     if (!payment || !onRollbackRemainderTransfer || loading) return;
 
-    const approved = await confirm({
+    const approved = await confirmPaymentAction({
       title: 'Откатить перенос остатка',
       description: 'Перенесенный остаток будет удален, а исходная сумма вернется в платеж. Операция доступна только пока остаток не оплачен.',
       confirmLabel: 'Откатить',
       cancelLabel: 'Отмена',
       variant: 'danger',
     });
-    if (!approved) return;
+    if (!approved || !confirmationContext?.isCurrent()) return;
 
     try {
       setLoading(true);
@@ -2724,14 +2746,14 @@ export function PaymentModal({
   const handleCancelPayment = async () => {
     if (!payment || loading) return;
 
-    const approved = await confirm({
+    const approved = await confirmPaymentAction({
       title: 'Аннулировать платеж',
       description: 'Платеж будет переведен в статус "Отменен", оплаченная сумма будет сброшена. Продолжить?',
       confirmLabel: 'Аннулировать',
       cancelLabel: 'Отмена',
       variant: 'danger',
     });
-    if (!approved) return;
+    if (!approved || !confirmationContext?.isCurrent()) return;
 
     try {
       setLoading(true);
@@ -3153,8 +3175,8 @@ export function PaymentModal({
         <div className="flex-1 overflow-y-auto px-6 pb-6">
           <form id={formId} ref={formRef} onSubmit={handleSubmit} autoComplete="off" className="space-y-6 py-4">
               <PaymentCreateRecovery
-                scopeVersion={() => scopeRef.current}
-                beforeOpen={async () => await confirm({
+                scopeVersion={() => JSON.stringify([scopeRef.current, confirmationOwner.scope])}
+                beforeOpen={async () => await confirmPaymentAction({
                   title: 'Открыть сохранённый платёж?',
                   description: 'Текущий черновик не будет сохранён. Будет открыта карточка подтверждённого платежа.',
                   confirmLabel: 'Открыть платёж', cancelLabel: 'Остаться в черновике', variant: 'primary',
@@ -4277,14 +4299,14 @@ export function PaymentModal({
                       type="button"
                       onClick={async () => {
                         if (!payment) return;
-                        const ok = await confirm({
+                        const ok = await confirmPaymentAction({
                           title: '\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u0435 \u0443\u0434\u0430\u043b\u0435\u043d\u0438\u044f',
                           description: t('confirmDeletePayment') ?? '\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u043f\u043b\u0430\u0442\u0451\u0436\u003f',
                           confirmLabel: '\u0423\u0434\u0430\u043b\u0438\u0442\u044c',
                           cancelLabel: '\u041e\u0442\u043c\u0435\u043d\u0430',
                           variant: 'danger',
                         });
-                        if (!ok) return;
+                        if (!ok || !confirmationContext?.isCurrent()) return;
                         try {
                           await onDelete!(payment.id);
                           onClose();
