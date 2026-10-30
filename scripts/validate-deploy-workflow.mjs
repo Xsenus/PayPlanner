@@ -448,7 +448,12 @@ export function validateDeployWorkflow(source) {
   requireValue(deployIds.step.env?.BACKEND_ARTIFACT_ID === backendArtifactId && deployIds.step.env?.FRONTEND_ARTIFACT_ID === frontendArtifactId
     && deployIds.lines.join('\n') === 'set -euo pipefail\n[[ "$BACKEND_ARTIFACT_ID" =~ ^xsenus-local-v1:[a-f0-9]{64}$ ]]\n[[ "$FRONTEND_ARTIFACT_ID" =~ ^xsenus-local-v1:[a-f0-9]{64}$ ]]\n[[ "$BACKEND_ARTIFACT_ID" != "$FRONTEND_ARTIFACT_ID" ]]'
     && downloads.every(({ index }) => deployIds.index < index), 'Deploy must reject empty, multiple or substituted artifact IDs before downloading');
-  const tar = command('deploy', 'tar -czf "${{ env.TAR_NAME }}" -C "${{ env.OUT_DIR }}" .');
+  const packagePreparation = command('deploy', 'node scripts/prepare-deployment-package.mjs "${{ env.OUT_DIR }}" "${{ github.sha }}"');
+  requireValue(packagePreparation.step.if === undefined && packagePreparation.lines.length === 1,
+    'Qualified deployment inventory must run unconditionally before archiving');
+  const tar = command('deploy', 'tar --null --no-recursion -czf "${{ env.TAR_NAME }}" -C "${{ env.OUT_DIR }}" -T - < "${{ env.OUT_DIR }}/deployment-files.nul"');
+  requireValue(tar.step.if === undefined && tar.lines.length === 1,
+    'Deploy must archive only the exact NUL-delimited ordinary qualified files');
   const unpackBackend = command('deploy', 'tar -xzf deploy-artifacts/backend.tar.gz -C "${{ env.OUT_DIR }}"');
   const unpackFrontend = command('deploy', 'tar -xzf deploy-artifacts/frontend.tar.gz -C "${{ env.OUT_DIR }}"');
   const bridge = command('deploy', 'node scripts/windows-vps-deploy.mjs');
@@ -456,6 +461,7 @@ export function validateDeployWorkflow(source) {
   const trustedDeploy = command('deploy', 'node scripts/verify-xsenus-runner.mjs build');
   const readiness = command('deploy', 'node scripts/run-production-deploy-readiness.mjs', true);
   const requiredBridgeEnv = {
+    ARTIFACT_NEEDS_JSON: needsJson,
     DEPLOY_SHA: sha, DEPLOY_ARCHIVE_NAME: '${{ env.TAR_NAME }}',
     VPS_SSH_HOST_FINGERPRINT: '${{ vars.VPS_SSH_HOST_FINGERPRINT }}', VPS_SSH_KEY: '${{ secrets.VPS_SSH_KEY }}',
     PAYPLANNER_WEBPUSH_ENABLED: "${{ vars.PAYPLANNER_WEBPUSH_ENABLED || 'false' }}",
@@ -472,7 +478,8 @@ export function validateDeployWorkflow(source) {
     && readiness.lines.includes('--token="" \\') && readiness.lines.includes('--require-websocket=true \\')
     && readiness.lines.includes('--allow-websocket-auth-challenge=true \\'), 'Preserve exact-revision public production readiness without a stored JWT');
   requireValue(downloads.every(({ index }) => index < unpackBackend.index && index < unpackFrontend.index)
-    && unpackBackend.index < tar.index && unpackFrontend.index < tar.index
+    && unpackBackend.index < packagePreparation.index && unpackFrontend.index < packagePreparation.index
+    && packagePreparation.index < tar.index
     && tar.index < bridge.index && bridge.index < readiness.index, 'Deploy download/unpack/tar/Linux-gates/SSH/readiness order');
   requireValue(!deploy.some(step => /(?:dotnet (?:test|build|publish)|npm (?:ci|run build))/.test(step.run ?? '')), 'Deploy must use qualified artifacts without rebuilding');
   for (const [id, job] of Object.entries(jobs)) {

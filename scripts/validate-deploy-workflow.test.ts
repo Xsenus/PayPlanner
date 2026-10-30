@@ -72,7 +72,7 @@ describe('merged production workflow protections', () => {
     const command = `run: dotnet format ${mode} backend/PayPlanner.Api.Migrations/PayPlanner.Api.Migrations.csproj --verify-no-changes --no-restore --verbosity diagnostic`;
     expect(() => validateDeployWorkflow(replaceOnce(command, 'run: echo formatted'))).toThrow();
     const job = parseWorkflow(workflow).jobs['backend-format'];
-    const step = job.steps.find(step => step.run === command.slice(5));
+    const step = job.steps.find((step: { run?: string }) => step.run === command.slice(5));
     expect(step.env).toEqual({ DOTNET_GCHeapHardLimit: '240000000', CompilerResponseFile: '${{ github.workspace }}/scripts/compiler-serial.rsp' });
   });
 });
@@ -148,6 +148,35 @@ describe('parallel deploy workflow release contract', () => {
     ['readiness revision', '--expected-sha="${{ github.sha }}"', '--expected-sha=old'],
   ])('preserves the reviewed Windows SSH deployment contract: %s', (_name, before, after) => {
     expect(() => validateDeployWorkflow(replaceInJob('deploy', job => job.replace(before, after)))).toThrow();
+  });
+
+  it('binds actual successful producer results to the deployment bridge itself', () => {
+    const header = '      - name: Verify Linux filesystem gates and deploy qualified package\n        env:\n';
+    const needs = '          ARTIFACT_NEEDS_JSON: ${{ toJSON(needs) }}\n';
+    expect(workflow).toContain(header + needs);
+    for (const replacement of ['', '          ARTIFACT_NEEDS_JSON: {}\n']) {
+      expect(() => validateDeployWorkflow(replaceInJob('deploy', job => job.replace(header + needs, header + replacement)))).toThrow();
+    }
+  });
+
+  it.each([
+    ['missing inventory', 'node scripts/prepare-deployment-package.mjs "${{ env.OUT_DIR }}" "${{ github.sha }}"', 'echo inventoried'],
+    ['stale inventory revision', 'node scripts/prepare-deployment-package.mjs "${{ env.OUT_DIR }}" "${{ github.sha }}"', 'node scripts/prepare-deployment-package.mjs "${{ env.OUT_DIR }}" main'],
+    ['recursive archive root', 'tar --null --no-recursion -czf "${{ env.TAR_NAME }}" -C "${{ env.OUT_DIR }}" -T - < "${{ env.OUT_DIR }}/deployment-files.nul"', 'tar -czf "${{ env.TAR_NAME }}" -C "${{ env.OUT_DIR }}" .'],
+    ['non-NUL file list', 'tar --null --no-recursion -czf', 'tar --no-recursion -czf'],
+    ['unbound file list', '-T - < "${{ env.OUT_DIR }}/deployment-files.nul"', '-T other-files.txt'],
+  ])('rejects incomplete deployment package preparation: %s', (_name, before, after) => {
+    expect(() => validateDeployWorkflow(replaceInJob('deploy', job => job.replace(before, after)))).toThrow();
+  });
+
+  it('requires inventory after unpacking and before creating the archive', () => {
+    const inventory = '      - name: Prepare qualified deployment package\n        run: node scripts/prepare-deployment-package.mjs "${{ env.OUT_DIR }}" "${{ github.sha }}"\n\n';
+    expect(workflow).toContain(inventory);
+    const without = workflow.replace(inventory, '');
+    const early = without.replace('      - name: Unpack qualified artifacts\n', inventory + '      - name: Unpack qualified artifacts\n');
+    const late = without.replace('      - name: Verify Linux filesystem gates and deploy qualified package\n', inventory + '      - name: Verify Linux filesystem gates and deploy qualified package\n');
+    expect(() => validateDeployWorkflow(early)).toThrow(/order/);
+    expect(() => validateDeployWorkflow(late)).toThrow(/order/);
   });
 
   it('requires reviewed deployment plan tests before frontend dependency installation', () => {
@@ -453,7 +482,7 @@ describe('parallel deploy workflow release contract', () => {
       expect(jobs[id].strategy).toBeUndefined();
       expect(jobs[id].concurrency).toEqual({ group: 'payplanner-xsenus-backend-tests', queue: 'max', 'cancel-in-progress': false });
       expect(jobs[id].outputs).toEqual({ 'qualified-artifact-id': `\${{ steps.qualified-upload.outputs.shard_${index}_id }}` });
-      const download = jobs.backend.steps.find(step => step.run?.includes(`get --kind qualified-shard --producer-job ${id} --shard ${index} `));
+      const download = jobs.backend.steps.find((step: { run?: string }) => step.run?.includes(`get --kind qualified-shard --producer-job ${id} --shard ${index} `));
       expect(download.env.EXPECTED_ARTIFACT_ID).toBe(`\${{ needs.backend-test.outputs.shard_${index}_id }}`);
       expect(jobs['backend-test'].outputs[`shard_${index}_id`]).toBe(`\${{ needs.${id}.outputs.qualified-artifact-id }}`);
       expect(download.env.ARTIFACT_NEEDS_JSON).toBe('${{ toJSON(needs) }}');
@@ -465,14 +494,14 @@ describe('parallel deploy workflow release contract', () => {
   it('uses immutable typed producer IDs and exact runtime bindings for rerun consumers', () => {
     const jobs = parseWorkflow(workflow).jobs;
     for (const [job, id, kind] of [['frontend', 'frontend-upload', 'frontend'], ['backend-build', 'runtime-upload', 'test-runtime'], ['backend-build', 'backend-upload', 'backend']]) {
-      const upload = jobs[job].steps.find(step => step.id === id);
+      const upload = jobs[job].steps.find((step: { id?: string }) => step.id === id);
       expect(upload.run).toContain(`put --kind ${kind} --source `);
       expect(upload.run).toContain('--retention-days 3');
       expect(upload.run).not.toMatch(/overwrite|latest|run-attempt|run-id/);
       expect(upload.with).toBeUndefined();
     }
     for (const id of [...shardJobs, 'backend-browser', 'backend']) {
-      const download = jobs[id].steps.find(step => step.name === 'Download compiled test runtime');
+      const download = jobs[id].steps.find((step: { name?: string }) => step.name === 'Download compiled test runtime');
       expect(download.run).toBe('node scripts/xsenus-artifact-store.mjs get --kind test-runtime --producer-job backend-build --destination test-artifacts');
       expect(download.env).toEqual({
         EXPECTED_ARTIFACT_ID: '${{ needs.backend-build.outputs.runtime-artifact-id }}', ARTIFACT_NEEDS_JSON: '${{ toJSON(needs) }}',

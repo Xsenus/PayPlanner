@@ -1134,17 +1134,15 @@ jobs:
           test -s "${{ env.OUT_DIR }}/fe/index.html"
           test -s "${{ env.OUT_DIR }}/fe/payplanner-push-worker.js"
 
-      - name: Prepare deploy scripts
-        run: |
-          mkdir -p "${{ env.OUT_DIR }}/deploy"
-          cp scripts/prune-deploy-backups.sh "${{ env.OUT_DIR }}/deploy/"
-          cp scripts/preserve-data-protection-keys.sh "${{ env.OUT_DIR }}/deploy/"
+      - name: Prepare qualified deployment package
+        run: node scripts/prepare-deployment-package.mjs "${{ env.OUT_DIR }}" "${{ github.sha }}"
 
       - name: Create tarball
-        run: tar -czf "${{ env.TAR_NAME }}" -C "${{ env.OUT_DIR }}" .
+        run: tar --null --no-recursion -czf "${{ env.TAR_NAME }}" -C "${{ env.OUT_DIR }}" -T - < "${{ env.OUT_DIR }}/deployment-files.nul"
 
       - name: Verify Linux filesystem gates and deploy qualified package
         env:
+          ARTIFACT_NEEDS_JSON: ${{ toJSON(needs) }}
           DEPLOY_SHA: ${{ github.sha }}
           DEPLOY_ARCHIVE_NAME: ${{ env.TAR_NAME }}
           VPS_SSH_HOST_FINGERPRINT: ${{ vars.VPS_SSH_HOST_FINGERPRINT }}
