@@ -21,11 +21,14 @@ public class AdminAccessInventoryTests
 
     [Theory]
     [MemberData(nameof(AdminGatekeeperControllers))]
-    public void AdminGatekeepers_UseDatabaseAwareFallback(string controllerFileName)
+    public void AdminGatekeepers_UseDatabaseAwareAdminCheck(string controllerFileName)
     {
         var source = ReadSourceFile("backend", "Controllers", controllerFileName);
 
-        Assert.Contains("IsUserAdminOrLegacyFallbackAsync", source, StringComparison.Ordinal);
+        if (controllerFileName == "LegalEntitiesController.cs")
+            Assert.Contains("if (!await _db.IsApprovedUserAdminAsync(context.HttpContext.User, context.HttpContext.RequestAborted))", source, StringComparison.Ordinal);
+        else
+            Assert.Contains("IsUserAdminOrLegacyFallbackAsync", source, StringComparison.Ordinal);
         Assert.DoesNotContain("!userId.HasValue || !await _db.IsUserAdminAsync", source, StringComparison.Ordinal);
         Assert.DoesNotContain("!userId.HasValue || !await _context.IsUserAdminAsync", source, StringComparison.Ordinal);
     }

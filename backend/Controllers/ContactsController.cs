@@ -553,7 +553,7 @@ public partial class ContactsController : ControllerBase
         try
         {
             if (_db.Database.CurrentTransaction is not null) throw new SellerSnapshotConflictException();
-            if (await GetCurrentAccessAsync(ct) is null) return Unauthorized();
+            if (await GetCompanyPromotionAccessAsync(ct) is null) return Forbid();
             return await DocumentSellerLease.RunSerializableAsync<ActionResult<ContactDirectoryItemDto>>(_db, async lease =>
             {
                 lease.AdmitCleanTracker();
@@ -569,10 +569,11 @@ public partial class ContactsController : ControllerBase
 
     private async Task<ActionResult<ContactDirectoryItemDto>> PromoteExternalContactCoreAsync(int id, PromoteContactRequest request, CancellationToken ct)
     {
-        var access = await GetCurrentAccessAsync(ct);
+        var companyPromotion = string.Equals(request.Target?.Trim(), "legalentity", StringComparison.OrdinalIgnoreCase);
+        var access = companyPromotion ? await GetCompanyPromotionAccessAsync(ct) : await GetCurrentAccessAsync(ct);
         if (access is null)
         {
-            return Unauthorized();
+            return companyPromotion ? Forbid() : Unauthorized();
         }
 
         var entity = await BuildVisibleExternalContactsQuery(access)
@@ -641,7 +642,7 @@ public partial class ContactsController : ControllerBase
             {
                 return BadRequest("Физическое лицо нужно оформить как клиента.");
             }
-            var canCreateLegalEntity = await _db.HasUserSectionPermissionAsync(
+            var canCreateLegalEntity = await _db.HasApprovedUserSectionPermissionAsync(
                 User,
                 RolePermissionCatalog.LegalEntities,
                 static permission => permission.CanCreate,
@@ -1042,6 +1043,9 @@ public partial class ContactsController : ControllerBase
 
     private Task<DataVisibilityAccess?> GetCurrentAccessAsync(CancellationToken ct)
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Clients, ct);
+
+    private async Task<DataVisibilityAccess?> GetCompanyPromotionAccessAsync(CancellationToken ct)
+        => (await _db.ResolveSectionAccessAsync(User, RolePermissionCatalog.Clients, ct, requireApprovedUser: true))?.Visibility;
 
     private IQueryable<ExternalContact> BuildVisibleExternalContactsQuery(DataVisibilityAccess? access)
     {

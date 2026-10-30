@@ -392,7 +392,9 @@ public class LegalEntitiesControllerInternalCoverageTests
     public async Task UpdateMainCompanySettings_ReturnsSortedMissingIds()
     {
         await using var db = await CreateContextAsync();
-        var controller = CreateController(db, new StubEnrichmentService(), currentUserId: 1);
+        var actor = new User { Email = "settings-admin@example.test", FullName = "Admin", PasswordHash = "hash", Role = new Role { Name = "admin" }, IsActive = true, IsApproved = true };
+        db.Users.Add(actor); await db.SaveChangesAsync();
+        var controller = CreateController(db, new StubEnrichmentService(), currentUserId: actor.Id);
 
         var action = await controller.UpdateMainCompanySettings(
             new UpdateMainCompanySettingsRequest

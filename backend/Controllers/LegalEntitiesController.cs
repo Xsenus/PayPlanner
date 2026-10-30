@@ -67,7 +67,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             return;
         }
 
-        if (!await _db.IsUserAdminOrLegacyFallbackAsync(context.HttpContext.User, context.HttpContext.RequestAborted))
+        if (!await _db.IsApprovedUserAdminAsync(context.HttpContext.User, context.HttpContext.RequestAborted))
         {
             context.Result = Forbid();
             return;
@@ -1088,8 +1088,27 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
     {
         var access = await GetCurrentAccessAsync(ct);
         if (access is null) return (null, Unauthorized());
-        if (!await HasLegalEntitiesPermissionAsync(static permission => permission.CanCreate, ct)) return (null, Forbid());
+        if (!await _db.HasApprovedUserSectionPermissionAsync(User, RolePermissionCatalog.LegalEntities, static permission => permission.CanCreate, ct)) return (null, Forbid());
         return (access, null);
+    }
+
+    private async Task<ActionResult<T>> RunApprovedCompanyAdminWriteAsync<T>(Func<Task<ActionResult<T>>> action, CancellationToken ct)
+    {
+        if (!await _db.IsApprovedUserAdminAsync(User, ct)) return Forbid();
+        try
+        {
+            return await DocumentSellerLease.RunSerializableAsync<ActionResult<T>>(_db, async lease =>
+            {
+                lease.AdmitCleanTracker();
+                if (!await _db.IsApprovedUserAdminAsync(User, ct)) return Forbid();
+                _db.ChangeTracker.Clear();
+                return await action();
+            }, static result => result.Result is OkObjectResult, ct);
+        }
+        catch (Exception error) when (error is SellerSnapshotConflictException || DocumentSellerLease.IsConflict(error))
+        {
+            return Conflict(new { code = "MainCompanySettingsChanged", message = "Настройки собственных компаний изменились или сейчас сохраняются. Изменения не сохранены. Проверьте список компаний и повторите действие." });
+        }
     }
 
     private async Task<ActionResult<LegalEntityDetailDto>> CreateProfileCoreAsync(LegalEntityRequest request, DataVisibilityAccess access, CancellationToken ct)
@@ -1355,6 +1374,9 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
     public async Task<ActionResult<MainCompanySettingsDto>> UpdateMainCompanySettings(
         [FromBody] UpdateMainCompanySettingsRequest request,
         CancellationToken ct)
+        => await RunApprovedCompanyAdminWriteAsync(() => UpdateMainCompanySettingsCoreAsync(request, ct), ct);
+
+    private async Task<ActionResult<MainCompanySettingsDto>> UpdateMainCompanySettingsCoreAsync(UpdateMainCompanySettingsRequest request, CancellationToken ct)
     {
         if (request.SellerSnapshotTiming is not null && !DocumentSellerSnapshotPolicy.IsValid(request.SellerSnapshotTiming))
             return BadRequest(new { message = "Выберите фиксацию реквизитов при первой подготовке файла или при создании документа." });
@@ -1453,6 +1475,9 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
     [HttpPut("company-profile/main/{id:int}")]
     [Authorize(Policy = "Admin")]
     public async Task<ActionResult<LegalEntityDetailDto>> SetCompanyProfileMain(int id, CancellationToken ct)
+        => await RunApprovedCompanyAdminWriteAsync(() => SetCompanyProfileMainCoreAsync(id, ct), ct);
+
+    private async Task<ActionResult<LegalEntityDetailDto>> SetCompanyProfileMainCoreAsync(int id, CancellationToken ct)
     {
         var entity = await _db.LegalEntities
             .Include(le => le.Clients)
@@ -1467,6 +1492,8 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             return NotFound();
         }
 
+        if (entity.ProfileStatus != CompanyProfileStatuses.Active)
+            return Conflict(new { message = "Собственной можно выбрать только активную компанию." });
         await UpsertMainCompanyIdAsync(id, ct);
         return Ok(MapDetail(entity));
     }
@@ -2014,11 +2041,8 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         return Ok(new RequisitesCheckResponse(entity.Id, issues));
     }
 
-    private async Task<bool> IsDatabaseAdminAsync(CancellationToken ct)
-    {
-        var userId = User.GetUserId();
-        return userId.HasValue && await _db.IsUserAdminAsync(userId.Value, ct);
-    }
+    private Task<bool> IsDatabaseAdminAsync(CancellationToken ct)
+        => _db.IsApprovedUserAdminAsync(User, ct);
 
     [HttpGet("{id:int}/case-finance-summaries")]
     public async Task<ActionResult<IEnumerable<ClientCaseFinanceSummaryDto>>> GetCaseFinanceSummaries(int id, CancellationToken ct)

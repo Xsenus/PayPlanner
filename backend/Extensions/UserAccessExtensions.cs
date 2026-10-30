@@ -7,6 +7,17 @@ namespace PayPlanner.Api.Extensions;
 
 public static class UserAccessExtensions
 {
+    public static async Task<bool> IsApprovedUserAdminAsync(this PaymentContext db, ClaimsPrincipal? principal, CancellationToken ct = default)
+    {
+        if (principal?.Identity?.IsAuthenticated != true) return false;
+        var userId = principal.GetUserId();
+        if (!userId.HasValue) return false;
+        var roleName = await db.Users.AsNoTracking()
+            .Where(user => user.Id == userId.Value && user.IsActive && user.IsApproved)
+            .Select(user => user.Role == null ? null : user.Role.Name).SingleOrDefaultAsync(ct);
+        return string.Equals(roleName, "admin", StringComparison.OrdinalIgnoreCase);
+    }
+
     public static Task<bool> IsUserAdminAsync(this PaymentContext db, int userId, CancellationToken ct = default)
         => db.Users
             .AsNoTracking()
@@ -80,13 +91,26 @@ public static class UserAccessExtensions
     /// одной строки прав, сохраняются исторические значения по умолчанию. Отсутствующий в уже
     /// заполненной БД пользователь не получает доступ даже при устаревшем admin-claim в токене.
     /// </remarks>
-    public static async Task<bool> HasUserSectionPermissionAsync(
+    public static Task<bool> HasUserSectionPermissionAsync(
         this PaymentContext db,
         ClaimsPrincipal? principal,
         string section,
         Func<RolePermissionValues, bool> isAllowed,
         CancellationToken ct = default)
+        => HasUserSectionPermissionCoreAsync(db, principal, section, isAllowed, requireApprovedUser: false, ct);
+
+    public static Task<bool> HasApprovedUserSectionPermissionAsync(
+        this PaymentContext db,
+        ClaimsPrincipal? principal,
+        string section,
+        Func<RolePermissionValues, bool> isAllowed,
+        CancellationToken ct = default)
+        => HasUserSectionPermissionCoreAsync(db, principal, section, isAllowed, requireApprovedUser: true, ct);
+
+    private static async Task<bool> HasUserSectionPermissionCoreAsync(PaymentContext db, ClaimsPrincipal? principal,
+        string section, Func<RolePermissionValues, bool> isAllowed, bool requireApprovedUser, CancellationToken ct)
     {
+        if (requireApprovedUser && (principal?.Identity?.IsAuthenticated != true || !principal.GetUserId().HasValue)) return false;
         if (principal is null)
         {
             return true;
@@ -105,7 +129,7 @@ public static class UserAccessExtensions
                     .Where(permission => permission.Section == section)
                 on item.RoleId equals configuredPermission.RoleId into configuredPermissions
             from configuredPermission in configuredPermissions.DefaultIfEmpty()
-            where item.Id == userId.Value && item.IsActive
+            where item.Id == userId.Value && item.IsActive && (!requireApprovedUser || item.IsApproved)
             select new
             {
                 item.RoleId,
@@ -122,6 +146,7 @@ public static class UserAccessExtensions
 
         if (user is null)
         {
+            if (requireApprovedUser) return false;
             if (await db.Users.AsNoTracking().AnyAsync(ct))
             {
                 return false;

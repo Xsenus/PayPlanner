@@ -20,7 +20,7 @@ public partial class LegalEntitiesControllerTests
         var request = BuildRequest();
         typeof(LegalEntityRequest).GetProperty(field)!.SetValue(request, "data:image/png;base64,QUFBQUFB");
 
-        var action = await CreateController(db, 10).Create(request, CancellationToken.None);
+        var action = await CreateController(db, await CreateUserAsync(db, "admin")).Create(request, CancellationToken.None);
 
         Assert.IsType<BadRequestObjectResult>(action.Result);
         Assert.Empty(await db.LegalEntities.AsNoTracking().ToListAsync());

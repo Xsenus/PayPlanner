@@ -1064,10 +1064,11 @@ public class LegalEntitiesControllerCoverageTests
     public async Task Create_ReturnsBadRequest_WhenFormRequirementsReportMissingFields()
     {
         await using var db = await CreateContextAsync();
+        var admin = await CreateAdminUserAsync(db);
         var controller = CreateController(
             db,
             new StubLegalEntityEnrichmentService(),
-            currentUserId: 1,
+            currentUserId: admin.Id,
             formRequirementsService: new StubFormRequirementsService(["ShortName", "Inn"]));
 
         var action = await controller.Create(new LegalEntityRequest { ShortName = "ООО Проверка" }, CancellationToken.None);

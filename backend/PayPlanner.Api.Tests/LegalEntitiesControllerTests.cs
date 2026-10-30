@@ -153,13 +153,14 @@ public partial class LegalEntitiesControllerTests
         var companyId = await CreateLegalEntityAsync(db, "Основная компания");
         var userId = await CreateUserAsync(db);
         var controller = CreateController(db, userId, isAdmin: true);
-        await controller.UpdateMainCompanySettings(
+        var setupAdmin = await CreateUserAsync(db, "admin");
+        Assert.IsType<OkObjectResult>((await CreateController(db, setupAdmin).UpdateMainCompanySettings(
             new UpdateMainCompanySettingsRequest
             {
                 CompanyIds = [companyId],
                 DefaultCompanyId = companyId,
             },
-            CancellationToken.None);
+            CancellationToken.None)).Result);
 
         var action = await controller.GetById(companyId, CancellationToken.None);
 
@@ -438,7 +439,7 @@ public partial class LegalEntitiesControllerTests
         var firstClientId = await CreateClientAsync(db, "Клиент 1");
         var secondClientId = await CreateClientAsync(db, "Клиент 2");
 
-        var controller = CreateController(db, userId: 42);
+        var controller = CreateController(db, await CreateUserAsync(db, "admin"));
         var request = BuildRequest();
         request.ClientIds.Add(firstClientId);
         request.ClientIds.Add(secondClientId);
@@ -884,7 +885,7 @@ public partial class LegalEntitiesControllerTests
         });
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db, userId: 17);
+        var controller = CreateController(db, await CreateUserAsync(db, "admin"));
         var request = BuildRequest();
         request.ServiceLanguage = new string('?', 7);
 
@@ -971,7 +972,7 @@ public partial class LegalEntitiesControllerTests
         var secondClientId = await CreateClientAsync(db, "Клиент 2");
         var thirdClientId = await CreateClientAsync(db, "Клиент 3");
 
-        var controller = CreateController(db, userId: 56);
+        var controller = CreateController(db, await CreateUserAsync(db, "admin"));
         var createRequest = BuildRequest();
         createRequest.ClientIds = [firstClientId, secondClientId];
 
@@ -1005,7 +1006,7 @@ public partial class LegalEntitiesControllerTests
         await using var db = await CreateContextAsync();
         var clientId = await CreateClientAsync(db, "Клиент для конфликта");
 
-        var controller = CreateController(db, userId: 57);
+        var controller = CreateController(db, await CreateUserAsync(db, "admin"));
         var createRequest = BuildRequest();
         createRequest.ClientIds = [clientId];
 
