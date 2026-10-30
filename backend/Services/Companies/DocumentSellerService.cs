@@ -132,11 +132,16 @@ public static class SellerLegalEntityComposer
             new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
 
     public static SellerSnapshotMetadata? ReadMetadata(string? json)
+        => ReadMetadata(json, out _);
+
+    internal static SellerSnapshotMetadata? ReadMetadata(string? json, out int? companyId)
     {
+        companyId = null;
         if (string.IsNullOrWhiteSpace(json)) return null;
         try
         {
             var data = JsonSerializer.Deserialize<SellerSnapshotData>(json);
+            companyId = data?.Id;
             return data is null ? null : new SellerSnapshotMetadata(data.FrozenAtUtc, data.FreezeReason, data.ImagesFrozen != true,
                 data.ShortName, data.BranchName, ReadPrintDefaults(data), data.ImagePrintDefaultsFrozen == true);
         }
@@ -557,10 +562,28 @@ public sealed class DocumentSellerService : IDocumentSellerService
 
         if (!string.IsNullOrWhiteSpace(document.SellerSnapshotJson))
         {
-            var metadata = SellerLegalEntityComposer.ReadMetadata(document.SellerSnapshotJson);
-            var live = metadata?.LegacyImages == true && companyId.HasValue ? await LoadCompanyAsync(companyId.Value, defaultCompany, ct) : null;
+            var metadata = SellerLegalEntityComposer.ReadMetadata(document.SellerSnapshotJson, out var legacySnapshotCompanyId);
             if (metadata is null)
                 throw new SellerSelectionException("Сохранённые реквизиты документа повреждены. Автоматическая замена текущим профилем недоступна.");
+            LegalEntity? live = null;
+            if (metadata.LegacyImages && companyId.HasValue)
+            {
+                if (legacySnapshotCompanyId is not > 0 || legacySnapshotCompanyId != companyId)
+                    throw new SellerSelectionException("Компания сохранённых реквизитов документа не соответствует выбранному продавцу. Автоматическая подстановка изображений другой компании недоступна.");
+                // A legacy snapshot still follows its source images. Soft deletion
+                // hides the profile, not these bytes from an authorized document.
+                // Read only the exact matching source; never expose its other fields
+                // or substitute a caller's possibly stale default-company images.
+                live = await _db.LegalEntities.IgnoreQueryFilters().AsNoTracking()
+                    .Where(row => row.Id == companyId.Value)
+                    .Select(row => new LegalEntity
+                    {
+                        Id = row.Id,
+                        LogoDataUrl = row.LogoDataUrl,
+                        SealDataUrl = row.SealDataUrl,
+                        DirectorSignatureDataUrl = row.DirectorSignatureDataUrl
+                    }).SingleOrDefaultAsync(ct);
+            }
             var references = SellerLegalEntityComposer.ReadFrozenImageReferences(document.SellerSnapshotJson);
             Dictionary<int, string>? versionImages = null;
             if (references.Count > 0)
