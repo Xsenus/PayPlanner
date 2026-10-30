@@ -1,3 +1,4 @@
+import type { DocumentReadOwner } from './useDocumentDeliveryOwner';
 import { awaitOwnedUiResult } from '../utils/StaleUiOperationError';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../services/api';
@@ -37,7 +38,7 @@ const EMPTY_SUMMARY: PaymentsListSummary = {
   total: 0,
 };
 
-export function usePaymentsPaged(params: UsePaymentsPagedParams) {
+export function usePaymentsPaged(params: UsePaymentsPagedParams, readOwner?: DocumentReadOwner) {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [total, setTotal] = useState(0);
   const [summary, setSummary] = useState<PaymentsListSummary>(EMPTY_SUMMARY);
@@ -96,9 +97,26 @@ export function usePaymentsPaged(params: UsePaymentsPagedParams) {
     ],
   );
   const enabled = params.enabled ?? true;
+  const readScope = readOwner?.scope;
+  const captureReadOwner = readOwner?.capture;
+  const [dataScope, setDataScope] = useState(readScope);
+  const resetReadScope = useRef<() => void>(() => undefined);
+  resetReadScope.current = () => {
+    abortRef.current?.abort(); abortRef.current = null;
+    setPayments([]); setTotal(0); setSummary(EMPTY_SUMMARY); setError(null); setLoadingInitial(enabled); setRefreshing(false);
+    setDataScope(readScope);
+  };
+  useLayoutEffect(() => {
+    if (readScope !== undefined) resetReadScope.current();
+  }, [readScope]);
+  const visible = readScope === undefined || dataScope === readScope;
+
 
   const fetchPage = useCallback(
-    async (mode: 'initial' | 'refresh' = 'initial', isCurrent: () => boolean = () => true) => {
+    async (mode: 'initial' | 'refresh' = 'initial', ownsOperation: () => boolean = () => true) => {
+      const owner = captureReadOwner?.();
+      const ownsRead = () => !captureReadOwner || owner?.isCurrent() === true;
+      const isCurrent = () => ownsRead() && ownsOperation();
       if (!isCurrent()) return;
       abortRef.current?.abort();
 
@@ -142,13 +160,13 @@ export function usePaymentsPaged(params: UsePaymentsPagedParams) {
         if (abortRef.current === controller) {
           abortRef.current = null;
         }
-        if (!controller.signal.aborted) {
+        if (!controller.signal.aborted && ownsRead()) {
           setLoadingInitial(false);
           setRefreshing(false);
         }
       }
     },
-    [enabled, requestParams],
+    [enabled, requestParams, captureReadOwner],
   );
 
   const currentFetchRef = useRef<typeof fetchPage | null>(null);
@@ -174,12 +192,12 @@ export function usePaymentsPaged(params: UsePaymentsPagedParams) {
   }, []);
 
   return {
-    payments,
-    total,
-    summary,
-    loading: loadingInitial,
-    refreshing,
-    error,
+    payments: visible ? payments : [],
+    total: visible ? total : 0,
+    summary: visible ? summary : EMPTY_SUMMARY,
+    loading: visible ? loadingInitial : enabled,
+    refreshing: visible && refreshing,
+    error: visible ? error : null,
     refresh,
     refreshOwned,
   };

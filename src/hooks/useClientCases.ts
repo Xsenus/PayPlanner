@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import type { DocumentReadOwner } from './useDocumentDeliveryOwner';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { apiService } from '../services/api';
 import type { ClientCase } from '../types';
 import { awaitOwnedUiResult, StaleUiOperationError } from '../utils/StaleUiOperationError';
 
 type CaseCreateUpdate = Omit<ClientCase, 'id' | 'createdAt' | 'payments'>;
 
-export function useClientCases(clientId?: number | string, options: { enabled?: boolean; legalEntityId?: number | string } = {}) {
+export function useClientCases(clientId?: number | string, options: { enabled?: boolean; legalEntityId?: number | string } = {}, readOwner?: DocumentReadOwner) {
   const [cases, setCases] = useState<ClientCase[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -14,8 +15,25 @@ export function useClientCases(clientId?: number | string, options: { enabled?: 
   const cid = clientId != null ? Number(clientId) : undefined;
   const legalEntityId = options.legalEntityId != null ? Number(options.legalEntityId) : undefined;
   const enabled = options.enabled ?? true;
+  const readScope = readOwner?.scope;
+  const captureReadOwner = readOwner?.capture;
+  const [dataScope, setDataScope] = useState(readScope);
+  const resetReadScope = useRef<() => void>(() => undefined);
+  resetReadScope.current = () => {
+    abortRef.current?.abort(); abortRef.current = null;
+    setCases([]); setError(null); setLoading(enabled);
+    setDataScope(readScope);
+  };
+  useLayoutEffect(() => {
+    if (readScope !== undefined) resetReadScope.current();
+  }, [readScope]);
+  const visible = readScope === undefined || dataScope === readScope;
+
 
   const refresh = useCallback(async () => {
+    const owner = captureReadOwner?.();
+    const isCurrent = () => !captureReadOwner || owner?.isCurrent() === true;
+    if (!isCurrent()) return;
     abortRef.current?.abort();
     abortRef.current = null;
     if (!enabled || (!cid && !legalEntityId)) {
@@ -34,20 +52,20 @@ export function useClientCases(clientId?: number | string, options: { enabled?: 
         { clientId: cid, legalEntityId },
         { signal: controller.signal },
       );
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || !isCurrent()) return;
       setCases(data);
     } catch (e) {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || !isCurrent()) return;
       setError(e);
     } finally {
       if (abortRef.current === controller) {
         abortRef.current = null;
       }
-      if (!controller.signal.aborted) {
+      if (!controller.signal.aborted && isCurrent()) {
         setLoading(false);
       }
     }
-  }, [cid, enabled, legalEntityId]);
+  }, [cid, enabled, legalEntityId, captureReadOwner]);
 
   useEffect(() => {
     void refresh();
@@ -97,9 +115,9 @@ export function useClientCases(clientId?: number | string, options: { enabled?: 
   }, []);
 
   return {
-    cases,
-    loading,
-    error,
+    cases: visible ? cases : [],
+    loading: visible ? loading : enabled,
+    error: visible ? error : null,
     refresh,
     createCase,
     updateCase,

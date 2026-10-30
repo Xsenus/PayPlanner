@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { DocumentReadOwner } from './useDocumentDeliveryOwner';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../services/api';
 import type { Invoice, InvoiceClientRole, InvoiceInput, InvoiceSummary, InvoiceWorkflowStatus, PaymentKind, PaymentStatus } from '../types';
 import { extractDisplayErrorMessage } from '../utils/errorUtils';
@@ -78,7 +79,7 @@ function makeSummaryKey(filters: InvoicesFilters): string {
   });
 }
 
-export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
+export function useInvoices(filters: InvoicesFilters, readOwner?: DocumentReadOwner): UseInvoicesResult {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
@@ -96,12 +97,32 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
   const invoicesAbortRef = useRef<AbortController | null>(null);
   const summaryAbortRef = useRef<AbortController | null>(null);
   const enabled = filters.enabled ?? true;
+  const readScope = readOwner?.scope;
+  const captureReadOwner = readOwner?.capture;
+  const [dataScope, setDataScope] = useState(readScope);
+  const resetReadScope = useRef<() => void>(() => undefined);
+  resetReadScope.current = () => {
+    invoicesAbortRef.current?.abort(); invoicesAbortRef.current = null;
+    summaryAbortRef.current?.abort(); summaryAbortRef.current = null;
+    hasLoadedRef.current = false; hasSummaryLoadedRef.current = false;
+    setInvoices([]); setSummary(null); setError(null); setLoading(enabled); setRefreshing(false); setSummaryLoading(enabled);
+    setPagination({ page: filters.page ?? 1, pageSize: filters.pageSize ?? 20, total: 0 });
+    setDataScope(readScope);
+  };
+  useLayoutEffect(() => {
+    if (readScope !== undefined) resetReadScope.current();
+  }, [readScope]);
+  const visible = readScope === undefined || dataScope === readScope;
+
 
   const filtersKey = useMemo(() => JSON.stringify(filters), [filters]);
   const summaryKey = useMemo(() => makeSummaryKey(filters), [filters]);
 
   const fetchInvoices = useCallback(
-    async (mode: 'auto' | 'refresh' = 'auto', isCurrent: () => boolean = () => true) => {
+    async (mode: 'auto' | 'refresh' = 'auto', ownsOperation: () => boolean = () => true) => {
+      const owner = captureReadOwner?.();
+      const ownsRead = () => !captureReadOwner || owner?.isCurrent() === true;
+      const isCurrent = () => ownsRead() && ownsOperation();
       if (!isCurrent()) return;
       invoicesAbortRef.current?.abort();
       invoicesAbortRef.current = null;
@@ -168,7 +189,7 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
         if (invoicesAbortRef.current === controller) {
           invoicesAbortRef.current = null;
         }
-        if (!controller.signal.aborted) {
+        if (!controller.signal.aborted && ownsRead()) {
           setLoading(false);
           setRefreshing(false);
         }
@@ -194,11 +215,15 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
       filters.page,
       filters.pageSize,
       enabled,
+      captureReadOwner,
     ],
   );
 
   const fetchSummary = useCallback(
-    async (mode: 'auto' | 'refresh' = 'auto', isCurrent: () => boolean = () => true) => {
+    async (mode: 'auto' | 'refresh' = 'auto', ownsOperation: () => boolean = () => true) => {
+      const owner = captureReadOwner?.();
+      const ownsRead = () => !captureReadOwner || owner?.isCurrent() === true;
+      const isCurrent = () => ownsRead() && ownsOperation();
       if (!isCurrent()) return;
       summaryAbortRef.current?.abort();
       summaryAbortRef.current = null;
@@ -247,7 +272,7 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
         if (summaryAbortRef.current === controller) {
           summaryAbortRef.current = null;
         }
-        if (!controller.signal.aborted) {
+        if (!controller.signal.aborted && ownsRead()) {
           setSummaryLoading(false);
         }
       }
@@ -268,6 +293,7 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
       filters.type,
       filters.installmentsOnly,
       enabled,
+      captureReadOwner,
     ],
   );
 
@@ -323,13 +349,13 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
   );
 
   return {
-    invoices,
-    loading,
-    refreshing,
-    error,
-    summary,
-    summaryLoading,
-    pagination,
+    invoices: visible ? invoices : [],
+    loading: visible ? loading : enabled,
+    refreshing: visible && refreshing,
+    error: visible ? error : null,
+    summary: visible ? summary : null,
+    summaryLoading: visible ? summaryLoading : enabled,
+    pagination: visible ? pagination : { page: filters.page ?? 1, pageSize: filters.pageSize ?? 20, total: 0 },
     refresh,
     refreshOwned,
     createInvoice,

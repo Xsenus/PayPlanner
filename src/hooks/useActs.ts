@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { DocumentReadOwner } from './useDocumentDeliveryOwner';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../services/api';
 import type { Act, ActInput, ActStatus, ActWorkflowStatus, ActsSummary, PaymentKind } from '../types';
 import { normalizeActArray, normalizeActsSummary } from '../utils/acts';
@@ -76,7 +77,7 @@ function makeSummaryKey(filters: ActsFilters): string {
   });
 }
 
-export function useActs(filters: ActsFilters): UseActsResult {
+export function useActs(filters: ActsFilters, readOwner?: DocumentReadOwner): UseActsResult {
   const [acts, setActs] = useState<Act[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
@@ -94,12 +95,32 @@ export function useActs(filters: ActsFilters): UseActsResult {
   const actsAbortRef = useRef<AbortController | null>(null);
   const summaryAbortRef = useRef<AbortController | null>(null);
   const enabled = filters.enabled ?? true;
+  const readScope = readOwner?.scope;
+  const captureReadOwner = readOwner?.capture;
+  const [dataScope, setDataScope] = useState(readScope);
+  const resetReadScope = useRef<() => void>(() => undefined);
+  resetReadScope.current = () => {
+    actsAbortRef.current?.abort(); actsAbortRef.current = null;
+    summaryAbortRef.current?.abort(); summaryAbortRef.current = null;
+    hasLoadedRef.current = false; hasSummaryLoadedRef.current = false;
+    setActs([]); setSummary(null); setError(null); setLoading(enabled); setRefreshing(false); setSummaryLoading(enabled);
+    setPagination({ page: filters.page ?? 1, pageSize: filters.pageSize ?? 20, total: 0 });
+    setDataScope(readScope);
+  };
+  useLayoutEffect(() => {
+    if (readScope !== undefined) resetReadScope.current();
+  }, [readScope]);
+  const visible = readScope === undefined || dataScope === readScope;
+
 
   const filtersKey = useMemo(() => JSON.stringify(filters), [filters]);
   const summaryKey = useMemo(() => makeSummaryKey(filters), [filters]);
 
   const fetchActs = useCallback(
-    async (mode: 'auto' | 'refresh' = 'auto', isCurrent: () => boolean = () => true) => {
+    async (mode: 'auto' | 'refresh' = 'auto', ownsOperation: () => boolean = () => true) => {
+      const owner = captureReadOwner?.();
+      const ownsRead = () => !captureReadOwner || owner?.isCurrent() === true;
+      const isCurrent = () => ownsRead() && ownsOperation();
       if (!isCurrent()) return;
       actsAbortRef.current?.abort();
       actsAbortRef.current = null;
@@ -165,17 +186,20 @@ export function useActs(filters: ActsFilters): UseActsResult {
         if (actsAbortRef.current === controller) {
           actsAbortRef.current = null;
         }
-        if (!controller.signal.aborted) {
+        if (!controller.signal.aborted && ownsRead()) {
           setLoading(false);
           setRefreshing(false);
         }
       }
     },
-    [enabled, filters.from, filters.to, filters.status, filters.workflowStatus, filters.type, filters.clientId, filters.legalEntityId, filters.contractId, filters.invoiceId, filters.paymentId, filters.caseId, filters.responsibleId, filters.search, filters.sortBy, filters.sortDir, filters.page, filters.pageSize],
+    [enabled, filters.from, filters.to, filters.status, filters.workflowStatus, filters.type, filters.clientId, filters.legalEntityId, filters.contractId, filters.invoiceId, filters.paymentId, filters.caseId, filters.responsibleId, filters.search, filters.sortBy, filters.sortDir, filters.page, filters.pageSize, captureReadOwner],
   );
 
   const fetchSummary = useCallback(
-    async (mode: 'auto' | 'refresh' = 'auto', isCurrent: () => boolean = () => true) => {
+    async (mode: 'auto' | 'refresh' = 'auto', ownsOperation: () => boolean = () => true) => {
+      const owner = captureReadOwner?.();
+      const ownsRead = () => !captureReadOwner || owner?.isCurrent() === true;
+      const isCurrent = () => ownsRead() && ownsOperation();
       if (!isCurrent()) return;
       summaryAbortRef.current?.abort();
       summaryAbortRef.current = null;
@@ -223,12 +247,12 @@ export function useActs(filters: ActsFilters): UseActsResult {
         if (summaryAbortRef.current === controller) {
           summaryAbortRef.current = null;
         }
-        if (!controller.signal.aborted) {
+        if (!controller.signal.aborted && ownsRead()) {
           setSummaryLoading(false);
         }
       }
     },
-    [enabled, filters.from, filters.to, filters.status, filters.workflowStatus, filters.type, filters.clientId, filters.legalEntityId, filters.contractId, filters.invoiceId, filters.paymentId, filters.caseId, filters.responsibleId, filters.search],
+    [enabled, filters.from, filters.to, filters.status, filters.workflowStatus, filters.type, filters.clientId, filters.legalEntityId, filters.contractId, filters.invoiceId, filters.paymentId, filters.caseId, filters.responsibleId, filters.search, captureReadOwner],
   );
 
   useEffect(() => {
@@ -283,13 +307,13 @@ export function useActs(filters: ActsFilters): UseActsResult {
   );
 
   return {
-    acts,
-    loading,
-    refreshing,
-    error,
-    summary,
-    summaryLoading,
-    pagination,
+    acts: visible ? acts : [],
+    loading: visible ? loading : enabled,
+    refreshing: visible && refreshing,
+    error: visible ? error : null,
+    summary: visible ? summary : null,
+    summaryLoading: visible ? summaryLoading : enabled,
+    pagination: visible ? pagination : { page: filters.page ?? 1, pageSize: filters.pageSize ?? 20, total: 0 },
     refresh,
     refreshOwned,
     createAct,

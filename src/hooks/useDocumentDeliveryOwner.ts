@@ -3,6 +3,7 @@ import { useAsyncOperationOwner } from './useAsyncOperationOwner';
 import { captureAuthSessionIdentity, isAuthSessionIdentityCurrent } from '../services/authService';
 
 export type DocumentDeliveryRead = { isCurrent: () => boolean };
+export type DocumentReadOwner = { scope: string; capture: () => DocumentDeliveryRead | null };
 export type DocumentDeliveryOperation = DocumentDeliveryRead & { finish: () => void; kind: string };
 
 // Owns UI acceptance and the next step of a delivery; an already sent request is not undone.

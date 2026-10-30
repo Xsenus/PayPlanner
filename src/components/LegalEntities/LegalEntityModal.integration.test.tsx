@@ -25,6 +25,7 @@ import type {
   LegalEntitySuggestion,
   Payment,
   PaymentPayload,
+  ClientCaseFinanceSummary,
 } from '../../types';
 
 let restoreArrayBuffer: () => void;
@@ -254,6 +255,58 @@ function deferCompanyImageProcessing() {
 }
 
 describe('LegalEntityModal integration', () => {
+  describe('automatic related reads', () => {
+    const areas = ['case', 'invoice', 'act', 'payment'] as const;
+    type Area = typeof areas[number];
+    const section = { case: 'cases', invoice: 'accounts', act: 'acts', payment: 'payments' } as const;
+    const apiFor = (area: Area) => (area === 'case' ? apiService.getCasesV1 : area === 'invoice' ? apiService.getInvoices : area === 'act' ? apiService.getActs : apiService.getPaymentsV2) as unknown as ReturnType<typeof vi.fn>;
+    const row = (area: Area, label = 'Private automatic row') => area === 'case' ? { id: 81, title: label, legalEntityId: 9, status: 'Open', createdAt: '2026-10-31' } as ClientCase : area === 'invoice' ? { id: 81, invoiceEntityId: 81, number: label, legalEntityId: 9, amount: 100, type: 'Income', status: 'Pending', date: '2026-10-31' } as Invoice : area === 'act' ? { id: 81, number: label, legalEntityId: 9, amount: 100, type: 'Income', status: 'Created', date: '2026-10-31' } as Act : { id: 81, description: label, legalEntityId: 9, amount: 100, paidAmount: 0, type: 'Income', status: 'Pending', date: '2026-10-31' } as Payment;
+    const response = (area: Area, label?: string) => area === 'case' ? [row(area, label)] : { items: [row(area, label)], total: 1, page: 1, pageSize: 5, ...(area === 'payment' ? { summary: { income: 100, expense: 0, balance: 100, incomeCount: 1, expenseCount: 0, total: 1 } } : {}) };
+    const propsFor = (mode: 'page' | 'modal') => ({ isOpen: true, mode, initial: createInitialLegalEntity({ isOwnCompany: false }), allowEdit: true, allowDelete: false, canViewCases: true, canViewAccounts: true, canViewActs: true, canViewPayments: true, onClose: vi.fn(), onSubmit: vi.fn(), suggest: vi.fn(), findById: vi.fn() });
+    const counts = () => [apiService.getCasesV1, apiService.getInvoices, apiService.getInvoicesSummary, apiService.getActs, apiService.getActsSummary, apiService.getPaymentsV2].map(fn => vi.mocked(fn).mock.calls.length);
+    for (const mode of ['page', 'modal'] as const) for (const area of areas) {
+      it(`profile open read scope: an already opened ${area} cannot retain cached details after scope changes in ${mode}`, async () => {
+        apiFor(area).mockResolvedValue(response(area)); if (area === 'payment') vi.mocked(apiService.getPayment).mockResolvedValue(row('payment') as Payment); const props = propsFor(mode); const view = render(<LegalEntityModal {...props} />); await screen.findAllByText(/Private automatic row/);
+        if (area === 'case') fireEvent.click(screen.getByTitle('Редактировать дело')); else fireEvent.click(screen.getByRole('button', { name: /Private automatic row/ })); const fixture = area === 'case' ? 'related-case-fixture' : area === 'invoice' ? 'invoice-lookup-fixture' : area === 'act' ? 'act-lookup-fixture' : 'legal-related-payment-modal'; await screen.findByTestId(fixture);
+        apiFor(area).mockResolvedValue(area === 'case' ? [] : { items: [], total: 0, page: 1, pageSize: 5, summary: { income: 0, expense: 0, balance: 0, incomeCount: 0, expenseCount: 0, total: 0 } }); view.rerender(<LegalEntityModal {...props} relatedRecordPermissions={{ [section[area]]: relatedPermissions({ canEdit: true, viewScope: 'own' }) }} />); expect(screen.queryByTestId(fixture)).toBeNull();
+        view.rerender(<LegalEntityModal {...props} />); expect(screen.queryByTestId(fixture)).toBeNull();
+      });
+      it(`profile automatic: cached ${area} is cleared and only its scope reloads in ${mode}`, async () => {
+        apiFor(area).mockResolvedValue(response(area)); const props = propsFor(mode); const view = render(<LegalEntityModal {...props} />); await screen.findAllByText(/Private automatic row/); await act(async () => undefined); const before = counts();
+        let finish!: (value: unknown) => void; apiFor(area).mockReturnValue(new Promise(resolve => { finish = resolve; })); view.rerender(<LegalEntityModal {...props} relatedRecordPermissions={{ [section[area]]: relatedPermissions({ viewScope: 'own' }) }} />);
+        expect(screen.queryByText(/Private automatic row/)).toBeNull(); const after = counts(); const affected = area === 'case' ? [0] : area === 'invoice' ? [1, 2] : area === 'act' ? [3, 4] : [5]; expect(after).toEqual(before.map((n, i) => n + (affected.includes(i) ? 1 : 0)));
+        await act(async () => finish(response(area, 'Current automatic row'))); expect(screen.getAllByText(/Current automatic row/).length).toBeGreaterThan(0);
+      });
+      for (const outcome of ['success', 'error'] as const) it.each(['login', 'actor', 'logout'] as const)(`profile automatic: ${area} ${outcome} cannot follow changed %s without render in ${mode}`, async change => {
+        let finish!: (value: unknown) => void; let reject!: (error: Error) => void; apiFor(area).mockReturnValue(new Promise((yes, no) => { finish = yes; reject = no; })); render(<LegalEntityModal {...propsFor(mode)} />); await waitFor(() => expect(apiFor(area)).toHaveBeenCalledOnce()); await act(async () => undefined); baseAuthSession.replace(change);
+        await act(async () => { if (outcome === 'success') finish(response(area)); else reject(new Error('Private automatic failure')); }); expect(screen.queryByText(/Private automatic row|Private automatic failure/)).toBeNull(); expect(apiFor(area)).toHaveBeenCalledOnce(); expect(toastErrorMock).not.toHaveBeenCalled();
+      });
+    }
+    const finance = { caseId: 81, hasCompletePaymentVisibility: true, incomeTotal: 87654, incomePaid: 0, incomeOutstanding: 87654, incomeCount: 1, expenseTotal: 0, expensePaid: 0, expenseOutstanding: 0, expenseCount: 0, plannedMargin: 87654, paidMargin: 0, outstandingBalance: 87654 } satisfies ClientCaseFinanceSummary;
+    it('profile finance read: current background refresh keeps its accepted economics until the next answer', async () => {
+      apiFor('case').mockResolvedValue(response('case')); vi.mocked(apiService.getLegalEntityCaseFinanceSummaries).mockResolvedValueOnce([finance]); vi.mocked(apiService.createPayment).mockResolvedValue({ id: 701 } as Payment); render(<LegalEntityModal {...propsFor('page')} />); await waitFor(() => expect(document.body.textContent!.replace(/\s/g, '')).toContain('87654'));
+      let finish!: (value: ClientCaseFinanceSummary[]) => void; vi.mocked(apiService.getLegalEntityCaseFinanceSummaries).mockReturnValue(new Promise(resolve => { finish = resolve; })); fireEvent.click(screen.getAllByRole('button', { name: 'Платёж' })[0]); const child = paymentModalPropsSpy.mock.lastCall![0] as { onSubmit: (payload: PaymentPayload) => Promise<Payment> };
+      await act(async () => { await child.onSubmit({ amount: 100, type: 'Income', date: '2026-10-31', status: 'Pending' } as PaymentPayload); }); await waitFor(() => expect(apiService.getLegalEntityCaseFinanceSummaries).toHaveBeenCalledTimes(2)); expect(document.body.textContent!.replace(/\s/g, '')).toContain('87654'); await act(async () => finish([{ ...finance, incomeTotal: 12345 }])); expect(document.body.textContent!.replace(/\s/g, '')).toContain('12345');
+    });
+    for (const mode of ['page', 'modal'] as const) {
+      it.each(['login', 'actor', 'logout'] as const)(`profile finance read: late economics cannot follow %s without render in ${mode}`, async change => {
+        apiFor('case').mockResolvedValue(response('case')); let finish!: (value: ClientCaseFinanceSummary[]) => void; vi.mocked(apiService.getLegalEntityCaseFinanceSummaries).mockReturnValue(new Promise(resolve => { finish = resolve; })); render(<LegalEntityModal {...propsFor(mode)} />); await waitFor(() => expect(apiService.getLegalEntityCaseFinanceSummaries).toHaveBeenCalledOnce()); await act(async () => undefined); baseAuthSession.replace(change);
+        await act(async () => finish([finance])); expect(document.body.textContent!.replace(/\s/g, '')).not.toContain('87654'); expect(apiService.getLegalEntityCaseFinanceSummaries).toHaveBeenCalledOnce();
+      });
+      it(`profile finance read: cached economics are hidden while a new payment visibility read waits in ${mode}`, async () => {
+        apiFor('case').mockResolvedValue(response('case')); vi.mocked(apiService.getLegalEntityCaseFinanceSummaries).mockResolvedValue([finance]); const props = propsFor(mode); const view = render(<LegalEntityModal {...props} />); await waitFor(() => expect(document.body.textContent!.replace(/\s/g, '')).toContain('87654'));
+        let finish!: (value: ClientCaseFinanceSummary[]) => void; vi.mocked(apiService.getLegalEntityCaseFinanceSummaries).mockReturnValue(new Promise(resolve => { finish = resolve; })); view.rerender(<LegalEntityModal {...props} relatedRecordPermissions={{ payments: relatedPermissions({ viewScope: 'own' }) }} />); expect(document.body.textContent!.replace(/\s/g, '')).not.toContain('87654'); expect(apiService.getLegalEntityCaseFinanceSummaries).toHaveBeenCalledTimes(2);
+        await act(async () => finish([{ ...finance, incomeTotal: 12345, incomeOutstanding: 12345 }])); expect(document.body.textContent!.replace(/\s/g, '')).toContain('12345');
+      });
+      it(`profile finance read: late errors stay hidden after scope ABA and cannot stop a new loader in ${mode}`, async () => {
+        apiFor('case').mockResolvedValue(response('case')); let fail!: (error: Error) => void; vi.mocked(apiService.getLegalEntityCaseFinanceSummaries).mockReturnValueOnce(new Promise((_yes, no) => { fail = no; })).mockReturnValue(new Promise(() => undefined)); const props = propsFor(mode); const view = render(<LegalEntityModal {...props} />); await waitFor(() => expect(apiService.getLegalEntityCaseFinanceSummaries).toHaveBeenCalledOnce());
+        view.rerender(<LegalEntityModal {...props} relatedRecordPermissions={{ payments: relatedPermissions({ viewScope: 'own' }) }} />); view.rerender(<LegalEntityModal {...props} />); await act(async () => fail(new Error('Private previous economics failed'))); expect(screen.queryByText(/Private previous economics failed/)).toBeNull(); expect(screen.getByText('Считаем экономику дела...')).toBeTruthy();
+      });
+    }
+    it('profile automatic: logout rerender clears cached rows and dispatches no unauthenticated related reads', async () => {
+      apiFor('case').mockResolvedValue(response('case')); const props = propsFor('page'); const view = render(<LegalEntityModal {...props} />); await screen.findAllByText(/Private automatic row/); await act(async () => undefined); const before = counts(); baseAuthSession.replace('logout'); view.rerender(<LegalEntityModal {...props} />); expect(screen.queryByText(/Private automatic row/)).toBeNull(); expect(counts()).toEqual(before);
+    });
+  });
   describe('financial section admission', () => {
     let session: ReturnType<typeof documentCopyTestSession>;
     beforeEach(() => {
@@ -456,6 +509,10 @@ describe('LegalEntityModal integration', () => {
       view.rerender(<LegalEntityModal {...props} initial={{ ...props.initial, id: 8 }} />); fireEvent.click(await screen.findByTitle('Редактировать дело')); const confirmation = { nextHearingConfirmedAt: '2026-10-31T06:00:00Z' };
       act(() => old.onNextHearingConfirmed!(confirmation)); expect(child('case').caseData?.nextHearingConfirmedAt).toBeUndefined();
       act(() => child('case').onNextHearingConfirmed!(confirmation)); expect(child('case').caseData?.nextHearingConfirmedAt).toBe(confirmation.nextHearingConfirmedAt);
+    });
+    it.each(['case', 'invoice', 'act'] as const)('related read-write scope: pending %s cannot adopt or refresh after visibility changes', async kind => {
+      let finish!: (value: unknown) => void; (apiCreate(kind) as unknown as ReturnType<typeof vi.fn>).mockReturnValue(new Promise(resolve => { finish = resolve; })); const props = propsFor('page'); const view = render(<LegalEntityModal {...props} />); const old = await open(kind); let saved!: Promise<void>; act(() => { saved = save(kind, old); });
+      view.rerender(<LegalEntityModal {...props} relatedRecordPermissions={{ [kindSection[kind]]: relatedPermissions({ canCreate: true, viewScope: 'own' }) }} />); const before = counts(); await act(async () => { finish({ ...row, number: 'Private scoped write' }); await expect(saved).rejects.toBeInstanceOf(StaleUiOperationError); }); expect(counts()).toEqual(before); expect(toastSuccessMock).not.toHaveBeenCalled();
     });
   });
 

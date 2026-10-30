@@ -4,7 +4,7 @@ import { useAsyncOperationOwner } from '../../hooks/useAsyncOperationOwner';
 import { useDocumentDeliveryOwner, type DocumentDeliveryRead } from '../../hooks/useDocumentDeliveryOwner';
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   ArrowLeft,
@@ -963,11 +963,9 @@ export function LegalEntityModal({
   const [caseSearch, setCaseSearch] = useState("");
   const [caseStatusFilter, setCaseStatusFilter] =
     useState<LegalEntityCaseStatusFilter>("all");
-  const [caseFinanceSummaries, setCaseFinanceSummaries] = useState<
-    Record<number, ClientCaseFinanceSummary>
-  >({});
-  const [caseFinanceLoading, setCaseFinanceLoading] = useState(false);
-  const [caseFinanceError, setCaseFinanceError] = useState<string | null>(null);
+  const [caseFinanceState, setCaseFinanceState] = useState<{
+    scope: string; items: Record<number, ClientCaseFinanceSummary>; loading: boolean; error: string | null;
+  } | null>(null);
   const [caseFinanceReloadToken, setCaseFinanceReloadToken] = useState(0);
   const [caseModalOpen, setCaseModalOpen] = useState(false);
   const [caseMode, setCaseMode] = useState<"create" | "edit">("create");
@@ -1058,14 +1056,33 @@ export function LegalEntityModal({
   const paymentReadOwner = capturePaymentReadOwner();
   const paymentReadAttempt = useRef<{ id: number; isCurrent: () => boolean } | null>(null);
   const relatedCaseOwner = useDocumentDeliveryOwner(JSON.stringify([classificationScope, caseModalOpen, caseMode, editingCase?.id,
-    canMutateRelated('cases', caseMode === 'edit' ? 'canEdit' : 'canCreate'), canMutateRelated('cases', 'canDelete'), canViewPayments]));
+    canMutateRelated('cases', caseMode === 'edit' ? 'canEdit' : 'canCreate'), canMutateRelated('cases', 'canDelete'), canViewPayments, relatedRecordPermissions?.cases?.viewScope]));
   const relatedInvoiceOwner = useDocumentDeliveryOwner(JSON.stringify([classificationScope, invoiceModalOpen, invoiceModalMode, selectedInvoice?.id,
-    selectedLegalEntityCaseId, canMutateRelated('accounts', invoiceModalMode === 'edit' ? 'canEdit' : 'canCreate'), canViewPayments, canViewActs]));
+    selectedLegalEntityCaseId, canMutateRelated('accounts', invoiceModalMode === 'edit' ? 'canEdit' : 'canCreate'), canViewPayments, canViewActs, relatedRecordPermissions?.accounts?.viewScope]));
   const relatedActOwner = useDocumentDeliveryOwner(JSON.stringify([classificationScope, actModalOpen, actModalMode, selectedAct?.id,
-    selectedLegalEntityCaseId, canMutateRelated('acts', actModalMode === 'edit' ? 'canEdit' : 'canCreate'), canViewAccounts]));
+    selectedLegalEntityCaseId, canMutateRelated('acts', actModalMode === 'edit' ? 'canEdit' : 'canCreate'), canViewAccounts, relatedRecordPermissions?.acts?.viewScope]));
   const relatedPaymentOwner = useDocumentDeliveryOwner(JSON.stringify([classificationScope, paymentModalOpen, paymentModalMode, selectedPayment?.id,
     selectedLegalEntityCaseId, canMutateRelated('payments', 'canCreate'), canMutateRelated('payments', 'canEdit'),
     relatedRecordPermissions?.payments?.viewScope, canViewCases, canViewAccounts, canViewActs]));
+  const relatedReadScope = JSON.stringify([currentLegalEntityId, isOpen, deleteOwnerScope]);
+  const casesReadOwner = useDocumentDeliveryOwner(JSON.stringify([relatedReadScope, canViewCases, relatedRecordPermissions?.cases?.viewScope]));
+  const invoicesReadOwner = useDocumentDeliveryOwner(JSON.stringify([relatedReadScope, canViewAccounts, relatedRecordPermissions?.accounts?.viewScope]));
+  const actsReadOwner = useDocumentDeliveryOwner(JSON.stringify([relatedReadScope, canViewActs, relatedRecordPermissions?.acts?.viewScope]));
+  const paymentsReadOwner = useDocumentDeliveryOwner(JSON.stringify([relatedReadScope, canViewPayments, relatedRecordPermissions?.payments?.viewScope]));
+  const { capture: captureFinanceReadOwner, scope: financeReadScope } = useDocumentDeliveryOwner(JSON.stringify([casesReadOwner.scope, paymentsReadOwner.scope]));
+  const visibleCaseFinance = caseFinanceState?.scope === financeReadScope ? caseFinanceState : null;
+  const caseFinanceSummaries = visibleCaseFinance?.items ?? {};
+  const caseFinanceLoading = visibleCaseFinance?.loading ?? false;
+  const caseFinanceError = visibleCaseFinance?.error ?? null;
+  const previousRelatedReadScopes = useRef({ cases: casesReadOwner.scope, invoices: invoicesReadOwner.scope, acts: actsReadOwner.scope, payments: paymentsReadOwner.scope });
+  useLayoutEffect(() => {
+    const previous = previousRelatedReadScopes.current;
+    previousRelatedReadScopes.current = { cases: casesReadOwner.scope, invoices: invoicesReadOwner.scope, acts: actsReadOwner.scope, payments: paymentsReadOwner.scope };
+    if (previous.cases !== casesReadOwner.scope && editingCase) { setCaseModalOpen(false); setEditingCase(null); }
+    if (previous.invoices !== invoicesReadOwner.scope && selectedInvoice) { setInvoiceModalOpen(false); setSelectedInvoice(null); }
+    if (previous.acts !== actsReadOwner.scope && selectedAct) { setActModalOpen(false); setSelectedAct(null); }
+    if (previous.payments !== paymentsReadOwner.scope && selectedPayment) { setPaymentModalOpen(false); setSelectedPayment(null); }
+  }, [casesReadOwner.scope, invoicesReadOwner.scope, actsReadOwner.scope, paymentsReadOwner.scope, editingCase, selectedInvoice, selectedAct, selectedPayment]);
   const legacyClassification = mainCompanyState?.owner === classificationOwner ? mainCompanyState : null;
   const ownCompanyClassification = currentLegalEntityId === null ? false
     : typeof initial?.isOwnCompany === 'boolean' ? initial.isOwnCompany
@@ -1124,9 +1141,9 @@ export function LegalEntityModal({
     deleteCase: deleteLegalEntityCase,
     setCases: setLegalEntityCases,
   } = useClientCases(undefined, {
-    enabled: canViewCases && isOpen && Boolean(currentLegalEntityId),
+    enabled: deleteSession.authenticated && canViewCases && isOpen && Boolean(currentLegalEntityId),
     legalEntityId: currentLegalEntityId ?? undefined,
-  });
+  }, casesReadOwner);
   const legalEntityInvoicesResult = useInvoices({
     legalEntityId: currentLegalEntityId ?? undefined,
     caseId: selectedCaseId,
@@ -1134,8 +1151,8 @@ export function LegalEntityModal({
     pageSize: 5,
     sortBy: "date",
     sortDir: "desc",
-    enabled: canViewAccounts && isOpen && Boolean(currentLegalEntityId),
-  });
+    enabled: deleteSession.authenticated && canViewAccounts && isOpen && Boolean(currentLegalEntityId),
+  }, invoicesReadOwner);
   const legalEntityActsResult = useActs({
     legalEntityId: currentLegalEntityId ?? undefined,
     caseId: selectedCaseId,
@@ -1143,8 +1160,8 @@ export function LegalEntityModal({
     pageSize: 5,
     sortBy: "date",
     sortDir: "desc",
-    enabled: canViewActs && isOpen && Boolean(currentLegalEntityId),
-  });
+    enabled: deleteSession.authenticated && canViewActs && isOpen && Boolean(currentLegalEntityId),
+  }, actsReadOwner);
   const legalEntityPaymentsResult = usePaymentsPaged({
     legalEntityId: currentLegalEntityId ?? undefined,
     caseId: selectedCaseId,
@@ -1152,8 +1169,8 @@ export function LegalEntityModal({
     pageSize: 5,
     sortBy: "date",
     sortDir: "desc",
-    enabled: canViewPayments && isOpen && Boolean(currentLegalEntityId),
-  });
+    enabled: deleteSession.authenticated && canViewPayments && isOpen && Boolean(currentLegalEntityId),
+  }, paymentsReadOwner);
 
   useEffect(() => {
     if (!isOpen || currentLegalEntityId === null || typeof initial?.isOwnCompany === 'boolean') return;
@@ -1188,44 +1205,29 @@ export function LegalEntityModal({
   );
 
   useEffect(() => {
-    if (!canViewPayments || !isOpen || !currentLegalEntityId) {
-      setCaseFinanceSummaries({});
-      setCaseFinanceError(null);
-      setCaseFinanceLoading(false);
+    if (!deleteSession.authenticated || !canViewCases || !canViewPayments || !isOpen || !currentLegalEntityId || !legalEntityCaseIdsKey) {
+      setCaseFinanceState({ scope: financeReadScope, items: {}, error: null, loading: false });
       return;
     }
 
-    if (!legalEntityCaseIdsKey) {
-      setCaseFinanceSummaries({});
-      setCaseFinanceError(null);
-      setCaseFinanceLoading(false);
-      return;
-    }
-
+    const owner = captureFinanceReadOwner();
+    if (!owner) return;
     let alive = true;
-    setCaseFinanceLoading(true);
-    setCaseFinanceError(null);
+    const current = () => alive && owner.isCurrent();
+    setCaseFinanceState(previous => ({ scope: financeReadScope, items: previous?.scope === financeReadScope ? previous.items : {}, loading: true, error: null }));
 
     apiService
       .getLegalEntityCaseFinanceSummaries(currentLegalEntityId)
       .then((items) => {
-        if (!alive) return;
-        setCaseFinanceSummaries(
-          Object.fromEntries((items ?? []).map((item) => [item.caseId, item])),
-        );
+        if (!current()) return;
+        setCaseFinanceState({ scope: financeReadScope, items: Object.fromEntries((items ?? []).map((item) => [item.caseId, item])), loading: false, error: null });
       })
       .catch((err) => {
-        if (!alive) return;
-        setCaseFinanceError(
-          extractErrorMessage(
+        if (!current()) return;
+        setCaseFinanceState({ scope: financeReadScope, items: {}, loading: false, error: extractErrorMessage(
             err,
             "Не удалось загрузить экономику дел юридического лица",
-          ),
-        );
-      })
-      .finally(() => {
-        if (!alive) return;
-        setCaseFinanceLoading(false);
+          ) });
       });
 
     return () => {
@@ -1233,6 +1235,10 @@ export function LegalEntityModal({
     };
   }, [
     canViewPayments,
+    canViewCases,
+    deleteSession.authenticated,
+    financeReadScope,
+    captureFinanceReadOwner,
     caseFinanceReloadToken,
     currentLegalEntityId,
     extractErrorMessage,
