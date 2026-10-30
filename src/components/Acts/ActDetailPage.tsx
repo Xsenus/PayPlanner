@@ -1459,7 +1459,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
             sizeBytes: 0,
             sourceType: 'act',
           }}
-          preparePdf={() => apiService.downloadActDocument(act.id, 'pdf', { includeSignatureAndSeal: true })}
+          preparePdf={() => apiService.downloadActDocument(act.id, 'pdf')}
           onClose={() => setMessengerDeliveryOpen(null)}
         />
       ) : null}
@@ -1470,7 +1470,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
           documentId={act.id}
           documentName={`Акт ${act.number || act.id}`}
           documentType="act"
-          preparePdf={() => apiService.downloadActDocument(act.id, 'pdf', { includeSignatureAndSeal: true })}
+          preparePdf={() => apiService.downloadActDocument(act.id, 'pdf')}
           onClose={() => setElectronicSignatureOpen(null)}
         />
       ) : null}

@@ -42,6 +42,23 @@ describe('invoice independent image transport', () => {
   });
 });
 
+describe('canonical delivery PDF transport', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it.each(['invoice', 'act'] as const)('leaves %s image defaults to the server when no copy override was chosen', async kind => {
+    const request = vi.fn<typeof fetch>().mockResolvedValue(new Response('%PDF-1.7', { headers: { 'Content-Type': 'application/pdf' } }));
+    vi.stubGlobal('fetch', request);
+    const blob = kind === 'invoice' ? await apiService.downloadInvoiceDocument(7, 'pdf') : await apiService.downloadActDocument(7, 'pdf');
+    expect(blob.type).toBe('application/pdf');
+    expect(await blob.text()).toBe('%PDF-1.7');
+    expect(request).toHaveBeenCalledOnce();
+    const [target, init] = request.mock.calls[0];
+    const url = new URL(String(target), 'https://local.invalid');
+    expect(url.pathname).toMatch(new RegExp(`/${kind === 'invoice' ? 'invoices' : 'acts'}/7/document$`));
+    expect(Object.fromEntries(url.searchParams)).toEqual({ format: 'pdf' });
+    expect(init?.method).toBe('GET');
+  });
+});
+
 describe('act and contract independent image transport', () => {
   afterEach(() => vi.unstubAllGlobals());
   it.each(['acts', 'contracts'] as const)('sends explicit false and cancellation for every %s format', async section => {

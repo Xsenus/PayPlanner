@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ActDetailPage } from './ActDetailPage';
 import { apiService } from '../../services/api';
+import { configureDocumentDeliveryTestApi } from '../../test/documentDeliveryFixtures';
 
 const {
   actModalSpy,
@@ -86,6 +87,11 @@ vi.mock('../../hooks/useToast', () => ({
 vi.mock('../../services/api', () => ({
   apiService: {
     getOwnCompanyOptions: vi.fn().mockResolvedValue([]),
+    getMessengerRecipients: vi.fn(),
+    getMessengerDocumentDeliveryHistory: vi.fn(),
+    prepareFinancialDocumentMessengerDelivery: vi.fn(),
+    queueMessengerDocumentDelivery: vi.fn(),
+    prepareElectronicSignatureEnvelope: vi.fn(),
     getMessengerDocumentDeliveryConfiguration: vi.fn().mockResolvedValue({ enabled: false, providers: [] }),
     getElectronicSignatureConfiguration: vi.fn().mockResolvedValue({ enabled: false, preparationEnabled: false, defaultSignatureType: 'qualified', defaultSigningOrder: 'sequential', defaultArchiveRetentionYears: 10, providers: [] }),
     getElectronicSignatureRecipients: vi.fn().mockResolvedValue([]),
@@ -122,6 +128,7 @@ vi.mock('../ui/ObjectAuditModal', () => ({
 
 describe('ActDetailPage', () => {
   beforeEach(() => {
+    configureDocumentDeliveryTestApi('act', 0, 0, false);
     vi.mocked(apiService.getDocumentImagePrintDefaults).mockReset().mockResolvedValue({ includeLogo: false, includeSeal: false, includeSignature: false });
     vi.clearAllMocks();
     dialogConfirmMock.mockResolvedValue(true);
@@ -313,6 +320,52 @@ describe('ActDetailPage', () => {
     fireEvent.click(button);
     if (access === 'allowed') await waitFor(() => expect(apiService.uploadActDocumentToYandexDisk).toHaveBeenCalledExactlyOnceWith(32, 'pdf'));
     else expect(apiService.uploadActDocumentToYandexDisk).not.toHaveBeenCalled();
+  });
+
+  describe('canonical delivery image defaults', () => {
+    it.each(['Мессенджер', 'Э-подпись'])('does not send from %s after a rejected act PDF and permits only an explicit retry', async channel => {
+      Object.assign(authState.user.role, { name: 'admin' });
+      const pdf = configureDocumentDeliveryTestApi('act', 32, 11);
+      downloadActDocumentMock.mockClear().mockResolvedValueOnce(new Blob(['<p>preview</p>'], { type: 'text/html' })).mockRejectedValueOnce(new Error('PDF недоступен')).mockResolvedValueOnce(pdf);
+      getActMock.mockResolvedValue({ id: 32, clientId: 11, number: '32', date: '2026-04-10', amount: 100, status: 'Created', type: 'Income', lineItems: [] });
+      getClientsMock.mockResolvedValue({ items: [] }); getActResponsiblesMock.mockResolvedValue({ items: [] });
+      render(<ActDetailPage actId={32} onBack={vi.fn()} />);
+      fireEvent.click(await screen.findByRole('button', { name: channel }));
+      if (channel === 'Мессенджер') { await screen.findAllByText(/Получатель PDF/); fireEvent.click(screen.getByLabelText(/Подтверждаю выбранный документ/)); }
+      else { fireEvent.click(await screen.findByText('Подписант PDF')); fireEvent.click(screen.getByLabelText(/Подтверждаю выбранную неизменяемую PDF-версию/)); }
+      const name = channel === 'Мессенджер' ? 'Подготовить и отправить' : 'Подготовить неизменяемую версию';
+      fireEvent.click(screen.getByRole('button', { name })); await screen.findByText('PDF недоступен');
+      expect(downloadActDocumentMock.mock.calls.filter(([, format]) => format === 'pdf')).toEqual([[32, 'pdf']]);
+      expect(apiService.prepareFinancialDocumentMessengerDelivery).not.toHaveBeenCalled(); expect(apiService.prepareElectronicSignatureEnvelope).not.toHaveBeenCalled(); expect(apiService.queueMessengerDocumentDelivery).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('button', { name }));
+      await waitFor(() => expect(channel === 'Мессенджер' ? apiService.queueMessengerDocumentDelivery : apiService.prepareElectronicSignatureEnvelope).toHaveBeenCalledOnce());
+      expect(downloadActDocumentMock.mock.calls.filter(([, format]) => format === 'pdf')).toEqual([[32, 'pdf'], [32, 'pdf']]);
+    });
+    it.each(['Мессенджер', 'Э-подпись'])('prepares the act PDF for %s without overriding saved image choices', async channel => {
+      Object.assign(authState.user.role, { name: 'admin' });
+      const pdf = configureDocumentDeliveryTestApi('act', 32, 11);
+      downloadActDocumentMock.mockClear().mockResolvedValueOnce(new Blob(['<p>preview</p>'], { type: 'text/html' })).mockResolvedValueOnce(pdf);
+      getActMock.mockResolvedValue({ id: 32, clientId: 11, number: '32', date: '2026-04-10', amount: 100, status: 'Created', type: 'Income', lineItems: [] });
+      getClientsMock.mockResolvedValue({ items: [] }); getActResponsiblesMock.mockResolvedValue({ items: [] });
+      render(<ActDetailPage actId={32} onBack={vi.fn()} />);
+      fireEvent.click(await screen.findByRole('button', { name: channel }));
+      expect(downloadActDocumentMock.mock.calls.filter(([, format]) => format === 'pdf')).toHaveLength(0);
+      if (channel === 'Мессенджер') {
+        await screen.findAllByText(/Получатель PDF/);
+        expect((screen.getByRole('button', { name: /Подготовить и отправить/ }) as HTMLButtonElement).disabled).toBe(true);
+        fireEvent.click(screen.getByLabelText(/Подтверждаю выбранный документ/));
+        fireEvent.click(screen.getByRole('button', { name: /Подготовить и отправить/ }));
+        await waitFor(() => expect(apiService.queueMessengerDocumentDelivery).toHaveBeenCalledExactlyOnceWith(102));
+        expect(apiService.prepareFinancialDocumentMessengerDelivery).toHaveBeenCalledExactlyOnceWith('act', 32, pdf, expect.objectContaining({ recipientBindingId: 8, confirmRecipientAndDocument: true }));
+      } else {
+        fireEvent.click(await screen.findByText('Подписант PDF'));
+        fireEvent.click(screen.getByLabelText(/Подтверждаю выбранную неизменяемую PDF-версию/));
+        fireEvent.click(screen.getByRole('button', { name: 'Подготовить неизменяемую версию' }));
+        await waitFor(() => expect(apiService.prepareElectronicSignatureEnvelope).toHaveBeenCalledExactlyOnceWith('act', 32, pdf, expect.objectContaining({ clientId: 11, signerAccountIds: [7], confirmSnapshotAndSigners: true })));
+        expect(apiService.queueMessengerDocumentDelivery).not.toHaveBeenCalled();
+      }
+      expect(downloadActDocumentMock.mock.calls.filter(([, format]) => format === 'pdf')).toEqual([[32, 'pdf']]);
+    });
   });
 
   describe('delivery ownership', () => {

@@ -21,6 +21,7 @@ import type { BaseDictItem } from '../../types/dictionaries';
 import { apiService, type PagedResult } from '../../services/api';
 import { storeInvoiceEditorDraft } from '../../utils/invoiceEditorBridge';
 import { defaultRolePermissions, type RolePermissions } from '../../types/permissions';
+import { configureDocumentDeliveryTestApi } from '../../test/documentDeliveryFixtures';
 
 const permissionState = vi.hoisted(() => ({ value: null as RolePermissions | null }));
 const printAuthState = vi.hoisted(() => ({ user: { id: 7, role: { id: 1 } } }));
@@ -123,6 +124,11 @@ vi.mock('../../hooks/useToast', () => ({
 vi.mock('../../services/api', () => ({
   apiService: {
     getOwnCompanyOptions: vi.fn().mockResolvedValue([]),
+    getMessengerRecipients: vi.fn(),
+    getMessengerDocumentDeliveryHistory: vi.fn(),
+    prepareFinancialDocumentMessengerDelivery: vi.fn(),
+    queueMessengerDocumentDelivery: vi.fn(),
+    prepareElectronicSignatureEnvelope: vi.fn(),
     getMessengerDocumentDeliveryConfiguration: vi.fn().mockResolvedValue({ enabled: false, providers: [] }),
     getElectronicSignatureConfiguration: vi.fn().mockResolvedValue({ enabled: false, preparationEnabled: false, defaultSignatureType: 'qualified', defaultSigningOrder: 'sequential', defaultArchiveRetentionYears: 10, providers: [] }),
     getElectronicSignatureRecipients: vi.fn().mockResolvedValue([]),
@@ -326,6 +332,7 @@ describe('InvoiceModal integration', () => {
   });
 
   beforeEach(() => {
+    configureDocumentDeliveryTestApi('invoice', 0, 0, false);
     printAuthState.user = { id: 7, role: { id: 1 } };
     vi.mocked(apiService.getDocumentImagePrintDefaults).mockReset().mockResolvedValue({ includeLogo: false, includeSeal: false, includeSignature: false });
     vi.mocked(apiService.prepareDocumentPrint).mockReset().mockImplementation(async () => Object.assign(new Blob(['print copy']), { text: async () => 'print copy' }));
@@ -3384,6 +3391,50 @@ describe('InvoiceModal integration', () => {
     fireEvent.click(button);
     if (access === 'allowed') await waitFor(() => expect(apiService.uploadInvoiceDocumentToYandexDisk).toHaveBeenCalledExactlyOnceWith(660, 'pdf'));
     else expect(apiService.uploadInvoiceDocumentToYandexDisk).not.toHaveBeenCalled();
+  });
+
+  describe('canonical delivery image defaults', () => {
+    it.each(['Мессенджер', 'Э-подпись'])('does not send from %s after a rejected invoice PDF and permits only an explicit retry', async channel => {
+      Object.assign(printAuthState.user.role, { name: 'admin' });
+      const pdf = configureDocumentDeliveryTestApi('invoice', 660, 11);
+      const download = vi.mocked(apiService.downloadInvoiceDocument); download.mockClear(); download.mockRejectedValueOnce(new Error('PDF недоступен')).mockResolvedValueOnce(pdf);
+      const invoice = { id: 660, clientId: 11, number: '660', date: '2026-04-08', type: 'Income', amount: 100, status: 'Pending', lineItems: [] } as unknown as Invoice;
+      render(<InvoiceModal open mode="edit" presentation="page" invoice={invoice} onClose={vi.fn()} onSubmit={vi.fn()} submitting={false} clients={[]} responsibles={[]} lookupsLoading={false} relatedPayments={[]} />);
+      fireEvent.click(await screen.findByRole('button', { name: channel }));
+      if (channel === 'Мессенджер') { await screen.findAllByText(/Получатель PDF/); fireEvent.click(screen.getByLabelText(/Подтверждаю выбранный документ/)); }
+      else { fireEvent.click(await screen.findByText('Подписант PDF')); fireEvent.click(screen.getByLabelText(/Подтверждаю выбранную неизменяемую PDF-версию/)); }
+      const name = channel === 'Мессенджер' ? 'Подготовить и отправить' : 'Подготовить неизменяемую версию';
+      fireEvent.click(screen.getByRole('button', { name })); await screen.findByText('PDF недоступен');
+      expect(download).toHaveBeenCalledExactlyOnceWith(660, 'pdf');
+      expect(apiService.prepareFinancialDocumentMessengerDelivery).not.toHaveBeenCalled(); expect(apiService.prepareElectronicSignatureEnvelope).not.toHaveBeenCalled(); expect(apiService.queueMessengerDocumentDelivery).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('button', { name }));
+      await waitFor(() => expect(channel === 'Мессенджер' ? apiService.queueMessengerDocumentDelivery : apiService.prepareElectronicSignatureEnvelope).toHaveBeenCalledOnce());
+      expect(download.mock.calls).toEqual([[660, 'pdf'], [660, 'pdf']]);
+    });
+    it.each(['Мессенджер', 'Э-подпись'])('prepares the invoice PDF for %s without overriding saved image choices', async channel => {
+      Object.assign(printAuthState.user.role, { name: 'admin' });
+      const pdf = configureDocumentDeliveryTestApi('invoice', 660, 11);
+      const download = vi.mocked(apiService.downloadInvoiceDocument); download.mockClear(); download.mockResolvedValueOnce(pdf);
+      const invoice = { id: 660, clientId: 11, number: '660', date: '2026-04-08', type: 'Income', amount: 100, status: 'Pending', lineItems: [] } as unknown as Invoice;
+      render(<InvoiceModal open mode="edit" presentation="page" invoice={invoice} onClose={vi.fn()} onSubmit={vi.fn()} submitting={false} clients={[]} responsibles={[]} lookupsLoading={false} relatedPayments={[]} />);
+      fireEvent.click(await screen.findByRole('button', { name: channel }));
+      expect(download).not.toHaveBeenCalled();
+      if (channel === 'Мессенджер') {
+        await screen.findAllByText(/Получатель PDF/);
+        expect((screen.getByRole('button', { name: /Подготовить и отправить/ }) as HTMLButtonElement).disabled).toBe(true);
+        fireEvent.click(screen.getByLabelText(/Подтверждаю выбранный документ/));
+        fireEvent.click(screen.getByRole('button', { name: /Подготовить и отправить/ }));
+        await waitFor(() => expect(apiService.queueMessengerDocumentDelivery).toHaveBeenCalledExactlyOnceWith(102));
+        expect(apiService.prepareFinancialDocumentMessengerDelivery).toHaveBeenCalledExactlyOnceWith('invoice', 660, pdf, expect.objectContaining({ recipientBindingId: 8, confirmRecipientAndDocument: true }));
+      } else {
+        fireEvent.click(await screen.findByText('Подписант PDF'));
+        fireEvent.click(screen.getByLabelText(/Подтверждаю выбранную неизменяемую PDF-версию/));
+        fireEvent.click(screen.getByRole('button', { name: 'Подготовить неизменяемую версию' }));
+        await waitFor(() => expect(apiService.prepareElectronicSignatureEnvelope).toHaveBeenCalledExactlyOnceWith('invoice', 660, pdf, expect.objectContaining({ clientId: 11, signerAccountIds: [7], confirmSnapshotAndSigners: true })));
+        expect(apiService.queueMessengerDocumentDelivery).not.toHaveBeenCalled();
+      }
+      expect(download).toHaveBeenCalledExactlyOnceWith(660, 'pdf');
+    });
   });
 
   describe('delivery ownership', () => {

@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Contract } from '../../types';
 import { ContractDetailPage } from './ContractDetailPage';
+import { configureDocumentDeliveryTestApi } from '../../test/documentDeliveryFixtures';
 
 const { dialogConfirmMock, dialogPromptMock, rolePermissionsResult, authState, deliveryToastSuccess, deliveryToastError } = vi.hoisted(() => ({
   deliveryToastSuccess: vi.fn(),
@@ -107,6 +108,11 @@ vi.mock('../ui/ObjectAuditModal', () => ({
 vi.mock('../../services/api', () => ({
   apiService: {
     getOwnCompanyOptions: vi.fn().mockResolvedValue([]),
+    getMessengerRecipients: vi.fn(),
+    getMessengerDocumentDeliveryHistory: vi.fn(),
+    prepareFinancialDocumentMessengerDelivery: vi.fn(),
+    queueMessengerDocumentDelivery: vi.fn(),
+    prepareElectronicSignatureEnvelope: vi.fn(),
     getMessengerDocumentDeliveryConfiguration: vi.fn().mockResolvedValue({ enabled: false, providers: [] }),
     getElectronicSignatureConfiguration: vi.fn().mockResolvedValue({ enabled: false, preparationEnabled: false, defaultSignatureType: 'qualified', defaultSigningOrder: 'sequential', defaultArchiveRetentionYears: 10, providers: [] }),
     getElectronicSignatureRecipients: vi.fn().mockResolvedValue([]),
@@ -164,6 +170,7 @@ const contractFixture = {
 
 describe('ContractDetailPage integration', () => {
   beforeEach(() => {
+    configureDocumentDeliveryTestApi('contract', 0, 0, false);
     deliveryToastSuccess.mockClear(); deliveryToastError.mockClear();
     Object.assign(rolePermissionsResult.yandexDisk, { canView: true, canCreate: true, viewScope: 'all' });
     vi.useRealTimers();
@@ -458,6 +465,32 @@ describe('ContractDetailPage integration', () => {
 
     const addCounterpartyButton = screen.getByRole('button', { name: 'Добавить контрагента' }) as HTMLButtonElement;
     expect(addCounterpartyButton.disabled).toBe(true);
+  });
+
+  describe('canonical delivery image defaults', () => {
+    it.each(['Мессенджер', 'Э-подпись'])('prepares the contract PDF for %s without overriding saved image choices', async channel => {
+      Object.assign(authState.user.role, { name: 'admin' });
+      const pdf = configureDocumentDeliveryTestApi('contract', 77, 10);
+      vi.mocked(apiService.downloadContractDocument).mockResolvedValueOnce(pdf);
+      render(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+      fireEvent.click(await screen.findByRole('button', { name: channel }));
+      expect(apiService.downloadContractDocument).not.toHaveBeenCalled();
+      if (channel === 'Мессенджер') {
+        await screen.findAllByText(/Получатель PDF/);
+        expect((screen.getByRole('button', { name: /Подготовить и отправить/ }) as HTMLButtonElement).disabled).toBe(true);
+        fireEvent.click(screen.getByLabelText(/Подтверждаю выбранный документ/));
+        fireEvent.click(screen.getByRole('button', { name: /Подготовить и отправить/ }));
+        await waitFor(() => expect(apiService.queueMessengerDocumentDelivery).toHaveBeenCalledExactlyOnceWith(102));
+        expect(apiService.prepareFinancialDocumentMessengerDelivery).toHaveBeenCalledExactlyOnceWith('contract', 77, pdf, expect.objectContaining({ recipientBindingId: 8, confirmRecipientAndDocument: true }));
+      } else {
+        fireEvent.click(await screen.findByText('Подписант PDF'));
+        fireEvent.click(screen.getByLabelText(/Подтверждаю выбранную неизменяемую PDF-версию/));
+        fireEvent.click(screen.getByRole('button', { name: 'Подготовить неизменяемую версию' }));
+        await waitFor(() => expect(apiService.prepareElectronicSignatureEnvelope).toHaveBeenCalledExactlyOnceWith('contract', 77, pdf, expect.objectContaining({ clientId: 10, signerAccountIds: [7], confirmSnapshotAndSigners: true })));
+        expect(apiService.queueMessengerDocumentDelivery).not.toHaveBeenCalled();
+      }
+      expect(apiService.downloadContractDocument).toHaveBeenCalledExactlyOnceWith(77, 'pdf');
+    });
   });
 
   describe('delivery ownership', () => {

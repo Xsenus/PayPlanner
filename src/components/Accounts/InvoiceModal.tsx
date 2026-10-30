@@ -5919,7 +5919,7 @@ export function InvoiceModal({
             sizeBytes: 0,
             sourceType: 'invoice',
           }}
-          preparePdf={() => apiService.downloadInvoiceDocument(invoice.id, 'pdf', { includeSignatureAndSeal: true })}
+          preparePdf={() => apiService.downloadInvoiceDocument(invoice.id, 'pdf')}
           onClose={() => setMessengerDeliveryOpen(null)}
         />
       ) : null}
@@ -5930,7 +5930,7 @@ export function InvoiceModal({
           documentId={invoice.id}
           documentName={`Счёт ${invoice.number || invoice.id}`}
           documentType="invoice"
-          preparePdf={() => apiService.downloadInvoiceDocument(invoice.id, 'pdf', { includeSignatureAndSeal: true })}
+          preparePdf={() => apiService.downloadInvoiceDocument(invoice.id, 'pdf')}
           onClose={() => setElectronicSignatureOpen(null)}
         />
       ) : null}
