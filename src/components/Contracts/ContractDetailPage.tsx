@@ -4,6 +4,7 @@ import { SystemSelect } from '../ui/SystemSelect';
 import { AlertTriangle, ArrowLeft, Ban, Check, Download, FileText, FileX, GripVertical, Loader2, Mail, Pencil, Plus, Printer, Save, Send, Settings2, UploadCloud, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useDocumentDeliveryOwner } from '../../hooks/useDocumentDeliveryOwner';
 import { useDialog } from '../../hooks/useDialog';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
 import { DocumentSellerPicker } from '../Documents/DocumentSellerPicker';
@@ -220,11 +221,17 @@ export function ContractDetailPage({
   const [documentSaving, setDocumentSaving] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [messengerDeliveryOpen, setMessengerDeliveryOpen] = useState(false);
-  const [electronicSignatureOpen, setElectronicSignatureOpen] = useState(false);
+  const [messengerDeliveryOpen, setMessengerDeliveryOpen] = useState<string | null>(null);
+  const [electronicSignatureOpen, setElectronicSignatureOpen] = useState<string | null>(null);
   const printScope = JSON.stringify([detailScope, canExport]);
   const printScopeRef = useRef(printScope);
   printScopeRef.current = printScope;
+  const canSendToDisk = canView && canExport && (isAdmin || Boolean(rolePermissions.yandexDisk?.canView && rolePermissions.yandexDisk?.canCreate));
+  const deliveryScope = JSON.stringify([printScope, contract?.id, contract?.updatedAt, contract?.auditUpdatedAt,
+    contract?.clients.map(c => c.id), isAdmin, canSendToDisk, rolePermissions.yandexDisk?.viewScope]);
+  const delivery = useDocumentDeliveryOwner(deliveryScope);
+  const documentActionBusy = documentSaving || delivery.busy;
+  useEffect(() => { setMessengerDeliveryOpen(null); setElectronicSignatureOpen(null); }, [delivery.scope]);
   const printGeneration = useRef(0);
   const [imagePrintRequest, setImagePrintRequest] = useState<{
     documentId: number; scope: string; generation: number; format: 'print' | 'word' | 'pdf';
@@ -376,8 +383,8 @@ export function ContractDetailPage({
     setEditMode(false);
     setSettingsOpen(false);
     setPickerOpen(false);
-    setMessengerDeliveryOpen(false);
-    setElectronicSignatureOpen(false);
+    setMessengerDeliveryOpen(null);
+    setElectronicSignatureOpen(null);
     if (!canView) {
       setLoading(false);
       return;
@@ -1015,39 +1022,39 @@ export function ContractDetailPage({
   };
 
   const sendContractByEmail = async () => {
-    if (!contract || documentSaving) return;
-
-    const email = (await prompt({
-      title: 'Отправить договор на email',
-      label: 'Email получателя',
-      inputType: 'email',
-      confirmLabel: 'Отправить',
-      cancelLabel: 'Отмена',
-    }))?.trim();
-    if (!email) return;
-
-    setDocumentSaving(true);
+    if (!contract || contract.id !== contractId || !canView || !canExport || documentSaving) return;
+    const operation = delivery.begin('email');
+    if (!operation) return;
     try {
+      const email = (await prompt({
+        title: 'Отправить договор на email',
+        label: 'Email получателя',
+        inputType: 'email',
+        confirmLabel: 'Отправить',
+        cancelLabel: 'Отмена',
+      }))?.trim();
+      if (!email || !operation.isCurrent()) return;
       await apiService.sendContractByEmail(contract.id, { email, format: 'pdf' });
-      toast.success('Договор отправлен на email.', 'Договоры');
+      if (operation.isCurrent()) toast.success('Договор отправлен на email.', 'Договоры');
     } catch (error) {
-      toast.error(extractDisplayErrorMessage(error, 'Не удалось отправить договор'), 'Договоры');
+      if (operation.isCurrent()) toast.error(extractDisplayErrorMessage(error, 'Не удалось отправить договор'), 'Договоры');
     } finally {
-      setDocumentSaving(false);
+      operation.finish();
     }
   };
 
   const uploadContractToYandexDisk = async () => {
-    if (!contract || documentSaving) return;
+    if (!contract || contract.id !== contractId || !canSendToDisk || documentSaving) return;
 
-    setDocumentSaving(true);
+    const operation = delivery.begin('disk');
+    if (!operation) return;
     try {
       const result = await apiService.uploadContractDocumentToYandexDisk(contract.id, 'pdf');
-      toast.success(`Договор отправлен на Яндекс.Диск: ${result.path}.`, 'Я.Диск');
+      if (operation.isCurrent()) toast.success(`Договор отправлен на Яндекс.Диск: ${result.path}.`, 'Я.Диск');
     } catch (error) {
-      toast.error(extractDisplayErrorMessage(error, 'Не удалось отправить договор на Яндекс.Диск'), 'Я.Диск');
+      if (operation.isCurrent()) toast.error(extractDisplayErrorMessage(error, 'Не удалось отправить договор на Яндекс.Диск'), 'Я.Диск');
     } finally {
-      setDocumentSaving(false);
+      operation.finish();
     }
   };
 
@@ -1081,7 +1088,7 @@ export function ContractDetailPage({
 
   if (!canView || (loadError?.scope === detailScope && !contract)) {
     return <div className="space-y-3 p-3 lg:p-4">
-      <button type="button" onClick={onBack} className="inline-flex items-center gap-2 rounded border px-3 py-2"><ArrowLeft className="h-4 w-4" />Назад</button>
+      <button type="button" onClick={() => { delivery.invalidate(); onBack(); }} className="inline-flex items-center gap-2 rounded border px-3 py-2"><ArrowLeft className="h-4 w-4" />Назад</button>
       <p role="alert">{!canView ? 'Нет доступа к договору.' : loadError?.message}</p>
     </div>;
   }
@@ -1096,7 +1103,7 @@ export function ContractDetailPage({
   return (
     <div className="p-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <button onClick={onBack} className="inline-flex items-center gap-2 rounded border px-3 py-2">
+        <button onClick={() => { delivery.invalidate(); onBack(); }} className="inline-flex items-center gap-2 rounded border px-3 py-2">
           <ArrowLeft className="h-4 w-4" />
           Назад
         </button>
@@ -1133,7 +1140,7 @@ export function ContractDetailPage({
             <button
               type="button"
               onClick={() => void downloadTerminationAgreement('pdf')}
-              disabled={documentSaving}
+              disabled={documentActionBusy}
               className="inline-flex items-center gap-2 rounded border border-orange-200 px-3 py-2 text-sm text-orange-700 disabled:opacity-60"
             >
               {documentSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
@@ -1143,7 +1150,7 @@ export function ContractDetailPage({
           <button
             type="button"
             onClick={() => void sendContractByEmail()}
-            disabled={documentSaving}
+            disabled={documentActionBusy || !canView || !canExport}
             className="inline-flex items-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm disabled:opacity-60"
           >
             {documentSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
@@ -1152,8 +1159,8 @@ export function ContractDetailPage({
           {isAdmin && contract.clients.length > 0 ? (
             <button
               type="button"
-              onClick={() => setMessengerDeliveryOpen(true)}
-              disabled={documentSaving}
+              onClick={() => { if (canView && canExport && delivery.capture()) setMessengerDeliveryOpen(delivery.scope); }}
+              disabled={documentActionBusy}
               className="inline-flex items-center gap-2 rounded border border-violet-200 px-3 py-2 text-sm text-violet-700 disabled:opacity-60"
             >
               <Send className="h-4 w-4" />
@@ -1163,8 +1170,8 @@ export function ContractDetailPage({
           {isAdmin && contract.clients.length > 0 ? (
             <button
               type="button"
-              onClick={() => setElectronicSignatureOpen(true)}
-              disabled={documentSaving}
+              onClick={() => { if (canView && canExport && delivery.capture()) setElectronicSignatureOpen(delivery.scope); }}
+              disabled={documentActionBusy}
               className="inline-flex items-center gap-2 rounded border border-blue-200 px-3 py-2 text-sm text-blue-700 disabled:opacity-60"
             >
               <FileText className="h-4 w-4" />
@@ -1174,7 +1181,7 @@ export function ContractDetailPage({
           <button
             type="button"
             onClick={() => void uploadContractToYandexDisk()}
-            disabled={documentSaving}
+            disabled={documentActionBusy || !canSendToDisk}
             className="inline-flex items-center gap-2 rounded border border-sky-200 px-3 py-2 text-sm text-sky-700 disabled:opacity-60"
           >
             {documentSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
@@ -2323,8 +2330,9 @@ export function ContractDetailPage({
           confirmLabel={imagePrintRequest.format === 'print' ? 'Печатать' : `Скачать ${imagePrintRequest.format === 'word' ? 'Word' : 'PDF'}`}
           onConfirm={confirmDocumentCopy} onClose={() => setImagePrintRequest(null)} />
       ) : null}
-      {messengerDeliveryOpen && contract.clients.length > 0 ? (
+      {messengerDeliveryOpen === delivery.scope && canView && canExport && isAdmin && contract.id === contractId && contract.clients.length > 0 ? (
         <MessengerDocumentDeliveryModal
+          key={delivery.scope} ownerScope={delivery.scope}
           clientId={contract.clients[0].id}
           clientOptions={contract.clients.map((client) => ({ id: client.id, name: client.name }))}
           document={{
@@ -2336,17 +2344,18 @@ export function ContractDetailPage({
             sourceType: 'contract',
           }}
           preparePdf={() => apiService.downloadContractDocument(contract.id, 'pdf')}
-          onClose={() => setMessengerDeliveryOpen(false)}
+          onClose={() => setMessengerDeliveryOpen(null)}
         />
       ) : null}
-      {electronicSignatureOpen && contract.clients.length > 0 ? (
+      {electronicSignatureOpen === delivery.scope && canView && canExport && isAdmin && contract.id === contractId && contract.clients.length > 0 ? (
         <ElectronicSignatureModal
+          key={delivery.scope} ownerScope={delivery.scope}
           clientId={contract.clients[0].id}
           documentId={contract.id}
           documentName={`Договор ${contract.number || contract.id}`}
           documentType="contract"
           preparePdf={() => apiService.downloadContractDocument(contract.id, 'pdf')}
-          onClose={() => setElectronicSignatureOpen(false)}
+          onClose={() => setElectronicSignatureOpen(null)}
         />
       ) : null}
     </div>

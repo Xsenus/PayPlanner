@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, Loader2, Send, ShieldCheck, UserPlus, X } from 'lucide-react';
 
 import {
@@ -9,6 +9,8 @@ import {
 } from '../../services/api';
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
+import { useDocumentDeliveryOwner } from '../../hooks/useDocumentDeliveryOwner';
+import { captureAuthSessionIdentity } from '../../services/authService';
 
 const CHANNEL_LABELS: Record<string, string> = {
   telegram: 'Telegram',
@@ -45,6 +47,7 @@ function resolveMessengerDeliverySourceType(sourceType?: string | null): Messeng
 }
 
 type Props = {
+  ownerScope?: string;
   document: MessengerDeliveryDocumentDescriptor;
   clientId: number;
   clientOptions?: Array<{ id: number; name: string }>;
@@ -52,17 +55,30 @@ type Props = {
   onClose: () => void;
 };
 
-export function MessengerDocumentDeliveryModal({ document, clientId, clientOptions, preparePdf, onClose }: Props) {
+export function MessengerDocumentDeliveryModal(props: Props) {
+  const key = JSON.stringify([props.ownerScope, props.document.id, props.document.sourceType, props.document.version,
+    props.document.originalFileName, props.document.sizeBytes, props.clientId, captureAuthSessionIdentity()]);
+  return <MessengerDeliveryForm key={key} {...props} />;
+}
+
+function MessengerDeliveryForm({ document, clientId, clientOptions, preparePdf, onClose, ownerScope }: Props) {
   const sourceType = resolveMessengerDeliverySourceType(document.sourceType);
   const [selectedClientId, setSelectedClientId] = useState(clientId);
-  const [configuration, setConfiguration] = useState<MessengerDocumentDeliveryConfiguration | null>(null);
-  const [recipients, setRecipients] = useState<MessengerRecipientBindingDto[]>([]);
-  const [history, setHistory] = useState<MessengerDocumentDeliveryDto[]>([]);
+  const scope = JSON.stringify([ownerScope, document.id, sourceType, document.version, selectedClientId]);
+  const delivery = useDocumentDeliveryOwner(scope);
+  const { capture: captureDelivery } = delivery;
+  const [loadedScope, setLoadedScope] = useState<string | null>(null);
+  const [storedConfiguration, setConfiguration] = useState<MessengerDocumentDeliveryConfiguration | null>(null);
+  const [storedRecipients, setRecipients] = useState<MessengerRecipientBindingDto[]>([]);
+  const [storedHistory, setHistory] = useState<MessengerDocumentDeliveryDto[]>([]);
+  const configuration = loadedScope === scope ? storedConfiguration : null;
+  const recipients = loadedScope === scope ? storedRecipients : [];
+  const history = loadedScope === scope ? storedHistory : [];
   const [recipientId, setRecipientId] = useState('');
   const [message, setMessage] = useState(`Направляем документ «${document.originalFileName}».`);
   const [confirmed, setConfirmed] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
+  const submitting = delivery.busy;
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [showRecipientForm, setShowRecipientForm] = useState(false);
@@ -73,37 +89,44 @@ export function MessengerDocumentDeliveryModal({ document, clientId, clientOptio
     ownershipConfirmed: false,
   });
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    const owner = captureDelivery();
+    if (!owner) return;
+    setLoadedScope(null);
     setLoading(true);
     setError('');
     try {
       const config = await apiService.getMessengerDocumentDeliveryConfiguration();
+      if (!owner.isCurrent()) return;
       setConfiguration(config);
       if (!config.enabled) {
         setRecipients([]);
         setHistory([]);
+        setLoadedScope(scope);
         return;
       }
       const [nextRecipients, nextHistory] = await Promise.all([
         apiService.getMessengerRecipients(selectedClientId),
         apiService.getMessengerDocumentDeliveryHistory(selectedClientId),
       ]);
+      if (!owner.isCurrent()) return;
       setRecipients(nextRecipients);
       const expectedType = sourceType ?? 'case-document';
       setHistory(nextHistory.filter((item) => item.documentId === document.id && item.documentType === expectedType));
       setRecipientId((current) => current || String(nextRecipients[0]?.id ?? ''));
+      setLoadedScope(scope);
     } catch (cause) {
+      if (!owner.isCurrent()) return;
+      setConfiguration(null); setRecipients([]); setHistory([]);
       setError(cause instanceof Error ? cause.message : 'Не удалось загрузить настройки доставки.');
     } finally {
-      setLoading(false);
+      if (owner.isCurrent()) setLoading(false);
     }
-  };
+  }, [captureDelivery, document.id, scope, selectedClientId, sourceType]);
 
   useEffect(() => {
     void load();
-    // Данные мастера зависят только от выбранного документа и клиента.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedClientId, document.id, sourceType]);
+  }, [load]);
 
   const enabledProviders = useMemo(
     () => configuration?.providers.filter((provider) => provider.enabled) ?? [],
@@ -113,11 +136,13 @@ export function MessengerDocumentDeliveryModal({ document, clientId, clientOptio
   const selectedProviderEnabled = enabledProviders.some((item) => item.channel === selectedRecipient?.channel);
 
   const createRecipient = async () => {
+    if (loadedScope !== scope || !configuration?.enabled) return;
     if (!newRecipient.displayName.trim() || !newRecipient.address.trim() || !newRecipient.ownershipConfirmed) {
       setError('Укажите получателя, контакт и подтвердите принадлежность контакта клиенту.');
       return;
     }
-    setSubmitting(true);
+    const operation = delivery.begin('recipient');
+    if (!operation) return;
     setError('');
     try {
       const created = await apiService.createMessengerRecipient({
@@ -129,18 +154,21 @@ export function MessengerDocumentDeliveryModal({ document, clientId, clientOptio
         verificationMethod: 'admin-confirmed',
         confirmContactOwnership: true,
       });
+      if (!operation.isCurrent()) return;
       setRecipients((items) => [created, ...items.filter((item) => item.id !== created.id)]);
       setRecipientId(String(created.id));
       setShowRecipientForm(false);
       setNewRecipient({ displayName: '', channel: 'telegram', address: '', ownershipConfirmed: false });
     } catch (cause) {
+      if (!operation.isCurrent()) return;
       setError(cause instanceof Error ? cause.message : 'Не удалось сохранить подтверждённый контакт.');
     } finally {
-      setSubmitting(false);
+      operation.finish();
     }
   };
 
   const prepareAndQueue = async () => {
+    if (loadedScope !== scope || loading) return;
     if (!recipientId || !confirmed) {
       setError('Выберите получателя и подтвердите документ, версию и контакт.');
       return;
@@ -149,7 +177,8 @@ export function MessengerDocumentDeliveryModal({ document, clientId, clientOptio
       setError('Выбранный официальный канал пока выключен администратором.');
       return;
     }
-    setSubmitting(true);
+    const operation = delivery.begin('send');
+    if (!operation) return;
     setError('');
     setSuccess('');
     try {
@@ -158,22 +187,27 @@ export function MessengerDocumentDeliveryModal({ document, clientId, clientOptio
         message: message.trim() || undefined,
         confirmRecipientAndDocument: true,
       };
+      const pdf = sourceType ? await requirePdf() : null;
+      if (!operation.isCurrent()) return;
       const prepared = sourceType
         ? await apiService.prepareFinancialDocumentMessengerDelivery(
             sourceType,
             document.id,
-            await requirePdf(),
+            pdf!,
             deliveryPayload,
           )
         : await apiService.prepareCaseDocumentMessengerDelivery(document.id, deliveryPayload);
+      if (!operation.isCurrent()) return;
       await apiService.queueMessengerDocumentDelivery(prepared.id);
+      if (!operation.isCurrent()) return;
       setSuccess('Документ поставлен в безопасную очередь отправки.');
       setConfirmed(false);
       await load();
     } catch (cause) {
+      if (!operation.isCurrent()) return;
       setError(cause instanceof Error ? cause.message : 'Не удалось подготовить отправку.');
     } finally {
-      setSubmitting(false);
+      operation.finish();
     }
   };
 
@@ -196,7 +230,7 @@ export function MessengerDocumentDeliveryModal({ document, clientId, clientOptio
             <div className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-600">Защищённая доставка</div>
             <h2 className="mt-1 text-lg font-semibold text-slate-900">Отправить документ</h2>
           </div>
-          <button type="button" onClick={onClose} aria-label="Закрыть мастер отправки" className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50">
+          <button type="button" onClick={() => { delivery.invalidate(); onClose(); }} aria-label="Закрыть мастер отправки" className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50">
             <X className="h-4 w-4" />
           </button>
         </header>
@@ -211,6 +245,8 @@ export function MessengerDocumentDeliveryModal({ document, clientId, clientOptio
                   setSelectedClientId(Number(event.target.value));
                   setRecipientId('');
                   setConfirmed(false);
+                  setSuccess(''); setShowRecipientForm(false);
+                  setNewRecipient({ displayName: '', channel: 'telegram', address: '', ownershipConfirmed: false });
                 }}
                 className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal"
               >

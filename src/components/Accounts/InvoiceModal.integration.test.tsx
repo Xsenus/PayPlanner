@@ -123,6 +123,10 @@ vi.mock('../../hooks/useToast', () => ({
 vi.mock('../../services/api', () => ({
   apiService: {
     getOwnCompanyOptions: vi.fn().mockResolvedValue([]),
+    getMessengerDocumentDeliveryConfiguration: vi.fn().mockResolvedValue({ enabled: false, providers: [] }),
+    getElectronicSignatureConfiguration: vi.fn().mockResolvedValue({ enabled: false, preparationEnabled: false, defaultSignatureType: 'qualified', defaultSigningOrder: 'sequential', defaultArchiveRetentionYears: 10, providers: [] }),
+    getElectronicSignatureRecipients: vi.fn().mockResolvedValue([]),
+    getElectronicSignatureHistory: vi.fn().mockResolvedValue([]),
     getDocumentImagePrintDefaults: vi.fn().mockResolvedValue({ includeLogo: false, includeSeal: false, includeSignature: false }),
     prepareDocumentPrint: vi.fn(),
     uploadInvoiceDocumentToYandexDisk: vi.fn(),
@@ -3380,6 +3384,73 @@ describe('InvoiceModal integration', () => {
     fireEvent.click(button);
     if (access === 'allowed') await waitFor(() => expect(apiService.uploadInvoiceDocumentToYandexDisk).toHaveBeenCalledExactlyOnceWith(660, 'pdf'));
     else expect(apiService.uploadInvoiceDocumentToYandexDisk).not.toHaveBeenCalled();
+  });
+
+  describe('delivery ownership', () => {
+    it.each(['Мессенджер', 'Э-подпись'].flatMap(channel => ['document', 'user', 'role', 'scope', 'admin'].map(change => ({ channel, change }))))('closes $channel and discards confirmation after $change', async ({ channel, change }) => {
+      Object.assign(printAuthState.user.role, { name: 'admin' });
+      const current = { ...props(), invoice: { ...props().invoice, clientId: 11 } };
+      const view = render(<InvoiceModal {...current} />);
+      fireEvent.click(await screen.findByRole('button', { name: channel }));
+      const title = channel === 'Мессенджер' ? 'Отправка документа в мессенджер' : 'Электронная подпись';
+      expect(await screen.findByLabelText(title)).toBeTruthy();
+      if (change === 'admin') Object.assign(printAuthState.user.role, { name: 'employee' });
+      view.rerender(<InvoiceModal {...changeOwner(change, current)} />);
+      await waitFor(() => expect(screen.queryByLabelText(title)).toBeNull());
+      Object.assign(printAuthState.user, { id: 7, role: { id: 1, name: 'admin' } });
+      permissionState.value!.accounts.viewScope = 'all';
+      view.rerender(<InvoiceModal {...current} />);
+      expect(screen.queryByLabelText(title)).toBeNull();
+    });
+    const props = () => ({ open: true, mode: 'edit' as const, presentation: 'page' as const,
+      invoice: { id: 660, number: '660', date: '2026-04-08', dueDate: '2026-05-07', type: 'Income', amount: 100, status: 'Pending', lineItems: [] } as unknown as Invoice,
+      onClose: vi.fn(), onSubmit: vi.fn(), submitting: false, clients: [], responsibles: [], lookupsLoading: false, relatedPayments: [] });
+    beforeEach(() => {
+      permissionState.value = { ...defaultRolePermissions, accounts: { ...defaultRolePermissions.accounts, canView: true, canExport: true, viewScope: 'all' }, yandexDisk: { ...defaultRolePermissions.yandexDisk, canView: true, canCreate: true } };
+      vi.mocked(apiService.sendInvoiceByEmail).mockReset().mockResolvedValue({ sent: true, recipient: 'client@example.test', fileName: 'invoice.docx', format: 'word' });
+    });
+    const changeOwner = (change: string, current: ReturnType<typeof props>) => {
+      if (change === 'user') printAuthState.user = { id: 8, role: { id: 1 } };
+      if (change === 'role') printAuthState.user = { id: 7, role: { id: 2 } };
+      if (change === 'export') permissionState.value!.accounts.canExport = false;
+      if (change === 'view') permissionState.value!.accounts.canView = false;
+      if (change === 'scope') permissionState.value!.accounts.viewScope = 'own';
+      if (change === 'close') return { ...current, open: false };
+      if (change === 'document') return { ...current, invoice: { ...current.invoice, id: 661, number: '661' } };
+      return { ...current };
+    };
+    it.each(['document', 'user', 'role', 'export', 'view', 'scope', 'close', 'unmount'] as const)('rejects a pending email confirmation after %s', async change => {
+      const pending = createDeferred<boolean>(); confirmMock.mockReturnValueOnce(pending.promise);
+      const current = props(); const view = render(<InvoiceModal {...current} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Отправить' }));
+      expect(confirmMock).toHaveBeenCalledOnce(); const next = changeOwner(change, current);
+      if (change === 'unmount') view.unmount(); else view.rerender(<InvoiceModal {...next} />);
+      await act(async () => pending.resolve(true));
+      expect(apiService.sendInvoiceByEmail).not.toHaveBeenCalled(); expect(toastSuccessMock).not.toHaveBeenCalled();
+    });
+    it.each(['email-success', 'email-error', 'disk-success', 'disk-error'] as const)('ignores %s after a scope change', async action => {
+      const pending = createDeferred<never>(); confirmMock.mockResolvedValue(true);
+      const send = vi.mocked(action.startsWith('email') ? apiService.sendInvoiceByEmail : apiService.uploadInvoiceDocumentToYandexDisk);
+      send.mockReturnValueOnce(pending.promise);
+      const current = props(); const view = render(<InvoiceModal {...current} />);
+      fireEvent.click(await screen.findByRole('button', { name: action.startsWith('email') ? 'Отправить' : 'Я.Диск' }));
+      await waitFor(() => expect(send).toHaveBeenCalledOnce());
+      view.rerender(<InvoiceModal {...changeOwner('scope', current)} />);
+      await act(async () => { if (action.endsWith('error')) pending.reject(new Error('stale delivery failure')); else pending.resolve({ path: '/old' } as never); });
+      expect(toastSuccessMock).not.toHaveBeenCalled(); expect(toastErrorMock).not.toHaveBeenCalled();
+      expect(screen.queryByText('stale delivery failure')).toBeNull();
+    });
+    it('sends only the current invoice and serializes email with disk delivery', async () => {
+      const pending = createDeferred<boolean>(); confirmMock.mockReturnValueOnce(pending.promise);
+      render(<InvoiceModal {...props()} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Отправить' }));
+      const disk = screen.getByRole('button', { name: 'Я.Диск' });
+      expect((disk as HTMLButtonElement).disabled).toBe(true); fireEvent.click(disk);
+      await act(async () => pending.resolve(true));
+      expect(apiService.sendInvoiceByEmail).toHaveBeenCalledExactlyOnceWith(660, { format: 'word', email: undefined });
+      expect(apiService.uploadInvoiceDocumentToYandexDisk).not.toHaveBeenCalled();
+      expect(toastSuccessMock).toHaveBeenCalledOnce();
+    });
   });
 
   describe('invoice document defaults', () => {

@@ -34,6 +34,7 @@ import { fromInputToApiDate, todayYMDInTimeZone, toDateInputValue } from '../../
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDocumentMenuLayout } from '../../hooks/useDocumentMenuLayout';
+import { useDocumentDeliveryOwner } from '../../hooks/useDocumentDeliveryOwner';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useInvoiceReferenceDictionaries } from '../../hooks/useInvoiceReferenceDictionaries';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
@@ -1028,7 +1029,6 @@ export function InvoiceModal({
   const [documentPreviewHtml, setDocumentPreviewHtml] = useState('');
   const [documentPreviewLoading, setDocumentPreviewLoading] = useState(false);
   const [documentPreviewError, setDocumentPreviewError] = useState<string | null>(null);
-  const [yandexDiskUploading, setYandexDiskUploading] = useState(false);
   const [printMenuOpen, setPrintMenuOpen] = useState(false);
   const printButtonRef = useRef<HTMLButtonElement>(null);
   const printRequestGeneration = useRef(0);
@@ -1044,8 +1044,8 @@ export function InvoiceModal({
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
   const printMenuLayout = useDocumentMenuLayout(printMenuOpen && open && canReadPrint && canExport, 24);
   const downloadMenuLayout = useDocumentMenuLayout(downloadMenuOpen && open && canReadPrint && canExport, 28);
-  const [messengerDeliveryOpen, setMessengerDeliveryOpen] = useState(false);
-  const [electronicSignatureOpen, setElectronicSignatureOpen] = useState(false);
+  const [messengerDeliveryOpen, setMessengerDeliveryOpen] = useState<string | null>(null);
+  const [electronicSignatureOpen, setElectronicSignatureOpen] = useState<string | null>(null);
   useEffect(() => { setImagePrintRequest(null); setPrintMenuOpen(false); setDownloadMenuOpen(false); }, [printScope]);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
@@ -1408,6 +1408,12 @@ export function InvoiceModal({
     () => clients.find((client) => String(client.id) === form.clientId) ?? null,
     [clients, form.clientId],
   );
+  const canSendToDisk = canReadPrint && canExport && (isAdmin || Boolean(permissions.yandexDisk.canView && permissions.yandexDisk.canCreate));
+  const deliveryScope = JSON.stringify([printScope, invoice?.auditUpdatedAt,
+    invoice?.clientId, invoice?.expenseClientId, selectedClient?.email, isAdmin, canSendToDisk, permissions.yandexDisk.viewScope]);
+  const delivery = useDocumentDeliveryOwner(deliveryScope);
+  const yandexDiskUploading = delivery.kind === 'disk';
+  useEffect(() => { setMessengerDeliveryOpen(null); setElectronicSignatureOpen(null); }, [delivery.scope]);
   const selectedLegalEntity = useMemo(
     () => legalEntities.find((entity) => String(entity.id) === form.legalEntityId) ?? null,
     [legalEntities, form.legalEntityId],
@@ -3239,20 +3245,21 @@ export function InvoiceModal({
   };
 
   const handleUploadDocumentToYandexDisk = async () => {
-    if (!canReadPrint || !canExport || (!isAdmin && (!permissions.yandexDisk.canView || !permissions.yandexDisk.canCreate))) return;
+    if (!open || !canSendToDisk) return;
     if (!invoice?.id) {
       toast.error('Сначала сохраните счёт, затем можно отправить документ на Яндекс.Диск.');
       return;
     }
 
-    setYandexDiskUploading(true);
+    const operation = delivery.begin('disk');
+    if (!operation) return;
     try {
       const result = await apiService.uploadInvoiceDocumentToYandexDisk(invoice.id, 'pdf');
-      toast.success(`Счёт отправлен на Яндекс.Диск: ${result.path}.`, 'Я.Диск');
+      if (operation.isCurrent()) toast.success(`Счёт отправлен на Яндекс.Диск: ${result.path}.`, 'Я.Диск');
     } catch (err) {
-      toast.error(extractDisplayErrorMessage(err, 'Не удалось отправить счёт на Яндекс.Диск.'), 'Я.Диск');
+      if (operation.isCurrent()) toast.error(extractDisplayErrorMessage(err, 'Не удалось отправить счёт на Яндекс.Диск.'), 'Я.Диск');
     } finally {
-      setYandexDiskUploading(false);
+      operation.finish();
     }
   };
 
@@ -3343,6 +3350,20 @@ export function InvoiceModal({
   };
 
   const handlePageAction = async (action: 'send' | 'markNotSigned' | 'sendToSigning' | 'markSigned' | 'copy' | 'paid' | 'cancel' | 'delete') => {
+    if (action === 'send') {
+      if (!open || !canReadPrint || !canExport || !invoice?.id) return;
+      const operation = delivery.begin('email');
+      if (!operation) return;
+      try {
+        const accepted = await confirm({ title: 'Отправить счёт', description: 'Сформировать документ WORD и отправить на email клиента?', confirmLabel: 'Отправить', cancelLabel: 'Отмена', variant: 'primary' });
+        if (!accepted || !operation.isCurrent()) return;
+        await apiService.sendInvoiceByEmail(invoice.id, { format: 'word', email: selectedClient?.email || undefined });
+        if (operation.isCurrent()) toast.success(selectedClient?.email ? `Документ WORD отправлен на ${selectedClient.email}.` : 'Документ WORD отправлен клиенту по email.', 'Счет отправлен');
+      } catch (err) {
+        if (operation.isCurrent()) toast.error(extractDisplayErrorMessage(err, 'Не удалось выполнить отправку счёта.'));
+      } finally { operation.finish(); }
+      return;
+    }
     if (action === 'cancel') {
       openCancelInvoiceDialog();
       return;
@@ -3368,20 +3389,6 @@ export function InvoiceModal({
     if (!accepted) return;
 
     try {
-      if (action === 'send') {
-        if (!invoice?.id) {
-          throw new Error('Сначала сохраните счёт, затем можно отправить документ.');
-        }
-        await apiService.sendInvoiceByEmail(invoice.id, { format: 'word', email: selectedClient?.email || undefined });
-        toast.success(
-          selectedClient?.email
-            ? `Документ WORD отправлен на ${selectedClient.email}.`
-            : 'Документ WORD отправлен клиенту по email.',
-          'Счет отправлен',
-        );
-        return;
-      }
-
       if (action === 'markNotSigned' || action === 'sendToSigning' || action === 'markSigned') {
         if (!invoice?.id) {
           throw new Error('Сначала сохраните счёт, затем можно менять статус подписания.');
@@ -4008,7 +4015,7 @@ export function InvoiceModal({
         {!isPageMode && (
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => { delivery.invalidate(); onClose(); }}
             className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
             aria-label={t('close') ?? 'Закрыть'}
           >
@@ -4275,12 +4282,12 @@ export function InvoiceModal({
 
           <div className="flex flex-wrap items-start gap-2 rounded-lg border border-slate-300 bg-white p-2 [&_button]:h-10 [&_button]:whitespace-nowrap">
             <div className="flex flex-wrap gap-1 rounded-md border border-slate-200 bg-slate-50 p-1">
-            <button type="button" onClick={() => void handlePageAction('send')} disabled={!canExport} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm disabled:opacity-60"><Send className="h-4 w-4" />Отправить</button>
+            <button type="button" onClick={() => void handlePageAction('send')} disabled={delivery.busy || !canReadPrint || !canExport} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm disabled:opacity-60"><Send className="h-4 w-4" />Отправить</button>
             {isAdmin && invoice && (invoice.type === 'Expense' ? invoice.expenseClientId : invoice.clientId) ? (
-              <button type="button" onClick={() => setMessengerDeliveryOpen(true)} className="inline-flex items-center justify-center gap-2 rounded border border-violet-200 bg-white px-3 py-2 text-sm text-violet-700"><Send className="h-4 w-4" />Мессенджер</button>
+              <button type="button" onClick={() => { if (canReadPrint && canExport && delivery.capture()) setMessengerDeliveryOpen(delivery.scope); }} className="inline-flex items-center justify-center gap-2 rounded border border-violet-200 bg-white px-3 py-2 text-sm text-violet-700"><Send className="h-4 w-4" />Мессенджер</button>
             ) : null}
             {isAdmin && invoice && (invoice.type === 'Expense' ? invoice.expenseClientId : invoice.clientId) ? (
-              <button type="button" onClick={() => setElectronicSignatureOpen(true)} className="inline-flex items-center justify-center gap-2 rounded border border-blue-200 bg-white px-3 py-2 text-sm text-blue-700"><FileText className="h-4 w-4" />Э-подпись</button>
+              <button type="button" onClick={() => { if (canReadPrint && canExport && delivery.capture()) setElectronicSignatureOpen(delivery.scope); }} className="inline-flex items-center justify-center gap-2 rounded border border-blue-200 bg-white px-3 py-2 text-sm text-blue-700"><FileText className="h-4 w-4" />Э-подпись</button>
             ) : null}
             </div>
             <div className="flex flex-wrap gap-1 rounded-md border border-slate-200 bg-slate-50 p-1">
@@ -4340,7 +4347,7 @@ export function InvoiceModal({
             <button
               type="button"
               onClick={() => void handleUploadDocumentToYandexDisk()}
-              disabled={yandexDiskUploading || !canReadPrint || !canExport || (!isAdmin && (!permissions.yandexDisk.canView || !permissions.yandexDisk.canCreate))}
+              disabled={delivery.busy || !canSendToDisk}
               className="inline-flex items-center justify-center gap-2 rounded border border-sky-200 bg-white px-3 py-2 text-sm text-sky-700 disabled:opacity-60"
             >
               {yandexDiskUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
@@ -5900,8 +5907,9 @@ export function InvoiceModal({
           onConfirm={confirmDocumentCopy} onClose={() => setImagePrintRequest(null)} />
       ) : null}
 
-      {messengerDeliveryOpen && invoice && (invoice.type === 'Expense' ? invoice.expenseClientId : invoice.clientId) ? (
+      {messengerDeliveryOpen === delivery.scope && open && canReadPrint && canExport && isAdmin && invoice && (invoice.type === 'Expense' ? invoice.expenseClientId : invoice.clientId) ? (
         <MessengerDocumentDeliveryModal
+          key={delivery.scope} ownerScope={delivery.scope}
           clientId={(invoice.type === 'Expense' ? invoice.expenseClientId : invoice.clientId)!}
           document={{
             id: invoice.id,
@@ -5912,17 +5920,18 @@ export function InvoiceModal({
             sourceType: 'invoice',
           }}
           preparePdf={() => apiService.downloadInvoiceDocument(invoice.id, 'pdf', { includeSignatureAndSeal: true })}
-          onClose={() => setMessengerDeliveryOpen(false)}
+          onClose={() => setMessengerDeliveryOpen(null)}
         />
       ) : null}
-      {electronicSignatureOpen && invoice && (invoice.type === 'Expense' ? invoice.expenseClientId : invoice.clientId) ? (
+      {electronicSignatureOpen === delivery.scope && open && canReadPrint && canExport && isAdmin && invoice && (invoice.type === 'Expense' ? invoice.expenseClientId : invoice.clientId) ? (
         <ElectronicSignatureModal
+          key={delivery.scope} ownerScope={delivery.scope}
           clientId={(invoice.type === 'Expense' ? invoice.expenseClientId : invoice.clientId)!}
           documentId={invoice.id}
           documentName={`Счёт ${invoice.number || invoice.id}`}
           documentType="invoice"
           preparePdf={() => apiService.downloadInvoiceDocument(invoice.id, 'pdf', { includeSignatureAndSeal: true })}
-          onClose={() => setElectronicSignatureOpen(false)}
+          onClose={() => setElectronicSignatureOpen(null)}
         />
       ) : null}
 

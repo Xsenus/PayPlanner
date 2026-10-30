@@ -3,11 +3,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Contract } from '../../types';
 import { ContractDetailPage } from './ContractDetailPage';
 
-const { dialogConfirmMock, dialogPromptMock, rolePermissionsResult, authState } = vi.hoisted(() => ({
+const { dialogConfirmMock, dialogPromptMock, rolePermissionsResult, authState, deliveryToastSuccess, deliveryToastError } = vi.hoisted(() => ({
+  deliveryToastSuccess: vi.fn(),
+  deliveryToastError: vi.fn(),
   dialogConfirmMock: vi.fn(),
   dialogPromptMock: vi.fn(),
   authState: { user: { id: 7, role: { id: 1 } } },
   rolePermissionsResult: {
+    yandexDisk: { canView: true, canCreate: true, viewScope: 'all' },
     clients: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     legalEntities: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     accounts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
@@ -59,8 +62,8 @@ vi.mock('../../contexts/AuthContext', () => ({
 
 vi.mock('../../hooks/useToast', () => ({
   useToast: () => ({
-    success: vi.fn(),
-    error: vi.fn(),
+    success: deliveryToastSuccess,
+    error: deliveryToastError,
   }),
 }));
 
@@ -104,6 +107,10 @@ vi.mock('../ui/ObjectAuditModal', () => ({
 vi.mock('../../services/api', () => ({
   apiService: {
     getOwnCompanyOptions: vi.fn().mockResolvedValue([]),
+    getMessengerDocumentDeliveryConfiguration: vi.fn().mockResolvedValue({ enabled: false, providers: [] }),
+    getElectronicSignatureConfiguration: vi.fn().mockResolvedValue({ enabled: false, preparationEnabled: false, defaultSignatureType: 'qualified', defaultSigningOrder: 'sequential', defaultArchiveRetentionYears: 10, providers: [] }),
+    getElectronicSignatureRecipients: vi.fn().mockResolvedValue([]),
+    getElectronicSignatureHistory: vi.fn().mockResolvedValue([]),
     getDocumentImagePrintDefaults: vi.fn(),
     prepareDocumentPrint: vi.fn(),
     getContract: vi.fn(),
@@ -157,6 +164,8 @@ const contractFixture = {
 
 describe('ContractDetailPage integration', () => {
   beforeEach(() => {
+    deliveryToastSuccess.mockClear(); deliveryToastError.mockClear();
+    Object.assign(rolePermissionsResult.yandexDisk, { canView: true, canCreate: true, viewScope: 'all' });
     vi.useRealTimers();
     authState.user = { id: 7, role: { id: 1 } };
     rolePermissionsResult.contracts.canView = true;
@@ -449,6 +458,85 @@ describe('ContractDetailPage integration', () => {
 
     const addCounterpartyButton = screen.getByRole('button', { name: 'Добавить контрагента' }) as HTMLButtonElement;
     expect(addCounterpartyButton.disabled).toBe(true);
+  });
+
+  describe('delivery ownership', () => {
+    it.each(['Мессенджер', 'Э-подпись'].flatMap(channel => ['document', 'user', 'role', 'scope', 'admin'].map(change => ({ channel, change }))))('closes $channel and discards confirmation after $change', async ({ channel, change }) => {
+      Object.assign(authState.user.role, { name: 'admin' });
+      vi.mocked(apiService.getContract).mockImplementation(async id => ({ ...contractFixture, id, number: String(id) }));
+      const view = render(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+      fireEvent.click(await screen.findByRole('button', { name: channel }));
+      const title = channel === 'Мессенджер' ? 'Отправка документа в мессенджер' : 'Электронная подпись';
+      expect(await screen.findByLabelText(title)).toBeTruthy(); changeOwner(change);
+      if (change === 'admin') Object.assign(authState.user.role, { name: 'employee' });
+      view.rerender(<ContractDetailPage contractId={change === 'document' ? 78 : 77} onBack={vi.fn()} />);
+      await waitFor(() => expect(screen.queryByLabelText(title)).toBeNull());
+      Object.assign(authState.user, { id: 7, role: { id: 1, name: 'admin' } }); rolePermissionsResult.contracts.viewScope = 'all';
+      view.rerender(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+      expect(screen.queryByLabelText(title)).toBeNull();
+    });
+    const deferred = <T,>() => {
+      let resolve!: (value: T) => void; let reject!: (error: Error) => void;
+      const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+      return { promise, resolve, reject };
+    };
+    const changeOwner = (change: string) => {
+      if (change === 'user') authState.user = { id: 8, role: { id: 1 } };
+      if (change === 'role') authState.user = { id: 7, role: { id: 2 } };
+      if (change === 'export') rolePermissionsResult.contracts.canExport = false;
+      if (change === 'view') rolePermissionsResult.contracts.canView = false;
+      if (change === 'scope') rolePermissionsResult.contracts.viewScope = 'own';
+    };
+    it.each(['document', 'user', 'role', 'export', 'view', 'scope', 'unmount'] as const)('rejects a pending email prompt after %s', async change => {
+      const pending = deferred<string | null>(); dialogPromptMock.mockReturnValueOnce(pending.promise);
+      vi.mocked(apiService.getContract).mockImplementation(async id => ({ ...contractFixture, id, number: String(id) }));
+      const view = render(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Email' }));
+      expect(dialogPromptMock).toHaveBeenCalledOnce(); changeOwner(change);
+      if (change === 'unmount') view.unmount(); else view.rerender(<ContractDetailPage contractId={change === 'document' ? 78 : 77} onBack={vi.fn()} />);
+      await act(async () => pending.resolve('client@example.test'));
+      expect(apiService.sendContractByEmail).not.toHaveBeenCalled(); expect(deliveryToastSuccess).not.toHaveBeenCalled();
+    });
+    it.each(['email-success', 'email-error', 'disk-success', 'disk-error'] as const)('ignores %s after a scope change', async action => {
+      const pending = deferred<never>(); dialogPromptMock.mockResolvedValueOnce('client@example.test');
+      const send = vi.mocked(action.startsWith('email') ? apiService.sendContractByEmail : apiService.uploadContractDocumentToYandexDisk);
+      send.mockReturnValueOnce(pending.promise);
+      const view = render(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+      fireEvent.click(await screen.findByRole('button', { name: action.startsWith('email') ? 'Email' : 'Я.Диск' }));
+      await waitFor(() => expect(send).toHaveBeenCalledOnce()); rolePermissionsResult.contracts.viewScope = 'own';
+      view.rerender(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+      await act(async () => { if (action.endsWith('error')) pending.reject(new Error('stale delivery failure')); else pending.resolve({ path: '/old' } as never); });
+      expect(deliveryToastSuccess).not.toHaveBeenCalled(); expect(deliveryToastError).not.toHaveBeenCalled();
+      expect(screen.queryByText('stale delivery failure')).toBeNull();
+    });
+    it.each(['export', 'disk-view', 'disk-create'] as const)('denies disk delivery without %s', async denied => {
+      if (denied === 'export') rolePermissionsResult.contracts.canExport = false;
+      if (denied === 'disk-view') rolePermissionsResult.yandexDisk.canView = false;
+      if (denied === 'disk-create') rolePermissionsResult.yandexDisk.canCreate = false;
+      render(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+      const button = await screen.findByRole('button', { name: 'Я.Диск' });
+      expect((button as HTMLButtonElement).disabled).toBe(true); fireEvent.click(button);
+      expect(apiService.uploadContractDocumentToYandexDisk).not.toHaveBeenCalled();
+    });
+    it('sends only the current contract and serializes email with disk delivery', async () => {
+      const pending = deferred<string | null>(); dialogPromptMock.mockReturnValueOnce(pending.promise);
+      render(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Email' }));
+      const disk = screen.getByRole('button', { name: 'Я.Диск' });
+      expect((disk as HTMLButtonElement).disabled).toBe(true); fireEvent.click(disk);
+      await act(async () => pending.resolve('client@example.test'));
+      expect(apiService.sendContractByEmail).toHaveBeenCalledExactlyOnceWith(77, { format: 'pdf', email: 'client@example.test' });
+      expect(apiService.uploadContractDocumentToYandexDisk).not.toHaveBeenCalled();
+      expect(deliveryToastSuccess).toHaveBeenCalledOnce();
+    });
+    it('uploads the current contract to disk with permitted access and saved image defaults', async () => {
+      render(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Я.Диск' }));
+      await waitFor(() => expect(deliveryToastSuccess).toHaveBeenCalledOnce());
+      expect(apiService.uploadContractDocumentToYandexDisk).toHaveBeenCalledExactlyOnceWith(77, 'pdf');
+      expect(deliveryToastError).not.toHaveBeenCalled();
+      expect((screen.getByRole('button', { name: 'Я.Диск' }) as HTMLButtonElement).disabled).toBe(false);
+    });
   });
 
   it('downloads and sends contract documents from the detail header', async () => {

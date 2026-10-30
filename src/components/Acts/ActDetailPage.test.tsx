@@ -19,7 +19,11 @@ const {
   dialogPromptMock,
   rolePermissionsMock,
   authState,
+  deliveryToastSuccess,
+  deliveryToastError,
 } = vi.hoisted(() => ({
+  deliveryToastSuccess: vi.fn(),
+  deliveryToastError: vi.fn(),
   actModalSpy: vi.fn(),
   getActMock: vi.fn(),
   getClientsMock: vi.fn(),
@@ -74,14 +78,18 @@ vi.mock('../../hooks/useDialog', () => ({
 
 vi.mock('../../hooks/useToast', () => ({
   useToast: () => ({
-    success: vi.fn(),
-    error: vi.fn(),
+    success: deliveryToastSuccess,
+    error: deliveryToastError,
   }),
 }));
 
 vi.mock('../../services/api', () => ({
   apiService: {
     getOwnCompanyOptions: vi.fn().mockResolvedValue([]),
+    getMessengerDocumentDeliveryConfiguration: vi.fn().mockResolvedValue({ enabled: false, providers: [] }),
+    getElectronicSignatureConfiguration: vi.fn().mockResolvedValue({ enabled: false, preparationEnabled: false, defaultSignatureType: 'qualified', defaultSigningOrder: 'sequential', defaultArchiveRetentionYears: 10, providers: [] }),
+    getElectronicSignatureRecipients: vi.fn().mockResolvedValue([]),
+    getElectronicSignatureHistory: vi.fn().mockResolvedValue([]),
     getDocumentImagePrintDefaults: vi.fn().mockResolvedValue({ includeLogo: false, includeSeal: false, includeSignature: false }),
     getAct: getActMock,
     getClients: getClientsMock,
@@ -305,6 +313,71 @@ describe('ActDetailPage', () => {
     fireEvent.click(button);
     if (access === 'allowed') await waitFor(() => expect(apiService.uploadActDocumentToYandexDisk).toHaveBeenCalledExactlyOnceWith(32, 'pdf'));
     else expect(apiService.uploadActDocumentToYandexDisk).not.toHaveBeenCalled();
+  });
+
+  describe('delivery ownership', () => {
+    it.each(['Мессенджер', 'Э-подпись'].flatMap(channel => ['document', 'user', 'role', 'scope', 'admin'].map(change => ({ channel, change }))))('closes $channel and discards confirmation after $change', async ({ channel, change }) => {
+      Object.assign(authState.user.role, { name: 'admin' });
+      getActMock.mockImplementation(async id => ({ id, number: String(id), date: '2026-04-10', amount: 100, status: 'Created', type: 'Income', clientId: 11, lineItems: [] }));
+      const view = render(<ActDetailPage actId={32} onBack={vi.fn()} />);
+      fireEvent.click(await screen.findByRole('button', { name: channel }));
+      const title = channel === 'Мессенджер' ? 'Отправка документа в мессенджер' : 'Электронная подпись';
+      expect(await screen.findByLabelText(title)).toBeTruthy(); changeOwner(change);
+      if (change === 'admin') Object.assign(authState.user.role, { name: 'employee' });
+      view.rerender(<ActDetailPage actId={change === 'document' ? 33 : 32} onBack={vi.fn()} />);
+      await waitFor(() => expect(screen.queryByLabelText(title)).toBeNull());
+      Object.assign(authState.user, { id: 1, role: { id: 1, name: 'admin' } }); rolePermissionsMock.acts.viewScope = 'all';
+      view.rerender(<ActDetailPage actId={32} onBack={vi.fn()} />);
+      expect(screen.queryByLabelText(title)).toBeNull();
+    });
+    const deferred = <T,>() => {
+      let resolve!: (value: T) => void; let reject!: (error: Error) => void;
+      const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+      return { promise, resolve, reject };
+    };
+    beforeEach(() => {
+      getActMock.mockImplementation(async id => ({ id, number: String(id), date: '2026-04-10', amount: 100, status: 'Created', type: 'Income', lineItems: [] }));
+      getClientsMock.mockResolvedValue({ items: [] }); getActResponsiblesMock.mockResolvedValue({ items: [] });
+      sendActByEmailMock.mockReset().mockResolvedValue(undefined);
+    });
+    const changeOwner = (change: string) => {
+      if (change === 'user') authState.user = { id: 8, role: { id: 1 } };
+      if (change === 'role') authState.user = { id: 1, role: { id: 2 } };
+      if (change === 'export') rolePermissionsMock.acts.canExport = false;
+      if (change === 'view') rolePermissionsMock.acts.canView = false;
+      if (change === 'scope') rolePermissionsMock.acts.viewScope = 'own';
+    };
+    it.each(['document', 'user', 'role', 'export', 'view', 'scope', 'unmount'] as const)('rejects a pending email confirmation after %s', async change => {
+      const pending = deferred<boolean>(); dialogConfirmMock.mockReturnValueOnce(pending.promise);
+      const view = render(<ActDetailPage actId={32} onBack={vi.fn()} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Отправить' }));
+      expect(dialogConfirmMock).toHaveBeenCalledOnce(); changeOwner(change);
+      if (change === 'unmount') view.unmount(); else view.rerender(<ActDetailPage actId={change === 'document' ? 33 : 32} onBack={vi.fn()} />);
+      await act(async () => pending.resolve(true));
+      expect(sendActByEmailMock).not.toHaveBeenCalled(); expect(deliveryToastSuccess).not.toHaveBeenCalled();
+    });
+    it.each(['email-success', 'email-error', 'disk-success', 'disk-error'] as const)('ignores %s after a scope change', async action => {
+      const pending = deferred<never>(); const send = action.startsWith('email') ? sendActByEmailMock : vi.mocked(apiService.uploadActDocumentToYandexDisk);
+      send.mockReturnValueOnce(pending.promise);
+      const view = render(<ActDetailPage actId={32} onBack={vi.fn()} />);
+      fireEvent.click(await screen.findByRole('button', { name: action.startsWith('email') ? 'Отправить' : 'Я.Диск' }));
+      await waitFor(() => expect(send).toHaveBeenCalledOnce()); rolePermissionsMock.acts.viewScope = 'own';
+      view.rerender(<ActDetailPage actId={32} onBack={vi.fn()} />);
+      await act(async () => { if (action.endsWith('error')) pending.reject(new Error('stale delivery failure')); else pending.resolve({ path: '/old' } as never); });
+      expect(deliveryToastSuccess).not.toHaveBeenCalled(); expect(deliveryToastError).not.toHaveBeenCalled();
+      expect(screen.queryByText('stale delivery failure')).toBeNull();
+    });
+    it('serializes email confirmation with disk delivery', async () => {
+      const pending = deferred<boolean>(); dialogConfirmMock.mockReturnValueOnce(pending.promise);
+      render(<ActDetailPage actId={32} onBack={vi.fn()} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Отправить' }));
+      const disk = screen.getByRole('button', { name: 'Я.Диск' });
+      expect((disk as HTMLButtonElement).disabled).toBe(true); fireEvent.click(disk);
+      await act(async () => pending.resolve(true));
+      expect(sendActByEmailMock).toHaveBeenCalledExactlyOnceWith(32, { format: 'word', email: undefined });
+      expect(apiService.uploadActDocumentToYandexDisk).not.toHaveBeenCalled();
+      expect(deliveryToastSuccess).toHaveBeenCalledOnce();
+    });
   });
 
   it('sends act document by email from the action bar', async () => {

@@ -10,8 +10,11 @@ import {
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { SystemSelect } from '../ui/SystemSelect';
+import { useDocumentDeliveryOwner } from '../../hooks/useDocumentDeliveryOwner';
+import { captureAuthSessionIdentity } from '../../services/authService';
 
 type Props = {
+  ownerScope?: string;
   documentType: 'invoice' | 'act' | 'contract';
   documentId: number;
   documentName: string;
@@ -25,7 +28,13 @@ const statusLabels: Record<string, string> = {
   declined: 'Отказ', expired: 'Истекло', cancelled: 'Отменено', failed: 'Ошибка', 'verification-failed': 'Ошибка проверки',
 };
 
-export function ElectronicSignatureModal({ documentType, documentId, documentName, clientId, preparePdf, onClose }: Props) {
+export function ElectronicSignatureModal(props: Props) {
+  return <ElectronicSignatureForm key={JSON.stringify([props.ownerScope, props.documentType, props.documentId, props.documentName, props.clientId, captureAuthSessionIdentity()])} {...props} />;
+}
+
+function ElectronicSignatureForm({ documentType, documentId, documentName, clientId, preparePdf, onClose, ownerScope }: Props) {
+  const delivery = useDocumentDeliveryOwner(JSON.stringify([ownerScope, documentType, documentId, clientId]));
+  const { capture: captureDelivery } = delivery;
   const [configuration, setConfiguration] = useState<ElectronicSignatureConfigurationDto | null>(null);
   const [recipients, setRecipients] = useState<ElectronicSignatureRecipientDto[]>([]);
   const [history, setHistory] = useState<ElectronicSignatureEnvelopeDto[]>([]);
@@ -38,13 +47,15 @@ export function ElectronicSignatureModal({ documentType, documentId, documentNam
   const [mchdReference, setMchdReference] = useState('');
   const [confirmed, setConfirmed] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
+  const submitting = delivery.busy;
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
   const [cancelCandidate, setCancelCandidate] = useState<ElectronicSignatureEnvelopeDto | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
   const load = useCallback(async () => {
+    const owner = captureDelivery();
+    if (!owner) return;
     setLoading(true);
     setError('');
     try {
@@ -53,6 +64,7 @@ export function ElectronicSignatureModal({ documentType, documentId, documentNam
         apiService.getElectronicSignatureRecipients(clientId),
         apiService.getElectronicSignatureHistory(documentType, documentId),
       ]);
+      if (!owner.isCurrent()) return;
       setConfiguration(config);
       setRecipients(nextRecipients);
       setHistory(nextHistory);
@@ -61,11 +73,12 @@ export function ElectronicSignatureModal({ documentType, documentId, documentNam
       setArchiveYears(config.defaultArchiveRetentionYears);
       setProvider(config.providers[0]?.name ?? 'KonturDiadoc');
     } catch (cause) {
+      if (!owner.isCurrent()) return;
       setError(cause instanceof Error ? cause.message : 'Не удалось загрузить контур электронной подписи.');
     } finally {
-      setLoading(false);
+      if (owner.isCurrent()) setLoading(false);
     }
-  }, [clientId, documentId, documentType]);
+  }, [captureDelivery, clientId, documentId, documentType]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -82,11 +95,14 @@ export function ElectronicSignatureModal({ documentType, documentId, documentNam
     if (!configuration?.preparationEnabled) return setError('Подготовка электронной подписи выключена администратором.');
     if (signerIds.length === 0 || !confirmed) return setError('Выберите подписантов и подтвердите неизменяемую версию документа.');
     if (requiresMchd && !mchdReference.trim()) return setError('Укажите ссылку или номер МЧД.');
-    setSubmitting(true);
+    if (loading) return;
+    const operation = delivery.begin('prepare');
+    if (!operation) return;
     setError('');
     setSuccess('');
     try {
       const pdf = await preparePdf();
+      if (!operation.isCurrent()) return;
       if (pdf.size <= 0 || (pdf.type && pdf.type !== 'application/pdf')) throw new Error('CRM не сформировала корректный PDF.');
       await apiService.prepareElectronicSignatureEnvelope(documentType, documentId, pdf, {
         clientId,
@@ -99,38 +115,48 @@ export function ElectronicSignatureModal({ documentType, documentId, documentNam
         powerOfAttorneyReference: mchdReference.trim() || undefined,
         confirmSnapshotAndSigners: true,
       });
+      if (!operation.isCurrent()) return;
       setConfirmed(false);
       setSuccess(selectedProvider?.enabled && configuration.enabled
         ? 'Неизменяемая версия подготовлена для отправки провайдеру.'
         : 'Неизменяемая версия подготовлена. Отправка останется выключенной до подключения официального провайдера.');
-      setHistory(await apiService.getElectronicSignatureHistory(documentType, documentId));
+      const nextHistory = await apiService.getElectronicSignatureHistory(documentType, documentId);
+      if (operation.isCurrent()) setHistory(nextHistory);
     } catch (cause) {
+      if (!operation.isCurrent()) return;
       setError(cause instanceof Error ? cause.message : 'Не удалось подготовить документ к подписанию.');
     } finally {
-      setSubmitting(false);
+      operation.finish();
     }
   };
 
   const cancelPrepared = async (item: ElectronicSignatureEnvelopeDto) => {
-    setSubmitting(true);
+    const operation = delivery.begin('cancel');
+    if (!operation) return;
     setError('');
     setSuccess('');
     try {
       await apiService.cancelElectronicSignatureEnvelope(item.publicId);
+      if (!operation.isCurrent()) return;
       setSuccess('Подготовленная версия отменена. PDF и история сохранены.');
-      setHistory(await apiService.getElectronicSignatureHistory(documentType, documentId));
+      const nextHistory = await apiService.getElectronicSignatureHistory(documentType, documentId);
+      if (operation.isCurrent()) setHistory(nextHistory);
     } catch (cause) {
+      if (!operation.isCurrent()) return;
       setError(cause instanceof Error ? cause.message : 'Не удалось отменить подготовленную версию.');
     } finally {
-      setSubmitting(false);
+      operation.finish();
     }
   };
 
   const downloadEvidence = async (item: ElectronicSignatureEnvelopeDto) => {
+    const operation = delivery.begin('archive');
+    if (!operation) return;
     setDownloadingId(item.id);
     setError('');
     try {
       const result = await apiService.downloadElectronicSignatureEvidencePackage(item.publicId);
+      if (!operation.isCurrent()) return;
       const url = URL.createObjectURL(result.blob);
       const anchor = document.createElement('a');
       anchor.href = url;
@@ -138,9 +164,11 @@ export function ElectronicSignatureModal({ documentType, documentId, documentNam
       anchor.click();
       URL.revokeObjectURL(url);
     } catch (cause) {
+      if (!operation.isCurrent()) return;
       setError(cause instanceof Error ? cause.message : 'Не удалось сформировать доказательный пакет.');
     } finally {
-      setDownloadingId(null);
+      if (operation.isCurrent()) setDownloadingId(null);
+      operation.finish();
     }
   };
 
@@ -149,7 +177,7 @@ export function ElectronicSignatureModal({ documentType, documentId, documentNam
       <div className="max-h-[94vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
         <header className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3">
           <div><h2 className="flex items-center gap-2 font-semibold text-slate-900"><FileSignature className="h-5 w-5 text-blue-600" /> Электронная подпись</h2><p className="mt-1 text-xs text-slate-500">{documentName}</p></div>
-          <button type="button" onClick={onClose} aria-label="Закрыть" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><X className="h-4 w-4" /></button>
+          <button type="button" onClick={() => { delivery.invalidate(); onClose(); }} aria-label="Закрыть" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><X className="h-4 w-4" /></button>
         </header>
         <div className="space-y-3 p-4">
           {loading ? <div className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />Загрузка…</div> : null}

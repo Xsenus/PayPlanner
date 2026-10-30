@@ -2,6 +2,7 @@ import { ArrowLeft, Ban, Check, ChevronDown, Download, FilePlus2, Link2, List, L
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDocumentMenuLayout } from '../../hooks/useDocumentMenuLayout';
+import { useDocumentDeliveryOwner } from '../../hooks/useDocumentDeliveryOwner';
 import { useDialog } from '../../hooks/useDialog';
 import { useDocumentStatusSettings } from '../../hooks/useDocumentStatusSettings';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
@@ -236,8 +237,8 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
   } | null>(null);
   const [pageActionLoading, setPageActionLoading] = useState<PageAction | null>(null);
   const [statusChangeOpen, setStatusChangeOpen] = useState(false);
-  const [messengerDeliveryOpen, setMessengerDeliveryOpen] = useState(false);
-  const [electronicSignatureOpen, setElectronicSignatureOpen] = useState(false);
+  const [messengerDeliveryOpen, setMessengerDeliveryOpen] = useState<string | null>(null);
+  const [electronicSignatureOpen, setElectronicSignatureOpen] = useState<string | null>(null);
   const [statusChangeValue, setStatusChangeValue] = useState<ActWorkflowStatus>('Draft');
   const [statusChangeReason, setStatusChangeReason] = useState('');
   const [statusChangeSubmitting, setStatusChangeSubmitting] = useState(false);
@@ -399,6 +400,10 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
     () => clients.find((client) => client.id === act?.clientId) ?? null,
     [act?.clientId, clients],
   );
+  const canSendToDisk = canView && canExport && (isAdmin || Boolean(permissions.yandexDisk?.canView && permissions.yandexDisk?.canCreate));
+  const deliveryScope = JSON.stringify([printScope, act?.id, act?.clientId, selectedClient?.email, isAdmin, canSendToDisk, permissions.yandexDisk?.viewScope]);
+  const delivery = useDocumentDeliveryOwner(deliveryScope);
+  useEffect(() => { setMessengerDeliveryOpen(null); setElectronicSignatureOpen(null); }, [delivery.scope]);
 
   const selectedResponsibleLabel = useMemo(() => {
     if (act?.responsibleName?.trim()) {
@@ -553,17 +558,19 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
   };
 
   const handleUploadDocumentToYandexDisk = async () => {
-    if (!act?.id || !canExport || (!isAdmin && (!permissions.yandexDisk?.canView || !permissions.yandexDisk?.canCreate))) return;
+    if (!act?.id || act.id !== actId || !canSendToDisk) return;
 
-    setPageActionLoading('yandexDisk');
+    const operation = delivery.begin('disk');
+    if (!operation) return;
     try {
       const result = await apiService.uploadActDocumentToYandexDisk(act.id, 'pdf');
+      if (!operation.isCurrent()) return;
       setError(null);
       toast.success(`Акт отправлен на Яндекс.Диск: ${result.path}.`, 'Я.Диск');
     } catch (uploadError) {
-      setError(extractDisplayErrorMessage(uploadError, 'Не удалось отправить акт на Яндекс.Диск.'));
+      if (operation.isCurrent()) setError(extractDisplayErrorMessage(uploadError, 'Не удалось отправить акт на Яндекс.Диск.'));
     } finally {
-      setPageActionLoading(null);
+      operation.finish();
     }
   };
 
@@ -805,23 +812,23 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
   }, [act, confirm, loadActBundle, prompt, toast]);
 
   const handleSend = useCallback(async () => {
-    if (!act) return;
-
-    const accepted = await confirm({
-      title: 'Отправить акт',
-      description: 'Сформировать документ WORD и отправить на email клиента?',
-      confirmLabel: 'Отправить',
-      cancelLabel: 'Отмена',
-      variant: 'primary',
-    });
-    if (!accepted) return;
-
-    setPageActionLoading('send');
+    if (!act || act.id !== actId || !canView || !canExport) return;
+    const operation = delivery.begin('email');
+    if (!operation) return;
     try {
+      const accepted = await confirm({
+        title: 'Отправить акт',
+        description: 'Сформировать документ WORD и отправить на email клиента?',
+        confirmLabel: 'Отправить',
+        cancelLabel: 'Отмена',
+        variant: 'primary',
+      });
+      if (!accepted || !operation.isCurrent()) return;
       await apiService.sendActByEmail(act.id, {
         format: 'word',
         email: selectedClient?.email || undefined,
       });
+      if (!operation.isCurrent()) return;
       setError(null);
       toast.success(
         selectedClient?.email
@@ -830,13 +837,14 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
         'Акт отправлен',
       );
     } catch (sendError) {
+      if (!operation.isCurrent()) return;
       const message = extractDisplayErrorMessage(sendError, 'Не удалось выполнить отправку акта.');
       setError(message);
       toast.error(message);
     } finally {
-      setPageActionLoading(null);
+      operation.finish();
     }
-  }, [act, confirm, selectedClient?.email, toast]);
+  }, [act, actId, canView, canExport, confirm, delivery, selectedClient?.email, toast]);
 
   const notSignedDisabled = !canEdit || currentWorkflowStatus === 'NotSigned' || act?.status === 'Terminated';
   const transferredDisabled = !canEdit || currentWorkflowStatus === 'OnSigning' || act?.status === 'Signed' || act?.status === 'Terminated';
@@ -919,7 +927,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
         <div className="rounded-2xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-700">
           {error ?? 'Акт не найден.'}
         </div>
-        <button type="button" onClick={onBack} className="mt-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">К списку актов</button>
+        <button type="button" onClick={() => { delivery.invalidate(); onBack(); }} className="mt-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">К списку актов</button>
       </div>
     );
   }
@@ -936,7 +944,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
           <div className="flex min-w-0 items-center gap-3 sm:flex-1">
             <button
               type="button"
-              onClick={onBack}
+              onClick={() => { delivery.invalidate(); onBack(); }}
               className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
             >
               <ArrowLeft className="h-4 w-4" />
@@ -1166,17 +1174,17 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
             <button
               type="button"
               onClick={() => void handleSend()}
-              disabled={pageActionLoading === 'send'}
+              disabled={delivery.busy || !canView || !canExport}
               className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {pageActionLoading === 'send' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              {delivery.kind === 'email' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               Отправить
             </button>
 
             {isAdmin && act.clientId ? (
               <button
                 type="button"
-                onClick={() => setMessengerDeliveryOpen(true)}
+                onClick={() => { if (canView && canExport && delivery.capture()) setMessengerDeliveryOpen(delivery.scope); }}
                 className="inline-flex items-center justify-center gap-2 rounded border border-violet-200 bg-white px-3 py-2 text-sm text-violet-700 transition hover:bg-violet-50"
               >
                 <Send className="h-4 w-4" />
@@ -1186,7 +1194,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
             {isAdmin && act.clientId ? (
               <button
                 type="button"
-                onClick={() => setElectronicSignatureOpen(true)}
+                onClick={() => { if (canView && canExport && delivery.capture()) setElectronicSignatureOpen(delivery.scope); }}
                 className="inline-flex items-center justify-center gap-2 rounded border border-blue-200 bg-white px-3 py-2 text-sm text-blue-700 transition hover:bg-blue-50"
               >
                 <FilePlus2 className="h-4 w-4" />
@@ -1232,10 +1240,10 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
             <button
               type="button"
               onClick={() => void handleUploadDocumentToYandexDisk()}
-              disabled={pageActionLoading === 'yandexDisk' || !canExport || (!isAdmin && (!permissions.yandexDisk?.canView || !permissions.yandexDisk?.canCreate))}
+              disabled={delivery.busy || !canSendToDisk}
               className="inline-flex items-center justify-center gap-2 rounded border border-sky-200 bg-white px-3 py-2 text-sm text-sky-700 transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {pageActionLoading === 'yandexDisk' ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+              {delivery.kind === 'disk' ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
               Я.Диск
             </button>
 
@@ -1439,8 +1447,9 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
           confirmLabel={imagePrintRequest.format === 'print' ? 'Печатать' : `Скачать ${imagePrintRequest.format === 'word' ? 'Word' : 'PDF'}`}
           onConfirm={confirmDocumentCopy} onClose={() => setImagePrintRequest(null)} />
       ) : null}
-      {messengerDeliveryOpen && act.clientId ? (
+      {messengerDeliveryOpen === delivery.scope && canView && canExport && isAdmin && act.id === actId && act.clientId ? (
         <MessengerDocumentDeliveryModal
+          key={delivery.scope} ownerScope={delivery.scope}
           clientId={act.clientId}
           document={{
             id: act.id,
@@ -1451,17 +1460,18 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
             sourceType: 'act',
           }}
           preparePdf={() => apiService.downloadActDocument(act.id, 'pdf', { includeSignatureAndSeal: true })}
-          onClose={() => setMessengerDeliveryOpen(false)}
+          onClose={() => setMessengerDeliveryOpen(null)}
         />
       ) : null}
-      {electronicSignatureOpen && act.clientId ? (
+      {electronicSignatureOpen === delivery.scope && canView && canExport && isAdmin && act.id === actId && act.clientId ? (
         <ElectronicSignatureModal
+          key={delivery.scope} ownerScope={delivery.scope}
           clientId={act.clientId}
           documentId={act.id}
           documentName={`Акт ${act.number || act.id}`}
           documentType="act"
           preparePdf={() => apiService.downloadActDocument(act.id, 'pdf', { includeSignatureAndSeal: true })}
-          onClose={() => setElectronicSignatureOpen(false)}
+          onClose={() => setElectronicSignatureOpen(null)}
         />
       ) : null}
     </div>
