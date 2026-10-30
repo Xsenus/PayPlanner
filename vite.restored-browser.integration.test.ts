@@ -29,7 +29,7 @@ async function launchBrowser(): Promise<Browser> {
   throw new Error('Для браузерного теста нужен установленный Chromium/Edge/Chrome.');
 }
 
-async function qualifyNativeBrowserFixture(coldTransformDelayMs = 0, coldClientTransformDelayMs = 0) {
+async function qualifyNativeBrowserFixture(coldTransformDelayMs = 0, coldClientTransformDelayMs = 0, coldTransitiveTransformDelayMs = 0) {
   let identity = ID;
   let uiOrigin = '';
   const requests: Array<{ path: string; marker?: string }> = [];
@@ -81,6 +81,10 @@ async function qualifyNativeBrowserFixture(coldTransformDelayMs = 0, coldClientT
     const config = createPayPlannerViteConfig(env);
     let coldTransformFinished = coldTransformDelayMs === 0;
     let coldClientTransformFinished = coldClientTransformDelayMs === 0;
+    const transitivePaths = ['/src/services/apiBaseUrl.ts', '/src/utils/restoredRuntimeSafety.ts', '/src/services/restoredRuntimeFetch.ts'];
+    let coldTransitiveArmed = false;
+    const coldTransitiveStarted = new Set<string>();
+    const coldTransitiveFinished = new Set<string>();
     const probeModuleId = '\0payplanner-restored-browser-probe';
     const probeHtml = '<!doctype html><head></head><body><button id="fixture-download" type="button">Скачать файл</button><script type="module" src="/__probe.js"></script></body>';
     const fixturePlugin: Plugin = { name: 'restored-browser-fixture',
@@ -123,6 +127,14 @@ async function qualifyNativeBrowserFixture(coldTransformDelayMs = 0, coldClientT
           await new Promise(resolve => setTimeout(resolve, coldTransformDelayMs));
           coldTransformFinished = true;
         }
+        if (coldTransitiveArmed && coldTransitiveTransformDelayMs > 0) {
+          const path = transitivePaths.find(path => id.replaceAll('\\', '/').split('?')[0].endsWith(path));
+          if (path && !coldTransitiveStarted.has(path)) {
+            coldTransitiveStarted.add(path);
+            await new Promise(resolve => setTimeout(resolve, coldTransitiveTransformDelayMs));
+            coldTransitiveFinished.add(path);
+          }
+        }
         return null;
       }, configureServer(vite) {
       vite.middlewares.use((request, response, next) => {
@@ -151,6 +163,33 @@ async function qualifyNativeBrowserFixture(coldTransformDelayMs = 0, coldClientT
     if (!optimizer) throw new Error('The fixture dependency optimizer is unavailable');
     await optimizer.scanProcessing;
     await Promise.all(optimizer.metadata.depInfoList.map(dependency => dependency.processing));
+    if (coldTransitiveTransformDelayMs > 0) {
+      server.environments.client.moduleGraph.invalidateAll();
+      coldTransitiveArmed = true;
+    }
+    // The optimizer can invalidate transforms after its processing promises
+    // settle. waitForRequestsIdle only tracks the initial static crawl, so
+    // explicitly compile the real current import graph after that boundary.
+    const client = server.environments.client;
+    const preparedModules = new Set<string>();
+    let pendingModules = ['/__probe.js', '/src/services/restoredBrowserSession.ts', '/src/services/apiTransport.ts', '/src/services/restoredRealtime.ts', '/@vite/client', '/@react-refresh'];
+    while (pendingModules.length) {
+      const batch = [...new Set(pendingModules)].filter(url => !preparedModules.has(url));
+      for (const url of batch) preparedModules.add(url);
+      if (preparedModules.size > 128) throw new Error('Fixture import graph exceeds its reviewed preparation bound');
+      const transformed = await Promise.all(batch.map(url => client.transformRequest(url)));
+      for (const result of transformed) expect(result?.code).toBeTruthy();
+      const modules = await Promise.all(batch.map(url => client.moduleGraph.getModuleByUrl(url)));
+      pendingModules = modules.flatMap(module => {
+        if (!module) throw new Error('Prepared fixture module is missing from its actual graph');
+        return [...module.importedModules].map(imported => imported.url);
+      });
+    }
+    for (const url of preparedModules) {
+      const module = await client.moduleGraph.getModuleByUrl(url);
+      expect(module?.transformResult?.code).toBeTruthy();
+    }
+    expect([...coldTransitiveFinished].sort()).toEqual(coldTransitiveTransformDelayMs > 0 ? [...transitivePaths].sort() : []);
     expect(coldTransformFinished).toBe(true);
     expect(coldClientTransformFinished).toBe(true);
     browser = await launchBrowser();
@@ -293,3 +332,6 @@ it('prepares cold fixture imports before navigation while retaining all native b
 
 it('prepares the real cold HMR client before navigation while retaining all native browser barriers',
   () => qualifyNativeBrowserFixture(0, 11_000), 90_000);
+
+it('prepares cold transitive imports after cache invalidation before navigation with all native barriers',
+  () => qualifyNativeBrowserFixture(0, 0, 11_000), 90_000);
