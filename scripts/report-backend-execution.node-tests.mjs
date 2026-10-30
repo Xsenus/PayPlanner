@@ -98,3 +98,105 @@ test('browser failure diagnostics expose only allowlisted stage codes', t => {
   assert.equal(JSON.stringify(report).includes('password'), false);
   assert.equal(JSON.stringify(report).includes('filePosts'), false);
 });
+
+function retirementFixture(t, text) {
+  const f = fixture(t);
+  mkdirSync(join(f.shard, 'batches/exclusive-0'), { recursive: true });
+  writeFileSync(join(f.shard, 'batches/exclusive-0/results.trx'), `<TestRun><Output>${text}</Output></TestRun>`);
+  return executionReport(f.root, 0).batches[0];
+}
+
+test('retirement diagnostics retain fixed failure codes and aggregate completed and failed phases privately', t => {
+  const phase = value => 'CASE_RETIREMENT_BUNDLE_PHASE ' + JSON.stringify(value) + '\n';
+  const batch = retirementFixture(t, 'private-error C:\\private-path\\secret\n'
+    + 'Unavailable proof released the identity\nUnavailable proof released the identity\n'
+    + 'Class bundle inputs changed or could not be verified. private-finalization-detail\n'
+    + phase({ phase: 'scenario', elapsedMs: 10000.2, completed: false, secret: 'private-password' })
+    + phase({ phase: 'scenario', elapsedMs: 125, completed: true })
+    + phase({ phase: 'production-build', elapsedMs: 45.1, completed: true }));
+  assert.deepEqual(batch.results.retirementDiagnostics, {
+    observedFailureCodes: ['class-finalization-failed', 'unavailable-proof-identity-released'],
+    observedExceptionKinds: [],
+    phases: [
+      { phase: 'production-build', completedMarkers: 1, failedMarkers: 0, maximumElapsedMs: 46 },
+      { phase: 'scenario', completedMarkers: 1, failedMarkers: 1, maximumElapsedMs: 10001 },
+    ],
+    phaseMarkersScanned: 3,
+    phaseMarkersTruncated: false,
+  });
+  assert.equal(batch.qualified, false);
+  const serialized = JSON.stringify(batch);
+  for (const secret of ['private', 'password', 'secret', 'Class bundle inputs', 'Unavailable proof released'])
+    assert.equal(serialized.includes(secret), false, secret);
+});
+
+test('retirement diagnostics accept XML-escaped markers but reject arbitrary phases, invalid values and malformed text', t => {
+  const phase = value => 'CASE_RETIREMENT_BUNDLE_PHASE ' + JSON.stringify(value).replaceAll('"', '&quot;') + '\n';
+  const batch = retirementFixture(t,
+    phase({ phase: 'class-dependency-finalization', elapsedMs: 3_600_000, completed: false })
+    + phase({ phase: 'private-unknown-phase', elapsedMs: 1, completed: true })
+    + phase({ phase: 'scenario', elapsedMs: -1, completed: true })
+    + phase({ phase: 'scenario', elapsedMs: 3_600_001, completed: true })
+    + phase({ phase: 'scenario', elapsedMs: 'private-time', completed: true })
+    + phase({ phase: 'scenario', elapsedMs: 1, completed: 'private-state' })
+    + 'CASE_RETIREMENT_BUNDLE_PHASE {"phase":"scenario","elapsedMs":1e309,"completed":true}\n'
+    + 'CASE_RETIREMENT_BUNDLE_PHASE private-malformed-json\n'
+    + 'CASE_RETIREMENT_BUNDLE_PHASE null\n');
+  assert.deepEqual(batch.results.retirementDiagnostics.phases, [
+    { phase: 'class-dependency-finalization', completedMarkers: 0, failedMarkers: 1, maximumElapsedMs: 3_600_000 },
+  ]);
+  assert.equal(batch.results.retirementDiagnostics.phaseMarkersScanned, 9);
+  assert.equal(JSON.stringify(batch).includes('private'), false);
+  assert.equal(batch.qualified, false);
+});
+
+test('retirement diagnostic scanning has a fixed bound and cannot promote a batch to qualified', t => {
+  const marker = 'CASE_RETIREMENT_BUNDLE_PHASE {"phase":"scenario","elapsedMs":1,"completed":true}\n';
+  const batch = retirementFixture(t, marker.repeat(300));
+  assert.deepEqual(batch.results.retirementDiagnostics, {
+    observedFailureCodes: [],
+    observedExceptionKinds: [],
+    phases: [{ phase: 'scenario', completedMarkers: 256, failedMarkers: 0, maximumElapsedMs: 1 }],
+    phaseMarkersScanned: 256,
+    phaseMarkersTruncated: true,
+  });
+  assert.equal(batch.qualified, false);
+  assert.deepEqual(batch.results.capturedOutcomes, {});
+});
+
+test('fixed failure signals distinguish ownership, input drift and missing browser boundary without reflecting suffixes', t => {
+  const batch = retirementFixture(t,
+    'Bundle ownership changed. private-owner\n'
+    + 'Source/config/environment changed between cases private-environment\n'
+    + 'Dependency/tool drift invalidates the entire class private-dependency\n'
+    + 'The browser never reached the owned boundary. private-process\n'
+    + 'UnknownException: private-stack\n');
+  assert.deepEqual(batch.results.retirementDiagnostics.observedFailureCodes,
+    ['browser-boundary-not-reached', 'bundle-owner-changed', 'case-input-drift', 'dependency-tool-drift']);
+  assert.equal(JSON.stringify(batch).includes('private'), false);
+  assert.equal(JSON.stringify(batch).includes('UnknownException'), false);
+});
+
+test('startup signals and known exception types remain fixed codes without error details', t => {
+  const batch = retirementFixture(t, 'Synthetic writable backend failed before listening: private-server-log\n'
+    + 'System.IO.FileNotFoundException: private-runtime-path\n'
+    + 'Microsoft.Data.Sqlite.SqliteException: private-database-content\n'
+    + 'Private.CustomException: private-secret\n');
+  assert.deepEqual(batch.results.retirementDiagnostics.observedFailureCodes, ['backend-startup-failed']);
+  assert.deepEqual(batch.results.retirementDiagnostics.observedExceptionKinds,
+    ['System.IO.FileNotFoundException', 'Microsoft.Data.Sqlite.SqliteException']);
+  assert.equal(JSON.stringify(batch).includes('private'), false);
+  assert.equal(JSON.stringify(batch).includes('CustomException'), false);
+  assert.equal(batch.qualified, false);
+});
+
+test('Node runtime and assertion codes are deduplicated without publishing module names or diffs', t => {
+  const batch = retirementFixture(t, "AssertionError [ERR_ASSERTION]: private-input-diff\n"
+    + "code: 'MODULE_NOT_FOUND', path: 'private-module-name'\n"
+    + "code: 'ERR_MODULE_NOT_FOUND', url: 'private-module-url'\n"
+    + "code: 'ERR_DLOPEN_FAILED', details: 'private-native-path'\n");
+  assert.deepEqual(batch.results.retirementDiagnostics.observedFailureCodes,
+    ['node-assertion-failed', 'node-module-not-found', 'node-native-module-load-failed']);
+  assert.equal(JSON.stringify(batch).includes('private'), false);
+  assert.equal(batch.qualified, false);
+});

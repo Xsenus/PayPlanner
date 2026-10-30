@@ -10,6 +10,85 @@ const errorKinds = new Set(['InvalidDataException', 'IOException', 'Win32Excepti
 const numberFields = ['BatchCount', 'AdmittedWorkers', 'AvailableBytes', 'Processors', 'Workers', 'Active', 'Cases', 'ExitCode', 'VstestPeakWorkingSetBytes'];
 const uploadFailureStages = new Set(['separate-version-response', 'separate-writ-response',
   'separate-document-response', 'separate-document-version-response']);
+const retirementPhases = new Set(['class-dependency-admission', 'source-key-cold', 'production-build',
+  'asset-publish-hash', 'source-key-after-build', 'source-key-hit', 'asset-before-case',
+  'preview-listen', 'browser-open', 'browser-goto', 'browser-snapshot', 'scenario',
+  'source-key-after-case', 'asset-after-case', 'browser-close', 'preview-close',
+  'class-dependency-finalization', 'class-source-finalization', 'class-asset-finalization']);
+const retirementFailureCodes = [
+  ['Input or artifact must be an ordinary file', 'non-ordinary-file'],
+  ['Input or artifact root must be an ordinary directory', 'non-ordinary-directory'],
+  ['Unowned input link', 'unowned-input-link'],
+  ['Non-ordinary root configuration', 'non-ordinary-root-configuration'],
+  ['Dependency/tool drift invalidates the entire class', 'dependency-tool-drift'],
+  ['Production artifact was replaced, extended or truncated', 'asset-drift'],
+  ['A required entry or notification chunk is missing', 'required-asset-missing'],
+  ['Inputs changed during production build', 'build-input-drift'],
+  ['Source/config/environment changed between cases', 'case-input-drift'],
+  ['Partial build cannot be retried', 'partial-build'],
+  ['Faulted class owner cannot build or qualify another case', 'faulted-node-owner'],
+  ['Invalid bundle root.', 'invalid-bundle-root'],
+  ['Bundle ownership changed.', 'bundle-owner-changed'],
+  ['Bundle ownership cannot follow a reparse point.', 'bundle-reparse-point'],
+  ['The class-owned API address is busy or unproven.', 'bundle-address-unproven'],
+  ['A failed or interrupted class build cannot admit another runtime.', 'failed-build-admission'],
+  ['Bundle address was not safely returned.', 'bundle-address-not-returned'],
+  ['A bundle child has not released its lease.', 'bundle-lease-not-released'],
+  ['Failed build owner is preserved for inspection:', 'failed-build-preserved'],
+  ['Class bundle inputs changed or could not be verified.', 'class-finalization-failed'],
+  ['Project root is missing.', 'project-root-missing'],
+  ['Synthetic writable backend failed before listening:', 'backend-startup-failed'],
+  ['Owned restarted backend exited before listening', 'backend-restart-failed'],
+  ['Browser fixture could not start.', 'browser-process-not-started'],
+  ['AssertionError [ERR_ASSERTION]', 'node-assertion-failed'],
+  ["code: 'MODULE_NOT_FOUND'", 'node-module-not-found'],
+  ["code: 'ERR_MODULE_NOT_FOUND'", 'node-module-not-found'],
+  ["code: 'ERR_DLOPEN_FAILED'", 'node-native-module-load-failed'],
+  ['The browser never reached the owned boundary.', 'browser-boundary-not-reached'],
+  ['Unavailable proof released the identity', 'unavailable-proof-identity-released'],
+  ['Unavailable proof lost unsaved fields', 'unavailable-proof-draft-lost'],
+  ['Ordinary polling released a retired identity', 'polling-released-identity'],
+  ['The forced outage did not exercise explicit unresolved-proof recovery', 'outage-recovery-not-exercised'],
+  ['A refused proof was silently accepted', 'refused-proof-accepted'],
+  ['Confirmed retirement retained its browser identity', 'confirmed-identity-retained'],
+];
+const retirementExceptionKinds = ['System.IO.IOException', 'System.IO.FileNotFoundException',
+  'System.IO.DirectoryNotFoundException', 'System.UnauthorizedAccessException', 'System.TimeoutException',
+  'System.OperationCanceledException', 'System.Threading.Tasks.TaskCanceledException',
+  'System.OutOfMemoryException', 'System.ComponentModel.Win32Exception', 'System.Net.Sockets.SocketException',
+  'Microsoft.Data.Sqlite.SqliteException', 'Xunit.Sdk.TrueException', 'Xunit.Sdk.EqualException'];
+
+function retirementDiagnostics(text) {
+  // Observed signals only, not a root-cause verdict or a qualification gate.
+  // Never reflect exception messages, paths, names, payloads or arbitrary JSON.
+  const phases = new Map();
+  const marker = 'CASE_RETIREMENT_BUNDLE_PHASE ';
+  let offset = -marker.length;
+  let scanned = 0;
+  for (; scanned < 256; scanned++) {
+    offset = text.indexOf(marker, offset + marker.length);
+    if (offset < 0) break;
+    const prefix = text.slice(offset + marker.length, offset + marker.length + 1024).replaceAll('&quot;', '"');
+    try {
+      const value = JSON.parse(prefix.slice(0, prefix.indexOf('}') + 1));
+      if (!retirementPhases.has(value.phase) || typeof value.completed !== 'boolean'
+        || !Number.isFinite(value.elapsedMs) || value.elapsedMs < 0 || value.elapsedMs > 3_600_000) continue;
+      // TRX can repeat a marker in ErrorInfo and stdout. These are marker
+      // occurrences, never a count of distinct cases or canonical outcomes.
+      const row = phases.get(value.phase) ?? { phase: value.phase, completedMarkers: 0, failedMarkers: 0, maximumElapsedMs: 0 };
+      row[value.completed ? 'completedMarkers' : 'failedMarkers']++;
+      row.maximumElapsedMs = Math.max(row.maximumElapsedMs, Math.ceil(value.elapsedMs));
+      phases.set(value.phase, row);
+    } catch { /* Malformed diagnostic text never becomes public output or success evidence. */ }
+  }
+  return {
+    observedFailureCodes: [...new Set(retirementFailureCodes.filter(([message]) => text.includes(message)).map(([, code]) => code))].sort(),
+    observedExceptionKinds: retirementExceptionKinds.filter(kind => text.includes(kind)),
+    phases: [...phases.values()].sort((a, b) => a.phase < b.phase ? -1 : a.phase > b.phase ? 1 : 0),
+    phaseMarkersScanned: scanned,
+    phaseMarkersTruncated: scanned === 256 && text.indexOf(marker, offset + marker.length) >= 0,
+  };
+}
 
 function readJson(path) {
   try {
@@ -61,6 +140,7 @@ function trxSummary(path) {
   }
   return { available: true, capturedOutcomes: counts, unsuccessfulIds: unsuccessfulIds.slice(0, 100),
     browserFailureStages: [...browserFailureStages].sort(),
+    retirementDiagnostics: retirementDiagnostics(text),
     omittedIds: Math.max(0, unsuccessfulIds.length - 100) };
 }
 
