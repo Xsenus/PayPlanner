@@ -98,6 +98,8 @@ public partial class LegalEntitiesControllerTests
         using var profile = await client.GetAsync("/api/legal-entities/company-profile");
         using var detail = await client.GetAsync($"/api/legal-entities/{companyId}");
         var opened = detail.IsSuccessStatusCode ? await detail.Content.ReadFromJsonAsync<PayPlanner.Api.Models.Responses.LegalEntityDetailDto>() : null;
+        if (opened is not null) Assert.True(opened.IsOwnCompany);
+        if (profile.IsSuccessStatusCode) Assert.True((await profile.Content.ReadFromJsonAsync<PayPlanner.Api.Models.Responses.LegalEntityDetailDto>())!.IsOwnCompany);
         using var update = await client.PutAsJsonAsync($"/api/legal-entities/{companyId}", new { shortName = "Changed by granted editor", profileEditVersion = opened?.ProfileEditVersion });
         Assert.Equal(profileStatus, profile.StatusCode); Assert.Equal(detailStatus, detail.StatusCode); Assert.Equal(updateStatus, update.StatusCode);
         if (profileStatus != HttpStatusCode.OK) Assert.DoesNotContain("QUFB", await profile.Content.ReadAsStringAsync());

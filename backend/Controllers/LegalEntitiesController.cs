@@ -535,10 +535,12 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
     private async Task<LegalEntityDetailDto> MapDetailForCurrentUserAsync(
         LegalEntity entity,
         CancellationToken ct,
+        bool isOwnCompany,
         bool includeInlineAssets = true)
     {
         var visibleClientIds = await LoadVisibleClientIdsAsync([entity], ct);
         var result = MapDetail(entity, includeInlineAssets, visibleClientIds);
+        result.IsOwnCompany = isOwnCompany;
         var defaults = await new CompanyDocumentImagePrintDefaultsService(_db).ReadAsync(entity.Id, ct);
         result.DocumentImagePrintDefaults = defaults.Value;
         result.DocumentImagePrintDefaultsInvalid = defaults.Invalid;
@@ -1278,7 +1280,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync(ct);
 
         var responseEntity = await LoadLegalEntityForDetailAsync(entity.Id, ct);
-        var response = await MapDetailForCurrentUserAsync(responseEntity ?? entity, ct, includeInlineAssets: false);
+        var response = await MapDetailForCurrentUserAsync(responseEntity ?? entity, ct, isOwnCompany: false, includeInlineAssets: false);
         return Created($"/api/legal-entities/{entity.Id}", response);
     }
 
@@ -1520,7 +1522,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             return NotFound("Головная организация не найдена.");
         }
 
-        return Ok(await MapDetailForCurrentUserAsync(entity, ct));
+        return Ok(await MapDetailForCurrentUserAsync(entity, ct, isOwnCompany: true));
     }
 
     [HttpPut("company-profile/main/{id:int}")]
@@ -2040,7 +2042,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             return NotFound();
         }
 
-        return Ok(await MapDetailForCurrentUserAsync(entity, ct));
+        return Ok(await MapDetailForCurrentUserAsync(entity, ct, isProfile));
     }
 
     /// <summary>
@@ -2444,7 +2446,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             await _db.SaveChangesAsync(ct);
 
             var responseEntity = await LoadLegalEntityForDetailAsync(entity.Id, ct);
-            return Ok(await MapDetailForCurrentUserAsync(responseEntity ?? entity, ct, includeInlineAssets: false));
+            return Ok(await MapDetailForCurrentUserAsync(responseEntity ?? entity, ct, isProfile, includeInlineAssets: false));
         }
 
         if (!CompanyDocumentImagePrintDefaultsService.ShouldWrite(request.DocumentImagePrintDefaultsChanged)) return await SaveProfileAsync();

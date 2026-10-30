@@ -25,7 +25,7 @@ describe('company profile access boundaries', () => {
   it.each([false, true])('branch caller: forwards explicit administrator authority from the profile when admin=%s', async admin => {
     fixture.admin = admin; fixture.view = true; fixture.edit = true;
     render(<CompanyProfile />); await screen.findByText('Assigned company', { selector: 'span' });
-    expect(fixture.modal.mock.lastCall?.[0]).toMatchObject({ canManageCompanyBranches: admin });
+    expect(fixture.modal.mock.lastCall?.[0]).toMatchObject({ canManageCompanyBranches: admin, canManageOwnCompanySettings: admin });
   });
 
   beforeEach(() => {

@@ -129,7 +129,7 @@ describe('LegalEntities permissions', () => {
     authUser.role.name = role;
     render(<LegalEntities initialLegalEntityId={7} detailOnly />);
     await waitFor(() => expect(modalSpy.mock.lastCall?.[0]?.initial?.id).toBe(7));
-    expect(modalSpy.mock.lastCall?.[0]).toMatchObject({ canManageCompanyBranches: role.toLowerCase() === 'admin' });
+    expect(modalSpy.mock.lastCall?.[0]).toMatchObject({ canManageCompanyBranches: role.toLowerCase() === 'admin', canManageOwnCompanySettings: role.toLowerCase() === 'admin' });
   });
 
   describe('deletion guard', () => {

@@ -494,6 +494,8 @@ export interface LegalEntitySummary {
 }
 
 export interface LegalEntityDetail extends LegalEntitySummary {
+  /** Принадлежность из той же авторизованной загрузки карточки; старые ответы могут не содержать поля. */
+  isOwnCompany?: boolean | null;
   profileEditVersion?: string | null;
   clients: LegalEntityClientLink[];
   documentImagePrintDefaults?: CompanyDocumentImagePrintDefaults | null;

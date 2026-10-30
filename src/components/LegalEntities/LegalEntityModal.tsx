@@ -785,7 +785,7 @@ export function LegalEntityModal({
   hideAuditSection = false,
   hideDictionaryButtons = false,
   compactReadOnlyView = false,
-  canManageOwnCompanySettings = true,
+  canManageOwnCompanySettings = false,
   canManageCompanyBranches = false,
   canViewCases = true,
   canViewAccounts = true,
@@ -989,7 +989,9 @@ export function LegalEntityModal({
   const [paymentModalMode, setPaymentModalMode] =
     useState<LegalEntityPaymentModalMode>("create");
   const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null);
-  const [mainCompanyIds, setMainCompanyIds] = useState<number[]>([]);
+  const [mainCompanyState, setMainCompanyState] = useState<{ owner: number; ids: number[]; error: string | null } | null>(null);
+  const [classificationRetry, setClassificationRetry] = useState(0);
+  const clientPickerOwner = useRef<number | null>(null);
   const selectedLegalEntityClientStatus = useMemo(
     () =>
       formState.clientStatusId
@@ -1042,8 +1044,19 @@ export function LegalEntityModal({
     && (relatedRecordPermissions === undefined || relatedRecordPermissions[section]?.[permission] === true);
   const isPageMode = mode === "page";
   const currentLegalEntityId = initial?.id ?? null;
-  const isOwnLegalEntity =
-    currentLegalEntityId !== null && mainCompanyIds.includes(currentLegalEntityId);
+  const classificationScope = JSON.stringify([currentLegalEntityId, isOpen, mode, readOnly, deleteOwnerScope,
+    canManageOwnCompanySettings, initial?.profileEditVersion, deleteSession]);
+  const { capture: captureClassificationOwner, isCurrent: isClassificationOwnerCurrent } = useAsyncOperationOwner(classificationScope);
+  const classificationOwner = captureClassificationOwner();
+  const legacyClassification = mainCompanyState?.owner === classificationOwner ? mainCompanyState : null;
+  const ownCompanyClassification = currentLegalEntityId === null ? false
+    : typeof initial?.isOwnCompany === 'boolean' ? initial.isOwnCompany
+      : legacyClassification && !legacyClassification.error ? legacyClassification.ids.includes(currentLegalEntityId) : null;
+  const isOwnLegalEntity = ownCompanyClassification === true;
+  const canViewClientLinks = ownCompanyClassification !== null && (!isOwnLegalEntity || canManageOwnCompanySettings);
+  const canEditClientLinksNow = () => canViewClientLinks && isOpen && !readOnly
+    && isClassificationOwnerCurrent(classificationOwner) && isAuthSessionIdentityCurrent(deleteSession);
+  const clientPickerActive = pickerOpen && clientPickerOwner.current === classificationOwner && canViewClientLinks && !readOnly;
   const selectedCaseId =
     selectedLegalEntityCaseId === "all" ? undefined : selectedLegalEntityCaseId;
   const showLegacyImageFields = false;
@@ -1058,21 +1071,25 @@ export function LegalEntityModal({
       ? t("editLegalEntity") || "Редактирование юридического лица"
       : t("addLegalEntity") || "Добавление юридического лица");
 
+  const documentClientsNeeded = invoiceModalOpen && canMutateRelated('accounts', invoiceModalMode === 'edit' ? 'canEdit' : 'canCreate')
+    || actModalOpen && canMutateRelated('acts', actModalMode === 'edit' ? 'canEdit' : 'canCreate');
   const clientsLookupOptions = useMemo(
     () =>
       ({
         mode: "paged" as const,
+        enabled: isOpen && documentClientsNeeded,
         page: 1,
         pageSize: 200,
         isActive: true,
         sortBy: "name" as const,
         sortDir: "asc" as const,
       }) satisfies Parameters<typeof useClients>[0],
-    [],
+    [isOpen, documentClientsNeeded],
   );
   const {
     clients: documentClients,
     loading: documentClientsLoading,
+    refreshing: documentClientsRefreshing,
     error: documentClientsError,
     refresh: refreshDocumentClients,
   } = useClients(clientsLookupOptions);
@@ -1122,29 +1139,31 @@ export function LegalEntityModal({
   });
 
   useEffect(() => {
-    if (!isOpen) {
-      setMainCompanyIds([]);
-      return;
-    }
-
+    if (!isOpen || currentLegalEntityId === null || typeof initial?.isOwnCompany === 'boolean') return;
+    const owner = captureClassificationOwner();
+    const session = captureAuthSessionIdentity();
     let cancelled = false;
+    const current = () => !cancelled && isClassificationOwnerCurrent(owner) && isAuthSessionIdentityCurrent(session);
+    setMainCompanyState(null);
     apiService
       .getMainCompanySettings()
       .then((settings) => {
-        if (!cancelled) {
-          setMainCompanyIds(settings.companies.map((company) => company.id));
+        if (current()) {
+          if (!Array.isArray(settings.companies) || !settings.companies.every(company => Number.isInteger(company.id) && company.id > 0))
+            throw new Error('Не удалось подтвердить принадлежность компании.');
+          setMainCompanyState({ owner, ids: settings.companies.map(company => company.id), error: null });
         }
       })
-      .catch(() => {
-        if (!cancelled) {
-          setMainCompanyIds([]);
+      .catch((error) => {
+        if (current()) {
+          setMainCompanyState({ owner, ids: [], error: extractDisplayErrorMessage(error, 'Не удалось подтвердить принадлежность компании.') });
         }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [isOpen]);
+  }, [isOpen, currentLegalEntityId, initial?.isOwnCompany, captureClassificationOwner, isClassificationOwnerCurrent, classificationScope, classificationRetry]);
 
   const legalEntityCaseIdsKey = useMemo(
     () => legalEntityCases.map((item) => item.id).join(","),
@@ -1466,7 +1485,10 @@ export function LegalEntityModal({
   }, [legalEntityCases, selectedLegalEntityCaseId]);
 
   useEffect(() => {
-    if (!isOpen || selectedClients.length === 0) return;
+    if (!isOpen || !canViewClientLinks || selectedClients.length === 0) return;
+
+    const owner = captureClassificationOwner();
+    const session = captureAuthSessionIdentity();
 
     const idsToHydrate = selectedClients
       .map((client) => client.id)
@@ -1487,7 +1509,7 @@ export function LegalEntityModal({
           ),
         );
 
-        if (cancelled) return;
+        if (cancelled || !isClassificationOwnerCurrent(owner) || !isAuthSessionIdentityCurrent(session)) return;
 
         const detailedClients = responses.filter(
           (client): client is ClientAssociationItem => client !== null,
@@ -1501,7 +1523,7 @@ export function LegalEntityModal({
           });
         }
       } finally {
-        if (!cancelled) {
+        if (!cancelled && isClassificationOwnerCurrent(owner) && isAuthSessionIdentityCurrent(session)) {
           setHydratedSelectedClientIds((prev) => [
             ...new Set([...prev, ...idsToHydrate]),
           ]);
@@ -1514,11 +1536,14 @@ export function LegalEntityModal({
     return () => {
       cancelled = true;
     };
-  }, [hydratedSelectedClientIds, isOpen, selectedClients]);
+  }, [canViewClientLinks, hydratedSelectedClientIds, isOpen, selectedClients, classificationScope, captureClassificationOwner, isClassificationOwnerCurrent]);
 
   useEffect(() => {
-    if (!pickerOpen) return;
+    if (!clientPickerActive) return;
+    const owner = captureClassificationOwner();
+    const session = captureAuthSessionIdentity();
     let cancelled = false;
+    const current = () => !cancelled && isClassificationOwnerCurrent(owner) && isAuthSessionIdentityCurrent(session);
 
     const fetchPickerClients = async () => {
       setPickerLoading(true);
@@ -1532,7 +1557,7 @@ export function LegalEntityModal({
           pageSize: pickerPageSize,
         });
 
-        if (cancelled) return;
+        if (!current()) return;
 
         setPickerClients(
           (response.items ?? []).map((client) =>
@@ -1541,7 +1566,7 @@ export function LegalEntityModal({
         );
         setPickerTotal(response.total ?? 0);
       } catch (err) {
-        if (cancelled) return;
+        if (!current()) return;
         const message =
           err instanceof Error ? err.message : "Не удалось загрузить клиентов";
         setPickerClients([]);
@@ -1549,7 +1574,7 @@ export function LegalEntityModal({
         setPickerError(message);
         toast.error(message, "Ошибка загрузки");
       } finally {
-        if (!cancelled) {
+        if (current()) {
           setPickerLoading(false);
         }
       }
@@ -1560,7 +1585,7 @@ export function LegalEntityModal({
     return () => {
       cancelled = true;
     };
-  }, [debouncedPickerSearch, pickerOpen, pickerPage, pickerPageSize, toast]);
+  }, [debouncedPickerSearch, clientPickerActive, pickerPage, pickerPageSize, toast, classificationScope, captureClassificationOwner, isClassificationOwnerCurrent]);
 
   useEffect(() => {
     setPickerPage(1);
@@ -1605,6 +1630,7 @@ export function LegalEntityModal({
   };
 
   const handleAddClient = (id: number) => {
+    if (!clientPickerActive || !canEditClientLinksNow()) return;
     const client = pickerClients.find((item) => item.id === id);
     if (!client) return;
 
@@ -1617,6 +1643,7 @@ export function LegalEntityModal({
   };
 
   const handleRemoveClient = (id: number) => {
+    if (!canEditClientLinksNow()) return;
     setSelectedClients((prev) => prev.filter((client) => client.id !== id));
     setHydratedSelectedClientIds((prev) =>
       prev.filter((clientId) => clientId !== id),
@@ -2077,6 +2104,11 @@ export function LegalEntityModal({
       onClose();
       return;
     }
+    if (!isAuthSessionIdentityCurrent(deleteSession)) return;
+    if (ownCompanyClassification === null) {
+      setError('Не удалось подтвердить принадлежность компании. Повторите проверку или откройте карточку заново. Введённые данные остаются в форме.');
+      return;
+    }
     if (imageUploadsRef.current.size > 0) {
       setError(IMAGE_PROCESSING_SAVE_MESSAGE);
       return;
@@ -2213,9 +2245,9 @@ export function LegalEntityModal({
           contactEmails.filter((x) => x.trim()),
         ),
         notes: normalize(formState.notes),
-        profileStatus: formState.profileStatus,
+        profileStatus: isOwnLegalEntity && !canManageOwnCompanySettings ? initial?.profileStatus ?? 'Active' : formState.profileStatus,
         addresses: dedupedAddressInputs,
-        clientIds,
+        clientIds: canViewClientLinks ? clientIds : (initial?.clients ?? []).map(client => client.id),
       };
 
       if (initial) {
@@ -2872,7 +2904,12 @@ export function LegalEntityModal({
         {!compactReadOnlyView ? (
           <button
             type="button"
-            onClick={() => setPickerOpen(true)}
+            onClick={() => {
+              if (!canEditClientLinksNow()) return;
+              clientPickerOwner.current = classificationOwner;
+              setPickerClients([]); setPickerTotal(0); setPickerError(null); setPickerLoading(true);
+              setPickerPage(1); setPickerOpen(true);
+            }}
             disabled={readOnly}
             className="inline-flex items-center gap-2 rounded border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
@@ -2967,7 +3004,7 @@ export function LegalEntityModal({
   };
 
   const documentsLookupsLoading =
-    documentClientsLoading || legalEntitiesLoading;
+    documentClientsLoading || documentClientsRefreshing || legalEntitiesLoading;
   const documentsLookupsError = [
     documentClientsError,
     legalEntitiesError,
@@ -4731,7 +4768,13 @@ export function LegalEntityModal({
 
         {!compactReadOnlyView ? legalEntityWorkSection : null}
 
-        {canManageOwnCompanySettings ? clientsSection : null}
+        {canViewClientLinks ? clientsSection : null}
+
+        {ownCompanyClassification === null ? <div role="status" className="rounded-xl border border-slate-200 p-3 text-sm text-slate-600">
+          {legacyClassification?.error ? <><p>{legacyClassification.error}</p><p>Принадлежность компании не подтверждена. Введённые данные остаются в форме.</p>
+            <button type="button" className="mt-1 text-blue-700 underline" onClick={() => setClassificationRetry(value => value + 1)}>Повторить проверку принадлежности</button></>
+            : 'Проверяем принадлежность компании…'}
+        </div> : null}
 
         <div className="mt-6">
           <LegalEntityFinanceSection
@@ -5242,7 +5285,7 @@ export function LegalEntityModal({
                 </button>
                 <button
                   type="submit"
-                  disabled={loading || deleting || readOnly || imageProcessing}
+                  disabled={loading || deleting || readOnly || imageProcessing || ownCompanyClassification === null}
                   className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
                 >
                   {loading && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -5385,7 +5428,7 @@ export function LegalEntityModal({
         }}
       />
 
-      {pickerOpen && (
+      {clientPickerActive && (
         <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-3xl rounded-xl bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b px-4 py-3">

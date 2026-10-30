@@ -1225,7 +1225,7 @@ describe('ClientDetail integration', () => {
   it.each([false, true])('branch caller: client requisites forward explicit management when admin=%s', async admin => {
     const previous = authState.isAdmin; authState.isAdmin = admin;
     try {
-      await openOwnerLegalModal(); expect(legalModalOwnerSpy.mock.lastCall?.[0]).toMatchObject({ canManageCompanyBranches: admin });
+      await openOwnerLegalModal(); expect(legalModalOwnerSpy.mock.lastCall?.[0]).toMatchObject({ canManageCompanyBranches: admin, canManageOwnCompanySettings: admin });
     } finally { authState.isAdmin = previous; }
   });
 

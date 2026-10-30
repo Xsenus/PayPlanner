@@ -233,7 +233,7 @@ describe('UnifiedContacts', () => {
       vi.mocked(apiService.getLegalEntity).mockResolvedValue(company as LegalEntityDetail);
       render(<UnifiedContacts initialKind="legal" lockKind />); fireEvent.click(await screen.findByText('Branch authority company'));
       await waitFor(() => expect(legalEntityModalMock.mock.lastCall?.[0]?.initial?.id).toBe(company.id));
-      expect(legalEntityModalMock.mock.lastCall?.[0]).toMatchObject({ canManageCompanyBranches: role === 'admin' });
+      expect(legalEntityModalMock.mock.lastCall?.[0]).toMatchObject({ canManageCompanyBranches: role === 'admin', canManageOwnCompanySettings: role === 'admin' });
     } finally { authUser.role.name = previous; }
   });
 

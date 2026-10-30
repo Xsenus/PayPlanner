@@ -763,6 +763,7 @@ export function LegalEntities({
           allowEdit={editing ? allowDetailEdit : canCreate}
           allowDelete={allowDetailDelete}
           canManageCompanyBranches={user?.role?.name?.toLowerCase() === 'admin'}
+          canManageOwnCompanySettings={user?.role?.name?.toLowerCase() === 'admin'}
           canViewCases={permissions.cases.canView}
           canViewAccounts={permissions.accounts.canView}
           canCreateAccounts={permissions.accounts.canView && permissions.accounts.canCreate}

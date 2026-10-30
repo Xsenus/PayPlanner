@@ -10,6 +10,7 @@ import { documentCopyTestSession } from '../../test/documentCopySession';
 import type { MenuSectionPermissions } from '../../types/permissions';
 import type {
   ActsSummary,
+  Client,
   InvoiceSummary,
   LegalEntityDadataDetails,
   LegalEntityDetail,
@@ -60,13 +61,14 @@ vi.mock('../../hooks/useDialog', () => ({
   useDialog: () => ({ confirm: confirmMock }),
 }));
 
-vi.mock('../../hooks/useToast', () => ({
-  useToast: () => ({
+vi.mock('../../hooks/useToast', () => {
+  const toast = {
     error: toastErrorMock,
     info: toastInfoMock,
     success: toastSuccessMock,
-  }),
-}));
+  };
+  return { useToast: () => toast };
+});
 
 vi.mock('../../hooks/useDictionaries', () => ({
   useDictionaries: () => ({
@@ -96,6 +98,7 @@ vi.mock('../../services/api', () => ({
     getActsSummary: vi.fn().mockResolvedValue(emptyActsSummary),
     getCasesV1: vi.fn().mockResolvedValue([]),
     getClientsV2: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+    getClient: vi.fn().mockResolvedValue(null),
     getInvoices: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 5 }),
     getInvoicesSummary: vi.fn().mockResolvedValue(emptyInvoiceSummary),
     getLegalEntityCaseFinanceSummaries: vi.fn().mockResolvedValue([]),
@@ -143,6 +146,12 @@ vi.mock('../Calendar/PaymentModal', () => ({
   },
 }));
 
+// These tests verify the parent's lookup lifecycle; document editors have their own suites.
+vi.mock('../Accounts/InvoiceModal', () => ({ InvoiceModal: ({ clients, lookupsLoading, lookupsError, onClose }: { clients: { name: string }[]; lookupsLoading: boolean; lookupsError?: string; onClose: () => void }) =>
+  <div data-testid="invoice-lookup-fixture"><span>{lookupsLoading ? 'Loading clients' : clients.map(client => client.name).join(',')}</span><span>{lookupsError}</span><button onClick={onClose}>Close document fixture</button></div> }));
+vi.mock('../Acts/ActModal', () => ({ ActModal: ({ clients, lookupsLoading, lookupsError, onClose }: { clients: { name: string }[]; lookupsLoading: boolean; lookupsError?: string; onClose: () => void }) =>
+  <div data-testid="act-lookup-fixture"><span>{lookupsLoading ? 'Loading clients' : clients.map(client => client.name).join(',')}</span><span>{lookupsError}</span><button onClick={onClose}>Close document fixture</button></div> }));
+
 vi.mock('../Clients/ClientStatusBadge', () => ({
   ClientStatusBadge: () => null,
 }));
@@ -162,6 +171,10 @@ function createInitialLegalEntity(
     addresses: [],
     ...overrides,
   } as LegalEntityDetail;
+}
+
+function lookupClient(id: number, name: string): Client {
+  return { id, name, email: '', phone: '', company: '', address: '', notes: '', createdAt: '', isActive: true };
 }
 
 function transparentImageData(_x: number, _y: number, width: number, height: number): ImageData {
@@ -199,6 +212,119 @@ function deferCompanyImageProcessing() {
 }
 
 describe('LegalEntityModal integration', () => {
+  describe('document client lookup lifecycle', () => {
+    beforeEach(() => { vi.mocked(apiService.getClientsV2).mockReset(); });
+    it.each(['Счёт', 'Акт'] as const)('document clients: a failed new opening never restores the previous list in %s', async name => {
+      vi.mocked(apiService.getClientsV2).mockResolvedValue({ items: [lookupClient(91, 'Previous document client')], total: 1, page: 1, pageSize: 200 });
+      render(<LegalEntityModal isOpen mode="page" initial={createInitialLegalEntity({ isOwnCompany: false })} allowEdit allowDelete={false} onClose={vi.fn()} onSubmit={vi.fn()} suggest={vi.fn()} findById={vi.fn()} />);
+      fireEvent.click(await screen.findByRole('button', { name })); await screen.findByText('Previous document client');
+      fireEvent.click(screen.getByRole('button', { name: 'Close document fixture' }));
+      vi.mocked(apiService.getClientsV2).mockRejectedValue(new Error('Document clients unavailable'));
+      fireEvent.click(screen.getByRole('button', { name })); await screen.findByText('Document clients unavailable');
+      expect(screen.queryByText('Previous document client')).toBeNull(); expect(apiService.getClientsV2).toHaveBeenCalledTimes(2);
+    });
+    it.each(['Счёт', 'Акт'] as const)('document clients: load only on opening %s and refresh after reopening', async name => {
+      vi.mocked(apiService.getClientsV2).mockResolvedValue({ items: [lookupClient(91, 'Fresh document client')], total: 1, page: 1, pageSize: 200 });
+      render(<LegalEntityModal isOpen mode="page" initial={createInitialLegalEntity({ isOwnCompany: false })} allowEdit allowDelete={false} onClose={vi.fn()} onSubmit={vi.fn()} suggest={vi.fn()} findById={vi.fn()} />);
+      expect(apiService.getClientsV2).not.toHaveBeenCalled(); fireEvent.click(await screen.findByRole('button', { name }));
+      await screen.findByText('Fresh document client'); expect(apiService.getClientsV2).toHaveBeenCalledTimes(1);
+      expect(apiService.getClientsV2).toHaveBeenCalledWith(expect.objectContaining({ page: 1, pageSize: 200, sortBy: 'name' }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
+      fireEvent.click(screen.getByRole('button', { name: 'Close document fixture' }));
+      vi.mocked(apiService.getClientsV2).mockResolvedValue({ items: [lookupClient(92, 'New document client')], total: 1, page: 1, pageSize: 200 });
+      fireEvent.click(screen.getByRole('button', { name })); await screen.findByText('New document client');
+      expect(screen.queryByText('Fresh document client')).toBeNull(); expect(apiService.getClientsV2).toHaveBeenCalledTimes(2);
+    });
+    it.each(['Счёт', 'Акт'] as const)('document clients: revoke %s access while the request is pending', async name => {
+      let finish!: (value: Awaited<ReturnType<typeof apiService.getClientsV2>>) => void;
+      vi.mocked(apiService.getClientsV2).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+      const props = { isOpen: true, mode: 'page' as const, initial: createInitialLegalEntity({ isOwnCompany: false }), allowEdit: true, allowDelete: false, onClose: vi.fn(), onSubmit: vi.fn(), suggest: vi.fn(), findById: vi.fn() };
+      const view = render(<LegalEntityModal {...props} />); fireEvent.click(await screen.findByRole('button', { name }));
+      await waitFor(() => expect(apiService.getClientsV2).toHaveBeenCalledTimes(1)); const signal = vi.mocked(apiService.getClientsV2).mock.calls[0][1]!.signal!;
+      await screen.findByText('Loading clients');
+      view.rerender(<LegalEntityModal {...props} canViewAccounts={false} canViewActs={false} />);
+      expect(signal.aborted).toBe(true); await act(async () => finish({ items: [lookupClient(91, 'Private late document client')], total: 1, page: 1, pageSize: 200 }));
+      expect(screen.queryByText('Private late document client')).toBeNull(); expect(screen.queryByTestId('invoice-lookup-fixture')).toBeNull(); expect(screen.queryByTestId('act-lookup-fixture')).toBeNull();
+    });
+  });
+
+  describe('own settings authority', () => {
+    let session: ReturnType<typeof documentCopyTestSession>;
+    beforeEach(() => { session = documentCopyTestSession(); vi.mocked(apiService.getClientsV2).mockClear(); vi.mocked(apiService.getClient).mockClear(); });
+    afterEach(() => session.restore());
+    const propsFor = (mode: 'page' | 'modal', own?: boolean) => ({
+      isOpen: true, mode, initial: createInitialLegalEntity({ shortName: 'Reviewed company', isOwnCompany: own, clients: [{ id: 7, name: 'Linked client', isActive: true }] }),
+      allowEdit: true, allowDelete: false, onClose: vi.fn(), onSubmit: vi.fn().mockImplementation(async value => ({ ...value, id: 9 })),
+      suggest: vi.fn(), findById: vi.fn(), canViewCases: false, canViewAccounts: false, canViewActs: false, canViewPayments: false,
+    });
+    for (const mode of ['page', 'modal'] as const) {
+      it(`own settings: defaults deny administrative settings but permit requisites editing in ${mode}`, async () => {
+        vi.mocked(apiService.getClient).mockClear(); const props = propsFor(mode, true);
+        render(<LegalEntityModal {...props} />);
+        expect(screen.queryByRole('button', { name: 'Добавить клиента' })).toBeNull(); expect(screen.queryByLabelText('Состояние профиля компании')).toBeNull();
+        expect(screen.getByDisplayValue('Reviewed company')).toHaveProperty('disabled', false);
+        expect(apiService.getMainCompanySettings).not.toHaveBeenCalled(); expect(apiService.getBankConnections).not.toHaveBeenCalled(); expect(apiService.getClient).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole('button', { name: /^Сохранить$/ }));
+        await waitFor(() => expect(props.onSubmit).toHaveBeenCalledWith(expect.objectContaining({ clientIds: [7], profileStatus: 'Active' })));
+      });
+      it(`own settings: ordinary client links remain available without profile permission in ${mode}`, async () => {
+        vi.mocked(apiService.getMainCompanySettings).mockRejectedValue(new Error('HTTP 403 Forbidden'));
+        const props = propsFor(mode, false); render(<LegalEntityModal {...props} />);
+        const add = screen.getByRole('button', { name: 'Добавить клиента' }); expect(add).toHaveProperty('disabled', false);
+        expect(apiService.getMainCompanySettings).not.toHaveBeenCalled(); expect(apiService.getBankConnections).not.toHaveBeenCalled();
+        fireEvent.click(add); expect(await screen.findByPlaceholderText('Поиск клиентов')).toBeTruthy(); expect(apiService.getClientsV2).toHaveBeenCalledTimes(1);
+      });
+      it(`own settings: revocation drops the picker and does not submit hidden link edits in ${mode}`, async () => {
+        const props = propsFor(mode, true); const view = render(<LegalEntityModal {...props} canManageOwnCompanySettings />);
+        await screen.findByLabelText('Состояние профиля компании');
+        const section = screen.getByRole('heading', { name: /Клиенты юридического лица/i }).closest('div')!.parentElement!.parentElement!;
+        const remove = Array.from(section.querySelectorAll('button')).find(button => !button.textContent?.trim())!;
+        expect(remove).toBeTruthy(); fireEvent.click(remove);
+        fireEvent.click(screen.getByRole('button', { name: 'Добавить клиента' })); await screen.findByPlaceholderText('Поиск клиентов');
+        view.rerender(<LegalEntityModal {...props} canManageOwnCompanySettings={false} />);
+        expect(screen.queryByPlaceholderText('Поиск клиентов')).toBeNull(); expect(screen.queryByLabelText('Состояние профиля компании')).toBeNull();
+        fireEvent.click(screen.getByRole('button', { name: /^Сохранить$/ }));
+        await waitFor(() => expect(props.onSubmit).toHaveBeenCalledWith(expect.objectContaining({ clientIds: [7] })));
+      });
+      it(`own settings: unknown legacy classification preserves input and retries explicitly in ${mode}`, async () => {
+        vi.mocked(apiService.getMainCompanySettings).mockRejectedValue(new Error('Offline classification'));
+        const props = propsFor(mode); render(<LegalEntityModal {...props} />);
+        await screen.findByText('Принадлежность компании не подтверждена. Введённые данные остаются в форме.');
+        expect(screen.queryByRole('button', { name: 'Добавить клиента' })).toBeNull(); expect(screen.getByRole('button', { name: /^Сохранить$/ })).toHaveProperty('disabled', true);
+        fireEvent.change(screen.getByDisplayValue('Reviewed company'), { target: { value: 'Preserved draft' } });
+        fireEvent.submit(document.querySelector('form')!); expect(props.onSubmit).not.toHaveBeenCalled();
+        vi.mocked(apiService.getMainCompanySettings).mockResolvedValue({ companies: [], defaultCompanyId: null });
+        fireEvent.click(screen.getByRole('button', { name: 'Повторить проверку принадлежности' }));
+        await screen.findByRole('button', { name: 'Добавить клиента' }); expect(screen.getByDisplayValue('Preserved draft')).toBeTruthy(); expect(apiService.getMainCompanySettings).toHaveBeenCalledTimes(2);
+      });
+      it(`own settings: a late legacy result cannot reclassify another card in ${mode}`, async () => {
+        let finish!: (value: Awaited<ReturnType<typeof apiService.getMainCompanySettings>>) => void;
+        vi.mocked(apiService.getMainCompanySettings).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+        const props = propsFor(mode); const view = render(<LegalEntityModal {...props} />);
+        view.rerender(<LegalEntityModal {...props} initial={{ ...props.initial, id: 8, isOwnCompany: false }} />);
+        await act(async () => finish({ companies: [{ id: 8, shortName: 'Stale own classification', clientsCount: 0, createdAt: '' }], defaultCompanyId: 8 }));
+        expect(screen.queryByLabelText('Состояние профиля компании')).toBeNull(); expect(screen.getByRole('button', { name: 'Добавить клиента' })).toHaveProperty('disabled', false);
+      });
+    }
+    it.each(['company', 'rights', 'session'] as const)('own settings: pending picker results cannot follow a changed %s', async change => {
+      let finish!: (value: Awaited<ReturnType<typeof apiService.getClientsV2>>) => void;
+      vi.mocked(apiService.getClientsV2).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+      const props = propsFor('page', true); const view = render(<LegalEntityModal {...props} canManageOwnCompanySettings />);
+      fireEvent.click(screen.getByRole('button', { name: 'Добавить клиента' })); await waitFor(() => expect(apiService.getClientsV2).toHaveBeenCalledTimes(1));
+      if (change === 'company') view.rerender(<LegalEntityModal {...props} initial={{ ...props.initial, id: 8, isOwnCompany: false }} canManageOwnCompanySettings />);
+      else if (change === 'rights') view.rerender(<LegalEntityModal {...props} canManageOwnCompanySettings={false} />);
+      else session.replace();
+      await act(async () => finish({ items: [lookupClient(91, 'Private late client')], total: 1, page: 1, pageSize: 24 }));
+      expect(screen.queryByText('Private late client')).toBeNull(); expect(toastErrorMock).not.toHaveBeenCalled();
+    });
+    it('own settings: late linked-client hydration cannot adopt another session without a render', async () => {
+      let finish!: () => void;
+      vi.mocked(apiService.getClient).mockReturnValueOnce(new Promise(resolve => { finish = () => resolve(lookupClient(7, 'Private late hydration')); }));
+      render(<LegalEntityModal {...propsFor('page', false)} />);
+      await waitFor(() => expect(apiService.getClient).toHaveBeenCalledTimes(1)); session.replace();
+      await act(async () => finish()); expect(screen.queryByText('Private late hydration')).toBeNull();
+    });
+  });
+
   for (const mode of ['page', 'modal'] as const) {
     it(`branch default: missing management authority remains readonly in ${mode}`, async () => {
       const session = documentCopyTestSession();
@@ -224,7 +350,7 @@ describe('LegalEntityModal integration', () => {
       const session = documentCopyTestSession();
       try {
         const initial = createInitialLegalEntity({ id: 9, profileEditVersion: 'A'.repeat(64) });
-        const props = { isOpen: true, mode, initial, allowEdit: true, allowDelete: false, canManageCompanyBranches: true, onClose: vi.fn(), onSubmit: vi.fn(), suggest: vi.fn(), findById: vi.fn(), canViewCases: false, canViewAccounts: false, canViewActs: false, canViewPayments: false };
+        const props = { isOpen: true, mode, initial, allowEdit: true, allowDelete: false, canManageCompanyBranches: true, canManageOwnCompanySettings: true, onClose: vi.fn(), onSubmit: vi.fn(), suggest: vi.fn(), findById: vi.fn(), canViewCases: false, canViewAccounts: false, canViewActs: false, canViewPayments: false };
         const view = render(<LegalEntityModal {...props} />);
         const add = await screen.findByRole('button', { name: /^Добавить$/ }); await waitFor(() => expect(add).toHaveProperty('disabled', false));
         fireEvent.click(add); expect(screen.getByRole('dialog', { name: 'Подразделение' })).toBeTruthy();
@@ -236,7 +362,7 @@ describe('LegalEntityModal integration', () => {
     it(`branch hookup: revoking management keeps profile editing but removes branch editing in ${mode}`, async () => {
       const session = documentCopyTestSession();
       try {
-        const props = { isOpen: true, mode, initial: createInitialLegalEntity({ id: 9 }), allowEdit: true, allowDelete: false, canManageCompanyBranches: true, onClose: vi.fn(), onSubmit: vi.fn(), suggest: vi.fn(), findById: vi.fn(), canViewCases: false, canViewAccounts: false, canViewActs: false, canViewPayments: false };
+        const props = { isOpen: true, mode, initial: createInitialLegalEntity({ id: 9 }), allowEdit: true, allowDelete: false, canManageCompanyBranches: true, canManageOwnCompanySettings: true, onClose: vi.fn(), onSubmit: vi.fn(), suggest: vi.fn(), findById: vi.fn(), canViewCases: false, canViewAccounts: false, canViewActs: false, canViewPayments: false };
         const view = render(<LegalEntityModal {...props} />); const add = await screen.findByRole('button', { name: /^Добавить$/ });
         await waitFor(() => expect(add).toHaveProperty('disabled', false)); fireEvent.click(add);
         view.rerender(<LegalEntityModal {...props} canManageOwnCompanySettings={false} />);

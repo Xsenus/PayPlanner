@@ -11347,6 +11347,7 @@ export function ClientDetail({
           allowEdit={clientPermissions.canEdit}
           allowDelete={false}
           canManageCompanyBranches={userIsAdmin}
+          canManageOwnCompanySettings={userIsAdmin}
           canViewCases={casePermissions.canView}
           canViewAccounts={accountPermissions.canView}
           canCreateAccounts={accountPermissions.canView && accountPermissions.canCreate}
