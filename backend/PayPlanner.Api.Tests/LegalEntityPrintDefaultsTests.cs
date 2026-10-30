@@ -165,14 +165,14 @@ public partial class LegalEntitiesControllerTests
     }
 
     [Fact]
-    public async Task PrintDefaults_CreateDoesNotCommitCallerTransaction()
+    public async Task PrintDefaults_CreateRejectsCallerTransactionWithoutChangingIt()
     {
         await using var db = await CreateContextAsync();
         var user = await CreateUserAsync(db, "admin");
         var controller = CreateController(db, user);
         await using var transaction = await db.Database.BeginTransactionAsync();
         var response = await controller.Create(new LegalEntityRequest { ShortName = "Caller transaction", DocumentImagePrintDefaults = PrintDefaultsRequest(7), DocumentImagePrintDefaultsChanged = true }, default);
-        Assert.IsType<CreatedResult>(response.Result);
+        Assert.IsType<ConflictObjectResult>(response.Result);
         Assert.Same(transaction, db.Database.CurrentTransaction);
         await transaction.RollbackAsync(); db.ChangeTracker.Clear();
         Assert.Empty(await db.LegalEntities.AsNoTracking().ToListAsync());

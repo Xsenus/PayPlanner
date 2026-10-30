@@ -861,16 +861,24 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         if (normalizedInn is null)
             return null;
 
-        var duplicate = await _db.LegalEntities
+        var duplicateId = await _db.LegalEntities
             .AsNoTracking()
             .Where(item => item.Inn != null && item.Inn.Trim() == normalizedInn)
             .Where(item => !excludeEntityId.HasValue || item.Id != excludeEntityId.Value)
-            .Select(item => new { item.Id, item.ShortName, item.Inn })
+            .Select(item => (int?)item.Id)
             .FirstOrDefaultAsync(ct);
 
-        if (duplicate is null)
+        if (!duplicateId.HasValue)
             return null;
 
+        var isOwn = (await OwnCompanyRegistry.LoadIdsAsync(_db, ct)).Contains(duplicateId.Value);
+        var visible = isOwn
+            ? (await CompanyProfileAccess.ResolveAsync(_db, User, ct))?.CompanyIds.Contains(duplicateId.Value) == true
+            : await HasLegalEntitiesPermissionAsync(static permission => permission.CanView, ct)
+                && await (await ApplyResponsibleVisibilityAsync(_db.LegalEntities.AsNoTracking().Where(item => item.Id == duplicateId.Value), ct)).AnyAsync(ct);
+        if (!visible) return Conflict("Юридическое лицо с таким ИНН уже существует.");
+        var duplicate = await _db.LegalEntities.AsNoTracking().Where(item => item.Id == duplicateId.Value)
+            .Select(item => new { item.Id, item.ShortName, item.Inn }).SingleAsync(ct);
         return Conflict($"Юридическое лицо с ИНН {duplicate.Inn} уже существует (ID: {duplicate.Id}, {duplicate.ShortName}).");
     }
 
@@ -1056,21 +1064,39 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
     [RequestSizeLimit(MaxLegalEntityRequestSizeBytes)]
     public async Task<ActionResult<LegalEntityDetailDto>> Create([FromBody] LegalEntityRequest request, CancellationToken ct)
     {
+        try
+        {
+            if (_db.Database.CurrentTransaction is not null) throw new SellerSnapshotConflictException();
+            var preflight = await ResolveCreateAccessAsync(ct);
+            if (preflight.Denied is not null) return preflight.Denied;
+            return await DocumentSellerLease.RunSerializableAsync<ActionResult<LegalEntityDetailDto>>(_db, async lease =>
+            {
+                lease.AdmitCleanTracker();
+                var authorization = await ResolveCreateAccessAsync(ct);
+                if (authorization.Denied is not null) return authorization.Denied;
+                _db.ChangeTracker.Clear();
+                return await CreateProfileCoreAsync(request, authorization.Access!, ct);
+            }, static result => result.Result is CreatedResult, ct);
+        }
+        catch (Exception error) when (error is SellerSnapshotConflictException || DocumentSellerLease.IsConflict(error))
+        {
+            return Conflict(new { code = "CompanyCreationConflict", message = "Создание компании пересеклось с другим изменением или запись сейчас занята. Карточка не создана. Проверьте список компаний и повторите действие." });
+        }
+    }
+
+    private async Task<(DataVisibilityAccess? Access, ActionResult? Denied)> ResolveCreateAccessAsync(CancellationToken ct)
+    {
         var access = await GetCurrentAccessAsync(ct);
-        if (access is null)
-        {
-            return Unauthorized();
-        }
+        if (access is null) return (null, Unauthorized());
+        if (!await HasLegalEntitiesPermissionAsync(static permission => permission.CanCreate, ct)) return (null, Forbid());
+        return (access, null);
+    }
 
-        if (!await HasLegalEntitiesPermissionAsync(static permission => permission.CanCreate, ct))
-        {
-            return Forbid();
-        }
-
+    private async Task<ActionResult<LegalEntityDetailDto>> CreateProfileCoreAsync(LegalEntityRequest request, DataVisibilityAccess access, CancellationToken ct)
+    {
         CompanyDocumentImagePrintDefaults? printDefaults = null;
         if (request.DocumentImagePrintDefaults is { } requestedDefaults && !requestedDefaults.TryToValue(out printDefaults))
             return BadRequest("Для каждого выбранного вида документа укажите логотип, печать и подпись.");
-        var writePrintDefaults = CompanyDocumentImagePrintDefaultsService.ShouldWrite(request.DocumentImagePrintDefaultsChanged);
 
         var requirementsSection = string.Equals(request.FormRequirementsSection, "clients-modal-legal", StringComparison.OrdinalIgnoreCase)
             ? "clients-modal-legal"
@@ -1200,8 +1226,6 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             UpdatedAt = DateTime.UtcNow,
         };
 
-        await using var defaultsTransaction = writePrintDefaults && _db.Database.CurrentTransaction is null
-            ? await _db.Database.BeginTransactionAsync(ct) : null;
         await EnsureAndNormalizeDictionaryValuesAsync(entity, ct);
         _db.LegalEntities.Add(entity);
         await _db.SaveChangesAsync(ct);
@@ -1215,8 +1239,6 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
 
         await ApplyLegalEntityAddressesAsync(entity, request.Addresses, ct);
         await _db.SaveChangesAsync(ct);
-
-        if (defaultsTransaction is not null) await defaultsTransaction.CommitAsync(ct);
 
         var responseEntity = await LoadLegalEntityForDetailAsync(entity.Id, ct);
         var response = await MapDetailForCurrentUserAsync(responseEntity ?? entity, ct, includeInlineAssets: false);

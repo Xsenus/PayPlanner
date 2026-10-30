@@ -198,6 +198,21 @@ function deferCompanyImageProcessing() {
 }
 
 describe('LegalEntityModal integration', () => {
+  it.each(['page', 'modal'] as const)('company creation conflict: keeps new input without an automatic retry in %s', async mode => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn().mockRejectedValue(new Error('Карточка не создана. Проверьте список компаний и повторите действие.'));
+    const onClose = vi.fn();
+    render(<LegalEntityModal isOpen mode={mode} allowEdit allowDelete={false} onClose={onClose} onSubmit={onSubmit} suggest={vi.fn()} findById={vi.fn()} />);
+    const name = document.querySelector<HTMLInputElement>('input[name="shortName"]')!;
+    await user.type(name, 'New company draft');
+    await user.click(screen.getByRole('button', { name: /^Добавить$/ }));
+    await screen.findByText('Карточка не создана. Проверьте список компаний и повторите действие.');
+    expect(onSubmit).toHaveBeenCalledTimes(1); expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByDisplayValue('New company draft')).toBeTruthy();
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty('profileEditVersion');
+    expect(screen.getByRole('button', { name: /^Добавить$/ })).toHaveProperty('disabled', false);
+  });
+
   it.each(['page', 'modal'] as const)('profile version: preserves the draft and original version on conflict in %s', async mode => {
     const user = userEvent.setup();
     const initial = createInitialLegalEntity({ shortName: 'Original company' });

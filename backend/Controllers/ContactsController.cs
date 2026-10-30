@@ -14,6 +14,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Companies;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -547,6 +548,27 @@ public partial class ContactsController : ControllerBase
         [FromBody] PromoteContactRequest request,
         CancellationToken ct)
     {
+        if (!string.Equals(request.Target?.Trim(), "legalentity", StringComparison.OrdinalIgnoreCase))
+            return await PromoteExternalContactCoreAsync(id, request, ct);
+        try
+        {
+            if (_db.Database.CurrentTransaction is not null) throw new SellerSnapshotConflictException();
+            if (await GetCurrentAccessAsync(ct) is null) return Unauthorized();
+            return await DocumentSellerLease.RunSerializableAsync<ActionResult<ContactDirectoryItemDto>>(_db, async lease =>
+            {
+                lease.AdmitCleanTracker();
+                _db.ChangeTracker.Clear();
+                return await PromoteExternalContactCoreAsync(id, request, ct);
+            }, static result => result.Result is OkObjectResult, ct);
+        }
+        catch (Exception error) when (error is SellerSnapshotConflictException || DocumentSellerLease.IsConflict(error))
+        {
+            return Conflict(new { code = "CompanyCreationConflict", message = "Создание организации из контакта пересеклось с другим изменением или запись сейчас занята. Изменения не сохранены. Проверьте список организаций и повторите действие." });
+        }
+    }
+
+    private async Task<ActionResult<ContactDirectoryItemDto>> PromoteExternalContactCoreAsync(int id, PromoteContactRequest request, CancellationToken ct)
+    {
         var access = await GetCurrentAccessAsync(ct);
         if (access is null)
         {
@@ -632,8 +654,9 @@ public partial class ContactsController : ControllerBase
             {
                 return Conflict("Для контакта уже создана полноценная карточка организации.");
             }
-            if (!string.IsNullOrWhiteSpace(entity.Inn) &&
-                await _db.LegalEntities.AsNoTracking().AnyAsync(x => x.Inn == entity.Inn, ct))
+            var normalizedInn = NormalizeOptional(entity.Inn);
+            if (normalizedInn is not null &&
+                await _db.LegalEntities.AsNoTracking().AnyAsync(x => x.Inn != null && x.Inn.Trim() == normalizedInn, ct))
             {
                 return Conflict("Юридическое лицо с таким ИНН уже существует.");
             }
@@ -649,7 +672,7 @@ public partial class ContactsController : ControllerBase
             {
                 ShortName = entity.FullName,
                 FullName = entity.FullName,
-                Inn = entity.Inn,
+                Inn = normalizedInn,
                 Phone = entity.Phone,
                 Email = entity.Email,
                 Director = entity.Position,
