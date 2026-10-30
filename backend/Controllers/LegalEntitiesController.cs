@@ -525,6 +525,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         result.DocumentImagePrintDefaults = defaults.Value;
         result.DocumentImagePrintDefaultsInvalid = defaults.Invalid;
         result.DocumentImagePrintDefaultsVersion = defaults.Version!;
+        result.ProfileEditVersion = CompanyProfileEditVersion.Compute(entity, entity.Addresses, entity.Clients.Select(client => client.Id), defaults.Version!);
         return result;
     }
 
@@ -2132,14 +2133,63 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
     [RequestSizeLimit(MaxLegalEntityRequestSizeBytes)]
     public async Task<ActionResult<LegalEntityDetailDto>> Update(int id, [FromBody] LegalEntityRequest request, CancellationToken ct)
     {
+        try
+        {
+            if (_db.Database.CurrentTransaction is not null) throw new SellerSnapshotConflictException();
+            var preflight = await ResolveProfileWriteAccessAsync(id, ct);
+            if (preflight.Denied is not null) return preflight.Denied;
+            return await DocumentSellerLease.RunSerializableAsync<ActionResult<LegalEntityDetailDto>>(_db, async lease =>
+            {
+                lease.AdmitCleanTracker();
+                var authorization = await ResolveProfileWriteAccessAsync(id, ct);
+                if (authorization.Denied is not null) return authorization.Denied;
+                if ((authorization.IsProfile || request.ProfileEditVersion is not null) && !CompanyProfileEditVersion.IsValid(request.ProfileEditVersion))
+                    throw new SellerSnapshotConflictException();
+                await lease.LockCompanyRowAsync(id, ct);
+                // The request owns a clean unit of work. Do not reuse scalar or
+                // navigation values left by an earlier operation in this context.
+                _db.ChangeTracker.Clear();
+                var entity = await LoadLegalEntityForDetailAsync(id, ct);
+                if (entity is null) return NotFound();
+                if (request.ProfileEditVersion is not null)
+                {
+                    var defaults = await new CompanyDocumentImagePrintDefaultsService(_db).ReadAsync(id, ct);
+                    var current = CompanyProfileEditVersion.Compute(entity, entity.Addresses, entity.Clients.Select(client => client.Id), defaults.Version!);
+                    if (!string.Equals(current, request.ProfileEditVersion, StringComparison.OrdinalIgnoreCase)) throw new SellerSnapshotConflictException();
+                }
+                return await UpdateProfileCoreAsync(id, request, entity, authorization.IsProfile, authorization.Access!, ct);
+            }, static result => result.Result is OkObjectResult, ct);
+        }
+        catch (Exception error) when (error is SellerSnapshotConflictException || DocumentSellerLease.IsConflict(error))
+        {
+            return Conflict(new { code = "CompanyProfileChanged", message = "Профиль компании изменился или сейчас сохраняется другим сотрудником. Ваш ввод не сохранён. Откройте карточку заново, сравните данные и повторите изменение." });
+        }
+    }
+
+    private async Task<(DataVisibilityAccess? Access, bool IsProfile, ActionResult? Denied)> ResolveProfileWriteAccessAsync(int id, CancellationToken ct)
+    {
         var isProfile = (await OwnCompanyRegistry.LoadIdsAsync(_db, ct)).Contains(id);
         CompanyProfileAccess? profileAccess = null;
         if (isProfile)
         {
             profileAccess = await CompanyProfileAccess.ResolveAsync(_db, User, ct);
-            if (profileAccess is null || !profileAccess.CanEdit) return Forbid();
-            if (!profileAccess.CompanyIds.Contains(id)) return NotFound();
+            if (profileAccess is null || !profileAccess.CanEdit) return (null, true, Forbid());
+            if (!profileAccess.CompanyIds.Contains(id)) return (null, true, NotFound());
         }
+
+        var access = profileAccess?.Section.Visibility ?? await GetCurrentAccessAsync(ct);
+        if (access is null) return (null, isProfile, Unauthorized());
+        if (!isProfile)
+        {
+            if (!await HasLegalEntitiesPermissionAsync(static permission => permission.CanEdit, ct)) return (null, false, Forbid());
+            var visible = await ApplyResponsibleVisibilityAsync(_db.LegalEntities.AsNoTracking().Where(entity => entity.Id == id), ct);
+            if (!await visible.AnyAsync(ct)) return (null, false, NotFound());
+        }
+        return (access, isProfile, null);
+    }
+
+    private async Task<ActionResult<LegalEntityDetailDto>> UpdateProfileCoreAsync(int id, LegalEntityRequest request, LegalEntity entity, bool isProfile, DataVisibilityAccess access, CancellationToken ct)
+    {
 
         CompanyDocumentImagePrintDefaults? printDefaults = null;
         if (request.DocumentImagePrintDefaults is { } requestedDefaults && !requestedDefaults.TryToValue(out printDefaults))
@@ -2151,31 +2201,6 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         if (string.IsNullOrWhiteSpace(request.ShortName))
         {
             return BadRequest("Необходимо указать краткое название");
-        }
-
-        var access = profileAccess?.Section.Visibility ?? await GetCurrentAccessAsync(ct);
-        if (access is null)
-        {
-            return Unauthorized();
-        }
-
-        if (!isProfile && !await HasLegalEntitiesPermissionAsync(static permission => permission.CanEdit, ct))
-        {
-            return Forbid();
-        }
-
-        var query = _db.LegalEntities
-            .Include(le => le.Clients)
-            .Include(le => le.Addresses)
-            .Include(le => le.ResponsibleUser)
-            .Include(le => le.ClientStatus)
-            .AsQueryable();
-        if (!isProfile) query = await ApplyResponsibleVisibilityAsync(query, ct);
-
-        var entity = await query.FirstOrDefaultAsync(le => le.Id == id, ct);
-        if (entity is null)
-        {
-            return NotFound();
         }
 
         var responsibleUserId = access.IsAdmin

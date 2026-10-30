@@ -492,6 +492,7 @@ export interface LegalEntitySummary {
 }
 
 export interface LegalEntityDetail extends LegalEntitySummary {
+  profileEditVersion?: string | null;
   clients: LegalEntityClientLink[];
   documentImagePrintDefaults?: CompanyDocumentImagePrintDefaults | null;
   documentImagePrintDefaultsInvalid?: boolean;
@@ -626,6 +627,7 @@ export interface LegalEntityAddressInput {
 }
 
 export interface LegalEntityInput {
+  profileEditVersion?: string | null;
   formRequirementsSection?: string | null;
   shortName: string;
   fullName?: string | null;

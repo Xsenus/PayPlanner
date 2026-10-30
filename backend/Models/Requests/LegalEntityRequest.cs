@@ -6,6 +6,9 @@ namespace PayPlanner.Api.Models.Requests;
 public class LegalEntityRequest
 {
     [MaxLength(64)]
+    public string? ProfileEditVersion { get; set; }
+
+    [MaxLength(64)]
     public string? FormRequirementsSection { get; set; }
 
     [Required]

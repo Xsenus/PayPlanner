@@ -79,6 +79,11 @@ public class ProviderSpecificSqlTests
     [InlineData("seller-share-without-nowait")]
     [InlineData("seller-unbounded-addresses")]
     [InlineData("seller-unsupported-provider")]
+    [InlineData("profile-lock-without-nowait")]
+    [InlineData("profile-lock-wrong-provider")]
+    [InlineData("print-defaults-lock-without-nowait")]
+    [InlineData("print-defaults-lock-wrong-provider")]
+    [InlineData("act-invoice-lock-without-nowait")]
     [InlineData("payment-attempt-without-nowait")]
     [InlineData("request-lock-without-nowait")]
     [InlineData("request-access-without-nowait")]
@@ -97,8 +102,9 @@ public class ProviderSpecificSqlTests
                 or "unregistered-multiline-share-owner" => "backend/Controllers/UnexpectedLocksController.cs",
             "bulk-unparameterized" or "contract-root-unparameterized" or "policy-key-unparameterized"
                 => "backend/Controllers/TasksController.cs",
-            "seller-share-without-nowait" or "seller-unbounded-addresses" or "seller-unsupported-provider"
+            "seller-share-without-nowait" or "seller-unbounded-addresses" or "seller-unsupported-provider" or "profile-lock-without-nowait" or "profile-lock-wrong-provider" or "act-invoice-lock-without-nowait"
                 => "backend/Services/Companies/DocumentSellerLease.cs",
+            "print-defaults-lock-without-nowait" or "print-defaults-lock-wrong-provider" => "backend/Services/Companies/CompanyDocumentImagePrintDefaultsService.cs",
             "payment-attempt-without-nowait" => "backend/Services/Payments/PaymentCreateAttemptLease.cs",
             "request-lock-without-nowait" or "request-access-without-nowait" => "backend/Services/Requests/SalesRequestService.cs",
             "note-lease-without-nowait" or "note-lease-wrong-provider" => "backend/Services/Notes/StickyNoteAccessLease.cs",
@@ -128,6 +134,11 @@ public class ProviderSpecificSqlTests
             "request-access-without-nowait" => original.Replace("FOR SHARE NOWAIT", "FOR SHARE", StringComparison.Ordinal),
             "seller-unbounded-addresses" => original.Replace("LIMIT 5001 FOR SHARE", "FOR SHARE", StringComparison.Ordinal),
             "seller-unsupported-provider" => original.Replace("if (!db.Database.IsNpgsql() && !db.Database.IsSqlite())", "if (false)", StringComparison.Ordinal),
+            "profile-lock-without-nowait" => original.Replace("{companyId} FOR UPDATE NOWAIT", "{companyId} FOR UPDATE", StringComparison.Ordinal),
+            "profile-lock-wrong-provider" => original.Replace("if (db.Database.IsNpgsql())", "if (true)", StringComparison.Ordinal),
+            "print-defaults-lock-without-nowait" => original.Replace("FOR UPDATE NOWAIT", "FOR UPDATE", StringComparison.Ordinal),
+            "print-defaults-lock-wrong-provider" => original.Replace("if (db.Database.IsNpgsql())", "if (true)", StringComparison.Ordinal),
+            "act-invoice-lock-without-nowait" => original.Replace("{id} FOR SHARE NOWAIT", "{id} FOR SHARE", StringComparison.Ordinal),
             _ => throw new ArgumentOutOfRangeException(nameof(mutation)),
         };
         Assert.NotEqual(original, changed);
@@ -301,13 +312,30 @@ public class ProviderSpecificSqlTests
         var sellerBegin = Method(sellerSource, "private static async Task<DocumentSellerLease> BeginAsync", "public static void RequireCleanTracker");
         AssertOrdered(sellerBegin, "if (!db.Database.IsNpgsql() && !db.Database.IsSqlite())", "throw new NotSupportedException(",
             "if (db.Database.CurrentTransaction is not null) return new(db, null)",
-            "if (db.Database.IsNpgsql())", "BeginTransactionAsync(IsolationLevel.ReadCommitted, ct)",
+            "if (db.Database.IsNpgsql())", "BeginTransactionAsync(isolation, ct)",
             "connection.DefaultTimeout = 1", "connection.BeginTransaction(IsolationLevel.Serializable, deferred: false)",
             "db.Database.UseTransactionAsync(native, ct)", "finally { connection.DefaultTimeout = timeout; }");
         var sellerRun = Method(sellerSource, "public static async Task<T> RunAsync<T>", "internal static async Task<DocumentSellerLease> BeginForCreationAsync");
-        AssertOrdered(sellerRun, "lease = await BeginForCreationAsync(db, ct)", "var result = await action(lease)",
-            "await lease.CommitAsync(ct)", "finally { if (lease is not null) await lease.DisposeAsync(); }");
+        AssertOrdered(sellerRun, "static _ => true, IsolationLevel.ReadCommitted", "if (db.Database.CurrentTransaction is not null) throw new SellerSnapshotConflictException()",
+            "shouldCommit, IsolationLevel.Serializable", "lease = await BeginAsync(db, ct, isolation)", "var result = await action(lease)",
+            "if (shouldCommit(result)) await lease.CommitAsync(ct)", "finally { if (lease is not null) await lease.DisposeAsync(); }");
+        var profileStart = sellerSource.IndexOf("internal async Task LockCompanyRowAsync", StringComparison.Ordinal);
+        var profileEnd = sellerSource.IndexOf("public async Task<IDocumentSeller[]> LockDocumentAsync", profileStart, StringComparison.Ordinal);
+        Assert.True(profileStart >= 0 && profileEnd > profileStart);
+        AssertOrdered(sellerSource[profileStart..profileEnd], "if (db.Database.IsNpgsql())", "{companyId} FOR UPDATE NOWAIT");
+        Approve("backend/Services/Companies/DocumentSellerLease.cs", sellerSource, "LockCompanyRowAsync", profileStart, profileEnd,
+            ["""await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"LegalEntities\" WHERE \"Id\" = {companyId} FOR UPDATE NOWAIT").ToArrayAsync(ct);"""]);
         Assert.Contains("private const int MaximumPayments = 5000;", sellerSource, StringComparison.Ordinal);
+
+        var printDefaultsSource = ReadSource("backend/Services/Companies/CompanyDocumentImagePrintDefaultsService.cs");
+        var printDefaultsStart = printDefaultsSource.IndexOf("public Task<T> EditAsync<T>", StringComparison.Ordinal);
+        var printDefaultsEnd = printDefaultsSource.IndexOf("public async Task", printDefaultsStart, StringComparison.Ordinal);
+        Assert.True(printDefaultsStart >= 0 && printDefaultsEnd > printDefaultsStart);
+        AssertOrdered(printDefaultsSource[printDefaultsStart..printDefaultsEnd], "DocumentSellerLease.RunAsync", "lease.AdmitCleanTracker()",
+            "if (db.Database.IsNpgsql())", "{companyId} FOR UPDATE NOWAIT", "if (ids.Length != 1) throw new SellerSnapshotConflictException()",
+            "ReadAsync(companyId", "expectedVersion", "return await edit()");
+        Approve("backend/Services/Companies/CompanyDocumentImagePrintDefaultsService.cs", printDefaultsSource, "EditAsync", printDefaultsStart, printDefaultsEnd,
+            ["""var ids = await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"LegalEntities\" WHERE \"Id\" = {companyId} FOR UPDATE NOWAIT").ToArrayAsync(ct);"""]);
 
         var documentStart = sellerSource.IndexOf("public async Task<IDocumentSeller[]> LockDocumentAsync", StringComparison.Ordinal);
         var documentEnd = sellerSource.IndexOf("private async Task<int[]> PaymentIdsAsync", documentStart, StringComparison.Ordinal);
@@ -333,6 +361,12 @@ public class ProviderSpecificSqlTests
         Assert.DoesNotContain("IgnoreQueryFilters", visibleRoots, StringComparison.Ordinal);
 
         var companyStart = sellerSource.IndexOf("public async Task LockCompanyAsync", StringComparison.Ordinal);
+        var actInvoiceStart = sellerSource.IndexOf("public async Task<PaymentType?> ReadLockedActInvoiceTypeAsync", StringComparison.Ordinal);
+        Assert.True(actInvoiceStart >= 0 && companyStart > actInvoiceStart);
+        AssertOrdered(sellerSource[actInvoiceStart..companyStart], "if (!act.InvoiceId.HasValue)", "if (db.Database.IsNpgsql())",
+            "{id} FOR SHARE NOWAIT", "db.Payments.AsNoTracking()", "type != act.Invoice.Type", "throw new SellerSnapshotConflictException()");
+        Approve("backend/Services/Companies/DocumentSellerLease.cs", sellerSource, "ReadLockedActInvoiceTypeAsync", actInvoiceStart, companyStart,
+            ["""await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"Payments\" WHERE \"Id\" = {id} FOR SHARE NOWAIT").ToArrayAsync(ct);"""], "FOR SHARE");
         var companyEnd = sellerSource.IndexOf("public async Task LockRegistryAsync", companyStart, StringComparison.Ordinal);
         Assert.True(companyStart >= 0 && companyEnd > companyStart);
         var companyMethod = sellerSource[companyStart..companyEnd];
@@ -347,7 +381,7 @@ public class ProviderSpecificSqlTests
              """await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"CompanyBranches\" WHERE \"Id\" = {branchId.Value} FOR SHARE NOWAIT").ToArrayAsync(ct);"""], "FOR SHARE");
 
         var registryStart = sellerSource.IndexOf("public async Task LockRegistryAsync", StringComparison.Ordinal);
-        var registryEnd = sellerSource.IndexOf("private static bool IsConflict", registryStart, StringComparison.Ordinal);
+        var registryEnd = sellerSource.IndexOf("internal static bool IsConflict", registryStart, StringComparison.Ordinal);
         Assert.True(registryStart >= 0 && registryEnd > registryStart);
         var registryMethod = sellerSource[registryStart..registryEnd];
         AssertOrdered(registryMethod, "if (!db.Database.IsNpgsql()) return;",
@@ -501,12 +535,14 @@ public class ProviderSpecificSqlTests
              """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"SalesRequests\" WHERE \"Id\" = {salesRequestId.Value} FOR SHARE NOWAIT", ct);""",
              """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Users\" WHERE \"Id\" IN (SELECT \"ResponsibleUserId\" FROM \"SalesRequests\" WHERE \"Id\" = {salesRequestId.Value} UNION SELECT \"CreatedByUserId\" FROM \"SalesRequests\" WHERE \"Id\" = {salesRequestId.Value}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);"""], "FOR SHARE");
 
-        Assert.Equal(31, approved.Count(statement => statement.Contains("FOR UPDATE", StringComparison.Ordinal)));
-        Assert.Equal(41, approved.Count(statement => statement.Contains("FOR SHARE", StringComparison.Ordinal)));
-        Assert.Equal(72, approved.Count);
+        Assert.Equal(33, approved.Count(statement => statement.Contains("FOR UPDATE", StringComparison.Ordinal)));
+        Assert.Equal(42, approved.Count(statement => statement.Contains("FOR SHARE", StringComparison.Ordinal)));
+        Assert.Equal(75, approved.Count);
 
         // Exact identities include owner, method range, line and complete SQL call.
         // An extra statement in any other production file/method remains a failure.
+        Assert.True(approved.SetEquals(matches), "Missing registered SQL: " + string.Join("\n", approved.Except(matches))
+            + "\nUnexpected SQL: " + string.Join("\n", matches.Except(approved)));
         Assert.Equal(approved.OrderBy(value => value, StringComparer.Ordinal), matches.OrderBy(value => value, StringComparer.Ordinal));
 
         string ReadSource(string relativePath)

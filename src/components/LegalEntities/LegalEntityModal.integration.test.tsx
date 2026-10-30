@@ -151,6 +151,7 @@ function createInitialLegalEntity(
 ): LegalEntityDetail {
   return {
     id: 9,
+    profileEditVersion: 'A'.repeat(64),
     shortName: '',
     fullName: '',
     inn: '',
@@ -197,6 +198,63 @@ function deferCompanyImageProcessing() {
 }
 
 describe('LegalEntityModal integration', () => {
+  it.each(['page', 'modal'] as const)('profile version: preserves the draft and original version on conflict in %s', async mode => {
+    const user = userEvent.setup();
+    const initial = createInitialLegalEntity({ shortName: 'Original company' });
+    const onSubmit = vi.fn().mockRejectedValue(new Error('Профиль компании изменился. Откройте карточку заново.'));
+    const onClose = vi.fn();
+    render(<LegalEntityModal isOpen mode={mode} initial={initial} allowEdit allowDelete={false} onClose={onClose} onSubmit={onSubmit} suggest={vi.fn()} findById={vi.fn()} />);
+    const name = await screen.findByDisplayValue('Original company');
+    await user.clear(name); await user.type(name, 'Unsaved draft');
+    await user.click(screen.getByRole('button', { name: /^Сохранить$/ }));
+    await screen.findByText('Профиль компании изменился. Откройте карточку заново.');
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ shortName: 'Unsaved draft', profileEditVersion: 'A'.repeat(64) });
+    expect(screen.getByDisplayValue('Unsaved draft')).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: /^Сохранить$/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+    expect(onSubmit.mock.calls[1][0].profileEditVersion).toBe('A'.repeat(64));
+  });
+
+  it.each(['page', 'modal'] as const)('profile version: blocks an old own-company form without losing input in %s', async mode => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(<LegalEntityModal isOpen mode={mode} initial={createInitialLegalEntity({ shortName: 'Old tab', profileEditVersion: null })} allowEdit allowDelete={false} onClose={vi.fn()} onSubmit={onSubmit} suggest={vi.fn()} findById={vi.fn()} />);
+    await user.click(await screen.findByRole('button', { name: /^Сохранить$/ }));
+    await screen.findByText('Для безопасного сохранения откройте карточку компании заново. Введённые данные пока остаются на экране.');
+    expect(screen.getByDisplayValue('Old tab')).toBeTruthy(); expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('profile version: adopts the saved version for a second page save without fetching it over the draft', async () => {
+    const user = userEvent.setup();
+    const initial = createInitialLegalEntity({ shortName: 'Company' });
+    const onSubmit = vi.fn().mockResolvedValue({ ...initial, profileEditVersion: 'B'.repeat(64) });
+    render(<LegalEntityModal isOpen mode="page" initial={initial} allowEdit allowDelete={false} onClose={vi.fn()} onSubmit={onSubmit} suggest={vi.fn()} findById={vi.fn()} />);
+    await user.click(await screen.findByRole('button', { name: /^Сохранить$/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Сохранить$/ })).toHaveProperty('disabled', false));
+    await user.click(screen.getByRole('button', { name: /^Сохранить$/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+    expect(onSubmit.mock.calls[0][0].profileEditVersion).toBe('A'.repeat(64));
+    expect(onSubmit.mock.calls[1][0].profileEditVersion).toBe('B'.repeat(64));
+  });
+
+  it.each((['page', 'modal'] as const).flatMap(mode => (['success', 'error'] as const).map(outcome => [mode, outcome] as const)))('profile version: ignores a late %s save after a fresh profile (%s)', async (mode, outcome) => {
+    const user = userEvent.setup();
+    const initial = createInitialLegalEntity({ shortName: 'Original' });
+    let resolve!: (value: LegalEntityDetail) => void; let reject!: (error: Error) => void;
+    const pending = new Promise<LegalEntityDetail>((ok, fail) => { resolve = ok; reject = fail; });
+    const props = { isOpen: true, mode, initial, allowEdit: true, allowDelete: false, onClose: vi.fn(), onSubmit: vi.fn().mockReturnValue(pending), suggest: vi.fn(), findById: vi.fn() };
+    const view = render(<LegalEntityModal {...props} />);
+    await user.click(await screen.findByRole('button', { name: /^Сохранить$/ }));
+    await waitFor(() => expect(props.onSubmit).toHaveBeenCalledTimes(1));
+    view.rerender(<LegalEntityModal {...props} initial={{ ...initial, shortName: 'Fresh profile', profileEditVersion: 'C'.repeat(64) }} />);
+    await act(async () => { if (outcome === 'success') resolve({ ...initial, shortName: 'Late stale profile', profileEditVersion: 'B'.repeat(64) }); else reject(new Error('Late stale conflict')); });
+    expect(screen.getByDisplayValue('Fresh profile')).toBeTruthy();
+    expect(screen.queryByDisplayValue('Late stale profile')).toBeNull(); expect(screen.queryByText('Late stale conflict')).toBeNull();
+    expect(props.onClose).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     vi.mocked(apiService.getCompanyBranches).mockClear();
     vi.mocked(apiService.getCompanyRequisitesCheck).mockClear();

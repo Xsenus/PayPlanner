@@ -6220,11 +6220,11 @@ export class ApiService {
   }
 
   async getLegalEntity(id: number) {
-    return this.request<LegalEntityDetail>(`/legal-entities/${id}`);
+    return this.request<LegalEntityDetail>(`/legal-entities/${id}`, { cache: 'no-store' });
   }
 
   async getCompanyProfileLegalEntity() {
-    return this.request<LegalEntityDetail>('/legal-entities/company-profile');
+    return this.request<LegalEntityDetail>('/legal-entities/company-profile', { cache: 'no-store' });
   }
 
   async getReconciliationCompanyParty(clientId: number) {

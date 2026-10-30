@@ -878,6 +878,7 @@ export function LegalEntityModal({
   const { isRequired } = useFormRequirements("legal-entities", isOpen);
   const { statuses: clientStatuses } = useClientStatuses();
   const [formState, setFormState] = useState<FormState>(DEFAULT_STATE);
+  const [profileEditVersion, setProfileEditVersion] = useState(initial?.profileEditVersion ?? null);
   const [selectedClients, setSelectedClients] = useState<
     ClientAssociationItem[]
   >([]);
@@ -1201,6 +1202,7 @@ export function LegalEntityModal({
       return;
     }
     setPrintDefaultsDraft(companyImagePrintDraft(initial));
+    setProfileEditVersion(initial?.profileEditVersion ?? null);
     if (initial) {
       setFormState({
         shortName: initial.shortName ?? "",
@@ -2066,6 +2068,10 @@ export function LegalEntityModal({
     setError(null);
     setLoading(true);
     try {
+      if (initial?.id && isOwnLegalEntity && !/^[a-f\d]{64}$/i.test(profileEditVersion ?? "")) {
+        setError("Для безопасного сохранения откройте карточку компании заново. Введённые данные пока остаются на экране.");
+        return;
+      }
       const shortName = formState.shortName.trim();
       const normalize = (value: string) => {
         const trimmed = value.trim();
@@ -2111,6 +2117,7 @@ export function LegalEntityModal({
         dedupedAddressInputs[0];
 
       const payload: LegalEntityInput = {
+        ...(initial?.id && /^[a-f\d]{64}$/i.test(profileEditVersion ?? "") ? { profileEditVersion } : {}),
         ...(isOwnLegalEntity ? companyImagePrintPayload(printDefaultsDraft) : {}),
         shortName,
         fullName: normalize(formState.fullName),
@@ -2235,9 +2242,13 @@ export function LegalEntityModal({
       if (initial && saved.id !== initial.id) throw new Error('Сервер вернул другую карточку юридического лица. Обновите карточку и повторите сохранение.');
       const latestInitial = saveContext.current.initial;
       if (latestInitial !== context.initial && latestInitial !== saved
+        && latestInitial?.profileEditVersion !== context.initial?.profileEditVersion
+        && latestInitial?.profileEditVersion !== saved.profileEditVersion) return;
+      if (latestInitial !== context.initial && latestInitial !== saved
         && latestInitial?.documentImagePrintDefaultsVersion !== context.initial?.documentImagePrintDefaultsVersion
         && latestInitial?.documentImagePrintDefaultsVersion !== saved.documentImagePrintDefaultsVersion) return;
       setPrintDefaultsDraft(companyImagePrintDraft(saved));
+      setProfileEditVersion(saved.profileEditVersion ?? null);
       setFormState((prev) => ({
         ...prev,
         shortName: saved.shortName ?? payload.shortName,
@@ -2437,6 +2448,7 @@ export function LegalEntityModal({
       if (err instanceof StaleUiOperationError) return;
       if (!isCurrentSave()) return;
       if (saveContext.current.initial?.documentImagePrintDefaultsVersion !== context.initial?.documentImagePrintDefaultsVersion) return;
+      if (saveContext.current.initial?.profileEditVersion !== context.initial?.profileEditVersion) return;
       const message = extractErrorMessage(
         err,
         t("saveError") || "Не удалось сохранить",

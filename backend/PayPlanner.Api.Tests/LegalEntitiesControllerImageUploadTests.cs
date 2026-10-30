@@ -108,7 +108,7 @@ public partial class LegalEntitiesControllerTests
         Assert.Equal(legacy, version.DataUrl);
 
         var result = await CreateController(db, adminId).Update(company.Id,
-            new LegalEntityRequest { ShortName = company.ShortName, SealDataUrl = CompanyImageTestData.TransparentPng, SealChanged = true }, CancellationToken.None);
+            new LegalEntityRequest { ShortName = company.ShortName, SealDataUrl = CompanyImageTestData.TransparentPng, SealChanged = true, ProfileEditVersion = await ReadProfileEditVersionAsync(db, company.Id) }, CancellationToken.None);
 
         Assert.IsType<OkObjectResult>(result.Result);
         Assert.Equal(snapshot, (await db.Acts.AsNoTracking().SingleAsync()).SellerSnapshotJson);
@@ -130,7 +130,7 @@ public partial class LegalEntitiesControllerTests
         db.UserCompanyAccesses.Add(new UserCompanyAccess { UserId = userId, LegalEntityId = own });
         await db.SaveChangesAsync();
         var controller = CreateController(db, userId, isAdmin: false);
-        var request = new LegalEntityRequest { ShortName = "Название", SealDataUrl = CompanyImageTestData.OpaquePng };
+        var request = new LegalEntityRequest { ShortName = "Название", SealDataUrl = CompanyImageTestData.OpaquePng, ProfileEditVersion = await ReadProfileEditVersionAsync(db, own) };
 
         var foreign = await controller.Update(other, request, CancellationToken.None);
         Assert.IsType<NotFoundResult>(foreign.Result);

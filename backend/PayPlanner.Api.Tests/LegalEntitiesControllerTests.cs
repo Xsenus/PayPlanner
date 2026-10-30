@@ -65,7 +65,7 @@ public partial class LegalEntitiesControllerTests
             Assert.All(list.Companies, item => { Assert.Null(item.SealDataUrl); Assert.Empty(item.Clients); });
         }
         else Assert.False(expectedView);
-        var result = await controller.Update(companyId, new LegalEntityRequest { ShortName = "Changed company" }, CancellationToken.None);
+        var result = await controller.Update(companyId, new LegalEntityRequest { ShortName = "Changed company", ProfileEditVersion = await ReadProfileEditVersionAsync(db, companyId) }, CancellationToken.None);
         Assert.Equal(expectedEdit, result.Result is OkObjectResult);
         Assert.Equal(expectedEdit ? "Changed company" : "Private own company", (await db.LegalEntities.SingleAsync(item => item.Id == companyId)).ShortName);
         if (!owner)
@@ -1282,7 +1282,7 @@ public partial class LegalEntitiesControllerTests
         await CreateController(db, adminId).UpdateMainCompanySettings(
             new UpdateMainCompanySettingsRequest { CompanyIds = [companyId], DefaultCompanyId = companyId },
             CancellationToken.None);
-        var request = new LegalEntityRequest { ShortName = "Своя компания", SealDataUrl = CompanyImageTestData.TransparentPng };
+        var request = new LegalEntityRequest { ShortName = "Своя компания", SealDataUrl = CompanyImageTestData.TransparentPng, ProfileEditVersion = await ReadProfileEditVersionAsync(db, companyId) };
 
         var denied = await CreateController(db, viewerId, isAdmin: false).Update(companyId, request, CancellationToken.None);
         var legalOnly = await CreateController(db, editorId, isAdmin: false).Update(companyId, request, CancellationToken.None);

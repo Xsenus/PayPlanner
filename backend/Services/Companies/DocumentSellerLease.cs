@@ -32,13 +32,24 @@ internal sealed class DocumentSellerLease : IAsyncDisposable
         => (this.db, ownedTransaction, nativeTransaction, closeConnection) = (db, transaction, native, close);
 
     public static async Task<T> RunAsync<T>(PaymentContext db, Func<DocumentSellerLease, Task<T>> action, CancellationToken ct)
+        => await RunCoreAsync(db, action, static _ => true, IsolationLevel.ReadCommitted, ct);
+
+    internal static Task<T> RunSerializableAsync<T>(PaymentContext db, Func<DocumentSellerLease, Task<T>> action, Func<T, bool> shouldCommit, CancellationToken ct)
+    {
+        // This entry point owns the complete edit. Never silently join a caller's
+        // transaction whose rollback or isolation the HTTP action cannot control.
+        if (db.Database.CurrentTransaction is not null) throw new SellerSnapshotConflictException();
+        return RunCoreAsync(db, action, shouldCommit, IsolationLevel.Serializable, ct);
+    }
+
+    private static async Task<T> RunCoreAsync<T>(PaymentContext db, Func<DocumentSellerLease, Task<T>> action, Func<T, bool> shouldCommit, IsolationLevel isolation, CancellationToken ct)
     {
         DocumentSellerLease? lease = null;
         try
         {
-            lease = await BeginForCreationAsync(db, ct);
+            lease = await BeginAsync(db, ct, isolation);
             var result = await action(lease);
-            await lease.CommitAsync(ct);
+            if (shouldCommit(result)) await lease.CommitAsync(ct);
             return result;
         }
         catch (Exception error) when (error is not SellerSnapshotConflictException && IsConflict(error))
@@ -64,12 +75,12 @@ internal sealed class DocumentSellerLease : IAsyncDisposable
         catch (Exception error) when (IsConflict(error)) { throw new SellerSnapshotConflictException(error); }
     }
 
-    private static async Task<DocumentSellerLease> BeginAsync(PaymentContext db, CancellationToken ct)
+    private static async Task<DocumentSellerLease> BeginAsync(PaymentContext db, CancellationToken ct, IsolationLevel isolation = IsolationLevel.ReadCommitted)
     {
         if (!db.Database.IsNpgsql() && !db.Database.IsSqlite())
             throw new NotSupportedException("Снимки продавца поддерживаются только SQLite и PostgreSQL.");
         if (db.Database.CurrentTransaction is not null) return new(db, null);
-        if (db.Database.IsNpgsql()) return new(db, await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct));
+        if (db.Database.IsNpgsql()) return new(db, await db.Database.BeginTransactionAsync(isolation, ct));
 
         var connection = (SqliteConnection)db.Database.GetDbConnection();
         var opened = connection.State != ConnectionState.Open;
@@ -108,6 +119,12 @@ internal sealed class DocumentSellerLease : IAsyncDisposable
     {
         RequireCleanTracker(db);
         cleanTrackerAdmitted = true;
+    }
+
+    internal async Task LockCompanyRowAsync(int companyId, CancellationToken ct)
+    {
+        if (db.Database.IsNpgsql())
+            await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"LegalEntities\" WHERE \"Id\" = {companyId} FOR UPDATE NOWAIT").ToArrayAsync(ct);
     }
 
     public async Task<IDocumentSeller[]> LockDocumentAsync(IDocumentSeller document, CancellationToken ct)
@@ -239,7 +256,7 @@ internal sealed class DocumentSellerLease : IAsyncDisposable
         await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"SystemSettings\" WHERE \"Key\" = ANY({keys}) ORDER BY \"Id\" FOR SHARE NOWAIT").ToArrayAsync(ct);
     }
 
-    private static bool IsConflict(Exception error)
+    internal static bool IsConflict(Exception error)
     {
         for (Exception? current = error; current is not null; current = current.InnerException)
             if (current is PostgresException { SqlState: PostgresErrorCodes.LockNotAvailable or PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.DeadlockDetected }

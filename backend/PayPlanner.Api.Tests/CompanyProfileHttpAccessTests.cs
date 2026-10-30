@@ -36,7 +36,7 @@ public partial class LegalEntitiesControllerTests
         db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyId", Value = companyId.ToString() });
         await db.SaveChangesAsync();
         var result = await CreateController(db, id, isAdmin: false).Update(companyId,
-            new PayPlanner.Api.Models.Requests.LegalEntityRequest { ShortName = "New requisites", ClientIds = [other.Id] }, CancellationToken.None);
+            new PayPlanner.Api.Models.Requests.LegalEntityRequest { ShortName = "New requisites", ClientIds = [other.Id], ProfileEditVersion = await ReadProfileEditVersionAsync(db, companyId) }, CancellationToken.None);
         Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(result.Result);
         Assert.Equal(companyId, (await db.Clients.SingleAsync(item => item.Id == linked.Id)).LegalEntityId);
         Assert.Null((await db.Clients.SingleAsync(item => item.Id == other.Id)).LegalEntityId);
@@ -56,7 +56,7 @@ public partial class LegalEntitiesControllerTests
         db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = $"[{companyId},{foreignId}]" });
         await db.SaveChangesAsync();
         var result = await CreateController(db, id, isAdmin: false).Update(companyId,
-            new PayPlanner.Api.Models.Requests.LegalEntityRequest { ShortName = "Forbidden rename", Inn = "1234567890" }, CancellationToken.None);
+            new PayPlanner.Api.Models.Requests.LegalEntityRequest { ShortName = "Forbidden rename", Inn = "1234567890", ProfileEditVersion = await ReadProfileEditVersionAsync(db, companyId) }, CancellationToken.None);
         var conflict = Assert.IsType<Microsoft.AspNetCore.Mvc.ConflictObjectResult>(result.Result);
         Assert.Equal("Юридическое лицо с таким ИНН уже существует.", conflict.Value);
         Assert.Equal("Own company", (await db.LegalEntities.SingleAsync(item => item.Id == companyId)).ShortName);
@@ -97,11 +97,12 @@ public partial class LegalEntitiesControllerTests
         if (role != "anonymous") client.DefaultRequestHeaders.Add("X-Fixture-User", id.ToString(CultureInfo.InvariantCulture));
         using var profile = await client.GetAsync("/api/legal-entities/company-profile");
         using var detail = await client.GetAsync($"/api/legal-entities/{companyId}");
-        using var update = await client.PutAsJsonAsync($"/api/legal-entities/{companyId}", new { shortName = "Changed by granted editor" });
+        var opened = detail.IsSuccessStatusCode ? await detail.Content.ReadFromJsonAsync<PayPlanner.Api.Models.Responses.LegalEntityDetailDto>() : null;
+        using var update = await client.PutAsJsonAsync($"/api/legal-entities/{companyId}", new { shortName = "Changed by granted editor", profileEditVersion = opened?.ProfileEditVersion });
         Assert.Equal(profileStatus, profile.StatusCode); Assert.Equal(detailStatus, detail.StatusCode); Assert.Equal(updateStatus, update.StatusCode);
         if (profileStatus != HttpStatusCode.OK) Assert.DoesNotContain("QUFB", await profile.Content.ReadAsStringAsync());
         if (detailStatus != HttpStatusCode.OK) Assert.DoesNotContain("Hidden company", await detail.Content.ReadAsStringAsync());
-        Assert.Equal(updateStatus == HttpStatusCode.OK ? "Changed by granted editor" : "Hidden company", company.ShortName);
+        Assert.Equal(updateStatus == HttpStatusCode.OK ? "Changed by granted editor" : "Hidden company", (await db.LegalEntities.AsNoTracking().SingleAsync(row => row.Id == companyId)).ShortName);
         if (role != "anonymous")
         {
             using var options = await client.GetAsync("/api/own-companies/options");

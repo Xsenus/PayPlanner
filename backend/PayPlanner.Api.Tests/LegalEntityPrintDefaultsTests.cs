@@ -71,6 +71,7 @@ public partial class LegalEntitiesControllerTests
         using var response = await client.PutAsJsonAsync($"/api/legal-entities/{fixture.CompanyId}", new LegalEntityRequest
         {
             ShortName = "Own profile",
+            ProfileEditVersion = await ReadProfileEditVersionAsync(db, fixture.CompanyId),
             DocumentImagePrintDefaults = PrintDefaultsRequest(mask),
             DocumentImagePrintDefaultsChanged = true,
             DocumentImagePrintDefaultsVersion = fixture.Version,
@@ -92,7 +93,7 @@ public partial class LegalEntitiesControllerTests
         await using var db = await CreateContextAsync();
         var fixture = await PrintDefaultsProfileFixture(db, canEdit, assigned);
         var controller = CreateController(db, fixture.UserId, isAdmin: false);
-        var response = await controller.Update(fixture.CompanyId, new LegalEntityRequest { ShortName = "Must not change", DocumentImagePrintDefaults = PrintDefaultsRequest(7), DocumentImagePrintDefaultsChanged = true }, default);
+        var response = await controller.Update(fixture.CompanyId, new LegalEntityRequest { ShortName = "Must not change", ProfileEditVersion = await ReadProfileEditVersionAsync(db, fixture.CompanyId), DocumentImagePrintDefaults = PrintDefaultsRequest(7), DocumentImagePrintDefaultsChanged = true }, default);
         if (status == 403) Assert.IsType<ForbidResult>(response.Result); else Assert.IsType<NotFoundResult>(response.Result);
         Assert.Equal("Own profile", (await db.LegalEntities.AsNoTracking().SingleAsync()).ShortName);
         Assert.Null((await new CompanyDocumentImagePrintDefaultsService(db).ReadAsync(fixture.CompanyId)).Value);
@@ -124,12 +125,12 @@ public partial class LegalEntitiesControllerTests
         await using var db = await CreateContextAsync();
         var fixture = await PrintDefaultsProfileFixture(db);
         var controller = CreateController(db, fixture.UserId, isAdmin: false);
-        await controller.Update(fixture.CompanyId, new LegalEntityRequest { ShortName = "Own profile", DocumentImagePrintDefaults = PrintDefaultsRequest(3), DocumentImagePrintDefaultsChanged = true, DocumentImagePrintDefaultsVersion = fixture.Version }, default);
-        await controller.Update(fixture.CompanyId, new LegalEntityRequest { ShortName = "Edited normally" }, default);
+        await controller.Update(fixture.CompanyId, new LegalEntityRequest { ShortName = "Own profile", ProfileEditVersion = await ReadProfileEditVersionAsync(db, fixture.CompanyId), DocumentImagePrintDefaults = PrintDefaultsRequest(3), DocumentImagePrintDefaultsChanged = true, DocumentImagePrintDefaultsVersion = fixture.Version }, default);
+        await controller.Update(fixture.CompanyId, new LegalEntityRequest { ShortName = "Edited normally", ProfileEditVersion = await ReadProfileEditVersionAsync(db, fixture.CompanyId) }, default);
         Assert.Equal(CompanyDocumentImagePrintDefaultsTests.Value(3), (await new CompanyDocumentImagePrintDefaultsService(db).ReadAsync(fixture.CompanyId)).Value);
-        await controller.Update(fixture.CompanyId, new LegalEntityRequest { ShortName = "Edited normally", DocumentImagePrintDefaults = PrintDefaultsRequest(7), DocumentImagePrintDefaultsChanged = false }, default);
+        await controller.Update(fixture.CompanyId, new LegalEntityRequest { ShortName = "Edited normally", ProfileEditVersion = await ReadProfileEditVersionAsync(db, fixture.CompanyId), DocumentImagePrintDefaults = PrintDefaultsRequest(7), DocumentImagePrintDefaultsChanged = false }, default);
         Assert.Equal(CompanyDocumentImagePrintDefaultsTests.Value(3), (await new CompanyDocumentImagePrintDefaultsService(db).ReadAsync(fixture.CompanyId)).Value);
-        await controller.Update(fixture.CompanyId, new LegalEntityRequest { ShortName = "Edited normally", DocumentImagePrintDefaultsChanged = true, DocumentImagePrintDefaultsVersion = (await new CompanyDocumentImagePrintDefaultsService(db).ReadAsync(fixture.CompanyId)).Version }, default);
+        await controller.Update(fixture.CompanyId, new LegalEntityRequest { ShortName = "Edited normally", ProfileEditVersion = await ReadProfileEditVersionAsync(db, fixture.CompanyId), DocumentImagePrintDefaultsChanged = true, DocumentImagePrintDefaultsVersion = (await new CompanyDocumentImagePrintDefaultsService(db).ReadAsync(fixture.CompanyId)).Version }, default);
         Assert.Null((await new CompanyDocumentImagePrintDefaultsService(db).ReadAsync(fixture.CompanyId)).Value);
         Assert.Equal("Edited normally", (await db.LegalEntities.AsNoTracking().SingleAsync()).ShortName);
     }
@@ -144,7 +145,7 @@ public partial class LegalEntitiesControllerTests
         var result = Assert.IsType<LegalEntityDetailDto>(Assert.IsType<OkObjectResult>((await controller.GetById(fixture.CompanyId, default)).Result).Value);
         Assert.True(result.DocumentImagePrintDefaultsInvalid); Assert.Null(result.DocumentImagePrintDefaults);
         var saved = Assert.IsType<LegalEntityDetailDto>(Assert.IsType<OkObjectResult>((await controller.Update(fixture.CompanyId,
-            new LegalEntityRequest { ShortName = "Own profile", DocumentImagePrintDefaults = PrintDefaultsRequest(0), DocumentImagePrintDefaultsChanged = true, DocumentImagePrintDefaultsVersion = result.DocumentImagePrintDefaultsVersion }, default)).Result).Value);
+            new LegalEntityRequest { ShortName = "Own profile", ProfileEditVersion = await ReadProfileEditVersionAsync(db, fixture.CompanyId), DocumentImagePrintDefaults = PrintDefaultsRequest(0), DocumentImagePrintDefaultsChanged = true, DocumentImagePrintDefaultsVersion = result.DocumentImagePrintDefaultsVersion }, default)).Result).Value);
         Assert.False(saved.DocumentImagePrintDefaultsInvalid);
         Assert.Equal(CompanyDocumentImagePrintDefaultsTests.Value(0), saved.DocumentImagePrintDefaults);
     }
@@ -214,6 +215,7 @@ public partial class LegalEntitiesControllerTests
         using var response = await client.PutAsJsonAsync($"/api/legal-entities/{fixture.CompanyId}", new
         {
             shortName = "Changed by old client",
+            profileEditVersion = await ReadProfileEditVersionAsync(db, fixture.CompanyId),
             documentImagePrintDefaults = PrintDefaultsRequest(0),
         });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -233,6 +235,7 @@ public partial class LegalEntitiesControllerTests
         using var winner = await client.PutAsJsonAsync($"/api/legal-entities/{fixture.CompanyId}", new LegalEntityRequest
         {
             ShortName = "First editor",
+            ProfileEditVersion = await ReadProfileEditVersionAsync(db, fixture.CompanyId),
             DocumentImagePrintDefaultsChanged = true,
             DocumentImagePrintDefaultsVersion = fixture.Version,
             DocumentImagePrintDefaults = PrintDefaultsRequest(5),
@@ -243,6 +246,7 @@ public partial class LegalEntitiesControllerTests
         using var stale = await client.PutAsJsonAsync($"/api/legal-entities/{fixture.CompanyId}", new LegalEntityRequest
         {
             ShortName = "Must not overwrite",
+            ProfileEditVersion = saved.ProfileEditVersion,
             DocumentImagePrintDefaultsChanged = true,
             DocumentImagePrintDefaultsVersion = fixture.Version,
             DocumentImagePrintDefaults = reset ? null : PrintDefaultsRequest(7),
@@ -253,6 +257,7 @@ public partial class LegalEntitiesControllerTests
         using var retry = await client.PutAsJsonAsync($"/api/legal-entities/{fixture.CompanyId}", new LegalEntityRequest
         {
             ShortName = "Reloaded editor",
+            ProfileEditVersion = saved.ProfileEditVersion,
             DocumentImagePrintDefaultsChanged = true,
             DocumentImagePrintDefaultsVersion = saved.DocumentImagePrintDefaultsVersion,
             DocumentImagePrintDefaults = reset ? null : PrintDefaultsRequest(7),
@@ -273,6 +278,7 @@ public partial class LegalEntitiesControllerTests
         using var response = await client.PutAsJsonAsync($"/api/legal-entities/{fixture.CompanyId}", new LegalEntityRequest
         {
             ShortName = "Must not change",
+            ProfileEditVersion = await ReadProfileEditVersionAsync(db, fixture.CompanyId),
             DocumentImagePrintDefaultsChanged = true,
             DocumentImagePrintDefaultsVersion = version,
             DocumentImagePrintDefaults = PrintDefaultsRequest(7),
@@ -282,6 +288,7 @@ public partial class LegalEntitiesControllerTests
         using var legacy = await client.PutAsJsonAsync($"/api/legal-entities/{fixture.CompanyId}", new LegalEntityRequest
         {
             ShortName = "Legacy edit",
+            ProfileEditVersion = await ReadProfileEditVersionAsync(db, fixture.CompanyId),
             DocumentImagePrintDefaultsChanged = false,
             DocumentImagePrintDefaultsVersion = version,
             DocumentImagePrintDefaults = PrintDefaultsRequest(7),
