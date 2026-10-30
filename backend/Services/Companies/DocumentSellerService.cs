@@ -173,6 +173,22 @@ public static class SellerLegalEntityComposer
         }
     }
 
+    internal static IReadOnlyList<(int CompanyId, string Kind, int VersionId)> ReadFrozenImageReferences(string json)
+    {
+        var data = JsonSerializer.Deserialize<SellerSnapshotData>(json);
+        if (data?.ImagesFrozen != true) return [];
+        var references = new List<(int CompanyId, string Kind, int VersionId)>(3);
+        foreach (var (versionId, kind) in new[] { (data.LogoVersionId, CompanyBrandImageKinds.Logo),
+            (data.SealVersionId, CompanyBrandImageKinds.Seal), (data.SignatureVersionId, CompanyBrandImageKinds.Signature) })
+        {
+            if (!versionId.HasValue) continue;
+            if (data.Id <= 0 || versionId.Value <= 0)
+                throw new SellerSelectionException("Сохранённые ссылки на изображения документа повреждены. Автоматическая замена изображениями профиля недоступна.");
+            references.Add((data.Id, kind, versionId.Value));
+        }
+        return references;
+    }
+
     /// <summary>
     /// Восстанавливает продавца из снимка. Изображения берутся из неизменяемых версий (<paramref name="versionImages"/>),
     /// а у старых снимков без версий — из профиля <paramref name="liveCompany"/>, если он известен.
@@ -543,12 +559,26 @@ public sealed class DocumentSellerService : IDocumentSellerService
         {
             var metadata = SellerLegalEntityComposer.ReadMetadata(document.SellerSnapshotJson);
             var live = metadata?.LegacyImages == true && companyId.HasValue ? await LoadCompanyAsync(companyId.Value, defaultCompany, ct) : null;
-            var versionIds = SellerLegalEntityComposer.ReadImageVersionIds(document.SellerSnapshotJson);
-            var versionImages = versionIds.Count == 0
-                ? null
-                : await _db.CompanyBrandImageVersions.AsNoTracking()
-                    .Where(version => versionIds.Contains(version.Id))
-                    .ToDictionaryAsync(version => version.Id, version => version.DataUrl, ct);
+            if (metadata is null)
+                throw new SellerSelectionException("Сохранённые реквизиты документа повреждены. Автоматическая замена текущим профилем недоступна.");
+            var references = SellerLegalEntityComposer.ReadFrozenImageReferences(document.SellerSnapshotJson);
+            Dictionary<int, string>? versionImages = null;
+            if (references.Count > 0)
+            {
+                var versionIds = references.Select(reference => reference.VersionId).Distinct().ToArray();
+                var snapshotCompanyId = references[0].CompanyId;
+                // At most three versions; never load another company's image bytes by a bare ID.
+                var versions = await _db.CompanyBrandImageVersions.AsNoTracking()
+                    .Where(version => version.LegalEntityId == snapshotCompanyId && versionIds.Contains(version.Id))
+                    .ToDictionaryAsync(version => version.Id, version => new { version.Kind, version.DataUrl }, ct);
+                versionImages = new Dictionary<int, string>(versions.Count);
+                foreach (var reference in references)
+                {
+                    if (!versions.TryGetValue(reference.VersionId, out var version) || version.Kind != reference.Kind || string.IsNullOrWhiteSpace(version.DataUrl))
+                        throw new SellerSelectionException("Сохранённое изображение документа недоступно или не соответствует его реквизитам. Восстановите исходную версию; автоматическая замена изображением профиля недоступна.");
+                    versionImages.TryAdd(reference.VersionId, version.DataUrl);
+                }
+            }
             var fromSnapshot = SellerLegalEntityComposer.FromSnapshot(document.SellerSnapshotJson, live, versionImages);
             if (fromSnapshot is not null)
             {
