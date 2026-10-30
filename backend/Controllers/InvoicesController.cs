@@ -3310,14 +3310,8 @@ public class InvoicesController : ControllerBase
             return Content(documentHtml, "text/html; charset=utf-8");
         }
 
-        var isOrderTemplate = string.Equals(template.Key, InvoiceDocumentTemplateEngine.OrderTemplateKey, StringComparison.OrdinalIgnoreCase);
-        var isOfferTemplate = string.Equals(template.Key, InvoiceDocumentTemplateEngine.OfferTemplateKey, StringComparison.OrdinalIgnoreCase);
         var bytes = normalizedFormat == "word"
-            ? isOrderTemplate
-                ? InvoiceOrderWordDocumentRenderer.Render(documentHtml)
-                : isOfferTemplate
-                    ? InvoiceOfferWordDocumentRenderer.Render(documentHtml)
-                    : InvoiceStandardWordDocumentRenderer.Render(documentHtml)
+            ? InvoiceWordDocumentRenderer.Render(documentHtml, template.Key, template.Html)
             : Encoding.UTF8.GetBytes(documentHtml);
         var isDocx = normalizedFormat == "word";
         var ext = normalizedFormat == "pdf" ? "pdf" : isDocx ? "docx" : "doc";
@@ -3413,25 +3407,25 @@ public class InvoicesController : ControllerBase
         }
         else if (string.Equals(template.Key, InvoiceDocumentTemplateEngine.OrderTemplateKey, StringComparison.OrdinalIgnoreCase))
         {
-            bytes = InvoiceOrderWordDocumentRenderer.Render(documentHtml);
+            bytes = InvoiceWordDocumentRenderer.Render(documentHtml, template.Key, template.Html);
             fileName = $"invoice-order-{SanitizeFilePart(documentNumber)}.docx";
             contentType = PayPlanner.Api.Services.Documents.HtmlWordDocumentBuilder.ContentType;
         }
         else if (string.Equals(template.Key, InvoiceDocumentTemplateEngine.DefaultTemplateKey, StringComparison.OrdinalIgnoreCase))
         {
-            bytes = InvoiceStandardWordDocumentRenderer.Render(documentHtml);
+            bytes = InvoiceWordDocumentRenderer.Render(documentHtml, template.Key, template.Html);
             fileName = $"invoice-{SanitizeFilePart(documentNumber)}.docx";
             contentType = PayPlanner.Api.Services.Documents.HtmlWordDocumentBuilder.ContentType;
         }
         else if (string.Equals(template.Key, InvoiceDocumentTemplateEngine.OfferTemplateKey, StringComparison.OrdinalIgnoreCase))
         {
-            bytes = InvoiceOfferWordDocumentRenderer.Render(documentHtml);
+            bytes = InvoiceWordDocumentRenderer.Render(documentHtml, template.Key, template.Html);
             fileName = $"invoice-offer-{SanitizeFilePart(documentNumber)}.docx";
             contentType = PayPlanner.Api.Services.Documents.HtmlWordDocumentBuilder.ContentType;
         }
         else
         {
-            bytes = InvoiceStandardWordDocumentRenderer.Render(documentHtml);
+            bytes = InvoiceWordDocumentRenderer.Render(documentHtml, template.Key, template.Html);
             fileName = $"invoice-{SanitizeFilePart(documentNumber)}.docx";
             contentType = PayPlanner.Api.Services.Documents.HtmlWordDocumentBuilder.ContentType;
         }
@@ -3567,25 +3561,25 @@ public class InvoicesController : ControllerBase
         }
         else if (string.Equals(template.Key, InvoiceDocumentTemplateEngine.OrderTemplateKey, StringComparison.OrdinalIgnoreCase))
         {
-            bytes = InvoiceOrderWordDocumentRenderer.Render(documentHtml);
+            bytes = InvoiceWordDocumentRenderer.Render(documentHtml, template.Key, template.Html);
             fileName = $"invoice-order-{SanitizeFilePart(payment.Invoice?.Number ?? payment.Account)}.docx";
             contentType = PayPlanner.Api.Services.Documents.HtmlWordDocumentBuilder.ContentType;
         }
         else if (string.Equals(template.Key, InvoiceDocumentTemplateEngine.DefaultTemplateKey, StringComparison.OrdinalIgnoreCase))
         {
-            bytes = InvoiceStandardWordDocumentRenderer.Render(documentHtml);
+            bytes = InvoiceWordDocumentRenderer.Render(documentHtml, template.Key, template.Html);
             fileName = $"invoice-{SanitizeFilePart(payment.Invoice?.Number ?? payment.Account)}.docx";
             contentType = PayPlanner.Api.Services.Documents.HtmlWordDocumentBuilder.ContentType;
         }
         else if (string.Equals(template.Key, InvoiceDocumentTemplateEngine.OfferTemplateKey, StringComparison.OrdinalIgnoreCase))
         {
-            bytes = InvoiceOfferWordDocumentRenderer.Render(documentHtml);
+            bytes = InvoiceWordDocumentRenderer.Render(documentHtml, template.Key, template.Html);
             fileName = $"invoice-offer-{SanitizeFilePart(payment.Invoice?.Number ?? payment.Account)}.docx";
             contentType = PayPlanner.Api.Services.Documents.HtmlWordDocumentBuilder.ContentType;
         }
         else
         {
-            bytes = InvoiceStandardWordDocumentRenderer.Render(documentHtml);
+            bytes = InvoiceWordDocumentRenderer.Render(documentHtml, template.Key, template.Html);
             fileName = $"invoice-{SanitizeFilePart(payment.Invoice?.Number ?? payment.Account)}.docx";
             contentType = PayPlanner.Api.Services.Documents.HtmlWordDocumentBuilder.ContentType;
         }
