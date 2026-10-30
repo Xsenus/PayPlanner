@@ -260,6 +260,7 @@ public class PaymentContext : DbContext
     }
 
     public DbSet<PaymentCreateAttempt> PaymentCreateAttempts => Set<PaymentCreateAttempt>();
+    public DbSet<BalanceApplicationReceipt> BalanceApplicationReceipts => Set<BalanceApplicationReceipt>();
     public DbSet<MoneyOperation> MoneyOperations => Set<MoneyOperation>();
     public DbSet<MoneyAccount> MoneyAccounts => Set<MoneyAccount>();
     public DbSet<CashOrder> CashOrders => Set<CashOrder>();
@@ -1185,6 +1186,22 @@ public class PaymentContext : DbContext
                   .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasIndex(x => x.UserId).HasDatabaseName("IX_PaymentResponsibles_UserId");
+        });
+
+        modelBuilder.Entity<BalanceApplicationReceipt>(entity =>
+        {
+            entity.ToTable("BalanceApplicationReceipts", table =>
+            {
+                table.HasCheckConstraint("CK_BalanceApplicationReceipts_Owner", "(\"ClientId\" IS NOT NULL AND \"LegalEntityId\" IS NULL) OR (\"ClientId\" IS NULL AND \"LegalEntityId\" IS NOT NULL)");
+                table.HasCheckConstraint("CK_BalanceApplicationReceipts_Outcome", "\"ActorUserId\" > 0 AND \"PaymentId\" > 0 AND \"AppliedAmount\" > 0 AND length(\"CommandSha256\") = 64");
+            });
+            entity.HasKey(receipt => receipt.RequestId);
+            entity.HasIndex(receipt => receipt.ActorUserId);
+            entity.Property(receipt => receipt.RequestId).ValueGeneratedNever();
+            entity.Property(receipt => receipt.CommandVersion).HasMaxLength(32).IsRequired();
+            entity.Property(receipt => receipt.CommandSha256).HasMaxLength(64).IsRequired();
+            entity.Property(receipt => receipt.AppliedAmount).HasColumnType("decimal(18,2)");
+            entity.Property(receipt => receipt.Balance).HasColumnType("decimal(18,2)");
         });
 
         modelBuilder.Entity<ClientBalanceTransaction>(entity =>

@@ -28,8 +28,17 @@ public sealed class ClientBalanceTransactionDto
 
 public sealed class ApplyClientBalanceRequest
 {
+    public Guid? RequestId { get; set; }
     public int PaymentId { get; set; }
     public decimal Amount { get; set; }
     public string? Description { get; set; }
     public int? SourcePaymentId { get; set; }
+}
+
+public sealed class BalanceApplicationResultDto
+{
+    public Guid RequestId { get; set; }
+    public decimal AppliedAmount { get; set; }
+    public decimal Balance { get; set; }
+    public bool IsReplay { get; set; }
 }

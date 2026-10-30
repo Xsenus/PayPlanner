@@ -564,6 +564,56 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("AppReleaseSeen");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.BalanceApplicationReceipt", b =>
+                {
+                    b.Property<Guid>("RequestId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("ActorUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("AppliedAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("Balance")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int?>("ClientId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CommandSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("CommandVersion")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("LegalEntityId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("PaymentId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("RequestId");
+
+                    b.HasIndex("ActorUserId");
+
+                    b.ToTable("BalanceApplicationReceipts", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_BalanceApplicationReceipts_Outcome", "\"ActorUserId\" > 0 AND \"PaymentId\" > 0 AND \"AppliedAmount\" > 0 AND length(\"CommandSha256\") = 64");
+
+                            t.HasCheckConstraint("CK_BalanceApplicationReceipts_Owner", "(\"ClientId\" IS NOT NULL AND \"LegalEntityId\" IS NULL) OR (\"ClientId\" IS NULL AND \"LegalEntityId\" IS NOT NULL)");
+                        });
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.Bank", b =>
                 {
                     b.Property<int>("Id")

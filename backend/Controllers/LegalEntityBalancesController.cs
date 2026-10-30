@@ -119,6 +119,14 @@ public class LegalEntityBalancesController : ControllerBase
         [FromBody] ApplyClientBalanceRequest request,
         CancellationToken ct)
     {
+        if (request.RequestId.HasValue)
+            return await PayPlanner.Api.Services.Payments.BalanceApplicationService.ApplyAsync(_db, null, legalEntityId, request, HttpContext,
+                async token =>
+                {
+                    if (await RequireVisibleLegalEntityAsync(legalEntityId, token) is { } denied) return denied;
+                    if (!await CanEditPaymentsAsync(token) || !await CanViewFullBalanceAsync(token)) return Forbid();
+                    return null;
+                }, ct);
         if (await RequireVisibleLegalEntityAsync(legalEntityId, ct) is { } forbidden)
         {
             return forbidden;
