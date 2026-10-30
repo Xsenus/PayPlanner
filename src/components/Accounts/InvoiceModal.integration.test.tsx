@@ -22,6 +22,7 @@ import { apiService, type PagedResult } from '../../services/api';
 import { storeInvoiceEditorDraft } from '../../utils/invoiceEditorBridge';
 import { defaultRolePermissions, type RolePermissions } from '../../types/permissions';
 import { configureDocumentDeliveryTestApi } from '../../test/documentDeliveryFixtures';
+import { documentCopyTestSession } from '../../test/documentCopySession';
 
 const permissionState = vi.hoisted(() => ({ value: null as RolePermissions | null }));
 const printAuthState = vi.hoisted(() => ({ user: { id: 7, role: { id: 1 } } }));
@@ -3505,6 +3506,96 @@ describe('InvoiceModal integration', () => {
   });
 
   describe('invoice document defaults', () => {
+    it.each((['print', 'word'] as const).flatMap(format => (['login', 'refresh'] as const).map(mode => ({ format, mode }))))('copy session expansion handles invoice $format after $mode', async ({ format, mode }) => {
+      const session = documentCopyTestSession(); const pending = createDeferred<Blob>();
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+      const operation = vi.mocked(format === 'print' ? apiService.prepareDocumentPrint : apiService.downloadInvoiceDocument);
+      try {
+        operation.mockClear().mockReturnValueOnce(pending.promise);
+        render(<InvoiceModal {...props()} />); const dialog = choose(format);
+        const label = format === 'print' ? 'Печатать' : 'Скачать Word';
+        await waitFor(() => expect((dialog.getByRole('button', { name: label }) as HTMLButtonElement).disabled).toBe(false));
+        fireEvent.click(dialog.getByRole('button', { name: label })); expect(operation).toHaveBeenCalledOnce();
+        if (mode === 'login') session.replace(); else session.refresh();
+        await act(async () => pending.resolve(Object.assign(new Blob(['current copy']), { text: async () => 'current copy' })));
+        if (format === 'print') {
+          const popup = vi.mocked(window.open).mock.results.at(-1)!.value as Window;
+          if (mode === 'login') { expect(popup.close).toHaveBeenCalledOnce(); expect(popup.document.write).not.toHaveBeenCalledWith('current copy'); }
+          else expect(popup.document.write).toHaveBeenCalledWith('current copy');
+        } else expect(click).toHaveBeenCalledTimes(mode === 'login' ? 0 : 1);
+      } finally { click.mockRestore(); session.restore(); }
+    });
+
+    it('copy session expansion rejects a login change while reading the invoice HTML body', async () => {
+      const session = documentCopyTestSession(); const body = createDeferred<string>();
+      const text = vi.fn(() => body.promise);
+      try {
+        vi.mocked(apiService.prepareDocumentPrint).mockResolvedValueOnce(Object.assign(new Blob(['body']), { text }));
+        render(<InvoiceModal {...props()} />); const dialog = choose('print');
+        await waitFor(() => expect((dialog.getByRole('button', { name: 'Печатать' }) as HTMLButtonElement).disabled).toBe(false));
+        fireEvent.click(dialog.getByRole('button', { name: 'Печатать' })); await waitFor(() => expect(text).toHaveBeenCalledOnce());
+        const popup = vi.mocked(window.open).mock.results.at(-1)!.value as Window;
+        session.replace(); await act(async () => body.resolve('stale secret body'));
+        expect(popup.document.write).not.toHaveBeenCalledWith('stale secret body'); expect(popup.close).toHaveBeenCalledOnce();
+      } finally { session.restore(); }
+    });
+
+    it.each(['login', 'scope', 'refresh'] as const)('copy session expansion checks deferred invoice printing on %s', async mode => {
+      const session = documentCopyTestSession(); const callbacks: Array<() => void> = [];
+      const nativeTimeout = window.setTimeout.bind(window);
+      const timer = vi.spyOn(window, 'setTimeout').mockImplementation((handler, delay, ...args) => {
+        if (delay === 250) { callbacks.push(() => { if (typeof handler === 'function') handler(...args); }); return 0 as unknown as ReturnType<typeof setTimeout>; }
+        return nativeTimeout(handler, delay, ...args) as unknown as ReturnType<typeof setTimeout>;
+      });
+      try {
+        const current = props(); const view = render(<InvoiceModal {...current} />); const dialog = choose('print');
+        await waitFor(() => expect((dialog.getByRole('button', { name: 'Печатать' }) as HTMLButtonElement).disabled).toBe(false));
+        fireEvent.click(dialog.getByRole('button', { name: 'Печатать' }));
+        const popup = vi.mocked(window.open).mock.results.at(-1)!.value as Window;
+        await waitFor(() => expect(popup.document.write).toHaveBeenCalledWith('print copy'));
+        expect(callbacks.length).toBeGreaterThan(0);
+        if (mode === 'login') session.replace();
+        if (mode === 'refresh') session.refresh();
+        if (mode === 'scope') view.rerender(<InvoiceModal {...changeOwner('scope', current)} />);
+        act(() => callbacks.slice().forEach(callback => callback()));
+        expect(popup.print).toHaveBeenCalledTimes(mode === 'refresh' ? 1 : 0);
+        expect(popup.close).toHaveBeenCalledTimes(mode === 'refresh' ? 0 : 1);
+      } finally { timer.mockRestore(); session.restore(); }
+    });
+
+    it('copy session expansion closes the invoice dialog on a same-user replacement login', async () => {
+      const session = documentCopyTestSession();
+      try {
+        const current = props(); const view = render(<InvoiceModal {...current} />); choose('pdf');
+        session.replace(); view.rerender(<InvoiceModal {...current} />);
+        expect(screen.queryByRole('dialog', { name: 'Изображения в документе' })).toBeNull();
+      } finally { session.restore(); }
+    });
+
+    it('copy session expansion refuses to open invoice defaults from a former login', async () => {
+      const session = documentCopyTestSession();
+      try {
+        render(<InvoiceModal {...props()} />); session.replace();
+        fireEvent.click(screen.getByRole('button', { name: /^Скачать/ }));
+        const choice = screen.queryByRole('button', { name: 'Счет: PDF по настройкам' });
+        if (choice) fireEvent.click(choice);
+        expect(screen.queryByRole('dialog', { name: 'Изображения в документе' })).toBeNull();
+        expect(apiService.getDocumentImagePrintDefaults).not.toHaveBeenCalled();
+      } finally { session.restore(); }
+    });
+    it('copy session fences a late invoice PDF before auth rerender', async () => {
+      const session = documentCopyTestSession(); const pending = createDeferred<Blob>();
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+      try {
+        vi.mocked(apiService.downloadInvoiceDocument).mockClear().mockReturnValueOnce(pending.promise);
+        render(<InvoiceModal {...props()} />); const dialog = choose('pdf');
+        await waitFor(() => expect((dialog.getByRole('button', { name: 'Скачать PDF' }) as HTMLButtonElement).disabled).toBe(false));
+        fireEvent.click(dialog.getByRole('button', { name: 'Скачать PDF' }));
+        expect(apiService.downloadInvoiceDocument).toHaveBeenCalledOnce(); session.replace();
+        await act(async () => pending.resolve(new Blob(['late copy'])));
+        expect(click).not.toHaveBeenCalled();
+      } finally { click.mockRestore(); session.restore(); }
+    });
     const templates = [{ label: 'Счет', key: undefined }, { label: 'Счет-договор', key: 'invoice-offer' }, { label: 'Заказ', key: 'invoice-order' }];
     const props = () => ({ open: true, mode: 'edit' as const, presentation: 'page' as const,
       invoice: { id: 660, number: '660', date: '2026-04-08', dueDate: '2026-05-07', type: 'Income', amount: 100, status: 'Pending', lineItems: [] } as unknown as Invoice,

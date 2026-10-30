@@ -4,7 +4,7 @@ import { SystemSelect } from '../ui/SystemSelect';
 import { AlertTriangle, ArrowLeft, Ban, Check, Download, FileText, FileX, GripVertical, Loader2, Mail, Pencil, Plus, Printer, Save, Send, Settings2, UploadCloud, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { useDocumentDeliveryOwner } from '../../hooks/useDocumentDeliveryOwner';
+import { useDocumentDeliveryOwner, type DocumentDeliveryRead } from '../../hooks/useDocumentDeliveryOwner';
 import { useDialog } from '../../hooks/useDialog';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
 import { DocumentSellerPicker } from '../Documents/DocumentSellerPicker';
@@ -218,12 +218,13 @@ export function ContractDetailPage({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [workflowSaving, setWorkflowSaving] = useState(false);
-  const [documentSaving, setDocumentSaving] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [messengerDeliveryOpen, setMessengerDeliveryOpen] = useState<string | null>(null);
   const [electronicSignatureOpen, setElectronicSignatureOpen] = useState<string | null>(null);
-  const printScope = JSON.stringify([detailScope, canExport]);
+  const printOwner = useDocumentDeliveryOwner(JSON.stringify([detailScope, canExport]));
+  const printScope = printOwner.scope;
+  const documentSaving = printOwner.busy;
   const printScopeRef = useRef(printScope);
   printScopeRef.current = printScope;
   const canSendToDisk = canView && canExport && (isAdmin || Boolean(rolePermissions.yandexDisk?.canView && rolePermissions.yandexDisk?.canCreate));
@@ -235,7 +236,7 @@ export function ContractDetailPage({
   const printGeneration = useRef(0);
   const [imagePrintRequest, setImagePrintRequest] = useState<{
     documentId: number; scope: string; generation: number; format: 'print' | 'word' | 'pdf';
-    initialOptions: DocumentImagePrintOptions;
+    initialOptions: DocumentImagePrintOptions; owner: DocumentDeliveryRead;
   } | null>(null);
   useEffect(() => { setImagePrintRequest(null); }, [printScope]);
 
@@ -961,7 +962,9 @@ export function ContractDetailPage({
 
   const requestDocumentCopy = (format: 'print' | 'word' | 'pdf') => {
     if (!contract || contract.id !== contractId || documentSaving || !canView || !canExport) return;
-    setImagePrintRequest({ documentId: contract.id, scope: printScope, generation: ++printGeneration.current, format,
+    const owner = printOwner.capture();
+    if (!owner) return;
+    setImagePrintRequest({ documentId: contract.id, scope: printScope, owner, generation: ++printGeneration.current, format,
       initialOptions: { includeLogo: false, includeSeal: false, includeSignature: false } });
   };
   const openContractDocumentPreview = () => requestDocumentCopy('print');
@@ -969,7 +972,7 @@ export function ContractDetailPage({
 
   const confirmDocumentCopy = async (images: DocumentImagePrintOptions, signal: AbortSignal) => {
     const request = imagePrintRequest;
-    if (!request || request.documentId !== contract?.id || request.documentId !== contractId || !canView || !canExport || request.scope !== printScopeRef.current)
+    if (!request || !request.owner.isCurrent() || request.documentId !== contract?.id || request.documentId !== contractId || !canView || !canExport || request.scope !== printScopeRef.current)
       throw new Error('Документ или права изменились. Откройте карточку повторно.');
     let previewWindow: Window | null | undefined;
     const closePendingWindow = () => { if (previewWindow && !previewWindow.closed) previewWindow.close(); };
@@ -985,7 +988,7 @@ export function ContractDetailPage({
         ? await apiService.prepareDocumentPrint('contracts', request.documentId, { ...images, signal })
         : await apiService.downloadContractDocument(request.documentId, request.format, { ...images, signal });
       signal.throwIfAborted();
-      if (request.scope !== printScopeRef.current) throw new Error('Документ или права изменились. Откройте карточку повторно.');
+      if (!request.owner.isCurrent() || request.scope !== printScopeRef.current) throw new Error('Документ или права изменились. Откройте карточку повторно.');
       if (request.format === 'print') {
         if (!previewWindow || previewWindow.closed) throw new Error('Окно печати закрыто. Повторите попытку.');
         const url = URL.createObjectURL(blob);
@@ -1004,20 +1007,21 @@ export function ContractDetailPage({
   };
 
   const downloadTerminationAgreement = async (format: 'word' | 'pdf') => {
-    if (!contract || documentSaving) return;
-
-    setDocumentSaving(true);
+    if (!contract || contract.id !== contractId || !canView || !canExport || documentSaving) return;
+    const operation = printOwner.begin('termination');
+    if (!operation) return;
     try {
       const blob = await apiService.downloadContractTerminationAgreement(contract.id, format);
+      if (!operation.isCurrent()) return;
       saveContractDocumentBlob(blob, format, 'contract-termination');
       toast.success(
         format === 'pdf' ? 'PDF соглашения о расторжении подготовлен.' : 'Соглашение о расторжении подготовлено.',
         'Договоры',
       );
     } catch (error) {
-      toast.error(extractDisplayErrorMessage(error, 'Не удалось сформировать соглашение о расторжении'), 'Договоры');
+      if (operation.isCurrent()) toast.error(extractDisplayErrorMessage(error, 'Не удалось сформировать соглашение о расторжении'), 'Договоры');
     } finally {
-      setDocumentSaving(false);
+      operation.finish();
     }
   };
 
@@ -1088,7 +1092,7 @@ export function ContractDetailPage({
 
   if (!canView || (loadError?.scope === detailScope && !contract)) {
     return <div className="space-y-3 p-3 lg:p-4">
-      <button type="button" onClick={() => { delivery.invalidate(); onBack(); }} className="inline-flex items-center gap-2 rounded border px-3 py-2"><ArrowLeft className="h-4 w-4" />Назад</button>
+      <button type="button" onClick={() => { printOwner.invalidate(); delivery.invalidate(); onBack(); }} className="inline-flex items-center gap-2 rounded border px-3 py-2"><ArrowLeft className="h-4 w-4" />Назад</button>
       <p role="alert">{!canView ? 'Нет доступа к договору.' : loadError?.message}</p>
     </div>;
   }
@@ -1103,7 +1107,7 @@ export function ContractDetailPage({
   return (
     <div className="p-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <button onClick={() => { delivery.invalidate(); onBack(); }} className="inline-flex items-center gap-2 rounded border px-3 py-2">
+        <button onClick={() => { printOwner.invalidate(); delivery.invalidate(); onBack(); }} className="inline-flex items-center gap-2 rounded border px-3 py-2">
           <ArrowLeft className="h-4 w-4" />
           Назад
         </button>
@@ -1140,7 +1144,7 @@ export function ContractDetailPage({
             <button
               type="button"
               onClick={() => void downloadTerminationAgreement('pdf')}
-              disabled={documentActionBusy}
+              disabled={documentActionBusy || !canView || !canExport || contract.id !== contractId}
               className="inline-flex items-center gap-2 rounded border border-orange-200 px-3 py-2 text-sm text-orange-700 disabled:opacity-60"
             >
               {documentSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
@@ -2323,7 +2327,7 @@ export function ContractDetailPage({
         onClose={() => setPickerOpen(false)}
       />
       {imagePrintRequest && canView && canExport && contract.id === contractId && imagePrintRequest.scope === printScope && imagePrintRequest.documentId === contract.id ? (
-        <DocumentImagePrintDialog key={`${contract.id}:${imagePrintRequest.generation}`}
+        <DocumentImagePrintDialog key={`${contract.id}:${imagePrintRequest.generation}`} owner={imagePrintRequest.owner}
           documentName={`Договор № ${contract.number || contract.id}`} initialOptions={imagePrintRequest.initialOptions}
           defaultsSource={{ section: 'contracts', documentId: contract.id }}
           notice={imagePrintRequest.format === 'print' ? 'Подготовка печатной копии закрепляет реквизиты по выбранному для документа правилу. Отмена в системном окне печати не отменяет подготовку копии.' : undefined}

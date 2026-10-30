@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { Loader2, X } from 'lucide-react';
 import { useModalFocusTrap } from '../../hooks/useModalFocusTrap';
@@ -6,6 +6,8 @@ import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import type { DocumentImagePrintOptions } from '../../types/documentImagePrint';
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { apiService } from '../../services/api';
+import { captureAuthSessionIdentity, isAuthSessionIdentityCurrent } from '../../services/authService';
+import type { DocumentDeliveryRead } from '../../hooks/useDocumentDeliveryOwner';
 
 interface Props {
   documentName: string;
@@ -13,13 +15,17 @@ interface Props {
   confirmLabel: string;
   notice?: string;
   defaultsSource?: { section: 'invoices' | 'acts' | 'contracts'; documentId: number };
+  owner?: DocumentDeliveryRead;
   onConfirm: (options: DocumentImagePrintOptions, signal: AbortSignal) => Promise<void>;
   onClose: () => void;
 }
 
 // Mount with a key for the document/action identity. Each mounted dialog owns its request.
-export function DocumentImagePrintDialog({ documentName, initialOptions, confirmLabel, notice, defaultsSource, onConfirm, onClose }: Props) {
+export function DocumentImagePrintDialog({ documentName, initialOptions, confirmLabel, notice, defaultsSource, owner, onConfirm, onClose }: Props) {
   const [options, setOptions] = useState(() => ({ ...initialOptions }));
+  const [session] = useState(captureAuthSessionIdentity);
+  const sessionCurrent = isAuthSessionIdentityCurrent(session);
+  const ownerCurrent = owner?.isCurrent() ?? true;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [defaultsError, setDefaultsError] = useState('');
@@ -29,10 +35,11 @@ export function DocumentImagePrintDialog({ documentName, initialOptions, confirm
   const section = defaultsSource?.section;
   const documentId = defaultsSource?.documentId;
   const sourceKey = section !== undefined && documentId !== undefined ? `${section}:${documentId}` : '';
-  const defaultsReady = !sourceKey || loadedSource === sourceKey;
-  const defaultsLoading = !defaultsReady && !defaultsError;
+  const defaultsReady = sessionCurrent && ownerCurrent && (!sourceKey || loadedSource === sourceKey);
+  const defaultsLoading = sessionCurrent && ownerCurrent && !defaultsReady && !defaultsError;
   const request = useRef<AbortController | null>(null);
   const closed = useRef(false);
+  const isCurrent = useCallback(() => !closed.current && (owner?.isCurrent() ?? true) && isAuthSessionIdentityCurrent(session), [owner, session]);
   const dialog = useRef<HTMLFormElement>(null);
   const cancel = useRef<HTMLButtonElement>(null);
   const close = () => {
@@ -45,39 +52,39 @@ export function DocumentImagePrintDialog({ documentName, initialOptions, confirm
   const onKeyDown = useModalFocusTrap(dialog, true, close, cancel);
   useEffect(() => () => { request.current?.abort(); }, []);
   useEffect(() => {
-    if (section === undefined || documentId === undefined || closed.current) return;
+    if (section === undefined || documentId === undefined || !isCurrent()) return;
     const controller = new AbortController();
     defaultsRequest.current = controller;
     const key = `${section}:${documentId}`;
     setLoadedSource(null); setDefaultsError('');
     void apiService.getDocumentImagePrintDefaults(section, documentId, controller.signal).then(value => {
-      if (controller.signal.aborted || closed.current) return;
+      if (controller.signal.aborted || !isCurrent()) return;
       if (!value || typeof value.includeLogo !== 'boolean' || typeof value.includeSeal !== 'boolean' || typeof value.includeSignature !== 'boolean')
         throw new Error('Не удалось прочитать набор изображений. Повторите загрузку настроек.');
       setOptions({ ...value }); setLoadedSource(key);
     }).catch(cause => {
-      if (!controller.signal.aborted && !closed.current)
+      if (!controller.signal.aborted && isCurrent())
         setDefaultsError(extractDisplayErrorMessage(cause, 'Не удалось загрузить настройки изображений. Повторите попытку.'));
     });
     return () => { controller.abort(); if (defaultsRequest.current === controller) defaultsRequest.current = null; };
-  }, [section, documentId, loadAttempt]);
+  }, [section, documentId, loadAttempt, isCurrent]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     event.stopPropagation();
-    if (request.current || closed.current || !defaultsReady || defaultsError) return;
+    if (request.current || !isCurrent() || !defaultsReady || defaultsError) return;
     const controller = new AbortController();
     request.current = controller;
     setBusy(true);
     setError('');
     try {
       await onConfirm({ ...options }, controller.signal);
-      if (!controller.signal.aborted && !closed.current) { closed.current = true; onClose(); }
+      if (!controller.signal.aborted && isCurrent()) { closed.current = true; onClose(); }
     } catch (cause) {
-      if (!controller.signal.aborted) setError(extractDisplayErrorMessage(cause, 'Не удалось подготовить документ. Повторите попытку.'));
+      if (!controller.signal.aborted && isCurrent()) setError(extractDisplayErrorMessage(cause, 'Не удалось подготовить документ. Повторите попытку.'));
     } finally {
       if (request.current === controller) request.current = null;
-      if (!controller.signal.aborted) setBusy(false);
+      if (!controller.signal.aborted && isCurrent()) setBusy(false);
     }
   };
 
@@ -96,6 +103,7 @@ export function DocumentImagePrintDialog({ documentName, initialOptions, confirm
         <div className="space-y-3 p-3">
           <p className="text-sm text-slate-600">Выберите изображения для этой копии документа.</p>
           {notice ? <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">{notice}</p> : null}
+          {!sessionCurrent || !ownerCurrent ? <p role="alert" className="text-sm text-red-700">Документ или сеанс входа изменились. Откройте документ повторно.</p> : null}
           {defaultsLoading ? <p role="status" className="text-sm text-slate-600">Загружаем настройки документа…</p> : null}
           <fieldset disabled={busy || !defaultsReady || !!defaultsError} className="space-y-2">
             <legend className="sr-only">Печатать в документе</legend>

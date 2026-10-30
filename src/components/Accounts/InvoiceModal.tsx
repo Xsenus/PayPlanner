@@ -34,7 +34,7 @@ import { fromInputToApiDate, todayYMDInTimeZone, toDateInputValue } from '../../
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDocumentMenuLayout } from '../../hooks/useDocumentMenuLayout';
-import { useDocumentDeliveryOwner } from '../../hooks/useDocumentDeliveryOwner';
+import { useDocumentDeliveryOwner, type DocumentDeliveryRead } from '../../hooks/useDocumentDeliveryOwner';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useInvoiceReferenceDictionaries } from '../../hooks/useInvoiceReferenceDictionaries';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
@@ -1033,13 +1033,14 @@ export function InvoiceModal({
   const printButtonRef = useRef<HTMLButtonElement>(null);
   const printRequestGeneration = useRef(0);
   const canReadPrint = isAdmin || permissions.accounts.canView;
-  const printScope = JSON.stringify([open, invoice?.id, currentUser?.id, currentUser?.role?.id,
-    canReadPrint, canExport, permissions.accounts.viewScope]);
+  const printOwner = useDocumentDeliveryOwner(JSON.stringify([open, invoice?.id, currentUser?.id, currentUser?.role?.id,
+    canReadPrint, canExport, permissions.accounts.viewScope]));
+  const printScope = printOwner.scope;
   const printScopeRef = useRef(printScope);
   printScopeRef.current = printScope;
   const [imagePrintRequest, setImagePrintRequest] = useState<{
     documentId: number; scope: string; generation: number; format: 'print' | 'word' | 'pdf'; templateKey?: string; useDefaults: boolean;
-    initialOptions: DocumentImagePrintOptions;
+    initialOptions: DocumentImagePrintOptions; owner: DocumentDeliveryRead;
   } | null>(null);
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
   const printMenuLayout = useDocumentMenuLayout(printMenuOpen && open && canReadPrint && canExport, 24);
@@ -3174,7 +3175,7 @@ export function InvoiceModal({
     return previewWindow;
   };
 
-  const printHtmlInWindow = (html: string, previewWindow?: Window | null) => {
+  const printHtmlInWindow = (html: string, previewWindow: Window | null | undefined, owner: DocumentDeliveryRead) => {
     if (!previewWindow || previewWindow.closed) {
       throw new Error('Окно печати было закрыто до загрузки документа. Повторите ещё раз.');
     }
@@ -3183,6 +3184,8 @@ export function InvoiceModal({
     previewWindow.document.write(html);
     previewWindow.document.close();
     window.setTimeout(() => {
+      if (!owner.isCurrent()) { if (!previewWindow.closed) previewWindow.close(); return; }
+      if (previewWindow.closed) return;
       try {
         previewWindow.focus();
         previewWindow.print();
@@ -3202,10 +3205,12 @@ export function InvoiceModal({
       return;
     }
     if (!canExport || !canReadPrint) return;
+    const owner = printOwner.capture();
+    if (!owner) return;
     (format === 'print' ? printButtonRef.current : downloadMenuRef.current?.querySelector('button'))?.focus();
     setPrintMenuOpen(false);
     setDownloadMenuOpen(false);
-    setImagePrintRequest({ documentId: invoice.id, scope: printScope, generation: ++printRequestGeneration.current, format, templateKey, useDefaults: combined === undefined,
+    setImagePrintRequest({ documentId: invoice.id, scope: printScope, owner, generation: ++printRequestGeneration.current, format, templateKey, useDefaults: combined === undefined,
       initialOptions: { includeLogo: true, includeSeal: combined ?? false, includeSignature: combined ?? false } });
   };
 
@@ -3213,10 +3218,10 @@ export function InvoiceModal({
 
   const confirmDocumentCopy = async (images: DocumentImagePrintOptions, signal: AbortSignal) => {
     const request = imagePrintRequest;
-    if (!request || request.documentId !== invoice?.id || !canReadPrint || !canExport || request.scope !== printScopeRef.current) throw new Error('Документ или права изменились. Откройте карточку повторно.');
+    if (!request || !request.owner.isCurrent() || request.documentId !== invoice?.id || !canReadPrint || !canExport || request.scope !== printScopeRef.current) throw new Error('Документ или права изменились. Откройте карточку повторно.');
     const requireCurrentCopy = () => {
       signal.throwIfAborted();
-      if (request.scope !== printScopeRef.current) throw new Error('Документ или права изменились. Откройте карточку повторно.');
+      if (!request.owner.isCurrent() || request.scope !== printScopeRef.current) throw new Error('Документ или права изменились. Откройте карточку повторно.');
     };
     let previewWindow: Window | null | undefined;
     const closePendingWindow = () => { if (previewWindow && !previewWindow.closed) previewWindow.close(); };
@@ -3232,7 +3237,7 @@ export function InvoiceModal({
       if (request.format === 'print') {
         const html = await blob.text();
         requireCurrentCopy();
-        printHtmlInWindow(html, previewWindow);
+        printHtmlInWindow(html, previewWindow, request.owner);
       } else {
         downloadBlob(blob, buildInvoiceDocumentFileName(invoice.number, invoice.date, request.format, request.templateKey));
       }
@@ -4015,7 +4020,7 @@ export function InvoiceModal({
         {!isPageMode && (
           <button
             type="button"
-            onClick={() => { delivery.invalidate(); onClose(); }}
+            onClick={() => { printOwner.invalidate(); delivery.invalidate(); onClose(); }}
             className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
             aria-label={t('close') ?? 'Закрыть'}
           >
@@ -5898,7 +5903,7 @@ export function InvoiceModal({
       />
 
       {imagePrintRequest && invoice && open && canReadPrint && canExport && imagePrintRequest.scope === printScope && imagePrintRequest.documentId === invoice.id ? (
-        <DocumentImagePrintDialog key={`${invoice.id}:${imagePrintRequest.generation}`}
+        <DocumentImagePrintDialog key={`${invoice.id}:${imagePrintRequest.generation}`} owner={imagePrintRequest.owner}
           documentName={`${imagePrintRequest.templateKey === INVOICE_OFFER_TEMPLATE_KEY ? 'Счёт-договор' : imagePrintRequest.templateKey === INVOICE_ORDER_TEMPLATE_KEY ? 'Заказ' : 'Счёт'} № ${invoice.number || invoice.id}`}
           initialOptions={imagePrintRequest.initialOptions}
           defaultsSource={imagePrintRequest.useDefaults ? { section: 'invoices', documentId: invoice.id } : undefined}

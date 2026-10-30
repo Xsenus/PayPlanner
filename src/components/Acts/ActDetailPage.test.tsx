@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ActDetailPage } from './ActDetailPage';
 import { apiService } from '../../services/api';
 import { configureDocumentDeliveryTestApi } from '../../test/documentDeliveryFixtures';
+import { documentCopyTestSession } from '../../test/documentCopySession';
 
 const {
   actModalSpy,
@@ -608,6 +609,70 @@ describe('ActDetailPage', () => {
   });
 
   describe('image print dialog', () => {
+    it.each((['print', 'word'] as const).flatMap(format => (['login', 'refresh'] as const).map(mode => ({ format, mode }))))('copy session expansion handles act $format after $mode', async ({ format, mode }) => {
+      const session = documentCopyTestSession(); let finish!: (blob: Blob) => void;
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+      try {
+        render(<ActDetailPage actId={35} onBack={vi.fn()} />); await loaded();
+        downloadActDocumentMock.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+        const dialog = open(format); fireEvent.click(dialog.getByRole('button', { name: format === 'print' ? 'Печатать' : 'Скачать Word' }));
+        expect(downloadActDocumentMock).toHaveBeenCalledOnce();
+        if (mode === 'login') session.replace(); else session.refresh();
+        await act(async () => finish(new Blob(['current copy'])));
+        if (format === 'print') {
+          const popup = vi.mocked(window.open).mock.results.at(-1)!.value as Window;
+          if (mode === 'login') { expect(popup.close).toHaveBeenCalledOnce(); expect(popup.location.href).toBe(''); }
+          else expect(popup.location.href).toContain('blob:');
+        } else expect(click).toHaveBeenCalledTimes(mode === 'login' ? 0 : 1);
+      } finally { click.mockRestore(); session.restore(); }
+    });
+
+    it.each(['login', 'scope', 'refresh'] as const)('copy session expansion checks delayed act PDF load printing on %s', async mode => {
+      const session = documentCopyTestSession();
+      try {
+        const view = render(<ActDetailPage actId={35} onBack={vi.fn()} />); await loaded();
+        const dialog = open('print'); fireEvent.click(dialog.getByRole('button', { name: 'Печатать' }));
+        const popup = vi.mocked(window.open).mock.results.at(-1)!.value as Window;
+        await waitFor(() => expect(typeof popup.onload).toBe('function'));
+        if (mode === 'login') session.replace();
+        if (mode === 'refresh') session.refresh();
+        if (mode === 'scope') { rolePermissionsMock.acts.viewScope = 'own'; view.rerender(<ActDetailPage actId={35} onBack={vi.fn()} />); }
+        act(() => popup.onload!.call(popup, new Event('load')));
+        expect(popup.print).toHaveBeenCalledTimes(mode === 'refresh' ? 1 : 0);
+        expect(popup.close).toHaveBeenCalledTimes(mode === 'refresh' ? 0 : 1);
+      } finally { session.restore(); }
+    });
+
+    it('copy session expansion closes the act dialog on a same-user replacement login', async () => {
+      const session = documentCopyTestSession();
+      try {
+        const view = render(<ActDetailPage actId={35} onBack={vi.fn()} />); await loaded(); open('pdf');
+        session.replace(); view.rerender(<ActDetailPage actId={35} onBack={vi.fn()} />);
+        expect(screen.queryByRole('dialog', { name: 'Изображения в документе' })).toBeNull();
+      } finally { session.restore(); }
+    });
+
+    it('copy session expansion refuses to open act defaults from a former login', async () => {
+      const session = documentCopyTestSession();
+      try {
+        render(<ActDetailPage actId={35} onBack={vi.fn()} />); await loaded(); session.replace();
+        fireEvent.click(screen.getByRole('button', { name: 'Скачать' }));
+        const choice = screen.queryByRole('button', { name: 'PDF по настройкам' }); if (choice) fireEvent.click(choice);
+        expect(screen.queryByRole('dialog', { name: 'Изображения в документе' })).toBeNull(); expect(apiService.getDocumentImagePrintDefaults).not.toHaveBeenCalled();
+      } finally { session.restore(); }
+    });
+    it('copy session fences a late act PDF before auth rerender', async () => {
+      const session = documentCopyTestSession(); let finish!: (blob: Blob) => void;
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+      try {
+        render(<ActDetailPage actId={35} onBack={vi.fn()} />); await loaded();
+        downloadActDocumentMock.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+        const dialog = open('pdf'); fireEvent.click(dialog.getByRole('button', { name: 'Скачать PDF' }));
+        expect(downloadActDocumentMock).toHaveBeenCalledOnce(); session.replace();
+        await act(async () => finish(new Blob(['late copy'])));
+        expect(click).not.toHaveBeenCalled();
+      } finally { click.mockRestore(); session.restore(); }
+    });
     beforeEach(() => {
       getActMock.mockImplementation(async (id: number) => ({ id, number: String(id), date: '2026-04-14', amount: 100,
         status: 'Created', type: 'Income', clientId: 7, lineItems: [] }));

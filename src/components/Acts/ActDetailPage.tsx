@@ -2,7 +2,7 @@ import { ArrowLeft, Ban, Check, ChevronDown, Download, FilePlus2, Link2, List, L
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDocumentMenuLayout } from '../../hooks/useDocumentMenuLayout';
-import { useDocumentDeliveryOwner } from '../../hooks/useDocumentDeliveryOwner';
+import { useDocumentDeliveryOwner, type DocumentDeliveryRead } from '../../hooks/useDocumentDeliveryOwner';
 import { useDialog } from '../../hooks/useDialog';
 import { useDocumentStatusSettings } from '../../hooks/useDocumentStatusSettings';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
@@ -115,13 +115,14 @@ function downloadBlob(fileName: string, blob: Blob) {
   URL.revokeObjectURL(href);
 }
 
-function openBlobInWindow(blob: Blob, targetWindow: Window | null, options?: { autoPrint?: boolean }) {
+function openBlobInWindow(blob: Blob, targetWindow: Window | null, options?: { autoPrint?: boolean; isCurrent?: () => boolean }) {
   if (!targetWindow || targetWindow.closed) throw new Error('Разрешите всплывающее окно для печати и повторите попытку.');
   const href = URL.createObjectURL(blob);
   const nextWindow = targetWindow;
   const cleanup = () => URL.revokeObjectURL(href);
   if (options?.autoPrint) {
     nextWindow.onload = () => {
+      if (options.isCurrent && !options.isCurrent()) { if (!nextWindow.closed) nextWindow.close(); cleanup(); return; }
       if (nextWindow.closed) return;
       nextWindow.focus();
       nextWindow.print();
@@ -227,13 +228,14 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
   const printMenuLayout = useDocumentMenuLayout(printMenuOpen && canView && canExport, 22);
   const downloadMenuLayout = useDocumentMenuLayout(downloadMenuOpen && canView && canExport, 22);
-  const printScope = JSON.stringify([actScope, canExport, act?.updatedAt, act?.auditUpdatedAt]);
+  const printOwner = useDocumentDeliveryOwner(JSON.stringify([actScope, canExport, act?.updatedAt, act?.auditUpdatedAt]));
+  const printScope = printOwner.scope;
   const printScopeRef = useRef(printScope);
   printScopeRef.current = printScope;
   const printGeneration = useRef(0);
   const [imagePrintRequest, setImagePrintRequest] = useState<{
     documentId: number; scope: string; generation: number; format: 'print' | DocumentFormat; useDefaults: boolean;
-    initialOptions: DocumentImagePrintOptions;
+    initialOptions: DocumentImagePrintOptions; owner: DocumentDeliveryRead;
   } | null>(null);
   const [pageActionLoading, setPageActionLoading] = useState<PageAction | null>(null);
   const [statusChangeOpen, setStatusChangeOpen] = useState(false);
@@ -521,10 +523,12 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
 
   const requestDocumentCopy = (format: 'print' | DocumentFormat, combined?: boolean) => {
     if (!act?.id || !canView || !canExport) return;
+    const owner = printOwner.capture();
+    if (!owner) return;
     (format === 'print' ? printMenuRef : downloadMenuRef).current?.querySelector('button')?.focus();
     setPrintMenuOpen(false);
     setDownloadMenuOpen(false);
-    setImagePrintRequest({ documentId: act.id, scope: printScope, generation: ++printGeneration.current, format, useDefaults: combined === undefined,
+    setImagePrintRequest({ documentId: act.id, scope: printScope, owner, generation: ++printGeneration.current, format, useDefaults: combined === undefined,
       initialOptions: { includeLogo: false, includeSeal: combined ?? false, includeSignature: combined ?? false } });
   };
   const handlePrintDocument = (combined: boolean) => requestDocumentCopy('print', combined);
@@ -532,7 +536,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
 
   const confirmDocumentCopy = async (images: DocumentImagePrintOptions, signal: AbortSignal) => {
     const request = imagePrintRequest;
-    if (!request || request.documentId !== act?.id || !canView || !canExport || request.scope !== printScopeRef.current)
+    if (!request || !request.owner.isCurrent() || request.documentId !== act?.id || !canView || !canExport || request.scope !== printScopeRef.current)
       throw new Error('Документ или права изменились. Откройте карточку повторно.');
     let previewWindow: Window | null | undefined;
     const closePendingWindow = () => { if (previewWindow && !previewWindow.closed) previewWindow.close(); };
@@ -546,8 +550,8 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
       signal.addEventListener('abort', closePendingWindow, { once: true });
       const blob = await apiService.downloadActDocument(request.documentId, request.format === 'print' ? 'pdf' : request.format, { ...images, signal });
       signal.throwIfAborted();
-      if (request.scope !== printScopeRef.current) throw new Error('Документ или права изменились. Откройте карточку повторно.');
-      if (request.format === 'print') openBlobInWindow(blob, previewWindow ?? null, { autoPrint: true });
+      if (!request.owner.isCurrent() || request.scope !== printScopeRef.current) throw new Error('Документ или права изменились. Откройте карточку повторно.');
+      if (request.format === 'print') openBlobInWindow(blob, previewWindow ?? null, { autoPrint: true, isCurrent: request.owner.isCurrent });
       else downloadBlob(buildActDocumentFileName(act.number || String(act.id), act.date || '', request.format), blob);
     } catch (cause) {
       closePendingWindow();
@@ -927,7 +931,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
         <div className="rounded-2xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-700">
           {error ?? 'Акт не найден.'}
         </div>
-        <button type="button" onClick={() => { delivery.invalidate(); onBack(); }} className="mt-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">К списку актов</button>
+        <button type="button" onClick={() => { printOwner.invalidate(); delivery.invalidate(); onBack(); }} className="mt-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">К списку актов</button>
       </div>
     );
   }
@@ -944,7 +948,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
           <div className="flex min-w-0 items-center gap-3 sm:flex-1">
             <button
               type="button"
-              onClick={() => { delivery.invalidate(); onBack(); }}
+              onClick={() => { printOwner.invalidate(); delivery.invalidate(); onBack(); }}
               className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
             >
               <ArrowLeft className="h-4 w-4" />
@@ -1440,7 +1444,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
         loading={statusChangeSubmitting}
       />
       {imagePrintRequest && canView && canExport && imagePrintRequest.scope === printScope && imagePrintRequest.documentId === act.id ? (
-        <DocumentImagePrintDialog key={`${act.id}:${imagePrintRequest.generation}`}
+        <DocumentImagePrintDialog key={`${act.id}:${imagePrintRequest.generation}`} owner={imagePrintRequest.owner}
           documentName={`Акт № ${act.number || act.id}`} initialOptions={imagePrintRequest.initialOptions}
           defaultsSource={imagePrintRequest.useDefaults ? { section: 'acts', documentId: act.id } : undefined}
           notice={act.type === 'Expense' ? 'В расходном акте изображения нашей компании не используются.' : undefined}

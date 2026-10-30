@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Contract } from '../../types';
 import { ContractDetailPage } from './ContractDetailPage';
 import { configureDocumentDeliveryTestApi } from '../../test/documentDeliveryFixtures';
+import { documentCopyTestSession } from '../../test/documentCopySession';
 
 const { dialogConfirmMock, dialogPromptMock, rolePermissionsResult, authState, deliveryToastSuccess, deliveryToastError } = vi.hoisted(() => ({
   deliveryToastSuccess: vi.fn(),
@@ -621,7 +622,112 @@ describe('ContractDetailPage integration', () => {
     });
   });
 
+  describe('termination copy owner', () => {
+    const terminated = { ...contractFixture, status: 'Terminated' as const, terminationDate: '2026-04-12', terminationTerms: 'Согласованное прекращение услуг' };
+    beforeEach(() => vi.mocked(apiService.getContract).mockResolvedValue(terminated));
+
+    it.each(['login', 'user', 'scope', 'export', 'back', 'error'] as const)('copy session expansion fences the former termination copy on %s', async change => {
+      const session = documentCopyTestSession(); let resolve!: (blob: Blob) => void; let reject!: (error: Error) => void;
+      const pending = new Promise<Blob>((yes, no) => { resolve = yes; reject = no; });
+      vi.mocked(apiService.downloadContractTerminationAgreement).mockReturnValueOnce(pending);
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {}); const back = vi.fn();
+      try {
+        const view = render(<ContractDetailPage contractId={77} onBack={back} />);
+        const button = await screen.findByRole('button', { name: 'Соглашение PDF' }); fireEvent.click(button); fireEvent.click(button);
+        expect(apiService.downloadContractTerminationAgreement).toHaveBeenCalledExactlyOnceWith(77, 'pdf');
+        if (change === 'login') session.replace();
+        if (change === 'back') { fireEvent.click(screen.getByRole('button', { name: 'Назад' })); expect(back).toHaveBeenCalledOnce(); }
+        if (change === 'user') authState.user = { id: 8, role: { id: 1 } };
+        if (change === 'export') rolePermissionsResult.contracts.canExport = false;
+        if (change === 'scope' || change === 'error') rolePermissionsResult.contracts.viewScope = 'own';
+        if (['user', 'export', 'scope', 'error'].includes(change)) view.rerender(<ContractDetailPage contractId={77} onBack={back} />);
+        await act(async () => { if (change === 'error') reject(new Error('Старая ошибка соглашения')); else resolve(new Blob(['late agreement'])); });
+        expect(click).not.toHaveBeenCalled(); expect(deliveryToastSuccess).not.toHaveBeenCalled(); expect(deliveryToastError).not.toHaveBeenCalled();
+      } finally { click.mockRestore(); session.restore(); }
+    });
+
+    it.each(['export', 'view'] as const)('copy session expansion refuses termination download without %s', async denied => {
+      if (denied === 'export') rolePermissionsResult.contracts.canExport = false; else rolePermissionsResult.contracts.canView = false;
+      render(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+      if (denied === 'export') {
+        const button = await screen.findByRole('button', { name: 'Соглашение PDF' }); expect((button as HTMLButtonElement).disabled).toBe(true); fireEvent.click(button);
+      } else await screen.findByText('Нет доступа к договору.');
+      expect(apiService.downloadContractTerminationAgreement).not.toHaveBeenCalled();
+    });
+
+    it('copy session expansion keeps a new termination copy locked after the former finally', async () => {
+      let first!: (blob: Blob) => void; let second!: (blob: Blob) => void;
+      vi.mocked(apiService.getContract).mockImplementation(async id => ({ ...terminated, id, number: String(id) }));
+      vi.mocked(apiService.downloadContractTerminationAgreement).mockReturnValueOnce(new Promise(resolve => { first = resolve; })).mockReturnValueOnce(new Promise(resolve => { second = resolve; }));
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+      try {
+        const view = render(<ContractDetailPage contractId={77} onBack={vi.fn()} />); fireEvent.click(await screen.findByRole('button', { name: 'Соглашение PDF' }));
+        view.rerender(<ContractDetailPage contractId={78} onBack={vi.fn()} />); const button = await screen.findByRole('button', { name: 'Соглашение PDF' }); fireEvent.click(button);
+        expect(apiService.downloadContractTerminationAgreement).toHaveBeenCalledTimes(2);
+        await act(async () => first(new Blob(['old agreement']))); expect((button as HTMLButtonElement).disabled).toBe(true); expect(click).not.toHaveBeenCalled();
+        await act(async () => second(new Blob(['current agreement']))); expect(click).toHaveBeenCalledOnce(); expect(deliveryToastSuccess).toHaveBeenCalledOnce();
+        expect(click.mock.contexts[0]).toHaveProperty('download', 'contract-termination-78.pdf');
+      } finally { click.mockRestore(); }
+    });
+
+    it('copy session expansion downloads the current termination PDF with permitted access', async () => {
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+      try {
+        render(<ContractDetailPage contractId={77} onBack={vi.fn()} />); fireEvent.click(await screen.findByRole('button', { name: 'Соглашение PDF' }));
+        await waitFor(() => expect(click).toHaveBeenCalledOnce()); expect(apiService.downloadContractTerminationAgreement).toHaveBeenCalledExactlyOnceWith(77, 'pdf');
+        expect(deliveryToastSuccess).toHaveBeenCalledOnce(); expect(deliveryToastError).not.toHaveBeenCalled();
+      } finally { click.mockRestore(); }
+    });
+  });
+
   describe('image print dialog', () => {
+    it.each((['print', 'word'] as const).flatMap(format => (['login', 'refresh'] as const).map(mode => ({ format, mode }))))('copy session expansion handles contract $format after $mode', async ({ format, mode }) => {
+      const session = documentCopyTestSession(); let finish!: (blob: Blob) => void;
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+      const operation = vi.mocked(format === 'print' ? apiService.prepareDocumentPrint : apiService.downloadContractDocument);
+      try {
+        render(<ContractDetailPage contractId={77} onBack={vi.fn()} />); await ready();
+        operation.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+        const dialog = await open(format); fireEvent.click(dialog.getByRole('button', { name: format === 'print' ? 'Печатать' : 'Скачать Word' }));
+        expect(operation).toHaveBeenCalledOnce(); if (mode === 'login') session.replace(); else session.refresh();
+        await act(async () => finish(new Blob(['current copy'])));
+        if (format === 'print') {
+          const popup = vi.mocked(window.open).mock.results.at(-1)!.value as Window;
+          if (mode === 'login') { expect(popup.close).toHaveBeenCalledOnce(); expect(popup.location.href).toBe(''); }
+          else expect(popup.location.href).toContain('blob:');
+        } else expect(click).toHaveBeenCalledTimes(mode === 'login' ? 0 : 1);
+      } finally { click.mockRestore(); session.restore(); }
+    });
+
+    it('copy session expansion closes the contract dialog on a same-user replacement login', async () => {
+      const session = documentCopyTestSession();
+      try {
+        const view = render(<ContractDetailPage contractId={77} onBack={vi.fn()} />); await ready(); await open('pdf');
+        session.replace(); view.rerender(<ContractDetailPage contractId={77} onBack={vi.fn()} />);
+        expect(screen.queryByRole('dialog', { name: 'Изображения в документе' })).toBeNull();
+      } finally { session.restore(); }
+    });
+
+    it('copy session expansion refuses to open contract defaults from a former login', async () => {
+      const session = documentCopyTestSession();
+      try {
+        render(<ContractDetailPage contractId={77} onBack={vi.fn()} />); await ready(); session.replace();
+        fireEvent.click(screen.getByRole('button', { name: 'PDF' }));
+        expect(screen.queryByRole('dialog', { name: 'Изображения в документе' })).toBeNull(); expect(apiService.getDocumentImagePrintDefaults).not.toHaveBeenCalled();
+      } finally { session.restore(); }
+    });
+    it('copy session fences a late contract PDF before auth rerender', async () => {
+      const session = documentCopyTestSession(); let finish!: (blob: Blob) => void;
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+      try {
+        render(<ContractDetailPage contractId={77} onBack={vi.fn()} />); await ready();
+        vi.mocked(apiService.downloadContractDocument).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+        const dialog = await open('pdf'); fireEvent.click(dialog.getByRole('button', { name: 'Скачать PDF' }));
+        expect(apiService.downloadContractDocument).toHaveBeenCalledOnce(); session.replace();
+        await act(async () => finish(new Blob(['late copy'])));
+        expect(click).not.toHaveBeenCalled();
+      } finally { click.mockRestore(); session.restore(); }
+    });
     const open = async (format: 'print' | 'word' | 'pdf') => {
       fireEvent.click(screen.getByRole('button', { name: format === 'print' ? 'Печать' : format === 'word' ? 'Word' : 'PDF' }));
       const dialog = within(screen.getByRole('dialog', { name: 'Изображения в документе' }));
