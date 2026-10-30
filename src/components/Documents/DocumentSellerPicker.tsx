@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { useAuth } from '../../contexts/AuthContext';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useToast } from '../../hooks/useToast';
 import { apiService } from '../../services/api';
+import { captureAuthSessionIdentity, getAuthOperationEpoch, isAuthSessionIdentityCurrent } from '../../services/authService';
 import type { DocumentSellerSnapshotInfo, OwnCompanyOption } from '../../types';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { SystemSelect } from '../ui/SystemSelect';
@@ -30,7 +33,37 @@ const SELECT_CLASS =
  * Показывается только если выбирать есть из чего: несколько компаний или у компании есть подразделения.
  * Пустой выбор означает компанию по умолчанию.
  */
-export function DocumentSellerPicker({
+export function DocumentSellerPicker(props: DocumentSellerPickerProps) {
+  const { user } = useAuth();
+  const permissions = useRolePermissions(user?.role?.id);
+  const permission = permissions[props.kind === 'invoice' ? 'accounts' : props.kind === 'act' ? 'acts' : 'contracts'];
+  const owner = JSON.stringify([props.kind, props.documentId, Boolean(props.draft), Boolean(props.frozen), props.canEdit,
+    user?.id, user?.role?.id, getAuthOperationEpoch(), permission.canView, permission.canEdit, permission.viewScope]);
+  return <DocumentSellerPickerOwner key={owner} {...props} />;
+}
+
+function DocumentSellerPickerOwner(props: DocumentSellerPickerProps) {
+  const { frozen, snapshotInfo } = props;
+  const [options, setOptions] = useState<OwnCompanyOption[] | null>(null);
+  useEffect(() => {
+    if (frozen && snapshotInfo?.companyName) {
+      setOptions([]);
+      return;
+    }
+    let cancelled = false;
+    const session = captureAuthSessionIdentity();
+    apiService.getOwnCompanyOptions().then(items => {
+      if (!cancelled && isAuthSessionIdentityCurrent(session)) setOptions(items);
+    }).catch(() => {
+      if (!cancelled && isAuthSessionIdentityCurrent(session)) setOptions([]);
+    });
+    return () => { cancelled = true; };
+  }, [frozen, snapshotInfo?.companyName]);
+  // A refreshed selection replaces only its editor, without reloading the company catalogue.
+  return <DocumentSellerSelection key={JSON.stringify([props.companyId ?? null, props.branchId ?? null])} {...props} options={options} />;
+}
+
+function DocumentSellerSelection({
   kind,
   documentId,
   draft = false,
@@ -41,34 +74,17 @@ export function DocumentSellerPicker({
   timeZoneId,
   canEdit,
   onChanged,
-}: DocumentSellerPickerProps) {
+  options,
+}: DocumentSellerPickerProps & { options: OwnCompanyOption[] | null }) {
   const toast = useToast();
-  const [options, setOptions] = useState<OwnCompanyOption[] | null>(null);
   const [selection, setSelection] = useState({ companyId, branchId });
   const [saving, setSaving] = useState(false);
-
+  const active = useRef(true);
+  const pending = useRef(false);
   useEffect(() => {
-    setSelection({ companyId, branchId });
-  }, [companyId, branchId, documentId]);
-
-  useEffect(() => {
-    if (frozen && snapshotInfo?.companyName) {
-      setOptions([]);
-      return;
-    }
-    let cancelled = false;
-    apiService
-      .getOwnCompanyOptions()
-      .then((items) => {
-        if (!cancelled) setOptions(items);
-      })
-      .catch(() => {
-        if (!cancelled) setOptions([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [frozen, snapshotInfo?.companyName]);
+    active.current = true;
+    return () => { active.current = false; };
+  }, []);
 
   const defaultCompany = useMemo(() => options?.find((item) => item.isDefault) ?? null, [options]);
   const effectiveCompany = useMemo(
@@ -81,12 +97,16 @@ export function DocumentSellerPicker({
   }
 
   const save = async (next: { companyId: number | null; branchId: number | null }) => {
+    if (!active.current || pending.current || frozen || !canEdit) return;
+    const session = captureAuthSessionIdentity();
+    const isCurrent = () => active.current && isAuthSessionIdentityCurrent(session);
     const previous = selection;
     setSelection(next);
     if (draft) {
       onChanged?.(next);
       return;
     }
+    pending.current = true;
     setSaving(true);
     try {
       if (kind === 'invoice') {
@@ -96,12 +116,14 @@ export function DocumentSellerPicker({
       } else {
         await apiService.setActSeller(documentId, next);
       }
-      onChanged?.(next);
+      if (isCurrent()) onChanged?.(next);
     } catch (error) {
-      setSelection(previous);
-      toast.error(extractDisplayErrorMessage(error, 'Не удалось сохранить продавца.'), 'Продавец');
+      if (isCurrent()) {
+        setSelection(previous);
+        toast.error(extractDisplayErrorMessage(error, 'Не удалось сохранить продавца.'), 'Продавец');
+      }
     } finally {
-      setSaving(false);
+      if (isCurrent()) { pending.current = false; setSaving(false); }
     }
   };
 

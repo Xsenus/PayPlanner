@@ -10,6 +10,9 @@ const { profileTimeZoneIdRef, getNextContractNumberMock, getContractRulesSetting
   getContractRulesSettingsMock: vi.fn(),
 }));
 
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 7, role: { id: 3 } } }) }));
+vi.mock('../../hooks/useRolePermissions', () => ({ useRolePermissions: () => ({ contracts: { canView: true, canEdit: true, viewScope: 'all' } }) }));
+
 vi.mock('../../hooks/useTranslation', () => ({
   useTranslation: () => ({ t: () => undefined }),
 }));
