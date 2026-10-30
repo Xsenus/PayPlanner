@@ -3382,13 +3382,16 @@ public class InvoicesController : ControllerBase
         await RememberInvoiceDocumentTemplateAsync(payment, template.Key, ct);
         var mainCompany = await ResolveInvoiceSellerAsync(payment, await LoadMainCompanyAsync(ct), true, ct);
         var shouldIncludeSignatureAndSeal = includeSignatureAndSeal ?? documentSettings.PrintWithSignatureAndSealByDefault;
-        var documentHtml = InvoiceDocumentTemplateEngine.RenderHtml(
+        var imageOptions = includeSignatureAndSeal.HasValue ? null : await _documentSeller.ReadImagePrintDefaultsAsync(payment, ct);
+        var documentHtml = imageOptions is null ? InvoiceDocumentTemplateEngine.RenderHtml(
             template.Html,
             payment,
             installmentDocumentContext.LineItems,
             mainCompany,
             shouldIncludeSignatureAndSeal,
-            installmentDocumentContext.ScheduleHtml);
+            installmentDocumentContext.ScheduleHtml)
+            : InvoiceDocumentTemplateEngine.RenderHtml(template.Html, payment, installmentDocumentContext.LineItems,
+                mainCompany, imageOptions, installmentDocumentContext.ScheduleHtml);
 
         var documentNumber = payment.Invoice?.Number ?? payment.Account;
         byte[] bytes;
@@ -3436,6 +3439,9 @@ public class InvoicesController : ControllerBase
         await using var stream = new MemoryStream(bytes);
         try
         {
+            if (!await CanUseInvoiceSellerAsync(id, edit: false, ct)) return Forbid();
+            if (await RequireSectionPermissionAsync(RolePermissionCatalog.YandexDisk, permission => permission.CanCreate, ct) is { } changedDiskPermission) return changedDiskPermission;
+            ct.ThrowIfCancellationRequested();
             var result = await _yandexDiskService.UploadCrmDocumentAsync(new YandexDiskCrmDocumentUpload(
                 stream,
                 contentType,
@@ -3532,13 +3538,16 @@ public class InvoicesController : ControllerBase
         var documentSettings = await GetInvoiceDocumentTemplateSettingsAsync(ct);
         var template = SelectInvoiceDocumentTemplate(documentSettings, null);
         var mainCompany = await ResolveInvoiceSellerAsync(payment, await LoadMainCompanyAsync(ct), true, ct);
-        var documentHtml = InvoiceDocumentTemplateEngine.RenderHtml(
+        var imageOptions = await _documentSeller.ReadImagePrintDefaultsAsync(payment, ct);
+        var documentHtml = imageOptions is null ? InvoiceDocumentTemplateEngine.RenderHtml(
             template.Html,
             payment,
             installmentDocumentContext.LineItems,
             mainCompany,
             documentSettings.PrintWithSignatureAndSealByDefault,
-            installmentDocumentContext.ScheduleHtml);
+            installmentDocumentContext.ScheduleHtml)
+            : InvoiceDocumentTemplateEngine.RenderHtml(template.Html, payment, installmentDocumentContext.LineItems,
+                mainCompany, imageOptions, installmentDocumentContext.ScheduleHtml);
         byte[] bytes;
         string fileName;
         string contentType;
@@ -3587,6 +3596,8 @@ public class InvoicesController : ControllerBase
             ? "Во вложении счёт."
             : request.Message.Trim();
 
+        if (!await CanUseInvoiceSellerAsync(id, edit: false, ct)) return Forbid();
+        ct.ThrowIfCancellationRequested();
         await _emailService.SendEmailWithAttachmentAsync(
             email,
             subject,

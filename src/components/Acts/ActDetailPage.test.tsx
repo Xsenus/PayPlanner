@@ -44,6 +44,7 @@ const {
     accounts: {
       canView: true,
     },
+    yandexDisk: { canView: true, canCreate: true },
     clients: {
       canView: true,
       canEdit: false,
@@ -92,6 +93,7 @@ vi.mock('../../services/api', () => ({
     deleteAct: vi.fn(),
     downloadActDocument: downloadActDocumentMock,
     sendActByEmail: sendActByEmailMock,
+    uploadActDocumentToYandexDisk: vi.fn(),
   },
 }));
 
@@ -123,6 +125,9 @@ describe('ActDetailPage', () => {
     rolePermissionsMock.acts.canExport = true;
     rolePermissionsMock.acts.viewScope = 'all';
     rolePermissionsMock.accounts.canView = true;
+    rolePermissionsMock.yandexDisk.canView = true;
+    rolePermissionsMock.yandexDisk.canCreate = true;
+    vi.mocked(apiService.uploadActDocumentToYandexDisk).mockReset().mockResolvedValue({ success: true, path: '/CRM/act.pdf' });
     rolePermissionsMock.clients.canView = true;
     rolePermissionsMock.clients.viewScope = 'all';
     getDocumentStatusesMock.mockResolvedValue([]);
@@ -286,6 +291,20 @@ describe('ActDetailPage', () => {
       mode: 'edit',
       presentation: 'page',
     }));
+  });
+
+  it.each(['allowed', 'export', 'disk-view', 'disk-create'] as const)('uses act image defaults for Yandex Disk and respects %s', async access => {
+    getActMock.mockResolvedValue({ id: 32, number: '32', date: '2026-04-10', amount: 100, status: 'Created', type: 'Income', lineItems: [] });
+    getClientsMock.mockResolvedValue({ items: [] }); getActResponsiblesMock.mockResolvedValue({ items: [] });
+    if (access === 'export') rolePermissionsMock.acts.canExport = false;
+    if (access === 'disk-view') rolePermissionsMock.yandexDisk.canView = false;
+    if (access === 'disk-create') rolePermissionsMock.yandexDisk.canCreate = false;
+    render(<ActDetailPage actId={32} onBack={vi.fn()} />);
+    const button = await screen.findByRole('button', { name: 'Я.Диск' });
+    expect((button as HTMLButtonElement).disabled).toBe(access !== 'allowed');
+    fireEvent.click(button);
+    if (access === 'allowed') await waitFor(() => expect(apiService.uploadActDocumentToYandexDisk).toHaveBeenCalledExactlyOnceWith(32, 'pdf'));
+    else expect(apiService.uploadActDocumentToYandexDisk).not.toHaveBeenCalled();
   });
 
   it('sends act document by email from the action bar', async () => {

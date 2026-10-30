@@ -553,13 +553,11 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
   };
 
   const handleUploadDocumentToYandexDisk = async () => {
-    if (!act?.id) return;
+    if (!act?.id || !canExport || (!isAdmin && (!permissions.yandexDisk?.canView || !permissions.yandexDisk?.canCreate))) return;
 
     setPageActionLoading('yandexDisk');
     try {
-      const result = await apiService.uploadActDocumentToYandexDisk(act.id, 'pdf', {
-        includeSignatureAndSeal: false,
-      });
+      const result = await apiService.uploadActDocumentToYandexDisk(act.id, 'pdf');
       setError(null);
       toast.success(`Акт отправлен на Яндекс.Диск: ${result.path}.`, 'Я.Диск');
     } catch (uploadError) {
@@ -1234,7 +1232,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
             <button
               type="button"
               onClick={() => void handleUploadDocumentToYandexDisk()}
-              disabled={pageActionLoading === 'yandexDisk'}
+              disabled={pageActionLoading === 'yandexDisk' || !canExport || (!isAdmin && (!permissions.yandexDisk?.canView || !permissions.yandexDisk?.canCreate))}
               className="inline-flex items-center justify-center gap-2 rounded border border-sky-200 bg-white px-3 py-2 text-sm text-sky-700 transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {pageActionLoading === 'yandexDisk' ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}

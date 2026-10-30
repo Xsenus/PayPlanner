@@ -125,6 +125,7 @@ vi.mock('../../services/api', () => ({
     getOwnCompanyOptions: vi.fn().mockResolvedValue([]),
     getDocumentImagePrintDefaults: vi.fn().mockResolvedValue({ includeLogo: false, includeSeal: false, includeSignature: false }),
     prepareDocumentPrint: vi.fn(),
+    uploadInvoiceDocumentToYandexDisk: vi.fn(),
     getInvoicePreview: vi.fn().mockResolvedValue(new Blob(['<html><body>preview</body></html>'], { type: 'text/html' })),
     downloadInvoiceDocument: vi
       .fn()
@@ -324,6 +325,7 @@ describe('InvoiceModal integration', () => {
     printAuthState.user = { id: 7, role: { id: 1 } };
     vi.mocked(apiService.getDocumentImagePrintDefaults).mockReset().mockResolvedValue({ includeLogo: false, includeSeal: false, includeSignature: false });
     vi.mocked(apiService.prepareDocumentPrint).mockReset().mockImplementation(async () => Object.assign(new Blob(['print copy']), { text: async () => 'print copy' }));
+    vi.mocked(apiService.uploadInvoiceDocumentToYandexDisk).mockReset().mockResolvedValue({ success: true, path: '/CRM/invoice.pdf' });
     permissionState.value = null;
     vi.mocked(apiService.getInvoicePreview).mockClear();
     caseModalSubmitPayloadRef.current = {
@@ -3365,6 +3367,19 @@ describe('InvoiceModal integration', () => {
         clientCaseIds: [],
       }));
     });
+  });
+
+  it.each(['allowed', 'export', 'disk-view', 'disk-create'] as const)('uses invoice image defaults for Yandex Disk and respects %s', async access => {
+    permissionState.value = { ...defaultRolePermissions,
+      accounts: { ...defaultRolePermissions.accounts, canView: true, canExport: access !== 'export' },
+      yandexDisk: { ...defaultRolePermissions.yandexDisk, canView: access !== 'disk-view', canCreate: access !== 'disk-create' } };
+    const invoice = { id: 660, number: '660', date: '2026-04-08', dueDate: '2026-05-07', type: 'Income', amount: 100, status: 'Pending', lineItems: [] } as unknown as Invoice;
+    render(<InvoiceModal open mode="edit" presentation="page" invoice={invoice} onClose={vi.fn()} onSubmit={vi.fn()} submitting={false} clients={[]} responsibles={[]} lookupsLoading={false} relatedPayments={[]} />);
+    const button = await screen.findByRole('button', { name: 'Я.Диск' });
+    expect((button as HTMLButtonElement).disabled).toBe(access !== 'allowed');
+    fireEvent.click(button);
+    if (access === 'allowed') await waitFor(() => expect(apiService.uploadInvoiceDocumentToYandexDisk).toHaveBeenCalledExactlyOnceWith(660, 'pdf'));
+    else expect(apiService.uploadInvoiceDocumentToYandexDisk).not.toHaveBeenCalled();
   });
 
   describe('invoice document defaults', () => {

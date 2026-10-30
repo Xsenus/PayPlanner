@@ -3239,6 +3239,7 @@ export function InvoiceModal({
   };
 
   const handleUploadDocumentToYandexDisk = async () => {
+    if (!canReadPrint || !canExport || (!isAdmin && (!permissions.yandexDisk.canView || !permissions.yandexDisk.canCreate))) return;
     if (!invoice?.id) {
       toast.error('Сначала сохраните счёт, затем можно отправить документ на Яндекс.Диск.');
       return;
@@ -3246,9 +3247,7 @@ export function InvoiceModal({
 
     setYandexDiskUploading(true);
     try {
-      const result = await apiService.uploadInvoiceDocumentToYandexDisk(invoice.id, 'pdf', {
-        includeSignatureAndSeal: false,
-      });
+      const result = await apiService.uploadInvoiceDocumentToYandexDisk(invoice.id, 'pdf');
       toast.success(`Счёт отправлен на Яндекс.Диск: ${result.path}.`, 'Я.Диск');
     } catch (err) {
       toast.error(extractDisplayErrorMessage(err, 'Не удалось отправить счёт на Яндекс.Диск.'), 'Я.Диск');
@@ -4341,7 +4340,7 @@ export function InvoiceModal({
             <button
               type="button"
               onClick={() => void handleUploadDocumentToYandexDisk()}
-              disabled={yandexDiskUploading || !canExport || (!isAdmin && !permissions.yandexDisk.canCreate)}
+              disabled={yandexDiskUploading || !canReadPrint || !canExport || (!isAdmin && (!permissions.yandexDisk.canView || !permissions.yandexDisk.canCreate))}
               className="inline-flex items-center justify-center gap-2 rounded border border-sky-200 bg-white px-3 py-2 text-sm text-sky-700 disabled:opacity-60"
             >
               {yandexDiskUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}

@@ -533,7 +533,10 @@ public class ContractsController : ControllerBase
 
         var mainCompany = await ResolveContractSellerAsync(contract, await LoadMainCompanyAsync(ct), true, ct);
         var template = await GetContractDocumentTemplateAsync(templateKey, ct);
-        var documentHtml = ContractDocumentTemplateEngine.RenderHtml(template.Html, contract, mainCompany);
+        var imageOptions = await _documentSeller.ReadImagePrintDefaultsAsync(contract, ct);
+        var documentHtml = imageOptions is null
+            ? ContractDocumentTemplateEngine.RenderHtml(template.Html, contract, mainCompany)
+            : ContractDocumentTemplateEngine.RenderHtml(template.Html, contract, mainCompany, imageOptions);
         var normalizedFormat = NormalizeDocumentFormat(format);
         if (normalizedFormat == "html")
         {
@@ -567,6 +570,9 @@ public class ContractsController : ControllerBase
         await using var stream = new MemoryStream(bytes);
         try
         {
+            if (!await CanUseContractSellerAsync(id, edit: false, ct)) return Forbid();
+            if (await RequireSectionPermissionAsync(RolePermissionCatalog.YandexDisk, permission => permission.CanCreate, ct) is { } changedDiskPermission) return changedDiskPermission;
+            ct.ThrowIfCancellationRequested();
             var result = await _yandexDiskService.UploadCrmDocumentAsync(new YandexDiskCrmDocumentUpload(
                 stream,
                 contentType,
@@ -650,7 +656,10 @@ public class ContractsController : ControllerBase
 
         var mainCompany = await ResolveContractSellerAsync(contract, await LoadMainCompanyAsync(ct), true, ct);
         var template = await GetContractDocumentTemplateAsync(preferredTemplateKey: null, ct);
-        var documentHtml = ContractDocumentTemplateEngine.RenderHtml(template.Html, contract, mainCompany);
+        var imageOptions = await _documentSeller.ReadImagePrintDefaultsAsync(contract, ct);
+        var documentHtml = imageOptions is null
+            ? ContractDocumentTemplateEngine.RenderHtml(template.Html, contract, mainCompany)
+            : ContractDocumentTemplateEngine.RenderHtml(template.Html, contract, mainCompany, imageOptions);
         var normalizedFormat = NormalizeDocumentFormat(request.Format);
         if (normalizedFormat == "html")
         {
@@ -682,6 +691,8 @@ public class ContractsController : ControllerBase
             contentType = "application/msword";
         }
 
+        if (!await CanUseContractSellerAsync(id, edit: false, ct)) return Forbid();
+        ct.ThrowIfCancellationRequested();
         await _emailService.SendEmailWithAttachmentAsync(
             email,
             string.IsNullOrWhiteSpace(request.Subject) ? $"Договор № {contract.Number}" : request.Subject.Trim(),

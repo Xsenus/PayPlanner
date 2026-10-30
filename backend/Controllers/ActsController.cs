@@ -1504,15 +1504,11 @@ public class ActsController : ControllerBase
         var documentSettings = await GetActDocumentTemplateSettingsAsync(ct);
         var template = SelectActDocumentTemplate(documentSettings);
         var mainCompany = await ResolveActSellerAsync(act, await LoadMainCompanyAsync(ct), true, ct);
-        var documentHtml = ActDocumentTemplateEngine.RenderHtml(
-            template.Html,
-            act,
-            act.LineItems
-                .OrderBy(item => item.SortOrder)
-                .ThenBy(item => item.Id)
-                .ToList(),
-            mainCompany,
-            includeSignatureAndSeal ?? documentSettings.PrintWithSignatureAndSealByDefault);
+        var imageOptions = includeSignatureAndSeal.HasValue ? null : await _documentSeller.ReadImagePrintDefaultsAsync(act, ct);
+        var lines = act.LineItems.OrderBy(item => item.SortOrder).ThenBy(item => item.Id).ToList();
+        var documentHtml = imageOptions is null
+            ? ActDocumentTemplateEngine.RenderHtml(template.Html, act, lines, mainCompany, includeSignatureAndSeal ?? documentSettings.PrintWithSignatureAndSealByDefault)
+            : ActDocumentTemplateEngine.RenderHtml(template.Html, act, lines, mainCompany, imageOptions);
 
         byte[] bytes;
         string fileName;
@@ -1541,6 +1537,9 @@ public class ActsController : ControllerBase
         await using var stream = new MemoryStream(bytes);
         try
         {
+            if (!await CanUseActSellerAsync(id, edit: false, ct)) return Forbid();
+            if (await RequireSectionPermissionAsync(RolePermissionCatalog.YandexDisk, permission => permission.CanCreate, ct) is { } changedDiskPermission) return changedDiskPermission;
+            ct.ThrowIfCancellationRequested();
             var result = await _yandexDiskService.UploadCrmDocumentAsync(new YandexDiskCrmDocumentUpload(
                 stream,
                 contentType,
@@ -1639,15 +1638,11 @@ public class ActsController : ControllerBase
         var documentSettings = await GetActDocumentTemplateSettingsAsync(ct);
         var template = SelectActDocumentTemplate(documentSettings);
         var mainCompany = await ResolveActSellerAsync(act, await LoadMainCompanyAsync(ct), true, ct);
-        var documentHtml = ActDocumentTemplateEngine.RenderHtml(
-            template.Html,
-            act,
-            act.LineItems
-                .OrderBy(item => item.SortOrder)
-                .ThenBy(item => item.Id)
-                .ToList(),
-            mainCompany,
-            documentSettings.PrintWithSignatureAndSealByDefault);
+        var imageOptions = await _documentSeller.ReadImagePrintDefaultsAsync(act, ct);
+        var lines = act.LineItems.OrderBy(item => item.SortOrder).ThenBy(item => item.Id).ToList();
+        var documentHtml = imageOptions is null
+            ? ActDocumentTemplateEngine.RenderHtml(template.Html, act, lines, mainCompany, documentSettings.PrintWithSignatureAndSealByDefault)
+            : ActDocumentTemplateEngine.RenderHtml(template.Html, act, lines, mainCompany, imageOptions);
 
         byte[] bytes;
         string fileName;
@@ -1680,6 +1675,8 @@ public class ActsController : ControllerBase
             ? "Во вложении акт."
             : request.Message.Trim();
 
+        if (!await CanUseActSellerAsync(id, edit: false, ct)) return Forbid();
+        ct.ThrowIfCancellationRequested();
         await _emailService.SendEmailWithAttachmentAsync(
             email,
             subject,
