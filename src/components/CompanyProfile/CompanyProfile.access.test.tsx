@@ -5,6 +5,7 @@ import TopBar from '../TopBar/TopBar';
 import { canAccessTab } from '../../appRouting';
 import { defaultRestrictedRolePermissions } from '../../types/permissions';
 import { apiService } from '../../services/api';
+import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
 
 const fixture = vi.hoisted(() => ({ admin: false, view: false, edit: false, modal: vi.fn(), navigate: vi.fn() }));
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 3, role: { id: 4 } }, isAdmin: () => fixture.admin }) }));
@@ -14,7 +15,7 @@ vi.mock('../../hooks/useToast', () => ({ useToast: () => ({ success: vi.fn() }) 
 vi.mock('../../hooks/useDialog', () => ({ useDialog: () => ({ confirm: vi.fn() }) }));
 vi.mock('../LegalEntities/LegalEntityModal', () => ({ LegalEntityModal: (props: { initial: { id: number; shortName: string }; allowEdit: boolean; onSubmit: (payload: { shortName: string }) => Promise<unknown> }) => {
   fixture.modal(props);
-  return <div><span>{props.initial.shortName}</span>{props.allowEdit ? <button onClick={() => void props.onSubmit({ shortName: 'Changed' })}>Save fixture</button> : null}</div>;
+  return <div><span>{props.initial.shortName}</span>{props.allowEdit ? <button onClick={() => void props.onSubmit({ shortName: 'Changed' }).catch(error => { if (!(error instanceof StaleUiOperationError)) throw error; })}>Save fixture</button> : null}</div>;
 } }));
 vi.mock('../../services/api', () => ({ apiService: { getMainCompanySettings: vi.fn(), getLegalEntity: vi.fn(), updateLegalEntity: vi.fn(), suggestLegalEntities: vi.fn(), findLegalEntityById: vi.fn(), getUnreadUserNotificationCount: vi.fn() } }));
 const api = vi.mocked(apiService);
