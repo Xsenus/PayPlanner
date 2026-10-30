@@ -78,8 +78,11 @@ internal static class Program
         // full stderr pipe cannot block stdout (or vice versa), without recoding.
         var stdout = process.StandardOutput.BaseStream.CopyToAsync(Console.OpenStandardOutput());
         var stderr = process.StandardError.BaseStream.CopyToAsync(Console.OpenStandardError());
-        await process.WaitForExitAsync();
-        await Task.WhenAll(stdout, stderr);
+        await OwnedOutputDrain.WaitAsync(process.WaitForExitAsync(), stdout, stderr, () =>
+        {
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+            catch (InvalidOperationException) when (process.HasExited) { /* Exit raced a failed output sink. */ }
+        });
         return process.ExitCode;
     }
 

@@ -618,10 +618,12 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Browser fixture could not start.");
         var stderr = process.StandardError.ReadToEndAsync();
         var browserPhase = "starting";
+        var retirementDocuments = !generatedDocuments && !courtDocuments && !financialDocuments && !chatAttachments;
         try
         {
             using var timeout = new CancellationTokenSource();
-            var phaseBudget = new SyntheticBrowserPhaseBudget(financialDocuments, timeout.CancelAfter, chatAttachments);
+            var phaseBudget = new SyntheticBrowserPhaseBudget(financialDocuments, timeout.CancelAfter, chatAttachments,
+                retirement: retirementDocuments);
             var stdout = ReadOutputAsync(timeout.Token);
             await Task.WhenAll(stdout, process.WaitForExitAsync(timeout.Token));
             Assert.True(process.ExitCode == 0, process.ExitCode == 0 ? null
@@ -637,6 +639,12 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
                     output.AppendLine(line);
                     if (_retirementBundle is not null && line.StartsWith("CASE_RETIREMENT_BUNDLE_PHASE ", StringComparison.Ordinal))
                         Console.WriteLine(line);
+                    if (retirementDocuments && line == "PP_CASE_RETIREMENT_BROWSER_PHASE cli-open")
+                    {
+                        browserPhase = line;
+                        phaseBudget.ObserveLine(line);
+                        Console.WriteLine(line);
+                    }
                     if (financialDocuments && Regex.IsMatch(line,
                         @"\APP_FINANCIAL_BROWSER_PHASE (?:vite-create|vite-listen|entry-transform|requests-idle|cli-open|cli-goto|cli-snapshot|scenario|browser-close|vite-close|control-close|stdin-close|done)\z",
                         RegexOptions.CultureInvariant))
@@ -673,9 +681,9 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
                 return output.ToString();
             }
         }
-        catch (OperationCanceledException) when (financialDocuments || chatAttachments)
+        catch (OperationCanceledException) when (financialDocuments || chatAttachments || retirementDocuments)
         {
-            throw new TimeoutException($"Synthetic {(chatAttachments ? "chat" : "financial")} browser timed out at: " + browserPhase);
+            throw new TimeoutException($"Synthetic {(chatAttachments ? "chat" : financialDocuments ? "financial" : "retirement")} browser timed out at: " + browserPhase);
         }
         finally
         {

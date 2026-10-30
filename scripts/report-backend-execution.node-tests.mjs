@@ -200,3 +200,61 @@ test('Node runtime and assertion codes are deduplicated without publishing modul
   assert.equal(JSON.stringify(batch).includes('private'), false);
   assert.equal(batch.qualified, false);
 });
+
+test('failed case entries retain bounded duration and fixed kinds without names, SQL or messages', t => {
+  const f = fixture(t), id = '12345678-1234-1234-1234-123456789abc';
+  mkdirSync(join(f.shard, 'batches/exclusive-0'), { recursive: true });
+  writeFileSync(join(f.shard, 'batches/exclusive-0/results.trx'), '<TestRun><Results>'
+    + `<UnitTestResult testId="${id}" outcome="Failed" duration="00:03:41.5807146" testName="private-name">`
+    + '<Output><ErrorInfo><Message>Npgsql.PostgresException: private-sql Checkpoint writer readiness timed out.</Message>'
+    + '</ErrorInfo></Output></UnitTestResult>'
+    + `<UnitTestResult testId="${id}" outcome="Failed" duration="00:00:00.0010000">`
+    + '<Output><ErrorInfo><Message>System.IO.IOException: A bundle child has not released its lease. private-path</Message>'
+    + '</ErrorInfo></Output></UnitTestResult></Results></TestRun>');
+  const batch = executionReport(f.root, 0).batches[0];
+  assert.deepEqual(batch.results.unsuccessfulCaseDetails, [
+    { id, outcome: 'Failed', durationMs: 221581, boundedBodyAvailable: true,
+      observedExceptionKinds: ['Npgsql.PostgresException'], observedFailureCodes: ['storage-checkpoint-readiness-timeout'] },
+    { id, outcome: 'Failed', durationMs: 1, boundedBodyAvailable: true,
+      observedExceptionKinds: ['System.IO.IOException'], observedFailureCodes: ['bundle-lease-not-released'] },
+  ]);
+  assert.deepEqual(batch.results.capturedOutcomes, { Failed: 2 });
+  assert.equal(batch.qualified, false);
+  assert.equal(JSON.stringify(batch).includes('private'), false);
+});
+
+test('failed case details bound entries and reject invalid durations and arbitrary exception kinds', t => {
+  const f = fixture(t), id = '12345678-1234-1234-1234-123456789abc';
+  mkdirSync(join(f.shard, 'batches/exclusive-0'), { recursive: true });
+  writeFileSync(join(f.shard, 'batches/exclusive-0/results.trx'), '<TestRun><Results>'
+    + `<UnitTestResult testId="${id}" outcome="Failed" duration="99:00:00" testName="private-name">`
+      .concat('<Output>Private.Exception: private-message</Output></UnitTestResult>').repeat(150)
+    + '</Results></TestRun>');
+  const batch = executionReport(f.root, 0).batches[0];
+  assert.equal(batch.results.unsuccessfulCaseDetails.length, 100);
+  assert.equal(batch.results.omittedIds, 50);
+  assert.equal(batch.results.unsuccessfulCaseDetails.every(row => row.durationMs === null
+    && row.observedExceptionKinds.length === 0 && row.observedFailureCodes.length === 0), true);
+  assert.equal(batch.qualified, false);
+  assert.equal(JSON.stringify(batch).includes('private'), false);
+});
+
+test('missing or oversized case bodies never borrow diagnostics from the next failed case', t => {
+  const f = fixture(t), id = '12345678-1234-1234-1234-123456789abc';
+  mkdirSync(join(f.shard, 'batches/exclusive-0'), { recursive: true });
+  writeFileSync(join(f.shard, 'batches/exclusive-0/results.trx'), '<TestRun><Results>'
+    + `<UnitTestResult testId="${id}" outcome="Failed" duration="private-time" />`
+    + `<UnitTestResult testId="${id}" outcome="Failed" duration="00:00:01">`
+    + 'private'.repeat(11_000) + 'Npgsql.NpgsqlException</UnitTestResult>'
+    + `<UnitTestResult testId="${id}" outcome="Failed" duration="00:00:02">`
+    + 'System.TimeoutException: private-details</UnitTestResult></Results></TestRun>');
+  const batch = executionReport(f.root, 0).batches[0];
+  assert.deepEqual(batch.results.unsuccessfulCaseDetails.map(row => ({ durationMs: row.durationMs,
+    boundedBodyAvailable: row.boundedBodyAvailable, observedExceptionKinds: row.observedExceptionKinds })), [
+    { durationMs: null, boundedBodyAvailable: true, observedExceptionKinds: [] },
+    { durationMs: 1000, boundedBodyAvailable: false, observedExceptionKinds: [] },
+    { durationMs: 2000, boundedBodyAvailable: true, observedExceptionKinds: ['System.TimeoutException'] },
+  ]);
+  assert.equal(batch.qualified, false);
+  assert.equal(JSON.stringify(batch).includes('private'), false);
+});
