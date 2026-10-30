@@ -1413,6 +1413,11 @@ export function InvoiceModal({
   const deliveryScope = JSON.stringify([printScope, invoice?.auditUpdatedAt,
     invoice?.clientId, invoice?.expenseClientId, selectedClient?.email, isAdmin, canSendToDisk, permissions.yandexDisk.viewScope]);
   const delivery = useDocumentDeliveryOwner(deliveryScope);
+  const leaveInvoiceCard = (leave: () => void) => {
+    printOwner.invalidate();
+    delivery.invalidate();
+    leave();
+  };
   const yandexDiskUploading = delivery.kind === 'disk';
   useEffect(() => { setMessengerDeliveryOpen(null); setElectronicSignatureOpen(null); }, [delivery.scope]);
   const selectedLegalEntity = useMemo(
@@ -3953,7 +3958,7 @@ export function InvoiceModal({
           {isPageMode && (
             <button
               type="button"
-              onClick={onBack ?? onClose}
+              onClick={() => leaveInvoiceCard(onBack ?? onClose)}
               className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
             >
               <ArrowLeft className="h-4 w-4" />
@@ -4020,7 +4025,7 @@ export function InvoiceModal({
         {!isPageMode && (
           <button
             type="button"
-            onClick={() => { printOwner.invalidate(); delivery.invalidate(); onClose(); }}
+            onClick={() => leaveInvoiceCard(onClose)}
             className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
             aria-label={t('close') ?? 'Закрыть'}
           >
@@ -5214,7 +5219,7 @@ export function InvoiceModal({
                     setPageViewMode(true);
                     return;
                   }
-                  onClose();
+                  leaveInvoiceCard(onClose);
                 }}
                 className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-100"
               >

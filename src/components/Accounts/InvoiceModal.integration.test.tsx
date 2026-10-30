@@ -3506,6 +3506,45 @@ describe('InvoiceModal integration', () => {
   });
 
   describe('invoice document defaults', () => {
+    it.each(['back', 'fallback', 'header', 'cancel'] as const)('invoice exit owner stops deferred printing before the %s callback', async exit => {
+      const session = documentCopyTestSession(); const callbacks: Array<() => void> = [];
+      const nativeTimeout = window.setTimeout.bind(window);
+      const timer = vi.spyOn(window, 'setTimeout').mockImplementation((handler, delay, ...args) => {
+        if (delay === 250) { callbacks.push(() => { if (typeof handler === 'function') handler(...args); }); return 0 as unknown as ReturnType<typeof setTimeout>; }
+        return nativeTimeout(handler, delay, ...args) as unknown as ReturnType<typeof setTimeout>;
+      });
+      const leave = vi.fn(() => callbacks.slice().forEach(callback => callback()));
+      try {
+        const current = { ...props(), onClose: leave, ...(exit === 'back' ? { onBack: leave } : {}) };
+        const view = render(<InvoiceModal {...current} />); const dialog = choose('print');
+        await waitFor(() => expect((dialog.getByRole('button', { name: 'Печатать' }) as HTMLButtonElement).disabled).toBe(false));
+        fireEvent.click(dialog.getByRole('button', { name: 'Печатать' }));
+        const popup = vi.mocked(window.open).mock.results.at(-1)!.value as Window;
+        await waitFor(() => expect(popup.document.write).toHaveBeenCalledWith('print copy'));
+        await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Изображения в документе' })).toBeNull());
+        if (exit === 'header' || exit === 'cancel') view.rerender(<InvoiceModal {...current} presentation="modal" />);
+        fireEvent.click(screen.getByRole('button', { name: exit === 'header' ? 'Закрыть' : exit === 'cancel' ? 'Отмена' : 'Назад' }));
+        expect(leave).toHaveBeenCalledOnce(); expect(popup.print).not.toHaveBeenCalled(); expect(popup.close).toHaveBeenCalledOnce();
+        expect(apiService.prepareDocumentPrint).toHaveBeenCalledOnce(); expect(current.onSubmit).not.toHaveBeenCalled();
+      } finally { timer.mockRestore(); session.restore(); }
+    });
+
+    it.each(['success', 'error', 'confirmation'] as const)('invoice exit owner ignores a pending delivery %s after page back', async result => {
+      permissionState.value = { ...defaultRolePermissions,
+        accounts: { ...defaultRolePermissions.accounts, canView: true, canExport: true, viewScope: 'all' },
+        yandexDisk: { ...defaultRolePermissions.yandexDisk, canView: true, canCreate: true } };
+      const pending = createDeferred<never>(); const leave = vi.fn();
+      if (result === 'confirmation') confirmMock.mockReturnValueOnce(pending.promise);
+      else vi.mocked(apiService.uploadInvoiceDocumentToYandexDisk).mockReturnValueOnce(pending.promise);
+      render(<InvoiceModal {...props()} onBack={leave} />);
+      fireEvent.click(await screen.findByRole('button', { name: result === 'confirmation' ? 'Отправить' : 'Я.Диск' }));
+      if (result === 'confirmation') expect(confirmMock).toHaveBeenCalledOnce();
+      else await waitFor(() => expect(apiService.uploadInvoiceDocumentToYandexDisk).toHaveBeenCalledOnce());
+      fireEvent.click(screen.getByRole('button', { name: 'Назад' })); expect(leave).toHaveBeenCalledOnce();
+      await act(async () => { if (result === 'error') pending.reject(new Error('former delivery error')); else pending.resolve((result === 'confirmation' ? true : { path: '/old' }) as never); });
+      expect(apiService.sendInvoiceByEmail).not.toHaveBeenCalled(); expect(toastSuccessMock).not.toHaveBeenCalled(); expect(toastErrorMock).not.toHaveBeenCalled();
+    });
+
     it.each((['print', 'word'] as const).flatMap(format => (['login', 'refresh'] as const).map(mode => ({ format, mode }))))('copy session expansion handles invoice $format after $mode', async ({ format, mode }) => {
       const session = documentCopyTestSession(); const pending = createDeferred<Blob>();
       const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
