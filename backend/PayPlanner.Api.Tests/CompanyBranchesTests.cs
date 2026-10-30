@@ -1,3 +1,5 @@
+using System.Security.Claims;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -119,8 +121,23 @@ public class CompanyBranchesControllerTests
         var company = new LegalEntity { ShortName = "ООО Своя", Inn = "7707083893", BankAccountsJson = accountsJson };
         db.LegalEntities.Add(company);
         await db.SaveChangesAsync();
+        var role = new Role { Name = "admin", Description = "Administrator" };
+        db.Users.Add(new User { Email = "branches@example.local", FullName = "Branch administrator", PasswordHash = "hash", Role = role, IsActive = true, IsApproved = true });
+        db.SystemSettings.Add(new SystemSetting { Key = "legalEntities.mainCompanyIds", Value = $"[{company.Id}]" });
+        await db.SaveChangesAsync(); db.ChangeTracker.Clear();
         return (db, company.Id);
     }
+
+    private static CompanyBranchesController Controller(PaymentContext db) => new(db)
+    {
+        ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, db.Users.Select(row => row.Id).Single().ToString()), new Claim(ClaimTypes.Role, "admin")], "Test"))
+            }
+        }
+    };
 
     private static CompanyBranchRequest Request(string name = "Офис", Action<CompanyBranchRequest>? tweak = null)
     {
@@ -134,7 +151,7 @@ public class CompanyBranchesControllerTests
     {
         var (db, companyId) = await CreateAsync();
         await using var _ = db;
-        var controller = new CompanyBranchesController(db);
+        var controller = Controller(db);
 
         var created = await controller.Create(companyId, Request(" Офис СПб "), CancellationToken.None);
 
@@ -158,7 +175,7 @@ public class CompanyBranchesControllerTests
     {
         var (db, companyId) = await CreateAsync();
         await using var _ = db;
-        var controller = new CompanyBranchesController(db);
+        var controller = Controller(db);
 
         var action = await controller.Create(companyId, Request("Офис", r =>
         {
@@ -175,7 +192,7 @@ public class CompanyBranchesControllerTests
         var (db, companyId) = await CreateAsync(
             "[{\"id\":\"a\",\"accountNumber\":\"1\"},{\"id\":\"b\",\"accountNumber\":\"2\",\"isArchived\":true}]");
         await using var _ = db;
-        var controller = new CompanyBranchesController(db);
+        var controller = Controller(db);
 
         var ok = await controller.Create(companyId, Request("Один", r => r.BankAccountId = "a"), CancellationToken.None);
         var archived = await controller.Create(companyId, Request("Два", r => r.BankAccountId = "b"), CancellationToken.None);
@@ -189,7 +206,7 @@ public class CompanyBranchesControllerTests
     {
         var (db, companyId) = await CreateAsync();
         await using var _ = db;
-        var controller = new CompanyBranchesController(db);
+        var controller = Controller(db);
 
         Assert.IsType<NotFoundResult>((await controller.Create(999, Request(), CancellationToken.None)).Result);
 
@@ -206,7 +223,7 @@ public class CompanyBranchesControllerTests
         var other = new LegalEntity { ShortName = "Другая" };
         db.LegalEntities.Add(other);
         await db.SaveChangesAsync();
-        var controller = new CompanyBranchesController(db);
+        var controller = Controller(db);
         var created = Assert.IsType<CompanyBranchDto>(
             Assert.IsType<CreatedResult>((await controller.Create(companyId, Request(), CancellationToken.None)).Result).Value);
 
@@ -229,7 +246,7 @@ public class CompanyBranchesControllerTests
         await using var _ = db;
         (await db.LegalEntities.SingleAsync()).Kpp = "770701001";
         await db.SaveChangesAsync();
-        var controller = new CompanyBranchesController(db);
+        var controller = Controller(db);
         var created = Assert.IsType<CompanyBranchDto>(
             Assert.IsType<CreatedResult>((await controller.Create(companyId, Request("Точка", r => r.Kpp = "780201001"), CancellationToken.None)).Result).Value);
 

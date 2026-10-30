@@ -2,10 +2,8 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
-using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
@@ -14,14 +12,14 @@ using PayPlanner.Api.Services.Companies;
 namespace PayPlanner.Api.Controllers;
 
 /// <summary>
-/// Филиалы, офисы, точки и направления собственной компании. Управление — только у администратора,
-/// как и остальные настройки собственных компаний. Филиал не имеет своего ИНН: переопределяются
+/// Филиалы, офисы, точки и направления собственной компании. Просмотр — по доступу к профилю,
+/// управление — только у действующего администратора. Филиал не имеет своего ИНН: переопределяются
 /// только КПП, адрес, банковский счёт и подписант, всё остальное наследуется от компании.
 /// </summary>
 [ApiController]
 [Route("api/legal-entities/{companyId:int}/branches")]
-[Authorize(Policy = "Admin")]
-public class CompanyBranchesController : ControllerBase, IAsyncActionFilter
+[Authorize]
+public class CompanyBranchesController : ControllerBase
 {
     private const int MaxSignerJsonLength = 8000;
 
@@ -32,24 +30,14 @@ public class CompanyBranchesController : ControllerBase, IAsyncActionFilter
         _db = db;
     }
 
-    [NonAction]
-    public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
-    {
-        if (!await _db.IsUserAdminOrLegacyFallbackAsync(context.HttpContext.User, context.HttpContext.RequestAborted))
-        {
-            context.Result = Forbid();
-            return;
-        }
-
-        await next();
-    }
-
     [HttpGet]
     public async Task<ActionResult<List<CompanyBranchDto>>> List(
         int companyId,
         [FromQuery] bool includeArchived,
         CancellationToken ct)
     {
+        var denied = await CheckAccessAsync(companyId, false, ct);
+        if (denied is not null) return denied;
         if (!await _db.LegalEntities.AsNoTracking().AnyAsync(le => le.Id == companyId, ct))
         {
             return NotFound();
@@ -66,9 +54,12 @@ public class CompanyBranchesController : ControllerBase, IAsyncActionFilter
     }
 
     [HttpPost]
-    public async Task<ActionResult<CompanyBranchDto>> Create(int companyId, [FromBody] CompanyBranchRequest request, CancellationToken ct)
+    public Task<ActionResult<CompanyBranchDto>> Create(int companyId, [FromBody] CompanyBranchRequest request, CancellationToken ct)
+        => MutateAsync(companyId, () => CreateCoreAsync(companyId, request, ct), ct);
+
+    private async Task<ActionResult<CompanyBranchDto>> CreateCoreAsync(int companyId, CompanyBranchRequest request, CancellationToken ct)
     {
-        var company = await _db.LegalEntities.FirstOrDefaultAsync(le => le.Id == companyId, ct);
+        var company = await LoadEditableCompanyAsync(companyId, ct);
         if (company is null)
         {
             return NotFound();
@@ -87,35 +78,31 @@ public class CompanyBranchesController : ControllerBase, IAsyncActionFilter
         }
 
         _db.CompanyBranches.Add(branch);
-        try
-        {
-            await _db.SaveChangesAsync(ct);
-        }
-        catch (DbUpdateException)
-        {
-            // Параллельное создание подразделения с тем же названием: уникальный индекс сработал раньше проверки.
-            return Conflict(new { message = "Подразделение с таким названием уже есть у компании." });
-        }
+        await _db.SaveChangesAsync(ct);
 
         return Created($"/api/legal-entities/{companyId}/branches/{branch.Id}", CompanyBranchDto.From(branch));
     }
 
     [HttpPut("{id:int}")]
-    public async Task<ActionResult<CompanyBranchDto>> Update(
+    public Task<ActionResult<CompanyBranchDto>> Update(
         int companyId,
         int id,
         [FromBody] CompanyBranchRequest request,
         CancellationToken ct)
+        => MutateAsync(companyId, () => UpdateCoreAsync(companyId, id, request, ct), ct);
+
+    private async Task<ActionResult<CompanyBranchDto>> UpdateCoreAsync(int companyId, int id, CompanyBranchRequest request, CancellationToken ct)
     {
+        var company = await LoadEditableCompanyAsync(companyId, ct);
+        if (company is null) return NotFound();
         var branch = await _db.CompanyBranches
-            .Include(b => b.LegalEntity)
             .FirstOrDefaultAsync(b => b.Id == id && b.LegalEntityId == companyId, ct);
         if (branch is null)
         {
             return NotFound();
         }
 
-        var error = await ApplyAsync(branch.LegalEntity, branch, request, ct);
+        var error = await ApplyAsync(company, branch, request, ct);
         if (error is not null)
         {
             return error;
@@ -133,6 +120,8 @@ public class CompanyBranchesController : ControllerBase, IAsyncActionFilter
         int id,
         CancellationToken ct)
     {
+        var denied = await CheckAccessAsync(companyId, false, ct);
+        if (denied is not null) return denied;
         var branch = await _db.CompanyBranches
             .AsNoTracking()
             .FirstOrDefaultAsync(b => b.Id == id && b.LegalEntityId == companyId, ct);
@@ -143,12 +132,75 @@ public class CompanyBranchesController : ControllerBase, IAsyncActionFilter
 
         var company = await _db.LegalEntities
             .AsNoTracking()
-            .Include(le => le.Addresses)
-            .FirstAsync(le => le.Id == companyId, ct);
+            .Select(row => new LegalEntity
+            {
+                Id = row.Id,
+                ShortName = row.ShortName,
+                FullName = row.FullName,
+                Inn = row.Inn,
+                Kpp = row.Kpp,
+                Ogrn = row.Ogrn,
+                Address = row.Address,
+                Addresses = row.Addresses,
+                BankAccountsJson = row.BankAccountsJson,
+                DocumentDirectorJson = row.DocumentDirectorJson,
+                TreasuryBankName = row.TreasuryBankName,
+                TreasuryBankBik = row.TreasuryBankBik,
+                TreasuryAccountNumber = row.TreasuryAccountNumber,
+                TreasuryCorrAccountNumber = row.TreasuryCorrAccountNumber
+            })
+            .FirstOrDefaultAsync(le => le.Id == companyId, ct);
+        if (company is null) return NotFound();
 
         return Ok(new CompanyEffectiveRequisitesResponse(
             CompanyRequisitesResolver.Resolve(company, branch, DateTime.UtcNow)));
     }
+
+    private async Task<ActionResult?> CheckAccessAsync(int companyId, bool write, CancellationToken ct)
+    {
+        var access = await CompanyProfileAccess.ResolveAsync(_db, User, ct);
+        if (access is null || write && !access.Section.Visibility.IsAdmin) return Forbid();
+        return access.CompanyIds.Contains(companyId) ? null : NotFound();
+    }
+
+    private Task<LegalEntity?> LoadEditableCompanyAsync(int companyId, CancellationToken ct)
+        => _db.LegalEntities.AsNoTracking().Where(row => row.Id == companyId)
+            .Select(row => new LegalEntity { Id = row.Id, ProfileStatus = row.ProfileStatus, BankAccountsJson = row.BankAccountsJson })
+            .SingleOrDefaultAsync(ct);
+
+    private async Task<ActionResult<CompanyBranchDto>> MutateAsync(int companyId, Func<Task<ActionResult<CompanyBranchDto>>> action, CancellationToken ct)
+    {
+        try
+        {
+            var denied = await CheckAccessAsync(companyId, true, ct);
+            if (denied is not null) return denied;
+            return await DocumentSellerLease.RunSerializableAsync(_db, async lease =>
+            {
+                lease.AdmitCleanTracker();
+                _db.ChangeTracker.Clear();
+                // Establish the transaction snapshot from the approved current actor,
+                // then recheck own-company membership before touching branch data.
+                var currentDenial = await CheckAccessAsync(companyId, true, ct);
+                if (currentDenial is not null) return new ActionResult<CompanyBranchDto>(currentDenial);
+                await lease.LockRegistryAsync(ct);
+                await lease.LockCompanyRowAsync(companyId, ct);
+                return await action();
+            }, static result => result.Result is CreatedResult or OkObjectResult, ct);
+        }
+        catch (DbUpdateException error) when (IsDuplicateName(error))
+        {
+            return Conflict(new { message = "Подразделение с таким названием уже есть у компании." });
+        }
+        catch (Exception error) when (error is SellerSnapshotConflictException || DocumentSellerLease.IsConflict(error))
+        {
+            return Conflict(new { code = "CompanyBranchConflict", message = "Компания или подразделение изменились либо сейчас сохраняются. Изменения не выполнены. Обновите подразделения и повторите действие." });
+        }
+    }
+
+    private static bool IsDuplicateName(DbUpdateException error) => error.GetBaseException() is
+        Npgsql.PostgresException { SqlState: Npgsql.PostgresErrorCodes.UniqueViolation, ConstraintName: "IX_CompanyBranches_LegalEntityId_Name" }
+        || error.GetBaseException() is Microsoft.Data.Sqlite.SqliteException { SqliteExtendedErrorCode: 2067 } sqlite
+        && sqlite.Message.Contains("CompanyBranches.LegalEntityId, CompanyBranches.Name", StringComparison.Ordinal);
 
     private async Task<ActionResult?> ApplyAsync(LegalEntity company, CompanyBranch branch, CompanyBranchRequest request, CancellationToken ct)
     {
