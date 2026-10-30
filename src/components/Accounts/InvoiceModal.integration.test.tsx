@@ -28,6 +28,9 @@ import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
 
 const permissionState = vi.hoisted(() => ({ value: null as RolePermissions | null }));
 const printAuthState = vi.hoisted(() => ({ user: { id: 7, role: { id: 1 } } }));
+let baseAuthSession: ReturnType<typeof documentCopyTestSession>;
+beforeEach(() => { baseAuthSession = documentCopyTestSession(); });
+afterEach(() => baseAuthSession.restore());
 vi.mock('../../hooks/useRolePermissions', () => ({
   useRolePermissions: () => permissionState.value ?? defaultRolePermissions,
 }));
@@ -2990,6 +2993,77 @@ describe('InvoiceModal integration', () => {
     const createdCase = (overrides: Partial<ClientCase> = {}) => ({ id: 440, clientId: 1, legalEntityId: null, title: 'Owned new case', status: 'Open', createdAt: '2026-10-31T01:00:00Z', ...overrides } as ClientCase);
     const caseSave = () => caseModalPropsSpy.mock.lastCall![0].onSave as (patch: Partial<ClientCase>) => Promise<void>;
     const openCase = async () => { fireEvent.click(screen.getByRole('button', { name: 'Создать дело' })); await screen.findByTestId('case-modal'); return caseSave(); };
+
+    it('case read owner: an old session cannot populate the open picker', async () => {
+      const pending = createDeferred<ClientCase[]>(); vi.mocked(apiService.getCases).mockReturnValue(pending.promise);
+      render(<InvoiceModal {...propsFor()} />); fireEvent.click(screen.getByRole('button', { name: 'Выбрать дело' }));
+      await waitFor(() => expect(apiService.getCases).toHaveBeenCalledOnce()); session.replace('actor');
+      await act(async () => pending.resolve([createdCase({ title: 'Private old session case' })]));
+      expect(screen.queryByText('Private old session case')).toBeNull();
+    });
+
+    it.each(['login', 'logout'] as const)('case read owner: ignores a pending %s success without a render', async change => {
+      const pending = createDeferred<ClientCase[]>(); vi.mocked(apiService.getCases).mockReturnValue(pending.promise);
+      render(<InvoiceModal {...propsFor()} />); fireEvent.click(screen.getByRole('button', { name: 'Выбрать дело' })); await waitFor(() => expect(apiService.getCases).toHaveBeenCalledOnce()); session.replace(change);
+      await act(async () => pending.resolve([createdCase({ title: 'Private session list' })])); expect(screen.queryByText('Private session list')).toBeNull();
+    });
+
+    it('case read owner: never reveals an old server error in another session', async () => {
+      const pending = createDeferred<ClientCase[]>(); vi.mocked(apiService.getCases).mockReturnValue(pending.promise); render(<InvoiceModal {...propsFor()} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Выбрать дело' })); await waitFor(() => expect(apiService.getCases).toHaveBeenCalledOnce()); session.replace('actor');
+      await act(async () => pending.reject(new Error('Private old case error'))); expect(screen.queryByText('Private old case error')).toBeNull();
+    });
+
+    it.each(['company', 'invoice', 'mode', 'closed', 'reopen', 'presentation', 'permission', 'permission-aba', 'visibility', 'unmount'] as const)('case read owner: pending list cannot follow %s', async change => {
+      const pending = createDeferred<ClientCase[]>(); vi.mocked(apiService.getCases).mockReturnValueOnce(pending.promise).mockResolvedValue([]);
+      const props = propsFor(); const view = render(<InvoiceModal {...props} />); fireEvent.click(screen.getByRole('button', { name: 'Выбрать дело' })); await waitFor(() => expect(apiService.getCases).toHaveBeenCalledOnce());
+      if (change === 'company') view.rerender(<InvoiceModal {...props} defaultClientId={2} />);
+      if (change === 'invoice') view.rerender(<InvoiceModal {...props} invoice={{ id: 92, clientId: 1, type: 'Income', lineItems: [] } as unknown as Invoice} />);
+      if (change === 'mode') view.rerender(<InvoiceModal {...props} mode="edit" />);
+      if (change === 'closed' || change === 'reopen') { view.rerender(<InvoiceModal {...props} open={false} />); if (change === 'reopen') view.rerender(<InvoiceModal {...props} />); }
+      if (change === 'presentation') view.rerender(<InvoiceModal {...props} presentation="page" />);
+      if (change === 'permission' || change === 'permission-aba' || change === 'visibility') {
+        permissionState.value = { ...defaultRolePermissions, cases: { ...defaultRolePermissions.cases, ...(change === 'visibility' ? { viewScope: 'own' } : { canView: false }) } };
+        view.rerender(<InvoiceModal {...props} />); if (change === 'permission-aba') { permissionState.value = null; view.rerender(<InvoiceModal {...props} />); }
+      }
+      if (change === 'unmount') view.unmount();
+      await act(async () => pending.resolve([createdCase({ title: 'Private context case' })]));
+      const picker = screen.queryByRole('button', { name: 'Выбрать дело' }) as HTMLButtonElement | null; if (picker && !picker.disabled) fireEvent.click(picker);
+      expect(screen.queryByText('Private context case')).toBeNull();
+    });
+
+    it('case read owner: clears cached names on revocation and requests fresh data on restoration', async () => {
+      vi.mocked(apiService.getCases).mockResolvedValueOnce([createdCase({ title: 'Previously visible case' })]).mockResolvedValue([createdCase({ id: 441, title: 'Newly visible case' })]);
+      const props = propsFor(); const view = render(<InvoiceModal {...props} />); fireEvent.click(screen.getByRole('button', { name: 'Выбрать дело' })); await screen.findByText('Previously visible case');
+      permissionState.value = { ...defaultRolePermissions, cases: { ...defaultRolePermissions.cases, canView: false } }; view.rerender(<InvoiceModal {...props} />);
+      expect(screen.queryByText('Previously visible case')).toBeNull(); expect(screen.getByRole('button', { name: 'Выбрать дело' })).toHaveProperty('disabled', true); expect(apiService.getCases).toHaveBeenCalledOnce();
+      permissionState.value = null; view.rerender(<InvoiceModal {...props} />); fireEvent.click(screen.getByRole('button', { name: 'Выбрать дело' })); await screen.findByText('Newly visible case');
+      expect(screen.queryByText('Previously visible case')).toBeNull(); expect(apiService.getCases).toHaveBeenCalledTimes(2);
+    });
+
+    it('case read owner: token renewal preserves a current read without another request', async () => {
+      const pending = createDeferred<ClientCase[]>(); vi.mocked(apiService.getCases).mockReturnValue(pending.promise); const props = propsFor(); const view = render(<InvoiceModal {...props} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Выбрать дело' })); await waitFor(() => expect(apiService.getCases).toHaveBeenCalledOnce()); session.refresh(); view.rerender(<InvoiceModal {...props} />);
+      await act(async () => pending.resolve([createdCase({ title: 'Current read case' })])); expect(await screen.findByText('Current read case')).toBeTruthy(); expect(apiService.getCases).toHaveBeenCalledOnce();
+    });
+
+    it.each(['session', 'accounts', 'cases'] as const)('case read owner: initial %s denial sends no case request', async denial => {
+      if (denial === 'session') session.replace('logout');
+      if (denial === 'accounts') permissionState.value = { ...defaultRolePermissions, accounts: { ...defaultRolePermissions.accounts, canView: false, canCreate: false } };
+      if (denial === 'cases') permissionState.value = { ...defaultRolePermissions, cases: { ...defaultRolePermissions.cases, canView: false } };
+      render(<InvoiceModal {...propsFor()} />); expect(screen.getByRole('button', { name: 'Выбрать дело' })).toHaveProperty('disabled', true); expect(apiService.getCases).not.toHaveBeenCalled();
+    });
+
+    it.each([{ value: [{ id: 0, clientId: 1 }] }, { value: [{ id: 445, clientId: 2, title: 'Foreign private case' }] }, { value: { items: [] } }])('case read owner: rejects malformed or foreign list %j', async ({ value }) => {
+      vi.mocked(apiService.getCases).mockResolvedValue(value as unknown as ClientCase[]); render(<InvoiceModal {...propsFor()} />); fireEvent.click(screen.getByRole('button', { name: 'Выбрать дело' }));
+      expect(await screen.findByText(/Не удалось подтвердить принадлежность списка дел/)).toBeTruthy(); expect(screen.queryByText('Foreign private case')).toBeNull();
+    });
+
+    it('case read owner: a saved case link survives denied lookup without being rewritten', async () => {
+      permissionState.value = { ...defaultRolePermissions, cases: { ...defaultRolePermissions.cases, canView: false } }; const props = propsFor();
+      render(<InvoiceModal {...props} mode="edit" invoice={{ id: 91, clientId: 1, number: 'SAVED-LINK', date: '2026-10-31', type: 'Income', status: 'Pending', amount: 0, clientCaseId: 741, clientCaseTitle: 'Saved invoice case', lineItems: [] } as unknown as Invoice} />);
+      fireEvent.submit(document.getElementById('invoice-edit-form')!); await waitFor(() => expect(props.onSubmit).toHaveBeenCalledWith(expect.objectContaining({ clientCaseIds: [741] }))); expect(apiService.getCases).not.toHaveBeenCalled();
+    });
 
     it('case creation owner: late response cannot enter a newly opened invoice', async () => {
       const pending = createDeferred<ClientCase>(); vi.mocked(apiService.createCase).mockReturnValue(pending.promise);

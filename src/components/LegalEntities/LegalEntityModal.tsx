@@ -1053,6 +1053,11 @@ export function LegalEntityModal({
     canMutateRelated('accounts', invoiceModalMode === 'edit' ? 'canEdit' : 'canCreate'),
   ]));
   const invoiceCaseOwner = captureInvoiceCaseOwner();
+  const { capture: capturePaymentReadOwner, isCurrent: isPaymentReadOwnerCurrent } = useAsyncOperationOwner(JSON.stringify([
+    classificationScope, canMutateRelated('payments', 'canEdit'), paymentModalOpen, paymentModalMode, selectedPayment?.id, selectedLegalEntityCaseId,
+  ]));
+  const paymentReadOwner = capturePaymentReadOwner();
+  const paymentReadAttempt = useRef<{ id: number; isCurrent: () => boolean } | null>(null);
   const legacyClassification = mainCompanyState?.owner === classificationOwner ? mainCompanyState : null;
   const ownCompanyClassification = currentLegalEntityId === null ? false
     : typeof initial?.isOwnCompany === 'boolean' ? initial.isOwnCompany
@@ -2743,6 +2748,7 @@ export function LegalEntityModal({
 
   const openCreatePayment = (caseId?: number) => {
     if (!canMutateRelated('payments', 'canCreate') || !currentLegalEntityId) return;
+    paymentReadAttempt.current = null;
     if (caseId) {
       setSelectedLegalEntityCaseId(caseId);
     }
@@ -2752,21 +2758,34 @@ export function LegalEntityModal({
   };
 
   const openEditPayment = async (payment: Payment) => {
-    if (!canMutateRelated('payments', 'canEdit')) return;
+    if (!isOpen || !currentLegalEntityId || !deleteSession.authenticated || !isAuthSessionIdentityCurrent(deleteSession)
+      || !isPaymentReadOwnerCurrent(paymentReadOwner) || !canMutateRelated('payments', 'canEdit')
+      || !Number.isInteger(payment.id) || payment.id <= 0) return;
+    if (paymentReadAttempt.current?.id === payment.id && paymentReadAttempt.current.isCurrent()) return;
+    const attempt: { id: number; isCurrent: () => boolean } = { id: payment.id, isCurrent: () => paymentReadAttempt.current === attempt
+      && isPaymentReadOwnerCurrent(paymentReadOwner) && isAuthSessionIdentityCurrent(deleteSession) };
+    paymentReadAttempt.current = attempt;
     try {
       const detailedPayment = await apiService.getPayment(payment.id);
+      if (!attempt.isCurrent()) return;
+      if (!detailedPayment || detailedPayment.id !== payment.id)
+        throw new Error('Не удалось подтвердить выбранный платёж. Повторите открытие.');
       setPaymentModalMode("edit");
       setSelectedPayment(detailedPayment);
       setPaymentModalOpen(true);
     } catch (error) {
+      if (!attempt.isCurrent()) return;
       toast.error(
         extractDisplayErrorMessage(error, "Не удалось загрузить платеж для редактирования."),
         "Платежи",
       );
+    } finally {
+      if (paymentReadAttempt.current === attempt) paymentReadAttempt.current = null;
     }
   };
 
   const closePaymentModal = () => {
+    paymentReadAttempt.current = null;
     setPaymentModalOpen(false);
     setSelectedPayment(null);
   };

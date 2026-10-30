@@ -6,7 +6,7 @@ import { DocumentImagePrintDialog } from '../Documents/DocumentImagePrintDialog'
 import type { DocumentImagePrintOptions } from '../../types/documentImagePrint';
 import { VatRateSelect } from '../Documents/VatRateSelect';
 import { SystemSelect } from '../ui/SystemSelect';
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Ban, Check, ChevronDown, Copy, Download, FileText, Link2, List, Loader2, Pencil, Plus, Printer, Send, Trash2, UploadCloud, UserRoundSearch, X } from 'lucide-react';
 import type {
   Act,
@@ -35,6 +35,8 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDocumentMenuLayout } from '../../hooks/useDocumentMenuLayout';
 import { useDocumentDeliveryOwner, type DocumentDeliveryRead } from '../../hooks/useDocumentDeliveryOwner';
+import { useAsyncOperationOwner } from '../../hooks/useAsyncOperationOwner';
+import { captureAuthSessionIdentity, isAuthSessionIdentityCurrent } from '../../services/authService';
 import { awaitOwnedUiResult, StaleUiOperationError } from '../../utils/StaleUiOperationError';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useInvoiceReferenceDictionaries } from '../../hooks/useInvoiceReferenceDictionaries';
@@ -1446,6 +1448,24 @@ export function InvoiceModal({
     : caseOwnerLegalEntityIdNumber
       ? `legal:${caseOwnerLegalEntityIdNumber}`
       : '';
+  const canReadCaseOptions = (isAdmin || permissions.cases.canView)
+    && (isAdmin || permissions.accounts.canView || mode === 'create' && permissions.accounts.canCreate);
+  const { epoch: caseReadEpoch, actor: caseReadActor, authenticated: caseReadAuthenticated } = captureAuthSessionIdentity();
+  const caseReadSession = useMemo(() => ({ epoch: caseReadEpoch, actor: caseReadActor, authenticated: caseReadAuthenticated }), [caseReadEpoch, caseReadActor, caseReadAuthenticated]);
+  const caseReadScope = JSON.stringify([open, mode, invoice?.id, presentation, caseOwnerKey, form.type,
+    currentUser?.id, currentUser?.role?.id, currentUser?.role?.name, canReadCaseOptions,
+    permissions.cases.viewScope, permissions.accounts.viewScope, caseReadSession]);
+  const { capture: captureCaseReadOwner, isCurrent: isCaseReadOwnerCurrent } = useAsyncOperationOwner(caseReadScope);
+  const caseReadOwnerAtRender = captureCaseReadOwner();
+  // Clear fetched names/errors before painting a different permission or login context.
+  // Selected IDs and the invoice's saved links are not rewritten here.
+  useLayoutEffect(() => {
+    setClientCaseOptions([]);
+    setClientCasesLoading(false);
+    setClientCasesError(null);
+    setClientCasesLoadedOwnerKey('');
+    setCaseDropdownOpen(false);
+  }, [caseReadScope]);
   const canCreateRelatedCase = (isAdmin || permissions.cases.canCreate)
     && (isAdmin || (mode === 'edit' ? permissions.accounts.canEdit : permissions.accounts.canCreate));
   const caseCreation = useDocumentDeliveryOwner(JSON.stringify([open, mode, invoice?.id, presentation, createCaseOpen,
@@ -1806,8 +1826,10 @@ export function InvoiceModal({
 
     async function loadClientCasesByClient() {
       const generation = ++clientCasesLoadGeneration.current;
-      const current = () => !cancelled && generation === clientCasesLoadGeneration.current;
-      if (!open || !caseOwnerKey) {
+      const owner = captureCaseReadOwner();
+      const current = () => !cancelled && generation === clientCasesLoadGeneration.current
+        && isCaseReadOwnerCurrent(owner) && isAuthSessionIdentityCurrent(caseReadSession);
+      if (!open || !caseOwnerKey || !canReadCaseOptions || !caseReadSession.authenticated) {
         setClientCaseOptions([]);
         setClientCasesError(null);
         setClientCasesLoadedOwnerKey('');
@@ -1833,6 +1855,9 @@ export function InvoiceModal({
           legalEntityId: legalEntityId && legalEntityId > 0 ? legalEntityId : undefined,
         });
         if (current()) {
+          if (!Array.isArray(response) || !response.every(item => item && Number.isInteger(item.id) && item.id > 0
+            && (clientId ? item.clientId === clientId : item.legalEntityId === legalEntityId)))
+            throw new Error('Не удалось подтвердить принадлежность списка дел. Откройте счёт повторно.');
           const nextOptions = [...(response ?? [])].sort(
             (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
           );
@@ -1854,7 +1879,8 @@ export function InvoiceModal({
     return () => {
       cancelled = true;
     };
-  }, [open, caseOwnerClientIdNumber, caseOwnerLegalEntityIdNumber, caseOwnerKey]);
+  }, [open, caseOwnerClientIdNumber, caseOwnerLegalEntityIdNumber, caseOwnerKey, caseReadScope,
+    captureCaseReadOwner, isCaseReadOwnerCurrent, caseReadSession, canReadCaseOptions]);
 
   useEffect(() => {
     if (!open) {
@@ -3669,10 +3695,12 @@ export function InvoiceModal({
                 title="Выбрать дело"
                 aria-label="Выбрать дело"
                 onClick={() => {
+                  if (!canReadCaseOptions || !caseReadSession.authenticated || !isCaseReadOwnerCurrent(caseReadOwnerAtRender)
+                    || !isAuthSessionIdentityCurrent(caseReadSession)) return;
                   setCaseDropdownOpen((prev) => !prev);
                   setActDropdownOpen(false);
                 }}
-                disabled={!caseOwnerKey}
+                disabled={!caseOwnerKey || !canReadCaseOptions || !caseReadSession.authenticated}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <List className="h-4 w-4" />

@@ -21,6 +21,9 @@ import type {
 } from '../../types';
 
 let restoreArrayBuffer: () => void;
+let baseAuthSession: ReturnType<typeof documentCopyTestSession>;
+beforeEach(() => { baseAuthSession = documentCopyTestSession(); });
+afterEach(() => baseAuthSession.restore());
 beforeAll(() => { restoreArrayBuffer = installBlobArrayBufferForTests(); });
 afterAll(() => { restoreArrayBuffer(); });
 
@@ -296,6 +299,84 @@ describe('LegalEntityModal integration', () => {
     it.each([{ id: 0 }, { legalEntityId: 8 }, { legalEntityId: null, clientId: 7 }] as const)('invoice case parent: rejects a malformed or foreign case %j', async wrong => {
       render(<LegalEntityModal {...propsFor('page')} />); const accept = await openInvoice(); act(() => accept(created(wrong)));
       expect(screen.queryAllByText('Owned invoice case')).toHaveLength(0);
+    });
+  });
+
+  describe('payment open ownership', () => {
+    let session: ReturnType<typeof documentCopyTestSession>;
+    beforeEach(() => { session = documentCopyTestSession(); });
+    afterEach(() => session.restore());
+    const payment = (id = 701, companyId = 9) => ({ id, legalEntityId: companyId, clientId: null, description: `Owned payment ${id}`, date: '2026-10-31', type: 'Expense', status: 'Pending', amount: 100, paidAmount: 0 } as Payment);
+    const propsFor = (mode: 'page' | 'modal' = 'page') => ({ isOpen: true, mode, initial: createInitialLegalEntity({ isOwnCompany: false }), allowEdit: true, allowDelete: false,
+      canViewCases: false, canViewAccounts: false, canViewActs: false, canViewPayments: true, onClose: vi.fn(), onSubmit: vi.fn(), suggest: vi.fn(), findById: vi.fn() });
+    const showPayments = () => vi.mocked(apiService.getPaymentsV2).mockResolvedValue({ items: [payment()], total: 1, page: 1, pageSize: 5, summary: { income: 0, expense: 100, balance: -100, incomeCount: 0, expenseCount: 1, total: 1 } });
+    it('payment open owner: old details cannot open in another company', async () => {
+      let finish!: (value: Payment) => void; showPayments(); vi.mocked(apiService.getPayment).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+      const props = propsFor(); const view = render(<LegalEntityModal {...props} />); fireEvent.click(await screen.findByRole('button', { name: 'Owned payment 701' }));
+      view.rerender(<LegalEntityModal {...props} initial={{ ...props.initial, id: 8 }} />); await act(async () => finish(payment()));
+      expect(screen.queryByTestId('legal-related-payment-modal')).toBeNull(); expect(toastErrorMock).not.toHaveBeenCalled();
+    });
+
+    for (const mode of ['page', 'modal'] as const) {
+      it.each(['closed', 'reopen', 'readonly', 'edit-permission', 'view-permission', 'permission-aba', 'mode', 'version', 'unmount'] as const)(`payment open owner: pending details cannot follow %s in ${mode}`, async change => {
+        let finish!: (value: Payment) => void; showPayments(); vi.mocked(apiService.getPayment).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+        const props = propsFor(mode); const view = render(<LegalEntityModal {...props} />); fireEvent.click(await screen.findByRole('button', { name: 'Owned payment 701' }));
+        if (change === 'closed' || change === 'reopen') { view.rerender(<LegalEntityModal {...props} isOpen={false} />); if (change === 'reopen') view.rerender(<LegalEntityModal {...props} />); }
+        if (change === 'readonly') view.rerender(<LegalEntityModal {...props} allowEdit={false} />);
+        if (change === 'edit-permission' || change === 'permission-aba') { view.rerender(<LegalEntityModal {...props} relatedRecordPermissions={{ payments: relatedPermissions({ canEdit: false }) }} />); if (change === 'permission-aba') view.rerender(<LegalEntityModal {...props} />); }
+        if (change === 'view-permission') view.rerender(<LegalEntityModal {...props} canViewPayments={false} />);
+        if (change === 'mode') view.rerender(<LegalEntityModal {...props} mode={mode === 'page' ? 'modal' : 'page'} />);
+        if (change === 'version') view.rerender(<LegalEntityModal {...props} initial={{ ...props.initial, profileEditVersion: 'B'.repeat(64) }} />);
+        if (change === 'unmount') view.unmount();
+        await act(async () => finish(payment())); expect(screen.queryByTestId('legal-related-payment-modal')).toBeNull(); expect(toastErrorMock).not.toHaveBeenCalled();
+      });
+
+      it(`payment open owner: current details and token refresh open once in ${mode}`, async () => {
+        let finish!: (value: Payment) => void; showPayments(); vi.mocked(apiService.getPayment).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+        render(<LegalEntityModal {...propsFor(mode)} />); const button = await screen.findByRole('button', { name: 'Owned payment 701' }); fireEvent.click(button); fireEvent.click(button);
+        expect(apiService.getPayment).toHaveBeenCalledExactlyOnceWith(701); session.refresh(); await act(async () => finish({ ...payment(), notes: 'Full owned payment details' }));
+        expect(await screen.findByTestId('legal-related-payment-modal')).toBeTruthy(); expect(paymentModalPropsSpy).toHaveBeenLastCalledWith(expect.objectContaining({ payment: expect.objectContaining({ id: 701, notes: 'Full owned payment details' }) }));
+      });
+    }
+
+    it.each(['login', 'actor', 'logout'] as const)('payment open owner: rejects old %s details without a render', async change => {
+      let finish!: (value: Payment) => void; showPayments(); vi.mocked(apiService.getPayment).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+      render(<LegalEntityModal {...propsFor()} />); const button = await screen.findByRole('button', { name: 'Owned payment 701' }); fireEvent.click(button); session.replace(change); fireEvent.click(button);
+      await act(async () => finish(payment())); expect(apiService.getPayment).toHaveBeenCalledOnce(); expect(screen.queryByTestId('legal-related-payment-modal')).toBeNull();
+    });
+
+    it('payment open owner: only the latest distinct payment request opens an editor', async () => {
+      const finish = new Map<number, (value: Payment) => void>(); showPayments(); const response = await vi.mocked(apiService.getPaymentsV2)();
+      vi.mocked(apiService.getPaymentsV2).mockResolvedValue({ ...response, items: [payment(), payment(702)], total: 2 }); vi.mocked(apiService.getPayment).mockImplementation(id => new Promise(resolve => { finish.set(id, resolve); }));
+      render(<LegalEntityModal {...propsFor()} />); fireEvent.click(await screen.findByRole('button', { name: 'Owned payment 701' })); fireEvent.click(await screen.findByRole('button', { name: 'Owned payment 702' }));
+      await act(async () => finish.get(701)!(payment())); expect(screen.queryByTestId('legal-related-payment-modal')).toBeNull();
+      await act(async () => finish.get(702)!(payment(702))); expect(paymentModalPropsSpy).toHaveBeenLastCalledWith(expect.objectContaining({ payment: expect.objectContaining({ id: 702 }) }));
+    });
+
+    it('payment open owner: choosing a new payment cancels pending details without replacing the new form', async () => {
+      let finish!: (value: Payment) => void; showPayments(); vi.mocked(apiService.getPayment).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+      render(<LegalEntityModal {...propsFor()} />); fireEvent.click(await screen.findByRole('button', { name: 'Owned payment 701' })); fireEvent.click(screen.getByRole('button', { name: 'Платёж' }));
+      await act(async () => finish(payment())); expect(paymentModalPropsSpy).toHaveBeenLastCalledWith(expect.objectContaining({ payment: undefined })); expect(screen.getByTestId('legal-related-payment-modal')).toBeTruthy();
+    });
+
+    it('payment open owner: a current failure permits retry while a stale failure stays private', async () => {
+      showPayments(); vi.mocked(apiService.getPayment).mockRejectedValueOnce(new Error('Current payment load failed')).mockResolvedValueOnce(payment());
+      const props = propsFor(); const view = render(<LegalEntityModal {...props} />); const button = await screen.findByRole('button', { name: 'Owned payment 701' }); fireEvent.click(button);
+      await waitFor(() => expect(toastErrorMock).toHaveBeenCalledOnce()); fireEvent.click(button); await screen.findByTestId('legal-related-payment-modal'); expect(apiService.getPayment).toHaveBeenCalledTimes(2);
+      const close = paymentModalPropsSpy.mock.lastCall![0].onClose as () => void; act(() => close()); let reject!: (error: Error) => void; vi.mocked(apiService.getPayment).mockReturnValueOnce(new Promise((_resolve, fail) => { reject = fail; }));
+      fireEvent.click(button); view.rerender(<LegalEntityModal {...props} initial={{ ...props.initial, id: 8 }} />); await act(async () => reject(new Error('Private old load error')));
+      expect(toastErrorMock).toHaveBeenCalledOnce(); expect(screen.queryByText('Private old load error')).toBeNull();
+    });
+
+    it('payment open owner: a mismatched detail ID never opens an editor', async () => {
+      showPayments(); vi.mocked(apiService.getPayment).mockResolvedValue(payment(702)); render(<LegalEntityModal {...propsFor()} />); fireEvent.click(await screen.findByRole('button', { name: 'Owned payment 701' }));
+      await waitFor(() => expect(toastErrorMock).toHaveBeenCalledOnce()); expect(screen.queryByTestId('legal-related-payment-modal')).toBeNull();
+    });
+
+    it('payment open owner: an invoice-linked row may retain its original parties', async () => {
+      showPayments(); vi.mocked(apiService.getPayment).mockResolvedValue({ ...payment(), legalEntityId: 8, expenseLegalEntityId: null, invoiceId: 71 }); render(<LegalEntityModal {...propsFor()} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Owned payment 701' })); expect(await screen.findByTestId('legal-related-payment-modal')).toBeTruthy();
+      expect(paymentModalPropsSpy).toHaveBeenLastCalledWith(expect.objectContaining({ payment: expect.objectContaining({ id: 701, legalEntityId: 8 }) }));
     });
   });
 
