@@ -1,8 +1,9 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CompanyTaxRegisterSection } from './CompanyTaxRegisterSection';
+import { documentCopyTestSession } from '../../test/documentCopySession';
 import { apiService } from '../../services/api';
 import type { TaxRegisterBook, TaxRegisterEntryItem, TaxRegisterJournalPage } from '../../types';
 
@@ -28,6 +29,10 @@ vi.mock('../../services/api', () => ({
     downloadTaxRegisterExport: vi.fn(),
   },
 }));
+
+let session: ReturnType<typeof documentCopyTestSession>;
+beforeEach(() => { session = documentCopyTestSession(); });
+afterEach(() => session.restore());
 
 const entry = (overrides: Partial<TaxRegisterEntryItem> = {}): TaxRegisterEntryItem => ({
   id: 1,
@@ -62,7 +67,7 @@ describe('CompanyTaxRegisterSection', () => {
 
   it('renders nothing when the server refuses access', async () => {
     vi.mocked(apiService.getTaxRegisterBook).mockRejectedValue(new Error('HTTP 403'));
-    const { container } = render(<CompanyTaxRegisterSection companyId={5} />);
+    const { container } = render(<CompanyTaxRegisterSection companyId={5} readOnly={false} />);
 
     await waitFor(() => expect(apiService.getTaxRegisterBook).toHaveBeenCalled());
     expect(container.textContent).toBe('');
@@ -70,7 +75,7 @@ describe('CompanyTaxRegisterSection', () => {
 
   it('shows a retry after a technical failure instead of hiding the section', async () => {
     vi.mocked(apiService.getTaxRegisterBook).mockRejectedValueOnce(new Error('Failed to fetch'));
-    render(<CompanyTaxRegisterSection companyId={5} />);
+    render(<CompanyTaxRegisterSection companyId={5} readOnly={false} />);
     expect(await screen.findByRole('alert')).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: 'Повторить загрузку' }));
     expect(await screen.findByTestId('tax-register-totals')).toBeTruthy();
@@ -78,7 +83,7 @@ describe('CompanyTaxRegisterSection', () => {
 
   it('can load drafts beyond the first 200 entries', async () => {
     vi.mocked(apiService.getTaxRegisterDrafts).mockResolvedValue({ total: 201, page: 1, pageSize: 200, items: [entry({ status: 'Draft' })] });
-    render(<CompanyTaxRegisterSection companyId={5} />);
+    render(<CompanyTaxRegisterSection companyId={5} readOnly={false} />);
     await userEvent.click(await screen.findByRole('button', { name: 'Следующие черновики' }));
     await waitFor(() => expect(apiService.getTaxRegisterDrafts).toHaveBeenCalledWith(5, 2026, 2));
   });
@@ -86,9 +91,9 @@ describe('CompanyTaxRegisterSection', () => {
   it('ignores an old company response after switching companies', async () => {
     let finishOld!: (value: TaxRegisterBook) => void;
     vi.mocked(apiService.getTaxRegisterBook).mockImplementationOnce(() => new Promise((resolve) => { finishOld = resolve; }));
-    const { rerender } = render(<CompanyTaxRegisterSection companyId={5} />);
-    vi.mocked(apiService.getTaxRegisterBook).mockResolvedValue(book({ legalEntityId: 6, entries: [entry({ documentRef: 'Компания 6' })] }));
-    rerender(<CompanyTaxRegisterSection companyId={6} />);
+    const { rerender } = render(<CompanyTaxRegisterSection companyId={5} readOnly={false} />);
+    vi.mocked(apiService.getTaxRegisterBook).mockResolvedValue(book({ legalEntityId: 6, entries: [entry({ legalEntityId: 6, documentRef: 'Компания 6' })] }));
+    rerender(<CompanyTaxRegisterSection companyId={6} readOnly={false} />);
     expect(await screen.findByText('Компания 6')).toBeTruthy();
     finishOld(book({ entries: [entry({ documentRef: 'Компания 5' })] }));
     await waitFor(() => expect(screen.queryByText('Компания 5')).toBeNull());
@@ -96,7 +101,7 @@ describe('CompanyTaxRegisterSection', () => {
   });
 
   it('shows totals and the approved entry', async () => {
-    render(<CompanyTaxRegisterSection companyId={5} />);
+    render(<CompanyTaxRegisterSection companyId={5} readOnly={false} />);
 
     expect((await screen.findByTestId('tax-register-totals')).textContent).toContain('Доходы');
     expect(screen.getByText('Счёт № 1')).toBeTruthy();
@@ -110,7 +115,7 @@ describe('CompanyTaxRegisterSection', () => {
       items: [entry({ id: 2, status: 'Draft', documentRef: null }), entry({ id: 3, status: 'Draft' })],
     });
     vi.mocked(apiService.approveTaxRegisterEntry).mockResolvedValue(entry({ id: 3 }));
-    render(<CompanyTaxRegisterSection companyId={5} />);
+    render(<CompanyTaxRegisterSection companyId={5} readOnly={false} />);
 
     const buttons = await screen.findAllByRole('button', { name: 'Утвердить' });
     expect((buttons[0] as HTMLButtonElement).disabled).toBe(true);
@@ -121,7 +126,7 @@ describe('CompanyTaxRegisterSection', () => {
 
   it('creates a draft from the form', async () => {
     vi.mocked(apiService.createTaxRegisterEntry).mockResolvedValue(entry({ status: 'Draft' }));
-    render(<CompanyTaxRegisterSection companyId={5} />);
+    render(<CompanyTaxRegisterSection companyId={5} readOnly={false} />);
 
     await screen.findByTestId('company-tax-register');
     const submit = screen.getByRole('button', { name: 'Добавить черновик' });
@@ -138,7 +143,7 @@ describe('CompanyTaxRegisterSection', () => {
 
   it('corrects an approved entry with a reason from the dialog', async () => {
     vi.mocked(apiService.correctTaxRegisterEntry).mockResolvedValue(entry({ id: 9, type: 'Correction', sign: -1 }));
-    render(<CompanyTaxRegisterSection companyId={5} />);
+    render(<CompanyTaxRegisterSection companyId={5} readOnly={false} />);
 
     await userEvent.click(await screen.findByRole('button', { name: 'Исправить' }));
 
@@ -149,7 +154,7 @@ describe('CompanyTaxRegisterSection', () => {
     vi.mocked(apiService.downloadTaxRegisterExport).mockResolvedValue(new Blob(['x']));
     URL.createObjectURL = vi.fn(() => 'blob:x');
     URL.revokeObjectURL = vi.fn();
-    render(<CompanyTaxRegisterSection companyId={5} />);
+    render(<CompanyTaxRegisterSection companyId={5} readOnly={false} />);
 
     await userEvent.click(await screen.findByRole('button', { name: 'Выгрузить Excel' }));
 
@@ -158,7 +163,7 @@ describe('CompanyTaxRegisterSection', () => {
 
   it('hides editing for a closed year', async () => {
     vi.mocked(apiService.getTaxRegisterBook).mockResolvedValue(book({ isClosed: true }));
-    render(<CompanyTaxRegisterSection companyId={5} />);
+    render(<CompanyTaxRegisterSection companyId={5} readOnly={false} />);
 
     expect(((await screen.findByRole('button', { name: 'Год закрыт' })) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.queryByRole('button', { name: 'Добавить черновик' })).toBeNull();
@@ -187,7 +192,7 @@ describe('CompanyTaxRegisterSection journal and book pages', () => {
 
   it('loads the journal with filters and shows author names', async () => {
     vi.mocked(apiService.getTaxRegisterJournal).mockResolvedValue({ total: 1, page: 1, pageSize: 20, items: [journalItem(1)] });
-    render(<CompanyTaxRegisterSection companyId={5} />);
+    render(<CompanyTaxRegisterSection companyId={5} readOnly={false} />);
 
     await userEvent.click(await screen.findByRole('button', { name: 'Журнал событий' }));
     await waitFor(() => expect(screen.getByTestId('tax-register-journal-list').textContent).toContain('Утверждена'));
@@ -203,7 +208,7 @@ describe('CompanyTaxRegisterSection journal and book pages', () => {
     vi.mocked(apiService.getTaxRegisterJournal)
       .mockRejectedValueOnce(new Error('Сеть недоступна'))
       .mockResolvedValueOnce({ total: 1, page: 1, pageSize: 20, items: [journalItem(2, 'Created')] });
-    render(<CompanyTaxRegisterSection companyId={5} />);
+    render(<CompanyTaxRegisterSection companyId={5} readOnly={false} />);
 
     await userEvent.click(await screen.findByRole('button', { name: 'Журнал событий' }));
     expect((await screen.findByRole('alert')).textContent).toContain('Сеть недоступна');
@@ -217,7 +222,7 @@ describe('CompanyTaxRegisterSection journal and book pages', () => {
     vi.mocked(apiService.getTaxRegisterJournal)
       .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
       .mockResolvedValueOnce({ total: 1, page: 1, pageSize: 20, items: [journalItem(3, 'Archived')] });
-    render(<CompanyTaxRegisterSection companyId={5} />);
+    render(<CompanyTaxRegisterSection companyId={5} readOnly={false} />);
 
     await userEvent.click(await screen.findByRole('button', { name: 'Журнал событий' }));
     await userEvent.selectOptions(screen.getByLabelText('Журнал: действие'), 'Archived');
@@ -230,7 +235,7 @@ describe('CompanyTaxRegisterSection journal and book pages', () => {
 
   it('requests the next page of a large book', async () => {
     vi.mocked(apiService.getTaxRegisterBook).mockResolvedValue(book({ totals: { income: 1, expense: 0, taxBase: 1, entries: 250 } }));
-    render(<CompanyTaxRegisterSection companyId={5} />);
+    render(<CompanyTaxRegisterSection companyId={5} readOnly={false} />);
 
     await userEvent.click(await screen.findByRole('button', { name: 'Следующие записи' }));
 

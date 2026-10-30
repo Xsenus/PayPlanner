@@ -93,6 +93,12 @@ vi.mock('../../services/api', () => ({
     getCompanyRequisitesCheck: vi.fn().mockResolvedValue({ legalEntityId: 9, issues: [] }),
     getCompanyBranches: vi.fn().mockResolvedValue([]),
     getBankConnections: vi.fn().mockResolvedValue([]),
+    getTaxRegisterBook: vi.fn(),
+    getTaxRegisterDrafts: vi.fn(),
+    closeTaxRegisterYear: vi.fn(),
+    syncBankConnectionAccounts: vi.fn(),
+    syncBankConnectionStatements: vi.fn(),
+    updateBankAccountSettings: vi.fn(),
     getActResponsibles: vi.fn().mockResolvedValue([]),
     getActs: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 5 }),
     getActsSummary: vi.fn().mockResolvedValue(emptyActsSummary),
@@ -212,6 +218,35 @@ function deferCompanyImageProcessing() {
 }
 
 describe('LegalEntityModal integration', () => {
+  describe('financial section admission', () => {
+    let session: ReturnType<typeof documentCopyTestSession>;
+    beforeEach(() => {
+      session = documentCopyTestSession();
+      vi.mocked(apiService.getBankConnections).mockImplementation(async id => [{ id: 1, legalEntityId: id, provider: 'Tochka', status: 'Active', accounts: [{ id: 10, externalAccountId: 'fixture', accountNumber: '40702810200000000001', currency: 'RUB', status: 'Open', isDefault: false, isHidden: false, statementsEnabled: true }] }]);
+      vi.mocked(apiService.getTaxRegisterBook).mockImplementation(async (id, year) => ({ legalEntityId: id, year, isClosed: false, totals: { income: 0, expense: 0, taxBase: 0, entries: 0 }, entries: [], page: 1, pageSize: 100 }));
+      vi.mocked(apiService.getTaxRegisterDrafts).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 200 });
+      vi.mocked(apiService.closeTaxRegisterYear).mockClear(); vi.mocked(apiService.syncBankConnectionAccounts).mockClear(); vi.mocked(apiService.syncBankConnectionStatements).mockClear(); vi.mocked(apiService.updateBankAccountSettings).mockClear();
+    });
+    afterEach(() => session.restore());
+    const propsFor = (mode: 'page' | 'modal') => ({ isOpen: true, mode, initial: createInitialLegalEntity({ isOwnCompany: true }), allowEdit: true, allowDelete: false, canManageOwnCompanySettings: true,
+      canViewCases: false, canViewAccounts: false, canViewActs: false, canViewPayments: false, onClose: vi.fn(), onSubmit: vi.fn(), suggest: vi.fn(), findById: vi.fn() });
+    for (const mode of ['page', 'modal'] as const) {
+      it(`finance parent: administrator view mode reaches both financial blocks in ${mode}`, async () => {
+        render(<LegalEntityModal {...propsFor(mode)} allowEdit={false} />); await screen.findByTestId('company-tax-register'); await screen.findByTestId('company-bank-connections');
+        expect(screen.queryByRole('button', { name: 'Добавить черновик' })).toBeNull();
+        for (const name of ['Закрыть год', 'Обновить счета', 'Загрузить выписки по всем счетам']) { const b = screen.getByRole('button', { name }); expect(b).toHaveProperty('disabled', true); fireEvent.click(b); }
+        expect(screen.getByLabelText('Скрыть счёт 40702810200000000001')).toHaveProperty('disabled', true);
+        expect(apiService.closeTaxRegisterYear).not.toHaveBeenCalled(); expect(apiService.syncBankConnectionAccounts).not.toHaveBeenCalled(); expect(apiService.syncBankConnectionStatements).not.toHaveBeenCalled();
+      });
+      it.each(['readonly', 'authority'] as const)(`finance parent: pending close-year belongs to its ${mode} %s admission`, async change => {
+        let finish!: (value: boolean) => void; confirmMock.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+        const props = propsFor(mode); const view = render(<LegalEntityModal {...props} />); fireEvent.click(await screen.findByRole('button', { name: 'Закрыть год' })); const signal = confirmMock.mock.calls[0][0].signal as AbortSignal;
+        if (change === 'readonly') view.rerender(<LegalEntityModal {...props} allowEdit={false} />); else view.rerender(<LegalEntityModal {...props} canManageOwnCompanySettings={false} />);
+        expect(signal.aborted).toBe(true); await act(async () => finish(true)); expect(apiService.closeTaxRegisterYear).not.toHaveBeenCalled(); expect(toastErrorMock).not.toHaveBeenCalled();
+      });
+    }
+  });
+
   describe('document client lookup lifecycle', () => {
     beforeEach(() => { vi.mocked(apiService.getClientsV2).mockReset(); });
     it.each(['Счёт', 'Акт'] as const)('document clients: a failed new opening never restores the previous list in %s', async name => {
@@ -642,6 +677,7 @@ describe('LegalEntityModal integration', () => {
     vi.mocked(apiService.getCompanyBranches).mockClear();
     vi.mocked(apiService.getCompanyRequisitesCheck).mockClear();
     vi.mocked(apiService.getBankConnections).mockClear();
+    vi.mocked(apiService.getBankConnections).mockResolvedValue([]);
     confirmMock.mockReset();
     toastErrorMock.mockReset();
     toastInfoMock.mockReset();

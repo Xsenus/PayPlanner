@@ -4812,8 +4812,8 @@ export function LegalEntityModal({
                 <option value="Archived">В архиве</option>
               </SystemSelect>
             </div>
-            <CompanyBankConnectionsSection companyId={currentLegalEntityId} />
-            <CompanyTaxRegisterSection companyId={currentLegalEntityId} />
+            <CompanyBankConnectionsSection companyId={currentLegalEntityId} readOnly={readOnly} ownerScope={classificationScope} />
+            <CompanyTaxRegisterSection companyId={currentLegalEntityId} readOnly={readOnly} ownerScope={classificationScope} />
           </>
         ) : null}
 

@@ -9,6 +9,7 @@ interface TaxRegisterJournalProps {
   companyId: number;
   /** Меняется после действий над записями, чтобы журнал перечитал данные. */
   refreshToken: number;
+  isCurrentOwner: () => boolean;
 }
 
 const PAGE_SIZE = 20;
@@ -27,7 +28,7 @@ const money = (value: number) => value.toLocaleString('ru-RU', { minimumFraction
  * Журнал событий регистра компании: кто и когда создал, утвердил, исправил или архивировал запись.
  * Ответы устаревших запросов отбрасываются, ошибка загрузки даёт кнопку повтора.
  */
-export function TaxRegisterJournal({ companyId, refreshToken }: TaxRegisterJournalProps) {
+export function TaxRegisterJournal({ companyId, refreshToken, isCurrentOwner }: TaxRegisterJournalProps) {
   const [open, setOpen] = useState(false);
   const [filters, setFilters] = useState({ from: '', to: '', action: '' });
   const [page, setPage] = useState(1);
@@ -37,6 +38,7 @@ export function TaxRegisterJournal({ companyId, refreshToken }: TaxRegisterJourn
   const sequence = useRef(0);
 
   const load = useCallback(async () => {
+    if (!isCurrentOwner()) return;
     const current = ++sequence.current;
     try {
       const result = await apiService.getTaxRegisterJournal(companyId, {
@@ -46,14 +48,14 @@ export function TaxRegisterJournal({ companyId, refreshToken }: TaxRegisterJourn
         page,
         pageSize: PAGE_SIZE,
       });
-      if (current !== sequence.current) return;
+      if (current !== sequence.current || !isCurrentOwner()) return;
       setData(result);
       setError(null);
     } catch (loadError) {
-      if (current !== sequence.current) return;
+      if (current !== sequence.current || !isCurrentOwner()) return;
       setError(extractDisplayErrorMessage(loadError, 'Не удалось загрузить журнал регистра.'));
     }
-  }, [companyId, filters, page]);
+  }, [companyId, filters, page, isCurrentOwner]);
 
   useEffect(() => {
     if (!open) return;
@@ -65,17 +67,20 @@ export function TaxRegisterJournal({ companyId, refreshToken }: TaxRegisterJourn
   }, [open, load, refreshToken]);
 
   useEffect(() => {
-    if (open && users.length === 0) {
-      void apiService.getTaskJournalAssignees().then(setUsers).catch(() => setUsers([]));
-    }
-  }, [open, users.length]);
+    if (!open || !isCurrentOwner()) return;
+    let cancelled = false;
+    void apiService.getTaskJournalAssignees().then(items => {
+      if (!cancelled && isCurrentOwner()) setUsers(items);
+    }).catch(() => { if (!cancelled && isCurrentOwner()) setUsers([]); });
+    return () => { cancelled = true; };
+  }, [open, isCurrentOwner]);
 
   const userName = (id: number) => users.find((item) => item.id === id)?.name ?? (id > 0 ? `Пользователь №${id}` : 'Система');
   const pages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
 
   return (
     <div className="mt-3" data-testid="tax-register-journal">
-      <button type="button" className="text-sm text-blue-700 underline" onClick={() => setOpen((value) => !value)}>
+      <button type="button" className="text-sm text-blue-700 underline" onClick={() => { if (isCurrentOwner()) setOpen((value) => !value); }}>
         {open ? 'Скрыть журнал событий' : 'Журнал событий'}
       </button>
       {open ? (

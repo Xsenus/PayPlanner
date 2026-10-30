@@ -60,9 +60,11 @@ export function DialogProvider({ children }: { children: ReactNode }) {
   const promptDialogRef = useRef<HTMLFormElement>(null);
   const promptInitialFocusRef = useRef<HTMLElement | null>(null);
   const ownedConfirmations = useRef(new Set<() => void>());
+  const ownedPrompts = useRef(new Set<() => void>());
   useEffect(() => {
     const pending = ownedConfirmations.current;
-    return () => { for (const abandon of [...pending]) abandon(); };
+    const prompts = ownedPrompts.current;
+    return () => { for (const abandon of [...pending, ...prompts]) abandon(); };
   }, []);
 
   const confirm = useCallback((options: ConfirmOptions | string) => {
@@ -101,11 +103,35 @@ export function DialogProvider({ children }: { children: ReactNode }) {
   const prompt = useCallback((options: PromptOptions | string) => {
     return new Promise<string | null>((resolve) => {
       const promptOptions = toPromptOptions(options);
-      setPromptRequest({
+      const signal = promptOptions.signal;
+      if (!signal) {
+        setPromptRequest({ ...promptOptions, value: promptOptions.defaultValue ?? '', resolve });
+        return;
+      }
+      if (signal.aborted) { resolve(null); return; }
+      let settled = false;
+      const abandon = () => cancel();
+      const settle = (result: string | null) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener('abort', cancel);
+        ownedPrompts.current.delete(abandon);
+        resolve(result);
+      };
+      const cancel = () => {
+        settle(null);
+        // Editing clones the request; the resolver identifies its original owner.
+        setPromptRequest(current => current?.resolve === settle ? null : current);
+      };
+      const request: PromptRequest = {
         ...promptOptions,
         value: promptOptions.defaultValue ?? '',
-        resolve,
-      });
+        resolve: settle,
+      };
+      ownedPrompts.current.add(abandon);
+      signal.addEventListener('abort', cancel, { once: true });
+      if (signal.aborted) { cancel(); return; }
+      setPromptRequest(request);
     });
   }, []);
 

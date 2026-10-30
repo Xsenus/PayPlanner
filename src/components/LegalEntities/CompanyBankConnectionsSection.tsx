@@ -1,14 +1,18 @@
 import { RefreshCw } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useToast } from '../../hooks/useToast';
+import { useAsyncOperationOwner } from '../../hooks/useAsyncOperationOwner';
 import { apiService } from '../../services/api';
+import { captureAuthSessionIdentity, isAuthSessionIdentityCurrent, type AuthSessionIdentity } from '../../services/authService';
 import type { BankAccountItem, BankConnectionItem, BankStatementRun, BankSyncLogItem } from '../../types';
 import { extractDisplayErrorMessage, isHttpErrorStatus } from '../../utils/errorUtils';
 import { createClientRequestId } from '../../utils/clientRequestId';
 
 interface CompanyBankConnectionsSectionProps {
   companyId: number;
+  readOnly?: boolean;
+  ownerScope?: string;
 }
 
 const PROVIDER_LABELS: Record<string, string> = { Tochka: 'Точка', Sber: 'Сбербанк' };
@@ -43,8 +47,18 @@ const toDateInput = (date: Date) => date.toISOString().slice(0, 10);
  * Банковские подключения собственной компании: список счетов из банка со статусами, настройки счёта,
  * загрузка счетов и выписок, журнал. Видно только администратору (сервер отдаёт данные только ему).
  */
-export function CompanyBankConnectionsSection({ companyId }: CompanyBankConnectionsSectionProps) {
+export function CompanyBankConnectionsSection({ companyId, readOnly = true, ownerScope }: CompanyBankConnectionsSectionProps) {
+  const { epoch, actor, authenticated } = captureAuthSessionIdentity();
+  const session = useMemo(() => ({ epoch, actor, authenticated }), [epoch, actor, authenticated]);
+  if (!authenticated || !Number.isInteger(companyId) || companyId <= 0) return null;
+  return <CompanyBankConnectionsScreen key={JSON.stringify([companyId, readOnly, ownerScope, session])} companyId={companyId} readOnly={readOnly} session={session} />;
+}
+
+function CompanyBankConnectionsScreen({ companyId, readOnly, session }: { companyId: number; readOnly: boolean; session: AuthSessionIdentity }) {
   const toast = useToast();
+  const { capture, isCurrent } = useAsyncOperationOwner('company-bank-connections');
+  const owner = capture();
+  const current = useCallback((value: number) => isCurrent(value) && isAuthSessionIdentityCurrent(session), [isCurrent, session]);
   const [connections, setConnections] = useState<BankConnectionItem[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [loadedCompanyId, setLoadedCompanyId] = useState<number | null>(null);
@@ -73,40 +87,43 @@ export function CompanyBankConnectionsSection({ companyId }: CompanyBankConnecti
     return () => { sequence.current++; };
   }, [companyId]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (loadOwner: number) => {
+    if (!current(loadOwner)) return;
     const sequence = ++loadSequence.current;
     try {
       const result = await apiService.getBankConnections(companyId);
-      if (sequence !== loadSequence.current) return;
+      if (sequence !== loadSequence.current || !current(loadOwner)) return;
+      if (!Array.isArray(result) || !result.every(connection => connection && Number.isInteger(connection.id) && connection.id > 0 && connection.legalEntityId === companyId && Array.isArray(connection.accounts)))
+        throw new Error('Не удалось подтвердить банковские подключения выбранной компании. Повторите загрузку.');
       setConnections(result);
       setLoadError(null);
     } catch (error) {
-      if (sequence !== loadSequence.current) return;
+      if (sequence !== loadSequence.current || !current(loadOwner)) return;
       setConnections([]);
       setLoadError(isHttpErrorStatus(error, 403) || isHttpErrorStatus(error, 401) ? null : extractDisplayErrorMessage(error, 'Не удалось загрузить банковские подключения.'));
     } finally {
-      if (sequence === loadSequence.current) {
+      if (sequence === loadSequence.current && current(loadOwner)) {
         setLoaded(true);
         setLoadedCompanyId(companyId);
       }
     }
-  }, [companyId]);
+  }, [companyId, current]);
 
   useEffect(() => {
-    void load();
+    void load(capture());
     const sequence = loadSequence;
     return () => { sequence.current++; };
-  }, [load]);
+  }, [load, capture]);
 
-  const run = async (action: (isCurrent: () => boolean) => Promise<void>, failure: string) => {
-    if (activeOperation.current !== null) return;
+  const run = async (action: (isCurrent: () => boolean) => Promise<void>, failure: string, write = true) => {
+    if (!current(owner) || write && readOnly || activeOperation.current !== null || !loaded || loadedCompanyId !== companyId || loadError) return;
     const sequence = operationSequence.current;
-    const isCurrent = () => sequence === operationSequence.current;
+    const isCurrent = () => sequence === operationSequence.current && current(owner);
     activeOperation.current = sequence;
     setBusy(true);
     try {
       await action(isCurrent);
-      if (isCurrent()) await load();
+      if (write && isCurrent()) await load(owner);
     } catch (error) {
       if (isCurrent()) toast.error(extractDisplayErrorMessage(error, failure), 'Банковские подключения');
     } finally {
@@ -121,7 +138,7 @@ export function CompanyBankConnectionsSection({ companyId }: CompanyBankConnecti
     return loadedCompanyId === companyId && loadError ? (
       <section className="mt-3 rounded-lg border border-slate-200 p-3">
         <p role="alert" className="text-sm text-red-700">{loadError}</p>
-        <button type="button" className="mt-2 rounded-lg border px-2 py-1 text-sm" onClick={() => void load()}>Повторить загрузку</button>
+        <button type="button" className="mt-2 rounded-lg border px-2 py-1 text-sm" onClick={() => void load(owner)}>Повторить загрузку</button>
       </section>
     ) : null;
   }
@@ -137,6 +154,7 @@ export function CompanyBankConnectionsSection({ companyId }: CompanyBankConnecti
   return (
     <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-3" data-testid="company-bank-connections">
       <h3 className="text-base font-semibold text-slate-900">Банковские подключения</h3>
+      {readOnly ? <p className="mt-1 text-xs text-slate-500">Режим просмотра: настройки счетов и загрузка выписок недоступны для изменения.</p> : null}
 
       {connections.map((connection) => (
         <div key={connection.id} className="mt-3 rounded-xl border border-slate-200 p-3">
@@ -153,7 +171,7 @@ export function CompanyBankConnectionsSection({ companyId }: CompanyBankConnecti
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                disabled={busy}
+                disabled={busy || readOnly}
                 onClick={() =>
                   void run(async (isCurrent) => {
                     const result = await apiService.syncBankConnectionAccounts(connection.id);
@@ -168,14 +186,10 @@ export function CompanyBankConnectionsSection({ companyId }: CompanyBankConnecti
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => {
-                  const sequence = operationSequence.current;
-                  void apiService.getBankSyncLogs(connection.id).then((page) => {
-                    if (sequence === operationSequence.current) setLogs({ connectionId: connection.id, items: page.items });
-                  }).catch((error) => {
-                    if (sequence === operationSequence.current) toast.error(extractDisplayErrorMessage(error, 'Не удалось загрузить журнал банка.'), 'Банковские подключения');
-                  });
-                }}
+                onClick={() => void run(async isCurrent => {
+                  const page = await apiService.getBankSyncLogs(connection.id);
+                  if (isCurrent()) setLogs({ connectionId: connection.id, items: page.items });
+                }, 'Не удалось загрузить журнал банка.', false)}
                 className="rounded-lg border border-slate-200 px-2 py-1 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
               >
                 Журнал
@@ -189,6 +203,7 @@ export function CompanyBankConnectionsSection({ companyId }: CompanyBankConnecti
               <input
                 type="date"
                 value={period.from}
+                disabled={busy || readOnly}
                 onChange={(event) => setPeriod((prev) => ({ ...prev, from: event.target.value }))}
                 className="rounded-lg border border-slate-300 px-2 py-1"
               />
@@ -198,13 +213,14 @@ export function CompanyBankConnectionsSection({ companyId }: CompanyBankConnecti
               <input
                 type="date"
                 value={period.to}
+                disabled={busy || readOnly}
                 onChange={(event) => setPeriod((prev) => ({ ...prev, to: event.target.value }))}
                 className="rounded-lg border border-slate-300 px-2 py-1"
               />
             </label>
             <button
               type="button"
-              disabled={busy || !period.from || !period.to}
+              disabled={busy || readOnly || !period.from || !period.to}
               onClick={() =>
                 void run(async (isCurrent) => {
                   const previous = statementRequests.current.get(connection.id);
@@ -214,7 +230,7 @@ export function CompanyBankConnectionsSection({ companyId }: CompanyBankConnecti
                   const result = await apiService.syncBankConnectionStatements(connection.id, {
                     from: request.from, to: request.to, requestId: request.requestId,
                   });
-                  if (result.status === 'Success' && statementRequests.current.get(connection.id) === request) {
+                  if (isCurrent() && result.status === 'Success' && statementRequests.current.get(connection.id) === request) {
                     statementRequests.current.delete(connection.id);
                   }
                   if (isCurrent()) setLastRun({ ...result, connectionId: connection.id });
@@ -270,7 +286,7 @@ export function CompanyBankConnectionsSection({ companyId }: CompanyBankConnecti
                             type="checkbox"
                             aria-label={`${field === 'isDefault' ? 'По умолчанию' : field === 'isHidden' ? 'Скрыть счёт' : 'Загружать выписки'} ${account.accountNumber}`}
                             checked={account[field]}
-                            disabled={busy || (field === 'isDefault' && account.status !== 'Open')}
+                            disabled={busy || readOnly || (field === 'isDefault' && account.status !== 'Open')}
                             onChange={(event) =>
                               void run(async () => {
                                 await apiService.updateBankAccountSettings(account.id, { [field]: event.target.checked });

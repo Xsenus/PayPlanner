@@ -13,6 +13,50 @@ function setup(strict = false) {
   return { view, api };
 }
 
+describe('DialogProvider owned prompt', () => {
+  it('prompt owner: never opens an already aborted prompt', async () => {
+    const { api } = setup(); const controller = new AbortController(); controller.abort();
+    await expect(api.prompt({ title: 'Old reason', signal: controller.signal })).resolves.toBeNull(); expect(screen.queryByRole('dialog')).toBeNull();
+  });
+  it('prompt owner: removes typed private text and resolves null on abort', async () => {
+    const { api } = setup(); const controller = new AbortController(); let result!: Promise<string | null>;
+    act(() => { result = api.prompt({ title: 'Owned reason', label: 'Reason', signal: controller.signal }); });
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Private financial reason' } });
+    await act(async () => { controller.abort(); expect(await result).toBeNull(); });
+    expect(screen.queryByRole('dialog')).toBeNull(); expect(screen.queryByDisplayValue('Private financial reason')).toBeNull();
+  });
+  it('prompt owner: an old abort never closes a newer prompt', async () => {
+    const { api } = setup(); const controller = new AbortController(); let old!: Promise<string | null>; let current!: Promise<string | null>;
+    act(() => { old = api.prompt({ title: 'Old', signal: controller.signal }); });
+    act(() => { current = api.prompt({ title: 'New', defaultValue: 'Current value' }); });
+    await act(async () => { controller.abort(); expect(await old).toBeNull(); });
+    fireEvent.submit(screen.getByRole('dialog', { name: 'New' }));
+    await expect(current).resolves.toBe('Current value');
+  });
+  it.each(['accept', 'cancel', 'escape'] as const)('prompt owner: cleans up the signal after %s and leaves the next prompt intact', async outcome => {
+    const { api } = setup(); const controller = new AbortController(); const remove = vi.spyOn(controller.signal, 'removeEventListener'); let result!: Promise<string | null>;
+    act(() => { result = api.prompt({ title: 'Owned', defaultValue: 'Value', signal: controller.signal }); });
+    const dialog = screen.getByRole('dialog', { name: 'Owned' });
+    if (outcome === 'accept') fireEvent.submit(dialog); else if (outcome === 'cancel') fireEvent.click(within(dialog).getByRole('button', { name: 'Отмена' })); else fireEvent.keyDown(dialog, { key: 'Escape' });
+    await expect(result).resolves.toBe(outcome === 'accept' ? 'Value' : null); expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
+    act(() => { void api.prompt({ title: 'Next' }); controller.abort(); }); expect(screen.getByRole('dialog', { name: 'Next' })).toBeTruthy();
+  });
+  it('prompt owner: provider unmount settles an outstanding prompt', async () => {
+    const { api, view } = setup(); const controller = new AbortController(); let result!: Promise<string | null>;
+    act(() => { result = api.prompt({ title: 'Pending', signal: controller.signal }); }); view.unmount(); await expect(result).resolves.toBeNull();
+  });
+  it('prompt owner: StrictMode cleanup cancels only the abandoned lifetime', async () => {
+    const calls: Promise<string | null>[] = [];
+    function Consumer() {
+      const api = useDialog();
+      useEffect(() => { const controller = new AbortController(); calls.push(api.prompt({ title: 'Mounted reason', defaultValue: 'Current', signal: controller.signal })); return () => controller.abort(); }, [api]);
+      return null;
+    }
+    render(<StrictMode><DialogProvider><Consumer /></DialogProvider></StrictMode>);
+    expect(calls).toHaveLength(2); await expect(calls[0]).resolves.toBeNull(); fireEvent.submit(screen.getByRole('dialog', { name: 'Mounted reason' })); await expect(calls[1]).resolves.toBe('Current');
+  });
+});
+
 describe('DialogProvider owned confirmation', () => {
   it('does not display an already cancelled confirmation', async () => {
     const { api } = setup(); const controller = new AbortController(); controller.abort();

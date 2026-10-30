@@ -20,6 +20,8 @@ export interface AlertOptions {
 }
 
 export interface PromptOptions {
+  /** Cancels this prompt when its owning screen is no longer current. */
+  signal?: AbortSignal;
   title: string;
   description?: string;
   label?: string;
