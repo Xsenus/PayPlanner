@@ -13,6 +13,49 @@ namespace PayPlanner.Api.Services.Payments;
 
 internal static class BalanceApplicationService
 {
+    public static async Task<IActionResult> InspectAsync(PaymentContext db, int? clientId, int? legalEntityId,
+        Guid key, int paymentId, HttpContext context, Func<CancellationToken, Task<IActionResult?>> authorize, CancellationToken ct)
+    {
+        var actorId = context.User.GetUserId();
+        if (actorId is not > 0) return new UnauthorizedResult();
+        if (key == Guid.Empty || paymentId <= 0) return new BadRequestResult();
+        BalanceApplicationLease? lease = null;
+        try
+        {
+            lease = await BalanceApplicationLease.BeginAsync(db, actorId.Value, ct);
+            if (!await db.Users.AsNoTracking().AnyAsync(user => user.Id == actorId.Value && user.IsActive && user.IsApproved, ct))
+                return new UnauthorizedResult();
+            if (await authorize(ct) is { } denied) return denied;
+            if (!await db.Payments.AsNoTracking().AnyAsync(p => p.Id == paymentId && p.ClientId == clientId && p.LegalEntityId == legalEntityId, ct))
+                return new NotFoundResult();
+            // A pending financial writer must finish before we report any observed state.
+            await lease.LockOwnedPaymentAsync(paymentId, clientId, legalEntityId, ct);
+            var receipt = await db.BalanceApplicationReceipts.AsNoTracking()
+                .Where(r => r.RequestId == key && r.ActorUserId == actorId.Value && r.PaymentId == paymentId
+                    && r.ClientId == clientId && r.LegalEntityId == legalEntityId)
+                .Select(r => new BalanceApplicationResultDto
+                {
+                    RequestId = r.RequestId,
+                    AppliedAmount = r.AppliedAmount,
+                    Balance = r.Balance,
+                    IsReplay = true,
+                }).SingleOrDefaultAsync(ct);
+            var status = new BalanceApplicationInspectionDto { RequestId = key, PaymentId = paymentId, Result = receipt };
+            if (receipt is null)
+            {
+                // Absence is NOT cancellation: a delayed original request may still arrive.
+                return new AcceptedResult((string?)null, status);
+            }
+            status.State = "Committed";
+            return new OkObjectResult(status);
+        }
+        catch (Exception error) when (BalanceApplicationLease.IsConflict(error))
+        {
+            return new ConflictObjectResult(new { message = FinancialConcurrencyGuard.ConflictMessage });
+        }
+        finally { if (lease is not null) await lease.DisposeAsync(); }
+    }
+
     private const string Version = "balance-apply-v1";
     internal static string CommandHash(int? clientId, int? legalEntityId, ApplyClientBalanceRequest request)
         => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new

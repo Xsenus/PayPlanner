@@ -1,4 +1,5 @@
 using System;
+using System.Text.Json.Serialization;
 using PayPlanner.Api.Models;
 
 namespace PayPlanner.Api.Models.Responses;
@@ -41,4 +42,13 @@ public sealed class BalanceApplicationResultDto
     public decimal AppliedAmount { get; set; }
     public decimal Balance { get; set; }
     public bool IsReplay { get; set; }
+}
+
+public sealed class BalanceApplicationInspectionDto
+{
+    public Guid RequestId { get; set; }
+    public int PaymentId { get; set; }
+    public string State { get; set; } = "Unconfirmed";
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public BalanceApplicationResultDto? Result { get; set; }
 }

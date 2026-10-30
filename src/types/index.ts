@@ -3576,6 +3576,14 @@ export interface ApplyClientBalanceResult {
   balance: number;
 }
 
+export type BalanceApplicationInspection = {
+  requestId: string;
+  paymentId: number;
+} & (
+  | { state: 'Unconfirmed'; result: null }
+  | { state: 'Committed'; result: ApplyClientBalanceResult & { requestId: string; isReplay: true } }
+);
+
 export interface IncomeType {
   id: number;
   name: string;

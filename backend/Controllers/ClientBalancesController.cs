@@ -113,6 +113,17 @@ public class ClientBalancesController : ControllerBase
         return Ok(items);
     }
 
+    [HttpGet("applications/{requestId:guid}")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<IActionResult> GetApplication(int clientId, Guid requestId, [FromQuery] int paymentId, CancellationToken ct)
+        => await PayPlanner.Api.Services.Payments.BalanceApplicationService.InspectAsync(_db, clientId, null, requestId, paymentId, HttpContext,
+            async token =>
+            {
+                if (await RequireVisibleClientAsync(clientId, token) is { } denied) return denied;
+                if (!await CanEditPaymentsAsync(token) || !await CanViewFullBalanceAsync(token)) return Forbid();
+                return null;
+            }, ct);
+
     [HttpPost("apply")]
     public async Task<IActionResult> ApplyCredit(
         int clientId,

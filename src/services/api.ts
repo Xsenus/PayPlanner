@@ -1,6 +1,7 @@
 import { acknowledgePaymentCreate, fencePaymentCreateAdoption, createPaymentGuarded, inspectPaymentCreate, openCommittedPaymentCreate, paymentCreateTokenMatches,
   type PaymentCreateContext, type PaymentCreateOwner, type PaymentCreatePorts, type PendingPaymentCreate } from './paymentCreateAttempts';
 import { createClientRequestId } from '../utils/clientRequestId';
+import { balanceApplicationInspectionPath, parseBalanceApplicationInspection, type BalanceApplicationOwnerKind } from './balanceApplicationInspection';
 import { API_BASE_URL } from './apiBaseUrl';
 import type { DocumentImagePrintOptions } from '../types/documentImagePrint';
 import { apiFetch as fetch } from './apiTransport';
@@ -6077,6 +6078,20 @@ export class ApiService {
       method: 'POST',
       body: JSON.stringify(payload),
     });
+  }
+
+  private async inspectBalanceApplication(kind: BalanceApplicationOwnerKind, id: number, paymentId: number, requestId: string, signal?: AbortSignal) {
+    const path = balanceApplicationInspectionPath(kind, id, paymentId, requestId);
+    const value = await this.request<unknown>(path, { signal, cache: 'no-store' });
+    return parseBalanceApplicationInspection(value, requestId, paymentId);
+  }
+
+  async inspectClientBalanceApplication(id: number, paymentId: number, requestId: string, signal?: AbortSignal) {
+    return this.inspectBalanceApplication('client', id, paymentId, requestId, signal);
+  }
+
+  async inspectLegalEntityBalanceApplication(id: number, paymentId: number, requestId: string, signal?: AbortSignal) {
+    return this.inspectBalanceApplication('legalEntity', id, paymentId, requestId, signal);
   }
 
   async getLegalEntityBalance(id: number) {

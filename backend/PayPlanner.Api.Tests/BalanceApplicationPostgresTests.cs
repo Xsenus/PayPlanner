@@ -12,6 +12,33 @@ namespace PayPlanner.Api.Tests;
 
 public sealed class BalanceApplicationPostgresTests(PostgreSqlModelTemplate template) : IClassFixture<PostgreSqlModelTemplate>
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NativeInspect_SeesCommittedOnlyAfterThePendingWriterFinishes(bool legalEntity)
+    {
+        await using var database = await template.CreateDatabaseAsync();
+        Fixture fixture;
+        await using (var seed = Open(database.ConnectionString)) fixture = await SeedAsync(seed, legalEntity);
+        var request = Request(fixture);
+        var barrier = new HoldFirstBalanceRead();
+        await using var writer = Open(database.ConnectionString, barrier);
+        await using var reader = Open(database.ConnectionString);
+        var pending = ApplyAsync(writer, fixture, request);
+        await barrier.Entered.Task.WaitAsync(TimeSpan.FromSeconds(20));
+        try
+        {
+            Assert.IsType<ConflictObjectResult>(await BalanceApplicationInspectionTests.InspectAsync(reader, fixture, request.RequestId!.Value).WaitAsync(TimeSpan.FromSeconds(10)));
+        }
+        finally { barrier.Release.TrySetResult(); }
+        var applied = Result(await pending);
+        var status = BalanceApplicationInspectionTests.InspectResult(await BalanceApplicationInspectionTests.InspectAsync(reader, fixture, request.RequestId!.Value));
+        Assert.Equal("Committed", status.State); Assert.NotNull(status.Result);
+        Assert.Equal(applied.AppliedAmount, status.Result.AppliedAmount); Assert.Equal(applied.Balance, status.Result.Balance);
+        Assert.Equal(25m, (await reader.Payments.AsNoTracking().SingleAsync()).PaidAmount);
+        Assert.Single(await reader.BalanceApplicationReceipts.ToArrayAsync());
+    }
+
     private static PostgreSqlPaymentContext Open(string connection, IInterceptor? interceptor = null)
     {
         var options = new DbContextOptionsBuilder<PostgreSqlPaymentContext>().UseNpgsql(connection);
