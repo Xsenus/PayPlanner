@@ -10,6 +10,7 @@ using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Invoices;
 using PayPlanner.Api.Services.Banking;
+using PayPlanner.Api.Services.Payments;
 using static PayPlanner.Api.Services.Banking.BankStatementImportRules;
 using System.Globalization;
 using System.Net;
@@ -1233,46 +1234,47 @@ public partial class MoneyOperationsController : ControllerBase
             return NotFound();
         }
 
-        await using var mutation = await MoneyMutationScope.BeginAsync(_db, ct);
-        var lease = await LeaseMoneyAccountsAsync([operation.MoneyAccountId.GetValueOrDefault()], static permission => permission.CanEdit, ct, allowExistingBankState: true);
-        if (lease.Error is not null) return lease.Error;
-        operation = await LockMoneyOperationAsync(operation, ct);
-        if (operation is null) return Conflict("Операция изменена другим запросом. Обновите запись.");
-        if (!await CanAccessCustomMoneyOperationAsync(id, moneyAccess!.Visibility, ct)) return NotFound();
-
-        if (!await CanAccessMoneyInvoiceAsync(operation, request.InvoiceId, forWrite: true, ct)) return Forbid();
-
-        if (IsAppliedToInvoice(operation))
+        return await RunMoneyInvoiceMutationAsync(true, async () =>
         {
-            return operation.LinkedInvoiceId == request.InvoiceId
-                ? Ok(operation)
-                : BadRequest("Связанную со счётом денежную операцию нельзя перенести на другой счёт без операции сторно.");
-        }
+            var lease = await LeaseMoneyAccountsAsync([operation.MoneyAccountId.GetValueOrDefault()], static permission => permission.CanEdit, ct, allowExistingBankState: true);
+            if (lease.Error is not null) return lease.Error;
+            operation = await LockMoneyOperationAsync(operation, ct);
+            if (operation is null) return Conflict("Операция изменена другим запросом. Обновите запись.");
+            if (!await CanAccessCustomMoneyOperationAsync(id, moneyAccess!.Visibility, ct)) return NotFound();
 
-        var validation = await ValidateInvoiceLinkAsync(operation, request.InvoiceId, ct);
-        if (validation.Error is not null)
-        {
-            return BadRequest(validation.Error);
-        }
+            if (!await CanAccessMoneyInvoiceAsync(operation, request.InvoiceId, forWrite: true, ct)) return Forbid();
 
-        var invoice = validation.Invoice!;
-        operation.LinkedInvoiceId = invoice.Id;
-        operation.PaidInvoiceNumber = invoice.Number;
-        operation.PaidAccountName = invoice.Number;
-        operation.MatchStatus = MoneyOperationMatchStatus.Matched;
-        operation.MatchedAt = DateTime.UtcNow;
-        operation.MatchComment = string.IsNullOrWhiteSpace(request.Comment)
-            ? $"Денежная операция сверена со счётом {invoice.Number}."
-            : request.Comment.Trim();
-        operation.UpdatedAt = DateTime.UtcNow;
+            if (IsAppliedToInvoice(operation))
+            {
+                return operation.LinkedInvoiceId == request.InvoiceId
+                    ? Ok(operation)
+                    : BadRequest("Связанную со счётом денежную операцию нельзя перенести на другой счёт без операции сторно.");
+            }
 
-        await ApplyMoneyOperationToInvoicePaymentAsync(operation, invoice.Id, ct);
-        await _db.SaveChangesAsync(ct);
-        if (await RefreshMoneyMutationAccessAsync(lease.Accounts.Values, static permission => permission.CanEdit, ct) is { } finalAccess)
-            return finalAccess;
-        if (!await CanAccessMoneyInvoiceAsync(operation, invoice.Id, forWrite: true, ct)) return Forbid();
-        await mutation.CommitAsync(ct);
-        return Ok(operation);
+            var validation = await ValidateInvoiceLinkAsync(operation, request.InvoiceId, ct);
+            if (validation.Error is not null)
+            {
+                return BadRequest(validation.Error);
+            }
+
+            var invoice = validation.Invoice!;
+            operation.LinkedInvoiceId = invoice.Id;
+            operation.PaidInvoiceNumber = invoice.Number;
+            operation.PaidAccountName = invoice.Number;
+            operation.MatchStatus = MoneyOperationMatchStatus.Matched;
+            operation.MatchedAt = DateTime.UtcNow;
+            operation.MatchComment = string.IsNullOrWhiteSpace(request.Comment)
+                ? $"Денежная операция сверена со счётом {invoice.Number}."
+                : request.Comment.Trim();
+            operation.UpdatedAt = DateTime.UtcNow;
+
+            await ApplyMoneyOperationToInvoicePaymentAsync(operation, invoice.Id, ct);
+            await _db.SaveChangesAsync(ct);
+            if (await RefreshMoneyMutationAccessAsync(lease.Accounts.Values, static permission => permission.CanEdit, ct) is { } finalAccess)
+                return finalAccess;
+            if (!await CanAccessMoneyInvoiceAsync(operation, invoice.Id, forWrite: true, ct)) return Forbid();
+            return Ok(operation);
+        }, ct);
     }
 
     [HttpPost]
@@ -1302,76 +1304,77 @@ public partial class MoneyOperationsController : ControllerBase
             return BadRequest("Сумма денежной операции должна быть больше нуля.");
         }
 
-        await using var mutation = await MoneyMutationScope.BeginAsync(_db, ct);
-        var lease = await LeaseMoneyAccountsAsync([model.MoneyAccountId.GetValueOrDefault()], static permission => permission.CanCreate, ct);
-        if (lease.Error is not null) return lease.Error;
-        var moneyAccountError = ApplyMoneyAccount(model, lease.Accounts[model.MoneyAccountId!.Value]);
-        if (moneyAccountError is not null)
+        return await RunMoneyInvoiceMutationAsync(model.LinkedInvoiceId.HasValue, async () =>
         {
-            return BadRequest(moneyAccountError);
-        }
-
-        var incomeTypeError = await ApplyIncomeTypeAsync(model, ct);
-        if (incomeTypeError is not null)
-        {
-            return BadRequest(incomeTypeError);
-        }
-
-        var responsibleUserError = await ApplyResponsibleUserAsync(model, ct);
-        if (responsibleUserError is not null)
-        {
-            return BadRequest(responsibleUserError);
-        }
-
-        model.AccountName = string.IsNullOrWhiteSpace(model.AccountName) ? null : model.AccountName.Trim();
-        model.CounterpartyName = string.IsNullOrWhiteSpace(model.CounterpartyName) ? null : model.CounterpartyName.Trim();
-        ApplyVat(model);
-        model.Currency = string.IsNullOrWhiteSpace(model.Currency) ? null : model.Currency.Trim();
-        model.PaymentOrderNumber = string.IsNullOrWhiteSpace(model.PaymentOrderNumber) ? null : model.PaymentOrderNumber.Trim();
-        model.Purpose = string.IsNullOrWhiteSpace(model.Purpose) ? null : model.Purpose.Trim();
-        model.PaidInvoiceNumber = string.IsNullOrWhiteSpace(model.PaidInvoiceNumber) ? null : model.PaidInvoiceNumber.Trim();
-        model.ProjectName = string.IsNullOrWhiteSpace(model.ProjectName) ? null : model.ProjectName.Trim();
-        model.DirectionName = string.IsNullOrWhiteSpace(model.DirectionName) ? null : model.DirectionName.Trim();
-        model.SalesPointName = string.IsNullOrWhiteSpace(model.SalesPointName) ? null : model.SalesPointName.Trim();
-        model.PaidAccountName = string.IsNullOrWhiteSpace(model.PaidAccountName) ? null : model.PaidAccountName.Trim();
-        model.MatchComment = string.IsNullOrWhiteSpace(model.MatchComment) ? null : model.MatchComment.Trim();
-        if (model.LinkedInvoiceId.HasValue)
-        {
-            var validation = await ValidateInvoiceLinkAsync(model, model.LinkedInvoiceId.Value, ct);
-            var invoice = validation.Invoice;
-            if (validation.Error is not null)
+            var lease = await LeaseMoneyAccountsAsync([model.MoneyAccountId.GetValueOrDefault()], static permission => permission.CanCreate, ct);
+            if (lease.Error is not null) return lease.Error;
+            var moneyAccountError = ApplyMoneyAccount(model, lease.Accounts[model.MoneyAccountId!.Value]);
+            if (moneyAccountError is not null)
             {
-                return BadRequest(validation.Error);
+                return BadRequest(moneyAccountError);
             }
 
-            model.PaidInvoiceNumber = invoice!.Number;
-            model.PaidAccountName = invoice.Number;
-            model.MatchStatus = MoneyOperationMatchStatus.Matched;
-            model.MatchedAt = DateTime.UtcNow;
-        }
-        else if (model.MatchStatus == MoneyOperationMatchStatus.Matched)
-        {
-            model.MatchStatus = MoneyOperationMatchStatus.None;
-            model.MatchedAt = null;
-        }
-        ApplyAdvanceReviewHint(model);
-        model.CreatedAt = DateTime.UtcNow;
+            var incomeTypeError = await ApplyIncomeTypeAsync(model, ct);
+            if (incomeTypeError is not null)
+            {
+                return BadRequest(incomeTypeError);
+            }
 
-        if (await RefreshMoneyMutationAccessAsync(lease.Accounts.Values, static permission => permission.CanCreate, ct) is { } changedAccess)
-            return changedAccess;
-        _db.MoneyOperations.Add(model);
-        await _db.SaveChangesAsync(ct);
-        if (model.LinkedInvoiceId.HasValue && model.MatchStatus == MoneyOperationMatchStatus.Matched)
-        {
-            await ApplyMoneyOperationToInvoicePaymentAsync(model, model.LinkedInvoiceId.Value, ct);
+            var responsibleUserError = await ApplyResponsibleUserAsync(model, ct);
+            if (responsibleUserError is not null)
+            {
+                return BadRequest(responsibleUserError);
+            }
+
+            model.AccountName = string.IsNullOrWhiteSpace(model.AccountName) ? null : model.AccountName.Trim();
+            model.CounterpartyName = string.IsNullOrWhiteSpace(model.CounterpartyName) ? null : model.CounterpartyName.Trim();
+            ApplyVat(model);
+            model.Currency = string.IsNullOrWhiteSpace(model.Currency) ? null : model.Currency.Trim();
+            model.PaymentOrderNumber = string.IsNullOrWhiteSpace(model.PaymentOrderNumber) ? null : model.PaymentOrderNumber.Trim();
+            model.Purpose = string.IsNullOrWhiteSpace(model.Purpose) ? null : model.Purpose.Trim();
+            model.PaidInvoiceNumber = string.IsNullOrWhiteSpace(model.PaidInvoiceNumber) ? null : model.PaidInvoiceNumber.Trim();
+            model.ProjectName = string.IsNullOrWhiteSpace(model.ProjectName) ? null : model.ProjectName.Trim();
+            model.DirectionName = string.IsNullOrWhiteSpace(model.DirectionName) ? null : model.DirectionName.Trim();
+            model.SalesPointName = string.IsNullOrWhiteSpace(model.SalesPointName) ? null : model.SalesPointName.Trim();
+            model.PaidAccountName = string.IsNullOrWhiteSpace(model.PaidAccountName) ? null : model.PaidAccountName.Trim();
+            model.MatchComment = string.IsNullOrWhiteSpace(model.MatchComment) ? null : model.MatchComment.Trim();
+            if (model.LinkedInvoiceId.HasValue)
+            {
+                var validation = await ValidateInvoiceLinkAsync(model, model.LinkedInvoiceId.Value, ct);
+                var invoice = validation.Invoice;
+                if (validation.Error is not null)
+                {
+                    return BadRequest(validation.Error);
+                }
+
+                model.PaidInvoiceNumber = invoice!.Number;
+                model.PaidAccountName = invoice.Number;
+                model.MatchStatus = MoneyOperationMatchStatus.Matched;
+                model.MatchedAt = DateTime.UtcNow;
+            }
+            else if (model.MatchStatus == MoneyOperationMatchStatus.Matched)
+            {
+                model.MatchStatus = MoneyOperationMatchStatus.None;
+                model.MatchedAt = null;
+            }
+            ApplyAdvanceReviewHint(model);
+            model.CreatedAt = DateTime.UtcNow;
+
+            if (await RefreshMoneyMutationAccessAsync(lease.Accounts.Values, static permission => permission.CanCreate, ct) is { } changedAccess)
+                return changedAccess;
+            _db.MoneyOperations.Add(model);
             await _db.SaveChangesAsync(ct);
-        }
-        await SyncCashOrderAsync(model, lease.Accounts[model.MoneyAccountId!.Value]);
-        if (await RefreshMoneyMutationAccessAsync(lease.Accounts.Values, static permission => permission.CanCreate, ct) is { } finalAccess)
-            return finalAccess;
-        if (model.LinkedInvoiceId.HasValue && !await CanAccessMoneyInvoiceAsync(model, model.LinkedInvoiceId.Value, forWrite: true, ct)) return Forbid();
-        await mutation.CommitAsync(ct);
-        return Created($"/api/money-operations/{model.Id}", model);
+            if (model.LinkedInvoiceId.HasValue && model.MatchStatus == MoneyOperationMatchStatus.Matched)
+            {
+                await ApplyMoneyOperationToInvoicePaymentAsync(model, model.LinkedInvoiceId.Value, ct);
+                await _db.SaveChangesAsync(ct);
+            }
+            await SyncCashOrderAsync(model, lease.Accounts[model.MoneyAccountId!.Value]);
+            if (await RefreshMoneyMutationAccessAsync(lease.Accounts.Values, static permission => permission.CanCreate, ct) is { } finalAccess)
+                return finalAccess;
+            if (model.LinkedInvoiceId.HasValue && !await CanAccessMoneyInvoiceAsync(model, model.LinkedInvoiceId.Value, forWrite: true, ct)) return Forbid();
+            return Created($"/api/money-operations/{model.Id}", model);
+        }, ct);
     }
 
     [HttpPost("transfer")]
@@ -1525,6 +1528,16 @@ public partial class MoneyOperationsController : ControllerBase
         => ImportBankStatementFileAsync(file, companyId, moneyAccountId, BankStatementImportTriggers.Manual, ct);
 
     private async Task<ActionResult<BankStatementImportResultDto>> ImportBankStatementFileAsync(
+        IFormFile? file, int? companyId, int? moneyAccountId, string trigger, CancellationToken ct)
+    {
+        try { return await ImportBankStatementFileCoreAsync(file, companyId, moneyAccountId, trigger, ct); }
+        catch (MoneyInvoiceAllocationException error) { return BadRequest(error.Message); }
+        catch (UnauthorizedAccessException) { return Forbid(); }
+        catch (Exception error) when (!ct.IsCancellationRequested && BalanceApplicationLease.IsConflict(error))
+        { return Conflict(FinancialConcurrencyGuard.ConflictMessage); }
+    }
+
+    private async Task<ActionResult<BankStatementImportResultDto>> ImportBankStatementFileCoreAsync(
         IFormFile? file, int? companyId, int? moneyAccountId, string trigger, CancellationToken ct)
     {
         var imports = new BankStatementImportService(_db);
@@ -2093,155 +2106,156 @@ public partial class MoneyOperationsController : ControllerBase
 
         if (!entity.MoneyAccountId.HasValue)
             return BadRequest("Принадлежность исторической операции не подтверждена. Эта запись доступна только для просмотра.");
-        await using var mutation = await MoneyMutationScope.BeginAsync(_db, ct);
-        var lease = await LeaseMoneyAccountsAsync([entity.MoneyAccountId.Value, model.MoneyAccountId.GetValueOrDefault()],
-            static permission => permission.CanEdit, ct, allowExistingBankState: entity.MoneyAccountId == model.MoneyAccountId);
-        if (lease.Error is not null) return lease.Error;
-        entity = await LockMoneyOperationAsync(entity, ct);
-        if (entity is null) return Conflict("Операция изменена другим запросом. Обновите запись.");
-        if (!await CanAccessCustomMoneyOperationAsync(id, moneyAccess!.Visibility, ct)) return NotFound();
-        var originalCashAccount = lease.Accounts[entity.MoneyAccountId!.Value];
-        if (await _db.CashOrders.AsNoTracking().AnyAsync(order => order.MoneyOperationId == entity.Id
-            && order.Status != CashOrderStatus.Cancelled && (order.MoneyAccountId.HasValue || order.CompanyId.HasValue)
-            && (order.MoneyAccountId != originalCashAccount.Id || order.CompanyId != originalCashAccount.CompanyId), ct))
-            return Conflict("Связанный кассовый ордер относится к другой кассе. Проверьте документы перед изменением операции.");
-
-        var originalLinkedInvoiceId = entity.LinkedInvoiceId;
-        var originalMatchStatus = entity.MatchStatus;
-        var originalAmount = entity.Amount;
-        // A normal read may redact the pointer. Retain the stored relationship
-        // only for an unchanged status; never accept a different supplied ID.
-        // The response flag is intentionally not trusted for authorization.
-        var preserveInvoiceLink = originalLinkedInvoiceId.HasValue && model.MatchStatus == originalMatchStatus
-            && (model.LinkedInvoiceId == originalLinkedInvoiceId
-                || model.LinkedInvoiceId is null && !await CanAccessMoneyInvoiceAsync(entity, originalLinkedInvoiceId.Value, forWrite: false, ct));
-        if (originalLinkedInvoiceId.HasValue)
+        return await RunMoneyInvoiceMutationAsync(entity.LinkedInvoiceId.HasValue || model.LinkedInvoiceId.HasValue, async () =>
         {
-            if (model.LinkedInvoiceId != originalLinkedInvoiceId && !preserveInvoiceLink)
+            var lease = await LeaseMoneyAccountsAsync([entity.MoneyAccountId.Value, model.MoneyAccountId.GetValueOrDefault()],
+                static permission => permission.CanEdit, ct, allowExistingBankState: entity.MoneyAccountId == model.MoneyAccountId);
+            if (lease.Error is not null) return lease.Error;
+            entity = await LockMoneyOperationAsync(entity, ct);
+            if (entity is null) return Conflict("Операция изменена другим запросом. Обновите запись.");
+            if (!await CanAccessCustomMoneyOperationAsync(id, moneyAccess!.Visibility, ct)) return NotFound();
+            var originalCashAccount = lease.Accounts[entity.MoneyAccountId!.Value];
+            if (await _db.CashOrders.AsNoTracking().AnyAsync(order => order.MoneyOperationId == entity.Id
+                && order.Status != CashOrderStatus.Cancelled && (order.MoneyAccountId.HasValue || order.CompanyId.HasValue)
+                && (order.MoneyAccountId != originalCashAccount.Id || order.CompanyId != originalCashAccount.CompanyId), ct))
+                return Conflict("Связанный кассовый ордер относится к другой кассе. Проверьте документы перед изменением операции.");
+
+            var originalLinkedInvoiceId = entity.LinkedInvoiceId;
+            var originalMatchStatus = entity.MatchStatus;
+            var originalAmount = entity.Amount;
+            // A normal read may redact the pointer. Retain the stored relationship
+            // only for an unchanged status; never accept a different supplied ID.
+            // The response flag is intentionally not trusted for authorization.
+            var preserveInvoiceLink = originalLinkedInvoiceId.HasValue && model.MatchStatus == originalMatchStatus
+                && (model.LinkedInvoiceId == originalLinkedInvoiceId
+                    || model.LinkedInvoiceId is null && !await CanAccessMoneyInvoiceAsync(entity, originalLinkedInvoiceId.Value, forWrite: false, ct));
+            if (originalLinkedInvoiceId.HasValue)
             {
-                return BadRequest("Сверенную денежную операцию нельзя отвязать или перенести на другой счёт через редактирование.");
+                if (model.LinkedInvoiceId != originalLinkedInvoiceId && !preserveInvoiceLink)
+                {
+                    return BadRequest("Сверенную денежную операцию нельзя отвязать или перенести на другой счёт через редактирование.");
+                }
+
+                if (Math.Abs(originalAmount - model.Amount) > 0.009m)
+                {
+                    return BadRequest("Сумму сверенной денежной операции нельзя изменить через редактирование.");
+                }
+                if (model.MatchStatus != originalMatchStatus && model.MatchStatus != MoneyOperationMatchStatus.Matched)
+                    return BadRequest("Изменение распределения требует отдельной операции сверки или сторно.");
             }
 
-            if (Math.Abs(originalAmount - model.Amount) > 0.009m)
+            // Old clients may omit currency. Editing an existing description must
+            // preserve its recorded currency, including an unknown historical value.
+            if (model.MoneyAccountId == entity.MoneyAccountId && string.IsNullOrWhiteSpace(model.Currency))
+                model.Currency = entity.Currency;
+            var preserveHistoricalCurrency = !MoneyFactsChanged(entity, model);
+            if (!preserveHistoricalCurrency && string.IsNullOrWhiteSpace(model.Currency))
+                return BadRequest("Перед изменением финансовых данных укажите подтверждённую валюту операции.");
+            // Cash edits also synchronize an order, so keep its stricter currency checks.
+            if (entity.Source == MoneyOperationSource.Cash && string.IsNullOrWhiteSpace(model.Currency))
+                return BadRequest("Валюта кассовой операции не подтверждена. Уточните её перед сохранением изменений.");
+            var moneyAccountError = ApplyMoneyAccount(model, lease.Accounts[model.MoneyAccountId!.Value],
+                preserveHistoricalCurrency && entity.Source != MoneyOperationSource.Cash);
+            if (moneyAccountError is not null)
             {
-                return BadRequest("Сумму сверенной денежной операции нельзя изменить через редактирование.");
+                return BadRequest(moneyAccountError);
             }
-            if (model.MatchStatus != originalMatchStatus && model.MatchStatus != MoneyOperationMatchStatus.Matched)
-                return BadRequest("Изменение распределения требует отдельной операции сверки или сторно.");
-        }
 
-        // Old clients may omit currency. Editing an existing description must
-        // preserve its recorded currency, including an unknown historical value.
-        if (model.MoneyAccountId == entity.MoneyAccountId && string.IsNullOrWhiteSpace(model.Currency))
-            model.Currency = entity.Currency;
-        var preserveHistoricalCurrency = !MoneyFactsChanged(entity, model);
-        if (!preserveHistoricalCurrency && string.IsNullOrWhiteSpace(model.Currency))
-            return BadRequest("Перед изменением финансовых данных укажите подтверждённую валюту операции.");
-        // Cash edits also synchronize an order, so keep its stricter currency checks.
-        if (entity.Source == MoneyOperationSource.Cash && string.IsNullOrWhiteSpace(model.Currency))
-            return BadRequest("Валюта кассовой операции не подтверждена. Уточните её перед сохранением изменений.");
-        var moneyAccountError = ApplyMoneyAccount(model, lease.Accounts[model.MoneyAccountId!.Value],
-            preserveHistoricalCurrency && entity.Source != MoneyOperationSource.Cash);
-        if (moneyAccountError is not null)
-        {
-            return BadRequest(moneyAccountError);
-        }
+            var imported = entity.BankStatementImportBatchId.HasValue || entity.SourceMovementKey is not null;
+            var changesMoney = MoneyFactsChanged(entity, model);
+            if (originalLinkedInvoiceId.HasValue && changesMoney)
+                return BadRequest("Финансовые данные связанной со счётом операции защищены от изменения через редактирование.");
+            if (imported && changesMoney)
+                return BadRequest("Финансовые данные импортированной операции защищены от изменения. Можно изменить её описание или категорию.");
+            if (changesMoney && !await CompanyMoneyAccounts(moneyAccess!, forNewOperations: true).AnyAsync(account => account.Id == model.MoneyAccountId, ct))
+                return BadRequest("Денежный счёт недоступен для изменения финансовых данных операции.");
+            if (!changesMoney) model.Date = entity.Date;
 
-        var imported = entity.BankStatementImportBatchId.HasValue || entity.SourceMovementKey is not null;
-        var changesMoney = MoneyFactsChanged(entity, model);
-        if (originalLinkedInvoiceId.HasValue && changesMoney)
-            return BadRequest("Финансовые данные связанной со счётом операции защищены от изменения через редактирование.");
-        if (imported && changesMoney)
-            return BadRequest("Финансовые данные импортированной операции защищены от изменения. Можно изменить её описание или категорию.");
-        if (changesMoney && !await CompanyMoneyAccounts(moneyAccess!, forNewOperations: true).AnyAsync(account => account.Id == model.MoneyAccountId, ct))
-            return BadRequest("Денежный счёт недоступен для изменения финансовых данных операции.");
-        if (!changesMoney) model.Date = entity.Date;
-
-        var incomeTypeError = await ApplyIncomeTypeAsync(model, ct);
-        if (incomeTypeError is not null)
-        {
-            return BadRequest(incomeTypeError);
-        }
-
-        var responsibleUserError = await ApplyResponsibleUserAsync(model, ct);
-        if (responsibleUserError is not null)
-        {
-            return BadRequest(responsibleUserError);
-        }
-
-        if (await RefreshMoneyMutationAccessAsync(lease.Accounts.Values, static permission => permission.CanEdit, ct) is { } changedAccess)
-            return changedAccess;
-        entity.Source = model.Source;
-        entity.Direction = model.Direction;
-        entity.AccountingType = model.AccountingType;
-        entity.MoneyAccountId = model.MoneyAccountId;
-        entity.Amount = model.Amount;
-        ApplyVat(model);
-        entity.VatRate = model.VatRate;
-        entity.VatAmount = model.VatAmount;
-        if (changesMoney) entity.Currency = string.IsNullOrWhiteSpace(model.Currency) ? null : model.Currency.Trim();
-        entity.AccountName = string.IsNullOrWhiteSpace(model.AccountName) ? null : model.AccountName.Trim();
-        entity.CounterpartyName = string.IsNullOrWhiteSpace(model.CounterpartyName) ? null : model.CounterpartyName.Trim();
-        entity.ResponsibleUserId = model.ResponsibleUserId;
-        entity.IncomeTypeId = model.IncomeTypeId;
-        entity.CategoryName = model.CategoryName;
-        entity.PaymentOrderNumber = string.IsNullOrWhiteSpace(model.PaymentOrderNumber) ? null : model.PaymentOrderNumber.Trim();
-        entity.Date = model.Date;
-        entity.RecognitionDate = model.RecognitionDate;
-        entity.IsAdvancePayment = model.IsAdvancePayment;
-        entity.Purpose = string.IsNullOrWhiteSpace(model.Purpose) ? null : model.Purpose.Trim();
-        if (!preserveInvoiceLink)
-        {
-            entity.PaidInvoiceNumber = string.IsNullOrWhiteSpace(model.PaidInvoiceNumber) ? null : model.PaidInvoiceNumber.Trim();
-            entity.PaidAmount = model.PaidAmount;
-        }
-        entity.ProjectName = string.IsNullOrWhiteSpace(model.ProjectName) ? null : model.ProjectName.Trim();
-        entity.DirectionName = string.IsNullOrWhiteSpace(model.DirectionName) ? null : model.DirectionName.Trim();
-        entity.SalesPointName = string.IsNullOrWhiteSpace(model.SalesPointName) ? null : model.SalesPointName.Trim();
-        entity.PaymentPriority = model.PaymentPriority;
-        if (!preserveInvoiceLink)
-            entity.PaidAccountName = string.IsNullOrWhiteSpace(model.PaidAccountName) ? null : model.PaidAccountName.Trim();
-        entity.MatchComment = string.IsNullOrWhiteSpace(model.MatchComment) ? null : model.MatchComment.Trim();
-        // An unchanged link retains its status, timestamps and applied amount.
-        // Editing the money description is not a new document allocation.
-        if (!preserveInvoiceLink && model.LinkedInvoiceId.HasValue)
-        {
-            var validation = await ValidateInvoiceLinkAsync(entity, model.LinkedInvoiceId.Value, ct);
-            if (validation.Error is not null) return BadRequest(validation.Error);
-            var invoice = validation.Invoice!;
-
-            entity.LinkedInvoiceId = invoice.Id;
-            entity.PaidInvoiceNumber = invoice.Number;
-            entity.PaidAccountName = invoice.Number;
-            entity.MatchStatus = MoneyOperationMatchStatus.Matched;
-            entity.MatchedAt = entity.MatchedAt ?? DateTime.UtcNow;
-            if (!originalLinkedInvoiceId.HasValue || originalMatchStatus != MoneyOperationMatchStatus.Matched)
+            var incomeTypeError = await ApplyIncomeTypeAsync(model, ct);
+            if (incomeTypeError is not null)
             {
-                await ApplyMoneyOperationToInvoicePaymentAsync(entity, invoice.Id);
+                return BadRequest(incomeTypeError);
             }
-        }
-        else if (!preserveInvoiceLink)
-        {
-            entity.LinkedInvoiceId = null;
-            entity.MatchedAt = null;
-            entity.MatchStatus = model.MatchStatus switch
-            {
-                MoneyOperationMatchStatus.ClarificationRequired => MoneyOperationMatchStatus.ClarificationRequired,
-                MoneyOperationMatchStatus.Ignored => MoneyOperationMatchStatus.Ignored,
-                _ => MoneyOperationMatchStatus.None,
-            };
-        }
-        ApplyAdvanceReviewHint(entity);
-        entity.UpdatedAt = DateTime.UtcNow;
 
-        await _db.SaveChangesAsync(ct);
-        await SyncCashOrderAsync(entity, lease.Accounts[entity.MoneyAccountId!.Value]);
-        if (await RefreshMoneyMutationAccessAsync(lease.Accounts.Values, static permission => permission.CanEdit, ct) is { } finalAccess)
-            return finalAccess;
-        if (!preserveInvoiceLink && entity.LinkedInvoiceId.HasValue
-            && !await CanAccessMoneyInvoiceAsync(entity, entity.LinkedInvoiceId.Value, forWrite: true, ct)) return Forbid();
-        await mutation.CommitAsync(ct);
-        return originalLinkedInvoiceId.HasValue ? await GetById(id, ct) : Ok(entity);
+            var responsibleUserError = await ApplyResponsibleUserAsync(model, ct);
+            if (responsibleUserError is not null)
+            {
+                return BadRequest(responsibleUserError);
+            }
+
+            if (await RefreshMoneyMutationAccessAsync(lease.Accounts.Values, static permission => permission.CanEdit, ct) is { } changedAccess)
+                return changedAccess;
+            entity.Source = model.Source;
+            entity.Direction = model.Direction;
+            entity.AccountingType = model.AccountingType;
+            entity.MoneyAccountId = model.MoneyAccountId;
+            entity.Amount = model.Amount;
+            ApplyVat(model);
+            entity.VatRate = model.VatRate;
+            entity.VatAmount = model.VatAmount;
+            if (changesMoney) entity.Currency = string.IsNullOrWhiteSpace(model.Currency) ? null : model.Currency.Trim();
+            entity.AccountName = string.IsNullOrWhiteSpace(model.AccountName) ? null : model.AccountName.Trim();
+            entity.CounterpartyName = string.IsNullOrWhiteSpace(model.CounterpartyName) ? null : model.CounterpartyName.Trim();
+            entity.ResponsibleUserId = model.ResponsibleUserId;
+            entity.IncomeTypeId = model.IncomeTypeId;
+            entity.CategoryName = model.CategoryName;
+            entity.PaymentOrderNumber = string.IsNullOrWhiteSpace(model.PaymentOrderNumber) ? null : model.PaymentOrderNumber.Trim();
+            entity.Date = model.Date;
+            entity.RecognitionDate = model.RecognitionDate;
+            entity.IsAdvancePayment = model.IsAdvancePayment;
+            entity.Purpose = string.IsNullOrWhiteSpace(model.Purpose) ? null : model.Purpose.Trim();
+            if (!preserveInvoiceLink)
+            {
+                entity.PaidInvoiceNumber = string.IsNullOrWhiteSpace(model.PaidInvoiceNumber) ? null : model.PaidInvoiceNumber.Trim();
+                entity.PaidAmount = model.PaidAmount;
+            }
+            entity.ProjectName = string.IsNullOrWhiteSpace(model.ProjectName) ? null : model.ProjectName.Trim();
+            entity.DirectionName = string.IsNullOrWhiteSpace(model.DirectionName) ? null : model.DirectionName.Trim();
+            entity.SalesPointName = string.IsNullOrWhiteSpace(model.SalesPointName) ? null : model.SalesPointName.Trim();
+            entity.PaymentPriority = model.PaymentPriority;
+            if (!preserveInvoiceLink)
+                entity.PaidAccountName = string.IsNullOrWhiteSpace(model.PaidAccountName) ? null : model.PaidAccountName.Trim();
+            entity.MatchComment = string.IsNullOrWhiteSpace(model.MatchComment) ? null : model.MatchComment.Trim();
+            // An unchanged link retains its status, timestamps and applied amount.
+            // Editing the money description is not a new document allocation.
+            if (!preserveInvoiceLink && model.LinkedInvoiceId.HasValue)
+            {
+                var validation = await ValidateInvoiceLinkAsync(entity, model.LinkedInvoiceId.Value, ct);
+                if (validation.Error is not null) return BadRequest(validation.Error);
+                var invoice = validation.Invoice!;
+
+                entity.LinkedInvoiceId = invoice.Id;
+                entity.PaidInvoiceNumber = invoice.Number;
+                entity.PaidAccountName = invoice.Number;
+                entity.MatchStatus = MoneyOperationMatchStatus.Matched;
+                entity.MatchedAt = entity.MatchedAt ?? DateTime.UtcNow;
+                if (!originalLinkedInvoiceId.HasValue || originalMatchStatus != MoneyOperationMatchStatus.Matched)
+                {
+                    await ApplyMoneyOperationToInvoicePaymentAsync(entity, invoice.Id);
+                }
+            }
+            else if (!preserveInvoiceLink)
+            {
+                entity.LinkedInvoiceId = null;
+                entity.MatchedAt = null;
+                entity.MatchStatus = model.MatchStatus switch
+                {
+                    MoneyOperationMatchStatus.ClarificationRequired => MoneyOperationMatchStatus.ClarificationRequired,
+                    MoneyOperationMatchStatus.Ignored => MoneyOperationMatchStatus.Ignored,
+                    _ => MoneyOperationMatchStatus.None,
+                };
+            }
+            ApplyAdvanceReviewHint(entity);
+            entity.UpdatedAt = DateTime.UtcNow;
+
+            await _db.SaveChangesAsync(ct);
+            await SyncCashOrderAsync(entity, lease.Accounts[entity.MoneyAccountId!.Value]);
+            if (await RefreshMoneyMutationAccessAsync(lease.Accounts.Values, static permission => permission.CanEdit, ct) is { } finalAccess)
+                return finalAccess;
+            if (!preserveInvoiceLink && entity.LinkedInvoiceId.HasValue
+                && !await CanAccessMoneyInvoiceAsync(entity, entity.LinkedInvoiceId.Value, forWrite: true, ct)) return Forbid();
+            return originalLinkedInvoiceId.HasValue ? await GetById(id, ct) : Ok(entity);
+        }, ct);
     }
 
     [HttpDelete("{id:int}")]

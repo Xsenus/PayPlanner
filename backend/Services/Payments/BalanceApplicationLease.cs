@@ -27,7 +27,13 @@ internal sealed class BalanceApplicationLease : IAsyncDisposable
     public static Task<BalanceApplicationLease> BeginSystemAsync(PaymentContext db, CancellationToken ct)
         => BeginCoreAsync(db, null, ct);
 
-    private static async Task<BalanceApplicationLease> BeginCoreAsync(PaymentContext db, int? actorId, CancellationToken ct)
+    // Banking owns a longer-lived context with unchanged account/user references.
+    // Keep those identities, still reject pending writes and refresh payment graphs
+    // explicitly under this lease before allocating money.
+    public static Task<BalanceApplicationLease> BeginWithTrackedReadsAsync(PaymentContext db, int? actorId, CancellationToken ct)
+        => BeginCoreAsync(db, actorId, ct, clearTracker: false);
+
+    private static async Task<BalanceApplicationLease> BeginCoreAsync(PaymentContext db, int? actorId, CancellationToken ct, bool clearTracker = true)
     {
         if (db.Database.CurrentTransaction is not null || db.ChangeTracker.HasChanges())
             throw new BalanceApplicationConflictException();
@@ -71,7 +77,7 @@ internal sealed class BalanceApplicationLease : IAsyncDisposable
             }
             else throw new NotSupportedException("Balance receipts support SQLite and PostgreSQL only.");
             // Admit only clean request contexts; never discard unrelated pending work.
-            db.ChangeTracker.Clear();
+            if (clearTracker) db.ChangeTracker.Clear();
             return lease;
         }
         catch

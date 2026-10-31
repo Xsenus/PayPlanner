@@ -10,6 +10,7 @@ using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services.Invoices;
+using PayPlanner.Api.Services.Payments;
 using static PayPlanner.Api.Services.Banking.BankStatementImportRules;
 
 namespace PayPlanner.Api.Services.Banking;
@@ -72,7 +73,9 @@ public sealed partial class BankStatementImportService(PaymentContext db)
         int? parentId = null, DateTime? rollbackAt = null, int? appendBatchId = null)
     {
         var packageKey = PackageKey(context, fileHash, parentId, rollbackAt);
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await using var transaction = await BalanceApplicationLease.BeginWithTrackedReadsAsync(db,
+            context.ImportedByUserId is > 0 ? context.ImportedByUserId : null, ct);
+        if (db.Database.IsNpgsql()) await db.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '2s'", ct);
         context = await LockAccountAsync(context, ct);
         if (parentId.HasValue && (context.Access is null || !await BankStatementImportAccess.ScopeBatches(db,
                 db.BankStatementImportBatches, context.Access, forMutation: true).AnyAsync(batch => batch.Id == parentId, ct)))
@@ -80,7 +83,7 @@ public sealed partial class BankStatementImportService(PaymentContext db)
         if (!appendBatchId.HasValue)
         {
             var previous = await FindReplayAsync(context, packageKey, ct);
-            if (previous is not null) return previous;
+            if (previous is not null) { await transaction.CommitAsync(ct); return previous; }
         }
         var result = new BankStatementImportResultDto { RowsRead = parsed.RowsRead, Skipped = parsed.Skipped };
         result.Errors.AddRange(parsed.Errors.Take(50));
@@ -316,7 +319,13 @@ public sealed partial class BankStatementImportService(PaymentContext db)
                     - (old == BankStatementImportRowStatus.Error ? 1 : 0);
             }
             foreach (var operation in created.Where(item => item.LinkedInvoiceId.HasValue && item.MatchStatus == MoneyOperationMatchStatus.Matched))
+            {
                 await MoneyOperationInvoiceAllocationService.ApplyAsync(db, operation, operation.LinkedInvoiceId!.Value, ct);
+                // Allocation has saved and verified this graph. Later rows reload
+                // it under the same locks instead of retaining every invoice in a file.
+                foreach (var entry in db.ChangeTracker.Entries<Payment>().Where(entry => entry.Entity.InvoiceId == operation.LinkedInvoiceId
+                    && entry.State == EntityState.Unchanged).ToArray()) entry.State = EntityState.Detached;
+            }
             await db.SaveChangesAsync(ct);
             foreach (var operation in created.Take(Math.Max(0, MaxResultOperations - result.Operations.Count)))
                 result.Operations.Add(new BankStatementImportCreatedOperationDto
