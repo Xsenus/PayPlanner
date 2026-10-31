@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Extensions;
+using PayPlanner.Api.Services.Payments;
 
 namespace PayPlanner.Api.Services.Notifications;
 
@@ -8,6 +10,25 @@ namespace PayPlanner.Api.Services.Notifications;
 public static class PaymentOverdueNotificationQueue
 {
     public const string TokenProperty = "OverdueNotificationToken";
+
+    internal static IQueryable<Payment> CurrentPayments(PaymentContext db, PaymentOverdueNotificationOutbox item)
+    {
+        var protectedPayments = PaymentCreditInvariantScope.CancellationProtectedPayments(db);
+        return db.Payments.AsNoTracking().ApplyUnambiguousInvoiceLinks()
+            .Where(payment => payment.Id == item.PaymentId && payment.Status == PaymentStatus.Overdue
+                && !payment.IsPaid && payment.Amount > 0m && payment.DocumentKind == item.DocumentKind
+                && payment.Date.Date == item.DueDate && EF.Property<string?>(payment, TokenProperty) == item.TransitionToken
+                && !protectedPayments.Any(closed => closed.Id == payment.Id));
+    }
+
+    internal static IQueryable<int> RecipientIds(PaymentContext db, PaymentOverdueNotificationOutbox item)
+    {
+        var section = item.DocumentKind == DocumentKind.Invoice ? RolePermissionCatalog.Accounts : RolePermissionCatalog.Payments;
+        return db.Users.AsNoTracking().Where(user => user.IsActive && user.IsApproved && user.Role != null
+                && (user.Role.Name == "admin" || user.Role.Permissions.Any(permission => permission.Section == section && permission.CanView))
+                && db.Set<PaymentResponsible>().Any(responsible => responsible.PaymentId == item.PaymentId && responsible.UserId == user.Id))
+            .Select(user => user.Id);
+    }
 
     public static IReadOnlyList<PaymentOverdueNotificationOutbox> Stage(
         PaymentContext db, IEnumerable<Payment> payments, DateTime nowUtc)

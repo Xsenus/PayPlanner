@@ -15,7 +15,7 @@ using PayPlanner.Api.Services.Tasks;
 
 namespace PayPlanner.Api.Services.Notifications;
 
-public sealed class NotificationService : INotificationService, ICaseDocumentNotificationLiveDispatcher, IDurableTaskStatusNotificationService
+public sealed partial class NotificationService : INotificationService, ICaseDocumentNotificationLiveDispatcher, IDurableTaskStatusNotificationService, IDurablePaymentOverdueNotificationService
 {
     public const string CourtEventLeaderUserIdSettingKey = "notifications.courtEventLeaderUserId";
     private static readonly SemaphoreSlim SmsRateLimitGate = new(1, 1);

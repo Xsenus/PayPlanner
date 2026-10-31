@@ -43,6 +43,7 @@ public sealed class PaymentOverdueBoundaryTests
     {
         var fault = new FailAfterSave(); await using var db = await SqliteTestContextFactory.CreateAsync(interceptor: fault); await SeedAsync(db, legal); var before = await PaymentAdvanceHistoryBoundaryTests.SnapshotAsync(db); var audits = await db.ObjectAuditEvents.CountAsync(); fault.Armed = true;
         await Assert.ThrowsAsync<IOException>(() => Runner(db).RunOnceAsync()); Assert.Equal(before, await PaymentAdvanceHistoryBoundaryTests.SnapshotAsync(db)); Assert.Equal(audits, await db.ObjectAuditEvents.CountAsync()); Assert.Null(db.Database.CurrentTransaction);
+        Assert.Empty(await db.PaymentOverdueNotificationOutboxes.ToArrayAsync()); Assert.Null(await PaymentOverdueOutboxFoundationTests.TokenAsync(db));
     }
     [Theory]
     [InlineData(false)]
@@ -255,11 +256,16 @@ public sealed class PaymentOverdueBoundaryTests
         public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData, InterceptionResult<int> result, CancellationToken ct = default)
         { if (Armed) { Entered.TrySetResult(); await Task.Delay(Timeout.Infinite, ct); } return result; }
     }
-    public class RecordingNotifications : DispatchProxy
+    public class RecordingNotifications : DispatchProxy, IDurablePaymentOverdueNotificationService
     {
         public List<(int PaymentId, int RecipientId)> Calls { get; } = [];
         public Func<Payment, int, Task>? Before { get; set; }
         public static INotificationService Create() => DispatchProxy.Create<INotificationService, RecordingNotifications>();
+        public Task NotifyOverdueForEventAsync(PaymentOverdueNotificationOutbox item, string claimToken, int recipientUserId, CancellationToken ct = default)
+        {
+            Calls.Add((item.PaymentId, recipientUserId));
+            return Before?.Invoke(new Payment { Id = item.PaymentId, DocumentKind = item.DocumentKind }, recipientUserId) ?? Task.CompletedTask;
+        }
         protected override object? Invoke(MethodInfo? method, object?[]? args)
         {
             if (method?.Name is not (nameof(INotificationService.NotifyPaymentChangedAsync) or nameof(INotificationService.NotifyInvoiceChangedAsync)) || args?[0] is not Payment payment || args[4] is not IEnumerable<int> recipients) throw new InvalidOperationException("Unexpected overdue notification method");
@@ -363,7 +369,8 @@ public sealed class PaymentOverduePostgresTests(PostgreSqlModelTemplate template
     {
         await using var database = await template.CreateDatabaseAsync(); await using (var db = Open(database.ConnectionString)) await PaymentOverdueBoundaryTests.SeedAsync(db, legal);
         var fault = new LostAcknowledgement(); await using var updating = Open(database.ConnectionString, fault); var notifications = PaymentOverdueBoundaryTests.RecordingNotifications.Create(); await Assert.ThrowsAsync<IOException>(() => PaymentOverdueBoundaryTests.Runner(updating, notifications).RunOnceAsync()); Assert.Empty(((PaymentOverdueBoundaryTests.RecordingNotifications)(object)notifications).Calls); Assert.Equal(1, await updating.Payments.CountAsync(p => p.Status == PaymentStatus.Overdue)); var audits = await updating.ObjectAuditEvents.CountAsync();
-        fault.Armed = false; Assert.Equal(0, await PaymentOverdueBoundaryTests.Runner(updating).RunOnceAsync()); Assert.Equal(audits, await updating.ObjectAuditEvents.CountAsync());
+        fault.Armed = false; Assert.Equal(0, await PaymentOverdueBoundaryTests.Runner(updating, notifications).RunOnceAsync()); Assert.Equal(audits, await updating.ObjectAuditEvents.CountAsync());
+        Assert.Single(((PaymentOverdueBoundaryTests.RecordingNotifications)(object)notifications).Calls); Assert.NotNull((await updating.PaymentOverdueNotificationOutboxes.AsNoTracking().SingleAsync()).CompletedAt);
     }
     [Theory]
     [InlineData(false)]

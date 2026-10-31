@@ -66,6 +66,17 @@ namespace PayPlanner.Api.Services
             await _runLock.WaitAsync(ct);
             try
             {
+                var recoveryErrors = new List<Exception>();
+                async Task RecoverAsync()
+                {
+                    try { await new PaymentOverdueNotificationDispatchProcessor(_scopeFactory).ProcessBatchAsync(ct); }
+                    catch (Exception error) when (!ct.IsCancellationRequested)
+                    {
+                        _logger.LogWarning(error, "Overdue notification recovery will be retried.");
+                        recoveryErrors.Add(error);
+                    }
+                }
+                await RecoverAsync();
                 var nowUtc = DateTime.UtcNow;
                 var lastId = 0;
                 int? throughId = null;
@@ -139,6 +150,7 @@ namespace PayPlanner.Api.Services
                         changedIds = due.Where(payment => payment.Status == PaymentStatus.Overdue).Select(payment => payment.Id).ToArray();
                         if (due.Length > 0)
                         {
+                            PaymentOverdueNotificationQueue.Stage(db, due.Where(payment => payment.Status == PaymentStatus.Overdue), nowUtc);
                             await db.SaveChangesAsync(ct);
                             if (!await credit.KeepsAppliedCreditAsync(ct)) throw new InvalidOperationException(PaymentCreditInvariantScope.RejectionMessage);
                         }
@@ -146,110 +158,14 @@ namespace PayPlanner.Api.Services
                     }
 
                     affected += changedIds.Length;
-                    var notificationService = scope.ServiceProvider.GetService<INotificationService>();
-                    if (changedIds.Length > 0 && notificationService is not null)
-                    {
-                        var messages = await db.Payments.AsNoTracking().Where(payment => changedIds.Contains(payment.Id)
-                            && payment.Status == PaymentStatus.Overdue && !payment.IsPaid).Include(payment => payment.Responsibles).ToArrayAsync(ct);
-                        var errors = new List<Exception>();
-                        var errorCount = 0;
-                        foreach (var payment in messages)
-                        {
-                            var isInvoice = payment.DocumentKind == DocumentKind.Invoice;
-                            var recipients = isInvoice ? await ResolveInvoiceNotificationRecipientsAsync(db, payment, ct)
-                                : await ResolvePaymentNotificationRecipientsAsync(db, payment, ct);
-                            foreach (var recipient in recipients)
-                            {
-                                ct.ThrowIfCancellationRequested();
-                                try
-                                {
-                                    using var dispatchScope = _scopeFactory.CreateScope();
-                                    var dispatcher = dispatchScope.ServiceProvider.GetService<INotificationService>();
-                                    if (dispatcher is null) continue;
-                                    if (isInvoice)
-                                        await dispatcher.NotifyInvoiceChangedAsync(payment, ["Статус оплаты счёта: Просрочен"], "CRM", 0, [recipient], ct);
-                                    else
-                                        await dispatcher.NotifyPaymentChangedAsync(payment, ["Статус: Ожидается -> Просрочен"], "CRM", 0, [recipient], ct);
-                                }
-                                catch (Exception error) when (!ct.IsCancellationRequested)
-                                {
-                                    errorCount++;
-                                    if (errors.Count < 32) { errors.Add(error); _logger.LogError(error, "Overdue notification failed for payment {PaymentId}.", payment.Id); }
-                                }
-                            }
-                        }
-                        if (errorCount == 1 && errors[0] is not OperationCanceledException) ExceptionDispatchInfo.Capture(errors[0]).Throw();
-                        if (errorCount > 0) throw new AggregateException($"Не удалось создать уведомлений о просрочке: {errorCount}.", errors);
-                    }
                 }
+                await RecoverAsync();
+                if (recoveryErrors.Count == 1) ExceptionDispatchInfo.Capture(recoveryErrors[0]).Throw();
+                if (recoveryErrors.Count > 0) throw new AggregateException("Уведомления о просрочке остаются в очереди.", recoveryErrors);
                 if (affected > 0) _logger.LogInformation("Marked {Count} payment(s) as Overdue.", affected);
                 return affected;
             }
             finally { _runLock.Release(); }
-        }
-
-        private static async Task<IReadOnlyCollection<int>> ResolvePaymentNotificationRecipientsAsync(
-            PaymentContext db,
-            Payment payment,
-            CancellationToken ct)
-        {
-            var candidateUserIds = payment.Responsibles
-                .Select(item => item.UserId)
-                .Where(userId => userId > 0)
-                .Distinct()
-                .ToArray();
-            if (candidateUserIds.Length == 0)
-            {
-                return Array.Empty<int>();
-            }
-
-            var allowedUserIds = await db.Users
-                .AsNoTracking()
-                .Where(user => candidateUserIds.Contains(user.Id)
-                    && user.IsActive
-                    && user.IsApproved
-                    && user.Role != null
-                    && (user.Role.Name == "admin"
-                        || user.Role.Permissions.Any(permission =>
-                            permission.Section == RolePermissionCatalog.Payments
-                            && permission.CanView)))
-                .Select(user => user.Id)
-                .ToListAsync(ct);
-
-            // NotificationService centrally revalidates object visibility before persisting notifications.
-            return allowedUserIds;
-        }
-
-        private static async Task<IReadOnlyCollection<int>> ResolveInvoiceNotificationRecipientsAsync(
-            PaymentContext db,
-            Payment payment,
-            CancellationToken ct)
-        {
-            var candidateUserIds = payment.Responsibles
-                .Select(item => item.UserId)
-                .Where(userId => userId > 0)
-                .Distinct()
-                .ToArray();
-            if (candidateUserIds.Length == 0)
-            {
-                return Array.Empty<int>();
-            }
-
-            var allowedUserIds = await db.Users
-                .AsNoTracking()
-                .Where(user => candidateUserIds.Contains(user.Id)
-                    && user.IsActive
-                    && user.IsApproved
-                    && user.Role != null
-                    && (user.Role.Name == "admin"
-                        || user.Role.Permissions.Any(permission =>
-                            permission.Section == RolePermissionCatalog.Accounts
-                            && permission.CanView)))
-                .Select(user => user.Id)
-                .ToListAsync(ct);
-
-            // NotificationService centrally revalidates object visibility before persisting notifications.
-            return allowedUserIds;
         }
 
         private static DateTime ResolvePaymentLocalToday(

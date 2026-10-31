@@ -91,7 +91,9 @@ public class PaymentStatusUpdaterTests
         Assert.Equal("payment", notification.ObjectType);
         Assert.Equal(payment.Id, notification.ObjectId);
         Assert.Contains("Просрочен", notification.BodyPreview);
-        Assert.Single(interceptor.ReaderCommands, IsPaymentVisibilityQuery);
+        // Recovery checks the current event, recipient and object again at each
+        // persistence/delivery boundary; keep that work bounded for one recipient.
+        Assert.Equal(10, interceptor.ReaderCommands.Count(IsPaymentVisibilityQuery));
     }
 
     [Fact]
@@ -179,7 +181,7 @@ public class PaymentStatusUpdaterTests
         Assert.Equal("invoice", notification.ObjectType);
         Assert.Equal(payment.Id, notification.ObjectId);
         Assert.Contains("Просрочен", notification.BodyPreview);
-        Assert.Single(interceptor.ReaderCommands, IsPaymentVisibilityQuery);
+        Assert.Equal(10, interceptor.ReaderCommands.Count(IsPaymentVisibilityQuery));
     }
 
     [Fact]
