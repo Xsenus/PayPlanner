@@ -652,21 +652,32 @@ public class PaymentsController : ControllerBase
                     && primary.Operation == "primary" && primary.State == PaymentCreateAttempt.Committed && primary.CanonicalPaymentId == sourceId, ct);
                 if (!ownsPrimary && !await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, permission => permission.CanEdit, ct))
                     return Forbid();
-                remainderSource = await _db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == sourceId, ct);
+                remainderSource = await _db.Payments.SingleAsync(payment => payment.Id == sourceId, ct);
                 if (remainderSource.DocumentKind != DocumentKind.Payment || remainderSource.Status == PaymentStatus.Cancelled
                     || remainderSource.AdvanceReviewStatus == PaymentAdvanceReviewStatus.Refunded
                     || await PaymentCreditInvariantScope.IsCancellationProtectedAsync(_db, sourceId, ct)
                     || await PaymentRemainderWriteRules.HasTransferredRemainderAsync(_db, remainderSource, ct)
                     || await HasCommittedRemainderAttemptAsync(sourceId, ct))
                     return AttemptConflict();
+                if (remainderSource.Status != PaymentStatus.Completed || !remainderSource.IsPaid
+                    || remainderSource.Amount <= 0m || remainderSource.PaidAmount != remainderSource.Amount
+                    || Math.Round(remainderSource.Amount, 2) != remainderSource.Amount
+                    || model.Amount <= 0m || Math.Round(model.Amount, 2) != model.Amount
+                    || model.PaidAmount != 0m || model.IsPaid || model.PaidDate.HasValue || model.LastPaymentDate.HasValue
+                    || model.Status is not (PaymentStatus.Pending or PaymentStatus.Overdue)
+                    || remainderSource.Amount > decimal.MaxValue - model.Amount)
+                    return BadRequest(new { message = "Отдельный остаток создаётся только к закрытой оплаченной части. Укажите положительный неоплаченный остаток; для незакрытого платежа используйте перенос остатка в его карточке." });
             }
             using var credit = new PaymentCreditInvariantScope(_db);
             var scope = new VersionedPaymentWriteBoundary.Scope(lease.LockPrimaryAsync);
             var result = await CreatePaymentCoreAsync(model, scope, ct);
             if (result is not CreatedResult) return result;
             if (remainderSource is not null && (PaymentBalanceHistoryRules.Binding.From(remainderSource) != PaymentBalanceHistoryRules.Binding.From(model)
-                || remainderSource.SellerCompanyId != model.SellerCompanyId || remainderSource.SellerBranchId != model.SellerBranchId))
+                || remainderSource.SellerCompanyId != model.SellerCompanyId || remainderSource.SellerBranchId != model.SellerBranchId
+                || remainderSource.ContractId != model.ContractId || remainderSource.ClientCaseId != model.ClientCaseId
+                || Normalize(remainderSource.Account) != Normalize(model.Account) || remainderSource.AccountDate?.Date != model.AccountDate?.Date))
                 return AttemptConflict();
+            if (remainderSource is not null) await LinkCreatedRemainderAsync(remainderSource, model, ct);
             if (!await credit.KeepsAppliedCreditAsync(ct))
                 return BadRequest(new { message = PaymentCreditInvariantScope.RejectionMessage });
             if (attempt.ExpiresAtUtc <= AttemptTime.GetUtcNow()) throw new PaymentCreateAttemptExpiredException();
@@ -682,6 +693,28 @@ public class PaymentsController : ControllerBase
             if (scope.AfterCommit is not null) await scope.AfterCommit();
             return result;
         }, ct);
+    }
+
+    private async Task LinkCreatedRemainderAsync(Payment source, Payment remainder, CancellationToken ct)
+    {
+        // The source lease is still held. Only this newly created pair is linked;
+        // neither historical text nor an older committed attempt is reinterpreted.
+        var originalAmount = source.Amount + remainder.Amount;
+        var date = remainder.Date.Date;
+        var now = DateTime.UtcNow;
+        source.SystemNotes = ReplaceTechnicalMarkerLine(source.SystemNotes,
+            PaymentRemainderTransferRules.PartialRemainderSourceMarker,
+            PaymentRemainderTransferRules.BuildSourceMarker(source.Id, originalAmount, source.PaidAmount, remainder.Amount, date));
+        remainder.SystemNotes = ReplaceTechnicalMarkerLine(remainder.SystemNotes,
+            PaymentRemainderTransferRules.PartialRemainderMarker,
+            PaymentRemainderTransferRules.BuildMarker(source.Id, originalAmount, source.PaidAmount, remainder.Amount, date));
+        var responsibleIds = await _db.PaymentResponsibles.AsNoTracking().Where(item => item.PaymentId == source.Id)
+            .Select(item => item.UserId).ToArrayAsync(ct);
+        await CopyPaymentResponsiblesAsync(remainder, responsibleIds.Except(remainder.Responsibles.Select(item => item.UserId)), ct);
+        var caseIds = await _db.InvoiceClientCases.AsNoTracking().Where(item => item.PaymentId == source.Id)
+            .Select(item => item.ClientCaseId).ToArrayAsync(ct);
+        CopyPaymentInvoiceClientCases(remainder, caseIds.Except(remainder.InvoiceClientCases.Select(item => item.ClientCaseId)));
+        UpsertPartialRemainderTransfer(source.Id, remainder.Id, originalAmount, source.PaidAmount, remainder.Amount, date, now);
     }
 
     private async Task<IActionResult?> RequireAttemptAccessAsync(CancellationToken ct)
