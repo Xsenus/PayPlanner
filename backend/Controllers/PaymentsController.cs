@@ -1561,6 +1561,60 @@ public class PaymentsController : ControllerBase
         });
     }
 
+    private sealed class AdvanceReviewBatchScope(BalanceApplicationLease lease, DataVisibilityAccess visibility)
+    {
+        public BalanceApplicationLease Lease { get; } = lease;
+        public DataVisibilityAccess Visibility { get; } = visibility;
+        public Func<Task>? AfterCommit { get; set; }
+    }
+
+    private async Task<IActionResult> RunAdvanceReviewBatchAsync(
+        Func<AdvanceReviewBatchScope, Task<IActionResult>> write, CancellationToken ct)
+    {
+        var actorId = User.GetUserId();
+        if (User?.Identity?.IsAuthenticated != true || actorId is not > 0) return Unauthorized();
+        BalanceApplicationLease? lease = null;
+        AdvanceReviewBatchScope? scope = null;
+        IActionResult result;
+        try
+        {
+            lease = await BalanceApplicationLease.BeginAsync(_db, actorId.Value, ct);
+            if (_db.Database.IsNpgsql()) await _db.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '2s'", ct);
+            if (!await _db.Users.AsNoTracking().AnyAsync(user => user.Id == actorId.Value && user.IsActive && user.IsApproved, ct))
+                return Unauthorized();
+            if (await RequirePaymentsEditAsync(ct) is { } forbidden) return forbidden;
+            var visibility = await ResolvePaymentsVisibilityAsync(ct);
+            if (visibility is null) return AccessDenied();
+            scope = new(lease, visibility);
+            result = await write(scope);
+            if (result is OkObjectResult) await lease.CommitAsync(ct);
+        }
+        catch (Exception error) when (BalanceApplicationLease.IsConflict(error)
+            && (lease?.CommitStarted != true || BalanceApplicationLease.IsDefiniteDatabaseAbort(error)))
+        {
+            return Conflict(new { message = "Платежи изменились или сейчас заняты. Обновите список и повторите действие." });
+        }
+        finally
+        {
+            if (lease is not null) await lease.DisposeAsync();
+        }
+        if (result is OkObjectResult && scope?.AfterCommit is { } notify) await notify();
+        return result;
+    }
+
+    private async Task<List<Payment>> LockAdvanceReviewBatchAsync(
+        IQueryable<Payment> query, BalanceApplicationLease lease, int limit, CancellationToken ct)
+    {
+        var ids = await query.AsNoTracking().OrderBy(payment => payment.Date).ThenBy(payment => payment.Id)
+            .Select(payment => payment.Id).Take(limit).ToArrayAsync(ct);
+        await lease.LockPaymentsAsync(ids, ct);
+        var payments = await query.Where(payment => ids.Contains(payment.Id))
+            .Include(payment => payment.Client).Include(payment => payment.LegalEntity)
+            .OrderBy(payment => payment.Date).ThenBy(payment => payment.Id).ToListAsync(ct);
+        if (payments.Count != ids.Length) throw new BalanceApplicationConflictException();
+        return payments;
+    }
+
     [HttpPost("advance-review/backfill")]
     public async Task<IActionResult> BackfillAdvanceReviewCandidates(
         [FromQuery] bool confirm = false,
@@ -1572,15 +1626,12 @@ public class PaymentsController : ControllerBase
             return BadRequest(new { message = "Backfill requires confirm=true." });
         }
 
-        var visibility = await ResolvePaymentsVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return AccessDenied();
-        }
-        if (await RequirePaymentsEditAsync(ct) is { } forbidden)
-        {
-            return forbidden;
-        }
+        return await RunAdvanceReviewBatchAsync(scope => BackfillAdvanceReviewCandidatesCoreAsync(scope, limit, ct), ct);
+    }
+
+    private async Task<IActionResult> BackfillAdvanceReviewCandidatesCoreAsync(AdvanceReviewBatchScope scope, int limit, CancellationToken ct)
+    {
+        var visibility = scope.Visibility;
 
         limit = Math.Clamp(limit, 1, 500);
         var candidatePredicate = PaymentAdvanceReviewService.UnallocatedAdvanceCandidatePredicate();
@@ -1593,13 +1644,7 @@ public class PaymentsController : ControllerBase
         var totalAmount = await query
             .SumAsync(payment => payment.PaidAmount > 0.009m ? payment.PaidAmount : payment.Amount, ct);
 
-        var payments = await query
-            .Include(payment => payment.Client)
-            .Include(payment => payment.LegalEntity)
-            .OrderBy(payment => payment.Date)
-            .ThenBy(payment => payment.Id)
-            .Take(limit)
-            .ToListAsync(ct);
+        var payments = await LockAdvanceReviewBatchAsync(query, scope.Lease, limit, ct);
 
         foreach (var payment in payments)
         {
@@ -1608,13 +1653,27 @@ public class PaymentsController : ControllerBase
             payment.AdvanceReviewedAt = null;
             payment.AdvanceReviewedByUserId = null;
             payment.AdvanceReviewedByUserName = null;
-            await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, payment, DateTime.UtcNow, _notificationService, ct);
         }
 
         if (payments.Count > 0)
         {
             _db.SetAuditReason($"Backfill контроля авансов: {payments.Count} старых платежей поставлены на разбор без изменения денежных проводок.");
             await _db.SaveChangesAsync(ct);
+            if (_notificationService is not null)
+            {
+                var ids = payments.Select(payment => payment.Id).ToArray();
+                scope.AfterCommit = async () =>
+                {
+                    var committedPayments = await _db.Payments.AsNoTracking()
+                        .Where(payment => ids.Contains(payment.Id)
+                            && payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.RequiresDecision)
+                        .Where(PaymentAdvanceReviewService.UnallocatedAdvanceCandidatePredicate())
+                        .Include(payment => payment.Client).Include(payment => payment.LegalEntity)
+                        .ToListAsync(ct);
+                    foreach (var payment in committedPayments)
+                        await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, payment, DateTime.UtcNow, _notificationService, ct);
+                };
+            }
         }
 
         var items = payments
@@ -1661,45 +1720,36 @@ public class PaymentsController : ControllerBase
             return BadRequest(new { message = "Backfill rollback requires confirm=true." });
         }
 
-        var visibility = await ResolvePaymentsVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return AccessDenied();
-        }
-        if (await RequirePaymentsEditAsync(ct) is { } forbidden)
-        {
-            return forbidden;
-        }
+        return await RunAdvanceReviewBatchAsync(scope => RollbackAdvanceReviewBackfillCoreAsync(scope, limit, ct), ct);
+    }
+
+    private async Task<IActionResult> RollbackAdvanceReviewBackfillCoreAsync(AdvanceReviewBatchScope scope, int limit, CancellationToken ct)
+    {
+        var visibility = scope.Visibility;
 
         limit = Math.Clamp(limit, 1, 500);
-        var backfilledPaymentIds = await _db.ObjectAuditEvents
-            .AsNoTracking()
-            .Where(item => item.ObjectType == "payment"
-                && item.Action == "Updated"
-                && item.MetadataJson != null
-                && item.MetadataJson.Contains("Backfill"))
-            .Select(item => item.ObjectId)
-            .Distinct()
-            .ToListAsync(ct);
+        // Preserve any later edit or restoration, including timestamp ties.
+        var history = _db.ObjectAuditEvents
+            .Where(item => item.ObjectType == "payment");
 
         var candidatePredicate = PaymentAdvanceReviewService.UnallocatedAdvanceCandidatePredicate();
         var query = _db.Payments
             .ApplyPaymentVisibility(visibility)
             .Where(candidatePredicate)
             .Where(payment => payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.RequiresDecision)
-            .Where(payment => backfilledPaymentIds.Contains(payment.Id));
+            .Where(payment => history.Any(item => item.ObjectId == payment.Id && item.Action == "Updated"
+                && item.MetadataJson != null
+                && item.MetadataJson.Contains("\"reason\":\"Backfill ")
+                && item.MetadataJson.Contains("\"AdvanceReviewStatus\"")
+                && !history.Any(later => later.ObjectId == item.ObjectId
+                    && (later.CreatedAt > item.CreatedAt
+                        || (later.CreatedAt == item.CreatedAt && later.Id > item.Id)))));
 
         var eligible = await query.CountAsync(ct);
         var totalAmount = await query
             .SumAsync(payment => payment.PaidAmount > 0.009m ? payment.PaidAmount : payment.Amount, ct);
 
-        var payments = await query
-            .Include(payment => payment.Client)
-            .Include(payment => payment.LegalEntity)
-            .OrderBy(payment => payment.Date)
-            .ThenBy(payment => payment.Id)
-            .Take(limit)
-            .ToListAsync(ct);
+        var payments = await LockAdvanceReviewBatchAsync(query, scope.Lease, limit, ct);
 
         foreach (var payment in payments)
         {

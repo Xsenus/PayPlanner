@@ -85,6 +85,12 @@ internal sealed class BalanceApplicationLease : IAsyncDisposable
             await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Payments\" WHERE \"Id\" = {id} FOR UPDATE NOWAIT", ct);
     }
 
+    public async Task LockPaymentsAsync(int[] ids, CancellationToken ct)
+    {
+        if (ids.Length > 0 && db.Database.IsNpgsql())
+            await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Payments\" WHERE \"Id\" = ANY ({ids}) ORDER BY \"Id\" FOR UPDATE NOWAIT", ct);
+    }
+
     public async Task CommitAsync(CancellationToken ct)
     {
         CommitStarted = true;
