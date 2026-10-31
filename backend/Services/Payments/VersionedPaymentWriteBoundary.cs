@@ -62,6 +62,8 @@ internal static class VersionedPaymentWriteBoundary
                     || changesInvoice && current.InvoiceId != model.InvoiceId)))
                     return controller.BadRequest(new { message = "По платежу есть история баланса. Изменение скрыло бы её основание; требуется сверка истории." });
                 if (await ValidateInvoiceAsync(current.InvoiceId, true) is { } invalidSource) return invalidSource;
+                if (await ValidateStructureAsync(db, current, model, deleting, ct) is { } structureError)
+                    return controller.Conflict(new { message = structureError });
             }
             if (!deferInvoiceValidation && (creating || changesInvoice && model?.InvoiceId != current?.InvoiceId))
             {
@@ -105,5 +107,47 @@ internal static class VersionedPaymentWriteBoundary
         finally { if (lease is not null) await lease.DisposeAsync(); }
         if (scope?.AfterCommit is not null && result is OkObjectResult or CreatedResult or NoContentResult) await scope.AfterCommit();
         return result;
+    }
+
+    private static async Task<string?> ValidateStructureAsync(PaymentContext db, Payment current, Payment? model, bool deleting, CancellationToken ct)
+    {
+        if (!deleting && InvoiceManagedPaymentRules.IsInvoiceManagedPayment(current))
+            return InvoiceManagedPaymentRules.UpdateBlockedMessage;
+
+        var amountChanged = model is not null && Math.Abs(model.Amount - current.Amount) > 0.009m;
+        var paidChanged = model is not null && Math.Abs(model.PaidAmount - current.PaidAmount) > 0.009m;
+        var cancelling = model?.Status == PaymentStatus.Cancelled && current.Status != PaymentStatus.Cancelled;
+        if (deleting || amountChanged || cancelling)
+        {
+            var isRemainder = PaymentRemainderTransferRules.IsPartialRemainderPayment(current)
+                || await db.PaymentRemainderTransfers.AsNoTracking().AnyAsync(link => link.RemainderPaymentId == current.Id, ct);
+            if (isRemainder)
+                return deleting ? PaymentRemainderTransferRules.RemainderDeleteBlockedMessage
+                    : amountChanged ? PaymentRemainderTransferRules.RemainderAmountUpdateBlockedMessage
+                    : PaymentRemainderTransferRules.RemainderCancelBlockedMessage;
+        }
+        if ((deleting || amountChanged || paidChanged) && await HasTransferredRemainderAsync(db, current, ct))
+            return deleting ? PaymentRemainderTransferRules.SourceDeleteBlockedMessage : PaymentRemainderTransferRules.SourceAmountUpdateBlockedMessage;
+        if (deleting && InvoiceManagedPaymentRules.IsInvoiceManagedPayment(current)
+            && (current.DocumentKind == DocumentKind.Invoice || InvoiceManagedPaymentRules.IsGeneratedInvoiceRemainderPayment(current)))
+            return InvoiceManagedPaymentRules.DeleteBlockedMessage;
+        return null;
+    }
+
+    private static async Task<bool> HasTransferredRemainderAsync(PaymentContext db, Payment current, CancellationToken ct)
+    {
+        if (PaymentRemainderTransferRules.IsPartialRemainderSourcePayment(current)
+            || await db.PaymentRemainderTransfers.AsNoTracking().AnyAsync(link => link.SourcePaymentId == current.Id, ct)) return true;
+        // Old transfers can have only a child marker. Narrow the streamed scalar
+        // fallback by the ID digits, then parse the marker to reject partial IDs.
+        // Structured links use the existing indexed lookup; notes-only updates
+        // never scan legacy history.
+        var token = current.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var candidates = db.Payments.AsNoTracking().ApplyUnambiguousInvoiceLinks()
+            .Where(payment => payment.SystemNotes != null && payment.SystemNotes.Contains(PaymentRemainderTransferRules.PartialRemainderMarker)
+                && payment.SystemNotes.Contains(token)).Select(payment => payment.SystemNotes);
+        await foreach (var notes in candidates.AsAsyncEnumerable().WithCancellation(ct))
+            if (PaymentRemainderTransferRules.TryReadMarker(notes, out var marker) && marker.SourcePaymentId == current.Id) return true;
+        return false;
     }
 }
