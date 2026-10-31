@@ -9227,6 +9227,10 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
 
+                    b.Property<string>("OverdueNotificationToken")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
                     b.Property<decimal>("PaidAmount")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
@@ -9482,6 +9486,67 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                             t.HasCheckConstraint("CK_PaymentCreateAttempts_State", "\"State\" IN ('Draft','Committed','Cancelled')");
                         });
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.PaymentOverdueNotificationOutbox", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("DocumentKind")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("DueDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("EventKey")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<DateTime?>("LastAttemptAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("LeaseToken")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime?>("LeaseUntil")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("PaymentId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("TransitionToken")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventKey")
+                        .IsUnique()
+                        .HasDatabaseName("IX_PaymentOverdueOutbox_EventKey");
+
+                    b.HasIndex("PaymentId", "Id")
+                        .HasDatabaseName("IX_PaymentOverdueOutbox_Payment");
+
+                    b.HasIndex("CompletedAt", "LeaseUntil", "LastAttemptAt", "Id")
+                        .HasDatabaseName("IX_PaymentOverdueOutbox_Due");
+
+                    b.ToTable("PaymentOverdueNotificationOutboxes");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.PaymentRemainderTransfer", b =>
@@ -15640,6 +15705,15 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("PaymentStatusEntity");
 
                     b.Navigation("Service");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.PaymentOverdueNotificationOutbox", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.Payment", null)
+                        .WithMany()
+                        .HasForeignKey("PaymentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.PaymentRemainderTransfer", b =>

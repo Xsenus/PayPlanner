@@ -18,8 +18,16 @@ namespace PayPlanner.Api.Data;
 /// </summary>
 public class PaymentContext : DbContext
 {
+    private static readonly string[] OverdueIdentityProperties =
+    [
+        nameof(Payment.Status), nameof(Payment.Date), nameof(Payment.DocumentKind), nameof(Payment.InvoiceId),
+        nameof(Payment.ClientId), nameof(Payment.LegalEntityId), nameof(Payment.Type),
+        nameof(Payment.SellerCompanyId), nameof(Payment.SellerBranchId),
+    ];
+
     private static readonly HashSet<string> AuditSystemPropertyNames = new(StringComparer.Ordinal)
     {
+        "OverdueNotificationToken",
         "CreatedAt",
         "CreatedByUserId",
         "CreatedByUserName",
@@ -994,6 +1002,7 @@ public class PaymentContext : DbContext
         modelBuilder.Entity<Payment>(entity =>
         {
             entity.HasKey(e => e.Id);
+            entity.Property<string?>("OverdueNotificationToken").HasMaxLength(32);
             entity.Property(e => e.Amount).HasColumnType("decimal(18,2)");
             entity.Property(e => e.Type).HasConversion<string>();
             entity.Property(e => e.Status).HasConversion<string>();
@@ -3889,6 +3898,18 @@ public class PaymentContext : DbContext
             entity.HasIndex(item => new { item.RecipientLinkId, item.CreatedAt });
         });
 
+        modelBuilder.Entity<PaymentOverdueNotificationOutbox>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.EventKey).HasMaxLength(160).IsRequired();
+            entity.Property(item => item.TransitionToken).HasMaxLength(32).IsRequired();
+            entity.Property(item => item.LeaseToken).HasMaxLength(32);
+            entity.HasOne<Payment>().WithMany().HasForeignKey(item => item.PaymentId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(item => item.EventKey).IsUnique().HasDatabaseName("IX_PaymentOverdueOutbox_EventKey");
+            entity.HasIndex(item => new { item.PaymentId, item.Id }).HasDatabaseName("IX_PaymentOverdueOutbox_Payment");
+            entity.HasIndex(item => new { item.CompletedAt, item.LeaseUntil, item.LastAttemptAt, item.Id }).HasDatabaseName("IX_PaymentOverdueOutbox_Due");
+        });
+
         modelBuilder.Entity<TaskStatusNotificationOutbox>(entity =>
         {
             entity.HasKey(item => item.Id);
@@ -4594,6 +4615,26 @@ public class PaymentContext : DbContext
            || propertyName.Contains("Percent", StringComparison.OrdinalIgnoreCase)
            || propertyName.Contains("Hours", StringComparison.OrdinalIgnoreCase);
 
+    private void CaptureOverdueNotificationTransitions()
+    {
+        foreach (var entry in ChangeTracker.Entries<Payment>())
+        {
+            if (entry.State != EntityState.Modified) continue;
+            var token = entry.Property<string?>("OverdueNotificationToken");
+            if (token.CurrentValue is null && token.OriginalValue is null) continue;
+            var fresh = token.IsModified && token.CurrentValue != token.OriginalValue
+                && Guid.TryParseExact(token.CurrentValue, "N", out _);
+            var boundaryChanged = OverdueIdentityProperties.Any(name => entry.Property(name).IsModified
+                    && !Equals(entry.Property(name).OriginalValue, entry.Property(name).CurrentValue));
+            if (entry.Entity.Status != PaymentStatus.Overdue || entry.Entity.IsPaid
+                || (entry.Metadata.FindProperty("IsDeleted") is not null && entry.Property<bool>("IsDeleted").CurrentValue)
+                || boundaryChanged && !fresh)
+                token.CurrentValue = null;
+            else if (!fresh && token.CurrentValue != token.OriginalValue)
+                token.CurrentValue = token.OriginalValue;
+        }
+    }
+
     private void CaptureTaskStatusTransitions()
     {
         var transitions = ChangeTracker.Entries<TaskJournalItem>()
@@ -4627,6 +4668,7 @@ public class PaymentContext : DbContext
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
+        CaptureOverdueNotificationTransitions();
         CaptureTaskStatusTransitions();
         var (closedTaskIds, deletedUserIds, revokedUserIds) = CaptureTimeTrackingTransitions();
         using var taskTimeTransaction = (closedTaskIds.Length > 0 || deletedUserIds.Length > 0 || revokedUserIds.Length > 0) && Database.CurrentTransaction is null ? Database.BeginTransaction() : null;
@@ -4708,6 +4750,7 @@ public class PaymentContext : DbContext
 
     private async Task<int> SaveChangesCoreAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken)
     {
+        CaptureOverdueNotificationTransitions();
         CaptureTaskStatusTransitions();
         var (closedTaskIds, deletedUserIds, revokedUserIds) = CaptureTimeTrackingTransitions();
         await using var taskTimeTransaction = (closedTaskIds.Length > 0 || deletedUserIds.Length > 0 || revokedUserIds.Length > 0) && Database.CurrentTransaction is null
@@ -5447,6 +5490,7 @@ public class PaymentContext : DbContext
     public DbSet<MaxOutboxMessage> MaxOutboxMessages { get; set; }
     public DbSet<TaskJournalDeadlineChangeRequest> TaskJournalDeadlineChangeRequests { get; set; }
     public DbSet<TaskStatusNotificationOutbox> TaskStatusNotificationOutboxes { get; set; }
+    public DbSet<PaymentOverdueNotificationOutbox> PaymentOverdueNotificationOutboxes { get; set; }
     public DbSet<TaskJournalFile> TaskJournalFiles { get; set; }
     public DbSet<TaskJournalTemplate> TaskJournalTemplates { get; set; }
     public DbSet<CasePositionTemplate> CasePositionTemplates { get; set; }

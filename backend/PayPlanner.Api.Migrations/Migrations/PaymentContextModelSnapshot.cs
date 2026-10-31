@@ -9034,6 +9034,10 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("OverdueNotificationToken")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
                     b.Property<decimal>("PaidAmount")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
@@ -9289,6 +9293,65 @@ namespace PayPlanner.Api.Migrations
 
                             t.HasCheckConstraint("CK_PaymentCreateAttempts_State", "\"State\" IN ('Draft','Committed','Cancelled')");
                         });
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.PaymentOverdueNotificationOutbox", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("DocumentKind")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("DueDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EventKey")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastAttemptAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LeaseToken")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LeaseUntil")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("PaymentId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("TransitionToken")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventKey")
+                        .IsUnique()
+                        .HasDatabaseName("IX_PaymentOverdueOutbox_EventKey");
+
+                    b.HasIndex("PaymentId", "Id")
+                        .HasDatabaseName("IX_PaymentOverdueOutbox_Payment");
+
+                    b.HasIndex("CompletedAt", "LeaseUntil", "LastAttemptAt", "Id")
+                        .HasDatabaseName("IX_PaymentOverdueOutbox_Due");
+
+                    b.ToTable("PaymentOverdueNotificationOutboxes");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.PaymentRemainderTransfer", b =>
@@ -15334,6 +15397,15 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("PaymentStatusEntity");
 
                     b.Navigation("Service");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.PaymentOverdueNotificationOutbox", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.Payment", null)
+                        .WithMany()
+                        .HasForeignKey("PaymentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.PaymentRemainderTransfer", b =>
