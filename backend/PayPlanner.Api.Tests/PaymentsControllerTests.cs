@@ -1260,8 +1260,10 @@ public class PaymentsControllerTests
         Assert.NotNull(installmentPayment);
 
         var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        db.Entry(installmentPayment!).State = EntityState.Detached;
         installmentPayment!.Description = "Updated";
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.Update(
             installmentPayment.Id,
             installmentPayment,
@@ -1309,6 +1311,7 @@ public class PaymentsControllerTests
 
         var controller = new PaymentsController(db, new NoopFormRequirementsService());
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.Update(payment.Id, model, CancellationToken.None);
         db.ChangeTracker.Clear();
 
@@ -1330,6 +1333,7 @@ public class PaymentsControllerTests
         var user = new User
         {
             Email = "payment-timezone@example.test",
+            IsApproved = true,
             FullName = "Payment Timezone User",
             IsActive = true,
             Role = role,
@@ -1375,6 +1379,7 @@ public class PaymentsControllerTests
             "dd.MM.yyyy (HH:mm:ss)",
             System.Globalization.CultureInfo.GetCultureInfo("ru-RU"));
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.Update(payment.Id, model, CancellationToken.None);
 
         var after = CalendarTimeZoneHelper.FormatUserDateTime(
@@ -1981,6 +1986,7 @@ public class PaymentsControllerTests
             LastPaymentDate = null,
         };
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.Update(standalonePayment.Id, updateModel, CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(actionResult);
@@ -2033,6 +2039,7 @@ public class PaymentsControllerTests
             ContractId = contract.Id,
         };
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.Update(payment.Id, updateModel, CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(actionResult);
@@ -2296,6 +2303,7 @@ public class PaymentsControllerTests
             Type = PaymentType.Income,
         };
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.Update(payment.Id, updateModel, CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(actionResult);
@@ -2337,6 +2345,7 @@ public class PaymentsControllerTests
             LastPaymentDate = null,
         };
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.Update(payment.Id, updateModel, CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(actionResult);
@@ -2380,6 +2389,7 @@ public class PaymentsControllerTests
             LastPaymentDate = null,
         };
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.Update(payment.Id, updateModel, CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(actionResult);
@@ -4263,6 +4273,7 @@ public class PaymentsControllerTests
         update.ClientId = client.Id;
         update.PaidAmount = 100m;
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.Update(payment.Id, update, CancellationToken.None);
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(actionResult);
@@ -4622,6 +4633,7 @@ public class PaymentsControllerTests
         sourceAmountChange.PaidDate = today;
         sourceAmountChange.LastPaymentDate = today;
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var sourceUpdateResult = await controller.Update(source.Id, sourceAmountChange, CancellationToken.None);
         var sourceConflict = Assert.IsType<ConflictObjectResult>(sourceUpdateResult);
         Assert.Contains(PaymentRemainderTransferRules.SourceAmountUpdateBlockedMessage, sourceConflict.Value?.ToString());
@@ -4630,6 +4642,7 @@ public class PaymentsControllerTests
         remainderAmountChange.ClientId = client.Id;
         remainderAmountChange.PaidAmount = 0m;
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var remainderAmountResult = await controller.Update(
             splitResponse.RemainderPayment.Id,
             remainderAmountChange,
@@ -4644,6 +4657,7 @@ public class PaymentsControllerTests
         remainderPay.LastPaymentDate = today.AddDays(14);
         remainderPay.Status = PaymentStatus.Completed;
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var remainderPayResult = await controller.Update(
             splitResponse.RemainderPayment.Id,
             remainderPay,
@@ -6474,6 +6488,7 @@ public class PaymentsControllerTests
             LastPaymentDate = new DateTime(2026, 6, 19)
         };
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var result = await controller.Update(payment.Id, update, CancellationToken.None);
 
         Assert.IsType<OkObjectResult>(result);
@@ -6486,6 +6501,30 @@ public class PaymentsControllerTests
         Assert.Contains("Дата", notification.BodyPreview);
         Assert.Contains("Сумма", notification.BodyPreview);
         Assert.Contains("Источник", notification.BodyPreview);
+    }
+
+    private static async Task AuthenticatePaymentWriterAsync(PaymentContext db, ControllerBase controller)
+    {
+        if (controller.User.GetUserId().HasValue) return;
+        // These legacy direct-action fixtures had no HTTP authentication context.
+        // Use a real approved database actor; retain the existing business assertions.
+        Assert.False(db.ChangeTracker.HasChanges());
+        var actor = new User
+        {
+            Email = $"ordinary-payment-{Guid.NewGuid():N}@test.local",
+            FullName = "Synthetic ordinary payment editor",
+            IsActive = true,
+            IsApproved = true,
+            IsEmployee = true,
+            Role = new Role { Name = "admin", Description = "Synthetic payment editor" },
+        };
+        db.Users.Add(actor);
+        await db.SaveChangesAsync();
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            { User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, actor.Id.ToString())], "synthetic")) }
+        };
     }
 
     private static Task<PaymentContext> CreateContextAsync(bool useObjectAuditModel = true)

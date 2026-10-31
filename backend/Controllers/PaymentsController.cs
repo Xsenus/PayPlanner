@@ -153,6 +153,45 @@ public class PaymentsController : ControllerBase
     private Task<IActionResult?> RequirePaymentsEditAsync(CancellationToken ct)
         => RequirePaymentsPermissionAsync(permission => permission.CanEdit, ct);
 
+    private sealed class PaymentWriteScope
+    {
+        public Func<Task>? AfterCommit { get; set; }
+    }
+
+    private async Task<IActionResult> RunPaymentWriteAsync(int id,
+        Func<PaymentWriteScope, Task<IActionResult>> write, CancellationToken ct)
+    {
+        var actorId = User.GetUserId();
+        if (User?.Identity?.IsAuthenticated != true || actorId is not > 0) return Unauthorized();
+        BalanceApplicationLease? lease = null;
+        var scope = new PaymentWriteScope();
+        IActionResult result;
+        try
+        {
+            // Participate before reading paid amounts, notes, permissions or balance
+            // entries. The managed Apply path owns the same payment row lock.
+            lease = await BalanceApplicationLease.BeginAsync(_db, actorId.Value, ct);
+            if (!await _db.Users.AsNoTracking().AnyAsync(user => user.Id == actorId.Value && user.IsActive && user.IsApproved, ct))
+                return Unauthorized();
+            await lease.LockPaymentAsync(id, ct);
+            result = await write(scope);
+            if (result is OkObjectResult) await lease.CommitAsync(ct);
+        }
+        catch (Exception error) when (BalanceApplicationLease.IsConflict(error)
+            && (lease?.CommitStarted != true || BalanceApplicationLease.IsDefiniteDatabaseAbort(error)))
+        {
+            return Conflict(new { message = "Платёж изменился или сейчас занят. Обновите карточку и повторите действие." });
+        }
+        finally
+        {
+            if (lease is not null) await lease.DisposeAsync();
+        }
+        // Notifications may use another context. Never publish an uncommitted change
+        // and never translate a post-commit failure into a retryable write conflict.
+        if (result is OkObjectResult && scope.AfterCommit is not null) await scope.AfterCommit();
+        return result;
+    }
+
     private async Task NotifyPaymentAssignedAsync(Payment payment, CancellationToken ct)
     {
         if (_notificationService is null)
@@ -692,7 +731,10 @@ public class PaymentsController : ControllerBase
     }
 
     [HttpPut("{id:int}")]
-    public async Task<IActionResult> Update(int id, [FromBody] Payment model, CancellationToken ct)
+    public Task<IActionResult> Update(int id, [FromBody] Payment model, CancellationToken ct)
+        => RunPaymentWriteAsync(id, scope => UpdateCoreAsync(id, model, scope, ct), ct);
+
+    private async Task<IActionResult> UpdateCoreAsync(int id, Payment model, PaymentWriteScope scope, CancellationToken ct)
     {
         if (await RequirePaymentsEditAsync(ct) is { } forbidden)
         {
@@ -743,6 +785,9 @@ public class PaymentsController : ControllerBase
         var originalRescheduleCount = Math.Max(0, e.RescheduleCount);
         var originalSystemNotes = e.SystemNotes ?? string.Empty;
         var originalInvoiceId = e.InvoiceId;
+        var originalClientId = e.ClientId;
+        var originalLegalEntityId = e.LegalEntityId;
+        var originalType = e.Type;
 
         if (e.PlannedDate == default)
         {
@@ -785,6 +830,11 @@ public class PaymentsController : ControllerBase
         e.AdvanceReviewReason = model.AdvanceReviewReason;
         var rawPaidAmount = model.PaidAmount;
         var appliedCreditAmount = await ClientBalanceService.GetAppliedCreditAmountAsync(_db, e.Id, ct);
+        if (appliedCreditAmount > AmountTolerance
+            && (e.ClientId != originalClientId || e.LegalEntityId != originalLegalEntityId || e.Type != originalType))
+            return BadRequest(new { message = "Нельзя менять контрагента или направление платежа с зачтённым балансом." });
+        if (e.Amount + AmountTolerance < appliedCreditAmount)
+            return BadRequest(new { message = "Сумма платежа не может быть меньше зачтённого баланса контрагента." });
         if (rawPaidAmount + 0.009m < appliedCreditAmount)
         {
             return BadRequest(new
@@ -872,6 +922,8 @@ public class PaymentsController : ControllerBase
 
         var invoiceBefore = await CaptureInvoiceNotificationSnapshotAsync(e, ct);
         await ApplyPaymentOverpaymentHandlingAsync(e, rawPaidAmount, now, paymentTimeZone, ct);
+        if (e.PaidAmount + AmountTolerance < appliedCreditAmount)
+            return BadRequest(new { message = "Оплата не может быть меньше зачтённого баланса контрагента." });
         await PaymentAdvanceReviewService.SyncBalanceAsync(_db, e, now, HttpContext, ct);
         await SyncPaymentCashOrderAsync(e, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, e, now, ct);
@@ -883,27 +935,35 @@ public class PaymentsController : ControllerBase
         }
 
         await _db.SaveChangesAsync(ct);
-        await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, e, now, _notificationService, ct);
-        PopulateAuditMetadata(_db, e);
-        await NotifyPaymentChangedAsync(
-            e,
-            BuildPaymentChangeLabels(
-                originalStatus,
-                e.Status,
-                originalDueDate,
-                e.Date.Date,
-                originalAmount,
-                e.Amount,
-                originalPaymentSourceId,
-                e.PaymentSourceId),
-            ct);
-        await NotifyInvoiceStateChangedAsync(e, invoiceBefore, ct);
+        scope.AfterCommit = async () =>
+        {
+            await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, e, now, _notificationService, ct);
+            PopulateAuditMetadata(_db, e);
+            await NotifyPaymentChangedAsync(
+                e,
+                BuildPaymentChangeLabels(
+                    originalStatus,
+                    e.Status,
+                    originalDueDate,
+                    e.Date.Date,
+                    originalAmount,
+                    e.Amount,
+                    originalPaymentSourceId,
+                    e.PaymentSourceId),
+                ct);
+            await NotifyInvoiceStateChangedAsync(e, invoiceBefore, ct);
+        };
         return Ok(e);
     }
 
     [HttpPost("{id:int}/status")]
-    public async Task<IActionResult> UpdateStatus(int id, [FromBody] UpdatePaymentStatusRequest request, CancellationToken ct)
+    public Task<IActionResult> UpdateStatus(int id, [FromBody] UpdatePaymentStatusRequest request, CancellationToken ct)
+        => RunPaymentWriteAsync(id, scope => UpdateStatusCoreAsync(id, request, scope, ct), ct);
+
+    private async Task<IActionResult> UpdateStatusCoreAsync(int id, UpdatePaymentStatusRequest request, PaymentWriteScope scope, CancellationToken ct)
     {
+        if (await RequirePaymentsEditAsync(ct) is { } forbidden) return forbidden;
+
         if (!ModelState.IsValid) return ValidationProblem(ModelState);
         if (!Enum.TryParse<PaymentStatus>(request.Status, ignoreCase: true, out var nextStatus))
         {
@@ -973,6 +1033,10 @@ public class PaymentsController : ControllerBase
             }
         }
 
+        var appliedCredit = await ClientBalanceService.GetAppliedCreditAmountAsync(_db, payment.Id, ct);
+        if (payment.PaidAmount + AmountTolerance < appliedCredit)
+            return BadRequest(new { message = "Нельзя уменьшить оплату ниже суммы, зачтённой с баланса контрагента." });
+
         PaymentDomainService.Normalize(payment);
         PaymentAdvanceReviewService.ApplyAutomaticReviewState(payment, now, HttpContext);
 
@@ -992,16 +1056,19 @@ public class PaymentsController : ControllerBase
         await SyncPaymentCashOrderAsync(payment, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, payment, now, ct);
         await _db.SaveChangesAsync(ct);
-        await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, payment, now, _notificationService, ct);
-        PopulateAuditMetadata(_db, payment);
-        if (originalStatus != payment.Status)
+        scope.AfterCommit = async () =>
         {
-            await NotifyPaymentChangedAsync(
-                payment,
-                [$"Статус: {originalStatus.ToDisplayString()} -> {payment.Status.ToDisplayString()}"],
-                ct);
-        }
-        await NotifyInvoiceStateChangedAsync(payment, invoiceBefore, ct);
+            await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, payment, now, _notificationService, ct);
+            PopulateAuditMetadata(_db, payment);
+            if (originalStatus != payment.Status)
+            {
+                await NotifyPaymentChangedAsync(
+                    payment,
+                    [$"Статус: {originalStatus.ToDisplayString()} -> {payment.Status.ToDisplayString()}"],
+                    ct);
+            }
+            await NotifyInvoiceStateChangedAsync(payment, invoiceBefore, ct);
+        };
         return Ok(payment);
     }
 
