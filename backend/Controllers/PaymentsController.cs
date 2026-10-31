@@ -636,30 +636,33 @@ public class PaymentsController : ControllerBase
                 return await GetById(attempt.CanonicalPaymentId!.Value, ct);
             }
             if (attempt.State != PaymentCreateAttempt.Draft) throw new InvalidOperationException("Unknown payment attempt state.");
-            return await CreatePaymentCoreAsync(model, ct, async () =>
-            {
-                // Every pre-existing financial Save/effect completed in this SAME owned transaction.
-                if (attempt.ExpiresAtUtc <= AttemptTime.GetUtcNow()) throw new PaymentCreateAttemptExpiredException();
-                attempt.State = PaymentCreateAttempt.Committed;
-                attempt.PayloadIdentity = identity;
-                attempt.CanonicalPaymentId = model.Id;
-                attempt.CommittedAtUtc = AttemptTime.GetUtcNow();
-                await _db.SaveChangesAsync(ct);
-                await lease.CommitAsync(ct);
-                await lease.DisposeAsync();
-                if (_db.Database.CurrentTransaction is not null)
-                    throw new InvalidOperationException("Payment notifications require a disposed financial transaction.");
-                // Return to the exact unchanged legacy notification tail, once for this first winner only.
-            });
+            using var credit = new PaymentCreditInvariantScope(_db);
+            var scope = new VersionedPaymentWriteBoundary.Scope(lease.LockPrimaryAsync);
+            var result = await CreatePaymentCoreAsync(model, scope, ct);
+            if (result is not CreatedResult) return result;
+            if (!await credit.KeepsAppliedCreditAsync(ct))
+                return BadRequest(new { message = PaymentCreditInvariantScope.RejectionMessage });
+            if (attempt.ExpiresAtUtc <= AttemptTime.GetUtcNow()) throw new PaymentCreateAttemptExpiredException();
+            attempt.State = PaymentCreateAttempt.Committed;
+            attempt.PayloadIdentity = identity;
+            attempt.CanonicalPaymentId = model.Id;
+            attempt.CommittedAtUtc = AttemptTime.GetUtcNow();
+            await _db.SaveChangesAsync(ct);
+            await lease.CommitAsync(ct);
+            await lease.DisposeAsync();
+            if (_db.Database.CurrentTransaction is not null)
+                throw new InvalidOperationException("Payment notifications require a disposed financial transaction.");
+            if (scope.AfterCommit is not null) await scope.AfterCommit();
+            return result;
         }, ct);
     }
 
     private async Task<IActionResult?> RequireAttemptAccessAsync(CancellationToken ct)
     {
         var actor = User.GetUserId();
-        if (User.Identity?.IsAuthenticated != true || actor is not > 0) return Unauthorized();
+        if (User?.Identity?.IsAuthenticated != true || actor is not > 0) return Unauthorized();
         // New ownership metadata must never use legacy empty-DB or stale-claim permission fallbacks.
-        if (!await _db.Users.AsNoTracking().AnyAsync(u => u.Id == actor.Value && u.IsActive, ct)) return Forbid();
+        if (!await _db.Users.AsNoTracking().AnyAsync(u => u.Id == actor.Value && u.IsActive && u.IsApproved, ct)) return Forbid();
         return await RequirePaymentsPermissionAsync(p => p.CanCreate, ct);
     }
 
@@ -702,6 +705,7 @@ public class PaymentsController : ControllerBase
         try
         {
             lease = await PaymentCreateAttemptLease.BeginAsync(_db, ct);
+            await lease.LockActorPermissionsAsync(User.GetUserId()!.Value, ct);
             // Recheck current global payment permission within admission; selection is not a new company ACL.
             if (await RequireAttemptAccessAsync(ct) is { } denied) return denied;
             return await action(lease);
@@ -710,7 +714,8 @@ public class PaymentsController : ControllerBase
         {
             return AttemptGone();
         }
-        catch (Exception error) when (lease?.CommitStarted != true && PaymentCreateAttemptLease.IsPrecommitConflict(error))
+        catch (Exception error) when ((lease?.CommitStarted != true || BalanceApplicationLease.IsDefiniteDatabaseAbort(error))
+            && PaymentCreateAttemptLease.IsPrecommitConflict(error))
         {
             return AttemptConflict();
         }
@@ -728,16 +733,12 @@ public class PaymentsController : ControllerBase
 
     [HttpPost]
     public Task<IActionResult> Create([FromBody] Payment model, CancellationToken ct)
-        => CreatePaymentCoreAsync(model, ct);
+        => VersionedPaymentWriteBoundary.RunAsync(this, _db, null, model, creating: true, deleting: false, changesInvoice: false,
+            scope => CreatePaymentCoreAsync(model, scope, ct), ct, deferInvoiceValidation: true);
 
     private async Task<IActionResult> CreatePaymentCoreAsync(
-        Payment model, CancellationToken ct, Func<Task>? commitAttempt = null)
+        Payment model, VersionedPaymentWriteBoundary.Scope scope, CancellationToken ct)
     {
-        if (await RequirePaymentsPermissionAsync(permission => permission.CanCreate, ct) is { } forbidden)
-        {
-            return forbidden;
-        }
-
         var missingCreate = await _formRequirements.GetMissingFieldsAsync("payments", model);
         if (missingCreate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingCreate });
 
@@ -761,7 +762,9 @@ public class PaymentsController : ControllerBase
             model.LastPaymentDate = model.PaidDate.Value.Date;
         }
 
+        var selectedInvoiceId = model.InvoiceId;
         await SyncInvoiceLinkAsync(model, ct);
+        if (selectedInvoiceId is > 0 && model.InvoiceId != selectedInvoiceId) return NotFound();
         if (await ValidateInvoiceLinkAccessAsync(model, ct) is { } invalidInvoice) return invalidInvoice;
         await PopulateMissingExpenseAttributionFromCaseAsync(model, ct);
         var createValidationError = await ValidatePaymentAttributionAsync(model, ct);
@@ -773,6 +776,8 @@ public class PaymentsController : ControllerBase
         var overpaymentValidationError = await ValidatePaymentOverpaymentHandlingAsync(model, rawPaidAmount, ct);
         if (overpaymentValidationError is not null) return overpaymentValidationError;
 
+        if (await ValidateNewPaymentFinancialScopeAsync(model, rawPaidAmount, scope, ct) is { } financialError) return financialError;
+
         _db.Payments.Add(model);
         await _db.SaveChangesAsync(ct);
         var invoiceBefore = await CaptureInvoiceNotificationSnapshotAsync(model, ct);
@@ -781,12 +786,86 @@ public class PaymentsController : ControllerBase
         await SyncPaymentCashOrderAsync(model, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, model, now, ct);
         await _db.SaveChangesAsync(ct);
-        if (commitAttempt is not null) await commitAttempt();
-        await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, model, now, _notificationService, ct);
-        PopulateAuditMetadata(_db, model);
-        await NotifyPaymentAssignedAsync(model, ct);
-        await NotifyInvoiceStateChangedAsync(model, invoiceBefore, ct);
+        scope.AfterCommit = async () =>
+        {
+            await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, model, now, _notificationService, ct);
+            PopulateAuditMetadata(_db, model);
+            await NotifyPaymentAssignedAsync(model, ct);
+            await NotifyInvoiceStateChangedAsync(model, invoiceBefore, ct);
+        };
         return Created($"/api/payments/{model.Id}", model);
+    }
+
+    private async Task<IActionResult?> ValidateNewPaymentFinancialScopeAsync(Payment model, decimal rawPaidAmount,
+        VersionedPaymentWriteBoundary.Scope scope, CancellationToken ct)
+    {
+        if (!model.InvoiceId.HasValue)
+        {
+            // An unresolved number must not silently turn a closed invoice's receipt
+            // into an unrelated advance. Keep legacy linking rules; inspect only this owner/year.
+            foreach (var candidate in BuildLookupCandidates(model))
+            {
+                var ownerClient = model.Type == PaymentType.Expense ? model.ExpenseClientId : model.ClientId;
+                var ownerCompany = model.Type == PaymentType.Expense ? model.ExpenseLegalEntityId : model.LegalEntityId;
+                if ((ownerClient is > 0) == (ownerCompany is > 0)) break;
+                var normalized = candidate.Number.ToLowerInvariant(); var year = candidate.Date.Year;
+                var invoiceIds = await _db.Payments.AsNoTracking().Where(p => p.DocumentKind == DocumentKind.Invoice && p.InvoiceId.HasValue
+                    && p.Type == model.Type && p.ClientId == model.ClientId && p.LegalEntityId == model.LegalEntityId
+                    && p.ExpenseClientId == model.ExpenseClientId && p.ExpenseLegalEntityId == model.ExpenseLegalEntityId)
+                    .Where(p => model.ClientCaseId.HasValue
+                        ? p.ClientCaseId == model.ClientCaseId || p.InvoiceClientCases.Any(link => link.ClientCaseId == model.ClientCaseId)
+                        : p.ClientCaseId == null && !p.InvoiceClientCases.Any())
+                    .Where(p => p.Invoice != null && p.Invoice.Number.ToLower() == normalized && p.Invoice.Date.Year == year
+                        || p.Account != null && p.Account.ToLower() == normalized && (p.AccountDate ?? p.Date).Year == year
+                        || p.LegacyAccountNumber != null && p.LegacyAccountNumber.ToLower() == normalized && (p.LegacyAccountDate ?? p.AccountDate ?? p.Date).Year == year)
+                    .Select(p => p.InvoiceId!.Value).Distinct().Take(2).ToArrayAsync(ct);
+                if (invoiceIds.Length == 0) continue;
+                var visibility = await ResolvePaymentsVisibilityAsync(ct);
+                if (visibility is null) return AccessDenied();
+                var visibleHeaders = _db.Payments.AsNoTracking().ApplyPaymentVisibility(visibility).ApplyUnambiguousInvoiceLinks()
+                    .Where(p => p.DocumentKind == DocumentKind.Invoice && p.InvoiceId.HasValue && invoiceIds.Contains(p.InvoiceId.Value));
+                if (await visibleHeaders.Select(p => p.InvoiceId).Distinct().CountAsync(ct) != invoiceIds.Length) return NotFound();
+                if (invoiceIds.Length > 1)
+                    return Conflict(new { message = "По номеру найдено несколько счетов. Выберите нужный счёт перед сохранением платежа." });
+                var headerId = await visibleHeaders.OrderBy(p => p.Status == PaymentStatus.Cancelled || p.InvoiceWorkflowStatus == InvoiceWorkflowStatus.Cancelled)
+                    .ThenBy(p => p.Id).Select(p => p.Id).FirstAsync(ct);
+                await scope.LockPaymentAsync(headerId, ct);
+                if (await PaymentCreditInvariantScope.IsCancellationProtectedAsync(_db, headerId, ct))
+                    return BadRequest(new { message = PaymentCreditInvariantScope.CancellationProtectedMessage });
+            }
+        }
+        if (model.InvoiceId.HasValue)
+        {
+            var visibility = await ResolvePaymentsVisibilityAsync(ct);
+            if (visibility is null) return AccessDenied();
+            var headerId = await _db.Payments.AsNoTracking().ApplyPaymentVisibility(visibility).ApplyUnambiguousInvoiceLinks()
+                .Where(p => p.InvoiceId == model.InvoiceId && p.DocumentKind == DocumentKind.Invoice)
+                .OrderBy(p => p.Status == PaymentStatus.Cancelled || p.InvoiceWorkflowStatus == InvoiceWorkflowStatus.Cancelled)
+                .ThenBy(p => p.Id).Select(p => (int?)p.Id).FirstOrDefaultAsync(ct);
+            if (headerId.HasValue)
+            {
+                await scope.LockPaymentAsync(headerId.Value, ct);
+                if (await PaymentCreditInvariantScope.IsCancellationProtectedAsync(_db, headerId.Value, ct))
+                    return BadRequest(new { message = PaymentCreditInvariantScope.CancellationProtectedMessage });
+            }
+            else if (!visibility.SeesAll || !await _db.Invoices.AnyAsync(i => i.Id == model.InvoiceId && !i.Payments.Any(), ct)) return NotFound();
+        }
+        if (model.Type == PaymentType.Income && CalculateOverpaymentAmount(model, rawPaidAmount) > AmountTolerance
+            && model.OverpaymentHandling == PaymentOverpaymentHandling.NextInstallment)
+        {
+            var target = await FindOverpaymentTargetInstallmentPaymentAsync(model, track: false, ct);
+            if (target is null) return BadRequest(new { message = "Следующий платёж рассрочки для зачёта переплаты не найден." });
+            var visibility = await ResolvePaymentsVisibilityAsync(ct);
+            if (visibility is null) return AccessDenied();
+            if (!await CanAccessPaymentAsync(target.Id, visibility, ct)) return NotFound();
+            await scope.LockPaymentAsync(target.Id, ct);
+            if (await PaymentCreditInvariantScope.IsCancellationProtectedAsync(_db, target.Id, ct))
+                return BadRequest(new { message = PaymentCreditInvariantScope.CancellationProtectedMessage });
+            // Freeze the selected row before the new payment receives an identity.
+            model.OverpaymentTargetPaymentId = target.Id;
+            if (await ValidatePaymentOverpaymentHandlingAsync(model, rawPaidAmount, ct) is { } invalidTarget) return invalidTarget;
+        }
+        return null;
     }
 
     [HttpPut("{id:int}")]

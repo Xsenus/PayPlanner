@@ -10,20 +10,26 @@ namespace PayPlanner.Api.Services.Payments;
 // the same lease and credit invariant as ordinary payment writers.
 internal static class VersionedPaymentWriteBoundary
 {
-    internal sealed class Scope
+    internal sealed class Scope(Func<int, CancellationToken, Task> lockPayment)
     {
+        private readonly HashSet<int> locked = [];
         public Func<Task>? AfterCommit { get; set; }
+        public async Task LockPaymentAsync(int id, CancellationToken ct)
+        {
+            if (locked.Add(id)) await lockPayment(id, ct);
+        }
     }
 
     public static async Task<IActionResult> RunAsync(ControllerBase controller, PaymentContext db, int? id, Payment? model,
-        bool creating, bool deleting, bool changesInvoice, Func<Scope, Task<IActionResult>> write, CancellationToken ct)
+        bool creating, bool deleting, bool changesInvoice, Func<Scope, Task<IActionResult>> write, CancellationToken ct, bool deferInvoiceValidation = false)
     {
         var actorId = controller.User.GetUserId();
         if (controller.User?.Identity?.IsAuthenticated != true || actorId is not > 0) return controller.Unauthorized();
-        BalanceApplicationLease? lease = null; var scope = new Scope(); IActionResult result;
+        BalanceApplicationLease? lease = null; Scope? scope = null; IActionResult result;
         try
         {
             lease = await BalanceApplicationLease.BeginAsync(db, actorId.Value, ct);
+            scope = new Scope(lease.LockPaymentAsync);
             using var credit = new PaymentCreditInvariantScope(db);
             if (db.Database.IsNpgsql()) await db.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '2s'", ct);
             if (!await db.Users.AsNoTracking().AnyAsync(u => u.Id == actorId.Value && u.IsActive && u.IsApproved, ct)) return controller.Unauthorized();
@@ -57,7 +63,7 @@ internal static class VersionedPaymentWriteBoundary
                     return controller.BadRequest(new { message = "По платежу есть история баланса. Изменение скрыло бы её основание; требуется сверка истории." });
                 if (await ValidateInvoiceAsync(current.InvoiceId, true) is { } invalidSource) return invalidSource;
             }
-            if (creating || changesInvoice && model?.InvoiceId != current?.InvoiceId)
+            if (!deferInvoiceValidation && (creating || changesInvoice && model?.InvoiceId != current?.InvoiceId))
             {
                 if (await ValidateInvoiceAsync(model?.InvoiceId, true) is { } invalidTarget) return invalidTarget;
             }
@@ -94,7 +100,7 @@ internal static class VersionedPaymentWriteBoundary
             && (lease?.CommitStarted != true || BalanceApplicationLease.IsDefiniteDatabaseAbort(error)))
         { return controller.Conflict(new { message = "Платёж или права изменились параллельно. Обновите данные и повторите действие." }); }
         finally { if (lease is not null) await lease.DisposeAsync(); }
-        if (scope.AfterCommit is not null && result is OkObjectResult or CreatedResult or NoContentResult) await scope.AfterCommit();
+        if (scope?.AfterCommit is not null && result is OkObjectResult or CreatedResult or NoContentResult) await scope.AfterCommit();
         return result;
     }
 }

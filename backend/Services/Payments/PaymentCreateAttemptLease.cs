@@ -35,7 +35,7 @@ internal sealed class PaymentCreateAttemptLease : IAsyncDisposable
         // Only clean read caches are discarded. Never persist/detach unrelated pending writes.
         db.ChangeTracker.Clear();
         if (db.Database.IsNpgsql())
-            return new(db, await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct));
+            return new(db, await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct));
         var connection = (SqliteConnection)db.Database.GetDbConnection();
         var opened = connection.State != ConnectionState.Open;
         var timeout = connection.DefaultTimeout;
@@ -58,6 +58,16 @@ internal sealed class PaymentCreateAttemptLease : IAsyncDisposable
             throw;
         }
         finally { connection.DefaultTimeout = timeout; }
+    }
+
+    public async Task LockActorPermissionsAsync(int actorId, CancellationToken ct)
+    {
+        if (!db.Database.IsNpgsql()) return;
+        await db.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '2s'", ct);
+        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Users\" WHERE \"Id\" = {actorId} FOR SHARE NOWAIT", ct);
+        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Roles\" WHERE \"Id\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {actorId}) FOR SHARE NOWAIT", ct);
+        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"RolePermissions\" WHERE \"RoleId\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {actorId}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);
+        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"UserId\" FROM \"UserCompanyAccesses\" WHERE \"UserId\" = {actorId} ORDER BY \"LegalEntityId\" FOR SHARE NOWAIT", ct);
     }
 
     public async Task<PaymentCreateAttempt?> LockAttemptAsync(Guid id, int actorId, CancellationToken ct)

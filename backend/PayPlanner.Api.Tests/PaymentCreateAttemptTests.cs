@@ -215,12 +215,18 @@ public sealed class PaymentCreateAttemptTests(PostgreSqlModelTemplate template) 
         var primary = Assert.IsType<Payment>(Assert.IsType<CreatedResult>(await controller.Create(new Payment
         { Date = DateTime.Today, PlannedDate = DateTime.Today, Amount = 100m, Type = PaymentType.Income, Status = PaymentStatus.Pending }, default)).Value);
         var attempt = await RegisterAsync(controller, "remainder", primary: primary.Id);
-        await using (var deleter = fixture.Open())
-        await using (var transaction = await deleter.Database.BeginTransactionAsync())
+        var hold = new HoldPrimaryDelete();
+        await using (var deleter = fixture.Open(hold))
         {
-            Assert.IsType<NoContentResult>(await Controller(deleter, actor).Delete(primary.Id, default));
-            Assert.IsType<ConflictObjectResult>(await controller.CommitCreateAttempt(attempt.AttemptId, Command(), default));
-            await transaction.CommitAsync();
+            var deleting = Controller(deleter, actor).Delete(primary.Id, default);
+            IActionResult? deleted = null;
+            try
+            {
+                await hold.Entered.Task.WaitAsync(TimeSpan.FromSeconds(15));
+                Assert.IsType<ConflictObjectResult>(await controller.CommitCreateAttempt(attempt.AttemptId, Command(), default));
+            }
+            finally { hold.Release.TrySetResult(); deleted = await deleting; }
+            Assert.IsType<NoContentResult>(deleted);
         }
         Assert.IsType<NotFoundResult>(await controller.CommitCreateAttempt(attempt.AttemptId, Command(), default));
         Assert.Empty(await db.Payments.AsNoTracking().ToArrayAsync());
@@ -949,6 +955,20 @@ public sealed class PaymentCreateAttemptTests(PostgreSqlModelTemplate template) 
         return Element(command.ToJsonString());
     }
     private static JsonElement Element(string raw) { using var document = JsonDocument.Parse(raw); return document.RootElement.Clone(); }
+
+    private sealed class HoldPrimaryDelete : SaveChangesInterceptor
+    {
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData,
+            InterceptionResult<int> result, CancellationToken ct = default)
+        {
+            if (eventData.Context!.ChangeTracker.Entries<Payment>().Any(e => e.State == EntityState.Deleted
+                || e.State == EntityState.Modified && e.Property<bool>("IsDeleted").CurrentValue))
+            { Entered.TrySetResult(); await Release.Task.WaitAsync(TimeSpan.FromSeconds(30), ct); }
+            return result;
+        }
+    }
 
     private sealed class NoopFormRequirements : IFormRequirementsService
     {

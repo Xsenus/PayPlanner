@@ -1879,6 +1879,7 @@ public class PaymentsControllerTests
         model.DocumentKind = default;
         var expectedLastPaymentDate = model.PaidDate.Value.Date;
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.Create(model, CancellationToken.None);
 
         var created = Assert.IsType<CreatedResult>(actionResult);
@@ -2484,6 +2485,7 @@ public class PaymentsControllerTests
         model.Account = "INV-NOT-FOUND";
         model.AccountDate = new DateTime(2026, 4, 18);
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.Create(model, CancellationToken.None);
 
         var created = Assert.IsType<CreatedResult>(actionResult);
@@ -2524,6 +2526,7 @@ public class PaymentsControllerTests
         model.Account = "INV-ZERO";
         model.AccountDate = new DateTime(2026, 4, 20);
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.Create(model, CancellationToken.None);
 
         var created = Assert.IsType<CreatedResult>(actionResult);
@@ -2568,6 +2571,7 @@ public class PaymentsControllerTests
         model.LegacyAccountNumber = "INV-DUP";
         model.LegacyAccountDate = invoice.Date;
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.Create(model, CancellationToken.None);
 
         var created = Assert.IsType<CreatedResult>(actionResult);
@@ -2584,6 +2588,7 @@ public class PaymentsControllerTests
         var controller = new PaymentsController(db, new NoopFormRequirementsService());
         var model = CreatePayment(new DateTime(2026, 4, 27), 5_000m, "Платеж без объектного аудита");
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.Create(model, CancellationToken.None);
 
         var created = Assert.IsType<CreatedResult>(actionResult);
@@ -2625,6 +2630,7 @@ public class PaymentsControllerTests
 
         var controller = new PaymentsController(db, new NoopFormRequirementsService());
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.Create(model, CancellationToken.None);
 
         var created = Assert.IsType<CreatedResult>(actionResult);
@@ -2672,6 +2678,7 @@ public class PaymentsControllerTests
 
         var controller = new PaymentsController(db, new NoopFormRequirementsService());
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.Create(model, CancellationToken.None);
 
         var created = Assert.IsType<CreatedResult>(actionResult);
@@ -5225,6 +5232,7 @@ public class PaymentsControllerTests
         linkedPayment.PaidDate = linkedPayment.Date;
         linkedPayment.LastPaymentDate = linkedPayment.Date;
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.Create(linkedPayment, CancellationToken.None);
 
         Assert.IsType<CreatedResult>(actionResult);
