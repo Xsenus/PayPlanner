@@ -37,6 +37,8 @@ internal static class VersionedPaymentWriteBoundary
                 permission => creating ? permission.CanCreate : deleting ? permission.CanDelete : permission.CanEdit, ct)) return controller.Forbid();
             var visibility = await db.ResolveDataVisibilityAsync(controller.User, RolePermissionCatalog.Payments, ct);
             if (visibility is null) return controller.Forbid();
+            if (creating && model is not null && PaymentCreateInputRules.Validate(db, model) is { } inputError)
+                return controller.BadRequest(new { message = inputError });
             Payment? current = null;
             Payment? original = null;
             if (id.HasValue)
