@@ -1183,6 +1183,7 @@ public class PaymentsControllerTests
 
         var controller = new PaymentsController(db, new NoopFormRequirementsService());
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.Delete(standalonePayment.Id, CancellationToken.None);
         db.ChangeTracker.Clear();
 
@@ -1199,6 +1200,7 @@ public class PaymentsControllerTests
 
         var controller = new PaymentsController(db, new NoopFormRequirementsService());
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.Delete(invoice.ParentPaymentId, CancellationToken.None);
         db.ChangeTracker.Clear();
 
@@ -1225,6 +1227,7 @@ public class PaymentsControllerTests
 
         var controller = new PaymentsController(db, new NoopFormRequirementsService());
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.Delete(legacyPayment.Id, CancellationToken.None);
         db.ChangeTracker.Clear();
 
@@ -1240,6 +1243,7 @@ public class PaymentsControllerTests
 
         var controller = new PaymentsController(db, new NoopFormRequirementsService());
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.Delete(invoice.InstallmentPaymentIds[0], CancellationToken.None);
         db.ChangeTracker.Clear();
 

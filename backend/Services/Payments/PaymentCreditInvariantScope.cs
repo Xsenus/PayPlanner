@@ -8,6 +8,7 @@ namespace PayPlanner.Api.Services.Payments;
 internal sealed class PaymentCreditInvariantScope : IDisposable
 {
     public const string RejectionMessage = "Сохранение уменьшило бы оплату связанного платежа или счёта ниже зачтённого баланса. Измените распределение оплаты.";
+    public const string CancellationProtectedMessage = "Платёж связан с аннулированным счётом или компенсацией оплаты. Денежные поля и связи защищены; требуется сверка истории.";
     private const decimal Tolerance = 0.009m;
     private readonly PaymentContext db;
     private readonly HashSet<Payment> changed = new(ReferenceEqualityComparer.Instance);
@@ -20,6 +21,20 @@ internal sealed class PaymentCreditInvariantScope : IDisposable
     }
 
     public void IncludePayments(IEnumerable<Payment> payments) => changed.UnionWith(payments);
+
+    public static Task<bool> IsCancellationProtectedAsync(PaymentContext db, int paymentId, CancellationToken ct)
+        => db.Payments.AsNoTracking().AnyAsync(payment => payment.Id == paymentId
+            && ((payment.DocumentKind == DocumentKind.Invoice
+                    && (payment.Status == PaymentStatus.Cancelled || payment.InvoiceWorkflowStatus == InvoiceWorkflowStatus.Cancelled))
+                || (payment.InvoiceId.HasValue
+                    && db.Payments.Any(root => root.InvoiceId == payment.InvoiceId && root.DocumentKind == DocumentKind.Invoice
+                        && (root.Status == PaymentStatus.Cancelled || root.InvoiceWorkflowStatus == InvoiceWorkflowStatus.Cancelled))
+                    && !db.Payments.Any(root => root.InvoiceId == payment.InvoiceId && root.DocumentKind == DocumentKind.Invoice
+                        && root.Status != PaymentStatus.Cancelled && root.InvoiceWorkflowStatus != InvoiceWorkflowStatus.Cancelled))
+                || db.ClientBalanceTransactions.Any(item => item.Type == ClientBalanceTransactionType.AdvanceFromCancelledInvoice
+                    && (item.PaymentId == payment.Id || payment.InvoiceId.HasValue && item.InvoiceId == payment.InvoiceId))
+                || (payment.InvoiceId.HasValue && db.MoneyOperations.Any(item => item.LinkedInvoiceId == payment.InvoiceId
+                    && item.Direction == MoneyOperationDirection.Expense && item.MatchComment == ClientBalanceService.CancelledInvoiceRefundComment))), ct);
 
     private void OnStateChanged(object? sender, EntityStateChangedEventArgs args)
     {

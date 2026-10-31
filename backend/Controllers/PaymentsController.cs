@@ -156,14 +156,24 @@ public class PaymentsController : ControllerBase
     private sealed class PaymentWriteScope(BalanceApplicationLease lease, PaymentContext db) : IDisposable
     {
         private readonly PaymentCreditInvariantScope credit = new(db);
+        private readonly HashSet<int> lockedRelatedPayments = [];
         public Func<Task>? AfterCommit { get; set; }
-        public Task LockPaymentAsync(int id, CancellationToken ct) => lease.LockPaymentAsync(id, ct);
+        public bool CancellationProtected { get; set; }
+        public bool ClosedReceiptMetadataOnly { get; set; }
+        public async Task LockPaymentAsync(int id, CancellationToken ct)
+        {
+            if (!lockedRelatedPayments.Add(id)) return;
+            await lease.LockPaymentAsync(id, ct);
+            if (await PaymentCreditInvariantScope.IsCancellationProtectedAsync(db, id, ct)) throw new CancellationProtectedPaymentException();
+        }
         public Task<bool> KeepsAppliedCreditAsync(CancellationToken ct) => credit.KeepsAppliedCreditAsync(ct);
-        public void Dispose() => credit.Dispose();
+        public void Dispose() { credit.Dispose(); lockedRelatedPayments.Clear(); }
     }
 
+    private sealed class CancellationProtectedPaymentException : Exception;
+
     private async Task<IActionResult> RunPaymentWriteAsync(int id,
-        Func<PaymentWriteScope, Task<IActionResult>> write, CancellationToken ct)
+        Func<PaymentWriteScope, Task<IActionResult>> write, CancellationToken ct, bool allowClosedMetadata = false, bool deleting = false)
     {
         var actorId = User.GetUserId();
         if (User?.Identity?.IsAuthenticated != true || actorId is not > 0) return Unauthorized();
@@ -179,18 +189,26 @@ public class PaymentsController : ControllerBase
             if (_db.Database.IsNpgsql()) await _db.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '2s'", ct);
             if (!await _db.Users.AsNoTracking().AnyAsync(user => user.Id == actorId.Value && user.IsActive && user.IsApproved, ct))
                 return Unauthorized();
-            if (await RequirePaymentsEditAsync(ct) is { } forbidden) return forbidden;
+            var forbidden = deleting ? await RequirePaymentsPermissionAsync(permission => permission.CanDelete, ct) : await RequirePaymentsEditAsync(ct);
+            if (forbidden is not null) return forbidden;
             var visibility = await ResolvePaymentsVisibilityAsync(ct);
             if (visibility is null) return AccessDenied();
             if (!await CanAccessPaymentAsync(id, visibility, ct)) return NotFound();
             await lease.LockPaymentAsync(id, ct);
+            scope.CancellationProtected = await PaymentCreditInvariantScope.IsCancellationProtectedAsync(_db, id, ct);
+            if (scope.CancellationProtected && !allowClosedMetadata)
+                return BadRequest(new { message = PaymentCreditInvariantScope.CancellationProtectedMessage });
             result = await write(scope);
-            if (result is OkObjectResult)
+            if (result is OkObjectResult or NoContentResult)
             {
-                if (!await scope.KeepsAppliedCreditAsync(ct))
+                if (!scope.ClosedReceiptMetadataOnly && !await scope.KeepsAppliedCreditAsync(ct))
                     return BadRequest(new { message = PaymentCreditInvariantScope.RejectionMessage });
                 await lease.CommitAsync(ct);
             }
+        }
+        catch (CancellationProtectedPaymentException)
+        {
+            return BadRequest(new { message = PaymentCreditInvariantScope.CancellationProtectedMessage });
         }
         catch (Exception error) when (BalanceApplicationLease.IsConflict(error)
             && (lease?.CommitStarted != true || BalanceApplicationLease.IsDefiniteDatabaseAbort(error)))
@@ -773,7 +791,7 @@ public class PaymentsController : ControllerBase
 
     [HttpPut("{id:int}")]
     public Task<IActionResult> Update(int id, [FromBody] Payment model, CancellationToken ct)
-        => RunPaymentWriteAsync(id, scope => UpdateCoreAsync(id, model, scope, ct), ct);
+        => RunPaymentWriteAsync(id, scope => UpdateCoreAsync(id, model, scope, ct), ct, allowClosedMetadata: true);
 
     private async Task<IActionResult> UpdateCoreAsync(int id, Payment model, PaymentWriteScope scope, CancellationToken ct)
     {
@@ -797,6 +815,7 @@ public class PaymentsController : ControllerBase
 
         var e = await _db.Payments.FindAsync(id);
         if (e is null) return NotFound();
+        if (scope.CancellationProtected) return await UpdateClosedReceiptMetadataAsync(e, model, scope, ct);
         if (InvoiceManagedPaymentRules.IsInvoiceManagedPayment(e))
         {
             return Conflict(new { message = InvoiceManagedPaymentRules.UpdateBlockedMessage });
@@ -996,6 +1015,44 @@ public class PaymentsController : ControllerBase
         };
         return Ok(e);
     }
+
+    private async Task<IActionResult> UpdateClosedReceiptMetadataAsync(Payment current, Payment model, PaymentWriteScope scope, CancellationToken ct)
+    {
+        if (await ValidateInvoiceLinkAccessAsync(current, ct) is { } invalidInvoice) return invalidInvoice;
+        if (current.DocumentKind != DocumentKind.Payment || InvoiceManagedPaymentRules.IsInvoiceManagedPayment(current)
+            || HasClosedReceiptFinancialChanges(current, model)
+            || (!string.IsNullOrEmpty(model.SystemNotes) && model.SystemNotes != current.SystemNotes))
+            return BadRequest(new { message = PaymentCreditInvariantScope.CancellationProtectedMessage });
+
+        // This path deliberately saves only ordinary receipt annotations. Running
+        // normalization, balance/cash synchronization or invoice refresh here could
+        // change historical money and dates even when only a note was submitted.
+        current.Description = model.Description ?? string.Empty;
+        current.Notes = model.Notes ?? string.Empty;
+        await _db.SaveChangesAsync(ct);
+        scope.ClosedReceiptMetadataOnly = true;
+        scope.AfterCommit = () => { PopulateAuditMetadata(_db, current); return Task.CompletedTask; };
+        return Ok(current);
+    }
+
+    private static bool HasClosedReceiptFinancialChanges(Payment current, Payment model)
+        => current.Amount != model.Amount || current.PaidAmount != model.PaidAmount || current.Type != model.Type || current.Status != model.Status
+            || current.InvoiceId != model.InvoiceId || current.DocumentKind != (model.DocumentKind == default ? DocumentKind.Payment : model.DocumentKind)
+            || current.ClientId != model.ClientId || current.LegalEntityId != model.LegalEntityId
+            || current.ExpenseClientId != model.ExpenseClientId || current.ExpenseLegalEntityId != model.ExpenseLegalEntityId
+            || current.ClientCaseId != model.ClientCaseId || current.ContractId != model.ContractId
+            || current.DealTypeId != model.DealTypeId || current.IncomeTypeId != model.IncomeTypeId || current.ServiceId != model.ServiceId
+            || current.PaymentSourceId != model.PaymentSourceId || current.PaymentStatusId != model.PaymentStatusId
+            || current.Date.Date != model.Date.Date
+            || (current.PlannedDate == default ? current.Date.Date : current.PlannedDate.Date)
+                != (model.PlannedDate == default ? (current.PlannedDate == default ? current.Date.Date : current.PlannedDate.Date) : model.PlannedDate.Date)
+            || current.PaidDate?.Date != model.PaidDate?.Date
+            || current.LastPaymentDate?.Date != (model.LastPaymentDate ?? model.PaidDate ?? current.LastPaymentDate)?.Date
+            || Normalize(current.Account) != Normalize(model.Account) || current.AccountDate?.Date != model.AccountDate?.Date
+            || Normalize(current.PaymentOrderNumber) != Normalize(model.PaymentOrderNumber) || current.PaymentDocumentDate?.Date != model.PaymentDocumentDate?.Date
+            || current.AdvanceReviewStatus != model.AdvanceReviewStatus || Normalize(current.AdvanceReviewReason) != Normalize(model.AdvanceReviewReason)
+            || current.OverpaymentHandling != model.OverpaymentHandling || current.OverpaymentTargetPaymentId != model.OverpaymentTargetPaymentId
+            || Normalize(current.OverpaymentComment) != Normalize(model.OverpaymentComment);
 
     [HttpPost("{id:int}/status")]
     public Task<IActionResult> UpdateStatus(int id, [FromBody] UpdatePaymentStatusRequest request, CancellationToken ct)
@@ -4844,7 +4901,10 @@ public class PaymentsController : ControllerBase
     }
 
     [HttpDelete("{id:int}")]
-    public async Task<IActionResult> Delete(int id, CancellationToken ct)
+    public Task<IActionResult> Delete(int id, CancellationToken ct)
+        => RunPaymentWriteAsync(id, _ => DeleteCoreAsync(id, ct), ct, deleting: true);
+
+    private async Task<IActionResult> DeleteCoreAsync(int id, CancellationToken ct)
     {
         if (await RequirePaymentsPermissionAsync(permission => permission.CanDelete, ct) is { } forbidden)
         {
@@ -4887,6 +4947,9 @@ public class PaymentsController : ControllerBase
         {
             return Conflict(new { message = InvoiceManagedPaymentRules.DeleteBlockedMessage });
         }
+
+        if (await _db.ClientBalanceTransactions.AsNoTracking().AnyAsync(item => item.PaymentId == payment.Id, ct))
+            return BadRequest(new { message = "По платежу есть история баланса. Удаление скрыло бы её основание; требуется сверка истории." });
 
         var invoiceId = payment.InvoiceId;
         _db.Payments.Remove(payment);

@@ -10,6 +10,7 @@ public static class ClientBalanceService
 {
     private const decimal AmountEpsilon = 0.009m;
     private const int DescriptionMaxLength = 500;
+    internal const string CancelledInvoiceRefundComment = "Возврат оплаты при аннулировании счёта.";
 
     public static Task<decimal> GetBalanceAsync(PaymentContext db, int clientId, CancellationToken ct = default)
         => GetBalanceAsync(db, clientId, null, ct);

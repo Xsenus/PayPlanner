@@ -48,7 +48,6 @@ public class InvoicesController : ControllerBase
     private readonly IYandexDiskService? _yandexDiskService;
     private readonly INotificationService? _notificationService;
     private const string InstallmentPaymentMarker = "[pp:installment-payment]";
-    private const string InvoiceCancellationRefundComment = "Возврат оплаты при аннулировании счёта.";
     private const string ExistingCancellationCompensationMessage = "По счёту уже есть аванс или возврат при аннулировании. Сначала сверьте историю отмены; прежние операции не изменены.";
     private static readonly CultureInfo RuCulture = CultureInfo.GetCultureInfo("ru-RU");
     private static readonly JsonSerializerOptions InstallmentMetadataJsonOptions = new()
@@ -1302,7 +1301,7 @@ public class InvoicesController : ControllerBase
         if (await _db.ClientBalanceTransactions.AsNoTracking().AnyAsync(item => item.ExternalKey == key
             || item.Type == ClientBalanceTransactionType.AdvanceFromCancelledInvoice && (item.PaymentId == paymentId || item.InvoiceId == invoiceId), ct)) return true;
         return await _db.MoneyOperations.AsNoTracking().AnyAsync(item => item.LinkedInvoiceId == invoiceId
-            && item.Direction == MoneyOperationDirection.Expense && item.MatchComment == InvoiceCancellationRefundComment, ct);
+            && item.Direction == MoneyOperationDirection.Expense && item.MatchComment == ClientBalanceService.CancelledInvoiceRefundComment, ct);
     }
 
     private async Task CancelLinkedActsAsync(Payment invoicePayment, string reason, DateTime now, int? actorId, CancellationToken ct)
@@ -5628,7 +5627,7 @@ public class InvoicesController : ControllerBase
             LinkedInvoiceId = invoiceEntityId,
             MatchStatus = MoneyOperationMatchStatus.Matched,
             MatchedAt = now,
-            MatchComment = InvoiceCancellationRefundComment,
+            MatchComment = ClientBalanceService.CancelledInvoiceRefundComment,
             CreatedAt = now,
         };
 
