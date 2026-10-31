@@ -106,6 +106,7 @@ internal static class VersionedPaymentWriteBoundary
                 return null;
             }
         }
+        catch (BalanceSourceHistoryException error) { return controller.BadRequest(new { message = error.Message }); }
         catch (Exception error) when (BalanceApplicationLease.IsConflict(error)
             && (lease?.CommitStarted != true || BalanceApplicationLease.IsDefiniteDatabaseAbort(error)))
         { return controller.Conflict(new { message = "Платёж или права изменились параллельно. Обновите данные и повторите действие." }); }

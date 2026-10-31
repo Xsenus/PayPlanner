@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services.Payments;
 
 namespace PayPlanner.Api.Services;
 
@@ -43,13 +44,19 @@ public static class ClientBalanceService
     {
         if (!HasValidCounterpartyOwner(payment) || payment.Type != PaymentType.Income)
         {
+            if (await BalanceSourceMutationRules.LoadAsync(db, payment.Id, BuildPaymentOverpaymentKey(payment.Id), ct) is not null)
+                throw new BalanceSourceHistoryException();
             return;
         }
 
         var overpaymentAmount = NormalizeAmount(rawPaidAmount - payment.Amount);
         var externalKey = BuildPaymentOverpaymentKey(payment.Id);
-        var existing = await db.ClientBalanceTransactions
-            .FirstOrDefaultAsync(item => item.ExternalKey == externalKey, ct);
+        var existing = await BalanceSourceMutationRules.LoadAsync(db, payment.Id, externalKey, ct);
+        if (existing is not null)
+        {
+            await BalanceSourceMutationRules.ValidateAsync(db, existing, payment, ClientBalanceTransactionType.Overpayment, Math.Max(0m, overpaymentAmount), ct);
+            if (overpaymentAmount > AmountEpsilon && Math.Abs(existing.Amount - overpaymentAmount) <= AmountEpsilon) return;
+        }
 
         if (overpaymentAmount <= AmountEpsilon)
         {
@@ -317,13 +324,24 @@ public static class ClientBalanceService
     {
         if (!HasValidCounterpartyOwner(payment) || payment.Type != PaymentType.Income)
         {
+            if (await BalanceSourceMutationRules.LoadAsync(db, payment.Id, BuildUnallocatedAdvanceKey(payment.Id), ct) is not null)
+                throw new BalanceSourceHistoryException();
             return;
         }
 
         var amount = NormalizeAmount(requestedAmount);
         var externalKey = BuildUnallocatedAdvanceKey(payment.Id);
-        var existing = await db.ClientBalanceTransactions
-            .FirstOrDefaultAsync(item => item.ExternalKey == externalKey, ct);
+        var existing = await BalanceSourceMutationRules.LoadAsync(db, payment.Id, externalKey, ct);
+        if (existing is not null)
+        {
+            await BalanceSourceMutationRules.ValidateAsync(db, existing, payment, ClientBalanceTransactionType.UnallocatedAdvance, Math.Max(0m, amount), ct);
+            if (amount > AmountEpsilon && Math.Abs(existing.Amount - amount) <= AmountEpsilon) return;
+        }
+        else if (amount > AmountEpsilon
+            && await PaymentBalanceHistoryRules.ValidateAdvanceCreditAsync(db, payment, amount, ct) is not null)
+        {
+            throw new BalanceSourceHistoryException();
+        }
 
         if (amount <= AmountEpsilon)
         {
@@ -373,10 +391,10 @@ public static class ClientBalanceService
     public static async Task RemoveUnallocatedAdvanceAsync(PaymentContext db, int paymentId, CancellationToken ct = default)
     {
         var externalKey = BuildUnallocatedAdvanceKey(paymentId);
-        var existing = await db.ClientBalanceTransactions
-            .FirstOrDefaultAsync(item => item.ExternalKey == externalKey, ct);
+        var existing = await BalanceSourceMutationRules.LoadAsync(db, paymentId, externalKey, ct);
         if (existing is not null)
         {
+            await BalanceSourceMutationRules.ValidateAsync(db, existing, null, ClientBalanceTransactionType.UnallocatedAdvance, 0m, ct);
             db.ClientBalanceTransactions.Remove(existing);
         }
     }
@@ -397,6 +415,12 @@ public static class ClientBalanceService
             return (false, "Вернуть можно только платеж, принятый как нераспределенный аванс.", 0m);
         }
 
+        var externalKey = BuildUnallocatedAdvanceRefundKey(payment.Id);
+        if (await BalanceSourceMutationRules.LoadAsync(db, payment.Id, externalKey, ct) is not null)
+            return (false, "Возврат уже есть в истории. Повторное изменение требует сверки истории.", 0m);
+        var sourceCredit = await BalanceSourceMutationRules.LoadAsync(db, payment.Id, BuildUnallocatedAdvanceKey(payment.Id), ct);
+        if (sourceCredit is null) return (false, "Основание аванса не подтверждено; требуется сверка истории.", 0m);
+        await BalanceSourceMutationRules.ValidateAsync(db, sourceCredit, payment, ClientBalanceTransactionType.UnallocatedAdvance, sourceCredit.Amount, ct);
         var available = await GetUnallocatedAdvanceAvailableAmountAsync(db, payment.Id, payment.ClientId, payment.LegalEntityId, ct);
         if (available <= AmountEpsilon)
         {
@@ -407,43 +431,26 @@ public static class ClientBalanceService
         if (available > balance + AmountEpsilon)
             return (false, "Общий остаток баланса уже использован. Возврат этого аванса требует сверки распределения оплаты.", 0m);
 
-        var externalKey = BuildUnallocatedAdvanceRefundKey(payment.Id);
-        var existing = await db.ClientBalanceTransactions
-            .FirstOrDefaultAsync(item => item.ExternalKey == externalKey, ct);
-
         var actor = httpContext?.User.GetDisplayName();
         var actorUserId = httpContext?.User.GetUserId();
         var refundDescription = string.IsNullOrWhiteSpace(description)
             ? $"Возврат нераспределенного аванса по платежу #{payment.Id}"
             : description.Trim();
 
-        if (existing is null)
+        db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
         {
-            db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
-            {
-                ClientId = payment.ClientId,
-                LegalEntityId = payment.LegalEntityId,
-                PaymentId = payment.Id,
-                Amount = available,
-                Type = ClientBalanceTransactionType.Refund,
-                Direction = ClientBalanceDirection.Debit,
-                Description = refundDescription,
-                ExternalKey = externalKey,
-                CreatedAt = utcNow,
-                CreatedByUserId = actorUserId,
-                CreatedByUserName = actor,
-            });
-        }
-        else
-        {
-            existing.ClientId = payment.ClientId;
-            existing.LegalEntityId = payment.LegalEntityId;
-            existing.PaymentId = payment.Id;
-            existing.Amount = available;
-            existing.Type = ClientBalanceTransactionType.Refund;
-            existing.Direction = ClientBalanceDirection.Debit;
-            existing.Description = refundDescription;
-        }
+            ClientId = payment.ClientId,
+            LegalEntityId = payment.LegalEntityId,
+            PaymentId = payment.Id,
+            Amount = available,
+            Type = ClientBalanceTransactionType.Refund,
+            Direction = ClientBalanceDirection.Debit,
+            Description = refundDescription,
+            ExternalKey = externalKey,
+            CreatedAt = utcNow,
+            CreatedByUserId = actorUserId,
+            CreatedByUserName = actor,
+        });
 
         return (true, null, available);
     }

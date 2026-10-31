@@ -213,6 +213,10 @@ public class PaymentsController : ControllerBase
         {
             return BadRequest(new { message = PaymentCreditInvariantScope.CancellationProtectedMessage });
         }
+        catch (BalanceSourceHistoryException error)
+        {
+            return BadRequest(new { message = error.Message });
+        }
         catch (Exception error) when (BalanceApplicationLease.IsConflict(error)
             && (lease?.CommitStarted != true || BalanceApplicationLease.IsDefiniteDatabaseAbort(error)))
         {
