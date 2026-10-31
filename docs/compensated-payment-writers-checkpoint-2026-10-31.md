@@ -1,5 +1,7 @@
 # Защита компенсированных платежей — 31 октября 2026
 
+Продолжение: [V1/V2 create/update/delete](versioned-payment-writers-checkpoint-2026-10-31.md) — 194 адресных успешных сценариев составно, включая 28 native PostgreSQL; основной Create и остальные писатели остаются в очереди.
+
 База `6a531c39`, ветка `feature/company-image-sequencing`. Продолжение [истории отмены](invoice-cancellation-history-checkpoint-2026-10-31.md). Итог этапа: **255 разных успешных адресных сценариев составно**, включая **23 native PostgreSQL**. Это не полный backend/CI и не закрытие всего финансового блока.
 
 ## Реализация и границы

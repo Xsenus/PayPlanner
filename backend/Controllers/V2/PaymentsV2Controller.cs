@@ -9,6 +9,7 @@ using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Payments;
 using PayPlanner.Api.Services.Notifications;
 
 namespace PayPlanner.Api.Controllers.V2;
@@ -432,13 +433,12 @@ public class PaymentsV2Controller : ControllerBase
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] Payment model, CancellationToken ct = default)
-    {
-        if (await RequirePaymentsPermissionAsync(permission => permission.CanCreate, ct) is { } forbidden)
-        {
-            return forbidden;
-        }
+    public Task<IActionResult> Create([FromBody] Payment model, CancellationToken ct = default)
+        => VersionedPaymentWriteBoundary.RunAsync(this, _db, null, model, creating: true, deleting: false, changesInvoice: false,
+            scope => CreateCoreAsync(model, scope, ct), ct);
 
+    private async Task<IActionResult> CreateCoreAsync(Payment model, VersionedPaymentWriteBoundary.Scope scope, CancellationToken ct)
+    {
         if (model.IncomeTypeId.HasValue)
         {
             var incomeType = await _db.IncomeTypes.AsNoTracking()
@@ -470,26 +470,17 @@ public class PaymentsV2Controller : ControllerBase
         await PaymentAdvanceReviewService.SyncBalanceAsync(_db, model, now, HttpContext, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, model, now, ct);
         await _db.SaveChangesAsync(ct);
-        await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, model, now, _notificationService, ct);
+        scope.AfterCommit = () => PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, model, now, _notificationService, ct);
         return Created($"/api/v2/payments/{model.Id}", model);
     }
 
     [HttpPut("{id:int}")]
-    public async Task<IActionResult> Update(int id, [FromBody] Payment model, CancellationToken ct = default)
+    public Task<IActionResult> Update(int id, [FromBody] Payment model, CancellationToken ct = default)
+        => VersionedPaymentWriteBoundary.RunAsync(this, _db, id, model, creating: false, deleting: false, changesInvoice: true,
+            scope => UpdateCoreAsync(id, model, scope, ct), ct);
+
+    private async Task<IActionResult> UpdateCoreAsync(int id, Payment model, VersionedPaymentWriteBoundary.Scope scope, CancellationToken ct)
     {
-        if (await RequirePaymentsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
-        {
-            return forbidden;
-        }
-
-        var visibility = await ResolvePaymentsVisibilityAsync(ct);
-        if (visibility is null) return MissingPaymentsVisibilityResult();
-        var canAccessPayment = await _db.Payments
-            .AsNoTracking()
-            .ApplyPaymentVisibility(visibility)
-            .AnyAsync(payment => payment.Id == id, ct);
-        if (!canAccessPayment) return NotFound();
-
         var entity = await _db.Payments.FindAsync(id);
         if (entity is null) return NotFound();
         if (InvoiceManagedPaymentRules.IsInvoiceManagedPayment(entity))
@@ -638,26 +629,17 @@ public class PaymentsV2Controller : ControllerBase
         }
 
         await _db.SaveChangesAsync(ct);
-        await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, entity, now, _notificationService, ct);
+        scope.AfterCommit = () => PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, entity, now, _notificationService, ct);
         return Ok(entity);
     }
 
     [HttpDelete("{id:int}")]
-    public async Task<IActionResult> Delete(int id, CancellationToken ct = default)
+    public Task<IActionResult> Delete(int id, CancellationToken ct = default)
+        => VersionedPaymentWriteBoundary.RunAsync(this, _db, id, null, creating: false, deleting: true, changesInvoice: false,
+            scope => DeleteCoreAsync(id, scope, ct), ct);
+
+    private async Task<IActionResult> DeleteCoreAsync(int id, VersionedPaymentWriteBoundary.Scope scope, CancellationToken ct)
     {
-        if (await RequirePaymentsPermissionAsync(permission => permission.CanDelete, ct) is { } forbidden)
-        {
-            return forbidden;
-        }
-
-        var visibility = await ResolvePaymentsVisibilityAsync(ct);
-        if (visibility is null) return MissingPaymentsVisibilityResult();
-        var canAccessPayment = await _db.Payments
-            .AsNoTracking()
-            .ApplyPaymentVisibility(visibility)
-            .AnyAsync(payment => payment.Id == id, ct);
-        if (!canAccessPayment) return NotFound();
-
         var entity = await _db.Payments.FindAsync(id);
         if (entity is null) return NotFound();
         if (

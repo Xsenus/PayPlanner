@@ -2072,6 +2072,7 @@ public class PaymentsControllerTests
         await db.SaveChangesAsync();
 
         var controller = new PaymentsV2Controller(db);
+        await AuthenticatePaymentWriterAsync(db, controller);
         var updateModel = new Payment
         {
             Amount = payment.Amount,
@@ -2118,6 +2119,7 @@ public class PaymentsControllerTests
         await db.SaveChangesAsync();
 
         var controller = new PaymentsV2Controller(db);
+        await AuthenticatePaymentWriterAsync(db, controller);
         var linkedPayment = CreatePayment(invoice.Date.AddDays(1), 4_000m, "V2 linked payment");
         linkedPayment.ClientId = client.Id;
         linkedPayment.InvoiceId = invoice.Id;
@@ -2166,6 +2168,7 @@ public class PaymentsControllerTests
         await db.SaveChangesAsync();
 
         var controller = new PaymentsV2Controller(db);
+        await AuthenticatePaymentWriterAsync(db, controller);
         var update = CreatePayment(linkedPayment.Date, linkedPayment.Amount, linkedPayment.Description);
         update.ClientId = client.Id;
         update.Status = PaymentStatus.Completed;
