@@ -39,6 +39,7 @@ internal static class VersionedPaymentWriteBoundary
             if (visibility is null) return controller.Forbid();
             if (creating && model is not null && PaymentCreateInputRules.Validate(db, model) is { } inputError)
                 return controller.BadRequest(new { message = inputError });
+            if (creating && model is not null) PaymentCreateInputRules.InitializeServerFields(model);
             Payment? current = null;
             Payment? original = null;
             if (id.HasValue)

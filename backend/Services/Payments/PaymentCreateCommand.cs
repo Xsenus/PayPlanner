@@ -71,6 +71,10 @@ public static class PaymentCreateCommand
         ["documentKind"] = FieldKind.PaymentKind,
     };
 
+    // The legacy entity endpoint shares the logical input allowlist without
+    // weakening this protocol's field validation or canonical request identity.
+    internal static IEnumerable<string> InputPropertyNames => Fields.Keys;
+
     private static readonly string[] RequiredFields =
     [
         "date", "plannedDate", "amount", "paidAmount", "type", "status",

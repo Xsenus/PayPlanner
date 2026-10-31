@@ -211,7 +211,7 @@ public sealed class PaymentCreateGraphTests
             balanceCount = await db.ClientBalanceTransactions.CountAsync()
         });
 
-    private static TestServer Server(PaymentContext db, Fixture fixture) => new(new WebHostBuilder()
+    internal static TestServer Server(PaymentContext db, Fixture fixture) => new(new WebHostBuilder()
         .UseEnvironment("Testing").UseSetting("BackgroundServices:Enabled", "false").UseSetting("Email:Enabled", "false")
         .ConfigureServices(services =>
         {
