@@ -11,9 +11,10 @@ type Props = {
   busy: boolean;
   begin: (entry: PendingBalanceApplication) => DocumentDeliveryOperation | null;
   adopt: (value: ReadyBalanceApplication, current: () => boolean) => Promise<boolean>;
+  onAcknowledged?: (value: ReadyBalanceApplication, current: () => boolean) => Promise<void>;
 };
 
-export function BalanceApplicationRecovery({ pending, context, canResolve, busy, begin, adopt }: Props) {
+export function BalanceApplicationRecovery({ pending, context, canResolve, busy, begin, adopt, onAcknowledged }: Props) {
   const owner = useDocumentDeliveryOwner(JSON.stringify([context, canResolve]));
   const running = useRef<DocumentDeliveryOperation | null>(null);
   const [message, setMessage] = useState<{ scope: string; requestId: string; error: boolean; text: string } | null>(null);
@@ -32,6 +33,7 @@ export function BalanceApplicationRecovery({ pending, context, canResolve, busy,
       if (!current() || !apiService.canContinueBalanceApplication(value)) return;
       if (!await adopt(value, current) || !current() || !apiService.canContinueBalanceApplication(value)) return;
       if (!await apiService.acknowledgeBalanceApplication(value) || !current()) return;
+      if (onAcknowledged) { await onAcknowledged(value, current); if (!current()) return; }
       setMessage({ scope: owner.scope, requestId: entry.requestId, error: false, text: value.state === 'Cancelled'
         ? 'Попытка закрыта без зачёта. Теперь можно выполнить новый зачёт.'
         : 'Зачёт подтверждён. Оплата платежа и доступный баланс обновлены.' });

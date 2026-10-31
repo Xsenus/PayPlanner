@@ -6068,12 +6068,12 @@ export class ApiService {
     return this.request<ClientCaseFinanceSummary[]>(`/legal-entities/${id}/case-finance-summaries`);
   }
 
-  async getClientBalance(id: number) {
-    return this.request<ClientBalanceSummary>(`/clients/${id}/balance`);
+  async getClientBalance(id: number, options?: { signal?: AbortSignal }) {
+    return this.request<ClientBalanceSummary>(`/clients/${id}/balance`, { signal: options?.signal, cache: 'no-store', expectedStatus: 200 });
   }
 
-  async getClientBalanceTransactions(id: number) {
-    return this.request<ClientBalanceTransaction[]>(`/clients/${id}/balance/transactions`);
+  async getClientBalanceTransactions(id: number, options?: { signal?: AbortSignal }) {
+    return this.request<ClientBalanceTransaction[]>(`/clients/${id}/balance/transactions`, { signal: options?.signal, cache: 'no-store', expectedStatus: 200 });
   }
 
   async applyClientBalance(id: number, payload: { paymentId: number; amount: number; description?: string | null; sourcePaymentId?: number | null }) {
@@ -6194,12 +6194,12 @@ export class ApiService {
     return this.cancelBalanceApplication('legalEntity', id, paymentId, requestId, signal);
   }
 
-  async getLegalEntityBalance(id: number) {
-    return this.request<ClientBalanceSummary>(`/legal-entities/${id}/balance`);
+  async getLegalEntityBalance(id: number, options?: { signal?: AbortSignal }) {
+    return this.request<ClientBalanceSummary>(`/legal-entities/${id}/balance`, { signal: options?.signal, cache: 'no-store', expectedStatus: 200 });
   }
 
-  async getLegalEntityBalanceTransactions(id: number) {
-    return this.request<ClientBalanceTransaction[]>(`/legal-entities/${id}/balance/transactions`);
+  async getLegalEntityBalanceTransactions(id: number, options?: { signal?: AbortSignal }) {
+    return this.request<ClientBalanceTransaction[]>(`/legal-entities/${id}/balance/transactions`, { signal: options?.signal, cache: 'no-store', expectedStatus: 200 });
   }
 
   async applyLegalEntityBalance(id: number, payload: { paymentId: number; amount: number; description?: string | null; sourcePaymentId?: number | null }) {

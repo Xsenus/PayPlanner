@@ -4,6 +4,7 @@ import type { Client, LegalEntitySummary, Payment } from '../../types';
 import { requestPaymentAdvanceReviewFilter } from '../../utils/paymentAdvanceReview';
 import { Payments } from './Payments';
 import { PaymentCreateAdoptedError } from '../../services/paymentCreateAttempts';
+import { BALANCE_APPLICATION_CHANGED, type CommittedBalanceApplication } from '../../services/balanceApplicationAttempts';
 
 const { confirmMock, rolePermissionsMock, usePaymentsPagedMock, doc04SavedResults, doc04Errors, doc04ToastError } = vi.hoisted(() => ({
   confirmMock: vi.fn(),
@@ -95,7 +96,14 @@ vi.mock('../../hooks/useTranslation', () => ({
 }));
 
 vi.mock('../../hooks/usePaymentsPaged', () => ({
-  usePaymentsPaged: (params: unknown) => usePaymentsPagedMock(params),
+  usePaymentsPaged: (params: unknown) => {
+    const result = usePaymentsPagedMock(params);
+    return { ...result, refreshOwned: async (current: () => boolean) => {
+      if (!current()) throw new Error('Stale list refresh');
+      await result.refresh();
+      if (!current()) throw new Error('Stale list refresh');
+    } };
+  },
 }));
 
 vi.mock('../../hooks/useDebouncedValue', () => ({
@@ -261,12 +269,32 @@ vi.mock('../../services/api', () => ({
     getLegalEntityBalance: vi.fn(),
     getLegalEntityBalanceTransactions: vi.fn(),
     applyLegalEntityBalance: vi.fn(),
+    applyClientBalanceGuarded: vi.fn(), applyLegalEntityBalanceGuarded: vi.fn(),
+    pendingBalanceApplications: vi.fn(() => []), canContinueBalanceApplication: vi.fn(() => true),
+    acknowledgeBalanceApplication: vi.fn(async () => true), inspectPendingBalanceApplication: vi.fn(),
+    cancelPendingBalanceApplication: vi.fn(), openAcknowledgedBalanceApplication: vi.fn(),
     getPartialPaymentRemainderCandidates: vi.fn(),
     transferExistingPaymentRemainder: vi.fn(),
   },
 }));
 
 import { apiService } from '../../services/api';
+
+function allocationResult(target: Payment, amount: number, kind: 'client' | 'legalEntity', ownerId: number): CommittedBalanceApplication {
+  const requestId = '11111111-1111-4111-8111-111111111111';
+  return { state: 'Committed', requestId, appliedAmount: amount, balance: 0, operationBalance: 0, isReplay: false,
+    canonicalPayment: { ...target, paidAmount: (target.paidAmount ?? 0) + amount },
+    attempt: { version: 'balance-application-v1', actorId: 7, apiScope: '/api', kind, ownerId, paymentId: target.id,
+      requestId, commandSha256: 'a'.repeat(64), createdAtUtc: '2026-10-31T00:00:00.000Z' } };
+}
+function persistAllocation(value: CommittedBalanceApplication) {
+  vi.mocked(apiService.pendingBalanceApplications).mockReturnValue([value.attempt]);
+  window.dispatchEvent(new Event(BALANCE_APPLICATION_CHANGED));
+  vi.mocked(apiService.acknowledgeBalanceApplication).mockImplementation(async () => {
+    vi.mocked(apiService.pendingBalanceApplications).mockReturnValue([]); window.dispatchEvent(new Event(BALANCE_APPLICATION_CHANGED)); return true;
+  });
+  return value;
+}
 
 describe('Payments integration', () => {
   beforeEach(() => {
@@ -283,6 +311,7 @@ describe('Payments integration', () => {
         canEdit: true,
         canDelete: true,
         canExport: true,
+        viewScope: 'all',
       },
     });
     vi.mocked(apiService.getPayment).mockReset();
@@ -304,6 +333,14 @@ describe('Payments integration', () => {
     vi.mocked(apiService.getLegalEntityBalance).mockReset();
     vi.mocked(apiService.getLegalEntityBalanceTransactions).mockReset();
     vi.mocked(apiService.applyLegalEntityBalance).mockReset();
+    vi.mocked(apiService.applyClientBalanceGuarded).mockReset();
+    vi.mocked(apiService.applyLegalEntityBalanceGuarded).mockReset();
+    vi.mocked(apiService.pendingBalanceApplications).mockReset().mockReturnValue([]);
+    vi.mocked(apiService.canContinueBalanceApplication).mockReset().mockReturnValue(true);
+    vi.mocked(apiService.acknowledgeBalanceApplication).mockReset().mockResolvedValue(true);
+    vi.mocked(apiService.inspectPendingBalanceApplication).mockReset();
+    vi.mocked(apiService.cancelPendingBalanceApplication).mockReset();
+    vi.mocked(apiService.openAcknowledgedBalanceApplication).mockReset();
     vi.mocked(apiService.getPartialPaymentRemainderCandidates).mockReset();
     vi.mocked(apiService.transferExistingPaymentRemainder).mockReset();
     vi.mocked(apiService.exportPaymentsCsv).mockResolvedValue({
@@ -942,6 +979,42 @@ describe('Payments integration', () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
+  it('does not open or read a shared balance when payment visibility is limited to own records', async () => {
+    rolePermissionsMock.mockReturnValue({ payments: { canView: true, canCreate: true, canEdit: true, canDelete: true, canExport: true, viewScope: 'own' } });
+    usePaymentsPagedMock.mockReturnValue({ ...paymentsPagedResult, payments: [{ id: 901, amount: 80, paidAmount: 80,
+      type: 'Income', status: 'Completed', clientId: 12, description: 'Аванс', advanceReviewStatus: 'AcceptedAsAdvance' } as Payment], total: 1 });
+    render(<Payments />); fireEvent.click(screen.getByRole('button', { name: 'allocate-advance-901' }));
+    expect(screen.queryByRole('dialog', { name: 'Распределить аванс' })).toBeNull();
+    expect(apiService.getClientBalance).not.toHaveBeenCalled(); expect(apiService.applyClientBalanceGuarded).not.toHaveBeenCalled();
+  });
+
+  it.each(['client', 'legalEntity'] as const)('recovers a %s balance application from the journal when the source and fully paid target are absent', async kind => {
+    const target = { id: 902, amount: 100, paidAmount: 100, status: 'Completed', type: 'Income', isPaid: true,
+      ...(kind === 'client' ? { clientId: 12, legalEntityId: null } : { clientId: null, legalEntityId: 77 }) } as Payment;
+    const value = allocationResult(target, 25, kind, kind === 'client' ? 12 : 77); const refresh = vi.fn().mockResolvedValue(undefined);
+    usePaymentsPagedMock.mockReturnValue({ ...paymentsPagedResult, payments: [], refresh });
+    vi.mocked(apiService.pendingBalanceApplications).mockReturnValue([value.attempt]);
+    vi.mocked(apiService.inspectPendingBalanceApplication).mockResolvedValue(value);
+    vi.mocked(apiService.acknowledgeBalanceApplication).mockImplementation(async () => {
+      vi.mocked(apiService.pendingBalanceApplications).mockReturnValue([]); window.dispatchEvent(new Event(BALANCE_APPLICATION_CHANGED)); return true;
+    });
+    render(<Payments />); fireEvent.click(await screen.findByRole('button', { name: 'Проверить зачёт' }));
+    await screen.findByText('Зачёт подтверждён. Оплата платежа и доступный баланс обновлены.');
+    expect(apiService.inspectPendingBalanceApplication).toHaveBeenCalledWith(value.attempt); expect(refresh).toHaveBeenCalledOnce();
+    expect(apiService.acknowledgeBalanceApplication).toHaveBeenCalledWith(value);
+    expect(apiService.applyClientBalanceGuarded).not.toHaveBeenCalled(); expect(apiService.applyLegalEntityBalanceGuarded).not.toHaveBeenCalled();
+  });
+
+  it('closes a cancelled attempt from the journal without a financial refresh or new allocation', async () => {
+    const value = allocationResult({ id: 902, clientId: 12, type: 'Income', amount: 100, paidAmount: 15 } as Payment, 25, 'client', 12);
+    const refresh = vi.fn().mockResolvedValue(undefined); usePaymentsPagedMock.mockReturnValue({ ...paymentsPagedResult, payments: [], refresh });
+    persistAllocation(value);
+    vi.mocked(apiService.cancelPendingBalanceApplication).mockResolvedValue({ state: 'Cancelled', requestId: value.requestId, attempt: value.attempt });
+    render(<Payments />); fireEvent.click(await screen.findByRole('button', { name: 'Закрыть попытку зачёта' }));
+    await screen.findByText('Попытка закрыта без зачёта. Теперь можно выполнить новый зачёт.'); expect(refresh).not.toHaveBeenCalled();
+    expect(apiService.applyClientBalanceGuarded).not.toHaveBeenCalled(); expect(apiService.applyLegalEntityBalanceGuarded).not.toHaveBeenCalled();
+  });
+
   it('allocates an accepted advance to an open client debt from the payments journal', async () => {
     const refresh = vi.fn().mockResolvedValue(undefined);
     const sourceAdvance = {
@@ -1018,26 +1091,26 @@ describe('Payments integration', () => {
         total: 17_100,
       },
     });
-    vi.mocked(apiService.applyClientBalance).mockResolvedValueOnce({ appliedAmount: 7_100, balance: 0 });
+    vi.mocked(apiService.applyClientBalanceGuarded).mockImplementationOnce(async () => persistAllocation(allocationResult(targetDebt, 7_100, 'client', 12)));
 
     render(<Payments />);
 
     fireEvent.click(screen.getByRole('button', { name: 'allocate-advance-901' }));
 
     expect(await screen.findByRole('dialog', { name: 'Распределить аванс' })).toBeTruthy();
-    expect(apiService.getClientBalance).toHaveBeenCalledWith(12);
-    expect(apiService.getClientBalanceTransactions).toHaveBeenCalledWith(12);
+    expect(apiService.getClientBalance).toHaveBeenCalledWith(12, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(apiService.getClientBalanceTransactions).toHaveBeenCalledWith(12, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(apiService.getPaymentsV2).toHaveBeenCalledWith(expect.objectContaining({
       clientId: 12,
       type: 'Income',
       page: 1,
       pageSize: 100,
-    }));
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Зачесть аванс' }));
 
     await waitFor(() => {
-      expect(apiService.applyClientBalance).toHaveBeenCalledWith(12, {
+      expect(apiService.applyClientBalanceGuarded).toHaveBeenCalledWith(12, {
         paymentId: 902,
         amount: 7_100,
         description: 'Распределение аванса по платежу #901',
@@ -1045,6 +1118,8 @@ describe('Payments integration', () => {
       });
     });
     expect(refresh).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Распределить аванс' })).toBeNull());
+    expect(screen.queryByRole('button', { name: 'Проверить зачёт' })).toBeNull();
   });
 
   it('allocates an accepted legal entity advance through the legal entity balance api', async () => {
@@ -1124,26 +1199,26 @@ describe('Payments integration', () => {
         total: 21_000,
       },
     });
-    vi.mocked(apiService.applyLegalEntityBalance).mockResolvedValueOnce({ appliedAmount: 9_000, balance: 0 });
+    vi.mocked(apiService.applyLegalEntityBalanceGuarded).mockImplementationOnce(async () => persistAllocation(allocationResult(targetDebt, 9_000, 'legalEntity', 77)));
 
     render(<Payments />);
 
     fireEvent.click(screen.getByRole('button', { name: 'allocate-advance-911' }));
 
     expect(await screen.findByRole('dialog', { name: 'Распределить аванс' })).toBeTruthy();
-    expect(apiService.getLegalEntityBalance).toHaveBeenCalledWith(77);
-    expect(apiService.getLegalEntityBalanceTransactions).toHaveBeenCalledWith(77);
+    expect(apiService.getLegalEntityBalance).toHaveBeenCalledWith(77, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(apiService.getLegalEntityBalanceTransactions).toHaveBeenCalledWith(77, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(apiService.getPaymentsV2).toHaveBeenCalledWith(expect.objectContaining({
       legalEntityId: 77,
       type: 'Income',
       page: 1,
       pageSize: 100,
-    }));
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Зачесть аванс' }));
 
     await waitFor(() => {
-      expect(apiService.applyLegalEntityBalance).toHaveBeenCalledWith(77, {
+      expect(apiService.applyLegalEntityBalanceGuarded).toHaveBeenCalledWith(77, {
         paymentId: 912,
         amount: 9_000,
         description: 'Распределение аванса по платежу #911',
@@ -1152,6 +1227,8 @@ describe('Payments integration', () => {
     });
     expect(apiService.applyClientBalance).not.toHaveBeenCalled();
     expect(refresh).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Распределить аванс' })).toBeNull());
+    expect(screen.queryByRole('button', { name: 'Проверить зачёт' })).toBeNull();
   });
 
   it('opens the existing payment modal for invoice-managed payments', async () => {

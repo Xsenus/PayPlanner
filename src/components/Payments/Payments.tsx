@@ -14,7 +14,11 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { usePaymentsPaged } from '../../hooks/usePaymentsPaged';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
-import type { ClientBalanceTransaction, ClientCase, ClientRole, PartialPaymentRemainderCandidate, Payment, PaymentAdvanceReviewDiagnosticsResponse, PaymentAdvanceReviewStatus, PaymentPayload, PaymentStatus } from '../../types';
+import { useDocumentDeliveryOwner } from '../../hooks/useDocumentDeliveryOwner';
+import { AdvanceAllocationModal } from './AdvanceAllocationModal';
+import { BalanceApplicationRecovery } from './BalanceApplicationRecovery';
+import { usePendingBalanceApplications } from '../../hooks/usePendingBalanceApplications';
+import type { ClientCase, ClientRole, PartialPaymentRemainderCandidate, Payment, PaymentAdvanceReviewDiagnosticsResponse, PaymentAdvanceReviewStatus, PaymentPayload, PaymentStatus } from '../../types';
 import { PaymentsTable, type PaymentTableColumnKey } from '../Calendar/PaymentsTable';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import { formatCurrencySmart } from '../../utils/formatters';
@@ -42,6 +46,7 @@ type AdvanceReviewFilter = 'all' | PaymentAdvanceReviewStatus;
 type ClientRoleFilter = 'all' | ClientRole;
 
 const ADVANCE_REVIEW_FILTER_INTENT_KEY = PAYMENT_ADVANCE_REVIEW_FILTER_INTENT_KEY;
+const noAdvanceContext = () => false;
 
 interface PaymentsProps {
   onOpenClient?: (clientId: number, caseId?: number) => void;
@@ -60,20 +65,6 @@ interface PaymentsProps {
 
 type SubmitDTO = PaymentPayload | ({ id: number } & PaymentPayload);
 
-type AdvanceAllocationState = {
-  source: Payment;
-  targets: Payment[];
-  selectedTargetId: number | null;
-  amount: string;
-  balance: number;
-  loading: boolean;
-  submitting: boolean;
-  error: string | null;
-  ownerKind: 'client' | 'legalEntity';
-  ownerId: number;
-  ownerName: string;
-};
-
 const STATUS_ORDER: PaymentStatus[] = ['Pending', 'Processing', 'Overdue', 'Completed', 'Cancelled'];
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
@@ -85,64 +76,6 @@ const PAYMENT_PREVIEW_STATUS_STYLES: Record<PaymentStatus, string> = {
   Processing: 'bg-sky-100 text-sky-700',
   Cancelled: 'bg-slate-200 text-slate-700',
 };
-
-function resolvePaymentOutstandingAmount(payment: Pick<Payment, 'amount' | 'paidAmount' | 'outstandingAmount'>) {
-  if (typeof payment.outstandingAmount === 'number' && Number.isFinite(payment.outstandingAmount)) {
-    return Math.max(payment.outstandingAmount, 0);
-  }
-  const amount = Number(payment.amount ?? 0);
-  const paid = Number(payment.paidAmount ?? 0);
-  return Math.max(amount - Math.min(paid, amount), 0);
-}
-
-function parseMoneyInput(value: string) {
-  const normalized = value.replace(/\s/g, '').replace(',', '.');
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function formatMoneyInput(value: number) {
-  return value > 0 ? String(Number(value.toFixed(2))) : '';
-}
-
-function resolveAdvanceSourceAvailableAmount(transactions: ClientBalanceTransaction[], sourcePaymentId: number) {
-  const appliedPrefix = `payment-unallocated-advance-apply:${sourcePaymentId}:`;
-  const credited = transactions
-    .filter((item) =>
-      item.paymentId === sourcePaymentId &&
-      item.type === 'UnallocatedAdvance' &&
-      item.direction === 'Credit')
-    .reduce((sum, item) => sum + Number(item.amount ?? 0), 0);
-  const applied = transactions
-    .filter((item) =>
-      item.type === 'CreditApplied' &&
-      item.direction === 'Debit' &&
-      Boolean(item.externalKey?.startsWith(appliedPrefix)))
-    .reduce((sum, item) => sum + Number(item.amount ?? 0), 0);
-  return Math.max(Number((credited - applied).toFixed(2)), 0);
-}
-
-function resolveAdvanceOwner(payment: Payment) {
-  const clientId = payment.clientId ?? payment.client?.id ?? 0;
-  if (clientId > 0) {
-    return {
-      kind: 'client' as const,
-      id: clientId,
-      name: payment.client?.name ?? payment.counterpartyName ?? 'Клиент не указан',
-    };
-  }
-
-  const legalEntityId = payment.legalEntityId ?? 0;
-  if (legalEntityId > 0) {
-    return {
-      kind: 'legalEntity' as const,
-      id: legalEntityId,
-      name: payment.legalEntityName ?? payment.counterpartyName ?? 'Юридическое лицо не указано',
-    };
-  }
-
-  return null;
-}
 
 const PAYMENT_COLUMN_CONFIGS = [
   { key: 'date', defaultVisible: true, defaultWidth: 140 },
@@ -377,11 +310,12 @@ export function Payments({
   subtitleKey,
   lockedTypeMessageKey,
 }: PaymentsProps) {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const { confirm } = useDialog();
   const toast = useToast();
   const permissions = useRolePermissions(user?.role?.id);
   const paymentsPermissions = permissions.payments;
+  const canViewSharedBalance = isAdmin?.() === true || (paymentsPermissions.canView && paymentsPermissions.viewScope === 'all');
   const canOpenLinkedClients = permissions.clients?.canView === true;
   const canOpenLinkedCases = permissions.cases?.canView === true;
   const canViewLinkedInvoices = permissions.accounts?.canView === true;
@@ -444,7 +378,8 @@ export function Payments({
   const [statusChangeReason, setStatusChangeReason] = useState('');
   const [statusChangeSubmitting, setStatusChangeSubmitting] = useState(false);
   const [statusChangeError, setStatusChangeError] = useState<string | null>(null);
-  const [advanceAllocation, setAdvanceAllocation] = useState<AdvanceAllocationState | null>(null);
+  const [advanceAllocationSource, setAdvanceAllocationSource] = useState<{ payment: Payment; context: string; revision: number; isCurrent: () => boolean } | null>(null);
+  const allocationRevision = useRef(0);
   const [advanceDiagnosticsQuery, setAdvanceDiagnosticsQuery] = useState('');
   const [advanceDiagnosticsDate, setAdvanceDiagnosticsDate] = useState('');
   const [advanceDiagnosticsAmount, setAdvanceDiagnosticsAmount] = useState('');
@@ -538,6 +473,13 @@ export function Payments({
   const maxAmountValue = useMemo(() => parseAmountInput(maxAmount), [maxAmount]);
   const appliedTypeFilter: TypeFilter = lockType ? (defaultType ?? 'all') : typeFilter;
   const selectedClientIds = useMemo(() => (selectedClientId ? [selectedClientId] : []), [selectedClientId]);
+  const paymentsReadOwner = useDocumentDeliveryOwner(JSON.stringify([user?.id, user?.role?.id, user?.role?.name, paymentsPermissions,
+    fromDate, toDate, selectedCounterpartyKey, clientRoleFilter, selectedCategories, appliedTypeFilter, statusFilter,
+    advanceReviewFilter, minAmountValue, maxAmountValue, debouncedSearch, page, pageSize]));
+  const { capture: capturePaymentsRead, scope: paymentsReadScope } = paymentsReadOwner;
+  const balanceRecoveryOwner = useDocumentDeliveryOwner(JSON.stringify([paymentsReadScope, canViewSharedBalance, paymentsPermissions.canEdit]));
+  const pendingBalance = usePendingBalanceApplications('client', 0, canViewSharedBalance, balanceRecoveryOwner.scope, true);
+  useLayoutEffect(() => { setAdvanceAllocationSource(null); }, [paymentsReadOwner.scope]);
 
   const {
     payments,
@@ -546,6 +488,7 @@ export function Payments({
     loading,
     refreshing,
     refresh,
+    refreshOwned,
     error,
   } = usePaymentsPaged({
     from: fromInputToApiDate(fromDate),
@@ -564,7 +507,8 @@ export function Payments({
     sortDir: 'desc',
     page,
     pageSize,
-  });
+    enabled: paymentsPermissions.canView,
+  }, paymentsReadOwner);
 
   const paymentExportParams = useMemo(
     () => ({
@@ -1409,173 +1353,16 @@ export function Payments({
     [confirm, paymentsPermissions.canEdit, refresh, showPermissionNotice, t, toast],
   );
 
-  const closeAdvanceAllocation = useCallback(() => {
-    setAdvanceAllocation(null);
-  }, []);
-
-  const handleAllocateAdvance = useCallback(
-    async (payment: Payment) => {
-      if (!paymentsPermissions.canEdit) {
-        showPermissionNotice(t('permissionNoEditPayment') ?? 'Недостаточно прав для редактирования платежей.');
-        return;
-      }
-
-      if (payment.advanceReviewStatus !== 'AcceptedAsAdvance') {
-        toast.error('Распределить можно только платеж, принятый как аванс.', 'Платежи');
-        return;
-      }
-
-      const owner = resolveAdvanceOwner(payment);
-      if (!owner) {
-        toast.error('Автоматическое распределение доступно только для авансов клиента или юридического лица.', 'Платежи');
-        return;
-      }
-
-      setAdvanceAllocation({
-        source: payment,
-        targets: [],
-        selectedTargetId: null,
-        amount: '',
-        balance: 0,
-        loading: true,
-        submitting: false,
-        error: null,
-        ownerKind: owner.kind,
-        ownerId: owner.id,
-        ownerName: owner.name,
-      });
-
-      try {
-        const [balanceResponse, paymentsResponse, balanceTransactions] = await Promise.all([
-          owner.kind === 'client'
-            ? apiService.getClientBalance(owner.id)
-            : apiService.getLegalEntityBalance(owner.id),
-          apiService.getPaymentsV2({
-            ...(owner.kind === 'client' ? { clientId: owner.id } : { legalEntityId: owner.id }),
-            type: 'Income',
-            page: 1,
-            pageSize: 100,
-            sortBy: 'date',
-            sortDir: 'asc',
-          }),
-          owner.kind === 'client'
-            ? apiService.getClientBalanceTransactions(owner.id)
-            : apiService.getLegalEntityBalanceTransactions(owner.id),
-        ]);
-
-        const totalBalance = Math.max(Number(balanceResponse.balance ?? 0), 0);
-        const sourceBalance = resolveAdvanceSourceAvailableAmount(balanceTransactions, payment.id);
-        const balance = Math.min(totalBalance, sourceBalance);
-        const targets = (paymentsResponse.items ?? [])
-          .filter((item) =>
-            item.id !== payment.id &&
-            item.status !== 'Completed' &&
-            item.status !== 'Cancelled' &&
-            item.type === 'Income' &&
-            resolvePaymentOutstandingAmount(item) > 0.005)
-          .slice(0, 100);
-        const firstTarget = targets[0] ?? null;
-        const initialAmount = firstTarget
-          ? Math.min(balance, resolvePaymentOutstandingAmount(firstTarget))
-          : 0;
-
-        setAdvanceAllocation({
-          source: payment,
-          targets,
-          selectedTargetId: firstTarget?.id ?? null,
-          amount: formatMoneyInput(initialAmount),
-          balance,
-          loading: false,
-          submitting: false,
-          error: null,
-          ownerKind: owner.kind,
-          ownerId: owner.id,
-          ownerName: owner.name,
-        });
-      } catch (error) {
-        setAdvanceAllocation((current) =>
-          current?.source.id === payment.id
-            ? {
-                ...current,
-                loading: false,
-                error: extractDisplayErrorMessage(error, 'Не удалось загрузить долги клиента для распределения аванса.'),
-              }
-            : current,
-        );
-      }
-    },
-    [paymentsPermissions.canEdit, showPermissionNotice, t, toast],
-  );
-
-  const handleAdvanceAllocationTargetChange = useCallback((targetId: number) => {
-    setAdvanceAllocation((current) => {
-      if (!current) return current;
-      const target = current.targets.find((item) => item.id === targetId) ?? null;
-      const nextAmount = target
-        ? Math.min(current.balance, resolvePaymentOutstandingAmount(target))
-        : 0;
-      return {
-        ...current,
-        selectedTargetId: targetId,
-        amount: formatMoneyInput(nextAmount),
-        error: null,
-      };
-    });
-  }, []);
-
-  const submitAdvanceAllocation = useCallback(async () => {
-    if (!advanceAllocation || advanceAllocation.submitting) return;
-
-    const target = advanceAllocation.targets.find((item) => item.id === advanceAllocation.selectedTargetId) ?? null;
-    if (!target) {
-      setAdvanceAllocation((current) => current ? { ...current, error: 'Выберите платеж, в который нужно зачесть аванс.' } : current);
-      return;
+  const handleAllocateAdvance = useCallback((payment: Payment) => {
+    if (!paymentsPermissions.canEdit || !canViewSharedBalance) {
+      showPermissionNotice(t('permissionNoEditPayment') ?? 'Недостаточно прав для распределения аванса.'); return;
     }
-
-    const amount = parseMoneyInput(advanceAllocation.amount);
-    const outstanding = resolvePaymentOutstandingAmount(target);
-    const maxAmount = Math.min(advanceAllocation.balance, outstanding);
-    if (amount <= 0.005) {
-      setAdvanceAllocation((current) => current ? { ...current, error: 'Укажите сумму зачета.' } : current);
-      return;
+    if (payment.advanceReviewStatus !== 'AcceptedAsAdvance') {
+      toast.error('Распределить можно только платеж, принятый как аванс.', 'Платежи'); return;
     }
-    if (amount > maxAmount + 0.005) {
-      setAdvanceAllocation((current) =>
-        current ? { ...current, error: `Сумма зачета не может быть больше ${formatCurrencySmart(maxAmount).full}.` } : current,
-      );
-      return;
-    }
-
-    try {
-      setAdvanceAllocation((current) => current ? { ...current, submitting: true, error: null } : current);
-      const applyPayload = {
-        paymentId: target.id,
-        amount,
-        description: `Распределение аванса по платежу #${advanceAllocation.source.id}`,
-        sourcePaymentId: advanceAllocation.source.id,
-      };
-      const result = advanceAllocation.ownerKind === 'client'
-        ? await apiService.applyClientBalance(advanceAllocation.ownerId, applyPayload)
-        : await apiService.applyLegalEntityBalance(advanceAllocation.ownerId, applyPayload);
-      toast.success(
-        `Аванс зачтен в платеж #${target.id} на сумму ${formatCurrencySmart(result.appliedAmount ?? amount).full}.`,
-        'Платежи',
-      );
-      setAdvanceAllocation(null);
-      await refresh();
-    } catch (error) {
-      setAdvanceAllocation((current) =>
-        current
-          ? {
-              ...current,
-              submitting: false,
-              error: extractDisplayErrorMessage(error, 'Не удалось распределить аванс.'),
-            }
-          : current,
-      );
-    }
-  }, [advanceAllocation, refresh, toast]);
-
+    const view = capturePaymentsRead(); if (!view) return;
+    setAdvanceAllocationSource({ payment, context: paymentsReadScope, revision: ++allocationRevision.current, isCurrent: view.isCurrent });
+  }, [paymentsPermissions.canEdit, canViewSharedBalance, capturePaymentsRead, paymentsReadScope, showPermissionNotice, t, toast]);
   const openPaymentStatusChange = useCallback((payment: Payment) => {
     if (!paymentsPermissions.canEdit) {
       showPermissionNotice(t('permissionNoEditPayment') ?? 'Недостаточно прав для редактирования платежей.');
@@ -1932,6 +1719,20 @@ export function Payments({
             </div>
           ) : null}
         </div>
+
+        <BalanceApplicationRecovery pending={pendingBalance} context={balanceRecoveryOwner.scope}
+          canResolve={canViewSharedBalance && paymentsPermissions.canEdit} busy={balanceRecoveryOwner.busy}
+          begin={() => {
+            const view = capturePaymentsRead(); if (!view || !canViewSharedBalance || !paymentsPermissions.canEdit) return null;
+            const action = balanceRecoveryOwner.begin('balance-recovery');
+            return action ? { ...action, isCurrent: () => action.isCurrent() && view.isCurrent() } : null;
+          }}
+          adopt={async (value, current) => {
+            if (!current() || !apiService.canContinueBalanceApplication(value)) return false;
+            pendingBalance.adopted(value);
+            if (value.state === 'Committed') await refreshOwned(current);
+            return current() && apiService.canContinueBalanceApplication(value);
+          }} />
 
         <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
           <div className="grid gap-4 xl:grid-cols-[minmax(420px,1fr)_minmax(520px,0.95fr)]">
@@ -2656,141 +2457,20 @@ export function Payments({
         ) : null}
       </div>
 
-      {advanceAllocation ? (
-        <div className="fixed inset-0 z-[1300] flex items-center justify-center bg-slate-900/60 p-4">
-          <div
-            className="w-full max-w-2xl rounded-xl bg-white shadow-2xl"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="advance-allocation-title"
-          >
-            <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
-              <div>
-                <h3 id="advance-allocation-title" className="text-lg font-semibold text-slate-900">
-                  Распределить аванс
-                </h3>
-                <p className="mt-1 text-sm text-slate-500">
-                  {`Авансовый платеж #${advanceAllocation.source.id}. Выберите долг клиента, куда зачесть доступный баланс.`}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={closeAdvanceAllocation}
-                className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
-                aria-label="Закрыть"
-                disabled={advanceAllocation.submitting}
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="space-y-4 px-5 py-4">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
-                    Доступный баланс
-                  </div>
-                  <div className="mt-1 text-xl font-semibold text-emerald-900">
-                    {formatCurrencySmart(advanceAllocation.balance).full}
-                  </div>
-                </div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Контрагент
-                  </div>
-                  <div className="mt-1 text-sm font-semibold text-slate-900">
-                    {advanceAllocation.ownerName}
-                  </div>
-                </div>
-              </div>
-
-              {advanceAllocation.loading ? (
-                <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Загружаем открытые долги клиента...
-                </div>
-              ) : advanceAllocation.targets.length === 0 ? (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
-                  Открытых входящих платежей с остатком долга по этому клиенту не найдено.
-                </div>
-              ) : (
-                <>
-                  <label className="block text-sm font-medium text-slate-700">
-                    Долг для зачета
-                    <SystemSelect
-                      value={advanceAllocation.selectedTargetId ?? ''}
-                      onChange={(event) => handleAdvanceAllocationTargetChange(Number(event.target.value))}
-                      disabled={advanceAllocation.submitting}
-                      className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                    >
-                      {advanceAllocation.targets.map((target) => {
-                        const outstanding = resolvePaymentOutstandingAmount(target);
-                        const labelParts = [
-                          `#${target.id}`,
-                          target.description || 'Без описания',
-                          `остаток ${formatCurrencySmart(outstanding).full}`,
-                          target.plannedDate || target.date ? `дата ${formatDate(target.plannedDate || target.date || '')}` : null,
-                        ].filter(Boolean);
-                        return (
-                          <option key={target.id} value={target.id}>
-                            {labelParts.join(' · ')}
-                          </option>
-                        );
-                      })}
-                    </SystemSelect>
-                  </label>
-
-                  <label className="block text-sm font-medium text-slate-700">
-                    Сумма зачета
-                    <input
-                      value={advanceAllocation.amount}
-                      onChange={(event) =>
-                        setAdvanceAllocation((current) =>
-                          current ? { ...current, amount: event.target.value, error: null } : current,
-                        )
-                      }
-                      inputMode="decimal"
-                      disabled={advanceAllocation.submitting}
-                      className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                    />
-                  </label>
-                </>
-              )}
-
-              {advanceAllocation.error ? (
-                <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                  {advanceAllocation.error}
-                </div>
-              ) : null}
-            </div>
-
-            <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
-              <button
-                type="button"
-                onClick={closeAdvanceAllocation}
-                disabled={advanceAllocation.submitting}
-                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-              >
-                Отмена
-              </button>
-              <button
-                type="button"
-                onClick={submitAdvanceAllocation}
-                disabled={
-                  advanceAllocation.loading ||
-                  advanceAllocation.submitting ||
-                  advanceAllocation.targets.length === 0
-                }
-                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {advanceAllocation.submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                Зачесть аванс
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
+      <AdvanceAllocationModal
+        source={advanceAllocationSource?.context === paymentsReadOwner.scope ? advanceAllocationSource.payment : null}
+        context={JSON.stringify([paymentsReadOwner.scope, advanceAllocationSource?.revision])}
+        isContextCurrent={advanceAllocationSource?.isCurrent ?? noAdvanceContext}
+        canEdit={paymentsPermissions.canEdit}
+        canViewBalance={canViewSharedBalance}
+        formatDate={formatDate}
+        onClose={() => setAdvanceAllocationSource(current => current?.revision === advanceAllocationSource?.revision ? null : current)}
+        onResolved={async (value, current) => {
+          if (!current() || !apiService.canContinueBalanceApplication(value)) return;
+          pendingBalance.adopted(value);
+          if (value.state === 'Committed') await refreshOwned(current);
+        }}
+      />
       {routePaymentPreviewOpen ? (
         <div className="fixed inset-0 z-[1300] flex items-center justify-center bg-slate-900/60 p-4">
           <div

@@ -9,8 +9,8 @@ export type PendingBalanceApplicationsView = { entries: PendingBalanceApplicatio
   adopted: (value: ReadyBalanceApplication) => void };
 
 // Metadata changes update the view, but never change the financial operation's owner.
-export function usePendingBalanceApplications(kind: BalanceApplicationOwnerKind, ownerId: number, enabled: boolean, context: string): PendingBalanceApplicationsView {
-  const key = JSON.stringify([kind, ownerId, enabled, context]);
+export function usePendingBalanceApplications(kind: BalanceApplicationOwnerKind, ownerId: number, enabled: boolean, context: string, allOwners = false): PendingBalanceApplicationsView {
+  const key = JSON.stringify([kind, ownerId, enabled, context, allOwners]);
   const history = useRef({ session: '', records: new Map<string, PendingBalanceApplication>(), accepted: new Set<string>() });
   const [view, setView] = useState<{ key: string; entries: PendingBalanceApplication[]; missing: Set<string>; error: string | null }>({ key: '', entries: [], missing: new Set(), error: null });
   const cache = useCallback(() => {
@@ -29,11 +29,11 @@ export function usePendingBalanceApplications(kind: BalanceApplicationOwnerKind,
         if (saved.records.has(entry.requestId) || saved.records.size < 64) saved.records.set(entry.requestId, entry);
         else error = 'Сначала проверьте ранее открытые зачёты, чтобы загрузить остальные.';
       }
-      const entries = [...saved.records.values()].filter(entry => entry.kind === kind && entry.ownerId === ownerId);
+      const entries = [...saved.records.values()].filter(entry => allOwners || (entry.kind === kind && entry.ownerId === ownerId));
       const missing = new Set(entries.filter(entry => !ids.has(entry.requestId)).map(entry => entry.requestId));
       setView({ key, entries, missing, error });
     } catch (cause) { setView({ key, entries: [], missing: new Set(), error: cause instanceof Error ? cause.message : 'Не удалось прочитать незавершённые зачёты.' }); }
-  }, [key, enabled, kind, ownerId, cache]);
+  }, [key, enabled, kind, ownerId, allOwners, cache]);
   useLayoutEffect(() => {
     read();
     window.addEventListener(BALANCE_APPLICATION_CHANGED, read);
