@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Companies;
 using System.Globalization;
 using System.Linq.Expressions;
 using System.Security.Claims;
@@ -755,6 +756,32 @@ public class PaymentContext : DbContext
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.HasOne(e => e.BankConnection).WithMany(c => c.Accounts).HasForeignKey(e => e.BankConnectionId).OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => new { e.BankConnectionId, e.ExternalAccountId }).IsUnique().HasDatabaseName("IX_BankConnectionAccounts_Connection_External");
+        });
+
+        modelBuilder.Entity<CompanyBankAccountBinding>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.ProfileAccountId).HasMaxLength(CompanyBankAccountList.MaxJsonLength).IsRequired();
+            entity.Property(x => x.ProfileAccountKey).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.Provider).HasMaxLength(16).IsRequired();
+            entity.Property(x => x.ExternalAccountId).HasMaxLength(128).IsRequired();
+            entity.Property(x => x.AccountNumber).HasMaxLength(34).IsRequired();
+            entity.Property(x => x.Bik).HasMaxLength(16).IsRequired();
+            entity.Property(x => x.Currency).HasMaxLength(8).IsRequired();
+            entity.Property(x => x.ConfirmedMatchVersion).HasMaxLength(128).IsRequired();
+            entity.Property(x => x.RevocationMatchVersion).HasMaxLength(128);
+            entity.Property(x => x.CreatedByUserName).HasMaxLength(200);
+            entity.Property(x => x.RevokedByUserName).HasMaxLength(200);
+            entity.HasOne<LegalEntity>().WithMany().HasForeignKey(x => x.LegalEntityId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<BankConnectionAccount>().WithMany().HasForeignKey(x => x.BankConnectionAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<User>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<User>().WithMany().HasForeignKey(x => x.RevokedByUserId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasIndex(x => new { x.LegalEntityId, x.ProfileAccountKey }).IsUnique()
+                .HasFilter("\"RevokedAtUtc\" IS NULL").HasDatabaseName("IX_CompanyBankBinding_ActiveProfile");
+            entity.HasIndex(x => x.BankConnectionAccountId).IsUnique()
+                .HasFilter("\"RevokedAtUtc\" IS NULL").HasDatabaseName("IX_CompanyBankBinding_ActiveBank");
+            entity.ToTable(table => table.HasCheckConstraint("CK_CompanyBankBinding_RevocationTime",
+                "(\"RevokedAtUtc\" IS NULL AND \"RevocationMatchVersion\" IS NULL AND \"RevokedByUserId\" IS NULL AND \"RevokedByUserName\" IS NULL) OR (\"RevokedAtUtc\" IS NOT NULL AND \"RevokedAtUtc\" >= \"CreatedAtUtc\" AND \"RevocationMatchVersion\" IS NOT NULL)"));
         });
 
         modelBuilder.Entity<CompanyBrandImageVersion>(entity =>
@@ -5516,6 +5543,7 @@ public class PaymentContext : DbContext
     public DbSet<SpreadsheetImportBatchOperation> SpreadsheetImportBatchOperations { get; set; }
     public DbSet<UserCompanyAccess> UserCompanyAccesses { get; set; }
     public DbSet<CompanyBranch> CompanyBranches { get; set; }
+    public DbSet<CompanyBankAccountBinding> CompanyBankAccountBindings { get; set; }
     public DbSet<BankConnection> BankConnections { get; set; }
     public DbSet<BankConnectionAccount> BankConnectionAccounts { get; set; }
     public DbSet<BankStatementOperation> BankStatementOperations { get; set; }

@@ -4157,6 +4157,104 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("ClientStatuses");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.CompanyBankAccountBinding", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AccountNumber")
+                        .IsRequired()
+                        .HasMaxLength(34)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("BankConnectionAccountId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Bik")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConfirmedMatchVersion")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExternalAccountId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("LegalEntityId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ProfileAccountId")
+                        .IsRequired()
+                        .HasMaxLength(16000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProfileAccountKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RevocationMatchVersion")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("RevokedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("RevokedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("RevokedByUserName")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BankConnectionAccountId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_CompanyBankBinding_ActiveBank")
+                        .HasFilter("\"RevokedAtUtc\" IS NULL");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("RevokedByUserId");
+
+                    b.HasIndex("LegalEntityId", "ProfileAccountKey")
+                        .IsUnique()
+                        .HasDatabaseName("IX_CompanyBankBinding_ActiveProfile")
+                        .HasFilter("\"RevokedAtUtc\" IS NULL");
+
+                    b.ToTable("CompanyBankAccountBindings", t =>
+                        {
+                            t.HasCheckConstraint("CK_CompanyBankBinding_RevocationTime", "(\"RevokedAtUtc\" IS NULL AND \"RevocationMatchVersion\" IS NULL AND \"RevokedByUserId\" IS NULL AND \"RevokedByUserName\" IS NULL) OR (\"RevokedAtUtc\" IS NOT NULL AND \"RevokedAtUtc\" >= \"CreatedAtUtc\" AND \"RevocationMatchVersion\" IS NOT NULL)");
+                        });
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.CompanyBranch", b =>
                 {
                     b.Property<int>("Id")
@@ -14430,6 +14528,31 @@ namespace PayPlanner.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("Account");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.CompanyBankAccountBinding", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.BankConnectionAccount", null)
+                        .WithMany()
+                        .HasForeignKey("BankConnectionAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.User", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.LegalEntity", null)
+                        .WithMany()
+                        .HasForeignKey("LegalEntityId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.User", null)
+                        .WithMany()
+                        .HasForeignKey("RevokedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.CompanyBranch", b =>
