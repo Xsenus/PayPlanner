@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services.Companies;
 
 namespace PayPlanner.Api.Services.Payments;
 
@@ -89,6 +90,14 @@ internal static class VersionedPaymentWriteBoundary
             result = await write(scope);
             if (result is OkObjectResult or CreatedResult or NoContentResult)
             {
+                // Inspect the effective kind after the route's existing normalization.
+                // Only a new income invoice owns our seller snapshot; ordinary money
+                // records and the supplier's expense invoice keep their existing side.
+                if (creating && result is CreatedResult && model is { DocumentKind: DocumentKind.Invoice, Type: PaymentType.Income })
+                {
+                    await new DocumentSellerService(db).InitializeForCreationAsync(model, null, ct);
+                    await db.SaveChangesAsync(ct);
+                }
                 if (original is not null && current is not null
                     && await PaymentRemainderWriteRules.ValidateUpdateAsync(db, original, current, ct) is { } normalizedError)
                     return controller.Conflict(new { message = normalizedError });
@@ -120,6 +129,9 @@ internal static class VersionedPaymentWriteBoundary
                 return null;
             }
         }
+        catch (SellerSnapshotConflictException error) { return controller.Conflict(new { message = error.Message }); }
+        catch (SellerSelectionException error) { return controller.BadRequest(new { message = error.Message }); }
+        catch (SellerSnapshotTooLargeException error) { return controller.BadRequest(new { message = error.Message }); }
         catch (BalanceSourceHistoryException error) { return controller.BadRequest(new { message = error.Message }); }
         catch (Exception error) when (BalanceApplicationLease.IsConflict(error)
             && (lease?.CommitStarted != true || BalanceApplicationLease.IsDefiniteDatabaseAbort(error)))
