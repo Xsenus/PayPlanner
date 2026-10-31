@@ -643,6 +643,8 @@ public class PaymentsController : ControllerBase
                 return await GetById(attempt.CanonicalPaymentId!.Value, ct);
             }
             if (attempt.State != PaymentCreateAttempt.Draft) throw new InvalidOperationException("Unknown payment attempt state.");
+            if (PaymentCreateInputRules.ValidateCreationState(model) is { } inputStateError)
+                return BadRequest(new { message = inputStateError });
             using var credit = new PaymentCreditInvariantScope(_db);
             var scope = new VersionedPaymentWriteBoundary.Scope(lease.LockPrimaryAsync);
             var result = await CreatePaymentCoreAsync(model, scope, ct);
@@ -931,6 +933,8 @@ public class PaymentsController : ControllerBase
         var originalPaymentSourceId = e.PaymentSourceId;
         var originalRescheduleCount = Math.Max(0, e.RescheduleCount);
         var originalSystemNotes = e.SystemNotes ?? string.Empty;
+        if (PaymentCreateInputRules.ValidateSystemNotesChange(originalSystemNotes, model.SystemNotes) is { } notesError)
+            return BadRequest(new { message = notesError });
         var originalBalanceBinding = PaymentBalanceHistoryRules.Binding.From(e);
         var originalInvoiceId = e.InvoiceId;
         var originalClientId = e.ClientId;
@@ -1859,6 +1863,8 @@ public class PaymentsController : ControllerBase
         var originalStatus = e.Status;
         var originalRescheduleCount = Math.Max(0, e.RescheduleCount);
         var originalSystemNotes = e.SystemNotes ?? string.Empty;
+        if (PaymentCreateInputRules.ValidateSystemNotesChange(originalSystemNotes, model.SystemNotes) is { } notesError)
+            return BadRequest(new { message = notesError });
         var originalNotes = e.Notes;
         var originalClientId = e.ClientId;
         var originalLegalEntityId = e.LegalEntityId;
@@ -2292,6 +2298,8 @@ public class PaymentsController : ControllerBase
         var originalStatus = source.Status;
         var originalRescheduleCount = Math.Max(0, source.RescheduleCount);
         var originalSystemNotes = source.SystemNotes ?? string.Empty;
+        if (PaymentCreateInputRules.ValidateSystemNotesChange(originalSystemNotes, model.SystemNotes) is { } notesError)
+            return BadRequest(new { message = notesError });
         var originalInvoiceId = source.InvoiceId;
         var originalDescription = source.Description;
         var originalNotes = source.Notes;

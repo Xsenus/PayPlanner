@@ -10,6 +10,8 @@ namespace PayPlanner.Api.Services.Payments;
 
 internal static class PaymentCreateInputRules
 {
+    internal const string StructuralNotesMessage = "Служебные пометки платежа формируются отдельными действиями системы. Уберите добавленные технические строки и повторите сохранение.";
+    internal const string InitialReviewMessage = "Новый платёж нельзя создавать с готовым результатом распределения, исключения или возврата аванса. Сначала сохраните платёж, затем выполните нужное действие.";
     internal const string RelatedRecordsMessage = "Связанные записи нельзя создавать одновременно с платежом. Создайте их отдельно и выберите в карточке платежа.";
     internal const string IdentityMessage = "Новый платёж нужно создавать из новой карточки. Обновите форму и повторите сохранение.";
     private static readonly HashSet<string> InputProperties = new(PaymentCreateCommand.InputPropertyNames.Concat(new[]
@@ -72,6 +74,27 @@ internal static class PaymentCreateInputRules
             }
             else if (value is not IEnumerable collection || collection.Cast<object?>().Any()) return RelatedRecordsMessage;
         }
+        return ValidateCreationState(model);
+    }
+
+    public static string? ValidateCreationState(Payment model)
+    {
+        if (model.AdvanceReviewStatus is not (PaymentAdvanceReviewStatus.None
+            or PaymentAdvanceReviewStatus.RequiresDecision or PaymentAdvanceReviewStatus.AcceptedAsAdvance)) return InitialReviewMessage;
+        return ValidateSystemNotesChange(null, model.SystemNotes);
+    }
+
+    public static string? ValidateSystemNotesChange(string? original, string? incoming)
+    {
+        // Check the reserved namespaces, including unknown/future markers. Do not
+        // strip input: that would silently change a command's logical meaning.
+        if (string.IsNullOrEmpty(incoming) || !ContainsReservedMarker(incoming)) return null;
+        var existing = (original ?? string.Empty).Split('\n').Select(line => line.Trim()).ToHashSet(StringComparer.Ordinal);
+        foreach (var line in incoming.Split('\n'))
+            if (ContainsReservedMarker(line) && !existing.Contains(line.Trim())) return StructuralNotesMessage;
         return null;
     }
+
+    private static bool ContainsReservedMarker(string text)
+        => text.Contains("[pp:", StringComparison.OrdinalIgnoreCase) || text.Contains("[PayPlanner:", StringComparison.OrdinalIgnoreCase);
 }

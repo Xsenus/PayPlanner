@@ -97,9 +97,12 @@ public class PaymentsV1Controller : ControllerBase
         if (createValidationError is not null) return createValidationError;
 
         model.Account = string.IsNullOrWhiteSpace(model.Account) ? null : model.Account.Trim();
+        var now = DateTime.UtcNow;
+        PaymentAdvanceReviewService.ApplyAutomaticReviewState(model, now, HttpContext);
         _db.Payments.Add(model);
         await _db.SaveChangesAsync(ct);
-        await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, model, DateTime.UtcNow, ct);
+        await PaymentAdvanceReviewService.SyncBalanceAsync(_db, model, now, HttpContext, ct);
+        await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, model, now, ct);
         await _db.SaveChangesAsync(ct);
         return Created($"/api/v1/payments/{model.Id}", model);
     }

@@ -50,6 +50,8 @@ internal static class VersionedPaymentWriteBoundary
                 await lease.LockPaymentAsync(id.Value, ct);
                 current = await db.Payments.SingleAsync(p => p.Id == id, ct);
                 original = (Payment)db.Entry(current).CurrentValues.ToObject();
+                if (!deleting && model is not null && PaymentCreateInputRules.ValidateSystemNotesChange(current.SystemNotes, model.SystemNotes) is { } notesError)
+                    return controller.BadRequest(new { message = notesError });
                 if (await PaymentCreditInvariantScope.IsCancellationProtectedAsync(db, id.Value, ct))
                 {
                     if (deleting || model is null || current.DocumentKind != DocumentKind.Payment
