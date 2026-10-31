@@ -3576,6 +3576,18 @@ export interface ApplyClientBalanceResult {
   balance: number;
 }
 
+export interface ManagedBalanceApplicationResult extends ApplyClientBalanceResult {
+  requestId: string;
+  isReplay: boolean;
+}
+
+export interface BalanceApplicationCommand {
+  paymentId: number;
+  amount: number;
+  description?: string | null;
+  sourcePaymentId?: number | null;
+}
+
 export type BalanceApplicationInspection = {
   requestId: string;
   paymentId: number;

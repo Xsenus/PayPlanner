@@ -135,6 +135,16 @@ public class LegalEntityBalancesController : ControllerBase
                 return null;
             }, ct);
 
+    [HttpPost("applications/{requestId:guid}/apply")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<IActionResult> ApplyManaged(int legalEntityId, Guid requestId, [FromBody] ApplyClientBalanceRequest request, CancellationToken ct)
+    {
+        if (request.RequestId.HasValue && request.RequestId.Value != requestId)
+            return BadRequest(new { message = "Идентификатор зачёта не совпадает с выбранной попыткой." });
+        request.RequestId = requestId;
+        return await ApplyCredit(legalEntityId, request, ct);
+    }
+
     [HttpPost("apply")]
     public async Task<IActionResult> ApplyCredit(
         int legalEntityId,

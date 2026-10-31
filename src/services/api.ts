@@ -1,7 +1,7 @@
-import { acknowledgePaymentCreate, fencePaymentCreateAdoption, createPaymentGuarded, inspectPaymentCreate, openCommittedPaymentCreate, paymentCreateTokenMatches,
+import { acknowledgePaymentCreate, assertPaymentCreateOwner, fencePaymentCreateAdoption, createPaymentGuarded, inspectPaymentCreate, openCommittedPaymentCreate, paymentCreateTokenMatches,
   type PaymentCreateContext, type PaymentCreateOwner, type PaymentCreatePorts, type PendingPaymentCreate } from './paymentCreateAttempts';
 import { createClientRequestId } from '../utils/clientRequestId';
-import { balanceApplicationInspectionPath, parseBalanceApplicationInspection, type BalanceApplicationOwnerKind } from './balanceApplicationInspection';
+import { balanceApplicationInspectionPath, parseBalanceApplicationInspection, parseManagedBalanceApplicationResult, prepareBalanceApplicationCommand, type BalanceApplicationOwnerKind } from './balanceApplicationInspection';
 import { API_BASE_URL } from './apiBaseUrl';
 import type { DocumentImagePrintOptions } from '../types/documentImagePrint';
 import { apiFetch as fetch } from './apiTransport';
@@ -6090,6 +6090,25 @@ export class ApiService {
     return this.inspectBalanceApplication('client', id, paymentId, requestId, signal);
   }
 
+  private async applyBalanceApplicationManaged(kind: BalanceApplicationOwnerKind, id: number, requestId: string, payload: BalanceApplicationCommand, actor: PaymentCreateOwner, signal?: AbortSignal) {
+    assertPaymentCreateOwner(actor);
+    const command = prepareBalanceApplicationCommand(payload);
+    const path = `${balanceApplicationInspectionPath(kind, id, command.paymentId, requestId).split('?')[0]}/apply`;
+    const value = await this.request<unknown>(path, {
+      method: 'POST', body: JSON.stringify(command), paymentCreateActor: actor, signal, cache: 'no-store', expectedStatus: 200,
+    });
+    assertPaymentCreateOwner(actor);
+    return parseManagedBalanceApplicationResult(value, requestId);
+  }
+
+  async applyClientBalanceManaged(id: number, requestId: string, payload: BalanceApplicationCommand, actor: PaymentCreateOwner, signal?: AbortSignal) {
+    return this.applyBalanceApplicationManaged('client', id, requestId, payload, actor, signal);
+  }
+
+  async applyLegalEntityBalanceManaged(id: number, requestId: string, payload: BalanceApplicationCommand, actor: PaymentCreateOwner, signal?: AbortSignal) {
+    return this.applyBalanceApplicationManaged('legalEntity', id, requestId, payload, actor, signal);
+  }
+
   async inspectLegalEntityBalanceApplication(id: number, paymentId: number, requestId: string, signal?: AbortSignal) {
     return this.inspectBalanceApplication('legalEntity', id, paymentId, requestId, signal);
   }
@@ -9909,6 +9928,7 @@ import type {
   ClientBalanceSummary,
   ClientBalanceTransaction,
   ApplyClientBalanceResult,
+  BalanceApplicationCommand,
   TransferPaymentRemainderResponse,
   RollbackPaymentRemainderTransferResponse,
   PartialPaymentRemainderCandidatesResponse,

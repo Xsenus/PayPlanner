@@ -6,6 +6,8 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,6 +21,93 @@ namespace PayPlanner.Api.Tests;
 
 public sealed class BalanceApplicationHttpTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ApplyManaged_StaleAdminClaimCannotBypassCurrentEditPermission(bool legalEntity)
+    {
+        await using var db = await SqliteTestContextFactory.CreateAsync();
+        var fixture = await SeedAsync(db, legalEntity);
+        (await db.RolePermissions.SingleAsync(p => p.Section == "payments")).CanEdit = false;
+        await db.SaveChangesAsync();
+        var context = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity([
+            new Claim(ClaimTypes.NameIdentifier, fixture.ActorId.ToString()), new Claim(ClaimTypes.Role, "admin"),
+        ], "synthetic"))
+        };
+        var controllerContext = new ControllerContext { HttpContext = context };
+        var request = Request(fixture); request.RequestId = null;
+        var key = Guid.NewGuid();
+        var denied = legalEntity
+            ? await new LegalEntityBalancesController(db) { ControllerContext = controllerContext }.ApplyManaged(fixture.OwnerId, key, request, CancellationToken.None)
+            : await new ClientBalancesController(db) { ControllerContext = controllerContext }.ApplyManaged(fixture.OwnerId, key, request, CancellationToken.None);
+        Assert.IsType<ForbidResult>(denied);
+        Assert.Equal(0m, (await db.Payments.AsNoTracking().SingleAsync()).PaidAmount);
+        Assert.Empty(await db.BalanceApplicationReceipts.ToArrayAsync());
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task WireManaged_RouteKeyIsMandatoryAndRepeatedCommandReplays(bool legalEntity, bool includeBodyKey)
+    {
+        await using var db = await SqliteTestContextFactory.CreateAsync();
+        var fixture = await SeedAsync(db, legalEntity); var key = Guid.NewGuid();
+        using var server = CreateServer(db); using var client = server.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Fixture-User", fixture.ActorId.ToString());
+        var route = $"/api/{(legalEntity ? "legal-entities" : "clients")}/{fixture.OwnerId}/balance/applications/{key}/apply";
+        object body = includeBodyKey ? new { paymentId = fixture.PaymentId, amount = 25m, requestId = key } : new { paymentId = fixture.PaymentId, amount = 25m };
+        using var first = await client.PostAsJsonAsync(route, body);
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode); Assert.True(first.Headers.CacheControl?.NoStore);
+        var firstJson = await first.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(key, firstJson.GetProperty("requestId").GetGuid()); Assert.False(firstJson.GetProperty("isReplay").GetBoolean());
+        using var repeated = await client.PostAsJsonAsync(route, body);
+        Assert.Equal(HttpStatusCode.OK, repeated.StatusCode);
+        Assert.True((await repeated.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("isReplay").GetBoolean());
+        Assert.Equal(25m, (await db.Payments.AsNoTracking().SingleAsync()).PaidAmount);
+        Assert.Single(await db.BalanceApplicationReceipts.ToArrayAsync());
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task WireManaged_ConflictingBodyKeyOrEmptyRouteKeyCannotBecomeLegacy(bool legalEntity, bool emptyRoute)
+    {
+        await using var db = await SqliteTestContextFactory.CreateAsync();
+        var fixture = await SeedAsync(db, legalEntity); var key = emptyRoute ? Guid.Empty : Guid.NewGuid();
+        using var server = CreateServer(db); using var client = server.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Fixture-User", fixture.ActorId.ToString());
+        var route = $"/api/{(legalEntity ? "legal-entities" : "clients")}/{fixture.OwnerId}/balance/applications/{key}/apply";
+        using var response = await client.PostAsJsonAsync(route, new { paymentId = fixture.PaymentId, amount = 25m, requestId = emptyRoute ? (Guid?)null : Guid.NewGuid() });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0m, (await db.Payments.AsNoTracking().SingleAsync()).PaidAmount);
+        Assert.Empty(await db.BalanceApplicationReceipts.ToArrayAsync());
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task WireManaged_AnonymousOrCancelledAttemptCannotApply(bool legalEntity, bool cancelled)
+    {
+        await using var db = await SqliteTestContextFactory.CreateAsync();
+        var fixture = await SeedAsync(db, legalEntity); var key = Guid.NewGuid();
+        if (cancelled) BalanceApplicationCancellationTests.CancelResult(await BalanceApplicationCancellationTests.CancelAsync(db, fixture, key));
+        using var server = CreateServer(db); using var client = server.CreateClient();
+        if (cancelled) client.DefaultRequestHeaders.Add("X-Fixture-User", fixture.ActorId.ToString());
+        var route = $"/api/{(legalEntity ? "legal-entities" : "clients")}/{fixture.OwnerId}/balance/applications/{key}/apply";
+        using var response = await client.PostAsJsonAsync(route, new { paymentId = fixture.PaymentId, amount = 25m });
+        Assert.Equal(cancelled ? HttpStatusCode.Conflict : HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal(0m, (await db.Payments.AsNoTracking().SingleAsync()).PaidAmount);
+        Assert.Equal(cancelled ? 1 : 0, await db.BalanceApplicationReceipts.CountAsync());
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]

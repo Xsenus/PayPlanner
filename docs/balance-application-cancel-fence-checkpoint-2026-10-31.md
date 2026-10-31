@@ -1,5 +1,7 @@
 # CMP-05 / SEC-01 — защита отмены попытки зачёта, 31 октября
 
+**Продолжение:** [выделенный managed Apply и защита совместимости](balance-application-managed-route-checkpoint-2026-10-31.md) готовы адресно:36 HTTP /142 frontend;154 backend составно с сохранёнными ветвями. Перед UI остаются metadata-only идентичность, все owner-bound порты, явное восстановление и канонические чтения.
+
 Продолжение [чтения результата](balance-application-recovery-checkpoint-2026-10-31.md), исходный коммит `9372b53`. Ветка `feature/company-image-sequencing`; активные планы [компании](payplanner-company-roadmap-2026-10-14.md), [доступа](payplanner-access-security-roadmap-2026-10-14.md) и [единый план](payplanner-unified-roadmap-2026-10-14.md). Последняя сверка чатов сохранена. VPS, другой выпуск, YouGile, push/merge не затрагиваются.
 
 ## Реализация в работе
