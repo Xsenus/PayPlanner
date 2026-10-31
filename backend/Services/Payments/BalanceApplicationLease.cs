@@ -19,7 +19,15 @@ internal sealed class BalanceApplicationLease : IAsyncDisposable
     private BalanceApplicationLease(PaymentContext db, IDbContextTransaction transaction, SqliteTransaction? native = null, bool closeConnection = false)
         => (this.db, this.transaction, this.native, this.closeConnection) = (db, transaction, native, closeConnection);
 
-    public static async Task<BalanceApplicationLease> BeginAsync(PaymentContext db, int actorId, CancellationToken ct)
+    public static Task<BalanceApplicationLease> BeginAsync(PaymentContext db, int actorId, CancellationToken ct)
+        => BeginCoreAsync(db, actorId, ct);
+
+    // A trusted background job has no interactive actor to impersonate. It still
+    // owns the same clean transaction and payment locks as interactive writers.
+    public static Task<BalanceApplicationLease> BeginSystemAsync(PaymentContext db, CancellationToken ct)
+        => BeginCoreAsync(db, null, ct);
+
+    private static async Task<BalanceApplicationLease> BeginCoreAsync(PaymentContext db, int? actorId, CancellationToken ct)
     {
         if (db.Database.CurrentTransaction is not null || db.ChangeTracker.HasChanges())
             throw new BalanceApplicationConflictException();
@@ -29,10 +37,13 @@ internal sealed class BalanceApplicationLease : IAsyncDisposable
             if (db.Database.IsNpgsql())
             {
                 lease = new(db, await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct));
-                await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Users\" WHERE \"Id\" = {actorId} FOR SHARE NOWAIT", ct);
-                await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Roles\" WHERE \"Id\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {actorId}) FOR SHARE NOWAIT", ct);
-                await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"RolePermissions\" WHERE \"RoleId\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {actorId}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);
-                await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"UserId\" FROM \"UserCompanyAccesses\" WHERE \"UserId\" = {actorId} ORDER BY \"LegalEntityId\" FOR SHARE NOWAIT", ct);
+                if (actorId.HasValue)
+                {
+                    await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Users\" WHERE \"Id\" = {actorId.Value} FOR SHARE NOWAIT", ct);
+                    await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Roles\" WHERE \"Id\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {actorId.Value}) FOR SHARE NOWAIT", ct);
+                    await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"RolePermissions\" WHERE \"RoleId\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {actorId.Value}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);
+                    await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"UserId\" FROM \"UserCompanyAccesses\" WHERE \"UserId\" = {actorId.Value} ORDER BY \"LegalEntityId\" FOR SHARE NOWAIT", ct);
+                }
             }
             else if (db.Database.IsSqlite())
             {

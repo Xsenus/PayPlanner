@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services.Notifications;
+using PayPlanner.Api.Services.Payments;
 
 namespace PayPlanner.Api.Services;
 
@@ -107,28 +108,24 @@ public sealed class PaymentAdvanceReviewMonitoringService : BackgroundService
         {
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
-            var notificationService = scope.ServiceProvider.GetService<INotificationService>();
             var candidatePredicate = PaymentAdvanceReviewService.UnallocatedAdvanceCandidatePredicate();
-            var payments = await db.Payments
-                .Include(payment => payment.Client)
-                .Include(payment => payment.LegalEntity)
-                .Include(payment => payment.ClientCase)
-                .Where(candidatePredicate)
-                .Where(payment => payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.None
-                    || payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.RequiresDecision)
-                .OrderBy(payment => payment.Date)
-                .ThenBy(payment => payment.Id)
-                .Take(settings.BatchSize)
-                .ToListAsync(cancellationToken);
-
             var markedCount = 0;
-            var notifiedCount = 0;
-            var escalatedCount = 0;
+            int[] ids;
             var now = DateTime.UtcNow;
-            foreach (var payment in payments)
+            await using (var lease = await BalanceApplicationLease.BeginSystemAsync(db, cancellationToken))
             {
-                if (payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.None)
+                if (db.Database.IsNpgsql()) await db.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '2s'", cancellationToken);
+                var query = db.Payments.Where(candidatePredicate)
+                    .Where(payment => payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.None
+                        || payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.RequiresDecision);
+                ids = await query.AsNoTracking().OrderBy(payment => payment.Date).ThenBy(payment => payment.Id)
+                    .Select(payment => payment.Id).Take(settings.BatchSize).ToArrayAsync(cancellationToken);
+                await lease.LockPaymentsAsync(ids, cancellationToken);
+                var lockedPayments = await query.Where(payment => ids.Contains(payment.Id)).ToListAsync(cancellationToken);
+                if (lockedPayments.Count != ids.Length) throw new BalanceApplicationConflictException();
+                foreach (var payment in lockedPayments)
                 {
+                    if (payment.AdvanceReviewStatus != PaymentAdvanceReviewStatus.None) continue;
                     payment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.RequiresDecision;
                     payment.AdvanceReviewReason = null;
                     payment.AdvanceReviewedAt = null;
@@ -136,32 +133,36 @@ public sealed class PaymentAdvanceReviewMonitoringService : BackgroundService
                     payment.AdvanceReviewedByUserName = null;
                     markedCount++;
                 }
-
-                if (await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(db, payment, now, notificationService, cancellationToken))
+                if (markedCount > 0)
                 {
-                    notifiedCount++;
+                    db.SetAuditReason($"Мониторинг авансов: {markedCount} платежей поставлены на контроль без изменения денежных проводок.");
+                    await db.SaveChangesAsync(cancellationToken);
                 }
-
-                escalatedCount += await PaymentAdvanceReviewService.EnsureReviewEscalationNotificationsAsync(
-                    db,
-                    payment,
-                    now,
-                    settings.CriticalAgeDays,
-                    notificationService,
-                    cancellationToken);
+                await lease.CommitAsync(cancellationToken);
             }
 
-            if (markedCount > 0)
+            // Dispatch only after the owned transaction has been committed and
+            // released. A delivery failure cannot undo or retry the batch write.
+            var notifiedCount = 0;
+            var escalatedCount = 0;
+            var notificationService = scope.ServiceProvider.GetService<INotificationService>();
+            if (ids.Length > 0 && notificationService is not null)
             {
-                db.SetAuditReason($"Мониторинг авансов: {markedCount} платежей поставлены на контроль без изменения денежных проводок.");
+                var committedPayments = await db.Payments.AsNoTracking().Where(payment => ids.Contains(payment.Id))
+                    .Where(candidatePredicate)
+                    .Where(payment => payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.RequiresDecision)
+                    .Include(payment => payment.Client).Include(payment => payment.LegalEntity).Include(payment => payment.ClientCase)
+                    .OrderBy(payment => payment.Date).ThenBy(payment => payment.Id).ToListAsync(cancellationToken);
+                foreach (var payment in committedPayments)
+                {
+                    if (await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(db, payment, now, notificationService, cancellationToken))
+                        notifiedCount++;
+                    escalatedCount += await PaymentAdvanceReviewService.EnsureReviewEscalationNotificationsAsync(
+                        db, payment, now, settings.CriticalAgeDays, notificationService, cancellationToken);
+                }
             }
 
-            if (payments.Count > 0 || notifiedCount > 0 || escalatedCount > 0)
-            {
-                await db.SaveChangesAsync(cancellationToken);
-            }
-
-            var result = new PaymentAdvanceReviewMonitoringResult(payments.Count, markedCount, notifiedCount, escalatedCount, true);
+            var result = new PaymentAdvanceReviewMonitoringResult(ids.Length, markedCount, notifiedCount, escalatedCount, true);
             await RecordSuccessAsync(
                 startedAt,
                 result,
