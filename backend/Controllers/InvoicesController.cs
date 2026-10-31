@@ -20,6 +20,7 @@ using PayPlanner.Api.Services.Companies;
 using PayPlanner.Api.Services.Documents;
 using PayPlanner.Api.Services.Invoices;
 using PayPlanner.Api.Services.Notifications;
+using PayPlanner.Api.Services.Payments;
 using PayPlanner.Api.Services.Tax;
 
 namespace PayPlanner.Api.Controllers;
@@ -954,6 +955,35 @@ public class InvoicesController : ControllerBase
     [HttpPost("{id:int}/cancel")]
     public async Task<ActionResult<InvoiceDto>> Cancel(int id, [FromBody] CancelInvoiceRequest request, CancellationToken ct)
     {
+        var actorId = User.GetUserId();
+        if (User.Identity?.IsAuthenticated != true || actorId is not > 0) return Unauthorized();
+        BalanceApplicationLease? lease = null;
+        var scope = new InvoiceCancellationWriteScope();
+        ActionResult<InvoiceDto> result;
+        try
+        {
+            lease = await BalanceApplicationLease.BeginAsync(_db, actorId.Value, ct);
+            if (_db.Database.IsNpgsql()) await _db.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '2s'", ct);
+            if (!await _db.Users.AsNoTracking().AnyAsync(user => user.Id == actorId.Value && user.IsActive && user.IsApproved, ct))
+                return Unauthorized();
+            result = await CancelCoreAsync(id, request, scope, ct);
+            if (result.Result is OkObjectResult) await lease.CommitAsync(ct);
+        }
+        catch (Exception error) when (BalanceApplicationLease.IsConflict(error)
+            && (lease?.CommitStarted != true || BalanceApplicationLease.IsDefiniteDatabaseAbort(error)))
+        { return Conflict(new { message = FinancialConcurrencyGuard.ConflictMessage }); }
+        finally { if (lease is not null) await lease.DisposeAsync(); }
+        if (result.Result is OkObjectResult && scope.AfterCommit is not null) await scope.AfterCommit();
+        return result;
+    }
+
+    private sealed class InvoiceCancellationWriteScope
+    {
+        public Func<Task>? AfterCommit { get; set; }
+    }
+
+    private async Task<ActionResult<InvoiceDto>> CancelCoreAsync(int id, CancelInvoiceRequest request, InvoiceCancellationWriteScope scope, CancellationToken ct)
+    {
         var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
         if (visibility is null)
         {
@@ -1005,8 +1035,9 @@ public class InvoicesController : ControllerBase
 
         var originalStatus = payment.Status;
         var originalWorkflowStatus = payment.InvoiceWorkflowStatus;
-        await using var transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
-        await LockInvoiceAggregateAsync(invoiceEntityId.Value, ct);
+        await LockInvoiceCancellationAggregateAsync(invoiceEntityId.Value, ct);
+        if (payment.Status == PaymentStatus.Cancelled || payment.InvoiceWorkflowStatus == InvoiceWorkflowStatus.Cancelled)
+            return Ok(await LoadInvoiceDtoAsync(payment.Id, ct));
 
         var generatedPayments = await LoadGeneratedInstallmentPaymentsAsync(invoiceEntityId.Value, payment.Id, ct);
         var now = DateTime.UtcNow;
@@ -1016,6 +1047,7 @@ public class InvoicesController : ControllerBase
 
         if (request.CancellationScope == InvoiceCancellationScope.UnpaidInstallmentsOnly)
         {
+            using var remainingCredit = new PaymentCreditInvariantScope(_db);
             var unpaidInstallmentCancelError = CancelUnpaidGeneratedInstallmentPayments(
                 payment,
                 generatedPayments,
@@ -1035,10 +1067,9 @@ public class InvoicesController : ControllerBase
                 ct);
 
             await _db.SaveChangesAsync(ct);
-            await transaction.CommitAsync(ct);
-
+            if (!await remainingCredit.KeepsAppliedCreditAsync(ct)) return BadRequest(new { message = PaymentCreditInvariantScope.RejectionMessage });
             var updatedDto = await LoadInvoiceDtoAsync(payment.Id, ct);
-            await NotifyInvoiceChangedAsync(payment, BuildInvoiceStatusChangeLabels(originalStatus, payment.Status, originalWorkflowStatus, payment.InvoiceWorkflowStatus), ct);
+            scope.AfterCommit = () => NotifyInvoiceChangedAsync(payment, BuildInvoiceStatusChangeLabels(originalStatus, payment.Status, originalWorkflowStatus, payment.InvoiceWorkflowStatus), ct);
             return Ok(updatedDto);
         }
 
@@ -1046,7 +1077,15 @@ public class InvoicesController : ControllerBase
             .Where(item => item.Status != PaymentStatus.Cancelled)
             .Prepend(payment)
             .ToList();
-        var receivedAmount = NormalizeMoneyAmount(paymentsToCancel.Sum(ResolvePaidAmount));
+        var representativePaidAmount = ResolvePaidAmount(payment);
+        var installmentPaidAmount = NormalizeMoneyAmount(paymentsToCancel.Where(item => item.Id != payment.Id).Sum(ResolvePaidAmount));
+        // The representative can already contain the sum of its installments.
+        // Missing historical totals are tolerated; conflicting positive totals
+        // require reconciliation instead of inventing a compensating amount.
+        if (representativePaidAmount > 0.009m && installmentPaidAmount > 0.009m
+            && Math.Abs(representativePaidAmount - installmentPaidAmount) > 0.009m)
+            return BadRequest("Оплата счёта не совпадает с оплатой его рассрочки. Сначала сверьте платежи, затем повторите аннулирование.");
+        var receivedAmount = NormalizeMoneyAmount(Math.Max(representativePaidAmount, installmentPaidAmount));
         var hasReceivedMoney = paymentsToCancel.Any(HasReceivedMoney);
 
         if (hasReceivedMoney)
@@ -1082,11 +1121,11 @@ public class InvoicesController : ControllerBase
                 return BadRequest("Нельзя зачесть оплату на тот же счёт, который аннулируется.");
             }
 
-            reallocationTarget = await _db.Payments
+            reallocationTarget = await BuildEditableInvoicePaymentsQuery(visibility)
                 .FirstOrDefaultAsync(item => item.Id == request.TargetPaymentId.Value, ct);
             if (reallocationTarget is null)
             {
-                return BadRequest("Целевой счёт для зачёта не найден.");
+                return NotFound();
             }
 
             if (reallocationTarget.DocumentKind != DocumentKind.Invoice || reallocationTarget.Type != PaymentType.Income)
@@ -1107,7 +1146,7 @@ public class InvoicesController : ControllerBase
             var targetInvoiceEntityId = reallocationTarget.InvoiceId;
             if (targetInvoiceEntityId.HasValue && targetInvoiceEntityId.Value > 0)
             {
-                await LockInvoiceAggregateAsync(targetInvoiceEntityId.Value, ct);
+                await LockInvoiceCancellationAggregateAsync(targetInvoiceEntityId.Value, ct);
             }
 
             var targetOutstandingAmount = ResolveOutstandingAmount(reallocationTarget);
@@ -1115,6 +1154,12 @@ public class InvoicesController : ControllerBase
             {
                 return BadRequest("По целевому счёту нет остатка для зачёта.");
             }
+        }
+
+        using (var sourceCredit = new PaymentCreditInvariantScope(_db))
+        {
+            sourceCredit.IncludePayments(paymentsToCancel);
+            if (!await sourceCredit.KeepsAppliedCreditAsync(ct)) return BadRequest(new { message = PaymentCreditInvariantScope.RejectionMessage });
         }
 
         var installmentCancelError = CancelGeneratedInstallmentPayments(
@@ -1160,6 +1205,7 @@ public class InvoicesController : ControllerBase
         if (reallocationTarget is not null)
         {
             await _db.SaveChangesAsync(ct);
+            using var targetCredit = new PaymentCreditInvariantScope(_db);
             var reallocationDescription = BuildCancelledInvoiceReallocationDescription(payment, reallocationTarget, reason);
             var reallocationResult = await ClientBalanceService.ApplyCounterpartyCreditAsync(
                 _db,
@@ -1177,6 +1223,9 @@ public class InvoicesController : ControllerBase
             {
                 return BadRequest(reallocationResult.Error ?? "Не удалось зачесть оплату на целевой счёт.");
             }
+
+            await _db.SaveChangesAsync(ct);
+            if (!await targetCredit.KeepsAppliedCreditAsync(ct)) return BadRequest(new { message = PaymentCreditInvariantScope.RejectionMessage });
 
             reallocatedAmount = reallocationResult.AppliedAmount;
             PaymentDomainService.AppendSystemNote(
@@ -1227,13 +1276,16 @@ public class InvoicesController : ControllerBase
             ct);
 
         await _db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
-
         var dto = await LoadInvoiceDtoAsync(payment.Id, ct);
         ApplyPersistedPaymentState(dto, payment);
-        await NotifyInvoiceChangedAsync(payment, BuildInvoiceStatusChangeLabels(originalStatus, payment.Status, originalWorkflowStatus, payment.InvoiceWorkflowStatus), ct);
+        scope.AfterCommit = () => NotifyInvoiceChangedAsync(payment, BuildInvoiceStatusChangeLabels(originalStatus, payment.Status, originalWorkflowStatus, payment.InvoiceWorkflowStatus), ct);
         return Ok(dto);
     }
+
+    private Task LockInvoiceCancellationAggregateAsync(int invoiceId, CancellationToken ct)
+        => _db.Database.IsNpgsql()
+            ? _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Payments\" WHERE \"InvoiceId\" = {invoiceId} ORDER BY \"Id\" FOR UPDATE NOWAIT", ct)
+            : Task.CompletedTask;
 
     private async Task CancelLinkedActsAsync(Payment invoicePayment, string reason, DateTime now, int? actorId, CancellationToken ct)
     {

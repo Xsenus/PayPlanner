@@ -155,6 +155,9 @@ public static class ClientBalanceService
             return (false, "Payment does not belong to this counterparty.", 0m);
         }
 
+        if (payment.Status == PaymentStatus.Cancelled || payment.InvoiceWorkflowStatus == InvoiceWorkflowStatus.Cancelled)
+            return (false, "Нельзя зачесть баланс в аннулированный платёж или счёт.", 0m);
+
         PaymentDomainService.Normalize(payment);
         var outstanding = NormalizeAmount(payment.Amount - payment.PaidAmount);
         if (outstanding <= AmountEpsilon)

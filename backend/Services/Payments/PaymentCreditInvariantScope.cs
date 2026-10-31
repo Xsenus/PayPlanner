@@ -19,6 +19,8 @@ internal sealed class PaymentCreditInvariantScope : IDisposable
         db.ChangeTracker.Tracked += OnTracked;
     }
 
+    public void IncludePayments(IEnumerable<Payment> payments) => changed.UnionWith(payments);
+
     private void OnStateChanged(object? sender, EntityStateChangedEventArgs args)
     {
         if ((args.OldState == EntityState.Modified || args.NewState == EntityState.Modified)
