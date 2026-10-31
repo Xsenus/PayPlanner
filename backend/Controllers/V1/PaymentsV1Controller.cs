@@ -1,10 +1,12 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Notifications;
 using PayPlanner.Api.Services.Payments;
 
 namespace PayPlanner.Api.Controllers.V1;
@@ -15,7 +17,22 @@ namespace PayPlanner.Api.Controllers.V1;
 public class PaymentsV1Controller : ControllerBase
 {
     private readonly PaymentContext _db;
-    public PaymentsV1Controller(PaymentContext db) => _db = db;
+    private readonly INotificationService? _notificationService;
+    private readonly ILogger<PaymentsV1Controller> _logger;
+    public PaymentsV1Controller(PaymentContext db, INotificationService? notificationService = null, ILogger<PaymentsV1Controller>? logger = null)
+        => (_db, _notificationService, _logger) = (db, notificationService, logger ?? NullLogger<PaymentsV1Controller>.Instance);
+
+    private async Task NotifyAdvanceAfterCommitAsync(Payment payment, DateTime now, CancellationToken ct)
+    {
+        try { await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, payment, now, _notificationService, ct); }
+        catch (Exception error) when (!ct.IsCancellationRequested)
+        {
+            // V1 has no create-attempt identity: do not hide an already committed
+            // financial result behind a notification failure. The existing monitor
+            // can recover a missing notification without repeating the money write.
+            _logger.LogError(error, "Advance review notification failed after V1 payment {PaymentId} was committed.", payment.Id);
+        }
+    }
 
     private Task<DataVisibilityAccess?> ResolvePaymentsVisibilityAsync(CancellationToken ct)
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
@@ -104,6 +121,7 @@ public class PaymentsV1Controller : ControllerBase
         await PaymentAdvanceReviewService.SyncBalanceAsync(_db, model, now, HttpContext, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, model, now, ct);
         await _db.SaveChangesAsync(ct);
+        scope.AfterCommit = () => NotifyAdvanceAfterCommitAsync(model, now, ct);
         return Created($"/api/v1/payments/{model.Id}", model);
     }
 
@@ -165,6 +183,7 @@ public class PaymentsV1Controller : ControllerBase
         }
 
         await _db.SaveChangesAsync(ct);
+        scope.AfterCommit = () => NotifyAdvanceAfterCommitAsync(e, now, ct);
         return Ok(e);
     }
 

@@ -211,11 +211,12 @@ public sealed class PaymentCreateGraphTests
             balanceCount = await db.ClientBalanceTransactions.CountAsync()
         });
 
-    internal static TestServer Server(PaymentContext db, Fixture fixture) => new(new WebHostBuilder()
+    internal static TestServer Server(PaymentContext db, Fixture fixture, PayPlanner.Api.Services.Notifications.INotificationService? notifications = null) => new(new WebHostBuilder()
         .UseEnvironment("Testing").UseSetting("BackgroundServices:Enabled", "false").UseSetting("Email:Enabled", "false")
         .ConfigureServices(services =>
         {
             services.AddLogging(); services.AddSingleton(db);
+            if (notifications is not null) services.AddSingleton(notifications);
             services.AddAuthentication("graph-fixture").AddScheme<AuthenticationSchemeOptions, FixtureAuthentication>("graph-fixture", _ => { });
             services.AddAuthorization();
             services.AddControllers().AddApplicationPart(typeof(PaymentsController).Assembly)
