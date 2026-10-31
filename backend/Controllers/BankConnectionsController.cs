@@ -102,7 +102,7 @@ public class BankConnectionsController : ControllerBase, IAsyncActionFilter
     [NonAction]
     public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
     {
-        if (!await _db.IsUserAdminOrLegacyFallbackAsync(context.HttpContext.User, context.HttpContext.RequestAborted))
+        if (!await _db.IsApprovedUserAdminAsync(context.HttpContext.User, context.HttpContext.RequestAborted))
         {
             context.Result = Forbid();
             return;
