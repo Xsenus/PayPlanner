@@ -3,8 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { API_BASE_URL } from './apiBaseUrl';
 import { bindPaymentCreateOwner, paymentCreateTokenMatches, PaymentCreateOwnerChangedError, type PaymentCreateOwner } from './paymentCreateAttempts';
 import { acknowledgeBalanceApplication, applyBalanceGuarded, balanceApplicationInFlight, BALANCE_APPLICATION_CHANGED,
-  BALANCE_APPLICATION_DEADLINE_MS, BalanceApplicationBusyError, BalanceApplicationRecoveryError,
-  cancelBalanceApplication, canContinueBalanceApplication, inspectBalanceApplication, pendingBalanceApplication, pendingBalanceApplications,
+  BALANCE_APPLICATION_DEADLINE_MS, BalanceApplicationBusyError, BalanceApplicationRecoveryError, BalanceApplicationRecordChangedError,
+  cancelBalanceApplication, canContinueBalanceApplication, inspectBalanceApplication, openAcknowledgedBalanceApplication, pendingBalanceApplication, pendingBalanceApplications,
   type BalanceApplicationPorts, type PendingBalanceApplication } from './balanceApplicationAttempts';
 import type { BalanceApplicationCommand, Payment } from '../types';
 
@@ -107,12 +107,43 @@ describe('durable balance application lifecycle', () => {
     await expect(applyBalanceGuarded('client', 7, command(), ports)).rejects.toThrow('подтверждён');
     expect(pendingBalanceApplications(ports.assertActor)).toHaveLength(1); expect(ports.apply).toHaveBeenCalledOnce();
   });
-  it.each(['payment', 'owner', 'amount', 'balance'] as const)('rejects invalid canonical %s without losing the receipt', async invalid => {
+  it.each([false, true])('rechecks an externally removed record without recreating it or posting money; cancelled=%s', async cancel => {
+    const ports = io(); const entry = await lostResponse(ports); localStorage.removeItem(storageKey());
+    if (cancel) vi.mocked(ports.inspect).mockResolvedValue({ requestId: entry.requestId, paymentId: entry.paymentId, state: 'Cancelled', result: null });
+    const writes = vi.spyOn(Storage.prototype, 'setItem'); const value = await openAcknowledgedBalanceApplication(entry, ports);
+    expect(value.state).toBe(cancel ? 'Cancelled' : 'Committed'); expect(canContinueBalanceApplication(value)).toBe(true);
+    expect(await acknowledgeBalanceApplication(value)).toBe(true); expect(writes).not.toHaveBeenCalled();
+    expect(ports.apply).toHaveBeenCalledOnce(); expect(ports.cancel).not.toHaveBeenCalled();
+    expect(ports.payment).toHaveBeenCalledTimes(cancel ? 0 : 1); expect(pendingBalanceApplications(ports.assertActor)).toEqual([]);
+  });
+  it('does not use the absent-record path while a current record is still stored', async () => {
+    const ports = io(); const entry = await lostResponse(ports);
+    await expect(openAcknowledgedBalanceApplication(entry, ports)).rejects.toBeInstanceOf(BalanceApplicationRecordChangedError);
+    expect(ports.inspect).not.toHaveBeenCalled(); expect(pendingBalanceApplications(ports.assertActor)).toEqual([entry]);
+  });
+  it('retains an unconfirmed externally removed result as unresolved without recreating metadata', async () => {
+    const ports = io(); const entry = await lostResponse(ports); localStorage.removeItem(storageKey());
+    vi.mocked(ports.inspect).mockResolvedValue({ requestId: entry.requestId, paymentId: entry.paymentId, state: 'Unconfirmed', result: null });
+    await expect(openAcknowledgedBalanceApplication(entry, ports)).rejects.toBeInstanceOf(BalanceApplicationRecoveryError);
+    expect(ports.apply).toHaveBeenCalledOnce(); expect(ports.cancel).not.toHaveBeenCalled(); expect(pendingBalanceApplications(ports.assertActor)).toEqual([]);
+  });
+  it('cannot adopt an absent-record read after another window starts a newer attempt', async () => {
+    const ports = io(); const entry = await lostResponse(ports); const name = storageKey(); localStorage.removeItem(name);
+    const read = deferred<Awaited<ReturnType<BalanceApplicationPorts['inspect']>>>(); vi.mocked(ports.inspect).mockReturnValueOnce(read.promise);
+    const action = openAcknowledgedBalanceApplication(entry, ports); await vi.waitFor(() => expect(ports.inspect).toHaveBeenCalledOnce());
+    const newer = { ...entry, requestId: '22222222-2222-4222-8222-222222222222' }; localStorage.setItem(name, JSON.stringify(newer));
+    read.resolve({ requestId: entry.requestId, paymentId: entry.paymentId, state: 'Committed', result: operation(entry, true) });
+    await expect(action).rejects.toBeInstanceOf(BalanceApplicationRecordChangedError); expect(ports.payment).not.toHaveBeenCalled();
+    expect(pendingBalanceApplications(ports.assertActor)).toEqual([newer]);
+  });
+  it.each(['payment', 'owner', 'amount', 'balance', 'status', 'paidFlag'] as const)('rejects invalid canonical %s without losing the receipt', async invalid => {
     const ports = io();
     if (invalid === 'payment') vi.mocked(ports.payment).mockImplementation(async entry => ({ id: 88, ...owned(entry), amount: 100, paidAmount: 25 } as Payment));
     if (invalid === 'owner') vi.mocked(ports.balance).mockResolvedValue({ clientId: 8, balance: 75 });
     if (invalid === 'amount') vi.mocked(ports.payment).mockImplementation(async entry => ({ id: 19, ...owned(entry), amount: NaN, paidAmount: 25 } as Payment));
     if (invalid === 'balance') vi.mocked(ports.balance).mockResolvedValue({ clientId: 7, balance: NaN });
+    if (invalid === 'status') vi.mocked(ports.payment).mockImplementation(async entry => ({ id: 19, ...owned(entry), amount: 100, paidAmount: 25, status: 'unknown', isPaid: false } as unknown as Payment));
+    if (invalid === 'paidFlag') vi.mocked(ports.payment).mockImplementation(async entry => ({ id: 19, ...owned(entry), amount: 100, paidAmount: 25, status: 'Processing', isPaid: 'false' } as unknown as Payment));
     await expect(applyBalanceGuarded('client', 7, command(), ports)).rejects.toBeInstanceOf(BalanceApplicationRecoveryError);
     expect(pendingBalanceApplications(ports.assertActor)).toHaveLength(1); expect(ports.apply).toHaveBeenCalledOnce();
   });

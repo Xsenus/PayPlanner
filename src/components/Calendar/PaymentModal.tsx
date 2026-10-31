@@ -11,6 +11,9 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { apiService } from '../../services/api';
 import { acknowledgeCreatedPayment, canContinueCreatedPayment, PaymentCreateAdoptedError, PAYMENT_CREATE_CHANGED, PaymentCreateRecoveryError, paymentCreateSessionVersion, type PaymentCreateContext } from '../../services/paymentCreateAttempts';
 import { PaymentCreateRecovery } from '../Payments/PaymentCreateRecovery';
+import { BalanceApplicationRecovery } from '../Payments/BalanceApplicationRecovery';
+import { usePendingBalanceApplications } from '../../hooks/usePendingBalanceApplications';
+import type { CommittedBalanceApplication, ReadyBalanceApplication } from '../../services/balanceApplicationAttempts';
 import type {
   Payment,
   PaymentStatus,
@@ -23,7 +26,6 @@ import type {
   Contract,
   ActResponsible,
   CashOrderType,
-  ApplyClientBalanceResult,
   PaymentOverpaymentHandling,
 } from '../../types';
 import { toDateInputValue, fromInputToApiDate, todayYMDInTimeZone, toRuDate } from '../../utils/dateUtils';
@@ -313,7 +315,7 @@ interface PaymentModalProps {
     remainderDate: string,
   ) => Promise<unknown>;
   availableClientBalance?: number;
-  onApplyClientBalance?: (amount: number, currentPayment?: Payment) => Promise<ApplyClientBalanceResult>;
+  onApplyClientBalance?: (amount: number, currentPayment?: Payment) => Promise<CommittedBalanceApplication>;
   onBalanceApplied?: (paymentId: number) => Promise<unknown> | unknown;
   canViewLinkedInvoices?: boolean;
   canCreateLinkedInvoices?: boolean;
@@ -545,6 +547,10 @@ export function PaymentModal({
     && formData.legalEntityId === String(payment?.legalEntityId ?? defaultLegalEntityId ?? '');
   const savedCounterpartyIsCurrent = !!payment && formData.type === payment.type
     && formData.clientId === String(payment.clientId ?? '') && formData.legalEntityId === String(payment.legalEntityId ?? '');
+  const balanceOwnerKind = formData.legalEntityId ? 'legalEntity' : 'client';
+  const balanceOwnerId = Number(formData.legalEntityId || formData.clientId || 0);
+  const pendingBalance = usePendingBalanceApplications(balanceOwnerKind, balanceOwnerId,
+    isOpen && canViewSharedBalance && savedCounterpartyIsCurrent && balanceOwnerId > 0, financialWriteOwner.scope);
   const { capture: captureInstallmentRead, scope: installmentReadScope } = useDocumentDeliveryOwner(JSON.stringify([isOpen, payment?.id,
     formData.type, formData.clientId, formData.legalEntityId, formData.clientCaseId, formData.invoiceId, formData.account, formData.accountDate,
     canViewLinkedInvoices, user?.id, user?.role?.id, user?.role?.name, paymentPermissions.canView, paymentPermissions.viewScope]));
@@ -557,7 +563,8 @@ export function PaymentModal({
   }, [installmentReadScope]);
   const beginFinancialWrite = (kind: string, allowed = canEditPayment, targetId = payment?.id) => {
     const key = String(targetId ?? 'new');
-    if (!isOpen || !allowed || savingRef.current || savingLoading || financialWrites.current.has(key)) return null;
+    if (!isOpen || !allowed || savingRef.current || savingLoading || financialWrites.current.has(key)
+      || (pendingBalance.blocked && kind !== 'balance-recovery')) return null;
     const operation = financialWriteOwner.begin(kind);
     if (!operation) return null;
     const entry = { screenId: payment?.id, operation };
@@ -2825,6 +2832,27 @@ export function PaymentModal({
     }
   };
 
+  const adoptBalanceApplication = async (value: ReadyBalanceApplication, current: () => boolean) => {
+    if (!current() || !apiService.canContinueBalanceApplication(value)) return false;
+    if (value.state === 'Cancelled') { pendingBalance.adopted(value); return true; }
+    if (value.attempt.kind !== balanceOwnerKind || value.attempt.ownerId !== balanceOwnerId) return false;
+    const canonical = value.canonicalPayment;
+    setBalanceDataScope(balanceReadScope); setLocalClientBalance(value.balance); setFetchedClientBalance(value.balance);
+    if (canonical.id === payment?.id) {
+      paymentRef.current = canonical; setConfirmedPayment(canonical);
+      setAppliedClientBalanceAmount(getAppliedClientBalanceAmount(canonical.systemNotes));
+      setFormData(prev => ({ ...prev, amount: formatMoneyDisplayValue(canonical.amount),
+        paidAmount: formatMoneyDisplayValue(canonical.paidAmount ?? 0), isPaid: canonical.isPaid, status: canonical.status,
+        lastPaymentDate: toDateInputValue(canonical.lastPaymentDate) || '', paidDate: toDateInputValue(canonical.paidDate) || '',
+        systemNotes: canonical.systemNotes ?? '' }));
+    }
+    setInstallmentPayments(prev => prev.map(item => item.id === canonical.id ? canonical : item)
+      .filter(item => resolvePaymentOutstandingAmount(item) > 0.005));
+    pendingBalance.adopted(value);
+    await onBalanceApplied?.(canonical.id);
+    return current() && apiService.canContinueBalanceApplication(value);
+  };
+
   const handleApplyClientBalance = async () => {
     if (!payment || !canViewSharedBalance || !savedCounterpartyIsCurrent || !canEditPayment || remainderPending || loading) return;
 
@@ -2837,7 +2865,6 @@ export function PaymentModal({
     const write = beginFinancialWrite('balance-current');
     if (!write) return;
     try {
-      const clientId = Number(formData.clientId || 0);
       const amount = parseDecimal(formData.amount);
       const paid = parseDecimal(formData.paidAmount);
       const currentRemaining = Math.max(amount - Math.min(paid, amount), 0);
@@ -2848,44 +2875,19 @@ export function PaymentModal({
         return;
       }
 
-      let result: ApplyClientBalanceResult;
-      if (onApplyClientBalance) {
+      let result: CommittedBalanceApplication;
+      if (onApplyClientBalance && balanceOwnerKind === 'client') {
         result = await onApplyClientBalance(requestedAmount, payment);
       } else {
-        if (!clientId) {
-          throw new Error('Клиент не выбран.');
+        if (!balanceOwnerId) {
+          throw new Error('Контрагент не выбран.');
         }
-        result = await apiService.applyClientBalance(clientId, {
-          paymentId: payment.id,
-          amount: requestedAmount,
-        });
+        const command = { paymentId: payment.id, amount: requestedAmount };
+        result = balanceOwnerKind === 'client' ? await apiService.applyClientBalanceGuarded(balanceOwnerId, command)
+          : await apiService.applyLegalEntityBalanceGuarded(balanceOwnerId, command);
       }
-
-      if (!write.isCurrent()) return;
-      const appliedAmount = Math.max(
-        0,
-        Math.min(result?.appliedAmount ?? expectedApplied, currentRemaining),
-      );
-      const nextPaid = Math.min(amount, paid + appliedAmount);
-      const nextBalance =
-        result?.balance ?? Math.max(Number((currentBalance - appliedAmount).toFixed(2)), 0);
-
-      setFormData((prev) => ({
-        ...prev,
-        paidAmount: formatMoneyDisplayValue(nextPaid),
-        isPaid: nextPaid >= amount - 0.005,
-        status: nextPaid >= amount - 0.005 ? 'Completed' : prev.status,
-        lastPaymentDate: prev.lastPaymentDate || defaultDate,
-        paidDate: nextPaid >= amount - 0.005 ? prev.paidDate || defaultDate : prev.paidDate,
-      }));
-      setAppliedClientBalanceAmount((prev) =>
-        Number((prev + appliedAmount).toFixed(2)),
-      );
-      setBalanceDataScope(balanceReadScope);
-      setLocalClientBalance(nextBalance);
-      setFetchedClientBalance(nextBalance);
-      await onBalanceApplied?.(payment.id);
-      if (!write.isCurrent()) return;
+      if (!await adoptBalanceApplication(result, write.isCurrent) || !write.isCurrent()) return;
+      if (!await apiService.acknowledgeBalanceApplication(result) || !write.isCurrent()) return;
       toast.success('Баланс зачтен в платеж.');
       setBalanceApplyAmount('');
     } catch (error) {
@@ -2976,48 +2978,13 @@ export function PaymentModal({
     const write = beginFinancialWrite('balance-installment', canEditPayment, selected.id);
     if (!write) return;
     try {
-      const result = await apiService.applyClientBalance(clientId, {
+      const result = await apiService.applyClientBalanceGuarded(clientId, {
         paymentId: selected.id,
         amount: amountToApply,
       });
-      if (!write.isCurrent() || !targetOwner.isCurrent()) return;
-      const appliedAmount = Math.max(0, result.appliedAmount ?? amountToApply);
-      const nextBalance = result.balance ?? Math.max(Number((currentBalance - appliedAmount).toFixed(2)), 0);
-
-      setBalanceDataScope(balanceReadScope);
-      setLocalClientBalance(nextBalance);
-      setFetchedClientBalance(nextBalance);
-      if (selected.id === payment?.id) {
-        const amount = parseDecimal(formData.amount);
-        const paid = parseDecimal(formData.paidAmount);
-        const nextPaid = Math.min(amount, paid + appliedAmount);
-        setFormData((prev) => ({
-          ...prev,
-          paidAmount: formatMoneyDisplayValue(nextPaid),
-          isPaid: nextPaid >= amount - 0.005,
-          status: nextPaid >= amount - 0.005 ? 'Completed' : prev.status,
-          lastPaymentDate: prev.lastPaymentDate || defaultDate,
-          paidDate: nextPaid >= amount - 0.005 ? prev.paidDate || defaultDate : prev.paidDate,
-        }));
-        setAppliedClientBalanceAmount((prev) => Number((prev + appliedAmount).toFixed(2)));
-      }
-
-      setInstallmentPayments((prev) =>
-        prev
-          .map((item) =>
-            item.id === selected.id
-              ? {
-                  ...item,
-                  paidAmount: Math.min(item.amount, (item.paidAmount ?? 0) + appliedAmount),
-                  outstandingAmount: Math.max(resolvePaymentOutstandingAmount(item) - appliedAmount, 0),
-                  status: (resolvePaymentOutstandingAmount(item) - appliedAmount <= 0.005 ? 'Completed' : 'Processing') as PaymentStatus,
-                }
-              : item,
-          )
-          .filter((item) => resolvePaymentOutstandingAmount(item) > 0.005),
-      );
-      await onBalanceApplied?.(selected.id);
-      if (!write.isCurrent() || !targetOwner.isCurrent()) return;
+      const current = () => write.isCurrent() && targetOwner.isCurrent();
+      if (!await adoptBalanceApplication(result, current) || !current()) return;
+      if (!await apiService.acknowledgeBalanceApplication(result) || !current()) return;
       toast.success('Баланс зачтен в выбранный платеж.');
       setBalanceApplyAmount('');
       setInstallmentTargetDialogMode(null);
@@ -3282,7 +3249,11 @@ export function PaymentModal({
                   setSaveError(null);
                 }}
               />
-            <fieldset disabled={loading || !canSavePayment || remainderPending} className="contents">
+            <BalanceApplicationRecovery pending={pendingBalance} context={financialWriteOwner.scope} busy={loading}
+              canResolve={canEditPayment && canViewSharedBalance && savedCounterpartyIsCurrent && !remainderPending}
+              begin={entry => beginFinancialWrite('balance-recovery', canEditPayment && canViewSharedBalance, entry.paymentId)}
+              adopt={adoptBalanceApplication} />
+            <fieldset disabled={loading || !canSavePayment || remainderPending || pendingBalance.blocked} className="contents">
             {showProcessHelp && (
               <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900 shadow-sm">
                 <div className="flex items-center gap-2 font-semibold">
@@ -4405,7 +4376,7 @@ export function PaymentModal({
 
                   <button
                     type="submit"
-                    disabled={loading || !canSavePayment || remainderReceiptBlocked}
+                    disabled={loading || !canSavePayment || remainderReceiptBlocked || pendingBalance.blocked}
                     className={`rounded-lg px-4 py-2 font-medium transition-colors sm:min-w-40 ${
                       formData.type === 'Income'
                         ? 'bg-emerald-600 text-white hover:bg-emerald-700'

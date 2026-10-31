@@ -30,7 +30,7 @@ const uuid = /^(?!00000000-0000-0000-0000-000000000000$)[a-f0-9]{8}(?:-[a-f0-9]{
 const fields = ['version', 'actorId', 'apiScope', 'kind', 'ownerId', 'paymentId', 'requestId', 'commandSha256', 'createdAtUtc'] as const;
 type Guard = BalanceApplicationPorts['assertActor'];
 type Receipt = { actor: PaymentCreateOwner; session: AuthSessionIdentity; entry: PendingBalanceApplication; guard: Guard; acknowledged: boolean };
-type Flow = { actor: PaymentCreateOwner; session: AuthSessionIdentity; ports: BalanceApplicationPorts; controller: AbortController;
+type Flow = { actor: PaymentCreateOwner; session: AuthSessionIdentity; ports: BalanceApplicationPorts; controller: AbortController; expectAbsent?: boolean;
   entry?: PendingBalanceApplication; live: boolean; financialStarted: boolean; committed: boolean; assert: () => void; fail: (error: unknown) => void };
 const receipts = new WeakMap<ReadyBalanceApplication, Receipt>();
 const inFlight = new Map<string, Flow>();
@@ -139,7 +139,10 @@ function bounded<T>(name: string, actor: PaymentCreateOwner, ports: BalanceAppli
     assert: () => {
       assertActor(actor, ports.assertActor, session);
       if (!flow.live || controller.signal.aborted || Date.now() >= deadline) throw timeout();
-      if (flow.entry) requireEntry(flow.entry, actor);
+      if (flow.entry) {
+        if (flow.expectAbsent) { if (readEntry(entryKey(flow.entry), actor)) throw new BalanceApplicationRecordChangedError(); }
+        else requireEntry(flow.entry, actor);
+      }
     },
     fail: error => { if (flow.live) { flow.live = false; controller.abort(); rejectBound(error); } },
   };
@@ -190,18 +193,19 @@ async function committed(flow: Flow, entry: PendingBalanceApplication, operation
   if (!payment || payment.id !== entry.paymentId || !ownerMatches(payment, entry)
     || typeof payment.amount !== 'number' || !Number.isFinite(payment.amount) || payment.amount < 0
     || typeof payment.paidAmount !== 'number' || !Number.isFinite(payment.paidAmount) || payment.paidAmount < 0
+    || typeof payment.isPaid !== 'boolean' || !['Pending', 'Completed', 'Overdue', 'Cancelled', 'Processing'].includes(payment.status)
     || !balance || !ownerMatches(balance, entry) || typeof balance.balance !== 'number' || !Number.isFinite(balance.balance))
     throw new Error('Актуальные данные зачёта не подтверждены. Повторите проверку.');
   flow.assert();
   const value: CommittedBalanceApplication = Object.freeze({ ...operation, state: 'Committed', attempt: entry,
     operationBalance: operation.balance, balance: balance.balance, canonicalPayment: payment });
-  receipts.set(value, { actor: flow.actor, session: flow.session, entry, guard: flow.ports.assertActor, acknowledged: false });
+  receipts.set(value, { actor: flow.actor, session: flow.session, entry, guard: flow.ports.assertActor, acknowledged: flow.expectAbsent === true });
   return value;
 }
 function cancelled(flow: Flow, entry: PendingBalanceApplication): CancelledBalanceApplication {
   flow.assert();
   const value: CancelledBalanceApplication = Object.freeze({ state: 'Cancelled', requestId: entry.requestId, attempt: entry });
-  receipts.set(value, { actor: flow.actor, session: flow.session, entry, guard: flow.ports.assertActor, acknowledged: false });
+  receipts.set(value, { actor: flow.actor, session: flow.session, entry, guard: flow.ports.assertActor, acknowledged: flow.expectAbsent === true });
   return value;
 }
 
@@ -232,11 +236,11 @@ export async function applyBalanceGuarded(kind: BalanceApplicationOwnerKind, own
     flow.assert(); return committed(flow, entry, result);
   }, actor);
 }
-async function resolveBalance(entry: PendingBalanceApplication, ports: BalanceApplicationPorts, cancel: boolean): Promise<ReadyBalanceApplication> {
+async function resolveBalance(entry: PendingBalanceApplication, ports: BalanceApplicationPorts, cancel: boolean, absent = false): Promise<ReadyBalanceApplication> {
   const actor = paymentCreateOwner(); assertActor(actor, ports.assertActor);
   const captured = parseEntry(JSON.stringify(entry), entryKey(entry), actor);
   return ownedFlow(captured.kind, captured.ownerId, captured.paymentId, ports, async flow => {
-    requireEntry(captured, flow.actor); flow.entry = captured; flow.financialStarted = true;
+    flow.entry = captured; flow.expectAbsent = absent; flow.assert(); flow.financialStarted = true;
     const raw = await (cancel ? ports.cancel(captured, flow.actor, flow.controller.signal) : ports.inspect(captured, flow.actor, flow.controller.signal));
     flow.assert();
     const status = parseBalanceApplicationInspection(raw, captured.requestId, captured.paymentId);
@@ -246,6 +250,9 @@ async function resolveBalance(entry: PendingBalanceApplication, ports: BalanceAp
 }
 export function inspectBalanceApplication(entry: PendingBalanceApplication, ports: BalanceApplicationPorts) { return resolveBalance(entry, ports, false); }
 export function cancelBalanceApplication(entry: PendingBalanceApplication, ports: BalanceApplicationPorts) { return resolveBalance(entry, ports, true); }
+// An already open editor must re-read money after another window removes its receipt.
+// This path is GET-only, requires the exact record to remain absent and never creates a new key.
+export function openAcknowledgedBalanceApplication(entry: PendingBalanceApplication, ports: BalanceApplicationPorts) { return resolveBalance(entry, ports, false, true); }
 
 export function canContinueBalanceApplication(value: ReadyBalanceApplication): boolean {
   const receipt = receipts.get(value); if (!receipt) return false;

@@ -4956,9 +4956,7 @@ export function ClientDetail({
     if (!target?.id || !clientId || !clientPermissions.canEdit) {
       throw new Error('Недостаточно прав или не выбран сохранённый платёж.');
     }
-    const result = await apiService.applyClientBalance(clientId, { paymentId: target.id, amount });
-    void refreshAfterPaymentSave();
-    return result;
+    return apiService.applyClientBalanceGuarded(clientId, { paymentId: target.id, amount });
   };
 
   const removePayment = async (target: Payment | number) => {

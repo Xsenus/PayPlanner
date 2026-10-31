@@ -1,12 +1,17 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { StrictMode } from 'react';
+import { webcrypto } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PaymentModal } from './PaymentModal';
 import type { Payment, PaymentPayload } from '../../types';
 import { apiService } from '../../services/api';
+import { acknowledgeBalanceApplication, applyBalanceGuarded, cancelBalanceApplication, canContinueBalanceApplication,
+  inspectBalanceApplication, openAcknowledgedBalanceApplication, pendingBalanceApplications, type BalanceApplicationPorts, type CommittedBalanceApplication } from '../../services/balanceApplicationAttempts';
+import { API_BASE_URL } from '../../services/apiBaseUrl';
 import { documentCopyTestSession } from '../../test/documentCopySession';
-import { acknowledgePaymentCreate, bindPaymentCreateOwner, createPaymentGuarded, fencePaymentCreateAdoption, inspectPaymentCreate, pendingPaymentCreates,
+import { acknowledgePaymentCreate, assertPaymentCreateOwner, bindPaymentCreateOwner, createPaymentGuarded, fencePaymentCreateAdoption, inspectPaymentCreate, pendingPaymentCreates,
+  paymentCreateTokenMatches,
   openCommittedPaymentCreate, type PaymentAttemptState, type PaymentCreateContext, type PaymentCreatePorts } from '../../services/paymentCreateAttempts';
 
 const {
@@ -154,7 +159,13 @@ vi.mock('../../services/api', () => ({
     getLegalEntitiesPaged: getLegalEntitiesPagedMock,
     getClientBalance: getClientBalanceMock,
     getLegalEntityBalance: getLegalEntityBalanceMock,
-    applyClientBalance: applyClientBalanceMock,
+    applyClientBalanceGuarded: applyClientBalanceMock,
+    applyLegalEntityBalanceGuarded: vi.fn(),
+    pendingBalanceApplications: vi.fn(() => []),
+    canContinueBalanceApplication: vi.fn(() => true),
+    acknowledgeBalanceApplication: vi.fn(async () => true),
+    inspectPendingBalanceApplication: vi.fn(), cancelPendingBalanceApplication: vi.fn(),
+    openAcknowledgedBalanceApplication: vi.fn(),
     getPaymentsV2: getPaymentsV2Mock,
     getNextCashOrderNumber: getNextCashOrderNumberMock,
     getCashOrderPrintHtmlForPayment: getCashOrderPrintHtmlForPaymentMock,
@@ -287,6 +298,46 @@ function doc04Field(name: string, value: string) {
   fireEvent.change(field!, { target: { value } });
   fireEvent.blur(field!);
 }
+function balanceResult(appliedAmount = 25, balance = 25, payment: Partial<Payment> = {}, isReplay = false): CommittedBalanceApplication {
+  const canonicalPayment = doc04Payment({ paidAmount: appliedAmount, outstandingAmount: 100 - appliedAmount, status: 'Processing',
+    systemNotes: `Зачтено с баланса контрагента: ${appliedAmount}`, ...payment });
+  return { state: 'Committed', requestId: '11111111-1111-4111-8111-111111111111', isReplay, appliedAmount, balance, operationBalance: balance,
+    canonicalPayment, attempt: { version: 'balance-application-v1', actorId: 1, apiScope: '/api', kind: 'client', ownerId: 69,
+      paymentId: canonicalPayment.id, requestId: '11111111-1111-4111-8111-111111111111', commandSha256: 'a'.repeat(64), createdAtUtc: '2026-10-31T00:00:00.000Z' } };
+}
+function realBalanceFixture(payment = doc04Payment({ paidAmount: 10 }), legal = false) {
+  localStorage.setItem('pp_token', `header.${btoa(JSON.stringify({ sub: '1' }))}.signature`);
+  localStorage.setItem('pp.auth-session-epoch.v1', 'real-balance-session'); bindPaymentCreateOwner(1, API_BASE_URL);
+  vi.stubGlobal('crypto', webcrypto);
+  const held = new Set<string>();
+  vi.stubGlobal('navigator', { locks: { request: async (name: string, _options: LockOptions, callback: (lock: Lock | null) => unknown) => {
+    if (held.has(name)) return callback(null); held.add(name);
+    try { return await callback({ name, mode: 'exclusive' } as Lock); } finally { held.delete(name); }
+  } } });
+  const canonical = { ...payment, paidAmount: 35, outstandingAmount: payment.amount - 35, status: 'Processing' as const,
+    systemNotes: 'Зачтено с баланса контрагента: 25,00', lastPaymentDate: '2026-10-31' };
+  const io: BalanceApplicationPorts = {
+    assertActor: actor => { assertPaymentCreateOwner(actor); if (actor.apiScope !== API_BASE_URL
+      || !paymentCreateTokenMatches(actor, localStorage.getItem('pp_token'))) throw new Error('Changed balance actor'); },
+    apply: vi.fn(async entry => ({ requestId: entry.requestId, appliedAmount: 25, balance: 75, isReplay: false })),
+    inspect: vi.fn(async entry => ({ requestId: entry.requestId, paymentId: entry.paymentId, state: 'Committed' as const,
+      result: { requestId: entry.requestId, appliedAmount: 25, balance: 75, isReplay: true as const } })),
+    cancel: vi.fn(async entry => ({ requestId: entry.requestId, paymentId: entry.paymentId, state: 'Cancelled' as const, result: null })),
+    payment: vi.fn(async () => canonical),
+    balance: vi.fn(async () => ({ clientId: legal ? null : 69, legalEntityId: legal ? 301 : null, balance: 65 })),
+  };
+  vi.mocked(apiService.pendingBalanceApplications).mockImplementation(() => pendingBalanceApplications(io.assertActor));
+  vi.mocked(apiService.canContinueBalanceApplication).mockImplementation(canContinueBalanceApplication);
+  vi.mocked(apiService.acknowledgeBalanceApplication).mockImplementation(acknowledgeBalanceApplication);
+  applyClientBalanceMock.mockImplementation((id, command) => applyBalanceGuarded('client', id, command, io));
+  vi.mocked(apiService.applyLegalEntityBalanceGuarded).mockImplementation((id, command) => applyBalanceGuarded('legalEntity', id, command, io));
+  vi.mocked(apiService.inspectPendingBalanceApplication).mockImplementation(entry => inspectBalanceApplication(entry, io));
+  vi.mocked(apiService.cancelPendingBalanceApplication).mockImplementation(entry => cancelBalanceApplication(entry, io));
+  vi.mocked(apiService.openAcknowledgedBalanceApplication).mockImplementation(entry => openAcknowledgedBalanceApplication(entry, io));
+  getClientBalanceMock.mockResolvedValue({ clientId: 69, balance: 50 });
+  getLegalEntityBalanceMock.mockResolvedValue({ clientId: null, legalEntityId: 301, balance: 50 });
+  return { io, canonical, payment };
+}
 function doc04NewFields() {
   doc04Field('amount', '100');
   doc04Field('description', 'Введённый платёж');
@@ -325,6 +376,111 @@ function doc04RealAttemptFixture(primary = doc04Payment(), rest = doc04Payment({
 }
 
 describe('PaymentModal integration', () => {
+  describe('durable balance recovery with the real lifecycle', () => {
+    afterEach(() => { bindPaymentCreateOwner(null, API_BASE_URL); localStorage.clear(); vi.unstubAllGlobals(); });
+    const start = async () => {
+      const field = await screen.findByRole('textbox', { name: 'Сумма зачета' });
+      fireEvent.change(field, { target: { value: '25' } }); fireEvent.click(screen.getByRole('button', { name: 'Зачесть' }));
+    };
+    const paid = () => document.querySelector<HTMLInputElement>('[name="paidAmount"]')!.value;
+    it.each([false, true])('adopts canonical money and retains unrelated input; legal=%s', async legal => {
+      const fixture = realBalanceFixture(doc04Payment({ paidAmount: 10, ...(legal ? { clientId: null, legalEntityId: 301 } : {}) }), legal);
+      render(<PaymentModal isOpen payment={fixture.payment} onClose={vi.fn()} onSubmit={vi.fn()} />);
+      doc04Field('description', 'Несохранённое описание'); await start();
+      await waitFor(() => expect(paid()).toBe('35,00')); await waitFor(() => expect(apiService.pendingBalanceApplications()).toEqual([]));
+      expect(document.querySelector<HTMLTextAreaElement>('[name="description"]')!.value).toBe('Несохранённое описание');
+      expect(fixture.io.apply).toHaveBeenCalledOnce(); expect(fixture.io.payment).toHaveBeenCalledOnce(); expect(fixture.io.balance).toHaveBeenCalledOnce();
+      doc04Field('paidAmount', '1'); expect(paid()).toBe('25,00');
+    });
+    it('preserves an unknown result, blocks save and recovers without another financial POST', async () => {
+      const fixture = realBalanceFixture(); vi.mocked(fixture.io.apply).mockRejectedValueOnce(new TypeError('lost ACK'));
+      const onSubmit = vi.fn(); render(<PaymentModal isOpen payment={fixture.payment} onClose={vi.fn()} onSubmit={onSubmit} />);
+      doc04Field('description', 'Сохранить мой ввод'); await start();
+      const check = await screen.findByRole('button', { name: 'Проверить зачёт' });
+      await waitFor(() => expect(check.hasAttribute('disabled')).toBe(false));
+      expect(paid()).toBe('10,00'); expect(screen.getByRole('button', { name: 'save' }).hasAttribute('disabled')).toBe(true);
+      fireEvent.submit(document.querySelector('form')!); expect(onSubmit).not.toHaveBeenCalled();
+      fireEvent.click(check); await screen.findByText('Зачёт подтверждён. Оплата платежа и доступный баланс обновлены.');
+      expect(paid()).toBe('35,00'); expect(fixture.io.apply).toHaveBeenCalledOnce(); expect(fixture.io.inspect).toHaveBeenCalledOnce();
+      expect(apiService.pendingBalanceApplications()).toEqual([]); expect(document.querySelector<HTMLTextAreaElement>('[name="description"]')!.value).toBe('Сохранить мой ввод');
+    });
+    it.each([false, true])('closes an unknown attempt explicitly, discovering an earlier commit when present; committed=%s', async committed => {
+      const fixture = realBalanceFixture(); vi.mocked(fixture.io.apply).mockRejectedValueOnce(new TypeError('lost ACK'));
+      if (committed) vi.mocked(fixture.io.cancel).mockImplementation(async entry => ({ requestId: entry.requestId, paymentId: entry.paymentId,
+        state: 'Committed', result: { requestId: entry.requestId, appliedAmount: 25, balance: 75, isReplay: true } }));
+      render(<PaymentModal isOpen payment={fixture.payment} onClose={vi.fn()} onSubmit={vi.fn()} />); await start();
+      const close = await screen.findByRole('button', { name: 'Закрыть попытку зачёта' }); await waitFor(() => expect(close.hasAttribute('disabled')).toBe(false));
+      fireEvent.click(close); await screen.findByText(committed ? 'Зачёт подтверждён. Оплата платежа и доступный баланс обновлены.' : 'Попытка закрыта без зачёта. Теперь можно выполнить новый зачёт.');
+      expect(paid()).toBe(committed ? '35,00' : '10,00'); expect(fixture.io.apply).toHaveBeenCalledOnce(); expect(fixture.io.cancel).toHaveBeenCalledOnce();
+      expect(fixture.io.payment).toHaveBeenCalledTimes(committed ? 1 : 0); expect(apiService.pendingBalanceApplications()).toEqual([]);
+    });
+    it('retains the key after a failed refresh and does not add the credit again when recovery succeeds', async () => {
+      const fixture = realBalanceFixture(); const onBalanceApplied = vi.fn().mockRejectedValueOnce(new Error('Refresh failed')).mockResolvedValue(undefined);
+      render(<PaymentModal isOpen payment={fixture.payment} onClose={vi.fn()} onSubmit={vi.fn()} onBalanceApplied={onBalanceApplied} />); await start();
+      await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith('Refresh failed')); expect(paid()).toBe('35,00');
+      const entry = apiService.pendingBalanceApplications()[0]; expect(entry).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'Проверить зачёт' })); await screen.findByText('Зачёт подтверждён. Оплата платежа и доступный баланс обновлены.');
+      expect(paid()).toBe('35,00'); doc04Field('paidAmount', '1'); expect(paid()).toBe('25,00');
+      expect(fixture.io.apply).toHaveBeenCalledOnce(); expect(onBalanceApplied).toHaveBeenCalledTimes(2); expect(apiService.pendingBalanceApplications()).toEqual([]);
+    });
+    it('keeps a committed receipt when canonical data is unavailable and resolves it by explicit read', async () => {
+      const fixture = realBalanceFixture(); vi.mocked(fixture.io.payment).mockRejectedValueOnce(new Error('Read unavailable'));
+      render(<PaymentModal isOpen payment={fixture.payment} onClose={vi.fn()} onSubmit={vi.fn()} />); await start();
+      await waitFor(() => expect(toastErrorMock).toHaveBeenCalled()); expect(paid()).toBe('10,00'); expect(apiService.pendingBalanceApplications()).toHaveLength(1);
+      fireEvent.click(screen.getByRole('button', { name: 'Проверить зачёт' })); await screen.findByText('Зачёт подтверждён. Оплата платежа и доступный баланс обновлены.');
+      expect(paid()).toBe('35,00'); expect(fixture.io.apply).toHaveBeenCalledOnce(); expect(fixture.io.payment).toHaveBeenCalledTimes(2);
+    });
+    it('finds a pending target after reopening another card even when that target is absent from the debt list', async () => {
+      const fixture = realBalanceFixture(); vi.mocked(fixture.io.apply).mockRejectedValueOnce(new TypeError('lost ACK'));
+      const props = { isOpen: true, onClose: vi.fn(), onSubmit: vi.fn(), payment: fixture.payment }; const view = render(<PaymentModal {...props} />); await start();
+      await waitFor(() => expect(toastErrorMock).toHaveBeenCalled()); view.rerender(<PaymentModal {...props} isOpen={false} />);
+      view.rerender(<PaymentModal {...props} payment={doc04Payment({ id: 9902, paidAmount: 0 })} />);
+      expect(await screen.findByText('Зачёт в платёж №9901')).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'Проверить зачёт' })); await screen.findByText('Зачёт подтверждён. Оплата платежа и доступный баланс обновлены.');
+      expect(paid()).toBe('0,00'); expect(fixture.io.apply).toHaveBeenCalledOnce(); expect(apiService.pendingBalanceApplications()).toEqual([]);
+    });
+    it.each([false, true])('requires a canonical read after another window removes metadata; permission toggled=%s', async permission => {
+      const fixture = realBalanceFixture(); vi.mocked(fixture.io.apply).mockRejectedValueOnce(new TypeError('lost ACK'));
+      const props = { isOpen: true, payment: fixture.payment, onClose: vi.fn(), onSubmit: vi.fn() }; const view = render(<PaymentModal {...props} />);
+      await start(); await waitFor(() => expect(toastErrorMock).toHaveBeenCalled());
+      if (permission) view.rerender(<PaymentModal {...props} canEditPayment={false} />);
+      const name = Object.keys(localStorage).find(key => key.startsWith('pp.balance-application.v1:'))!;
+      act(() => { localStorage.removeItem(name); window.dispatchEvent(new StorageEvent('storage', { key: name, newValue: null })); });
+      if (permission) view.rerender(<PaymentModal {...props} />);
+      expect(paid()).toBe('10,00'); expect(screen.getByRole('button', { name: 'save' }).hasAttribute('disabled')).toBe(true);
+      expect(screen.queryByRole('button', { name: 'Закрыть попытку зачёта' })).toBeNull();
+      expect(screen.getByText('Запись закрыта в другом окне. Обновите финансовые данные проверкой.')).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'Проверить зачёт' }));
+      await screen.findByText('Зачёт подтверждён. Оплата платежа и доступный баланс обновлены.');
+      expect(paid()).toBe('35,00'); expect(fixture.io.apply).toHaveBeenCalledOnce(); expect(fixture.io.cancel).not.toHaveBeenCalled();
+      expect(apiService.openAcknowledgedBalanceApplication).toHaveBeenCalledOnce(); expect(apiService.pendingBalanceApplications()).toEqual([]);
+      expect(screen.getByRole('button', { name: 'save' }).hasAttribute('disabled')).toBe(false);
+    });
+    it('keeps an externally removed but unconfirmed record blocked without reposting money', async () => {
+      const fixture = realBalanceFixture(); vi.mocked(fixture.io.apply).mockRejectedValueOnce(new TypeError('lost ACK'));
+      render(<PaymentModal isOpen payment={fixture.payment} onClose={vi.fn()} onSubmit={vi.fn()} />); await start();
+      await waitFor(() => expect(toastErrorMock).toHaveBeenCalled());
+      const name = Object.keys(localStorage).find(key => key.startsWith('pp.balance-application.v1:'))!;
+      act(() => { localStorage.removeItem(name); window.dispatchEvent(new StorageEvent('storage', { key: name, newValue: null })); });
+      vi.mocked(fixture.io.inspect).mockImplementation(async entry => ({ requestId: entry.requestId, paymentId: entry.paymentId, state: 'Unconfirmed', result: null }));
+      fireEvent.click(screen.getByRole('button', { name: 'Проверить зачёт' })); await screen.findByRole('alert');
+      expect(paid()).toBe('10,00'); expect(screen.getByRole('button', { name: 'save' }).hasAttribute('disabled')).toBe(true);
+      expect(screen.getByRole('button', { name: 'Проверить зачёт' })).toBeTruthy(); expect(fixture.io.apply).toHaveBeenCalledOnce();
+    });
+    it.each(['payment', 'permission'] as const)('ignores late recovery and retains the key when %s changes', async change => {
+      const fixture = realBalanceFixture(); vi.mocked(fixture.io.apply).mockRejectedValueOnce(new TypeError('lost ACK'));
+      const props = { isOpen: true, onClose: vi.fn(), onSubmit: vi.fn(), payment: fixture.payment }; const view = render(<PaymentModal {...props} />); await start();
+      await waitFor(() => expect(toastErrorMock).toHaveBeenCalled()); const entry = apiService.pendingBalanceApplications()[0];
+      let finish!: (value: Awaited<ReturnType<BalanceApplicationPorts['inspect']>>) => void;
+      vi.mocked(fixture.io.inspect).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+      fireEvent.click(screen.getByRole('button', { name: 'Проверить зачёт' })); await waitFor(() => expect(fixture.io.inspect).toHaveBeenCalledOnce());
+      view.rerender(<PaymentModal {...props} {...(change === 'payment' ? { payment: doc04Payment({ id: 9902 }) } : { canEditPayment: false })} />);
+      await act(async () => finish({ requestId: entry.requestId, paymentId: entry.paymentId, state: 'Committed',
+        result: { requestId: entry.requestId, appliedAmount: 25, balance: 75, isReplay: true } }));
+      expect(paid()).toBe(change === 'payment' ? '0,00' : '10,00'); expect(apiService.pendingBalanceApplications()).toEqual([entry]);
+      expect(apiService.acknowledgeBalanceApplication).not.toHaveBeenCalled(); expect(toastSuccessMock).not.toHaveBeenCalled();
+    });
+  });
   describe('balance write ownership', () => {
     const current = (overrides: Partial<Payment> = {}) => doc04Payment({ clientId: 69, amount: 100, paidAmount: 0, invoiceId: undefined, ...overrides });
     const openBalance = async () => { const field = await screen.findByRole('textbox', { name: 'Сумма зачета' }); fireEvent.change(field, { target: { value: '25' } }); return screen.getByRole('button', { name: 'Зачесть' }); };
@@ -362,7 +518,7 @@ describe('PaymentModal integration', () => {
         } finally { session.restore(); }
       });
       it(`balance current: ${route} keeps endpoint, precision, explicit retry and refresh`, async () => {
-        const { props, mutation } = setup(route); mutation.mockRejectedValueOnce(new Error('Current allocation refused')).mockResolvedValue({ appliedAmount: 25, balance: 25 }); await apply(route); await waitFor(() => expect(toastErrorMock).toHaveBeenCalledOnce()); await apply(route); await waitFor(() => expect(props.onBalanceApplied).toHaveBeenCalledOnce());
+        const { props, mutation } = setup(route); mutation.mockRejectedValueOnce(new Error('Current allocation refused')).mockResolvedValue(balanceResult(25, 25, { id: route === 'installment' ? 9903 : 9901 })); await apply(route); await waitFor(() => expect(toastErrorMock).toHaveBeenCalledOnce()); await apply(route); await waitFor(() => expect(props.onBalanceApplied).toHaveBeenCalledOnce());
         const id = route === 'installment' ? 9903 : 9901; if (route === 'callback') expect(mutation).toHaveBeenLastCalledWith(25, expect.objectContaining({ id })); else expect(mutation).toHaveBeenLastCalledWith(69, { paymentId: id, amount: 25 }); expect(props.onBalanceApplied).toHaveBeenCalledWith(id); expect(toastSuccessMock).toHaveBeenCalledOnce(); expect(mutation).toHaveBeenCalledTimes(2);
         if (route !== 'installment') expect(document.querySelector<HTMLInputElement>('[name="paidAmount"]')?.value).toBe('25,00'); else expect(document.querySelector<HTMLInputElement>('[name="paidAmount"]')?.value).toBe('0,00');
       });
@@ -372,7 +528,7 @@ describe('PaymentModal integration', () => {
     }
     it('balance lock: an obsolete finally cannot release a newer payment allocation', async () => {
       const first = pending<{ appliedAmount: number; balance: number }>(); const second = pending<{ appliedAmount: number; balance: number }>(); const { props, view } = setup('direct'); applyClientBalanceMock.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise); await apply('direct'); view.rerender(<PaymentModal {...props} payment={current({ id: 9902 })} />); await apply('direct');
-      await act(async () => first.resolve({ appliedAmount: 25, balance: 25 })); fireEvent.submit(document.querySelector('form')!); expect(props.onSubmit).not.toHaveBeenCalled(); expect(applyClientBalanceMock).toHaveBeenCalledTimes(2); await act(async () => second.resolve({ appliedAmount: 25, balance: 25 })); expect(props.onBalanceApplied).toHaveBeenCalledExactlyOnceWith(9902); expect(toastSuccessMock).toHaveBeenCalledOnce();
+      await act(async () => first.resolve({ appliedAmount: 25, balance: 25 })); fireEvent.submit(document.querySelector('form')!); expect(props.onSubmit).not.toHaveBeenCalled(); expect(applyClientBalanceMock).toHaveBeenCalledTimes(2); await act(async () => second.resolve(balanceResult(25, 25, { id: 9902 }))); expect(props.onBalanceApplied).toHaveBeenCalledExactlyOnceWith(9902); expect(toastSuccessMock).toHaveBeenCalledOnce();
     });
     for (const route of routes) it.each(['reopen', 'permission-aba'] as const)(`balance pending lock: ${route} keeps the same payment reserved across %s until its dispatched result arrives`, async change => {
       const saved = pending<{ appliedAmount: number; balance: number }>(); const { props, view, mutation } = setup(route); mutation.mockReturnValue(saved.promise); await apply(route); await waitFor(() => expect(mutation).toHaveBeenCalledOnce());
@@ -383,13 +539,13 @@ describe('PaymentModal integration', () => {
       setup('direct'); const field = await screen.findByRole('textbox', { name: 'Сумма зачета' }); fireEvent.change(field, { target: { value: String(amount) } }); fireEvent.click(screen.getByRole('button', { name: 'Зачесть' })); expect(applyClientBalanceMock).not.toHaveBeenCalled(); expect(toastErrorMock).toHaveBeenCalledOnce();
     });
     it('balance boundary: request precision and the existing remaining-amount cap are preserved', async () => {
-      applyClientBalanceMock.mockResolvedValue({ appliedAmount: 25.56789, balance: 24.43 }); render(<PaymentModal isOpen payment={current({ paidAmount: 80, outstandingAmount: 20 })} availableClientBalance={50} onClose={vi.fn()} onSubmit={vi.fn()} />); const field = await screen.findByRole('textbox', { name: 'Сумма зачета' }); fireEvent.change(field, { target: { value: '25.56789' } }); fireEvent.click(screen.getByRole('button', { name: 'Зачесть' })); await waitFor(() => expect(applyClientBalanceMock).toHaveBeenCalledExactlyOnceWith(69, { paymentId: 9901, amount: 25.56789 })); await screen.findByText(/Зачтено с баланса: 20,00/); expect(document.querySelector<HTMLInputElement>('[name="paidAmount"]')?.value).toBe('100,00');
+      applyClientBalanceMock.mockResolvedValue(balanceResult(20, 30, { paidAmount: 100, outstandingAmount: 0, status: 'Completed', isPaid: true })); render(<PaymentModal isOpen payment={current({ paidAmount: 80, outstandingAmount: 20 })} availableClientBalance={50} onClose={vi.fn()} onSubmit={vi.fn()} />); const field = await screen.findByRole('textbox', { name: 'Сумма зачета' }); fireEvent.change(field, { target: { value: '25.56789' } }); fireEvent.click(screen.getByRole('button', { name: 'Зачесть' })); await waitFor(() => expect(applyClientBalanceMock).toHaveBeenCalledExactlyOnceWith(69, { paymentId: 9901, amount: 25.56789 })); await screen.findByText(/Зачтено с баланса: 20,00/); expect(document.querySelector<HTMLInputElement>('[name="paidAmount"]')?.value).toBe('100,00');
     });
     it('balance boundary: changing a draft counterparty cannot allocate against the old saved party', async () => {
       setup('direct'); await openBalance(); fireEvent.click(screen.getByRole('button', { name: 'Выбрать контрагента' })); await selectPickerOption('Supplier Client'); expect(screen.queryByRole('textbox', { name: 'Сумма зачета' })).toBeNull(); expect(applyClientBalanceMock).not.toHaveBeenCalled();
     });
     it('balance owner: a pending refresh callback cannot clear new input or notify a new card', async () => {
-      const refreshed = pending<void>(); const { props, view } = setup('direct'); props.onBalanceApplied.mockReturnValueOnce(refreshed.promise); applyClientBalanceMock.mockResolvedValue({ appliedAmount: 25, balance: 25 }); await apply('direct'); await waitFor(() => expect(props.onBalanceApplied).toHaveBeenCalledOnce()); view.rerender(<PaymentModal {...props} payment={current({ id: 9902 })} />); const field = await screen.findByRole('textbox', { name: 'Сумма зачета' }); fireEvent.change(field, { target: { value: '17' } }); await act(async () => refreshed.resolve()); expect(field).toHaveProperty('value', '17'); expect(toastSuccessMock).not.toHaveBeenCalled();
+      const refreshed = pending<void>(); const { props, view } = setup('direct'); props.onBalanceApplied.mockReturnValueOnce(refreshed.promise); applyClientBalanceMock.mockResolvedValue(balanceResult()); await apply('direct'); await waitFor(() => expect(props.onBalanceApplied).toHaveBeenCalledOnce()); view.rerender(<PaymentModal {...props} payment={current({ id: 9902 })} />); const field = await screen.findByRole('textbox', { name: 'Сумма зачета' }); fireEvent.change(field, { target: { value: '17' } }); await act(async () => refreshed.resolve()); expect(field).toHaveProperty('value', '17'); expect(toastSuccessMock).not.toHaveBeenCalled();
     });
     it('balance owner: readonly cannot offer allocation and a saved counterparty replacement invalidates its draft action', async () => {
       const { props, view } = setup('direct'); await openBalance(); view.rerender(<PaymentModal {...props} canEditPayment={false} />); expect(screen.queryByRole('textbox', { name: 'Сумма зачета' })).toBeNull(); view.rerender(<PaymentModal {...props} payment={current({ clientId: 77 })} />); expect(screen.queryByRole('textbox', { name: 'Сумма зачета' })).toBeNull(); expect(applyClientBalanceMock).not.toHaveBeenCalled();
@@ -507,6 +663,13 @@ describe('PaymentModal integration', () => {
     getClientBalanceMock.mockReset();
     getLegalEntityBalanceMock.mockReset();
     applyClientBalanceMock.mockReset();
+    vi.mocked(apiService.pendingBalanceApplications).mockReset().mockReturnValue([]);
+    vi.mocked(apiService.canContinueBalanceApplication).mockReset().mockReturnValue(true);
+    vi.mocked(apiService.acknowledgeBalanceApplication).mockReset().mockResolvedValue(true);
+    vi.mocked(apiService.applyLegalEntityBalanceGuarded).mockReset();
+    vi.mocked(apiService.inspectPendingBalanceApplication).mockReset();
+    vi.mocked(apiService.cancelPendingBalanceApplication).mockReset();
+    vi.mocked(apiService.openAcknowledgedBalanceApplication).mockReset();
     getPaymentsV2Mock.mockReset();
     getNextCashOrderNumberMock.mockReset();
     getCashOrderPrintHtmlForPaymentMock.mockReset();
@@ -2498,7 +2661,7 @@ describe('PaymentModal integration', () => {
   it('applies available client balance to an existing payment', async () => {
     const onBalanceApplied = vi.fn().mockResolvedValue(undefined);
     getClientBalanceMock.mockResolvedValue({ clientId: 69, balance: 750 });
-    applyClientBalanceMock.mockResolvedValue({ appliedAmount: 750, balance: 0 });
+    applyClientBalanceMock.mockResolvedValue(balanceResult(750, 0, { id: 996, amount: 16250, paidAmount: 750, outstandingAmount: 15500 }));
 
     render(
       <PaymentModal

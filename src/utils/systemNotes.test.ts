@@ -119,4 +119,10 @@ describe('systemNotes helpers', () => {
 
     expect(getAppliedClientBalanceAmount(notes)).toBe(2000.5);
   });
+
+  it('recognizes current counterparty notes together with legacy notes without counting other financial events', () => {
+    const notes = ['Зачтено с баланса контрагента: 1\u00a0250,50', 'Зачтено с баланса клиента: 100,25',
+      'Зачтено с баланса: 5.25', 'Возвращено с баланса контрагента: 900,00', 'Зачтено с баланса контрагента: -3,00'].join('\n');
+    expect(getAppliedClientBalanceAmount(notes)).toBe(1356);
+  });
 });

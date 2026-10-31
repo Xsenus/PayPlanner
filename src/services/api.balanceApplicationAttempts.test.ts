@@ -34,16 +34,16 @@ describe.each(['client', 'legalEntity'] as const)('%s durable balance API', kind
     : apiService.applyLegalEntityBalanceGuarded(7, { paymentId: 19, amount: 25 });
   const owned = () => kind === 'client' ? { clientId: 7, legalEntityId: null } : { clientId: null, legalEntityId: 7 };
   const ack = (entry = metadata(), isReplay = false) => ({ requestId: entry.requestId, appliedAmount: 25, balance: 75, isReplay });
-  function responder() {
+  function responder(known?: PendingBalanceApplication) {
     return vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
-      const url = String(input); const entry = metadata();
+      const url = String(input); const entry = known ?? metadata();
       expect(entry.actorId).toBe(1); expect(entry.apiScope).toBe(API_BASE_URL);
       expect(new Headers(init?.headers).get('Authorization')).toBe(localStorage.getItem('pp_token') && `Bearer ${localStorage.getItem('pp_token')}`);
       expect(init?.cache).toBe('no-store'); expect(init?.signal).toBeInstanceOf(AbortSignal);
       if (url.endsWith('/apply')) return Response.json(ack());
       if (url.includes(`/applications/${entry.requestId}`)) return Response.json({ requestId: entry.requestId, paymentId: 19,
         state: url.endsWith('/cancel') ? 'Cancelled' : 'Committed', result: url.endsWith('/cancel') ? null : ack(entry, true) });
-      return Response.json(url.endsWith('/payments/19') ? { id: 19, ...owned(), amount: 100, paidAmount: 45 } : { ...owned(), balance: 65 });
+      return Response.json(url.endsWith('/payments/19') ? { id: 19, ...owned(), amount: 100, paidAmount: 45, status: 'Processing', isPaid: false } : { ...owned(), balance: 65 });
     });
   }
   async function unknown() {
@@ -90,6 +90,15 @@ describe.each(['client', 'legalEntity'] as const)('%s durable balance API', kind
     vi.stubGlobal('fetch', fetch); const value = await apiService.cancelPendingBalanceApplication(entry);
     expect(value.state).toBe('Committed'); if (value.state !== 'Committed') throw new Error('Expected commit');
     expect(value.canonicalPayment.paidAmount).toBe(45); expect(value.isReplay).toBe(true); expect(fetch).toHaveBeenCalledTimes(3);
+  });
+  it('reads an externally closed outcome with the same key, without restoring metadata or sending POST', async () => {
+    const entry = await unknown(); const name = Object.keys(localStorage).find(key => key.startsWith('pp.balance-application.v1:'))!;
+    localStorage.removeItem(name); const fetch = responder(entry); vi.stubGlobal('fetch', fetch);
+    const writes = vi.spyOn(Storage.prototype, 'setItem'); const value = await apiService.openAcknowledgedBalanceApplication(entry);
+    expect(value.state).toBe('Committed'); expect(apiService.canContinueBalanceApplication(value)).toBe(true);
+    expect(await apiService.acknowledgeBalanceApplication(value)).toBe(true); expect(writes).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(3); expect(fetch.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
+    expect(apiService.pendingBalanceApplications()).toEqual([]);
   });
   it.each(['inspect', 'cancel'] as const)('rejects a foreign actor before %s transport', async action => {
     const entry = await unknown(); login(2, 'actor-b'); const fetch = responder(); vi.stubGlobal('fetch', fetch);

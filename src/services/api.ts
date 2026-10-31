@@ -4,7 +4,7 @@ import { createClientRequestId } from '../utils/clientRequestId';
 import { balanceApplicationInspectionPath, parseBalanceApplicationInspection, parseManagedBalanceApplicationResult, prepareBalanceApplicationCommand, type BalanceApplicationOwnerKind } from './balanceApplicationInspection';
 import { API_BASE_URL } from './apiBaseUrl';
 import { acknowledgeBalanceApplication, applyBalanceGuarded, balanceApplicationInFlight, cancelBalanceApplication,
-  canContinueBalanceApplication, inspectBalanceApplication, pendingBalanceApplication, pendingBalanceApplications,
+  canContinueBalanceApplication, inspectBalanceApplication, openAcknowledgedBalanceApplication, pendingBalanceApplication, pendingBalanceApplications,
   type BalanceApplicationPorts, type PendingBalanceApplication, type ReadyBalanceApplication } from './balanceApplicationAttempts';
 import type { DocumentImagePrintOptions } from '../types/documentImagePrint';
 import { apiFetch as fetch } from './apiTransport';
@@ -6125,6 +6125,10 @@ export class ApiService {
 
   inspectPendingBalanceApplication(entry: PendingBalanceApplication) {
     return inspectBalanceApplication(entry, this.balanceApplicationPorts());
+  }
+
+  openAcknowledgedBalanceApplication(entry: PendingBalanceApplication) {
+    return openAcknowledgedBalanceApplication(entry, this.balanceApplicationPorts());
   }
 
   cancelPendingBalanceApplication(entry: PendingBalanceApplication) {

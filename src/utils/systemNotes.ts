@@ -206,7 +206,7 @@ function parseMoneyFromText(value: string): number {
 
 export function getAppliedClientBalanceAmount(systemNotes?: string | null): number {
   const total = getVisibleSystemNoteLines(systemNotes).reduce((sum, line) => {
-    const match = line.match(/зачтено\s+с\s+баланса(?:\s+клиента)?\s*:\s*([0-9\s.,-]+)/i);
+    const match = line.match(/зачтено\s+с\s+баланса(?:\s+(?:клиента|контрагента))?\s*:\s*([0-9\s.,-]+)/i);
     if (!match) {
       return sum;
     }
