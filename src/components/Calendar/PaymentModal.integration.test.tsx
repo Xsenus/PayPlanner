@@ -282,9 +282,10 @@ function getLastPrintHtml(): string {
   return String(writeMock.mock.calls[0]?.[0] ?? '');
 }
 
+const doc04SourceToken = 'remainder-v2:' + 'A'.repeat(64);
 function doc04Payment(overrides: Partial<Payment> = {}): Payment {
   return {
-    id: 9901, date: '2026-04-10', plannedDate: '2026-04-10', amount: 100,
+    remainderConfirmationToken: doc04SourceToken, id: 9901, date: '2026-04-10', plannedDate: '2026-04-10', amount: 100,
     paidAmount: 0, outstandingAmount: 100, hasPartialPayment: false, status: 'Pending',
     type: 'Income', description: 'Подтверждённый платёж', isPaid: false, notes: '',
     systemNotes: '', rescheduleCount: 0, createdAt: '2026-04-10T00:00:00Z',
@@ -3365,6 +3366,45 @@ describe('PaymentModal integration', () => {
     expect(onSubmit.mock.lastCall?.[0]).toEqual(expect.objectContaining({ description: 'Новая запись', amount: 100 }));
   });
 
+  it.each(['missing', 'malformed'])('source snapshot refuses an unconfirmed %s primary snapshot without duplicating the primary', async kind => {
+    const primary = doc04Payment({ amount: 35, paidAmount: 35, status: 'Completed', isPaid: true,
+      remainderConfirmationToken: kind === 'missing' ? undefined : 'invalid' });
+    const onSubmit = vi.fn().mockResolvedValue(primary); const onCreateRemainder = vi.fn();
+    render(<PaymentModal isOpen onClose={vi.fn()} onSubmit={onSubmit} onCreateRemainder={onCreateRemainder} />);
+    doc04NewFields(); doc04Field('paidAmount', '35'); fireEvent.click(screen.getByLabelText('Перенести остаток'));
+    fireEvent.change(document.querySelector<HTMLInputElement>('#reschedule-date')!, { target: { value: '2026-05-20' } });
+    fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('Снимок исходного платежа'));
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить создание остатка' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1)); expect(onCreateRemainder).not.toHaveBeenCalled();
+  });
+
+  it('source snapshot stops automatic remainder creation when a recovered primary amount changed', async () => {
+    const primary = doc04Payment({ amount: 45, paidAmount: 45, status: 'Completed', isPaid: true });
+    const onSubmit = vi.fn().mockResolvedValue(primary); const onCreateRemainder = vi.fn();
+    render(<PaymentModal isOpen onClose={vi.fn()} onSubmit={onSubmit} onCreateRemainder={onCreateRemainder} />);
+    doc04NewFields(); doc04Field('paidAmount', '35'); fireEvent.click(screen.getByLabelText('Перенести остаток'));
+    fireEvent.change(document.querySelector<HTMLInputElement>('#reschedule-date')!, { target: { value: '2026-05-20' } });
+    fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('оплаченная часть уже изменилась'));
+    expect(onSubmit).toHaveBeenCalledTimes(1); expect(onCreateRemainder).not.toHaveBeenCalled();
+  });
+
+  it('source snapshot retains the original token and source ID across remainder retries', async () => {
+    const primary = doc04Payment({ amount: 35, paidAmount: 35, status: 'Completed', isPaid: true });
+    const onSubmit = vi.fn().mockResolvedValue(primary); const onCreateRemainder = vi.fn().mockRejectedValueOnce(new Error('Retry the unchanged command'))
+      .mockResolvedValue(doc04Payment({ id: 9902, amount: 65 }));
+    render(<PaymentModal isOpen onClose={vi.fn()} onSubmit={onSubmit} onCreateRemainder={onCreateRemainder} />);
+    doc04NewFields(); doc04Field('paidAmount', '35'); fireEvent.click(screen.getByLabelText('Перенести остаток'));
+    fireEvent.change(document.querySelector<HTMLInputElement>('#reschedule-date')!, { target: { value: '2026-05-20' } });
+    fireEvent.click(screen.getByRole('button', { name: 'addPayment' })); await screen.findByText('Retry the unchanged command');
+    primary.remainderConfirmationToken = 'remainder-v2:' + 'B'.repeat(64); primary.id = 9999;
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить создание остатка' })); await screen.findByText('Платёж и остаток сохранены.');
+    expect(onSubmit).toHaveBeenCalledTimes(1); expect(onCreateRemainder).toHaveBeenCalledTimes(2);
+    expect(onCreateRemainder.mock.calls[0][1]).toEqual({ operation: 'remainder', primaryPaymentId: 9901, sourceConfirmationToken: doc04SourceToken });
+    expect(onCreateRemainder.mock.calls[1][1]).toEqual(onCreateRemainder.mock.calls[0][1]);
+  });
+
   it('passes the confirmed primary ID explicitly to a successful new remainder operation', async () => {
     const primary = doc04Payment({ amount: 35, paidAmount: 35, outstandingAmount: 0, status: 'Completed', isPaid: true });
     const onSubmit = vi.fn().mockResolvedValue(primary);
@@ -3376,7 +3416,7 @@ describe('PaymentModal integration', () => {
     fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
     await screen.findByText('Платёж и остаток сохранены.');
     expect(onSubmit).toHaveBeenCalledTimes(1); expect(onCreateRemainder).toHaveBeenCalledTimes(1);
-    expect(onCreateRemainder.mock.calls[0][1]).toEqual({ operation: 'remainder', primaryPaymentId: primary.id });
+    expect(onCreateRemainder.mock.calls[0][1]).toEqual({ operation: 'remainder', primaryPaymentId: primary.id, sourceConfirmationToken: primary.remainderConfirmationToken });
     expect(onCreateRemainder.mock.calls[0][0]).toMatchObject({ amount: 65, paidAmount: 0, date: '2026-05-20' });
   });
 
@@ -3453,7 +3493,7 @@ describe('PaymentModal integration', () => {
       expect(onSubmit).toHaveBeenCalledTimes(1); expect(io.commit).toHaveBeenCalledTimes(2);
       expect(onCreateRemainder).toHaveBeenCalledTimes(1);
       expect(onCreateRemainder.mock.calls[0][0]).toEqual(expect.objectContaining({ amount: 65, paidAmount: 0, date: '2026-05-20' }));
-      expect(onCreateRemainder.mock.calls[0][1]).toEqual({ operation: 'remainder', primaryPaymentId: primary.id });
+      expect(onCreateRemainder.mock.calls[0][1]).toEqual({ operation: 'remainder', primaryPaymentId: primary.id, sourceConfirmationToken: primary.remainderConfirmationToken });
     } finally {
       cleanup.mockRestore(); bindPaymentCreateOwner(null, '/api'); localStorage.clear(); vi.unstubAllGlobals();
     }
@@ -3512,7 +3552,7 @@ describe('PaymentModal integration', () => {
       fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
       await screen.findByText('Платёж и остаток сохранены.');
       expect(f.io.register).toHaveBeenCalledTimes(2); expect(f.io.commit).toHaveBeenCalledTimes(2);
-      expect(f.onCreateRemainder.mock.calls[0][1]).toEqual({ operation: 'remainder', primaryPaymentId: primary.id });
+      expect(f.onCreateRemainder.mock.calls[0][1]).toEqual({ operation: 'remainder', primaryPaymentId: primary.id, sourceConfirmationToken: primary.remainderConfirmationToken });
       expect(f.io.register).toHaveBeenNthCalledWith(2, expect.objectContaining({ operation: 'remainder', primaryPaymentId: primary.id }), expect.anything(), expect.any(AbortSignal));
       expect(pendingPaymentCreates()).toEqual([]); expect(screen.queryByRole('alert')).toBeNull();
     } finally { f.cleanup(); }
@@ -3551,7 +3591,7 @@ describe('PaymentModal integration', () => {
       await waitFor(() => expect(pendingPaymentCreates()[0]).toMatchObject({ phase: 'committed', canonicalPaymentId: f.rest.id, primaryPaymentId: primary.id }));
       rerender(<PaymentModal {...props} isOpen />); await screen.findByRole('button', { name: `Открыть платёж №${f.rest.id}` });
       expect(f.io.register).toHaveBeenCalledTimes(2);
-      await expect(createPaymentGuarded({ ...primary }, { operation: 'remainder', primaryPaymentId: primary.id }, f.io)).rejects.toThrow('Результат создания');
+      await expect(createPaymentGuarded({ ...primary }, { operation: 'remainder', primaryPaymentId: primary.id, sourceConfirmationToken: doc04SourceToken }, f.io)).rejects.toThrow('Результат создания');
       expect(f.io.register).toHaveBeenCalledTimes(2);
     } finally { f.cleanup(); }
   });
@@ -3575,7 +3615,7 @@ describe('PaymentModal integration', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Повторить создание остатка' }));
       await screen.findByText('Платёж и остаток сохранены.');
       expect(f.onCreateRemainder).toHaveBeenCalledTimes(1); expect(f.io.commit).toHaveBeenCalledTimes(2);
-      expect(f.onCreateRemainder.mock.calls[0][1]).toEqual({ operation: 'remainder', primaryPaymentId: primary.id });
+      expect(f.onCreateRemainder.mock.calls[0][1]).toEqual({ operation: 'remainder', primaryPaymentId: primary.id, sourceConfirmationToken: primary.remainderConfirmationToken });
     } finally { f.cleanup(); }
   });
 

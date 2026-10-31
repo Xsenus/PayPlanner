@@ -1,7 +1,11 @@
 import { getAuthSessionEpoch } from './authService';
 import type { Payment, PaymentPayload } from '../types';
 
-export type PaymentCreateContext = { operation: 'primary' | 'remainder'; primaryPaymentId?: number };
+export type PaymentCreateContext = { operation: 'primary'; primaryPaymentId?: never; sourceConfirmationToken?: never }
+  | { operation: 'remainder'; primaryPaymentId: number; sourceConfirmationToken: string };
+export function isPaymentSourceConfirmationToken(value: unknown): value is string {
+  return typeof value === 'string' && /^remainder-v2:[0-9A-F]{64}$/.test(value);
+}
 export type PaymentCreateOwner = Readonly<{ actorId: number; apiScope: string; generation: number; sessionEpoch: string }>;
 export type PaymentAttemptState = {
   attemptId: string; state: 'Draft' | 'Committed' | 'Cancelled';
@@ -278,13 +282,19 @@ export async function createPaymentGuarded(payment: PaymentPayload, context: Pay
     if (!lease) throw new Error('Создание платежа выполняется в другой вкладке. Дождитесь ответа.');
     assertPaymentCreateOwner(actor);
     return withAttemptDeadline(actor, true, async (flow) => {
-      const command = serializePaymentCreate(payment);
+      const serializedPayment = serializePaymentCreate(payment);
       const pending = pendingPaymentCreates();
       if (pending.length) throw new PaymentCreateRecoveryError(pending[0], false);
       const operation = context?.operation ?? 'primary';
       const primaryPaymentId = operation === 'remainder' ? context?.primaryPaymentId : null;
       if (operation === 'remainder' && !positive(primaryPaymentId)) throw new Error('Не подтверждён исходный платёж остатка.');
       if (operation === 'primary' && context?.primaryPaymentId !== undefined) throw new Error('Некорректная связь платежа.');
+      const sourceConfirmationToken = context?.sourceConfirmationToken;
+      if (operation === 'remainder' && !isPaymentSourceConfirmationToken(sourceConfirmationToken))
+        throw new Error('Снимок исходного платежа не подтверждён. Откройте сохранённый платёж заново и проверьте суммы.');
+      if (operation === 'primary' && sourceConfirmationToken !== undefined) throw new Error('Снимок исходного платежа допустим только для остатка.');
+      const command = operation === 'remainder'
+        ? JSON.stringify({ ...JSON.parse(serializedPayment), sourceConfirmationToken }) : serializedPayment;
       const selection = payment as PaymentPayload & { sellerCompanyId?: number | null; sellerBranchId?: number | null };
       const body = { operation, primaryPaymentId: primaryPaymentId ?? null,
         sellerCompanyId: selection.sellerCompanyId ?? null, sellerBranchId: selection.sellerBranchId ?? null };

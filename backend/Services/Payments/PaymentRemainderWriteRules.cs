@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
 using PayPlanner.Api.Data;
@@ -19,18 +20,18 @@ internal static class PaymentRemainderWriteRules
         {
             payment.Id,
             Binding = PaymentBalanceHistoryRules.Binding.From(payment),
-            payment.Amount,
-            payment.PaidAmount,
+            Amount = payment.Amount.ToString("G29", CultureInfo.InvariantCulture),
+            PaidAmount = payment.PaidAmount.ToString("G29", CultureInfo.InvariantCulture),
             payment.Status,
             payment.IsPaid,
-            payment.Date,
-            payment.PlannedDate,
-            payment.PaidDate,
-            payment.LastPaymentDate,
+            Date = SnapshotTicks(payment.Date),
+            PlannedDate = SnapshotTicks(payment.PlannedDate),
+            PaidDate = SnapshotTicks(payment.PaidDate),
+            LastPaymentDate = SnapshotTicks(payment.LastPaymentDate),
             payment.Account,
-            payment.AccountDate,
+            AccountDate = SnapshotTicks(payment.AccountDate),
             payment.LegacyAccountNumber,
-            payment.LegacyAccountDate,
+            LegacyAccountDate = SnapshotTicks(payment.LegacyAccountDate),
             payment.ContractId,
             payment.ClientCaseId,
             payment.DealTypeId,
@@ -45,8 +46,15 @@ internal static class PaymentRemainderWriteRules
             payment.Notes,
             payment.SystemNotes
         });
-        return "remainder-v1:" + Convert.ToHexString(SHA256.HashData(bytes));
+        return "remainder-v2:" + Convert.ToHexString(SHA256.HashData(bytes));
     }
+
+    public static bool IsConfirmationToken(string? value)
+        => value is { Length: 77 } && value.StartsWith("remainder-v2:", StringComparison.Ordinal)
+            && value.AsSpan(13).IndexOfAnyExcept("0123456789ABCDEF") < 0;
+
+    private static long? SnapshotTicks(DateTime? value)
+        => value.HasValue ? (value.Value.Kind == DateTimeKind.Local ? value.Value.ToUniversalTime().Ticks : value.Value.Ticks) : null;
 
     public static async Task<string?> ValidateUpdateAsync(PaymentContext db, Payment current, Payment model, CancellationToken ct)
     {

@@ -249,6 +249,8 @@ public sealed class CreateAttemptRemainderLinkTests
             // The older shared helper omits these optional fields; send the real
             // transport fields so the rejection is exercised before normalization.
             var command = JsonNode.Parse(PaymentInputStateTests.Command(model).GetRawText())!.AsObject();
+            var primary = Assert.IsType<Payment>(Assert.IsType<OkObjectResult>(await PaymentCreateFinancialBoundaryTests.Controller(db, source).GetById(source.PaymentId, default)).Value);
+            command["sourceConfirmationToken"] = primary.RemainderConfirmationToken;
             if (model.PaidDate.HasValue) command["paidDate"] = model.PaidDate.Value;
             if (model.LastPaymentDate.HasValue) command["lastPaymentDate"] = model.LastPaymentDate.Value;
             var id = await db.PaymentCreateAttempts.Select(p => p.Id).SingleAsync();

@@ -27,6 +27,7 @@ public static class PaymentCreateCommand
         NullableDateTimeString,
         NullablePositiveInt32,
         PaymentKind,
+        SourceConfirmation,
     }
 
     private static readonly Dictionary<string, FieldKind> Fields = new(StringComparer.Ordinal)
@@ -69,11 +70,12 @@ public static class PaymentCreateCommand
         ["sellerCompanyId"] = FieldKind.NullablePositiveInt32,
         ["sellerBranchId"] = FieldKind.NullablePositiveInt32,
         ["documentKind"] = FieldKind.PaymentKind,
+        ["sourceConfirmationToken"] = FieldKind.SourceConfirmation,
     };
 
     // The legacy entity endpoint shares the logical input allowlist without
     // weakening this protocol's field validation or canonical request identity.
-    internal static IEnumerable<string> InputPropertyNames => Fields.Keys;
+    internal static IEnumerable<string> InputPropertyNames => Fields.Keys.Where(name => name != "sourceConfirmationToken");
 
     private static readonly string[] RequiredFields =
     [
@@ -186,7 +188,22 @@ public static class PaymentCreateCommand
             // Defaults such as Payment.CreatedAt are applied only after the logical identity.
             // Bind canonical numbers so exact integral exponent/fraction spellings also reach
             // the same int32 value, without depending on a rounded decimal reader result.
-            var parsed = JsonSerializer.Deserialize<Payment>(canonical, options);
+            // Snapshot metadata participates in identity, not Payment binding.
+            var paymentBytes = canonical;
+            if (fields.ContainsKey("sourceConfirmationToken"))
+            {
+                using var document = JsonDocument.Parse(canonical);
+                using var modelBuffer = new MemoryStream();
+                using (var modelWriter = new Utf8JsonWriter(modelBuffer))
+                {
+                    modelWriter.WriteStartObject();
+                    foreach (var property in document.RootElement.EnumerateObject())
+                        if (property.Name != "sourceConfirmationToken") property.WriteTo(modelWriter);
+                    modelWriter.WriteEndObject();
+                }
+                paymentBytes = modelBuffer.ToArray();
+            }
+            var parsed = JsonSerializer.Deserialize<Payment>(paymentBytes, options);
             if (parsed is null
                 || parsed.DocumentKind != DocumentKind.Payment
                 || !Enum.IsDefined(parsed.Type)
@@ -221,6 +238,8 @@ public static class PaymentCreateCommand
 
         switch (kind)
         {
+            case FieldKind.SourceConfirmation:
+                return value.ValueKind == JsonValueKind.String && PaymentRemainderWriteRules.IsConfirmationToken(value.GetString());
             case FieldKind.String:
             case FieldKind.EnumString:
             case FieldKind.DateTimeString:

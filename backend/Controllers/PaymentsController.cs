@@ -518,6 +518,7 @@ public class PaymentsController : ControllerBase
     }
 
     [HttpGet("{id:int}")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
@@ -535,6 +536,7 @@ public class PaymentsController : ControllerBase
             return NotFound();
         }
 
+        if (item.DocumentKind == DocumentKind.Payment) item.RemainderConfirmationToken = PaymentRemainderWriteRules.BuildConfirmationToken(item);
         PaymentDisplayNameService.FillCounterpartyNames([item]);
         await AttachContractorRecipientsAsync(new[] { item }, ct);
         return Ok(item);
@@ -646,6 +648,9 @@ public class PaymentsController : ControllerBase
             if (PaymentCreateInputRules.ValidateCreationState(model) is { } inputStateError)
                 return BadRequest(new { message = inputStateError });
             Payment? remainderSource = null;
+            var hasSourceConfirmation = body.TryGetProperty("sourceConfirmationToken", out var sourceConfirmation);
+            if (!attempt.PrimaryPaymentId.HasValue && hasSourceConfirmation)
+                return BadRequest(new { message = "Снимок исходного платежа допустим только для команды остатка." });
             if (attempt.PrimaryPaymentId is { } sourceId)
             {
                 var ownsPrimary = await _db.PaymentCreateAttempts.AsNoTracking().AnyAsync(primary => primary.ActorUserId == attempt.ActorUserId
@@ -653,6 +658,10 @@ public class PaymentsController : ControllerBase
                 if (!ownsPrimary && !await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, permission => permission.CanEdit, ct))
                     return Forbid();
                 remainderSource = await _db.Payments.SingleAsync(payment => payment.Id == sourceId, ct);
+                if (!hasSourceConfirmation)
+                    return BadRequest(new { message = "Подтвердите актуальный исходный платёж перед созданием остатка." });
+                if (!string.Equals(sourceConfirmation.GetString(), PaymentRemainderWriteRules.BuildConfirmationToken(remainderSource), StringComparison.Ordinal))
+                    return Conflict(new { message = "Исходный платёж изменился после сохранения формы. Откройте его заново и проверьте суммы перед созданием остатка." });
                 if (remainderSource.DocumentKind != DocumentKind.Payment || remainderSource.Status == PaymentStatus.Cancelled
                     || remainderSource.AdvanceReviewStatus == PaymentAdvanceReviewStatus.Refunded
                     || await PaymentCreditInvariantScope.IsCancellationProtectedAsync(_db, sourceId, ct)
@@ -691,6 +700,7 @@ public class PaymentsController : ControllerBase
             if (_db.Database.CurrentTransaction is not null)
                 throw new InvalidOperationException("Payment notifications require a disposed financial transaction.");
             if (scope.AfterCommit is not null) await scope.AfterCommit();
+            model.RemainderConfirmationToken = PaymentRemainderWriteRules.BuildConfirmationToken(model);
             return result;
         }, ct);
     }
@@ -4926,6 +4936,8 @@ public class PaymentsController : ControllerBase
                 PlannedDate = payment.PlannedDate,
                 RescheduleCount = payment.RescheduleCount,
                 ServiceId = payment.ServiceId,
+                SellerCompanyId = payment.SellerCompanyId,
+                SellerBranchId = payment.SellerBranchId,
                 Status = payment.Status,
                 SystemNotes = payment.SystemNotes,
                 Type = payment.Type,

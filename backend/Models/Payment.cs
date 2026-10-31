@@ -8,6 +8,10 @@ namespace PayPlanner.Api.Models
     /// </summary>
     public class Payment : PayPlanner.Api.Services.Companies.IDocumentSeller
     {
+        [NotMapped]
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? RemainderConfirmationToken { get; internal set; }
+
         /// <summary>
         /// Счет.
         /// </summary>

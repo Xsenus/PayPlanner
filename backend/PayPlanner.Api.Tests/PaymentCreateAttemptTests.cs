@@ -698,8 +698,13 @@ public sealed class PaymentCreateAttemptTests(PostgreSqlModelTemplate template) 
         var controller = Controller(db, actor);
         var primary = Assert.IsType<Payment>(Assert.IsType<CreatedResult>(await controller.Create(new Payment
         { Date = DateTime.Today, PlannedDate = DateTime.Today, Amount = 100m, Type = PaymentType.Income, Status = PaymentStatus.Pending }, default)).Value);
-        var attempt = await RegisterAsync(controller, "remainder", primary: primary.Id);
+        // A historical committed remainder can lack a structural pair. Keep
+        // exercising its opaque cancel/visibility contract, not a new split of
+        // this deliberately unpaid source (now rejected by the financial path).
+        var attempt = await RegisterAsync(controller);
         var canonical = Assert.IsType<Payment>(Assert.IsType<CreatedResult>(await controller.CommitCreateAttempt(attempt.AttemptId, Command(), default)).Value);
+        var historical = await db.PaymentCreateAttempts.SingleAsync(p => p.Id == attempt.AttemptId);
+        historical.Operation = "remainder"; historical.PrimaryPaymentId = primary.Id; await db.SaveChangesAsync();
         if (deleted) Assert.IsType<NoContentResult>(await controller.Delete(primary.Id, default));
         else
         {

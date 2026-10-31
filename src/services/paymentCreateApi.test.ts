@@ -46,6 +46,20 @@ describe('payment attempt actual fetch boundary', () => {
     refreshed.resolve(token(1, 'new-login'));
     await expect(saving).rejects.toThrow('Сессия изменилась'); expect(request).not.toHaveBeenCalled();
   });
+  it('source snapshot reaches the dedicated commit unchanged and stays out of registration', async () => {
+    vi.spyOn(authService, 'ensureFreshSession').mockResolvedValue(token(1));
+    const sourceConfirmationToken = 'remainder-v2:' + 'A'.repeat(64);
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(json({ ...state, operation: 'remainder', primaryPaymentId: 81 }, 201))
+      .mockResolvedValueOnce(json({ ...payload, id: 82 }, 201)); vi.stubGlobal('fetch', request);
+    const saved = await apiService.createPayment(payload, { operation: 'remainder', primaryPaymentId: 81, sourceConfirmationToken });
+    expect(saved.id).toBe(82);
+    expect(JSON.parse(request.mock.calls[0][1]!.body as string)).toEqual({ operation: 'remainder', primaryPaymentId: 81, sellerCompanyId: null, sellerBranchId: null });
+    expect(JSON.parse(request.mock.calls[1][1]!.body as string)).toEqual({ ...payload, sourceConfirmationToken });
+    expect(request.mock.calls.map(([url]) => String(url))).toEqual([
+      `${getApiBaseUrl()}/payments/create-attempts`, `${getApiBaseUrl()}/payments/create-attempts/${id}/commit`,
+    ]);
+  });
+
   it('allows same-session token refresh, dedicated register+commit, and no profile/keyless request', async () => {
     vi.spyOn(authService, 'ensureFreshSession').mockImplementation(async () => {
       localStorage.setItem('pp_token', token(1, 'refreshed')); return token(1, 'refreshed');

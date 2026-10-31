@@ -320,7 +320,13 @@ public sealed class LegacyRemainderConfirmationTests
         var controller = PaymentCreateFinancialBoundaryTests.Controller(db, source);
         var body = JsonSerializer.SerializeToElement(new { operation = "remainder", primaryPaymentId = source.PaymentId });
         var id = Assert.IsType<PaymentCreateAttemptStateDto>(Assert.IsType<CreatedResult>(await controller.RegisterCreateAttempt(body, default)).Value).AttemptId;
-        return model => controller.CommitCreateAttempt(id, PaymentInputStateTests.Command(model), default);
+        var primary = Assert.IsType<Payment>(Assert.IsType<OkObjectResult>(await controller.GetById(source.PaymentId, default)).Value);
+        return model =>
+        {
+            var command = System.Text.Json.Nodes.JsonNode.Parse(PaymentInputStateTests.Command(model).GetRawText())!.AsObject();
+            command["sourceConfirmationToken"] = primary.RemainderConfirmationToken;
+            return controller.CommitCreateAttempt(id, JsonSerializer.SerializeToElement(command), default);
+        };
     }
     internal static async Task AssertFailureAsync(PaymentContext db, Fixture source, FailSave fault)
     {

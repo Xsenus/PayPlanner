@@ -3935,6 +3935,7 @@ export interface ContractInput extends DocumentSellerCreateSelection {
 }
 
 export interface Payment {
+  remainderConfirmationToken?: string | null;
   id: number;
   date: string;
   plannedDate: string;
@@ -4011,6 +4012,7 @@ export interface Payment {
 
 export type PaymentPayload = Omit<
   Payment,
+  | 'remainderConfirmationToken'
   | 'id'
   | 'createdAt'
   | 'auditCreatedByUserId'

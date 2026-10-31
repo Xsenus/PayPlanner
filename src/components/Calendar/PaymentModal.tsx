@@ -9,7 +9,7 @@ import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { useDictionaries } from '../../hooks/useDictionaries';
 import { useTranslation } from '../../hooks/useTranslation';
 import { apiService } from '../../services/api';
-import { acknowledgeCreatedPayment, canContinueCreatedPayment, PaymentCreateAdoptedError, PAYMENT_CREATE_CHANGED, PaymentCreateRecoveryError, paymentCreateSessionVersion, type PaymentCreateContext } from '../../services/paymentCreateAttempts';
+import { acknowledgeCreatedPayment, canContinueCreatedPayment, isPaymentSourceConfirmationToken, PaymentCreateAdoptedError, PAYMENT_CREATE_CHANGED, PaymentCreateRecoveryError, paymentCreateSessionVersion, type PaymentCreateContext } from '../../services/paymentCreateAttempts';
 import { PaymentCreateRecovery } from '../Payments/PaymentCreateRecovery';
 import { BalanceApplicationRecovery } from '../Payments/BalanceApplicationRecovery';
 import { usePendingBalanceApplications } from '../../hooks/usePendingBalanceApplications';
@@ -359,7 +359,7 @@ export function PaymentModal({
   const savingRef = useRef(false);
   const scopeRef = useRef(0);
   const permissionRevisionRef = useRef(0);
-  const pendingRemainderRef = useRef<{ payment: Payment; payload: PaymentPayload } | null>(null);
+  const pendingRemainderRef = useRef<{ primaryPaymentId: number; sourceConfirmationToken?: string | null; payload: PaymentPayload } | null>(null);
   const [remainderPending, setRemainderPending] = useState(false);
   const [remainderReceiptBlocked, setRemainderReceiptBlocked] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -1053,11 +1053,14 @@ export function PaymentModal({
   const completePendingRemainder = async (scope: number) => {
     const pending = pendingRemainderRef.current;
     if (!pending || !onCreateRemainder) throw new Error('Не удалось восстановить данные остатка.');
+    const sourceConfirmationToken = pending.sourceConfirmationToken;
+    if (!isPaymentSourceConfirmationToken(sourceConfirmationToken))
+      throw new Error('Снимок исходного платежа не подтверждён. Откройте сохранённый платёж заново и проверьте суммы.');
     const actorVersion = paymentCreateSessionVersion();
     let created: Payment;
     try {
       created = requireSavedPayment(await onCreateRemainder(pending.payload, {
-        operation: 'remainder', primaryPaymentId: pending.payment.id,
+        operation: 'remainder', primaryPaymentId: pending.primaryPaymentId, sourceConfirmationToken,
       }));
     } catch (error) {
       if (error instanceof PaymentCreateAdoptedError) {
@@ -1070,7 +1073,7 @@ export function PaymentModal({
         && scope === scopeRef.current && actorVersion === paymentCreateSessionVersion()) {
         recoveryContinuationRef.current = { attemptId: error.attempt.attemptId, accept: async (saved) => {
           if (scope !== scopeRef.current || actorVersion !== paymentCreateSessionVersion()) return false;
-          if (saved.id === pending.payment.id) throw new Error('Сервер вернул исходный платёж вместо остатка.');
+          if (saved.id === pending.primaryPaymentId) throw new Error('Сервер вернул исходный платёж вместо остатка.');
           pendingRemainderRef.current = null;
           setRemainderPending(false);
           setSaveNotice('Платёж и остаток сохранены.');
@@ -1080,7 +1083,7 @@ export function PaymentModal({
       throw error;
     }
     if (scope !== scopeRef.current || actorVersion !== paymentCreateSessionVersion()) return;
-    if (created.id === pending.payment.id) throw new Error('Создание отдельного остатка не подтверждено сервером.');
+    if (created.id === pending.primaryPaymentId) throw new Error('Создание отдельного остатка не подтверждено сервером.');
     if (!canContinueCreatedPayment(created)) {
       pendingRemainderRef.current = null; setRemainderPending(false); setSaveNotice('Сохранённый остаток подтверждён.'); return;
     }
@@ -2035,6 +2038,12 @@ export function PaymentModal({
           && (!payment || !onTransferRemainder);
 
         if (shouldCreateRemainderViaFallback) {
+          if (!Number.isFinite(saved.amount) || !Number.isFinite(saved.paidAmount)
+            || Math.abs(saved.amount - paymentData.amount) > 0.009
+            || Math.abs(saved.paidAmount - (paymentData.paidAmount ?? 0)) > 0.009) {
+            setSaveError('Платёж сохранён, но его оплаченная часть уже изменилась. Остаток не создан. Откройте платёж заново и проверьте суммы.');
+            return true;
+          }
           const nextPayment: PaymentPayload = {
             ...paymentData,
             date: normalizedRescheduleDate,
@@ -2053,7 +2062,7 @@ export function PaymentModal({
             ].join('\n'),
             rescheduleCount: (formData.rescheduleCount ?? 0) + 1,
           };
-          pendingRemainderRef.current = { payment: saved, payload: nextPayment };
+          pendingRemainderRef.current = { primaryPaymentId: saved.id, sourceConfirmationToken: saved.remainderConfirmationToken, payload: nextPayment };
           setRemainderPending(true);
           setRemainderReceiptBlocked(!receiptAcknowledged);
           if (!createRemainder) {
@@ -3223,7 +3232,7 @@ export function PaymentModal({
                   if (continuation?.attemptId === attempt.attemptId) {
                     if (!await continuation.accept(saved)) return false;
                     recoveryContinuationRef.current = null;
-                  } else if (attempt.operation === 'primary' && pendingRemainderRef.current?.payment.id === saved.id) {
+                  } else if (attempt.operation === 'primary' && pendingRemainderRef.current?.primaryPaymentId === saved.id) {
                     // The primary ACK was already adopted; browser receipt cleanup alone blocked
                     // the unstarted remainder. Opening that primary must retain its exact pending command.
                     acceptSavedPayment(saved);
@@ -3239,7 +3248,7 @@ export function PaymentModal({
                   return true;
                 }}
                 onAcknowledged={(saved, attempt) => {
-                  if (attempt.operation === 'primary' && pendingRemainderRef.current?.payment.id === saved.id) {
+                  if (attempt.operation === 'primary' && pendingRemainderRef.current?.primaryPaymentId === saved.id) {
                     setRemainderReceiptBlocked(false);
                     setSaveNotice('Платёж подтверждён. Остаток ещё не создан; нажмите «Сохранить».');
                   }

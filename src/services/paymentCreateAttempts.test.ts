@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { acknowledgeCreatedPayment, acknowledgePaymentCreate, fencePaymentCreateAdoption, bindPaymentCreateOwner, createPaymentGuarded, inspectPaymentCreate,
   openCommittedPaymentCreate, PAYMENT_CREATE_FIELDS, PaymentCreateRecoveryError, pendingPaymentCreates,
-  serializePaymentCreate, type PaymentAttemptState, type PaymentCreatePorts } from './paymentCreateAttempts';
+  serializePaymentCreate, type PaymentAttemptState, type PaymentCreateContext, type PaymentCreatePorts } from './paymentCreateAttempts';
 import { PAYMENT_ATTEMPT_DEADLINE_MS, PaymentCreateAdoptedError } from './paymentCreateAttempts';
 import type { Payment, PaymentPayload } from '../types';
 
@@ -11,7 +11,8 @@ const token = (actor: number) => `header.${btoa(JSON.stringify({ sub: String(act
 const command = (): PaymentPayload => ({ date: '2026-10-26', plannedDate: '2026-10-26', amount: 123.456789,
   paidAmount: 0, type: 'Income', status: 'Pending', description: '  исходное описание  ', isPaid: false,
   notes: '', systemNotes: '', rescheduleCount: 0 });
-const payment = (id: number): Payment => ({ ...command(), id, outstandingAmount: 123.456789, hasPartialPayment: false, createdAt: '2026-10-26T00:00:00Z' });
+const sourceToken = 'remainder-v2:' + 'A'.repeat(64);
+const payment = (id: number): Payment => ({ remainderConfirmationToken: sourceToken, ...command(), id, outstandingAmount: 123.456789, hasPartialPayment: false, createdAt: '2026-10-26T00:00:00Z' });
 function state(overrides: Partial<PaymentAttemptState> = {}): PaymentAttemptState {
   return { attemptId: firstId, state: 'Draft', operation: 'primary', sellerCompanyId: null, sellerBranchId: null,
     primaryPaymentId: null, createdAtUtc: '2026-10-26T00:00:00Z', expiresAtUtc: '2026-10-27T00:00:00Z',
@@ -40,6 +41,31 @@ beforeEach(() => { localStorage.clear(); sessionStorage.clear(); lockManager(); 
 afterEach(() => { vi.restoreAllMocks(); bindPaymentCreateOwner(null, '/api'); localStorage.clear(); vi.unstubAllGlobals(); });
 
 describe('payment command and durable financial boundary', () => {
+  it('source snapshot is sent only in the remainder command and never persisted as draft metadata', async () => {
+    const io = ports(); vi.mocked(io.register).mockResolvedValue(state({ operation: 'remainder', primaryPaymentId: 91 }));
+    vi.mocked(io.commit).mockResolvedValue(payment(92));
+    await createPaymentGuarded(command(), { operation: 'remainder', primaryPaymentId: 91, sourceConfirmationToken: sourceToken }, io);
+    expect(JSON.parse(vi.mocked(io.commit).mock.calls[0][1])).toEqual({ ...command(), sourceConfirmationToken: sourceToken });
+    expect(vi.mocked(io.register).mock.calls[0][0]).not.toHaveProperty('sourceConfirmationToken');
+    expect(Object.keys(localStorage).map(key => localStorage.getItem(key)).join('')).not.toContain(sourceToken);
+  });
+
+  it.each([undefined, null, '', 'remainder-v1:' + 'A'.repeat(64), 'remainder-v2:' + 'X'.repeat(64)])(
+    'source snapshot rejects missing or malformed metadata %s before registering', async value => {
+      const io = ports();
+      await expect(createPaymentGuarded(command(), { operation: 'remainder', primaryPaymentId: 91, sourceConfirmationToken: value } as unknown as PaymentCreateContext, io)).rejects.toThrow('Снимок исходного платежа');
+      expect(io.register).not.toHaveBeenCalled(); expect(io.commit).not.toHaveBeenCalled(); expect(pendingPaymentCreates()).toEqual([]);
+    });
+
+  it('source snapshot response fields never become ordinary payment input', () => {
+    expect(JSON.parse(serializePaymentCreate({ ...command(), remainderConfirmationToken: sourceToken } as PaymentPayload))).toEqual(command());
+  });
+
+  it('source snapshot cannot be attached to a primary operation', async () => {
+    const io = ports();
+    await expect(createPaymentGuarded(command(), { operation: 'primary', sourceConfirmationToken: sourceToken } as unknown as PaymentCreateContext, io)).rejects.toThrow('только для остатка');
+    expect(io.register).not.toHaveBeenCalled(); expect(io.commit).not.toHaveBeenCalled();
+  });
   it('serializes exactly the 38 allowed fields without response fields, rounding or new defaults', () => {
     expect(PAYMENT_CREATE_FIELDS).toHaveLength(38);
     const value = { ...command(), id: 700, clientName: 'private', sellerSnapshotJson: '{}', client: { id: 6 },
@@ -61,7 +87,7 @@ describe('payment command and durable financial boundary', () => {
     vi.mocked(io.commit).mockResolvedValueOnce(payment(91)).mockResolvedValueOnce(payment(92));
     const primary = await createPaymentGuarded(command(), undefined, io);
     expect(await acknowledgeCreatedPayment(primary)).toBe(true);
-    const remainder = await createPaymentGuarded(command(), { operation: 'remainder', primaryPaymentId: primary.id }, io);
+    const remainder = await createPaymentGuarded(command(), { operation: 'remainder', primaryPaymentId: primary.id, sourceConfirmationToken: sourceToken }, io);
     expect(remainder.id).toBe(92);
     expect(await acknowledgeCreatedPayment(remainder)).toBe(true);
     expect(vi.mocked(io.register).mock.calls[1][0]).toMatchObject({ operation: 'remainder', primaryPaymentId: 91 });
@@ -206,7 +232,7 @@ describe('unknown outcome, permission failures and owner isolation', () => {
     const io = ports();
     vi.mocked(io.register).mockResolvedValue(state({ operation: 'remainder', primaryPaymentId: 91 }));
     vi.mocked(io.get).mockResolvedValue(state({ operation: 'remainder', primaryPaymentId: 91 }));
-    await expect(createPaymentGuarded(command(), { operation: 'remainder', primaryPaymentId: 91 }, io))
+    await expect(createPaymentGuarded(command(), { operation: 'remainder', primaryPaymentId: 91, sourceConfirmationToken: sourceToken }, io))
       .rejects.toBeInstanceOf(PaymentCreateRecoveryError);
     expect(pendingPaymentCreates()[0]).toMatchObject({ attemptId: firstId, primaryPaymentId: 91 });
     expect(io.commit).toHaveBeenCalledTimes(1);
