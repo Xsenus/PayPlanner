@@ -10,6 +10,8 @@ public static class PaymentRemainderTransferRules
     public const string PartialRemainderSourceMarker = "[pp:partial-remainder-source]";
     public const string SourceDeleteBlockedMessage = "Платеж уже разделен частичной оплатой: остаток перенесен отдельным платежом. Удалять исходный платеж отдельно нельзя.";
     public const string SourceAmountUpdateBlockedMessage = "Платеж уже разделен частичной оплатой: сумма и оплаченная часть исходного платежа зафиксированы. Измените перенесенный остаток отдельной операцией.";
+    public const string SourceStatusUpdateBlockedMessage = "Платёж уже разделён частичной оплатой. Статус и признак оплаты исходного платежа зафиксированы; используйте изменение или откат переноса остатка.";
+    public const string BindingUpdateBlockedMessage = "Платёж связан с переносом остатка. Контрагента, направление и связь со счётом нельзя менять отдельно от связанной оплаты.";
     public const string RemainderDeleteBlockedMessage = "Перенесенный остаток нельзя удалить отдельно: он связан с исходным частично оплаченным платежом.";
     public const string RemainderAmountUpdateBlockedMessage = "Сумма перенесенного остатка зафиксирована при частичной оплате. Можно оплатить остаток, но нельзя менять его сумму напрямую.";
     public const string RemainderCancelBlockedMessage = "Перенесенный остаток нельзя отменить напрямую: он связан с исходным частично оплаченным платежом.";

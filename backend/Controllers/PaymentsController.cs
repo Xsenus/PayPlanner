@@ -905,6 +905,7 @@ public class PaymentsController : ControllerBase
 
         var transferProtectionError = await ValidatePartialRemainderUpdateAsync(e, model, ct);
         if (transferProtectionError is not null) return transferProtectionError;
+        var originalTransferPayment = (Payment)_db.Entry(e).CurrentValues.ToObject();
 
         if (model.IncomeTypeId.HasValue)
         {
@@ -1081,6 +1082,9 @@ public class PaymentsController : ControllerBase
             await InvoicePaymentStateService.RefreshInvoiceAggregateAsync(_db, originalInvoiceId.Value, now, ct);
         }
 
+        if (await PaymentRemainderWriteRules.ValidateUpdateAsync(_db, originalTransferPayment, e, ct) is { } normalizedTransferError)
+            return Conflict(new { message = normalizedTransferError });
+
         await _db.SaveChangesAsync(ct);
         scope.AfterCommit = async () =>
         {
@@ -1152,6 +1156,9 @@ public class PaymentsController : ControllerBase
         {
             return Conflict(new { message = InvoiceManagedPaymentRules.UpdateBlockedMessage });
         }
+
+        if (await PaymentRemainderWriteRules.ValidateStatusAsync(_db, payment, nextStatus, ct) is { } remainderError)
+            return Conflict(new { message = remainderError });
 
         var now = DateTime.UtcNow;
         var actor = User.GetDisplayName();
@@ -1828,6 +1835,7 @@ public class PaymentsController : ControllerBase
 
         var transferProtectionError = await ValidatePartialRemainderUpdateAsync(e, model, ct);
         if (transferProtectionError is not null) return transferProtectionError;
+        var originalTransferPayment = (Payment)_db.Entry(e).CurrentValues.ToObject();
 
         if (model.IncomeTypeId.HasValue)
         {
@@ -1998,6 +2006,9 @@ public class PaymentsController : ControllerBase
             return BadRequest(new { message = "Оплата не может быть меньше зачтённого баланса контрагента." });
         await SyncPaymentCashOrderAsync(e, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, e, now, ct);
+        if (await PaymentRemainderWriteRules.ValidateUpdateAsync(_db, originalTransferPayment, e, ct) is { } normalizedTransferError)
+            return Conflict(new { message = normalizedTransferError });
+
         await _db.SaveChangesAsync(ct);
         PopulateAuditMetadata(_db, e);
         return Ok(e);
@@ -3805,36 +3816,8 @@ public class PaymentsController : ControllerBase
     }
 
     private async Task<ActionResult?> ValidatePartialRemainderUpdateAsync(Payment current, Payment model, CancellationToken ct)
-    {
-        if (await IsPartialRemainderPaymentAsync(current, ct))
-        {
-            if (!AreAmountsEqual(model.Amount, current.Amount))
-            {
-                return Conflict(new { message = PaymentRemainderTransferRules.RemainderAmountUpdateBlockedMessage });
-            }
-
-            if (model.Status == PaymentStatus.Cancelled && current.Status != PaymentStatus.Cancelled)
-            {
-                return Conflict(new { message = PaymentRemainderTransferRules.RemainderCancelBlockedMessage });
-            }
-
-            return null;
-        }
-
-        var transferredRemainder = await FindPartialRemainderPaymentAsync(current.Id, ct);
-        if (transferredRemainder is null)
-        {
-            return null;
-        }
-
-        if (!AreAmountsEqual(model.Amount, current.Amount)
-            || !AreAmountsEqual(model.PaidAmount, current.PaidAmount))
-        {
-            return Conflict(new { message = PaymentRemainderTransferRules.SourceAmountUpdateBlockedMessage });
-        }
-
-        return null;
-    }
+        => await PaymentRemainderWriteRules.ValidateUpdateAsync(_db, current, model, ct) is { } error
+            ? Conflict(new { message = error }) : null;
 
     private readonly record struct PartialRemainderTransferPair(
         Payment Source,
