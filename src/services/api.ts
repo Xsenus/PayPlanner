@@ -3,6 +3,9 @@ import { acknowledgePaymentCreate, assertPaymentCreateOwner, fencePaymentCreateA
 import { createClientRequestId } from '../utils/clientRequestId';
 import { balanceApplicationInspectionPath, parseBalanceApplicationInspection, parseManagedBalanceApplicationResult, prepareBalanceApplicationCommand, type BalanceApplicationOwnerKind } from './balanceApplicationInspection';
 import { API_BASE_URL } from './apiBaseUrl';
+import { acknowledgeBalanceApplication, applyBalanceGuarded, balanceApplicationInFlight, cancelBalanceApplication,
+  canContinueBalanceApplication, inspectBalanceApplication, pendingBalanceApplication, pendingBalanceApplications,
+  type BalanceApplicationPorts, type PendingBalanceApplication, type ReadyBalanceApplication } from './balanceApplicationAttempts';
 import type { DocumentImagePrintOptions } from '../types/documentImagePrint';
 import { apiFetch as fetch } from './apiTransport';
 import { authService, assertAuthSessionIdentity, captureAuthSessionIdentity, AuthSessionChangedError } from './authService';
@@ -6080,9 +6083,63 @@ export class ApiService {
     });
   }
 
-  private async inspectBalanceApplication(kind: BalanceApplicationOwnerKind, id: number, paymentId: number, requestId: string, signal?: AbortSignal) {
+  private readonly assertBalanceActor = (actor: PaymentCreateOwner) => {
+    assertPaymentCreateOwner(actor);
+    if (actor.apiScope !== API_BASE_URL || !paymentCreateTokenMatches(actor, getAuthToken()))
+      throw new ApiHttpFailure(403, 'Пользователь изменился. Проверьте зачёт в своей учётной записи.');
+  };
+
+  private balanceApplicationPorts(): BalanceApplicationPorts {
+    const canonical = async <T>(path: string, actor: PaymentCreateOwner, signal: AbortSignal): Promise<T> => {
+      this.assertBalanceActor(actor);
+      const value = await this.request<T>(path, { paymentCreateActor: actor, signal, cache: 'no-store', expectedStatus: 200 });
+      this.assertBalanceActor(actor); return value;
+    };
+    return {
+      assertActor: this.assertBalanceActor,
+      apply: (entry, command, actor, signal) => this.applyBalanceApplicationManaged(entry.kind, entry.ownerId, entry.requestId, command, actor, signal),
+      inspect: (entry, actor, signal) => this.inspectBalanceApplication(entry.kind, entry.ownerId, entry.paymentId, entry.requestId, signal, actor),
+      cancel: (entry, actor, signal) => this.cancelBalanceApplication(entry.kind, entry.ownerId, entry.paymentId, entry.requestId, signal, actor),
+      payment: (entry, actor, signal) => canonical<Payment>(`/payments/${entry.paymentId}`, actor, signal),
+      balance: (entry, actor, signal) => canonical<ClientBalanceSummary>(`/${entry.kind === 'client' ? 'clients' : 'legal-entities'}/${entry.ownerId}/balance`, actor, signal),
+    };
+  }
+
+  applyClientBalanceGuarded(id: number, payload: BalanceApplicationCommand) {
+    return applyBalanceGuarded('client', id, payload, this.balanceApplicationPorts());
+  }
+
+  applyLegalEntityBalanceGuarded(id: number, payload: BalanceApplicationCommand) {
+    return applyBalanceGuarded('legalEntity', id, payload, this.balanceApplicationPorts());
+  }
+
+  pendingBalanceApplications() { return pendingBalanceApplications(this.assertBalanceActor); }
+
+  pendingBalanceApplication(kind: BalanceApplicationOwnerKind, id: number, paymentId: number) {
+    return pendingBalanceApplication(kind, id, paymentId, this.assertBalanceActor);
+  }
+
+  balanceApplicationInFlight(kind: BalanceApplicationOwnerKind, id: number, paymentId: number) {
+    return balanceApplicationInFlight(kind, id, paymentId, this.assertBalanceActor);
+  }
+
+  inspectPendingBalanceApplication(entry: PendingBalanceApplication) {
+    return inspectBalanceApplication(entry, this.balanceApplicationPorts());
+  }
+
+  cancelPendingBalanceApplication(entry: PendingBalanceApplication) {
+    return cancelBalanceApplication(entry, this.balanceApplicationPorts());
+  }
+
+  canContinueBalanceApplication(value: ReadyBalanceApplication) { return canContinueBalanceApplication(value); }
+
+  acknowledgeBalanceApplication(value: ReadyBalanceApplication) { return acknowledgeBalanceApplication(value); }
+
+  private async inspectBalanceApplication(kind: BalanceApplicationOwnerKind, id: number, paymentId: number, requestId: string, signal?: AbortSignal, actor?: PaymentCreateOwner) {
+    if (actor) this.assertBalanceActor(actor);
     const path = balanceApplicationInspectionPath(kind, id, paymentId, requestId);
-    const value = await this.request<unknown>(path, { signal, cache: 'no-store' });
+    const value = await this.request<unknown>(path, { signal, cache: 'no-store', paymentCreateActor: actor });
+    if (actor) this.assertBalanceActor(actor);
     return parseBalanceApplicationInspection(value, requestId, paymentId);
   }
 
@@ -6113,11 +6170,13 @@ export class ApiService {
     return this.inspectBalanceApplication('legalEntity', id, paymentId, requestId, signal);
   }
 
-  private async cancelBalanceApplication(kind: BalanceApplicationOwnerKind, id: number, paymentId: number, requestId: string, signal?: AbortSignal) {
+  private async cancelBalanceApplication(kind: BalanceApplicationOwnerKind, id: number, paymentId: number, requestId: string, signal?: AbortSignal, actor?: PaymentCreateOwner) {
+    if (actor) this.assertBalanceActor(actor);
     const path = `${balanceApplicationInspectionPath(kind, id, paymentId, requestId).split('?')[0]}/cancel`;
     const value = await this.request<unknown>(path, {
-      method: 'POST', body: JSON.stringify({ paymentId }), signal, cache: 'no-store', expectedStatus: 200,
+      method: 'POST', body: JSON.stringify({ paymentId }), signal, cache: 'no-store', expectedStatus: 200, paymentCreateActor: actor,
     });
+    if (actor) this.assertBalanceActor(actor);
     const status = parseBalanceApplicationInspection(value, requestId, paymentId);
     if (status.state === 'Unconfirmed') throw new Error('Отмена зачёта ещё не подтверждена. Проверьте результат перед новым зачётом.');
     return status;
