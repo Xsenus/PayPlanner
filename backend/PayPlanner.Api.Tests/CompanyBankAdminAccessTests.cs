@@ -71,8 +71,8 @@ public sealed class CompanyBankAdminAccessTests(PostgreSqlModelTemplate template
             using var restored = await SendAsync(client, fixture, "list"); Assert.Equal(HttpStatusCode.OK, restored.StatusCode);
         });
 
-    private sealed record Fixture(int User, int Connection, int Account);
-    private static async Task<Fixture> SeedAsync(PaymentContext db)
+    internal sealed record Fixture(int User, int Connection, int Account);
+    internal static async Task<Fixture> SeedAsync(PaymentContext db)
     {
         var user = new User { Email = "bank-admin@test.local", FullName = "Fixture administrator", PasswordHash = "unused", IsActive = true, IsApproved = true, Role = new Role { Name = "admin" } };
         var company = new LegalEntity { ShortName = "Confidential fixture company", ProfileStatus = CompanyProfileStatuses.Active };
@@ -117,7 +117,7 @@ public sealed class CompanyBankAdminAccessTests(PostgreSqlModelTemplate template
             _ => throw new ArgumentOutOfRangeException(nameof(action)),
         };
     }
-    private static TestServer Server(PaymentContext db, IBankSyncService sync)
+    internal static TestServer Server(PaymentContext db, IBankSyncService sync)
         => new(new WebHostBuilder().UseEnvironment("Testing").UseSetting("BackgroundServices:Enabled", "false").UseSetting("Email:Enabled", "false")
             .ConfigureServices(services =>
             {

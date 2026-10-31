@@ -6,6 +6,7 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services.Banking;
+using PayPlanner.Api.Services.Companies;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -138,6 +139,20 @@ public class BankConnectionsController : ControllerBase, IAsyncActionFilter
             item.LastError,
             item.LastAccountsSyncAt,
             byConnection.GetValueOrDefault(item.Id) ?? [])).ToList());
+    }
+
+    [HttpGet("{id:int}/profile-account-matches")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<ActionResult<CompanyBankAccountMatchReport>> GetProfileAccountMatches(int id, CancellationToken ct)
+    {
+        try
+        {
+            var report = await new CompanyBankAccountMatchService(_db).ReadAsync(id, ct);
+            return report is null ? NotFound() : Ok(report);
+        }
+        catch (CompanyBankAccountMatchLimitException error) { return Conflict(new { message = error.Message }); }
+        catch (Exception error) when (error is SellerSnapshotConflictException || DocumentSellerLease.IsConflict(error))
+        { return Conflict(new { message = "Сверка счетов сейчас недоступна. Повторите чтение данных." }); }
     }
 
     [HttpPost("{id:int}/sync-accounts")]
