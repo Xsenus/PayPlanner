@@ -52,13 +52,20 @@ internal static class VersionedPaymentWriteBoundary
                 original = (Payment)db.Entry(current).CurrentValues.ToObject();
                 if (!deleting && model is not null && PaymentCreateInputRules.ValidateSystemNotesChange(current.SystemNotes, model.SystemNotes) is { } notesError)
                     return controller.BadRequest(new { message = notesError });
-                if (await PaymentCreditInvariantScope.IsCancellationProtectedAsync(db, id.Value, ct))
+                if (!deleting && model is not null && PaymentAdvanceReviewService.NormalizeUpdateInput(current, model) is { } reviewError)
+                    return controller.BadRequest(new { message = reviewError });
+                if (await PaymentCreditInvariantScope.IsCancellationProtectedAsync(db, id.Value, ct)
+                    || current.AdvanceReviewStatus == PaymentAdvanceReviewStatus.Refunded)
                 {
                     if (deleting || model is null || current.DocumentKind != DocumentKind.Payment
                         || InvoiceManagedPaymentRules.IsInvoiceManagedPayment(current)
                         || CancelledReceiptAnnotations.HasFinancialChanges(current, model)
                         || !string.IsNullOrEmpty(model.SystemNotes) && model.SystemNotes != current.SystemNotes)
-                        return controller.BadRequest(new { message = PaymentCreditInvariantScope.CancellationProtectedMessage });
+                        return controller.BadRequest(new
+                        {
+                            message = current.AdvanceReviewStatus == PaymentAdvanceReviewStatus.Refunded
+                            ? PaymentAdvanceReviewService.RefundedEditMessage : PaymentCreditInvariantScope.CancellationProtectedMessage
+                        });
                     if (await ValidateInvoiceAsync(current.InvoiceId, false) is { } hiddenParent) return hiddenParent;
                     current.Description = model.Description ?? string.Empty; current.Notes = model.Notes ?? string.Empty;
                     await db.SaveChangesAsync(ct); await lease.CommitAsync(ct);

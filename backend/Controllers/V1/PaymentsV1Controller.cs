@@ -150,7 +150,13 @@ public class PaymentsV1Controller : ControllerBase
         var updateValidationError = await ValidatePaymentAttributionAsync(e, ct);
         if (updateValidationError is not null) return updateValidationError;
 
-        await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, e, DateTime.UtcNow, ct);
+        var now = DateTime.UtcNow;
+        PaymentAdvanceReviewService.ApplyValidatedUpdateState(e, model);
+        PaymentAdvanceReviewService.ApplyAutomaticReviewState(e, now, HttpContext);
+        if (await PaymentBalanceHistoryRules.ValidateSyncAsync(_db, e, ct) is { } reviewHistoryError)
+            return BadRequest(new { message = reviewHistoryError });
+        await PaymentAdvanceReviewService.SyncBalanceAsync(_db, e, now, HttpContext, ct);
+        await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, e, now, ct);
         if (originalInvoiceId.HasValue
             && originalInvoiceId.Value > 0
             && originalInvoiceId != e.InvoiceId)

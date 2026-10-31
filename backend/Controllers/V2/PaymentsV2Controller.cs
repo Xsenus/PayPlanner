@@ -549,8 +549,7 @@ public class PaymentsV2Controller : ControllerBase
         entity.PaidAmount = model.PaidAmount;
         entity.LastPaymentDate = model.LastPaymentDate ?? model.PaidDate ?? entity.LastPaymentDate;
         entity.SystemNotes = MergeSystemNotes(originalSystemNotes, model.SystemNotes);
-        entity.AdvanceReviewStatus = model.AdvanceReviewStatus;
-        entity.AdvanceReviewReason = model.AdvanceReviewReason;
+        PaymentAdvanceReviewService.ApplyValidatedUpdateState(entity, model);
 
         var updateValidationError = await ValidatePaymentAttributionAsync(entity, ct);
         if (updateValidationError is not null) return updateValidationError;

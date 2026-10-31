@@ -11,11 +11,41 @@ namespace PayPlanner.Api.Services;
 
 public static class PaymentAdvanceReviewService
 {
+    internal const string ReviewActionMessage = "Результат контроля аванса нельзя менять обычным сохранением платежа. Используйте отдельное действие принятия, исключения или возврата аванса.";
+    internal const string RefundedEditMessage = "По платежу уже оформлен возврат аванса. Можно изменить только обычное описание и заметку; денежная история сохраняется.";
     private const decimal AmountEpsilon = 0.009m;
     private const string AdvanceReviewRequiredEventKeyPrefix = "payment-advance-review-required:";
     private const string AdvanceReviewEscalationEventKeyPrefix = "payment-advance-review-escalation:";
     private static readonly Func<Payment, bool> UnallocatedAdvanceCandidateEvaluator =
         UnallocatedAdvanceCandidatePredicate().Compile();
+
+    internal static string? NormalizeUpdateInput(Payment current, Payment incoming)
+    {
+        if (!Enum.IsDefined(current.AdvanceReviewStatus) || !Enum.IsDefined(incoming.AdvanceReviewStatus)) return ReviewActionMessage;
+        if (incoming.AdvanceReviewStatus != current.AdvanceReviewStatus
+            && incoming.AdvanceReviewStatus is PaymentAdvanceReviewStatus.Ignored or PaymentAdvanceReviewStatus.Refunded or PaymentAdvanceReviewStatus.Allocated)
+            return ReviewActionMessage;
+        if (incoming.AdvanceReviewStatus == PaymentAdvanceReviewStatus.AcceptedAsAdvance
+            && current.AdvanceReviewStatus != PaymentAdvanceReviewStatus.AcceptedAsAdvance)
+        {
+            if (current.AdvanceReviewStatus is PaymentAdvanceReviewStatus.Ignored or PaymentAdvanceReviewStatus.Refunded) return ReviewActionMessage;
+            incoming.AdvanceReviewReason = NormalizeReason(incoming.AdvanceReviewReason);
+            return null;
+        }
+        // Older entity DTOs omit this input and bind None. That is not a command
+        // to erase a decision, its reason, or the balance credit behind it.
+        incoming.AdvanceReviewStatus = current.AdvanceReviewStatus;
+        incoming.AdvanceReviewReason = current.AdvanceReviewReason;
+        return null;
+    }
+
+    internal static void ApplyValidatedUpdateState(Payment current, Payment incoming)
+    {
+        if (incoming.AdvanceReviewStatus == PaymentAdvanceReviewStatus.AcceptedAsAdvance
+            && current.AdvanceReviewStatus != PaymentAdvanceReviewStatus.AcceptedAsAdvance) ClearReviewStamp(current);
+        current.AdvanceReviewStatus = incoming.AdvanceReviewStatus;
+        current.AdvanceReviewReason = incoming.AdvanceReviewReason;
+    }
 
     public static Expression<Func<Payment, bool>> UnallocatedAdvanceCandidatePredicate()
         => payment => payment.Type == PaymentType.Income
@@ -63,7 +93,7 @@ public static class PaymentAdvanceReviewService
         {
             if (payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.AcceptedAsAdvance)
             {
-                StampReviewIfNeeded(payment, utcNow, httpContext, "Принято как аванс");
+                StampReviewIfNeeded(payment, utcNow, httpContext, NormalizeReason(payment.AdvanceReviewReason) ?? "Принято как аванс");
                 return;
             }
 
@@ -103,8 +133,11 @@ public static class PaymentAdvanceReviewService
             return (false, "Платеж уже связан со счетом, актом или закрывающим документом, либо не является входящим оплаченным платежом.");
         }
 
+        var decisionReason = NormalizeReason(reason) ?? "Деньги приняты как нераспределенный аванс клиента";
+        if (payment.AdvanceReviewStatus != PaymentAdvanceReviewStatus.AcceptedAsAdvance || NormalizeReason(payment.AdvanceReviewReason) != decisionReason)
+            ClearReviewStamp(payment);
         payment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.AcceptedAsAdvance;
-        payment.AdvanceReviewReason = NormalizeReason(reason) ?? "Деньги приняты как нераспределенный аванс клиента";
+        payment.AdvanceReviewReason = decisionReason;
         StampReviewIfNeeded(payment, utcNow, httpContext, payment.AdvanceReviewReason);
         await SyncBalanceAsync(db, payment, utcNow, httpContext, ct);
         return (true, null);
@@ -121,8 +154,11 @@ public static class PaymentAdvanceReviewService
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(payment);
 
+        var decisionReason = NormalizeReason(reason) ?? "Исключено из контроля нераспределенных авансов";
+        if (payment.AdvanceReviewStatus != PaymentAdvanceReviewStatus.Ignored || NormalizeReason(payment.AdvanceReviewReason) != decisionReason)
+            ClearReviewStamp(payment);
         payment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.Ignored;
-        payment.AdvanceReviewReason = NormalizeReason(reason) ?? "Исключено из контроля нераспределенных авансов";
+        payment.AdvanceReviewReason = decisionReason;
         StampReviewIfNeeded(payment, utcNow, httpContext, payment.AdvanceReviewReason);
         await ClientBalanceService.RemoveUnallocatedAdvanceAsync(db, payment.Id, ct);
         return (true, null);
@@ -376,6 +412,13 @@ public static class PaymentAdvanceReviewService
         payment.AdvanceReviewedAt = utcNow;
         payment.AdvanceReviewedByUserId = httpContext?.User.GetUserId() ?? payment.AdvanceReviewedByUserId;
         payment.AdvanceReviewedByUserName = httpContext?.User.GetDisplayName() ?? payment.AdvanceReviewedByUserName;
+    }
+
+    private static void ClearReviewStamp(Payment payment)
+    {
+        payment.AdvanceReviewedAt = null;
+        payment.AdvanceReviewedByUserId = null;
+        payment.AdvanceReviewedByUserName = null;
     }
 
     private static void StampReviewIfNeeded(Payment payment, DateTime utcNow, HttpContext? httpContext, string? reason)

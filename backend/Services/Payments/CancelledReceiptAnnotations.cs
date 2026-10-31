@@ -16,7 +16,7 @@ internal static class CancelledReceiptAnnotations
             || (current.PlannedDate == default ? current.Date.Date : current.PlannedDate.Date)
                 != (model.PlannedDate == default ? (current.PlannedDate == default ? current.Date.Date : current.PlannedDate.Date) : model.PlannedDate.Date)
             || current.PaidDate?.Date != model.PaidDate?.Date
-            || current.LastPaymentDate?.Date != (model.LastPaymentDate ?? model.PaidDate ?? current.LastPaymentDate)?.Date
+            || (current.LastPaymentDate ?? current.PaidDate)?.Date != (model.LastPaymentDate ?? model.PaidDate ?? current.LastPaymentDate)?.Date
             || Normalize(current.Account) != Normalize(model.Account) || current.AccountDate?.Date != model.AccountDate?.Date
             || Normalize(current.PaymentOrderNumber) != Normalize(model.PaymentOrderNumber) || current.PaymentDocumentDate?.Date != model.PaymentDocumentDate?.Date
             || current.AdvanceReviewStatus != model.AdvanceReviewStatus || Normalize(current.AdvanceReviewReason) != Normalize(model.AdvanceReviewReason)

@@ -903,6 +903,10 @@ public class PaymentsController : ControllerBase
 
         var e = await _db.Payments.FindAsync(id);
         if (e is null) return NotFound();
+        if (PaymentAdvanceReviewService.NormalizeUpdateInput(e, model) is { } reviewError)
+            return BadRequest(new { message = reviewError });
+        if (e.AdvanceReviewStatus == PaymentAdvanceReviewStatus.Refunded)
+            return await UpdateClosedReceiptMetadataAsync(e, model, scope, ct, PaymentAdvanceReviewService.RefundedEditMessage);
         if (scope.CancellationProtected) return await UpdateClosedReceiptMetadataAsync(e, model, scope, ct);
         if (InvoiceManagedPaymentRules.IsInvoiceManagedPayment(e))
         {
@@ -978,8 +982,7 @@ public class PaymentsController : ControllerBase
         e.OverpaymentHandling = model.OverpaymentHandling;
         e.OverpaymentTargetPaymentId = model.OverpaymentTargetPaymentId;
         e.OverpaymentComment = model.OverpaymentComment;
-        e.AdvanceReviewStatus = model.AdvanceReviewStatus;
-        e.AdvanceReviewReason = model.AdvanceReviewReason;
+        PaymentAdvanceReviewService.ApplyValidatedUpdateState(e, model);
         var rawPaidAmount = model.PaidAmount;
         var appliedCreditAmount = await ClientBalanceService.GetAppliedCreditAmountAsync(_db, e.Id, ct);
         if (appliedCreditAmount > AmountTolerance
@@ -1115,13 +1118,13 @@ public class PaymentsController : ControllerBase
         return Ok(e);
     }
 
-    private async Task<IActionResult> UpdateClosedReceiptMetadataAsync(Payment current, Payment model, PaymentWriteScope scope, CancellationToken ct)
+    private async Task<IActionResult> UpdateClosedReceiptMetadataAsync(Payment current, Payment model, PaymentWriteScope scope, CancellationToken ct, string? financialMessage = null)
     {
         if (await ValidateInvoiceLinkAccessAsync(current, ct) is { } invalidInvoice) return invalidInvoice;
         if (current.DocumentKind != DocumentKind.Payment || InvoiceManagedPaymentRules.IsInvoiceManagedPayment(current)
             || CancelledReceiptAnnotations.HasFinancialChanges(current, model)
             || (!string.IsNullOrEmpty(model.SystemNotes) && model.SystemNotes != current.SystemNotes))
-            return BadRequest(new { message = PaymentCreditInvariantScope.CancellationProtectedMessage });
+            return BadRequest(new { message = financialMessage ?? PaymentCreditInvariantScope.CancellationProtectedMessage });
 
         // This path deliberately saves only ordinary receipt annotations. Running
         // normalization, balance/cash synchronization or invoice refresh here could
