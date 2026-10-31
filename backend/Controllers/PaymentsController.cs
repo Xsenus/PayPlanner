@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using PayPlanner.Api.Data;
@@ -153,9 +154,60 @@ public class PaymentsController : ControllerBase
     private Task<IActionResult?> RequirePaymentsEditAsync(CancellationToken ct)
         => RequirePaymentsPermissionAsync(permission => permission.CanEdit, ct);
 
-    private sealed class PaymentWriteScope
+    private sealed class PaymentWriteScope : IDisposable
     {
+        private readonly BalanceApplicationLease lease;
+        private readonly PaymentContext db;
+        private readonly HashSet<Payment> changed = new(ReferenceEqualityComparer.Instance);
+
+        public PaymentWriteScope(BalanceApplicationLease lease, PaymentContext db)
+        {
+            this.lease = lease;
+            this.db = db;
+            db.ChangeTracker.StateChanged += OnStateChanged;
+            db.ChangeTracker.Tracked += OnTracked;
+        }
+
         public Func<Task>? AfterCommit { get; set; }
+        public Task LockPaymentAsync(int id, CancellationToken ct) => lease.LockPaymentAsync(id, ct);
+
+        private void OnStateChanged(object? sender, EntityStateChangedEventArgs args)
+        {
+            if ((args.OldState == EntityState.Modified || args.NewState == EntityState.Modified)
+                && args.Entry.Entity is Payment payment) changed.Add(payment);
+        }
+
+        private void OnTracked(object? sender, EntityTrackedEventArgs args)
+        {
+            if (args.Entry.State == EntityState.Modified && args.Entry.Entity is Payment payment) changed.Add(payment);
+        }
+
+        public async Task<bool> KeepsAppliedCreditAsync(CancellationToken ct)
+        {
+            // Save accepts tracked originals. Remember the modified objects across
+            // every intermediate Save, including recalculated invoice representatives.
+            var payments = changed.ToArray().Where(p => p.Id > 0 && db.Entry(p).State is not (EntityState.Detached or EntityState.Deleted))
+                .ToDictionary(p => p.Id);
+            foreach (var ids in payments.Keys.Chunk(500))
+            {
+                var applied = await db.ClientBalanceTransactions.AsNoTracking()
+                    .Where(t => t.PaymentId.HasValue && ids.Contains(t.PaymentId.Value)
+                        && t.Type == ClientBalanceTransactionType.CreditApplied && t.Direction == ClientBalanceDirection.Debit)
+                    .GroupBy(t => t.PaymentId!.Value)
+                    .Select(group => new { Id = group.Key, Amount = group.Sum(t => t.Amount) }).ToArrayAsync(ct);
+                foreach (var credit in applied)
+                    if (payments[credit.Id].PaidAmount + AmountTolerance < credit.Amount
+                        || payments[credit.Id].Amount + AmountTolerance < credit.Amount) return false;
+            }
+            return true;
+        }
+
+        public void Dispose()
+        {
+            db.ChangeTracker.StateChanged -= OnStateChanged;
+            db.ChangeTracker.Tracked -= OnTracked;
+            changed.Clear();
+        }
     }
 
     private async Task<IActionResult> RunPaymentWriteAsync(int id,
@@ -164,18 +216,25 @@ public class PaymentsController : ControllerBase
         var actorId = User.GetUserId();
         if (User?.Identity?.IsAuthenticated != true || actorId is not > 0) return Unauthorized();
         BalanceApplicationLease? lease = null;
-        var scope = new PaymentWriteScope();
+        PaymentWriteScope? scope = null;
         IActionResult result;
         try
         {
             // Participate before reading paid amounts, notes, permissions or balance
             // entries. The managed Apply path owns the same payment row lock.
             lease = await BalanceApplicationLease.BeginAsync(_db, actorId.Value, ct);
+            scope = new(lease, _db);
+            if (_db.Database.IsNpgsql()) await _db.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '2s'", ct);
             if (!await _db.Users.AsNoTracking().AnyAsync(user => user.Id == actorId.Value && user.IsActive && user.IsApproved, ct))
                 return Unauthorized();
             await lease.LockPaymentAsync(id, ct);
             result = await write(scope);
-            if (result is OkObjectResult) await lease.CommitAsync(ct);
+            if (result is OkObjectResult)
+            {
+                if (!await scope.KeepsAppliedCreditAsync(ct))
+                    return BadRequest(new { message = "Сохранение уменьшило бы оплату связанного платежа ниже зачтённого баланса. Измените распределение оплаты." });
+                await lease.CommitAsync(ct);
+            }
         }
         catch (Exception error) when (BalanceApplicationLease.IsConflict(error)
             && (lease?.CommitStarted != true || BalanceApplicationLease.IsDefiniteDatabaseAbort(error)))
@@ -184,12 +243,38 @@ public class PaymentsController : ControllerBase
         }
         finally
         {
+            scope?.Dispose();
             if (lease is not null) await lease.DisposeAsync();
         }
         // Notifications may use another context. Never publish an uncommitted change
         // and never translate a post-commit failure into a retryable write conflict.
-        if (result is OkObjectResult && scope.AfterCommit is not null) await scope.AfterCommit();
+        if (result is OkObjectResult && scope?.AfterCommit is { } notify) await notify();
         return result;
+    }
+
+    private Task<IActionResult> RunRemainderWriteAsync(int id,
+        Func<PaymentWriteScope, Task<IActionResult>> write, CancellationToken ct)
+        => RunPaymentWriteAsync(id, async scope =>
+        {
+            if (await RequirePaymentsEditAsync(ct) is { } forbidden) return forbidden;
+            var visibility = await ResolvePaymentsVisibilityAsync(ct);
+            if (visibility is null) return AccessDenied();
+            if (!await CanAccessPaymentAsync(id, visibility, ct)) return NotFound();
+            return await write(scope);
+        }, ct);
+
+    private async Task<IActionResult?> LockRemainderPairAsync(int id, PartialRemainderTransferPair pair,
+        PaymentWriteScope scope, CancellationToken ct)
+    {
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null) return AccessDenied();
+        if (!await CanAccessPaymentAsync(pair.Source.Id, visibility, ct)
+            || !await CanAccessPaymentAsync(pair.Remainder.Id, visibility, ct)) return NotFound();
+        // The request root is already locked. NOWAIT avoids waiting on a caller
+        // that entered through the other member of this same pair.
+        if (pair.Source.Id != id) await scope.LockPaymentAsync(pair.Source.Id, ct);
+        if (pair.Remainder.Id != id) await scope.LockPaymentAsync(pair.Remainder.Id, ct);
+        return null;
     }
 
     private async Task NotifyPaymentAssignedAsync(Payment payment, CancellationToken ct)
@@ -1600,8 +1685,12 @@ public class PaymentsController : ControllerBase
     }
 
     [HttpPut("{id:int}/invoice-managed")]
-    public async Task<IActionResult> UpdateInvoiceManaged(int id, [FromBody] Payment model, CancellationToken ct)
+    public Task<IActionResult> UpdateInvoiceManaged(int id, [FromBody] Payment model, CancellationToken ct)
+        => RunPaymentWriteAsync(id, scope => UpdateInvoiceManagedCoreAsync(id, model, ct), ct);
+
+    private async Task<IActionResult> UpdateInvoiceManagedCoreAsync(int id, Payment model, CancellationToken ct)
     {
+        if (await RequirePaymentsEditAsync(ct) is { } forbidden) return forbidden;
         var missingUpdate = await _formRequirements.GetMissingFieldsAsync("payments", model);
         if (missingUpdate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingUpdate });
 
@@ -1644,6 +1733,8 @@ public class PaymentsController : ControllerBase
         var originalRescheduleCount = Math.Max(0, e.RescheduleCount);
         var originalSystemNotes = e.SystemNotes ?? string.Empty;
         var originalNotes = e.Notes;
+        var originalClientId = e.ClientId;
+        var originalLegalEntityId = e.LegalEntityId;
 
         if (e.PlannedDate == default)
         {
@@ -1714,6 +1805,11 @@ public class PaymentsController : ControllerBase
         await PopulateMissingExpenseAttributionFromCaseAsync(e, ct);
         var invoiceManagedValidationError = await ValidatePaymentAttributionAsync(e, ct);
         if (invoiceManagedValidationError is not null) return invoiceManagedValidationError;
+        if (appliedCreditAmount > AmountTolerance
+            && (e.ClientId != originalClientId || e.LegalEntityId != originalLegalEntityId || e.Type != immutableType))
+            return BadRequest(new { message = "Нельзя менять контрагента или направление платежа с зачтённым балансом." });
+        if (e.Amount + AmountTolerance < appliedCreditAmount)
+            return BadRequest(new { message = "Сумма платежа не может быть меньше зачтённого баланса контрагента." });
         PaymentDomainService.Normalize(e);
 
         if (e.LastPaymentDate is null && e.PaidAmount > 0m)
@@ -1783,6 +1879,8 @@ public class PaymentsController : ControllerBase
         if (overpaymentValidationError is not null) return overpaymentValidationError;
 
         await ApplyPaymentOverpaymentHandlingAsync(e, rawPaidAmount, now, paymentTimeZone, ct);
+        if (e.PaidAmount + AmountTolerance < appliedCreditAmount)
+            return BadRequest(new { message = "Оплата не может быть меньше зачтённого баланса контрагента." });
         await SyncPaymentCashOrderAsync(e, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, e, now, ct);
         await _db.SaveChangesAsync(ct);
@@ -1916,10 +2014,14 @@ public class PaymentsController : ControllerBase
     }
 
     [HttpPost("{id:int}/partial-remainder/from-existing")]
-    public async Task<IActionResult> TransferExistingPartialRemainder(
+    public Task<IActionResult> TransferExistingPartialRemainder(
         int id,
         [FromBody] TransferExistingPaymentRemainderRequest request,
         CancellationToken ct)
+        => RunRemainderWriteAsync(id, scope => TransferExistingPartialRemainderCoreAsync(id, request, scope, ct), ct);
+
+    private async Task<IActionResult> TransferExistingPartialRemainderCoreAsync(int id,
+        TransferExistingPaymentRemainderRequest request, PaymentWriteScope scope, CancellationToken ct)
     {
         if (request.RemainderDate == default)
         {
@@ -1942,13 +2044,14 @@ public class PaymentsController : ControllerBase
         _skipRemainderTransferFormRequirements = true;
         try
         {
-            return await TransferPartialRemainder(
+            return await TransferPartialRemainderCoreAsync(
                 id,
                 new TransferPaymentRemainderRequest
                 {
                     Payment = transferModel,
                     RemainderDate = request.RemainderDate.Date,
                 },
+                scope,
                 ct);
         }
         finally
@@ -1958,10 +2061,14 @@ public class PaymentsController : ControllerBase
     }
 
     [HttpPut("{id:int}/partial-remainder")]
-    public async Task<IActionResult> TransferPartialRemainder(
+    public Task<IActionResult> TransferPartialRemainder(
         int id,
         [FromBody] TransferPaymentRemainderRequest request,
         CancellationToken ct)
+        => RunRemainderWriteAsync(id, scope => TransferPartialRemainderCoreAsync(id, request, scope, ct), ct);
+
+    private async Task<IActionResult> TransferPartialRemainderCoreAsync(int id,
+        TransferPaymentRemainderRequest request, PaymentWriteScope scope, CancellationToken ct)
     {
         if (request.Payment is null)
         {
@@ -1989,6 +2096,9 @@ public class PaymentsController : ControllerBase
         var existingRemainder = await FindPartialRemainderPaymentAsync(source.Id, ct);
         if (existingRemainder is not null)
         {
+            var visibility = await ResolvePaymentsVisibilityAsync(ct);
+            if (visibility is null || !await CanAccessPaymentAsync(existingRemainder.Id, visibility, ct)) return NotFound();
+            await scope.LockPaymentAsync(existingRemainder.Id, ct);
             PopulateAuditMetadata(_db, source);
             PopulateAuditMetadata(_db, existingRemainder);
             return Ok(new TransferPaymentRemainderResponse
@@ -2045,7 +2155,6 @@ public class PaymentsController : ControllerBase
             });
         }
 
-        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
 
         var originalDueDate = source.Date.Date;
         var originalPlannedDate = (source.PlannedDate == default ? source.Date : source.PlannedDate).Date;
@@ -2056,6 +2165,9 @@ public class PaymentsController : ControllerBase
         var originalInvoiceId = source.InvoiceId;
         var originalDescription = source.Description;
         var originalNotes = source.Notes;
+        var originalClientId = source.ClientId;
+        var originalLegalEntityId = source.LegalEntityId;
+        var originalType = source.Type;
 
         if (source.PlannedDate == default)
         {
@@ -2122,6 +2234,9 @@ public class PaymentsController : ControllerBase
         }
 
         if (await ValidateInvoiceLinkAccessAsync(source, ct) is { } invalidInvoice) return invalidInvoice;
+        if (appliedCreditAmount > AmountTolerance
+            && (source.ClientId != originalClientId || source.LegalEntityId != originalLegalEntityId || source.Type != originalType))
+            return BadRequest(new { message = "Нельзя менять контрагента или направление платежа с зачтённым балансом." });
         var sourceValidationError = await ValidatePaymentAttributionAsync(source, ct);
         if (sourceValidationError is not null) return sourceValidationError;
         PaymentDomainService.Normalize(source);
@@ -2231,7 +2346,6 @@ public class PaymentsController : ControllerBase
         await _db.SaveChangesAsync(ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, remainderPayment, now, ct);
         await _db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
 
         PopulateAuditMetadata(_db, source);
         PopulateAuditMetadata(_db, remainderPayment);
@@ -2244,7 +2358,10 @@ public class PaymentsController : ControllerBase
     }
 
     [HttpPost("{id:int}/partial-remainder/rollback")]
-    public async Task<IActionResult> RollbackPartialRemainderTransfer(int id, CancellationToken ct)
+    public Task<IActionResult> RollbackPartialRemainderTransfer(int id, CancellationToken ct)
+        => RunRemainderWriteAsync(id, scope => RollbackPartialRemainderTransferCoreAsync(id, scope, ct), ct);
+
+    private async Task<IActionResult> RollbackPartialRemainderTransferCoreAsync(int id, PaymentWriteScope scope, CancellationToken ct)
     {
         var pair = await ResolvePartialRemainderTransferPairAsync(id, ct);
         if (pair is null)
@@ -2252,6 +2369,7 @@ public class PaymentsController : ControllerBase
             return BadRequest(new { message = "Перенос остатка для платежа не найден." });
         }
 
+        if (await LockRemainderPairAsync(id, pair.Value, scope, ct) is { } inaccessible) return inaccessible;
         var validationError = await ValidateRemainderCanBeReworkedAsync(pair.Value, ct);
         if (validationError is not null) return validationError;
 
@@ -2263,7 +2381,8 @@ public class PaymentsController : ControllerBase
         var remainder = pair.Value.Remainder;
         var marker = pair.Value.Marker;
 
-        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+        if (marker.PaidAmount + AmountTolerance < await ClientBalanceService.GetAppliedCreditAmountAsync(_db, source.Id, ct))
+            return BadRequest(new { message = "Оплата не может быть меньше зачтённого баланса контрагента." });
 
         source.Amount = marker.SourceOriginalAmount;
         source.PaidAmount = marker.PaidAmount;
@@ -2287,7 +2406,6 @@ public class PaymentsController : ControllerBase
         await _db.SaveChangesAsync(ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, source, now, ct);
         await _db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
 
         PopulateAuditMetadata(_db, source);
         return Ok(new RollbackPaymentRemainderTransferResponse
@@ -2298,10 +2416,14 @@ public class PaymentsController : ControllerBase
     }
 
     [HttpPut("{id:int}/partial-remainder/adjust")]
-    public async Task<IActionResult> AdjustPartialRemainderTransfer(
+    public Task<IActionResult> AdjustPartialRemainderTransfer(
         int id,
         [FromBody] AdjustPaymentRemainderTransferRequest request,
         CancellationToken ct)
+        => RunRemainderWriteAsync(id, scope => AdjustPartialRemainderTransferCoreAsync(id, request, scope, ct), ct);
+
+    private async Task<IActionResult> AdjustPartialRemainderTransferCoreAsync(int id,
+        AdjustPaymentRemainderTransferRequest request, PaymentWriteScope scope, CancellationToken ct)
     {
         if (request.RemainderDate == default)
         {
@@ -2314,6 +2436,7 @@ public class PaymentsController : ControllerBase
             return BadRequest(new { message = "Перенос остатка для платежа не найден." });
         }
 
+        if (await LockRemainderPairAsync(id, pair.Value, scope, ct) is { } inaccessible) return inaccessible;
         var validationError = await ValidateRemainderCanBeReworkedAsync(pair.Value, ct);
         if (validationError is not null) return validationError;
 
@@ -2347,7 +2470,6 @@ public class PaymentsController : ControllerBase
             });
         }
 
-        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
 
         var remainderDate = request.RemainderDate.Date;
         source.Amount = paidAmount;
@@ -2419,7 +2541,6 @@ public class PaymentsController : ControllerBase
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, source, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, remainder, now, ct);
         await _db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
 
         PopulateAuditMetadata(_db, source);
         PopulateAuditMetadata(_db, remainder);
@@ -3411,18 +3532,26 @@ public class PaymentsController : ControllerBase
             return await LoadPaymentForRemainderTransferAsync(structuredRemainderId.Value, ct);
         }
 
-        var legacyCandidates = await _db.Payments
+        var legacyCandidates = _db.Payments
+            .AsNoTracking()
             .ApplyUnambiguousInvoiceLinks()
-            .Include(payment => payment.Responsibles)
-            .Include(payment => payment.InvoiceClientCases)
             .Where(payment => payment.SystemNotes != null
                               && payment.SystemNotes.Contains(PaymentRemainderTransferRules.PartialRemainderMarker))
             .OrderBy(payment => payment.Id)
-            .ToListAsync(ct);
+            .Select(payment => new { payment.Id, payment.SystemNotes });
 
-        return legacyCandidates.FirstOrDefault(payment =>
-            PaymentRemainderTransferRules.TryReadMarker(payment.SystemNotes, out var marker)
-            && marker.SourcePaymentId == sourcePaymentId);
+        int? foundId = null;
+        await foreach (var candidate in legacyCandidates.AsAsyncEnumerable().WithCancellation(ct))
+        {
+            if (PaymentRemainderTransferRules.TryReadMarker(candidate.SystemNotes, out var marker)
+                && marker.SourcePaymentId == sourcePaymentId)
+            {
+                foundId = candidate.Id;
+                break;
+            }
+        }
+        // Close the streaming reader before loading the single selected graph.
+        return foundId.HasValue ? await LoadPaymentForRemainderTransferAsync(foundId.Value, ct) : null;
     }
 
     private async Task<bool> IsPartialRemainderPaymentAsync(Payment payment, CancellationToken ct)
@@ -3545,7 +3674,8 @@ public class PaymentsController : ControllerBase
     {
         if (pair.Remainder.IsPaid
             || pair.Remainder.PaidAmount > 0.009m
-            || pair.Remainder.Status == PaymentStatus.Completed)
+            || pair.Remainder.Status == PaymentStatus.Completed
+            || await ClientBalanceService.GetAppliedCreditAmountAsync(_db, pair.Remainder.Id, ct) > AmountTolerance)
         {
             return Conflict(new { message = PaymentRemainderTransferRules.RemainderAlreadyProcessedMessage });
         }

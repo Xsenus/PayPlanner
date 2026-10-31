@@ -1419,6 +1419,7 @@ public class PaymentsControllerTests
         model.AccountDate = new DateTime(2027, 1, 1);
         model.SystemNotes = installmentPayment.SystemNotes;
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.UpdateInvoiceManaged(
             installmentPayment.Id,
             model,
@@ -1458,6 +1459,7 @@ public class PaymentsControllerTests
         model.InvoiceId = null;
         model.SystemNotes = installmentPayment.SystemNotes;
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.UpdateInvoiceManaged(
             installmentPayment.Id,
             model,
@@ -1522,6 +1524,7 @@ public class PaymentsControllerTests
         update.AccountDate = new DateTime(2030, 1, 1);
         update.SystemNotes = installment.SystemNotes;
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.UpdateInvoiceManaged(installment.Id, update, CancellationToken.None);
 
         if (foreignOwner)
@@ -1626,6 +1629,7 @@ public class PaymentsControllerTests
         update.PaidDate = paidDate;
         update.LastPaymentDate = paidDate;
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.UpdateInvoiceManaged(installment.Id, update, CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(actionResult);
@@ -1678,6 +1682,7 @@ public class PaymentsControllerTests
         edited.PaymentOrderNumber = "ПКО-2026-0099";
         edited.PaymentDocumentDate = paidDate.AddDays(1);
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var editedActionResult = await controller.UpdateInvoiceManaged(installment.Id, edited, CancellationToken.None);
 
         var editedOk = Assert.IsType<OkObjectResult>(editedActionResult);
@@ -1749,6 +1754,7 @@ public class PaymentsControllerTests
         update.PaymentOrderNumber = occupiedNumber;
         update.PaymentDocumentDate = installment.Date;
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.UpdateInvoiceManaged(installment.Id, update, CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(actionResult);
@@ -1790,6 +1796,7 @@ public class PaymentsControllerTests
         model.AccountDate = new DateTime(2027, 2, 2);
         model.SystemNotes = parentPayment.SystemNotes;
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.UpdateInvoiceManaged(
             parentPayment.Id,
             model,
@@ -3171,6 +3178,7 @@ public class PaymentsControllerTests
         update.OverpaymentHandling = PaymentOverpaymentHandling.Advance;
         update.OverpaymentComment = "Аванс по делу";
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.UpdateInvoiceManaged(installment.Id, update, CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(actionResult);
@@ -3217,6 +3225,7 @@ public class PaymentsControllerTests
         update.PaidDate = installment.Date;
         update.LastPaymentDate = installment.Date;
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.UpdateInvoiceManaged(installment.Id, update, CancellationToken.None);
 
         var conflict = Assert.IsType<ConflictObjectResult>(actionResult);
@@ -3272,6 +3281,7 @@ public class PaymentsControllerTests
         update.LastPaymentDate = firstInstallment.Date;
         update.OverpaymentHandling = PaymentOverpaymentHandling.NextInstallment;
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.UpdateInvoiceManaged(firstInstallment.Id, update, CancellationToken.None);
 
         Assert.IsType<OkObjectResult>(actionResult);
@@ -3346,6 +3356,7 @@ public class PaymentsControllerTests
         update.OverpaymentHandling = PaymentOverpaymentHandling.NextInstallment;
         update.OverpaymentTargetPaymentId = thirdInstallment.Id;
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.UpdateInvoiceManaged(firstInstallment.Id, update, CancellationToken.None);
 
         Assert.IsType<OkObjectResult>(actionResult);
@@ -3413,6 +3424,7 @@ public class PaymentsControllerTests
         update.OverpaymentHandling = PaymentOverpaymentHandling.NextInstallment;
         update.OverpaymentTargetPaymentId = secondInstallment.Id;
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.UpdateInvoiceManaged(firstInstallment.Id, update, CancellationToken.None);
 
         Assert.IsType<OkObjectResult>(actionResult);
@@ -3473,6 +3485,7 @@ public class PaymentsControllerTests
         update.OverpaymentHandling = PaymentOverpaymentHandling.Refund;
         update.OverpaymentComment = "Вернуть клиенту";
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.UpdateInvoiceManaged(installment.Id, update, CancellationToken.None);
 
         Assert.IsType<OkObjectResult>(actionResult);
@@ -4322,6 +4335,7 @@ public class PaymentsControllerTests
         update.InvoiceId = invoice.Id;
         update.PaidAmount = 100m;
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.UpdateInvoiceManaged(installment.Id, update, CancellationToken.None);
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(actionResult);
@@ -4375,6 +4389,7 @@ public class PaymentsControllerTests
         update.PaidDate = firstInstallment.Date;
         update.LastPaymentDate = firstInstallment.Date;
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.UpdateInvoiceManaged(firstInstallment.Id, update, CancellationToken.None);
 
         Assert.IsType<OkObjectResult>(actionResult);
@@ -4454,6 +4469,7 @@ public class PaymentsControllerTests
         update.LastPaymentDate = today;
         update.SystemNotes = firstInstallment.SystemNotes;
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.TransferPartialRemainder(
             firstInstallment.Id,
             new TransferPaymentRemainderRequest
@@ -4530,10 +4546,12 @@ public class PaymentsControllerTests
             RemainderDate = today.AddDays(14),
         };
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var firstResult = await controller.TransferPartialRemainder(source.Id, request, CancellationToken.None);
         Assert.IsType<OkObjectResult>(firstResult);
         db.ChangeTracker.Clear();
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var secondResult = await controller.TransferPartialRemainder(source.Id, request, CancellationToken.None);
         var secondOk = Assert.IsType<OkObjectResult>(secondResult);
         var secondResponse = Assert.IsType<TransferPaymentRemainderResponse>(secondOk.Value);
@@ -4568,6 +4586,7 @@ public class PaymentsControllerTests
         update.PaidDate = today;
         update.LastPaymentDate = today;
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var splitResult = await controller.TransferPartialRemainder(
             source.Id,
             new TransferPaymentRemainderRequest
@@ -4615,6 +4634,7 @@ public class PaymentsControllerTests
         update.PaidDate = today;
         update.LastPaymentDate = today;
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var splitResult = await controller.TransferPartialRemainder(
             source.Id,
             new TransferPaymentRemainderRequest
@@ -4693,6 +4713,7 @@ public class PaymentsControllerTests
         update.PaidDate = today;
         update.LastPaymentDate = today;
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var splitResult = await controller.TransferPartialRemainder(
             source.Id,
             new TransferPaymentRemainderRequest
@@ -4705,6 +4726,7 @@ public class PaymentsControllerTests
         var splitResponse = Assert.IsType<TransferPaymentRemainderResponse>(splitOk.Value);
         await ClearSystemNotesAsync(db, source.Id, splitResponse.RemainderPayment.Id);
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var rollbackResult = await controller.RollbackPartialRemainderTransfer(
             splitResponse.RemainderPayment.Id,
             CancellationToken.None);
@@ -4748,6 +4770,7 @@ public class PaymentsControllerTests
         update.PaidDate = today;
         update.LastPaymentDate = today;
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var splitResult = await controller.TransferPartialRemainder(
             source.Id,
             new TransferPaymentRemainderRequest
@@ -4761,6 +4784,7 @@ public class PaymentsControllerTests
         await ClearSystemNotesAsync(db, source.Id, splitResponse.RemainderPayment.Id);
 
         var newRemainderDate = today.AddDays(30);
+        await AuthenticatePaymentWriterAsync(db, controller);
         var adjustResult = await controller.AdjustPartialRemainderTransfer(
             source.Id,
             new AdjustPaymentRemainderTransferRequest
@@ -4819,6 +4843,7 @@ public class PaymentsControllerTests
         update.PaidDate = today;
         update.LastPaymentDate = today;
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var splitResult = await controller.TransferPartialRemainder(
             source.Id,
             new TransferPaymentRemainderRequest
@@ -4841,6 +4866,7 @@ public class PaymentsControllerTests
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var adjustResult = await controller.AdjustPartialRemainderTransfer(
             source.Id,
             new AdjustPaymentRemainderTransferRequest
@@ -5048,6 +5074,7 @@ public class PaymentsControllerTests
         var controller = new PaymentsController(db, new NoopFormRequirementsService());
         var remainderDate = today.AddDays(10);
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.TransferExistingPartialRemainder(
             source.Id,
             new TransferExistingPaymentRemainderRequest { RemainderDate = remainderDate },
@@ -5110,6 +5137,7 @@ public class PaymentsControllerTests
         var controller = new PaymentsController(db, new NoopFormRequirementsService());
         var remainderDate = today.AddDays(10);
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.TransferExistingPartialRemainder(
             source.Id,
             new TransferExistingPaymentRemainderRequest { RemainderDate = remainderDate },
