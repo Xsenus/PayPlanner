@@ -1,5 +1,7 @@
 # Финансовая граница создания платежа — 31 октября 2026
 
+Продолжение: [история авансов и переназначение](payment-advance-history-checkpoint-2026-10-31.md) — 171 адресный успешный сценарий составно, включая 34 native PostgreSQL; далее backfill/rollback и остальные писатели.
+
 База `bfa4ae8c`, ветка `feature/company-image-sequencing`. Продолжение [V1/V2](versioned-payment-writers-checkpoint-2026-10-31.md). Итог: **161 разных успешных адресных сценариев составно**, включая **53 native PostgreSQL**. Это не полный backend/CI и не закрытие больших CMP/SEC/DOC-пакетов.
 
 ## Подтверждённый дефект и реализация

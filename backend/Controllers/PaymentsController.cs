@@ -198,11 +198,14 @@ public class PaymentsController : ControllerBase
             scope.CancellationProtected = await PaymentCreditInvariantScope.IsCancellationProtectedAsync(_db, id, ct);
             if (scope.CancellationProtected && !allowClosedMetadata)
                 return BadRequest(new { message = PaymentCreditInvariantScope.CancellationProtectedMessage });
+            var balanceBefore = scope.CancellationProtected ? null : await PaymentBalanceHistoryRules.CaptureOwnerBalanceAsync(_db, id, ct);
             result = await write(scope);
             if (result is OkObjectResult or NoContentResult)
             {
                 if (!scope.ClosedReceiptMetadataOnly && !await scope.KeepsAppliedCreditAsync(ct))
                     return BadRequest(new { message = PaymentCreditInvariantScope.RejectionMessage });
+                if (!await PaymentBalanceHistoryRules.KeepsOwnerBalanceAsync(_db, balanceBefore, ct))
+                    return BadRequest(new { message = "Изменение создало бы отрицательный остаток баланса. Требуется сверка оплаты." });
                 await lease.CommitAsync(ct);
             }
         }
@@ -923,6 +926,7 @@ public class PaymentsController : ControllerBase
         var originalPaymentSourceId = e.PaymentSourceId;
         var originalRescheduleCount = Math.Max(0, e.RescheduleCount);
         var originalSystemNotes = e.SystemNotes ?? string.Empty;
+        var originalBalanceBinding = PaymentBalanceHistoryRules.Binding.From(e);
         var originalInvoiceId = e.InvoiceId;
         var originalClientId = e.ClientId;
         var originalLegalEntityId = e.LegalEntityId;
@@ -990,6 +994,8 @@ public class PaymentsController : ControllerBase
         await PopulateMissingExpenseAttributionFromCaseAsync(e, ct);
         var updateValidationError = await ValidatePaymentAttributionAsync(e, ct);
         if (updateValidationError is not null) return updateValidationError;
+        if (await PaymentBalanceHistoryRules.ValidateBindingAsync(_db, e, originalBalanceBinding, ct) is { } historyError)
+            return BadRequest(new { message = historyError });
         PaymentDomainService.Normalize(e);
 
         if (e.LastPaymentDate is null && e.PaidAmount > 0m)
@@ -1059,6 +1065,8 @@ public class PaymentsController : ControllerBase
         var overpaymentValidationError = await ValidatePaymentOverpaymentHandlingAsync(e, rawPaidAmount, ct);
         if (overpaymentValidationError is not null) return overpaymentValidationError;
 
+        if (await PaymentBalanceHistoryRules.ValidateSyncAsync(_db, e, ct, rawPaidAmount) is { } advanceHistoryError)
+            return BadRequest(new { message = advanceHistoryError });
         var invoiceBefore = await CaptureInvoiceNotificationSnapshotAsync(e, ct);
         await ApplyPaymentOverpaymentHandlingAsync(e, rawPaidAmount, now, paymentTimeZone, ct);
         if (e.PaidAmount + AmountTolerance < appliedCreditAmount)
@@ -1208,6 +1216,8 @@ public class PaymentsController : ControllerBase
                 paymentTimeZone);
         }
 
+        if (await PaymentBalanceHistoryRules.ValidateSyncAsync(_db, payment, ct) is { } advanceHistoryError)
+            return BadRequest(new { message = advanceHistoryError });
         var invoiceBefore = await CaptureInvoiceNotificationSnapshotAsync(payment, ct);
         await ClientBalanceService.UpsertPaymentOverpaymentAsync(_db, payment, payment.PaidAmount, now, HttpContext, ct);
         await PaymentAdvanceReviewService.SyncBalanceAsync(_db, payment, now, HttpContext, ct);
@@ -1231,24 +1241,20 @@ public class PaymentsController : ControllerBase
     }
 
     [HttpPost("{id:int}/advance-review/accept")]
-    public async Task<IActionResult> AcceptAdvance(int id, [FromBody] PaymentAdvanceReviewRequest? request, CancellationToken ct)
-    {
-        var visibility = await ResolvePaymentsVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return AccessDenied();
-        }
-        if (await RequirePaymentsEditAsync(ct) is { } forbidden)
-        {
-            return forbidden;
-        }
-        if (!await CanAccessPaymentAsync(id, visibility, ct))
-        {
-            return NotFound();
-        }
+    public Task<IActionResult> AcceptAdvance(int id, [FromBody] PaymentAdvanceReviewRequest? request, CancellationToken ct)
+        => RunPaymentWriteAsync(id, scope => AcceptAdvanceCoreAsync(id, request, scope, ct), ct);
 
+    private async Task<IActionResult> AcceptAdvanceCoreAsync(int id, PaymentAdvanceReviewRequest? request, PaymentWriteScope scope, CancellationToken ct)
+    {
         var payment = await _db.Payments.FindAsync(new object[] { id }, ct);
         if (payment is null) return NotFound();
+
+        if (await PaymentBalanceHistoryRules.ValidateReviewAsync(_db, payment, ct) is { } reviewHistoryError)
+            return BadRequest(new { message = reviewHistoryError });
+        PaymentDomainService.Normalize(payment);
+        var expectedCredit = PaymentAdvanceReviewService.IsUnallocatedAdvanceCandidate(payment) ? PaymentAdvanceReviewService.GetAdvanceAmount(payment) : 0m;
+        if (await PaymentBalanceHistoryRules.ValidateAdvanceCreditAsync(_db, payment, expectedCredit, ct) is { } advanceHistoryError)
+            return BadRequest(new { message = advanceHistoryError });
 
         var now = DateTime.UtcNow;
         var result = await PaymentAdvanceReviewService.AcceptAsAdvanceAsync(
@@ -1265,29 +1271,23 @@ public class PaymentsController : ControllerBase
 
         _db.SetAuditReason($"Контроль аванса: платеж принят как аванс. {payment.AdvanceReviewReason}");
         await _db.SaveChangesAsync(ct);
-        PopulateAuditMetadata(_db, payment);
+        scope.AfterCommit = () => { PopulateAuditMetadata(_db, payment); return Task.CompletedTask; };
         return Ok(payment);
     }
 
     [HttpPost("{id:int}/advance-review/ignore")]
-    public async Task<IActionResult> IgnoreAdvance(int id, [FromBody] PaymentAdvanceReviewRequest? request, CancellationToken ct)
-    {
-        var visibility = await ResolvePaymentsVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return AccessDenied();
-        }
-        if (await RequirePaymentsEditAsync(ct) is { } forbidden)
-        {
-            return forbidden;
-        }
-        if (!await CanAccessPaymentAsync(id, visibility, ct))
-        {
-            return NotFound();
-        }
+    public Task<IActionResult> IgnoreAdvance(int id, [FromBody] PaymentAdvanceReviewRequest? request, CancellationToken ct)
+        => RunPaymentWriteAsync(id, scope => IgnoreAdvanceCoreAsync(id, request, scope, ct), ct);
 
+    private async Task<IActionResult> IgnoreAdvanceCoreAsync(int id, PaymentAdvanceReviewRequest? request, PaymentWriteScope scope, CancellationToken ct)
+    {
         var payment = await _db.Payments.FindAsync(new object[] { id }, ct);
         if (payment is null) return NotFound();
+
+        if (await PaymentBalanceHistoryRules.ValidateReviewAsync(_db, payment, ct) is { } reviewHistoryError)
+            return BadRequest(new { message = reviewHistoryError });
+        if (await PaymentBalanceHistoryRules.ValidateAdvanceCreditAsync(_db, payment, 0m, ct) is { } advanceHistoryError)
+            return BadRequest(new { message = advanceHistoryError });
 
         var now = DateTime.UtcNow;
         var result = await PaymentAdvanceReviewService.IgnoreAsync(
@@ -1304,32 +1304,24 @@ public class PaymentsController : ControllerBase
 
         _db.SetAuditReason($"Контроль аванса: платеж исключен из контроля. {payment.AdvanceReviewReason}");
         await _db.SaveChangesAsync(ct);
-        PopulateAuditMetadata(_db, payment);
+        scope.AfterCommit = () => { PopulateAuditMetadata(_db, payment); return Task.CompletedTask; };
         return Ok(payment);
     }
 
     [HttpPost("{id:int}/advance-review/refund")]
-    public async Task<IActionResult> RefundAdvance(int id, [FromBody] PaymentAdvanceReviewRequest? request, CancellationToken ct)
-    {
-        var visibility = await ResolvePaymentsVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return AccessDenied();
-        }
-        if (await RequirePaymentsEditAsync(ct) is { } forbidden)
-        {
-            return forbidden;
-        }
-        if (!await CanAccessPaymentAsync(id, visibility, ct))
-        {
-            return NotFound();
-        }
+    public Task<IActionResult> RefundAdvance(int id, [FromBody] PaymentAdvanceReviewRequest? request, CancellationToken ct)
+        => RunPaymentWriteAsync(id, scope => RefundAdvanceCoreAsync(id, request, scope, ct), ct);
 
+    private async Task<IActionResult> RefundAdvanceCoreAsync(int id, PaymentAdvanceReviewRequest? request, PaymentWriteScope scope, CancellationToken ct)
+    {
         var payment = await _db.Payments
             .Include(item => item.PaymentSource)
             .Include(item => item.CashOrders)
             .FirstOrDefaultAsync(item => item.Id == id, ct);
         if (payment is null) return NotFound();
+
+        if (await PaymentBalanceHistoryRules.ValidateReviewAsync(_db, payment, ct) is { } reviewHistoryError)
+            return BadRequest(new { message = reviewHistoryError });
 
         var now = DateTime.UtcNow;
         var reason = string.IsNullOrWhiteSpace(request?.Reason)
@@ -1365,7 +1357,7 @@ public class PaymentsController : ControllerBase
 
         _db.SetAuditReason($"Контроль аванса: аванс #{payment.Id} возвращен клиенту на сумму {result.RefundedAmount:N2}. {reason}");
         await _db.SaveChangesAsync(ct);
-        PopulateAuditMetadata(_db, payment);
+        scope.AfterCommit = () => { PopulateAuditMetadata(_db, payment); return Task.CompletedTask; };
         return Ok(payment);
     }
 
@@ -4778,6 +4770,11 @@ public class PaymentsController : ControllerBase
                 LegacyAccountNumber = payment.LegacyAccountNumber,
                 Notes = payment.Notes,
                 PaidAmount = payment.PaidAmount,
+                AdvanceReviewStatus = payment.AdvanceReviewStatus,
+                AdvanceReviewReason = payment.AdvanceReviewReason,
+                AdvanceReviewedAt = payment.AdvanceReviewedAt,
+                AdvanceReviewedByUserId = payment.AdvanceReviewedByUserId,
+                AdvanceReviewedByUserName = payment.AdvanceReviewedByUserName,
                 PaidDate = payment.PaidDate,
                 PaymentDocumentDate = payment.PaymentDocumentDate,
                 PaymentOrderNumber = payment.PaymentOrderNumber,

@@ -619,6 +619,8 @@ public class PaymentsV2Controller : ControllerBase
 
         entity.RescheduleCount = rescheduleCount;
 
+        if (await PaymentBalanceHistoryRules.ValidateSyncAsync(_db, entity, ct, model.PaidAmount) is { } advanceHistoryError)
+            return BadRequest(new { message = advanceHistoryError });
         await PaymentAdvanceReviewService.SyncBalanceAsync(_db, entity, now, HttpContext, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, entity, now, ct);
         if (originalInvoiceId.HasValue

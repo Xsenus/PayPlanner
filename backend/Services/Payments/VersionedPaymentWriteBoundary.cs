@@ -67,10 +67,13 @@ internal static class VersionedPaymentWriteBoundary
             {
                 if (await ValidateInvoiceAsync(model?.InvoiceId, true) is { } invalidTarget) return invalidTarget;
             }
+            var balanceBefore = id.HasValue ? await PaymentBalanceHistoryRules.CaptureOwnerBalanceAsync(db, id.Value, ct) : null;
             result = await write(scope);
             if (result is OkObjectResult or CreatedResult or NoContentResult)
             {
                 if (!await credit.KeepsAppliedCreditAsync(ct)) return controller.BadRequest(new { message = PaymentCreditInvariantScope.RejectionMessage });
+                if (!await PaymentBalanceHistoryRules.KeepsOwnerBalanceAsync(db, balanceBefore, ct))
+                    return controller.BadRequest(new { message = "Изменение создало бы отрицательный остаток баланса. Требуется сверка оплаты." });
                 await lease.CommitAsync(ct);
             }
 

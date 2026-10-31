@@ -25,6 +25,7 @@ internal static class BalanceApplicationService
             if (db.Database.IsNpgsql()) await db.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '2s'", ct);
             if (await AuthorizeTargetAsync(db, actorId.Value, clientId, legalEntityId, request.PaymentId, authorize, ct) is { } denied) return denied;
             await lease.LockOwnedPaymentAsync(request.PaymentId, clientId, legalEntityId, ct);
+            if (await AuthorizeAndLockSourceAsync(db, lease, clientId, legalEntityId, request, context, ct) is { } sourceDenied) return sourceDenied;
             using var credit = new PaymentCreditInvariantScope(db);
             var result = await SpendAsync(db, clientId, legalEntityId, request, context, null, ct);
             if (!result.Success) return new BadRequestObjectResult(new { message = result.Error });
@@ -48,6 +49,23 @@ internal static class BalanceApplicationService
         if (await authorize(ct) is { } denied) return denied;
         return await db.Payments.AsNoTracking().ApplyUnambiguousInvoiceLinks()
             .AnyAsync(p => p.Id == paymentId && p.ClientId == clientId && p.LegalEntityId == legalEntityId, ct) ? null : new NotFoundResult();
+    }
+
+    private static async Task<IActionResult?> AuthorizeAndLockSourceAsync(PaymentContext db, BalanceApplicationLease lease,
+        int? clientId, int? legalEntityId, ApplyClientBalanceRequest request, HttpContext context, CancellationToken ct)
+    {
+        if (!request.SourcePaymentId.HasValue) return null;
+        var sourceId = request.SourcePaymentId.Value;
+        var visibility = await db.ResolveDataVisibilityAsync(context.User, RolePermissionCatalog.Payments, ct);
+        if (sourceId <= 0 || sourceId == request.PaymentId || visibility is null
+            || !await db.Payments.AsNoTracking().ApplyPaymentVisibility(visibility).ApplyUnambiguousInvoiceLinks()
+                .AnyAsync(p => p.Id == sourceId && p.ClientId == clientId && p.LegalEntityId == legalEntityId, ct))
+            return new BadRequestObjectResult(new { message = "Выбранный аванс недоступен или больше не может быть использован." });
+        // Availability still comes from the historical ledger. This lock serializes
+        // its consumption with review, refund, deletion and ordinary source edits.
+        await lease.LockOwnedPaymentAsync(sourceId, clientId, legalEntityId, ct);
+        return await PaymentCreditInvariantScope.IsCancellationProtectedAsync(db, sourceId, ct)
+            ? new BadRequestObjectResult(new { message = PaymentCreditInvariantScope.CancellationProtectedMessage }) : null;
     }
 
     private static Task<(bool Success, string? Error, decimal AppliedAmount)> SpendAsync(PaymentContext db,
@@ -217,6 +235,8 @@ internal static class BalanceApplicationService
                     IsReplay = true,
                 });
             }
+
+            if (await AuthorizeAndLockSourceAsync(db, lease, clientId, legalEntityId, request, context, ct) is { } sourceDenied) return sourceDenied;
 
             // Source availability is derived from the existing ledger prefix. Keep that
             // accounting identity while replacing the timestamp suffix with a stable key.

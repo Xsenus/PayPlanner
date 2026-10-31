@@ -403,6 +403,10 @@ public static class ClientBalanceService
             return (false, "У выбранного аванса нет доступного остатка для возврата.", 0m);
         }
 
+        var balance = await GetBalanceAsync(db, payment.ClientId, payment.LegalEntityId, ct);
+        if (available > balance + AmountEpsilon)
+            return (false, "Общий остаток баланса уже использован. Возврат этого аванса требует сверки распределения оплаты.", 0m);
+
         var externalKey = BuildUnallocatedAdvanceRefundKey(payment.Id);
         var existing = await db.ClientBalanceTransactions
             .FirstOrDefaultAsync(item => item.ExternalKey == externalKey, ct);

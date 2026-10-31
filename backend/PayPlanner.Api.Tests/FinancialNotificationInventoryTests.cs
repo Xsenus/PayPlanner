@@ -51,7 +51,8 @@ public class FinancialNotificationInventoryTests
         AssertMethodContains(invoicesSource, "MarkSigned", "NotifyInvoiceChangedAsync");
         AssertMethodContains(invoicesSource, "MarkNotSigned", "NotifyInvoiceChangedAsync");
         AssertMethodContains(invoicesSource, "UpdateWorkflowStatus", "NotifyInvoiceChangedAsync");
-        AssertMethodContains(invoicesSource, "Cancel", "NotifyInvoiceChangedAsync");
+        AssertMethodContains(invoicesSource, "Cancel", "CancelCoreAsync", "lease.CommitAsync", "scope.AfterCommit");
+        AssertMethodContains(invoicesSource, "CancelCoreAsync", "NotifyInvoiceChangedAsync");
 
         AssertMethodContains(actsSource, "Create", "NotifyActCreatedAsync");
         AssertMethodContains(actsSource, "Update", "NotifyActChangedAsync");
