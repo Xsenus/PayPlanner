@@ -40,6 +40,8 @@ internal static class VersionedPaymentWriteBoundary
             if (creating && model is not null && PaymentCreateInputRules.Validate(db, model) is { } inputError)
                 return controller.BadRequest(new { message = inputError });
             if (creating && model is not null) PaymentCreateInputRules.InitializeServerFields(model);
+            if (creating && model is not null && await PaymentCreateInputRules.ValidateSellerSelectionAsync(db, model, ct) is { } sellerError)
+                return controller.BadRequest(new { message = sellerError });
             Payment? current = null;
             Payment? original = null;
             if (id.HasValue)

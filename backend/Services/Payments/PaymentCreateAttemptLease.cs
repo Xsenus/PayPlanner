@@ -78,17 +78,8 @@ internal sealed class PaymentCreateAttemptLease : IAsyncDisposable
         return await db.PaymentCreateAttempts.SingleOrDefaultAsync(a => a.Id == id && a.ActorUserId == actorId, ct);
     }
 
-    public async Task LockSellerSelectionAsync(int? companyId, int? branchId, CancellationToken ct)
-    {
-        if (!db.Database.IsNpgsql()) return; // SQLite BEGIN IMMEDIATE owns writer admission.
-        // Existing DocumentSellerLease registry -> company -> branch order. No snapshot/default changes.
-        var keys = new[] { "legalEntities.mainCompanyId", "legalEntities.mainCompanyIds", "legalEntities.defaultMainCompanyId" };
-        await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"SystemSettings\" WHERE \"Key\" = ANY({keys}) ORDER BY \"Id\" FOR SHARE NOWAIT").ToArrayAsync(ct);
-        if (companyId.HasValue)
-            await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"LegalEntities\" WHERE \"Id\" = {companyId.Value} FOR UPDATE NOWAIT").ToArrayAsync(ct);
-        if (branchId.HasValue)
-            await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"CompanyBranches\" WHERE \"Id\" = {branchId.Value} FOR SHARE NOWAIT").ToArrayAsync(ct);
-    }
+    public Task LockSellerSelectionAsync(int? companyId, int? branchId, CancellationToken ct)
+        => PaymentCreateInputRules.LockSellerSelectionAsync(db, companyId, branchId, ct);
 
     public async Task LockPrimaryAsync(int id, CancellationToken ct)
     {
