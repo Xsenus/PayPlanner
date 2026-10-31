@@ -269,7 +269,8 @@ public static class PaymentAdvanceReviewService
         DateTime utcNow,
         int criticalAgeDays,
         INotificationService? notificationService = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        Func<NotificationEventEnvelope, CancellationToken, Task<bool>>? dispatch = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(payment);
@@ -328,8 +329,7 @@ public static class PaymentAdvanceReviewService
                 continue;
             }
 
-            var created = await notificationService.NotifyAsync(
-                new NotificationEventEnvelope(
+            var envelope = new NotificationEventEnvelope(
                     adminUserId,
                     UserNotificationTypes.PaymentAdvanceReviewEscalation,
                     eventKey,
@@ -353,8 +353,10 @@ public static class PaymentAdvanceReviewService
                         ageDays,
                         criticalAgeDays = normalizedCriticalAgeDays,
                         advanceReviewStatus = payment.AdvanceReviewStatus.ToString(),
-                    }),
-                ct);
+                    });
+            var created = dispatch is null
+                ? await notificationService.NotifyAsync(envelope, ct)
+                : await dispatch(envelope, ct);
 
             if (created)
             {

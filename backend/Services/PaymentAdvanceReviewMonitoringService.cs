@@ -1,3 +1,5 @@
+using System.Runtime.ExceptionServices;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
@@ -8,6 +10,9 @@ namespace PayPlanner.Api.Services;
 
 public sealed class PaymentAdvanceReviewMonitoringService : BackgroundService
 {
+    public const string CursorSettingKey = "payments.advanceReview.monitoring.cursor";
+    private static readonly JsonSerializerOptions CursorJsonOptions = new(JsonSerializerDefaults.Web);
+
     public const string EnabledSettingKey = "payments.advanceReview.monitoring.enabled";
     public const string IntervalHoursSettingKey = "payments.advanceReview.monitoring.intervalHours";
     public const string BatchSizeSettingKey = "payments.advanceReview.monitoring.batchSize";
@@ -115,11 +120,23 @@ public sealed class PaymentAdvanceReviewMonitoringService : BackgroundService
             await using (var lease = await BalanceApplicationLease.BeginSystemAsync(db, cancellationToken))
             {
                 if (db.Database.IsNpgsql()) await db.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '2s'", cancellationToken);
+                if (db.Database.IsNpgsql())
+                {
+                    // Serialize cursor initialization as well as existing rows.
+                    // NOWAIT admission keeps independent jobs from waiting on each other.
+                    if (!await db.Database.SqlQuery<bool>($"SELECT pg_try_advisory_xact_lock(831033, hashtext({CursorSettingKey})) AS \"Value\"").SingleAsync(cancellationToken))
+                        throw new DbUpdateConcurrencyException("Фоновый контроль авансов уже выполняется. Повторите запуск позднее.");
+                    await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"SystemSettings\" WHERE \"Key\" = {CursorSettingKey} FOR UPDATE NOWAIT", cancellationToken);
+                }
+                var cursorSetting = await db.SystemSettings.SingleOrDefaultAsync(item => item.Key == CursorSettingKey, cancellationToken);
+                var cursor = ParseCursor(cursorSetting?.Value);
+                if (cursorSetting is not null && cursor is null)
+                    _logger.LogWarning("Advance review cursor is invalid; restarting its bounded cycle.");
                 var query = db.Payments.Where(candidatePredicate)
                     .Where(payment => payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.None
                         || payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.RequiresDecision);
-                ids = await query.AsNoTracking().OrderBy(payment => payment.Date).ThenBy(payment => payment.Id)
-                    .Select(payment => payment.Id).Take(settings.BatchSize).ToArrayAsync(cancellationToken);
+                var page = await LoadCursorPageAsync(query, cursor, settings.BatchSize, cancellationToken);
+                ids = page.Ids;
                 await lease.LockPaymentsAsync(ids, cancellationToken);
                 var lockedPayments = await query.Where(payment => ids.Contains(payment.Id)).ToListAsync(cancellationToken);
                 if (lockedPayments.Count != ids.Length) throw new BalanceApplicationConflictException();
@@ -136,8 +153,9 @@ public sealed class PaymentAdvanceReviewMonitoringService : BackgroundService
                 if (markedCount > 0)
                 {
                     db.SetAuditReason($"Мониторинг авансов: {markedCount} платежей поставлены на контроль без изменения денежных проводок.");
-                    await db.SaveChangesAsync(cancellationToken);
                 }
+                var cursorChanged = UpdateCursor(db, cursorSetting, page.Position, now);
+                if (markedCount > 0 || cursorChanged) await db.SaveChangesAsync(cancellationToken);
                 await lease.CommitAsync(cancellationToken);
             }
 
@@ -153,13 +171,20 @@ public sealed class PaymentAdvanceReviewMonitoringService : BackgroundService
                     .Where(payment => payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.RequiresDecision)
                     .Include(payment => payment.Client).Include(payment => payment.LegalEntity).Include(payment => payment.ClientCase)
                     .OrderBy(payment => payment.Date).ThenBy(payment => payment.Id).ToListAsync(cancellationToken);
+                var deliveryErrors = new NotificationFailures();
                 foreach (var payment in committedPayments)
                 {
-                    if (await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(db, payment, now, notificationService, cancellationToken))
-                        notifiedCount++;
-                    escalatedCount += await PaymentAdvanceReviewService.EnsureReviewEscalationNotificationsAsync(
-                        db, payment, now, settings.CriticalAgeDays, notificationService, cancellationToken);
+                    notifiedCount += await DispatchIsolatedAsync(payment.Id, async (notificationDb, dispatcher) =>
+                        await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(notificationDb, payment, now, dispatcher, cancellationToken) ? 1 : 0,
+                        deliveryErrors, cancellationToken);
+                    escalatedCount += await DispatchIsolatedAsync(payment.Id, (notificationDb, dispatcher) =>
+                        PaymentAdvanceReviewService.EnsureReviewEscalationNotificationsAsync(notificationDb, payment, now, settings.CriticalAgeDays, dispatcher, cancellationToken,
+                            async (envelope, token) => await DispatchIsolatedAsync(payment.Id,
+                                async (_, recipientDispatcher) => await recipientDispatcher.NotifyAsync(envelope, token) ? 1 : 0, deliveryErrors, token) > 0),
+                        deliveryErrors, cancellationToken);
                 }
+                if (deliveryErrors.Count == 1 && deliveryErrors.Errors[0] is not OperationCanceledException) ExceptionDispatchInfo.Capture(deliveryErrors.Errors[0]).Throw();
+                if (deliveryErrors.Count > 0) throw new AggregateException($"Не удалось создать уведомлений контроля авансов: {deliveryErrors.Count}.", deliveryErrors.Errors);
             }
 
             var result = new PaymentAdvanceReviewMonitoringResult(ids.Length, markedCount, notifiedCount, escalatedCount, true);
@@ -176,6 +201,91 @@ public sealed class PaymentAdvanceReviewMonitoringService : BackgroundService
         {
             _runLock.Release();
         }
+    }
+
+    private sealed class NotificationFailures
+    {
+        public const int SampleLimit = 32;
+        public int Count { get; private set; }
+        public List<Exception> Errors { get; } = [];
+        public void Record(Exception error)
+        {
+            Count++;
+            if (Errors.Count < SampleLimit) Errors.Add(error);
+        }
+    }
+
+    private async Task<int> DispatchIsolatedAsync(int paymentId,
+        Func<PaymentContext, INotificationService, Task<int>> dispatch, NotificationFailures errors, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        try
+        {
+            // A failed notification may leave its DbContext unusable or dirty.
+            // Other recipients must never save that context's pending changes.
+            using var scope = _scopeFactory.CreateScope();
+            var dispatcher = scope.ServiceProvider.GetService<INotificationService>();
+            return dispatcher is null ? 0 : await dispatch(scope.ServiceProvider.GetRequiredService<PaymentContext>(), dispatcher);
+        }
+        catch (Exception error) when (!ct.IsCancellationRequested)
+        {
+            errors.Record(error);
+            if (errors.Count <= NotificationFailures.SampleLimit)
+                _logger.LogError(error, "Advance review notification failed for payment {PaymentId}.", paymentId);
+            else if (errors.Count == NotificationFailures.SampleLimit + 1)
+                _logger.LogWarning("Additional advance review notification failures are counted without individual error logs.");
+            return 0;
+        }
+    }
+
+    private readonly record struct MonitoringCursor(int Version, int AfterId, int ThroughId);
+
+    private static MonitoringCursor? ParseCursor(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 256) return null;
+        try
+        {
+            var cursor = JsonSerializer.Deserialize<MonitoringCursor>(value, CursorJsonOptions);
+            return cursor.Version == 1 && cursor.AfterId >= 0 && cursor.ThroughId >= cursor.AfterId ? cursor : null;
+        }
+        catch (JsonException) { return null; }
+    }
+
+    private static async Task<(int[] Ids, MonitoringCursor Position)> LoadCursorPageAsync(
+        IQueryable<Payment> query, MonitoringCursor? previous, int limit, CancellationToken ct)
+    {
+        // Immutable IDs and a finite high-water mark prevent backdated or
+        // continuous arrivals from extending a cycle indefinitely. No OFFSET.
+        async Task<MonitoringCursor> StartCycleAsync()
+            => new(1, 0, await query.Select(payment => (int?)payment.Id).MaxAsync(ct) ?? 0);
+        Task<int[]> LoadAsync(MonitoringCursor position)
+            => position.ThroughId == 0 ? Task.FromResult(Array.Empty<int>())
+                : query.AsNoTracking().Where(payment => payment.Id > position.AfterId && payment.Id <= position.ThroughId)
+                    .OrderBy(payment => payment.Id).Select(payment => payment.Id).Take(limit).ToArrayAsync(ct);
+        var cursor = previous ?? new(1, 0, 0);
+        if (cursor.AfterId >= cursor.ThroughId) cursor = await StartCycleAsync();
+        var ids = await LoadAsync(cursor);
+        if (ids.Length == 0 && cursor.ThroughId > 0)
+        {
+            cursor = await StartCycleAsync();
+            ids = await LoadAsync(cursor);
+        }
+        return (ids, ids.Length == 0 ? new(1, 0, 0) : cursor with { AfterId = ids[^1] });
+    }
+
+    private static bool UpdateCursor(PaymentContext db, SystemSetting? setting, MonitoringCursor cursor, DateTime now)
+    {
+        if (setting is null && cursor.ThroughId == 0) return false;
+        var value = JsonSerializer.Serialize(cursor, CursorJsonOptions);
+        if (setting is null)
+            db.SystemSettings.Add(new() { Key = CursorSettingKey, Value = value, CreatedAt = now, UpdatedAt = now });
+        else
+        {
+            if (setting.Value == value) return false;
+            setting.Value = value;
+            setting.UpdatedAt = now;
+        }
+        return true;
     }
 
     public async Task<int> CountPendingCandidatesAsync(CancellationToken cancellationToken = default)

@@ -280,7 +280,7 @@ public sealed class AdvanceReviewMonitoringPostgresTests(PostgreSqlModelTemplate
         try
         {
             var error = await Assert.ThrowsAnyAsync<Exception>(() => AdvanceReviewMonitoringBoundaryTests.Runner(second).RunOnceAsync().WaitAsync(TimeSpan.FromSeconds(10)));
-            Assert.Equal(PostgresErrorCodes.LockNotAvailable, Assert.IsType<PostgresException>(error).SqlState);
+            Assert.IsType<DbUpdateConcurrencyException>(error);
         }
         finally { barrier.Release.TrySetResult(); }
         Assert.Equal(1, (await pending.WaitAsync(TimeSpan.FromSeconds(20))).MarkedCount); Assert.Equal(0, (await AdvanceReviewMonitoringBoundaryTests.Runner(second).RunOnceAsync()).MarkedCount);
