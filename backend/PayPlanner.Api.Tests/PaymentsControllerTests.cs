@@ -5141,7 +5141,7 @@ public class PaymentsControllerTests
     }
 
     [Fact]
-    public async Task TransferExistingPartialRemainder_UsesLegacyOriginalAmountFromSystemNote()
+    public async Task TransferExistingPartialRemainder_UsesExplicitlyConfirmedLegacyOriginalAmount()
     {
         await using var db = await CreateContextAsync();
 
@@ -5167,9 +5167,18 @@ public class PaymentsControllerTests
         var remainderDate = today.AddDays(10);
 
         await AuthenticatePaymentWriterAsync(db, controller);
+        var previewResult = await controller.GetPartialRemainderCandidates(null, null, null, null, includeFuture: true);
+        var preview = Assert.Single(Assert.IsType<PartialPaymentRemainderCandidatesResponse>(Assert.IsType<OkObjectResult>(previewResult.Result).Value).Items);
         var actionResult = await controller.TransferExistingPartialRemainder(
             source.Id,
-            new TransferExistingPaymentRemainderRequest { RemainderDate = remainderDate },
+            new TransferExistingPaymentRemainderRequest
+            {
+                RemainderDate = remainderDate,
+                OriginalAmount = 80_000m,
+                ExpectedAmount = 35_000m,
+                ExpectedPaidAmount = 35_000m,
+                ConfirmationToken = preview.ConfirmationToken
+            },
             CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(actionResult);

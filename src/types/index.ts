@@ -4053,6 +4053,15 @@ export interface PartialPaymentRemainderCandidate {
   remainderAmount: number;
   daysPastDue: number;
   suggestedRemainderDate: string;
+  needsAmountConfirmation?: boolean;
+  confirmationToken?: string;
+}
+
+export interface PaymentRemainderConfirmation {
+  originalAmount: number;
+  expectedAmount: number;
+  expectedPaidAmount: number;
+  confirmationToken: string;
 }
 
 export interface PartialPaymentRemainderCandidatesResponse {

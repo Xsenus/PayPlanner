@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using System.Security.Cryptography;
+using System.Text.Json;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
@@ -9,6 +11,43 @@ namespace PayPlanner.Api.Services.Payments;
 // All callers already own their payment transaction and current row lock.
 internal static class PaymentRemainderWriteRules
 {
+    public static string BuildConfirmationToken(Payment payment)
+    {
+        // An opaque optimistic snapshot, not a permission/secret. Only mapped
+        // scalar inputs participate; read-model names and related graphs do not.
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            payment.Id,
+            Binding = PaymentBalanceHistoryRules.Binding.From(payment),
+            payment.Amount,
+            payment.PaidAmount,
+            payment.Status,
+            payment.IsPaid,
+            payment.Date,
+            payment.PlannedDate,
+            payment.PaidDate,
+            payment.LastPaymentDate,
+            payment.Account,
+            payment.AccountDate,
+            payment.LegacyAccountNumber,
+            payment.LegacyAccountDate,
+            payment.ContractId,
+            payment.ClientCaseId,
+            payment.DealTypeId,
+            payment.IncomeTypeId,
+            payment.ServiceId,
+            payment.PaymentSourceId,
+            payment.PaymentStatusId,
+            payment.SellerCompanyId,
+            payment.SellerBranchId,
+            payment.AdvanceReviewStatus,
+            payment.Description,
+            payment.Notes,
+            payment.SystemNotes
+        });
+        return "remainder-v1:" + Convert.ToHexString(SHA256.HashData(bytes));
+    }
+
     public static async Task<string?> ValidateUpdateAsync(PaymentContext db, Payment current, Payment model, CancellationToken ct)
     {
         var amountChanged = Math.Abs(model.Amount - current.Amount) > 0.009m;
@@ -57,7 +96,7 @@ internal static class PaymentRemainderWriteRules
         => PaymentRemainderTransferRules.IsPartialRemainderPayment(current) ? Task.FromResult(true)
             : db.PaymentRemainderTransfers.AsNoTracking().AnyAsync(link => link.RemainderPaymentId == current.Id, ct);
 
-    private static async Task<bool> HasTransferredRemainderAsync(PaymentContext db, Payment current, CancellationToken ct)
+    internal static async Task<bool> HasTransferredRemainderAsync(PaymentContext db, Payment current, CancellationToken ct)
     {
         if (PaymentRemainderTransferRules.IsPartialRemainderSourcePayment(current)
             || await db.PaymentRemainderTransfers.AsNoTracking().AnyAsync(link => link.SourcePaymentId == current.Id, ct)) return true;

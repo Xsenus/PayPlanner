@@ -540,7 +540,7 @@ describe('Payments integration', () => {
     vi.mocked(apiService.getLegalEntities).mockResolvedValue([supplier]);
     vi.mocked(apiService.getPartialPaymentRemainderCandidates).mockImplementation(async (params) => ({
       items: params?.clientId === 12 ? [{ payment, originalAmount: 100, paidAmount: 40, remainderAmount: 60, daysPastDue: 15,
-        suggestedRemainderDate: '2026-10-18' }] : [], total: params?.clientId === 12 ? 1 : params?.legalEntityId === 12 ? 2 : 0,
+        suggestedRemainderDate: '2026-10-18', confirmationToken: 'observed-remainder' }] : [], total: params?.clientId === 12 ? 1 : params?.legalEntityId === 12 ? 2 : 0,
       page: 1, pageSize: 100, totalOriginalAmount: 100, totalPaidAmount: 40, totalRemainderAmount: 60,
       includeFuture: false, checkedAt: '2026-10-16T00:00:00Z',
     }));
@@ -555,7 +555,9 @@ describe('Payments integration', () => {
     await waitFor(() => expect(action.textContent).toContain('1'));
     fireEvent.click(action);
     fireEvent.click(await screen.findByRole('button', { name: 'Создать остаток' }));
-    await waitFor(() => expect(apiService.transferExistingPaymentRemainder).toHaveBeenCalledWith(payment.id, '2026-10-18'));
+    await waitFor(() => expect(apiService.transferExistingPaymentRemainder).toHaveBeenCalledWith(payment.id, '2026-10-18', {
+      originalAmount: 100, expectedAmount: 100, expectedPaidAmount: 40, confirmationToken: 'observed-remainder',
+    }));
     fireEvent.click(screen.getByRole('button', { name: new RegExp(client.name) }));
     fireEvent.click(await screen.findByRole('button', { name: 'Юридические лица' }));
     await selectCounterparty(supplier.shortName!);
@@ -564,7 +566,7 @@ describe('Payments integration', () => {
     const currentScopeCalls = vi.mocked(apiService.getPartialPaymentRemainderCandidates).mock.calls.filter(([params]) => params?.legalEntityId === 12).length;
     await act(async () => { completeTransfer({ payment, remainderPayment: { ...payment, id: 902 }, createdRemainder: true }); });
     expect(vi.mocked(apiService.getPartialPaymentRemainderCandidates).mock.calls.filter(([params]) => params?.clientId === 12)).toHaveLength(oldScopeCalls);
-    expect(vi.mocked(apiService.getPartialPaymentRemainderCandidates).mock.calls.filter(([params]) => params?.legalEntityId === 12)).toHaveLength(currentScopeCalls + 1);
+    expect(vi.mocked(apiService.getPartialPaymentRemainderCandidates).mock.calls.filter(([params]) => params?.legalEntityId === 12)).toHaveLength(currentScopeCalls);
     expect(action.textContent).toContain('2');
     expect(apiService.transferExistingPaymentRemainder).toHaveBeenCalledTimes(1);
   });
@@ -1316,6 +1318,83 @@ describe('Payments integration', () => {
       expect(action.className).toContain('border-amber');
       expect(action.textContent).toContain('3');
     });
+  });
+
+  async function openConfirmedLegacyRemainder(options?: { canEdit?: boolean; malformed?: string }) {
+    const payment: Payment = { id: 9901, date: '2026-10-01', plannedDate: '2026-10-01', amount: 40, paidAmount: 40,
+      outstandingAmount: 0, hasPartialPayment: false, type: 'Income', status: 'Completed', description: 'Старый платёж для подтверждения',
+      isPaid: true, notes: '', systemNotes: '', rescheduleCount: 0, createdAt: '2026-10-01T00:00:00Z' };
+    const candidate = { payment, originalAmount: 100, paidAmount: 40, remainderAmount: 60, daysPastDue: 5,
+      suggestedRemainderDate: '2026-11-15', needsAmountConfirmation: true, confirmationToken: 'opaque-observed' };
+    if (options?.malformed === 'token') candidate.confirmationToken = '';
+    if (options?.malformed === 'total') candidate.originalAmount = NaN;
+    if (options?.malformed === 'balance') candidate.remainderAmount = 61;
+    if (options?.malformed === 'negative') candidate.paidAmount = -40;
+    if (options?.canEdit === false) rolePermissionsMock.mockReturnValue({ payments: {
+      canView: true, canCreate: true, canEdit: false, canDelete: true, canExport: true, viewScope: 'all',
+    } });
+    vi.mocked(apiService.getPartialPaymentRemainderCandidates).mockResolvedValue({ items: [candidate], total: 1, page: 1, pageSize: 100,
+      totalOriginalAmount: 100, totalPaidAmount: 40, totalRemainderAmount: 60, includeFuture: false, checkedAt: '2026-11-01T00:00:00Z' });
+    const outcome = { payment, remainderPayment: { ...payment, id: 9902, amount: 60, paidAmount: 0, isPaid: false }, createdRemainder: true };
+    vi.mocked(apiService.transferExistingPaymentRemainder).mockResolvedValue(outcome);
+    const rendered = render(<Payments />);
+    const toolbar = screen.getByRole('button', { name: 'Частичные без остатка' });
+    await waitFor(() => expect(toolbar.textContent).toContain('1')); fireEvent.click(toolbar);
+    const button = await screen.findByRole('button', { name: 'Создать остаток' });
+    return { ...rendered, payment, outcome, button };
+  }
+
+  it('remainder confirmation shows the legacy origin and sends exactly the confirmed snapshot', async () => {
+    const { button } = await openConfirmedLegacyRemainder();
+    expect(screen.getByText('Сумма из старой заметки. Проверьте её перед переносом.')).toBeTruthy();
+    fireEvent.click(button);
+    await waitFor(() => expect(apiService.transferExistingPaymentRemainder).toHaveBeenCalledWith(9901, '2026-11-15', {
+      originalAmount: 100, expectedAmount: 40, expectedPaidAmount: 40, confirmationToken: 'opaque-observed',
+    }));
+    expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ title: 'Подтвердите сумму старого платежа',
+      description: expect.stringContaining('Общая сумма предложена по старой заметке.') }));
+  });
+
+  it.each(['token', 'total', 'balance', 'negative'])('remainder confirmation rejects malformed %s before confirming or sending', async malformed => {
+    const { button } = await openConfirmedLegacyRemainder({ malformed }); fireEvent.click(button);
+    expect(confirmMock).not.toHaveBeenCalled(); expect(apiService.transferExistingPaymentRemainder).not.toHaveBeenCalled();
+  });
+
+  it('remainder confirmation requires edit permission', async () => {
+    const { button } = await openConfirmedLegacyRemainder({ canEdit: false }); expect((button as HTMLButtonElement).disabled).toBe(true); fireEvent.click(button);
+    expect(confirmMock).not.toHaveBeenCalled(); expect(apiService.transferExistingPaymentRemainder).not.toHaveBeenCalled();
+  });
+
+  it('remainder confirmation cancellation sends no mutation', async () => {
+    confirmMock.mockResolvedValue(false); const { button } = await openConfirmedLegacyRemainder(); fireEvent.click(button);
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false)); expect(apiService.transferExistingPaymentRemainder).not.toHaveBeenCalled();
+  });
+
+  it.each(['view', 'permission', 'actor', 'unmount'])('remainder confirmation ignores approval after a change of %s', async change => {
+    let approve!: (value: boolean) => void; confirmMock.mockImplementation(() => new Promise<boolean>(resolve => { approve = resolve; }));
+    const rendered = await openConfirmedLegacyRemainder(); fireEvent.click(rendered.button); await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1));
+    const oldToken = localStorage.getItem('pp_token'); const oldEpoch = localStorage.getItem('pp.auth-session-epoch.v1');
+    try {
+      if (change === 'view') rendered.rerender(<Payments defaultType="Expense" lockType />);
+      else if (change === 'permission') {
+        rolePermissionsMock.mockReturnValue({ payments: { canView: true, canCreate: true, canEdit: false, canDelete: true, canExport: true, viewScope: 'all' } });
+        rendered.rerender(<Payments />);
+      } else if (change === 'actor') localStorage.setItem('pp_token', `header.${btoa(JSON.stringify({ sub: 'another-synthetic-user' }))}.signature`);
+      else rendered.unmount();
+      await act(async () => { approve(true); }); expect(apiService.transferExistingPaymentRemainder).not.toHaveBeenCalled();
+    } finally {
+      if (oldToken === null) localStorage.removeItem('pp_token'); else localStorage.setItem('pp_token', oldToken);
+      if (oldEpoch === null) localStorage.removeItem('pp.auth-session-epoch.v1'); else localStorage.setItem('pp.auth-session-epoch.v1', oldEpoch);
+    }
+  });
+
+  it('remainder confirmation holds one pending operation across repeated clicks', async () => {
+    const rendered = await openConfirmedLegacyRemainder();
+    let complete!: (value: typeof rendered.outcome) => void;
+    vi.mocked(apiService.transferExistingPaymentRemainder).mockImplementation(() => new Promise(resolve => { complete = resolve; }));
+    fireEvent.click(rendered.button); await waitFor(() => expect(apiService.transferExistingPaymentRemainder).toHaveBeenCalledTimes(1));
+    fireEvent.click(rendered.button); expect(confirmMock).toHaveBeenCalledTimes(1); expect(apiService.transferExistingPaymentRemainder).toHaveBeenCalledTimes(1);
+    await act(async () => { complete(rendered.outcome); }); await waitFor(() => expect((rendered.button as HTMLButtonElement).disabled).toBe(false));
   });
 
   it('opens a route-driven payment preview and closes it back through the callback', async () => {

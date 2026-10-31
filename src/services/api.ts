@@ -5913,10 +5913,10 @@ export class ApiService {
     return this.request<PartialPaymentRemainderCandidatesResponse>(`/payments/partial-remainder-candidates${q}`);
   }
 
-  async transferExistingPaymentRemainder(id: number, remainderDate: string) {
+  async transferExistingPaymentRemainder(id: number, remainderDate: string, confirmation?: PaymentRemainderConfirmation) {
     return this.request<TransferPaymentRemainderResponse>(`/payments/${id}/partial-remainder/from-existing`, {
       method: 'POST',
-      body: JSON.stringify({ remainderDate }),
+      body: JSON.stringify({ remainderDate, ...confirmation }),
     });
   }
 
@@ -9995,6 +9995,7 @@ import type {
   TransferPaymentRemainderResponse,
   RollbackPaymentRemainderTransferResponse,
   PartialPaymentRemainderCandidatesResponse,
+  PaymentRemainderConfirmation,
   CleanedAddress,
   DadataAddressSuggestion,
   ClientReferenceItem,

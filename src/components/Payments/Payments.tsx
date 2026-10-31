@@ -477,6 +477,8 @@ export function Payments({
     fromDate, toDate, selectedCounterpartyKey, clientRoleFilter, selectedCategories, appliedTypeFilter, statusFilter,
     advanceReviewFilter, minAmountValue, maxAmountValue, debouncedSearch, page, pageSize]));
   const { capture: capturePaymentsRead, scope: paymentsReadScope } = paymentsReadOwner;
+  const remainderWriteOwner = useDocumentDeliveryOwner(JSON.stringify(['legacy-remainder', paymentsReadScope]));
+  const { begin: beginRemainderWrite } = remainderWriteOwner;
   const balanceRecoveryOwner = useDocumentDeliveryOwner(JSON.stringify([paymentsReadScope, canViewSharedBalance, paymentsPermissions.canEdit]));
   const pendingBalance = usePendingBalanceApplications('client', 0, canViewSharedBalance, balanceRecoveryOwner.scope, true);
   useLayoutEffect(() => { setAdvanceAllocationSource(null); }, [paymentsReadOwner.scope]);
@@ -1541,39 +1543,65 @@ export function Payments({
 
   const handleTransferExistingRemainder = useCallback(
     async (candidate: PartialPaymentRemainderCandidate) => {
-      const remainderDate = remainderCandidateDates[candidate.payment.id];
-      if (!remainderDate) {
-        toast.error('Укажите дату, на которую нужно перенести остаток.', 'Платежи');
-        return;
-      }
-
-      const normalizedDate = fromInputToApiDate(remainderDate);
-      if (!normalizedDate) {
-        toast.error('Дата переноса остатка указана неверно.', 'Платежи');
-        return;
-      }
-
-      const confirmed = await confirm({
-        title: 'Создать платеж на остаток',
-        description: `Исходный платеж будет закрыт на оплаченную сумму ${formatCurrencySmart(candidate.paidAmount).full}, а остаток ${formatCurrencySmart(candidate.remainderAmount).full} появится отдельным платежом на выбранную дату.`,
-        confirmLabel: 'Создать остаток',
-        cancelLabel: 'Отмена',
-      });
-      if (!confirmed) return;
-
+      const operation = beginRemainderWrite('transfer-existing');
+      if (!operation) return;
       try {
-        await apiService.transferExistingPaymentRemainder(candidate.payment.id, normalizedDate);
-        toast.success('Остаток создан отдельным платежом.', 'Платежи');
-        await refresh();
+        if (!paymentsPermissions.canView || !paymentsPermissions.canEdit) {
+          showPermissionNotice(t('permissionNoEditPayment') ?? 'Недостаточно прав для переноса остатка.');
+          return;
+        }
+        const remainderDate = remainderCandidateDates[candidate.payment.id];
+        if (!remainderDate) {
+          toast.error('Укажите дату, на которую нужно перенести остаток.', 'Платежи');
+          return;
+        }
+
+        const normalizedDate = fromInputToApiDate(remainderDate);
+        if (!normalizedDate) {
+          toast.error('Дата переноса остатка указана неверно.', 'Платежи');
+          return;
+        }
+
+        const values = [candidate.originalAmount, candidate.payment.amount, candidate.paidAmount, candidate.remainderAmount];
+        if (values.some(value => !Number.isFinite(value) || value < 0)
+          || candidate.originalAmount <= candidate.paidAmount
+          || Math.abs(candidate.originalAmount - candidate.paidAmount - candidate.remainderAmount) > 0.009
+          || typeof candidate.confirmationToken !== 'string' || !candidate.confirmationToken) {
+          toast.error('Обновите список и проверьте суммы исходного платежа.', 'Платежи');
+          return;
+        }
+        const confirmation = {
+          originalAmount: Number(candidate.originalAmount.toFixed(2)),
+          expectedAmount: Number(candidate.payment.amount.toFixed(2)),
+          expectedPaidAmount: Number(candidate.paidAmount.toFixed(2)),
+          confirmationToken: candidate.confirmationToken,
+        };
+
+        const confirmed = await confirm({
+          title: candidate.needsAmountConfirmation ? 'Подтвердите сумму старого платежа' : 'Создать платеж на остаток',
+          description: `${candidate.needsAmountConfirmation ? 'Общая сумма предложена по старой заметке. Проверьте её перед переносом. ' : ''}Всего: ${formatCurrencySmart(confirmation.originalAmount).full}. Оплачено: ${formatCurrencySmart(confirmation.expectedPaidAmount).full}. Остаток: ${formatCurrencySmart(candidate.remainderAmount).full} на ${formatDate(normalizedDate)}. Исходный платёж будет закрыт на оплаченную часть.`,
+          confirmLabel: 'Создать остаток',
+          cancelLabel: 'Отмена',
+        });
+        if (!confirmed || !operation.isCurrent()) return;
+
+        const result = await apiService.transferExistingPaymentRemainder(candidate.payment.id, normalizedDate, confirmation);
+        if (!operation.isCurrent()) return;
+        await refreshOwned(operation.isCurrent);
+        if (!operation.isCurrent()) return;
         await currentRemainderLoaderRef.current?.();
+        if (!operation.isCurrent()) return;
+        toast.success(result.createdRemainder ? 'Остаток создан отдельным платежом.' : 'Остаток уже создан.', 'Платежи');
       } catch (error) {
+        if (!operation.isCurrent()) return;
         toast.error(
           extractDisplayErrorMessage(error, 'Не удалось создать платеж на остаток.'),
           'Платежи',
         );
-      }
+      } finally { operation.finish(); }
     },
-    [confirm, refresh, remainderCandidateDates, toast],
+    [confirm, refreshOwned, remainderCandidateDates, toast, beginRemainderWrite, formatDate, paymentsPermissions.canView,
+      paymentsPermissions.canEdit, showPermissionNotice, t],
   );
 
   const handleCloseModal = useCallback(() => {
@@ -2124,6 +2152,7 @@ export function Payments({
                             </td>
                             <td className="px-4 py-3 text-slate-700">
                               <div>{`Всего: ${formatCurrencySmart(candidate.originalAmount).full}`}</div>
+                              {candidate.needsAmountConfirmation ? <div className="mt-1 text-xs text-amber-700">Сумма из старой заметки. Проверьте её перед переносом.</div> : null}
                               <div className="font-semibold text-emerald-700">
                                 {`Оплачено: ${formatCurrencySmart(candidate.paidAmount).full}`}
                               </div>
@@ -2135,6 +2164,7 @@ export function Payments({
                               <SystemDateInput
                                 type="date"
                                 value={remainderCandidateDates[payment.id] ?? ''}
+                                disabled={remainderWriteOwner.busy || !paymentsPermissions.canEdit}
                                 onChange={(event) =>
                                   setRemainderCandidateDates((current) => ({
                                     ...current,
@@ -2157,7 +2187,7 @@ export function Payments({
                                 <button
                                   type="button"
                                   onClick={() => void handleTransferExistingRemainder(candidate)}
-                                  disabled={remainderCandidatesLoading}
+                                  disabled={remainderCandidatesLoading || remainderWriteOwner.busy || !paymentsPermissions.canEdit}
                                   className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-amber-600 px-3 text-xs font-medium text-white transition hover:bg-amber-700 disabled:opacity-60">
                                   <CalendarPlus className="h-3.5 w-3.5" />
                                   Создать остаток

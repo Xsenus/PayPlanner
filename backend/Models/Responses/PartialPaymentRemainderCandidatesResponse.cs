@@ -10,6 +10,8 @@ public sealed class PartialPaymentRemainderCandidateDto
     public decimal RemainderAmount { get; set; }
     public int DaysPastDue { get; set; }
     public DateTime SuggestedRemainderDate { get; set; }
+    public bool NeedsAmountConfirmation { get; set; }
+    public string ConfirmationToken { get; set; } = string.Empty;
 }
 
 public sealed class PartialPaymentRemainderCandidatesResponse

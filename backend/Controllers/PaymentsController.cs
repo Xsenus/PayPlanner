@@ -645,10 +645,28 @@ public class PaymentsController : ControllerBase
             if (attempt.State != PaymentCreateAttempt.Draft) throw new InvalidOperationException("Unknown payment attempt state.");
             if (PaymentCreateInputRules.ValidateCreationState(model) is { } inputStateError)
                 return BadRequest(new { message = inputStateError });
+            Payment? remainderSource = null;
+            if (attempt.PrimaryPaymentId is { } sourceId)
+            {
+                var ownsPrimary = await _db.PaymentCreateAttempts.AsNoTracking().AnyAsync(primary => primary.ActorUserId == attempt.ActorUserId
+                    && primary.Operation == "primary" && primary.State == PaymentCreateAttempt.Committed && primary.CanonicalPaymentId == sourceId, ct);
+                if (!ownsPrimary && !await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, permission => permission.CanEdit, ct))
+                    return Forbid();
+                remainderSource = await _db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == sourceId, ct);
+                if (remainderSource.DocumentKind != DocumentKind.Payment || remainderSource.Status == PaymentStatus.Cancelled
+                    || remainderSource.AdvanceReviewStatus == PaymentAdvanceReviewStatus.Refunded
+                    || await PaymentCreditInvariantScope.IsCancellationProtectedAsync(_db, sourceId, ct)
+                    || await PaymentRemainderWriteRules.HasTransferredRemainderAsync(_db, remainderSource, ct)
+                    || await HasCommittedRemainderAttemptAsync(sourceId, ct))
+                    return AttemptConflict();
+            }
             using var credit = new PaymentCreditInvariantScope(_db);
             var scope = new VersionedPaymentWriteBoundary.Scope(lease.LockPrimaryAsync);
             var result = await CreatePaymentCoreAsync(model, scope, ct);
             if (result is not CreatedResult) return result;
+            if (remainderSource is not null && (PaymentBalanceHistoryRules.Binding.From(remainderSource) != PaymentBalanceHistoryRules.Binding.From(model)
+                || remainderSource.SellerCompanyId != model.SellerCompanyId || remainderSource.SellerBranchId != model.SellerBranchId))
+                return AttemptConflict();
             if (!await credit.KeepsAppliedCreditAsync(ct))
                 return BadRequest(new { message = PaymentCreditInvariantScope.RejectionMessage });
             if (attempt.ExpiresAtUtc <= AttemptTime.GetUtcNow()) throw new PaymentCreateAttemptExpiredException();
@@ -2047,13 +2065,13 @@ public class PaymentsController : ControllerBase
         var now = DateTime.UtcNow;
         var paymentTimeZone = await ResolvePaymentTimeZoneAsync(ct);
         var today = PaymentDomainService.ResolveLocalToday(now, paymentTimeZone);
-        var sourceIdsWithRemainders = await GetPartialRemainderSourceIdsAsync(ct);
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
         if (visibility is null)
         {
             return AccessDenied();
         }
 
+        var sourceIdsWithRemainders = await GetPartialRemainderSourceIdsAsync(ct);
         var query = _db.Payments
             .AsQueryable()
             .ApplyPaymentVisibility(visibility)
@@ -2101,6 +2119,7 @@ public class PaymentsController : ControllerBase
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToList();
+        foreach (var item in pageItems) item.ConfirmationToken = PaymentRemainderWriteRules.BuildConfirmationToken(item.Payment);
 
         return Ok(new PartialPaymentRemainderCandidatesResponse
         {
@@ -2124,7 +2143,8 @@ public class PaymentsController : ControllerBase
         candidate = default!;
 
         var paidAmount = Math.Round(payment.PaidAmount, 2, MidpointRounding.AwayFromZero);
-        if (paidAmount <= 0m)
+        if (payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.Refunded
+            || paidAmount <= 0m || paidAmount > Math.Round(payment.Amount, 2, MidpointRounding.AwayFromZero) + AmountTolerance)
         {
             return false;
         }
@@ -2148,6 +2168,7 @@ public class PaymentsController : ControllerBase
             RemainderAmount = remainderAmount,
             DaysPastDue = payment.Date.Date < today ? (today - payment.Date.Date).Days : 0,
             SuggestedRemainderDate = suggestedDate,
+            NeedsAmountConfirmation = originalAmount > Math.Round(payment.Amount, 2, MidpointRounding.AwayFromZero) + AmountTolerance,
         };
         return true;
     }
@@ -2170,10 +2191,34 @@ public class PaymentsController : ControllerBase
         var source = await _db.Payments.AsNoTracking().FirstOrDefaultAsync(payment => payment.Id == id, ct);
         if (source is null) return NotFound();
 
-        var originalAmount = ResolveStoredPartialRemainderOriginalAmount(source);
+        var storedAmount = Math.Round(source.Amount, 2, MidpointRounding.AwayFromZero);
         var paidAmount = Math.Round(source.PaidAmount, 2, MidpointRounding.AwayFromZero);
+        // A known structural outcome wins over a stale preview after a lost
+        // response. The shared core rechecks access to both rows and returns it.
+        var knownOutcome = await _db.PaymentRemainderTransfers.AsNoTracking().AnyAsync(link => link.SourcePaymentId == source.Id, ct);
+        if (!knownOutcome && source.AdvanceReviewStatus == PaymentAdvanceReviewStatus.Refunded)
+            return BadRequest(new { message = PaymentAdvanceReviewService.RefundedEditMessage });
+        var hasConfirmation = request.OriginalAmount.HasValue || request.ExpectedAmount.HasValue
+            || request.ExpectedPaidAmount.HasValue || request.ConfirmationToken is not null;
+        var originalAmount = storedAmount;
+        if (!knownOutcome && hasConfirmation)
+        {
+            if (request.OriginalAmount is not { } confirmed || request.ExpectedAmount is not { } expected
+                || request.ExpectedPaidAmount is not { } expectedPaid || string.IsNullOrEmpty(request.ConfirmationToken)
+                || confirmed <= 0m || expected < 0m || expectedPaid < 0m
+                || Math.Round(confirmed, 2) != confirmed || Math.Round(expected, 2) != expected || Math.Round(expectedPaid, 2) != expectedPaid)
+                return BadRequest(new { message = "Подтвердите общую сумму и обновите данные исходного платежа." });
+            if (expected != storedAmount || expectedPaid != paidAmount
+                || !string.Equals(request.ConfirmationToken, PaymentRemainderWriteRules.BuildConfirmationToken(source), StringComparison.Ordinal))
+                return Conflict(new { message = "Исходный платёж изменился после просмотра. Обновите список и подтвердите суммы заново." });
+            if (storedAmount > paidAmount + AmountTolerance && confirmed != storedAmount)
+                return BadRequest(new { message = "Общая сумма должна совпадать с сохранённой суммой частично оплаченного платежа." });
+            originalAmount = confirmed;
+        }
+        if (!knownOutcome && storedAmount <= paidAmount + AmountTolerance && !hasConfirmation)
+            return BadRequest(new { message = "Общую сумму старого платежа нужно подтвердить явно. Заметка сама по себе не является основанием для нового остатка." });
         var remainderAmount = Math.Round(originalAmount - paidAmount, 2, MidpointRounding.AwayFromZero);
-        if (paidAmount <= 0m || remainderAmount <= AmountTolerance)
+        if (!knownOutcome && (paidAmount <= 0m || paidAmount > storedAmount + AmountTolerance || remainderAmount <= AmountTolerance))
         {
             return BadRequest(new { message = "У платежа нет частично оплаченного остатка для переноса." });
         }
@@ -2247,6 +2292,11 @@ public class PaymentsController : ControllerBase
                 CreatedRemainder = false,
             });
         }
+
+        if (await HasCommittedRemainderAttemptAsync(source.Id, ct))
+            return Conflict(new { message = "По платежу уже сохранён отдельный остаток. Проверьте восстановление создания платежей; повторный остаток не создаётся." });
+        if (source.AdvanceReviewStatus == PaymentAdvanceReviewStatus.Refunded)
+            return BadRequest(new { message = PaymentAdvanceReviewService.RefundedEditMessage });
 
         if (source.Status == PaymentStatus.Cancelled)
         {
@@ -2699,6 +2749,8 @@ public class PaymentsController : ControllerBase
             .AsNoTracking()
             .Select(item => item.SourcePaymentId)
             .ToHashSetAsync(ct);
+        var attemptedSources = await CommittedRemainderAttempts().Select(attempt => attempt.PrimaryPaymentId!.Value).Distinct().ToArrayAsync(ct);
+        sourceIds.UnionWith(attemptedSources);
 
         var markerLines = await _db.Payments
             .AsNoTracking()
@@ -2719,12 +2771,22 @@ public class PaymentsController : ControllerBase
         return sourceIds;
     }
 
+    private IQueryable<PaymentCreateAttempt> CommittedRemainderAttempts()
+        => _db.PaymentCreateAttempts.AsNoTracking().Where(attempt => attempt.State == PaymentCreateAttempt.Committed
+            && attempt.Operation == "remainder" && attempt.PrimaryPaymentId.HasValue && attempt.CanonicalPaymentId.HasValue
+            && attempt.CanonicalPaymentId != attempt.PrimaryPaymentId
+            && _db.Payments.Any(child => child.Id == attempt.CanonicalPaymentId));
+
+    private Task<bool> HasCommittedRemainderAttemptAsync(int sourceId, CancellationToken ct)
+        => CommittedRemainderAttempts().AnyAsync(attempt => attempt.PrimaryPaymentId == sourceId, ct);
+
     private static decimal ResolveStoredPartialRemainderOriginalAmount(Payment payment)
     {
         var storedAmount = Math.Round(payment.Amount, 2, MidpointRounding.AwayFromZero);
         var paidAmount = Math.Round(payment.PaidAmount, 2, MidpointRounding.AwayFromZero);
 
         if (TryReadLegacyPartialRemainderHint(payment, out var hint)
+            && Math.Abs(hint.PaidAmount - paidAmount) <= AmountTolerance
             && storedAmount <= paidAmount + AmountTolerance
             && hint.OriginalAmount > storedAmount + AmountTolerance
             && hint.OriginalAmount > paidAmount + AmountTolerance)
