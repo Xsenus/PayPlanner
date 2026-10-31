@@ -23,8 +23,10 @@ internal sealed class PaymentCreditInvariantScope : IDisposable
     public void IncludePayments(IEnumerable<Payment> payments) => changed.UnionWith(payments);
 
     public static Task<bool> IsCancellationProtectedAsync(PaymentContext db, int paymentId, CancellationToken ct)
-        => db.Payments.AsNoTracking().AnyAsync(payment => payment.Id == paymentId
-            && ((payment.DocumentKind == DocumentKind.Invoice
+        => CancellationProtectedPayments(db).AnyAsync(payment => payment.Id == paymentId, ct);
+
+    public static IQueryable<Payment> CancellationProtectedPayments(PaymentContext db)
+        => db.Payments.Where(payment => ((payment.DocumentKind == DocumentKind.Invoice
                     && (payment.Status == PaymentStatus.Cancelled || payment.InvoiceWorkflowStatus == InvoiceWorkflowStatus.Cancelled))
                 || (payment.InvoiceId.HasValue
                     && db.Payments.Any(root => root.InvoiceId == payment.InvoiceId && root.DocumentKind == DocumentKind.Invoice
@@ -34,7 +36,7 @@ internal sealed class PaymentCreditInvariantScope : IDisposable
                 || db.ClientBalanceTransactions.Any(item => item.Type == ClientBalanceTransactionType.AdvanceFromCancelledInvoice
                     && (item.PaymentId == payment.Id || payment.InvoiceId.HasValue && item.InvoiceId == payment.InvoiceId))
                 || (payment.InvoiceId.HasValue && db.MoneyOperations.Any(item => item.LinkedInvoiceId == payment.InvoiceId
-                    && item.Direction == MoneyOperationDirection.Expense && item.MatchComment == ClientBalanceService.CancelledInvoiceRefundComment))), ct);
+                    && item.Direction == MoneyOperationDirection.Expense && item.MatchComment == ClientBalanceService.CancelledInvoiceRefundComment))));
 
     private void OnStateChanged(object? sender, EntityStateChangedEventArgs args)
     {
