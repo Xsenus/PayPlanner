@@ -9,6 +9,7 @@ import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { useDictionaries } from '../../hooks/useDictionaries';
 import { useTranslation } from '../../hooks/useTranslation';
 import { apiService } from '../../services/api';
+import { captureAuthSessionIdentity, isAuthSessionIdentityCurrent, type AuthSessionIdentity } from '../../services/authService';
 import { acknowledgeCreatedPayment, canContinueCreatedPayment, isPaymentSourceConfirmationToken, PaymentCreateAdoptedError, PAYMENT_CREATE_CHANGED, PaymentCreateRecoveryError, paymentCreateSessionVersion, type PaymentCreateContext } from '../../services/paymentCreateAttempts';
 import { PaymentCreateRecovery } from '../Payments/PaymentCreateRecovery';
 import { BalanceApplicationRecovery } from '../Payments/BalanceApplicationRecovery';
@@ -362,6 +363,9 @@ export function PaymentModal({
   const pendingRemainderRef = useRef<{ primaryPaymentId: number; sourceConfirmationToken?: string | null; payload: PaymentPayload } | null>(null);
   const [remainderPending, setRemainderPending] = useState(false);
   const [remainderReceiptBlocked, setRemainderReceiptBlocked] = useState(false);
+  const unverifiedSourceRef = useRef<number | null>(null);
+  const [unverifiedSourceId, setUnverifiedSourceId] = useState<number | null>(null);
+  const sourceOutcomeRef = useRef<{ key: string; actor: string; session: AuthSessionIdentity } | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
   const canSavePayment = remainderPending ? canCreatePayment : payment ? canEditPayment : canCreatePayment;
@@ -382,6 +386,16 @@ export function PaymentModal({
     canViewLinkedInvoices, canCreateLinkedInvoices, !!onDelete, !!onCreateRemainder, !!onTransferRemainder, !!onRollbackRemainderTransfer, !!onAdjustRemainderTransfer,
     user?.id, user?.role?.id, user?.role?.name, paymentPermissions.canView, paymentPermissions.viewScope]));
   const { capture: captureConfirmationOwner } = confirmationOwner;
+  const { begin: beginSourceRefresh, scope: sourceRefreshScope, busy: sourceRefreshBusy } = useDocumentDeliveryOwner(confirmationOwner.scope);
+  const sourceReadController = useRef<{ scope: string; sourceId: number; controller: AbortController } | null>(null);
+  const sourceRefreshBlocked = unverifiedSourceId !== null && unverifiedSourceId === payment?.id;
+  useEffect(() => () => {
+    if (sourceReadController.current?.scope === sourceRefreshScope) sourceReadController.current.controller.abort();
+  }, [sourceRefreshScope]);
+  useEffect(() => () => {
+    const request = sourceReadController.current;
+    if (request && request.sourceId === payment?.id) request.controller.abort();
+  }, [payment?.id]);
   const confirmationContext = useMemo(() => captureConfirmationOwner(), [captureConfirmationOwner]);
   const pendingConfirmations = useRef(new Set<AbortController>());
   useEffect(() => {
@@ -416,6 +430,7 @@ export function PaymentModal({
       pendingRemainderRef.current = null;
       setRemainderPending(false);
       setRemainderReceiptBlocked(false);
+      unverifiedSourceRef.current = null; setUnverifiedSourceId(null); sourceOutcomeRef.current = null;
       setSaveError(null);
       setSaveNotice(null);
     }
@@ -435,6 +450,7 @@ export function PaymentModal({
     pendingRemainderRef.current = null;
     setRemainderPending(false);
     setRemainderReceiptBlocked(false);
+    unverifiedSourceRef.current = null; setUnverifiedSourceId(null); sourceOutcomeRef.current = null;
     setSaveError(null);
     setSaveNotice(null);
     savingRef.current = false;
@@ -461,6 +477,7 @@ export function PaymentModal({
       setConfirmedPayment(null);
       setRemainderPending(false);
       setRemainderReceiptBlocked(false);
+      unverifiedSourceRef.current = null; setUnverifiedSourceId(null); sourceOutcomeRef.current = null;
       setLoading(false);
       setSaveError(null);
       setSaveNotice(null);
@@ -564,6 +581,7 @@ export function PaymentModal({
   const beginFinancialWrite = (kind: string, allowed = canEditPayment, targetId = payment?.id) => {
     const key = String(targetId ?? 'new');
     if (!isOpen || !allowed || savingRef.current || savingLoading || financialWrites.current.has(key)
+      || (unverifiedSourceRef.current !== null && unverifiedSourceRef.current === paymentRef.current?.id)
       || (pendingBalance.blocked && kind !== 'balance-recovery')) return null;
     const operation = financialWriteOwner.begin(kind);
     if (!operation) return null;
@@ -1050,6 +1068,55 @@ export function PaymentModal({
     setOverpaymentComment('');
     autoCashOrderDraftRef.current = null;
   };
+  const acceptCanonicalSourceRef = useRef(acceptSavedPayment);
+  acceptCanonicalSourceRef.current = acceptSavedPayment;
+  const refreshSavedSource = useCallback(async (sourceId: number) => {
+    const actor = paymentCreateSessionVersion();
+    const outcome = sourceOutcomeRef.current;
+    if (!isOpen || !paymentPermissions.canView || !outcome || outcome.actor !== actor
+      || !isAuthSessionIdentityCurrent(outcome.session)
+      || unverifiedSourceRef.current !== sourceId || paymentRef.current?.id !== sourceId) return;
+    const operation = beginSourceRefresh('refresh-source');
+    if (!operation) return;
+    const cardScope = scopeRef.current;
+    sourceReadController.current?.controller.abort();
+    const request = { scope: sourceRefreshScope, sourceId, controller: new AbortController() };
+    sourceReadController.current = request;
+    const current = () => operation.isCurrent() && scopeRef.current === cardScope && actor === paymentCreateSessionVersion()
+      && sourceOutcomeRef.current === outcome && isAuthSessionIdentityCurrent(outcome.session)
+      && unverifiedSourceRef.current === sourceId && paymentRef.current?.id === sourceId;
+    try {
+      const canonical = await apiService.getPayment(sourceId, request.controller.signal);
+      if (!current()) return;
+      if (!canonical || canonical.id !== sourceId || canonical.documentKind !== 'Payment'
+        || !Number.isFinite(canonical.amount) || !Number.isFinite(canonical.paidAmount)
+        || canonical.amount < 0 || canonical.paidAmount < 0
+        || !isPaymentSourceConfirmationToken(canonical.remainderConfirmationToken)) return;
+      acceptCanonicalSourceRef.current(canonical);
+      unverifiedSourceRef.current = null;
+      setUnverifiedSourceId(null);
+    } catch {
+      // The financial result is already confirmed. Keep the source readonly;
+      // a retry below performs only this GET, never the original command.
+    } finally {
+      if (sourceReadController.current === request) sourceReadController.current = null;
+      operation.finish();
+    }
+  }, [isOpen, paymentPermissions.canView, beginSourceRefresh, sourceRefreshScope]);
+  useEffect(() => {
+    if (unverifiedSourceId !== null && payment?.id === unverifiedSourceId) void refreshSavedSource(unverifiedSourceId);
+  }, [unverifiedSourceId, payment?.id, refreshSavedSource]);
+  const observeSavedRemainder = (sourceId: number, remainderId: number, session: AuthSessionIdentity) => {
+    if (!isAuthSessionIdentityCurrent(session) || paymentRef.current?.id !== sourceId) return;
+    if (!Number.isSafeInteger(remainderId) || remainderId <= 0 || remainderId === sourceId)
+      throw new Error('Создание отдельного остатка не подтверждено сервером.');
+    const actor = paymentCreateSessionVersion();
+    const key = JSON.stringify([scopeRef.current, actor, sourceId, remainderId]);
+    if (sourceOutcomeRef.current?.key === key) return;
+    sourceOutcomeRef.current = { key, actor, session };
+    unverifiedSourceRef.current = sourceId;
+    setUnverifiedSourceId(sourceId);
+  };
   const completePendingRemainder = async (scope: number) => {
     const pending = pendingRemainderRef.current;
     if (!pending || !onCreateRemainder) throw new Error('Не удалось восстановить данные остатка.');
@@ -1057,6 +1124,7 @@ export function PaymentModal({
     if (!isPaymentSourceConfirmationToken(sourceConfirmationToken))
       throw new Error('Снимок исходного платежа не подтверждён. Откройте сохранённый платёж заново и проверьте суммы.');
     const actorVersion = paymentCreateSessionVersion();
+    const actorSession = captureAuthSessionIdentity();
     let created: Payment;
     try {
       created = requireSavedPayment(await onCreateRemainder(pending.payload, {
@@ -1065,6 +1133,7 @@ export function PaymentModal({
     } catch (error) {
       if (error instanceof PaymentCreateAdoptedError) {
         if (scope === scopeRef.current && actorVersion === paymentCreateSessionVersion()) {
+          observeSavedRemainder(pending.primaryPaymentId, error.payment.id, actorSession);
           pendingRemainderRef.current = null; setRemainderPending(false); setSaveNotice('Сохранённый остаток открыт.');
         }
         return;
@@ -1074,6 +1143,7 @@ export function PaymentModal({
         recoveryContinuationRef.current = { attemptId: error.attempt.attemptId, accept: async (saved) => {
           if (scope !== scopeRef.current || actorVersion !== paymentCreateSessionVersion()) return false;
           if (saved.id === pending.primaryPaymentId) throw new Error('Сервер вернул исходный платёж вместо остатка.');
+          observeSavedRemainder(pending.primaryPaymentId, saved.id, actorSession);
           pendingRemainderRef.current = null;
           setRemainderPending(false);
           setSaveNotice('Платёж и остаток сохранены.');
@@ -1085,10 +1155,12 @@ export function PaymentModal({
     if (scope !== scopeRef.current || actorVersion !== paymentCreateSessionVersion()) return;
     if (created.id === pending.primaryPaymentId) throw new Error('Создание отдельного остатка не подтверждено сервером.');
     if (!canContinueCreatedPayment(created)) {
+      observeSavedRemainder(pending.primaryPaymentId, created.id, actorSession);
       pendingRemainderRef.current = null; setRemainderPending(false); setSaveNotice('Сохранённый остаток подтверждён.'); return;
     }
     const receiptAcknowledged = await acknowledgeCreatedPayment(created);
     if (scope !== scopeRef.current || actorVersion !== paymentCreateSessionVersion()) return;
+    observeSavedRemainder(pending.primaryPaymentId, created.id, actorSession);
     pendingRemainderRef.current = null;
     setRemainderPending(false);
     if (!receiptAcknowledged) setSaveError('Платёж и остаток сохранены, но подтверждение остатка не завершено. Проверьте результат в разделе восстановления.');
@@ -1796,7 +1868,7 @@ export function PaymentModal({
       return;
     }
 
-    if (loading || savingRef.current || !canSavePayment) return;
+    if (loading || savingRef.current || !canSavePayment || sourceRefreshBlocked) return;
     setSaveError(null);
     setSaveNotice(null);
     const scope = scopeRef.current;
@@ -2499,10 +2571,10 @@ export function PaymentModal({
     && (onRollbackRemainderTransfer || onAdjustRemainderTransfer),
   );
   const isRepresentativeInvoicePayment = payment?.documentKind === 'Invoice' && Boolean(payment.invoiceId && payment.invoiceId > 0);
-  const canDelete = !remainderPending && !!payment && !!onDelete && !isRepresentativeInvoicePayment && !isProtectedTransferredRemainder && !isProtectedRemainderSource;
-  const canCancelPayment = !remainderPending && canEditPayment && !!payment && !isProtectedTransferredRemainder && !isProtectedRemainderSource && payment.status !== 'Cancelled';
-  const canMovePayment = !remainderPending && canEditPayment && !!payment && !isProtectedTransferredRemainder && !isProtectedRemainderSource && payment.status !== 'Cancelled';
-  const canPrintPayment = !!payment;
+  const canDelete = !sourceRefreshBlocked && !remainderPending && !!payment && !!onDelete && !isRepresentativeInvoicePayment && !isProtectedTransferredRemainder && !isProtectedRemainderSource;
+  const canCancelPayment = !sourceRefreshBlocked && !remainderPending && canEditPayment && !!payment && !isProtectedTransferredRemainder && !isProtectedRemainderSource && payment.status !== 'Cancelled';
+  const canMovePayment = !sourceRefreshBlocked && !remainderPending && canEditPayment && !!payment && !isProtectedTransferredRemainder && !isProtectedRemainderSource && payment.status !== 'Cancelled';
+  const canPrintPayment = !sourceRefreshBlocked && !!payment;
   const paymentPrintTitle = resolvePaymentPrintTitle(
     formData.type,
     selectedPaymentSource?.name,
@@ -2619,6 +2691,7 @@ export function PaymentModal({
   };
 
   const handlePrintPayment = async (format: 'legacy' | 'cashOrder' = 'legacy') => {
+    if (sourceRefreshBlocked) return;
     let printWindow: Window | null = null;
     try {
       setPrintMenuOpen(false);
@@ -3259,10 +3332,10 @@ export function PaymentModal({
                 }}
               />
             <BalanceApplicationRecovery pending={pendingBalance} context={financialWriteOwner.scope} busy={loading}
-              canResolve={canEditPayment && canViewSharedBalance && savedCounterpartyIsCurrent && !remainderPending}
+              canResolve={canEditPayment && canViewSharedBalance && savedCounterpartyIsCurrent && !remainderPending && !sourceRefreshBlocked}
               begin={entry => beginFinancialWrite('balance-recovery', canEditPayment && canViewSharedBalance, entry.paymentId)}
               adopt={adoptBalanceApplication} />
-            <fieldset disabled={loading || !canSavePayment || remainderPending || pendingBalance.blocked} className="contents">
+            <fieldset disabled={loading || sourceRefreshBlocked || !canSavePayment || remainderPending || pendingBalance.blocked} className="contents">
             {showProcessHelp && (
               <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900 shadow-sm">
                 <div className="flex items-center gap-2 font-semibold">
@@ -4266,6 +4339,12 @@ export function PaymentModal({
             </fieldset>
             {saveError ? <p role="alert" className="text-sm text-red-700">{saveError}</p> : null}
             {remainderPending ? <p className="text-sm text-amber-800">Платёж уже сохранён. Осталось создать остаток; повторное сохранение не создаст платёж заново.</p> : null}
+            {sourceRefreshBlocked ? <div role="region" aria-label="Обновление исходного платежа" aria-live="polite" className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              <p>{sourceRefreshBusy ? 'Остаток сохранён. Обновляем исходную карточку.' : 'Остаток сохранён. Данные исходной карточки ещё не обновлены; изменения временно недоступны.'}</p>
+              <button type="button" disabled={sourceRefreshBusy || !paymentPermissions.canView}
+                onClick={() => { if (unverifiedSourceId !== null) void refreshSavedSource(unverifiedSourceId); }}
+                className="rounded-lg border border-amber-300 bg-white px-3 py-2 font-medium disabled:opacity-50">Повторить чтение карточки</button>
+            </div> : null}
             {saveNotice ? <p role="status" className="text-sm text-emerald-700">{saveNotice}</p> : null}
             <div className="border-t border-gray-200 py-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -4385,7 +4464,7 @@ export function PaymentModal({
 
                   <button
                     type="submit"
-                    disabled={loading || !canSavePayment || remainderReceiptBlocked || pendingBalance.blocked}
+                    disabled={loading || sourceRefreshBlocked || !canSavePayment || remainderReceiptBlocked || pendingBalance.blocked}
                     className={`rounded-lg px-4 py-2 font-medium transition-colors sm:min-w-40 ${
                       formData.type === 'Income'
                         ? 'bg-emerald-600 text-white hover:bg-emerald-700'

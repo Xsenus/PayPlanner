@@ -57,7 +57,7 @@ const {
   invoiceModalPropsSpy: vi.fn(),
   toastErrorMock: vi.fn(),
   toastSuccessMock: vi.fn(),
-  paymentScopeState: { value: 'all' as 'all' | 'own' },
+  paymentScopeState: { value: 'all' as 'all' | 'own', canView: true },
 }));
 
 vi.mock('../../contexts/AuthContext', () => ({
@@ -65,7 +65,7 @@ vi.mock('../../contexts/AuthContext', () => ({
 }));
 
 vi.mock('../../hooks/useRolePermissions', () => ({
-  useRolePermissions: () => ({ payments: { canView: true, viewScope: paymentScopeState.value } }),
+  useRolePermissions: () => ({ payments: { canView: paymentScopeState.canView, viewScope: paymentScopeState.value } }),
 }));
 
 vi.mock('../../hooks/useClients', () => ({
@@ -146,6 +146,7 @@ vi.mock('../../hooks/useUserTimeZone', () => ({
 
 vi.mock('../../services/api', () => ({
   apiService: {
+    getPayment: vi.fn(),
     inspectPaymentCreate: vi.fn(), openPaymentCreate: vi.fn(), acknowledgePaymentCreate: vi.fn(), fencePaymentCreateAdoption: vi.fn(),
     getInvoices: getInvoicesMock,
     getActResponsibles: getActResponsiblesMock,
@@ -283,8 +284,9 @@ function getLastPrintHtml(): string {
 }
 
 const doc04SourceToken = 'remainder-v2:' + 'A'.repeat(64);
+const doc04CanonicalPayments = new Map<number, Payment>();
 function doc04Payment(overrides: Partial<Payment> = {}): Payment {
-  return {
+  const payment: Payment = {
     remainderConfirmationToken: doc04SourceToken, id: 9901, date: '2026-04-10', plannedDate: '2026-04-10', amount: 100,
     paidAmount: 0, outstandingAmount: 100, hasPartialPayment: false, status: 'Pending',
     type: 'Income', description: 'Подтверждённый платёж', isPaid: false, notes: '',
@@ -292,6 +294,14 @@ function doc04Payment(overrides: Partial<Payment> = {}): Payment {
     clientId: 69, documentKind: 'Payment', paymentOrderNumber: 'ПКО-2026-9901',
     paymentDocumentDate: '2026-04-11', ...overrides,
   };
+  doc04CanonicalPayments.set(payment.id, payment);
+  return payment;
+}
+function doc04CanonicalSource(primary: Payment, remainderAmount = 65, overrides: Partial<Payment> = {}): Payment {
+  return { ...primary, remainderConfirmationToken: 'remainder-v2:' + 'B'.repeat(64),
+    systemNotes: `${primary.systemNotes}\n[pp:partial-remainder-source] ${JSON.stringify({ SourcePaymentId: primary.id,
+      SourceOriginalAmount: primary.amount + remainderAmount, PaidAmount: primary.paidAmount, RemainderAmount: remainderAmount, RemainderDate: '2026-05-20' })}`,
+    ...overrides };
 }
 function doc04Field(name: string, value: string) {
   const field = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[name="${name}"]`);
@@ -650,6 +660,13 @@ describe('PaymentModal integration', () => {
 
   beforeEach(() => {
     paymentScopeState.value = 'all';
+    paymentScopeState.canView = true;
+    doc04CanonicalPayments.clear();
+    vi.mocked(apiService.getPayment).mockReset().mockImplementation(async id => {
+      const primary = doc04CanonicalPayments.get(id);
+      if (!primary) throw new Error('Synthetic primary not registered');
+      return doc04CanonicalSource(primary, doc04CanonicalPayments.get(9902)?.amount ?? 65);
+    });
     confirmMock.mockReset();
     createInvoiceMock.mockReset();
     getActResponsiblesMock.mockReset();
@@ -3139,6 +3156,183 @@ describe('PaymentModal integration', () => {
     await act(async () => { answer(true); });
     await screen.findByRole('status');
     expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  async function startSourceRefresh(options: {
+    read?: () => Promise<Payment>;
+    props?: Partial<Parameters<typeof PaymentModal>[0]>;
+  } = {}) {
+    const primary = doc04Payment({ amount: 35, paidAmount: 35, outstandingAmount: 0, status: 'Completed', isPaid: true });
+    const remainder = doc04Payment({ id: 9902, amount: 65 });
+    const canonical = doc04CanonicalSource(primary, 65, { description: 'Канонический источник' });
+    vi.mocked(apiService.getPayment).mockImplementationOnce(options.read ?? (async () => canonical));
+    const props = { isOpen: true, defaultClientId: 69, onClose: vi.fn(), onDelete: vi.fn(),
+      onSubmit: vi.fn().mockResolvedValue(primary), onCreateRemainder: vi.fn().mockResolvedValue(remainder), ...options.props };
+    const rendered = render(<PaymentModal {...props} />);
+    doc04NewFields(); doc04Field('paidAmount', '35'); fireEvent.click(screen.getByLabelText('Перенести остаток'));
+    fireEvent.change(document.querySelector<HTMLInputElement>('#reschedule-date')!, { target: { value: '2026-05-20' } });
+    fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
+    await waitFor(() => expect(props.onCreateRemainder).toHaveBeenCalledTimes(1));
+    return { ...rendered, props, primary, remainder, canonical };
+  }
+  const sourceDescription = () => document.querySelector<HTMLTextAreaElement>('[name="description"]')!.value;
+
+  it('source refresh adopts the current primary and its structural action restrictions', async () => {
+    const f = await startSourceRefresh();
+    await waitFor(() => expect(sourceDescription()).toBe(f.canonical.description));
+    expect(apiService.getPayment).toHaveBeenCalledTimes(1); expect(vi.mocked(apiService.getPayment).mock.calls[0][0]).toBe(f.primary.id);
+    expect(vi.mocked(apiService.getPayment).mock.calls[0][1]).toBeInstanceOf(AbortSignal);
+    expect(screen.queryByRole('region', { name: 'Обновление исходного платежа' })).toBeNull();
+    for (const name of ['Перенести', 'Аннулировать', 'delete']) expect(screen.queryByRole('button', { name })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Заметки' }));
+    doc04Field('notes', 'Уточнение после перечитывания'); fireEvent.click(screen.getByRole('button', { name: 'save' }));
+    await waitFor(() => expect(f.props.onSubmit).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(f.props.onSubmit).mock.calls[1][0]).toEqual(expect.objectContaining({ id: f.primary.id, systemNotes: f.canonical.systemNotes.trim() }));
+    expect(f.props.onCreateRemainder).toHaveBeenCalledTimes(1);
+  });
+
+  it('source refresh failure keeps a readonly source and retries only its GET', async () => {
+    const f = await startSourceRefresh({ read: async () => { throw new Error('Private server diagnostic'); } });
+    const retry = await screen.findByRole('button', { name: 'Повторить чтение карточки' });
+    await waitFor(() => expect((retry as HTMLButtonElement).disabled).toBe(false));
+    expect(document.querySelector('fieldset')?.disabled).toBe(true); expect((screen.getByRole('button', { name: 'save' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByText('Private server diagnostic')).toBeNull();
+    fireEvent.submit(document.querySelector('form')!); expect(f.props.onSubmit).toHaveBeenCalledTimes(1); expect(f.props.onCreateRemainder).toHaveBeenCalledTimes(1);
+    vi.mocked(apiService.getPayment).mockResolvedValueOnce(f.canonical); fireEvent.click(retry);
+    await waitFor(() => expect(sourceDescription()).toBe(f.canonical.description));
+    expect(apiService.getPayment).toHaveBeenCalledTimes(2); expect(f.props.onSubmit).toHaveBeenCalledTimes(1); expect(f.props.onCreateRemainder).toHaveBeenCalledTimes(1);
+  });
+
+  it('source refresh owns one pending read and blocks duplicate clicks or writes', async () => {
+    let finish!: (value: Payment) => void;
+    const f = await startSourceRefresh({ read: () => new Promise(resolve => { finish = resolve; }) });
+    await waitFor(() => expect(apiService.getPayment).toHaveBeenCalledTimes(1));
+    const retry = screen.getByRole('button', { name: 'Повторить чтение карточки' }); expect((retry as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(retry); fireEvent.click(retry); fireEvent.submit(document.querySelector('form')!);
+    expect(apiService.getPayment).toHaveBeenCalledTimes(1); expect(f.props.onSubmit).toHaveBeenCalledTimes(1); expect(f.props.onCreateRemainder).toHaveBeenCalledTimes(1);
+    await act(async () => { finish(f.canonical); }); await waitFor(() => expect(sourceDescription()).toBe(f.canonical.description));
+  });
+
+  it.each(['id', 'kind', 'token', 'amount', 'paid'])('source refresh rejects an invalid %s response without adopting it', async change => {
+    const f = await startSourceRefresh({ read: async () => {
+      const canonical = doc04CanonicalSource(doc04Payment({ amount: 35, paidAmount: 35, isPaid: true, status: 'Completed' }));
+      return { ...canonical, description: 'Untrusted response', ...(change === 'id' ? { id: 9999 }
+        : change === 'kind' ? { documentKind: 'Invoice' as const } : change === 'token' ? { remainderConfirmationToken: '' }
+          : change === 'amount' ? { amount: NaN } : { paidAmount: Infinity }) };
+    } });
+    const retry = await screen.findByRole('button', { name: 'Повторить чтение карточки' });
+    await waitFor(() => expect((retry as HTMLButtonElement).disabled).toBe(false));
+    expect(sourceDescription()).not.toBe('Untrusted response'); expect(document.querySelector('fieldset')?.disabled).toBe(true);
+    expect(f.props.onSubmit).toHaveBeenCalledTimes(1); expect(f.props.onCreateRemainder).toHaveBeenCalledTimes(1);
+  });
+
+  it('source refresh accepts an authoritative concurrent rollback without recreating the old remainder', async () => {
+    const rolledBack = doc04Payment({ amount: 100, paidAmount: 35, status: 'Processing', isPaid: false,
+      description: 'Уже выполнен откат переноса', systemNotes: 'Перенос отменён другим сотрудником' });
+    const f = await startSourceRefresh({ read: async () => rolledBack });
+    await waitFor(() => expect(sourceDescription()).toBe(rolledBack.description));
+    expect(screen.queryByRole('region', { name: 'Обновление исходного платежа' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Перенести' })).toBeTruthy();
+    expect(f.props.onSubmit).toHaveBeenCalledTimes(1); expect(f.props.onCreateRemainder).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['card', 'close', 'unmount', 'actor', 'A-B-A'])('source refresh rejects a late response after %s', async change => {
+    const oldToken = localStorage.getItem('pp_token'); const oldEpoch = localStorage.getItem('pp.auth-session-epoch.v1');
+    try {
+      const firstToken = `header.${btoa(JSON.stringify({ sub: 'first-source-actor' }))}.signature`;
+      localStorage.setItem('pp_token', firstToken); localStorage.setItem('pp.auth-session-epoch.v1', 'source-first-A');
+      let finish!: (value: Payment) => void;
+      const f = await startSourceRefresh({ read: () => new Promise(resolve => { finish = resolve; }) });
+      await waitFor(() => expect(apiService.getPayment).toHaveBeenCalledTimes(1));
+      const signal = vi.mocked(apiService.getPayment).mock.calls[0][1]!;
+      if (change === 'card') f.rerender(<PaymentModal {...f.props} payment={doc04Payment({ id: 9994, description: 'Другая карточка' })} />);
+      else if (change === 'close') f.rerender(<PaymentModal {...f.props} isOpen={false} />);
+      else if (change === 'unmount') f.unmount();
+      else {
+        localStorage.setItem('pp_token', `header.${btoa(JSON.stringify({ sub: 'another-actor' }))}.signature`);
+        if (change === 'A-B-A') { localStorage.setItem('pp_token', firstToken); localStorage.setItem('pp.auth-session-epoch.v1', 'replacement-A'); }
+        f.rerender(<PaymentModal {...f.props} />);
+      }
+      await waitFor(() => expect(signal.aborted).toBe(true));
+      await act(async () => { finish({ ...f.canonical, description: 'Late private response' }); });
+      expect(screen.queryByDisplayValue('Late private response')).toBeNull(); expect(apiService.getPayment).toHaveBeenCalledTimes(1);
+      if (change === 'card') expect(sourceDescription()).toBe('Другая карточка');
+      expect(f.props.onSubmit).toHaveBeenCalledTimes(1); expect(f.props.onCreateRemainder).toHaveBeenCalledTimes(1);
+    } finally {
+      if (oldToken === null) localStorage.removeItem('pp_token'); else localStorage.setItem('pp_token', oldToken);
+      if (oldEpoch === null) localStorage.removeItem('pp.auth-session-epoch.v1'); else localStorage.setItem('pp.auth-session-epoch.v1', oldEpoch);
+    }
+  });
+
+  it('source refresh cancels the old permission context and uses the currently allowed read', async () => {
+    let finish!: (value: Payment) => void;
+    const f = await startSourceRefresh({ read: () => new Promise(resolve => { finish = resolve; }) });
+    await waitFor(() => expect(apiService.getPayment).toHaveBeenCalledTimes(1)); const oldSignal = vi.mocked(apiService.getPayment).mock.calls[0][1]!;
+    vi.mocked(apiService.getPayment).mockResolvedValueOnce(f.canonical); f.rerender(<PaymentModal {...f.props} canEditPayment={false} />);
+    await waitFor(() => expect(apiService.getPayment).toHaveBeenCalledTimes(2)); expect(oldSignal.aborted).toBe(true);
+    await waitFor(() => expect(sourceDescription()).toBe(f.canonical.description));
+    await act(async () => { finish({ ...f.canonical, description: 'Old permission response' }); });
+    expect(sourceDescription()).toBe(f.canonical.description); expect(document.querySelector('fieldset')?.disabled).toBe(true);
+    expect(f.props.onSubmit).toHaveBeenCalledTimes(1); expect(f.props.onCreateRemainder).toHaveBeenCalledTimes(1);
+  });
+
+  it('source refresh pauses when view permission is lost and reauthorizes after it returns', async () => {
+    let finish!: (value: Payment) => void;
+    const f = await startSourceRefresh({ read: () => new Promise(resolve => { finish = resolve; }) });
+    await waitFor(() => expect(apiService.getPayment).toHaveBeenCalledTimes(1)); const oldSignal = vi.mocked(apiService.getPayment).mock.calls[0][1]!;
+    paymentScopeState.canView = false; f.rerender(<PaymentModal {...f.props} />);
+    await waitFor(() => expect(oldSignal.aborted).toBe(true));
+    expect((screen.getByRole('button', { name: 'Повторить чтение карточки' }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => { finish({ ...f.canonical, description: 'Hidden response' }); }); expect(sourceDescription()).not.toBe('Hidden response');
+    expect(apiService.getPayment).toHaveBeenCalledTimes(1);
+    vi.mocked(apiService.getPayment).mockResolvedValueOnce(f.canonical); paymentScopeState.canView = true; f.rerender(<PaymentModal {...f.props} />);
+    await waitFor(() => expect(sourceDescription()).toBe(f.canonical.description)); expect(apiService.getPayment).toHaveBeenCalledTimes(2);
+    expect(f.props.onSubmit).toHaveBeenCalledTimes(1); expect(f.props.onCreateRemainder).toHaveBeenCalledTimes(1);
+  });
+
+  it('source refresh survives adoption of the same saved primary by its parent', async () => {
+    let finish!: (value: Payment) => void;
+    const f = await startSourceRefresh({ read: () => new Promise(resolve => { finish = resolve; }) });
+    await waitFor(() => expect(apiService.getPayment).toHaveBeenCalledTimes(1)); const oldSignal = vi.mocked(apiService.getPayment).mock.calls[0][1]!;
+    vi.mocked(apiService.getPayment).mockResolvedValueOnce(f.canonical); f.rerender(<PaymentModal {...f.props} payment={f.primary} />);
+    await waitFor(() => expect(sourceDescription()).toBe(f.canonical.description)); expect(oldSignal.aborted).toBe(true);
+    await act(async () => { finish({ ...f.canonical, description: 'Superseded parent read' }); });
+    expect(sourceDescription()).toBe(f.canonical.description); expect(apiService.getPayment).toHaveBeenCalledTimes(2);
+    expect(f.props.onSubmit).toHaveBeenCalledTimes(1); expect(f.props.onCreateRemainder).toHaveBeenCalledTimes(1);
+  });
+
+  it('source refresh never reads ahead of an unknown remainder result', async () => {
+    let finish!: (value: Payment) => void; const create = vi.fn().mockImplementation(() => new Promise<Payment>(resolve => { finish = resolve; }));
+    const f = await startSourceRefresh({ props: { onCreateRemainder: create } });
+    expect(apiService.getPayment).not.toHaveBeenCalled();
+    await act(async () => { finish(f.remainder); }); await waitFor(() => expect(sourceDescription()).toBe(f.canonical.description));
+    expect(create).toHaveBeenCalledTimes(1); expect(create.mock.calls[0][1]).toMatchObject({ sourceConfirmationToken: doc04SourceToken });
+    expect(apiService.getPayment).toHaveBeenCalledTimes(1);
+  });
+
+  it('source refresh aborts when recovery opens another confirmed payment inside the same modal', async () => {
+    const primary = doc04Payment({ amount: 35, paidAmount: 35, status: 'Completed', isPaid: true });
+    const rest = doc04Payment({ id: 9902, amount: 65, description: 'Открыт подтверждённый остаток' });
+    const f = doc04RealAttemptFixture(primary, rest); let finishRead!: (value: Payment) => void;
+    vi.mocked(apiService.getPayment).mockImplementationOnce(() => new Promise(resolve => { finishRead = resolve; }));
+    const originalRemove = Storage.prototype.removeItem; let failAck = true;
+    const cleanup = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, key: string) {
+      if (key.includes(f.ids[1]) && failAck) { failAck = false; throw new Error('Synthetic receipt cleanup failure'); }
+      return originalRemove.call(this, key);
+    });
+    try {
+      render(<PaymentModal isOpen onClose={vi.fn()} onSubmit={f.onSubmit} onCreateRemainder={f.onCreateRemainder} />);
+      doc04NewFields(); doc04Field('paidAmount', '35'); fireEvent.click(screen.getByLabelText('Перенести остаток'));
+      fireEvent.change(document.querySelector<HTMLInputElement>('#reschedule-date')!, { target: { value: '2026-05-20' } });
+      fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
+      await waitFor(() => expect(apiService.getPayment).toHaveBeenCalledTimes(1));
+      const signal = vi.mocked(apiService.getPayment).mock.calls[0][1]!;
+      fireEvent.click(await screen.findByRole('button', { name: `Открыть платёж №${rest.id}` }));
+      await waitFor(() => expect(sourceDescription()).toBe(rest.description)); await waitFor(() => expect(signal.aborted).toBe(true));
+      await act(async () => { finishRead(doc04CanonicalSource(primary, 65, { description: 'Поздний старый источник' })); });
+      expect(sourceDescription()).toBe(rest.description); expect(apiService.getPayment).toHaveBeenCalledTimes(1);
+      expect(f.io.commit).toHaveBeenCalledTimes(2); expect(f.onCreateRemainder).toHaveBeenCalledTimes(1);
+    } finally { cleanup.mockRestore(); f.cleanup(); }
   });
 
   it('resumes only the pending remainder after a confirmed primary save and then updates the same payment', async () => {

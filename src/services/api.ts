@@ -5789,8 +5789,8 @@ export class ApiService {
     return this.request<Payment[]>(`/payments${q}`, { signal });
   }
 
-  async getPayment(id: number) {
-    return this.request<Payment>(`/payments/${id}`);
+  async getPayment(id: number, signal?: AbortSignal) {
+    return this.request<Payment>(`/payments/${id}`, { signal, cache: 'no-store' });
   }
 
   private paymentCreatePorts(): PaymentCreatePorts {
