@@ -1429,6 +1429,9 @@ public class AccountsController : ControllerBase
             return new List<PaymentAggregateItem>();
         }
 
+        var representative = payments.FirstOrDefault(payment => payment.Id == representativePaymentId);
+        if (representative?.Status == PaymentStatus.Cancelled) return [representative];
+
         var ordered = payments
             .OrderBy(payment => EffectivePlannedDate(payment) ?? DateTime.MaxValue)
             .ThenBy(payment => payment.Id)

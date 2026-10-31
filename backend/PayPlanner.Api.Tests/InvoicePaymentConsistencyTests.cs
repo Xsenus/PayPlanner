@@ -553,6 +553,20 @@ public class InvoicePaymentConsistencyTests
         var invoicesController = CreateInvoicesController(db);
         var accountsController = new AccountsController(db);
         var paymentsController = CreatePaymentsController(db);
+        var adminRole = await db.Roles.SingleOrDefaultAsync(role => role.Name == "admin") ?? new Role { Name = "admin" };
+        var actor = new User
+        {
+            Role = adminRole,
+            Email = "invoice-link-writer@test.local",
+            FullName = "Invoice link administrator",
+            PasswordHash = "unused",
+            IsActive = true,
+            IsApproved = true,
+            IsEmployee = true,
+        };
+        db.Users.Add(actor);
+        await db.SaveChangesAsync();
+        ((ClaimsIdentity)paymentsController.User.Identity!).AddClaim(new Claim(ClaimTypes.NameIdentifier, actor.Id.ToString()));
 
         var updateModel = new Payment
         {

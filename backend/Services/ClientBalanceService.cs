@@ -260,7 +260,7 @@ public static class ClientBalanceService
         return (true, null, applied);
     }
 
-    public static async Task UpsertCancelledInvoiceAdvanceAsync(
+    public static async Task<bool> TryCreateCancelledInvoiceAdvanceAsync(
         PaymentContext db,
         Payment payment,
         decimal requestedAmount,
@@ -271,51 +271,38 @@ public static class ClientBalanceService
     {
         if (!HasValidCounterpartyOwner(payment) || payment.Type != PaymentType.Income)
         {
-            return;
+            return false;
         }
 
         var amount = NormalizeAmount(requestedAmount);
         if (amount <= AmountEpsilon)
         {
-            return;
+            return false;
         }
 
         var externalKey = BuildCancelledInvoiceAdvanceKey(payment.Id);
-        var existing = await db.ClientBalanceTransactions
-            .FirstOrDefaultAsync(item => item.ExternalKey == externalKey, ct);
+        if (await db.ClientBalanceTransactions.AnyAsync(item => item.ExternalKey == externalKey, ct)) return false;
 
         var actor = httpContext?.User.GetDisplayName();
         var actorUserId = httpContext?.User.GetUserId();
-        var description = $"Аванс по аннулированному счёту №{payment.Account}. Причина: {reason}";
+        var description = NormalizeDescription($"Аванс по аннулированному счёту №{payment.Account}. Причина: {reason}");
 
-        if (existing is null)
+        db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
         {
-            db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
-            {
-                ClientId = payment.ClientId,
-                LegalEntityId = payment.LegalEntityId,
-                InvoiceId = payment.InvoiceId,
-                PaymentId = payment.Id,
-                Amount = amount,
-                Type = ClientBalanceTransactionType.AdvanceFromCancelledInvoice,
-                Direction = ClientBalanceDirection.Credit,
-                Description = description,
-                ExternalKey = externalKey,
-                CreatedAt = utcNow,
-                CreatedByUserId = actorUserId,
-                CreatedByUserName = actor,
-            });
-            return;
-        }
-
-        existing.ClientId = payment.ClientId;
-        existing.LegalEntityId = payment.LegalEntityId;
-        existing.InvoiceId = payment.InvoiceId;
-        existing.PaymentId = payment.Id;
-        existing.Amount = amount;
-        existing.Type = ClientBalanceTransactionType.AdvanceFromCancelledInvoice;
-        existing.Direction = ClientBalanceDirection.Credit;
-        existing.Description = description;
+            ClientId = payment.ClientId,
+            LegalEntityId = payment.LegalEntityId,
+            InvoiceId = payment.InvoiceId,
+            PaymentId = payment.Id,
+            Amount = amount,
+            Type = ClientBalanceTransactionType.AdvanceFromCancelledInvoice,
+            Direction = ClientBalanceDirection.Credit,
+            Description = description,
+            ExternalKey = externalKey,
+            CreatedAt = utcNow,
+            CreatedByUserId = actorUserId,
+            CreatedByUserName = actor,
+        });
+        return true;
     }
 
     public static async Task UpsertUnallocatedAdvanceAsync(
@@ -532,10 +519,13 @@ public static class ClientBalanceService
         => (clientId.HasValue && clientId.Value > 0 && !legalEntityId.HasValue)
             || (legalEntityId.HasValue && legalEntityId.Value > 0 && !clientId.HasValue);
 
-    private static string NormalizeDescription(string? description)
+    internal static string NormalizeDescription(string? description, int maxLength = DescriptionMaxLength)
     {
         var normalized = string.IsNullOrWhiteSpace(description) ? string.Empty : description.Trim();
-        return normalized.Length <= DescriptionMaxLength ? normalized : normalized[..DescriptionMaxLength];
+        if (normalized.Length <= maxLength) return normalized;
+        var length = maxLength;
+        if (length > 0 && char.IsHighSurrogate(normalized[length - 1]) && char.IsLowSurrogate(normalized[length])) --length;
+        return normalized[..length];
     }
 
     private static string? NormalizeExternalKey(string? externalKey)

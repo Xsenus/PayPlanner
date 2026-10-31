@@ -48,6 +48,8 @@ public class InvoicesController : ControllerBase
     private readonly IYandexDiskService? _yandexDiskService;
     private readonly INotificationService? _notificationService;
     private const string InstallmentPaymentMarker = "[pp:installment-payment]";
+    private const string InvoiceCancellationRefundComment = "Возврат оплаты при аннулировании счёта.";
+    private const string ExistingCancellationCompensationMessage = "По счёту уже есть аванс или возврат при аннулировании. Сначала сверьте историю отмены; прежние операции не изменены.";
     private static readonly CultureInfo RuCulture = CultureInfo.GetCultureInfo("ru-RU");
     private static readonly JsonSerializerOptions InstallmentMetadataJsonOptions = new()
     {
@@ -1038,8 +1040,15 @@ public class InvoicesController : ControllerBase
         await LockInvoiceCancellationAggregateAsync(invoiceEntityId.Value, ct);
         if (payment.Status == PaymentStatus.Cancelled || payment.InvoiceWorkflowStatus == InvoiceWorkflowStatus.Cancelled)
             return Ok(await LoadInvoiceDtoAsync(payment.Id, ct));
+        if (await HasInvoiceCancellationCompensationAsync(payment.Id, invoiceEntityId.Value, ct))
+            return Conflict(new { message = ExistingCancellationCompensationMessage });
 
-        var generatedPayments = await LoadGeneratedInstallmentPaymentsAsync(invoiceEntityId.Value, payment.Id, ct);
+        var relatedPayments = await LoadInvoiceCancellationPaymentsAsync(invoiceEntityId.Value, payment.Id, ct);
+        var generatedPayments = relatedPayments.Where(InvoiceManagedPaymentRules.IsGeneratedInstallmentPayment).ToList();
+        if (relatedPayments.Any(item => item.Status != PaymentStatus.Cancelled
+            && ((item.DocumentKind != DocumentKind.Payment && !InvoiceManagedPaymentRules.IsGeneratedInstallmentPayment(item))
+                || (InvoiceManagedPaymentRules.IsGeneratedInstallmentPayment(item) && item.Type != payment.Type))))
+            return BadRequest("У счёта есть связанные начисления или другие документы. Перед аннулированием требуется сверка; прежние записи и связи не изменены.");
         var now = DateTime.UtcNow;
         var actor = User.GetDisplayName();
         var actorId = GetUserId(User);
@@ -1073,20 +1082,20 @@ public class InvoicesController : ControllerBase
             return Ok(updatedDto);
         }
 
-        var paymentsToCancel = generatedPayments
-            .Where(item => item.Status != PaymentStatus.Cancelled)
-            .Prepend(payment)
-            .ToList();
+        var receivedPaymentSources = relatedPayments
+            .Where(item => item.Status != PaymentStatus.Cancelled && item.Type == payment.Type
+                && (item.DocumentKind == DocumentKind.Payment || InvoiceManagedPaymentRules.IsGeneratedInstallmentPayment(item)))
+            .Prepend(payment).ToList();
         var representativePaidAmount = ResolvePaidAmount(payment);
-        var installmentPaidAmount = NormalizeMoneyAmount(paymentsToCancel.Where(item => item.Id != payment.Id).Sum(ResolvePaidAmount));
-        // The representative can already contain the sum of its installments.
+        var relatedPaidAmount = NormalizeMoneyAmount(receivedPaymentSources.Where(item => item.Id != payment.Id).Sum(ResolvePaidAmount));
+        // The representative can already contain the sum of its payment sources.
         // Missing historical totals are tolerated; conflicting positive totals
         // require reconciliation instead of inventing a compensating amount.
-        if (representativePaidAmount > 0.009m && installmentPaidAmount > 0.009m
-            && Math.Abs(representativePaidAmount - installmentPaidAmount) > 0.009m)
-            return BadRequest("Оплата счёта не совпадает с оплатой его рассрочки. Сначала сверьте платежи, затем повторите аннулирование.");
-        var receivedAmount = NormalizeMoneyAmount(Math.Max(representativePaidAmount, installmentPaidAmount));
-        var hasReceivedMoney = paymentsToCancel.Any(HasReceivedMoney);
+        if (representativePaidAmount > 0.009m && relatedPaidAmount > 0.009m
+            && Math.Abs(representativePaidAmount - relatedPaidAmount) > 0.009m)
+            return BadRequest("Оплата счёта не совпадает с оплатой связанных платежей. Сначала сверьте платежи, затем повторите аннулирование.");
+        var receivedAmount = NormalizeMoneyAmount(Math.Max(representativePaidAmount, relatedPaidAmount));
+        var hasReceivedMoney = receivedPaymentSources.Any(HasReceivedMoney);
 
         if (hasReceivedMoney)
         {
@@ -1158,7 +1167,7 @@ public class InvoicesController : ControllerBase
 
         using (var sourceCredit = new PaymentCreditInvariantScope(_db))
         {
-            sourceCredit.IncludePayments(paymentsToCancel);
+            sourceCredit.IncludePayments(receivedPaymentSources);
             if (!await sourceCredit.KeepsAppliedCreditAsync(ct)) return BadRequest(new { message = PaymentCreditInvariantScope.RejectionMessage });
         }
 
@@ -1177,14 +1186,14 @@ public class InvoicesController : ControllerBase
 
         if (hasReceivedMoney && request.ReceivedMoneyAction is InvoiceCancellationMoneyAction.LeaveAsAdvance or InvoiceCancellationMoneyAction.Reallocate)
         {
-            await ClientBalanceService.UpsertCancelledInvoiceAdvanceAsync(
+            if (!await ClientBalanceService.TryCreateCancelledInvoiceAdvanceAsync(
                 _db,
                 payment,
                 receivedAmount,
                 reason,
                 now,
                 HttpContext,
-                ct);
+                ct)) return Conflict(new { message = ExistingCancellationCompensationMessage });
         }
 
         MoneyOperation? refundOperation = null;
@@ -1192,7 +1201,7 @@ public class InvoicesController : ControllerBase
         {
             refundOperation = await CreateInvoiceRefundOperationAsync(
                 payment,
-                paymentsToCancel,
+                receivedPaymentSources,
                 invoiceEntityId.Value,
                 receivedAmount,
                 reason,
@@ -1286,6 +1295,15 @@ public class InvoicesController : ControllerBase
         => _db.Database.IsNpgsql()
             ? _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Payments\" WHERE \"InvoiceId\" = {invoiceId} ORDER BY \"Id\" FOR UPDATE NOWAIT", ct)
             : Task.CompletedTask;
+
+    private async Task<bool> HasInvoiceCancellationCompensationAsync(int paymentId, int invoiceId, CancellationToken ct)
+    {
+        var key = ClientBalanceService.BuildCancelledInvoiceAdvanceKey(paymentId);
+        if (await _db.ClientBalanceTransactions.AsNoTracking().AnyAsync(item => item.ExternalKey == key
+            || item.Type == ClientBalanceTransactionType.AdvanceFromCancelledInvoice && (item.PaymentId == paymentId || item.InvoiceId == invoiceId), ct)) return true;
+        return await _db.MoneyOperations.AsNoTracking().AnyAsync(item => item.LinkedInvoiceId == invoiceId
+            && item.Direction == MoneyOperationDirection.Expense && item.MatchComment == InvoiceCancellationRefundComment, ct);
+    }
 
     private async Task CancelLinkedActsAsync(Payment invoicePayment, string reason, DateTime now, int? actorId, CancellationToken ct)
     {
@@ -5459,7 +5477,7 @@ public class InvoicesController : ControllerBase
         }
     }
 
-    private Task<List<Payment>> LoadGeneratedInstallmentPaymentsAsync(
+    private Task<List<Payment>> LoadInvoiceCancellationPaymentsAsync(
         int invoiceEntityId,
         int representativePaymentId,
         CancellationToken ct)
@@ -5467,9 +5485,7 @@ public class InvoicesController : ControllerBase
             .Include(payment => payment.PaymentSource)
             .Where(payment =>
                 payment.InvoiceId == invoiceEntityId
-                && payment.Id != representativePaymentId
-                && payment.SystemNotes != null
-                && payment.SystemNotes.Contains(InstallmentPaymentMarker))
+                && payment.Id != representativePaymentId)
             .OrderBy(payment => payment.Date)
             .ThenBy(payment => payment.Id)
             .ToListAsync(ct);
@@ -5591,7 +5607,7 @@ public class InvoicesController : ControllerBase
             ?? payment.LegalEntity?.FullName
             ?? payment.CounterpartyName;
         var invoiceNumber = string.IsNullOrWhiteSpace(payment.Account) ? payment.Invoice?.Number : payment.Account;
-        var purpose = $"Возврат оплаты по аннулированному счёту №{invoiceNumber}. Причина: {reason}";
+        var purpose = ClientBalanceService.NormalizeDescription($"Возврат оплаты по аннулированному счёту №{invoiceNumber}. Причина: {reason}", 1000);
 
         var operation = new MoneyOperation
         {
@@ -5612,7 +5628,7 @@ public class InvoicesController : ControllerBase
             LinkedInvoiceId = invoiceEntityId,
             MatchStatus = MoneyOperationMatchStatus.Matched,
             MatchedAt = now,
-            MatchComment = "Возврат оплаты при аннулировании счёта.",
+            MatchComment = InvoiceCancellationRefundComment,
             CreatedAt = now,
         };
 

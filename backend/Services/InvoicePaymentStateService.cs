@@ -188,6 +188,9 @@ public static class InvoicePaymentStateService
             return new List<Payment>();
         }
 
+        var representative = payments.FirstOrDefault(payment => payment.Id == representativePaymentId);
+        if (representative?.Status == PaymentStatus.Cancelled) return [representative];
+
         var ordered = payments
             .OrderBy(EffectivePlannedDate)
             .ThenBy(payment => payment.Id)
@@ -287,6 +290,7 @@ public static class InvoicePaymentStateService
         IReadOnlyCollection<Payment> statusSources,
         DateTime utcNow)
     {
+        if (representative.Status == PaymentStatus.Cancelled || representative.InvoiceWorkflowStatus == InvoiceWorkflowStatus.Cancelled) return;
         if (statusSources.Count == 0)
         {
             representative.Status = DeriveInvoiceStatus(
