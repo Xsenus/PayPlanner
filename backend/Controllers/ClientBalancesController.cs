@@ -1,4 +1,3 @@
-using System.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -146,62 +145,18 @@ public class ClientBalancesController : ControllerBase
     }
 
     [HttpPost("apply")]
-    public async Task<IActionResult> ApplyCredit(
+    public Task<IActionResult> ApplyCredit(
         int clientId,
         [FromBody] ApplyClientBalanceRequest request,
         CancellationToken ct)
     {
-        if (request.RequestId.HasValue)
-            return await PayPlanner.Api.Services.Payments.BalanceApplicationService.ApplyAsync(_db, clientId, null, request, HttpContext,
-                async token =>
-                {
-                    if (await RequireVisibleClientAsync(clientId, token) is { } denied) return denied;
-                    if (!await CanEditPaymentsAsync(token) || !await CanViewFullBalanceAsync(token)) return Forbid();
-                    return null;
-                }, ct);
-        if (await RequireVisibleClientAsync(clientId, ct) is { } forbidden)
+        async Task<IActionResult?> AuthorizeAsync(CancellationToken token)
         {
-            return forbidden;
+            if (await RequireVisibleClientAsync(clientId, token) is { } denied) return denied;
+            return !await CanEditPaymentsAsync(token) || !await CanViewFullBalanceAsync(token) ? Forbid() : null;
         }
-
-        if (!await CanEditPaymentsAsync(ct) || !await CanViewFullBalanceAsync(ct))
-        {
-            return Forbid();
-        }
-
-        try
-        {
-            await using var transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
-            var result = await ClientBalanceService.ApplyCreditAsync(
-                _db,
-                clientId,
-                request.PaymentId,
-                request.Amount,
-                DateTime.UtcNow,
-                HttpContext,
-                ct,
-                description: request.Description,
-                sourcePaymentId: request.SourcePaymentId);
-
-            if (!result.Success)
-            {
-                return BadRequest(new { message = result.Error });
-            }
-
-            await _db.SaveChangesAsync(ct);
-
-            var balance = await ClientBalanceService.GetBalanceAsync(_db, clientId, ct);
-            await transaction.CommitAsync(ct);
-            return Ok(new
-            {
-                appliedAmount = result.AppliedAmount,
-                balance = Math.Round(balance, 2, MidpointRounding.AwayFromZero),
-            });
-        }
-        catch (Exception exception) when (FinancialConcurrencyGuard.IsSerializationFailure(exception))
-        {
-            _db.ChangeTracker.Clear();
-            return Conflict(new { message = FinancialConcurrencyGuard.ConflictMessage });
-        }
+        return request.RequestId.HasValue
+            ? PayPlanner.Api.Services.Payments.BalanceApplicationService.ApplyAsync(_db, clientId, null, request, HttpContext, AuthorizeAsync, ct)
+            : PayPlanner.Api.Services.Payments.BalanceApplicationService.ApplyLegacyAsync(_db, clientId, null, request, HttpContext, AuthorizeAsync, ct);
     }
 }

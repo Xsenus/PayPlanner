@@ -3532,6 +3532,7 @@ public class PaymentsControllerTests
 
         var controller = new ClientBalancesController(db);
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.ApplyCredit(
             client.Id,
             new ApplyClientBalanceRequest { PaymentId = payment.Id, Amount = 800m },
@@ -3579,6 +3580,7 @@ public class PaymentsControllerTests
         await db.SaveChangesAsync();
 
         var controller = CreateClientBalancesController(db, user.Id);
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.ApplyCredit(
             client.Id,
             new ApplyClientBalanceRequest { PaymentId = payment.Id, Amount = 800m },
@@ -3676,6 +3678,7 @@ public class PaymentsControllerTests
         var controller = CreateClientBalancesController(db, user.Id);
         Assert.IsType<ForbidResult>(await controller.GetSummary(client.Id, CancellationToken.None));
         Assert.IsType<ForbidResult>(await controller.GetTransactions(client.Id, CancellationToken.None));
+        await AuthenticatePaymentWriterAsync(db, controller);
         Assert.IsType<ForbidResult>(await controller.ApplyCredit(
             client.Id,
             new ApplyClientBalanceRequest { PaymentId = payment.Id, Amount = 800m },
@@ -3713,6 +3716,7 @@ public class PaymentsControllerTests
         var controller = CreateClientBalancesController(db, user.Id);
         Assert.IsType<OkObjectResult>(await controller.GetSummary(client.Id, CancellationToken.None));
         Assert.IsType<OkObjectResult>(await controller.GetTransactions(client.Id, CancellationToken.None));
+        await AuthenticatePaymentWriterAsync(db, controller);
         Assert.IsType<OkObjectResult>(await controller.ApplyCredit(
             client.Id,
             new ApplyClientBalanceRequest { PaymentId = payment.Id, Amount = 800m },
@@ -3811,6 +3815,7 @@ public class PaymentsControllerTests
         var controller = CreateLegalEntityBalancesController(db, user.Id);
         Assert.IsType<ForbidResult>(await controller.GetSummary(legalEntity.Id, CancellationToken.None));
         Assert.IsType<ForbidResult>(await controller.GetTransactions(legalEntity.Id, CancellationToken.None));
+        await AuthenticatePaymentWriterAsync(db, controller);
         Assert.IsType<ForbidResult>(await controller.ApplyCredit(
             legalEntity.Id,
             new ApplyClientBalanceRequest { PaymentId = payment.Id, Amount = 800m },
@@ -3849,6 +3854,7 @@ public class PaymentsControllerTests
         var controller = CreateLegalEntityBalancesController(db, user.Id);
         Assert.IsType<OkObjectResult>(await controller.GetSummary(legalEntity.Id, CancellationToken.None));
         Assert.IsType<OkObjectResult>(await controller.GetTransactions(legalEntity.Id, CancellationToken.None));
+        await AuthenticatePaymentWriterAsync(db, controller);
         Assert.IsType<OkObjectResult>(await controller.ApplyCredit(
             legalEntity.Id,
             new ApplyClientBalanceRequest { PaymentId = payment.Id, Amount = 800m },
@@ -3963,7 +3969,12 @@ public class PaymentsControllerTests
         targetPayment.PaidAmount = 0m;
         targetPayment.Status = PaymentStatus.Overdue;
 
-        db.Payments.AddRange(sourceAdvance, otherAdvance, targetPayment);
+        var previousTarget = CreatePayment(new DateTime(2026, 3, 6), 300m, "Ранее оплаченный долг");
+        previousTarget.ClientId = client.Id;
+        previousTarget.PaidAmount = 300m;
+        previousTarget.Status = PaymentStatus.Completed;
+        previousTarget.IsPaid = true;
+        db.Payments.AddRange(sourceAdvance, otherAdvance, targetPayment, previousTarget);
         await db.SaveChangesAsync();
 
         db.ClientBalanceTransactions.AddRange(
@@ -3981,12 +3992,12 @@ public class PaymentsControllerTests
             new ClientBalanceTransaction
             {
                 ClientId = client.Id,
-                PaymentId = targetPayment.Id,
+                PaymentId = previousTarget.Id,
                 Amount = 300m,
                 Type = ClientBalanceTransactionType.CreditApplied,
                 Direction = ClientBalanceDirection.Debit,
                 Description = "Ранее зачтено из первого аванса",
-                ExternalKey = ClientBalanceService.BuildUnallocatedAdvanceApplicationKey(sourceAdvance.Id, targetPayment.Id, new DateTime(2026, 3, 6, 10, 0, 0, DateTimeKind.Utc)),
+                ExternalKey = ClientBalanceService.BuildUnallocatedAdvanceApplicationKey(sourceAdvance.Id, previousTarget.Id, new DateTime(2026, 3, 6, 10, 0, 0, DateTimeKind.Utc)),
                 CreatedAt = DateTime.UtcNow,
             },
             new ClientBalanceTransaction
@@ -4006,6 +4017,7 @@ public class PaymentsControllerTests
 
         var controller = new ClientBalancesController(db);
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.ApplyCredit(
             client.Id,
             new ApplyClientBalanceRequest
@@ -4114,6 +4126,7 @@ public class PaymentsControllerTests
         var summaryOk = Assert.IsType<OkObjectResult>(summaryResult);
         Assert.Equal(900m, Assert.IsType<ClientBalanceSummaryDto>(summaryOk.Value).Balance);
 
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.ApplyCredit(
             legalEntity.Id,
             new ApplyClientBalanceRequest
@@ -4179,6 +4192,7 @@ public class PaymentsControllerTests
         await db.SaveChangesAsync();
 
         var controller = CreateLegalEntityBalancesController(db, user.Id);
+        await AuthenticatePaymentWriterAsync(db, controller);
         var actionResult = await controller.ApplyCredit(
             hiddenLegalEntity.Id,
             new ApplyClientBalanceRequest { PaymentId = payment.Id, Amount = 900m },
@@ -4230,6 +4244,7 @@ public class PaymentsControllerTests
         await db.SaveChangesAsync();
 
         var controller = new ClientBalancesController(db);
+        await AuthenticatePaymentWriterAsync(db, controller);
         var result = await controller.ApplyCredit(
             client.Id,
             new ApplyClientBalanceRequest
@@ -6187,6 +6202,7 @@ public class PaymentsControllerTests
         await db.SaveChangesAsync();
 
         var balanceController = CreateClientBalancesController(db, user.Id);
+        await AuthenticatePaymentWriterAsync(db, balanceController);
         var applyResult = await balanceController.ApplyCredit(
             client.Id,
             new ApplyClientBalanceRequest

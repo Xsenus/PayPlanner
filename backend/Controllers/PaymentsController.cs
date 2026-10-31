@@ -6,7 +6,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using PayPlanner.Api.Data;
@@ -154,60 +153,13 @@ public class PaymentsController : ControllerBase
     private Task<IActionResult?> RequirePaymentsEditAsync(CancellationToken ct)
         => RequirePaymentsPermissionAsync(permission => permission.CanEdit, ct);
 
-    private sealed class PaymentWriteScope : IDisposable
+    private sealed class PaymentWriteScope(BalanceApplicationLease lease, PaymentContext db) : IDisposable
     {
-        private readonly BalanceApplicationLease lease;
-        private readonly PaymentContext db;
-        private readonly HashSet<Payment> changed = new(ReferenceEqualityComparer.Instance);
-
-        public PaymentWriteScope(BalanceApplicationLease lease, PaymentContext db)
-        {
-            this.lease = lease;
-            this.db = db;
-            db.ChangeTracker.StateChanged += OnStateChanged;
-            db.ChangeTracker.Tracked += OnTracked;
-        }
-
+        private readonly PaymentCreditInvariantScope credit = new(db);
         public Func<Task>? AfterCommit { get; set; }
         public Task LockPaymentAsync(int id, CancellationToken ct) => lease.LockPaymentAsync(id, ct);
-
-        private void OnStateChanged(object? sender, EntityStateChangedEventArgs args)
-        {
-            if ((args.OldState == EntityState.Modified || args.NewState == EntityState.Modified)
-                && args.Entry.Entity is Payment payment) changed.Add(payment);
-        }
-
-        private void OnTracked(object? sender, EntityTrackedEventArgs args)
-        {
-            if (args.Entry.State == EntityState.Modified && args.Entry.Entity is Payment payment) changed.Add(payment);
-        }
-
-        public async Task<bool> KeepsAppliedCreditAsync(CancellationToken ct)
-        {
-            // Save accepts tracked originals. Remember the modified objects across
-            // every intermediate Save, including recalculated invoice representatives.
-            var payments = changed.ToArray().Where(p => p.Id > 0 && db.Entry(p).State is not (EntityState.Detached or EntityState.Deleted))
-                .ToDictionary(p => p.Id);
-            foreach (var ids in payments.Keys.Chunk(500))
-            {
-                var applied = await db.ClientBalanceTransactions.AsNoTracking()
-                    .Where(t => t.PaymentId.HasValue && ids.Contains(t.PaymentId.Value)
-                        && t.Type == ClientBalanceTransactionType.CreditApplied && t.Direction == ClientBalanceDirection.Debit)
-                    .GroupBy(t => t.PaymentId!.Value)
-                    .Select(group => new { Id = group.Key, Amount = group.Sum(t => t.Amount) }).ToArrayAsync(ct);
-                foreach (var credit in applied)
-                    if (payments[credit.Id].PaidAmount + AmountTolerance < credit.Amount
-                        || payments[credit.Id].Amount + AmountTolerance < credit.Amount) return false;
-            }
-            return true;
-        }
-
-        public void Dispose()
-        {
-            db.ChangeTracker.StateChanged -= OnStateChanged;
-            db.ChangeTracker.Tracked -= OnTracked;
-            changed.Clear();
-        }
+        public Task<bool> KeepsAppliedCreditAsync(CancellationToken ct) => credit.KeepsAppliedCreditAsync(ct);
+        public void Dispose() => credit.Dispose();
     }
 
     private async Task<IActionResult> RunPaymentWriteAsync(int id,
@@ -227,12 +179,16 @@ public class PaymentsController : ControllerBase
             if (_db.Database.IsNpgsql()) await _db.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '2s'", ct);
             if (!await _db.Users.AsNoTracking().AnyAsync(user => user.Id == actorId.Value && user.IsActive && user.IsApproved, ct))
                 return Unauthorized();
+            if (await RequirePaymentsEditAsync(ct) is { } forbidden) return forbidden;
+            var visibility = await ResolvePaymentsVisibilityAsync(ct);
+            if (visibility is null) return AccessDenied();
+            if (!await CanAccessPaymentAsync(id, visibility, ct)) return NotFound();
             await lease.LockPaymentAsync(id, ct);
             result = await write(scope);
             if (result is OkObjectResult)
             {
                 if (!await scope.KeepsAppliedCreditAsync(ct))
-                    return BadRequest(new { message = "Сохранение уменьшило бы оплату связанного платежа ниже зачтённого баланса. Измените распределение оплаты." });
+                    return BadRequest(new { message = PaymentCreditInvariantScope.RejectionMessage });
                 await lease.CommitAsync(ct);
             }
         }

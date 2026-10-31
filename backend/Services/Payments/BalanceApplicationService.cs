@@ -13,6 +13,51 @@ namespace PayPlanner.Api.Services.Payments;
 
 internal static class BalanceApplicationService
 {
+    public static async Task<IActionResult> ApplyLegacyAsync(PaymentContext db, int? clientId, int? legalEntityId,
+        ApplyClientBalanceRequest request, HttpContext context, Func<CancellationToken, Task<IActionResult?>> authorize, CancellationToken ct)
+    {
+        var actorId = context.User.GetUserId();
+        if (context.User.Identity?.IsAuthenticated != true || actorId is not > 0) return new UnauthorizedResult();
+        BalanceApplicationLease? lease = null;
+        try
+        {
+            lease = await BalanceApplicationLease.BeginAsync(db, actorId.Value, ct);
+            if (db.Database.IsNpgsql()) await db.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '2s'", ct);
+            if (await AuthorizeTargetAsync(db, actorId.Value, clientId, legalEntityId, request.PaymentId, authorize, ct) is { } denied) return denied;
+            await lease.LockOwnedPaymentAsync(request.PaymentId, clientId, legalEntityId, ct);
+            using var credit = new PaymentCreditInvariantScope(db);
+            var result = await SpendAsync(db, clientId, legalEntityId, request, context, null, ct);
+            if (!result.Success) return new BadRequestObjectResult(new { message = result.Error });
+            await db.SaveChangesAsync(ct);
+            if (!await credit.KeepsAppliedCreditAsync(ct)) return new BadRequestObjectResult(new { message = PaymentCreditInvariantScope.RejectionMessage });
+            var balance = clientId.HasValue ? await ClientBalanceService.GetBalanceAsync(db, clientId.Value, ct)
+                : await ClientBalanceService.GetLegalEntityBalanceAsync(db, legalEntityId!.Value, ct);
+            await lease.CommitAsync(ct);
+            return new OkObjectResult(new { appliedAmount = result.AppliedAmount, balance = Math.Round(balance, 2, MidpointRounding.AwayFromZero) });
+        }
+        catch (Exception error) when (BalanceApplicationLease.IsConflict(error)
+            && (lease?.CommitStarted != true || BalanceApplicationLease.IsDefiniteDatabaseAbort(error)))
+        { return new ConflictObjectResult(new { message = FinancialConcurrencyGuard.ConflictMessage }); }
+        finally { if (lease is not null) await lease.DisposeAsync(); }
+    }
+
+    private static async Task<IActionResult?> AuthorizeTargetAsync(PaymentContext db, int actorId, int? clientId, int? legalEntityId,
+        int paymentId, Func<CancellationToken, Task<IActionResult?>> authorize, CancellationToken ct)
+    {
+        if (!await db.Users.AsNoTracking().AnyAsync(user => user.Id == actorId && user.IsActive && user.IsApproved, ct)) return new UnauthorizedResult();
+        if (await authorize(ct) is { } denied) return denied;
+        return await db.Payments.AsNoTracking().ApplyUnambiguousInvoiceLinks()
+            .AnyAsync(p => p.Id == paymentId && p.ClientId == clientId && p.LegalEntityId == legalEntityId, ct) ? null : new NotFoundResult();
+    }
+
+    private static Task<(bool Success, string? Error, decimal AppliedAmount)> SpendAsync(PaymentContext db,
+        int? clientId, int? legalEntityId, ApplyClientBalanceRequest request, HttpContext context, string? externalKey, CancellationToken ct)
+        => clientId.HasValue
+            ? ClientBalanceService.ApplyCreditAsync(db, clientId.Value, request.PaymentId, request.Amount, DateTime.UtcNow, context, ct,
+                description: request.Description, sourcePaymentId: request.SourcePaymentId, externalKey: externalKey)
+            : ClientBalanceService.ApplyLegalEntityCreditAsync(db, legalEntityId!.Value, request.PaymentId, request.Amount, DateTime.UtcNow, context, ct,
+                description: request.Description, sourcePaymentId: request.SourcePaymentId, externalKey: externalKey);
+
     public static async Task<IActionResult> InspectAsync(PaymentContext db, int? clientId, int? legalEntityId,
         Guid key, int paymentId, HttpContext context, Func<CancellationToken, Task<IActionResult?>> authorize, CancellationToken ct)
     {
@@ -140,7 +185,7 @@ internal static class BalanceApplicationService
         ApplyClientBalanceRequest request, HttpContext context, Func<CancellationToken, Task<IActionResult?>> authorize, CancellationToken ct)
     {
         var actorId = context.User.GetUserId();
-        if (actorId is not > 0) return new UnauthorizedResult();
+        if (context.User.Identity?.IsAuthenticated != true || actorId is not > 0) return new UnauthorizedResult();
         if (request.RequestId is not { } key || key == Guid.Empty || request.PaymentId <= 0 || request.Amount <= 0
             || request.SourcePaymentId is <= 0 || request.Description?.Length > 500)
             return new BadRequestObjectResult(new { message = "Проверьте идентификатор и параметры зачёта." });
@@ -149,12 +194,8 @@ internal static class BalanceApplicationService
         try
         {
             lease = await BalanceApplicationLease.BeginAsync(db, actorId.Value, ct);
-            if (!await db.Users.AsNoTracking().AnyAsync(user => user.Id == actorId.Value && user.IsActive && user.IsApproved, ct))
-                return new UnauthorizedResult();
-            if (await authorize(ct) is { } denied) return denied;
-            // Never acquire an identity-only lock on an inaccessible/foreign payment.
-            if (!await db.Payments.AsNoTracking().AnyAsync(p => p.Id == request.PaymentId && p.ClientId == clientId && p.LegalEntityId == legalEntityId, ct))
-                return new NotFoundResult();
+            if (db.Database.IsNpgsql()) await db.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '2s'", ct);
+            if (await AuthorizeTargetAsync(db, actorId.Value, clientId, legalEntityId, request.PaymentId, authorize, ct) is { } denied) return denied;
             await lease.LockOwnedPaymentAsync(request.PaymentId, clientId, legalEntityId, ct);
             var receipt = await db.BalanceApplicationReceipts.AsNoTracking()
                 .SingleOrDefaultAsync(r => r.RequestId == key, ct);
@@ -182,11 +223,8 @@ internal static class BalanceApplicationService
             var externalKey = request.SourcePaymentId is { } sourceId
                 ? $"{ClientBalanceService.BuildUnallocatedAdvanceApplicationKeyPrefix(sourceId)}{request.PaymentId}:{key:N}"
                 : $"balance-apply:{actorId.Value}:{key:N}";
-            var result = clientId.HasValue
-                ? await ClientBalanceService.ApplyCreditAsync(db, clientId.Value, request.PaymentId, request.Amount, DateTime.UtcNow, context, ct,
-                    description: request.Description, sourcePaymentId: request.SourcePaymentId, externalKey: externalKey)
-                : await ClientBalanceService.ApplyLegalEntityCreditAsync(db, legalEntityId!.Value, request.PaymentId, request.Amount, DateTime.UtcNow, context, ct,
-                    description: request.Description, sourcePaymentId: request.SourcePaymentId, externalKey: externalKey);
+            using var credit = new PaymentCreditInvariantScope(db);
+            var result = await SpendAsync(db, clientId, legalEntityId, request, context, externalKey, ct);
             if (!result.Success) return new BadRequestObjectResult(new { message = result.Error });
             await db.SaveChangesAsync(ct);
             var balance = clientId.HasValue ? await ClientBalanceService.GetBalanceAsync(db, clientId.Value, ct)
@@ -206,6 +244,7 @@ internal static class BalanceApplicationService
                 CreatedAtUtc = DateTime.UtcNow,
             });
             await db.SaveChangesAsync(ct);
+            if (!await credit.KeepsAppliedCreditAsync(ct)) return new BadRequestObjectResult(new { message = PaymentCreditInvariantScope.RejectionMessage });
             await lease.CommitAsync(ct);
             return new OkObjectResult(new BalanceApplicationResultDto
             {
