@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Extensions;
+using PayPlanner.Api.Services.Payments;
 
 namespace PayPlanner.Api.Services;
 
@@ -8,6 +10,8 @@ public sealed class InvoicePaymentStateReconciliationService : BackgroundService
 {
     private const string ConfigurationSection = "InvoicePaymentStateReconciliation";
     private const int DefaultBatchSize = 500;
+    private const int MaximumRelatedPayments = 5000;
+    private readonly SemaphoreSlim _runLock = new(1, 1);
     private static readonly TimeSpan DefaultStartupDelay = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan DefaultInterval = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan ErrorDelay = TimeSpan.FromSeconds(30);
@@ -91,105 +95,112 @@ public sealed class InvoicePaymentStateReconciliationService : BackgroundService
 
     public async Task<InvoicePaymentStateReconciliationResult> RunOnceAsync(CancellationToken ct = default)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
-        var now = DateTime.UtcNow;
-        var batchSize = GetBatchSize();
-        var result = new InvoicePaymentStateReconciliationResult();
-
-        var lastInvoiceId = 0;
-        while (!ct.IsCancellationRequested)
+        await _runLock.WaitAsync(ct);
+        try
         {
-            var invoiceIds = await db.Payments
-                .Where(payment =>
-                    payment.DocumentKind == DocumentKind.Invoice
-                    && payment.InvoiceId.HasValue
-                    && payment.InvoiceId.Value > lastInvoiceId)
-                .Select(payment => payment.InvoiceId!.Value)
-                .Distinct()
-                .OrderBy(id => id)
-                .Take(batchSize)
-                .ToListAsync(ct);
-
-            if (invoiceIds.Count == 0)
+            var now = DateTime.UtcNow;
+            var result = new InvoicePaymentStateReconciliationResult();
+            var batchSize = GetBatchSize();
+            int throughInvoiceId, throughStandaloneId;
+            using (var scope = _scopeFactory.CreateScope())
             {
-                break;
+                var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
+                EnsureClean(db);
+                throughInvoiceId = await db.Payments.AsNoTracking().Where(payment => payment.DocumentKind == DocumentKind.Invoice && payment.InvoiceId > 0)
+                    .Select(payment => payment.InvoiceId).MaxAsync(ct) ?? 0;
+                throughStandaloneId = await db.Payments.AsNoTracking().Where(payment => payment.DocumentKind == DocumentKind.Invoice
+                        && (!payment.InvoiceId.HasValue || payment.InvoiceId <= 0)).Select(payment => (int?)payment.Id).MaxAsync(ct) ?? 0;
             }
-
-            lastInvoiceId = invoiceIds[^1];
-            var payments = await db.Payments
-                .Where(payment => payment.InvoiceId.HasValue && invoiceIds.Contains(payment.InvoiceId.Value))
-                .ToListAsync(ct);
-
-            foreach (var group in payments.GroupBy(payment => payment.InvoiceId!.Value))
+            // Each graph is an independent financial unit. A rejected/busy graph
+            // rolls back alone and cannot starve unrelated invoices in this sweep.
+            foreach (var standalone in new[] { false, true })
             {
-                ApplyEvaluation(group.ToList(), now, result);
+                var lastId = 0;
+                var throughId = standalone ? throughStandaloneId : throughInvoiceId;
+                while (true)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    int[] keys;
+                    using (var scope = _scopeFactory.CreateScope())
+                    {
+                        var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
+                        EnsureClean(db);
+                        var headers = db.Payments.AsNoTracking().Where(payment => payment.DocumentKind == DocumentKind.Invoice);
+                        var query = standalone
+                            ? headers.Where(payment => !payment.InvoiceId.HasValue || payment.InvoiceId <= 0).Select(payment => payment.Id)
+                            : headers.Where(payment => payment.InvoiceId > 0).Select(payment => payment.InvoiceId!.Value).Distinct();
+                        keys = await query.Where(id => id > lastId && id <= throughId).OrderBy(id => id).Take(batchSize).ToArrayAsync(ct);
+                    }
+                    if (keys.Length == 0) break;
+                    lastId = keys[^1];
+                    foreach (var key in keys) result.Include(await ReconcileGraphAsync(key, standalone, now, ct));
+                }
             }
-
-            if (result.PendingSaves > 0)
-            {
-                await db.SaveChangesAsync(ct);
-                result.ClearPendingSaves();
-            }
+            if (result.Skipped > 0)
+                _logger.LogWarning("Invoice reconciliation left {Skipped} aggregate(s) unchanged: {Conflicted} busy, {Oversized} oversized; the rest require history/link review.", result.Skipped, result.Conflicted, result.Oversized);
+            return result;
         }
-
-        var lastStandalonePaymentId = 0;
-        while (!ct.IsCancellationRequested)
-        {
-            var standalonePayments = await db.Payments
-                .Where(payment =>
-                    payment.DocumentKind == DocumentKind.Invoice
-                    && (!payment.InvoiceId.HasValue || payment.InvoiceId.Value <= 0)
-                    && payment.Id > lastStandalonePaymentId)
-                .OrderBy(payment => payment.Id)
-                .Take(batchSize)
-                .ToListAsync(ct);
-
-            if (standalonePayments.Count == 0)
-            {
-                break;
-            }
-
-            lastStandalonePaymentId = standalonePayments[^1].Id;
-            foreach (var payment in standalonePayments)
-            {
-                ApplyEvaluation(new List<Payment> { payment }, now, result);
-            }
-
-            if (result.PendingSaves > 0)
-            {
-                await db.SaveChangesAsync(ct);
-                result.ClearPendingSaves();
-            }
-        }
-
-        return result;
+        finally { _runLock.Release(); }
     }
 
-    private static void ApplyEvaluation(
-        List<Payment> payments,
-        DateTime now,
-        InvoicePaymentStateReconciliationResult result)
+    private async Task<InvoicePaymentStateReconciliationResult> ReconcileGraphAsync(int key, bool standalone, DateTime now, CancellationToken ct)
     {
-        var evaluation = InvoicePaymentStateService.EvaluateInvoiceAggregate(payments, now);
-        if (evaluation is null)
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
+        EnsureClean(db);
+        var result = new InvoicePaymentStateReconciliationResult();
+        BalanceApplicationLease? lease = null;
+        try
         {
-            return;
+            lease = await BalanceApplicationLease.BeginSystemAsync(db, ct);
+            if (db.Database.IsNpgsql()) await db.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '2s'", ct);
+            var graph = standalone
+                ? db.Payments.Where(payment => payment.Id == key && payment.DocumentKind == DocumentKind.Invoice
+                    && (!payment.InvoiceId.HasValue || payment.InvoiceId <= 0))
+                : db.Payments.Where(payment => payment.InvoiceId == key);
+            var ids = await graph.AsNoTracking().OrderBy(payment => payment.Id).Select(payment => payment.Id).Take(MaximumRelatedPayments + 1).ToArrayAsync(ct);
+            if (ids.Length == 0) return result;
+            result.Scanned = 1;
+            if (ids.Length > MaximumRelatedPayments) { result.Skipped = 1; result.Oversized = 1; return result; }
+            await lease.LockPaymentsAsync(ids, ct);
+            var currentIds = await graph.AsNoTracking().OrderBy(payment => payment.Id).Select(payment => payment.Id).Take(MaximumRelatedPayments + 1).ToArrayAsync(ct);
+            if (!ids.SequenceEqual(currentIds)) throw new DbUpdateConcurrencyException("Invoice payment graph changed during reconciliation.");
+            if (await graph.HasAmbiguousInvoiceLinksAsync(ct)
+                || await PaymentCreditInvariantScope.CancellationProtectedPayments(db).AnyAsync(payment => ids.Contains(payment.Id), ct))
+            { result.Skipped = 1; return result; }
+            var payments = await graph.ToListAsync(ct);
+            var headerType = payments.FirstOrDefault(payment => payment.DocumentKind == DocumentKind.Invoice)?.Type;
+            if (headerType.HasValue && payments.Any(payment => payment.Type != headerType.Value))
+            { result.Skipped = 1; return result; }
+            var evaluation = InvoicePaymentStateService.EvaluateInvoiceAggregate(payments, now);
+            if (evaluation is null) { result.Scanned = 0; return result; }
+            if (evaluation.HasChanges)
+            {
+                result.Changed = 1;
+                using var credit = new PaymentCreditInvariantScope(db);
+                credit.IncludePayments(payments);
+                var representative = payments.Single(payment => payment.Id == evaluation.RepresentativePaymentId);
+                InvoicePaymentStateService.ApplySnapshot(representative, evaluation.Suggested);
+                await db.SaveChangesAsync(ct);
+                if (!await credit.KeepsAppliedCreditAsync(ct)) { result.Skipped = 1; return result; }
+            }
+            await lease.CommitAsync(ct);
+            result.Applied = result.Changed;
+            return result;
         }
+        catch (Exception error) when (!ct.IsCancellationRequested && BalanceApplicationLease.IsConflict(error)
+            && (lease?.CommitStarted != true || BalanceApplicationLease.IsDefiniteDatabaseAbort(error)))
+        {
+            result.Scanned = 1; result.Skipped = 1; result.Conflicted = 1;
+            return result;
+        }
+        finally { if (lease is not null) await lease.DisposeAsync(); }
+    }
 
-        result.Scanned++;
-        if (!evaluation.HasChanges)
-        {
-            return;
-        }
-
-        result.Changed++;
-        var representative = payments.First(payment => payment.Id == evaluation.RepresentativePaymentId);
-        if (InvoicePaymentStateService.ApplySnapshot(representative, evaluation.Suggested))
-        {
-            result.Applied++;
-            result.MarkPendingSave();
-        }
+    private static void EnsureClean(PaymentContext db)
+    {
+        if (db.Database.CurrentTransaction is not null || db.ChangeTracker.HasChanges())
+            throw new InvalidOperationException("Invoice reconciliation requires its own clean context and transaction.");
     }
 
     private bool IsEnabled()
@@ -225,9 +236,13 @@ public sealed class InvoicePaymentStateReconciliationResult
     public int Scanned { get; internal set; }
     public int Changed { get; internal set; }
     public int Applied { get; internal set; }
-    internal int PendingSaves { get; private set; }
+    public int Skipped { get; internal set; }
+    public int Conflicted { get; internal set; }
+    public int Oversized { get; internal set; }
 
-    internal void MarkPendingSave() => PendingSaves++;
-
-    internal void ClearPendingSaves() => PendingSaves = 0;
+    internal void Include(InvoicePaymentStateReconciliationResult other)
+    {
+        Scanned += other.Scanned; Changed += other.Changed; Applied += other.Applied;
+        Skipped += other.Skipped; Conflicted += other.Conflicted; Oversized += other.Oversized;
+    }
 }
