@@ -175,14 +175,18 @@ export function CounterpartyPickerModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draftSelected, setDraftSelected] = useState<CounterpartySelection[]>(selected);
-  const clientListRequestRef = useRef<Promise<Client[]> | null>(null);
+  const clientListRequestRef = useRef<{ promise: Promise<Client[]>; controller: AbortController } | null>(null);
+  const clientsAllowed = normalizedScopes.includes('client');
   const dialogRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const trapDialogKeys = useModalFocusTrap(dialogRef, open, onClose, searchRef);
 
   useEffect(() => {
-    if (!open) clientListRequestRef.current = null;
-  }, [open]);
+    const requestRef = clientListRequestRef;
+    const clear = () => { requestRef.current?.controller.abort(); requestRef.current = null; };
+    if (!open || !clientsAllowed) clear();
+    return clear;
+  }, [open, clientsAllowed]);
 
   useEffect(() => {
     if (!open) return;
@@ -208,20 +212,26 @@ export function CounterpartyPickerModal({
     }
 
     let cancelled = false;
+    const legalController = scope === 'legalEntity' ? new AbortController() : null;
     const load = async () => {
       setLoading(true);
       setError(null);
       try {
         if (scope === 'client') {
-          const request = clientListRequestRef.current ?? apiService.getClients();
+          let request = clientListRequestRef.current;
+          if (!request || request.controller.signal.aborted) {
+            const controller = new AbortController();
+            request = { controller, promise: apiService.getClients({ signal: controller.signal }) };
+          }
           clientListRequestRef.current = request;
           let clients: Client[];
           try {
-            clients = await request;
+            clients = await request.promise;
           } catch (loadError) {
             if (clientListRequestRef.current === request) clientListRequestRef.current = null;
             throw loadError;
           }
+          if (cancelled || request.controller.signal.aborted) return;
           const filteredClients = clients
             .filter((client) => client.isActive !== false)
             .filter((client) => matchesClientRole(client, counterpartyRole))
@@ -233,10 +243,12 @@ export function CounterpartyPickerModal({
           return;
         }
 
-        const filteredLegalEntities = (await apiService.getLegalEntities({
+        const entities = await apiService.getLegalEntities({
           search: debouncedQuery || undefined,
           ...(counterpartyRole ? { counterpartyRole } : {}),
-        }))
+        }, { signal: legalController!.signal });
+        if (cancelled || legalController!.signal.aborted) return;
+        const filteredLegalEntities = entities
           .filter((entity) => matchesLegalEntityRole(entity, counterpartyRole))
           .filter((entity) => matchesLegalEntitySearch(entity, debouncedQuery))
           .sort((left, right) => normalizeSearchText(getLegalEntityDisplayName(left)).localeCompare(normalizeSearchText(getLegalEntityDisplayName(right)), 'ru'));
@@ -258,6 +270,7 @@ export function CounterpartyPickerModal({
     void load();
     return () => {
       cancelled = true;
+      legalController?.abort();
     };
   }, [counterpartyRole, debouncedQuery, normalizedScopes, open, page, pageSize, scope]);
 
