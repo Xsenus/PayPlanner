@@ -6055,8 +6055,8 @@ export class ApiService {
     });
   }
 
-  async getClient(id: number) {
-    return this.request<Client>(`/clients/${id}`);
+  async getClient(id: number, options?: { signal?: AbortSignal }) {
+    return this.request<Client>(`/clients/${id}`, { signal: options?.signal, cache: 'no-store' });
   }
 
   async getClientStats(id: number): Promise<ClientStats>;

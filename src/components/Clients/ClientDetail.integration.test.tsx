@@ -9,6 +9,7 @@ import { useClientStatuses } from '../../hooks/useClientStatuses';
 import { useFormRequirements } from '../../hooks/useFormRequirements';
 import * as timeZoneHook from '../../hooks/useUserTimeZone';
 import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
+import { documentCopyTestSession } from '../../test/documentCopySession';
 
 const CLIENT_PROFILE_NOTES_PREFIX = '__PP_CLIENT_PROFILE_V2__:';
 type LegalModalOwnerProps = { initial?: LegalEntityDetail | null; onClose: () => void; onSubmit: (payload: LegalEntityInput) => Promise<LegalEntityDetail> };
@@ -561,8 +562,136 @@ vi.mock('./ClientStatusBadge', () => ({
 }));
 
 describe('ClientDetail integration', () => {
+  it('profile owner baseline: switching client hides the previous personal fields while the new read is pending', async () => {
+    let finish!: (client: Client) => void;
+    const next = new Promise<Client>(resolve => { finish = resolve; });
+    vi.mocked(apiService.getClient).mockResolvedValueOnce(createClient()).mockReturnValueOnce(next);
+    const p = { clientId: 1, onBack: vi.fn(), initialSection: 'profile' as const };
+    const view = render(<ClientDetail {...p} />); await screen.findAllByText('Иванов Иван Иванович');
+    view.rerender(<ClientDetail {...p} clientId={2} />);
+    expect(screen.queryByText('Иванов Иван Иванович')).toBeNull();
+    await act(async () => finish({ ...createClient({ lastName: 'Новый' }), id: 2, name: 'Новый клиент' }));
+  });
+  it('profile owner baseline: a new role reloads personal data instead of retaining the previous response', async () => {
+    vi.mocked(apiService.getClient).mockResolvedValueOnce(createClient()).mockResolvedValueOnce({ ...createClient({ lastName: 'Разрешённый' }), name: 'Разрешённый профиль' });
+    const p = { clientId: 1, onBack: vi.fn(), initialSection: 'profile' as const };
+    const view = render(<ClientDetail {...p} />); await screen.findAllByText('Иванов Иван Иванович');
+    authState.roleId = 2; view.rerender(<ClientDetail {...p} />);
+    await waitFor(() => expect(apiService.getClient).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText('Иванов Иван Иванович')).toBeNull();
+  });
+  it('profile owner baseline: denied client viewing never fetches its personal card', async () => {
+    permissionsResult.clients.canView = false;
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+    await act(async () => {}); expect(apiService.getClient).not.toHaveBeenCalled();
+  });
+  it('profile owner baseline: a late profile save cannot notify the parent or toast under another role', async () => {
+    let finish!: (client: Client) => void;
+    vi.mocked(apiService.updateClient).mockReturnValueOnce(new Promise<Client>(resolve => { finish = resolve; }));
+    const changed = vi.fn(); const p = { clientId: 1, onBack: vi.fn(), onClientUpdated: changed, initialSection: 'profile' as const };
+    const view = render(<ClientDetail {...p} />); await screen.findAllByText('Иванов Иван Иванович');
+    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(apiService.updateClient).toHaveBeenCalledTimes(1));
+    authState.roleId = 2; view.rerender(<ClientDetail {...p} />);
+    await act(async () => finish(createClient()));
+    expect(changed).not.toHaveBeenCalled(); expect(toastSuccessMock).not.toHaveBeenCalled();
+  });
+  it('profile owner current: parent render and token refresh retain the draft and a successful pending save', async () => {
+    const session = documentCopyTestSession();
+    try {
+      const p = { clientId: 1, onBack: vi.fn(), onClientUpdated: vi.fn(), initialSection: 'profile' as const };
+      const view = render(<ClientDetail {...p} />); await screen.findAllByText('Иванов Иван Иванович'); fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+      fireEvent.change(screen.getByDisplayValue('Иванов'), { target: { value: 'Черновик' } });
+      session.refresh(); view.rerender(<ClientDetail {...p} />); expect(screen.getByDisplayValue('Черновик')).toBeTruthy(); expect(apiService.getClient).toHaveBeenCalledTimes(1);
+      let finish!: (client: Client) => void; vi.mocked(apiService.updateClient).mockReturnValueOnce(new Promise<Client>(resolve => { finish = resolve; }));
+      const form = screen.getByRole('button', { name: 'Сохранить' }).closest('form')!; fireEvent.submit(form); fireEvent.submit(form);
+      expect(apiService.updateClient).toHaveBeenCalledTimes(1); expect(screen.getByDisplayValue('Черновик')).toHaveProperty('disabled', true);
+      session.refresh(); view.rerender(<ClientDetail {...p} />); await act(async () => finish(createClient({ lastName: 'Черновик' })));
+      expect(p.onClientUpdated).toHaveBeenCalledTimes(1); expect(apiService.getClient).toHaveBeenCalledTimes(1);
+      const payload = vi.mocked(apiService.updateClient).mock.calls[0][1]; expect(JSON.parse(payload.notes!.slice(CLIENT_PROFILE_NOTES_PREFIX.length)).lastName).toBe('Черновик');
+    } finally { session.restore(); }
+  });
+  it('profile owner failure: a failed save preserves the draft and allows one explicit retry', async () => {
+    vi.mocked(apiService.updateClient).mockReset().mockRejectedValueOnce(new Error('Временная ошибка профиля')).mockResolvedValueOnce(createClient({ lastName: 'Черновик' }));
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />); await screen.findAllByText('Иванов Иван Иванович'); fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+    fireEvent.change(screen.getByDisplayValue('Иванов'), { target: { value: 'Черновик' } }); fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith('Временная ошибка профиля', 'Ошибка сохранения'));
+    expect(screen.getByDisplayValue('Черновик')).toHaveProperty('disabled', false); expect(toastSuccessMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' })); await waitFor(() => expect(toastSuccessMock).toHaveBeenCalledWith('Изменения карточки клиента сохранены.', 'Клиент обновлен'));
+    expect(apiService.updateClient).toHaveBeenCalledTimes(2);
+  });
+  it('profile owner session: replaced login blocks a mounted submit before another render', async () => {
+    const session = documentCopyTestSession();
+    try {
+      render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />); await screen.findAllByText('Иванов Иван Иванович'); fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+      session.replace('login'); fireEvent.submit(screen.getByRole('button', { name: 'Сохранить' }).closest('form')!);
+      expect(apiService.updateClient).not.toHaveBeenCalled();
+    } finally { session.restore(); }
+  });
+  it.each(['success', 'error'] as const)('profile owner read: an obsolete %s after a role change cannot restore the old profile', async outcome => {
+    let finish!: (client: Client) => void; let fail!: (error: Error) => void;
+    const old = new Promise<Client>((resolve, reject) => { finish = resolve; fail = reject; });
+    vi.mocked(apiService.getClient).mockReturnValueOnce(old).mockResolvedValueOnce({ ...createClient({ lastName: 'Разрешённый' }), name: 'Разрешённый профиль' });
+    const p = { clientId: 1, onBack: vi.fn(), initialSection: 'profile' as const }; const view = render(<ClientDetail {...p} />);
+    await waitFor(() => expect(apiService.getClient).toHaveBeenCalledTimes(1)); const signal = vi.mocked(apiService.getClient).mock.calls[0][1]?.signal;
+    authState.roleId = 2; view.rerender(<ClientDetail {...p} />); await screen.findAllByText('Разрешённый профиль');
+    await act(async () => { if (outcome === 'success') finish(createClient()); else fail(new Error('Прежняя ошибка профиля')); });
+    expect(signal?.aborted).toBe(true); expect(screen.queryByText('Иванов Иван Иванович')).toBeNull(); expect(screen.queryByText('Прежняя ошибка профиля')).toBeNull();
+  });
+  it('profile owner retry: a forbidden read has an explicit retry and never exposes a blank editable form', async () => {
+    vi.mocked(apiService.getClient).mockRejectedValueOnce(new Error('HTTP 403 - Доступ закрыт')).mockResolvedValueOnce(createClient());
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />); await screen.findByText('Недостаточно прав для выполнения действия.');
+    expect(screen.queryByRole('button', { name: 'Редактировать' })).toBeNull(); expect(apiService.getClient).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку клиента' })); await screen.findAllByText('Иванов Иван Иванович'); expect(apiService.getClient).toHaveBeenCalledTimes(2);
+  });
+  it('profile owner identity: a wrong returned client ID never populates personal fields', async () => {
+    vi.mocked(apiService.getClient).mockResolvedValueOnce({ ...createClient(), id: 77 });
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />); await screen.findByText('Сервер вернул другую карточку клиента. Повторите загрузку.');
+    expect(screen.queryByText('Иванов Иван Иванович')).toBeNull(); expect(screen.queryByRole('button', { name: 'Редактировать' })).toBeNull();
+  });
+  it('profile owner delete: revoking the view cancels confirmation and never dispatches a delete', async () => {
+    permissionsResult.clients.canDelete = true; let approve!: (value: boolean) => void; confirmMock.mockReturnValueOnce(new Promise<boolean>(resolve => { approve = resolve; }));
+    const p = { clientId: 1, onBack: vi.fn(), initialSection: 'profile' as const }; const view = render(<ClientDetail {...p} />); await screen.findAllByText('Иванов Иван Иванович');
+    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' })); fireEvent.click(screen.getByRole('button', { name: 'Удалить' }));
+    const signal = confirmMock.mock.calls[0][0].signal; permissionsResult.clients.canView = false; view.rerender(<ClientDetail {...p} />);
+    expect(signal.aborted).toBe(true); await act(async () => approve(true)); expect(apiService.deleteClient).not.toHaveBeenCalled(); expect(p.onBack).not.toHaveBeenCalled();
+  });
+  it('profile owner delete result: a late delete cannot navigate away from a different client', async () => {
+    permissionsResult.clients.canDelete = true; let finish!: () => void; vi.mocked(apiService.deleteClient).mockReset().mockReturnValueOnce(new Promise<void>(resolve => { finish = resolve; }));
+    const p = { clientId: 1, onBack: vi.fn(), initialSection: 'profile' as const }; const view = render(<ClientDetail {...p} />); await screen.findAllByText('Иванов Иван Иванович');
+    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' })); fireEvent.click(screen.getByRole('button', { name: 'Удалить' })); await waitFor(() => expect(apiService.deleteClient).toHaveBeenCalledTimes(1));
+    view.rerender(<ClientDetail {...p} clientId={2} />); await act(async () => finish()); expect(p.onBack).not.toHaveBeenCalled();
+  });
+  it('profile owner delete current: cancelled confirmation preserves the editor and a current retry deletes once', async () => {
+    permissionsResult.clients.canDelete = true; confirmMock.mockResolvedValueOnce(false).mockResolvedValue(true);
+    let finish!: () => void; vi.mocked(apiService.deleteClient).mockReset().mockReturnValueOnce(new Promise<void>(resolve => { finish = resolve; }));
+    const back = vi.fn(); render(<ClientDetail clientId={1} onBack={back} initialSection="profile" />); fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+    fireEvent.change(screen.getByDisplayValue('Иванов'), { target: { value: 'Черновик' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Удалить' })); await waitFor(() => expect(screen.getByRole('button', { name: 'Удалить' })).toHaveProperty('disabled', false));
+    expect(apiService.deleteClient).not.toHaveBeenCalled(); expect(screen.getByDisplayValue('Черновик')).toHaveProperty('disabled', false);
+    const form = screen.getByRole('button', { name: 'Сохранить' }).closest('form')!;
+    fireEvent.click(screen.getByRole('button', { name: 'Удалить' })); fireEvent.submit(form);
+    await waitFor(() => expect(apiService.deleteClient).toHaveBeenCalledTimes(1)); expect(apiService.updateClient).not.toHaveBeenCalled();
+    await act(async () => finish()); expect(back).toHaveBeenCalledTimes(1);
+  });
+  it('profile owner wrong save: another returned client ID cannot replace the draft or notify its parent', async () => {
+    vi.mocked(apiService.updateClient).mockResolvedValueOnce({ ...createClient(), id: 77 });
+    const updated = vi.fn(); render(<ClientDetail clientId={1} onBack={vi.fn()} onClientUpdated={updated} initialSection="profile" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' })); fireEvent.change(screen.getByDisplayValue('Иванов'), { target: { value: 'Черновик' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' })); await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith('Сервер вернул другую карточку клиента. Повторите сохранение.', 'Ошибка сохранения'));
+    expect(updated).not.toHaveBeenCalled(); expect(toastSuccessMock).not.toHaveBeenCalled(); expect(screen.getByDisplayValue('Черновик')).toHaveProperty('disabled', false);
+  });
+  it('profile owner local confirmation: changing role cancels deletion of an unsaved phone and its old toast', async () => {
+    vi.mocked(apiService.getClient).mockResolvedValue({ ...createClient({ phones: ['+70000000001', '+70000000002'] }) });
+    let approve!: (value: boolean) => void; confirmMock.mockReturnValueOnce(new Promise<boolean>(resolve => { approve = resolve; }));
+    const props = { clientId: 1, onBack: vi.fn(), initialSection: 'profile' as const }; const view = render(<ClientDetail {...props} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' })); fireEvent.click(screen.getAllByRole('button', { name: 'Удалить телефон' })[0]);
+    const signal = confirmMock.mock.calls[0][0].signal; authState.roleId = 2; view.rerender(<ClientDetail {...props} />);
+    expect(signal.aborted).toBe(true); await act(async () => approve(true)); expect(toastSuccessMock).not.toHaveBeenCalled(); expect(apiService.updateClient).not.toHaveBeenCalled();
+  });
   it('requirements caller: client profile rules follow the current client and view access', async () => {
-    const p = { onBack: vi.fn(), initialSection: 'profile' as const }; const view = render(<ClientDetail {...p} clientId={1} />); const first = vi.mocked(useFormRequirements).mock.lastCall;
+    const p = { onBack: vi.fn(), initialSection: 'profile' as const }; const view = render(<ClientDetail {...p} clientId={1} />); await waitFor(() => expect(vi.mocked(useFormRequirements).mock.lastCall?.[1]).toBe(true)); const first = vi.mocked(useFormRequirements).mock.lastCall;
     expect(first?.[0]).toBe('clients'); expect(first?.[1]).toBe(true); view.rerender(<ClientDetail {...p} clientId={2} />); expect(vi.mocked(useFormRequirements).mock.lastCall?.[2]?.ownerScope).not.toBe(first?.[2]?.ownerScope);
     permissionsResult.clients.canView = false; view.rerender(<ClientDetail {...p} clientId={2} />); expect(vi.mocked(useFormRequirements).mock.lastCall?.[1]).toBe(false); await act(async () => {});
   });
@@ -611,10 +740,11 @@ describe('ClientDetail integration', () => {
     useContractsMock.mockReturnValue(emptyContractsResult);
     usePaymentsPagedMock.mockReturnValue(emptyPaymentsResult);
 
-    vi.mocked(apiService.getClient).mockResolvedValue(createClient());
+    vi.mocked(apiService.getClient).mockReset().mockImplementation(async id => ({ ...createClient(), id }));
     vi.mocked(apiService.getClients).mockResolvedValue([]);
     vi.mocked(apiService.getActResponsibles).mockResolvedValue([]);
-    vi.mocked(apiService.updateClient).mockResolvedValue(createClient());
+    vi.mocked(apiService.updateClient).mockReset().mockResolvedValue(createClient());
+    vi.mocked(apiService.deleteClient).mockReset().mockResolvedValue(undefined);
     vi.mocked(apiService.getClientPowersOfAttorney).mockResolvedValue([]);
     vi.mocked(apiService.getClientCaseFinanceSummaries).mockResolvedValue([]);
     vi.mocked(apiService.getClientCaseExpenseDetails).mockResolvedValue([]);

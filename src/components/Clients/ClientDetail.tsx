@@ -55,6 +55,7 @@ import { useTranslation } from "../../hooks/useTranslation";
 import { useFormRequirements } from "../../hooks/useFormRequirements";
 import { useAuth } from "../../contexts/AuthContext";
 import { useAsyncOperationOwner } from '../../hooks/useAsyncOperationOwner';
+import { useDocumentDeliveryOwner, type DocumentReadOwner } from '../../hooks/useDocumentDeliveryOwner';
 import { awaitOwnedUiResult, StaleUiOperationError } from '../../utils/StaleUiOperationError';
 import { useRolePermissions } from "../../hooks/useRolePermissions";
 import { useDialog } from "../../hooks/useDialog";
@@ -1391,7 +1392,25 @@ function ProfileDocumentReadList({ title, entries }: { title: string; entries: A
   );
 }
 
-export function ClientDetail({
+type ClientDetailAuthority = { auth: ReturnType<typeof useAuth>; permissions: ReturnType<typeof useRolePermissions> };
+
+export function ClientDetail(props: ClientDetailProps) {
+  const auth = useAuth();
+  const permissions = useRolePermissions(auth.user?.role?.id);
+  const owner = useDocumentDeliveryOwner(JSON.stringify([props.clientId, auth.user?.id, auth.user?.role?.id,
+    auth.user?.departmentId, auth.isAdmin(), permissions]));
+  const guard = <Args extends unknown[],>(callback: ((...args: Args) => void) | undefined) => callback
+    ? (...args: Args) => { if (owner.capture()) callback(...args); } : undefined;
+  return <ClientDetailScreen key={owner.scope} {...props} authority={{ auth, permissions }} screenOwner={owner}
+    onBack={() => { if (owner.capture()) props.onBack(); }}
+    onClientUpdated={guard(props.onClientUpdated)} onOpenInvoicePage={guard(props.onOpenInvoicePage)}
+    onOpenActPage={guard(props.onOpenActPage)} onCreateActPage={guard(props.onCreateActPage)}
+    onOpenCasePage={guard(props.onOpenCasePage)} onOpenTask={guard(props.onOpenTask)} />;
+}
+
+function ClientDetailScreen({
+  authority,
+  screenOwner,
   clientId,
   onBack,
   onClientUpdated,
@@ -1401,15 +1420,30 @@ export function ClientDetail({
   onCreateActPage,
   onOpenCasePage,
   onOpenTask,
-}: ClientDetailProps) {
+}: ClientDetailProps & { authority: ClientDetailAuthority; screenOwner: DocumentReadOwner }) {
   const profileFieldId = useId();
   const { t } = useTranslation();
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin } = authority.auth;
+  const captureScreen = screenOwner.capture;
+  const clientSaveOwner = useDocumentDeliveryOwner(screenOwner.scope);
+  const clientDeleteOwner = useDocumentDeliveryOwner(screenOwner.scope);
+  const clientFormSaving = clientSaveOwner.busy;
+  const clientActionBusy = clientFormSaving || clientDeleteOwner.busy;
+  const pendingProfileMutation = useRef<{ isCurrent: () => boolean } | null>(null);
+  const profileConfirmations = useRef(new Set<AbortController>());
+  useEffect(() => { const pending = profileConfirmations.current; return () => { for (const controller of pending) controller.abort(); }; }, []);
   const { confirm } = useDialog();
   const toast = useToast();
   const profileTimeZoneId = useUserTimeZone();
-  const permissions = useRolePermissions(user?.role?.id);
+  const permissions = authority.permissions;
   const userIsAdmin = isAdmin();
+  const canReadClient = Boolean(user?.id) && (userIsAdmin || permissions.clients.canView);
+  const confirmProfile = async (options: Exclude<Parameters<typeof confirm>[0], string>) => {
+    const owner = captureScreen(); if (!owner) return false;
+    const controller = new AbortController(); profileConfirmations.current.add(controller);
+    try { const result = await confirm({ ...options, signal: controller.signal }); return result && owner.isCurrent(); }
+    finally { profileConfirmations.current.delete(controller); controller.abort(); }
+  };
   const clientPermissions = permissions.clients;
   const legalEntityPermissions = permissions.legalEntities;
   const casePermissions = permissions.cases;
@@ -1497,6 +1531,11 @@ export function ClientDetail({
     ownerScope: JSON.stringify([clientId, user?.id, user?.role?.id, userIsAdmin, clientPermissions, permissions.dictionaries]) });
   const [clientName, setClientName] = useState<string>("...");
   const [clientData, setClientData] = useState<Client | null>(null);
+  const [hydratedClient, setHydratedClient] = useState<Client | null>(null);
+  const profileReady = canReadClient && Boolean(clientData && hydratedClient === clientData);
+  const [clientReadError, setClientReadError] = useState<string | null>(null);
+  const [clientReadLoading, setClientReadLoading] = useState(canReadClient);
+  const [clientReadRetry, setClientReadRetry] = useState(0);
   const taskJournalContext = useMemo(
     () => {
       const title = clientName && clientName !== "..." ? clientName : clientData?.name ?? `Клиент #${clientId}`;
@@ -1517,7 +1556,6 @@ export function ClientDetail({
   const [selectedCaseId, setSelectedCaseId] = useState<number | "all">(
     initialCaseId ?? "all",
   );
-  const [clientFormSaving, setClientFormSaving] = useState(false);
   const refreshClientBalance = useCallback(async () => {
     if (!clientId || !canViewClientFinancialSummary) {
       setClientBalance(null);
@@ -1766,19 +1804,20 @@ export function ClientDetail({
   }, []);
 
   const openLegalEntityCreateModal = () => {
+    if (!captureScreen()) return;
     invalidateLegalOwner();
     setLegalEntityModalInitial(null);
     setLegalEntityModalOpen(true);
   };
 
   const openLegalEntityEditModal = async () => {
-    if (!selectedLegalEntity) return;
+    if (!captureScreen() || !selectedLegalEntity) return;
     invalidateLegalOwner();
     const owner = captureLegalOwner();
     const targetId = selectedLegalEntity.id;
     try {
       const detail = await apiService.getLegalEntity(selectedLegalEntity.id);
-      if (!isCurrentLegalOwner(owner)) return;
+      if (!captureScreen() || !isCurrentLegalOwner(owner)) return;
       if (detail.id !== targetId) throw new Error('Сервер вернул другую карточку юридического лица. Повторите открытие.');
       setLegalEntityModalInitial(detail);
       setLegalEntityModalOpen(true);
@@ -1801,7 +1840,7 @@ export function ClientDetail({
   const submitLegalEntityModal = async (
     payload: LegalEntityInput,
   ): Promise<LegalEntityDetail> => {
-    if (!isCurrentLegalOwner(legalOwnerAtRender)) throw new StaleUiOperationError();
+    if (!captureScreen() || !isCurrentLegalOwner(legalOwnerAtRender)) throw new StaleUiOperationError();
     if (!legalEntityModalOpen || !clientPermissions.canView || !clientPermissions.canEdit) throw new Error('Нет разрешения на сохранение юридического лица.');
     const owner = legalOwnerAtRender;
     const targetId = legalEntityModalInitial?.id;
@@ -1811,7 +1850,7 @@ export function ClientDetail({
     const nextPayload = { ...payload, clientIds: nextClientIds };
     const saved = await awaitOwnedUiResult(() => legalEntityModalInitial
       ? apiService.updateLegalEntity(legalEntityModalInitial.id, nextPayload)
-      : apiService.createLegalEntity(nextPayload), () => isCurrentLegalOwner(owner));
+      : apiService.createLegalEntity(nextPayload), () => Boolean(captureScreen()) && isCurrentLegalOwner(owner));
     if (targetId !== undefined && saved.id !== targetId) throw new Error('Сервер вернул другую карточку юридического лица. Обновите страницу.');
     mergeLegalEntityOptions([saved]);
     setClientFormState((prev) => ({
@@ -3096,18 +3135,21 @@ export function ClientDetail({
     setContractPage(1);
   };
 
-  const handleUpdateClient = async (payload: ClientInput) => {
+  const handleUpdateClient = async (payload: ClientInput, current: () => boolean) => {
+    if (!captureScreen() || !current()) throw new StaleUiOperationError();
     if (!clientPermissions.canEdit) {
       showPermissionWarning("Недостаточно прав для редактирования клиента.");
       throw new Error("Недостаточно прав для редактирования клиента.");
     }
     try {
-      const updated = await apiService.updateClient(clientId, payload);
+      const updated = await awaitOwnedUiResult(() => apiService.updateClient(clientId, payload), current);
+      if (updated.id !== clientId) throw new Error('Сервер вернул другую карточку клиента. Повторите сохранение.');
       setClientData(updated);
       setClientName(updated.name ?? `Client #${clientId}`);
       onClientUpdated?.(updated);
       return updated;
     } catch (err) {
+      if (!current()) throw new StaleUiOperationError();
       const message = formatApiValidationError(
         err,
         "Не удалось обновить клиента",
@@ -3118,48 +3160,56 @@ export function ClientDetail({
   };
 
   const handleDeleteClientCard = async () => {
+    if (!captureScreen() || !profileReady || clientActionBusy || pendingProfileMutation.current?.isCurrent()) return;
     if (!clientPermissions.canDelete) {
       showPermissionWarning("Недостаточно прав для удаления клиента.");
       return;
     }
 
-    const ok = await confirm({
-      title: "Подтверждение удаления",
-      description: "Удалить клиента? Действие необратимо.",
-      confirmLabel: "Удалить",
-      cancelLabel: "Отмена",
-      variant: "danger",
-    });
-
-    if (!ok) return;
-
+    const operation = clientDeleteOwner.begin('delete'); if (!operation) return;
+    pendingProfileMutation.current = operation;
     try {
-      await apiService.deleteClient(clientId);
-      onBack();
-    } catch (err) {
-      const raw =
-        err instanceof Error ? err.message : "Не удалось удалить клиента";
-      const marker = " - ";
-      const markerIndex = raw.indexOf(marker);
-      const payload =
-        markerIndex >= 0 ? raw.slice(markerIndex + marker.length).trim() : raw;
+      const ok = await confirmProfile({
+        title: "Подтверждение удаления",
+        description: "Удалить клиента? Действие необратимо.",
+        confirmLabel: "Удалить",
+        cancelLabel: "Отмена",
+        variant: "danger",
+      });
+
+      if (!ok || !operation.isCurrent()) return;
+
       try {
-        const parsed = JSON.parse(payload) as {
-          message?: string;
-          usage?: string[];
-        };
-        const message = parsed.message?.trim() || "Не удалось удалить клиента";
-        const usage =
-          Array.isArray(parsed.usage) && parsed.usage.length > 0
-            ? ` Используется в: ${parsed.usage.join(", ")}.`
-            : "";
-        toast.error(`${message}${usage}`.trim(), "Удаление невозможно");
-      } catch {
-        toast.error(raw, "Удаление невозможно");
+        await apiService.deleteClient(clientId);
+        if (operation.isCurrent()) onBack();
+      } catch (err) {
+        if (!operation.isCurrent()) return;
+        const raw =
+          err instanceof Error ? err.message : "Не удалось удалить клиента";
+        const marker = " - ";
+        const markerIndex = raw.indexOf(marker);
+        const payload =
+          markerIndex >= 0 ? raw.slice(markerIndex + marker.length).trim() : raw;
+        try {
+          const parsed = JSON.parse(payload) as {
+            message?: string;
+            usage?: string[];
+          };
+          const message = parsed.message?.trim() || "Не удалось удалить клиента";
+          const usage =
+            Array.isArray(parsed.usage) && parsed.usage.length > 0
+              ? ` Используется в: ${parsed.usage.join(", ")}.`
+              : "";
+          toast.error(`${message}${usage}`.trim(), "Удаление невозможно");
+        } catch {
+          toast.error(raw, "Удаление невозможно");
+        }
       }
+    } finally {
+      if (pendingProfileMutation.current === operation) pendingProfileMutation.current = null;
+      operation.finish();
     }
   };
-
   const openContractCreate = () => {
     if (!contractPermissions.canCreate) {
       showPermissionWarning("Недостаточно прав для добавления договоров.");
@@ -3294,7 +3344,7 @@ export function ClientDetail({
 
   const { isRequired } = useFormRequirements(
     "clients",
-    activeSection === "profile" && (userIsAdmin || clientPermissions.canView),
+    activeSection === "profile" && profileReady,
     { ownerScope: JSON.stringify([clientId, user?.id, user?.role?.id, userIsAdmin, clientPermissions, clientProfileEditing, clientFormState.kind]) },
   );
 
@@ -3365,49 +3415,53 @@ export function ClientDetail({
       toastTitle,
       onDelete,
     }: ClientProfileDeleteActionOptions) => {
+      const owner = captureScreen();
+      if (!owner || pendingProfileMutation.current?.isCurrent()) return false;
       if (!clientPermissions.canEdit) {
         showPermissionWarning("Недостаточно прав для редактирования клиента.");
         return false;
       }
 
-      const ok = await confirm({
+      const controller = new AbortController(); profileConfirmations.current.add(controller);
+      let ok: boolean;
+      try { ok = await confirm({
+        signal: controller.signal,
         title,
         description,
         confirmLabel: "Удалить",
         cancelLabel: "Отмена",
         variant: "danger",
-      });
+      }); } finally { profileConfirmations.current.delete(controller); controller.abort(); }
 
-      if (!ok) return false;
+      if (!ok || !owner.isCurrent() || pendingProfileMutation.current?.isCurrent()) return false;
 
       onDelete();
       toast.success(successMessage, toastTitle);
       return true;
     },
-    [clientPermissions.canEdit, confirm, showPermissionWarning, toast],
+    [clientPermissions.canEdit, confirm, showPermissionWarning, toast, captureScreen],
   );
 
   useEffect(() => {
-    let alive = true;
-    apiService
-      .getClient(clientId)
-      .then((c) => {
-        if (!alive) return;
-        setClientName(c.name ?? `Client #${clientId}`);
-        setClientData(c);
-      })
-      .catch(() => {
-        if (!alive) return;
-        setClientName(`Client #${clientId}`);
-        setClientData(null);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [clientId]);
+    const owner = canReadClient ? captureScreen() : null;
+    if (!owner) return;
+    const controller = new AbortController();
+    const current = () => owner.isCurrent() && !controller.signal.aborted;
+    setClientReadLoading(true); setClientReadError(null);
+    void apiService.getClient(clientId, { signal: controller.signal }).then(c => {
+      if (!current()) return;
+      if (c.id !== clientId) throw new Error('Сервер вернул другую карточку клиента. Повторите загрузку.');
+      setClientName(c.name ?? `Client #${clientId}`); setClientData(c);
+    }).catch(error => {
+      if (!current()) return;
+      setClientName(`Client #${clientId}`); setClientData(null);
+      setClientReadError(extractDisplayErrorMessage(error, 'Не удалось загрузить карточку клиента.'));
+    }).finally(() => { if (current()) setClientReadLoading(false); });
+    return () => controller.abort();
+  }, [clientId, canReadClient, captureScreen, clientReadRetry]);
 
   useEffect(() => {
-    if (!clientData) return;
+    if (!clientData) { setHydratedClient(null); return; }
     const profile = parseClientExtendedProfile(clientData);
     const nextClientFormState = {
       kind: profile.kind,
@@ -3496,6 +3550,7 @@ export function ClientDetail({
     };
     clientFormBaselineRef.current = nextClientFormState;
     setClientFormState(nextClientFormState);
+    setHydratedClient(clientData);
     setClientProfileEditing(false);
     // setProfileDocuments({
     //   passport: profile.passports[0] ?? '',
@@ -4655,9 +4710,9 @@ export function ClientDetail({
   }, [clientFormState.clientStatusId, sortedClientStatuses]);
 
   const canManageClientResponsible = userIsAdmin && clientPermissions.canEdit;
-  const canEditClientProfile = clientPermissions.canEdit && clientProfileEditing;
+  const canEditClientProfile = profileReady && clientPermissions.canEdit && clientProfileEditing && !clientActionBusy;
   const canManageClientResponsibleInProfile =
-    canManageClientResponsible && clientProfileEditing;
+    profileReady && canManageClientResponsible && clientProfileEditing && !clientActionBusy;
 
   const clientResponsibleOptions = useMemo(() => {
     const options = [...actResponsibles];
@@ -5316,6 +5371,7 @@ export function ClientDetail({
       HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
     >,
   ) => {
+    if (!captureScreen() || pendingProfileMutation.current?.isCurrent() || !canEditClientProfile) return;
     const { name, value } = event.target;
     if (name === "legalEntityId") {
       setClientFormState((prev) => ({ ...prev, legalEntityId: value }));
@@ -5337,6 +5393,7 @@ export function ClientDetail({
   };
 
   const cancelClientProfileEditing = () => {
+    if (!captureScreen() || pendingProfileMutation.current?.isCurrent()) return;
     if (clientFormBaselineRef.current) {
       setClientFormState(clientFormBaselineRef.current);
     }
@@ -5936,11 +5993,14 @@ export function ClientDetail({
     event: React.FormEvent<HTMLFormElement>,
   ) => {
     event.preventDefault();
+    if (!captureScreen() || clientActionBusy || pendingProfileMutation.current?.isCurrent()) return;
     if (!canEditClientProfile) {
       showPermissionWarning("Недостаточно прав для редактирования клиента.");
       return;
     }
-    setClientFormSaving(true);
+    const operation = clientSaveOwner.begin('save'); if (!operation) return;
+    pendingProfileMutation.current = operation;
+    const current = () => operation.isCurrent() && Boolean(captureScreen());
     try {
       const primaryPassport =
         clientFormState.passportEntries[0] ?? createEmptyPassportEntry();
@@ -6093,7 +6153,8 @@ export function ClientDetail({
             ? Number(clientFormState.clientStatusId)
             : null,
           isClientAndSupplier: clientFormState.isClientAndSupplier,
-        });
+        }, current);
+        if (!current()) return;
         toast.success(
           "Изменения карточки клиента сохранены.",
           "Клиент обновлен",
@@ -6103,7 +6164,8 @@ export function ClientDetail({
         return;
       }
     } finally {
-      setClientFormSaving(false);
+      if (pendingProfileMutation.current === operation) pendingProfileMutation.current = null;
+      operation.finish();
     }
   };
 
@@ -6375,7 +6437,13 @@ export function ClientDetail({
 
           </aside>
           <div className="min-w-0 flex-1">
-        {activeSection === "profile" ? (
+        {activeSection === "profile" ? (!profileReady ? (
+          <div className="rounded-xl border border-gray-100 bg-white p-3">
+            {clientReadLoading || (canReadClient && !clientReadError) ? <p role="status">Загружаем карточку клиента…</p> : null}
+            {clientReadError ? <div role="alert">{clientReadError}<button type="button" onClick={() => { if (captureScreen()) setClientReadRetry(value => value + 1); }} className="ml-2 underline">Повторить загрузку клиента</button></div> : null}
+            {!canReadClient ? <p>Нет доступа к профилю клиента.</p> : null}
+          </div>
+        ) : (
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 mb-3 p-3">
             <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
               <div>
@@ -6392,7 +6460,7 @@ export function ClientDetail({
                     <button
                       type="button"
                       onClick={cancelClientProfileEditing}
-                      disabled={clientFormSaving}
+                      disabled={clientActionBusy}
                       className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-60"
                     >
                       <X className="h-4 w-4" />
@@ -7964,7 +8032,7 @@ export function ClientDetail({
                 <button
                   type="button"
                   onClick={handleDeleteClientCard}
-                  disabled={!clientPermissions.canDelete || clientFormSaving}
+                  disabled={!clientPermissions.canDelete || clientActionBusy}
                   className="inline-flex items-center justify-center rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-red-700 disabled:opacity-60"
                 >
                   {t("delete") ?? "Удалить"}
@@ -7973,7 +8041,7 @@ export function ClientDetail({
               ) : null}
             </form>
           </div>
-        ) : activeSection === "payments" ? (
+        )) : activeSection === "payments" ? (
           <>
             <TwoTypeStats
               clientId={clientId}
