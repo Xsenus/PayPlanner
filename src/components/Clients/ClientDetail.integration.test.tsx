@@ -111,6 +111,7 @@ function createPermissions() {
   return {
     clients: { canView: true, canCreate: false, canEdit: true, canDelete: false },
     legalEntities: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+    companyProfile: { canView: false, canCreate: false, canEdit: false, canDelete: false },
     cases: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     accounts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     acts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
@@ -704,6 +705,7 @@ describe('ClientDetail integration', () => {
   beforeEach(() => {
     legalModalOwnerSpy.mockClear(); authState.userId = 7; authState.roleId = 1;
     Object.assign(permissionsResult.legalEntities, createPermissions().legalEntities);
+    Object.assign(permissionsResult.companyProfile, createPermissions().companyProfile);
     vi.mocked(apiService.getLegalEntity).mockReset(); vi.mocked(apiService.createLegalEntity).mockReset(); vi.mocked(apiService.updateLegalEntity).mockReset();
     Object.assign(permissionsResult.clients, createPermissions().clients);
     Object.assign(permissionsResult.cases, createPermissions().cases);
@@ -771,7 +773,7 @@ describe('ClientDetail integration', () => {
     vi.mocked(apiService.deleteClientPowerOfAttorney).mockResolvedValue(undefined);
     vi.mocked(apiService.getOksoDictionary).mockReset().mockResolvedValue([]);
     vi.mocked(apiService.getOkpdtrDictionary).mockReset().mockResolvedValue([]);
-    vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({
+    vi.mocked(apiService.getLegalEntitiesPaged).mockReset().mockResolvedValue({
       items: [],
       total: 0,
       page: 1,
@@ -1349,9 +1351,166 @@ describe('ClientDetail integration', () => {
     expect(document.querySelector('option[value="20662"]')).toBeTruthy();
   });
 
+  const linkedLookupEntity = { id: 21, shortName: 'Текущая выбранная компания', fullName: 'Текущая выбранная компания', clients: [], clientsCount: 0, createdAt: '2026-11-01T00:00:00Z', isOwnCompany: false } as LegalEntityDetail;
+  function linkedLookupClient() { return { ...createClient({ kind: 'legal' }), legalEntityId: 21, legalEntity: linkedLookupEntity }; }
+  async function editLinkedLookup() {
+    vi.mocked(apiService.getClient).mockResolvedValue(linkedLookupClient());
+    const props = { clientId: 1, onBack: vi.fn(), initialSection: 'profile' as const };
+    const view = render(<ClientDetail {...props} />); fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+    return { view, props };
+  }
+  it('company lookup baseline: a role without legal view keeps the linked ID without querying the catalogue', async () => {
+    permissionsResult.legalEntities.canView = false;
+    await editLinkedLookup(); await act(async () => {});
+    expect(apiService.getLegalEntitiesPaged).not.toHaveBeenCalled();
+    expect(document.querySelector<HTMLSelectElement>('select[name="legalEntityId"]')?.value).toBe('21');
+  });
+  it('company lookup baseline: changing the query aborts the obsolete page request', async () => {
+    let finish!: (value: Awaited<ReturnType<typeof apiService.getLegalEntitiesPaged>>) => void;
+    vi.mocked(apiService.getLegalEntitiesPaged).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const { view } = await editLinkedLookup(); await waitFor(() => expect(apiService.getLegalEntitiesPaged).toHaveBeenCalledTimes(1));
+    const signal = vi.mocked(apiService.getLegalEntitiesPaged).mock.calls[0][1]?.signal;
+    fireEvent.change(screen.getByLabelText('Поиск юридического лица клиента'), { target: { value: 'новый поиск' } });
+    await waitFor(() => expect(apiService.getLegalEntitiesPaged).toHaveBeenCalledTimes(2));
+    expect(signal?.aborted).toBe(true); await act(async () => finish({ items: [], total: 0, page: 1, pageSize: 20 })); view.unmount();
+  });
+  it('company caller baseline: legal creation permission controls both full and quick creation', async () => {
+    await editLinkedLookup();
+    expect(screen.getByRole('button', { name: 'Создать юрлицо' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Быстрое создание' })).toHaveProperty('disabled', true);
+  });
+  it('company caller baseline: viewing requisites without legal edit opens a readonly company', async () => {
+    vi.mocked(apiService.getLegalEntity).mockResolvedValue(linkedLookupEntity);
+    await editLinkedLookup(); fireEvent.click(screen.getByRole('button', { name: 'Реквизиты' }));
+    await waitFor(() => expect(legalModalOwnerSpy).toHaveBeenCalled()); expect(legalModalOwnerSpy.mock.lastCall![0].allowEdit).toBe(false);
+  });
+  it('company caller baseline: a late quick creation cannot toast after a different role takes over', async () => {
+    permissionsResult.legalEntities.canCreate = true;
+    let finish!: (entity: LegalEntityDetail) => void; vi.mocked(apiService.createLegalEntity).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const { view, props } = await editLinkedLookup(); fireEvent.click(screen.getByRole('button', { name: 'Быстрое создание' }));
+    fireEvent.change(screen.getByRole('textbox', { name: /Название организации/ }), { target: { value: 'Новая компания' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Создать' })); await waitFor(() => expect(apiService.createLegalEntity).toHaveBeenCalledTimes(1));
+    authState.roleId = 2; view.rerender(<ClientDetail {...props} />);
+    await act(async () => finish({ ...linkedLookupEntity, id: 22 })); expect(toastSuccessMock).not.toHaveBeenCalled();
+  });
+
+  it('company lookup current: denial removes other rows and explicit retry preserves query and the linked company', async () => {
+    const other = { ...linkedLookupEntity, id: 22, shortName: 'Другой контрагент' };
+    vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValueOnce({ items: [linkedLookupEntity, other], total: 2, page: 1, pageSize: 20 }).mockRejectedValueOnce(new Error('HTTP 403 - Доступ закрыт')).mockResolvedValueOnce({ items: [linkedLookupEntity], total: 1, page: 1, pageSize: 20 });
+    await editLinkedLookup(); await waitFor(() => expect(document.querySelector('select[name="legalEntityId"] option[value="22"]')).not.toBeNull());
+    const query = screen.getByLabelText('Поиск юридического лица клиента'); fireEvent.change(query, { target: { value: 'новая строка' } });
+    await screen.findByText('Недостаточно прав для выполнения действия.'); const select = document.querySelector<HTMLSelectElement>('select[name="legalEntityId"]')!;
+    expect(select.value).toBe('21'); expect(select.disabled).toBe(true); expect(select.querySelector('option[value="22"]')).toBeNull(); expect(apiService.getLegalEntitiesPaged).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку организаций' })); await waitFor(() => expect(select.disabled).toBe(false));
+    expect(select.value).toBe('21'); expect(query).toHaveProperty('value', 'новая строка'); expect(apiService.getLegalEntitiesPaged).toHaveBeenCalledTimes(3);
+  });
+  it('company lookup selection: choosing a loaded row keeps one page read and the selected ID', async () => {
+    vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({ items: [linkedLookupEntity, { ...linkedLookupEntity, id: 22, shortName: 'Выбранный контрагент' }], total: 2, page: 1, pageSize: 20 });
+    await editLinkedLookup(); await waitFor(() => expect(document.querySelector('select[name="legalEntityId"] option[value="22"]')).not.toBeNull());
+    const select = document.querySelector<HTMLSelectElement>('select[name="legalEntityId"]')!; fireEvent.change(select, { target: { value: '22' } }); await act(async () => {});
+    expect(select.value).toBe('22'); expect(apiService.getLegalEntitiesPaged).toHaveBeenCalledTimes(1);
+  });
+  it('company lookup stale: a previous successful query cannot repopulate the current page', async () => {
+    let finish!: (value: Awaited<ReturnType<typeof apiService.getLegalEntitiesPaged>>) => void;
+    vi.mocked(apiService.getLegalEntitiesPaged).mockReturnValueOnce(new Promise(resolve => { finish = resolve; })).mockResolvedValueOnce({ items: [{ ...linkedLookupEntity, id: 22, shortName: 'Актуальный результат' }], total: 1, page: 1, pageSize: 20 });
+    await editLinkedLookup(); fireEvent.change(screen.getByLabelText('Поиск юридического лица клиента'), { target: { value: 'актуальный' } });
+    await waitFor(() => expect(document.querySelector('select[name="legalEntityId"] option[value="22"]')).not.toBeNull());
+    await act(async () => finish({ items: [{ ...linkedLookupEntity, id: 23, shortName: 'Прежний результат' }], total: 1, page: 1, pageSize: 20 }));
+    expect(document.querySelector('select[name="legalEntityId"] option[value="23"]')).toBeNull();
+  });
+  it('company lookup identity: a manual selection survives denial as an ID without allowing an unknown name to be saved', async () => {
+    vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValueOnce({ items: [linkedLookupEntity, { ...linkedLookupEntity, id: 22, shortName: 'Ручной выбор' }], total: 2, page: 1, pageSize: 20 }).mockRejectedValueOnce(new Error('HTTP 403 - Доступ закрыт'));
+    await editLinkedLookup(); await waitFor(() => expect(document.querySelector('select[name="legalEntityId"] option[value="22"]')).not.toBeNull());
+    const select = document.querySelector<HTMLSelectElement>('select[name="legalEntityId"]')!; fireEvent.change(select, { target: { value: '22' } });
+    fireEvent.change(screen.getByLabelText('Поиск юридического лица клиента'), { target: { value: 'отказ' } }); await screen.findByText('Недостаточно прав для выполнения действия.');
+    expect(select.value).toBe('22'); expect(select.querySelector('option[value="22"]')?.textContent).toContain('#22');
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' })); await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith('Не удалось подтвердить название выбранной организации. Повторите загрузку списка.', 'Проверка данных'));
+    expect(apiService.updateClient).not.toHaveBeenCalled();
+  });
+  it('company caller read: double opening stays single-flight and cancelling the profile aborts its details', async () => {
+    let finish!: (value: LegalEntityDetail) => void; vi.mocked(apiService.getLegalEntity).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    await editLinkedLookup(); const open = screen.getByRole('button', { name: 'Реквизиты' }); fireEvent.click(open); fireEvent.click(open);
+    expect(apiService.getLegalEntity).toHaveBeenCalledTimes(1); const signal = vi.mocked(apiService.getLegalEntity).mock.calls[0][1]?.signal;
+    fireEvent.click(screen.getByRole('button', { name: 'Отмена' })); expect(signal?.aborted).toBe(true);
+    await act(async () => finish(linkedLookupEntity)); expect(legalModalOwnerSpy).not.toHaveBeenCalled(); expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+  it('company caller readonly: direct submit cannot bypass the company edit permission', async () => {
+    vi.mocked(apiService.getLegalEntity).mockResolvedValue(linkedLookupEntity); await editLinkedLookup(); fireEvent.click(screen.getByRole('button', { name: 'Реквизиты' }));
+    await waitFor(() => expect(legalModalOwnerSpy).toHaveBeenCalled()); const modal = legalModalOwnerSpy.mock.lastCall![0] as LegalModalOwnerProps;
+    await expect(modal.onSubmit({ shortName: 'Запрещённое изменение', clientIds: [] })).rejects.toThrow('Нет разрешения'); expect(apiService.updateLegalEntity).not.toHaveBeenCalled();
+  });
+  it('company caller related rights: editing a company does not grant mutation of its cases or financial records', async () => {
+    const { modal } = await openOwnerLegalModal();
+    const props = modal as LegalModalOwnerProps & { deleteOwnerScope: string; relatedRecordPermissions: Record<string, unknown> };
+    expect(props.deleteOwnerScope).toEqual(expect.any(String));
+    expect(props.relatedRecordPermissions).toEqual({
+      cases: permissionsResult.cases,
+      accounts: permissionsResult.accounts,
+      acts: permissionsResult.acts,
+      payments: permissionsResult.payments,
+    });
+    for (const section of ['cases', 'accounts', 'acts', 'payments'] as const) {
+      expect(props.relatedRecordPermissions[section]).toEqual(expect.objectContaining({ canCreate: false, canEdit: false, canDelete: false }));
+    }
+  });
+  it('company lookup malformed: duplicate IDs fail closed without losing the linked company', async () => {
+    vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValueOnce({ items: [linkedLookupEntity, linkedLookupEntity], total: 2, page: 1, pageSize: 20 });
+    await editLinkedLookup();
+    await screen.findByText('Не удалось подтвердить данные списка организаций. Повторите загрузку.');
+    expect(document.querySelector<HTMLSelectElement>('select[name="legalEntityId"]')?.value).toBe('21');
+    expect(screen.getByRole('button', { name: 'Повторить загрузку организаций' })).toBeTruthy();
+    expect(apiService.updateClient).not.toHaveBeenCalled();
+  });
+  it.each([false, true])('company caller own profile: profile edit=%s controls the own-company form independently of legal edit', async canEdit => {
+    Object.assign(permissionsResult.companyProfile, { canView: true, canEdit }); permissionsResult.legalEntities.canEdit = !canEdit;
+    const own = { ...linkedLookupEntity, isOwnCompany: true }; vi.mocked(apiService.getClient).mockResolvedValue({ ...linkedLookupClient(), legalEntity: own }); vi.mocked(apiService.getLegalEntity).mockResolvedValue(own);
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />); fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' })); fireEvent.click(screen.getByRole('button', { name: 'Реквизиты' }));
+    await waitFor(() => expect(legalModalOwnerSpy).toHaveBeenCalled()); expect(legalModalOwnerSpy.mock.lastCall![0].allowEdit).toBe(canEdit);
+  });
+  it('company caller own view: legal view alone does not open a known own-company profile', async () => {
+    const own = { ...linkedLookupEntity, isOwnCompany: true }; vi.mocked(apiService.getClient).mockResolvedValue({ ...linkedLookupClient(), legalEntity: own });
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />); fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+    expect(screen.getByRole('button', { name: 'Реквизиты' })).toHaveProperty('disabled', true); expect(apiService.getLegalEntity).not.toHaveBeenCalled();
+  });
+  it('company caller save: a current edited company overrides its older page row and stays single-flight', async () => {
+    const { entity, modal } = await openOwnerLegalModal(false); let finish!: (value: LegalEntityDetail) => void;
+    vi.mocked(apiService.updateLegalEntity).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    let first!: Promise<LegalEntityDetail>; act(() => { first = modal.onSubmit({ shortName: 'Обновлённое название', clientIds: [2] }); });
+    await expect(modal.onSubmit({ shortName: 'Дубль', clientIds: [] })).rejects.toThrow('уже сохраняется');
+    let finishPage!: (page: Awaited<ReturnType<typeof apiService.getLegalEntitiesPaged>>) => void;
+    vi.mocked(apiService.getLegalEntitiesPaged).mockReturnValueOnce(new Promise(resolve => { finishPage = resolve; }));
+    await act(async () => { finish({ ...entity, shortName: 'Обновлённое название' }); await first; });
+    expect(document.querySelector('select[name="legalEntityId"] option[value="21"]')?.textContent).toContain('Обновлённое название');
+    expect(apiService.updateLegalEntity).toHaveBeenCalledTimes(1); expect(apiService.updateLegalEntity).toHaveBeenCalledWith(21, expect.objectContaining({ clientIds: [2, 1] }));
+    await act(async () => finishPage({ items: [{ ...entity, shortName: 'Обновлённое название' }], total: 1, page: 1, pageSize: 20 }));
+    expect(apiService.getLegalEntitiesPaged).toHaveBeenCalledTimes(2);
+  });
+  it('company caller quick retry: failure retains the draft and success selects one persisted company without saving the client', async () => {
+    permissionsResult.legalEntities.canCreate = true; vi.mocked(apiService.createLegalEntity).mockRejectedValueOnce(new Error('Временная ошибка создания')).mockResolvedValueOnce({ ...linkedLookupEntity, id: 22, shortName: 'Новая организация' });
+    await editLinkedLookup(); fireEvent.click(screen.getByRole('button', { name: 'Быстрое создание' })); fireEvent.change(screen.getByRole('textbox', { name: /Название организации/ }), { target: { value: 'Новая организация' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Создать' })); await screen.findByText('Временная ошибка создания');
+    expect(screen.getByRole('textbox', { name: /Название организации/ })).toHaveProperty('value', 'Новая организация');
+    fireEvent.click(screen.getByRole('button', { name: 'Создать' })); await waitFor(() => expect(document.querySelector<HTMLSelectElement>('select[name="legalEntityId"]')?.value).toBe('22'));
+    expect(apiService.createLegalEntity).toHaveBeenCalledTimes(2); expect(apiService.updateClient).not.toHaveBeenCalled(); expect(apiService.getLegalEntitiesPaged).toHaveBeenCalledTimes(2);
+  });
+  it('company caller persisted cancel: cancelling the client reloads the company link already saved by the nested form', async () => {
+    const { entity, modal } = await openOwnerLegalModal(true); const saved = { ...entity, id: 22, shortName: 'Уже сохранённая компания' }; vi.mocked(apiService.createLegalEntity).mockResolvedValue(saved);
+    await act(async () => { await modal.onSubmit({ shortName: saved.shortName, clientIds: [] }); });
+    vi.mocked(apiService.getClient).mockResolvedValue({ ...createClient({ kind: 'legal' }), legalEntityId: 22, legalEntity: saved });
+    fireEvent.click(screen.getByRole('button', { name: 'Отмена' })); await screen.findByRole('button', { name: 'Редактировать' });
+    expect(document.querySelector<HTMLSelectElement>('select[name="legalEntityId"]')?.value).toBe('22'); expect(apiService.getClient).toHaveBeenCalledTimes(2); expect(apiService.updateClient).not.toHaveBeenCalled();
+  });
+  it('company caller persisted failure: failed reconciliation shows retry instead of the obsolete local link', async () => {
+    const { entity, modal } = await openOwnerLegalModal(); const saved = { ...entity, shortName: 'Сохранённые реквизиты' }; vi.mocked(apiService.updateLegalEntity).mockResolvedValue(saved);
+    await act(async () => { await modal.onSubmit({ shortName: saved.shortName, clientIds: [] }); }); vi.mocked(apiService.getClient).mockRejectedValueOnce(new Error('HTTP 403 - Доступ закрыт'));
+    fireEvent.click(screen.getByRole('button', { name: 'Отмена' })); await screen.findByText('Недостаточно прав для выполнения действия.');
+    expect(screen.queryByRole('button', { name: 'Редактировать' })).toBeNull(); expect(screen.getByRole('button', { name: 'Повторить загрузку клиента' })).toBeTruthy();
+  });
+
   async function openOwnerLegalModal(create = false, load?: Promise<LegalEntityDetail>) {
     const entity = { id: 21, shortName: 'Owner original organisation', clients: [], clientsCount: 0, createdAt: '2026-10-29T00:00:00Z' } as LegalEntityDetail;
     permissionsResult.legalEntities.canEdit = true;
+    permissionsResult.legalEntities.canCreate = create;
     vi.mocked(apiService.getClient).mockImplementation(async id => ({ ...createClient({ kind: 'legal' }), id, legalEntityId: 21, legalEntity: entity }));
     vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({ items: [entity], total: 1, page: 1, pageSize: 20 });
     vi.mocked(apiService.getLegalEntity).mockReturnValue(load ?? Promise.resolve(entity));
@@ -1420,7 +1579,7 @@ describe('ClientDetail integration', () => {
     let finish!: (value: LegalEntityDetail) => void; let fail!: (error: Error) => void;
     const pending = new Promise<LegalEntityDetail>((resolve, reject) => { finish = resolve; fail = reject; });
     const { view, props, entity } = await openOwnerLegalModal(false, pending);
-    await waitFor(() => expect(apiService.getLegalEntity).toHaveBeenCalledWith(21));
+    await waitFor(() => expect(apiService.getLegalEntity).toHaveBeenCalledWith(21, { signal: expect.any(AbortSignal) }));
     view.rerender(<ClientDetail {...props} clientId={2} />);
     await act(async () => { if (outcome === 'success') finish(entity); else fail(new Error('Obsolete legal opening')); await pending.catch(() => undefined); });
     expect(legalModalOwnerSpy).not.toHaveBeenCalled();
@@ -1483,7 +1642,7 @@ describe('ClientDetail integration', () => {
         search: undefined,
         page: 1,
         pageSize: 20,
-      });
+      }, { signal: expect.any(AbortSignal) });
     });
     expect(screen.getAllByText(/ООО Ромашка/).length).toBeGreaterThan(0);
 
@@ -1495,7 +1654,7 @@ describe('ClientDetail integration', () => {
         search: 'ром',
         page: 1,
         pageSize: 20,
-      });
+      }, { signal: expect.any(AbortSignal) });
     });
   });
 

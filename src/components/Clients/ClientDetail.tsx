@@ -55,13 +55,13 @@ import { useTranslation } from "../../hooks/useTranslation";
 import { useFormRequirements } from "../../hooks/useFormRequirements";
 import { useAuth } from "../../contexts/AuthContext";
 import { useAsyncOperationOwner } from '../../hooks/useAsyncOperationOwner';
-import { useDocumentDeliveryOwner, type DocumentReadOwner } from '../../hooks/useDocumentDeliveryOwner';
+import { useDocumentDeliveryOwner, type DocumentReadOwner, type DocumentDeliveryRead } from '../../hooks/useDocumentDeliveryOwner';
 import { awaitOwnedUiResult, StaleUiOperationError } from '../../utils/StaleUiOperationError';
 import { useRolePermissions } from "../../hooks/useRolePermissions";
 import { useDialog } from "../../hooks/useDialog";
 import { useToast } from "../../hooks/useToast";
 import { useUserTimeZone } from "../../hooks/useUserTimeZone";
-import { extractDisplayErrorMessage } from "../../utils/errorUtils";
+import { extractDisplayErrorMessage, isHttpErrorStatus } from "../../utils/errorUtils";
 import { PaymentModal } from "../Calendar/PaymentModal";
 import type {
   Act,
@@ -114,6 +114,7 @@ import { ObjectAuditModal } from "../ui/ObjectAuditModal";
 import { TaskJournal } from "../Tasks/TaskJournal";
 import { isInvoiceManagedPayment, isPartialRemainderSourcePayment, isTransferredRemainderPayment } from "../../utils/invoicePayments";
 import { useClientStatuses } from "../../hooks/useClientStatuses";
+import { useDictionarySnapshot } from "../../hooks/useDictionarySnapshot";
 import { ClientStatusBadge } from "./ClientStatusBadge";
 import { ClientReconciliationAct } from "./ClientReconciliationAct";
 import { DatePeriodPicker } from "../DateRange/DatePeriodPicker";
@@ -285,6 +286,7 @@ const SECTION_ORDER: ClientDetailSection[] = [
 
 const DETAIL_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 const LEGAL_ENTITY_LOOKUP_PAGE_SIZE = 20;
+const EMPTY_LEGAL_LOOKUP: Awaited<ReturnType<typeof apiService.getLegalEntitiesPaged>> = { items: [], total: 0, page: 1, pageSize: LEGAL_ENTITY_LOOKUP_PAGE_SIZE };
 const CLIENT_DETAIL_TABLE_STORAGE_PREFIX = "pp.client_detail_table";
 const CLIENT_BALANCE_TRANSACTION_LABELS: Record<
   ClientBalanceTransaction["type"],
@@ -1668,15 +1670,32 @@ function ClientDetailScreen({
     isClientAndSupplier: false,
   });
   const clientFormBaselineRef = useRef<typeof clientFormState | null>(null);
-  const [legalEntityOptions, setLegalEntityOptions] = useState<LegalEntitySummary[]>([]);
+  const [rememberedLegalEntity, setRememberedLegalEntity] = useState<{ entity: LegalEntitySummary; page: typeof EMPTY_LEGAL_LOOKUP } | null>(null);
+  const persistedLegalChange = useRef(false);
   const [legalEntityLookupSearch, setLegalEntityLookupSearch] = useState("");
   const debouncedLegalEntityLookupSearch = useDebouncedValue(
     legalEntityLookupSearch.trim(),
     300,
   );
-  const [legalEntityLookupLoading, setLegalEntityLookupLoading] =
-    useState(false);
-  const [legalEntityLookupTotal, setLegalEntityLookupTotal] = useState(0);
+  const canViewLegalCatalogue = userIsAdmin || legalEntityPermissions.canView;
+  const legalLookupEnabled = profileReady && activeSection === "profile" && clientFormState.kind === "legal" && canViewLegalCatalogue;
+  const loadLegalLookup = useCallback(async (signal: AbortSignal) => {
+    const response = await apiService.getLegalEntitiesPaged({ search: debouncedLegalEntityLookupSearch || undefined,
+      page: 1, pageSize: LEGAL_ENTITY_LOOKUP_PAGE_SIZE }, { signal });
+    if (!response || !Array.isArray(response.items) || !response.items.every(item => Number.isSafeInteger(item?.id) && item.id > 0 && typeof item.shortName === 'string')
+      || new Set(response.items.map(item => item.id)).size !== response.items.length || !Number.isSafeInteger(response.total) || response.total < 0) {
+      throw new Error('Не удалось подтвердить данные списка организаций. Повторите загрузку.');
+    }
+    return response;
+  }, [debouncedLegalEntityLookupSearch]);
+  const legalLookup = useDictionarySnapshot(loadLegalLookup, EMPTY_LEGAL_LOOKUP, { enabled: legalLookupEnabled,
+    ownerScope: JSON.stringify([screenOwner.scope, activeSection, profileReady, clientFormState.kind, debouncedLegalEntityLookupSearch]) }, false);
+  const legalLookupRef = useRef(legalLookup);
+  legalLookupRef.current = legalLookup;
+  const legalEntityLookupLoading = legalLookup.loading;
+  const legalEntityLookupTotal = legalLookup.value.total;
+  const legalLookupDenied = Boolean(legalLookup.error && (isHttpErrorStatus(new Error(legalLookup.error), 401) || isHttpErrorStatus(new Error(legalLookup.error), 403)));
+  useEffect(() => { if (legalLookupDenied) setRememberedLegalEntity(null); }, [legalLookupDenied]);
   const [addressSuggestionsByIndex, setAddressSuggestionsByIndex] = useState<
     Record<number, DadataAddressSuggestion[]>
   >({});
@@ -1719,21 +1738,37 @@ function ClientDetailScreen({
   const [legalEntityModalOpen, setLegalEntityModalOpen] = useState(false);
   const [legalEntityModalInitial, setLegalEntityModalInitial] =
     useState<LegalEntityDetail | null>(null);
+  const [legalEntityOpening, setLegalEntityOpening] = useState(false);
+  const legalReadAttempt = useRef<{ controller: AbortController; isCurrent: () => boolean } | null>(null);
+  const legalWriteAttempt = useRef<DocumentDeliveryRead | null>(null);
+  const canCreateLegal = userIsAdmin || legalEntityPermissions.canCreate;
+  const canReadLegal = (entity: (LegalEntitySummary & { isOwnCompany?: boolean | null }) | null) => userIsAdmin || (entity?.isOwnCompany === true
+    ? permissions.companyProfile?.canView : entity?.isOwnCompany === false
+      ? legalEntityPermissions.canView : legalEntityPermissions.canView || permissions.companyProfile?.canView);
+  const canWriteLegal = (entity: LegalEntityDetail | null) => userIsAdmin || (entity
+    ? entity.isOwnCompany === true ? permissions.companyProfile?.canEdit : legalEntityPermissions.canEdit
+    : legalEntityPermissions.canCreate);
   const { capture: captureLegalOwner, isCurrent: isCurrentLegalOwner, invalidate: invalidateLegalOwner } = useAsyncOperationOwner(JSON.stringify([
-    user?.id, user?.role?.id, clientId, clientPermissions.canView, clientPermissions.canEdit,
+    screenOwner.scope, profileReady, clientProfileEditing, legalEntityPromptOpen, user?.id, user?.role?.id, clientId, clientPermissions.canView, clientPermissions.canEdit,
     legalEntityPermissions.canView, legalEntityPermissions.canEdit, legalEntityPermissions.viewScope,
     legalEntityModalOpen, legalEntityModalInitial?.id, clientFormState.legalEntityId,
   ]));
   const legalOwnerAtRender = captureLegalOwner();
-  const legalModalContext = JSON.stringify([clientId, user?.id, user?.role?.id, clientPermissions.canView, clientPermissions.canEdit,
+  const legalModalContext = JSON.stringify([screenOwner.scope, profileReady, clientProfileEditing, clientFormState.legalEntityId, clientId, user?.id, user?.role?.id, clientPermissions.canView, clientPermissions.canEdit,
     legalEntityPermissions.canView, legalEntityPermissions.canEdit, legalEntityPermissions.viewScope]);
   const previousLegalModalContext = useRef(legalModalContext);
+  useEffect(() => {
+    setLegalEntityOpening(false);
+    return () => { legalReadAttempt.current?.controller.abort(); };
+  }, [legalModalContext]);
   useEffect(() => {
     if (previousLegalModalContext.current === legalModalContext) return;
     previousLegalModalContext.current = legalModalContext;
     invalidateLegalOwner();
     setLegalEntityModalOpen(false);
     setLegalEntityModalInitial(null);
+    setLegalEntityPromptOpen(false);
+    setLegalEntityPromptSubmitting(false);
   }, [legalModalContext, invalidateLegalOwner]);
   const [poaPromptOpen, setPoaPromptOpen] = useState(false);
   const [poaPromptSubmitting, setPoaPromptSubmitting] = useState(false);
@@ -1785,53 +1820,52 @@ function ClientDetailScreen({
     Boolean(requiredKeys?.some((requiredKey) => isRequired(requiredKey)));
 
   const closeLegalEntityPrompt = (force = false) => {
+    if (!captureScreen() || !isCurrentLegalOwner(legalOwnerAtRender)) return;
     if (legalEntityPromptSubmitting && !force) return;
+    invalidateLegalOwner();
     setLegalEntityPromptOpen(false);
+    setLegalEntityPromptSubmitting(false);
     setLegalEntityPromptError(null);
     setLegalEntityDraft({ shortName: "", inn: "" });
   };
 
-  const mergeLegalEntityOptions = useCallback((items: LegalEntitySummary[]) => {
-    setLegalEntityOptions((prev) => {
-      const byId = new Map<number, LegalEntitySummary>();
-      [...prev, ...items].forEach((item) => byId.set(item.id, item));
-      return [...byId.values()].sort((a, b) =>
-        a.shortName.localeCompare(b.shortName, undefined, {
-          sensitivity: "base",
-        }),
-      );
-    });
+  const rememberLegalEntity = useCallback((entity: LegalEntitySummary) => {
+    setRememberedLegalEntity({ entity, page: legalLookupRef.current.value });
   }, []);
 
   const openLegalEntityCreateModal = () => {
-    if (!captureScreen()) return;
+    if (!captureScreen() || !canEditClientProfile || !canCreateLegal || legalWriteAttempt.current?.isCurrent()) return;
+    legalReadAttempt.current?.controller.abort();
     invalidateLegalOwner();
     setLegalEntityModalInitial(null);
     setLegalEntityModalOpen(true);
   };
 
   const openLegalEntityEditModal = async () => {
-    if (!captureScreen() || !selectedLegalEntity) return;
+    if (!captureScreen() || !canEditClientProfile || !selectedLegalEntity || !canReadLegal(selectedLegalEntity)
+      || legalReadAttempt.current?.isCurrent() || legalWriteAttempt.current?.isCurrent()) return;
     invalidateLegalOwner();
-    const owner = captureLegalOwner();
-    const targetId = selectedLegalEntity.id;
+    const owner = captureLegalOwner(); const targetId = selectedLegalEntity.id;
+    const controller = new AbortController();
+    const attempt = { controller, isCurrent: () => Boolean(captureScreen()) && isCurrentLegalOwner(owner) && !controller.signal.aborted && legalReadAttempt.current === attempt };
+    legalReadAttempt.current?.controller.abort(); legalReadAttempt.current = attempt; setLegalEntityOpening(true);
     try {
-      const detail = await apiService.getLegalEntity(selectedLegalEntity.id);
-      if (!captureScreen() || !isCurrentLegalOwner(owner)) return;
+      const detail = await apiService.getLegalEntity(targetId, { signal: controller.signal });
+      if (!attempt.isCurrent()) return;
       if (detail.id !== targetId) throw new Error('Сервер вернул другую карточку юридического лица. Повторите открытие.');
-      setLegalEntityModalInitial(detail);
-      setLegalEntityModalOpen(true);
+      if (!canReadLegal(detail)) throw new Error('Нет разрешения на просмотр юридического лица.');
+      setLegalEntityModalInitial(detail); setLegalEntityModalOpen(true);
     } catch (error) {
-      if (!isCurrentLegalOwner(owner)) return;
-      const message = extractDisplayErrorMessage(
-        error,
-        "Не удалось загрузить карточку юридического лица",
-      );
-      toast.error(message, "Юрлица");
+      if (attempt.isCurrent()) toast.error(extractDisplayErrorMessage(error, "Не удалось загрузить карточку юридического лица"), "Юрлица");
+    } finally {
+      if (attempt.isCurrent()) setLegalEntityOpening(false);
+      if (legalReadAttempt.current === attempt) legalReadAttempt.current = null;
     }
   };
 
   const closeLegalEntityModal = () => {
+    if (!captureScreen() || !isCurrentLegalOwner(legalOwnerAtRender)) return;
+    legalReadAttempt.current?.controller.abort();
     invalidateLegalOwner();
     setLegalEntityModalOpen(false);
     setLegalEntityModalInitial(null);
@@ -1841,34 +1875,51 @@ function ClientDetailScreen({
     payload: LegalEntityInput,
   ): Promise<LegalEntityDetail> => {
     if (!captureScreen() || !isCurrentLegalOwner(legalOwnerAtRender)) throw new StaleUiOperationError();
-    if (!legalEntityModalOpen || !clientPermissions.canView || !clientPermissions.canEdit) throw new Error('Нет разрешения на сохранение юридического лица.');
+    if (!legalEntityModalOpen || !canEditClientProfile || !canWriteLegal(legalEntityModalInitial)) throw new Error('Нет разрешения на сохранение юридического лица.');
+    if (legalWriteAttempt.current?.isCurrent()) throw new Error('Юридическое лицо уже сохраняется. Дождитесь завершения.');
     const owner = legalOwnerAtRender;
     const targetId = legalEntityModalInitial?.id;
-    const nextClientIds = Array.from(
-      new Set([...(payload.clientIds ?? []), clientId].filter((id) => id > 0)),
-    );
-    const nextPayload = { ...payload, clientIds: nextClientIds };
-    const saved = await awaitOwnedUiResult(() => legalEntityModalInitial
-      ? apiService.updateLegalEntity(legalEntityModalInitial.id, nextPayload)
-      : apiService.createLegalEntity(nextPayload), () => Boolean(captureScreen()) && isCurrentLegalOwner(owner));
-    if (targetId !== undefined && saved.id !== targetId) throw new Error('Сервер вернул другую карточку юридического лица. Обновите страницу.');
-    mergeLegalEntityOptions([saved]);
-    setClientFormState((prev) => ({
-      ...prev,
-      kind: "legal",
-      legalEntityId: String(saved.id),
-    }));
-    closeLegalEntityModal();
-    toast.success(
-      legalEntityModalInitial
-        ? "Карточка юридического лица обновлена."
-        : "Юридическое лицо создано и выбрано.",
-      "Юрлица",
-    );
-    return saved;
+    const attempt: DocumentDeliveryRead = { isCurrent: () => Boolean(captureScreen()) && isCurrentLegalOwner(owner) && legalWriteAttempt.current === attempt };
+    legalWriteAttempt.current = attempt;
+    try {
+      const nextClientIds = Array.from(
+        new Set([...(payload.clientIds ?? []), clientId].filter((id) => id > 0)),
+      );
+      const nextPayload = { ...payload, clientIds: nextClientIds };
+      const saved = await awaitOwnedUiResult(() => legalEntityModalInitial
+        ? apiService.updateLegalEntity(legalEntityModalInitial.id, nextPayload)
+        : apiService.createLegalEntity(nextPayload), attempt.isCurrent);
+      if (targetId !== undefined && saved.id !== targetId) throw new Error('Сервер вернул другую карточку юридического лица. Обновите страницу.');
+      persistedLegalChange.current = true;
+      rememberLegalEntity(saved);
+      void legalLookupRef.current.refresh();
+      setClientFormState((prev) => ({
+        ...prev,
+        kind: "legal",
+        legalEntityId: String(saved.id),
+      }));
+      closeLegalEntityModal();
+      toast.success(
+        legalEntityModalInitial
+          ? "Карточка юридического лица обновлена."
+          : "Юридическое лицо создано и выбрано.",
+        "Юрлица",
+      );
+      return saved;
+    } finally { if (legalWriteAttempt.current === attempt) legalWriteAttempt.current = null; }
+  };
+
+  const openQuickLegalEntity = () => {
+    if (!captureScreen() || !canEditClientProfile || !canCreateLegal || legalWriteAttempt.current?.isCurrent()) return;
+    legalReadAttempt.current?.controller.abort(); invalidateLegalOwner();
+    setLegalEntityPromptSubmitting(false); setLegalEntityPromptError(null);
+    setLegalEntityDraft({ shortName: "", inn: "" }); setLegalEntityPromptOpen(true);
   };
 
   const submitQuickLegalEntity = async () => {
+    if (!captureScreen() || !isCurrentLegalOwner(legalOwnerAtRender) || !legalEntityPromptOpen || !canEditClientProfile || !canCreateLegal || legalWriteAttempt.current?.isCurrent()) return;
+    const owner = legalOwnerAtRender;
+    const attempt: DocumentDeliveryRead = { isCurrent: () => Boolean(captureScreen()) && isCurrentLegalOwner(owner) && legalWriteAttempt.current === attempt };
     const shortName = legalEntityDraft.shortName.trim();
     const inn = legalEntityDraft.inn.trim();
 
@@ -1877,14 +1928,17 @@ function ClientDetailScreen({
       return;
     }
 
+    legalWriteAttempt.current = attempt;
     try {
       setLegalEntityPromptSubmitting(true);
-      const created = await apiService.createLegalEntity({
+      const created = await awaitOwnedUiResult(() => apiService.createLegalEntity({
         shortName,
         inn: inn || undefined,
         clientIds: [clientId],
-      });
-      mergeLegalEntityOptions([created]);
+      }), attempt.isCurrent);
+      persistedLegalChange.current = true;
+      rememberLegalEntity(created);
+      void legalLookupRef.current.refresh();
       setClientFormState((prev) => ({
         ...prev,
         kind: "legal",
@@ -1907,6 +1961,7 @@ function ClientDetailScreen({
       closeLegalEntityPrompt(true);
       toast.success("Организация создана.", "Юрлица");
     } catch (error) {
+      if (!attempt.isCurrent()) return;
       const message = extractDisplayErrorMessage(
         error,
         "Не удалось создать организацию",
@@ -1914,7 +1969,8 @@ function ClientDetailScreen({
       setLegalEntityPromptError(message);
       toast.error(message, "Юрлица");
     } finally {
-      setLegalEntityPromptSubmitting(false);
+      if (attempt.isCurrent()) setLegalEntityPromptSubmitting(false);
+      if (legalWriteAttempt.current === attempt) legalWriteAttempt.current = null;
     }
   };
 
@@ -3144,6 +3200,7 @@ function ClientDetailScreen({
     try {
       const updated = await awaitOwnedUiResult(() => apiService.updateClient(clientId, payload), current);
       if (updated.id !== clientId) throw new Error('Сервер вернул другую карточку клиента. Повторите сохранение.');
+      persistedLegalChange.current = false;
       setClientData(updated);
       setClientName(updated.name ?? `Client #${clientId}`);
       onClientUpdated?.(updated);
@@ -3559,64 +3616,6 @@ function ClientDetailScreen({
     // });
   }, [clientData]);
 
-  useEffect(() => {
-    if (clientData?.legalEntity) {
-      mergeLegalEntityOptions([clientData.legalEntity]);
-    }
-  }, [clientData?.legalEntity, mergeLegalEntityOptions]);
-
-  useEffect(() => {
-    if (activeSection !== "profile" || clientFormState.kind !== "legal") {
-      return;
-    }
-
-    let alive = true;
-    setLegalEntityLookupLoading(true);
-
-    apiService
-      .getLegalEntitiesPaged({
-        search: debouncedLegalEntityLookupSearch || undefined,
-        page: 1,
-        pageSize: LEGAL_ENTITY_LOOKUP_PAGE_SIZE,
-      })
-      .then((response) => {
-        if (!alive) return;
-        setLegalEntityOptions((prev) => {
-          const selectedId = clientFormState.legalEntityId
-            ? Number(clientFormState.legalEntityId)
-            : null;
-          const selected = selectedId
-            ? prev.find((item) => item.id === selectedId)
-            : null;
-          const byId = new Map<number, LegalEntitySummary>();
-          if (selected) byId.set(selected.id, selected);
-          (response.items ?? []).forEach((item) => byId.set(item.id, item));
-          return [...byId.values()].sort((a, b) =>
-            a.shortName.localeCompare(b.shortName, undefined, {
-              sensitivity: "base",
-            }),
-          );
-        });
-        setLegalEntityLookupTotal(response.total ?? 0);
-      })
-      .catch(() => {
-        if (!alive) return;
-        setLegalEntityLookupTotal(0);
-      })
-      .finally(() => {
-        if (!alive) return;
-        setLegalEntityLookupLoading(false);
-      });
-
-    return () => {
-      alive = false;
-    };
-  }, [
-    activeSection,
-    clientFormState.kind,
-    clientFormState.legalEntityId,
-    debouncedLegalEntityLookupSearch,
-  ]);
 
   const caseIdForQuery =
     selectedCaseId === "all" ? undefined : Number(selectedCaseId);
@@ -4690,15 +4689,18 @@ function ClientDetailScreen({
   );
 
   const selectedLegalEntity = useMemo(() => {
-    if (!clientFormState.legalEntityId) return null;
-    return (
-      legalEntityOptions.find(
-        (entity) => entity.id === Number(clientFormState.legalEntityId),
-      ) ?? null
-    );
-  }, [clientFormState.legalEntityId, legalEntityOptions]);
-
-  const sortedLegalEntities = legalEntityOptions;
+    const id = Number(clientFormState.legalEntityId); if (!id) return null;
+    const remembered = !legalLookupDenied && rememberedLegalEntity?.entity.id === id ? rememberedLegalEntity : null;
+    return (remembered && remembered.page === legalLookup.value ? remembered.entity : null)
+      ?? legalLookup.value.items.find(entity => entity.id === id)
+      ?? remembered?.entity
+      ?? (clientData?.legalEntity?.id === id ? clientData.legalEntity : null);
+  }, [clientFormState.legalEntityId, legalLookup.value, legalLookupDenied, rememberedLegalEntity, clientData?.legalEntity]);
+  const sortedLegalEntities = useMemo(() => {
+    const rows = new Map(legalLookup.value.items.map(entity => [entity.id, entity]));
+    if (selectedLegalEntity) rows.set(selectedLegalEntity.id, selectedLegalEntity);
+    return [...rows.values()].sort((a, b) => a.shortName.localeCompare(b.shortName, undefined, { sensitivity: 'base' }));
+  }, [legalLookup.value.items, selectedLegalEntity]);
 
   const selectedClientStatus = useMemo(() => {
     if (!clientFormState.clientStatusId) return null;
@@ -5374,6 +5376,10 @@ function ClientDetailScreen({
     if (!captureScreen() || pendingProfileMutation.current?.isCurrent() || !canEditClientProfile) return;
     const { name, value } = event.target;
     if (name === "legalEntityId") {
+      if (!legalLookupEnabled || legalLookup.loading || legalLookup.error || !legalLookup.capture()) return;
+      const entity = sortedLegalEntities.find(item => String(item.id) === value);
+      if (value && !entity) return;
+      if (entity) rememberLegalEntity(entity);
       setClientFormState((prev) => ({ ...prev, legalEntityId: value }));
       return;
     }
@@ -5394,6 +5400,11 @@ function ClientDetailScreen({
 
   const cancelClientProfileEditing = () => {
     if (!captureScreen() || pendingProfileMutation.current?.isCurrent()) return;
+    if (persistedLegalChange.current) {
+      persistedLegalChange.current = false;
+      setClientProfileEditing(false); setClientData(null); setHydratedClient(null); setClientReadRetry(value => value + 1);
+      return;
+    }
     if (clientFormBaselineRef.current) {
       setClientFormState(clientFormBaselineRef.current);
     }
@@ -6125,6 +6136,10 @@ function ClientDetailScreen({
         );
         return;
       }
+      if (profile.kind === "legal" && !selectedLegalEntity) {
+        toast.error('Не удалось подтвердить название выбранной организации. Повторите загрузку списка.', 'Проверка данных');
+        return;
+      }
       try {
         await handleUpdateClient({
           name: buildClientDisplayName(
@@ -6784,7 +6799,7 @@ function ClientDetailScreen({
                     <button
                       type="button"
                       onClick={openLegalEntityCreateModal}
-                      disabled={!canEditClientProfile}
+                      disabled={!canEditClientProfile || !canCreateLegal || legalEntityOpening}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <Plus className="h-4 w-4" />
@@ -6793,7 +6808,7 @@ function ClientDetailScreen({
                     <button
                       type="button"
                       onClick={() => void openLegalEntityEditModal()}
-                      disabled={!canEditClientProfile || !selectedLegalEntity}
+                      disabled={!canEditClientProfile || !selectedLegalEntity || !canReadLegal(selectedLegalEntity) || legalEntityOpening}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <Edit className="h-4 w-4" />
@@ -6809,7 +6824,7 @@ function ClientDetailScreen({
                     onChange={(event) =>
                       setLegalEntityLookupSearch(event.target.value)
                     }
-                    disabled={!canEditClientProfile}
+                    disabled={!canEditClientProfile || !canViewLegalCatalogue}
                     placeholder="Поиск по названию, ИНН, КПП или ОГРН"
                     aria-label="Поиск юридического лица клиента"
                     className="mb-2 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
@@ -6818,10 +6833,11 @@ function ClientDetailScreen({
                     name="legalEntityId"
                     value={clientFormState.legalEntityId}
                     onChange={handleClientFormChange}
-                    disabled={!canEditClientProfile}
+                    disabled={!canEditClientProfile || !legalLookupEnabled || legalLookup.loading || Boolean(legalLookup.error)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
                   >
                     <option value="">Выберите юридическое лицо</option>
+                    {clientFormState.legalEntityId && !sortedLegalEntities.some(item => String(item.id) === clientFormState.legalEntityId) ? <option value={clientFormState.legalEntityId}>Выбранная организация #{clientFormState.legalEntityId}</option> : null}
                     {sortedLegalEntities.map((entity) => (
                       <option key={entity.id} value={entity.id}>
                         {entity.shortName}
@@ -6829,20 +6845,18 @@ function ClientDetailScreen({
                       </option>
                     ))}
                   </SystemSelect>
+                  {legalLookup.error ? <div role="alert" className="mt-1 text-xs text-rose-700">{extractDisplayErrorMessage(new Error(legalLookup.error), 'Не удалось загрузить организации.')} <button type="button" onClick={() => void legalLookup.refresh()} className="underline">Повторить загрузку организаций</button></div> : null}
                   <div className="mt-1 text-xs text-slate-500">
                     {legalEntityLookupLoading
                       ? "Загрузка юрлиц..."
                       : `Найдено: ${legalEntityLookupTotal}`}
                   </div>
+                  <p className="mt-2 text-xs text-slate-600">Юрлицо сохраняется сразу. Отмена карточки клиента не отменяет создание или изменение юрлица и его связи.</p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     <button
                       type="button"
-                      onClick={() => {
-                        setLegalEntityPromptError(null);
-                        setLegalEntityDraft({ shortName: "", inn: "" });
-                        setLegalEntityPromptOpen(true);
-                      }}
-                      disabled={!canEditClientProfile}
+                      onClick={openQuickLegalEntity}
+                      disabled={!canEditClientProfile || !canCreateLegal || legalEntityOpening}
                       className="inline-flex items-center justify-center rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       Быстрое создание
@@ -11410,9 +11424,10 @@ function ClientDetailScreen({
           onClose={closeLegalEntityModal}
           onSubmit={submitLegalEntityModal}
           initial={legalEntityModalInitial}
+          deleteOwnerScope={legalModalContext}
           suggest={(payload) => apiService.suggestLegalEntities(payload)}
           findById={(payload) => apiService.findLegalEntityById(payload)}
-          allowEdit={clientPermissions.canEdit}
+          allowEdit={canEditClientProfile && canWriteLegal(legalEntityModalInitial)}
           allowDelete={false}
           canManageCompanyBranches={userIsAdmin}
           canManageOwnCompanySettings={userIsAdmin}
@@ -11421,6 +11436,7 @@ function ClientDetailScreen({
           canCreateAccounts={accountPermissions.canView && accountPermissions.canCreate}
           canViewActs={actPermissions.canView}
           canViewPayments={paymentPermissions.canView}
+          relatedRecordPermissions={{ cases: casePermissions, accounts: accountPermissions, acts: actPermissions, payments: paymentPermissions }}
           titleOverride={
             legalEntityModalInitial
               ? "Реквизиты юридического лица"
@@ -11439,6 +11455,7 @@ function ClientDetailScreen({
               label: "Название организации",
               value: legalEntityDraft.shortName,
               onChange: (value) => {
+                if (!captureScreen() || !isCurrentLegalOwner(legalOwnerAtRender) || !legalEntityPromptOpen || legalWriteAttempt.current?.isCurrent()) return;
                 setLegalEntityDraft((prev) => ({ ...prev, shortName: value }));
                 if (legalEntityPromptError) {
                   setLegalEntityPromptError(null);
@@ -11453,6 +11470,7 @@ function ClientDetailScreen({
               label: "ИНН",
               value: legalEntityDraft.inn,
               onChange: (value) => {
+                if (!captureScreen() || !isCurrentLegalOwner(legalOwnerAtRender) || !legalEntityPromptOpen || legalWriteAttempt.current?.isCurrent()) return;
                 setLegalEntityDraft((prev) => ({ ...prev, inn: value }));
                 if (legalEntityPromptError) {
                   setLegalEntityPromptError(null);

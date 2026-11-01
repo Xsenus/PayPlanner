@@ -6341,11 +6341,12 @@ export class ApiService {
     });
     return this.request<PagedResult<LegalEntitySummary>>(`/legal-entities/paged${q}`, {
       signal: options?.signal,
+      cache: 'no-store',
     });
   }
 
-  async getLegalEntity(id: number) {
-    return this.request<LegalEntityDetail>(`/legal-entities/${id}`, { cache: 'no-store' });
+  async getLegalEntity(id: number, options?: { signal?: AbortSignal }) {
+    return this.request<LegalEntityDetail>(`/legal-entities/${id}`, { cache: 'no-store', signal: options?.signal });
   }
 
   async getCompanyProfileLegalEntity() {
