@@ -35,6 +35,7 @@ type UsePersistedTableSettingsOptions<K extends string> = {
   columns: TableColumnConfig<K>[];
   defaultPageSize: number;
   enabled?: boolean;
+  persistLocally?: boolean;
   minPageSize?: number;
   maxPageSize?: number;
   minColumnWidth?: number;
@@ -71,6 +72,7 @@ export function usePersistedTableSettings<K extends string>({
   columns,
   defaultPageSize,
   enabled = true,
+  persistLocally = true,
   minPageSize = 5,
   maxPageSize = 100,
   minColumnWidth = 96,
@@ -165,8 +167,8 @@ export function usePersistedTableSettings<K extends string>({
   );
 
   const initialSettings = useMemo(
-    () => normalizeSettings(safeRead<Partial<TableSettingsRecord<K>> | null>(storageKey, null)),
-    [normalizeSettings, storageKey],
+    () => normalizeSettings(persistLocally ? safeRead<Partial<TableSettingsRecord<K>> | null>(storageKey, null) : null),
+    [normalizeSettings, persistLocally, storageKey],
   );
 
   const [visibleColumns, setVisibleColumns] = useState<K[]>(initialSettings.visibleColumns);
@@ -190,7 +192,7 @@ export function usePersistedTableSettings<K extends string>({
     }
 
     let active = true;
-    const cachedSettings = normalizeSettings(safeRead<Partial<TableSettingsRecord<K>> | null>(storageKey, null));
+    const cachedSettings = normalizeSettings(persistLocally ? safeRead<Partial<TableSettingsRecord<K>> | null>(storageKey, null) : null);
 
     setLoadedSettingsKey(null);
     setVisibleColumns(cachedSettings.visibleColumns);
@@ -208,7 +210,7 @@ export function usePersistedTableSettings<K extends string>({
         setColumnOrder(normalized.columnOrder);
         setColumnWidths(normalized.columnWidths);
         setPageSize(normalized.pageSize);
-        safeWrite(storageKey, normalized);
+        if (persistLocally) safeWrite(storageKey, normalized);
       } catch {
         /** */
       } finally {
@@ -223,7 +225,7 @@ export function usePersistedTableSettings<K extends string>({
     return () => {
       active = false;
     };
-  }, [enabled, normalizeSettings, settingsKey, storageKey]);
+  }, [enabled, normalizeSettings, persistLocally, settingsKey, storageKey]);
 
   useEffect(() => {
     const payload = normalizeSettings({
@@ -232,7 +234,7 @@ export function usePersistedTableSettings<K extends string>({
       columnWidths,
       pageSize,
     });
-    safeWrite(storageKey, payload);
+    if (persistLocally) safeWrite(storageKey, payload);
     if (!enabled) return;
     if (loadedSettingsKey !== settingsKey) return;
 
@@ -255,6 +257,7 @@ export function usePersistedTableSettings<K extends string>({
     enabled,
     normalizeSettings,
     pageSize,
+    persistLocally,
     settingsKey,
     loadedSettingsKey,
     storageKey,

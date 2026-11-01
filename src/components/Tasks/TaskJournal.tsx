@@ -3104,7 +3104,8 @@ export function TaskJournal({
     columns: TASK_JOURNAL_TABLE_COLUMNS,
     defaultPageSize: 25,
     minColumnWidth: 96,
-    enabled: currentUserId !== null,
+    enabled: currentUserId !== null && !isRouteTaskPage,
+    persistLocally: !isRouteTaskPage,
   });
   const openTaskCreate = useCallback(() => {
     if (!canCreateTasks) {

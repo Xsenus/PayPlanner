@@ -12,8 +12,10 @@ vi.mock('../services/api', () => ({
 
 type TestColumnKey = 'number' | 'title' | 'date' | 'hidden';
 
-function TableSettingsProbe({ userId = 0 }: { userId?: number }) {
+function TableSettingsProbe({ userId = 0, enabled = true, persistLocally = true }: { userId?: number; enabled?: boolean; persistLocally?: boolean }) {
   const { visibleColumns, orderedVisibleColumns, getColumnWidth, getTableWidth, handleResizeStart, toggleColumn, moveColumn } = usePersistedTableSettings<TestColumnKey>({
+    enabled,
+    persistLocally,
     storageKey: userId ? `pp.test_table_settings.${userId}` : 'pp.test_table_settings',
     settingsKey: userId ? `test_table_settings.${userId}` : 'test_table_settings',
     columns: [
@@ -49,6 +51,26 @@ describe('usePersistedTableSettings', () => {
       key: 'test_table_settings',
       value: '{}',
     });
+  });
+
+  it('keeps local-only persistence when server synchronization is disabled', () => {
+    render(<TableSettingsProbe enabled={false} />);
+    fireEvent.click(screen.getByTestId('hide-title'));
+    expect(JSON.parse(localStorage.getItem('pp.test_table_settings') ?? '{}').visibleColumns).toEqual(['number', 'date']);
+    expect(apiService.getUserSetting).not.toHaveBeenCalled();
+    expect(apiService.upsertUserSetting).not.toHaveBeenCalled();
+  });
+
+  it('can persist to the server without reading or replacing the local cache', async () => {
+    const cached = JSON.stringify({ visibleColumns: ['title'] });
+    localStorage.setItem('pp.test_table_settings', cached);
+    vi.mocked(apiService.getUserSetting).mockResolvedValue({ key: 'test_table_settings', value: JSON.stringify({ visibleColumns: ['number', 'title', 'date'], pageSize: 20 }) });
+    render(<TableSettingsProbe persistLocally={false} />);
+    await waitFor(() => expect(apiService.getUserSetting).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByTestId('hide-title'));
+    await waitFor(() => expect(apiService.upsertUserSetting).toHaveBeenCalledTimes(1));
+    expect(localStorage.getItem('pp.test_table_settings')).toBe(cached);
+    expect(JSON.parse(vi.mocked(apiService.upsertUserSetting).mock.calls[0][1]).visibleColumns).toEqual(['number', 'date']);
   });
 
   it('adds newly introduced default-visible columns to saved settings', () => {

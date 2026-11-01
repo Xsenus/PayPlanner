@@ -11,6 +11,65 @@ import { USER_NOTIFICATIONS_EVENT } from '../../utils/userNotifications';
 describe('TaskJournal', () => {
   setupTaskJournalTests();
 
+  it.each(['legacy', 'modern'] as const)('reference local layout: routed %s task leaves both employees cached layouts untouched', async taskCardWindowMode => {
+    const setup = await renderJournal([createTask()], { settings: { taskCardWindowMode } });
+    setup.unmount(); vi.clearAllMocks();
+    const keys = [7, 8].map(id => `pp.task_journal.table_settings.v1.user:${id}`);
+    keys.forEach((key, index) => localStorage.setItem(key, JSON.stringify({ pageSize: 10 + index })));
+    const originals = keys.map(key => localStorage.getItem(key));
+    const reads = vi.spyOn(Storage.prototype, 'getItem');
+    const writes = vi.spyOn(Storage.prototype, 'setItem');
+    try {
+      const view = render(<TaskJournal routeTaskId={101} />);
+      await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+      authState.user = { ...authState.user, id: 8 };
+      view.rerender(<TaskJournal routeTaskId={101} />);
+      await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+      expect(reads.mock.calls.filter(([key]) => keys.includes(key))).toEqual([]);
+      expect(writes.mock.calls.filter(([key]) => keys.includes(key))).toEqual([]);
+      reads.mockRestore();
+      expect(keys.map(key => localStorage.getItem(key))).toEqual(originals);
+    } finally {
+      reads.mockRestore(); writes.mockRestore();
+    }
+  });
+
+  it.each(['legacy', 'modern'] as const)('reference browser baseline: routed %s task neither reads nor saves the hidden table layout', async taskCardWindowMode => {
+    const setup = await renderJournal([createTask()], { settings: { taskCardWindowMode } });
+    setup.unmount(); vi.clearAllMocks();
+    render(<TaskJournal routeTaskId={101} />);
+    await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    expect(apiMock.getUserSetting.mock.calls.filter(([key]) => key === 'task_journal_table_settings_v1')).toEqual([]);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 800)); });
+    expect(apiMock.upsertUserSetting.mock.calls.filter(([key]) => key === 'task_journal_table_settings_v1')).toEqual([]);
+  });
+  it('reference layout regression: the normal journal still reads and saves its layout', async () => {
+    await renderJournal([createTask()]);
+    expect(apiMock.getUserSetting.mock.calls.filter(([key]) => key === 'task_journal_table_settings_v1')).toHaveLength(1);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 800)); });
+    const writes = apiMock.upsertUserSetting.mock.calls.filter(([key]) => key === 'task_journal_table_settings_v1');
+    expect(writes).toHaveLength(1); expect(JSON.parse(writes[0][1]).pageSize).toBe(25);
+  });
+  it('reference layout regression: opening a routed task cancels an already scheduled layout save', async () => {
+    const view = await renderJournal([createTask()]);
+    view.rerender(<TaskJournal routeTaskId={101} />);
+    await screen.findByTestId('task-legacy-card-window');
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 800)); });
+    expect(apiMock.getUserSetting.mock.calls.filter(([key]) => key === 'task_journal_table_settings_v1')).toHaveLength(1);
+    expect(apiMock.upsertUserSetting.mock.calls.filter(([key]) => key === 'task_journal_table_settings_v1')).toEqual([]);
+  });
+  it('reference layout regression: returning from the routed card restores journal layout loading and saving', async () => {
+    const setup = await renderJournal([createTask()]); setup.unmount(); vi.clearAllMocks();
+    const view = render(<TaskJournal routeTaskId={101} />);
+    await screen.findByTestId('task-legacy-card-window');
+    expect(apiMock.getUserSetting.mock.calls.filter(([key]) => key === 'task_journal_table_settings_v1')).toEqual([]);
+    view.rerender(<TaskJournal routeTaskId={null} />);
+    await screen.findByTestId('task-table');
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 800)); });
+    expect(apiMock.getUserSetting.mock.calls.filter(([key]) => key === 'task_journal_table_settings_v1')).toHaveLength(1);
+    expect(apiMock.upsertUserSetting.mock.calls.filter(([key]) => key === 'task_journal_table_settings_v1')).toHaveLength(1);
+  });
+
 
   it.each(['legacy', 'modern'] as const)('starts routed task data before ancillary metadata in the %s card', async (taskCardWindowMode) => {
     const setup = await renderJournal([createTask()], { settings: { taskCardWindowMode } });
