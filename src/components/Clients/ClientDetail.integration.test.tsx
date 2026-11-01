@@ -751,7 +751,10 @@ describe('ClientDetail integration', () => {
     vi.mocked(apiService.getActResponsibles).mockReset().mockResolvedValue([]);
     vi.mocked(apiService.updateClient).mockReset().mockResolvedValue(createClient());
     vi.mocked(apiService.deleteClient).mockReset().mockResolvedValue(undefined);
-    vi.mocked(apiService.getClientPowersOfAttorney).mockResolvedValue([]);
+    vi.mocked(apiService.getClientPowersOfAttorney).mockReset().mockResolvedValue([]);
+    vi.mocked(apiService.createClientPowerOfAttorney).mockReset();
+    vi.mocked(apiService.updateClientPowerOfAttorney).mockReset();
+    vi.mocked(apiService.deleteClientPowerOfAttorney).mockReset();
     vi.mocked(apiService.getClientCaseFinanceSummaries).mockResolvedValue([]);
     vi.mocked(apiService.getClientCaseExpenseDetails).mockResolvedValue([]);
     vi.mocked(apiService.getContracts).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 200 });
@@ -1913,6 +1916,7 @@ describe('ClientDetail integration', () => {
   it('updates and deletes a power of attorney directly from the client card', async () => {
     const user = userEvent.setup();
     const originalPoa = createPowerOfAttorney();
+    permissionsResult.clients.canDelete = true;
     const updatedPoa = createPowerOfAttorney({
       issuer: 'Новый нотариус',
       validUntil: '2026-05-15',
@@ -1979,6 +1983,63 @@ describe('ClientDetail integration', () => {
     await waitFor(() => {
       expect(screen.queryByText('Кем выдана: Новый нотариус')).toBeNull();
     });
+  });
+
+  async function openPoaPermissionProfile() {
+    vi.mocked(apiService.getClientPowersOfAttorney).mockResolvedValue([createPowerOfAttorney()]);
+    const props = { clientId: 1, onBack: vi.fn(), initialSection: 'profile' as const };
+    const view = render(<ClientDetail {...props} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Дополнительная информация' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Доверенности' }));
+    await screen.findByText('Кем выдана: Старый нотариус');
+    return { props, view };
+  }
+  it('poa operation permissions: profile edit alone does not allow creating or deleting a power', async () => {
+    await openPoaPermissionProfile();
+    expect(screen.getByRole('button', { name: '+ Добавить доверенность' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Удалить доверенность' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Изменить доверенность' })).toHaveProperty('disabled', false);
+  });
+  it('poa operation permissions: separate create and delete permissions enable their existing actions', async () => {
+    permissionsResult.clients.canCreate = true; permissionsResult.clients.canDelete = true;
+    await openPoaPermissionProfile();
+    expect(screen.getByRole('button', { name: '+ Добавить доверенность' })).toHaveProperty('disabled', false);
+    expect(screen.getByRole('button', { name: 'Удалить доверенность' })).toHaveProperty('disabled', false);
+  });
+  it.each([[true, false], [false, true]])('poa operation permissions: create=%s and delete=%s remain independent', async (create, remove) => {
+    permissionsResult.clients.canCreate = create; permissionsResult.clients.canDelete = remove;
+    await openPoaPermissionProfile();
+    expect(screen.getByRole('button', { name: '+ Добавить доверенность' })).toHaveProperty('disabled', !create);
+    expect(screen.getByRole('button', { name: 'Удалить доверенность' })).toHaveProperty('disabled', !remove);
+  });
+  it('poa operation owner: a late create cannot notify another role', async () => {
+    permissionsResult.clients.canCreate = true;
+    let finish!: (value: PowerOfAttorney) => void; vi.mocked(apiService.createClientPowerOfAttorney).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const { props, view } = await openPoaPermissionProfile(); fireEvent.click(screen.getByRole('button', { name: '+ Добавить доверенность' }));
+    const prompt = within(screen.getByRole('dialog', { name: 'Новая доверенность' }));
+    fireEvent.change(prompt.getByLabelText(/Номер доверенности/), { target: { value: 'Новая доверенность' } });
+    fireEvent.change(prompt.getByLabelText('Дата выдачи'), { target: { value: '2026-11-02' } });
+    fireEvent.click(prompt.getByRole('button', { name: 'Создать' })); await waitFor(() => expect(apiService.createClientPowerOfAttorney).toHaveBeenCalledOnce());
+    authState.roleId = 2; view.rerender(<ClientDetail {...props} />);
+    await act(async () => finish(createPowerOfAttorney({ id: 78, number: 'Новая доверенность' })));
+    expect(toastSuccessMock).not.toHaveBeenCalled();
+  });
+  it('poa operation owner: a queued delete confirmation cannot issue a request under another role', async () => {
+    permissionsResult.clients.canDelete = true;
+    let answer!: (value: boolean) => void; confirmMock.mockReturnValueOnce(new Promise(resolve => { answer = resolve; }));
+    const { props, view } = await openPoaPermissionProfile(); fireEvent.click(screen.getByRole('button', { name: 'Удалить доверенность' }));
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledOnce()); authState.roleId = 2; view.rerender(<ClientDetail {...props} />);
+    expect(confirmMock.mock.calls[0][0].signal.aborted).toBe(true);
+    await act(async () => answer(true)); expect(apiService.deleteClientPowerOfAttorney).not.toHaveBeenCalled(); expect(toastSuccessMock).not.toHaveBeenCalled();
+  });
+  it('poa operation owner: collapsing the group aborts its one pending delete confirmation', async () => {
+    permissionsResult.clients.canDelete = true;
+    let answer!: (value: boolean) => void; confirmMock.mockReturnValueOnce(new Promise(resolve => { answer = resolve; }));
+    await openPoaPermissionProfile(); const remove = screen.getByRole('button', { name: 'Удалить доверенность' }); fireEvent.click(remove); fireEvent.click(remove);
+    expect(confirmMock).toHaveBeenCalledOnce(); const signal = confirmMock.mock.calls[0][0].signal as AbortSignal;
+    fireEvent.click(screen.getByRole('button', { name: 'Скрыть дополнительную информацию' })); expect(signal.aborted).toBe(true);
+    await act(async () => answer(true)); expect(apiService.deleteClientPowerOfAttorney).not.toHaveBeenCalled();
   });
 
   it('clears hidden passport validity dates before saving the client card', async () => {

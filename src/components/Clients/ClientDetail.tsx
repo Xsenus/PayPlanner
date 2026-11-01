@@ -1790,6 +1790,11 @@ function ClientDetailScreen({
     createEmptyPoaDraft(),
   );
   const isEditingPoa = poaDraft.id !== null;
+  const poaDeleteConfirmation = useRef<AbortController | null>(null);
+  const poaConfirmationScope = JSON.stringify([screenOwner.scope, profileReady, activeSection, activeProfileGroup, profileAdditionalOpen, clientProfileEditing]);
+  const currentPoaConfirmationScope = useRef(poaConfirmationScope);
+  currentPoaConfirmationScope.current = poaConfirmationScope;
+  useEffect(() => () => { poaDeleteConfirmation.current?.abort(); }, [poaConfirmationScope]);
 
   const hasMeaningfulValue = (value: unknown): boolean => {
     if (value === null || value === undefined) return false;
@@ -1995,18 +2000,22 @@ function ClientDetailScreen({
   };
 
   const openCreatePoaPrompt = () => {
+    if (!captureScreen() || !canEditClientProfile || (!userIsAdmin && !clientPermissions.canCreate)) return;
     setPoaPromptError(null);
     setPoaDraft(createEmptyPoaDraft());
     setPoaPromptOpen(true);
   };
 
   const openEditPoaPrompt = (poa: PowerOfAttorney) => {
+    if (!captureScreen() || !canEditClientProfile || (!userIsAdmin && !clientPermissions.canEdit)) return;
     setPoaPromptError(null);
     setPoaDraft(createPoaDraftFromItem(poa));
     setPoaPromptOpen(true);
   };
 
   const submitQuickPowerOfAttorney = async () => {
+    const owner = captureScreen();
+    if (!owner || !canEditClientProfile || (!userIsAdmin && (poaDraft.id === null ? !clientPermissions.canCreate : !clientPermissions.canEdit))) return;
     const number = poaDraft.number.trim();
     const issuedAt = poaDraft.issuedAt.trim();
 
@@ -2031,6 +2040,7 @@ function ClientDetailScreen({
           clientId,
           payload,
         );
+        if (!owner.isCurrent()) return;
         setPowersOfAttorney((prev) => [created, ...prev]);
         toast.success("Доверенность создана.", "Доверенности");
       } else {
@@ -2039,6 +2049,7 @@ function ClientDetailScreen({
           poaDraft.id,
           payload,
         );
+        if (!owner.isCurrent()) return;
         setPowersOfAttorney((prev) =>
           prev.map((item) => (item.id === updated.id ? updated : item)),
         );
@@ -2046,6 +2057,7 @@ function ClientDetailScreen({
       }
       closePoaPrompt(true);
     } catch (error) {
+      if (!owner.isCurrent()) return;
       const message = extractDisplayErrorMessage(
         error,
         poaDraft.id === null
@@ -2055,39 +2067,46 @@ function ClientDetailScreen({
       setPoaPromptError(message);
       toast.error(message, "Доверенности");
     } finally {
-      setPoaPromptSubmitting(false);
+      if (owner.isCurrent()) setPoaPromptSubmitting(false);
     }
   };
 
   const deletePowerOfAttorney = async (poa: PowerOfAttorney) => {
-    if (!clientPermissions.canEdit) {
-      showPermissionWarning("Недостаточно прав для редактирования клиента.");
+    const owner = captureScreen();
+    if (currentPoaConfirmationScope.current !== poaConfirmationScope || poaDeleteConfirmation.current) return;
+    if (!owner || !canEditClientProfile || (!userIsAdmin && !clientPermissions.canDelete)) {
+      if (owner) showPermissionWarning("Недостаточно прав для удаления доверенности.");
       return;
     }
 
-    const ok = await confirm({
-      title: "Удаление доверенности",
-      description: `Удалить доверенность №${poa.number}?`,
-      confirmLabel: "Удалить",
-      cancelLabel: "Отмена",
-      variant: "danger",
-    });
-
-    if (!ok) return;
-
+    const controller = new AbortController();
+    poaDeleteConfirmation.current = controller;
     try {
+      const ok = await confirm({
+        title: "Удаление доверенности",
+        description: `Удалить доверенность №${poa.number}?`,
+        confirmLabel: "Удалить",
+        cancelLabel: "Отмена",
+        variant: "danger",
+        signal: controller.signal,
+      });
+      if (!ok || !owner.isCurrent() || controller.signal.aborted) return;
       await apiService.deleteClientPowerOfAttorney(clientId, poa.id);
+      if (!owner.isCurrent() || controller.signal.aborted) return;
       setPowersOfAttorney((prev) => prev.filter((item) => item.id !== poa.id));
       if (poaDraft.id === poa.id) {
         closePoaPrompt(true);
       }
       toast.success("Доверенность удалена.", "Доверенности");
     } catch (error) {
+      if (!owner.isCurrent() || controller.signal.aborted) return;
       const message = extractDisplayErrorMessage(
         error,
         "Не удалось удалить доверенность",
       );
       toast.error(message, "Доверенности");
+    } finally {
+      if (poaDeleteConfirmation.current === controller) poaDeleteConfirmation.current = null;
     }
   };
 
@@ -7867,7 +7886,7 @@ function ClientDetailScreen({
                               </label>
                               <button
                                 type="button"
-                                disabled={!canEditClientProfile}
+                                disabled={!canEditClientProfile || (!userIsAdmin && !clientPermissions.canCreate)}
                                 onClick={openCreatePoaPrompt}
                                 className="text-sm text-emerald-600"
                               >
@@ -7922,7 +7941,7 @@ function ClientDetailScreen({
                                             onClick={() =>
                                               void deletePowerOfAttorney(poa)
                                             }
-                                            disabled={!canEditClientProfile}
+                                            disabled={!canEditClientProfile || (!userIsAdmin && !clientPermissions.canDelete)}
                                             className={PROFILE_DELETE_ICON_BUTTON_CLASS}
                                             title="Удалить доверенность"
                                             aria-label="Удалить доверенность"
