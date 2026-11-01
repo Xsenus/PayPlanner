@@ -1419,6 +1419,64 @@ describe('LegalEntityModal integration', () => {
     expect(screen.queryByText('Платежи')).toBeNull();
   });
 
+  describe('company address autofill ownership', () => {
+    const propsFor = (mode: 'page' | 'modal') => ({ isOpen: true, mode, initial: createInitialLegalEntity({ shortName: 'Профиль адресов', isOwnCompany: false,
+      addresses: [{ id: 1, type: 3, value: 'Первый адрес', isPrimary: true, createdAt: '2026-11-01T00:00:00Z' }, { id: 2, type: 2, value: 'Второй адрес', isPrimary: false, createdAt: '2026-11-01T00:00:00Z' }] }),
+      allowEdit: true, allowDelete: false, canManageOwnCompanySettings: false, canViewCases: false, canViewAccounts: false, canViewActs: false, canViewPayments: false,
+      onClose: vi.fn(), onSubmit: vi.fn(), suggest: vi.fn(), findById: vi.fn() });
+    for (const mode of ['page', 'modal'] as const) {
+      it.each(['manual', 'delete', 'company'] as const)(`company address baseline: ${mode} clean result cannot cross %s`, async change => {
+        let resolve!: (value: { result: string; cityWithType: string }) => void;
+        vi.mocked(apiService.cleanAddress).mockReturnValue(new Promise(done => { resolve = done; }));
+        const p = propsFor(mode); const view = render(<LegalEntityModal {...p} />); fireEvent.click(screen.getByRole('button', { name: 'Адреса' }));
+        fireEvent.click(screen.getAllByRole('button', { name: 'Найти адрес' })[0]); expect(apiService.cleanAddress).toHaveBeenCalledOnce();
+        if (change === 'manual') fireEvent.change(screen.getAllByLabelText('Полный адрес')[0], { target: { value: 'Ручной адрес' } });
+        if (change === 'delete') fireEvent.click(screen.getAllByRole('button', { name: 'Удалить адрес' })[0]);
+        if (change === 'company') view.rerender(<LegalEntityModal {...p} initial={{ ...p.initial, id: 12, shortName: 'Новый профиль' }} />);
+        await act(async () => resolve({ result: 'Старый результат', cityWithType: 'Устаревший город' }));
+        expect(screen.queryByDisplayValue('Устаревший город')).toBeNull();
+        if (change === 'manual') expect(screen.getByDisplayValue('Ручной адрес')).toBeTruthy();
+        if (change === 'delete') expect(screen.getByDisplayValue('Второй адрес')).toBeTruthy();
+      });
+      it(`company address baseline: ${mode} removing a row cancels its scheduled request`, async () => {
+        const p = propsFor(mode); render(<LegalEntityModal {...p} />); fireEvent.click(screen.getByRole('button', { name: 'Адреса' }));
+        fireEvent.change(screen.getAllByLabelText('Полный адрес')[0], { target: { value: 'Запрос удалённого адреса' } });
+        fireEvent.click(screen.getAllByRole('button', { name: 'Удалить адрес' })[0]);
+        await act(async () => { await new Promise(done => setTimeout(done, 400)); });
+        expect(apiService.suggestClientAddresses).not.toHaveBeenCalled(); expect(screen.getByDisplayValue('Второй адрес')).toBeTruthy();
+      });
+      it(`company address parent: ${mode} repeated clicks share one request and show its result`, async () => {
+        let resolve!: (value: { result: string; cityWithType: string }) => void;
+        vi.mocked(apiService.cleanAddress).mockReturnValueOnce(new Promise(done => { resolve = done; }));
+        render(<LegalEntityModal {...propsFor(mode)} />); fireEvent.click(screen.getByRole('button', { name: 'Адреса' }));
+        const find = screen.getAllByRole('button', { name: 'Найти адрес' })[0]; fireEvent.click(find); fireEvent.click(find);
+        expect(apiService.cleanAddress).toHaveBeenCalledOnce(); await act(async () => resolve({ result: 'Первый адрес', cityWithType: 'Текущий город' }));
+        expect(screen.getAllByLabelText('Город')[0]).toHaveProperty('value', 'Текущий город'); expect(screen.getByDisplayValue('Второй адрес')).toBeTruthy();
+      });
+      it(`company address parent: ${mode} an owned failure keeps input and permits an explicit retry`, async () => {
+        vi.mocked(apiService.cleanAddress).mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({ result: 'Первый адрес', cityWithType: 'Текущий город' });
+        render(<LegalEntityModal {...propsFor(mode)} />); fireEvent.click(screen.getByRole('button', { name: 'Адреса' }));
+        fireEvent.click(screen.getAllByRole('button', { name: 'Найти адрес' })[0]);
+        expect((await screen.findByRole('alert')).textContent).toContain('Введённые данные сохранены'); expect(screen.getByDisplayValue('Первый адрес')).toBeTruthy();
+        fireEvent.click(screen.getAllByRole('button', { name: 'Найти адрес' })[0]); await waitFor(() => expect(screen.getAllByLabelText('Город')[0]).toHaveProperty('value', 'Текущий город'));
+        expect(screen.queryByRole('alert')).toBeNull(); expect(apiService.cleanAddress).toHaveBeenCalledTimes(2);
+      });
+      it(`company address parent: ${mode} chosen suggestion remains visible when normalization fails`, async () => {
+        vi.mocked(apiService.suggestClientAddresses).mockResolvedValue([{ value: 'Выбранный адрес' }]); vi.mocked(apiService.cleanAddress).mockRejectedValueOnce(new Error('offline'));
+        render(<LegalEntityModal {...propsFor(mode)} />); fireEvent.click(screen.getByRole('button', { name: 'Адреса' }));
+        fireEvent.change(screen.getAllByLabelText('Полный адрес')[0], { target: { value: 'Запрос адреса' } }); fireEvent.click(await screen.findByText('Выбранный адрес'));
+        expect((await screen.findByRole('alert')).textContent).toContain('Введённые данные сохранены'); expect(screen.getByDisplayValue('Выбранный адрес')).toBeTruthy();
+      });
+      it(`company address parent: ${mode} save sends only persisted address fields`, async () => {
+        const p = propsFor(mode); p.onSubmit.mockResolvedValue(p.initial); render(<LegalEntityModal {...p} />);
+        fireEvent.click(screen.getByRole('button', { name: 'Сохранить' })); await waitFor(() => expect(p.onSubmit).toHaveBeenCalledOnce());
+        const payload = p.onSubmit.mock.calls[0][0] as LegalEntityInput; expect(payload.addresses).toHaveLength(2);
+        expect(payload.addresses?.map(row => row.value)).toEqual(['Первый адрес', 'Второй адрес']);
+        expect(JSON.stringify(payload)).not.toContain('uiKey');
+      });
+    }
+  });
+
   describe('company autofill ownership', () => {
     const first = { shortName: 'Первый кандидат', inn: '7707083893', address: 'Первый адрес' };
     const propsFor = (mode: 'page' | 'modal') => ({ isOpen: true, mode, initial: createInitialLegalEntity({ shortName: 'Текущий профиль', inn: '7707083893', isOwnCompany: false }),

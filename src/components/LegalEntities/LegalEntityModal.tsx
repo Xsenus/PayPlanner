@@ -40,7 +40,6 @@ import type {
   LegalEntityInput,
   LegalEntitySuggestion,
   LegalEntityDadataDetails,
-  DadataAddressSuggestion,
   CompanyProfileStatus,
 } from "../../types";
 import { ClientStatusBadge } from "../Clients/ClientStatusBadge";
@@ -54,6 +53,8 @@ import {
 } from "../Clients/addressEntryPersistence";
 import { chooseBestDisplayAddress } from "../Clients/addressEntryUtils";
 import { apiService } from "../../services/api";
+import { createClientRequestId } from '../../utils/clientRequestId';
+import { useCompanyAddressAutofill } from './useCompanyAddressAutofill';
 import { useActs } from "../../hooks/useActs";
 import { useClients } from "../../hooks/useClients";
 import { useClientCases } from "../../hooks/useClientCases";
@@ -527,6 +528,7 @@ function mergeClientAssociationItems(
 const createEmptyLegalEntityAddressEntry = (
   isPrimary = false,
 ): ClientAddressEntryFormValue => ({
+  uiKey: createClientRequestId(),
   type: "legal",
   isPrimary,
   additionalTypes: [],
@@ -950,10 +952,6 @@ export function LegalEntityModal({
   const [addressEntries, setAddressEntries] = useState<
     ClientAddressEntryFormValue[]
   >([]);
-  const [addressSuggestionsByIndex, setAddressSuggestionsByIndex] = useState<
-    Record<number, DadataAddressSuggestion[]>
-  >({});
-  const addressSuggestionTimersRef = useRef<Record<number, number>>({});
   const [contactPhones, setContactPhones] = useState<string[]>([]);
   const [contactEmails, setContactEmails] = useState<string[]>([]);
   const [dictModalOpen, setDictModalOpen] = useState(false);
@@ -1061,6 +1059,9 @@ export function LegalEntityModal({
   }, [initial, isOpen, companyAutofillOwner.scope]);
   const invalidateCompanyDetails = () => { companyAutofillRequests.current.details++; };
   const canStartCompanyAutofill = () => isOpen && !readOnly && !loading && !hideDadataSection;
+  const addressAutofill = useCompanyAddressAutofill({ entries: addressEntries, setEntries: setAddressEntries,
+    scope: JSON.stringify([classificationScope, loading]), enabled: isOpen && !readOnly && !loading,
+    resetKey: initial, onUseAddress: invalidateCompanyDetails });
   const { capture: captureInvoiceCaseOwner, isCurrent: isInvoiceCaseOwnerCurrent } = useAsyncOperationOwner(JSON.stringify([
     classificationScope, invoiceModalOpen, invoiceModalMode, selectedInvoice?.id, canViewCases,
     canMutateRelated('accounts', invoiceModalMode === 'edit' ? 'canEdit' : 'canCreate'),
@@ -1473,7 +1474,6 @@ export function LegalEntityModal({
       setSealChanged(false);
       setDirectorSignatureChanged(false);
       setAddressEntries([createEmptyLegalEntityAddressEntry(true)]);
-      setAddressSuggestionsByIndex({});
       setContactPhones([]);
       setContactEmails([]);
     }
@@ -1497,15 +1497,6 @@ export function LegalEntityModal({
     setActModalOpen(false);
     setSelectedAct(null);
   }, [initial, isOpen]);
-
-  useEffect(
-    () => () => {
-      Object.values(addressSuggestionTimersRef.current).forEach((timerId) =>
-        window.clearTimeout(timerId),
-      );
-    },
-    [],
-  );
 
   useEffect(() => {
     if (!isOpen) return;
@@ -1810,6 +1801,7 @@ export function LegalEntityModal({
     value: string,
   ) => {
     invalidateCompanyDetails();
+    addressAutofill.invalidate(addressEntries[index]?.uiKey);
     setAddressEntries((prev) =>
       prev.map((entry, i) =>
         i === index ? { ...entry, [key]: value } : entry,
@@ -1819,11 +1811,13 @@ export function LegalEntityModal({
 
   const setPrimaryAddressFormEntry = (index: number) => {
     invalidateCompanyDetails();
+    addressAutofill.invalidate(addressEntries[index]?.uiKey);
     setAddressEntries((prev) => setPrimaryAddressEntry(prev, index));
   };
 
   const toggleAdditionalAddressType = (index: number, type: string) => {
     invalidateCompanyDetails();
+    addressAutofill.invalidate(addressEntries[index]?.uiKey);
     setAddressEntries((prev) =>
       prev.map((entry, i) => {
         if (i !== index) return entry;
@@ -1836,121 +1830,6 @@ export function LegalEntityModal({
         };
       }),
     );
-  };
-
-  const scheduleAddressSuggestions = (index: number, query: string) => {
-    const timers = addressSuggestionTimersRef.current;
-    if (timers[index]) window.clearTimeout(timers[index]);
-    timers[index] = window.setTimeout(async () => {
-      const normalized = query.trim();
-      if (normalized.length < 3) {
-        setAddressSuggestionsByIndex((prev) => ({ ...prev, [index]: [] }));
-        return;
-      }
-      try {
-        const items = await apiService.suggestClientAddresses(normalized, 7);
-        setAddressSuggestionsByIndex((prev) => ({
-          ...prev,
-          [index]: items ?? [],
-        }));
-      } catch {
-        setAddressSuggestionsByIndex((prev) => ({ ...prev, [index]: [] }));
-      }
-    }, 350);
-  };
-
-  const fillAddressEntryByDaData = async (index: number, rawInput?: string) => {
-    const source = (
-      rawInput ??
-      addressEntries[index]?.fullAddress ??
-      ""
-    ).trim();
-    if (!source) return;
-    const cleaned = await apiService.cleanAddress(source);
-    setAddressEntries((prev) =>
-      prev.map((entry, i) => {
-        if (i !== index) return entry;
-
-        const updated = {
-          ...entry,
-          postalCode: cleaned.postalCode ?? "",
-          country: cleaned.country ?? entry.country ?? "",
-          region: cleaned.regionWithType ?? "",
-          district: cleaned.areaWithType ?? "",
-          city: cleaned.cityWithType ?? "",
-          settlement: cleaned.settlementWithType ?? "",
-          street: cleaned.streetWithType ?? "",
-          house: cleaned.house ?? "",
-          flat: cleaned.flat ?? "",
-          fiasId: cleaned.fiasId ?? "",
-          kladrId: cleaned.kladrId ?? "",
-          geoLat: cleaned.geoLat ?? "",
-          geoLon: cleaned.geoLon ?? "",
-        };
-
-        return {
-          ...updated,
-          fullAddress: chooseBestDisplayAddress(
-            updated,
-            entry.fullAddress,
-            cleaned.result,
-            source,
-          ),
-        };
-      }),
-    );
-  };
-
-  const applyAddressSuggestion = async (
-    index: number,
-    suggestion: DadataAddressSuggestion,
-  ) => {
-    invalidateCompanyDetails();
-    const selected = (
-      suggestion.unrestrictedValue ??
-      suggestion.value ??
-      ""
-    ).trim();
-    if (!selected) return;
-
-    setAddressEntries((prev) =>
-      prev.map((entry, i) => {
-        if (i !== index) return entry;
-
-        const updated = {
-          ...entry,
-          postalCode: suggestion.postalCode ?? "",
-          country: entry.country ?? "",
-          region: suggestion.regionWithType ?? "",
-          district: suggestion.areaWithType ?? "",
-          city: suggestion.cityWithType ?? "",
-          settlement: suggestion.settlementWithType ?? "",
-          street: suggestion.streetWithType ?? "",
-          house: suggestion.house ?? "",
-          flat: suggestion.flat ?? "",
-          fiasId: suggestion.fiasId ?? entry.fiasId ?? "",
-          kladrId: suggestion.kladrId ?? entry.kladrId ?? "",
-          geoLat: suggestion.geoLat ?? entry.geoLat ?? "",
-          geoLon: suggestion.geoLon ?? entry.geoLon ?? "",
-        };
-
-        return {
-          ...updated,
-          fullAddress: chooseBestDisplayAddress(
-            updated,
-            selected,
-            entry.fullAddress,
-          ),
-        };
-      }),
-    );
-    setAddressSuggestionsByIndex((prev) => ({ ...prev, [index]: [] }));
-
-    try {
-      await fillAddressEntryByDaData(index, selected);
-    } catch {
-      // fallback from suggestion above is already applied
-    }
   };
 
   const handleSuggest = async () => {
@@ -4685,11 +4564,13 @@ export function LegalEntityModal({
                 canEdit={!readOnly}
                 compactReadOnly={compactReadOnlyView}
                 addressTypeOptions={[...ADDRESS_TYPE_OPTIONS]}
-                suggestionsByIndex={addressSuggestionsByIndex}
+                suggestionsByIndex={addressAutofill.suggestionsByIndex}
+                errorsByIndex={addressAutofill.errorsByIndex}
                 onUpdateEntry={updateAddressFormEntry}
                 onSetPrimary={setPrimaryAddressFormEntry}
                 onRemoveEntry={(index) => {
                   invalidateCompanyDetails();
+                  addressAutofill.invalidate(addressEntries[index]?.uiKey);
                   setAddressEntries((prev) =>
                     prev.length > 1
                       ? ensureSinglePrimaryAddressEntryList(
@@ -4708,11 +4589,11 @@ export function LegalEntityModal({
                   );
                 }}
                 onToggleAdditionalType={toggleAdditionalAddressType}
-                onScheduleSuggestions={scheduleAddressSuggestions}
+                onScheduleSuggestions={(index, query) => addressAutofill.schedule(addressEntries[index]?.uiKey, query)}
                 onFindAddress={(index) => {
-                  void fillAddressEntryByDaData(index);
+                  void addressAutofill.clean(addressEntries[index]?.uiKey);
                 }}
-                onApplySuggestion={applyAddressSuggestion}
+                onApplySuggestion={(index, suggestion) => addressAutofill.apply(addressEntries[index]?.uiKey, suggestion)}
               />
             )}
 

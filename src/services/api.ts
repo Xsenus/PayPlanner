@@ -6694,10 +6694,11 @@ export class ApiService {
   }
 
 
-  async cleanAddress(address: string) {
+  async cleanAddress(address: string, signal?: AbortSignal) {
     return this.request<CleanedAddress>('/clients/dadata/clean-address', {
       method: 'POST',
       body: JSON.stringify({ address }),
+      signal,
     });
   }
 
@@ -6715,10 +6716,11 @@ export class ApiService {
   }
 
 
-  async suggestClientAddresses(query: string, limit = 7) {
+  async suggestClientAddresses(query: string, limit = 7, signal?: AbortSignal) {
     return this.request<DadataAddressSuggestion[]>(`/clients/dadata/suggest-address`, {
       method: 'POST',
       body: JSON.stringify({ query, limit }),
+      signal,
     });
   }
 

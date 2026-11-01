@@ -37,6 +37,13 @@ const addressTypeOptions = [
 ];
 
 describe("ClientAddressEntriesForm integration", () => {
+  it('keeps the surviving keyed row and focus when the previous row is removed', () => {
+    const first = { ...baseEntry, uiKey: 'first' }; const second = { ...baseEntry, uiKey: 'second', fullAddress: updatedFullAddress };
+    const props = { entries: [first, second], canEdit: true, addressTypeOptions, suggestionsByIndex: {}, onUpdateEntry: vi.fn(), onSetPrimary: vi.fn(), onRemoveEntry: vi.fn(), onAddEntry: vi.fn(), onToggleAdditionalType: vi.fn(), onScheduleSuggestions: vi.fn(), onFindAddress: vi.fn(), onApplySuggestion: vi.fn() };
+    const view = render(<ClientAddressEntriesForm {...props} />); const surviving = screen.getByDisplayValue(updatedFullAddress); surviving.focus();
+    view.rerender(<ClientAddressEntriesForm {...props} entries={[second]} />);
+    expect(screen.getByDisplayValue(updatedFullAddress)).toBe(surviving); expect(document.activeElement).toBe(surviving);
+  });
   it("shows all address details as text in read mode and keeps the edit form available", () => {
     const props = {
       entries: [{ ...baseEntry, additionalTypes: ["actual"], validFrom: "2026-01-02" }],

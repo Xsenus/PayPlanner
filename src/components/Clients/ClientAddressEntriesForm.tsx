@@ -7,6 +7,8 @@ import type { DadataAddressSuggestion } from "../../types";
 import { ADDRESS_ENTRY_VALIDITY_FIELDS_VISIBLE } from "../../config/features";
 
 export interface ClientAddressEntryFormValue {
+  /** Optional form-lifetime identity; never a database address ID. */
+  uiKey?: string;
   type: string;
   isPrimary: boolean;
   additionalTypes: string[];
@@ -42,6 +44,7 @@ interface ClientAddressEntriesFormProps {
   validityDateInputClassName?: string;
   addressTypeOptions: AddressTypeOption[];
   suggestionsByIndex: Record<number, DadataAddressSuggestion[]>;
+  errorsByIndex?: Record<number, string>;
   onUpdateEntry: (
     index: number,
     key: keyof ClientAddressEntryFormValue,
@@ -75,6 +78,7 @@ export function ClientAddressEntriesForm({
   validityDateInputClassName = ADDRESS_ENTRY_VALIDITY_DATE_INPUT_CLASS,
   addressTypeOptions,
   suggestionsByIndex,
+  errorsByIndex = {},
   onUpdateEntry,
   onSetPrimary,
   onRemoveEntry,
@@ -102,7 +106,7 @@ export function ClientAddressEntriesForm({
             ...(shouldShowValidityFields ? [["Действует с", entry.validFrom], ["Действует по", entry.validTo]] : []),
           ];
           return (
-            <section key={`address-entry-${index}`} aria-label={`Адрес #${index + 1}`} className="border-t border-slate-200 pt-3">
+            <section key={entry.uiKey ?? `address-entry-${index}`} aria-label={`Адрес #${index + 1}`} className="border-t border-slate-200 pt-3">
               <h4 className="mb-2 text-sm font-semibold text-slate-800">Адрес #{index + 1} · {entry.isPrimary ? "По умолчанию" : "Дополнительный"}</h4>
               <dl className="grid grid-cols-2 gap-x-4 gap-y-2 xl:grid-cols-4">
                 {fields.map(([label, value]) => <div key={label} className={`min-w-0 ${label === "Полный адрес" ? "col-span-2" : ""}`}><dt className="text-xs text-slate-500">{label}</dt><dd className="text-sm text-slate-900 [overflow-wrap:anywhere]">{value || "Не указано"}</dd></div>)}
@@ -118,7 +122,7 @@ export function ClientAddressEntriesForm({
     <div className="space-y-4 md:col-span-2">
       {entries.map((entry, index) => (
         <div
-          key={`address-entry-${index}`}
+          key={entry.uiKey ?? `address-entry-${index}`}
           className="rounded-xl border border-slate-200 bg-slate-50 p-4"
         >
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -280,7 +284,8 @@ export function ClientAddressEntriesForm({
               </div>
             ) : null}
 
-            {showReadonlyControls &&
+            {errorsByIndex[index] ? <p role="alert" className="text-sm text-red-700 xl:col-span-4">{errorsByIndex[index]}</p> : null}
+            {showReadonlyControls && canEdit &&
             (suggestionsByIndex[index]?.length ?? 0) > 0 ? (
               <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-3 xl:col-span-4">
                 <p className="mb-2 text-xs font-medium uppercase tracking-wide text-indigo-600">
@@ -291,6 +296,7 @@ export function ClientAddressEntriesForm({
                     <button
                       key={`${item.value}-${item.unrestrictedValue ?? ""}`}
                       type="button"
+                      disabled={!canEdit}
                       onClick={() => {
                         void onApplySuggestion(index, item);
                       }}
