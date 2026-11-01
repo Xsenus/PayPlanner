@@ -2498,7 +2498,9 @@ export function TaskJournal({
   const canViewClients = isAdminUser || permissions.clients.canView;
   const canViewLegalEntities = isAdminUser || permissions.legalEntities.canView;
   const canViewCases = isAdminUser || permissions.cases.canView;
-  const { clients } = useClients({ enabled: canViewClients });
+  const { clients } = useClients({ enabled: canViewClients,
+    ownerScope: JSON.stringify([currentUserId, user?.role?.id, isAdminUser, permissions.clients, permissions.cases, permissions.contracts,
+      permissions.accounts, permissions.acts, permissions.payments]) });
   const { legalEntities } = useLegalEntities({ enabled: canViewLegalEntities,
     ownerScope: JSON.stringify([currentUserId, user?.role?.id, isAdminUser, permissions.legalEntities]) });
   const canCreateTasks = !offlineCalendarSnapshot && (isAdminUser || permissions.tasks.canCreate);

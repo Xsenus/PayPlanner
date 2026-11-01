@@ -36,7 +36,9 @@ export function Calculator({ onOpenPayment }: { onOpenPayment?: (id: number, typ
     [canViewClients, canViewLegalEntities],
   );
   const canSelectCounterparty = allowedCounterpartyScopes.length > 0;
-  const clientsOptions = useMemo(() => ({ enabled: canViewClients }), [canViewClients]);
+  const clientOwnerScope = JSON.stringify([user?.id, user?.role?.id, permissions.clients, permissions.cases, permissions.contracts,
+    permissions.accounts, permissions.acts, permissions.payments]);
+  const clientsOptions = useMemo(() => ({ enabled: canViewClients, ownerScope: clientOwnerScope }), [canViewClients, clientOwnerScope]);
   const { clients } = useClients(clientsOptions);
   const toast = useToast();
   const { confirm } = useDialog();

@@ -11,6 +11,7 @@ import { acknowledgeBalanceApplication, applyBalanceGuarded, cancelBalanceApplic
 import { API_BASE_URL } from '../../services/apiBaseUrl';
 import { documentCopyTestSession } from '../../test/documentCopySession';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
+import { useClients } from '../../hooks/useClients';
 import { acknowledgePaymentCreate, assertPaymentCreateOwner, bindPaymentCreateOwner, createPaymentGuarded, fencePaymentCreateAdoption, inspectPaymentCreate, pendingPaymentCreates,
   paymentCreateTokenMatches,
   openCommittedPaymentCreate, type PaymentAttemptState, type PaymentCreateContext, type PaymentCreatePorts } from '../../services/paymentCreateAttempts';
@@ -70,14 +71,14 @@ vi.mock('../../hooks/useRolePermissions', () => ({
 }));
 
 vi.mock('../../hooks/useClients', () => ({
-  useClients: () => ({
+  useClients: vi.fn(() => ({
     clients: [
       { id: 69, name: 'Test Client' },
       { id: 77, name: 'Supplier Client' },
       { id: 88, name: 'Expense Client' },
     ],
     loading: false,
-  }),
+  })),
 }));
 
 vi.mock('../../hooks/useLegalEntities', () => ({
@@ -388,6 +389,12 @@ function doc04RealAttemptFixture(primary = doc04Payment(), rest = doc04Payment({
 }
 
 describe('PaymentModal integration', () => {
+  it('client caller: payment scope owns the client lookup and closing disables it', async () => {
+    const props = { isOpen: true, onClose: vi.fn(), onSubmit: vi.fn() }; const view = render(<PaymentModal {...props} />);
+    const first = vi.mocked(useClients).mock.lastCall?.[0]; expect(first?.enabled).toBe(true); expect(first?.ownerScope).toBeTruthy();
+    paymentScopeState.value = 'own'; view.rerender(<PaymentModal {...props} />); expect(vi.mocked(useClients).mock.lastCall?.[0]?.ownerScope).not.toBe(first?.ownerScope);
+    view.rerender(<PaymentModal {...props} isOpen={false} />); expect(vi.mocked(useClients).mock.lastCall?.[0]?.enabled).toBe(false); await act(async () => undefined);
+  });
   it('directory caller: payment access scope owns its lookup and closing disables it', async () => {
     const props = { isOpen: true, onClose: vi.fn(), onSubmit: vi.fn() }; const view = render(<PaymentModal {...props} />);
     const first = vi.mocked(useLegalEntities).mock.lastCall?.[0]; expect(first?.enabled).toBe(true);

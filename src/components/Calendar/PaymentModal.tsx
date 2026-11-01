@@ -371,11 +371,11 @@ export function PaymentModal({
   const canSavePayment = remainderPending ? canCreatePayment : payment ? canEditPayment : canCreatePayment;
   const autoCashOrderDraftRef = useRef<{ number: string; date: string; type: CashOrderType } | null>(null);
 
-  const { clients, loading: clientsLoading } = useClients();
   const { dealTypes, incomeTypes, paymentSources, services = [] } = useDictionaries();
   const { t } = useTranslation();
   const { user, isAdmin } = useAuth();
-  const paymentPermissions = useRolePermissions(user?.role?.id).payments;
+  const permissions = useRolePermissions(user?.role?.id);
+  const paymentPermissions = permissions.payments;
   const canViewSharedBalance = isAdmin() || (
     paymentPermissions.canView && paymentPermissions.viewScope === 'all'
   );
@@ -385,6 +385,9 @@ export function PaymentModal({
     canViewLinkedInvoices, canCreateLinkedInvoices, !!onDelete, !!onCreateRemainder, !!onTransferRemainder, !!onRollbackRemainderTransfer, !!onAdjustRemainderTransfer,
     user?.id, user?.role?.id, user?.role?.name, paymentPermissions.canView, paymentPermissions.viewScope]));
   const { capture: captureConfirmationOwner } = confirmationOwner;
+  const { clients, loading: clientsLoading } = useClients({ enabled: isOpen,
+    ownerScope: JSON.stringify([confirmationOwner.scope, permissions.clients, permissions.cases, permissions.contracts,
+      permissions.accounts, permissions.acts, permissions.payments]) });
   const { legalEntities, loading: legalEntitiesLoading, error: legalEntitiesError } = useLegalEntities({ enabled: isOpen, ownerScope: confirmationOwner.scope });
   const { begin: beginSourceRefresh, scope: sourceRefreshScope, busy: sourceRefreshBusy } = useDocumentDeliveryOwner(confirmationOwner.scope);
   const sourceReadController = useRef<{ scope: string; sourceId: number; controller: AbortController } | null>(null);

@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Calculator } from './Calculator';
+import { useClients } from '../../hooks/useClients';
 import { PaymentCreateRecoveryError, type PendingPaymentCreate } from '../../services/paymentCreateAttempts';
 import { bindPaymentCreateOwner, createPaymentGuarded, pendingPaymentCreates, inspectPaymentCreate,
   openCommittedPaymentCreate, fencePaymentCreateAdoption, acknowledgePaymentCreate, type PaymentCreatePorts,
@@ -8,10 +9,11 @@ import { bindPaymentCreateOwner, createPaymentGuarded, pendingPaymentCreates, in
 import type { InstallmentPlanInput, Payment } from '../../types';
 
 const mocks = vi.hoisted(() => ({ create: vi.fn(), confirm: vi.fn(), success: vi.fn(), error: vi.fn(), info: vi.fn(), rejection: vi.fn() }));
+const lookupAccess = vi.hoisted(() => ({ canView: true, viewScope: 'all' as 'all' | 'own' }));
 vi.mock('../../services/api', () => ({ apiService: { createPayment: mocks.create } }));
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 1, role: { id: 1 } } }) }));
-vi.mock('../../hooks/useClients', () => ({ useClients: () => ({ clients: [] }) }));
-vi.mock('../../hooks/useRolePermissions', () => ({ useRolePermissions: () => ({ clients: { canView: true },
+vi.mock('../../hooks/useClients', () => ({ useClients: vi.fn(() => ({ clients: [] })) }));
+vi.mock('../../hooks/useRolePermissions', () => ({ useRolePermissions: () => ({ clients: lookupAccess,
   legalEntities: { canView: true }, cases: { canView: true }, payments: { canView: true, canCreate: true } }) }));
 vi.mock('../../hooks/useToast', () => ({ useToast: () => ({ success: mocks.success, error: mocks.error, info: mocks.info }) }));
 vi.mock('../../hooks/useDialog', () => ({ useDialog: () => ({ confirm: mocks.confirm }) }));
@@ -29,6 +31,7 @@ vi.mock('../Accounts/InstallmentPlanner', () => ({ InstallmentPlanner: (props: {
 } as InstallmentPlanInput }).catch(mocks.rejection)}>Сохранить тестовый график</button> }));
 function saved(id: number): Payment { return { id } as Payment; }
 beforeEach(() => {
+  lookupAccess.canView = true; lookupAccess.viewScope = 'all';
   vi.clearAllMocks(); mocks.create.mockReset(); mocks.confirm.mockReset().mockResolvedValue(true);
   localStorage.clear(); localStorage.setItem('pp_token', `header.${btoa(JSON.stringify({ sub: '1' }))}.signature`);
   localStorage.setItem('pp.auth-session-epoch.v1', 'original-A');
@@ -54,6 +57,11 @@ function realCalculatorAttempt() {
 }
 
 describe('Calculator direct guarded-create consumer', () => {
+  it('client caller: calculator lookup scope changes with visibility and disables denied reads', () => {
+    const view = render(<Calculator />); const first = vi.mocked(useClients).mock.lastCall?.[0]; expect(first?.enabled).toBe(true); expect(first?.ownerScope).toBeTruthy();
+    lookupAccess.viewScope = 'own'; view.rerender(<Calculator />); expect(vi.mocked(useClients).mock.lastCall?.[0]?.ownerScope).not.toBe(first?.ownerScope);
+    lookupAccess.canView = false; view.rerender(<Calculator />); expect(vi.mocked(useClients).mock.lastCall?.[0]?.enabled).toBe(false);
+  });
   it('continues the existing ordinary schedule loop after each known success without changing calculated amounts', async () => {
     mocks.create.mockResolvedValueOnce(saved(81)).mockResolvedValueOnce(saved(82));
     render(<Calculator />); fireEvent.click(screen.getByRole('button', { name: 'Сохранить тестовый график' }));

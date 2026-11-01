@@ -13,6 +13,9 @@ describe('owned legal entity directory', () => {
   let session: ReturnType<typeof documentCopyTestSession>;
   beforeEach(() => { vi.resetAllMocks(); session = documentCopyTestSession(); vi.mocked(apiService.getLegalEntities).mockResolvedValue([entity(1)]); });
   afterEach(() => session.restore());
+  it('directory boundary: a disabled catalogue keeps a stable empty array', () => {
+    const view = renderHook(() => useLegalEntities({ enabled: false })); const rows = view.result.current.legalEntities; view.rerender(); expect(view.result.current.legalEntities).toBe(rows); expect(apiService.getLegalEntities).not.toHaveBeenCalled();
+  });
   it('directory baseline: a disabled hook cannot adopt a late response', async () => {
     const old = deferred<LegalEntitySummary[]>(); vi.mocked(apiService.getLegalEntities).mockReturnValue(old.promise);
     const view = renderHook(({ enabled }) => useLegalEntities({ enabled }), { initialProps: { enabled: true } });

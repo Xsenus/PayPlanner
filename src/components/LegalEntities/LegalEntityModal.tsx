@@ -1130,13 +1130,14 @@ export function LegalEntityModal({
       ({
         mode: "paged" as const,
         enabled: isOpen && documentClientsNeeded,
+        ownerScope: JSON.stringify([classificationScope, relatedInvoiceOwner.scope, relatedActOwner.scope]),
         page: 1,
         pageSize: 200,
         isActive: true,
         sortBy: "name" as const,
         sortDir: "asc" as const,
       }) satisfies Parameters<typeof useClients>[0],
-    [isOpen, documentClientsNeeded],
+    [isOpen, documentClientsNeeded, classificationScope, relatedInvoiceOwner.scope, relatedActOwner.scope],
   );
   const {
     clients: documentClients,

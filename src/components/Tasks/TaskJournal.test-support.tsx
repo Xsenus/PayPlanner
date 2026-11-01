@@ -139,10 +139,10 @@ vi.mock('../../hooks/useDialog', () => ({
 }));
 
 vi.mock('../../hooks/useClients', () => ({
-  useClients: (options?: { enabled?: boolean }) => ({
+  useClients: vi.fn((options?: { enabled?: boolean }) => ({
     clients: options?.enabled === false ? [] : clientsState.clients,
     loading: false,
-  }),
+  })),
 }));
 
 vi.mock('../../hooks/useClientCases', () => ({

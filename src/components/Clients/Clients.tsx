@@ -518,9 +518,13 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
     return filters;
   }, [activeFilterColumns, filterSettings.filters, filterParamMap]);
 
+  const clientOwnerScope = JSON.stringify([user?.id, user?.role?.id, clientPermissions, permissions.cases,
+    permissions.contracts, permissions.accounts, permissions.acts, permissions.payments]);
   const clientsQueryOptions = useMemo(
     () => ({
       mode: 'paged' as const,
+      enabled: canViewClients,
+      ownerScope: clientOwnerScope,
       search: debouncedQuery || undefined,
       isActive: activityFilter === 'all' ? undefined : activityFilter === 'active',
       sortBy: 'name' as const,
@@ -536,7 +540,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
         ...activeFilters,
       },
     }),
-    [debouncedQuery, activityFilter, page, pageSize, statusFilter, activeFilters],
+    [debouncedQuery, activityFilter, page, pageSize, statusFilter, activeFilters, canViewClients, clientOwnerScope],
   );
 
   const { clients, loading, refreshing, total, createClient, updateClient, setClients, refresh } =

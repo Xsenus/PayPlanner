@@ -6,6 +6,7 @@ import { isHttpErrorStatus } from '../utils/errorUtils';
 import type { LegalEntityDetail, LegalEntityInput, LegalEntitySuggestion, LegalEntitySummary } from '../types';
 
 type View = { scope: string; rows: LegalEntitySummary[]; loading: boolean; error: string | null };
+const emptyEntities: LegalEntitySummary[] = [];
 const validEntity = (value: LegalEntitySummary) => value && Number.isSafeInteger(value.id) && value.id > 0 && typeof value.shortName === 'string';
 const invalidData = () => new Error('Не удалось подтвердить данные справочника компаний. Обновите список.');
 
@@ -85,6 +86,6 @@ export function useLegalEntities(options?: { enabled?: boolean; ownerScope?: str
   }, [admit]);
   const visible = view.scope === scope ? view : null;
   const sorted = useMemo(() => [...(visible?.rows ?? [])].sort((a, b) => a.shortName.localeCompare(b.shortName, undefined, { sensitivity: 'base' })), [visible?.rows]);
-  return { legalEntities: enabled ? sorted : [], loading: enabled && (visible?.loading ?? true), error: enabled ? visible?.error ?? null : null,
+  return { legalEntities: enabled ? sorted : emptyEntities, loading: enabled && (visible?.loading ?? true), error: enabled ? visible?.error ?? null : null,
     refresh: fetchAll, createLegalEntity, updateLegalEntity, deleteLegalEntity, getLegalEntity, suggestLegalEntities, findLegalEntityById };
 }

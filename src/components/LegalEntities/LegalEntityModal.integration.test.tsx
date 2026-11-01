@@ -1421,6 +1421,21 @@ describe('LegalEntityModal integration', () => {
   });
 
   describe('company directory parent ownership', () => {
+    it.each(['page', 'modal'] as const)('client caller: profile %s reads clients for its document and clears old permissions', async mode => {
+      const p = { isOpen: true, mode, initial: createInitialLegalEntity({ shortName: 'Компания', isOwnCompany: false }), allowEdit: true, allowDelete: false,
+        canManageOwnCompanySettings: false, canViewCases: false, canViewAccounts: true, canViewActs: false, canViewPayments: false,
+        onClose: vi.fn(), onSubmit: vi.fn(), suggest: vi.fn(), findById: vi.fn() };
+      const row = (id: number): Client => ({ id, name: `Клиент ${id}`, phone: '', email: '', company: '', address: '', notes: '', isActive: true, createdAt: '2026-11-01T00:00:00Z', cases: [], contracts: [] });
+      vi.mocked(apiService.getClientsV2).mockClear().mockResolvedValue({ items: [row(301)], total: 1, page: 1, pageSize: 200 });
+      const view = render(<LegalEntityModal {...p} />); await act(async () => undefined); expect(apiService.getClientsV2).not.toHaveBeenCalled();
+      fireEvent.click(screen.getAllByRole('button', { name: 'Счёт' })[0]); await screen.findByTestId('invoice-lookup-fixture');
+      const last = () => invoiceModalPropsSpy.mock.calls.at(-1)![0] as { clients: Client[] };
+      await waitFor(() => expect(last().clients.map(item => item.id)).toEqual([301]));
+      let resolve!: (value: { items: Client[]; total: number; page: number; pageSize: number }) => void;
+      vi.mocked(apiService.getClientsV2).mockReturnValueOnce(new Promise(done => { resolve = done; }));
+      view.rerender(<LegalEntityModal {...p} relatedRecordPermissions={{ accounts: relatedPermissions({ canCreate: true, viewScope: 'own' }) }} />); expect(last().clients).toEqual([]);
+      await act(async () => resolve({ items: [row(302)], total: 1, page: 1, pageSize: 200 })); await waitFor(() => expect(last().clients.map(item => item.id)).toEqual([302]));
+    });
     it.each(['page', 'modal'] as const)('directory caller: profile %s reads companies only for an open document and clears a changed scope', async mode => {
       const p = { isOpen: true, mode, initial: createInitialLegalEntity({ shortName: 'Компания', isOwnCompany: false }), allowEdit: true, allowDelete: false,
         canManageOwnCompanySettings: false, canViewCases: false, canViewAccounts: true, canViewActs: false, canViewPayments: false,

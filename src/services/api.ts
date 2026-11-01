@@ -6046,6 +6046,7 @@ export class ApiService {
   async getClients(options?: { signal?: AbortSignal }) {
     return this.request<Client[]>('/clients', {
       signal: options?.signal,
+      cache: 'no-store',
     });
   }
 
@@ -6055,9 +6056,10 @@ export class ApiService {
 
   async getClientStats(id: number): Promise<ClientStats>;
   async getClientStats(id: number, params?: { caseId?: number; clientRole?: ClientRole }): Promise<ClientStats>;
-  async getClientStats(id: number, params?: { caseId?: number; clientRole?: ClientRole }) {
+  async getClientStats(id: number, params: { caseId?: number; clientRole?: ClientRole } | undefined, options: { signal?: AbortSignal }): Promise<ClientStats>;
+  async getClientStats(id: number, params?: { caseId?: number; clientRole?: ClientRole }, options?: { signal?: AbortSignal }) {
     const q = buildQuery({ caseId: params?.caseId, clientRole: params?.clientRole });
-    return this.request<ClientStats>(`/clients/${id}/stats${q}`);
+    return this.request<ClientStats>(`/clients/${id}/stats${q}`, { signal: options?.signal, cache: 'no-store' });
   }
 
   async getClientCaseFinanceSummaries(id: number, params?: { clientRole?: ClientRole }) {
@@ -6756,6 +6758,7 @@ export class ApiService {
     });
     return this.request<PagedResult<Client>>(`/v2/clients${q}`, {
       signal: options?.signal,
+      cache: 'no-store',
     });
   }
 
