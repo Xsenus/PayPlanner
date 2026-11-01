@@ -10,11 +10,11 @@ import type { ClientAddressEntryFormValue as Entry } from '../Clients/ClientAddr
 vi.mock('../../services/api', () => ({ apiService: { cleanAddress: vi.fn(), suggestClientAddresses: vi.fn() } }));
 const entry = (uiKey: string): Entry => ({ uiKey, fullAddress: `Адрес ${uiKey}`, type: 'legal', isPrimary: uiKey === 'a', additionalTypes: [], postalCode: '', country: '', region: '', district: '', city: '', settlement: '', street: '', house: '', flat: '', validFrom: '', validTo: '' });
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: Error) => void; const promise = new Promise<T>((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; }
-function setup() {
+function setup(options: { fallbackToSuggestions?: boolean; preserveMissingSuggestionFields?: boolean } = {}) {
   const initial = [entry('a'), entry('b')]; const onUseAddress = vi.fn();
   const view = renderHook((props: { scope: string; enabled: boolean; resetKey: unknown }) => {
     const [entries, setEntries] = useState(initial);
-    return { ...useCompanyAddressAutofill({ entries, setEntries, onUseAddress, ...props }), entries, setEntries };
+    return { ...useCompanyAddressAutofill({ entries, setEntries, onUseAddress, ...options, ...props }), entries, setEntries };
   }, { initialProps: { scope: 'first', enabled: true, resetKey: 'initial' } as { scope: string; enabled: boolean; resetKey: unknown } });
   const type = (key: string, query: string) => act(() => {
     view.result.current.setEntries(previous => previous.map(row => row.uiKey === key ? { ...row, fullAddress: query } : row));
@@ -124,5 +124,71 @@ describe('company address owned operations', () => {
   it('shows an owned suggestion error without changing the address', async () => {
     vi.mocked(apiService.suggestClientAddresses).mockRejectedValueOnce(new Error('offline')); const view = setup(); view.type('a', 'Запрос адреса'); await view.tick();
     expect(view.result.current.entries[0].fullAddress).toBe('Запрос адреса'); expect(view.result.current.errorsByIndex[0]).toContain('Введённые данные сохранены');
+  });
+  it('client fallback preserves existing partial fields and uses the same cancellation signal', async () => {
+    vi.mocked(apiService.cleanAddress).mockRejectedValueOnce(new Error('clean unavailable'));
+    vi.mocked(apiService.suggestClientAddresses).mockResolvedValueOnce([{ value: 'Полный резервный адрес', cityWithType: 'г Резервный' }]);
+    const view = setup({ fallbackToSuggestions: true, preserveMissingSuggestionFields: true });
+    act(() => view.result.current.setEntries(previous => [{ ...previous[0], house: '42', flat: '7', fiasId: 'existing-id' }, previous[1]]));
+    await act(async () => view.result.current.clean('a'));
+    expect(apiService.suggestClientAddresses).toHaveBeenCalledExactlyOnceWith('Адрес a', 1, vi.mocked(apiService.cleanAddress).mock.calls[0][1]);
+    expect(view.result.current.entries[0]).toMatchObject({ city: 'г Резервный', house: '42', flat: '7', fiasId: 'existing-id' });
+    expect(view.result.current.entries[1]).toBe(view.initial[1]); expect(view.result.current.errorsByIndex).toEqual({});
+  });
+  it.each([401, 403])('client fallback never follows an authorization failure HTTP%s', async status => {
+    vi.mocked(apiService.cleanAddress).mockRejectedValueOnce(new Error(`HTTP ${status} - forbidden`));
+    const view = setup({ fallbackToSuggestions: true }); await act(async () => view.result.current.clean('a'));
+    expect(apiService.suggestClientAddresses).not.toHaveBeenCalled(); expect(view.result.current.entries).toEqual(view.initial);
+    expect(view.result.current.errorsByIndex[0]).toContain('Недостаточно прав');
+  });
+  it('client fallback does not start after a stale clean fails', async () => {
+    const pending = deferred<CleanedAddress>(); vi.mocked(apiService.cleanAddress).mockReturnValueOnce(pending.promise);
+    const view = setup({ fallbackToSuggestions: true }); act(() => { void view.result.current.clean('a'); });
+    session.replace('actor'); await act(async () => pending.reject(new Error('old clean failure')));
+    expect(apiService.suggestClientAddresses).not.toHaveBeenCalled(); expect(view.result.current.entries).toEqual(view.initial);
+  });
+  it('client fallback does not repeat a server search that already returned not found', async () => {
+    vi.mocked(apiService.cleanAddress).mockRejectedValueOnce(new Error('HTTP 404 - Адрес не найден'));
+    const view = setup({ fallbackToSuggestions: true }); await act(async () => view.result.current.clean('a'));
+    expect(apiService.suggestClientAddresses).not.toHaveBeenCalled(); expect(view.result.current.entries).toEqual(view.initial);
+    expect(view.result.current.errorsByIndex[0]).toContain('Введённые данные сохранены');
+  });
+  it('client fallback ignores a late suggestion after the row was edited', async () => {
+    const pending = deferred<DadataAddressSuggestion[]>(); vi.mocked(apiService.cleanAddress).mockRejectedValueOnce(new Error('clean unavailable'));
+    vi.mocked(apiService.suggestClientAddresses).mockReturnValueOnce(pending.promise);
+    const view = setup({ fallbackToSuggestions: true }); act(() => { void view.result.current.clean('a'); }); await act(async () => {});
+    const signal = vi.mocked(apiService.suggestClientAddresses).mock.calls[0][2]!;
+    act(() => { view.result.current.invalidate('a'); view.result.current.setEntries(previous => [{ ...previous[0], fullAddress: 'Мой новый адрес' }, previous[1]]); });
+    await act(async () => pending.resolve([{ value: 'Устаревший адрес', cityWithType: 'Старый город' }]));
+    expect(signal.aborted).toBe(true); expect(view.result.current.entries[0].fullAddress).toBe('Мой новый адрес'); expect(view.result.current.errorsByIndex).toEqual({});
+  });
+  it.each([
+    { name: 'object', rows: {} }, { name: 'invalid label', rows: [{ value: {} }] },
+    { name: 'invalid field', rows: [{ value: 'Адрес', house: {} }] },
+    { name: 'duplicate labels', rows: [{ value: 'Адрес' }, { value: 'Адрес' }] },
+    { name: 'oversized result', rows: Array.from({ length: 8 }, (_, index) => ({ value: `Адрес ${index}` })) },
+  ])('invalid suggestion payload $name is rejected without changing the typed row', async ({ rows }) => {
+    vi.mocked(apiService.suggestClientAddresses).mockResolvedValueOnce(rows as DadataAddressSuggestion[]);
+    const view = setup(); view.type('a', 'Мой адрес'); await view.tick();
+    expect(view.result.current.entries[0].fullAddress).toBe('Мой адрес'); expect(view.result.current.suggestionsByIndex[0]).toEqual([]);
+    expect(view.result.current.errorsByIndex[0]).toContain('Введённые данные сохранены');
+  });
+  it('a valid empty suggestion response stays empty without a retry loop', async () => {
+    vi.mocked(apiService.suggestClientAddresses).mockResolvedValueOnce([]); const view = setup();
+    view.type('a', 'Адрес без результата'); await view.tick(); await view.tick();
+    expect(apiService.suggestClientAddresses).toHaveBeenCalledOnce(); expect(view.result.current.errorsByIndex).toEqual({}); expect(view.result.current.suggestionsByIndex[0]).toEqual([]);
+  });
+  it('an empty unrestricted label still allows choosing the displayed value', async () => {
+    vi.mocked(apiService.suggestClientAddresses).mockResolvedValueOnce([{ value: 'Выбранный адрес', unrestrictedValue: '' }]);
+    const view = setup(); view.type('a', 'Адрес'); await view.tick();
+    await act(async () => view.result.current.apply('a', view.result.current.suggestionsByIndex[0][0]));
+    expect(apiService.cleanAddress).toHaveBeenCalledExactlyOnceWith('Выбранный адрес', expect.any(AbortSignal));
+  });
+  it('unmount cancels a timer and an in-flight request, including a late failure', async () => {
+    const pending = deferred<CleanedAddress>(); vi.mocked(apiService.cleanAddress).mockReturnValueOnce(pending.promise);
+    const view = setup({ fallbackToSuggestions: true }); view.type('a', 'Отложенный поиск'); act(() => { void view.result.current.clean('b'); });
+    const signal = vi.mocked(apiService.cleanAddress).mock.calls[0][1]!; view.unmount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(350); pending.reject(new Error('late failure')); });
+    expect(signal.aborted).toBe(true); expect(apiService.suggestClientAddresses).not.toHaveBeenCalled();
   });
 });

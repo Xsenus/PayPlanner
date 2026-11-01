@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ClientDetail } from './ClientDetail';
-import type { Act, Client, Contract, Invoice, LegalEntityDetail, LegalEntityInput, Payment, PowerOfAttorney } from '../../types';
+import type { Act, Client, Contract, Invoice, LegalEntityDetail, LegalEntityInput, Payment, PowerOfAttorney, CleanedAddress, DadataAddressSuggestion } from '../../types';
 import { apiService } from '../../services/api';
 import { useClientStatuses } from '../../hooks/useClientStatuses';
 import { useFormRequirements } from '../../hooks/useFormRequirements';
@@ -17,6 +17,13 @@ const legalModalOwnerSpy = vi.hoisted(() => vi.fn());
 const invoiceLookupPropsSpy = vi.hoisted(() => vi.fn());
 const caseLookupPropsSpy = vi.hoisted(() => vi.fn());
 const poaPromptPropsSpy = vi.hoisted(() => vi.fn());
+const addressFormPropsSpy = vi.hoisted(() => vi.fn());
+vi.mock('./ClientAddressEntriesForm', async importOriginal => {
+  const actual = await importOriginal<typeof import('./ClientAddressEntriesForm')>();
+  return { ...actual, ClientAddressEntriesForm: (props: Parameters<typeof actual.ClientAddressEntriesForm>[0]) => {
+    addressFormPropsSpy(props); return <actual.ClientAddressEntriesForm {...props} />;
+  } };
+});
 vi.mock('../ui/FormPromptModal', async importOriginal => {
   const actual = await importOriginal<typeof import('../ui/FormPromptModal')>();
   return { ...actual, FormPromptModal: (props: Parameters<typeof actual.FormPromptModal>[0]) => {
@@ -364,6 +371,8 @@ vi.mock('../../services/api', () => ({
     getClient: vi.fn(),
     updateClient: vi.fn(),
     deleteClient: vi.fn(),
+    cleanAddress: vi.fn(),
+    suggestClientAddresses: vi.fn(),
     getClientPowersOfAttorney: vi.fn(),
     getClientCaseFinanceSummaries: vi.fn(),
     getClientCaseExpenseDetails: vi.fn(),
@@ -713,6 +722,7 @@ describe('ClientDetail integration', () => {
     expect(vi.mocked(useClientStatuses).mock.lastCall?.[0]?.ownerScope).not.toBe(second?.ownerScope); await act(async () => {});
   });
   beforeEach(() => {
+    addressFormPropsSpy.mockClear(); poaPromptPropsSpy.mockClear();
     legalModalOwnerSpy.mockClear(); authState.userId = 7; authState.roleId = 1;
     invoiceLookupPropsSpy.mockClear(); caseLookupPropsSpy.mockClear();
     Object.assign(permissionsResult.legalEntities, createPermissions().legalEntities);
@@ -759,6 +769,8 @@ describe('ClientDetail integration', () => {
     vi.mocked(apiService.getActResponsibles).mockReset().mockResolvedValue([]);
     vi.mocked(apiService.updateClient).mockReset().mockResolvedValue(createClient());
     vi.mocked(apiService.deleteClient).mockReset().mockResolvedValue(undefined);
+    vi.mocked(apiService.cleanAddress).mockReset().mockResolvedValue({ result: 'Уточнённый адрес', cityWithType: 'г Новый', house: '42' });
+    vi.mocked(apiService.suggestClientAddresses).mockReset().mockResolvedValue([{ value: 'Подсказка адреса', cityWithType: 'г Подсказка' }]);
     vi.mocked(apiService.getClientPowersOfAttorney).mockReset().mockResolvedValue([]);
     vi.mocked(apiService.createClientPowerOfAttorney).mockReset();
     vi.mocked(apiService.updateClientPowerOfAttorney).mockReset();
@@ -1993,6 +2005,135 @@ describe('ClientDetail integration', () => {
     });
   });
 
+  async function openAddressProfile() {
+    vi.mocked(apiService.getClient).mockResolvedValue({ ...createClient({ addressEntries: [
+      { type: 'registration', isPrimary: true, fullAddress: 'Первый адрес', postalCode: '630000', country: 'Россия', city: 'г Исходный', house: '1', flat: '7' },
+      { type: 'actual', isPrimary: false, fullAddress: 'Второй адрес', city: 'г Другой', house: '2' },
+    ] }) });
+    const props = { clientId: 1, onBack: vi.fn(), initialSection: 'profile' as const };
+    const view = render(<ClientDetail {...props} />); fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+    return { props, view };
+  }
+  function latestAddressProps() {
+    return addressFormPropsSpy.mock.calls.at(-1)![0] as Parameters<typeof import('./ClientAddressEntriesForm').ClientAddressEntriesForm>[0];
+  }
+  it('client address caller: read mode is lazy and temporary row keys never enter saved notes', async () => {
+    await openAddressProfile(); expect(apiService.cleanAddress).not.toHaveBeenCalled(); expect(apiService.suggestClientAddresses).not.toHaveBeenCalled();
+    const entries = latestAddressProps().entries; expect(entries[0].uiKey).toBeTruthy(); expect(entries[1].uiKey).not.toBe(entries[0].uiKey);
+    fireEvent.submit(screen.getByDisplayValue('Иванов').closest('form')!);
+    await waitFor(() => expect(apiService.updateClient).toHaveBeenCalledOnce());
+    const notes = vi.mocked(apiService.updateClient).mock.calls[0][1].notes!; const saved = JSON.parse(notes.slice(CLIENT_PROFILE_NOTES_PREFIX.length));
+    expect(saved.addressEntries).toHaveLength(2); expect(saved.addressEntries[0].fullAddress).toBe('Первый адрес');
+    expect(saved.addressEntries.every((row: object) => !Object.hasOwn(row, 'uiKey'))).toBe(true);
+  });
+  it('client address caller: repeated find is single flight and applies only to the selected row', async () => {
+    let finish!: (row: CleanedAddress) => void; vi.mocked(apiService.cleanAddress).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    await openAddressProfile(); const old = latestAddressProps(); act(() => { old.onFindAddress(0); old.onFindAddress(0); });
+    expect(apiService.cleanAddress).toHaveBeenCalledExactlyOnceWith('Первый адрес', expect.any(AbortSignal));
+    await act(async () => finish({ result: 'Уточнённый первый адрес', cityWithType: 'г Первый', house: '42' }));
+    expect(latestAddressProps().entries[0]).toMatchObject({ city: 'г Первый', house: '42', type: 'registration', isPrimary: true });
+    expect(latestAddressProps().entries[1].fullAddress).toBe('Второй адрес');
+  });
+  it('client address caller: an edited row rejects an old clean and does not launch its fallback', async () => {
+    let fail!: (reason: Error) => void; vi.mocked(apiService.cleanAddress).mockReturnValueOnce(new Promise((_, reject) => { fail = reject; }));
+    await openAddressProfile(); fireEvent.click(screen.getAllByRole('button', { name: 'Найти адрес' })[0]);
+    const signal = vi.mocked(apiService.cleanAddress).mock.calls[0][1]!;
+    fireEvent.change(screen.getAllByLabelText('Квартира')[0], { target: { value: '99' } });
+    await act(async () => fail(new Error('Старая ошибка')));
+    expect(signal.aborted).toBe(true); expect(apiService.suggestClientAddresses).not.toHaveBeenCalled();
+    expect(latestAddressProps().entries[0].flat).toBe('99'); expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+  it('client address caller: a surviving keyed row keeps focus and receives its clean after another row is removed', async () => {
+    let finish!: (row: CleanedAddress) => void; vi.mocked(apiService.cleanAddress).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    await openAddressProfile(); const input = screen.getByDisplayValue('Второй адрес');
+    fireEvent.click(screen.getAllByRole('button', { name: 'Найти адрес' })[1]); input.focus();
+    await act(async () => latestAddressProps().onRemoveEntry(0));
+    expect(screen.getByDisplayValue('Второй адрес')).toBe(input);
+    await act(async () => finish({ result: 'Уточнённый второй', cityWithType: 'г Второй' }));
+    expect(latestAddressProps().entries).toHaveLength(1); expect(latestAddressProps().entries[0].city).toBe('г Второй');
+  });
+  it('client address caller: suggestions debounce and a newer query rejects an old response', async () => {
+    let finish!: (rows: DadataAddressSuggestion[]) => void; vi.mocked(apiService.suggestClientAddresses).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }))
+      .mockResolvedValueOnce([{ value: 'Текущая подсказка' }]);
+    await openAddressProfile(); fireEvent.change(screen.getAllByLabelText('Полный адрес')[0], { target: { value: 'Первый поиск' } });
+    await waitFor(() => expect(apiService.suggestClientAddresses).toHaveBeenCalledOnce()); const signal = vi.mocked(apiService.suggestClientAddresses).mock.calls[0][2]!;
+    fireEvent.change(screen.getAllByLabelText('Полный адрес')[0], { target: { value: 'Новый поиск' } });
+    await screen.findByRole('button', { name: 'Текущая подсказка' });
+    await act(async () => finish([{ value: 'Устаревшая подсказка' }]));
+    expect(signal.aborted).toBe(true); expect(screen.queryByRole('button', { name: 'Устаревшая подсказка' })).toBeNull();
+    expect(latestAddressProps().entries[0].fullAddress).toBe('Новый поиск');
+  });
+  it('client address caller: a cached suggestion cannot overwrite a manual field edit', async () => {
+    await openAddressProfile(); fireEvent.change(screen.getAllByLabelText('Полный адрес')[0], { target: { value: 'Поиск адреса' } });
+    await screen.findByRole('button', { name: 'Подсказка адреса' }); const old = latestAddressProps(); const suggestion = old.suggestionsByIndex[0][0];
+    fireEvent.change(screen.getAllByLabelText('Квартира')[0], { target: { value: '99' } });
+    await act(async () => old.onApplySuggestion(0, suggestion));
+    expect(apiService.cleanAddress).not.toHaveBeenCalled(); expect(latestAddressProps().entries[0].flat).toBe('99');
+  });
+  it('client address caller: a current suggestion preserves partial fields if both remote reads fail', async () => {
+    await openAddressProfile(); fireEvent.change(screen.getAllByLabelText('Полный адрес')[0], { target: { value: 'Поиск адреса' } });
+    await screen.findByRole('button', { name: 'Подсказка адреса' });
+    vi.mocked(apiService.cleanAddress).mockRejectedValueOnce(new Error('clean unavailable')); vi.mocked(apiService.suggestClientAddresses).mockRejectedValueOnce(new Error('fallback unavailable'));
+    fireEvent.click(screen.getByRole('button', { name: 'Подсказка адреса' }));
+    await screen.findByRole('alert');
+    expect(latestAddressProps().entries[0]).toMatchObject({ city: 'г Подсказка', flat: '7', postalCode: '630000' });
+    expect(apiService.suggestClientAddresses).toHaveBeenLastCalledWith('Подсказка адреса', 1, expect.any(AbortSignal));
+  });
+  it('client address caller: a definitive not-found response preserves the row without another search', async () => {
+    vi.mocked(apiService.cleanAddress).mockRejectedValueOnce(new Error('HTTP 404 - Адрес не найден'));
+    await openAddressProfile(); fireEvent.click(screen.getAllByRole('button', { name: 'Найти адрес' })[0]);
+    await screen.findByRole('alert');
+    expect(apiService.suggestClientAddresses).not.toHaveBeenCalled(); expect(latestAddressProps().entries[0].fullAddress).toBe('Первый адрес');
+  });
+  it.each(['role', 'permission', 'cancel'] as const)('client address caller: changing %s cancels a pending find and its late failure', async mode => {
+    let fail!: (reason: Error) => void; vi.mocked(apiService.cleanAddress).mockReturnValueOnce(new Promise((_, reject) => { fail = reject; }));
+    const { props, view } = await openAddressProfile(); fireEvent.click(screen.getAllByRole('button', { name: 'Найти адрес' })[0]);
+    const signal = vi.mocked(apiService.cleanAddress).mock.calls[0][1]!;
+    if (mode === 'role') { authState.roleId = 2; view.rerender(<ClientDetail {...props} />); }
+    else if (mode === 'permission') { permissionsResult.clients.canEdit = false; view.rerender(<ClientDetail {...props} />); }
+    else fireEvent.click(screen.getByRole('button', { name: 'Отмена' }));
+    await act(async () => fail(new Error('Старая ошибка адреса')));
+    expect(signal.aborted).toBe(true); expect(apiService.suggestClientAddresses).not.toHaveBeenCalled(); expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+  it('client address caller: old callbacks cannot change the shifted row or start a lookup after deletion', async () => {
+    await openAddressProfile(); const old = latestAddressProps(); await act(async () => old.onRemoveEntry(0));
+    act(() => { old.onUpdateEntry(0, 'fullAddress', 'Чужая подстановка'); old.onFindAddress(0); old.onScheduleSuggestions(0, 'Старый поиск'); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
+    expect(latestAddressProps().entries[0].fullAddress).toBe('Второй адрес'); expect(apiService.cleanAddress).not.toHaveBeenCalled(); expect(apiService.suggestClientAddresses).not.toHaveBeenCalled();
+  });
+  it('client address caller: authentication replacement rejects old field and lookup callbacks before rerender', async () => {
+    const session = documentCopyTestSession(); await openAddressProfile(); const old = latestAddressProps(); session.replace('actor');
+    act(() => { old.onUpdateEntry(0, 'flat', '99'); old.onFindAddress(0); old.onScheduleSuggestions(0, 'Чужой поиск'); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
+    expect(latestAddressProps().entries[0].flat).toBe('7'); expect(apiService.cleanAddress).not.toHaveBeenCalled(); expect(apiService.suggestClientAddresses).not.toHaveBeenCalled();
+  });
+  it('client address caller: same-user token refresh preserves a pending clean and the typed address', async () => {
+    let finish!: (row: CleanedAddress) => void; vi.mocked(apiService.cleanAddress).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const session = documentCopyTestSession(); const { props, view } = await openAddressProfile(); fireEvent.click(screen.getAllByRole('button', { name: 'Найти адрес' })[0]);
+    session.refresh(); view.rerender(<ClientDetail {...props} />);
+    await act(async () => finish({ result: 'Текущий адрес', cityWithType: 'г Текущий' }));
+    expect(latestAddressProps().entries[0].city).toBe('г Текущий'); expect(apiService.cleanAddress).toHaveBeenCalledOnce();
+  });
+  it('client address caller: cancelling edit invalidates a queued address deletion and its toast', async () => {
+    let answer!: (value: boolean) => void; confirmMock.mockReturnValueOnce(new Promise(resolve => { answer = resolve; }));
+    await openAddressProfile(); const old = latestAddressProps(); act(() => { void old.onRemoveEntry(0); });
+    fireEvent.click(screen.getByRole('button', { name: 'Отмена' })); await act(async () => answer(true));
+    expect(latestAddressProps().entries).toHaveLength(2); expect(toastSuccessMock).not.toHaveBeenCalled();
+  });
+  it('client address caller: saving the profile cancels pending enrichment before it can alter the saved snapshot', async () => {
+    let finishClean!: (row: CleanedAddress) => void; let finishSave!: (row: Client) => void;
+    vi.mocked(apiService.cleanAddress).mockReturnValueOnce(new Promise(resolve => { finishClean = resolve; }));
+    vi.mocked(apiService.updateClient).mockReturnValueOnce(new Promise(resolve => { finishSave = resolve; }));
+    await openAddressProfile(); fireEvent.click(screen.getAllByRole('button', { name: 'Найти адрес' })[0]);
+    const signal = vi.mocked(apiService.cleanAddress).mock.calls[0][1]!;
+    fireEvent.submit(screen.getByDisplayValue('Иванов').closest('form')!); await waitFor(() => expect(apiService.updateClient).toHaveBeenCalledOnce());
+    expect(signal.aborted).toBe(true);
+    await act(async () => finishClean({ result: 'Устаревший адрес', cityWithType: 'г Устаревший' }));
+    const saved = JSON.parse(vi.mocked(apiService.updateClient).mock.calls[0][1].notes!.slice(CLIENT_PROFILE_NOTES_PREFIX.length));
+    expect(saved.addressEntries[0].fullAddress).toBe('Первый адрес'); expect(saved.addressEntries[0].city).toBe('г Исходный');
+    expect(latestAddressProps().entries[0].city).toBe('г Исходный');
+    await act(async () => finishSave(createClient())); expect(latestAddressProps().entries.every(row => row.city !== 'г Устаревший')).toBe(true);
+  });
   async function openPoaPermissionProfile() {
     poaPromptPropsSpy.mockClear();
     vi.mocked(apiService.getClientPowersOfAttorney).mockResolvedValue([createPowerOfAttorney()]);

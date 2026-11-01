@@ -2,28 +2,53 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState, type Dispatch,
 import { useDocumentDeliveryOwner, type DocumentDeliveryRead } from '../../hooks/useDocumentDeliveryOwner';
 import { apiService } from '../../services/api';
 import type { CleanedAddress, DadataAddressSuggestion } from '../../types';
-import type { ClientAddressEntryFormValue as Entry } from '../Clients/ClientAddressEntriesForm';
+import type { ClientAddressEntryFormValue } from '../Clients/ClientAddressEntriesForm';
 import { chooseBestDisplayAddress } from '../Clients/addressEntryUtils';
+import { isHttpErrorStatus } from '../../utils/errorUtils';
+
+type Entry = ClientAddressEntryFormValue & { sourceQuery?: string };
 
 const FIELDS = ['fullAddress', 'postalCode', 'country', 'region', 'district', 'city', 'settlement', 'street', 'house', 'flat', 'fiasId', 'kladrId', 'geoLat', 'geoLon'] as const;
 const sameAddress = (a: Entry, b: Entry) => FIELDS.every(key => a[key] === b[key]);
 type Request = { key: string; snapshot: Entry; owner: DocumentDeliveryRead; controller: AbortController; kind: 'clean' | 'suggest'; pending: boolean };
 type Result = { request: Request; items: DadataAddressSuggestion[]; error?: string };
-interface Options {
-  entries: Entry[]; setEntries: Dispatch<SetStateAction<Entry[]>>; scope: string; enabled: boolean;
+interface Options<T extends Entry> {
+  entries: T[]; setEntries: Dispatch<SetStateAction<T[]>>; scope: string; enabled: boolean;
   resetKey: unknown; onUseAddress: () => void;
+  fallbackToSuggestions?: boolean; preserveMissingSuggestionFields?: boolean;
 }
 
-function cleanedEntry(entry: Entry, cleaned: CleanedAddress): Entry {
-  const updated = { ...entry, postalCode: cleaned.postalCode ?? '', country: cleaned.country ?? entry.country ?? '',
+const RESPONSE_FIELDS = ['unrestrictedValue', 'postalCode', 'country', 'regionWithType', 'areaWithType', 'cityWithType', 'settlementWithType', 'streetWithType', 'house', 'flat', 'fiasId', 'kladrId', 'geoLat', 'geoLon'];
+function validAddressResponse(value: unknown, label: 'value' | 'result'): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const row = value as Record<string, unknown>;
+  return typeof row[label] === 'string' && Boolean(row[label].trim()) && RESPONSE_FIELDS.every(key => row[key] == null || typeof row[key] === 'string');
+}
+function assertSuggestions(value: unknown, limit: number): asserts value is DadataAddressSuggestion[] {
+  if (!Array.isArray(value) || value.length > limit || !value.every(item => validAddressResponse(item, 'value'))
+    || new Set(value.map(item => JSON.stringify([item.value, item.unrestrictedValue ?? '']))).size !== value.length) throw new Error('Invalid suggestions');
+}
+function cleanedEntry<T extends Entry>(entry: T, cleaned: CleanedAddress, source: string, keepCountry: boolean): T {
+  const updated = { ...entry, ...(entry.sourceQuery !== undefined ? { sourceQuery: source } : {}), postalCode: cleaned.postalCode ?? '', country: keepCountry ? cleaned.country || entry.country || '' : cleaned.country ?? entry.country ?? '',
     region: cleaned.regionWithType ?? '', district: cleaned.areaWithType ?? '', city: cleaned.cityWithType ?? '',
     settlement: cleaned.settlementWithType ?? '', street: cleaned.streetWithType ?? '', house: cleaned.house ?? '', flat: cleaned.flat ?? '',
     fiasId: cleaned.fiasId ?? '', kladrId: cleaned.kladrId ?? '', geoLat: cleaned.geoLat ?? '', geoLon: cleaned.geoLon ?? '' };
   return { ...updated, fullAddress: chooseBestDisplayAddress(updated, entry.fullAddress, cleaned.result, entry.fullAddress) };
 }
 
+function suggestedEntry<T extends Entry>(entry: T, suggestion: DadataAddressSuggestion, keep: boolean, source: string): T {
+  const part = (value: string | null | undefined, previous: string | undefined) => keep ? value || previous || '' : value ?? '';
+  const identifier = (value: string | null | undefined, previous: string | undefined) => keep ? value || previous || '' : value ?? previous ?? '';
+  const updated = { ...entry, ...(entry.sourceQuery !== undefined ? { sourceQuery: source } : {}),
+    postalCode: part(suggestion.postalCode, entry.postalCode), country: entry.country ?? '', region: part(suggestion.regionWithType, entry.region),
+    district: part(suggestion.areaWithType, entry.district), city: part(suggestion.cityWithType, entry.city), settlement: part(suggestion.settlementWithType, entry.settlement),
+    street: part(suggestion.streetWithType, entry.street), house: part(suggestion.house, entry.house), flat: part(suggestion.flat, entry.flat),
+    fiasId: identifier(suggestion.fiasId, entry.fiasId), kladrId: identifier(suggestion.kladrId, entry.kladrId), geoLat: identifier(suggestion.geoLat, entry.geoLat), geoLon: identifier(suggestion.geoLon, entry.geoLon) };
+  return { ...updated, fullAddress: chooseBestDisplayAddress(updated, suggestion.unrestrictedValue || suggestion.value, entry.fullAddress, source) };
+}
+
 /** Owns only unsaved address UI; no database IDs or document snapshots are changed. */
-export function useCompanyAddressAutofill({ entries, setEntries, scope, enabled, resetKey, onUseAddress }: Options) {
+export function useCompanyAddressAutofill<T extends Entry>({ entries, setEntries, scope, enabled, resetKey, onUseAddress, fallbackToSuggestions = false, preserveMissingSuggestionFields = false }: Options<T>) {
   const owner = useDocumentDeliveryOwner(JSON.stringify([scope, enabled]));
   const rows = useMemo(() => new Map(entries.filter(x => x.uiKey).map(x => [x.uiKey!, x])), [entries]);
   const rowsRef = useRef(rows); rowsRef.current = rows;
@@ -71,7 +96,9 @@ export function useCompanyAddressAutofill({ entries, setEntries, scope, enabled,
       timers.current.delete(request.key); if (!current(request)) return;
       try {
         const items = await apiService.suggestClientAddresses(normalized, 7, request.controller.signal);
-        if (current(request)) setResults(previous => new Map(previous).set(request.key, { request, items: items ?? [] }));
+        if (!current(request)) return;
+        assertSuggestions(items, 7);
+        setResults(previous => new Map(previous).set(request.key, { request, items }));
       } catch {
         if (current(request)) setResults(previous => new Map(previous).set(request.key, { request, items: [], error: 'Не удалось получить подсказки адреса. Введённые данные сохранены.' }));
       } finally { request.pending = false; }
@@ -82,10 +109,25 @@ export function useCompanyAddressAutofill({ entries, setEntries, scope, enabled,
     try {
       const cleaned = await apiService.cleanAddress(source, request.controller.signal);
       if (!owns(request)) return;
-      if (!cleaned || typeof cleaned.result !== 'string') throw new Error('Invalid address response');
-      setEntries(previous => owns(request) ? previous.map(entry => entry.uiKey === request.key && sameAddress(entry, request.snapshot) ? cleanedEntry(entry, cleaned) : entry) : previous);
-    } catch {
-      if (owns(request)) setResults(previous => new Map(previous).set(request.key, { request, items: [], error: 'Не удалось уточнить адрес. Введённые данные сохранены.' }));
+      if (!validAddressResponse(cleaned, 'result')) throw new Error('Invalid address response');
+      setEntries(previous => owns(request) ? previous.map(entry => entry.uiKey === request.key && sameAddress(entry, request.snapshot) ? cleanedEntry(entry, cleaned, source, preserveMissingSuggestionFields) : entry) : previous);
+    } catch (error) {
+      if (!owns(request)) return;
+      const denied = isHttpErrorStatus(error, 401) || isHttpErrorStatus(error, 403);
+      // The clean endpoint has already tried its fallback before returning 404.
+      if (fallbackToSuggestions && !denied && !isHttpErrorStatus(error, 404)) {
+        try {
+          const suggestions = await apiService.suggestClientAddresses(source, 1, request.controller.signal);
+          if (!owns(request)) return;
+          assertSuggestions(suggestions, 1);
+          const suggestion = suggestions[0];
+          if (suggestion) {
+            setEntries(previous => owns(request) ? previous.map(entry => entry.uiKey === request.key && sameAddress(entry, request.snapshot) ? suggestedEntry(entry, suggestion, preserveMissingSuggestionFields, source) : entry) : previous);
+            return;
+          }
+        } catch { /* Preserve the current row and show one owned error below. */ }
+      }
+      if (owns(request)) setResults(previous => new Map(previous).set(request.key, { request, items: [], error: denied ? 'Недостаточно прав для уточнения адреса. Введённые данные сохранены.' : 'Не удалось уточнить адрес. Введённые данные сохранены.' }));
     } finally { request.pending = false; }
   };
   const clean = async (key?: string) => {
@@ -98,12 +140,8 @@ export function useCompanyAddressAutofill({ entries, setEntries, scope, enabled,
   const apply = async (key: string | undefined, suggestion: DadataAddressSuggestion) => {
     const entry = key ? rowsRef.current.get(key) : undefined; const result = key ? results.get(key) : undefined;
     if (!entry || !result || !current(result.request) || !result.items.includes(suggestion)) return;
-    const selected = (suggestion.unrestrictedValue ?? suggestion.value ?? '').trim(); if (!selected) return;
-    const next = { ...entry, postalCode: suggestion.postalCode ?? '', country: entry.country ?? '', region: suggestion.regionWithType ?? '',
-      district: suggestion.areaWithType ?? '', city: suggestion.cityWithType ?? '', settlement: suggestion.settlementWithType ?? '', street: suggestion.streetWithType ?? '',
-      house: suggestion.house ?? '', flat: suggestion.flat ?? '', fiasId: suggestion.fiasId ?? entry.fiasId ?? '', kladrId: suggestion.kladrId ?? entry.kladrId ?? '',
-      geoLat: suggestion.geoLat ?? entry.geoLat ?? '', geoLon: suggestion.geoLon ?? entry.geoLon ?? '' };
-    next.fullAddress = chooseBestDisplayAddress(next, selected, entry.fullAddress);
+    const selected = (suggestion.unrestrictedValue || suggestion.value || '').trim(); if (!selected) return;
+    const next = suggestedEntry(entry, suggestion, preserveMissingSuggestionFields, selected);
     const request = start(key, next); if (!request) return;
     useAddress.current();
     setEntries(previous => owns(request) ? previous.map(row => row.uiKey === request.key && sameAddress(row, entry) ? { ...next, type: row.type, isPrimary: row.isPrimary, additionalTypes: row.additionalTypes } : row) : previous);
@@ -115,5 +153,5 @@ export function useCompanyAddressAutofill({ entries, setEntries, scope, enabled,
     if (!result || !current(result.request)) return;
     suggestionsByIndex[index] = result.items; if (result.error) errorsByIndex[index] = result.error;
   });
-  return { schedule, clean, apply, invalidate, suggestionsByIndex, errorsByIndex };
+  return { schedule, clean, apply, invalidate, suggestionsByIndex, errorsByIndex, capture: () => enabled ? owner.capture() : null };
 }

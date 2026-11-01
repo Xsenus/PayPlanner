@@ -42,6 +42,7 @@ import {
   useRef,
   useState,
   type MouseEvent,
+  type SetStateAction,
 } from "react";
 import { useClientCases } from "../../hooks/useClientCases";
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
@@ -79,7 +80,6 @@ import type {
   ContractClient,
   ContractInput,
   ContractStatus,
-  DadataAddressSuggestion,
   Invoice,
   InvoiceInput,
   InvoiceWorkflowStatus,
@@ -117,6 +117,8 @@ import { useClientStatuses } from "../../hooks/useClientStatuses";
 import { assertDictionaryRows, useDictionarySnapshot } from "../../hooks/useDictionarySnapshot";
 import { ClientStatusBadge } from "./ClientStatusBadge";
 import { ClientReconciliationAct } from "./ClientReconciliationAct";
+import { useCompanyAddressAutofill } from '../LegalEntities/useCompanyAddressAutofill';
+import { createClientRequestId } from '../../utils/clientRequestId';
 import { DatePeriodPicker } from "../DateRange/DatePeriodPicker";
 import { loadClientInvoiceRelatedPayments } from "../../utils/clientInvoiceRelatedPayments";
 import { refreshClientInvoiceModalData as refreshClientInvoiceModalDataHelper } from "../../utils/clientInvoiceModalData";
@@ -901,6 +903,7 @@ interface ClientProfileDeleteActionOptions {
   successMessage: string;
   toastTitle: string;
   onDelete: () => void;
+  isCurrent?: () => boolean;
 }
 
 const CLIENT_PROFILE_NOTES_PREFIX = "__PP_CLIENT_PROFILE_V2__:";
@@ -952,6 +955,7 @@ const createEmptyPassportEntry = (): ClientPassportItem => ({
   validTo: "",
 });
 const createEmptyAddressEntry = (isPrimary = false): ClientAddressItem => ({
+  uiKey: createClientRequestId(),
   type: "registration",
   isPrimary,
   additionalTypes: [],
@@ -1396,7 +1400,7 @@ const serializeClientExtendedProfile = (
     birthCertificateEntries: profile.birthCertificateEntries,
     militaryIdEntries: profile.militaryIdEntries,
     passportEntries: stripPassportEntryValidityList(profile.passportEntries),
-    addressEntries: stripAddressEntryValidityList(profile.addressEntries),
+    addressEntries: stripAddressEntryValidityList(profile.addressEntries).map(entry => { const saved = { ...entry }; delete saved.uiKey; return saved; }),
     comment: profile.comment.trim(),
     legacyNotes: profile.legacyNotes.trim(),
   });
@@ -1638,7 +1642,7 @@ function ClientDetailScreen({
   //   birthCertificate: '',
   //   militaryId: '',
   // });
-  const [clientFormState, setClientFormState] = useState({
+  const [clientFormState, setClientFormState] = useState(() => ({
     kind: "individual" as ClientKind,
     lastName: "",
     firstName: "",
@@ -1690,7 +1694,7 @@ function ClientDetailScreen({
     isActive: true,
     clientStatusId: "",
     isClientAndSupplier: false,
-  });
+  }));
   const clientFormBaselineRef = useRef<typeof clientFormState | null>(null);
   const [rememberedLegalEntity, setRememberedLegalEntity] = useState<{ entity: LegalEntitySummary; page: typeof EMPTY_LEGAL_LOOKUP } | null>(null);
   const persistedLegalChange = useRef(false);
@@ -1718,10 +1722,6 @@ function ClientDetailScreen({
   const legalEntityLookupTotal = legalLookup.value.total;
   const legalLookupDenied = Boolean(legalLookup.error && (isHttpErrorStatus(new Error(legalLookup.error), 401) || isHttpErrorStatus(new Error(legalLookup.error), 403)));
   useEffect(() => { if (legalLookupDenied) setRememberedLegalEntity(null); }, [legalLookupDenied]);
-  const [addressSuggestionsByIndex, setAddressSuggestionsByIndex] = useState<
-    Record<number, DadataAddressSuggestion[]>
-  >({});
-  const addressSuggestionTimersRef = useRef<Record<number, number>>({});
   const [oksoOptions, setOksoOptions] = useState<ClientReferenceItem[]>([]);
   const [okpdtrOptions, setOkpdtrOptions] = useState<ClientReferenceItem[]>([]);
   const [oksoSearch, setOksoSearch] = useState("");
@@ -3559,9 +3559,10 @@ function ClientDetailScreen({
       successMessage,
       toastTitle,
       onDelete,
+      isCurrent,
     }: ClientProfileDeleteActionOptions) => {
       const owner = captureScreen();
-      if (!owner || pendingProfileMutation.current?.isCurrent()) return false;
+      if (!owner || pendingProfileMutation.current?.isCurrent() || isCurrent?.() === false) return false;
       if (!clientPermissions.canEdit) {
         showPermissionWarning("Недостаточно прав для редактирования клиента.");
         return false;
@@ -3578,7 +3579,7 @@ function ClientDetailScreen({
         variant: "danger",
       }); } finally { profileConfirmations.current.delete(controller); controller.abort(); }
 
-      if (!ok || !owner.isCurrent() || pendingProfileMutation.current?.isCurrent()) return false;
+      if (!ok || !owner.isCurrent() || pendingProfileMutation.current?.isCurrent() || isCurrent?.() === false) return false;
 
       onDelete();
       toast.success(successMessage, toastTitle);
@@ -3677,7 +3678,7 @@ function ClientDetailScreen({
           : [createEmptyPassportEntry()],
       addressEntries:
         profile.addressEntries.length > 0
-          ? ensureSinglePrimaryAddressEntryList(profile.addressEntries)
+          ? ensureSinglePrimaryAddressEntryList(profile.addressEntries.map(entry => ({ ...entry, uiKey: createClientRequestId() })))
           : [createEmptyAddressEntry(true)],
       comment: profile.comment,
       legacyNotes: profile.legacyNotes,
@@ -4802,6 +4803,14 @@ function ClientDetailScreen({
   }, [clientFormState.clientStatusId, sortedClientStatuses]);
 
   const canEditClientProfile = profileReady && clientPermissions.canEdit && clientProfileEditing && !clientActionBusy;
+  const setClientAddressEntries = useCallback((action: SetStateAction<ClientAddressItem[]>) => {
+    setClientFormState(previous => ({ ...previous, addressEntries: typeof action === 'function' ? action(previous.addressEntries) : action }));
+  }, []);
+  const addressAutofill = useCompanyAddressAutofill({ entries: clientFormState.addressEntries, setEntries: setClientAddressEntries,
+    scope: screenOwner.scope, enabled: canEditClientProfile && activeSection === 'profile' && clientFormState.kind === 'individual',
+    resetKey: clientData, onUseAddress: () => undefined, fallbackToSuggestions: true, preserveMissingSuggestionFields: true });
+  const currentAddressEntries = useRef(clientFormState.addressEntries);
+  currentAddressEntries.current = clientFormState.addressEntries;
   const canManageClientResponsibleInProfile =
     profileReady && canManageClientResponsible && clientProfileEditing && !clientActionBusy;
 
@@ -5667,10 +5676,13 @@ function ClientDetailScreen({
     key: keyof ClientAddressItem,
     value: string,
   ) => {
+    const target = clientFormState.addressEntries[index]?.uiKey;
+    if (!target || key === 'uiKey' || !addressAutofill.capture() || !canEditClientProfile) return;
+    if (!['type', 'validFrom', 'validTo', 'uiKey'].includes(key)) addressAutofill.invalidate(target);
     setClientFormState((prev) => ({
       ...prev,
-      addressEntries: prev.addressEntries.map((item, i) => {
-        if (i !== index) return item;
+      addressEntries: prev.addressEntries.map((item) => {
+        if (item.uiKey !== target) return item;
         const updated = { ...item, [key]: value };
         if (
           [
@@ -5707,13 +5719,16 @@ function ClientDetailScreen({
   };
 
   const setPrimaryAddressFormEntry = (index: number) => {
+    const target = clientFormState.addressEntries[index]?.uiKey;
+    if (!target || !addressAutofill.capture() || !canEditClientProfile) return;
     setClientFormState((prev) => ({
       ...prev,
-      addressEntries: setPrimaryAddressEntry(prev.addressEntries, index),
+      addressEntries: prev.addressEntries.some(item => item.uiKey === target) ? setPrimaryAddressEntry(prev.addressEntries, prev.addressEntries.findIndex(item => item.uiKey === target)) : prev.addressEntries,
     }));
   };
 
   const addAddressEntry = () => {
+    if (!addressAutofill.capture() || !canEditClientProfile) return;
     setClientFormState((prev) => ({
       ...prev,
       addressEntries: ensureSinglePrimaryAddressEntryList([
@@ -5724,6 +5739,9 @@ function ClientDetailScreen({
   };
 
   const removeAddressEntry = async (index: number) => {
+    const owner = addressAutofill.capture();
+    const target = clientFormState.addressEntries[index]?.uiKey;
+    if (!owner || !target || !canEditClientProfile) return;
     const addressLabel =
       clientFormState.addressEntries[index]?.fullAddress?.trim() ?? "";
 
@@ -5734,13 +5752,15 @@ function ClientDetailScreen({
         : `Удалить адрес #${index + 1}?`,
       successMessage: "Адрес удалён.",
       toastTitle: "Адреса",
+      isCurrent: () => owner.isCurrent() && currentAddressEntries.current.some(item => item.uiKey === target),
       onDelete: () => {
+        addressAutofill.invalidate(target);
         setClientFormState((prev) => ({
           ...prev,
           addressEntries:
-            prev.addressEntries.filter((_, i) => i !== index).length > 0
+            prev.addressEntries.filter(item => item.uiKey !== target).length > 0
               ? ensureSinglePrimaryAddressEntryList(
-                  prev.addressEntries.filter((_, i) => i !== index),
+                  prev.addressEntries.filter(item => item.uiKey !== target),
                 )
               : [createEmptyAddressEntry(true)],
         }));
@@ -5749,10 +5769,12 @@ function ClientDetailScreen({
   };
 
   const toggleAddressAdditionalType = (index: number, type: string) => {
+    const target = clientFormState.addressEntries[index]?.uiKey;
+    if (!target || !addressAutofill.capture() || !canEditClientProfile) return;
     setClientFormState((prev) => ({
       ...prev,
-      addressEntries: prev.addressEntries.map((item, i) => {
-        if (i !== index) return item;
+      addressEntries: prev.addressEntries.map((item) => {
+        if (item.uiKey !== target) return item;
         const has = item.additionalTypes.includes(type);
         return {
           ...item,
@@ -5845,192 +5867,6 @@ function ClientDetailScreen({
         }));
       },
     });
-  };
-
-  const loadAddressSuggestions = async (index: number, query: string) => {
-    const raw = query.trim();
-    if (raw.length < 3) {
-      setAddressSuggestionsByIndex((prev) => ({ ...prev, [index]: [] }));
-      return;
-    }
-    try {
-      const suggestions = await apiService.suggestClientAddresses(raw, 7);
-      setAddressSuggestionsByIndex((prev) => ({
-        ...prev,
-        [index]: suggestions ?? [],
-      }));
-    } catch (error) {
-      toast.error(
-        extractDisplayErrorMessage(
-          error,
-          "Не удалось получить подсказки адресов",
-        ),
-        "DaData",
-      );
-    }
-  };
-
-  const scheduleAddressSuggestions = (index: number, query: string) => {
-    const timers = addressSuggestionTimersRef.current;
-    if (timers[index]) window.clearTimeout(timers[index]);
-    timers[index] = window.setTimeout(() => {
-      void loadAddressSuggestions(index, query);
-    }, 350);
-  };
-
-  const fillAddressEntryByDaData = async (
-    index: number,
-    rawInput?: string,
-    options?: { silent?: boolean },
-  ) => {
-    const entry = clientFormState.addressEntries[index];
-    const raw = (rawInput || entry?.fullAddress || "").trim();
-    if (!raw) return;
-    try {
-      const cleaned = await apiService.cleanAddress(raw);
-      setClientFormState((prev) => ({
-        ...prev,
-        addressEntries: prev.addressEntries.map((item, i) => {
-          if (i !== index) return item;
-          const updated = {
-            ...item,
-            sourceQuery: raw,
-            postalCode: cleaned.postalCode || "",
-            country: cleaned.country || item.country || "",
-            region: cleaned.regionWithType || "",
-            district: cleaned.areaWithType || "",
-            city: cleaned.cityWithType || "",
-            settlement: cleaned.settlementWithType || "",
-            street: cleaned.streetWithType || "",
-            house: cleaned.house || "",
-            flat: cleaned.flat || "",
-            fiasId: cleaned.fiasId || "",
-            kladrId: cleaned.kladrId || "",
-            geoLat: cleaned.geoLat || "",
-            geoLon: cleaned.geoLon || "",
-          };
-          return {
-            ...updated,
-            fullAddress: chooseBestDisplayAddress(
-              updated,
-              item.fullAddress,
-              cleaned.result,
-              raw,
-            ),
-          };
-        }),
-      }));
-    } catch (error) {
-      try {
-        const suggestions = await apiService.suggestClientAddresses(raw, 1);
-        const fallbackSuggestion = suggestions?.[0];
-        if (fallbackSuggestion) {
-          const fallbackAddress = (
-            fallbackSuggestion.unrestrictedValue ||
-            fallbackSuggestion.value ||
-            raw
-          ).trim();
-          setClientFormState((prev) => ({
-            ...prev,
-            addressEntries: prev.addressEntries.map((item, i) => {
-              if (i !== index) return item;
-              const updated = {
-                ...item,
-                sourceQuery: raw,
-                postalCode: fallbackSuggestion.postalCode || item.postalCode,
-                country: item.country || "",
-                region: fallbackSuggestion.regionWithType || item.region,
-                district: fallbackSuggestion.areaWithType || item.district,
-                city: fallbackSuggestion.cityWithType || item.city,
-                settlement:
-                  fallbackSuggestion.settlementWithType || item.settlement,
-                street: fallbackSuggestion.streetWithType || item.street,
-                house: fallbackSuggestion.house || item.house,
-                flat: fallbackSuggestion.flat || item.flat,
-                fiasId: fallbackSuggestion.fiasId || item.fiasId,
-                kladrId: fallbackSuggestion.kladrId || item.kladrId,
-                geoLat: fallbackSuggestion.geoLat || item.geoLat,
-                geoLon: fallbackSuggestion.geoLon || item.geoLon,
-              };
-              return {
-                ...updated,
-                fullAddress: chooseBestDisplayAddress(
-                  updated,
-                  fallbackAddress,
-                  item.fullAddress,
-                  raw,
-                ),
-              };
-            }),
-          }));
-          return;
-        }
-      } catch {
-        // ignore and show main error below
-      }
-
-      if (!options?.silent) {
-        toast.error(
-          extractDisplayErrorMessage(error, "Не удалось найти адрес"),
-          "DaData",
-        );
-        return;
-      }
-      throw error;
-    }
-  };
-
-  const applyAddressSuggestion = async (
-    index: number,
-    suggestion: DadataAddressSuggestion,
-  ) => {
-    const selected = (
-      suggestion.unrestrictedValue ||
-      suggestion.value ||
-      ""
-    ).trim();
-    if (!selected) return;
-
-    // Быстро заполняем минимум из suggestion даже если clean endpoint временно недоступен.
-    setClientFormState((prev) => ({
-      ...prev,
-      addressEntries: prev.addressEntries.map((item, i) => {
-        if (i !== index) return item;
-        const updated = {
-          ...item,
-          sourceQuery: selected,
-          postalCode: suggestion.postalCode || item.postalCode,
-          country: item.country || "",
-          region: suggestion.regionWithType || item.region,
-          district: suggestion.areaWithType || item.district,
-          city: suggestion.cityWithType || item.city,
-          settlement: suggestion.settlementWithType || item.settlement,
-          street: suggestion.streetWithType || item.street,
-          house: suggestion.house || item.house,
-          flat: suggestion.flat || item.flat,
-          fiasId: suggestion.fiasId || item.fiasId,
-          kladrId: suggestion.kladrId || item.kladrId,
-          geoLat: suggestion.geoLat || item.geoLat,
-          geoLon: suggestion.geoLon || item.geoLon,
-        };
-        return {
-          ...updated,
-          fullAddress: chooseBestDisplayAddress(
-            updated,
-            selected,
-            item.fullAddress,
-          ),
-        };
-      }),
-    }));
-
-    setAddressSuggestionsByIndex((prev) => ({ ...prev, [index]: [] }));
-
-    try {
-      await fillAddressEntryByDaData(index, selected, { silent: true });
-    } catch {
-      // fallback уже применён выше через suggestion
-    }
   };
 
   const handleClientFormSubmit = async (
@@ -7020,17 +6856,18 @@ function ClientDetailScreen({
                             canEdit={canEditClientProfile}
                             textReadOnly={!clientProfileEditing}
                             addressTypeOptions={ADDRESS_TYPE_OPTIONS}
-                            suggestionsByIndex={addressSuggestionsByIndex}
+                            suggestionsByIndex={addressAutofill.suggestionsByIndex}
+                            errorsByIndex={addressAutofill.errorsByIndex}
                             onUpdateEntry={updateAddressFormEntry}
                             onSetPrimary={setPrimaryAddressFormEntry}
                             onRemoveEntry={removeAddressEntry}
                             onAddEntry={addAddressEntry}
                             onToggleAdditionalType={toggleAddressAdditionalType}
-                            onScheduleSuggestions={scheduleAddressSuggestions}
+                            onScheduleSuggestions={(index, query) => addressAutofill.schedule(clientFormState.addressEntries[index]?.uiKey, query)}
                             onFindAddress={(index) => {
-                              void fillAddressEntryByDaData(index);
+                              void addressAutofill.clean(clientFormState.addressEntries[index]?.uiKey);
                             }}
-                            onApplySuggestion={applyAddressSuggestion}
+                            onApplySuggestion={(index, suggestion) => addressAutofill.apply(clientFormState.addressEntries[index]?.uiKey, suggestion)}
                           />
                         )}
                   </div>
