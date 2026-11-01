@@ -8427,8 +8427,8 @@ export class ApiService {
   async getServices() {
     return this.getDict('services');
   }
-  async getInvoiceReferenceDictionaries() {
-    return this.request<InvoiceReferenceDictionaries>('/invoices/reference-dictionaries');
+  async getInvoiceReferenceDictionaries(options?: { signal?: AbortSignal }) {
+    return this.request<InvoiceReferenceDictionaries>('/invoices/reference-dictionaries', { signal: options?.signal, cache: 'no-store' });
   }
   async getClientStatuses(options?: { signal?: AbortSignal }) {
     return this.getDict('client-statuses', options);

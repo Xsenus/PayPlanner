@@ -155,7 +155,7 @@ const INVOICE_WORKFLOW_STATUS_CLASSES: Record<InvoiceWorkflowStatus, string> = {
 
 type InvoiceCounterpartyPickerMode = 'main' | 'expense';
 
-type LineItemLookupState = { lineItemId: string } | null;
+type LineItemLookupState = { lineItemId: string; ownerScope: string } | null;
 type InvoiceCancellationScope = 'All' | 'UnpaidInstallmentsOnly';
 type InvoiceCancellationMoneyAction = 'Reject' | 'LeaveAsAdvance' | 'Refund' | 'Reallocate';
 type InvoiceCancellationRefundSource = 'Bank' | 'Cash' | 'Card' | 'EMoney';
@@ -1089,20 +1089,44 @@ export function InvoiceModal({
     [],
   );
 
-  const { invoiceUnits, services, serviceCategories } = useInvoiceReferenceDictionaries();
+  const referenceScope = JSON.stringify([invoice?.id, mode, presentation, currentUser?.id, currentUser?.role?.id, isAdmin, permissions.accounts]);
+  const { invoiceUnits, services, serviceCategories, loading: referencesLoading, error: referencesError,
+    refresh: refreshReferences, capture: captureReferenceOwner } = useInvoiceReferenceDictionaries({ enabled: open && canReadPrint, ownerScope: referenceScope });
+  const referencesReady = open && canReadPrint && !referencesLoading && !referencesError;
+  const canEditInvoiceItems = canReadPrint && (isAdmin || (mode === 'edit' ? permissions.accounts.canEdit : permissions.accounts.canCreate));
+  const referenceView = useRef({ scope: referenceScope, ready: referencesReady, services, loading: referencesLoading, error: referencesError, editable: canEditInvoiceItems && !pageViewMode && !submitting });
+  referenceView.current = { scope: referenceScope, ready: referencesReady, services, loading: referencesLoading, error: referencesError, editable: canEditInvoiceItems && !pageViewMode && !submitting };
+  const capturePrintOwner = printOwner.capture;
+  const canChangeCurrentInvoiceItems = useCallback(() => open && referenceView.current.scope === referenceScope && referenceView.current.editable
+    && Boolean(capturePrintOwner()) && Boolean(captureReferenceOwner()), [capturePrintOwner, captureReferenceOwner, open, referenceScope]);
+  const canUseCurrentReferences = useCallback(() => canChangeCurrentInvoiceItems() && referenceView.current.ready && referenceView.current.services === services,
+    [canChangeCurrentInvoiceItems, services]);
+  const currentLineItemLookup = useRef(lineItemLookupState);
+  currentLineItemLookup.current = lineItemLookupState;
+  const isCurrentLineItemLookup = () => Boolean(lineItemLookupState && currentLineItemLookup.current === lineItemLookupState
+    && lineItemLookupState.ownerScope === referenceScope && referenceView.current.scope === referenceScope && open && capturePrintOwner() && captureReferenceOwner());
+  useEffect(() => { setLineItemLookupState(null); setLineItemLookupQuery(''); }, [referenceScope]);
+  const referenceRetry = useRef<{ scope: string } | null>(null);
+  const retryReferences = async () => {
+    if (!open || referenceView.current.scope !== referenceScope || !captureReferenceOwner() || !capturePrintOwner()
+      || referenceView.current.loading || !referenceView.current.error || referenceRetry.current?.scope === referenceScope) return;
+    const attempt = { scope: referenceScope }; referenceRetry.current = attempt;
+    try { await refreshReferences(); }
+    finally { if (referenceRetry.current === attempt) referenceRetry.current = null; }
+  };
   const documentStatusSettings = useDocumentStatusSettings();
   const invoiceWorkflowStatusLabels = useMemo(
     () => getDocumentStatusLabels(documentStatusSettings, 'invoice', DEFAULT_INVOICE_WORKFLOW_STATUS_LABELS),
     [documentStatusSettings],
   );
-  const unitOptions = useMemo(() => invoiceUnits.map((item) => item.name).filter((name) => Boolean(name?.trim())), [invoiceUnits]);
+  const unitOptions = useMemo(() => referencesReady ? invoiceUnits.map((item) => item.name).filter((name) => Boolean(name?.trim())) : [], [invoiceUnits, referencesReady]);
   const sortedServiceCategories = useMemo(
-    () => [...serviceCategories].sort((left, right) => left.name.localeCompare(right.name, 'ru')),
-    [serviceCategories],
+    () => referencesReady ? [...serviceCategories].sort((left, right) => left.name.localeCompare(right.name, 'ru')) : [],
+    [serviceCategories, referencesReady],
   );
   const sortedServices = useMemo(
-    () => [...services].sort((left, right) => left.name.localeCompare(right.name, 'ru')),
-    [services],
+    () => referencesReady ? [...services].sort((left, right) => left.name.localeCompare(right.name, 'ru')) : [],
+    [services, referencesReady],
   );
   const serviceCategoryById = useMemo(() => {
     const map = new Map<number, string>();
@@ -1125,12 +1149,12 @@ export function InvoiceModal({
     return map;
   }, [sortedServices]);
   const activeLineItemLookup = useMemo(() => {
-    if (!lineItemLookupState) {
+    if (!lineItemLookupState || lineItemLookupState.ownerScope !== referenceScope) {
       return null;
     }
 
     return lineItems.find((item) => item.id === lineItemLookupState.lineItemId) ?? null;
-  }, [lineItemLookupState, lineItems]);
+  }, [lineItemLookupState, lineItems, referenceScope]);
   const lineItemCategoryFilterOptions = useMemo(
     () =>
       sortedServiceCategories.map((category) => ({
@@ -1232,6 +1256,7 @@ export function InvoiceModal({
   };
 
   const handleLineItemCategoryChange = (id: string, serviceCategoryId: string) => {
+    if (!isCurrentLineItemLookup() || !canUseCurrentReferences() || (serviceCategoryId && !sortedServiceCategories.some(category => String(category.id) === serviceCategoryId))) return;
     const currentLineItem = lineItems.find((item) => item.id === id);
     const template = currentLineItem ? resolveLineItemTemplate(currentLineItem, currentLineItem.name, serviceCategoryId) : null;
     const patch: Partial<LineItem> = {
@@ -1251,17 +1276,20 @@ export function InvoiceModal({
   };
 
   const openLineItemLookup = (lineItemId: string) => {
+    if (!canChangeCurrentInvoiceItems()) return;
     const currentLineItem = lineItems.find((item) => item.id === lineItemId);
     setLineItemLookupQuery(currentLineItem?.name ?? '');
-    setLineItemLookupState({ lineItemId });
+    setLineItemLookupState({ lineItemId, ownerScope: referenceScope });
   };
 
   const closeLineItemLookup = () => {
+    if (!isCurrentLineItemLookup()) return;
     setLineItemLookupState(null);
     setLineItemLookupQuery('');
   };
 
   const handleLineItemServiceSelect = (serviceId: string) => {
+    if (!isCurrentLineItemLookup() || !canUseCurrentReferences()) return;
     const currentLineItemId = lineItemLookupState?.lineItemId;
     if (!currentLineItemId) {
       return;
@@ -1291,6 +1319,7 @@ export function InvoiceModal({
   };
 
   const applyCustomLineItemServiceName = () => {
+    if (!isCurrentLineItemLookup() || !canChangeCurrentInvoiceItems()) return;
     const currentLineItemId = lineItemLookupState?.lineItemId;
     const trimmedQuery = lineItemLookupQuery.trim();
     if (!currentLineItemId || !trimmedQuery) {
@@ -1302,10 +1331,11 @@ export function InvoiceModal({
       return;
     }
 
-    const template = resolveLineItemTemplate(currentLineItem, trimmedQuery);
+    const currentCatalogue = canUseCurrentReferences();
+    const template = currentCatalogue ? resolveLineItemTemplate(currentLineItem, trimmedQuery) : null;
     const patch: Partial<LineItem> = {
       name: trimmedQuery,
-      serviceId: template ? String(template.id) : '',
+      serviceId: template ? String(template.id) : currentCatalogue ? '' : currentLineItem.serviceId,
     };
 
     if (template?.categoryId) {
@@ -1325,6 +1355,7 @@ export function InvoiceModal({
   };
 
   const clearLineItemServiceName = () => {
+    if (!isCurrentLineItemLookup() || !canChangeCurrentInvoiceItems()) return;
     const currentLineItemId = lineItemLookupState?.lineItemId;
     if (!currentLineItemId) {
       return;
@@ -2204,7 +2235,7 @@ export function InvoiceModal({
   }, [lineItems, calculateLineItemsTotal]);
 
   useEffect(() => {
-    if (!unitOptions.length) return;
+    if (!unitOptions.length || !canUseCurrentReferences()) return;
     setLineItems((prev) => {
       let changed = false;
       const next = prev.map((item) => {
@@ -2214,10 +2245,10 @@ export function InvoiceModal({
       });
       return changed ? next : prev;
     });
-  }, [unitOptions]);
+  }, [unitOptions, canUseCurrentReferences]);
 
   useEffect(() => {
-    if (!sortedServices.length) return;
+    if (!sortedServices.length || !canUseCurrentReferences()) return;
 
     setLineItems((prev) => {
       let changed = false;
@@ -2235,7 +2266,7 @@ export function InvoiceModal({
       });
       return changed ? next : prev;
     });
-  }, [resolveLineItemTemplate, sortedServices.length]);
+  }, [resolveLineItemTemplate, sortedServices.length, canUseCurrentReferences]);
 
   const updateLineItem = (id: string, patch: Partial<LineItem>) => {
     setLineItems((prev) => {
@@ -3988,7 +4019,7 @@ export function InvoiceModal({
   );
   const lineItemLookupQueryTrimmed = lineItemLookupQuery.trim();
   const activeLineItemCategoryLabel = activeLineItemLookup?.serviceCategoryId
-    ? serviceCategoryById.get(Number(activeLineItemLookup.serviceCategoryId)) ?? 'Все категории'
+    ? serviceCategoryById.get(Number(activeLineItemLookup.serviceCategoryId)) ?? `Выбранная категория #${activeLineItemLookup.serviceCategoryId}`
     : 'Все категории';
   const activeLineItemSelectedServiceId = activeLineItemLookup
     ? String(resolveLineItemTemplate(activeLineItemLookup)?.id ?? '')
@@ -4694,6 +4725,11 @@ export function InvoiceModal({
                               + Добавить
                             </button>
                           </header>
+                          {referencesLoading ? <p className="mb-2 text-xs text-slate-500">Загрузка справочников позиций...</p> : null}
+                          {referencesError ? <div role="alert" className="mb-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                            {extractDisplayErrorMessage(new Error(referencesError), 'Не удалось загрузить справочники позиций.')}
+                            <button type="button" onClick={() => { void retryReferences(); }} disabled={referencesLoading} className="ml-2 underline">Повторить загрузку услуг</button>
+                          </div> : null}
                           <div className="-mx-1 overflow-x-auto px-1">
                             <div className={`space-y-3 ${LINE_ITEM_GRID_MIN_WIDTH_CLASS}`}>
                               <div className={`hidden items-center gap-3 px-1 text-xs font-semibold uppercase tracking-wide text-slate-500 md:grid ${LINE_ITEM_GRID_TEMPLATE}`}>
@@ -4718,6 +4754,7 @@ export function InvoiceModal({
                                         type="button"
                                         data-testid="invoice-line-item-service-trigger"
                                         onClick={() => openLineItemLookup(item.id)}
+                                        disabled={!canEditInvoiceItems || submitting}
                                         aria-label="Наименование услуги"
                                         title={item.name || 'Выберите наименование услуги'}
                                         className="flex min-h-[3.25rem] w-full items-center justify-between gap-3 rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-left text-sm transition hover:border-blue-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-100 md:h-10 md:min-h-10 md:py-2"
@@ -5555,7 +5592,7 @@ export function InvoiceModal({
       )}
 
       <InvoiceLineItemLookupDialog
-        open={!!lineItemLookupState}
+        open={!!lineItemLookupState && lineItemLookupState.ownerScope === referenceScope && canEditInvoiceItems && !pageViewMode}
         title="Выбор наименования услуги"
         description={
           activeLineItemCategoryLabel === 'Все категории'
@@ -5577,7 +5614,10 @@ export function InvoiceModal({
         customActionLabel={canApplyCustomServiceName ? `Использовать: ${lineItemLookupQueryTrimmed}` : undefined}
         customActionDescription={canApplyCustomServiceName ? 'Сохранить введённый текст как наименование позиции.' : undefined}
         noOptionsText="Подходящие услуги не найдены"
-        onQueryChange={setLineItemLookupQuery}
+        loading={referencesLoading}
+        error={referencesError ? extractDisplayErrorMessage(new Error(referencesError), 'Не удалось загрузить услуги.') : null}
+        onRetry={() => { void retryReferences(); }}
+        onQueryChange={(value) => { if (isCurrentLineItemLookup()) setLineItemLookupQuery(value); }}
         onClose={closeLineItemLookup}
         onSelect={handleLineItemServiceSelect}
         onClear={clearLineItemServiceName}

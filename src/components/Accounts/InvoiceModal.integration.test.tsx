@@ -28,6 +28,13 @@ import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
 
 const permissionState = vi.hoisted(() => ({ value: null as RolePermissions | null }));
 const printAuthState = vi.hoisted(() => ({ user: { id: 7, role: { id: 1 } } }));
+const referenceState = vi.hoisted(() => ({ loading: false, error: null as string | null, refresh: vi.fn(), capture: vi.fn(() => ({ isCurrent: () => true })) }));
+const referenceHookSpy = vi.hoisted(() => vi.fn());
+const referenceLookupSpy = vi.hoisted(() => vi.fn());
+vi.mock('./InvoiceLineItemLookupDialog', async () => {
+  const actual = await vi.importActual<typeof import('./InvoiceLineItemLookupDialog')>('./InvoiceLineItemLookupDialog');
+  return { InvoiceLineItemLookupDialog: (props: Parameters<typeof actual.InvoiceLineItemLookupDialog>[0]) => { referenceLookupSpy(props); return <actual.InvoiceLineItemLookupDialog {...props} />; } };
+});
 let baseAuthSession: ReturnType<typeof documentCopyTestSession>;
 beforeEach(() => { baseAuthSession = documentCopyTestSession(); });
 afterEach(() => baseAuthSession.restore());
@@ -110,14 +117,12 @@ vi.mock('../../contexts/AuthContext', () => ({
 }));
 
 vi.mock('../../hooks/useInvoiceReferenceDictionaries', () => ({
-  useInvoiceReferenceDictionaries: () => ({
+  useInvoiceReferenceDictionaries: (options: unknown) => { referenceHookSpy(options); return ({
     invoiceUnits: invoiceUnitsMock,
     services: servicesMock,
     serviceCategories: serviceCategoriesMock,
-    loading: false,
-    error: null,
-    refresh: vi.fn(),
-  }),
+    ...referenceState,
+  }); },
 }));
 
 vi.mock('../../hooks/useDialog', () => ({
@@ -310,6 +315,55 @@ async function selectPickerOption(name: string): Promise<void> {
 }
 
 describe('InvoiceModal integration', () => {
+  const referenceProps = () => ({ open: true, mode: 'create' as const, invoice: null, onClose: vi.fn(), onSubmit: vi.fn().mockResolvedValue(undefined), submitting: false,
+    clients: [], responsibles: [], lookupsLoading: false, relatedPayments: [] });
+  function seedReferenceServices() {
+    serviceCategoriesMock.push({ id: 1, name: 'Текущая категория', description: '', colorHex: '', createdAt: '', isActive: true });
+    servicesMock.push({ id: 1, name: 'Услуга из каталога', description: '', colorHex: '', createdAt: '', isActive: true, categoryId: 1, unit: 'усл.', defaultPrice: 9999 });
+  }
+  it('reference caller scope: closed and forbidden callers are disabled and permission changes close the open picker', async () => {
+    seedReferenceServices(); const props = referenceProps(); const view = render(<InvoiceModal {...props} open={false} />);
+    expect(referenceHookSpy.mock.lastCall![0].enabled).toBe(false); view.rerender(<InvoiceModal {...props} />); await act(async () => {});
+    fireEvent.click(screen.getByRole('button', { name: 'Наименование услуги' })); expect(screen.getByText('Выбор наименования услуги')).toBeTruthy(); const scope = referenceHookSpy.mock.lastCall![0].ownerScope;
+    permissionState.value = { ...defaultRolePermissions, accounts: { ...defaultRolePermissions.accounts, canView: false, canCreate: false } };
+    view.rerender(<InvoiceModal {...props} />); expect(referenceHookSpy.mock.lastCall![0].enabled).toBe(false); expect(referenceHookSpy.mock.lastCall![0].ownerScope).not.toBe(scope);
+    expect(screen.queryByText('Выбор наименования услуги')).toBeNull();
+  });
+  it('reference caller session: an old service callback cannot apply a financial template after login replacement', async () => {
+    seedReferenceServices(); const props = referenceProps(); render(<InvoiceModal {...props} />); await act(async () => {});
+    fireEvent.change(screen.getByLabelText('Цена'), { target: { value: '1234,56' } }); const before = (screen.getByLabelText('Цена') as HTMLInputElement).value;
+    fireEvent.click(screen.getByRole('button', { name: 'Наименование услуги' })); const old = referenceLookupSpy.mock.lastCall![0];
+    baseAuthSession.replace('actor'); act(() => old.onSelect('1'));
+    expect(screen.getByLabelText('Цена')).toHaveProperty('value', before); expect(props.onSubmit).not.toHaveBeenCalled();
+  });
+  it('reference caller refresh: a held choice cannot change price while refreshed catalogues are loading', async () => {
+    seedReferenceServices(); const props = referenceProps(); const view = render(<InvoiceModal {...props} />); await act(async () => {});
+    fireEvent.change(screen.getByLabelText('Цена'), { target: { value: '1234,56' } }); const before = (screen.getByLabelText('Цена') as HTMLInputElement).value;
+    fireEvent.click(screen.getByRole('button', { name: 'Наименование услуги' })); const old = referenceLookupSpy.mock.lastCall![0];
+    referenceState.loading = true; view.rerender(<InvoiceModal {...props} />); act(() => { old.onSelect('1'); old.onFilterChange('1'); });
+    expect(screen.getByLabelText('Цена')).toHaveProperty('value', before); expect(screen.queryByTestId('invoice-line-item-lookup-option-1')).toBeNull();
+    expect(screen.getByText('Загрузка справочника услуг...')).toBeTruthy();
+  });
+  it('reference caller manual: unavailable catalogues allow a custom name without applying cached price or unit defaults', async () => {
+    seedReferenceServices(); referenceState.error = 'HTTP 403 - Справочник закрыт';
+    const props = referenceProps(); render(<InvoiceModal {...props} />); await act(async () => {});
+    fireEvent.change(screen.getByLabelText('Цена'), { target: { value: '1234,56' } }); fireEvent.change(screen.getByLabelText('Единица измерения'), { target: { value: 'час' } });
+    const before = (screen.getByLabelText('Цена') as HTMLInputElement).value;
+    fireEvent.click(screen.getByRole('button', { name: 'Наименование услуги' })); fireEvent.change(screen.getByPlaceholderText('Поиск наименования'), { target: { value: 'Ручное наименование' } });
+    fireEvent.click(screen.getByRole('button', { name: /Использовать: Ручное наименование/ }));
+    expect(screen.getByLabelText('Цена')).toHaveProperty('value', before); expect(screen.getByLabelText('Единица измерения')).toHaveProperty('value', 'час');
+    expect(screen.getByRole('button', { name: 'Наименование услуги' }).textContent).toContain('Ручное наименование'); expect(props.onSubmit).not.toHaveBeenCalled();
+  });
+  it('reference caller retry: one explicit retry retains query and amount fields', async () => {
+    referenceState.error = 'Временный отказ справочника'; const pending = createDeferred<void>(); referenceState.refresh.mockReturnValue(pending.promise);
+    const props = referenceProps(); const view = render(<InvoiceModal {...props} />); await act(async () => {});
+    fireEvent.change(screen.getByLabelText('Цена'), { target: { value: '1234,56' } }); const before = (screen.getByLabelText('Цена') as HTMLInputElement).value;
+    fireEvent.click(screen.getByRole('button', { name: 'Наименование услуги' })); fireEvent.change(screen.getByPlaceholderText('Поиск наименования'), { target: { value: 'Сохраняемый поиск' } });
+    const retry = referenceLookupSpy.mock.lastCall![0].onRetry; act(() => { retry(); retry(); }); expect(referenceState.refresh).toHaveBeenCalledOnce();
+    referenceState.loading = true; view.rerender(<InvoiceModal {...props} />); expect(screen.getAllByRole('button', { name: 'Повторить загрузку услуг' }).every(button => (button as HTMLButtonElement).disabled)).toBe(true);
+    referenceState.loading = false; referenceState.error = null; await act(async () => { pending.resolve(); }); view.rerender(<InvoiceModal {...props} />);
+    expect(screen.getByPlaceholderText('Поиск наименования')).toHaveProperty('value', 'Сохраняемый поиск'); expect(screen.getByLabelText('Цена')).toHaveProperty('value', before);
+  });
   it('caller lookup retry: an explicit retry preserves the invoice draft and is disabled during loading', async () => {
     const retry = vi.fn();
     const props = { open: true, mode: 'create' as const, invoice: null, onClose: vi.fn(), onSubmit: vi.fn().mockResolvedValue(undefined), submitting: false,
@@ -351,6 +405,9 @@ describe('InvoiceModal integration', () => {
 
   beforeEach(() => {
     configureDocumentDeliveryTestApi('invoice', 0, 0, false);
+    referenceHookSpy.mockClear(); referenceState.loading = false; referenceState.error = null;
+    referenceLookupSpy.mockClear();
+    referenceState.refresh.mockReset().mockResolvedValue(undefined); referenceState.capture.mockReset().mockImplementation(() => ({ isCurrent: () => true }));
     printAuthState.user = { id: 7, role: { id: 1 } };
     vi.mocked(apiService.getDocumentImagePrintDefaults).mockReset().mockResolvedValue({ includeLogo: false, includeSeal: false, includeSignature: false });
     vi.mocked(apiService.prepareDocumentPrint).mockReset().mockImplementation(async () => Object.assign(new Blob(['print copy']), { text: async () => 'print copy' }));

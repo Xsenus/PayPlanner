@@ -24,6 +24,9 @@ interface InvoiceLineItemLookupDialogProps {
   options: InvoiceLineItemLookupOption[];
   searchPlaceholder: string;
   noOptionsText?: string;
+  loading?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
   maxWidthClassName?: string;
   clearActionLabel?: string;
   clearActionDescription?: string;
@@ -55,6 +58,9 @@ export function InvoiceLineItemLookupDialog({
   options,
   searchPlaceholder,
   noOptionsText = 'Ничего не найдено',
+  loading = false,
+  error,
+  onRetry,
   maxWidthClassName = 'max-w-3xl',
   clearActionLabel,
   clearActionDescription,
@@ -135,6 +141,10 @@ export function InvoiceLineItemLookupDialog({
         </div>
 
         <div className="space-y-4 px-6 py-5">
+          {loading ? <p className="text-xs text-slate-500">Загрузка справочника услуг...</p> : null}
+          {error ? <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{error}
+            {onRetry ? <button type="button" onClick={onRetry} disabled={loading} className="ml-2 underline">Повторить загрузку услуг</button> : null}
+          </div> : null}
           {filterOptions?.length && onFilterChange && filterLabel ? (
             <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -144,6 +154,7 @@ export function InvoiceLineItemLookupDialog({
                     <SystemSelect
                       value={filterValue}
                       onChange={(event) => onFilterChange(event.target.value)}
+                      disabled={loading || Boolean(error)}
                       data-testid="invoice-line-item-lookup-filter-select"
                       className="w-full appearance-none rounded-2xl border border-slate-300 bg-white px-4 py-3 pr-11 text-sm text-slate-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                     >
@@ -236,6 +247,7 @@ export function InvoiceLineItemLookupDialog({
                     key={option.value}
                     type="button"
                     onClick={() => onSelect(option.value)}
+                    disabled={loading || Boolean(error)}
                     data-testid={`invoice-line-item-lookup-option-${option.value}`}
                     className={`flex w-full items-center justify-between gap-4 rounded-2xl border px-4 py-3 text-left transition ${
                       isSelected

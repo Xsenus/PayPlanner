@@ -1,60 +1,21 @@
-import { useCallback, useEffect, useState } from 'react';
-import { apiService } from '../services/api';
-import type { ServiceCategoryDictionaryItem, ServiceDictionaryItem } from '../types';
-import type { BaseDictItem } from '../types/dictionaries';
+import { apiService, type InvoiceReferenceDictionaries } from '../services/api';
+import { assertDictionaryRows, useDictionarySnapshot, type DictionaryReadOptions } from './useDictionarySnapshot';
 
-type InvoiceReferenceDictionariesState = {
-  invoiceUnits: BaseDictItem[];
-  services: ServiceDictionaryItem[];
-  serviceCategories: ServiceCategoryDictionaryItem[];
-  loading: boolean;
-  error: string | null;
-  refresh: () => Promise<void>;
-};
+const empty: InvoiceReferenceDictionaries = { invoiceUnits: [], services: [], serviceCategories: [] };
 
-const DICTS_CHANGED = 'dicts:changed';
+async function load(signal: AbortSignal): Promise<InvoiceReferenceDictionaries> {
+  const response = await apiService.getInvoiceReferenceDictionaries({ signal });
+  for (const group of ['invoiceUnits', 'services', 'serviceCategories'] as const) assertDictionaryRows(response?.[group]);
+  if (response.services.some(item => (item.defaultPrice != null && (typeof item.defaultPrice !== 'number' || !Number.isFinite(item.defaultPrice)))
+    || (item.categoryId != null && (!Number.isSafeInteger(item.categoryId) || item.categoryId <= 0))
+    || (item.unit != null && typeof item.unit !== 'string') || (item.description != null && typeof item.description !== 'string'))) {
+    throw new Error('Не удалось подтвердить данные услуг. Повторите загрузку справочника.');
+  }
+  return { invoiceUnits: response.invoiceUnits.filter(item => item.isActive !== false),
+    services: response.services.filter(item => item.isActive !== false), serviceCategories: response.serviceCategories.filter(item => item.isActive !== false) };
+}
 
-export function useInvoiceReferenceDictionaries(): InvoiceReferenceDictionariesState {
-  const [invoiceUnits, setInvoiceUnits] = useState<BaseDictItem[]>([]);
-  const [services, setServices] = useState<ServiceDictionaryItem[]>([]);
-  const [serviceCategories, setServiceCategories] = useState<ServiceCategoryDictionaryItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await apiService.getInvoiceReferenceDictionaries();
-      setInvoiceUnits((response.invoiceUnits ?? []).filter((item) => item.isActive !== false));
-      setServices((response.services ?? []).filter((item) => item.isActive !== false));
-      setServiceCategories((response.serviceCategories ?? []).filter((item) => item.isActive !== false));
-    } catch (err) {
-      setInvoiceUnits([]);
-      setServices([]);
-      setServiceCategories([]);
-      setError(err instanceof Error ? err.message : 'Не удалось загрузить справочники счета');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  useEffect(() => {
-    const handler = () => void refresh();
-    window.addEventListener(DICTS_CHANGED, handler);
-    return () => window.removeEventListener(DICTS_CHANGED, handler);
-  }, [refresh]);
-
-  return {
-    invoiceUnits,
-    services,
-    serviceCategories,
-    loading,
-    error,
-    refresh,
-  };
+export function useInvoiceReferenceDictionaries(options?: DictionaryReadOptions) {
+  const state = useDictionarySnapshot(load, empty, options);
+  return { ...state.value, loading: state.loading, error: state.error, refresh: state.refresh, capture: state.capture };
 }
