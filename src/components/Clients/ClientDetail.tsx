@@ -1,4 +1,4 @@
-import { PaymentCreateAdoptedError } from '../../services/paymentCreateAttempts';
+import { PaymentCreateAdoptedError, type PaymentCreateContext } from '../../services/paymentCreateAttempts';
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
@@ -3875,7 +3875,20 @@ function ClientDetailScreen({
     sortDir: "asc",
     page: paymentPage,
     pageSize: paymentPageSize,
-  });
+  }, screenOwner);
+  const paymentFormOwner = useDocumentDeliveryOwner(JSON.stringify([screenOwner.scope, payModalOpen, editingPayment?.id,
+    activeSection, paymentViewMode, caseIdForQuery, paymentModalDefaultExpenseClientId]));
+  const paymentMutationOwner = useDocumentDeliveryOwner(screenOwner.scope);
+  const pendingPaymentAction = useRef<DocumentDeliveryRead | null>(null);
+  const paymentOpenRequest = useRef<AbortController | null>(null);
+  const paymentConfirmations = useRef(new Set<AbortController>());
+  const latestPaymentRefresh = useRef<(current: () => boolean, skipPayments?: boolean) => Promise<void>>(async () => undefined);
+  const paymentListAtRender = useRef({ payments, page: paymentPage }); paymentListAtRender.current = { payments, page: paymentPage };
+  useEffect(() => () => {
+    paymentOpenRequest.current?.abort(); paymentOpenRequest.current = null;
+    for (const controller of paymentConfirmations.current) controller.abort();
+  }, [paymentFormOwner.scope]);
+
 
   const visiblePayments = payments;
   const relatedContractOptions = useMemo(
@@ -4852,35 +4865,31 @@ function ClientDetailScreen({
 
 
   const openAddPayment = () => {
-    if (!paymentPermissions.canView || !paymentPermissions.canCreate) {
-      showPermissionWarning(
-        t("permissionNoAddPayment") ??
-          "Недостаточно прав для добавления платежей.",
-      );
-      return;
+    if (!captureScreen() || !paymentFormOwner.capture() || pendingPaymentAction.current?.isCurrent()) return;
+    if (!user?.id || !paymentPermissions.canView || !paymentPermissions.canCreate) {
+      showPermissionWarning(t("permissionNoAddPayment") ?? "Недостаточно прав для добавления платежей."); return;
     }
-    setActiveSection("payments");
-    setEditingPayment(null);
-    setPayModalOpen(true);
+    paymentOpenRequest.current?.abort(); paymentOpenRequest.current = null;
+    setActiveSection("payments"); setEditingPayment(null); setPayModalOpen(true);
   };
   const openEditPayment = async (p: Payment) => {
-    if (!paymentPermissions.canEdit) {
-      showPermissionWarning(
-        t("permissionNoEditPayment") ??
-          "Недостаточно прав для редактирования платежей.",
-      );
-      return;
+    const owner = captureScreen(); const form = paymentFormOwner.capture();
+    if (!owner || !form || pendingPaymentAction.current?.isCurrent()) return;
+    if (!user?.id || !paymentPermissions.canView || !paymentPermissions.canEdit) {
+      showPermissionWarning(t("permissionNoEditPayment") ?? "Недостаточно прав для редактирования платежей."); return;
     }
+    paymentOpenRequest.current?.abort();
+    const controller = new AbortController(); paymentOpenRequest.current = controller;
+    const current = () => owner.isCurrent() && form.isCurrent() && !controller.signal.aborted && paymentOpenRequest.current === controller;
     try {
-      const detailedPayment = await apiService.getPayment(p.id);
-      setActiveSection("payments");
-      setEditingPayment(detailedPayment);
-      setPayModalOpen(true);
+      const detailedPayment = await awaitOwnedUiResult(() => apiService.getPayment(p.id, controller.signal), current);
+      if (detailedPayment.id !== p.id) throw new Error('Сервер вернул другой платёж. Повторите открытие.');
+      setActiveSection("payments"); setEditingPayment(detailedPayment); setPayModalOpen(true);
     } catch (error) {
-      toast.error(
-        extractDisplayErrorMessage(error, "Не удалось загрузить платеж для редактирования."),
-        t("payments") ?? "Платежи",
-      );
+      if (current()) toast.error(extractDisplayErrorMessage(error, "Не удалось загрузить платеж для редактирования."), t("payments") ?? "Платежи");
+    } finally {
+      if (paymentOpenRequest.current === controller) paymentOpenRequest.current = null;
+      controller.abort();
     }
   };
   const openAddAct = () => {
@@ -4920,6 +4929,8 @@ function ClientDetailScreen({
     setActModalOpen(true);
   };
   const closePayModal = () => {
+    if (!captureScreen() || !paymentFormOwner.capture()) return;
+    paymentOpenRequest.current?.abort(); paymentOpenRequest.current = null;
     setPayModalOpen(false);
     setEditingPayment(null);
   };
@@ -4943,168 +4954,131 @@ function ClientDetailScreen({
     accountDate: p.accountDate ?? null,
   });
 
-  const refreshAfterPaymentSave = async () => {
+  const refreshAfterPaymentSave = async (current: () => boolean, skipPayments = false) => {
     try {
-      await refreshPayments();
-      await refreshClientBalance();
-      if (clientBalanceExpanded) await refreshClientBalanceTransactions();
-      bumpStats();
-    } catch {
-      toast.error('Платёж сохранён, но связанные списки пока не удалось обновить.', 'Платежи');
+      if (!skipPayments) await awaitOwnedUiResult(refreshPayments, current);
+      await awaitOwnedUiResult(refreshClientBalance, current);
+      if (clientBalanceExpanded) await awaitOwnedUiResult(refreshClientBalanceTransactions, current);
+      if (current()) bumpStats();
+    } catch (error) {
+      if (current() && !(error instanceof StaleUiOperationError)) toast.error('Платёж сохранён, но связанные списки пока не удалось обновить.', 'Платежи');
     }
   };
+  latestPaymentRefresh.current = refreshAfterPaymentSave;
 
+  const beginPaymentAction = (allowed: boolean, targetId?: number, requiresForm = true) => {
+    const screen = captureScreen(); const form = paymentFormOwner.capture();
+    if (!screen || !form || (requiresForm && !payModalOpen)) throw new StaleUiOperationError();
+    if (!user?.id || !paymentPermissions.canView || !allowed) throw new Error('Недостаточно прав для действия с платежом.');
+    if (targetId !== undefined && (!Number.isSafeInteger(targetId) || targetId <= 0
+      || (requiresForm && editingPayment && editingPayment.id !== targetId))) throw new Error('Открыт другой платёж. Повторите действие в его карточке.');
+    const operation = paymentMutationOwner.begin('payment');
+    if (!operation) throw new Error('Дождитесь завершения текущего действия с платежом.');
+    pendingPaymentAction.current = operation;
+    return { current: () => screen.isCurrent() && form.isCurrent() && operation.isCurrent(),
+      screenCurrent: screen.isCurrent, finish: () => {
+        if (pendingPaymentAction.current === operation) pendingPaymentAction.current = null;
+        operation.finish();
+      } };
+  };
+  const runPaymentWrite = async <T,>(allowed: boolean, work: () => Promise<T>, options: {
+    targetId?: number; success?: string; error: string; refresh?: boolean; validate?: (value: T) => void;
+  }): Promise<T> => {
+    const action = beginPaymentAction(allowed, options.targetId); let dispatched = false;
+    try {
+      const value = await awaitOwnedUiResult(() => { dispatched = true; return work(); }, action.current);
+      options.validate?.(value);
+      if (options.refresh !== false) void latestPaymentRefresh.current(action.screenCurrent);
+      if (options.success) toast.success(options.success, 'Платежи');
+      return value;
+    } catch (error) {
+      if (!action.current()) throw new StaleUiOperationError();
+      if (!(error instanceof PaymentCreateAdoptedError)) toast.error(extractDisplayErrorMessage(error, options.error), 'Платежи');
+      throw error;
+    } finally {
+      const stale = !action.current(); action.finish();
+      // A closed form cannot adopt the response. A fresh read may reconcile its original live screen.
+      if (dispatched && stale && action.screenCurrent()) void latestPaymentRefresh.current(action.screenCurrent);
+    }
+  };
+  const validateSavedPayment = (value: Payment, expectedId?: number) => {
+    if (!Number.isSafeInteger(value?.id) || value.id <= 0 || (expectedId !== undefined && value.id !== expectedId))
+      throw new Error('Сервер вернул другой платёж. Обновите список перед продолжением.');
+  };
   const submitPayment = async (payload: PaymentUpsert): Promise<Payment> => {
     const isEdit = 'id' in payload;
-    if (!(isEdit ? clientPermissions.canEdit : clientPermissions.canCreate)) {
-      throw new Error('Недостаточно прав для сохранения платежа.');
-    }
-    try {
-      let saved: Payment;
+    return runPaymentWrite(isEdit ? paymentPermissions.canEdit : paymentPermissions.canCreate, () => {
       if ('id' in payload) {
         const { id, ...rest } = payload;
-        saved = editingPayment && isInvoiceManagedPayment(editingPayment)
-          ? await apiService.updateInvoiceManagedPayment(id, toBody(rest))
-          : await apiService.updatePayment(id, toBody(rest));
-      } else {
-        saved = await apiService.createPayment(toBody(payload));
+        return editingPayment && isInvoiceManagedPayment(editingPayment)
+          ? apiService.updateInvoiceManagedPayment(id, toBody(rest)) : apiService.updatePayment(id, toBody(rest));
       }
-      void refreshAfterPaymentSave();
-      toast.success(isEdit ? 'Платёж обновлён.' : 'Платёж создан.', 'Платежи');
-      return saved;
-    } catch (error) {
-      if (error instanceof PaymentCreateAdoptedError) throw error;
-      toast.error(extractDisplayErrorMessage(error, 'Не удалось сохранить платёж.'), 'Платежи');
-      throw error;
-    }
+      if (editingPayment) throw new Error('Открыт сохранённый платёж. Повторите открытие формы создания.');
+      return apiService.createPayment(toBody(payload));
+    }, { targetId: isEdit ? payload.id : undefined, success: isEdit ? 'Платёж обновлён.' : 'Платёж создан.',
+      error: 'Не удалось сохранить платёж.', validate: value => validateSavedPayment(value, isEdit ? payload.id : undefined) });
   };
-
-  const transferPaymentRemainder = async (
-    payload: { id: number } & PaymentPayload,
-    remainderDate: string,
-  ): Promise<Payment> => {
-    if (!clientPermissions.canEdit) throw new Error('Недостаточно прав для редактирования платежа.');
-    try {
-      const saved = await apiService.transferPaymentRemainder(payload.id, toBody(payload), remainderDate);
-      void refreshAfterPaymentSave();
-      toast.success('Остаток платежа перенесён.', 'Платежи');
-      return saved.payment;
-    } catch (error) {
-      toast.error(extractDisplayErrorMessage(error, 'Не удалось перенести остаток платежа'), 'Платежи');
-      throw error;
-    }
+  const transferPaymentRemainder = async (payload: { id: number } & PaymentPayload, remainderDate: string): Promise<Payment> => {
+    const saved = await runPaymentWrite(paymentPermissions.canEdit, () => apiService.transferPaymentRemainder(payload.id, toBody(payload), remainderDate),
+      { targetId: payload.id, success: 'Остаток платежа перенесён.', error: 'Не удалось перенести остаток платежа', validate: value => validateSavedPayment(value.payment, payload.id) });
+    return saved.payment;
   };
-
-  const rollbackPaymentRemainderTransfer = async (paymentId: number) => {
-    if (!clientPermissions.canEdit) {
-      showPermissionWarning(
-        t("permissionNoEditPayment") ??
-          "Недостаточно прав для редактирования платежей.",
-      );
-      return;
-    }
-
-    try {
-      await apiService.rollbackPaymentRemainderTransfer(paymentId);
-      await refreshPayments();
-      await refreshClientBalance();
-      if (clientBalanceExpanded) await refreshClientBalanceTransactions();
-      bumpStats();
-      toast.success("Перенос остатка отменен.", "Платежи");
-    } catch (error) {
-      toast.error(
-        extractDisplayErrorMessage(error, "Не удалось откатить перенос остатка"),
-        "Платежи",
-      );
-      throw error;
-    }
-  };
-
-  const adjustPaymentRemainderTransfer = async (
-    paymentId: number,
-    paidAmount: number,
-    remainderDate: string,
-  ) => {
-    if (!clientPermissions.canEdit) {
-      showPermissionWarning(
-        t("permissionNoEditPayment") ??
-          "Недостаточно прав для редактирования платежей.",
-      );
-      return;
-    }
-
-    try {
-      await apiService.adjustPaymentRemainderTransfer(paymentId, paidAmount, remainderDate);
-      await refreshPayments();
-      await refreshClientBalance();
-      if (clientBalanceExpanded) await refreshClientBalanceTransactions();
-      bumpStats();
-      toast.success("Разделение платежа обновлено.", "Платежи");
-    } catch (error) {
-      toast.error(
-        extractDisplayErrorMessage(error, "Не удалось изменить разделение платежа"),
-        "Платежи",
-      );
-      throw error;
-    }
-  };
-
+  const rollbackPaymentRemainderTransfer = (paymentId: number) => runPaymentWrite(paymentPermissions.canEdit,
+    () => apiService.rollbackPaymentRemainderTransfer(paymentId), { targetId: paymentId, success: 'Перенос остатка отменен.', error: 'Не удалось откатить перенос остатка', validate: value => validateSavedPayment(value.payment, paymentId) });
+  const adjustPaymentRemainderTransfer = (paymentId: number, paidAmount: number, remainderDate: string) => runPaymentWrite(paymentPermissions.canEdit,
+    () => apiService.adjustPaymentRemainderTransfer(paymentId, paidAmount, remainderDate), { targetId: paymentId, success: 'Разделение платежа обновлено.', error: 'Не удалось изменить разделение платежа', validate: value => validateSavedPayment(value.payment, paymentId) });
   const applyClientBalanceToPayment = async (amount: number, currentPayment?: Payment) => {
     const target = currentPayment ?? editingPayment;
-    if (!target?.id || !clientId || !clientPermissions.canEdit) {
-      throw new Error('Недостаточно прав или не выбран сохранённый платёж.');
-    }
-    return apiService.applyClientBalanceGuarded(clientId, { paymentId: target.id, amount });
+    return runPaymentWrite(paymentPermissions.canEdit, () => {
+      if (!target?.id || !clientId) throw new Error('Не выбран сохранённый платёж.');
+      return apiService.applyClientBalanceGuarded(clientId, { paymentId: target.id, amount });
+    }, { targetId: target?.id, refresh: false, error: 'Не удалось зачесть баланс в платёж.' });
   };
-
-  const removePayment = async (target: Payment | number) => {
-    const isLockedPayment = typeof target !== "number"
-      && (target.documentKind === "Invoice" || isTransferredRemainderPayment(target) || isPartialRemainderSourcePayment(target));
+  const createPaymentRemainder = (payload: PaymentPayload, context: PaymentCreateContext) => runPaymentWrite(paymentPermissions.canCreate,
+    () => apiService.createPayment(toBody(payload), context), { targetId: context.primaryPaymentId, error: 'Не удалось создать остаток платежа', validate: value => { validateSavedPayment(value);
+      if (context.operation === 'remainder' && value.id === context.primaryPaymentId) throw new Error('Сервер вернул исходный платёж вместо остатка.'); } });
+  const paymentBalanceApplied = async () => {
+    const screen = captureScreen(); const form = paymentFormOwner.capture();
+    if (!screen || !form || !payModalOpen) throw new StaleUiOperationError();
+    if (!user?.id || !paymentPermissions.canView) throw new Error('Недостаточно прав для просмотра платежей.');
+    await latestPaymentRefresh.current(() => screen.isCurrent() && form.isCurrent());
+  };
+  const removePayment = async (target: Payment | number, fromForm = false) => {
+    if (!captureScreen() || !paymentFormOwner.capture()) return false;
+    const isLockedPayment = typeof target !== 'number'
+      && (target.documentKind === 'Invoice' || isTransferredRemainderPayment(target) || isPartialRemainderSourcePayment(target));
     if (isLockedPayment) {
-      toast.error(
-        isTransferredRemainderPayment(target as Payment) || isPartialRemainderSourcePayment(target as Payment)
-          ? "Перенесенный остаток нельзя удалить отдельно."
-          : 'Документ счета удаляется через раздел "Счета".',
-        "Платежи",
-      );
-      return false;
+      toast.error(isTransferredRemainderPayment(target as Payment) || isPartialRemainderSourcePayment(target as Payment)
+        ? 'Перенесенный остаток нельзя удалить отдельно.' : 'Документ счета удаляется через раздел "Счета".', 'Платежи'); return false;
     }
-
-    const id = typeof target === "number" ? target : target.id;
-    if (!paymentPermissions.canDelete) {
-      showPermissionWarning(
-        t("permissionNoDeletePayment") ??
-          "Недостаточно прав для удаления платежей.",
-      );
-      return;
-    }
-    if (
-      !(await confirm({
-        title: "Подтверждение удаления",
-        description: "Удалить платёж?",
-        confirmLabel: "Удалить",
-        cancelLabel: "Отмена",
-        variant: "danger",
-      }))
-    )
-      return;
+    const id = typeof target === 'number' ? target : target.id;
+    let action: ReturnType<typeof beginPaymentAction>;
+    try { action = beginPaymentAction(paymentPermissions.canDelete, id, fromForm); }
+    catch (error) { if (!(error instanceof StaleUiOperationError)) showPermissionWarning(extractDisplayErrorMessage(error, 'Удаление платежа недоступно.')); return false; }
+    const controller = new AbortController(); paymentConfirmations.current.add(controller); let dispatched = false;
     try {
-      await apiService.deletePayment(id);
-      if (payments.length === 1 && paymentPage > 1) {
-        setPaymentPage((currentPage) => Math.max(1, currentPage - 1));
-      } else {
-        await refreshPayments();
-      }
-      bumpStats();
-      toast.success("Платёж удалён.", "Платежи");
-      return true;
+      // PaymentModal confirms its own delete; table actions use this single owned confirmation.
+      if (!fromForm && !await awaitOwnedUiResult(() => confirm({ signal: controller.signal, title: 'Подтверждение удаления',
+        description: 'Удалить платёж?', confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' }), action.current)) return false;
+      await awaitOwnedUiResult(() => { dispatched = true; return apiService.deletePayment(id); }, action.current);
+      const list = paymentListAtRender.current;
+      const previousPage = list.payments.length === 1 && list.payments[0].id === id && list.page > 1;
+      if (previousPage) setPaymentPage(page => Math.max(1, page - 1));
+      void latestPaymentRefresh.current(action.screenCurrent, previousPage);
+      toast.success('Платёж удалён.', 'Платежи'); return true;
     } catch (error) {
-      toast.error(
-        extractDisplayErrorMessage(error, "Не удалось удалить платёж"),
-        "Платежи",
-      );
+      if (action.current()) toast.error(extractDisplayErrorMessage(error, 'Не удалось удалить платёж'), 'Платежи');
       return false;
+    } finally {
+      const stale = !action.current(); controller.abort(); paymentConfirmations.current.delete(controller); action.finish();
+      if (dispatched && stale && action.screenCurrent()) void latestPaymentRefresh.current(action.screenCurrent);
     }
+  };
+  const deletePaymentFromModal = async (id: number) => {
+    if (!captureScreen() || !paymentFormOwner.capture() || !payModalOpen) throw new StaleUiOperationError();
+    if (editingPayment && editingPayment.id !== id) throw new Error('Открыт другой платёж.');
+    if (!await removePayment(editingPayment ?? id, true)) throw new Error('Платёж не удалён.');
+    closePayModal();
   };
 
   const submitAct = async (payload: ActInput) => {
@@ -6239,6 +6213,7 @@ function ClientDetailScreen({
                 <button
                   type="button"
                   onClick={openAddPayment}
+                  disabled={paymentMutationOwner.busy}
                   className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white shadow-sm transition-colors hover:bg-blue-700"
                   title={SECTION_META.payments.actionLabel}
                   aria-label={SECTION_META.payments.actionLabel}
@@ -9398,6 +9373,7 @@ function ClientDetailScreen({
                                             onClick={() =>
                                               openEditPayment(payment)
                                             }
+                                            disabled={paymentMutationOwner.busy}
                                             title="Редактировать"
                                             aria-label="Редактировать"
                                           >
@@ -9414,6 +9390,7 @@ function ClientDetailScreen({
                                             onClick={() =>
                                               removePayment(payment)
                                             }
+                                            disabled={paymentMutationOwner.busy}
                                             title="Удалить"
                                             aria-label="Удалить"
                                           >
@@ -11227,8 +11204,8 @@ function ClientDetailScreen({
           onClose={closePayModal}
           payment={editingPayment ?? undefined}
           onSubmit={submitPayment}
-          canCreatePayment={clientPermissions.canCreate}
-          canEditPayment={clientPermissions.canEdit}
+          canCreatePayment={paymentPermissions.canView && paymentPermissions.canCreate}
+          canEditPayment={paymentPermissions.canView && paymentPermissions.canEdit}
           onTransferRemainder={transferPaymentRemainder}
           onRollbackRemainderTransfer={rollbackPaymentRemainderTransfer}
           onAdjustRemainderTransfer={adjustPaymentRemainderTransfer}
@@ -11236,41 +11213,11 @@ function ClientDetailScreen({
           canCreateLinkedInvoices={accountPermissions.canView && accountPermissions.canCreate}
           availableClientBalance={clientBalance?.balance ?? 0}
           onApplyClientBalance={applyClientBalanceToPayment}
-          onBalanceApplied={async () => {
-            await refreshPayments();
-            await refreshClientBalance();
-            if (clientBalanceExpanded) await refreshClientBalanceTransactions();
-            bumpStats();
-          }}
-          onCreateRemainder={async (payload, context) => {
-            try {
-              if (!clientPermissions.canCreate) throw new Error('Недостаточно прав для создания остатка.');
-              const created = await apiService.createPayment(toBody(payload), context);
-              void refreshAfterPaymentSave();
-              return created;
-            } catch (error) {
-              if (error instanceof PaymentCreateAdoptedError) throw error;
-              toast.error(
-                extractDisplayErrorMessage(
-                  error,
-                  "Не удалось создать остаток платежа",
-                ),
-                "Платежи",
-              );
-              throw error;
-            }
-          }}
-          onDelete={
-            clientPermissions.canDelete &&
-            (!editingPayment || (editingPayment.documentKind !== "Invoice" && !isTransferredRemainderPayment(editingPayment) && !isPartialRemainderSourcePayment(editingPayment)))
-              ? async (id: number) => {
-                  const removed = await removePayment(editingPayment ?? id);
-                  if (removed) {
-                    closePayModal();
-                  }
-                }
-              : undefined
-          }
+          onBalanceApplied={paymentBalanceApplied}
+          onCreateRemainder={createPaymentRemainder}
+          onDelete={paymentPermissions.canView && paymentPermissions.canDelete
+            && (!editingPayment || (editingPayment.documentKind !== 'Invoice' && !isTransferredRemainderPayment(editingPayment) && !isPartialRemainderSourcePayment(editingPayment)))
+            ? deletePaymentFromModal : undefined}
           type={editingPayment?.type ?? paymentViewConfig.type ?? "Income"}
           defaultClientId={
             paymentViewMode === "expenseClient" ? undefined : clientId

@@ -3,11 +3,12 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ClientDetail } from './ClientDetail';
-import type { Act, Client, Contract, Invoice, LegalEntityDetail, LegalEntityInput, Payment, PowerOfAttorney, CleanedAddress, DadataAddressSuggestion } from '../../types';
+import type { Act, Client, Contract, Invoice, LegalEntityDetail, LegalEntityInput, Payment, PowerOfAttorney, CleanedAddress, DadataAddressSuggestion, PaymentPayload } from '../../types';
 import { apiService } from '../../services/api';
 import { useClientStatuses } from '../../hooks/useClientStatuses';
 import { useFormRequirements } from '../../hooks/useFormRequirements';
 import * as timeZoneHook from '../../hooks/useUserTimeZone';
+import { PaymentCreateAdoptedError } from '../../services/paymentCreateAttempts';
 import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
 import { documentCopyTestSession } from '../../test/documentCopySession';
 
@@ -18,6 +19,7 @@ const invoiceLookupPropsSpy = vi.hoisted(() => vi.fn());
 const caseLookupPropsSpy = vi.hoisted(() => vi.fn());
 const poaPromptPropsSpy = vi.hoisted(() => vi.fn());
 const addressFormPropsSpy = vi.hoisted(() => vi.fn());
+const tablePaginationPropsSpy = vi.hoisted(() => vi.fn());
 vi.mock('./ClientAddressEntriesForm', async importOriginal => {
   const actual = await importOriginal<typeof import('./ClientAddressEntriesForm')>();
   return { ...actual, ClientAddressEntriesForm: (props: Parameters<typeof actual.ClientAddressEntriesForm>[0]) => {
@@ -204,6 +206,63 @@ function createClient(profileOverrides?: Record<string, unknown>): Client {
   } as Client;
 }
 
+type ClientPaymentModalProps = Parameters<typeof import('../Calendar/PaymentModal').PaymentModal>[0];
+const clientPaymentRecord = (id = 502): Payment => ({ id, date: '2026-11-02', plannedDate: '2026-11-02', amount: 1250.75,
+  paidAmount: 0, outstandingAmount: 1250.75, hasPartialPayment: false, status: 'Pending', description: `Платёж клиента ${id}`,
+  isPaid: false, notes: 'Ручная заметка', systemNotes: '', clientId: 1, type: 'Income', documentKind: 'Payment',
+  createdAt: '2026-11-02T00:00:00Z', rescheduleCount: 0 } as Payment);
+const clientPaymentPayload = (): PaymentPayload => ({ date: '2026-11-02', amount: 1250.75, type: 'Income', status: 'Pending',
+  isPaid: false, description: 'Новый платёж', notes: 'Ручная заметка' } as PaymentPayload);
+const currentClientPaymentModal = () => paymentModalPropsSpy.mock.calls.at(-1)?.[0] as ClientPaymentModalProps;
+async function openClientPaymentCreate() {
+  fireEvent.click(await screen.findByRole('button', { name: /Добавить плат/ }));
+  await waitFor(() => expect(paymentModalPropsSpy).toHaveBeenCalled());
+  return currentClientPaymentModal();
+}
+
+const paymentCallerMethods = { create: 'createPayment', update: 'updatePayment', managed: 'updateInvoiceManagedPayment',
+  transfer: 'transferPaymentRemainder', rollback: 'rollbackPaymentRemainderTransfer', adjust: 'adjustPaymentRemainderTransfer',
+  balance: 'applyClientBalanceGuarded', remainder: 'createPayment', delete: 'deletePayment' } as const;
+type PaymentCallerOperation = keyof typeof paymentCallerMethods;
+const paymentCallerOperations = Object.keys(paymentCallerMethods) as PaymentCallerOperation[];
+const paymentCallerWrite = (kind: PaymentCallerOperation) => vi.mocked(apiService[paymentCallerMethods[kind]]) as unknown as ReturnType<typeof vi.fn>;
+const clientRemainderContext = { operation: 'remainder' as const, primaryPaymentId: 502, sourceConfirmationToken: `remainder-v2:${'A'.repeat(64)}` };
+function clientBalanceResult(): Awaited<ReturnType<typeof apiService.applyClientBalanceGuarded>> {
+  return { state: 'Committed', appliedAmount: 100, balance: 25, operationBalance: 25, requestId: 'fixture-request', isReplay: false,
+    canonicalPayment: clientPaymentRecord(), attempt: { version: 'balance-application-v1', actorId: 7, apiScope: 'http://test.local/api',
+      kind: 'client', ownerId: 1, paymentId: 502, requestId: 'fixture-request', commandSha256: 'a'.repeat(64), createdAtUtc: '2026-11-02T00:00:00Z' } };
+}
+function paymentCallerResponse(kind: PaymentCallerOperation): unknown {
+  if (kind === 'delete') return undefined;
+  if (kind === 'balance') return clientBalanceResult();
+  if (kind === 'transfer' || kind === 'adjust') return { payment: clientPaymentRecord(), remainderPayment: clientPaymentRecord(503), createdRemainder: kind === 'transfer' };
+  if (kind === 'rollback') return { payment: clientPaymentRecord(), removedRemainderPaymentId: 503 };
+  return clientPaymentRecord(kind === 'create' || kind === 'remainder' ? 503 : 502);
+}
+function invokePaymentCaller(modal: ClientPaymentModalProps, kind: PaymentCallerOperation): Promise<unknown> {
+  if (kind === 'create') return modal.onSubmit(clientPaymentPayload());
+  if (kind === 'update' || kind === 'managed') return modal.onSubmit({ ...clientPaymentPayload(), id: 502 });
+  if (kind === 'transfer') return modal.onTransferRemainder!({ ...clientPaymentPayload(), id: 502 }, '2026-11-03');
+  if (kind === 'rollback') return modal.onRollbackRemainderTransfer!(502);
+  if (kind === 'adjust') return modal.onAdjustRemainderTransfer!(502, 100.25, '2026-11-03');
+  if (kind === 'balance') return modal.onApplyClientBalance!(100, modal.payment ?? undefined);
+  if (kind === 'remainder') return modal.onCreateRemainder!(clientPaymentPayload(), clientRemainderContext);
+  return modal.onDelete!(502);
+}
+async function setupPaymentCaller(kind: PaymentCallerOperation) {
+  Object.assign(permissionsResult.payments, { canView: true, canCreate: true, canEdit: true, canDelete: true });
+  Object.assign(permissionsResult.clients, { canCreate: false, canEdit: false, canDelete: false });
+  const row = kind === 'managed' ? { ...clientPaymentRecord(), documentKind: 'Invoice' as const, invoiceId: 91 } : clientPaymentRecord();
+  usePaymentsPagedMock.mockReturnValue({ ...emptyPaymentsResult, payments: [row], total: 1 });
+  vi.mocked(apiService.getPayment).mockResolvedValueOnce(row);
+  const props = { clientId: 1, onBack: vi.fn(), initialSection: 'payments' as const };
+  const view = render(<ClientDetail {...props} />);
+  if (kind === 'create') await openClientPaymentCreate();
+  else { const tableRow = (await screen.findByText('Платёж клиента 502')).closest('tr')!; fireEvent.click(within(tableRow).getByRole('button', { name: 'Редактировать' }));
+    await waitFor(() => expect(currentClientPaymentModal()?.payment?.id).toBe(502)); }
+  return { view, props, modal: currentClientPaymentModal() };
+}
+
 function createPowerOfAttorney(overrides: Partial<PowerOfAttorney> = {}): PowerOfAttorney {
   return {
     id: 77,
@@ -381,6 +440,9 @@ vi.mock('../../services/api', () => ({
     getActs: vi.fn(),
     getPaymentsV2: vi.fn(),
     getPayment: vi.fn(),
+    createPayment: vi.fn(), updatePayment: vi.fn(), updateInvoiceManagedPayment: vi.fn(), deletePayment: vi.fn(),
+    transferPaymentRemainder: vi.fn(), rollbackPaymentRemainderTransfer: vi.fn(), adjustPaymentRemainderTransfer: vi.fn(),
+    applyClientBalanceGuarded: vi.fn(),
     getClients: vi.fn(),
     getActResponsibles: vi.fn(),
     createClientPowerOfAttorney: vi.fn(),
@@ -568,7 +630,7 @@ vi.mock('../ui/TableColumnSettings', () => ({
 }));
 
 vi.mock('../ui/TablePagination', () => ({
-  TablePagination: () => null,
+  TablePagination: (props: Parameters<typeof import('../ui/TablePagination').TablePagination>[0]) => { tablePaginationPropsSpy(props); return null; },
 }));
 
 vi.mock('../ui/ObjectAuditModal', () => ({
@@ -582,6 +644,253 @@ vi.mock('./ClientStatusBadge', () => ({
 }));
 
 describe('ClientDetail integration', () => {
+  it('payment caller: payments create permission works independently of client create', async () => {
+    permissionsResult.payments.canCreate = true;
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="payments" />);
+    const modal = await openClientPaymentCreate();
+    expect(modal.canCreatePayment).toBe(true);
+    await act(async () => { expect(await modal.onSubmit(clientPaymentPayload())).toMatchObject({ id: 503, amount: 1250.75 }); });
+    expect(apiService.createPayment).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ amount: 1250.75, clientId: 1, notes: 'Ручная заметка' }));
+  });
+  it('payment caller: a retained submit cannot send a payment after client replacement', async () => {
+    permissionsResult.payments.canCreate = true; permissionsResult.clients.canCreate = true;
+    const props = { clientId: 1, onBack: vi.fn(), initialSection: 'payments' as const };
+    const view = render(<ClientDetail {...props} />); const modal = await openClientPaymentCreate();
+    view.rerender(<ClientDetail {...props} clientId={2} />);
+    await act(async () => { await expect(modal.onSubmit(clientPaymentPayload())).rejects.toBeInstanceOf(StaleUiOperationError); });
+    expect(apiService.createPayment).not.toHaveBeenCalled();
+  });
+  it('payment caller: late success cannot toast or refresh after role replacement', async () => {
+    permissionsResult.payments.canCreate = true; permissionsResult.clients.canCreate = true;
+    let finish!: (value: Payment) => void; vi.mocked(apiService.createPayment).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const props = { clientId: 1, onBack: vi.fn(), initialSection: 'payments' as const };
+    const view = render(<ClientDetail {...props} />); const modal = await openClientPaymentCreate();
+    let outcome!: Promise<unknown>; act(() => { outcome = modal.onSubmit(clientPaymentPayload()).catch(error => error); });
+    await waitFor(() => expect(apiService.createPayment).toHaveBeenCalledOnce());
+    authState.roleId = 2; view.rerender(<ClientDetail {...props} />);
+    const refreshes = emptyPaymentsResult.refresh.mock.calls.length;
+    await act(async () => { finish(clientPaymentRecord(503)); expect(await outcome).toBeInstanceOf(StaleUiOperationError); });
+    expect(emptyPaymentsResult.refresh).toHaveBeenCalledTimes(refreshes); expect(toastSuccessMock).not.toHaveBeenCalled();
+  });
+  it('payment caller: revoked queued deletion never dispatches under another role', async () => {
+    permissionsResult.payments.canDelete = true;
+    usePaymentsPagedMock.mockReturnValue({ ...emptyPaymentsResult, payments: [clientPaymentRecord()], total: 1 });
+    let approve!: (answer: boolean) => void; confirmMock.mockReturnValueOnce(new Promise(resolve => { approve = resolve; }));
+    const props = { clientId: 1, onBack: vi.fn(), initialSection: 'payments' as const };
+    const view = render(<ClientDetail {...props} />);
+    const row = (await screen.findByText('Платёж клиента 502')).closest('tr')!;
+    fireEvent.click(within(row).getByRole('button', { name: 'Удалить' }));
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledOnce()); const signal = confirmMock.mock.calls[0][0].signal;
+    authState.roleId = 2; view.rerender(<ClientDetail {...props} />);
+    await act(async () => approve(true));
+    expect(apiService.deletePayment).not.toHaveBeenCalled(); expect(signal?.aborted).toBe(true);
+  });
+  it('payment caller: a late editor read cannot replace the most recent payment', async () => {
+    permissionsResult.payments.canEdit = true;
+    usePaymentsPagedMock.mockReturnValue({ ...emptyPaymentsResult, payments: [clientPaymentRecord(502), clientPaymentRecord(504)], total: 2 });
+    let first!: (value: Payment) => void; let second!: (value: Payment) => void;
+    vi.mocked(apiService.getPayment).mockReturnValueOnce(new Promise(resolve => { first = resolve; })).mockReturnValueOnce(new Promise(resolve => { second = resolve; }));
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="payments" />);
+    for (const id of [502, 504]) { const row = (await screen.findByText(`Платёж клиента ${id}`)).closest('tr')!; fireEvent.click(within(row).getByRole('button', { name: 'Редактировать' })); }
+    await act(async () => second(clientPaymentRecord(504))); expect(currentClientPaymentModal().payment?.id).toBe(504);
+    await act(async () => first(clientPaymentRecord(502))); expect(currentClientPaymentModal().payment?.id).toBe(504);
+  });
+  it.each(paymentCallerOperations)('payment matrix: current %s uses payment rights and preserves the request', async kind => {
+    const { modal } = await setupPaymentCaller(kind); let value: unknown;
+    await act(async () => { value = await invokePaymentCaller(modal, kind); });
+    expect(paymentCallerWrite(kind)).toHaveBeenCalledOnce();
+    const body = expect.objectContaining({ amount: 1250.75, notes: 'Ручная заметка', clientId: 1 });
+    if (kind === 'create') expect(apiService.createPayment).toHaveBeenCalledWith(body);
+    if (kind === 'update') expect(apiService.updatePayment).toHaveBeenCalledWith(502, body);
+    if (kind === 'managed') { expect(apiService.updateInvoiceManagedPayment).toHaveBeenCalledWith(502, body); expect(apiService.updatePayment).not.toHaveBeenCalled(); }
+    if (kind === 'transfer') { expect(apiService.transferPaymentRemainder).toHaveBeenCalledWith(502, body, '2026-11-03'); expect(value).toEqual(clientPaymentRecord()); }
+    if (kind === 'rollback') expect(apiService.rollbackPaymentRemainderTransfer).toHaveBeenCalledWith(502);
+    if (kind === 'adjust') expect(apiService.adjustPaymentRemainderTransfer).toHaveBeenCalledWith(502, 100.25, '2026-11-03');
+    if (kind === 'balance') { expect(apiService.applyClientBalanceGuarded).toHaveBeenCalledWith(1, { paymentId: 502, amount: 100 }); expect(value).toEqual(clientBalanceResult()); }
+    if (kind === 'remainder') expect(apiService.createPayment).toHaveBeenCalledWith(body, clientRemainderContext);
+    if (kind === 'delete') { expect(apiService.deletePayment).toHaveBeenCalledWith(502); expect(confirmMock).not.toHaveBeenCalled(); }
+  });
+  it.each(paymentCallerOperations)('payment matrix: revoked operation rights block retained %s before another render', async kind => {
+    const { modal } = await setupPaymentCaller(kind);
+    Object.assign(permissionsResult.payments, { canCreate: false, canEdit: false, canDelete: false });
+    await act(async () => { await expect(invokePaymentCaller(modal, kind)).rejects.toBeInstanceOf(Error); });
+    for (const method of new Set(Object.values(paymentCallerMethods))) expect(apiService[method]).not.toHaveBeenCalled();
+  });
+  it.each(paymentCallerOperations)('payment matrix: replaced authentication blocks retained %s without a render', async kind => {
+    const session = documentCopyTestSession();
+    try { const { modal } = await setupPaymentCaller(kind); session.replace('login');
+      await act(async () => { await expect(invokePaymentCaller(modal, kind)).rejects.toBeInstanceOf(Error); });
+      for (const method of new Set(Object.values(paymentCallerMethods))) expect(apiService[method]).not.toHaveBeenCalled();
+    } finally { session.restore(); }
+  });
+  it.each(paymentCallerOperations.flatMap(kind => ['success', 'error'].map(outcome => ({ kind, outcome }))))('payment matrix: late $kind $outcome cannot enter another role', async ({ kind, outcome }) => {
+    const { view, props, modal } = await setupPaymentCaller(kind);
+    let finish!: (value: unknown) => void; let fail!: (error: Error) => void;
+    paymentCallerWrite(kind).mockReturnValueOnce(new Promise((resolve, reject) => { finish = resolve; fail = reject; }));
+    let result!: Promise<unknown>; act(() => { result = invokePaymentCaller(modal, kind).then(value => ({ value }), error => ({ error })); });
+    await waitFor(() => expect(paymentCallerWrite(kind)).toHaveBeenCalledOnce()); authState.roleId = 2; view.rerender(<ClientDetail {...props} />);
+    const refreshes = emptyPaymentsResult.refresh.mock.calls.length;
+    await act(async () => { if (outcome === 'success') finish(paymentCallerResponse(kind)); else fail(new Error('Старая финансовая ошибка')); await result; });
+    expect(await result).toMatchObject({ error: expect.any(Error) });
+    expect(emptyPaymentsResult.refresh).toHaveBeenCalledTimes(refreshes); expect(toastSuccessMock).not.toHaveBeenCalled(); expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+  it.each(['create', 'update', 'delete'] as const)('payment lifetime: closed %s callbacks cannot mutate or close a reopened form', async kind => {
+    const { modal } = await setupPaymentCaller(kind); act(() => modal.onClose());
+    const next = await openClientPaymentCreate();
+    act(() => modal.onClose()); expect(currentClientPaymentModal()).toBe(next);
+    await act(async () => { await expect(invokePaymentCaller(modal, kind)).rejects.toBeInstanceOf(Error); });
+    expect(paymentCallerWrite(kind)).not.toHaveBeenCalled();
+  });
+  it('payment lifetime: pending write blocks parallel operations and closed success reconciles by a fresh read', async () => {
+    const { modal } = await setupPaymentCaller('create'); let finish!: (value: Payment) => void;
+    vi.mocked(apiService.createPayment).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    let result!: Promise<unknown>; act(() => { result = modal.onSubmit(clientPaymentPayload()).catch(error => error); });
+    await act(async () => { await expect(modal.onSubmit(clientPaymentPayload())).rejects.toThrow('Дождитесь'); await expect(modal.onCreateRemainder!(clientPaymentPayload(), clientRemainderContext)).rejects.toThrow('Дождитесь'); });
+    expect(apiService.createPayment).toHaveBeenCalledOnce(); act(() => modal.onClose());
+    expect(screen.getByRole('button', { name: /Добавить плат/ })).toHaveProperty('disabled', true);
+    const refreshes = emptyPaymentsResult.refresh.mock.calls.length;
+    await act(async () => { finish(clientPaymentRecord(503)); expect(await result).toBeInstanceOf(StaleUiOperationError); });
+    expect(emptyPaymentsResult.refresh).toHaveBeenCalledTimes(refreshes + 1); expect(toastSuccessMock).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /Добавить плат/ })).toHaveProperty('disabled', false);
+    await openClientPaymentCreate();
+  });
+  it('payment lifetime: same-user token refresh retains a valid pending save', async () => {
+    const session = documentCopyTestSession();
+    try { const { view, props, modal } = await setupPaymentCaller('create'); let finish!: (value: Payment) => void;
+      vi.mocked(apiService.createPayment).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+      let result!: Promise<Payment>; act(() => { result = modal.onSubmit(clientPaymentPayload()); }); session.refresh(); view.rerender(<ClientDetail {...props} />);
+      await act(async () => { finish(clientPaymentRecord(503)); expect(await result).toEqual(clientPaymentRecord(503)); });
+      expect(apiService.createPayment).toHaveBeenCalledOnce(); expect(toastSuccessMock).toHaveBeenCalledWith('Платёж создан.', 'Платежи');
+    } finally { session.restore(); }
+  });
+  it('payment lifetime: current failure permits one explicit retry with the same financial payload', async () => {
+    const { modal } = await setupPaymentCaller('create');
+    vi.mocked(apiService.createPayment).mockRejectedValueOnce(new Error('Временная ошибка платежа')).mockResolvedValueOnce(clientPaymentRecord(503));
+    await act(async () => { await expect(modal.onSubmit(clientPaymentPayload())).rejects.toThrow('Временная ошибка'); });
+    await act(async () => { await expect(modal.onSubmit(clientPaymentPayload())).resolves.toMatchObject({ id: 503, amount: 1250.75 }); });
+    expect(apiService.createPayment).toHaveBeenCalledTimes(2); expect(vi.mocked(apiService.createPayment).mock.calls[0][0]).toEqual(vi.mocked(apiService.createPayment).mock.calls[1][0]);
+  });
+  it('payment lifetime: a changed screen during list refresh cannot launch the old balance continuation', async () => {
+    let finish!: () => void; const refresh = vi.fn().mockReturnValueOnce(new Promise<void>(resolve => { finish = resolve; }));
+    const { view, props, modal } = await setupPaymentCaller('create'); usePaymentsPagedMock.mockReturnValue({ ...emptyPaymentsResult, refresh }); view.rerender(<ClientDetail {...props} />);
+    await act(async () => { await modal.onSubmit(clientPaymentPayload()); }); expect(refresh).toHaveBeenCalledOnce();
+    authState.roleId = 2; view.rerender(<ClientDetail {...props} />); await act(async () => {}); const balances = vi.mocked(apiService.getClientBalance).mock.calls.length;
+    await act(async () => finish()); expect(apiService.getClientBalance).toHaveBeenCalledTimes(balances);
+  });
+  it.each(['update', 'transfer', 'rollback', 'adjust', 'balance', 'remainder', 'delete'] as const)('payment identity: %s refuses a different existing payment ID', async kind => {
+    const { modal } = await setupPaymentCaller(kind);
+    await act(async () => {
+      const operation = kind === 'update' ? modal.onSubmit({ ...clientPaymentPayload(), id: 504 })
+        : kind === 'transfer' ? modal.onTransferRemainder!({ ...clientPaymentPayload(), id: 504 }, '2026-11-03')
+        : kind === 'rollback' ? modal.onRollbackRemainderTransfer!(504)
+        : kind === 'adjust' ? modal.onAdjustRemainderTransfer!(504, 100.25, '2026-11-03')
+        : kind === 'balance' ? modal.onApplyClientBalance!(100, clientPaymentRecord(504))
+        : kind === 'remainder' ? modal.onCreateRemainder!(clientPaymentPayload(), { ...clientRemainderContext, primaryPaymentId: 504 }) : modal.onDelete!(504);
+      await expect(operation).rejects.toBeInstanceOf(Error);
+    }); expect(paymentCallerWrite(kind)).not.toHaveBeenCalled();
+  });
+  it('payment identity: a different update response is rejected without success or refresh', async () => {
+    const { modal } = await setupPaymentCaller('update'); vi.mocked(apiService.updatePayment).mockResolvedValueOnce(clientPaymentRecord(777));
+    const refreshes = emptyPaymentsResult.refresh.mock.calls.length;
+    await act(async () => { await expect(modal.onSubmit({ ...clientPaymentPayload(), id: 502 })).rejects.toThrow('другой платёж'); });
+    expect(toastSuccessMock).not.toHaveBeenCalled(); expect(emptyPaymentsResult.refresh).toHaveBeenCalledTimes(refreshes);
+  });
+  it.each(['create', 'update'] as const)('payment independent view: %s does not require access to the personal client profile', async kind => {
+    const { view, props } = await setupPaymentCaller(kind);
+    permissionsResult.clients.canView = false; view.rerender(<ClientDetail {...props} />);
+    if (kind === 'create') await openClientPaymentCreate();
+    else { vi.mocked(apiService.getPayment).mockResolvedValueOnce(clientPaymentRecord()); const row = (await screen.findByText('Платёж клиента 502')).closest('tr')!;
+      fireEvent.click(within(row).getByRole('button', { name: 'Редактировать' })); await waitFor(() => expect(currentClientPaymentModal()?.payment?.id).toBe(502)); }
+    await act(async () => { await invokePaymentCaller(currentClientPaymentModal(), kind); });
+    expect(paymentCallerWrite(kind)).toHaveBeenCalledOnce();
+  });
+  it('payment remainder permission: create remains independent of edit for a confirmed source', async () => {
+    const { modal } = await setupPaymentCaller('remainder'); permissionsResult.payments.canEdit = false;
+    await act(async () => { await expect(invokePaymentCaller(modal, 'remainder')).resolves.toMatchObject({ id: 503 }); });
+    expect(apiService.createPayment).toHaveBeenCalledOnce();
+  });
+  it('payment recovery: an adopted create keeps its typed outcome and permits the confirmed next update', async () => {
+    const { modal } = await setupPaymentCaller('create'); const adopted = new PaymentCreateAdoptedError(clientPaymentRecord(503));
+    vi.mocked(apiService.createPayment).mockRejectedValueOnce(adopted); vi.mocked(apiService.updatePayment).mockResolvedValueOnce(clientPaymentRecord(503));
+    await act(async () => { await expect(modal.onSubmit(clientPaymentPayload())).rejects.toBe(adopted); }); expect(toastErrorMock).not.toHaveBeenCalled();
+    await act(async () => { await expect(modal.onSubmit({ ...clientPaymentPayload(), id: 503 })).resolves.toMatchObject({ id: 503 }); });
+    expect(apiService.updatePayment).toHaveBeenCalledWith(503, expect.objectContaining({ amount: 1250.75, clientId: 1 }));
+  });
+  it.each(['transfer', 'rollback', 'adjust'] as const)('payment response identity: %s rejects another canonical payment', async kind => {
+    const { modal } = await setupPaymentCaller(kind);
+    const result = kind === 'rollback' ? { payment: clientPaymentRecord(777), removedRemainderPaymentId: 503 }
+      : { payment: clientPaymentRecord(777), remainderPayment: clientPaymentRecord(503), createdRemainder: false };
+    paymentCallerWrite(kind).mockResolvedValueOnce(result);
+    await act(async () => { await expect(invokePaymentCaller(modal, kind)).rejects.toThrow('другой платёж'); }); expect(toastSuccessMock).not.toHaveBeenCalled();
+  });
+  it('payment response identity: a source returned as its new remainder is rejected', async () => {
+    const { modal } = await setupPaymentCaller('remainder'); vi.mocked(apiService.createPayment).mockResolvedValueOnce(clientPaymentRecord());
+    await act(async () => { await expect(invokePaymentCaller(modal, 'remainder')).rejects.toThrow('исходный платёж'); });
+  });
+  it.each([0, -1, 1.5])('payment response identity: invalid new ID %s is rejected without success', async id => {
+    const { modal } = await setupPaymentCaller('create'); vi.mocked(apiService.createPayment).mockResolvedValueOnce(clientPaymentRecord(id));
+    await act(async () => { await expect(invokePaymentCaller(modal, 'create')).rejects.toThrow('другой платёж'); }); expect(toastSuccessMock).not.toHaveBeenCalled();
+  });
+  it('payment table confirmation: cancel releases its single pending action and retry deletes once', async () => {
+    Object.assign(permissionsResult.payments, { canView: true, canDelete: true });
+    usePaymentsPagedMock.mockReturnValue({ ...emptyPaymentsResult, payments: [clientPaymentRecord()], total: 1 });
+    let approve!: (value: boolean) => void; confirmMock.mockReturnValueOnce(new Promise(resolve => { approve = resolve; }));
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="payments" />); const row = (await screen.findByText('Платёж клиента 502')).closest('tr')!;
+    const button = within(row).getByRole('button', { name: 'Удалить' }); fireEvent.click(button); fireEvent.click(button);
+    expect(confirmMock).toHaveBeenCalledOnce(); expect(apiService.deletePayment).not.toHaveBeenCalled();
+    await act(async () => approve(false)); expect(button).toHaveProperty('disabled', false); confirmMock.mockResolvedValueOnce(true);
+    fireEvent.click(button); await waitFor(() => expect(apiService.deletePayment).toHaveBeenCalledOnce());
+    expect(toastSuccessMock).toHaveBeenCalledWith('Платёж удалён.', 'Платежи');
+  });
+  it('payment read ownership: a wrong returned ID never opens the editor', async () => {
+    Object.assign(permissionsResult.payments, { canView: true, canEdit: true }); usePaymentsPagedMock.mockReturnValue({ ...emptyPaymentsResult, payments: [clientPaymentRecord()], total: 1 });
+    vi.mocked(apiService.getPayment).mockResolvedValueOnce(clientPaymentRecord(777)); render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="payments" />);
+    const row = (await screen.findByText('Платёж клиента 502')).closest('tr')!; fireEvent.click(within(row).getByRole('button', { name: 'Редактировать' }));
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith('Сервер вернул другой платёж. Повторите открытие.', 'Платежи')); expect(paymentModalPropsSpy).not.toHaveBeenCalled();
+  });
+  it('payment read ownership: opening create aborts an old detail request and ignores its late failure', async () => {
+    Object.assign(permissionsResult.payments, { canView: true, canEdit: true, canCreate: true }); usePaymentsPagedMock.mockReturnValue({ ...emptyPaymentsResult, payments: [clientPaymentRecord()], total: 1 });
+    let fail!: (error: Error) => void; vi.mocked(apiService.getPayment).mockReturnValueOnce(new Promise((_, reject) => { fail = reject; }));
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="payments" />); const row = (await screen.findByText('Платёж клиента 502')).closest('tr')!;
+    fireEvent.click(within(row).getByRole('button', { name: 'Редактировать' })); const signal = vi.mocked(apiService.getPayment).mock.calls[0][1];
+    const modal = await openClientPaymentCreate(); expect(signal?.aborted).toBe(true);
+    await act(async () => fail(new Error('Старая ошибка detail'))); expect(currentClientPaymentModal()).toBe(modal); expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+  it('payment balance notification: a revoked form cannot start follow-up reads', async () => {
+    const { view, props, modal } = await setupPaymentCaller('balance'); authState.roleId = 2; view.rerender(<ClientDetail {...props} />); await act(async () => {});
+    const balances = vi.mocked(apiService.getClientBalance).mock.calls.length;
+    await act(async () => { await expect(modal.onBalanceApplied!(502)).rejects.toBeInstanceOf(StaleUiOperationError); }); expect(apiService.getClientBalance).toHaveBeenCalledTimes(balances);
+  });
+  it('payment pending entry: an edit click before the busy render cannot launch another detail read', async () => {
+    const { view, props, modal } = await setupPaymentCaller('update');
+    usePaymentsPagedMock.mockReturnValue({ ...emptyPaymentsResult, payments: [clientPaymentRecord(), clientPaymentRecord(504)], total: 2 }); view.rerender(<ClientDetail {...props} />);
+    const row = (await screen.findByText('Платёж клиента 504')).closest('tr')!; const button = within(row).getByRole('button', { name: 'Редактировать' });
+    vi.mocked(apiService.updatePayment).mockImplementationOnce(async () => { fireEvent.click(button); return clientPaymentRecord(); });
+    await act(async () => { await expect(modal.onSubmit({ ...clientPaymentPayload(), id: 502 })).resolves.toMatchObject({ id: 502 }); });
+    expect(apiService.getPayment).toHaveBeenCalledOnce();
+  });
+  it.each(paymentCallerOperations)('payment view revocation: %s cannot use remaining write rights without view', async kind => {
+    const { modal } = await setupPaymentCaller(kind); permissionsResult.payments.canView = false;
+    await act(async () => { await expect(invokePaymentCaller(modal, kind)).rejects.toBeInstanceOf(Error); });
+    for (const method of new Set(Object.values(paymentCallerMethods))) expect(apiService[method]).not.toHaveBeenCalled();
+  });
+  it('payment delete retry: a current failure retains its form for one explicit retry', async () => {
+    const { modal } = await setupPaymentCaller('delete'); vi.mocked(apiService.deletePayment).mockRejectedValueOnce(new Error('Удаление временно недоступно')).mockResolvedValueOnce(undefined);
+    await act(async () => { await expect(modal.onDelete!(502)).rejects.toThrow('не удалён'); }); expect(toastSuccessMock).not.toHaveBeenCalled();
+    await act(async () => { await expect(modal.onDelete!(502)).resolves.toBeUndefined(); }); expect(apiService.deletePayment).toHaveBeenCalledTimes(2);
+    await expect(modal.onDelete!(502)).rejects.toBeInstanceOf(StaleUiOperationError); expect(apiService.deletePayment).toHaveBeenCalledTimes(2);
+    expect(confirmMock).not.toHaveBeenCalled();
+  });
+  it('payment delete pagination: the last row returns to the previous page without an extra old-page read', async () => {
+    Object.assign(permissionsResult.payments, { canView: true, canDelete: true }); usePaymentsPagedMock.mockReturnValue({ ...emptyPaymentsResult, payments: [clientPaymentRecord()], total: 21 });
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="payments" />); await screen.findByText('Платёж клиента 502');
+    const paging = tablePaginationPropsSpy.mock.calls.at(-1)?.[0] as Parameters<typeof import('../ui/TablePagination').TablePagination>[0];
+    act(() => paging.onPageChange(2)); expect(usePaymentsPagedMock.mock.calls.at(-1)?.[0].page).toBe(2);
+    const refreshes = emptyPaymentsResult.refresh.mock.calls.length; const row = screen.getByText('Платёж клиента 502').closest('tr')!;
+    fireEvent.click(within(row).getByRole('button', { name: 'Удалить' }));
+    await waitFor(() => expect(usePaymentsPagedMock.mock.calls.at(-1)?.[0].page).toBe(1));
+    expect(apiService.deletePayment).toHaveBeenCalledExactlyOnceWith(502); expect(emptyPaymentsResult.refresh).toHaveBeenCalledTimes(refreshes);
+  });
   it('profile owner baseline: switching client hides the previous personal fields while the new read is pending', async () => {
     let finish!: (client: Client) => void;
     const next = new Promise<Client>(resolve => { finish = resolve; });
@@ -722,7 +1031,7 @@ describe('ClientDetail integration', () => {
     expect(vi.mocked(useClientStatuses).mock.lastCall?.[0]?.ownerScope).not.toBe(second?.ownerScope); await act(async () => {});
   });
   beforeEach(() => {
-    addressFormPropsSpy.mockClear(); poaPromptPropsSpy.mockClear();
+    addressFormPropsSpy.mockClear(); poaPromptPropsSpy.mockClear(); tablePaginationPropsSpy.mockClear();
     legalModalOwnerSpy.mockClear(); authState.userId = 7; authState.roleId = 1;
     invoiceLookupPropsSpy.mockClear(); caseLookupPropsSpy.mockClear();
     Object.assign(permissionsResult.legalEntities, createPermissions().legalEntities);
@@ -751,8 +1060,8 @@ describe('ClientDetail integration', () => {
     useInvoicesMock.mockReset();
     useContractsMock.mockReset();
     usePaymentsPagedMock.mockReset();
-    vi.mocked(apiService.getClientBalance).mockClear();
-    vi.mocked(apiService.getClientBalanceTransactions).mockClear();
+    vi.mocked(apiService.getClientBalance).mockReset().mockResolvedValue({ clientId: 1, balance: 0 });
+    vi.mocked(apiService.getClientBalanceTransactions).mockReset().mockResolvedValue([]);
     vi.mocked(apiService.getClientCaseFinanceSummaries).mockClear();
     window.sessionStorage.clear();
     authState.isAdmin = false;
@@ -762,6 +1071,7 @@ describe('ClientDetail integration', () => {
     useInvoicesMock.mockReturnValue(emptyInvoicesResult);
     useContractsMock.mockReturnValue(emptyContractsResult);
     usePaymentsPagedMock.mockReturnValue(emptyPaymentsResult);
+    for (const result of [emptyActsResult, emptyInvoicesResult, emptyContractsResult, emptyLegalEntitiesResult, emptyPaymentsResult]) result.refresh.mockClear();
 
     vi.mocked(apiService.getClient).mockReset().mockImplementation(async id => ({ ...createClient(), id }));
     vi.mocked(useClientStatuses).mockReturnValue({ statuses: [], loading: false, error: null, refresh: vi.fn() } as ReturnType<typeof useClientStatuses>);
@@ -775,12 +1085,12 @@ describe('ClientDetail integration', () => {
     vi.mocked(apiService.createClientPowerOfAttorney).mockReset();
     vi.mocked(apiService.updateClientPowerOfAttorney).mockReset();
     vi.mocked(apiService.deleteClientPowerOfAttorney).mockReset();
-    vi.mocked(apiService.getClientCaseFinanceSummaries).mockResolvedValue([]);
-    vi.mocked(apiService.getClientCaseExpenseDetails).mockResolvedValue([]);
-    vi.mocked(apiService.getContracts).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 200 });
-    vi.mocked(apiService.getInvoices).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 200 });
-    vi.mocked(apiService.getActs).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 200 });
-    vi.mocked(apiService.getPaymentsV2).mockResolvedValue({
+    vi.mocked(apiService.getClientCaseFinanceSummaries).mockReset().mockResolvedValue([]);
+    vi.mocked(apiService.getClientCaseExpenseDetails).mockReset().mockResolvedValue([]);
+    vi.mocked(apiService.getContracts).mockReset().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 200 });
+    vi.mocked(apiService.getInvoices).mockReset().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 200 });
+    vi.mocked(apiService.getActs).mockReset().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 200 });
+    vi.mocked(apiService.getPaymentsV2).mockReset().mockResolvedValue({
       items: [],
       total: 0,
       page: 1,
@@ -795,6 +1105,14 @@ describe('ClientDetail integration', () => {
       },
     });
     vi.mocked(apiService.getPayment).mockReset();
+    vi.mocked(apiService.createPayment).mockReset().mockResolvedValue(clientPaymentRecord(503));
+    vi.mocked(apiService.updatePayment).mockReset().mockResolvedValue(clientPaymentRecord());
+    vi.mocked(apiService.updateInvoiceManagedPayment).mockReset().mockResolvedValue(clientPaymentRecord());
+    vi.mocked(apiService.deletePayment).mockReset().mockResolvedValue(undefined);
+    vi.mocked(apiService.transferPaymentRemainder).mockReset().mockResolvedValue({ payment: clientPaymentRecord(), remainderPayment: clientPaymentRecord(503), createdRemainder: true });
+    vi.mocked(apiService.rollbackPaymentRemainderTransfer).mockReset().mockResolvedValue({ payment: clientPaymentRecord(), removedRemainderPaymentId: 503 });
+    vi.mocked(apiService.adjustPaymentRemainderTransfer).mockReset().mockResolvedValue({ payment: clientPaymentRecord(), remainderPayment: clientPaymentRecord(503), createdRemainder: false });
+    vi.mocked(apiService.applyClientBalanceGuarded).mockReset().mockResolvedValue(clientBalanceResult());
     vi.mocked(apiService.createClientPowerOfAttorney).mockResolvedValue(createPowerOfAttorney());
     vi.mocked(apiService.updateClientPowerOfAttorney).mockResolvedValue(createPowerOfAttorney());
     vi.mocked(apiService.deleteClientPowerOfAttorney).mockResolvedValue(undefined);
@@ -856,12 +1174,14 @@ describe('ClientDetail integration', () => {
   });
 
   it('does not enable hidden tab data hooks on the initial profile view', async () => {
+    for (const section of ['cases', 'payments', 'accounts', 'acts', 'contracts'] as const) permissionsResult[section].canCreate = true;
     render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
 
     await screen.findByRole('heading', { name: 'Карточка клиента' });
 
     expect(useClientCasesMock).toHaveBeenCalledWith(1, expect.objectContaining({ enabled: false }));
-    expect(usePaymentsPagedMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
+    expect(usePaymentsPagedMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }),
+      expect.objectContaining({ scope: expect.any(String), capture: expect.any(Function) }));
     expect(useInvoicesMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
     expect(useActsMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
     expect(useContractsMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
@@ -2504,7 +2824,7 @@ describe('ClientDetail integration', () => {
     render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
 
     await screen.findByRole('heading', { level: 1, name: 'Иванов Иван Иванович' });
-    await user.click(screen.getByRole('button', { name: 'Редактировать' }));
+    await user.click(await screen.findByRole('button', { name: 'Редактировать' }));
     await user.click(screen.getByRole('button', { name: 'Сохранить' }));
 
     await waitFor(() => {
@@ -2772,7 +3092,7 @@ describe('ClientDetail integration', () => {
     await user.click(editButton!);
 
     await waitFor(() => {
-      expect(apiService.getPayment).toHaveBeenCalledWith(502);
+      expect(apiService.getPayment).toHaveBeenCalledWith(502, expect.any(AbortSignal));
       expect(paymentModalPropsSpy).toHaveBeenLastCalledWith(
         expect.objectContaining({ payment: detailedPayment, isOpen: true }),
       );
