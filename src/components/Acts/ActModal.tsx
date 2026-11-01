@@ -46,6 +46,7 @@ interface ActModalProps {
   responsibles: ActResponsible[];
   lookupsLoading: boolean;
   lookupsError?: string | null;
+  onRetryLookups?: () => void;
   defaultClientId?: number | null;
   defaultResponsibleId?: number | null;
   initialValues?: Partial<ActInput> & { amount?: number | null };
@@ -501,6 +502,7 @@ export function ActModal({
   responsibles,
   lookupsLoading,
   lookupsError,
+  onRetryLookups,
   defaultClientId,
   defaultResponsibleId,
   initialValues,
@@ -2369,6 +2371,7 @@ export function ActModal({
         {(lookupsError || invoiceError || actDetailsError) && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
             {actDetailsError || lookupsError || invoiceError}
+            {lookupsError && onRetryLookups ? <button type="button" onClick={() => { if (open && editorScopeRef.current === editorScope && !lookupsLoading) onRetryLookups(); }} disabled={lookupsLoading} className="ml-2 underline">Повторить загрузку справочников</button> : null}
             {isEdit && actReadState.scope === editorScope && actReadState.kind === 'retry' ? (
               <button type="button" onClick={() => setActReadAttempt((attempt) => attempt + 1)} className="ml-2 underline">Повторить загрузку акта</button>
             ) : null}

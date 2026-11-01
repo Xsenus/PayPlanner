@@ -14,6 +14,8 @@ import { documentCopyTestSession } from '../../test/documentCopySession';
 const CLIENT_PROFILE_NOTES_PREFIX = '__PP_CLIENT_PROFILE_V2__:';
 type LegalModalOwnerProps = { initial?: LegalEntityDetail | null; onClose: () => void; onSubmit: (payload: LegalEntityInput) => Promise<LegalEntityDetail> };
 const legalModalOwnerSpy = vi.hoisted(() => vi.fn());
+const invoiceLookupPropsSpy = vi.hoisted(() => vi.fn());
+const caseLookupPropsSpy = vi.hoisted(() => vi.fn());
 vi.mock('../LegalEntities/LegalEntityModal', () => ({ LegalEntityModal: (props: LegalModalOwnerProps) => { legalModalOwnerSpy(props); return null; } }));
 
 const {
@@ -409,7 +411,7 @@ vi.mock('../Acts/ActModal', () => ({
 }));
 
 vi.mock('../Accounts/InvoiceModal', () => ({
-  InvoiceModal: () => null,
+  InvoiceModal: (props: unknown) => { invoiceLookupPropsSpy(props); return null; },
 }));
 
 vi.mock('../Contracts/ContractModal', () => ({
@@ -424,7 +426,7 @@ vi.mock('../Tasks/TaskJournal', () => ({
 }));
 
 vi.mock('./CaseModal', () => ({
-  CaseModal: () => null,
+  CaseModal: (props: unknown) => { caseLookupPropsSpy(props); return null; },
 }));
 
 vi.mock('../Statistics/TwoTypeStats', () => ({
@@ -704,6 +706,7 @@ describe('ClientDetail integration', () => {
   });
   beforeEach(() => {
     legalModalOwnerSpy.mockClear(); authState.userId = 7; authState.roleId = 1;
+    invoiceLookupPropsSpy.mockClear(); caseLookupPropsSpy.mockClear();
     Object.assign(permissionsResult.legalEntities, createPermissions().legalEntities);
     Object.assign(permissionsResult.companyProfile, createPermissions().companyProfile);
     vi.mocked(apiService.getLegalEntity).mockReset(); vi.mocked(apiService.createLegalEntity).mockReset(); vi.mocked(apiService.updateLegalEntity).mockReset();
@@ -743,8 +746,9 @@ describe('ClientDetail integration', () => {
     usePaymentsPagedMock.mockReturnValue(emptyPaymentsResult);
 
     vi.mocked(apiService.getClient).mockReset().mockImplementation(async id => ({ ...createClient(), id }));
-    vi.mocked(apiService.getClients).mockResolvedValue([]);
-    vi.mocked(apiService.getActResponsibles).mockResolvedValue([]);
+    vi.mocked(useClientStatuses).mockReturnValue({ statuses: [], loading: false, error: null, refresh: vi.fn() } as ReturnType<typeof useClientStatuses>);
+    vi.mocked(apiService.getClients).mockReset().mockResolvedValue([]);
+    vi.mocked(apiService.getActResponsibles).mockReset().mockResolvedValue([]);
     vi.mocked(apiService.updateClient).mockReset().mockResolvedValue(createClient());
     vi.mocked(apiService.deleteClient).mockReset().mockResolvedValue(undefined);
     vi.mocked(apiService.getClientPowersOfAttorney).mockResolvedValue([]);
@@ -855,6 +859,138 @@ describe('ClientDetail integration', () => {
       expect(apiService.getActResponsibles).toHaveBeenCalledTimes(1);
     });
     expect(apiService.getClients).not.toHaveBeenCalled();
+  });
+
+  it('shared lookup baseline: an admin responsible denial waits for an explicit retry instead of looping', async () => {
+    authState.isAdmin = true;
+    vi.mocked(apiService.getActResponsibles).mockReset().mockRejectedValueOnce(new Error('HTTP 403 - Доступ закрыт')).mockReturnValue(new Promise(() => {}));
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+    await screen.findByRole('button', { name: 'Редактировать' });
+    await act(async () => {});
+    expect(apiService.getActResponsibles).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Повторить загрузку ответственных' })).toBeTruthy();
+  });
+
+  it('shared lookup baseline: a missing status catalogue keeps the actual selected ID and name', async () => {
+    vi.mocked(apiService.getClient).mockResolvedValue({ ...createClient(), clientStatusId: 24, clientStatus: { id: 24, name: 'Сохранённый статус', description: '', colorHex: '#64748b', createdAt: '2026-11-01T00:00:00Z', isActive: true } });
+    vi.mocked(useClientStatuses).mockReturnValueOnce({ statuses: [], loading: true, error: null, refresh: vi.fn() } as ReturnType<typeof useClientStatuses>);
+    vi.mocked(useClientStatuses).mockReturnValue({ statuses: [], loading: true, error: null, refresh: vi.fn() } as ReturnType<typeof useClientStatuses>);
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+    await screen.findByRole('button', { name: 'Редактировать' });
+    const select = document.querySelector<HTMLSelectElement>('select[name="clientStatusId"]')!;
+    expect(select.value).toBe('24');
+    expect(select.selectedOptions[0].textContent).toBe('Сохранённый статус');
+  });
+
+  it('shared lookup retry: responsible denial preserves the profile and retries only once on explicit action', async () => {
+    authState.isAdmin = true;
+    vi.mocked(apiService.getClient).mockResolvedValue({ ...createClient(), responsibleUserId: 5, responsibleUserName: 'Сохранённый ответственный' });
+    let finish!: (rows: Awaited<ReturnType<typeof apiService.getActResponsibles>>) => void;
+    vi.mocked(apiService.getActResponsibles).mockRejectedValueOnce(new Error('HTTP 403 - Доступ закрыт')).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+    fireEvent.change(screen.getByDisplayValue('Иванов'), { target: { value: 'Сохраняемый черновик' } });
+    const retry = await screen.findByRole('button', { name: 'Повторить загрузку ответственных' });
+    expect(screen.getByRole('combobox', { name: 'Ответственный' })).toHaveProperty('disabled', true);
+    fireEvent.click(retry); fireEvent.click(retry);
+    expect(apiService.getActResponsibles).toHaveBeenCalledTimes(2); expect(apiService.getClients).not.toHaveBeenCalled();
+    await act(async () => finish([]));
+    expect(screen.queryByRole('button', { name: 'Повторить загрузку ответственных' })).toBeNull();
+    expect(screen.getByDisplayValue('Сохраняемый черновик')).toBeTruthy();
+    expect(screen.getByRole('combobox', { name: 'Ответственный' })).toHaveProperty('disabled', false);
+    expect(apiService.getActResponsibles).toHaveBeenCalledTimes(2);
+  });
+
+  it('shared lookup role: old responsible rows are aborted and cannot enter the next role catalogue', async () => {
+    authState.isAdmin = true;
+    let finish!: (rows: Awaited<ReturnType<typeof apiService.getActResponsibles>>) => void;
+    vi.mocked(apiService.getActResponsibles).mockReturnValueOnce(new Promise(resolve => { finish = resolve; })).mockResolvedValueOnce([{ id: 8, fullName: 'Текущий сотрудник' }]);
+    const props = { clientId: 1, onBack: vi.fn(), initialSection: 'profile' as const }; const view = render(<ClientDetail {...props} />);
+    await waitFor(() => expect(apiService.getActResponsibles).toHaveBeenCalledOnce()); const signal = vi.mocked(apiService.getActResponsibles).mock.calls[0][0]?.signal;
+    authState.roleId = 2; view.rerender(<ClientDetail {...props} />); await waitFor(() => expect(apiService.getActResponsibles).toHaveBeenCalledTimes(2));
+    expect(signal?.aborted).toBe(true); await act(async () => finish([{ id: 7, fullName: 'Прежний сотрудник' }]));
+    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+    const picker = screen.getByRole('combobox', { name: 'Ответственный' }); expect(within(picker).getByRole('option', { name: 'Текущий сотрудник' })).toBeTruthy(); expect(within(picker).queryByRole('option', { name: 'Прежний сотрудник' })).toBeNull();
+  });
+
+  it('shared lookup invoice empty: a valid empty client list is loaded once and does not loop', async () => {
+    permissionsResult.accounts.canCreate = true;
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Добавить счёт' })); await act(async () => {});
+    expect(apiService.getClients).toHaveBeenCalledOnce(); expect(apiService.getActResponsibles).toHaveBeenCalledOnce();
+    expect(invoiceLookupPropsSpy.mock.lastCall![0]).toMatchObject({ lookupsLoading: false, lookupsError: null, clients: [expect.objectContaining({ id: 1 })] });
+  });
+
+  it('shared lookup invoice partial: retry keeps successful responsibles and only reloads failed clients', async () => {
+    permissionsResult.accounts.canCreate = true;
+    vi.mocked(apiService.getActResponsibles).mockResolvedValue([{ id: 7, fullName: 'Текущий ответственный' }]);
+    let finish!: (rows: Client[]) => void;
+    vi.mocked(apiService.getClients).mockRejectedValueOnce(new Error('HTTP 403 - Клиенты закрыты')).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />); fireEvent.click(await screen.findByRole('button', { name: 'Добавить счёт' }));
+    await waitFor(() => expect(invoiceLookupPropsSpy.mock.lastCall![0].lookupsError).toContain('Недостаточно прав'));
+    const retry = invoiceLookupPropsSpy.mock.lastCall![0].onRetryLookups; act(() => { retry(); retry(); });
+    expect(apiService.getClients).toHaveBeenCalledTimes(2); expect(apiService.getActResponsibles).toHaveBeenCalledOnce();
+    await act(async () => finish([{ ...createClient(), id: 2, name: 'Другой доступный клиент' }]));
+    expect(invoiceLookupPropsSpy.mock.lastCall![0]).toMatchObject({ lookupsLoading: false, lookupsError: null, responsibles: [{ id: 7, fullName: 'Текущий ответственный' }] });
+  });
+
+  it('shared lookup client denial: financial access does not query the client catalogue without client view', async () => {
+    permissionsResult.clients.canView = false; permissionsResult.accounts.canCreate = true;
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="accounts" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Добавить счёт' })); await act(async () => {});
+    expect(apiService.getClients).not.toHaveBeenCalled(); expect(apiService.getClient).not.toHaveBeenCalled();
+    expect(apiService.getActResponsibles).toHaveBeenCalledOnce();
+  });
+
+  it('shared lookup closed invoice: closing aborts the page and a held retry cannot restart the closed form', async () => {
+    permissionsResult.accounts.canCreate = true;
+    let finish!: (rows: Client[]) => void; vi.mocked(apiService.getClients).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />); fireEvent.click(await screen.findByRole('button', { name: 'Добавить счёт' }));
+    await waitFor(() => expect(apiService.getClients).toHaveBeenCalledOnce()); const signal = vi.mocked(apiService.getClients).mock.calls[0][0]?.signal;
+    const props = invoiceLookupPropsSpy.mock.lastCall![0]; act(() => props.onClose()); expect(signal?.aborted).toBe(true);
+    await act(async () => { await props.onRetryLookups(); finish([{ ...createClient(), id: 99, name: 'Прежний результат' }]); }); expect(apiService.getClients).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: 'Добавить счёт' })); await act(async () => {});
+    expect(apiService.getClients).toHaveBeenCalledTimes(2); expect(invoiceLookupPropsSpy.mock.lastCall![0].clients.some((row: Client) => row.id === 99)).toBe(false);
+  });
+
+  it('shared lookup case: the case caller receives an independent responsible error and explicit retry', async () => {
+    permissionsResult.cases.canCreate = true;
+    vi.mocked(apiService.getActResponsibles).mockRejectedValueOnce(new Error('HTTP 403 - Ответственные закрыты')).mockResolvedValueOnce([]);
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />); fireEvent.click(await screen.findByRole('button', { name: 'Добавить дело' }));
+    await waitFor(() => expect(caseLookupPropsSpy.mock.lastCall![0].responsiblesError).toContain('Недостаточно прав'));
+    expect(apiService.getClients).not.toHaveBeenCalled(); await act(async () => caseLookupPropsSpy.mock.lastCall![0].onRetryResponsibles());
+    expect(apiService.getActResponsibles).toHaveBeenCalledTimes(2); expect(caseLookupPropsSpy.mock.lastCall![0]).toMatchObject({ responsiblesLoading: false, responsiblesError: null });
+  });
+
+  it('shared lookup status retry: one explicit refresh preserves the current draft and selected ID', async () => {
+    let finish!: () => void; const refresh = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+    vi.mocked(useClientStatuses).mockReturnValue({ statuses: [], loading: false, error: 'HTTP 403 - Статусы закрыты', refresh } as ReturnType<typeof useClientStatuses>);
+    vi.mocked(apiService.getClient).mockResolvedValue({ ...createClient(), clientStatusId: 24 });
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />); fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+    fireEvent.change(screen.getByDisplayValue('Иванов'), { target: { value: 'Статусы не стирают ввод' } });
+    const select = document.querySelector<HTMLSelectElement>('select[name="clientStatusId"]')!; expect(select.value).toBe('24'); expect(select.disabled).toBe(true);
+    const retry = screen.getByRole('button', { name: 'Повторить загрузку статусов' }); fireEvent.click(retry); fireEvent.click(retry); expect(refresh).toHaveBeenCalledOnce();
+    await act(async () => finish()); expect(select.value).toBe('24'); expect(screen.getByDisplayValue('Статусы не стирают ввод')).toBeTruthy();
+  });
+
+  it.each(['responsibles', 'clients'])('shared lookup malformed: invalid %s rows stop once and expose an explicit retry', async kind => {
+    permissionsResult.accounts.canCreate = true;
+    if (kind === 'responsibles') vi.mocked(apiService.getActResponsibles).mockResolvedValue([{ id: 7, fullName: 'Один' }, { id: 7, fullName: 'Дубль' }]);
+    else vi.mocked(apiService.getClients).mockResolvedValue([{ ...createClient(), id: 0 }]);
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />); fireEvent.click(await screen.findByRole('button', { name: 'Добавить счёт' }));
+    await waitFor(() => expect(invoiceLookupPropsSpy.mock.lastCall![0].lookupsError).toContain('Не удалось подтвердить данные справочника'));
+    await act(async () => {}); expect(apiService.getClients).toHaveBeenCalledOnce(); expect(apiService.getActResponsibles).toHaveBeenCalledOnce();
+  });
+
+  it('shared lookup status boundary: an obsolete option cannot replace the selected status in the saved profile', async () => {
+    const status = { id: 24, name: 'Текущий статус', description: '', colorHex: '#64748b', createdAt: '2026-11-01T00:00:00Z', isActive: true };
+    vi.mocked(useClientStatuses).mockReturnValue({ statuses: [status], loading: false, error: null, refresh: vi.fn() } as ReturnType<typeof useClientStatuses>);
+    vi.mocked(apiService.getClient).mockResolvedValue({ ...createClient(), clientStatusId: 24, clientStatus: status });
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />); fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+    const select = document.querySelector<HTMLSelectElement>('select[name="clientStatusId"]')!;
+    const option = document.createElement('option'); option.value = '99'; select.append(option); fireEvent.change(select, { target: { value: '99' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' })); await waitFor(() => expect(apiService.updateClient).toHaveBeenCalledOnce());
+    expect(vi.mocked(apiService.updateClient).mock.calls[0][1].clientStatusId).toBe(24);
   });
 
   it('opens the client tasks tab with a client-scoped task journal', async () => {

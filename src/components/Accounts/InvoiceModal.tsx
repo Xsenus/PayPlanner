@@ -298,6 +298,7 @@ interface InvoiceModalProps {
   responsibles: ActResponsible[];
   lookupsLoading: boolean;
   lookupsError?: string | null;
+  onRetryLookups?: () => void;
   defaultClientId?: number;
   defaultLegalEntityId?: number;
   defaultExpenseClientId?: number;
@@ -923,6 +924,7 @@ export function InvoiceModal({
   responsibles = [],
   lookupsLoading,
   lookupsError,
+  onRetryLookups,
   defaultClientId,
   defaultLegalEntityId,
   defaultExpenseClientId,
@@ -5057,7 +5059,9 @@ export function InvoiceModal({
                                 <span className="text-xs text-slate-500">{t('loading') ?? 'Загрузка...'}</span>
                               )}
                               {lookupsError && (
-                                <span className="text-xs text-rose-600">{lookupsError}</span>
+                                <span className="text-xs text-rose-600">{lookupsError}
+                                  {onRetryLookups ? <button type="button" onClick={() => { if (open && printOwner.capture() && !lookupsLoading) onRetryLookups(); }} disabled={lookupsLoading} className="ml-2 underline">Повторить загрузку справочников</button> : null}
+                                </span>
                               )}
                               {(selectedClient?.clientStatus || selectedClient?.responsibleUserName || selectedLegalEntity) && (
                                 <div className="mt-2 space-y-1 rounded-xl border border-slate-100 bg-slate-50 p-2">

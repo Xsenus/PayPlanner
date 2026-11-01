@@ -114,7 +114,7 @@ import { ObjectAuditModal } from "../ui/ObjectAuditModal";
 import { TaskJournal } from "../Tasks/TaskJournal";
 import { isInvoiceManagedPayment, isPartialRemainderSourcePayment, isTransferredRemainderPayment } from "../../utils/invoicePayments";
 import { useClientStatuses } from "../../hooks/useClientStatuses";
-import { useDictionarySnapshot } from "../../hooks/useDictionarySnapshot";
+import { assertDictionaryRows, useDictionarySnapshot } from "../../hooks/useDictionarySnapshot";
 import { ClientStatusBadge } from "./ClientStatusBadge";
 import { ClientReconciliationAct } from "./ClientReconciliationAct";
 import { DatePeriodPicker } from "../DateRange/DatePeriodPicker";
@@ -287,6 +287,19 @@ const SECTION_ORDER: ClientDetailSection[] = [
 const DETAIL_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 const LEGAL_ENTITY_LOOKUP_PAGE_SIZE = 20;
 const EMPTY_LEGAL_LOOKUP: Awaited<ReturnType<typeof apiService.getLegalEntitiesPaged>> = { items: [], total: 0, page: 1, pageSize: LEGAL_ENTITY_LOOKUP_PAGE_SIZE };
+const EMPTY_CLIENT_LOOKUP: Client[] = [];
+const EMPTY_RESPONSIBLE_LOOKUP: ActResponsible[] = [];
+async function loadClientLookup(signal: AbortSignal) {
+  const rows = await apiService.getClients({ signal });
+  assertDictionaryRows(rows);
+  return rows;
+}
+async function loadResponsibleLookup(signal: AbortSignal) {
+  const rows = await apiService.getActResponsibles({ signal });
+  if (!Array.isArray(rows)) throw new Error('Не удалось подтвердить список ответственных. Повторите загрузку.');
+  assertDictionaryRows(rows.map(row => ({ id: row?.id, name: row?.fullName })));
+  return rows;
+}
 const CLIENT_DETAIL_TABLE_STORAGE_PREFIX = "pp.client_detail_table";
 const CLIENT_BALANCE_TRANSACTION_LABELS: Record<
   ClientBalanceTransaction["type"],
@@ -1529,7 +1542,7 @@ function ClientDetailScreen({
       return firstAllowed ?? "payments";
     },
   );
-  const { statuses: clientStatuses } = useClientStatuses({ enabled: userIsAdmin || clientPermissions.canView,
+  const { statuses: clientStatuses, loading: clientStatusesLoading, error: clientStatusesError, refresh: refreshClientStatuses } = useClientStatuses({ enabled: userIsAdmin || clientPermissions.canView,
     ownerScope: JSON.stringify([clientId, user?.id, user?.role?.id, userIsAdmin, clientPermissions, permissions.dictionaries]) });
   const [clientName, setClientName] = useState<string>("...");
   const [clientData, setClientData] = useState<Client | null>(null);
@@ -2363,12 +2376,6 @@ function ClientDetailScreen({
   const [selectedAct, setSelectedAct] = useState<Act | null>(null);
   const [actSubmitting, setActSubmitting] = useState(false);
   const [actModalError, setActModalError] = useState<string | null>(null);
-  const [actClients, setActClients] = useState<Client[]>([]);
-  const [actResponsibles, setActResponsibles] = useState<ActResponsible[]>([]);
-  const [actClientsLoaded, setActClientsLoaded] = useState(false);
-  const [actResponsiblesLoaded, setActResponsiblesLoaded] = useState(false);
-  const [actLookupsLoading, setActLookupsLoading] = useState(false);
-  const [actLookupsError, setActLookupsError] = useState<string | null>(null);
 
   const today = useMemo(() => new Date(), []);
 
@@ -2516,11 +2523,6 @@ function ClientDetailScreen({
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [invoiceSubmitting, setInvoiceSubmitting] = useState(false);
   const [invoiceModalError, setInvoiceModalError] = useState<string | null>(
-    null,
-  );
-  const [invoiceClients, setInvoiceClients] = useState<Client[]>([]);
-  const [invoiceLookupsLoading, setInvoiceLookupsLoading] = useState(false);
-  const [invoiceLookupsError, setInvoiceLookupsError] = useState<string | null>(
     null,
   );
   const [invoiceModalRelatedPayments, setInvoiceModalRelatedPayments] =
@@ -3039,30 +3041,7 @@ function ClientDetailScreen({
     setInvoiceModalPaymentsLoading(false);
   };
 
-  const ensureInvoiceClients = useCallback(async () => {
-    if (!invoiceModalOpen) return;
-    if (invoiceClients.length > 0 && !invoiceLookupsError) return;
-    setInvoiceLookupsLoading(true);
-    try {
-      const list = await apiService.getClients();
-      setInvoiceClients(list ?? []);
-      setInvoiceLookupsError(null);
-    } catch (err) {
-      setInvoiceLookupsError(
-        err instanceof Error
-          ? err.message
-          : (t("clientsLoadError") ?? "Не удалось загрузить клиентов"),
-      );
-    } finally {
-      setInvoiceLookupsLoading(false);
-    }
-  }, [invoiceModalOpen, invoiceClients.length, invoiceLookupsError, t]);
 
-  useEffect(() => {
-    if (invoiceModalOpen) {
-      void ensureInvoiceClients();
-    }
-  }, [invoiceModalOpen, ensureInvoiceClients]);
 
   const submitInvoice = async (payload: InvoiceInput) => {
     const isEdit = invoiceModalMode === "edit" && selectedInvoice;
@@ -3379,6 +3358,44 @@ function ClientDetailScreen({
   };
 
   const [caseModalOpen, setCaseModalOpen] = useState(false);
+  const canManageClientResponsible = userIsAdmin && clientPermissions.canEdit;
+  const clientsLookupNeeded = canReadClient && ((actModalOpen && actPermissions.canView) || (invoiceModalOpen && accountPermissions.canView));
+  const responsibleLookupNeeded = (profileReady && activeSection === 'profile' && canManageClientResponsible)
+    || (actModalOpen && actPermissions.canView) || (invoiceModalOpen && accountPermissions.canView) || (caseModalOpen && casePermissions.canView);
+  const sharedClientLookup = useDictionarySnapshot(loadClientLookup, EMPTY_CLIENT_LOOKUP,
+    { enabled: clientsLookupNeeded, ownerScope: screenOwner.scope }, false);
+  const responsibleLookup = useDictionarySnapshot(loadResponsibleLookup, EMPTY_RESPONSIBLE_LOOKUP,
+    { enabled: responsibleLookupNeeded, ownerScope: screenOwner.scope }, false);
+  const actClients = sharedClientLookup.value;
+  const invoiceClients = sharedClientLookup.value;
+  const actResponsibles = responsibleLookup.value;
+  const actLookupsLoading = sharedClientLookup.loading || responsibleLookup.loading;
+  const actLookupsError = sharedClientLookup.error || responsibleLookup.error
+    ? extractDisplayErrorMessage(new Error(sharedClientLookup.error || responsibleLookup.error || ''), 'Не удалось загрузить справочники.') : null;
+  const invoiceLookupsLoading = actLookupsLoading;
+  const invoiceLookupsError = actLookupsError;
+  const retryingLookups = useRef(false);
+  const sharedLookupContext = JSON.stringify([screenOwner.scope, activeSection, actModalOpen, invoiceModalOpen, caseModalOpen]);
+  const currentLookupContext = useRef(sharedLookupContext);
+  currentLookupContext.current = sharedLookupContext;
+  const retrySharedLookups = async () => {
+    if (!captureScreen() || currentLookupContext.current !== sharedLookupContext || retryingLookups.current) return;
+    const requests: (() => Promise<void>)[] = [];
+    if (clientsLookupNeeded && sharedClientLookup.error && !sharedClientLookup.loading) requests.push(sharedClientLookup.refresh);
+    if (responsibleLookupNeeded && responsibleLookup.error && !responsibleLookup.loading) requests.push(responsibleLookup.refresh);
+    if (!requests.length) return;
+    retryingLookups.current = true;
+    try { await Promise.all(requests.map(refresh => refresh())); }
+    finally { retryingLookups.current = false; }
+  };
+  const retryingStatuses = useRef(false);
+  const retryCurrentStatuses = async () => {
+    if (!captureScreen() || !clientStatusesError || clientStatusesLoading || retryingStatuses.current) return;
+    retryingStatuses.current = true;
+    try { await refreshClientStatuses(); }
+    finally { retryingStatuses.current = false; }
+  };
+
   const [editingCase, setEditingCase] = useState<ClientCase | null>(null);
   const [caseMode, setCaseMode] = useState<"create" | "edit">("create");
 
@@ -4680,13 +4697,15 @@ function ClientDetailScreen({
 
   const addCaseLabel = t("addCase") ?? "Добавить дело";
 
-  const sortedClientStatuses = useMemo(
-    () =>
-      [...clientStatuses].sort((a, b) =>
-        a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
-      ),
-    [clientStatuses],
-  );
+  const sortedClientStatuses = useMemo(() => {
+    const rows = [...clientStatuses];
+    const selectedId = Number(clientFormState.clientStatusId);
+    if (selectedId && !rows.some(row => row.id === selectedId)) {
+      rows.push(clientData?.clientStatus?.id === selectedId ? clientData.clientStatus
+        : { id: selectedId, name: `Выбранный статус #${selectedId}`, description: '', colorHex: '#64748b', createdAt: '1970-01-01T00:00:00Z', isActive: true });
+    }
+    return rows.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  }, [clientStatuses, clientData?.clientStatus, clientFormState.clientStatusId]);
 
   const selectedLegalEntity = useMemo(() => {
     const id = Number(clientFormState.legalEntityId); if (!id) return null;
@@ -4711,7 +4730,6 @@ function ClientDetailScreen({
     );
   }, [clientFormState.clientStatusId, sortedClientStatuses]);
 
-  const canManageClientResponsible = userIsAdmin && clientPermissions.canEdit;
   const canEditClientProfile = profileReady && clientPermissions.canEdit && clientProfileEditing && !clientActionBusy;
   const canManageClientResponsibleInProfile =
     profileReady && canManageClientResponsible && clientProfileEditing && !clientActionBusy;
@@ -4723,12 +4741,12 @@ function ClientDetailScreen({
       : null;
     if (
       currentResponsibleId &&
-      !options.some((responsible) => responsible.id === currentResponsibleId) &&
-      clientData?.responsibleUserName
+      !options.some((responsible) => responsible.id === currentResponsibleId)
     ) {
       options.push({
         id: currentResponsibleId,
-        fullName: clientData.responsibleUserName,
+        fullName: clientData?.responsibleUserId === currentResponsibleId && clientData.responsibleUserName
+          ? clientData.responsibleUserName : `Ответственный #${currentResponsibleId}`,
       });
     }
 
@@ -4737,6 +4755,7 @@ function ClientDetailScreen({
     );
   }, [
     actResponsibles,
+    clientData?.responsibleUserId,
     clientData?.responsibleUserName,
     clientFormState.responsibleUserId,
   ]);
@@ -4750,67 +4769,7 @@ function ClientDetailScreen({
     [clientResponsibleOptions],
   );
 
-  const ensureActLookups = useCallback(async (options?: { includeClients?: boolean }) => {
-    const includeClients = options?.includeClients ?? true;
-    if (actLookupsLoading) return;
-    const needsClients =
-      includeClients && (!actClientsLoaded || Boolean(actLookupsError));
-    const needsResponsibles =
-      !actResponsiblesLoaded || Boolean(actLookupsError);
-    if (!needsClients && !needsResponsibles)
-      return;
-    setActLookupsLoading(true);
-    try {
-      const [clientsResponse, responsiblesResponse] = await Promise.all([
-        needsClients ? apiService.getClients() : Promise.resolve(actClients),
-        needsResponsibles
-          ? apiService.getActResponsibles()
-          : Promise.resolve(actResponsibles),
-      ]);
-      if (needsClients) {
-        setActClients(clientsResponse ?? []);
-        setActClientsLoaded(true);
-      }
-      if (needsResponsibles) {
-        setActResponsibles(responsiblesResponse ?? []);
-        setActResponsiblesLoaded(true);
-      }
-      setActLookupsError(null);
-    } catch (error) {
-      setActLookupsError(
-        error instanceof Error
-          ? error.message
-          : "Не удалось загрузить справочники",
-      );
-    } finally {
-      setActLookupsLoading(false);
-    }
-  }, [
-    actClients,
-    actClientsLoaded,
-    actResponsibles,
-    actResponsiblesLoaded,
-    actLookupsError,
-    actLookupsLoading,
-  ]);
 
-  useEffect(() => {
-    if (actModalOpen) {
-      void ensureActLookups({ includeClients: true });
-    }
-  }, [actModalOpen, ensureActLookups]);
-
-  useEffect(() => {
-    if (invoiceModalOpen || canManageClientResponsible) {
-      void ensureActLookups({ includeClients: false });
-    }
-  }, [canManageClientResponsible, ensureActLookups, invoiceModalOpen]);
-
-  useEffect(() => {
-    if (caseModalOpen) {
-      void ensureActLookups({ includeClients: false });
-    }
-  }, [caseModalOpen, ensureActLookups]);
 
   const openAddPayment = () => {
     if (!paymentPermissions.canView || !paymentPermissions.canCreate) {
@@ -5384,10 +5343,13 @@ function ClientDetailScreen({
       return;
     }
     if (name === "responsibleUserId") {
+      if (!canManageClientResponsibleInProfile || responsibleLookup.loading || responsibleLookup.error
+        || (value && !actResponsibles.some(item => String(item.id) === value))) return;
       setClientFormState((prev) => ({ ...prev, responsibleUserId: value }));
       return;
     }
     if (name === "clientStatusId") {
+      if (clientStatusesLoading || clientStatusesError || (value && !clientStatuses.some(status => String(status.id) === value))) return;
       setClientFormState((prev) => ({ ...prev, clientStatusId: value }));
       return;
     }
@@ -6499,6 +6461,8 @@ function ClientDetailScreen({
                     label={"Ответственный" + requiredMark("ResponsibleUserId")}
                     value={clientFormState.responsibleUserId}
                     onChange={(value) => {
+                      if (!captureScreen() || !canManageClientResponsibleInProfile || responsibleLookup.loading || responsibleLookup.error
+                        || (value && !actResponsibles.some(item => String(item.id) === value))) return;
                       setClientFormState((prev) => ({
                         ...prev,
                         responsibleUserId: value,
@@ -6509,7 +6473,7 @@ function ClientDetailScreen({
                     title="Выбор ответственного"
                     searchPlaceholder="Поиск ответственного"
                     emptyOptionLabel="Не указан"
-                    disabled={!canManageClientResponsibleInProfile}
+                    disabled={!canManageClientResponsibleInProfile || responsibleLookup.loading || Boolean(responsibleLookup.error)}
                     buttonClassName={`disabled:bg-gray-100 ${requiredInputClass("ResponsibleUserId", clientFormState.responsibleUserId)}`}
                     helperText={
                       canManageClientResponsible
@@ -6517,6 +6481,13 @@ function ClientDetailScreen({
                         : "Назначается автоматически при создании клиента. Изменение доступно администратору."
                     }
                   />
+                  {responsibleLookupNeeded && responsibleLookup.loading ? <p className="mt-1 text-xs text-slate-500">Загрузка ответственных...</p> : null}
+                  {responsibleLookupNeeded && responsibleLookup.error ? (
+                    <div role="alert" className="mt-1 text-xs text-rose-600">
+                      {extractDisplayErrorMessage(new Error(responsibleLookup.error), 'Не удалось загрузить ответственных.')}
+                      <button type="button" onClick={() => { void retrySharedLookups(); }} disabled={responsibleLookup.loading} className="ml-2 underline">Повторить загрузку ответственных</button>
+                    </div>
+                  ) : null}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -6527,7 +6498,7 @@ function ClientDetailScreen({
                     name="clientStatusId"
                     value={clientFormState.clientStatusId}
                     onChange={handleClientFormChange}
-                    disabled={!canEditClientProfile}
+                    disabled={!canEditClientProfile || clientStatusesLoading || Boolean(clientStatusesError)}
                     className={`w-full px-3 py-2 border rounded-lg focus:ring-2 disabled:bg-gray-100 ${requiredInputClass("ClientStatusId", clientFormState.clientStatusId)}`}
                   >
                     <option value="">
@@ -6539,6 +6510,13 @@ function ClientDetailScreen({
                       </option>
                     ))}
                   </SystemSelect>
+                  {clientStatusesLoading ? <p className="mt-1 text-xs text-slate-500">Загрузка статусов...</p> : null}
+                  {clientStatusesError ? (
+                    <div role="alert" className="mt-1 text-xs text-rose-600">
+                      {extractDisplayErrorMessage(new Error(clientStatusesError), 'Не удалось загрузить статусы.')}
+                      <button type="button" onClick={() => { void retryCurrentStatuses(); }} disabled={clientStatusesLoading} className="ml-2 underline">Повторить загрузку статусов</button>
+                    </div>
+                  ) : null}
                   {selectedClientStatus?.description && (
                     <p className="mt-2 text-xs text-gray-500">
                       {selectedClientStatus.description}
@@ -11278,6 +11256,7 @@ function ClientDetailScreen({
           responsibles={actResponsibles}
           lookupsLoading={invoiceLookupsLoading}
           lookupsError={invoiceLookupsError}
+          onRetryLookups={() => { void retrySharedLookups(); }}
           defaultClientId={
             invoiceViewMode === "expenseClient" ? undefined : clientId
           }
@@ -11311,6 +11290,7 @@ function ClientDetailScreen({
           responsibles={actResponsibles}
           lookupsLoading={actLookupsLoading}
           lookupsError={actLookupsError}
+          onRetryLookups={() => { void retrySharedLookups(); }}
           defaultClientId={clientId}
         />
 
@@ -11411,6 +11391,9 @@ function ClientDetailScreen({
                 : undefined
             }
             responsibles={actResponsibles}
+            responsiblesLoading={responsibleLookup.loading}
+            responsiblesError={responsibleLookup.error ? extractDisplayErrorMessage(new Error(responsibleLookup.error), 'Не удалось загрузить ответственных.') : null}
+            onRetryResponsibles={() => { void retrySharedLookups(); }}
             allowEdit={caseMode === "edit" ? casePermissions.canEdit : casePermissions.canCreate}
             canViewFinance={paymentPermissions.canView}
             onOpenTask={permissions.tasks.canView ? onOpenTask : undefined}

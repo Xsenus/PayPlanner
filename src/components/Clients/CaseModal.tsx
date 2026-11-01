@@ -33,6 +33,9 @@ interface CaseModalProps {
   onNextHearingConfirmed?: (confirmation: Pick<ClientCase, 'nextHearingConfirmedForAt' | 'nextHearingConfirmedAt' | 'nextHearingConfirmedByUserId' | 'nextHearingConfirmedByName'>) => void;
   onDelete?: () => Promise<void> | void;
   responsibles?: ActResponsible[];
+  responsiblesLoading?: boolean;
+  responsiblesError?: string | null;
+  onRetryResponsibles?: () => void;
   overlayClassName?: string;
   allowEdit?: boolean;
   canViewFinance?: boolean;
@@ -267,6 +270,9 @@ export function CaseModal({
   onNextHearingConfirmed,
   onDelete,
   responsibles = [],
+  responsiblesLoading = false,
+  responsiblesError,
+  onRetryResponsibles,
   overlayClassName,
   allowEdit = true,
   canViewFinance = true,
@@ -1276,15 +1282,26 @@ export function CaseModal({
               aria-label="Ответственный"
               className="mt-1 w-full border rounded-lg px-3 py-2 bg-white"
               value={responsibleUserId}
-              onChange={(e) => setResponsibleUserId(e.target.value)}
-              disabled={saving}>
+              onChange={(e) => {
+                if (!allowEdit || !caseActionOwner.capture() || saving || responsiblesLoading || responsiblesError
+                  || (e.target.value && !responsibles.some(item => String(item.id) === e.target.value))) return;
+                setResponsibleUserId(e.target.value);
+              }}
+              disabled={saving || responsiblesLoading || Boolean(responsiblesError)}>
               <option value="">Ответственный владельца</option>
+              {responsibleUserId && !responsibles.some(item => String(item.id) === responsibleUserId) ? (
+                <option value={responsibleUserId}>{caseData.responsibleUserId === Number(responsibleUserId) && caseData.responsibleUserName ? caseData.responsibleUserName : `Ответственный #${responsibleUserId}`}</option>
+              ) : null}
               {responsibles.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.fullName}
                 </option>
               ))}
             </SystemSelect>
+            {responsiblesLoading ? <p className="mt-1 text-xs text-slate-500">Загрузка ответственных...</p> : null}
+            {responsiblesError ? <p role="alert" className="mt-1 text-xs text-rose-600">{responsiblesError}
+              {onRetryResponsibles ? <button type="button" onClick={() => { if (isOpen && caseActionOwner.capture()) onRetryResponsibles(); }} disabled={responsiblesLoading} className="ml-2 underline">Повторить загрузку ответственных</button> : null}
+            </p> : null}
           </div>
 
           <div>

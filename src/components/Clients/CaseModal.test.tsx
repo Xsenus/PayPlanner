@@ -67,6 +67,30 @@ function createCase(overrides: Partial<ClientCase> = {}): ClientCase {
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: Error) => void; const promise = new Promise<T>((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; }
 
 describe('CaseModal', () => {
+  it('caller lookup retry: a failed responsible catalogue keeps its selected ID and draft while retrying', async () => {
+    const retry = vi.fn();
+    const props = { isOpen: true, caseData: createCase({ responsibleUserId: 5, responsibleUserName: 'Прежний ответственный' }), onClose: vi.fn(), onSave: vi.fn(),
+      responsibles: [], responsiblesLoading: false, responsiblesError: 'Ответственные временно недоступны', onRetryResponsibles: retry };
+    const view = render(<CaseModal {...props} />); await act(async () => {});
+    fireEvent.change(screen.getByLabelText('Название дела'), { target: { value: 'Сохраняемый черновик дела' } });
+    const select = document.querySelector<HTMLSelectElement>('select[aria-label="Ответственный"]')!;
+    expect(select.value).toBe('5'); expect(select.selectedOptions[0].textContent).toBe('Прежний ответственный'); expect(select.disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку ответственных' })); expect(retry).toHaveBeenCalledOnce();
+    view.rerender(<CaseModal {...props} responsiblesLoading />);
+    expect(screen.getByRole('button', { name: 'Повторить загрузку ответственных' })).toHaveProperty('disabled', true);
+    expect(screen.getByLabelText('Название дела')).toHaveProperty('value', 'Сохраняемый черновик дела'); expect(props.onSave).not.toHaveBeenCalled();
+  });
+
+  it('caller lookup selection: a responsible ID outside the current catalogue cannot replace the saved ID', async () => {
+    const save = vi.fn();
+    render(<CaseModal isOpen caseData={createCase({ responsibleUserId: 5 })} onClose={vi.fn()} onSave={save} responsibles={[{ id: 7, fullName: 'Разрешённый ответственный' }]} />); await act(async () => {});
+    const select = document.querySelector<HTMLSelectElement>('select[aria-label="Ответственный"]')!;
+    fireEvent.change(select, { target: { value: '7' } });
+    const obsoleteOption = document.createElement('option'); obsoleteOption.value = '99'; obsoleteOption.textContent = 'Прежняя строка'; select.append(obsoleteOption);
+    fireEvent.change(select, { target: { value: '99' } });
+    fireEvent.keyDown(screen.getByLabelText('Название дела'), { key: 'Enter', ctrlKey: true });
+    await waitFor(() => expect(save).toHaveBeenCalledOnce()); expect(save.mock.calls[0][0]).toMatchObject({ responsibleUserId: 7 });
+  });
   it.each(['ctrlKey', 'metaKey'] as const)('case draft baseline: %s saves current fields rather than the earlier keyboard snapshot', async key => {
     const onSave = vi.fn(); render(<CaseModal isOpen caseData={createCase({ feeAmount: 10, courtStateFeeAmount: 5 })} onClose={vi.fn()} onSave={onSave} />); await act(async () => {});
     fireEvent.change(screen.getByLabelText('Номер дела'), { target: { value: 'НОВЫЙ-2026' } });

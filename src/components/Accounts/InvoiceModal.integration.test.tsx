@@ -310,6 +310,17 @@ async function selectPickerOption(name: string): Promise<void> {
 }
 
 describe('InvoiceModal integration', () => {
+  it('caller lookup retry: an explicit retry preserves the invoice draft and is disabled during loading', async () => {
+    const retry = vi.fn();
+    const props = { open: true, mode: 'create' as const, invoice: null, onClose: vi.fn(), onSubmit: vi.fn().mockResolvedValue(undefined), submitting: false,
+      clients: [createTestClient(1, 'Текущий клиент')], responsibles: [], lookupsLoading: false, lookupsError: 'Справочники временно недоступны', onRetryLookups: retry, defaultClientId: 1, relatedPayments: [] };
+    const view = render(<InvoiceModal {...props} />); await act(async () => {});
+    fireEvent.change(screen.getByLabelText('Номер счёта'), { target: { value: 'INV-DRAFT-RETRY' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку справочников' })); expect(retry).toHaveBeenCalledOnce();
+    view.rerender(<InvoiceModal {...props} lookupsLoading />);
+    expect(screen.getByRole('button', { name: 'Повторить загрузку справочников' })).toHaveProperty('disabled', true);
+    expect(screen.getByLabelText('Номер счёта')).toHaveProperty('value', 'INV-DRAFT-RETRY'); expect(props.onSubmit).not.toHaveBeenCalled();
+  });
   const storeInvoiceEditorDraftMock = vi.mocked(storeInvoiceEditorDraft);
 
   it('opens invoice preview without requesting financial data or enabling export', async () => {

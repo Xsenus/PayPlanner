@@ -150,6 +150,17 @@ async function selectPickerOption(name: string): Promise<void> {
 }
 
 describe('ActModal integration', () => {
+  it('caller lookup retry: an explicit retry preserves the act draft and is disabled during loading', async () => {
+    const retry = vi.fn();
+    const props = { open: true, mode: 'create' as const, act: null, onClose: vi.fn(), onSubmit: vi.fn().mockResolvedValue(undefined), submitting: false,
+      clients: [createClient(1, 'Текущий клиент')], responsibles: [], lookupsLoading: false, lookupsError: 'Справочники временно недоступны', onRetryLookups: retry, defaultClientId: 1, presentation: 'page' as const };
+    const view = render(<ActModal {...props} />); await act(async () => {});
+    fireEvent.change(screen.getByLabelText('Номер акта'), { target: { value: 'DRAFT-RETRY' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку справочников' })); expect(retry).toHaveBeenCalledOnce();
+    view.rerender(<ActModal {...props} lookupsLoading />);
+    expect(screen.getByRole('button', { name: 'Повторить загрузку справочников' })).toHaveProperty('disabled', true);
+    expect(screen.getByLabelText('Номер акта')).toHaveProperty('value', 'DRAFT-RETRY'); expect(props.onSubmit).not.toHaveBeenCalled();
+  });
   it('requirements caller: act rules follow the editor access scope and closing', async () => {
     const p = { open: true, mode: 'create' as const, act: null, onClose: vi.fn(), onSubmit: vi.fn(), submitting: false, clients: [], responsibles: [], lookupsLoading: false, presentation: 'page' as const, accessScopeKey: 'all' };
     const view = render(<ActModal {...p} />); const first = vi.mocked(useFormRequirements).mock.lastCall; expect(first?.[0]).toBe('acts'); expect(first?.[1]).toBe(true);
