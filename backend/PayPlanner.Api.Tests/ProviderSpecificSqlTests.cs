@@ -105,6 +105,12 @@ public class ProviderSpecificSqlTests
     [InlineData("binding-guard-wrong-provider")]
     [InlineData("binding-guard-unbounded")]
     [InlineData("binding-guard-unparameterized")]
+    [InlineData("document-bank-without-nowait")]
+    [InlineData("document-bank-wrong-provider")]
+    [InlineData("document-bank-weak-source-lock")]
+    [InlineData("document-bank-foreign-scope")]
+    [InlineData("document-bank-unbounded")]
+    [InlineData("document-bank-without-transaction")]
     [InlineData("balance-without-nowait")]
     [InlineData("balance-wrong-provider")]
     [InlineData("balance-source-without-nowait")]
@@ -118,6 +124,9 @@ public class ProviderSpecificSqlTests
         var root = FindRepositoryRoot();
         var relativePath = mutation switch
         {
+            "document-bank-without-nowait" or "document-bank-wrong-provider" or "document-bank-weak-source-lock"
+                or "document-bank-foreign-scope" or "document-bank-unbounded" or "document-bank-without-transaction"
+                => "backend/Services/Companies/CompanyBankDocumentSelectionService.cs",
             "balance-without-nowait" or "balance-wrong-provider" => "backend/Services/Payments/BalanceApplicationLease.cs",
             "balance-source-without-nowait" => "backend/Services/Payments/BalanceSourceMutationRules.cs",
             "allocation-without-nowait" or "allocation-unbounded" => "backend/Services/MoneyOperationInvoiceAllocationService.cs",
@@ -148,6 +157,12 @@ public class ProviderSpecificSqlTests
             ? "" : File.ReadAllText(Path.Combine(root, relativePath));
         var changed = mutation switch
         {
+            "document-bank-without-nowait" => original.Replace("NOWAIT", "", StringComparison.Ordinal),
+            "document-bank-wrong-provider" => original.Replace("if (db.Database.IsNpgsql())", "if (true)", StringComparison.Ordinal),
+            "document-bank-weak-source-lock" => original.Replace("FOR UPDATE NOWAIT", "FOR SHARE NOWAIT", StringComparison.Ordinal),
+            "document-bank-foreign-scope" => original.Replace("{company.Id} FOR SHARE NOWAIT", "{0} FOR SHARE NOWAIT", StringComparison.Ordinal),
+            "document-bank-unbounded" => original.Replace(".Take(CompanyBankAccountMatchService.MaximumProfileAccounts + 1)", ".Take(int.MaxValue)", StringComparison.Ordinal),
+            "document-bank-without-transaction" => original.Replace("if (db.Database.CurrentTransaction is null)", "if (false)", StringComparison.Ordinal),
             "balance-without-nowait" or "balance-source-without-nowait" or "allocation-without-nowait" or "overdue-without-nowait" or "advance-cursor-without-nowait" or "invoice-cancel-without-nowait"
                 => original.Replace("FOR UPDATE NOWAIT", "FOR UPDATE", StringComparison.Ordinal),
             "balance-wrong-provider" => original.Replace("if (db.Database.IsNpgsql())", "if (true)", StringComparison.Ordinal),
@@ -708,9 +723,22 @@ public class ProviderSpecificSqlTests
         Approve("backend/Services/Payments/BalanceSourceMutationRules.cs", sourceRules, "LoadAsync", sourceRulesStart, sourceRulesEnd,
             ["""await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Payments\" WHERE \"Id\" = {paymentId} FOR UPDATE NOWAIT", ct);"""]);
 
-        Assert.Equal(45, approved.Count(statement => statement.Contains("FOR UPDATE", StringComparison.Ordinal)));
-        Assert.Equal(55, approved.Count(statement => statement.Contains("FOR SHARE", StringComparison.Ordinal)));
-        Assert.Equal(100, approved.Count);
+        var documentBankSource = ReadSource("backend/Services/Companies/CompanyBankDocumentSelectionService.cs");
+        var documentBankStart = documentBankSource.IndexOf("public async Task<CompanyBankDocumentSelection?> ValidateAsync", StringComparison.Ordinal);
+        var documentBankEnd = documentBankSource.IndexOf("private static SellerSelectionException Unavailable", documentBankStart, StringComparison.Ordinal);
+        Assert.True(documentBankStart >= 0 && documentBankEnd > documentBankStart);
+        var documentBankMethod = documentBankSource[documentBankStart..documentBankEnd];
+        AssertOrdered(documentBankMethod, "if (db.Database.CurrentTransaction is null)", ".Take(CompanyBankAccountMatchService.MaximumProfileAccounts + 1)",
+            "x.BankConnection.LegalEntityId == company.Id", "if (source is null)", "if (db.Database.IsNpgsql())",
+            "FROM \\\"BankConnections\\\"", "if (connections.Length != 1)", "FROM \\\"BankConnectionAccounts\\\"", "if (banks.Length != 1)", "FROM \\\"MoneyAccounts\\\"");
+        Approve("backend/Services/Companies/CompanyBankDocumentSelectionService.cs", documentBankSource, "ValidateAsync", documentBankStart, documentBankEnd,
+            ["""var banks = await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"BankConnectionAccounts\" WHERE \"Id\" = {binding.BankConnectionAccountId} AND \"BankConnectionId\" = {source.BankConnectionId} FOR UPDATE NOWAIT").ToArrayAsync(ct);"""]);
+        Approve("backend/Services/Companies/CompanyBankDocumentSelectionService.cs", documentBankSource, "ValidateAsync", documentBankStart, documentBankEnd,
+            ["""var connections = await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"BankConnections\" WHERE \"Id\" = {source.BankConnectionId} AND \"LegalEntityId\" = {company.Id} FOR SHARE NOWAIT").ToArrayAsync(ct);""",
+             """await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"MoneyAccounts\" WHERE \"BankConnectionAccountId\" = {binding.BankConnectionAccountId} AND \"CompanyId\" = {company.Id} ORDER BY \"Id\" FOR SHARE NOWAIT").ToArrayAsync(ct);"""], "FOR SHARE");
+        Assert.Equal(46, approved.Count(statement => statement.Contains("FOR UPDATE", StringComparison.Ordinal)));
+        Assert.Equal(57, approved.Count(statement => statement.Contains("FOR SHARE", StringComparison.Ordinal)));
+        Assert.Equal(103, approved.Count);
 
         // Exact identities include owner, method range, line and complete SQL call.
         // An extra statement in any other production file/method remains a failure.

@@ -58,7 +58,8 @@ public static class SellerLegalEntityComposer
         string? FreezeReason = null,
         string? BranchName = null,
         JsonElement? ImagePrintDefaults = null,
-        bool? ImagePrintDefaultsFrozen = null);
+        bool? ImagePrintDefaultsFrozen = null,
+        CompanyBankDocumentSelection? BankSelection = null);
 
     public static LegalEntity Compose(LegalEntity company, CompanyBranch? branch)
     {
@@ -119,7 +120,8 @@ public static class SellerLegalEntityComposer
 
     public static string ToSnapshotJson(LegalEntity seller, int? logoVersionId = null, int? sealVersionId = null, int? signatureVersionId = null, bool imagesFrozen = false,
         DateTime? frozenAtUtc = null, string? freezeReason = null, string? branchName = null,
-        CompanyDocumentImagePrintDefaults? imagePrintDefaults = null, bool imagePrintDefaultsFrozen = false)
+        CompanyDocumentImagePrintDefaults? imagePrintDefaults = null, bool imagePrintDefaultsFrozen = false,
+        CompanyBankDocumentSelection? bankSelection = null)
         => JsonSerializer.Serialize(new SellerSnapshotData(
             seller.Id, seller.ShortName, seller.FullName, seller.OrganizationForm, seller.Inn, seller.Kpp,
             seller.Ogrn, seller.Okpo, seller.Okved, seller.TaxSystem, seller.VatWithoutVat,
@@ -128,7 +130,7 @@ public static class SellerLegalEntityComposer
             seller.TreasuryBankBik, seller.TreasuryAccountNumber, seller.TreasuryCorrAccountNumber,
             logoVersionId, sealVersionId, signatureVersionId, imagesFrozen ? true : null, frozenAtUtc, freezeReason, branchName,
             imagePrintDefaults is null ? null : JsonSerializer.Deserialize<JsonElement>(CompanyDocumentImagePrintDefaultsService.Serialize(imagePrintDefaults)),
-            imagePrintDefaultsFrozen ? true : null),
+            imagePrintDefaultsFrozen ? true : null, bankSelection),
             new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
 
     public static SellerSnapshotMetadata? ReadMetadata(string? json)
@@ -351,6 +353,26 @@ public sealed class DocumentSellerService : IDocumentSellerService
         {
             if (await ValidateSelectionAsync(document.SellerCompanyId, document.SellerBranchId, ct) is { } error)
                 throw new SellerSelectionException(error);
+            var creatingTransaction = _db.Database.CurrentTransaction is not null;
+            await DocumentSellerLease.RunAsync(_db, async lease =>
+            {
+                var registry = await OwnCompanyRegistry.ReadStateAsync(_db, ct);
+                var selected = await SelectForFreezeAsync(document, registry, true, ct);
+                if (!selected.CompanyId.HasValue) return false;
+                await lease.LockRegistryAsync(ct);
+                if (registry != await OwnCompanyRegistry.ReadStateAsync(_db, ct)) throw new SellerSnapshotConflictException();
+                await lease.LockCompanyAsync(selected.CompanyId.Value, selected.BranchId, ct, lockAddresses: false);
+                if (registry != await OwnCompanyRegistry.ReadStateAsync(_db, ct)
+                    || selected != await SelectForFreezeAsync(document, registry, true, ct)) throw new SellerSnapshotConflictException();
+                var company = await _db.LegalEntities.AsNoTracking().Where(x => x.Id == selected.CompanyId)
+                    .Select(x => new LegalEntity { Id = x.Id, BankAccountsJson = x.BankAccountsJson == null || x.BankAccountsJson.Length <= CompanyBankAccountList.MaxJsonLength ? x.BankAccountsJson : null }).SingleAsync(ct);
+                var branch = selected.BranchId.HasValue ? await _db.CompanyBranches.AsNoTracking()
+                    .SingleAsync(x => x.Id == selected.BranchId && x.LegalEntityId == company.Id, ct) : null;
+                var binding = await new CompanyBankDocumentSelectionService(_db).ValidateAsync(company, branch, ct, RequiredBankCurrency(document));
+                if (binding is not null && !creatingTransaction)
+                    throw new InvalidOperationException("Создание документа со связанным банковским счётом требует общей транзакции.");
+                return true;
+            }, ct);
             return;
         }
         if (_db.Database.CurrentTransaction is null)
@@ -655,6 +677,8 @@ public sealed class DocumentSellerService : IDocumentSellerService
                     .FirstOrDefaultAsync(item => item.Id == document.SellerBranchId && item.LegalEntityId == company.Id, ct);
         }
 
+        var bankSelection = freeze
+            ? await new CompanyBankDocumentSelectionService(_db).ValidateAsync(company, branch, ct, RequiredBankCurrency(document)) : null;
         var composed = SellerLegalEntityComposer.Compose(company, branch);
         if (freeze)
         {
@@ -674,7 +698,7 @@ public sealed class DocumentSellerService : IDocumentSellerService
             var signature = await EnsureImageVersionAsync(company.Id, CompanyBrandImageKinds.Signature, composed.DirectorSignatureDataUrl, ct);
             var snapshot = SellerLegalEntityComposer.ToSnapshotJson(composed, logo, seal, signature, imagesFrozen: true,
                 frozenAtUtc: DateTime.UtcNow, freezeReason: DocumentSellerSnapshotPolicy.Effective(document.SellerSnapshotPolicy), branchName: branch?.Name,
-                imagePrintDefaults: printDefaults.Value, imagePrintDefaultsFrozen: true);
+                imagePrintDefaults: printDefaults.Value, imagePrintDefaultsFrozen: true, bankSelection: bankSelection);
             if (snapshot.Length > MaxSnapshotLength)
             {
                 // Молча оставить документ «живым» нельзя: выданный файл потеряет защиту от правок профиля.
@@ -690,6 +714,8 @@ public sealed class DocumentSellerService : IDocumentSellerService
 
         return composed;
     }
+
+    private static string? RequiredBankCurrency(IDocumentSeller document) => document is Payment or Act ? "RUB" : null;
 
     private sealed record FreezeSelection(int? CompanyId, int? BranchId, string? OriginalSelectionError);
 

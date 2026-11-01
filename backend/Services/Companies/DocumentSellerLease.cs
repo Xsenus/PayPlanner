@@ -230,11 +230,11 @@ internal sealed class DocumentSellerLease : IAsyncDisposable
         return type;
     }
 
-    public async Task LockCompanyAsync(int companyId, int? branchId, CancellationToken ct)
+    public async Task LockCompanyAsync(int companyId, int? branchId, CancellationToken ct, bool lockAddresses = true)
     {
         if (!db.Database.IsNpgsql())
         {
-            if (await db.AddressRecords.AsNoTracking().Where(address => address.LegalEntityId == companyId)
+            if (lockAddresses && await db.AddressRecords.AsNoTracking().Where(address => address.LegalEntityId == companyId)
                 .Select(address => address.Id).Take(MaximumPayments + 1).CountAsync(ct) > MaximumPayments)
                 throw new SellerSelectionException("Слишком много адресов компании для одного снимка реквизитов.");
             return;
@@ -243,8 +243,11 @@ internal sealed class DocumentSellerLease : IAsyncDisposable
         // after these short locks. UPDATE (not SHARE) also serializes image inserts.
         await LockRegistryAsync(ct);
         await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"LegalEntities\" WHERE \"Id\" = {companyId} FOR UPDATE NOWAIT").ToArrayAsync(ct);
-        var addresses = await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"AddressRecords\" WHERE \"LegalEntityId\" = {companyId} ORDER BY \"Id\" LIMIT 5001 FOR SHARE NOWAIT").ToArrayAsync(ct);
-        if (addresses.Length > MaximumPayments) throw new SellerSelectionException("Слишком много адресов компании для одного снимка реквизитов.");
+        if (lockAddresses)
+        {
+            var addresses = await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"AddressRecords\" WHERE \"LegalEntityId\" = {companyId} ORDER BY \"Id\" LIMIT 5001 FOR SHARE NOWAIT").ToArrayAsync(ct);
+            if (addresses.Length > MaximumPayments) throw new SellerSelectionException("Слишком много адресов компании для одного снимка реквизитов.");
+        }
         if (branchId.HasValue)
             await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"CompanyBranches\" WHERE \"Id\" = {branchId.Value} FOR SHARE NOWAIT").ToArrayAsync(ct);
     }
