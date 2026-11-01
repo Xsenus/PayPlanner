@@ -3,6 +3,7 @@ import { acknowledgePaymentCreate, assertPaymentCreateOwner, fencePaymentCreateA
 import { createClientRequestId } from '../utils/clientRequestId';
 import { balanceApplicationInspectionPath, parseBalanceApplicationInspection, parseManagedBalanceApplicationResult, prepareBalanceApplicationCommand, type BalanceApplicationOwnerKind } from './balanceApplicationInspection';
 import { API_BASE_URL } from './apiBaseUrl';
+import { parseCompanyBankBindingReceipt, parseCompanyBankMatchReport } from './companyBankBindings';
 import { acknowledgeBalanceApplication, applyBalanceGuarded, balanceApplicationInFlight, cancelBalanceApplication,
   canContinueBalanceApplication, inspectBalanceApplication, openAcknowledgedBalanceApplication, pendingBalanceApplication, pendingBalanceApplications,
   type BalanceApplicationPorts, type PendingBalanceApplication, type ReadyBalanceApplication } from './balanceApplicationAttempts';
@@ -6398,6 +6399,21 @@ export class ApiService {
 
   async getBankConnections(companyId: number) {
     return this.request<BankConnectionItem[]>(`/bank-connections?companyId=${companyId}`);
+  }
+
+  async getCompanyBankAccountMatches(companyId: number, connectionId: number, signal?: AbortSignal) {
+    return parseCompanyBankMatchReport(await this.request<unknown>(`/bank-connections/${connectionId}/profile-account-matches`,
+      { signal, cache: 'no-store', expectedStatus: 200 }), companyId, connectionId);
+  }
+
+  async bindCompanyBankAccount(connectionId: number, payload: { bankAccountId: number; profileAccountId: string; expectedVersion: string }, signal?: AbortSignal) {
+    return parseCompanyBankBindingReceipt(await this.request<unknown>(`/bank-connections/${connectionId}/profile-account-bindings`,
+      { method: 'POST', body: JSON.stringify(payload), signal, cache: 'no-store', expectedStatus: 200 }), 'Bound');
+  }
+
+  async revokeCompanyBankAccount(connectionId: number, bindingId: number, expectedVersion: string, signal?: AbortSignal) {
+    return parseCompanyBankBindingReceipt(await this.request<unknown>(`/bank-connections/${connectionId}/profile-account-bindings/${bindingId}/revoke`,
+      { method: 'POST', body: JSON.stringify({ expectedVersion }), signal, cache: 'no-store', expectedStatus: 200 }), 'Revoked', bindingId);
   }
 
   async syncBankConnectionAccounts(connectionId: number) {

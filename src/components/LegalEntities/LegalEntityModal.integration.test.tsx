@@ -7,6 +7,7 @@ import { LegalEntityModal } from './LegalEntityModal';
 import { apiService } from '../../services/api';
 import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
 import { documentCopyTestSession } from '../../test/documentCopySession';
+import { bankConnectionFixture, bankReportFixture, bankVersion, bindingFixture } from '../../test/companyBankBindingFixtures';
 import { bindPaymentCreateOwner, createPaymentGuarded, pendingPaymentCreates, openCommittedPaymentCreate, fencePaymentCreateAdoption,
   acknowledgePaymentCreate, PaymentCreateAdoptedError, PaymentCreateRecoveryError, type PaymentCreatePorts, type PaymentAttemptState } from '../../services/paymentCreateAttempts';
 import type { MenuSectionPermissions } from '../../types/permissions';
@@ -111,6 +112,9 @@ vi.mock('../../services/api', () => ({
     getCompanyRequisitesCheck: vi.fn().mockResolvedValue({ legalEntityId: 9, issues: [] }),
     getCompanyBranches: vi.fn().mockResolvedValue([]),
     getBankConnections: vi.fn().mockResolvedValue([]),
+    getCompanyBankAccountMatches: vi.fn(),
+    bindCompanyBankAccount: vi.fn(),
+    revokeCompanyBankAccount: vi.fn(),
     getTaxRegisterBook: vi.fn(),
     getTaxRegisterDrafts: vi.fn(),
     closeTaxRegisterYear: vi.fn(),
@@ -332,6 +336,44 @@ describe('LegalEntityModal integration', () => {
         const props = propsFor(mode); const view = render(<LegalEntityModal {...props} />); fireEvent.click(await screen.findByRole('button', { name: 'Закрыть год' })); const signal = confirmMock.mock.calls[0][0].signal as AbortSignal;
         if (change === 'readonly') view.rerender(<LegalEntityModal {...props} allowEdit={false} />); else view.rerender(<LegalEntityModal {...props} canManageOwnCompanySettings={false} />);
         expect(signal.aborted).toBe(true); await act(async () => finish(true)); expect(apiService.closeTaxRegisterYear).not.toHaveBeenCalled(); expect(toastErrorMock).not.toHaveBeenCalled();
+      });
+    }
+  });
+
+  describe('bank binding parent admission', () => {
+    beforeEach(() => {
+      confirmMock.mockResolvedValue(true);
+      vi.mocked(apiService.getBankConnections).mockClear().mockImplementation(async id => [bankConnectionFixture(id)]);
+      vi.mocked(apiService.getCompanyBankAccountMatches).mockImplementation(async id => bankReportFixture(id));
+      vi.mocked(apiService.bindCompanyBankAccount).mockClear(); vi.mocked(apiService.revokeCompanyBankAccount).mockClear();
+    });
+    const propsFor = (mode: 'page' | 'modal', own = true) => ({ isOpen: true, mode, initial: createInitialLegalEntity({ isOwnCompany: own }),
+      allowEdit: true, allowDelete: false, canManageOwnCompanySettings: true, canViewCases: false, canViewAccounts: false, canViewActs: false, canViewPayments: false,
+      onClose: vi.fn(), onSubmit: vi.fn(), suggest: vi.fn(), findById: vi.fn() });
+    for (const mode of ['page', 'modal'] as const) {
+      it(`bank binding parent: delegated profile edit does not read bank administration in ${mode}`, async () => {
+        render(<LegalEntityModal {...propsFor(mode)} canManageOwnCompanySettings={false} />); await act(async () => undefined);
+        expect(screen.queryByTestId('company-bank-connections')).toBeNull(); expect(apiService.getBankConnections).not.toHaveBeenCalled();
+      });
+      it(`bank binding parent: former own company cleanup is reachable in ${mode}`, async () => {
+        const p = propsFor(mode, false); const id = p.initial.id;
+        const report = { ...bankReportFixture(id), canBind: false, profileIssues: ['CompanyNotOwn'], groups: [], accounts: [], activeBindings: [{ ...bindingFixture(), bankAccountId: id + 96 }] };
+        vi.mocked(apiService.getCompanyBankAccountMatches).mockResolvedValueOnce(report).mockResolvedValueOnce({ ...report, activeBindings: [], version: bankVersion('B') });
+        vi.mocked(apiService.revokeCompanyBankAccount).mockResolvedValue({ bindingId: 77, state: 'Revoked', isReplay: false });
+        render(<LegalEntityModal {...p} />); fireEvent.click(await screen.findByRole('button', { name: 'Сверить счета профиля' }));
+        fireEvent.click(await screen.findByRole('button', { name: 'Снять связь' })); await screen.findByText('Подтверждённые связи компании (0)');
+        expect(apiService.revokeCompanyBankAccount).toHaveBeenCalledWith(id + 6, 77, bankVersion(), expect.any(AbortSignal));
+      });
+      it.each(['rights', 'draft'] as const)(`bank binding parent: pending confirmation is fenced by ${mode} %s`, async change => {
+        let finish!: (value: boolean) => void; confirmMock.mockReturnValue(new Promise<boolean>(resolve => { finish = resolve; }));
+        const p = propsFor(mode); const view = render(<LegalEntityModal {...p} />);
+        fireEvent.click(await screen.findByRole('button', { name: 'Сверить счета профиля' })); const bank = await screen.findByLabelText('Банковский источник');
+        fireEvent.click(bank); fireEvent.click(screen.getByRole('option', { name: `Сбербанк · ${bankConnectionFixture(p.initial.id).accounts[0].accountNumber} · RUB · БИК 044525225` }));
+        fireEvent.click(screen.getByLabelText('Счёт профиля')); fireEvent.click(screen.getByRole('option', { name: 'Основной расчётный — profile-A' })); fireEvent.click(screen.getByRole('button', { name: 'Подтвердить связь' }));
+        const signal = confirmMock.mock.calls.at(-1)![0].signal as AbortSignal;
+        if (change === 'rights') view.rerender(<LegalEntityModal {...p} canManageOwnCompanySettings={false} />);
+        else { fireEvent.click(screen.getByLabelText('Состояние профиля компании')); fireEvent.click(screen.getByRole('option', { name: 'В архиве' })); }
+        expect(signal.aborted).toBe(true); await act(async () => finish(true)); expect(apiService.bindCompanyBankAccount).not.toHaveBeenCalled();
       });
     }
   });

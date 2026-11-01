@@ -71,6 +71,10 @@ public sealed class CompanyBankAccountMatchTests(PostgreSqlModelTemplate templat
             await db.SaveChangesAsync(); var before = await SnapshotAsync(db);
             var report = Assert.IsType<CompanyBankAccountMatchReport>(await new CompanyBankAccountMatchService(db).ReadAsync(f.Base.Connection, default));
             var row = Assert.Single(report.Accounts);
+            Assert.Equal(bank.AccountNumber, row.AccountNumber); Assert.Equal(bank.Bik, row.Bik); Assert.Equal(bank.Currency, row.Currency);
+            Assert.Equal(bank.ExternalAccountId, row.ExternalAccountId); Assert.Equal(bank.Status, row.Status); Assert.Equal(bank.IsHidden, row.IsHidden);
+            var source = await db.BankConnections.AsNoTracking().SingleAsync(x => x.Id == f.Base.Connection);
+            Assert.Equal(source.Provider, row.Provider); Assert.Equal(source.Status, row.ConnectionStatus);
             Assert.Equal(f.Company, report.CompanyId); Assert.Matches("^bank-profile-match-v2:[A-F0-9]{64}$", report.Version);
             var group = Group(report, row);
             var status = mode switch { "bank-currency" or "missing-bik" => "InvalidBankIdentity", "duplicate-local" => "Ambiguous", "number" or "bik" or "profile-currency" or "different-currency" or "RUR" or "archive" or "missing-id" or "duplicate-id" or "bad-json" or "bad-flag" => "Missing", _ => "UniqueCandidate" };
@@ -220,10 +224,47 @@ public sealed class CompanyBankAccountMatchTests(PostgreSqlModelTemplate templat
             }
             gate.Release.TrySetResult(); var report = (await read.WaitAsync(TimeSpan.FromSeconds(30)))!;
             var row = Assert.Single(report.Accounts); Assert.Equal("UniqueCandidate", Group(report, row)!.ProfileMatchStatus); Assert.Equal(f.Money, Assert.Single(row.LinkedMoneyAccountIds));
+            Assert.Equal("RUB", row.Currency); Assert.Equal(Number, row.AccountNumber); Assert.Equal(Bik, row.Bik);
+            Assert.Equal(BankProviderKeys.Sber, row.Provider); Assert.Equal("synthetic", row.ExternalAccountId);
+            Assert.Equal(BankAccountStatuses.Open, row.Status); Assert.False(row.IsHidden); Assert.Equal(BankConnectionStatuses.Active, row.ConnectionStatus);
             var current = (await new CompanyBankAccountMatchService(db).ReadAsync(f.Base.Connection, default))!;
             Assert.NotEqual(report.Version, current.Version); Assert.Equal("UniqueCandidate", Group(current, Assert.Single(current.Accounts))!.ProfileMatchStatus);
+            Assert.Equal("USD", Assert.Single(current.Accounts).Currency);
         }
         finally { gate.Release.TrySetResult(); await read.WaitAsync(TimeSpan.FromSeconds(30)); }
+    }
+
+    [Theory]
+    [InlineData("number")]
+    [InlineData("external")]
+    [InlineData("bik")]
+    [InlineData("currency")]
+    [InlineData("provider")]
+    [InlineData("status")]
+    [InlineData("connection-status")]
+    public async Task OversizedLegacySourceMetadataIsNotReturnedButStillChangesTheVersion(string field)
+    {
+        await using var db = await SqliteTestContextFactory.CreateAsync(); var f = await SeedAsync(db);
+        var bank = await db.BankConnectionAccounts.SingleAsync(); var connection = await db.BankConnections.SingleAsync();
+        var oversized = new string('X', 10000);
+        switch (field)
+        {
+            case "number": bank.AccountNumber = oversized; break;
+            case "external": bank.ExternalAccountId = oversized; break;
+            case "bik": bank.Bik = oversized; break;
+            case "currency": bank.Currency = oversized; break;
+            case "provider": connection.Provider = oversized; break;
+            case "status": bank.Status = oversized; break;
+            case "connection-status": connection.Status = oversized; break;
+        }
+        await db.SaveChangesAsync(); var before = await SnapshotAsync(db);
+        var report = (await new CompanyBankAccountMatchService(db).ReadAsync(f.Base.Connection, default))!;
+        Assert.Contains("SourceMetadataUnavailable", Assert.Single(report.Accounts).Issues);
+        Assert.DoesNotContain(oversized, JsonSerializer.Serialize(report)); Assert.Equal(before, await SnapshotAsync(db));
+        connection.LastError = "Unrelated diagnostic"; await db.SaveChangesAsync();
+        Assert.Equal(report.Version, (await new CompanyBankAccountMatchService(db).ReadAsync(f.Base.Connection, default))!.Version);
+        bank.ExternalAccountId += "Y"; await db.SaveChangesAsync();
+        Assert.NotEqual(report.Version, (await new CompanyBankAccountMatchService(db).ReadAsync(f.Base.Connection, default))!.Version);
     }
 
     private static CompanyBankAccountMatchGroup? Group(CompanyBankAccountMatchReport report, CompanyBankAccountMatch row)

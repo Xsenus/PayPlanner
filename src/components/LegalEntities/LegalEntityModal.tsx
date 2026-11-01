@@ -917,6 +917,8 @@ export function LegalEntityModal({
   const [suggestLoading, setSuggestLoading] = useState(false);
   const [suggestError, setSuggestError] = useState<string | null>(null);
   const [bankAccounts, setBankAccounts] = useState<BankAccountItem[]>([]);
+  const [savedBankBindingScope, setSavedBankBindingScope] = useState<string | null>(null);
+  const bankBindingScope = useMemo(() => JSON.stringify([bankAccounts, formState.profileStatus]), [bankAccounts, formState.profileStatus]);
   const [cashRegisters, setCashRegisters] = useState<CashRegisterItem[]>([]);
   const [cards, setCards] = useState<CardItem[]>([]);
   const [englishRequisites, setEnglishRequisites] = useState<EnglishRequisites>(
@@ -1332,6 +1334,7 @@ export function LegalEntityModal({
       setBankAccounts(
         parseJsonOrDefault<BankAccountItem[]>(initial.bankAccountsJson, []),
       );
+      setSavedBankBindingScope(JSON.stringify([parseJsonOrDefault<BankAccountItem[]>(initial.bankAccountsJson, []), initial.profileStatus ?? 'Active']));
       setCashRegisters(
         parseJsonOrDefault<CashRegisterItem[]>(initial.cashRegistersJson, []),
       );
@@ -2412,6 +2415,7 @@ export function LegalEntityModal({
           bankAccounts,
         ),
       );
+      setSavedBankBindingScope(JSON.stringify([parseJsonOrDefault<BankAccountItem[]>(saved.bankAccountsJson, bankAccounts), saved.profileStatus ?? formState.profileStatus]));
       setCashRegisters(
         parseJsonOrDefault<CashRegisterItem[]>(
           saved.cashRegistersJson,
@@ -4902,9 +4906,13 @@ export function LegalEntityModal({
                 <option value="Archived">В архиве</option>
               </SystemSelect>
             </div>
-            <CompanyBankConnectionsSection companyId={currentLegalEntityId} readOnly={readOnly} ownerScope={classificationScope} />
             <CompanyTaxRegisterSection companyId={currentLegalEntityId} readOnly={readOnly} ownerScope={classificationScope} />
           </>
+        ) : null}
+
+        {ownCompanyClassification !== null && currentLegalEntityId !== null && canManageOwnCompanySettings ? (
+          <CompanyBankConnectionsSection companyId={currentLegalEntityId} readOnly={readOnly} ownerScope={classificationScope}
+            profileDirty={loading || bankBindingScope !== savedBankBindingScope} />
         ) : null}
 
         {isOwnLegalEntity && currentLegalEntityId !== null ? (

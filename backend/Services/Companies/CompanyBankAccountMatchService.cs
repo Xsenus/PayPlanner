@@ -13,7 +13,9 @@ public sealed record CompanyBankAccountMatchGroup(int Id, string ProfileMatchSta
     IReadOnlyList<CompanyBankProfileCandidate> ProfileCandidates, IReadOnlyList<int> BankAccountIds,
     IReadOnlyList<int> ManualMoneyAccountCandidateIds, bool HasArchivedProfileCandidates);
 public sealed record CompanyBankAccountMatch(int BankAccountId, int? GroupId,
-    IReadOnlyList<int> LinkedMoneyAccountIds, IReadOnlyList<string> Issues);
+    IReadOnlyList<int> LinkedMoneyAccountIds, IReadOnlyList<string> Issues,
+    string Provider, string ExternalAccountId, string AccountNumber, string? Bik, string Currency,
+    string Status, bool IsHidden, string ConnectionStatus);
 public sealed record CompanyBankActiveBinding(int Id, string? ProfileAccountId, int BankAccountId,
     string AccountNumber, string Bik, string Currency, DateTime ConfirmedAtUtc);
 public sealed record CompanyBankAccountMatchReport(int CompanyId, int BankConnectionId, string Version,
@@ -157,7 +159,12 @@ public sealed class CompanyBankAccountMatchService(PaymentContext db)
             if (validLinked.Length > 1) issues.Add("MultipleLinkedMoneyAccounts");
             if (validLinked.Any(x => !x.Active)) issues.Add("LinkedMoneyAccountInactive");
             if (group?.ManualMoneyAccountCandidateIds.Count > 0) issues.Add("ManualMoneyCandidatesRequireReview");
-            rows.Add(new(bank.Id, group?.Id, validLinked.Select(x => x.Id).ToArray(), issues));
+            if (bank.Provider.Length > 16 || bank.ExternalAccountId.Length > 128 || bank.Number.Length > 34
+                || bank.Bik?.Length > 16 || bank.Currency.Length > 8 || bank.Status.Length > 16 || bank.ConnectionStatus.Length > 16)
+                issues.Add("SourceMetadataUnavailable");
+            rows.Add(new(bank.Id, group?.Id, validLinked.Select(x => x.Id).ToArray(), issues,
+                Bounded(bank.Provider, 16), Bounded(bank.ExternalAccountId, 128), Bounded(bank.Number, 34),
+                bank.Bik?.Length > 16 ? null : bank.Bik, Bounded(bank.Currency, 8), Bounded(bank.Status, 16), bank.Hidden, Bounded(bank.ConnectionStatus, 16)));
         }
         // Include all relevant company connections: a duplicate elsewhere must not
         // turn into a false unique candidate. No company images or financial history are loaded.
@@ -167,6 +174,8 @@ public sealed class CompanyBankAccountMatchService(PaymentContext db)
             bindings.Where(x => x.LegalEntityId == company.Id).Select(x => new CompanyBankActiveBinding(x.Id, x.ProfileId, x.BankConnectionAccountId,
                 x.AccountNumber, x.Bik, x.Currency, x.CreatedAtUtc)).ToArray());
     }
+
+    private static string Bounded(string value, int maximum) => value.Length <= maximum ? value : "";
 
     internal static Identity? Key(string? number, string? bik, string? currency)
     {

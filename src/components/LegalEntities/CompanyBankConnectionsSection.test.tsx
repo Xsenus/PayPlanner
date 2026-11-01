@@ -7,6 +7,8 @@ import { documentCopyTestSession } from '../../test/documentCopySession';
 import { apiService } from '../../services/api';
 import type { BankConnectionItem } from '../../types';
 
+vi.mock('../../hooks/useDialog', () => ({ useDialog: () => ({ confirm: vi.fn().mockResolvedValue(true) }) }));
+
 vi.mock('../../hooks/useToast', () => ({
   useToast: () => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }),
 }));

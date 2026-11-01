@@ -6,6 +6,7 @@ import { documentCopyTestSession } from '../../test/documentCopySession';
 import type { BankConnectionItem, BankSyncLogPage } from '../../types';
 
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+vi.mock('../../hooks/useDialog', () => ({ useDialog: () => ({ confirm: vi.fn().mockResolvedValue(true) }) }));
 vi.mock('../../hooks/useToast', () => ({ useToast: () => toast }));
 vi.mock('../../services/api', () => ({ apiService: { getBankConnections: vi.fn(), syncBankConnectionAccounts: vi.fn(), syncBankConnectionStatements: vi.fn(), updateBankAccountSettings: vi.fn(), getBankSyncLogs: vi.fn() } }));
 const connection = (id = 5): BankConnectionItem => ({ id, legalEntityId: id, provider: 'Tochka', status: 'Active', accounts: [{ id: id * 10, externalAccountId: 'test', accountNumber: `4070281020000000000${id}`, currency: 'RUB', status: 'Open', isDefault: false, isHidden: false, statementsEnabled: true }] });

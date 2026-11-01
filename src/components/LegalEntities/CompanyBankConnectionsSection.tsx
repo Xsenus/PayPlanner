@@ -8,11 +8,14 @@ import { captureAuthSessionIdentity, isAuthSessionIdentityCurrent, type AuthSess
 import type { BankAccountItem, BankConnectionItem, BankStatementRun, BankSyncLogItem } from '../../types';
 import { extractDisplayErrorMessage, isHttpErrorStatus } from '../../utils/errorUtils';
 import { createClientRequestId } from '../../utils/clientRequestId';
+import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
+import { CompanyBankBindingsSection } from './CompanyBankBindingsSection';
 
 interface CompanyBankConnectionsSectionProps {
   companyId: number;
   readOnly?: boolean;
   ownerScope?: string;
+  profileDirty?: boolean;
 }
 
 const PROVIDER_LABELS: Record<string, string> = { Tochka: 'Точка', Sber: 'Сбербанк' };
@@ -47,19 +50,20 @@ const toDateInput = (date: Date) => date.toISOString().slice(0, 10);
  * Банковские подключения собственной компании: список счетов из банка со статусами, настройки счёта,
  * загрузка счетов и выписок, журнал. Видно только администратору (сервер отдаёт данные только ему).
  */
-export function CompanyBankConnectionsSection({ companyId, readOnly = true, ownerScope }: CompanyBankConnectionsSectionProps) {
+export function CompanyBankConnectionsSection({ companyId, readOnly = true, ownerScope, profileDirty = false }: CompanyBankConnectionsSectionProps) {
   const { epoch, actor, authenticated } = captureAuthSessionIdentity();
   const session = useMemo(() => ({ epoch, actor, authenticated }), [epoch, actor, authenticated]);
   if (!authenticated || !Number.isInteger(companyId) || companyId <= 0) return null;
-  return <CompanyBankConnectionsScreen key={JSON.stringify([companyId, readOnly, ownerScope, session])} companyId={companyId} readOnly={readOnly} session={session} />;
+  return <CompanyBankConnectionsScreen key={JSON.stringify([companyId, readOnly, ownerScope, profileDirty, session])} companyId={companyId} readOnly={readOnly} profileDirty={profileDirty} session={session} />;
 }
 
-function CompanyBankConnectionsScreen({ companyId, readOnly, session }: { companyId: number; readOnly: boolean; session: AuthSessionIdentity }) {
+function CompanyBankConnectionsScreen({ companyId, readOnly, profileDirty, session }: { companyId: number; readOnly: boolean; profileDirty: boolean; session: AuthSessionIdentity }) {
   const toast = useToast();
   const { capture, isCurrent } = useAsyncOperationOwner('company-bank-connections');
   const owner = capture();
   const current = useCallback((value: number) => isCurrent(value) && isAuthSessionIdentityCurrent(session), [isCurrent, session]);
   const [connections, setConnections] = useState<BankConnectionItem[]>([]);
+  const [dataRevision, setDataRevision] = useState(0);
   const [loaded, setLoaded] = useState(false);
   const [loadedCompanyId, setLoadedCompanyId] = useState<number | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -96,6 +100,7 @@ function CompanyBankConnectionsScreen({ companyId, readOnly, session }: { compan
       if (!Array.isArray(result) || !result.every(connection => connection && Number.isInteger(connection.id) && connection.id > 0 && connection.legalEntityId === companyId && Array.isArray(connection.accounts)))
         throw new Error('Не удалось подтвердить банковские подключения выбранной компании. Повторите загрузку.');
       setConnections(result);
+      setDataRevision(value => value + 1);
       setLoadError(null);
     } catch (error) {
       if (sequence !== loadSequence.current || !current(loadOwner)) return;
@@ -115,7 +120,7 @@ function CompanyBankConnectionsScreen({ companyId, readOnly, session }: { compan
     return () => { sequence.current++; };
   }, [load, capture]);
 
-  const run = async (action: (isCurrent: () => boolean) => Promise<void>, failure: string, write = true) => {
+  const run = async (action: (isCurrent: () => boolean) => Promise<void>, failure: string, write = true, refresh = true) => {
     if (!current(owner) || write && readOnly || activeOperation.current !== null || !loaded || loadedCompanyId !== companyId || loadError) return;
     const sequence = operationSequence.current;
     const isCurrent = () => sequence === operationSequence.current && current(owner);
@@ -123,9 +128,9 @@ function CompanyBankConnectionsScreen({ companyId, readOnly, session }: { compan
     setBusy(true);
     try {
       await action(isCurrent);
-      if (write && isCurrent()) await load(owner);
+      if (write && refresh && isCurrent()) await load(owner);
     } catch (error) {
-      if (isCurrent()) toast.error(extractDisplayErrorMessage(error, failure), 'Банковские подключения');
+      if (!(error instanceof StaleUiOperationError) && isCurrent()) toast.error(extractDisplayErrorMessage(error, failure), 'Банковские подключения');
     } finally {
       if (isCurrent()) {
         activeOperation.current = null;
@@ -153,7 +158,11 @@ function CompanyBankConnectionsScreen({ companyId, readOnly, session }: { compan
 
   return (
     <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-3" data-testid="company-bank-connections">
-      <h3 className="text-base font-semibold text-slate-900">Банковские подключения</h3>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-base font-semibold text-slate-900">Банковские подключения</h3>
+        <button type="button" disabled={busy} className="rounded-lg border px-2 py-1 text-sm disabled:opacity-50"
+          onClick={() => void run(async () => { await load(owner); }, 'Не удалось перезагрузить подключения.', false)}>Перезагрузить данные подключений</button>
+      </div>
       {readOnly ? <p className="mt-1 text-xs text-slate-500">Режим просмотра: настройки счетов и загрузка выписок недоступны для изменения.</p> : null}
 
       {connections.map((connection) => (
@@ -196,6 +205,9 @@ function CompanyBankConnectionsScreen({ companyId, readOnly, session }: { compan
               </button>
             </div>
           </div>
+
+          <CompanyBankBindingsSection key={`${connection.id}:${dataRevision}`} companyId={companyId} connection={connection} session={session}
+            readOnly={readOnly} profileDirty={profileDirty} busy={busy} run={run} />
 
           <div className="mt-2 flex flex-wrap items-end gap-2 text-sm">
             <label className="flex flex-col gap-1">
