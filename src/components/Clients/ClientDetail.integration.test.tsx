@@ -16,6 +16,14 @@ type LegalModalOwnerProps = { initial?: LegalEntityDetail | null; onClose: () =>
 const legalModalOwnerSpy = vi.hoisted(() => vi.fn());
 const invoiceLookupPropsSpy = vi.hoisted(() => vi.fn());
 const caseLookupPropsSpy = vi.hoisted(() => vi.fn());
+const poaPromptPropsSpy = vi.hoisted(() => vi.fn());
+vi.mock('../ui/FormPromptModal', async importOriginal => {
+  const actual = await importOriginal<typeof import('../ui/FormPromptModal')>();
+  return { ...actual, FormPromptModal: (props: Parameters<typeof actual.FormPromptModal>[0]) => {
+    if (props.title === 'Новая доверенность' || props.title === 'Редактирование доверенности') poaPromptPropsSpy(props);
+    return <actual.FormPromptModal {...props} />;
+  } };
+});
 vi.mock('../LegalEntities/LegalEntityModal', () => ({ LegalEntityModal: (props: LegalModalOwnerProps) => { legalModalOwnerSpy(props); return null; } }));
 
 const {
@@ -1986,6 +1994,7 @@ describe('ClientDetail integration', () => {
   });
 
   async function openPoaPermissionProfile() {
+    poaPromptPropsSpy.mockClear();
     vi.mocked(apiService.getClientPowersOfAttorney).mockResolvedValue([createPowerOfAttorney()]);
     const props = { clientId: 1, onBack: vi.fn(), initialSection: 'profile' as const };
     const view = render(<ClientDetail {...props} />);
@@ -1995,6 +2004,176 @@ describe('ClientDetail integration', () => {
     await screen.findByText('Кем выдана: Старый нотариус');
     return { props, view };
   }
+  function latestPoaPrompt() {
+    return poaPromptPropsSpy.mock.calls.map(call => call[0]).filter(props => props.open).at(-1) as Parameters<typeof import('../ui/FormPromptModal').FormPromptModal>[0];
+  }
+  async function openNewPoaDraft() {
+    permissionsResult.clients.canCreate = true;
+    const view = await openPoaPermissionProfile();
+    fireEvent.click(screen.getByRole('button', { name: '+ Добавить доверенность' }));
+    const prompt = within(screen.getByRole('dialog', { name: 'Новая доверенность' }));
+    fireEvent.change(prompt.getByLabelText(/Номер доверенности/), { target: { value: 'Новая 78' } });
+    fireEvent.change(prompt.getByLabelText('Дата выдачи'), { target: { value: '2026-11-02' } });
+    return view;
+  }
+  it('poa form lifetime: repeated submit sends one create and blocks profile writes until completion', async () => {
+    let finish!: (value: PowerOfAttorney) => void;
+    vi.mocked(apiService.createClientPowerOfAttorney).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    await openNewPoaDraft();
+    const prompt = latestPoaPrompt();
+    act(() => { void prompt.onConfirm(); void prompt.onConfirm(); });
+    expect(apiService.createClientPowerOfAttorney).toHaveBeenCalledOnce();
+    expect(within(screen.getByRole('dialog', { name: 'Новая доверенность' })).getByLabelText(/Номер доверенности/)).toHaveProperty('disabled', true);
+    fireEvent.submit(screen.getByDisplayValue('Иванов').closest('form')!);
+    expect(apiService.updateClient).not.toHaveBeenCalled();
+    await act(async () => finish(createPowerOfAttorney({ id: 78, number: 'Новая 78' })));
+    expect(screen.getByText('№Новая 78')).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: 'Новая доверенность' })).toBeNull();
+    expect(toastSuccessMock).toHaveBeenCalledWith('Доверенность создана.', 'Доверенности');
+    expect(apiService.getClientPowersOfAttorney).toHaveBeenCalledOnce();
+  });
+  it('poa form lifetime: a failed update preserves the draft and allows one explicit retry', async () => {
+    vi.mocked(apiService.updateClientPowerOfAttorney).mockRejectedValueOnce(new Error('Сохранение временно недоступно'))
+      .mockResolvedValueOnce(createPowerOfAttorney({ issuer: 'Исправленный нотариус' }));
+    await openPoaPermissionProfile(); fireEvent.click(screen.getByRole('button', { name: 'Изменить доверенность' }));
+    fireEvent.change(within(screen.getByRole('dialog', { name: 'Редактирование доверенности' })).getByLabelText('Кем выдана'), { target: { value: 'Исправленный нотариус' } });
+    const prompt = latestPoaPrompt();
+    await act(async () => { void prompt.onConfirm(); void prompt.onConfirm(); });
+    expect(apiService.updateClientPowerOfAttorney).toHaveBeenCalledOnce();
+    expect(screen.getByText('Сохранение временно недоступно')).toBeTruthy();
+    expect(screen.getByDisplayValue('Исправленный нотариус')).toBeTruthy();
+    await act(async () => latestPoaPrompt().onConfirm());
+    expect(apiService.updateClientPowerOfAttorney).toHaveBeenCalledTimes(2);
+    expect(screen.getByText('Кем выдана: Исправленный нотариус')).toBeTruthy();
+  });
+  it('poa form lifetime: closing a pending create keeps its barrier and reconciles the current list without stale toast', async () => {
+    let finish!: (value: PowerOfAttorney) => void;
+    vi.mocked(apiService.createClientPowerOfAttorney).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    await openNewPoaDraft(); const prompt = latestPoaPrompt();
+    act(() => { void prompt.onConfirm(); });
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Новая доверенность' })).getByRole('button', { name: 'Отмена' }));
+    expect(screen.queryByRole('dialog', { name: 'Новая доверенность' })).toBeNull();
+    expect(screen.getByRole('button', { name: '+ Добавить доверенность' })).toHaveProperty('disabled', true);
+    vi.mocked(apiService.getClientPowersOfAttorney).mockResolvedValueOnce([createPowerOfAttorney(), createPowerOfAttorney({ id: 78, number: 'Подтверждено чтением' })]);
+    await act(async () => finish(createPowerOfAttorney({ id: 78, number: 'Старый ответ записи' })));
+    await screen.findByText('№Подтверждено чтением');
+    expect(screen.queryByText('№Старый ответ записи')).toBeNull(); expect(toastSuccessMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '+ Добавить доверенность' }));
+    await act(async () => { prompt.fields[0].onChange('Старая подстановка'); prompt.onCancel(); await prompt.onConfirm(); });
+    expect(screen.getByRole('dialog', { name: 'Новая доверенность' })).toBeTruthy();
+    expect(within(screen.getByRole('dialog', { name: 'Новая доверенность' })).getByLabelText(/Номер доверенности/)).toHaveProperty('value', '');
+    expect(apiService.createClientPowerOfAttorney).toHaveBeenCalledOnce();
+  });
+  it('poa form lifetime: collapsing the group hides a draft and invalidates its submit, cancel and field callbacks', async () => {
+    await openNewPoaDraft(); const old = latestPoaPrompt();
+    fireEvent.click(screen.getByRole('button', { name: 'Скрыть дополнительную информацию' }));
+    expect(screen.queryByRole('dialog', { name: 'Новая доверенность' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Дополнительная информация' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Доверенности' }));
+    await screen.findByText('Кем выдана: Старый нотариус');
+    fireEvent.click(screen.getByRole('button', { name: 'Изменить доверенность' }));
+    await act(async () => { old.fields[0].onChange('Старая строка'); old.onCancel(); await old.onConfirm(); });
+    expect(screen.getByRole('dialog', { name: 'Редактирование доверенности' })).toBeTruthy();
+    expect(within(screen.getByRole('dialog', { name: 'Редактирование доверенности' })).getByLabelText(/Номер доверенности/)).toHaveProperty('value', '321');
+    expect(apiService.createClientPowerOfAttorney).not.toHaveBeenCalled(); expect(apiService.updateClientPowerOfAttorney).not.toHaveBeenCalled();
+  });
+  it('poa form lifetime: replacing authentication before render prevents submit and field changes', async () => {
+    const session = documentCopyTestSession(); await openNewPoaDraft(); const prompt = latestPoaPrompt();
+    session.replace('actor');
+    await act(async () => { prompt.fields[0].onChange('Чужой ввод'); await prompt.onConfirm(); });
+    expect(apiService.createClientPowerOfAttorney).not.toHaveBeenCalled();
+    expect(screen.queryByDisplayValue('Чужой ввод')).toBeNull();
+  });
+  it('poa form lifetime: same-user token refresh preserves the draft and its current submit', async () => {
+    const session = documentCopyTestSession(); const { props, view } = await openNewPoaDraft();
+    vi.mocked(apiService.createClientPowerOfAttorney).mockResolvedValueOnce(createPowerOfAttorney({ id: 78, number: 'Новая 78' }));
+    session.refresh(); view.rerender(<ClientDetail {...props} />);
+    expect(screen.getByDisplayValue('Новая 78')).toBeTruthy();
+    await act(async () => latestPoaPrompt().onConfirm());
+    expect(apiService.createClientPowerOfAttorney).toHaveBeenCalledOnce(); expect(screen.getByText('№Новая 78')).toBeTruthy();
+  });
+  it.each([
+    { label: 'another client', row: createPowerOfAttorney({ id: 78, clientId: 2 }) },
+    { label: 'existing ID', row: createPowerOfAttorney() },
+    { label: 'invalid shape', row: null },
+  ])('poa form lifetime: create rejects an unconfirmed response ($label)', async ({ row }) => {
+    vi.mocked(apiService.createClientPowerOfAttorney).mockResolvedValueOnce(row as PowerOfAttorney);
+    await openNewPoaDraft(); await act(async () => latestPoaPrompt().onConfirm());
+    expect(screen.getByText('Не удалось подтвердить сохранённую доверенность. Обновите список перед повторным созданием.')).toBeTruthy();
+    expect(screen.getByDisplayValue('Новая 78')).toBeTruthy(); expect(toastSuccessMock).not.toHaveBeenCalled();
+  });
+  it.each([
+    { label: 'another ID', row: createPowerOfAttorney({ id: 78, issuer: 'Чужой нотариус' }) },
+    { label: 'another client', row: createPowerOfAttorney({ clientId: 2, issuer: 'Чужой нотариус' }) },
+  ])('poa form lifetime: update rejects a different saved record ($label)', async ({ row }) => {
+    vi.mocked(apiService.updateClientPowerOfAttorney).mockResolvedValueOnce(row);
+    await openPoaPermissionProfile(); fireEvent.click(screen.getByRole('button', { name: 'Изменить доверенность' }));
+    await act(async () => latestPoaPrompt().onConfirm());
+    expect(screen.getByText('Сервер вернул другую доверенность. Обновите список перед повторным сохранением.')).toBeTruthy();
+    expect(screen.queryByText('Кем выдана: Чужой нотариус')).toBeNull(); expect(toastSuccessMock).not.toHaveBeenCalled();
+  });
+  it('poa form lifetime: a late delete after reopening the group reconciles only through a current read', async () => {
+    permissionsResult.clients.canDelete = true; permissionsResult.clients.canCreate = true;
+    let finish!: () => void; vi.mocked(apiService.deleteClientPowerOfAttorney).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    await openPoaPermissionProfile(); fireEvent.click(screen.getByRole('button', { name: 'Удалить доверенность' }));
+    await waitFor(() => expect(apiService.deleteClientPowerOfAttorney).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole('button', { name: 'Скрыть дополнительную информацию' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Дополнительная информация' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Доверенности' }));
+    await screen.findByText('Кем выдана: Старый нотариус');
+    expect(screen.getByRole('button', { name: '+ Добавить доверенность' })).toHaveProperty('disabled', true);
+    vi.mocked(apiService.getClientPowersOfAttorney).mockResolvedValueOnce([]);
+    await act(async () => finish()); await screen.findByText('Доверенности не найдены.');
+    expect(toastSuccessMock).not.toHaveBeenCalled(); expect(apiService.getClientPowersOfAttorney).toHaveBeenCalledTimes(3);
+    expect(screen.getByRole('button', { name: '+ Добавить доверенность' })).toHaveProperty('disabled', false);
+  });
+  it.each(['role', 'client', 'edit permission'] as const)('poa form lifetime: a late failure cannot notify a changed %s', async change => {
+    let fail!: (reason: Error) => void;
+    vi.mocked(apiService.createClientPowerOfAttorney).mockReturnValueOnce(new Promise((_, reject) => { fail = reject; }));
+    const { props, view } = await openNewPoaDraft(); const prompt = latestPoaPrompt(); act(() => { void prompt.onConfirm(); });
+    if (change === 'role') authState.roleId = 2;
+    if (change === 'edit permission') permissionsResult.clients.canEdit = false;
+    if (change === 'client') vi.mocked(apiService.getClient).mockResolvedValueOnce({ ...createClient(), id: 2, name: 'Другой клиент' });
+    view.rerender(<ClientDetail {...props} clientId={change === 'client' ? 2 : 1} />);
+    expect(screen.queryByRole('dialog', { name: 'Новая доверенность' })).toBeNull();
+    await act(async () => { await prompt.onConfirm(); fail(new Error('Ошибка прежней записи')); });
+    expect(toastErrorMock).not.toHaveBeenCalled(); expect(toastSuccessMock).not.toHaveBeenCalled();
+    expect(apiService.createClientPowerOfAttorney).toHaveBeenCalledOnce();
+  });
+  it('poa form lifetime: an old finalizer cannot unlock a new role operation', async () => {
+    let failOld!: (reason: Error) => void; let finishNew!: (value: PowerOfAttorney) => void;
+    vi.mocked(apiService.createClientPowerOfAttorney).mockReturnValueOnce(new Promise((_, reject) => { failOld = reject; }))
+      .mockReturnValueOnce(new Promise(resolve => { finishNew = resolve; }));
+    const { props, view } = await openNewPoaDraft(); act(() => { void latestPoaPrompt().onConfirm(); });
+    authState.roleId = 2; view.rerender(<ClientDetail {...props} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Дополнительная информация' })); fireEvent.click(screen.getByRole('button', { name: 'Доверенности' }));
+    await screen.findByText('Кем выдана: Старый нотариус'); fireEvent.click(screen.getByRole('button', { name: '+ Добавить доверенность' }));
+    const prompt = within(screen.getByRole('dialog', { name: 'Новая доверенность' }));
+    fireEvent.change(prompt.getByLabelText(/Номер доверенности/), { target: { value: 'Новая роль' } }); fireEvent.change(prompt.getByLabelText('Дата выдачи'), { target: { value: '2026-11-02' } });
+    const current = latestPoaPrompt(); act(() => { void current.onConfirm(); });
+    await act(async () => failOld(new Error('Старая ошибка')));
+    expect(prompt.getByLabelText(/Номер доверенности/)).toHaveProperty('disabled', true); expect(toastErrorMock).not.toHaveBeenCalled();
+    act(() => { void current.onConfirm(); }); expect(apiService.createClientPowerOfAttorney).toHaveBeenCalledTimes(2);
+    await act(async () => finishNew(createPowerOfAttorney({ id: 78, number: 'Новая роль' })));
+    expect(screen.getByText('№Новая роль')).toBeTruthy(); expect(toastSuccessMock).toHaveBeenCalledOnce();
+  });
+  it('poa form lifetime: a queued delete blocks other writes and cancellation releases them', async () => {
+    permissionsResult.clients.canDelete = true; permissionsResult.clients.canCreate = true;
+    let answer!: (value: boolean) => void; confirmMock.mockReturnValueOnce(new Promise(resolve => { answer = resolve; }));
+    await openPoaPermissionProfile(); fireEvent.click(screen.getByRole('button', { name: 'Удалить доверенность' }));
+    expect(screen.getByRole('button', { name: '+ Добавить доверенность' })).toHaveProperty('disabled', true);
+    fireEvent.submit(screen.getByDisplayValue('Иванов').closest('form')!); expect(apiService.updateClient).not.toHaveBeenCalled();
+    await act(async () => answer(false)); expect(apiService.deleteClientPowerOfAttorney).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '+ Добавить доверенность' })).toHaveProperty('disabled', false);
+  });
+  it('poa form lifetime: missing required fields preserve the prompt without starting a write', async () => {
+    await openNewPoaDraft(); const prompt = within(screen.getByRole('dialog', { name: 'Новая доверенность' }));
+    fireEvent.change(prompt.getByLabelText(/Номер доверенности/), { target: { value: '   ' } });
+    await act(async () => latestPoaPrompt().onConfirm());
+    expect(screen.getByText('Укажите номер и дату выдачи доверенности.')).toBeTruthy();
+    expect(apiService.createClientPowerOfAttorney).not.toHaveBeenCalled(); expect(prompt.getByLabelText(/Номер доверенности/)).toHaveProperty('disabled', false);
+  });
   async function openPoaReadProfile() {
     const props = { clientId: 1, onBack: vi.fn(), initialSection: 'profile' as const };
     const view = render(<ClientDetail {...props} />);
