@@ -3,7 +3,7 @@ import { useDocumentDeliveryOwner, type DocumentDeliveryRead } from '../../hooks
 import { apiService } from '../../services/api';
 import type { CleanedAddress, DadataAddressSuggestion } from '../../types';
 import type { ClientAddressEntryFormValue } from '../Clients/ClientAddressEntriesForm';
-import { chooseBestDisplayAddress } from '../Clients/addressEntryUtils';
+import { chooseBestDisplayAddress, getAddressSuggestionLabel } from '../Clients/addressEntryUtils';
 import { isHttpErrorStatus } from '../../utils/errorUtils';
 
 type Entry = ClientAddressEntryFormValue & { sourceQuery?: string };
@@ -44,7 +44,7 @@ function suggestedEntry<T extends Entry>(entry: T, suggestion: DadataAddressSugg
     district: part(suggestion.areaWithType, entry.district), city: part(suggestion.cityWithType, entry.city), settlement: part(suggestion.settlementWithType, entry.settlement),
     street: part(suggestion.streetWithType, entry.street), house: part(suggestion.house, entry.house), flat: part(suggestion.flat, entry.flat),
     fiasId: identifier(suggestion.fiasId, entry.fiasId), kladrId: identifier(suggestion.kladrId, entry.kladrId), geoLat: identifier(suggestion.geoLat, entry.geoLat), geoLon: identifier(suggestion.geoLon, entry.geoLon) };
-  return { ...updated, fullAddress: chooseBestDisplayAddress(updated, suggestion.unrestrictedValue || suggestion.value, entry.fullAddress, source) };
+  return { ...updated, fullAddress: chooseBestDisplayAddress(updated, getAddressSuggestionLabel(suggestion), entry.fullAddress, source) };
 }
 
 /** Owns only unsaved address UI; no database IDs or document snapshots are changed. */
@@ -140,7 +140,7 @@ export function useCompanyAddressAutofill<T extends Entry>({ entries, setEntries
   const apply = async (key: string | undefined, suggestion: DadataAddressSuggestion) => {
     const entry = key ? rowsRef.current.get(key) : undefined; const result = key ? results.get(key) : undefined;
     if (!entry || !result || !current(result.request) || !result.items.includes(suggestion)) return;
-    const selected = (suggestion.unrestrictedValue || suggestion.value || '').trim(); if (!selected) return;
+    const selected = getAddressSuggestionLabel(suggestion); if (!selected) return;
     const next = suggestedEntry(entry, suggestion, preserveMissingSuggestionFields, selected);
     const request = start(key, next); if (!request) return;
     useAddress.current();

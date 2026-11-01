@@ -1,3 +1,4 @@
+import { getAddressSuggestionLabel } from './addressEntryUtils';
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
@@ -302,7 +303,7 @@ export function ClientAddressEntriesForm({
                       }}
                       className="rounded-full border border-indigo-200 bg-white px-3 py-1 text-xs text-indigo-700 hover:bg-indigo-100"
                     >
-                      {item.unrestrictedValue || item.value}
+                      {getAddressSuggestionLabel(item)}
                     </button>
                   ))}
                 </div>

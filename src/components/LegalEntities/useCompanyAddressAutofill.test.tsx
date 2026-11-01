@@ -191,4 +191,41 @@ describe('company address owned operations', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(350); pending.reject(new Error('late failure')); });
     expect(signal.aborted).toBe(true); expect(apiService.suggestClientAddresses).not.toHaveBeenCalled();
   });
+  it.each([false, true])('suggestion label whitespace: chosen value is applied in client mode %s', async clientMode => {
+    const value = 'г Синтетический, ул Новая, д 42';
+    vi.mocked(apiService.suggestClientAddresses).mockResolvedValueOnce([{ value: `  ${value}  `, unrestrictedValue: ' \t ' }]);
+    vi.mocked(apiService.cleanAddress).mockRejectedValueOnce(new Error('HTTP 403 - forbidden'));
+    const view = setup({ fallbackToSuggestions: clientMode, preserveMissingSuggestionFields: clientMode });
+    view.type('a', 'Мой адрес'); await view.tick();
+    await act(async () => view.result.current.apply('a', view.result.current.suggestionsByIndex[0][0]));
+    expect(apiService.cleanAddress).toHaveBeenCalledExactlyOnceWith(value, expect.any(AbortSignal));
+    expect(view.result.current.entries[0].fullAddress).toBe(value);
+    expect(view.result.current.entries[1]).toBe(view.initial[1]);
+    expect(view.onUseAddress).toHaveBeenCalledOnce();
+    expect(apiService.suggestClientAddresses).toHaveBeenCalledOnce();
+    expect(view.result.current.errorsByIndex[0]).toContain('Недостаточно прав');
+  });
+  it('suggestion label whitespace: fallback applies the ordinary label and keeps partial fields', async () => {
+    vi.mocked(apiService.cleanAddress).mockRejectedValueOnce(new Error('clean unavailable'));
+    vi.mocked(apiService.suggestClientAddresses).mockResolvedValueOnce([{ value: 'г Синтетический, ул Новая, д 42', unrestrictedValue: ' \t ' }]);
+    const view = setup({ fallbackToSuggestions: true, preserveMissingSuggestionFields: true });
+    act(() => view.result.current.setEntries(previous => [{ ...previous[0], flat: '7', fiasId: 'original-id' }, previous[1]]));
+    await act(async () => view.result.current.clean('a'));
+    expect(view.result.current.entries[0]).toMatchObject({ fullAddress: 'г Синтетический, ул Новая, д 42', flat: '7', fiasId: 'original-id' });
+    expect(view.result.current.entries[1]).toBe(view.initial[1]);
+    expect(apiService.suggestClientAddresses).toHaveBeenCalledExactlyOnceWith('Адрес a', 1, vi.mocked(apiService.cleanAddress).mock.calls[0][1]);
+    expect(view.result.current.errorsByIndex).toEqual({});
+  });
+  it.each([false, true])('suggestion label: a nonblank full label wins in client mode %s', async clientMode => {
+    const full = 'г Синтетический, ул Полная, д 42';
+    vi.mocked(apiService.suggestClientAddresses).mockResolvedValueOnce([{ value: 'Короткий адрес', unrestrictedValue: `  ${full}  ` }]);
+    vi.mocked(apiService.cleanAddress).mockRejectedValueOnce(new Error('HTTP 403 - forbidden'));
+    const view = setup({ fallbackToSuggestions: clientMode, preserveMissingSuggestionFields: clientMode });
+    view.type('a', 'Мой адрес'); await view.tick();
+    await act(async () => view.result.current.apply('a', view.result.current.suggestionsByIndex[0][0]));
+    expect(apiService.cleanAddress).toHaveBeenCalledExactlyOnceWith(full, expect.any(AbortSignal));
+    expect(view.result.current.entries[0].fullAddress).toBe(full);
+    expect(apiService.suggestClientAddresses).toHaveBeenCalledOnce();
+  });
+
 });

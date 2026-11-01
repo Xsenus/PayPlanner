@@ -63,6 +63,24 @@ describe("ClientAddressEntriesForm integration", () => {
     expect(screen.getByRole("button", { name: "Удалить адрес" })).toBeTruthy();
   });
 
+  it.each([
+    { kind: 'missing', unrestrictedValue: undefined, label: 'Обычный адрес' },
+    { kind: 'empty', unrestrictedValue: '', label: 'Обычный адрес' },
+    { kind: 'whitespace', unrestrictedValue: ' \t ', label: 'Обычный адрес' },
+    { kind: 'full', unrestrictedValue: '  Полное название адреса  ', label: 'Полное название адреса' },
+  ])('suggestion label display $kind is readable and applies the original item', ({ unrestrictedValue, label }) => {
+    const item: DadataAddressSuggestion = { value: '  Обычный адрес  ', unrestrictedValue };
+    const onApplySuggestion = vi.fn();
+    render(<ClientAddressEntriesForm entries={[baseEntry]} canEdit addressTypeOptions={addressTypeOptions}
+      suggestionsByIndex={{ 0: [item] }} onUpdateEntry={vi.fn()} onSetPrimary={vi.fn()} onRemoveEntry={vi.fn()}
+      onAddEntry={vi.fn()} onToggleAdditionalType={vi.fn()} onScheduleSuggestions={vi.fn()}
+      onFindAddress={vi.fn()} onApplySuggestion={onApplySuggestion} />);
+    const button = screen.getByRole('button', { name: label });
+    expect(button.textContent).toBe(label);
+    fireEvent.click(button);
+    expect(onApplySuggestion).toHaveBeenCalledExactlyOnceWith(0, item);
+  });
+
   it("shows full address suggestions and applies the selected suggestion", async () => {
     const user = userEvent.setup();
     const onApplySuggestion = vi.fn().mockResolvedValue(undefined);

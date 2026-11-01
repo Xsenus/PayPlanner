@@ -1,3 +1,5 @@
+import type { DadataAddressSuggestion } from '../../types';
+
 export interface AddressDisplayParts {
   postalCode?: string | null;
   country?: string | null;
@@ -12,6 +14,10 @@ export interface AddressDisplayParts {
 
 function normalizeAddressPart(value?: string | null): string {
   return (value ?? '').trim();
+}
+
+export function getAddressSuggestionLabel(suggestion: Pick<DadataAddressSuggestion, 'value' | 'unrestrictedValue'>): string {
+  return normalizeAddressPart(suggestion.unrestrictedValue) || normalizeAddressPart(suggestion.value);
 }
 
 export function composeAddressFromParts(parts: AddressDisplayParts): string {
