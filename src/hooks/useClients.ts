@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, type Dispatch, type SetStateAction } from 'react';
 import { apiService } from '../services/api';
-import { useDocumentDeliveryOwner } from './useDocumentDeliveryOwner';
+import { useDocumentDeliveryOwner, type DocumentDeliveryRead } from './useDocumentDeliveryOwner';
 import { awaitOwnedUiResult, StaleUiOperationError } from '../utils/StaleUiOperationError';
 import { isHttpErrorStatus } from '../utils/errorUtils';
 import type { Client, ClientStats, ClientRole, ClientInput } from '../types';
@@ -155,25 +155,25 @@ export function useClients(options?: ClientsListOptions) {
 export function useClientStats(clientId: number, caseId?: number, clientRole?: ClientRole, options?: { enabled?: boolean; ownerScope?: string }) {
   const enabled = (options?.enabled ?? true) && Number.isSafeInteger(clientId) && clientId > 0;
   const { capture, scope } = useDocumentDeliveryOwner(JSON.stringify([enabled, clientId, caseId, clientRole, options?.ownerScope ?? '']));
-  const [view, setView] = useState<{ scope: string; stats: ClientStats | null; loading: boolean; error: string | null }>({ scope, stats: null, loading: enabled, error: null });
+  const [view, setView] = useState<{ scope: string; owner: DocumentDeliveryRead | null; stats: ClientStats | null; loading: boolean; error: string | null }>({ scope, owner: null, stats: null, loading: enabled, error: null });
   const read = useRef<{ sequence: number; controller: AbortController | null }>({ sequence: 0, controller: null });
   const cancel = useCallback(() => { read.current.sequence++; read.current.controller?.abort(); read.current.controller = null; }, []);
   const refresh = useCallback(async () => {
     const captured = enabled ? capture() : null; if (!captured) return;
     cancel(); const sequence = read.current.sequence; const controller = new AbortController(); read.current.controller = controller;
     const current = () => captured.isCurrent() && sequence === read.current.sequence && !controller.signal.aborted;
-    setView(previous => ({ scope, stats: previous.scope === scope ? previous.stats : null, loading: true, error: null }));
+    setView(previous => ({ scope, owner: captured, stats: previous.scope === scope && previous.owner?.isCurrent() ? previous.stats : null, loading: true, error: null }));
     try {
       const data = await apiService.getClientStats(clientId, { caseId, clientRole }, { signal: controller.signal });
       if (!current()) return;
       if (!data || data.clientId !== clientId) throw invalidClients();
-      setView(previous => current() ? { scope, stats: data, loading: false, error: null } : previous);
+      setView(previous => current() ? { scope, owner: captured, stats: data, loading: false, error: null } : previous);
     } catch (error) {
-      if (current()) setView(previous => current() ? { scope, stats: denied(error) ? null : previous.scope === scope ? previous.stats : null,
+      if (current()) setView(previous => current() ? { scope, owner: captured, stats: denied(error) ? null : previous.scope === scope && previous.owner?.isCurrent() ? previous.stats : null,
         loading: false, error: error instanceof Error ? error.message : 'Failed to fetch client statistics' } : previous);
     } finally { if (read.current.controller === controller) read.current.controller = null; }
   }, [enabled, capture, scope, cancel, clientId, caseId, clientRole]);
   useEffect(() => { void refresh(); return cancel; }, [refresh, cancel]);
-  const visible = view.scope === scope ? view : null;
+  const visible = view.scope === scope && view.owner?.isCurrent() ? view : null;
   return { stats: enabled ? visible?.stats ?? null : null, loading: enabled && (visible?.loading ?? true), error: enabled ? visible?.error ?? null : null, refresh };
 }

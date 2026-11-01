@@ -1,119 +1,61 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback } from 'react';
 import { apiService } from '../services/api';
-import type {
-  ClientStatus,
-  DealType,
-  IncomeType,
-  PaymentSource,
-  PaymentStatusEntity,
-  ServiceDictionaryItem,
-  ServiceCategoryDictionaryItem,
-} from '../types';
+import { assertDictionaryRows, useDictionarySnapshot, type DictionaryReadOptions } from './useDictionarySnapshot';
+import type { ClientStatus, DealType, IncomeType, PaymentSource, PaymentStatusEntity, ServiceDictionaryItem, ServiceCategoryDictionaryItem } from '../types';
 import type { BaseDictItem } from '../types/dictionaries';
 
-const DICTS_CHANGED = 'dicts:changed';
+type DictionarySnapshot = {
+  dealTypes: DealType[]; incomeTypes: IncomeType[]; paymentSources: PaymentSource[];
+  services: ServiceDictionaryItem[]; serviceCategories: ServiceCategoryDictionaryItem[];
+  paymentStatuses: PaymentStatusEntity[]; clientStatuses: ClientStatus[];
+  countries: BaseDictItem[]; baseCurrencies: BaseDictItem[]; serviceLanguages: BaseDictItem[];
+  organizationForms: BaseDictItem[]; timezones: BaseDictItem[]; taxSystems: BaseDictItem[];
+  taxSystemModes: BaseDictItem[]; invoiceUnits: BaseDictItem[]; invoiceItemNames: BaseDictItem[];
+};
+export type DictionaryGroup = keyof DictionarySnapshot;
+export type DictionariesOptions = DictionaryReadOptions & { include?: readonly DictionaryGroup[] };
+const empty: DictionarySnapshot = { dealTypes: [], incomeTypes: [], paymentSources: [], services: [], serviceCategories: [],
+  paymentStatuses: [], clientStatuses: [], countries: [], baseCurrencies: [], serviceLanguages: [], organizationForms: [], timezones: [],
+  taxSystems: [], taxSystemModes: [], invoiceUnits: [], invoiceItemNames: [] };
+const loaders: { [K in DictionaryGroup]: (signal: AbortSignal) => Promise<DictionarySnapshot[K]> } = {
+  dealTypes: signal => apiService.getDict('deal-types', { signal }),
+  incomeTypes: async signal => {
+    const parts = await Promise.all([apiService.getIncomeTypes('Income', undefined, { signal }), apiService.getIncomeTypes('Expense', undefined, { signal })]);
+    parts.forEach(assertDictionaryRows);
+    const byId = new Map<number, IncomeType>();
+    for (const part of parts) for (const item of part) byId.set(item.id, item);
+    return Array.from(byId.values());
+  },
+  paymentSources: signal => apiService.getDict('payment-sources', { signal }),
+  services: signal => apiService.getDict('services', { signal }),
+  serviceCategories: signal => apiService.getDict('service-categories', { signal }),
+  paymentStatuses: signal => apiService.getDict('payment-statuses', { signal }),
+  clientStatuses: signal => apiService.getDict('client-statuses', { signal }),
+  countries: signal => apiService.getDict('countries', { signal }),
+  baseCurrencies: signal => apiService.getDict('base-currencies', { signal }),
+  serviceLanguages: signal => apiService.getDict('service-languages', { signal }),
+  organizationForms: signal => apiService.getDict('organization-forms', { signal }),
+  timezones: signal => apiService.getDict('timezones', { signal }),
+  taxSystems: signal => apiService.getDict('tax-systems', { signal }),
+  taxSystemModes: signal => apiService.getDict('tax-system-modes', { signal }),
+  invoiceUnits: signal => apiService.getDict('invoice-units', { signal }),
+  invoiceItemNames: signal => apiService.getDict('invoice-item-names', { signal }),
+};
+const groups = Object.keys(loaders) as DictionaryGroup[];
+const includeInactive = new Set<DictionaryGroup>(['dealTypes', 'incomeTypes', 'paymentSources', 'paymentStatuses']);
 
-export function useDictionaries() {
-  const [dealTypes, setDealTypes] = useState<DealType[]>([]);
-  const [incomeTypes, setIncomeTypes] = useState<IncomeType[]>([]);
-  const [paymentSources, setPaymentSources] = useState<PaymentSource[]>([]);
-  const [services, setServices] = useState<ServiceDictionaryItem[]>([]);
-  const [serviceCategories, setServiceCategories] = useState<ServiceCategoryDictionaryItem[]>([]);
-  const [paymentStatuses, setPaymentStatuses] = useState<PaymentStatusEntity[]>([]);
-  const [clientStatuses, setClientStatuses] = useState<ClientStatus[]>([]);
-  const [countries, setCountries] = useState<BaseDictItem[]>([]);
-  const [baseCurrencies, setBaseCurrencies] = useState<BaseDictItem[]>([]);
-  const [serviceLanguages, setServiceLanguages] = useState<BaseDictItem[]>([]);
-  const [organizationForms, setOrganizationForms] = useState<BaseDictItem[]>([]);
-  const [timezones, setTimezones] = useState<BaseDictItem[]>([]);
-  const [taxSystems, setTaxSystems] = useState<BaseDictItem[]>([]);
-  const [taxSystemModes, setTaxSystemModes] = useState<BaseDictItem[]>([]);
-  const [invoiceUnits, setInvoiceUnits] = useState<BaseDictItem[]>([]);
-  const [invoiceItemNames, setInvoiceItemNames] = useState<BaseDictItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [deal, incIncome, incExpense, sources, servicesResp, serviceCategoriesResp, statuses, clientStatusesResp, countriesResp, baseCurrenciesResp, serviceLanguagesResp, organizationFormsResp, timezonesResp, taxSystemsResp, taxSystemModesResp, invoiceUnitsResp, invoiceItemNamesResp] = await Promise.all([
-        apiService.getDict('deal-types'),
-        apiService.getIncomeTypes('Income'),
-        apiService.getIncomeTypes('Expense'),
-        apiService.getDict('payment-sources'),
-        apiService.getDict('services'),
-        apiService.getDict('service-categories'),
-        apiService.getDict('payment-statuses'),
-        apiService.getDict('client-statuses'),
-        apiService.getDict('countries'),
-        apiService.getDict('base-currencies'),
-        apiService.getDict('service-languages'),
-        apiService.getDict('organization-forms'),
-        apiService.getDict('timezones'),
-        apiService.getDict('tax-systems'),
-        apiService.getDict('tax-system-modes'),
-        apiService.getDict('invoice-units'),
-        apiService.getDict('invoice-item-names'),
-      ]);
-
-      setDealTypes(deal ?? []);
-
-      const merged = [...(incIncome ?? []), ...(incExpense ?? [])];
-      const byId = new Map<number, IncomeType>();
-      for (const it of merged) byId.set(it.id, it);
-      setIncomeTypes(Array.from(byId.values()));
-
-      setPaymentSources(sources ?? []);
-      setServices((servicesResp ?? []).filter((service) => service.isActive !== false));
-      setServiceCategories((serviceCategoriesResp ?? []).filter((item) => item.isActive !== false));
-      setPaymentStatuses(statuses ?? []);
-      setClientStatuses((clientStatusesResp ?? []).filter((status) => status.isActive !== false));
-      setCountries((countriesResp ?? []).filter((item) => item.isActive !== false));
-      setBaseCurrencies((baseCurrenciesResp ?? []).filter((item) => item.isActive !== false));
-      setServiceLanguages((serviceLanguagesResp ?? []).filter((item) => item.isActive !== false));
-      setOrganizationForms((organizationFormsResp ?? []).filter((item) => item.isActive !== false));
-      setTimezones((timezonesResp ?? []).filter((item) => item.isActive !== false));
-      setTaxSystems((taxSystemsResp ?? []).filter((item) => item.isActive !== false));
-      setTaxSystemModes((taxSystemModesResp ?? []).filter((item) => item.isActive !== false));
-      setInvoiceUnits((invoiceUnitsResp ?? []).filter((item) => item.isActive !== false));
-      setInvoiceItemNames((invoiceItemNamesResp ?? []).filter((item) => item.isActive !== false));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load dictionaries');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  useEffect(() => {
-    const handler = () => void refresh();
-    window.addEventListener(DICTS_CHANGED, handler);
-    return () => window.removeEventListener(DICTS_CHANGED, handler);
-  }, [refresh]);
-
-  return {
-    dealTypes,
-    incomeTypes,
-    paymentSources,
-    services,
-    serviceCategories,
-    paymentStatuses,
-    clientStatuses,
-    countries,
-    baseCurrencies,
-    serviceLanguages,
-    organizationForms,
-    timezones,
-    taxSystems,
-    taxSystemModes,
-    invoiceUnits,
-    invoiceItemNames,
-    loading,
-    error,
-    refresh,
-  };
+export function useDictionaries(options?: DictionariesOptions) {
+  // Canonical order prevents refetching for equivalent inline selections or duplicates.
+  const includeKey = groups.filter(group => !options?.include || options.include.includes(group)).join('|');
+  const load = useCallback(async (signal: AbortSignal): Promise<DictionarySnapshot> => {
+    const entries = await Promise.all((includeKey.split('|').filter(Boolean) as DictionaryGroup[]).map(async group => {
+      const rows = await loaders[group](signal);
+      assertDictionaryRows(rows);
+      return [group, includeInactive.has(group) ? rows : rows.filter(item => item.isActive !== false)];
+    }));
+    return { ...empty, ...Object.fromEntries(entries) };
+  }, [includeKey]);
+  const state = useDictionarySnapshot(load, empty, { enabled: (options?.enabled ?? true) && Boolean(includeKey),
+    ownerScope: JSON.stringify([options?.ownerScope ?? '', includeKey]) });
+  return { ...state.value, loading: state.loading, error: state.error, refresh: state.refresh };
 }

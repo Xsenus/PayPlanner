@@ -1,47 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo } from 'react';
 import { apiService } from '../services/api';
+import { assertDictionaryRows, useDictionarySnapshot, type DictionaryReadOptions } from './useDictionarySnapshot';
 import type { ClientStatus } from '../types';
 
-export function useClientStatuses() {
-  const [statuses, setStatuses] = useState<ClientStatus[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchAll = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await apiService.getClientStatuses();
-      setStatuses((data ?? []).filter((s) => s.isActive !== false));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось загрузить статусы клиентов');
-    } finally {
-      setLoading(false);
-    }
+const empty: ClientStatus[] = [];
+export function useClientStatuses(options?: DictionaryReadOptions) {
+  const load = useCallback(async (signal: AbortSignal) => {
+    const rows = await apiService.getClientStatuses({ signal });
+    assertDictionaryRows(rows);
+    return rows.filter(item => item.isActive !== false);
   }, []);
-
-  useEffect(() => {
-    void fetchAll();
-  }, [fetchAll]);
-
-  useEffect(() => {
-    const handleDictsChanged = () => {
-      void fetchAll();
-    };
-    window.addEventListener('dicts:changed', handleDictsChanged);
-    return () => window.removeEventListener('dicts:changed', handleDictsChanged);
-  }, [fetchAll]);
-
-  const sorted = useMemo(
-    () =>
-      [...statuses].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })),
-    [statuses],
-  );
-
-  return {
-    statuses: sorted,
-    loading,
-    error,
-    refresh: fetchAll,
-  };
+  const state = useDictionarySnapshot(load, empty, options);
+  const sorted = useMemo(() => [...state.value].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })), [state.value]);
+  return { statuses: sorted, loading: state.loading, error: state.error, refresh: state.refresh };
 }

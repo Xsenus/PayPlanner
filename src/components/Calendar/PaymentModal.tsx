@@ -371,7 +371,6 @@ export function PaymentModal({
   const canSavePayment = remainderPending ? canCreatePayment : payment ? canEditPayment : canCreatePayment;
   const autoCashOrderDraftRef = useRef<{ number: string; date: string; type: CashOrderType } | null>(null);
 
-  const { dealTypes, incomeTypes, paymentSources, services = [] } = useDictionaries();
   const { t } = useTranslation();
   const { user, isAdmin } = useAuth();
   const permissions = useRolePermissions(user?.role?.id);
@@ -385,6 +384,8 @@ export function PaymentModal({
     canViewLinkedInvoices, canCreateLinkedInvoices, !!onDelete, !!onCreateRemainder, !!onTransferRemainder, !!onRollbackRemainderTransfer, !!onAdjustRemainderTransfer,
     user?.id, user?.role?.id, user?.role?.name, paymentPermissions.canView, paymentPermissions.viewScope]));
   const { capture: captureConfirmationOwner } = confirmationOwner;
+  const { dealTypes, incomeTypes, paymentSources, services = [] } = useDictionaries({ enabled: isOpen,
+    ownerScope: JSON.stringify([confirmationOwner.scope, permissions.dictionaries]), include: ['dealTypes', 'incomeTypes', 'paymentSources', 'services'] });
   const { clients, loading: clientsLoading } = useClients({ enabled: isOpen,
     ownerScope: JSON.stringify([confirmationOwner.scope, permissions.clients, permissions.cases, permissions.contracts,
       permissions.accounts, permissions.acts, permissions.payments]) });

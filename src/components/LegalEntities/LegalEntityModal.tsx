@@ -875,17 +875,7 @@ export function LegalEntityModal({
 
     return raw || fallback;
   }, []);
-  const {
-    countries,
-    baseCurrencies,
-    serviceLanguages,
-    organizationForms,
-    timezones,
-    taxSystems,
-    taxSystemModes,
-  } = useDictionaries();
   const { isRequired } = useFormRequirements("legal-entities", isOpen);
-  const { statuses: clientStatuses } = useClientStatuses();
   const [formState, setFormState] = useState<FormState>(DEFAULT_STATE);
   const [profileEditVersion, setProfileEditVersion] = useState(initial?.profileEditVersion ?? null);
   const [selectedClients, setSelectedClients] = useState<
@@ -992,16 +982,6 @@ export function LegalEntityModal({
   const [mainCompanyState, setMainCompanyState] = useState<{ owner: number; ids: number[]; error: string | null } | null>(null);
   const [classificationRetry, setClassificationRetry] = useState(0);
   const clientPickerOwner = useRef<number | null>(null);
-  const selectedLegalEntityClientStatus = useMemo(
-    () =>
-      formState.clientStatusId
-        ? clientStatuses.find(
-            (status) => status.id === Number(formState.clientStatusId),
-          ) ?? null
-        : null,
-    [clientStatuses, formState.clientStatusId],
-  );
-
   const readOnly = !allowEdit && !!initial;
   const deleteSession = captureAuthSessionIdentity();
   const { capture: captureDeleteOwner, isCurrent: isCurrentDeleteOwner } = useAsyncOperationOwner(JSON.stringify([
@@ -1092,6 +1072,15 @@ export function LegalEntityModal({
   const responsibles = responsibleLookupEnabled ? currentResponsibleLookup?.items ?? [] : [];
   const responsiblesLoading = responsibleLookupEnabled && (currentResponsibleLookup?.loading ?? true);
   const responsiblesError = responsibleLookupEnabled ? currentResponsibleLookup?.error ?? null : null;
+  const { countries, baseCurrencies, serviceLanguages, organizationForms, timezones, taxSystems, taxSystemModes } = useDictionaries({
+    enabled: responsibleLookupEnabled, ownerScope: responsibleOwner.scope,
+    include: ['countries', 'baseCurrencies', 'serviceLanguages', 'organizationForms', 'timezones', 'taxSystems', 'taxSystemModes'],
+  });
+  const { statuses: clientStatuses } = useClientStatuses({ enabled: responsibleLookupEnabled, ownerScope: responsibleOwner.scope });
+  const selectedLegalEntityClientStatus = useMemo(
+    () => formState.clientStatusId ? clientStatuses.find(status => status.id === Number(formState.clientStatusId)) ?? null : null,
+    [clientStatuses, formState.clientStatusId],
+  );
   const relatedReadScope = JSON.stringify([currentLegalEntityId, isOpen, deleteOwnerScope]);
   const casesReadOwner = useDocumentDeliveryOwner(JSON.stringify([relatedReadScope, canViewCases, relatedRecordPermissions?.cases?.viewScope]));
   const invoicesReadOwner = useDocumentDeliveryOwner(JSON.stringify([relatedReadScope, canViewAccounts, relatedRecordPermissions?.accounts?.viewScope]));

@@ -204,4 +204,9 @@ describe('owned client directory', () => {
   it('client boundary: a disabled empty catalogue keeps its array identity across parent renders', () => {
     const view = renderHook(() => useClients({ enabled: false })); const first = view.result.current.clients; view.rerender(); expect(view.result.current.clients).toBe(first); expect(apiService.getClients).not.toHaveBeenCalled();
   });
+  it('client reopen: statistics cannot revive the old client after an absent id lifetime', async () => {
+    const view = renderHook(({ id }) => useClientStats(id), { initialProps: { id: 1 } }); await waitFor(() => expect(view.result.current.loading).toBe(false));
+    view.rerender({ id: 0 }); vi.mocked(apiService.getClientStats).mockReturnValue(new Promise(() => {})); view.rerender({ id: 1 });
+    expect(view.result.current.stats).toBeNull(); expect(view.result.current.loading).toBe(true);
+  });
 });

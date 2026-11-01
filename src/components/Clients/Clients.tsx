@@ -369,7 +369,6 @@ function saveFilterSettings(storageKey: string, settings: ClientTableFilterSetti
 }
 
 export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPayment, onOpenTask }: ClientsProps = {}) {
-  const { statuses: clientStatuses } = useClientStatuses();
   const { t } = useTranslation();
   const { user } = useAuth();
   const profileTimeZoneId = useUserTimeZone();
@@ -383,6 +382,8 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
   const canCreateClients = clientPermissions.canCreate;
   const canEditClients = clientPermissions.canEdit;
   const canDeleteClients = clientPermissions.canDelete;
+  const { statuses: clientStatuses } = useClientStatuses({ enabled: canViewClients,
+    ownerScope: JSON.stringify([user?.id, user?.role?.id, clientPermissions, permissions.dictionaries]) });
   const isColumnAllowed = useCallback(
     (columnId: ColumnId) => {
       if (columnId === 'invoicesCount') return permissions.accounts.canView;

@@ -8403,12 +8403,14 @@ export class ApiService {
     paymentType?: 'Income' | 'Expense',
     isActive?: boolean,
   ): Promise<IncomeType[]>;
+  async getIncomeTypes(paymentType: 'Income' | 'Expense' | undefined, isActive: boolean | undefined, options: { signal?: AbortSignal }): Promise<IncomeType[]>;
   async getIncomeTypes(
     paymentType?: 'Income' | 'Expense',
     isActive?: boolean,
+    options?: { signal?: AbortSignal },
   ): Promise<IncomeType[]> {
     const q = buildQuery({ paymentType, isActive });
-    return this.request<IncomeType[]>(`${pathForKind('income-types')}${q}`);
+    return this.request<IncomeType[]>(`${pathForKind('income-types')}${q}`, { signal: options?.signal, cache: 'no-store' });
   }
 
   async getPaymentSources() {
@@ -8420,8 +8422,8 @@ export class ApiService {
   async getInvoiceReferenceDictionaries() {
     return this.request<InvoiceReferenceDictionaries>('/invoices/reference-dictionaries');
   }
-  async getClientStatuses() {
-    return this.getDict('client-statuses');
+  async getClientStatuses(options?: { signal?: AbortSignal }) {
+    return this.getDict('client-statuses', options);
   }
   async getPaymentStatuses() {
     return this.getDict('payment-statuses');
@@ -8484,8 +8486,8 @@ export class ApiService {
   }
 
   // ===== Dictionaries (универсальный CRUD) =====
-  async getDict<K extends DictKind>(kind: K): Promise<DictItemByKind<K>[]> {
-    return this.request<DictItemByKind<K>[]>(pathForKind(kind));
+  async getDict<K extends DictKind>(kind: K, options?: { signal?: AbortSignal }): Promise<DictItemByKind<K>[]> {
+    return this.request<DictItemByKind<K>[]>(pathForKind(kind), { signal: options?.signal, cache: 'no-store' });
   }
 
   async createDict<K extends DictKind>(

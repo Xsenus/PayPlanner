@@ -5,6 +5,8 @@ import { imageFixtureBytes, imageFixtureFile, installBlobArrayBufferForTests } f
 
 import { LegalEntityModal } from './LegalEntityModal';
 import { apiService } from '../../services/api';
+import { useDictionaries } from '../../hooks/useDictionaries';
+import { useClientStatuses } from '../../hooks/useClientStatuses';
 import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
 import { documentCopyTestSession } from '../../test/documentCopySession';
 import { bankConnectionFixture, bankReportFixture, bankVersion, bindingFixture } from '../../test/companyBankBindingFixtures';
@@ -91,7 +93,7 @@ vi.mock('../../hooks/useToast', () => {
 });
 
 vi.mock('../../hooks/useDictionaries', () => ({
-  useDictionaries: () => ({
+  useDictionaries: vi.fn(() => ({
     countries: [],
     baseCurrencies: [],
     serviceLanguages: [],
@@ -99,8 +101,9 @@ vi.mock('../../hooks/useDictionaries', () => ({
     timezones: [],
     taxSystems: [],
     taxSystemModes: [],
-  }),
+  })),
 }));
+vi.mock('../../hooks/useClientStatuses', () => ({ useClientStatuses: vi.fn(() => ({ statuses: [] })) }));
 
 vi.mock('../../hooks/useFormRequirements', () => ({
   useFormRequirements: () => ({
@@ -1421,6 +1424,14 @@ describe('LegalEntityModal integration', () => {
   });
 
   describe('company directory parent ownership', () => {
+    it.each(['page', 'modal'] as const)('dictionary caller: profile %s requests only its fields and scopes both hooks to current access', async mode => {
+      const p = { isOpen: true, mode, initial: createInitialLegalEntity({ shortName: 'Справочники', isOwnCompany: false }), allowEdit: true, allowDelete: false,
+        canViewCases: false, canViewAccounts: false, canViewActs: false, canViewPayments: false, onClose: vi.fn(), onSubmit: vi.fn(), suggest: vi.fn(), findById: vi.fn() };
+      const view = render(<LegalEntityModal {...p} deleteOwnerScope="all" />); const first = vi.mocked(useDictionaries).mock.lastCall?.[0]; const firstStatus = vi.mocked(useClientStatuses).mock.lastCall?.[0];
+      expect(first?.enabled).toBe(true); expect(first?.include).toEqual(['countries', 'baseCurrencies', 'serviceLanguages', 'organizationForms', 'timezones', 'taxSystems', 'taxSystemModes']); expect(firstStatus?.ownerScope).toBe(first?.ownerScope);
+      view.rerender(<LegalEntityModal {...p} deleteOwnerScope="own" />); expect(vi.mocked(useDictionaries).mock.lastCall?.[0]?.ownerScope).not.toBe(first?.ownerScope); expect(vi.mocked(useClientStatuses).mock.lastCall?.[0]?.ownerScope).not.toBe(firstStatus?.ownerScope);
+      view.rerender(<LegalEntityModal {...p} isOpen={false} />); expect(vi.mocked(useDictionaries).mock.lastCall?.[0]?.enabled).toBe(false); expect(vi.mocked(useClientStatuses).mock.lastCall?.[0]?.enabled).toBe(false); await act(async () => {});
+    });
     describe('company responsible lookup ownership', () => {
     beforeEach(() => vi.mocked(apiService.getActResponsibles).mockReset().mockResolvedValue([]));
     afterEach(() => vi.mocked(apiService.getActResponsibles).mockReset().mockResolvedValue([]));

@@ -321,7 +321,9 @@ export function Payments({
   const canViewLinkedInvoices = permissions.accounts?.canView === true;
   const canCreateLinkedInvoices = canViewLinkedInvoices && permissions.accounts?.canCreate === true;
   const { t, formatDate } = useTranslation();
-  const { dealTypes, incomeTypes, paymentSources } = useDictionaries();
+  const { dealTypes, incomeTypes, paymentSources } = useDictionaries({ enabled: paymentsPermissions.canView,
+    ownerScope: JSON.stringify([user?.id, user?.role?.id, paymentsPermissions, permissions.dictionaries]),
+    include: ['dealTypes', 'incomeTypes', 'paymentSources'] });
   const profileTimeZoneId = useUserTimeZone();
   const defaultFrom = defaultFromDate(profileTimeZoneId);
   const defaultTo = defaultToDate(profileTimeZoneId);

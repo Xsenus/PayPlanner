@@ -12,6 +12,7 @@ import { API_BASE_URL } from '../../services/apiBaseUrl';
 import { documentCopyTestSession } from '../../test/documentCopySession';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { useClients } from '../../hooks/useClients';
+import { useDictionaries } from '../../hooks/useDictionaries';
 import { acknowledgePaymentCreate, assertPaymentCreateOwner, bindPaymentCreateOwner, createPaymentGuarded, fencePaymentCreateAdoption, inspectPaymentCreate, pendingPaymentCreates,
   paymentCreateTokenMatches,
   openCommittedPaymentCreate, type PaymentAttemptState, type PaymentCreateContext, type PaymentCreatePorts } from '../../services/paymentCreateAttempts';
@@ -109,7 +110,7 @@ vi.mock('../../hooks/useLegalEntities', () => ({
 }));
 
 vi.mock('../../hooks/useDictionaries', () => ({
-  useDictionaries: () => ({
+  useDictionaries: vi.fn(() => ({
     dealTypes: [
       { id: 7, name: 'Юридические услуги', description: '', colorHex: '#000000', isActive: true, createdAt: '2026-04-01T00:00:00Z' },
     ],
@@ -123,7 +124,7 @@ vi.mock('../../hooks/useDictionaries', () => ({
     services: [
       { id: 9, name: 'Тип юр услуги', description: '', unit: 'шт', defaultPrice: 0, colorHex: '#000000', isActive: true, createdAt: '2026-04-01T00:00:00Z' },
     ],
-  }),
+  })),
 }));
 
 vi.mock('../../hooks/useTranslation', () => ({
@@ -389,6 +390,12 @@ function doc04RealAttemptFixture(primary = doc04Payment(), rest = doc04Payment({
 }
 
 describe('PaymentModal integration', () => {
+  it('dictionary caller: payment uses four groups under the confirmation scope and stops when closed', async () => {
+    const p = { isOpen: true, onClose: vi.fn(), onSubmit: vi.fn() }; const view = render(<PaymentModal {...p} />); const first = vi.mocked(useDictionaries).mock.lastCall?.[0];
+    expect(first?.include).toEqual(['dealTypes', 'incomeTypes', 'paymentSources', 'services']); expect(first?.enabled).toBe(true);
+    paymentScopeState.value = 'own'; view.rerender(<PaymentModal {...p} />); expect(vi.mocked(useDictionaries).mock.lastCall?.[0]?.ownerScope).not.toBe(first?.ownerScope);
+    view.rerender(<PaymentModal {...p} isOpen={false} />); expect(vi.mocked(useDictionaries).mock.lastCall?.[0]?.enabled).toBe(false); await act(async () => {});
+  });
   it('client caller: payment scope owns the client lookup and closing disables it', async () => {
     const props = { isOpen: true, onClose: vi.fn(), onSubmit: vi.fn() }; const view = render(<PaymentModal {...props} />);
     const first = vi.mocked(useClients).mock.lastCall?.[0]; expect(first?.enabled).toBe(true); expect(first?.ownerScope).toBeTruthy();

@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ClientDetail } from './ClientDetail';
 import type { Act, Client, Contract, Invoice, LegalEntityDetail, LegalEntityInput, Payment, PowerOfAttorney } from '../../types';
 import { apiService } from '../../services/api';
+import { useClientStatuses } from '../../hooks/useClientStatuses';
 import * as timeZoneHook from '../../hooks/useUserTimeZone';
 import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
 
@@ -308,7 +309,7 @@ vi.mock('../../hooks/useLegalEntities', () => ({
 }));
 
 vi.mock('../../hooks/useClientStatuses', () => ({
-  useClientStatuses: () => ({ statuses: [] as unknown[] }),
+  useClientStatuses: vi.fn(() => ({ statuses: [] as unknown[] })),
 }));
 
 vi.mock('../../hooks/useClientCases', () => ({
@@ -559,6 +560,12 @@ vi.mock('./ClientStatusBadge', () => ({
 }));
 
 describe('ClientDetail integration', () => {
+  it('dictionary caller: client profile status scope follows the opened client and its rights', async () => {
+    const onBack = vi.fn(); const view = render(<ClientDetail clientId={1} onBack={onBack} initialSection="profile" />); const first = vi.mocked(useClientStatuses).mock.lastCall?.[0]; expect(first?.enabled).toBe(true);
+    view.rerender(<ClientDetail clientId={2} onBack={onBack} initialSection="profile" />); expect(vi.mocked(useClientStatuses).mock.lastCall?.[0]?.ownerScope).not.toBe(first?.ownerScope);
+    const second = vi.mocked(useClientStatuses).mock.lastCall?.[0]; permissionsResult.clients.canEdit = false; view.rerender(<ClientDetail clientId={2} onBack={onBack} initialSection="profile" />);
+    expect(vi.mocked(useClientStatuses).mock.lastCall?.[0]?.ownerScope).not.toBe(second?.ownerScope); await act(async () => {});
+  });
   beforeEach(() => {
     legalModalOwnerSpy.mockClear(); authState.userId = 7; authState.roleId = 1;
     Object.assign(permissionsResult.legalEntities, createPermissions().legalEntities);

@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import type { Client, LegalEntitySummary, Payment } from '../../types';
 import { requestPaymentAdvanceReviewFilter } from '../../utils/paymentAdvanceReview';
 import { Payments } from './Payments';
+import { useDictionaries } from '../../hooks/useDictionaries';
 import { PaymentCreateAdoptedError } from '../../services/paymentCreateAttempts';
 import { BALANCE_APPLICATION_CHANGED, type CommittedBalanceApplication } from '../../services/balanceApplicationAttempts';
 
@@ -122,11 +123,11 @@ vi.mock('../../hooks/useClients', () => ({
 }));
 
 vi.mock('../../hooks/useDictionaries', () => ({
-  useDictionaries: () => ({
+  useDictionaries: vi.fn(() => ({
     dealTypes: [],
     incomeTypes: [],
     paymentSources: [],
-  }),
+  })),
 }));
 
 vi.mock('../../hooks/usePersistedTableSettings', () => ({
@@ -297,6 +298,12 @@ function persistAllocation(value: CommittedBalanceApplication) {
 }
 
 describe('Payments integration', () => {
+  it('dictionary caller: payment list uses three groups and clears the lookup scope when access changes', async () => {
+    const view = render(<Payments />); const first = vi.mocked(useDictionaries).mock.lastCall?.[0]; expect(first?.include).toEqual(['dealTypes', 'incomeTypes', 'paymentSources']); expect(first?.enabled).toBe(true);
+    const permissions = rolePermissionsMock.mock.results.at(-1)!.value; rolePermissionsMock.mockReturnValue({ ...permissions, payments: { ...permissions.payments, viewScope: 'own' } });
+    view.rerender(<Payments />); expect(vi.mocked(useDictionaries).mock.lastCall?.[0]?.ownerScope).not.toBe(first?.ownerScope);
+    rolePermissionsMock.mockReturnValue({ ...permissions, payments: { ...permissions.payments, canView: false } }); view.rerender(<Payments />); expect(vi.mocked(useDictionaries).mock.lastCall?.[0]?.enabled).toBe(false); await act(async () => {});
+  });
   beforeEach(() => {
     doc04SavedResults.length = 0;
     vi.mocked(apiService.getClients).mockReset().mockResolvedValue([]);

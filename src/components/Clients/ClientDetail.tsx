@@ -1493,7 +1493,8 @@ export function ClientDetail({
       return firstAllowed ?? "payments";
     },
   );
-  const { statuses: clientStatuses } = useClientStatuses();
+  const { statuses: clientStatuses } = useClientStatuses({ enabled: userIsAdmin || clientPermissions.canView,
+    ownerScope: JSON.stringify([clientId, user?.id, user?.role?.id, userIsAdmin, clientPermissions, permissions.dictionaries]) });
   const [clientName, setClientName] = useState<string>("...");
   const [clientData, setClientData] = useState<Client | null>(null);
   const taskJournalContext = useMemo(
