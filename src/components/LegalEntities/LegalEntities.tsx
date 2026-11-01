@@ -171,6 +171,7 @@ export function LegalEntities({
     getColumnWidth,
     resetTableSettings,
   } = usePersistedTableSettings<LegalEntityColumnKey>({
+    enabled: !detailOnly && legalPermissions.canView,
     storageKey: 'pp.legal_entities_table_settings.v1',
     settingsKey: 'legal_entities_table_settings',
     columns: LEGAL_ENTITY_COLUMNS.map((column) => ({
@@ -188,6 +189,7 @@ export function LegalEntities({
 
   const fetchLegalEntities = useCallback(
     async (targetPage = page, withLoading = true, signal?: AbortSignal) => {
+      if (!legalPermissions.canView) return;
       const owner = captureDetailOwner();
       try {
         if (withLoading) setLoading(true);
@@ -221,11 +223,11 @@ export function LegalEntities({
         if (withLoading && !signal?.aborted && isCurrentDetailOwner(owner)) setLoading(false);
       }
     },
-    [debouncedSearch, page, pageSize, toast, captureDetailOwner, isCurrentDetailOwner],
+    [debouncedSearch, page, pageSize, toast, captureDetailOwner, isCurrentDetailOwner, legalPermissions.canView],
   );
 
   useEffect(() => {
-    if (detailOnly || detailPageOpen || modalBusy) {
+    if (!legalPermissions.canView || detailOnly || detailPageOpen || modalBusy) {
       return undefined;
     }
     if (page !== 1 && previousLegalEntitiesQueryScopeRef.current !== legalEntitiesQueryScopeKey) {
@@ -238,7 +240,7 @@ export function LegalEntities({
     return () => {
       controller.abort();
     };
-  }, [detailOnly, detailPageOpen, modalBusy, fetchLegalEntities, legalEntitiesQueryScopeKey, page, detailSecurityScope]);
+  }, [legalPermissions.canView, detailOnly, detailPageOpen, modalBusy, fetchLegalEntities, legalEntitiesQueryScopeKey, page, detailSecurityScope]);
 
   useEffect(() => {
     setPage(1);
@@ -615,8 +617,14 @@ export function LegalEntities({
     onDetailClose?.();
   };
 
+  if (!legalPermissions.canView) {
+    return <div role="alert" className="p-3 lg:p-4">Нет разрешения на просмотр юридических лиц.</div>;
+  }
   if (previousDetailSecurityScope.current !== detailSecurityScope) {
     return <div role="status" className="p-3 lg:p-4">Обновляем доступ к карточкам...</div>;
+  }
+  if (detailOnly && initialLegalEntityId && initialLegalEntityId > 0 && detailPageOpen && editing?.id !== initialLegalEntityId) {
+    return <div role="status" className="p-3 lg:p-4">Загружаем другую карточку...</div>;
   }
   return (
     <div className={detailOnly ? 'p-3 lg:p-4' : 'p-6'}>

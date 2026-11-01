@@ -6,6 +6,7 @@ import { defaultRolePermissions } from '../../types/permissions';
 import type { LegalEntityDetail, LegalEntityInput } from '../../types';
 import { StaleUiOperationError } from '../../utils/StaleUiOperationError';
 import { documentCopyTestSession } from '../../test/documentCopySession';
+import { apiService } from '../../services/api';
 
 type OwnerModalProps = { isOpen: boolean; initial?: LegalEntityDetail | null; onBack: () => void; onClose: () => void; onDelete?: () => Promise<void>; onSubmit: (payload: LegalEntityInput) => Promise<LegalEntityDetail> };
 const modalSpy = vi.hoisted(() => vi.fn());
@@ -125,11 +126,87 @@ const legalEntity = {
 };
 
 describe('LegalEntities permissions', () => {
+  describe('table layout request admission', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.mocked(apiService.getUserSetting).mockReset().mockResolvedValue(null);
+      vi.mocked(apiService.upsertUserSetting).mockReset().mockResolvedValue({ key: 'legal_entities_table_settings', value: '' });
+    });
+    afterEach(() => { vi.useRealTimers(); });
+    const deny = () => {
+      const current = permissionMocks.useRolePermissions.mock.results.at(-1)!.value as typeof defaultRolePermissions;
+      permissionMocks.useRolePermissions.mockReturnValue({ ...current, legalEntities: { ...current.legalEntities, canView: false } });
+    };
+    it('table layout baseline: direct details neither load nor save the hidden registry layout', async () => {
+      const view = render(<LegalEntities initialLegalEntityId={7} detailOnly />);
+      try { await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); expect(modalSpy.mock.lastCall?.[0]?.initial?.id).toBe(7); expect(apiService.getUserSetting).not.toHaveBeenCalled(); expect(apiService.upsertUserSetting).not.toHaveBeenCalled(); }
+      finally { view.unmount(); }
+    });
+    it('table layout baseline: a denied registry does not load or save its layout', async () => {
+      permissionMocks.useRolePermissions.mockReturnValue({ ...defaultRolePermissions, legalEntities: { ...defaultRolePermissions.legalEntities, canView: false } }); const view = render(<LegalEntities />);
+      try { await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); expect(apiService.getUserSetting).not.toHaveBeenCalled(); expect(apiService.upsertUserSetting).not.toHaveBeenCalled(); expect(apiMocks.getLegalEntitiesPaged).not.toHaveBeenCalled(); }
+      finally { view.unmount(); }
+    });
+    it('table layout baseline: revoking view cancels an already scheduled layout save', async () => {
+      const view = render(<LegalEntities />);
+      try { await act(async () => {}); expect(apiService.getUserSetting).toHaveBeenCalledOnce(); deny(); view.rerender(<LegalEntities />); await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); expect(apiService.upsertUserSetting).not.toHaveBeenCalled(); }
+      finally { view.unmount(); }
+    });
+    it('table layout baseline: a late layout response after revocation cannot start a save', async () => {
+      let finish!: (value: null) => void; vi.mocked(apiService.getUserSetting).mockReturnValueOnce(new Promise<null>(resolve => { finish = resolve; })); const view = render(<LegalEntities />);
+      try { await act(async () => {}); expect(apiService.getUserSetting).toHaveBeenCalledOnce(); deny(); view.rerender(<LegalEntities />); await act(async () => finish(null)); await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); expect(apiService.upsertUserSetting).not.toHaveBeenCalled(); }
+      finally { view.unmount(); }
+    });
+    it('table layout regression: an authorized registry retains its layout read and save', async () => {
+      const view = render(<LegalEntities />);
+      try { await act(async () => {}); expect(apiService.getUserSetting).toHaveBeenCalledExactlyOnceWith('legal_entities_table_settings'); await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); expect(apiService.upsertUserSetting).toHaveBeenCalledOnce(); const [key, value] = vi.mocked(apiService.upsertUserSetting).mock.calls[0]; expect(key).toBe('legal_entities_table_settings'); expect(JSON.parse(value).visibleColumns).toContain('shortName'); }
+      finally { view.unmount(); }
+    });
+    it('table layout regression: opening standalone details cancels the earlier registry save', async () => {
+      const view = render(<LegalEntities />);
+      try { await act(async () => {}); expect(apiService.getUserSetting).toHaveBeenCalledOnce(); view.rerender(<LegalEntities initialLegalEntityId={7} detailOnly />); await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); expect(modalSpy.mock.lastCall?.[0]?.initial?.id).toBe(7); expect(apiService.getUserSetting).toHaveBeenCalledOnce(); expect(apiService.upsertUserSetting).not.toHaveBeenCalled(); }
+      finally { view.unmount(); }
+    });
+    it('directory admission baseline: revoking view hides records without another directory read', async () => {
+      const view = render(<LegalEntities />);
+      try { await act(async () => {}); expect(screen.getByText(legalEntity.shortName)).toBeTruthy(); const reads = apiMocks.getLegalEntitiesPaged.mock.calls.length; deny(); view.rerender(<LegalEntities />); await act(async () => {}); expect(screen.queryByText(legalEntity.shortName)).toBeNull(); expect(apiMocks.getLegalEntitiesPaged).toHaveBeenCalledTimes(reads); }
+      finally { view.unmount(); }
+    });
+    it('directory admission regression: a late successful list response stays hidden after revocation', async () => {
+      let finish!: (value: { items: typeof legalEntity[]; total: number; page: number; pageSize: number }) => void;
+      apiMocks.getLegalEntitiesPaged.mockReturnValueOnce(new Promise(resolve => { finish = resolve; })); const view = render(<LegalEntities />);
+      try { await act(async () => {}); const signal = apiMocks.getLegalEntitiesPaged.mock.calls[0][1].signal as AbortSignal; deny(); view.rerender(<LegalEntities />); expect(signal.aborted).toBe(true); await act(async () => finish({ items: [legalEntity], total: 1, page: 1, pageSize: 12 })); expect(screen.queryByText(legalEntity.shortName)).toBeNull(); expect(screen.getByRole('alert').textContent).toContain('Нет разрешения'); expect(apiMocks.getLegalEntitiesPaged).toHaveBeenCalledOnce(); }
+      finally { view.unmount(); }
+    });
+    it('directory admission regression: a denied direct target never opens a private form', async () => {
+      permissionMocks.useRolePermissions.mockReturnValue({ ...defaultRolePermissions, legalEntities: { ...defaultRolePermissions.legalEntities, canView: false } }); const view = render(<LegalEntities initialLegalEntityId={7} detailOnly />);
+      try { await act(async () => {}); expect(apiMocks.getLegalEntity).not.toHaveBeenCalled(); expect(apiMocks.getLegalEntitiesPaged).not.toHaveBeenCalled(); expect(modalSpy).not.toHaveBeenCalled(); expect(screen.getByRole('alert').textContent).toContain('Нет разрешения'); }
+      finally { view.unmount(); }
+    });
+    it('directory admission regression: restoring view reads fresh rows and restores the journal layout', async () => {
+      const allowed = { ...defaultRolePermissions, legalEntities: { ...defaultRolePermissions.legalEntities, canView: true } }; permissionMocks.useRolePermissions.mockReturnValue({ ...allowed, legalEntities: { ...allowed.legalEntities, canView: false } }); const view = render(<LegalEntities />);
+      try { await act(async () => {}); expect(apiMocks.getLegalEntitiesPaged).not.toHaveBeenCalled(); permissionMocks.useRolePermissions.mockReturnValue(allowed); view.rerender(<LegalEntities />); await act(async () => {}); expect(screen.getByText(legalEntity.shortName)).toBeTruthy(); expect(apiMocks.getLegalEntitiesPaged).toHaveBeenCalledOnce(); expect(apiService.getUserSetting).toHaveBeenCalledExactlyOnceWith('legal_entities_table_settings'); await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); expect(apiService.upsertUserSetting).toHaveBeenCalledOnce(); }
+      finally { view.unmount(); }
+    });
+  });
   it.each(['admin', 'ADMIN', 'limited-lawyer'])('branch caller: derives management from the current role %s', async role => {
     authUser.role.name = role;
     render(<LegalEntities initialLegalEntityId={7} detailOnly />);
     await waitFor(() => expect(modalSpy.mock.lastCall?.[0]?.initial?.id).toBe(7));
     expect(modalSpy.mock.lastCall?.[0]).toMatchObject({ canManageCompanyBranches: role.toLowerCase() === 'admin', canManageOwnCompanySettings: role.toLowerCase() === 'admin' });
+  });
+
+  it('detail target baseline: hides the old editor before effects load another standalone company', async () => {
+    const view = render(<LegalEntities initialLegalEntityId={7} detailOnly />);
+    await waitFor(() => expect(modalSpy.mock.lastCall?.[0]?.initial?.id).toBe(7));
+    let finish!: (value: LegalEntityDetail) => void;
+    apiMocks.getLegalEntity.mockReturnValueOnce(new Promise<LegalEntityDetail>(resolve => { finish = resolve; }));
+    modalSpy.mockClear();
+    view.rerender(<LegalEntities initialLegalEntityId={8} detailOnly />);
+    expect(modalSpy).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Назад из карточки' })).toBeNull();
+    await act(async () => { finish({ ...legalEntity, id: 8, clients: [] }); });
+    expect(modalSpy.mock.lastCall?.[0]?.initial?.id).toBe(8);
   });
 
   describe('deletion guard', () => {
