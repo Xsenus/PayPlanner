@@ -1419,6 +1419,96 @@ describe('LegalEntityModal integration', () => {
     expect(screen.queryByText('Платежи')).toBeNull();
   });
 
+  describe('company autofill ownership', () => {
+    const first = { shortName: 'Первый кандидат', inn: '7707083893', address: 'Первый адрес' };
+    const propsFor = (mode: 'page' | 'modal') => ({ isOpen: true, mode, initial: createInitialLegalEntity({ shortName: 'Текущий профиль', inn: '7707083893', isOwnCompany: false }),
+      allowEdit: true, allowDelete: false, canManageOwnCompanySettings: false, canViewCases: false, canViewAccounts: false, canViewActs: false, canViewPayments: false,
+      onClose: vi.fn(), onSubmit: vi.fn(), suggest: vi.fn().mockResolvedValue([first]), findById: vi.fn() });
+    for (const mode of ['page', 'modal'] as const) {
+      it(`company autofill: old search cannot populate a different ${mode} profile`, async () => {
+        let resolve!: (value: LegalEntitySuggestion[]) => void; const p = propsFor(mode); p.suggest.mockReturnValue(new Promise(done => { resolve = done; }));
+        const view = render(<LegalEntityModal {...p} />); fireEvent.click(screen.getByRole('button', { name: 'Найти' }));
+        view.rerender(<LegalEntityModal {...p} initial={{ ...p.initial, id: 12, shortName: 'Новый профиль' }} />);
+        await act(async () => resolve([first])); expect(screen.queryByText('Первый кандидат')).toBeNull();
+      });
+      it.each(['company', 'readonly', 'manual'] as const)(`company autofill: late details preserve ${mode} %s context`, async change => {
+        let resolve!: (value: LegalEntityDadataDetails) => void; const p = propsFor(mode); p.findById.mockReturnValue(new Promise(done => { resolve = done; }));
+        const view = render(<LegalEntityModal {...p} />); fireEvent.click(screen.getByRole('button', { name: 'Найти' }));
+        fireEvent.click(await screen.findByText('Первый кандидат')); expect(p.findById).toHaveBeenCalledOnce();
+        if (change === 'company') view.rerender(<LegalEntityModal {...p} initial={{ ...p.initial, id: 12, shortName: 'Новый профиль' }} />);
+        if (change === 'readonly') view.rerender(<LegalEntityModal {...p} allowEdit={false} />);
+        if (change === 'manual') fireEvent.change(screen.getByDisplayValue('Первый кандидат'), { target: { value: 'Ручное название' } });
+        await act(async () => resolve({ shortName: 'Устаревшие реквизиты', address: 'Устаревший адрес' }));
+        expect(screen.queryByDisplayValue('Устаревшие реквизиты')).toBeNull(); expect(screen.queryByDisplayValue('Устаревший адрес')).toBeNull();
+        if (change === 'manual') expect(screen.getByDisplayValue('Ручное название')).toBeTruthy();
+      });
+      it.each(['close', 'readonly', 'session', 'refresh'] as const)(`company autofill boundary: ${mode} %s rejects old search success and error`, async change => {
+        for (const outcome of ['success', 'error'] as const) {
+          const iterationSession = documentCopyTestSession();
+          let resolve!: (value: LegalEntitySuggestion[]) => void; let reject!: (reason: Error) => void;
+          const p = propsFor(mode); p.suggest.mockReturnValue(new Promise((a, b) => { resolve = a; reject = b; }));
+          const view = render(<LegalEntityModal {...p} />); fireEvent.click(screen.getByRole('button', { name: 'Найти' }));
+          if (change === 'close') { view.rerender(<LegalEntityModal {...p} isOpen={false} />); view.rerender(<LegalEntityModal {...p} />); }
+          if (change === 'readonly') view.rerender(<LegalEntityModal {...p} allowEdit={false} />);
+          if (change === 'session') iterationSession.replace();
+          if (change === 'refresh') view.rerender(<LegalEntityModal {...p} initial={{ ...p.initial }} />);
+          await act(async () => { if (outcome === 'success') resolve([first]); else reject(new Error('Устаревшая ошибка DaData')); });
+          expect(screen.queryByText('Первый кандидат')).toBeNull(); expect(screen.queryByText('Устаревшая ошибка DaData')).toBeNull();
+          if (change !== 'readonly') expect(screen.getByRole('button', { name: 'Найти' })).toHaveProperty('disabled', false);
+          view.unmount();
+          iterationSession.restore();
+        }
+      });
+      it.each(['success', 'error'] as const)(`company autofill boundary: ${mode} old %s cannot finish a newer query`, async outcome => {
+        let resolveOld!: (value: LegalEntitySuggestion[]) => void; let rejectOld!: (reason: Error) => void; let resolveNew!: (value: LegalEntitySuggestion[]) => void;
+        const p = propsFor(mode); p.suggest.mockReturnValueOnce(new Promise((a, b) => { resolveOld = a; rejectOld = b; })).mockReturnValueOnce(new Promise(done => { resolveNew = done; }));
+        render(<LegalEntityModal {...p} />); fireEvent.click(screen.getByRole('button', { name: 'Найти' }));
+        fireEvent.change(screen.getByPlaceholderText('Например: 7707083893 или ООО Пример'), { target: { value: 'Новый поиск' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Найти' })); expect(p.suggest).toHaveBeenCalledTimes(2);
+        await act(async () => { if (outcome === 'success') resolveOld([first]); else rejectOld(new Error('Устаревшая ошибка DaData')); });
+        expect(screen.getByRole('button', { name: 'Найти' })).toHaveProperty('disabled', true);
+        expect(screen.queryByText('Первый кандидат')).toBeNull(); expect(screen.queryByText('Устаревшая ошибка DaData')).toBeNull();
+        await act(async () => resolveNew([{ shortName: 'Новый кандидат', inn: '633009620345' }]));
+        expect(screen.getByText('Новый кандидат')).toBeTruthy(); expect(screen.getByRole('button', { name: 'Найти' })).toHaveProperty('disabled', false);
+      });
+      it.each(['success', 'error'] as const)(`company autofill boundary: ${mode} latest selection wins over old %s`, async outcome => {
+        let resolveOld!: (value: LegalEntityDadataDetails) => void; let rejectOld!: (reason: Error) => void;
+        const p = propsFor(mode); p.suggest.mockResolvedValue([first, { shortName: 'Второй кандидат', inn: '633009620345' }]);
+        p.findById.mockReturnValueOnce(new Promise((a, b) => { resolveOld = a; rejectOld = b; })).mockResolvedValueOnce({ shortName: 'Последний выбор', inn: '633009620345', address: 'Последний адрес' });
+        render(<LegalEntityModal {...p} />); fireEvent.click(screen.getByRole('button', { name: 'Найти' })); fireEvent.click(await screen.findByText('Первый кандидат'));
+        fireEvent.click(screen.getByText('Второй кандидат')); await screen.findByDisplayValue('Последний выбор');
+        await act(async () => { if (outcome === 'success') resolveOld({ shortName: 'Устаревшие реквизиты', address: 'Устаревший адрес' }); else rejectOld(new Error('Old details')); });
+        expect(screen.getByDisplayValue('Последний выбор')).toBeTruthy(); expect(screen.queryByDisplayValue('Устаревшие реквизиты')).toBeNull();
+        fireEvent.click(screen.getByRole('button', { name: 'Адреса' })); expect(screen.queryByDisplayValue('Первый адрес')).toBeNull();
+      });
+      it(`company autofill boundary: ${mode} session replacement before render blocks cached selection`, async () => {
+        const p = propsFor(mode); render(<LegalEntityModal {...p} />); fireEvent.click(screen.getByRole('button', { name: 'Найти' }));
+        const candidate = await screen.findByText('Первый кандидат'); baseAuthSession.replace(); fireEvent.click(candidate);
+        expect(p.findById).not.toHaveBeenCalled(); expect(screen.getByDisplayValue('Текущий профиль')).toBeTruthy();
+      });
+      it(`company autofill boundary: ${mode} manual contacts cancel pending details`, async () => {
+        let resolve!: (value: LegalEntityDadataDetails) => void; const p = propsFor(mode); p.findById.mockReturnValue(new Promise(done => { resolve = done; }));
+        render(<LegalEntityModal {...p} />); fireEvent.click(screen.getByRole('button', { name: 'Найти' })); fireEvent.click(await screen.findByText('Первый кандидат'));
+        fireEvent.click(screen.getByRole('button', { name: 'Контакты' })); fireEvent.click(screen.getByRole('button', { name: '+ Добавить email' }));
+        await act(async () => resolve({ shortName: 'Устаревшие реквизиты', emails: ['stale@example.local'] }));
+        expect(screen.queryByDisplayValue('Устаревшие реквизиты')).toBeNull(); expect(screen.queryByDisplayValue('stale@example.local')).toBeNull();
+      });
+      it.each(['close', 'session'] as const)(`company autofill extra: ${mode} pending details cannot cross %s`, async change => {
+        let resolve!: (value: LegalEntityDadataDetails) => void; const p = propsFor(mode); p.findById.mockReturnValue(new Promise(done => { resolve = done; }));
+        const view = render(<LegalEntityModal {...p} />); fireEvent.click(screen.getByRole('button', { name: 'Найти' })); fireEvent.click(await screen.findByText('Первый кандидат'));
+        if (change === 'close') { view.rerender(<LegalEntityModal {...p} isOpen={false} />); view.rerender(<LegalEntityModal {...p} />); } else baseAuthSession.replace();
+        await act(async () => resolve({ shortName: 'Устаревшие реквизиты', address: 'Устаревший адрес' }));
+        expect(screen.queryByDisplayValue('Устаревшие реквизиты')).toBeNull(); expect(screen.queryByDisplayValue('Устаревший адрес')).toBeNull();
+      });
+      it(`company autofill extra: ${mode} same-session token refresh preserves pending details`, async () => {
+        let resolve!: (value: LegalEntityDadataDetails) => void; const p = propsFor(mode); p.findById.mockReturnValue(new Promise(done => { resolve = done; }));
+        const view = render(<LegalEntityModal {...p} />); fireEvent.click(screen.getByRole('button', { name: 'Найти' })); fireEvent.click(await screen.findByText('Первый кандидат'));
+        baseAuthSession.refresh(); view.rerender(<LegalEntityModal {...p} />);
+        await act(async () => resolve({ shortName: 'Актуальные реквизиты', inn: '7707083893' })); expect(screen.getByDisplayValue('Актуальные реквизиты')).toBeTruthy();
+      });
+    }
+  });
+
   it('prefills DaData query from saved inn and keeps the full address after suggestion selection', async () => {
     const suggestMock = vi
       .fn<(payload: { query?: string; inn?: string; limit?: number }) => Promise<LegalEntitySuggestion[]>>()

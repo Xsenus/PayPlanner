@@ -1047,6 +1047,20 @@ export function LegalEntityModal({
     canManageOwnCompanySettings, initial?.profileEditVersion, deleteSession]);
   const { capture: captureClassificationOwner, isCurrent: isClassificationOwnerCurrent } = useAsyncOperationOwner(classificationScope);
   const classificationOwner = captureClassificationOwner();
+  const companyAutofillOwner = useDocumentDeliveryOwner(JSON.stringify([classificationScope, loading, hideDadataSection]));
+  const companyAutofillRequests = useRef({ search: 0, details: 0 });
+  const [companyAutofillResultScope, setCompanyAutofillResultScope] = useState<string | null>(null);
+  const scopedSuggestions = companyAutofillResultScope === companyAutofillOwner.scope ? suggestions : [];
+  const scopedSuggestError = companyAutofillResultScope === companyAutofillOwner.scope ? suggestError : null;
+  const scopedSuggestLoading = companyAutofillResultScope === companyAutofillOwner.scope && suggestLoading;
+  useLayoutEffect(() => {
+    const requests = companyAutofillRequests.current;
+    requests.search++; requests.details++;
+    setSuggestions([]); setSuggestError(null); setSuggestLoading(false); setCompanyAutofillResultScope(null);
+    return () => { requests.search++; requests.details++; };
+  }, [initial, isOpen, companyAutofillOwner.scope]);
+  const invalidateCompanyDetails = () => { companyAutofillRequests.current.details++; };
+  const canStartCompanyAutofill = () => isOpen && !readOnly && !loading && !hideDadataSection;
   const { capture: captureInvoiceCaseOwner, isCurrent: isInvoiceCaseOwnerCurrent } = useAsyncOperationOwner(JSON.stringify([
     classificationScope, invoiceModalOpen, invoiceModalMode, selectedInvoice?.id, canViewCases,
     canMutateRelated('accounts', invoiceModalMode === 'edit' ? 'canEdit' : 'canCreate'),
@@ -1649,6 +1663,7 @@ export function LegalEntityModal({
       HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
     >,
   ) => {
+    invalidateCompanyDetails();
     const { name, value, type } = e.target;
     const parsed =
       type === "checkbox" ? (e.target as HTMLInputElement).checked : value;
@@ -1794,6 +1809,7 @@ export function LegalEntityModal({
     key: keyof ClientAddressEntryFormValue,
     value: string,
   ) => {
+    invalidateCompanyDetails();
     setAddressEntries((prev) =>
       prev.map((entry, i) =>
         i === index ? { ...entry, [key]: value } : entry,
@@ -1802,10 +1818,12 @@ export function LegalEntityModal({
   };
 
   const setPrimaryAddressFormEntry = (index: number) => {
+    invalidateCompanyDetails();
     setAddressEntries((prev) => setPrimaryAddressEntry(prev, index));
   };
 
   const toggleAdditionalAddressType = (index: number, type: string) => {
+    invalidateCompanyDetails();
     setAddressEntries((prev) =>
       prev.map((entry, i) => {
         if (i !== index) return entry;
@@ -1887,6 +1905,7 @@ export function LegalEntityModal({
     index: number,
     suggestion: DadataAddressSuggestion,
   ) => {
+    invalidateCompanyDetails();
     const selected = (
       suggestion.unrestrictedValue ??
       suggestion.value ??
@@ -1935,6 +1954,13 @@ export function LegalEntityModal({
   };
 
   const handleSuggest = async () => {
+    if (!canStartCompanyAutofill()) return;
+    const owner = companyAutofillOwner.capture(); if (!owner) return;
+    const sequence = ++companyAutofillRequests.current.search;
+    invalidateCompanyDetails();
+    const current = () => owner.isCurrent() && sequence === companyAutofillRequests.current.search;
+    setCompanyAutofillResultScope(companyAutofillOwner.scope);
+    setSuggestions([]);
     setSuggestError(null);
     const query = dadataQuery.trim();
     if (!query) {
@@ -1949,22 +1975,28 @@ export function LegalEntityModal({
         await suggest({ query, limit: 6 }),
         6,
       );
+      if (!current()) return;
       setSuggestions(results);
       if (results.length === 0) {
         setSuggestError(t("legalEntityDadataNoResults") || "Ничего не найдено");
       }
     } catch (err) {
+      if (!current()) return;
       setSuggestError(
         err instanceof Error
           ? err.message
           : t("legalEntityDadataError") || "Не удалось получить подсказки",
       );
     } finally {
-      setSuggestLoading(false);
+      if (current()) setSuggestLoading(false);
     }
   };
 
   const applySuggestion = async (suggestion: LegalEntitySuggestion) => {
+    if (!canStartCompanyAutofill() || !scopedSuggestions.includes(suggestion)) return;
+    const owner = companyAutofillOwner.capture(); if (!owner) return;
+    const sequence = ++companyAutofillRequests.current.details;
+    const current = () => owner.isCurrent() && sequence === companyAutofillRequests.current.details;
     const baseAddress = suggestion.address?.trim();
     const applyFallbackAddress = (address: string) => {
       setAddressEntries((prev) =>
@@ -2002,6 +2034,7 @@ export function LegalEntityModal({
         query,
         kpp: suggestion.kpp ?? undefined,
       });
+      if (!current()) return;
       const normalizedAddress = chooseBestDisplayAddress(
         {
           country: details.country,
@@ -2094,10 +2127,16 @@ export function LegalEntityModal({
         applyFallbackAddress(baseAddress);
       }
     } catch {
-      if (baseAddress) {
+      if (current() && baseAddress) {
         applyFallbackAddress(baseAddress);
       }
     }
+  };
+
+  const updateDadataQuery = (value: string) => {
+    if (!canStartCompanyAutofill() || !companyAutofillOwner.capture()) return;
+    companyAutofillRequests.current.search++; invalidateCompanyDetails();
+    setDadataQuery(value); setSuggestions([]); setSuggestError(null); setSuggestLoading(false);
   };
 
   const requiredFieldKey = (name: string) =>
@@ -4004,7 +4043,8 @@ export function LegalEntityModal({
           <input
             type="text"
             value={dadataQuery}
-            onChange={(e) => setDadataQuery(e.target.value)}
+            onChange={(e) => updateDadataQuery(e.target.value)}
+            disabled={readOnly || loading}
             placeholder={
               t("legalEntityDadataPlaceholder") ||
               "Например: 7707083893 или ООО Пример"
@@ -4015,23 +4055,24 @@ export function LegalEntityModal({
         <button
           type="button"
           onClick={handleSuggest}
-          disabled={suggestLoading || readOnly}
+          disabled={scopedSuggestLoading || readOnly || loading}
           className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
         >
-          {suggestLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+          {scopedSuggestLoading && <Loader2 className="h-4 w-4 animate-spin" />}
           {t("legalEntityDadataSearch") || "Найти"}
         </button>
       </div>
-      {suggestError && (
+      {scopedSuggestError && (
         <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
-          {suggestError}
+          {scopedSuggestError}
         </div>
       )}
       <div className="mt-3 space-y-2">
-        {suggestions.map((suggestion, idx) => (
+        {scopedSuggestions.map((suggestion, idx) => (
           <button
             key={`${suggestion.inn ?? suggestion.shortName}-${idx}`}
             type="button"
+            disabled={readOnly || loading}
             onClick={() => {
               void applySuggestion(suggestion);
             }}
@@ -4062,7 +4103,7 @@ export function LegalEntityModal({
             </div>
           </button>
         ))}
-        {!suggestLoading && suggestions.length === 0 && !suggestError && (
+        {!scopedSuggestLoading && scopedSuggestions.length === 0 && !scopedSuggestError && (
           <div className="rounded-lg border border-dashed border-blue-200 p-3 text-center text-xs text-blue-700/80">
             {t("legalEntityDadataHint") ||
               "Результаты появятся после выполнения поиска."}
@@ -4647,23 +4688,25 @@ export function LegalEntityModal({
                 suggestionsByIndex={addressSuggestionsByIndex}
                 onUpdateEntry={updateAddressFormEntry}
                 onSetPrimary={setPrimaryAddressFormEntry}
-                onRemoveEntry={(index) =>
+                onRemoveEntry={(index) => {
+                  invalidateCompanyDetails();
                   setAddressEntries((prev) =>
                     prev.length > 1
                       ? ensureSinglePrimaryAddressEntryList(
                           prev.filter((_, i) => i !== index),
                         )
                       : [createEmptyLegalEntityAddressEntry(true)],
-                  )
-                }
-                onAddEntry={() =>
+                  );
+                }}
+                onAddEntry={() => {
+                  invalidateCompanyDetails();
                   setAddressEntries((prev) =>
                     ensureSinglePrimaryAddressEntryList([
                       ...prev,
                       createEmptyLegalEntityAddressEntry(),
                     ]),
-                  )
-                }
+                  );
+                }}
                 onToggleAdditionalType={toggleAdditionalAddressType}
                 onScheduleSuggestions={scheduleAddressSuggestions}
                 onFindAddress={(index) => {
@@ -4682,7 +4725,7 @@ export function LegalEntityModal({
                   {!compactReadOnlyView ? (
                     <button
                       type="button"
-                      onClick={() => setContactPhones((prev) => [...prev, ""])}
+                      onClick={() => { invalidateCompanyDetails(); setContactPhones((prev) => [...prev, ""]); }}
                       disabled={readOnly}
                       className="mb-2 rounded-xl border border-blue-200 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
                     >
@@ -4695,24 +4738,26 @@ export function LegalEntityModal({
                         <input
                           value={v}
                           disabled={readOnly}
-                          onChange={(e) =>
+                          onChange={(e) => {
+                            invalidateCompanyDetails();
                             setContactPhones((prev) =>
                               prev.map((x, i) =>
                                 i === idx ? e.target.value : x,
                               ),
-                            )
-                          }
+                            );
+                          }}
                           className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
                         />
                         {!compactReadOnlyView ? (
                           <button
                             type="button"
                             disabled={readOnly}
-                            onClick={() =>
+                            onClick={() => {
+                              invalidateCompanyDetails();
                               setContactPhones((prev) =>
                                 prev.filter((_, i) => i !== idx),
-                              )
-                            }
+                              );
+                            }}
                             className="rounded-xl border border-rose-200 px-3 text-rose-600"
                           >
                             ✕
@@ -4729,7 +4774,7 @@ export function LegalEntityModal({
                   {!compactReadOnlyView ? (
                     <button
                       type="button"
-                      onClick={() => setContactEmails((prev) => [...prev, ""])}
+                      onClick={() => { invalidateCompanyDetails(); setContactEmails((prev) => [...prev, ""]); }}
                       disabled={readOnly}
                       className="mb-2 rounded-xl border border-blue-200 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
                     >
@@ -4742,24 +4787,26 @@ export function LegalEntityModal({
                         <input
                           value={v}
                           disabled={readOnly}
-                          onChange={(e) =>
+                          onChange={(e) => {
+                            invalidateCompanyDetails();
                             setContactEmails((prev) =>
                               prev.map((x, i) =>
                                 i === idx ? e.target.value : x,
                               ),
-                            )
-                          }
+                            );
+                          }}
                           className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
                         />
                         {!compactReadOnlyView ? (
                           <button
                             type="button"
                             disabled={readOnly}
-                            onClick={() =>
+                            onClick={() => {
+                              invalidateCompanyDetails();
                               setContactEmails((prev) =>
                                 prev.filter((_, i) => i !== idx),
-                              )
-                            }
+                              );
+                            }}
                             className="rounded-xl border border-rose-200 px-3 text-rose-600"
                           >
                             ✕
