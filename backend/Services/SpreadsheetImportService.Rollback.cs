@@ -218,7 +218,7 @@ public sealed partial class SpreadsheetImportService
                 }
 
                 targetLegalEntity ??= new LegalEntity();
-                RestoreLegalEntitySnapshot(targetLegalEntity, snapshot.LegalEntity);
+                await RestoreLegalEntitySnapshotAsync(db, targetLegalEntity, snapshot.LegalEntity, cancellationToken);
                 if (targetLegalEntity.Id == 0)
                 {
                     db.LegalEntities.Add(targetLegalEntity);

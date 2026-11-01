@@ -2259,6 +2259,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
                 return await UpdateProfileCoreAsync(id, request, entity, authorization.IsProfile, authorization.Access!, ct);
             }, static result => result.Result is OkObjectResult, ct);
         }
+        catch (CompanyBankBindingException error) { return Conflict(new { code = error.Code, message = error.Message }); }
         catch (Exception error) when (error is SellerSnapshotConflictException || DocumentSellerLease.IsConflict(error))
         {
             return Conflict(new { code = "CompanyProfileChanged", message = "Профиль компании изменился или сейчас сохраняется другим сотрудником. Ваш ввод не сохранён. Откройте карточку заново, сравните данные и повторите изменение." });
@@ -2336,6 +2337,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         }
 
         var activeAccountIds = CompanyBankAccountList.ActiveAccountIds(bankAccounts.Json);
+        await CompanyBankAccountBindingProfileGuard.ValidateAsync(_db, entity.Id, bankAccounts.Json, ct);
         var brokenBranches = await _db.CompanyBranches
             .AsNoTracking()
             .Where(b => b.LegalEntityId == entity.Id && b.Status == CompanyProfileStatuses.Active && b.BankAccountId != null)

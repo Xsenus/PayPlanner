@@ -29,9 +29,9 @@ public sealed class CompanyBankAccountMatchService(PaymentContext db)
     public const int MaximumMoneyAccounts = 1000;
     public const int MaximumProfileAccounts = 128;
 
-    private sealed record Identity(string Number, string Bik, string Currency);
-    private sealed record Profile(string? Id, string Name, Identity? Identity, bool Archived);
-    private sealed record BankRow(int Id, int ConnectionId, string Number, string? Bik, string Currency, string Status, bool Hidden, string ConnectionStatus);
+    internal sealed record Identity(string Number, string Bik, string Currency);
+    internal sealed record Profile(string? Id, string Name, Identity? Identity, bool Archived);
+    private sealed record BankRow(int Id, int ConnectionId, string Provider, string ExternalAccountId, string Number, string? Bik, string Currency, string Status, bool Hidden, string ConnectionStatus);
     private sealed record MoneyRow(int Id, int? CompanyId, int? BankAccountId, MoneyOperationSource Source, string? Number, string? Bik, string Currency, bool Active);
 
     public async Task<CompanyBankAccountMatchReport?> ReadAsync(int connectionId, CancellationToken ct)
@@ -40,6 +40,16 @@ public sealed class CompanyBankAccountMatchService(PaymentContext db)
         // Pending tracked edits are neither flushed nor cleared: all reads are persisted projections.
         if (db.Database.CurrentTransaction is not null) throw new SellerSnapshotConflictException();
         await using var snapshot = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+        var report = await ReadCoreAsync(connectionId, ct);
+        await snapshot.CommitAsync(ct);
+        return report;
+    }
+
+    // Only an admitted command may supply its own short transaction. The public
+    // read keeps rejecting an inherited transaction and never clears tracked work.
+    internal async Task<CompanyBankAccountMatchReport?> ReadCoreAsync(int connectionId, CancellationToken ct, int? excludeBindingId = null)
+    {
+        if (db.Database.CurrentTransaction is null) throw new SellerSnapshotConflictException();
         var companyId = await db.BankConnections.AsNoTracking().Where(x => x.Id == connectionId)
             .Select(x => (int?)x.LegalEntityId).SingleOrDefaultAsync(ct);
         if (!companyId.HasValue || !(await OwnCompanyRegistry.LoadIdsAsync(db, ct)).Contains(companyId.Value)) return null;
@@ -55,7 +65,7 @@ public sealed class CompanyBankAccountMatchService(PaymentContext db)
         var profiles = company.TooLarge ? [] : ReadProfiles(company.Json, profileIssues);
         if (company.TooLarge) profileIssues.Add("ProfileAccountsTooLarge");
         var banks = await db.BankConnectionAccounts.AsNoTracking().Where(x => x.BankConnection.LegalEntityId == company.Id)
-            .OrderBy(x => x.Id).Select(x => new BankRow(x.Id, x.BankConnectionId, x.AccountNumber, x.Bik, x.Currency,
+            .OrderBy(x => x.Id).Select(x => new BankRow(x.Id, x.BankConnectionId, x.BankConnection.Provider, x.ExternalAccountId, x.AccountNumber, x.Bik, x.Currency,
                 x.Status, x.IsHidden, x.BankConnection.Status)).Take(MaximumBankAccounts + 1).ToArrayAsync(ct);
         if (banks.Length > MaximumBankAccounts) throw new CompanyBankAccountMatchLimitException();
         var selected = banks.Where(x => x.ConnectionId == connectionId).ToArray();
@@ -67,6 +77,34 @@ public sealed class CompanyBankAccountMatchService(PaymentContext db)
                 x.BankBik == null || x.BankBik.Length <= 16 ? x.BankBik : null,
                 x.Currency.Length <= 8 ? x.Currency : "", x.IsActive)).Take(MaximumMoneyAccounts + 1).ToArrayAsync(ct);
         if (money.Length > MaximumMoneyAccounts) throw new CompanyBankAccountMatchLimitException();
+        var bindings = await db.CompanyBankAccountBindings.AsNoTracking()
+            .Where(x => x.RevokedAtUtc == null && (x.LegalEntityId == company.Id || bankIds.Contains(x.BankConnectionAccountId))
+                && (!excludeBindingId.HasValue || x.Id != excludeBindingId.Value))
+            .OrderBy(x => x.Id).Select(x => new
+            {
+                x.Id,
+                x.LegalEntityId,
+                x.ProfileAccountKey,
+                ProfileId = x.ProfileAccountId.Length <= CompanyBankAccountList.MaxJsonLength ? x.ProfileAccountId : null,
+                ProfileIdTooLarge = x.ProfileAccountId.Length > CompanyBankAccountList.MaxJsonLength,
+                x.BankConnectionAccountId,
+                x.Provider,
+                x.ExternalAccountId,
+                x.AccountNumber,
+                x.Bik,
+                x.Currency,
+                x.ConfirmedMatchVersion,
+                x.CreatedByUserId,
+                x.CreatedByUserName,
+                x.CreatedAtUtc,
+            }).Take(MaximumProfileAccounts + MaximumBankAccounts + 1).ToArrayAsync(ct);
+        if (bindings.Length > MaximumProfileAccounts + MaximumBankAccounts) throw new CompanyBankAccountMatchLimitException();
+        // Historical confirmations are never deleted/reactivated by commands.
+        // Including their last ID prevents an old pre-bind version from becoming
+        // valid again after a bind/revoke cycle, without loading the full history.
+        var lastBindingId = await db.CompanyBankAccountBindings.AsNoTracking()
+            .Where(x => x.LegalEntityId == company.Id && (!excludeBindingId.HasValue || x.Id != excludeBindingId.Value))
+            .Select(x => (int?)x.Id).MaxAsync(ct) ?? 0;
 
         var activeProfiles = profiles.Where(x => !x.Archived && x.Id is not null && x.Identity is not null).ToLookup(x => x.Identity!);
         var archivedProfiles = profiles.Where(x => x.Archived && x.Identity is not null).ToLookup(x => x.Identity!);
@@ -110,12 +148,11 @@ public sealed class CompanyBankAccountMatchService(PaymentContext db)
         }
         // Include all relevant company connections: a duplicate elsewhere must not
         // turn into a false unique candidate. No company images or financial history are loaded.
-        var version = "bank-profile-match-v1:" + Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new { company.Id, connectionId, company.Json, company.TooLarge, banks, money })));
-        await snapshot.CommitAsync(ct);
+        var version = "bank-profile-match-v2:" + Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new { company.Id, connectionId, company.Json, company.TooLarge, banks, money, bindings, lastBindingId })));
         return new(company.Id, connectionId, version, profileIssues.Distinct(StringComparer.Ordinal).ToArray(), groups.Values.OrderBy(x => x.Id).ToArray(), rows);
     }
 
-    private static Identity? Key(string? number, string? bik, string? currency)
+    internal static Identity? Key(string? number, string? bik, string? currency)
     {
         var n = BankStatementImportRules.NormalizeBankAccount(number);
         var b = BankStatementImportRules.NormalizeBankAccount(bik);
@@ -123,7 +160,7 @@ public sealed class CompanyBankAccountMatchService(PaymentContext db)
         return n.Length == 0 || b.Length == 0 || c is null ? null : new(n, b, c);
     }
 
-    private static Profile[] ReadProfiles(string? json, List<string> issues)
+    internal static Profile[] ReadProfiles(string? json, List<string> issues)
     {
         if (string.IsNullOrWhiteSpace(json)) return [];
         try

@@ -7,8 +7,10 @@ namespace PayPlanner.Api.Services;
 
 public sealed partial class SpreadsheetImportService
 {
-    private static void RestoreLegalEntitySnapshot(LegalEntity entity, LegalEntitySnapshot snapshot)
+    private static async Task RestoreLegalEntitySnapshotAsync(PaymentContext db, LegalEntity entity, LegalEntitySnapshot snapshot, CancellationToken ct)
     {
+        if (entity.Id > 0 && !string.Equals(entity.BankAccountsJson, snapshot.BankAccountsJson, StringComparison.Ordinal))
+            await Companies.CompanyBankAccountBindingProfileGuard.ValidateAsync(db, entity.Id, snapshot.BankAccountsJson, ct);
         entity.ShortName = snapshot.ShortName;
         entity.FullName = snapshot.FullName;
         entity.Inn = snapshot.Inn;

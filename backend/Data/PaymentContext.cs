@@ -780,6 +780,8 @@ public class PaymentContext : DbContext
                 .HasFilter("\"RevokedAtUtc\" IS NULL").HasDatabaseName("IX_CompanyBankBinding_ActiveProfile");
             entity.HasIndex(x => x.BankConnectionAccountId).IsUnique()
                 .HasFilter("\"RevokedAtUtc\" IS NULL").HasDatabaseName("IX_CompanyBankBinding_ActiveBank");
+            entity.HasIndex(x => new { x.LegalEntityId, x.Id }).HasDatabaseName("IX_CompanyBankBinding_Company_History");
+            entity.HasIndex(x => x.BankConnectionAccountId, "CompanyBankBindingBankHistory").HasDatabaseName("IX_CompanyBankBinding_Bank_History");
             entity.ToTable(table => table.HasCheckConstraint("CK_CompanyBankBinding_RevocationTime",
                 "(\"RevokedAtUtc\" IS NULL AND \"RevocationMatchVersion\" IS NULL AND \"RevokedByUserId\" IS NULL AND \"RevokedByUserName\" IS NULL) OR (\"RevokedAtUtc\" IS NOT NULL AND \"RevokedAtUtc\" >= \"CreatedAtUtc\" AND \"RevocationMatchVersion\" IS NOT NULL)"));
         });

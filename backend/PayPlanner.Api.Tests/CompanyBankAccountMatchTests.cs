@@ -71,7 +71,7 @@ public sealed class CompanyBankAccountMatchTests(PostgreSqlModelTemplate templat
             await db.SaveChangesAsync(); var before = await SnapshotAsync(db);
             var report = Assert.IsType<CompanyBankAccountMatchReport>(await new CompanyBankAccountMatchService(db).ReadAsync(f.Base.Connection, default));
             var row = Assert.Single(report.Accounts);
-            Assert.Equal(f.Company, report.CompanyId); Assert.Matches("^bank-profile-match-v1:[A-F0-9]{64}$", report.Version);
+            Assert.Equal(f.Company, report.CompanyId); Assert.Matches("^bank-profile-match-v2:[A-F0-9]{64}$", report.Version);
             var group = Group(report, row);
             var status = mode switch { "bank-currency" or "missing-bik" => "InvalidBankIdentity", "duplicate-local" => "Ambiguous", "number" or "bik" or "profile-currency" or "different-currency" or "RUR" or "archive" or "missing-id" or "duplicate-id" or "bad-json" or "bad-flag" => "Missing", _ => "UniqueCandidate" };
             Assert.Equal(status, group?.ProfileMatchStatus ?? "InvalidBankIdentity");

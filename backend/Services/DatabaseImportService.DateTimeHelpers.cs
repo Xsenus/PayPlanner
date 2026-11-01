@@ -46,9 +46,10 @@ public sealed partial class DatabaseImportService
         return current.Message;
     }
 
-    private static Task SaveImportedChangesAsync(PaymentContext target, CancellationToken cancellationToken)
+    private static async Task SaveImportedChangesAsync(PaymentContext target, CancellationToken cancellationToken)
     {
+        await Companies.CompanyBankAccountBindingProfileGuard.ValidateTrackedAsync(target, cancellationToken);
         NormalizeTrackedDateTimes(target);
-        return target.SaveChangesAsync(cancellationToken);
+        await target.SaveChangesAsync(cancellationToken);
     }
 }

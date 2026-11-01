@@ -143,7 +143,10 @@ public sealed partial class SpreadsheetImportService
                     legalEntity.OrganizationForm = Truncate(BuildCounterpartyOrganizationForm(draft), 64);
                 }
 
-                legalEntity.BankAccountsJson = MergeLegalEntityBankAccounts(legalEntity.BankAccountsJson, draft);
+                var bankAccounts = MergeLegalEntityBankAccounts(legalEntity.BankAccountsJson, draft);
+                if (legalEntity.Id > 0 && !string.Equals(bankAccounts, legalEntity.BankAccountsJson, StringComparison.Ordinal))
+                    await Companies.CompanyBankAccountBindingProfileGuard.ValidateAsync(db, legalEntity.Id, bankAccounts, cancellationToken);
+                legalEntity.BankAccountsJson = bankAccounts;
                 legalEntity.Notes = MergeLegalEntityNotes(legalEntity.Notes, draft);
                 legalEntity.UpdatedAt = now;
             }

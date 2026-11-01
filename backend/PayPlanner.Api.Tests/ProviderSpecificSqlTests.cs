@@ -85,6 +85,9 @@ public class ProviderSpecificSqlTests
     [InlineData("print-defaults-lock-wrong-provider")]
     [InlineData("act-invoice-lock-without-nowait")]
     [InlineData("payment-attempt-without-nowait")]
+    [InlineData("payment-input-without-nowait")]
+    [InlineData("payment-input-wrong-provider")]
+    [InlineData("payment-input-without-transaction")]
     [InlineData("request-lock-without-nowait")]
     [InlineData("request-access-without-nowait")]
     [InlineData("upload-share-without-nowait")]
@@ -93,11 +96,40 @@ public class ProviderSpecificSqlTests
     [InlineData("deadline-lease-wrong-provider")]
     [InlineData("note-lease-without-nowait")]
     [InlineData("note-lease-wrong-provider")]
+    [InlineData("binding-share-without-nowait")]
+    [InlineData("binding-revoke-without-nowait")]
+    [InlineData("binding-wrong-provider")]
+    [InlineData("binding-stale-session")]
+    [InlineData("binding-foreign-money-lock")]
+    [InlineData("binding-guard-without-nowait")]
+    [InlineData("binding-guard-wrong-provider")]
+    [InlineData("binding-guard-unbounded")]
+    [InlineData("binding-guard-unparameterized")]
+    [InlineData("balance-without-nowait")]
+    [InlineData("balance-wrong-provider")]
+    [InlineData("balance-source-without-nowait")]
+    [InlineData("allocation-without-nowait")]
+    [InlineData("allocation-unbounded")]
+    [InlineData("overdue-without-nowait")]
+    [InlineData("advance-cursor-without-nowait")]
+    [InlineData("invoice-cancel-without-nowait")]
     public void ForUpdateRegistry_RejectsUnregisteredOrUnguardedSql(string mutation)
     {
         var root = FindRepositoryRoot();
         var relativePath = mutation switch
         {
+            "balance-without-nowait" or "balance-wrong-provider" => "backend/Services/Payments/BalanceApplicationLease.cs",
+            "balance-source-without-nowait" => "backend/Services/Payments/BalanceSourceMutationRules.cs",
+            "allocation-without-nowait" or "allocation-unbounded" => "backend/Services/MoneyOperationInvoiceAllocationService.cs",
+            "overdue-without-nowait" => "backend/Services/Notifications/NotificationService.PaymentOverdue.cs",
+            "advance-cursor-without-nowait" => "backend/Services/PaymentAdvanceReviewMonitoringService.cs",
+            "invoice-cancel-without-nowait" => "backend/Controllers/InvoicesController.cs",
+            "payment-input-without-nowait" or "payment-input-wrong-provider" or "payment-input-without-transaction"
+                => "backend/Services/Payments/PaymentCreateInputRules.cs",
+            "binding-share-without-nowait" or "binding-revoke-without-nowait" or "binding-wrong-provider" or "binding-stale-session" or "binding-foreign-money-lock"
+                => "backend/Services/Companies/CompanyBankAccountBindingService.cs",
+            "binding-guard-without-nowait" or "binding-guard-wrong-provider" or "binding-guard-unbounded" or "binding-guard-unparameterized"
+                => "backend/Services/Companies/CompanyBankAccountBindingProfileGuard.cs",
             "unregistered-owner" or "unregistered-share-owner" or "unregistered-key-share-owner"
                 or "unregistered-multiline-share-owner" => "backend/Controllers/UnexpectedLocksController.cs",
             "bulk-unparameterized" or "contract-root-unparameterized" or "policy-key-unparameterized"
@@ -116,6 +148,20 @@ public class ProviderSpecificSqlTests
             ? "" : File.ReadAllText(Path.Combine(root, relativePath));
         var changed = mutation switch
         {
+            "balance-without-nowait" or "balance-source-without-nowait" or "allocation-without-nowait" or "overdue-without-nowait" or "advance-cursor-without-nowait" or "invoice-cancel-without-nowait"
+                => original.Replace("FOR UPDATE NOWAIT", "FOR UPDATE", StringComparison.Ordinal),
+            "balance-wrong-provider" => original.Replace("if (db.Database.IsNpgsql())", "if (true)", StringComparison.Ordinal),
+            "allocation-unbounded" => original.Replace(".Take(MaximumRelatedPayments + 1)", ".Take(int.MaxValue)", StringComparison.Ordinal),
+            "payment-input-without-nowait" => original.Replace("FOR SHARE NOWAIT", "FOR SHARE", StringComparison.Ordinal),
+            "payment-input-wrong-provider" => original.Replace("if (!db.Database.IsNpgsql()) return;", "if (false) return;", StringComparison.Ordinal),
+            "payment-input-without-transaction" => original.Replace("if (db.Database.CurrentTransaction is null)", "if (false)", StringComparison.Ordinal),
+            "binding-share-without-nowait" => original.Replace("FOR SHARE NOWAIT", "FOR SHARE", StringComparison.Ordinal),
+            "binding-revoke-without-nowait" or "binding-guard-without-nowait" => original.Replace("FOR UPDATE NOWAIT", "FOR UPDATE", StringComparison.Ordinal),
+            "binding-wrong-provider" or "binding-guard-wrong-provider" => original.Replace("if (db.Database.IsNpgsql())", "if (true)", StringComparison.Ordinal),
+            "binding-stale-session" => original.Replace("actor.AuthTokenVersion != tokenVersion", "false", StringComparison.Ordinal),
+            "binding-foreign-money-lock" => original.Replace("if (lockedBank.Length == 0) return;", "if (false) return;", StringComparison.Ordinal),
+            "binding-guard-unbounded" => original.Replace("changes.Chunk(16)", "changes.Chunk(int.MaxValue)", StringComparison.Ordinal),
+            "binding-guard-unparameterized" => original.Replace("ANY({ids})", "ANY(ARRAY[1,2])", StringComparison.Ordinal),
             "unregistered-owner" => "SELECT 1 FOR UPDATE",
             "lease-without-nowait" => original.Replace("FOR UPDATE NOWAIT", "FOR UPDATE", StringComparison.Ordinal),
             "bulk-unparameterized" => original.Replace("ANY({visibleIds})", "ANY(1, 2)", StringComparison.Ordinal),
@@ -455,20 +501,36 @@ public class ProviderSpecificSqlTests
              """await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Users\" WHERE \"Id\" = ANY({userIds}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);"""], "FOR SHARE");
 
         var attemptSource = ReadSource("backend/Services/Payments/PaymentCreateAttemptLease.cs");
+        var actorStart = attemptSource.IndexOf("public async Task LockActorPermissionsAsync", StringComparison.Ordinal);
         var attemptStart = attemptSource.IndexOf("public async Task<PaymentCreateAttempt?> LockAttemptAsync", StringComparison.Ordinal);
-        var attemptEnd = attemptSource.IndexOf("public async Task LockSellerSelectionAsync", attemptStart, StringComparison.Ordinal);
+        Assert.True(actorStart >= 0 && attemptStart > actorStart);
+        var attemptEnd = attemptSource.IndexOf("public Task LockSellerSelectionAsync", attemptStart, StringComparison.Ordinal);
+        Assert.True(attemptEnd > attemptStart);
         var sellerStart = attemptEnd;
         var sellerEnd = attemptSource.IndexOf("public async Task LockPrimaryAsync", sellerStart, StringComparison.Ordinal);
         var primaryStart = sellerEnd;
         var primaryEnd = attemptSource.IndexOf("public async Task CommitAsync", primaryStart, StringComparison.Ordinal);
         Assert.True(attemptStart >= 0 && attemptEnd > attemptStart && sellerEnd > sellerStart && primaryEnd > primaryStart);
+        AssertOrdered(attemptSource[actorStart..attemptStart], "if (!db.Database.IsNpgsql()) return;", "SET LOCAL lock_timeout",
+            "FROM \\\"Users\\\"", "FROM \\\"Roles\\\"", "FROM \\\"RolePermissions\\\"", "FROM \\\"UserCompanyAccesses\\\"");
+        Approve("backend/Services/Payments/PaymentCreateAttemptLease.cs", attemptSource, "LockActorPermissionsAsync", actorStart, attemptStart,
+            ["""await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Users\" WHERE \"Id\" = {actorId} FOR SHARE NOWAIT", ct);""",
+             """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Roles\" WHERE \"Id\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {actorId}) FOR SHARE NOWAIT", ct);""",
+             """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"RolePermissions\" WHERE \"RoleId\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {actorId}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);""",
+             """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"UserId\" FROM \"UserCompanyAccesses\" WHERE \"UserId\" = {actorId} ORDER BY \"LegalEntityId\" FOR SHARE NOWAIT", ct);"""], "FOR SHARE");
         AssertOrdered(attemptSource[attemptStart..attemptEnd], "if (db.Database.IsNpgsql())", "{actorId} FOR UPDATE NOWAIT", "db.PaymentCreateAttempts.SingleOrDefaultAsync");
         Approve("backend/Services/Payments/PaymentCreateAttemptLease.cs", attemptSource, "LockAttemptAsync", attemptStart, attemptEnd,
             ["""await db.Database.SqlQuery<Guid>($"SELECT \"Id\" AS \"Value\" FROM \"PaymentCreateAttempts\" WHERE \"Id\" = {id} AND \"ActorUserId\" = {actorId} FOR UPDATE NOWAIT").ToArrayAsync(ct);"""]);
-        AssertOrdered(attemptSource[sellerStart..sellerEnd], "if (!db.Database.IsNpgsql()) return;", "ANY({keys}) ORDER BY", "if (companyId.HasValue)", "if (branchId.HasValue)");
-        Approve("backend/Services/Payments/PaymentCreateAttemptLease.cs", attemptSource, "LockSellerSelectionAsync", sellerStart, sellerEnd,
+        Assert.Contains("=> PaymentCreateInputRules.LockSellerSelectionAsync(db, companyId, branchId, ct);", attemptSource[sellerStart..sellerEnd], StringComparison.Ordinal);
+        var inputSource = ReadSource("backend/Services/Payments/PaymentCreateInputRules.cs");
+        var inputStart = inputSource.IndexOf("internal static async Task LockSellerSelectionAsync", StringComparison.Ordinal);
+        Assert.True(inputStart >= 0);
+        var inputEnd = inputSource.IndexOf("public static string? Validate", inputStart, StringComparison.Ordinal);
+        Assert.True(inputEnd > inputStart);
+        AssertOrdered(inputSource[inputStart..inputEnd], "if (db.Database.CurrentTransaction is null)", "if (!db.Database.IsNpgsql()) return;", "ANY({keys}) ORDER BY", "if (companyId.HasValue)", "if (branchId.HasValue)");
+        Approve("backend/Services/Payments/PaymentCreateInputRules.cs", inputSource, "LockSellerSelectionAsync", inputStart, inputEnd,
             ["""await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"LegalEntities\" WHERE \"Id\" = {companyId.Value} FOR UPDATE NOWAIT").ToArrayAsync(ct);"""]);
-        Approve("backend/Services/Payments/PaymentCreateAttemptLease.cs", attemptSource, "LockSellerSelectionAsync", sellerStart, sellerEnd,
+        Approve("backend/Services/Payments/PaymentCreateInputRules.cs", inputSource, "LockSellerSelectionAsync", inputStart, inputEnd,
             ["""await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"SystemSettings\" WHERE \"Key\" = ANY({keys}) ORDER BY \"Id\" FOR SHARE NOWAIT").ToArrayAsync(ct);""",
              """await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"CompanyBranches\" WHERE \"Id\" = {branchId.Value} FOR SHARE NOWAIT").ToArrayAsync(ct);"""], "FOR SHARE");
         AssertOrdered(attemptSource[primaryStart..primaryEnd], "if (db.Database.IsNpgsql())", "{id} FOR UPDATE NOWAIT");
@@ -535,9 +597,120 @@ public class ProviderSpecificSqlTests
              """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"SalesRequests\" WHERE \"Id\" = {salesRequestId.Value} FOR SHARE NOWAIT", ct);""",
              """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Users\" WHERE \"Id\" IN (SELECT \"ResponsibleUserId\" FROM \"SalesRequests\" WHERE \"Id\" = {salesRequestId.Value} UNION SELECT \"CreatedByUserId\" FROM \"SalesRequests\" WHERE \"Id\" = {salesRequestId.Value}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);"""], "FOR SHARE");
 
-        Assert.Equal(33, approved.Count(statement => statement.Contains("FOR UPDATE", StringComparison.Ordinal)));
-        Assert.Equal(42, approved.Count(statement => statement.Contains("FOR SHARE", StringComparison.Ordinal)));
-        Assert.Equal(75, approved.Count);
+        var bindingSource = ReadSource("backend/Services/Companies/CompanyBankAccountBindingService.cs");
+        var revokeStart = bindingSource.IndexOf("public Task<CompanyBankBindingReceipt> RevokeAsync", StringComparison.Ordinal);
+        var revokeEnd = bindingSource.IndexOf("private sealed record Actor", revokeStart, StringComparison.Ordinal);
+        Assert.True(revokeStart >= 0 && revokeEnd > revokeStart);
+        AssertOrdered(bindingSource[revokeStart..revokeEnd], "if (db.Database.IsNpgsql())", "FOR UPDATE NOWAIT", "var binding = await db.CompanyBankAccountBindings");
+        Approve("backend/Services/Companies/CompanyBankAccountBindingService.cs", bindingSource, "RevokeAsync", revokeStart, revokeEnd,
+            ["""await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"CompanyBankAccountBindings\" WHERE \"Id\" = {bindingId} AND \"LegalEntityId\" = {companyId} FOR UPDATE NOWAIT").ToArrayAsync(ct);"""]);
+        var bindingRunStart = bindingSource.IndexOf("private async Task<CompanyBankBindingReceipt> RunAsync", StringComparison.Ordinal);
+        var bindingRunEnd = bindingSource.IndexOf("private async Task LockBankSourceAsync", bindingRunStart, StringComparison.Ordinal);
+        Assert.True(bindingRunStart >= 0 && bindingRunEnd > bindingRunStart);
+        AssertOrdered(bindingSource[bindingRunStart..bindingRunEnd], "DocumentSellerLease.RunSerializableAsync", "lease.AdmitCleanTracker()",
+            "if (db.Database.IsNpgsql())", "FROM \\\"Users\\\"", "FROM \\\"Roles\\\"", "IsApprovedUserAdminAsync", "AuthSessionClaims.TryGetTokenVersion",
+            "actor.AuthTokenVersion != tokenVersion", "lease.LockRegistryAsync", "lease.LockCompanyRowAsync", "if (db.Database.IsNpgsql())", "FROM \\\"BankConnections\\\"");
+        Approve("backend/Services/Companies/CompanyBankAccountBindingService.cs", bindingSource, "RunAsync", bindingRunStart, bindingRunEnd,
+            ["""await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"Users\" WHERE \"Id\" = {id} FOR SHARE NOWAIT").ToArrayAsync(ct);""",
+             """await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"Roles\" WHERE \"Id\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {id}) FOR SHARE NOWAIT").ToArrayAsync(ct);""",
+             """await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"BankConnections\" WHERE \"Id\" = {connectionId} FOR SHARE NOWAIT").ToArrayAsync(ct);"""], "FOR SHARE");
+        var sourceEnd = bindingSource.IndexOf("private async Task TouchCompanyAsync", bindingRunEnd, StringComparison.Ordinal);
+        Assert.True(sourceEnd > bindingRunEnd);
+        AssertOrdered(bindingSource[bindingRunEnd..sourceEnd], "if (!db.Database.IsNpgsql()) return;", "FROM \\\"BankConnectionAccounts\\\"", "if (lockedBank.Length == 0) return;", "FROM \\\"MoneyAccounts\\\"");
+        Approve("backend/Services/Companies/CompanyBankAccountBindingService.cs", bindingSource, "LockBankSourceAsync", bindingRunEnd, sourceEnd,
+            ["""var lockedBank = await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"BankConnectionAccounts\" WHERE \"Id\" = {bankId} AND \"BankConnectionId\" = {connectionId} FOR SHARE NOWAIT").ToArrayAsync(ct);""",
+             """await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"MoneyAccounts\" WHERE \"BankConnectionAccountId\" = {bankId} ORDER BY \"Id\" FOR SHARE NOWAIT").ToArrayAsync(ct);"""], "FOR SHARE");
+
+        var bindingGuardSource = ReadSource("backend/Services/Companies/CompanyBankAccountBindingProfileGuard.cs");
+        var trackedStart = bindingGuardSource.IndexOf("public static async Task ValidateTrackedAsync", StringComparison.Ordinal);
+        var singleStart = bindingGuardSource.IndexOf("public static async Task ValidateAsync", trackedStart, StringComparison.Ordinal);
+        var bindingsReadStart = bindingGuardSource.IndexOf("private static async Task<BindingIdentity[]> ReadBindingsAsync", singleStart, StringComparison.Ordinal);
+        Assert.True(trackedStart >= 0 && singleStart > trackedStart && bindingsReadStart > singleStart);
+        AssertOrdered(bindingGuardSource[trackedStart..singleStart], "EntityState.Modified && x.Entity.Id > 0", "if (db.Database.CurrentTransaction is null)",
+            "changes.Chunk(16)", "if (db.Database.IsNpgsql())", "ANY({ids}) ORDER BY", "ReadBindingsAsync", "ValidateCandidate");
+        Approve("backend/Services/Companies/CompanyBankAccountBindingProfileGuard.cs", bindingGuardSource, "ValidateTrackedAsync", trackedStart, singleStart,
+            ["""await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"LegalEntities\" WHERE \"Id\" = ANY({ids}) ORDER BY \"Id\" FOR UPDATE NOWAIT").ToArrayAsync(ct);"""]);
+        AssertOrdered(bindingGuardSource[singleStart..bindingsReadStart], "if (db.Database.CurrentTransaction is null)", "if (db.Database.IsNpgsql())",
+            "{companyId} FOR UPDATE NOWAIT", "ReadBindingsAsync", "ValidateCandidate");
+        Approve("backend/Services/Companies/CompanyBankAccountBindingProfileGuard.cs", bindingGuardSource, "ValidateAsync", singleStart, bindingsReadStart,
+            ["""await db.Database.SqlQuery<int>($"SELECT \"Id\" AS \"Value\" FROM \"LegalEntities\" WHERE \"Id\" = {companyId} FOR UPDATE NOWAIT").ToArrayAsync(ct);"""]);
+
+        var cancellationStart = invoiceSource.IndexOf("private Task LockInvoiceCancellationAggregateAsync", StringComparison.Ordinal);
+        Assert.True(cancellationStart >= 0);
+        var cancellationEnd = invoiceSource.IndexOf("private async Task<bool> HasInvoiceCancellationCompensationAsync", cancellationStart, StringComparison.Ordinal);
+        Assert.True(cancellationEnd > cancellationStart);
+        AssertOrdered(invoiceSource[cancellationStart..cancellationEnd], "_db.Database.IsNpgsql()", "{invoiceId} ORDER BY", ": Task.CompletedTask");
+        Approve("backend/Controllers/InvoicesController.cs", invoiceSource, "LockInvoiceCancellationAggregateAsync", cancellationStart, cancellationEnd,
+            ["""? _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Payments\" WHERE \"InvoiceId\" = {invoiceId} ORDER BY \"Id\" FOR UPDATE NOWAIT", ct)"""]);
+
+        var allocationSource = ReadSource("backend/Services/MoneyOperationInvoiceAllocationService.cs");
+        var allocationStart = allocationSource.IndexOf("public static async Task ApplyAsync", StringComparison.Ordinal);
+        Assert.True(allocationStart >= 0);
+        var allocationEnd = allocationSource.IndexOf("private static async Task<List<Payment>> ReloadGraphAsync", allocationStart, StringComparison.Ordinal);
+        Assert.True(allocationEnd > allocationStart);
+        AssertOrdered(allocationSource[allocationStart..allocationEnd], "if (db.Database.CurrentTransaction is null)", ".Take(MaximumRelatedPayments + 1)",
+            "ids.Length == 0 || ids.Length > MaximumRelatedPayments", "if (db.Database.IsNpgsql())", "ANY ({ids}) ORDER BY", "else if (db.Database.IsSqlite())", "else throw new NotSupportedException");
+        Approve("backend/Services/MoneyOperationInvoiceAllocationService.cs", allocationSource, "ApplyAsync", allocationStart, allocationEnd,
+            ["""await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Payments\" WHERE \"Id\" = ANY ({ids}) ORDER BY \"Id\" FOR UPDATE NOWAIT", ct);"""]);
+
+        var monitoringSource = ReadSource("backend/Services/PaymentAdvanceReviewMonitoringService.cs");
+        var monitoringStart = monitoringSource.IndexOf("private async Task<PaymentAdvanceReviewMonitoringResult> RunOnceAsync", StringComparison.Ordinal);
+        Assert.True(monitoringStart >= 0);
+        var monitoringEnd = monitoringSource.IndexOf("private async Task<int> DispatchIsolatedAsync", monitoringStart, StringComparison.Ordinal);
+        Assert.True(monitoringEnd > monitoringStart);
+        AssertOrdered(monitoringSource[monitoringStart..monitoringEnd], "BalanceApplicationLease.BeginSystemAsync", "if (db.Database.IsNpgsql())", "{CursorSettingKey} FOR UPDATE NOWAIT", "lease.LockPaymentsAsync");
+        Approve("backend/Services/PaymentAdvanceReviewMonitoringService.cs", monitoringSource, "RunOnceAsync", monitoringStart, monitoringEnd,
+            ["""await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"SystemSettings\" WHERE \"Key\" = {CursorSettingKey} FOR UPDATE NOWAIT", cancellationToken);"""]);
+
+        var overdueSource = ReadSource("backend/Services/Notifications/NotificationService.PaymentOverdue.cs");
+        var overdueStart = overdueSource.IndexOf("public async Task NotifyOverdueForEventAsync", StringComparison.Ordinal);
+        Assert.True(overdueStart >= 0);
+        var overdueEnd = overdueSource.IndexOf("private async Task<bool> IsOverdueRecipientCurrentAsync", overdueStart, StringComparison.Ordinal);
+        Assert.True(overdueEnd > overdueStart);
+        AssertOrdered(overdueSource[overdueStart..overdueEnd], "BalanceApplicationLease.BeginAsync", "lease.LockPaymentAsync", "if (_context.Database.IsNpgsql())",
+            "FROM \\\"PaymentOverdueNotificationOutboxes\\\"", "IsOverdueRecipientCurrentAsync", "lease.CommitAsync");
+        Approve("backend/Services/Notifications/NotificationService.PaymentOverdue.cs", overdueSource, "NotifyOverdueForEventAsync", overdueStart, overdueEnd,
+            ["""await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"PaymentOverdueNotificationOutboxes\" WHERE \"Id\" = {item.Id} FOR UPDATE NOWAIT", ct);"""]);
+
+        var balanceSource = ReadSource("backend/Services/Payments/BalanceApplicationLease.cs");
+        var balanceStart = balanceSource.IndexOf("private static async Task<BalanceApplicationLease> BeginCoreAsync", StringComparison.Ordinal);
+        Assert.True(balanceStart >= 0);
+        var ownedStart = balanceSource.IndexOf("public async Task LockOwnedPaymentAsync", balanceStart, StringComparison.Ordinal);
+        var paymentStart = balanceSource.IndexOf("public async Task LockPaymentAsync", ownedStart, StringComparison.Ordinal);
+        var paymentsStart = balanceSource.IndexOf("public async Task LockPaymentsAsync", paymentStart, StringComparison.Ordinal);
+        var balanceEnd = balanceSource.IndexOf("public async Task CommitAsync", paymentsStart, StringComparison.Ordinal);
+        Assert.True(ownedStart > balanceStart && paymentStart > ownedStart && paymentsStart > paymentStart && balanceEnd > paymentsStart);
+        AssertOrdered(balanceSource[balanceStart..ownedStart], "db.Database.CurrentTransaction is not null || db.ChangeTracker.HasChanges()", "if (db.Database.IsNpgsql())",
+            "IsolationLevel.Serializable", "if (actorId.HasValue)", "FROM \\\"Users\\\"", "FROM \\\"Roles\\\"", "FROM \\\"RolePermissions\\\"", "FROM \\\"UserCompanyAccesses\\\"",
+            "else if (db.Database.IsSqlite())", "deferred: false", "else throw new NotSupportedException");
+        Approve("backend/Services/Payments/BalanceApplicationLease.cs", balanceSource, "BeginCoreAsync", balanceStart, ownedStart,
+            ["""await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Users\" WHERE \"Id\" = {actorId.Value} FOR SHARE NOWAIT", ct);""",
+             """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Roles\" WHERE \"Id\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {actorId.Value}) FOR SHARE NOWAIT", ct);""",
+             """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"RolePermissions\" WHERE \"RoleId\" = (SELECT \"RoleId\" FROM \"Users\" WHERE \"Id\" = {actorId.Value}) ORDER BY \"Id\" FOR SHARE NOWAIT", ct);""",
+             """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"UserId\" FROM \"UserCompanyAccesses\" WHERE \"UserId\" = {actorId.Value} ORDER BY \"LegalEntityId\" FOR SHARE NOWAIT", ct);"""], "FOR SHARE");
+        AssertOrdered(balanceSource[ownedStart..paymentStart], "if (!db.Database.IsNpgsql()) return;", "if (clientId.HasValue)", "{clientId.Value} AND", "{legalEntityId!.Value} AND");
+        Approve("backend/Services/Payments/BalanceApplicationLease.cs", balanceSource, "LockOwnedPaymentAsync", ownedStart, paymentStart,
+            ["""await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Payments\" WHERE \"Id\" = {id} AND \"ClientId\" = {clientId.Value} AND \"LegalEntityId\" IS NULL FOR UPDATE NOWAIT", ct);""",
+             """await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Payments\" WHERE \"Id\" = {id} AND \"LegalEntityId\" = {legalEntityId!.Value} AND \"ClientId\" IS NULL FOR UPDATE NOWAIT", ct);"""]);
+        AssertOrdered(balanceSource[paymentStart..paymentsStart], "if (db.Database.IsNpgsql())", "{id} FOR UPDATE NOWAIT");
+        Approve("backend/Services/Payments/BalanceApplicationLease.cs", balanceSource, "LockPaymentAsync", paymentStart, paymentsStart,
+            ["""await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Payments\" WHERE \"Id\" = {id} FOR UPDATE NOWAIT", ct);"""]);
+        AssertOrdered(balanceSource[paymentsStart..balanceEnd], "if (ids.Length > 0 && db.Database.IsNpgsql())", "ANY ({ids}) ORDER BY");
+        Approve("backend/Services/Payments/BalanceApplicationLease.cs", balanceSource, "LockPaymentsAsync", paymentsStart, balanceEnd,
+            ["""await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Payments\" WHERE \"Id\" = ANY ({ids}) ORDER BY \"Id\" FOR UPDATE NOWAIT", ct);"""]);
+
+        var sourceRules = ReadSource("backend/Services/Payments/BalanceSourceMutationRules.cs");
+        var sourceRulesStart = sourceRules.IndexOf("public static async Task<ClientBalanceTransaction?> LoadAsync", StringComparison.Ordinal);
+        Assert.True(sourceRulesStart >= 0);
+        var sourceRulesEnd = sourceRules.IndexOf("public static async Task ValidateAsync", sourceRulesStart, StringComparison.Ordinal);
+        Assert.True(sourceRulesEnd > sourceRulesStart);
+        AssertOrdered(sourceRules[sourceRulesStart..sourceRulesEnd], "if (db.Database.CurrentTransaction is null", "IsolationLevel.Serializable", "if (db.Database.IsNpgsql())", "{paymentId} FOR UPDATE NOWAIT", "else if (!db.Database.IsSqlite()) throw new NotSupportedException");
+        Approve("backend/Services/Payments/BalanceSourceMutationRules.cs", sourceRules, "LoadAsync", sourceRulesStart, sourceRulesEnd,
+            ["""await db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Payments\" WHERE \"Id\" = {paymentId} FOR UPDATE NOWAIT", ct);"""]);
+
+        Assert.Equal(45, approved.Count(statement => statement.Contains("FOR UPDATE", StringComparison.Ordinal)));
+        Assert.Equal(55, approved.Count(statement => statement.Contains("FOR SHARE", StringComparison.Ordinal)));
+        Assert.Equal(100, approved.Count);
 
         // Exact identities include owner, method range, line and complete SQL call.
         // An extra statement in any other production file/method remains a failure.

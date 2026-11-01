@@ -936,7 +936,7 @@
 | GET | api/legal-entities/{id:int}/case-finance-summaries | LegalEntitiesController | GetCaseFinanceSummaries | backend/Controllers/LegalEntitiesController.cs:2100 | [Authorize] | да | нет |
 | POST | api/legal-entities/suggest | LegalEntitiesController | Suggest | backend/Controllers/LegalEntitiesController.cs:2205 | [Authorize] | да | нет |
 | PUT | api/legal-entities/{id:int} | LegalEntitiesController | Update | backend/Controllers/LegalEntitiesController.cs:2231 | [Authorize] | да | docs/pay-33-36-implementation-log-2026-10-09.md |
-| POST | api/legal-entities/migrate-legacy-addresses | LegalEntitiesController | MigrateLegacyAddresses | backend/Controllers/LegalEntitiesController.cs:2469 | [Authorize]; [Authorize(Policy = "Admin")] | да | нет |
+| POST | api/legal-entities/migrate-legacy-addresses | LegalEntitiesController | MigrateLegacyAddresses | backend/Controllers/LegalEntitiesController.cs:2471 | [Authorize]; [Authorize(Policy = "Admin")] | да | нет |
 | GET |  | LegalEntityBalancesController | GetSummary | backend/Controllers/LegalEntityBalancesController.cs:56 | не задано | да | нет |
 | GET | transactions | LegalEntityBalancesController | GetTransactions | backend/Controllers/LegalEntityBalancesController.cs:77 | не задано | да | docs/bank-integrations-api-verification-2026-10-09.md, docs/delete-behavior-contract-2026-06-10.md |
 | GET | applications/{requestId:guid} | LegalEntityBalancesController | GetApplication | backend/Controllers/LegalEntityBalancesController.cs:115 | не задано | да | docs/balance-application-cancel-fence-checkpoint-2026-10-31.md, docs/balance-application-managed-route-checkpoint-2026-10-31.md, docs/balance-application-recovery-checkpoint-2026-10-31.md |
