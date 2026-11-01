@@ -89,8 +89,8 @@ describe('Contact editor operation owner', () => {
  });
  it('contact editor held selection: saving ignores a previous select callback and retries the original type', async () => {
   const pending = deferred<ContactDirectoryItemDto>(); vi.mocked(apiService.updateExternalContact).mockReturnValueOnce(pending.promise);
-  const p = props(); render(<ContactEditorModal {...p} />);
-  const type = screen.getAllByRole('combobox')[0] as HTMLSelectElement;
+  const p = props(); const view = render(<ContactEditorModal {...p} />);
+  const type = view.container.querySelector('select')!;
   fireEvent.click(screen.getByRole('button', { name: /Сохранить/ }));
   fireEvent.change(type, { target: { value: 'Organization' } });
   await act(async () => pending.reject(new Error('Повторите сохранение')));

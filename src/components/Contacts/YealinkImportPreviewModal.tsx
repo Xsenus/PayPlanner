@@ -193,9 +193,10 @@ export function YealinkImportPreviewModal({
                           ) : (
                             <SystemSelect
                               value={currentAction}
-                              onChange={(event) =>
-                                onChangeDecision(detail.rowId, event.target.value as YealinkContactImportDecisionAction)
-                              }
+                              disabled={importing}
+                              onChange={(event) => {
+                                if (!importing) onChangeDecision(detail.rowId, event.target.value as YealinkContactImportDecisionAction);
+                              }}
                               className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
                             >
                               {isExisting(detail) ? (

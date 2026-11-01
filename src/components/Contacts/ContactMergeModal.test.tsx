@@ -48,7 +48,7 @@ describe('contact merge dialog', () => {
     await waitFor(() => expect(apiService.previewContactMerge).toHaveBeenCalledWith({
       primarySourceType: 'client', primarySourceId: 1,
       duplicateSourceType: 'client', duplicateSourceId: 2,
-    }));
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) })));
     expect(await screen.findByText(/Будет перенесено связей: 3/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Объединить и архивировать' }));
 
@@ -72,7 +72,7 @@ describe('contact merge dialog', () => {
     await waitFor(() => expect(apiService.previewContactMerge).toHaveBeenCalledWith({
       primarySourceType: 'client', primarySourceId: 1,
       duplicateSourceType: 'external', duplicateSourceId: 2,
-    }));
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) })));
     expect((screen.getByRole('button', { name: 'Объединить и архивировать' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
@@ -90,7 +90,7 @@ describe('contact merge dialog', () => {
     await waitFor(() => expect(apiService.previewContactMerge).toHaveBeenCalledWith({
       primarySourceType: 'client', primarySourceId: 2,
       duplicateSourceType: 'external', duplicateSourceId: 1,
-    }));
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) })));
     expect((screen.getByRole('button', { name: 'Объединить и архивировать' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
@@ -115,7 +115,7 @@ describe('contact merge dialog', () => {
     await waitFor(() => expect(apiService.previewContactMerge).toHaveBeenCalledWith({
       primarySourceType: 'external', primarySourceId: 1,
       duplicateSourceType: 'client', duplicateSourceId: 2,
-    }));
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) })));
     expect(await screen.findByText(/новую полную карточку и перенесёт на неё связи/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Объединить и архивировать' }));
     await waitFor(() => expect(apiService.mergeContacts).toHaveBeenCalledTimes(1));

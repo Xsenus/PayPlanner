@@ -46,7 +46,9 @@ import { ContactMergeModal } from './ContactMergeModal';
 
 type EditorState = ({ mode: 'create-external'; contact: null } | { mode: 'edit-client'; contact: ContactDirectoryItemDto } | { mode: 'edit-external'; contact: ContactDirectoryItemDto }) & { scope: string; owner: DocumentDeliveryRead };
 
-type YealinkImportState = {
+type ActionView = { id: number; scope: string; owner: DocumentDeliveryRead };
+
+type YealinkImportState = ActionView & {
   file: File;
   preview: YealinkContactImportResultDto;
   decisions: Record<number, YealinkContactImportDecisionAction>;
@@ -153,8 +155,6 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
   const [storedSummaryContacts, setSummaryContacts] = useState<ContactDirectoryItemDto[]>([]);
   const [rawLoading, setLoading] = useState(true);
   const [rawRefreshing, setRefreshing] = useState(false);
-  const [downloadingXml, setDownloadingXml] = useState(false);
-  const [importingXml, setImportingXml] = useState(false);
   const [storedError, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [viewScope, setViewScope] = useState<string | null>(null);
@@ -165,6 +165,15 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
   const refreshing = currentView && rawRefreshing;
   const error = currentView ? storedError : null;
   const editorScope = JSON.stringify([directoryScope, scope]);
+  const [readRejectionEpoch, setReadRejectionEpoch] = useState(0);
+  const actionOwner = useDocumentDeliveryOwner(JSON.stringify([editorScope, readRejectionEpoch]));
+  const importOwner = useDocumentDeliveryOwner(actionOwner.scope);
+  const downloadOwner = useDocumentDeliveryOwner(actionOwner.scope);
+  const promotionOwner = useDocumentDeliveryOwner(actionOwner.scope);
+  const pendingImport = useRef<DocumentDeliveryRead | null>(null);
+  const importingXml = importOwner.busy;
+  const downloadingXml = downloadOwner.busy;
+  const canUseAdminTools = canViewDirectory && admin;
   const activeEditor = editor?.scope === editorScope && editor.owner.isCurrent() ? editor : null;
   const { legalEntities, loading: entitiesLoading, error: entitiesError, refresh: refreshEntities } = useLegalEntities({ enabled: canViewDirectory && (admin || permissions.legalEntities.canView), ownerScope: directoryScope });
   const loadResponsibles = useCallback((signal: AbortSignal) => apiService.getActResponsibles({ signal }), []);
@@ -172,7 +181,17 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
   const responsibles = responsibleSnapshot.value;
 
   const [yealinkImport, setYealinkImport] = useState<YealinkImportState | null>(null);
-  const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergeOpen, setMergeOpen] = useState<ActionView | null>(null);
+  const activeImport = canUseAdminTools && yealinkImport?.scope === actionOwner.scope && yealinkImport.owner.isCurrent() ? yealinkImport : null;
+  const activeMerge = canUseAdminTools && mergeOpen?.scope === actionOwner.scope && mergeOpen.owner.isCurrent() ? mergeOpen : null;
+  const importPreviewRef = useRef(activeImport);
+  const mergeViewRef = useRef(activeMerge);
+  importPreviewRef.current = activeImport;
+  mergeViewRef.current = activeMerge;
+  const actionSequence = useRef(0);
+  const fileChooserOwner = useRef<DocumentDeliveryRead | null>(null);
+  const actionReads = useRef<{ import: AbortController | null; download: AbortController | null }>({ import: null, download: null });
+  const actionConfirmations = useRef(new Set<AbortController>());
   const [page, setPage] = useState(() => (
     typeof savedViewState?.page === 'number' && Number.isInteger(savedViewState.page) && savedViewState.page > 0
       ? savedViewState.page
@@ -235,6 +254,32 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
     hasLoadedRef.current = false; setViewScope(null); setContacts([]); setSummaryContacts([]); setError(null); setEditor(null);
   }, [directoryScope]);
 
+  useLayoutEffect(() => {
+    const reads = actionReads.current;
+    const confirmations = actionConfirmations.current;
+    reads.import?.abort(); reads.download?.abort();
+    for (const controller of confirmations) controller.abort();
+    fileChooserOwner.current = null;
+    pendingImport.current = null;
+    importPreviewRef.current = null; mergeViewRef.current = null;
+    setYealinkImport(null); setMergeOpen(null);
+    return () => {
+      reads.import?.abort(); reads.download?.abort();
+      for (const controller of confirmations) controller.abort();
+    };
+  }, [actionOwner.scope]);
+
+  const confirmAction = async (options: Exclude<Parameters<typeof confirm>[0], string>) => {
+    const owner = actionOwner.capture(); if (!owner) return false;
+    const controller = new AbortController(); actionConfirmations.current.add(controller);
+    try {
+      const approved = await confirm({ ...options, signal: controller.signal });
+      return approved && owner.isCurrent() && !controller.signal.aborted;
+    } finally {
+      actionConfirmations.current.delete(controller); controller.abort();
+    }
+  };
+
   const loadDirectory = useCallback(async () => {
     const owner = canViewDirectory ? captureDirectory() : null;
     if (!owner) return;
@@ -282,11 +327,15 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
 
       setContacts(data);
       setSummaryContacts(summaryData);
+      return true;
     } catch (nextError) {
       if (requestId !== requestIdRef.current || controller.signal.aborted || !owner.isCurrent()) {
         return;
       }
-      if (isHttpErrorStatus(nextError, 401) || isHttpErrorStatus(nextError, 403)) { setContacts([]); setSummaryContacts([]); setEditor(null); }
+      if (isHttpErrorStatus(nextError, 401) || isHttpErrorStatus(nextError, 403)) {
+        setContacts([]); setSummaryContacts([]); setEditor(null);
+        setReadRejectionEpoch(previous => previous + 1);
+      }
       setError(extractDisplayErrorMessage(nextError, 'Не удалось загрузить контакты'));
     } finally {
       if (activeRequestControllerRef.current === controller) {
@@ -301,6 +350,7 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
   }, [debouncedSearch, includeInactive, legalEntityId, scope, syncOnly, canViewDirectory, captureDirectory, directoryScope]);
 
   const handleScopeChange = (nextScope: ContactScope) => {
+    if (!canViewDirectory || !actionOwner.capture()) return;
     setScope(nextScope);
     setPage(1);
     onScopeChange?.(nextScope);
@@ -373,7 +423,7 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
 
   const handleDelete = async (contact: ContactDirectoryItemDto) => {
     const owner = canDeleteContact ? captureDirectory() : null; if (!owner) return;
-    const approved = await confirm({
+    const approved = await confirmAction({
       title: 'Удалить контакт',
       description: `Удалить контакт "${contact.fullName}" из справочника?`,
       confirmLabel: 'Удалить',
@@ -400,148 +450,153 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
     }
   };
 
+  const canPromote = (contact: ContactDirectoryItemDto) => canViewDirectory && (admin || (contact.contactType === 'Organization'
+    ? permissions.clients.canView && permissions.legalEntities.canCreate : permissions.clients.canCreate));
+
+  const openContact = (contact: ContactDirectoryItemDto) => {
+    if (!actionOwner.capture()) return;
+    const current = contacts.find(item => item.sourceType === contact.sourceType && item.sourceId === contact.sourceId);
+    if (!current) return;
+    const clientId = current.sourceType === 'client' ? current.sourceId : current.linkedClientId;
+    const entityId = current.sourceType === 'legal' ? current.sourceId : current.linkedLegalEntityId;
+    if (clientId && (admin || permissions.clients.canView)) onOpenClient?.(clientId);
+    else if (entityId && (admin || permissions.legalEntities.canView)) onOpenLegalEntity?.(entityId);
+  };
+
   const handlePromote = async (contact: ContactDirectoryItemDto) => {
+    if (!canPromote(contact)) return;
+    const operation = promotionOwner.begin('promote'); if (!operation) return;
     const target = contact.contactType === 'Organization' ? 'legalEntity' : 'client';
     const role: ContactRole = contact.roles?.includes('Supplier') ? 'Supplier' : 'Client';
-    const approved = await confirm({
-      title: 'Создать полноценную карточку?',
-      description: contact.contactType === 'Organization'
-        ? `Для «${contact.fullName}» будет создано юридическое лицо. Сотрудники останутся привязаны к организации.`
-        : `Для «${contact.fullName}» будет создана карточка клиента с уже заполненными контактными данными.`,
-      confirmLabel: 'Создать карточку',
-      cancelLabel: 'Отмена',
-      variant: 'primary',
-    });
-    if (!approved) return;
-
     try {
+      const approved = await confirmAction({
+        title: 'Создать полноценную карточку?',
+        description: contact.contactType === 'Organization'
+          ? `Для «${contact.fullName}» будет создано юридическое лицо. Сотрудники останутся привязаны к организации.`
+          : `Для «${contact.fullName}» будет создана карточка клиента с уже заполненными контактными данными.`,
+        confirmLabel: 'Создать карточку', cancelLabel: 'Отмена', variant: 'primary',
+      });
+      if (!approved || !operation.isCurrent()) return;
       const saved = await apiService.promoteExternalContact(contact.sourceId, { target, role });
+      if (!operation.isCurrent()) return;
       toast.success('Полноценная карточка создана', 'Контакты');
-      await loadDirectory();
-      if (saved.linkedClientId && onOpenClient) onOpenClient(saved.linkedClientId);
-      if (saved.linkedLegalEntityId && onOpenLegalEntity) onOpenLegalEntity(saved.linkedLegalEntityId);
+      const refreshed = await loadDirectory();
+      if (!refreshed || !operation.isCurrent()) return;
+      if (saved.linkedClientId && (admin || permissions.clients.canView)) onOpenClient?.(saved.linkedClientId);
+      else if (saved.linkedLegalEntityId && (admin || permissions.legalEntities.canView)) onOpenLegalEntity?.(saved.linkedLegalEntityId);
     } catch (nextError) {
-      toast.error(extractDisplayErrorMessage(nextError, 'Не удалось создать полноценную карточку'), 'Контакты');
-    }
+      if (operation.isCurrent()) toast.error(extractDisplayErrorMessage(nextError, 'Не удалось создать полноценную карточку'), 'Контакты');
+    } finally { operation.finish(); }
   };
 
   const handleDownloadXml = async () => {
-    setDownloadingXml(true);
+    if (!canUseAdminTools) return;
+    const operation = downloadOwner.begin('download'); if (!operation) return;
+    const controller = new AbortController(); actionReads.current.download = controller;
     try {
-      const response = await apiService.downloadYealinkContactsXml();
+      const response = await apiService.downloadYealinkContactsXml({ signal: controller.signal });
+      if (!operation.isCurrent() || controller.signal.aborted) return;
       const href = window.URL.createObjectURL(response.blob);
-      const link = document.createElement('a');
-      link.href = href;
-      link.download = response.fileName || 'RemotePhonebook.xml';
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(href);
-      toast.success('Yealink XML подготовлен', 'Контакты');
+      try {
+        const link = document.createElement('a'); link.href = href; link.download = response.fileName || 'RemotePhonebook.xml';
+        document.body.appendChild(link);
+        try { link.click(); } finally { link.remove(); }
+      } finally { window.URL.revokeObjectURL(href); }
+      if (operation.isCurrent()) toast.success('Yealink XML подготовлен', 'Контакты');
     } catch (nextError) {
-      toast.error(extractDisplayErrorMessage(nextError, 'Не удалось скачать XML'), 'Контакты');
+      if (operation.isCurrent()) toast.error(extractDisplayErrorMessage(nextError, 'Не удалось скачать XML'), 'Контакты');
     } finally {
-      setDownloadingXml(false);
+      if (actionReads.current.download === controller) actionReads.current.download = null;
+      operation.finish();
     }
+  };
+
+  const handleChooseImport = () => {
+    if (!canUseAdminTools || importingXml || pendingImport.current?.isCurrent()) return;
+    fileChooserOwner.current = actionOwner.capture();
+    if (fileChooserOwner.current) importInputRef.current?.click();
   };
 
   const handleImportXmlFile = async (file: File | null | undefined) => {
-    if (!file) {
-      return;
-    }
-
-    setImportingXml(true);
+    const chooser = fileChooserOwner.current; fileChooserOwner.current = null;
+    if (!file || !canUseAdminTools || !chooser?.isCurrent()) return;
+    const operation = importOwner.begin('preview'); if (!operation) return;
+    pendingImport.current = operation;
+    const input = importInputRef.current;
+    const controller = new AbortController(); actionReads.current.import = controller;
     try {
       toast.info('Читаю XML и проверяю совпадения по телефонам...', 'Контакты');
-      const preview = await apiService.importYealinkContactsXml(file, { dryRun: true });
+      const preview = await apiService.importYealinkContactsXml(file, { dryRun: true, signal: controller.signal });
+      if (!operation.isCurrent() || controller.signal.aborted) return;
       const decisions = preview.details.reduce<Record<number, YealinkContactImportDecisionAction>>((acc, detail) => {
-        if (detail.action === 'Existing' || detail.action === 'SkippedExisting') {
-          acc[detail.rowId] = 'skip';
-        } else if (detail.action === 'WouldCreateExternal' || detail.action === 'WouldCreate') {
-          acc[detail.rowId] = 'createExternal';
-        }
+        if (detail.action === 'Existing' || detail.action === 'SkippedExisting') acc[detail.rowId] = 'skip';
+        else if (detail.action === 'WouldCreateExternal' || detail.action === 'WouldCreate') acc[detail.rowId] = 'createExternal';
         return acc;
       }, {});
-
-      setYealinkImport({ file, preview, decisions });
-      toast.success(
-        `Файл прочитан: ${preview.scanned} записей, новых к созданию ${preview.created}, найдено в CRM ${preview.skippedExisting}.`,
-        'Контакты',
-      );
+      const owner = actionOwner.capture(); if (!owner) return;
+      setYealinkImport({ id: ++actionSequence.current, scope: actionOwner.scope, owner, file, preview, decisions });
+      toast.success(`Файл прочитан: ${preview.scanned} записей, новых к созданию ${preview.created}, найдено в CRM ${preview.skippedExisting}.`, 'Контакты');
     } catch (nextError) {
-      toast.error(extractDisplayErrorMessage(nextError, 'Не удалось импортировать Yealink XML'), 'Контакты');
+      if (operation.isCurrent()) toast.error(extractDisplayErrorMessage(nextError, 'Не удалось импортировать Yealink XML'), 'Контакты');
     } finally {
-      setImportingXml(false);
-      if (importInputRef.current) {
-        importInputRef.current.value = '';
-      }
+      if (actionReads.current.import === controller) actionReads.current.import = null;
+      if (operation.isCurrent() && input) input.value = '';
+      if (pendingImport.current === operation) pendingImport.current = null;
+      operation.finish();
     }
   };
 
+  const currentImport = () => activeImport && actionOwner.capture() && importPreviewRef.current?.id === activeImport.id ? importPreviewRef.current : null;
   const handleChangeImportDecision = (rowId: number, action: YealinkContactImportDecisionAction) => {
-    setYealinkImport((current) =>
-      current
-        ? {
-            ...current,
-            decisions: {
-              ...current.decisions,
-              [rowId]: action,
-            },
-          }
-        : current,
-    );
+    const current = currentImport(); if (!current || importingXml || pendingImport.current?.isCurrent()) return;
+    const detail = current.preview.details.find(item => item.rowId === rowId); if (!detail) return;
+    const existing = detail.action === 'Existing' || detail.action === 'SkippedExisting';
+    const fresh = detail.action === 'WouldCreateExternal' || detail.action === 'WouldCreate';
+    if (!(existing && (action === 'skip' || action === 'updateExisting')) && !(fresh && ['skip', 'createExternal', 'createClient'].includes(action))) return;
+    setYealinkImport(previous => previous?.id === current.id ? { ...previous, decisions: { ...previous.decisions, [rowId]: action } } : previous);
   };
 
   const handleCloseImportPreview = () => {
-    if (importingXml) {
-      return;
-    }
-
-    setYealinkImport(null);
+    if (!currentImport() || importingXml || pendingImport.current?.isCurrent()) return;
+    importPreviewRef.current = null; setYealinkImport(null);
     toast.info('Импорт Yealink XML отменён.', 'Контакты');
   };
 
   const handleConfirmImportPreview = async () => {
-    if (!yealinkImport) {
-      return;
-    }
-
-    const decisions = Object.entries(yealinkImport.decisions).map(([rowId, action]) => ({
-      rowId: Number(rowId),
-      action,
-    }));
-    const createCount = decisions.filter((item) => item.action === 'createExternal' || item.action === 'createClient').length;
-    const updateCount = decisions.filter((item) => item.action === 'updateExisting').length;
-    const skipCount = decisions.filter((item) => item.action === 'skip').length;
-
-    const approved = await confirm({
-      title: 'Импортировать выбранные контакты?',
-      description: `Будет создано: ${createCount}. Обновлено: ${updateCount}. Оставлено без изменений или пропущено: ${skipCount}.`,
-      confirmLabel: 'Импортировать',
-      cancelLabel: 'Отмена',
-      variant: 'primary',
-    });
-
-    if (!approved) {
-      toast.info('Импорт Yealink XML отменён.', 'Контакты');
-      return;
-    }
-
-    setImportingXml(true);
+    const current = currentImport(); if (!current) return;
+    const operation = importOwner.begin('import'); if (!operation) return;
+    pendingImport.current = operation;
+    const isCurrent = () => operation.isCurrent() && importPreviewRef.current?.id === current.id;
+    const decisions = Object.entries(current.decisions).map(([rowId, action]) => ({ rowId: Number(rowId), action }));
+    const createCount = decisions.filter(item => item.action === 'createExternal' || item.action === 'createClient').length;
+    const updateCount = decisions.filter(item => item.action === 'updateExisting').length;
+    const skipCount = decisions.filter(item => item.action === 'skip').length;
     try {
-      const result = await apiService.importYealinkContactsXml(yealinkImport.file, { decisions });
-      toast.success(
-        `Импорт завершён: создано ${result.created}, обновлено ${result.updated}, оставлено ${result.skippedExisting}, пропущено ${result.skippedByUser}.`,
-        'Контакты',
-      );
-      setYealinkImport(null);
-      void loadDirectory();
+      const approved = await confirmAction({
+        title: 'Импортировать выбранные контакты?',
+        description: `Будет создано: ${createCount}. Обновлено: ${updateCount}. Оставлено без изменений или пропущено: ${skipCount}.`,
+        confirmLabel: 'Импортировать', cancelLabel: 'Отмена', variant: 'primary',
+      });
+      if (!isCurrent()) return;
+      if (!approved) { toast.info('Импорт Yealink XML отменён.', 'Контакты'); return; }
+      const result = await apiService.importYealinkContactsXml(current.file, { decisions });
+      if (!isCurrent()) return;
+      toast.success(`Импорт завершён: создано ${result.created}, обновлено ${result.updated}, оставлено ${result.skippedExisting}, пропущено ${result.skippedByUser}.`, 'Контакты');
+      importPreviewRef.current = null; setYealinkImport(null); void loadDirectory();
     } catch (nextError) {
-      toast.error(extractDisplayErrorMessage(nextError, 'Не удалось импортировать выбранные контакты'), 'Контакты');
+      if (isCurrent()) toast.error(extractDisplayErrorMessage(nextError, 'Не удалось импортировать выбранные контакты'), 'Контакты');
     } finally {
-      setImportingXml(false);
+      if (pendingImport.current === operation) pendingImport.current = null;
+      operation.finish();
     }
   };
+
+  const openMerge = () => {
+    const owner = canUseAdminTools ? actionOwner.capture() : null; if (!owner) return;
+    const next = { id: ++actionSequence.current, scope: actionOwner.scope, owner };
+    mergeViewRef.current = next; setMergeOpen(next);
+  };
+  const currentMerge = () => activeMerge && actionOwner.capture() && mergeViewRef.current?.id === activeMerge.id;
 
   const renderContactCell = (contact: ContactDirectoryItemDto, column: ContactColumnKey) => {
     switch (column) {
@@ -631,22 +686,22 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
           <Pencil className="h-4 w-4" />
         </button>
       ) : null}
-      {contact.sourceType === 'external' && !contact.hasFullProfile ? (
-        <button type="button" onClick={() => void handlePromote(contact)} className="rounded-xl border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 transition hover:bg-blue-50">
+      {canPromote(contact) && contact.sourceType === 'external' && !contact.hasFullProfile ? (
+        <button type="button" disabled={promotionOwner.busy} onClick={() => void handlePromote(contact)} className="rounded-xl border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 transition hover:bg-blue-50">
           Оформить
         </button>
       ) : null}
       {contact.sourceType === 'client' && onOpenClient ? (
-        <button type="button" onClick={() => onOpenClient(contact.sourceId)} className="rounded-xl border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50">Открыть</button>
+        <button type="button" onClick={() => openContact(contact)} className="rounded-xl border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50">Открыть</button>
       ) : null}
       {contact.sourceType === 'legal' && onOpenLegalEntity ? (
-        <button type="button" onClick={() => onOpenLegalEntity(contact.sourceId)} className="rounded-xl border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">Открыть</button>
+        <button type="button" onClick={() => openContact(contact)} className="rounded-xl border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">Открыть</button>
       ) : null}
       {contact.sourceType === 'external' && contact.linkedClientId && onOpenClient ? (
-        <button type="button" onClick={() => onOpenClient(contact.linkedClientId!)} className="rounded-xl border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50">Открыть</button>
+        <button type="button" onClick={() => openContact(contact)} className="rounded-xl border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50">Открыть</button>
       ) : null}
       {contact.sourceType === 'external' && contact.linkedLegalEntityId && onOpenLegalEntity ? (
-        <button type="button" onClick={() => onOpenLegalEntity(contact.linkedLegalEntityId!)} className="rounded-xl border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">Открыть</button>
+        <button type="button" onClick={() => openContact(contact)} className="rounded-xl border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">Открыть</button>
       ) : null}
       {canDeleteContact && contact.sourceType === 'external' && !contact.hasFullProfile ? (
         <button type="button" onClick={() => void handleDelete(contact)} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-rose-200 text-rose-600 transition hover:bg-rose-50" aria-label={`Удалить ${contact.fullName}`}>
@@ -699,11 +754,11 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
           </div>
 
           <div className="flex flex-wrap gap-3">
-            {isAdmin() ? (
+            {canUseAdminTools ? (
               <>
                 <button
                   type="button"
-                  onClick={() => setMergeOpen(true)}
+                  onClick={openMerge}
                   className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100"
                 >
                   <GitMerge className="h-4 w-4" /> Объединить дубли
@@ -717,7 +772,7 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
                 />
                 <button
                   type="button"
-                  onClick={() => importInputRef.current?.click()}
+                  onClick={handleChooseImport}
                   disabled={importingXml}
                   className="inline-flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
@@ -1041,18 +1096,18 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
         onSaved={handleSaved}
       />
 
-      {yealinkImport ? (
+      {activeImport ? (
         <YealinkImportPreviewModal
-          fileName={yealinkImport.file.name}
-          preview={yealinkImport.preview}
-          decisions={yealinkImport.decisions}
+          fileName={activeImport.file.name}
+          preview={activeImport.preview}
+          decisions={activeImport.decisions}
           importing={importingXml}
           onChangeDecision={handleChangeImportDecision}
           onClose={handleCloseImportPreview}
           onConfirm={() => void handleConfirmImportPreview()}
         />
       ) : null}
-      {mergeOpen ? <ContactMergeModal onClose={() => setMergeOpen(false)} onMerged={() => void loadDirectory()} /> : null}
+      {activeMerge ? <ContactMergeModal key={activeMerge.id} ownerScope={actionOwner.scope} readOwner={actionOwner} enabled={canUseAdminTools} onClose={() => { if (currentMerge()) { mergeViewRef.current = null; setMergeOpen(null); } }} onMerged={() => { if (currentMerge()) void loadDirectory(); }} /> : null}
     </div>
   );
 }

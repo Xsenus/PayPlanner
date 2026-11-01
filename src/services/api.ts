@@ -4429,10 +4429,12 @@ export class ApiService {
     });
   }
 
-  async previewContactMerge(payload: ContactMergeRequestDto) {
+  async previewContactMerge(payload: ContactMergeRequestDto, options?: { signal?: AbortSignal }) {
     return this.request<ContactMergePreviewDto>('/contacts/merge/preview', {
       method: 'POST',
       body: JSON.stringify(payload),
+      signal: options?.signal,
+      cache: 'no-store',
     });
   }
 
@@ -4475,11 +4477,13 @@ export class ApiService {
     return this.request<void>(`/contacts/external/${id}`, { method: 'DELETE' });
   }
 
-  async downloadYealinkContactsXml() {
+  async downloadYealinkContactsXml(options?: { signal?: AbortSignal }) {
     const token = getAuthToken();
     const response = await fetch(`${API_BASE_URL}/contacts/exports/yealink`, {
       method: 'GET',
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      signal: options?.signal,
+      cache: 'no-store',
     });
 
     if (!response.ok) {
@@ -4497,7 +4501,7 @@ export class ApiService {
 
   async importYealinkContactsXml(
     file: File,
-    options: boolean | { dryRun?: boolean; decisions?: YealinkContactImportDecisionDto[] } = false,
+    options: boolean | { dryRun?: boolean; decisions?: YealinkContactImportDecisionDto[]; signal?: AbortSignal } = false,
   ) {
     const payload = new FormData();
     payload.append('file', file);
@@ -4513,6 +4517,7 @@ export class ApiService {
     return this.request<YealinkContactImportResultDto>(`/contacts/imports/yealink${query}`, {
       method: 'POST',
       body: payload,
+      signal: dryRun && typeof options !== 'boolean' ? options.signal : undefined,
     });
   }
 
