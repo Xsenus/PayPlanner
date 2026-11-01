@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CaseModal } from './CaseModal';
 import { apiService } from '../../services/api';
 import type { ClientCase, ClientCaseDocument } from '../../types';
+import { documentCopyTestSession } from '../../test/documentCopySession';
 
 const dialogMock = vi.hoisted(() => ({
   confirm: vi.fn(),
@@ -63,8 +64,96 @@ function createCase(overrides: Partial<ClientCase> = {}): ClientCase {
     ...overrides,
   } as ClientCase;
 }
+function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: Error) => void; const promise = new Promise<T>((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; }
 
 describe('CaseModal', () => {
+  it.each(['ctrlKey', 'metaKey'] as const)('case draft baseline: %s saves current fields rather than the earlier keyboard snapshot', async key => {
+    const onSave = vi.fn(); render(<CaseModal isOpen caseData={createCase({ feeAmount: 10, courtStateFeeAmount: 5 })} onClose={vi.fn()} onSave={onSave} />); await act(async () => {});
+    fireEvent.change(screen.getByLabelText('Номер дела'), { target: { value: 'НОВЫЙ-2026' } });
+    fireEvent.change(screen.getByLabelText('Сумма гонорара'), { target: { value: '123.45' } });
+    fireEvent.change(screen.getByLabelText('Сумма иска'), { target: { value: '12.34' } });
+    fireEvent.change(screen.getByLabelText('Присуждено судом'), { target: { value: '56.78' } });
+    fireEvent.change(screen.getByLabelText('Госпошлина по делу'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Крайний срок'), { target: { value: '2026-12-03' } });
+    fireEvent.change(screen.getByLabelText('Стратегия и план действий'), { target: { value: 'Новая позиция' } });
+    fireEvent.keyDown(screen.getByLabelText('Название дела'), { key: 'Enter', [key]: true }); await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ caseNumber: 'НОВЫЙ-2026', feeAmount: 123.45, courtClaimAmount: 12.34, courtAwardedAmount: 56.78, courtStateFeeAmount: null, clearCourtStateFeeAmount: true, dueDate: '2026-12-03', strategy: 'Новая позиция' }));
+  });
+  it('case draft baseline: keyboard save respects a newly revoked edit permission', async () => {
+    const props = { isOpen: true, caseData: createCase(), onClose: vi.fn(), onSave: vi.fn() }; const view = render(<CaseModal {...props} />); await act(async () => {}); view.rerender(<CaseModal {...props} allowEdit={false} />);
+    fireEvent.keyDown(screen.getByLabelText('Название дела'), { key: 'Enter', ctrlKey: true }); await act(async () => {}); expect(props.onSave).not.toHaveBeenCalled(); await screen.findByText('Недостаточно прав для редактирования дела.');
+  });
+  it.each(['save', 'close'] as const)('case draft baseline: keyboard %s uses the current parent callback', async kind => {
+    const props = { isOpen: true, caseData: createCase(), onClose: vi.fn(), onSave: vi.fn() }; const latest = { onClose: vi.fn(), onSave: vi.fn() }; const view = render(<CaseModal {...props} />); await act(async () => {}); view.rerender(<CaseModal {...props} {...latest} />);
+    fireEvent.keyDown(screen.getByLabelText('Название дела'), kind === 'save' ? { key: 'Enter', metaKey: true } : { key: 'Escape' }); await act(async () => {});
+    expect(props.onSave).not.toHaveBeenCalled(); expect(props.onClose).not.toHaveBeenCalled(); expect(kind === 'save' ? latest.onSave : latest.onClose).toHaveBeenCalledOnce();
+  });
+  it('case draft baseline: rapid keyboard saves dispatch only one pending save', async () => {
+    const onSave = vi.fn().mockReturnValue(new Promise<void>(() => {})); render(<CaseModal isOpen caseData={createCase()} onClose={vi.fn()} onSave={onSave} />); await act(async () => {});
+    act(() => { fireEvent.keyDown(screen.getByLabelText('Название дела'), { key: 'Enter', ctrlKey: true }); fireEvent.keyDown(screen.getByLabelText('Название дела'), { key: 'Enter', metaKey: true }); }); expect(onSave).toHaveBeenCalledOnce();
+  });
+  it.each(['success', 'error'] as const)('case draft boundary: closing suppresses the pending save %s', async outcome => {
+    const pending = deferred<void>(); const props = { isOpen: true, caseData: createCase(), onClose: vi.fn(), onSave: vi.fn().mockReturnValue(pending.promise) }; render(<CaseModal {...props} />); await act(async () => {});
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' })); await waitFor(() => expect(props.onSave).toHaveBeenCalledOnce()); fireEvent.click(screen.getByRole('button', { name: 'Закрыть' }));
+    await act(async () => { if (outcome === 'success') pending.resolve(undefined); else pending.reject(new Error('Прежняя ошибка')); }); expect(props.onClose).toHaveBeenCalledOnce(); expect(screen.queryByText('Прежняя ошибка')).toBeNull();
+    fireEvent.keyDown(screen.getByLabelText('Название дела'), { key: 'Enter', ctrlKey: true }); expect(props.onSave).toHaveBeenCalledOnce();
+  });
+  it.each(['login', 'actor', 'logout'] as const)('case draft boundary: %s prevents a keyboard write before render', async mode => {
+    const session = documentCopyTestSession();
+    try { const onSave = vi.fn(); render(<CaseModal isOpen caseData={createCase()} onClose={vi.fn()} onSave={onSave} />); await act(async () => {}); session.replace(mode); fireEvent.keyDown(screen.getByLabelText('Название дела'), { key: 'Enter', ctrlKey: true }); await act(async () => {}); expect(onSave).not.toHaveBeenCalled(); }
+    finally { session.restore(); }
+  });
+  it('case draft boundary: a previous case save cannot close the new case or block its save', async () => {
+    const pending = deferred<void>(); const props = { isOpen: true, caseData: createCase(), onClose: vi.fn(), onSave: vi.fn().mockReturnValueOnce(pending.promise).mockResolvedValue(undefined) }; const view = render(<CaseModal {...props} />); await act(async () => {});
+    fireEvent.keyDown(screen.getByLabelText('Название дела'), { key: 'Enter', ctrlKey: true }); view.rerender(<CaseModal {...props} caseData={createCase({ id: 2, title: 'Другое дело' })} />); await act(async () => pending.resolve(undefined)); expect(props.onClose).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByLabelText('Название дела'), { key: 'Enter', ctrlKey: true }); await waitFor(() => expect(props.onSave).toHaveBeenCalledTimes(2)); expect(props.onSave).toHaveBeenLastCalledWith(expect.objectContaining({ title: 'Другое дело' }));
+  });
+  it.each(['sync', 'async'] as const)('case draft boundary: a current %s failure permits one explicit retry', async mode => {
+    const onSave = vi.fn().mockResolvedValue(undefined); if (mode === 'sync') onSave.mockImplementationOnce(() => { throw new Error('Повторите сохранение'); }); else onSave.mockRejectedValueOnce(new Error('Повторите сохранение'));
+    render(<CaseModal isOpen caseData={createCase()} onClose={vi.fn()} onSave={onSave} />); await act(async () => {}); fireEvent.keyDown(screen.getByLabelText('Название дела'), { key: 'Enter', ctrlKey: true }); await screen.findByText('Повторите сохранение'); expect(onSave).toHaveBeenCalledOnce(); fireEvent.click(screen.getByRole('button', { name: 'Сохранить' })); await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2));
+  });
+  it('case draft boundary: an existing save error is hidden when edit authority changes', async () => {
+    const props = { isOpen: true, caseData: createCase(), onClose: vi.fn(), onSave: vi.fn().mockRejectedValue(new Error('Прежний доступ')) }; const view = render(<CaseModal {...props} />); await act(async () => {}); fireEvent.keyDown(screen.getByLabelText('Название дела'), { key: 'Enter', ctrlKey: true }); await screen.findByText('Прежний доступ'); view.rerender(<CaseModal {...props} allowEdit={false} />); expect(screen.queryByText('Прежний доступ')).toBeNull();
+  });
+  it.each(['close', 'rights'] as const)('case draft boundary: %s cancels a pending delete confirmation', async mode => {
+    const pending = deferred<boolean>(); dialogMock.confirm.mockReturnValue(pending.promise); const props = { isOpen: true, caseData: createCase(), onClose: vi.fn(), onSave: vi.fn(), onDelete: vi.fn() }; const view = render(<CaseModal {...props} />); await act(async () => {}); fireEvent.click(screen.getByRole('button', { name: 'Удалить' })); const signal = dialogMock.confirm.mock.calls[0][0].signal as AbortSignal;
+    fireEvent.keyDown(screen.getByLabelText('Название дела'), { key: 'Enter', ctrlKey: true }); expect(props.onSave).not.toHaveBeenCalled();
+    if (mode === 'close') fireEvent.click(screen.getByRole('button', { name: 'Закрыть' })); else view.rerender(<CaseModal {...props} allowEdit={false} />);
+    expect(signal.aborted).toBe(true); await act(async () => pending.resolve(true)); expect(props.onDelete).not.toHaveBeenCalled();
+  });
+  it('case draft boundary: an ordinary delete confirms once and closes its own window', async () => {
+    const props = { isOpen: true, caseData: createCase(), onClose: vi.fn(), onSave: vi.fn(), onDelete: vi.fn().mockResolvedValue(undefined) }; render(<CaseModal {...props} />); await act(async () => {}); fireEvent.click(screen.getByRole('button', { name: 'Удалить' })); await waitFor(() => expect(props.onClose).toHaveBeenCalledOnce()); expect(props.onDelete).toHaveBeenCalledOnce(); expect(dialogMock.confirm).toHaveBeenCalledOnce();
+  });
+  it('case draft boundary: current delete cancellation unlocks the save action', async () => {
+    dialogMock.confirm.mockResolvedValue(false); const props = { isOpen: true, caseData: createCase(), onClose: vi.fn(), onSave: vi.fn(), onDelete: vi.fn() }; render(<CaseModal {...props} />); await act(async () => {}); fireEvent.click(screen.getByRole('button', { name: 'Удалить' })); await waitFor(() => expect((screen.getByRole('button', { name: 'Сохранить' }) as HTMLButtonElement).disabled).toBe(false)); fireEvent.keyDown(screen.getByLabelText('Название дела'), { key: 'Enter', metaKey: true }); await waitFor(() => expect(props.onSave).toHaveBeenCalledOnce()); expect(props.onDelete).not.toHaveBeenCalled();
+  });
+  it('case draft boundary: keys outside the case window cannot save or close it', async () => {
+    const props = { isOpen: true, caseData: createCase(), onClose: vi.fn(), onSave: vi.fn() }; render(<CaseModal {...props} />); await act(async () => {}); fireEvent.keyDown(window, { key: 'Enter', ctrlKey: true }); fireEvent.keyDown(window, { key: 'Escape' }); await act(async () => {}); expect(props.onSave).not.toHaveBeenCalled(); expect(props.onClose).not.toHaveBeenCalled();
+  });
+  it.each(['composition', 'repeat'] as const)('case draft boundary: ignores %s keyboard submission', async kind => {
+    const onSave = vi.fn(); render(<CaseModal isOpen caseData={createCase()} onClose={vi.fn()} onSave={onSave} />); await act(async () => {}); fireEvent.keyDown(screen.getByLabelText('Название дела'), { key: 'Enter', ctrlKey: true, isComposing: kind === 'composition', repeat: kind === 'repeat' }); await act(async () => {}); expect(onSave).not.toHaveBeenCalled();
+  });
+  it('case draft boundary: focus starts in the title and stays in the window with Tab', async () => {
+    render(<CaseModal isOpen caseData={createCase()} onClose={vi.fn()} onSave={vi.fn()} />); await act(async () => {}); expect(document.activeElement).toBe(screen.getByLabelText('Название дела'));
+    const first = screen.getByRole('button', { name: 'Закрыть' }); const last = screen.getByRole('button', { name: 'Сохранить' }); first.focus(); fireEvent.keyDown(first, { key: 'Tab', shiftKey: true }); expect(document.activeElement).toBe(last); fireEvent.keyDown(last, { key: 'Tab' }); expect(document.activeElement).toBe(first);
+  });
+  it.each(['-1', '12.345'])('case draft boundary: keyboard validation rejects current court amount %s', async amount => {
+    const onSave = vi.fn(); render(<CaseModal isOpen caseData={createCase()} onClose={vi.fn()} onSave={onSave} />); await act(async () => {}); fireEvent.change(screen.getByLabelText('Сумма иска'), { target: { value: amount } }); fireEvent.keyDown(screen.getByLabelText('Название дела'), { key: 'Enter', ctrlKey: true }); await screen.findByText('Судебные суммы укажите неотрицательным числом с точностью до копеек.'); expect(onSave).not.toHaveBeenCalled();
+  });
+  it.each(['Escape', 'Tab', 'Enter'])('case popup boundary: %s in the calendar does not act on the case window', async key => {
+    const props = { isOpen: true, caseData: createCase(), onClose: vi.fn(), onSave: vi.fn() }; render(<CaseModal {...props} />); await act(async () => {});
+    const trigger = screen.getByRole('button', { name: 'Выбрать: Крайний срок' }); fireEvent.click(trigger); const nextMonth = screen.getByRole('button', { name: 'Следующий месяц' }); nextMonth.focus();
+    fireEvent.keyDown(key === 'Escape' ? trigger : nextMonth, { key, ctrlKey: key === 'Enter' }); await act(async () => {}); expect(props.onSave).not.toHaveBeenCalled(); expect(props.onClose).not.toHaveBeenCalled();
+    if (key === 'Escape') expect(screen.queryByRole('dialog', { name: 'Выбор даты' })).toBeNull(); else { expect(screen.getByRole('dialog', { name: 'Выбор даты' })).toBeTruthy(); expect(document.activeElement).toBe(nextMonth); }
+  });
+  it('case popup boundary: a background case cannot receive keyboard save behind another dialog', async () => {
+    const first = vi.fn(); const second = vi.fn(); render(<><CaseModal isOpen caseData={createCase()} onClose={vi.fn()} onSave={first} /><CaseModal isOpen caseData={createCase({ id: 2 })} onClose={vi.fn()} onSave={second} /></>); await act(async () => {});
+    const titles = screen.getAllByLabelText('Название дела'); fireEvent.keyDown(titles[0], { key: 'Enter', ctrlKey: true }); expect(first).not.toHaveBeenCalled(); expect(second).not.toHaveBeenCalled(); fireEvent.keyDown(titles[1], { key: 'Enter', ctrlKey: true }); await waitFor(() => expect(second).toHaveBeenCalledOnce());
+  });
+  it.each(['ctrlKey', 'metaKey'] as const)('case date shortcut: %s on a closed date control saves instead of opening the calendar', async modifier => {
+    const onSave = vi.fn(); render(<CaseModal isOpen caseData={createCase()} onClose={vi.fn()} onSave={onSave} />); await act(async () => {});
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Выбрать: Крайний срок' }), { key: 'Enter', [modifier]: true }); await waitFor(() => expect(onSave).toHaveBeenCalledOnce()); expect(screen.queryByRole('dialog', { name: 'Выбор даты' })).toBeNull();
+  });
   it.each(['retired', 'uploaded'] as const)('handles explicit %s proof without resetting unsaved position or transmitting a file', async (outcome) => {
     const pending = { uploadKey: '11111111-1111-4111-8111-111111111111', fileName: 'own.pdf', status: 'waiting' as const,
       documentId: null, version: null, sha256: null, contentType: null, requestedDocumentKey: null, documentKey: null,

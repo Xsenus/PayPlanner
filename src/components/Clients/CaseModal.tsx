@@ -8,11 +8,14 @@ import { CasePositionTemplatePicker } from '../Cases/CasePositionTemplatePicker'
 import { CourtRecoveryPanel } from '../Cases/CourtRecoveryPanel';
 import { ExecutiveWritDocumentUpload } from '../Cases/ExecutiveWritDocumentUpload';
 import { CaseDocumentUploadStatusPanel } from '../Cases/CaseDocumentUploadStatusPanel';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { Download, ExternalLink, FileText, Link2, Plus, RotateCw, Trash2, Upload, X } from 'lucide-react';
 import type { ActResponsible, ClientCase, ClientCaseActivity, ClientCaseDocument, ClientCaseDocumentTemplate, ClientCaseFinanceSummary, ClientCaseRelatedParty, LegalEntitySummary } from '../../types';
 import { useDialog } from '../../hooks/useDialog';
+import { useModalFocusTrap } from '../../hooks/useModalFocusTrap';
+import { useDocumentDeliveryOwner, type DocumentDeliveryRead } from '../../hooks/useDocumentDeliveryOwner';
+import { awaitOwnedUiResult, StaleUiOperationError } from '../../utils/StaleUiOperationError';
 import { apiService, type ContactDirectoryItemDto } from '../../services/api';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { downloadBlob } from '../../utils/downloadBlob';
@@ -273,6 +276,18 @@ export function CaseModal({
   canCreateTasks = false,
 }: CaseModalProps) {
   const { confirm, prompt } = useDialog();
+  const caseActionOwner = useDocumentDeliveryOwner(JSON.stringify([isOpen, caseData.id, caseData.clientId, caseData.legalEntityId, allowEdit, canViewFinance]));
+  const modalRef = useRef<HTMLDivElement>(null);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  const deleteConfirmation = useRef<AbortController | null>(null);
+  const handleClose = () => {
+    if (!isOpen || !caseActionOwner.capture()) return;
+    caseActionOwner.invalidate(); deleteConfirmation.current?.abort(); onClose();
+  };
+  const trapFocus = useModalFocusTrap(modalRef, isOpen, handleClose, titleInputRef);
+  useEffect(() => {
+    return () => { deleteConfirmation.current?.abort(); };
+  }, [caseActionOwner.scope]);
   const [timeZoneId, setTimeZoneId] = useState(() => normalizeUserTimeZoneId());
   const [title, setTitle] = useState(caseData.title ?? '');
   const [description, setDescription] = useState(caseData.description ?? '');
@@ -350,8 +365,13 @@ export function CaseModal({
     () => filterCaseDocumentTemplatesByCaseType(documentTemplates, caseType),
     [documentTemplates, caseType],
   );
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const saving = caseActionOwner.busy;
+  const [errorState, setErrorState] = useState<{ owner: DocumentDeliveryRead; message: string } | null>(null);
+  const error = errorState?.owner.isCurrent() ? errorState.message : null;
+  const setError = (message: string | null) => {
+    const owner = caseActionOwner.capture(); if (!owner) return;
+    setErrorState(message ? { owner, message } : null);
+  };
   const [activity, setActivity] = useState<ClientCaseActivity>({
     lastViewedAt: caseData.lastViewedAt ?? null,
     lastViewedByUserId: caseData.lastViewedByUserId ?? null,
@@ -495,8 +515,7 @@ export function CaseModal({
     setRelatedPartySourceKey('');
     setRelatedPartyLegalEntityId('');
     setRelatedPartyRole('Участник');
-    setError(null);
-    setSaving(false);
+    setErrorState(null);
   }, [caseData, isOpen]);
 
   const refreshDocuments = useCallback(async () => {
@@ -684,19 +703,6 @@ export function CaseModal({
     };
   }, [canUseContactRelatedParties, canUseLegalEntityRelatedParties, caseData.id, isOpen]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'enter') {
-        void handleSave();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, title, description, status]);
-
   const applyCalculatedProceduralDeadlines = (decisionDate = courtDecisionAt) => {
     if (!decisionDate) return;
     setAppealDeadlineAt(addMonthsToDateInput(decisionDate, 1));
@@ -769,6 +775,7 @@ export function CaseModal({
   };
 
   const handleSave = async () => {
+    if (!isOpen || !caseActionOwner.capture()) return;
     if (!allowEdit) {
       setError('Недостаточно прав для редактирования дела.');
       return;
@@ -779,7 +786,7 @@ export function CaseModal({
       setError(v);
       return;
     }
-    setSaving(true);
+    const operation = caseActionOwner.begin('save'); if (!operation) return;
     setError(null);
     try {
       const patch: Partial<ClientCase> = {
@@ -839,28 +846,31 @@ export function CaseModal({
           ? ''
           : activity.inactivityRemindersDisabledReason?.trim(),
       };
-      await onSave(patch);
-      onClose();
+      await awaitOwnedUiResult(() => Promise.resolve(onSave(patch)), operation.isCurrent);
+      handleClose();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (operation.isCurrent() && !(e instanceof StaleUiOperationError)) setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setSaving(false);
+      operation.finish();
     }
   };
 
   const handleDelete = async () => {
-    if (!onDelete) return;
-    const ok = await confirm({ title: 'Подтверждение удаления', description: 'Удалить это дело? Действие необратимо.', confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' });
-    if (!ok) return;
-    setSaving(true);
+    if (!onDelete || !isOpen || !caseActionOwner.capture()) return;
+    if (!allowEdit) { setError('Недостаточно прав для редактирования дела.'); return; }
+    const operation = caseActionOwner.begin('delete'); if (!operation) return;
+    const controller = new AbortController(); deleteConfirmation.current = controller;
     setError(null);
     try {
-      await onDelete();
-      onClose();
+      const ok = await awaitOwnedUiResult(() => confirm({ signal: controller.signal, title: 'Подтверждение удаления', description: 'Удалить это дело? Действие необратимо.', confirmLabel: 'Удалить', cancelLabel: 'Отмена', variant: 'danger' }), operation.isCurrent);
+      if (!ok) return;
+      await awaitOwnedUiResult(() => Promise.resolve(onDelete()), operation.isCurrent);
+      handleClose();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (operation.isCurrent() && !(e instanceof StaleUiOperationError)) setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setSaving(false);
+      if (deleteConfirmation.current === controller) deleteConfirmation.current = null;
+      operation.finish();
     }
   };
 
@@ -1123,18 +1133,33 @@ export function CaseModal({
   const incomePaid = financeSummary?.incomePaid ?? 0;
   const incomeOutstanding = financeSummary?.incomeOutstanding ?? Math.max(0, incomeTotal - incomePaid);
   const daysSinceActivity = getDaysSince(activity.lastViewedAt ?? caseData.lastViewedAt);
+  const ownsKeyboard = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.nativeEvent.isComposing || !(event.target instanceof Node) || !event.currentTarget.contains(event.target)) return false;
+    const popups = document.querySelectorAll('[role="dialog"], [role="alertdialog"], [role="listbox"]');
+    return popups[popups.length - 1] === event.currentTarget;
+  };
 
   const modal = (
     <div className={`fixed inset-0 ${overlayClassName ?? 'z-[1000]'} bg-black/30 flex items-center justify-center p-4`}>
       <div
+        ref={modalRef}
         className="w-full max-w-4xl bg-white rounded-2xl shadow-xl"
         role="dialog"
-        aria-modal="true">
+        aria-modal="true"
+        onKeyDownCapture={(event) => {
+          if (event.defaultPrevented || event.repeat || !ownsKeyboard(event)) return;
+          if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'enter') {
+            event.preventDefault(); event.stopPropagation(); void handleSave();
+          }
+        }}
+        onKeyDown={(event) => {
+          if (!event.defaultPrevented && ownsKeyboard(event)) trapFocus(event);
+        }}>
         <div className="flex items-center justify-between px-5 py-4 border-b">
           <h3 className="text-lg font-semibold">Дело</h3>
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             className="p-2 rounded-lg hover:bg-gray-100"
             aria-label="Закрыть">
             <X size={18} />
@@ -1199,6 +1224,7 @@ export function CaseModal({
               Название <span className="text-red-500">*</span>
             </label>
             <input
+              ref={titleInputRef}
               aria-label="Название дела"
               className="mt-1 w-full border rounded-lg px-3 py-2"
               value={title}
@@ -2182,7 +2208,7 @@ export function CaseModal({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleClose}
               className="px-4 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60"
               disabled={saving}>
               Отмена
