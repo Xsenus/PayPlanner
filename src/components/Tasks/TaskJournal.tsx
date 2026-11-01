@@ -66,7 +66,7 @@ import { useDialog } from '../../hooks/useDialog';
 import { useModalFocusTrap } from '../../hooks/useModalFocusTrap';
 import { useClients } from '../../hooks/useClients';
 import { useClientCases } from '../../hooks/useClientCases';
-import { useDocumentDeliveryOwner, type DocumentReadOwner } from '../../hooks/useDocumentDeliveryOwner';
+import { useDocumentDeliveryOwner, type DocumentReadOwner, type DocumentDeliveryRead } from '../../hooks/useDocumentDeliveryOwner';
 import { useDictionarySnapshot } from '../../hooks/useDictionarySnapshot';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
@@ -2504,6 +2504,7 @@ export function TaskJournal({
   const canViewCases = isAdminUser || permissions.cases.canView;
   const caseReferenceScope = JSON.stringify([currentUserId, user?.role?.id, user?.departmentId, isAdminUser,
     permissions.cases, permissions.clients, permissions.legalEntities]);
+  const wizardReferenceScope = JSON.stringify([caseReferenceScope, permissions.tasks, permissions.contracts]);
   const { clients } = useClients({ enabled: canViewClients,
     ownerScope: JSON.stringify([currentUserId, user?.role?.id, isAdminUser, permissions.clients, permissions.cases, permissions.contracts,
       permissions.accounts, permissions.acts, permissions.payments]) });
@@ -2665,12 +2666,14 @@ export function TaskJournal({
   const selectedFilterLegalEntityId = counterpartyFilter.startsWith('legal:')
     ? Number(counterpartyFilter.slice('legal:'.length))
     : undefined;
-  const { cases: filterClientCases, loading: filterClientCasesLoading } = useClientCases(
+  const filterCasesOwner = useDocumentDeliveryOwner(JSON.stringify([caseReferenceScope, counterpartyFilter, canViewCases, isRouteTaskPage]));
+  const { cases: filterClientCases, loading: filterClientCasesLoading, error: filterCasesError, refresh: refreshFilterCases } = useClientCases(
     selectedFilterClientId,
     {
-      enabled: counterpartyFilter !== 'all' && canViewCases,
+      enabled: !isRouteTaskPage && counterpartyFilter !== 'all' && canViewCases,
       legalEntityId: selectedFilterLegalEntityId,
     },
+    filterCasesOwner,
   );
   const [assigneeFilter, setAssigneeFilter] = useState(initialPreferences.assigneeFilter);
   const [typeFilter, setTypeFilter] = useState<TaskJournalType | 'all'>(initialPreferences.typeFilter);
@@ -2763,6 +2766,7 @@ export function TaskJournal({
     pendingRouteTaskReadRef.current = null;
     lastOpenedRouteTaskIdRef.current = null;
     setModal(null);
+    setCreationWizard(null);
     setTasks([]);
     setHighlightedTaskId(null);
     setCompletionPromptTask(null);
@@ -4106,7 +4110,7 @@ export function TaskJournal({
     .sort((left, right) => left.label.localeCompare(right.label, 'ru')), [clients, legalEntities]);
 
   const caseFilterOptions = useMemo(() => {
-    if (counterpartyFilter === 'all' || !canViewCases || filterClientCasesLoading) {
+    if (counterpartyFilter === 'all' || !canViewCases || filterClientCasesLoading || filterCasesError) {
       return [];
     }
 
@@ -4116,7 +4120,7 @@ export function TaskJournal({
         : Boolean(selectedFilterLegalEntityId) && clientCase.legalEntityId === selectedFilterLegalEntityId)
       .map((clientCase) => ({ id: clientCase.id, label: clientCase.title }))
       .sort((left, right) => left.label.localeCompare(right.label, 'ru'));
-  }, [canViewCases, counterpartyFilter, filterClientCases, filterClientCasesLoading, selectedFilterClientId, selectedFilterLegalEntityId]);
+  }, [canViewCases, counterpartyFilter, filterClientCases, filterClientCasesLoading, filterCasesError, selectedFilterClientId, selectedFilterLegalEntityId]);
 
   const selectedFilterCounterparty = useMemo(
     () => filterCounterpartyOptions.find((counterparty) => counterparty.value === counterpartyFilter) ?? null,
@@ -4152,14 +4156,14 @@ export function TaskJournal({
   }, [filterCounterpartyOptions, search]);
 
   useEffect(() => {
-    if (caseFilter === 'all' || counterpartyFilter === 'all' || filterClientCasesLoading) {
+    if (isRouteTaskPage || !canViewCases || filterCasesError || caseFilter === 'all' || counterpartyFilter === 'all' || filterClientCasesLoading) {
       return;
     }
 
     if (!filterClientCases.some((clientCase) => clientCase.id === Number(caseFilter))) {
       setCaseFilter('all');
     }
-  }, [caseFilter, counterpartyFilter, filterClientCases, filterClientCasesLoading]);
+  }, [caseFilter, counterpartyFilter, filterClientCases, filterClientCasesLoading, canViewCases, isRouteTaskPage, filterCasesError]);
 
   const visibleTaskCalendarUserIds = useMemo(() => {
     if (isAdminUser || taskCalendarViewScope === 'all') {
@@ -6325,6 +6329,7 @@ export function TaskJournal({
             onRetryAssignees={assigneeSnapshot.refresh}
             captureAssignees={assigneeSnapshot.capture}
             caseReferenceScope={caseReferenceScope}
+            wizardReferenceScope={wizardReferenceScope}
             clients={clients}
             legalEntities={legalEntities}
             counterpartyOptions={counterpartyOptions}
@@ -6802,20 +6807,27 @@ export function TaskJournal({
               ))}
             </SystemSelect>
 
-            <SystemSelect
-              value={caseFilter}
-              onChange={(event) => setCaseFilter(event.target.value)}
-              disabled={counterpartyFilter === 'all' || !canViewCases || filterClientCasesLoading}
-              className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-              aria-label="Фильтр по делу"
-              data-testid="task-case-filter"
-            >
-              <option value="all">{counterpartyFilter === 'all' ? 'Сначала выберите контрагента' : 'Все дела контрагента'}</option>
-              {caseFilterOptions.map((clientCase) => (
-                <option key={clientCase.id} value={String(clientCase.id)}>{clientCase.label}</option>
-              ))}
-            </SystemSelect>
-
+            <div className="min-w-0">
+              <SystemSelect
+                value={caseFilter}
+                onChange={(event) => {
+                  if (!canViewCases || filterClientCasesLoading || filterCasesError || !filterCasesOwner.capture()) return;
+                  const value = event.target.value;
+                  if (value === 'all' || caseFilterOptions.some(item => String(item.id) === value)) setCaseFilter(value);
+                }}
+                disabled={counterpartyFilter === 'all' || !canViewCases || filterClientCasesLoading || Boolean(filterCasesError)}
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                aria-label="Фильтр по делу"
+                data-testid="task-case-filter"
+              >
+                <option value="all">{counterpartyFilter === 'all' ? 'Сначала выберите контрагента' : 'Все дела контрагента'}</option>
+                {caseFilter !== 'all' && !caseFilterOptions.some(item => String(item.id) === caseFilter) ? <option value={caseFilter}>Выбранное дело</option> : null}
+                {caseFilterOptions.map((clientCase) => (
+                  <option key={clientCase.id} value={String(clientCase.id)}>{clientCase.label}</option>
+                ))}
+              </SystemSelect>
+              {canViewCases && filterCasesError ? <div role="alert" className="mt-1 text-xs text-rose-700">{extractDisplayErrorMessage(filterCasesError, 'Не удалось загрузить дела.')} <button type="button" onClick={() => void refreshFilterCases()} className="underline">Повторить загрузку дел фильтра</button></div> : null}
+            </div>
             <SystemSelect
               value={assigneeFilter}
               onChange={(event) => setAssigneeFilter(event.target.value)}
@@ -7305,6 +7317,7 @@ export function TaskJournal({
           onRetryAssignees={assigneeSnapshot.refresh}
           captureAssignees={assigneeSnapshot.capture}
           caseReferenceScope={caseReferenceScope}
+          wizardReferenceScope={wizardReferenceScope}
           clients={clients}
           legalEntities={legalEntities}
           counterpartyOptions={counterpartyOptions}
@@ -7348,6 +7361,9 @@ export function TaskJournal({
 
       {creationWizard ? (
         <TaskBillingCreateWizard
+          key={JSON.stringify([currentUserId, creationWizard.defaults])}
+          referenceScope={wizardReferenceScope}
+          canContinue={canCreateTasks && (isAdminUser || permissions.tasks.canView)}
           counterpartyOptions={counterpartyOptions}
           initialDefaults={creationWizard.defaults}
           autoLoadBilling={creationWizard.autoLoadBilling}
@@ -11136,6 +11152,8 @@ function TaskBillingCreateWizard({
   mode = 'create',
   autoLoadBilling = false,
   canViewCases,
+  referenceScope,
+  canContinue,
   onCancel,
   onContinue,
 }: {
@@ -11144,6 +11162,8 @@ function TaskBillingCreateWizard({
   mode?: 'create' | 'edit';
   autoLoadBilling?: boolean;
   canViewCases: boolean;
+  referenceScope: string;
+  canContinue: boolean;
   onCancel: () => void;
   onContinue: (defaults: Partial<TaskJournalUpsertPayload>) => void;
 }) {
@@ -11156,62 +11176,76 @@ function TaskBillingCreateWizard({
   const [counterpartySearchPending, setCounterpartySearchPending] = useState(false);
   const [clientCaseId, setClientCaseId] = useState(initialDefaults.clientCaseId ? String(initialDefaults.clientCaseId) : '');
   const [step, setStep] = useState<'binding' | 'billing'>('binding');
-  const [billingContext, setBillingContext] = useState<TaskBillingContext | null>(null);
+  const [billingState, setBillingState] = useState<{ scope: string; owner: DocumentDeliveryRead; context: TaskBillingContext } | null>(null);
   const [selectedContractId, setSelectedContractId] = useState('');
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const autoLoadAttemptedRef = useRef(false);
+  const autoLoadAttemptedRef = useRef<DocumentDeliveryRead | null>(null);
   const [kind, rawId] = counterparty.split(':');
   const ownerId = Number(rawId) || null;
   const clientId = kind === 'client' ? ownerId : null;
   const legalEntityId = kind === 'legal' ? ownerId : null;
-  const { cases, loading: casesLoading } = useClientCases(clientId ?? undefined, {
-    enabled: canViewCases && Boolean(ownerId),
+  const wizardOwner = useDocumentDeliveryOwner(JSON.stringify([referenceScope, canContinue, mode, initialDefaults.clientId, initialDefaults.legalEntityId, initialDefaults.clientCaseId]));
+  const caseReadOwner = useDocumentDeliveryOwner(JSON.stringify([wizardOwner.scope, counterparty, canViewCases]));
+  const { cases, loading: casesLoading, error: casesError, refresh: refreshCases } = useClientCases(clientId ?? undefined, {
+    enabled: canContinue && canViewCases && Boolean(ownerId),
     legalEntityId: legalEntityId ?? undefined,
-  });
-  const availableCases = cases.filter((item) => !isClosedClientCase(item));
+  }, caseReadOwner);
+  const availableCases = casesError ? [] : cases.filter((item) => !isClosedClientCase(item) || (item.id === initialDefaults.clientCaseId && String(item.id) === clientCaseId));
   const selectedCase = availableCases.find((item) => String(item.id) === clientCaseId) ?? null;
   const selectedCounterparty = counterpartyOptions.find((item) => item.value === counterparty) ?? null;
+  const { scope: billingScope, capture: captureBilling, begin: beginBilling, busy: loading } = useDocumentDeliveryOwner(JSON.stringify([caseReadOwner.scope, clientCaseId, counterpartySearchPending]));
+  const billingRequest = useRef<AbortController | null>(null);
+  const billingContext = billingState?.scope === billingScope && billingState.owner.isCurrent() ? billingState.context : null;
+  const visibleStep = step === 'billing' && billingContext ? 'billing' : 'binding';
+  const canReadBilling = canContinue && canViewCases && Boolean(ownerId && selectedCase) && !casesLoading && !casesError && !counterpartySearchPending;
+  const canCompleteBinding = canContinue && Boolean(ownerId) && !counterpartySearchPending && (!clientCaseId || Boolean(canViewCases && selectedCase && !casesLoading && !casesError));
+  useLayoutEffect(() => {
+    setBillingState(null); setSelectedContractId(''); setStep('binding'); setError(null);
+    return () => { billingRequest.current?.abort(); billingRequest.current = null; };
+  }, [billingScope]);
   const selectedContract = billingContext?.contracts.find((item) => String(item.id) === selectedContractId)
     ?? billingContext?.contracts[0]
     ?? null;
 
   const loadBilling = useCallback(async () => {
-    if (!ownerId || !clientCaseId) {
-      setError('Сначала выберите клиента и дело.');
-      return;
-    }
-
-    setLoading(true);
+    if (!canReadBilling) return;
+    const operation = beginBilling('billing');
+    const owner = captureBilling();
+    if (!operation || !owner) return;
+    const controller = new AbortController();
+    billingRequest.current?.abort(); billingRequest.current = controller;
     setError(null);
     try {
       const context = await apiService.getTaskBillingContext({
         clientId: clientId ?? undefined,
         legalEntityId: legalEntityId ?? undefined,
         clientCaseId: Number(clientCaseId),
-      });
-      setBillingContext(context);
+      }, { signal: controller.signal });
+      if (!operation.isCurrent() || controller.signal.aborted) return;
+      setBillingState({ scope: billingScope, owner, context });
       setSelectedContractId(context.contracts[0] ? String(context.contracts[0].id) : '');
       setStep('billing');
     } catch (loadError) {
-      setError(extractDisplayErrorMessage(loadError, 'Не удалось проверить договор по делу.'));
+      if (operation.isCurrent() && !controller.signal.aborted) setError(extractDisplayErrorMessage(loadError, 'Не удалось проверить договор по делу.'));
     } finally {
-      setLoading(false);
+      if (billingRequest.current === controller) billingRequest.current = null;
+      operation.finish();
     }
-  }, [clientCaseId, clientId, legalEntityId, ownerId]);
+  }, [beginBilling, captureBilling, billingScope, canReadBilling, clientCaseId, clientId, legalEntityId]);
 
   useEffect(() => {
-    if (!autoLoadBilling || autoLoadAttemptedRef.current || !ownerId || !clientCaseId) {
-      return;
-    }
-
-    autoLoadAttemptedRef.current = true;
+    if (!autoLoadBilling || autoLoadAttemptedRef.current?.isCurrent() || !canReadBilling) return;
+    const owner = captureBilling();
+    if (!owner) return;
+    autoLoadAttemptedRef.current = owner;
     void loadBilling();
-  }, [autoLoadBilling, clientCaseId, loadBilling, ownerId]);
+  }, [autoLoadBilling, canReadBilling, captureBilling, loadBilling]);
 
   const complete = (classification: 'billable' | 'internal') => {
+    if (!canCompleteBinding || !wizardOwner.capture() || !captureBilling()) return;
+    if (classification === 'billable' && (!canReadBilling || !billingContext)) return;
     const contract = classification === 'billable' ? selectedContract : null;
-    const selectedCaseId = selectedCase?.id ?? (Number(clientCaseId) || null);
+    const selectedCaseId = selectedCase?.id ?? null;
     const objectName = [selectedCounterparty?.label, selectedCase?.title].filter(Boolean).join(' - ')
       || initialDefaults.objectName
       || '';
@@ -11239,7 +11273,7 @@ function TaskBillingCreateWizard({
     : contractMode === 'Fixed'
       ? 'Работа выполняется в рамках фиксированной суммы. Внимание: следите за объёмом услуг по этому делу.'
       : 'Новая клиентская задача без договора учитывается как платная и попадёт в контроль выставления счёта. Если работа не должна оплачиваться клиентом, выберите внутреннюю задачу.';
-  const isAutoLoadingBilling = step === 'binding' && autoLoadBilling && loading;
+  const isAutoLoadingBilling = visibleStep === 'binding' && autoLoadBilling && loading;
   const billingContextLabel = [selectedCounterparty?.label, selectedCase?.title].filter(Boolean).join(' · ')
     || initialDefaults.objectName
     || 'Клиентская задача';
@@ -11255,12 +11289,12 @@ function TaskBillingCreateWizard({
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="pp-task-billing-kicker text-xs font-bold uppercase tracking-[0.16em]">
-              {isAutoLoadingBilling ? 'Проверка привязки' : `${mode === 'edit' ? 'Привязка задачи' : 'Новая задача'} · шаг ${step === 'binding' ? '1 из 2' : '2 из 2'}`}
+              {isAutoLoadingBilling ? 'Проверка привязки' : `${mode === 'edit' ? 'Привязка задачи' : 'Новая задача'} · шаг ${visibleStep === 'binding' ? '1 из 2' : '2 из 2'}`}
             </div>
             <h2 id="task-create-wizard-title" className="pp-task-billing-heading mt-1 text-xl font-bold">
               {isAutoLoadingBilling
                 ? 'Проверяем договор по делу'
-                : step === 'binding'
+                : visibleStep === 'binding'
                   ? 'Выберите клиента и дело'
                   : 'Определите учёт задачи'}
             </h2>
@@ -11268,7 +11302,7 @@ function TaskBillingCreateWizard({
           <button type="button" onClick={onCancel} className="pp-task-billing-quiet-action rounded-xl p-2" aria-label="Закрыть"><X className="h-5 w-5" /></button>
         </div>
 
-        {step === 'binding' ? (
+        {visibleStep === 'binding' ? (
           isAutoLoadingBilling ? (
             <div role="status" className="pp-task-billing-loading mt-4 rounded-xl border px-4 py-4">
               <div className="flex items-center gap-3 text-sm font-semibold">
@@ -11287,6 +11321,7 @@ function TaskBillingCreateWizard({
               value={counterparty}
               options={counterpartyOptions}
               onChange={(value) => {
+                if (!canContinue || !wizardOwner.capture()) return;
                 if (value !== counterparty) setClientCaseId('');
                 setCounterparty(value);
                 setError(null);
@@ -11303,21 +11338,26 @@ function TaskBillingCreateWizard({
               Дело
               <SystemSelect
                 value={clientCaseId}
-                onChange={(event) => { setClientCaseId(event.target.value); setError(null); }}
-                disabled={!ownerId || casesLoading}
+                onChange={(event) => { if (!canContinue || !canViewCases || casesLoading || casesError || !caseReadOwner.capture()) return; const value = event.target.value; if (value && !availableCases.some(item => String(item.id) === value)) return; setClientCaseId(value); setError(null); }}
+                disabled={!canContinue || !canViewCases || !ownerId || casesLoading || Boolean(casesError)}
                 className="mt-1.5 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-400 disabled:bg-slate-50"
                 data-testid="task-billing-wizard-case"
               >
                 <option value="">{casesLoading ? 'Загрузка дел…' : 'Выберите дело'}</option>
+                {clientCaseId && !availableCases.some(item => String(item.id) === clientCaseId) ? <option value={clientCaseId}>Выбранное дело</option> : null}
                 {availableCases.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
               </SystemSelect>
             </label>
-            {!casesLoading && ownerId && availableCases.length === 0 ? <div className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">У контрагента нет активных дел. Платную задачу можно создать после добавления дела, а неоплачиваемую — прямо сейчас с привязкой к контрагенту.</div> : null}
+            {canContinue && canViewCases && casesError ? <div role="alert" className="text-sm text-rose-700">{extractDisplayErrorMessage(casesError, 'Не удалось загрузить дела.')} <button type="button" onClick={() => void refreshCases()} className="underline">Повторить загрузку дел мастера</button></div> : null}
+            {canContinue && !canViewCases && ownerId ? <p role="status" className="text-sm text-slate-600">Нет доступа к списку дел.</p> : null}
+            {!canContinue ? <div role="alert" className="text-sm text-rose-700">Недостаточно прав для продолжения.</div> : null}
+            {!casesLoading && !casesError && canViewCases && ownerId && availableCases.length === 0 ? <div className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">У контрагента нет активных дел. Платную задачу можно создать после добавления дела, а неоплачиваемую — прямо сейчас с привязкой к контрагенту.</div> : null}
             {error ? <div className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</div> : null}
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
               <button
                 type="button"
-                onClick={() => onContinue({
+                disabled={!canContinue}
+                onClick={() => { if (!canContinue || !wizardOwner.capture()) return; onContinue({
                   ...initialDefaults,
                   isInternal: true,
                   clientId: null,
@@ -11327,7 +11367,7 @@ function TaskBillingCreateWizard({
                   clientBillingClassification: 'internal',
                   billingContractId: null,
                   billingMode: '',
-                })}
+                }); }}
                 className="rounded-xl px-3 py-2.5 text-left text-sm font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-800"
               >
                 {mode === 'edit' ? 'Оставить задачу внутренней без клиента' : 'Создать общую внутреннюю задачу без клиента'}
@@ -11337,12 +11377,12 @@ function TaskBillingCreateWizard({
                 <button
                   type="button"
                   onClick={() => complete('internal')}
-                  disabled={!ownerId || counterpartySearchPending}
+                  disabled={!canCompleteBinding}
                   className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
                 >
                   <ShieldAlert className="h-4 w-4" /> Неоплачиваемая задача
                 </button>
-                <button type="button" onClick={() => void loadBilling()} disabled={loading || counterpartySearchPending || !ownerId || !clientCaseId} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
+                <button type="button" onClick={() => void loadBilling()} disabled={loading || !canReadBilling} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
                   {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Проверить договор
                 </button>
               </div>
@@ -11358,7 +11398,7 @@ function TaskBillingCreateWizard({
             {billingContext && billingContext.contracts.length > 1 ? (
               <label className="mb-3 block text-sm font-semibold text-slate-700">
                 Договор
-                <SystemSelect value={selectedContractId} onChange={(event) => setSelectedContractId(event.target.value)} className="mt-1.5 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm">
+                <SystemSelect value={selectedContractId} onChange={(event) => { if (captureBilling() && billingContext?.contracts.some(item => String(item.id) === event.target.value)) setSelectedContractId(event.target.value); }} className="mt-1.5 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm">
                   {billingContext.contracts.map((contract) => <option key={contract.id} value={contract.id}>№{contract.number} · {contract.billingMode === 'Actual' ? 'по факту' : 'фиксированная сумма'}</option>)}
                 </SystemSelect>
               </label>
@@ -11369,12 +11409,12 @@ function TaskBillingCreateWizard({
               <p className="mt-2 text-sm leading-6">{warningText}</p>
             </div>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <button type="button" onClick={() => complete('billable')} className={`pp-task-billing-choice pp-task-billing-choice-${billingNoticeTone} min-h-32 rounded-2xl border-2 p-4 text-left transition`}>
+              <button type="button" onClick={() => complete('billable')} disabled={!canCompleteBinding || !canReadBilling} className={`pp-task-billing-choice pp-task-billing-choice-${billingNoticeTone} min-h-32 rounded-2xl border-2 p-4 text-left transition`}>
                 <WalletCards className="h-7 w-7" />
                 <span className="mt-3 block text-base font-bold">{contractMode === 'Fixed' ? 'Клиентская задача' : contractMode === 'Actual' ? 'Платная задача' : 'Платная задача без договора'}</span>
                 <span className="mt-1 block text-sm">{contractMode === 'Fixed' ? 'Учесть объём в рамках фиксированного договора' : 'Добавить в контроль будущего счёта'}</span>
               </button>
-              <button type="button" onClick={() => complete('internal')} className="pp-task-billing-choice pp-task-billing-choice-neutral min-h-32 rounded-2xl border-2 p-4 text-left transition">
+              <button type="button" onClick={() => complete('internal')} disabled={!canCompleteBinding} className="pp-task-billing-choice pp-task-billing-choice-neutral min-h-32 rounded-2xl border-2 p-4 text-left transition">
                 <ShieldAlert className="h-7 w-7" />
                 <span className="mt-3 block text-base font-bold">Внутренняя задача</span>
                 <span className="mt-1 block text-sm">Не учитывать в системе оплаты с клиентом</span>
@@ -11401,6 +11441,7 @@ type TaskModalProps = {
   onRetryAssignees: () => Promise<void>;
   captureAssignees: DocumentReadOwner['capture'];
   caseReferenceScope: string;
+  wizardReferenceScope: string;
   clients: Client[];
   legalEntities: LegalEntitySummary[];
   counterpartyOptions: LookupSelectOption[];
@@ -11493,6 +11534,7 @@ function TaskModal({
   onRetryAssignees,
   captureAssignees,
   caseReferenceScope,
+  wizardReferenceScope,
   clients,
   legalEntities,
   counterpartyOptions,
@@ -12168,6 +12210,8 @@ function TaskModal({
   const billingWizardDialog = billingWizardForm && state?.task ? (
     <TaskBillingCreateWizard
       mode="edit"
+      referenceScope={JSON.stringify([wizardReferenceScope, currentUserId, taskId])}
+      canContinue={!isReadOnly && canSwitchToEdit}
       counterpartyOptions={counterpartyOptions}
       initialDefaults={billingWizardForm}
       autoLoadBilling={Boolean(billingWizardForm.clientCaseId)}

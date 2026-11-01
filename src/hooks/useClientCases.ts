@@ -7,14 +7,14 @@ import { awaitOwnedUiResult, StaleUiOperationError } from '../utils/StaleUiOpera
 type CaseCreateUpdate = Omit<ClientCase, 'id' | 'createdAt' | 'payments'>;
 
 export function useClientCases(clientId?: number | string, options: { enabled?: boolean; legalEntityId?: number | string } = {}, readOwner?: DocumentReadOwner) {
-  const [cases, setCases] = useState<ClientCase[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<unknown>(null);
-  const abortRef = useRef<AbortController | null>(null);
-
   const cid = clientId != null ? Number(clientId) : undefined;
   const legalEntityId = options.legalEntityId != null ? Number(options.legalEntityId) : undefined;
   const enabled = options.enabled ?? true;
+  const [cases, setCases] = useState<ClientCase[]>([]);
+  const [loading, setLoading] = useState(enabled && Boolean(cid || legalEntityId));
+  const [error, setError] = useState<unknown>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
   const readScope = readOwner?.scope;
   const captureReadOwner = readOwner?.capture;
   const [dataScope, setDataScope] = useState(readScope);

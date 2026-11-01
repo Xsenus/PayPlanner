@@ -2415,6 +2415,17 @@ describe('apiService case calendar', () => {
     expect(String(url)).toContain('reminderMinutes=30');
   });
 
+  it('passes abort and no-store to the task billing context without changing binding filters', async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn<typeof fetch>(async () => Response.json({ contracts: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    await apiService.getTaskBillingContext({ clientId: 10, clientCaseId: 100 }, { signal: controller.signal });
+    const [url, options] = fetchMock.mock.calls[0];
+    const query = new URL(String(url), 'http://local.invalid').searchParams;
+    expect(query.get('clientId')).toBe('10'); expect(query.get('clientCaseId')).toBe('100');
+    expect(options?.signal).toBe(controller.signal); expect(options?.cache).toBe('no-store');
+  });
+
   it('bypasses the browser cache for case references while preserving cancellation and filters', async () => {
     const controller = new AbortController();
     const fetchMock = vi.fn<typeof fetch>(async () => Response.json([]));

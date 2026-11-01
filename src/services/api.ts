@@ -5100,9 +5100,9 @@ export class ApiService {
     return this.request<TaskJournalAssignee[]>(`/tasks/assignees${q}`, { ...options, cache: 'no-store' });
   }
 
-  async getTaskBillingContext(params: { clientId?: number; legalEntityId?: number; clientCaseId: number }) {
+  async getTaskBillingContext(params: { clientId?: number; legalEntityId?: number; clientCaseId: number }, options?: Pick<RequestInit, 'signal'>) {
     const q = buildQuery(params);
-    return this.request<TaskBillingContext>(`/tasks/billing-context${q}`);
+    return this.request<TaskBillingContext>(`/tasks/billing-context${q}`, { ...options, cache: 'no-store' });
   }
 
   async getTaskJournalSettings() {
